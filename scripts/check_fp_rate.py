@@ -1306,8 +1306,9 @@ class Outcome:
     false_negatives: list[str]
 
 
-def evaluate(corpus: list[Case] = CORPUS) -> Outcome:
+def evaluate(corpus: list[Case] | None = None) -> Outcome:
     """Run the corpus under scoping and collect FP / FN case names."""
+    corpus = corpus if corpus is not None else CORPUS
     fp: list[str] = []
     fn: list[str] = []
     for case in corpus:
@@ -1391,7 +1392,7 @@ def _category_of(name: str) -> str:
 
 
 def category_breakdown(
-    outcome: Outcome | None = None, corpus: list[Case] = CORPUS
+    outcome: Outcome | None = None, corpus: list[Case] | None = None
 ) -> dict[str, dict[str, int]]:
     """Per-axis case counts + FP/FN tally for trend archiving.
 
@@ -1399,6 +1400,7 @@ def category_breakdown(
     false_negatives}``. Sorted by axis name so the JSON is diff-stable across
     runs (CI can archive it and compare release-over-release).
     """
+    corpus = corpus if corpus is not None else CORPUS
     outcome = outcome or evaluate(corpus)
     fp_set = set(outcome.false_positives)
     fn_set = set(outcome.false_negatives)

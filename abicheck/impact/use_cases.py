@@ -281,7 +281,12 @@ def load_use_case_manifest(path: str | Path) -> list[UseCaseDefinition]:
     """
     try:
         text = Path(path).read_text(encoding="utf-8")
-        raw = yaml.load(text, Loader=_DuplicateKeyCheckingLoader)
+        # `_DuplicateKeyCheckingLoader` subclasses `yaml.SafeLoader` and only
+        # replaces its mapping constructor with the duplicate-key check;
+        # bandit's B506 flags every `Loader=` it cannot name-match against
+        # `SafeLoader`/`CSafeLoader`, subclasses included (same annotation as
+        # `dump_manifest._load_strict_yaml`).
+        raw = yaml.load(text, Loader=_DuplicateKeyCheckingLoader)  # nosec B506
     except UnicodeError as exc:
         raise UseCaseManifestError(
             f"impact-use-cases.yaml: {path}: not valid UTF-8: {exc}"
@@ -612,7 +617,7 @@ def join_use_case_graph(
     evidence): unlike :func:`~abicheck.impact.consumer_graph.join_consumer_graph`
     — whose result never leaves ``appcompat.py``'s own in-memory analysis —
     this function is the module's *documented public Python API* (see
-    ``docs/use/use-case-impact.md``), so a caller following that doc and
+    ``docs/contribute/use-case-impact.md``), so a caller following that doc and
     calling ``joined.to_dict()`` on the result is a real, reachable path,
     not a hypothetical future pipeline. ``library_graph`` may already carry
     a non-empty ``graph_id`` from its own :meth:`~abicheck.buildsource.source_graph.SourceGraphSummary.finalize`;

@@ -691,8 +691,8 @@ def test_join_of_an_empty_use_case_graph_is_a_pure_copy() -> None:
 
 def test_join_clears_the_inherited_graph_id(tmp_path) -> None:
     """Codex review, fresh evidence: join_use_case_graph is this module's
-    documented public Python API (docs/use/use-case-impact.md), so a caller
-    following that doc and calling joined.to_dict() on the result is a real,
+    documented public Python API (docs/contribute/use-case-impact.md), so a
+    caller following that doc and calling joined.to_dict() on the result is a real,
     reachable path -- not join_consumer_graph's situation, whose result
     never leaves appcompat.py's own in-memory analysis. Left un-cleared, the
     deep copy inherits the library graph's own finalized graph_id even

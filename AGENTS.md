@@ -808,11 +808,13 @@ Once a root command genuinely clears the bar above, pick the right home:
 
 - **Action pinning is deliberately partial, not a full sweep.** Third-party
   GitHub Actions in `.github/workflows/agentready.yml`, `ci.yml` (the
-  `id-token: write` jobs), `pages.yml`, `publish.yml`, and `security.yml` are
+  `id-token: write` jobs), `pages.yml`, `publish.yml`, `security.yml`, and
+  `schedule-check-project-failure-path.yml` (its one `dispatch` job) are
   pinned to a full commit SHA (with a `# <tag>` comment) rather than a
-  mutable tag/branch — those five carry `security-events:write`,
-  `pull-requests:write`, `contents:write`, or `id-token:write` (OIDC/PyPI
-  Trusted Publishing), so a re-pointed tag there is a real supply-chain risk.
+  mutable tag/branch — those carry `security-events:write`,
+  `pull-requests:write`, `contents:write`, `actions:write`, or
+  `id-token:write` (OIDC/PyPI Trusted Publishing), so a re-pointed tag there
+  is a real supply-chain risk.
   The root `action.yml` (the composite Action third-party repos consume
   directly) is pinned the same way, for the same reason: its final step
   conditionally runs `github/codeql-action/upload-sarif` under whatever

@@ -9,6 +9,7 @@ import hashlib
 import os
 import re
 import shlex
+from collections.abc import Sequence
 from pathlib import Path
 
 from ._compiler_options import has_explicit_std
@@ -108,7 +109,7 @@ _EXTERN_C_PATTERN = re.compile(rb'^\s*extern\s+"C"')
 # are a reliable signal that ``--lang c`` was mis-specified and a C++ retry is the
 # right degrade. Match actual declarations, not keywords in comments (applied
 # line-by-line to non-comment lines).
-_CPP_ONLY_PATTERNS = [
+_CPP_ONLY_PATTERNS = (
     re.compile(rb"^\s*class\s+\w+\s*[:{]"),  # class Foo { / class Foo :
     re.compile(rb"^\s*namespace\s+\w+"),  # namespace ns
     re.compile(rb"^\s*template\s*<"),  # template<...>
@@ -129,16 +130,18 @@ _CPP_ONLY_PATTERNS = [
     re.compile(rb"\bnullptr\b"),  # C++ nullptr
     re.compile(rb"\bnoexcept\b"),  # C++ noexcept
     re.compile(rb"\boverride\b"),  # C++ override specifier
-]
+)
 
 # Full set used for auto language-mode detection (lang unspecified) and the
 # failure hint: here ``extern "C"`` *does* count, because castxml always parses in
 # a C++-ish mode, so an aggregate including an extern "C" header is built as .hpp.
-_CPP_PATTERNS = [_EXTERN_C_PATTERN, *_CPP_ONLY_PATTERNS]
+# Both sets are tuples: they are read-only, and one of them is a default argument.
+_CPP_PATTERNS = (_EXTERN_C_PATTERN, *_CPP_ONLY_PATTERNS)
 
 
 def _detect_cpp_headers(
-    header_paths: list[Path], patterns: list[re.Pattern[bytes]] = _CPP_PATTERNS
+    header_paths: Sequence[Path],
+    patterns: Sequence[re.Pattern[bytes]] = _CPP_PATTERNS,
 ) -> bool:
     """Auto-detect whether headers require C++ compilation mode (FIX-A).
 

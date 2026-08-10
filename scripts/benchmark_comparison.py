@@ -74,7 +74,7 @@ os.environ.setdefault("PYTHONPATH", str(REPO_DIR))
 _abicheck_bin = shutil.which("abicheck")
 if _abicheck_bin:
     try:
-        with open(_abicheck_bin) as _f:
+        with open(_abicheck_bin, encoding="utf-8") as _f:
             _first_line = _f.readline().strip()
         if _first_line.startswith("#!"):
             _tokens = shlex.split(_first_line.lstrip("#!"))
@@ -94,8 +94,7 @@ else:
 _ABICHECK_ENV = {**os.environ, "PYTHONPATH": str(REPO_DIR)}
 # True when abicheck CLI is importable via _PYTHON (even without installed bin)
 def _abicheck_available() -> bool:
-    import subprocess as _sp
-    r = _sp.run([_PYTHON, "-m", "abicheck.cli", "--help"],
+    r = subprocess.run([_PYTHON, "-m", "abicheck.cli", "--help"],
                 capture_output=True, timeout=10, env=_ABICHECK_ENV)
     return r.returncode == 0
 

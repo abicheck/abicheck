@@ -598,7 +598,7 @@ decisions.
   ingestion itself is still not implemented**, and neither is any CLI flag
   reading the manifest or report-level field/finding consuming the joined
   graph (that's G29 Phase 6's `USE_CASE_IMPACT_CONFIRMED`).
-- `docs/use/use-case-impact.md` (new, **done**): manifest format, entrypoint
+- `docs/contribute/use-case-impact.md` (new, **done**): manifest format, entrypoint
   mapping, test association, declared-vs-observed use (**trace ingestion
   itself remains unimplemented** — documented honestly as not-yet-built, not
   described as working), full-library-vs-consumer-scoped verdict semantics
@@ -698,7 +698,7 @@ abicheck/impact/
 docs/learn/impact-analysis.md          # Phase 3 slices 1/6/7 + Phase 4's consumer join (ADR-057), DONE
 docs/reference/source-graph-schema.md     # Phase 2 D1-D6 identity/merge/traversal-policy schema, DONE
 docs/learn/graph-coverage.md           # Phase 1, DONE
-docs/use/use-case-impact.md        # Phase 4 slice 2, DONE (manifest format, entrypoint mapping, test association, declared-vs-observed; trace ingestion documented as not-yet-built)
+docs/contribute/use-case-impact.md        # Phase 4 slice 2, DONE (manifest format, entrypoint mapping, test association, declared-vs-observed; trace ingestion documented as not-yet-built)
 docs/contribute/detector-impact-contract.md  # DONE, ahead of Phase 5/6 themselves — see Phase 3 section above
 examples/case194.../case205.../           # Phase 6
 ```

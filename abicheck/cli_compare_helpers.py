@@ -1863,8 +1863,6 @@ def _fold_evidence_depth_into_json(
     """
     if fmt != "json":
         return text
-    import json
-
     from .cli_buildsource_helpers import _resolve_side_pack
     from .cli_dump_helpers import evidence_depth_label
 

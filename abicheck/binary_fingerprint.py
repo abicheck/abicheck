@@ -565,7 +565,7 @@ def _compute_code_hash(
                 sec_data,
             )
 
-        sec_addr, sec_size, sec_data = section_cache[shndx]
+        sec_addr, _sec_size, sec_data = section_cache[shndx]
         sym_addr = sym.entry.st_value
         sym_size = sym.entry.st_size
 

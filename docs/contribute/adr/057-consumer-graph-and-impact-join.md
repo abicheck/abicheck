@@ -335,7 +335,7 @@ absence of a trace must never read as "not used", a semantics decision with
 no data yet to validate against. This slice adds no CLI flag reading the
 manifest, no report field, and no finding enrichment — it is graph-building
 only, the same position slice 1 was in before its own D5/D8 wiring. See
-[Use-Case Impact](../../use/use-case-impact.md) for the user-facing manifest
+[Use-Case Impact](../use-case-impact.md) for the user-facing manifest
 format and the declared-vs-observed distinction, and
 `tests/test_use_cases.py` for the test coverage.
 
@@ -363,7 +363,7 @@ format and the declared-vs-observed distinction, and
   slice 2** (2026-08-09 amendment, above): `use_case`/`test_case` nodes and
   `USE_CASE_USES_ENTRY`/`TEST_COVERS_USE_CASE` edges, in
   `abicheck/impact/use_cases.py`; see
-  [Use-Case Impact](../../use/use-case-impact.md). `TRACE_OBSERVED_ENTRY`/
+  [Use-Case Impact](../use-case-impact.md). `TRACE_OBSERVED_ENTRY`/
   `TRACE_OBSERVED_EDGE` remain reserved, unpopulated — see the next bullet.
 - **Runtime-trace ingestion** (`RUNTIME_FAILED_TO_RESOLVE_SYMBOL`,
   `runtime_probe`, and — as of slice 2 — `TRACE_OBSERVED_ENTRY`/

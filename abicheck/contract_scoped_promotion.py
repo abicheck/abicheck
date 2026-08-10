@@ -245,7 +245,7 @@ def stamp_scoped_changes(
     decision says BREAKING (Codex review, confirmed via `--required-symbol`
     under `--contract exports`).
     """
-    promoted = [c for c in changes]
+    promoted = list(changes)
     for change in promoted:
         stamp_explicit_scope_contract_evaluation(change)
     _record_scoped_compatibility_decisions(

@@ -469,6 +469,6 @@ def _expand_rpath(
 def _find_resolved_key(graph: DependencyGraph, soname: str) -> str | None:
     """Find the resolved path key for a given soname in the graph."""
     for key, node in graph.nodes.items():
-        if node.soname == soname or Path(key).name == soname:
+        if soname in (node.soname, Path(key).name):
             return key
     return None

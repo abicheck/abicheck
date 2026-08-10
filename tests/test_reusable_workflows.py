@@ -44,6 +44,9 @@ CHECK_SINGLE = WORKFLOWS_DIR / "check-single.yml"
 CHECK_PROJECT = WORKFLOWS_DIR / "check-project.yml"
 TEST_ACTION = WORKFLOWS_DIR / "test-action.yml"
 TEST_CHECK_PROJECT_FAILURE_PATH = WORKFLOWS_DIR / "test-check-project-failure-path.yml"
+SCHEDULE_CHECK_PROJECT_FAILURE_PATH = (
+    WORKFLOWS_DIR / "schedule-check-project-failure-path.yml"
+)
 
 
 def _load(path: Path) -> dict[str, Any]:
@@ -1269,19 +1272,177 @@ class TestCheckProjectFixtureDoesNotFailTheRequiredWorkflow:
         assert ".github/workflows/check-project.yml" not in pr_paths
         assert ".github/workflows/check-project.yml" not in push_paths
 
-    def test_failure_path_workflow_does_not_trigger_on_pull_request(self) -> None:
+    def test_failure_path_workflow_does_not_trigger_on_pull_request_or_push(
+        self,
+    ) -> None:
         """Even in its own non-required workflow file, this fixture's
         expected failure still posts a real, visible red check-run against
         whatever commit SHA triggered it -- 'not required' doesn't mean
-        'invisible' on a PR's checks list, and a human skimming that list
-        has no way to tell 'expected, by design' apart from a genuine
-        failure without reading this file's own header comment. Restricting
-        the trigger to `push: branches: [main]` (i.e. only after a PR has
-        already merged) means no open PR ever shows this fixture's
-        deliberate failure as one of its own checks."""
+        'invisible' on a checks list, and a human (or an automated health
+        signal) has no way to tell 'expected, by design' apart from a
+        genuine failure without reading this file's own header comment.
+        Neither `pull_request` nor `push` (which would attach the run to a
+        commit SHA that is part of `main`'s own history) may trigger this
+        workflow -- only `workflow_dispatch`, which the sibling
+        `schedule-check-project-failure-path.yml` uses against a dedicated,
+        disposable fixture ref, never against `main` directly."""
         data = _load(TEST_CHECK_PROJECT_FAILURE_PATH)
         assert "pull_request" not in data[True]
-        assert data[True]["push"]["branches"] == ["main"]
+        assert "push" not in data[True]
+        assert "schedule" not in data[True]
+        assert data[True]["workflow_dispatch"] == {}
+
+    def test_failure_path_workflow_has_no_schedule_of_its_own(self) -> None:
+        """A `schedule:` trigger declared directly on this file would still
+        run against `main`'s own tip commit (schedule always resolves the
+        workflow file from the default branch) -- exactly the SHA-pollution
+        problem this file exists to avoid. Automated scheduling must live in
+        the sibling dispatcher workflow instead, which targets a disjoint
+        fixture ref."""
+        data = _load(TEST_CHECK_PROJECT_FAILURE_PATH)
+        assert "schedule" not in data[True]
+
+
+class TestScheduleCheckProjectFailurePathDispatcher:
+    """`schedule-check-project-failure-path.yml` is the automated-trigger
+    half of test-check-project-failure-path.yml: it runs on `main` on a
+    schedule, but its own job's pass/fail must never be the dispatched run's
+    own overall conclusion (expected to be "failure" every time, by design)
+    -- `gh workflow run` is fire-and-forget and does not block on the run it
+    creates, so a job that only dispatches and stops would report green
+    both when the fixture behaves correctly AND when it regresses (Codex
+    review). This job must instead poll for that specific run, wait for it
+    to complete, and gate its own exit code on the dispatched run's
+    `test-check-project-verify` job conclusion alone."""
+
+    def test_dispatcher_workflow_has_no_python_assertions_of_its_own(self) -> None:
+        """This job doesn't re-implement test-check-project-verify's own
+        JSON-parsing assertions -- it only reads back that job's already-
+        computed conclusion."""
+        data = _load(SCHEDULE_CHECK_PROJECT_FAILURE_PATH)
+        job = data["jobs"]["dispatch"]
+        run_steps = " ".join(s.get("run", "") for s in _steps(job))
+        assert "assert" not in run_steps
+        assert "uses: ./.github/workflows/check-project.yml" not in str(data)
+
+    def test_dispatcher_targets_a_fixture_ref_not_main(self) -> None:
+        data = _load(SCHEDULE_CHECK_PROJECT_FAILURE_PATH)
+        job = data["jobs"]["dispatch"]
+        run_steps = " ".join(s.get("run", "") for s in _steps(job))
+        assert "ci-fixture/check-project-failure-path" in run_steps
+        assert 'REF="ci-fixture/check-project-failure-path"' in run_steps
+        assert "git commit --allow-empty" in run_steps
+
+    def test_dispatcher_dispatches_the_failure_path_workflow(self) -> None:
+        data = _load(SCHEDULE_CHECK_PROJECT_FAILURE_PATH)
+        job = data["jobs"]["dispatch"]
+        run_steps = " ".join(s.get("run", "") for s in _steps(job))
+        assert 'WORKFLOW="test-check-project-failure-path.yml"' in run_steps
+        assert 'gh workflow run "$WORKFLOW" --repo "$REPO" --ref "$REF"' in run_steps
+
+    def test_dispatcher_waits_for_the_dispatched_run_to_complete(self) -> None:
+        """`gh workflow run` alone doesn't block on the run it creates --
+        this job must separately poll `gh run list`/`gh run view` for the
+        specific run it just dispatched (correlated by the fixture commit's
+        own SHA) and wait for `status == completed` before drawing any
+        conclusion from it (Codex review)."""
+        data = _load(SCHEDULE_CHECK_PROJECT_FAILURE_PATH)
+        job = data["jobs"]["dispatch"]
+        run_steps = " ".join(s.get("run", "") for s in _steps(job))
+        assert "gh run list --repo" in run_steps
+        assert "FIXTURE_SHA" in run_steps
+        assert "gh run view" in run_steps
+        assert '--json status --jq .status' in run_steps
+        assert 'status = "completed"' in run_steps or '"$status" = "completed"' in run_steps
+
+    def test_dispatcher_gates_on_the_verify_job_conclusion_not_the_run_conclusion(
+        self,
+    ) -> None:
+        """The dispatched run's own overall conclusion is expected to be
+        "failure" on every correct run -- the only signal this job may act
+        on is test-check-project-verify's own job conclusion (Codex
+        review)."""
+        data = _load(SCHEDULE_CHECK_PROJECT_FAILURE_PATH)
+        job = data["jobs"]["dispatch"]
+        run_steps = " ".join(s.get("run", "") for s in _steps(job))
+        assert 'select(.name | test("verify"))' in run_steps
+        assert "verify_conclusion" in run_steps
+        assert '"$verify_conclusion" != "success"' in run_steps
+        # Must not gate on the run's own top-level conclusion field.
+        assert "--json conclusion" not in run_steps
+
+    def test_dispatcher_poll_budget_exceeds_the_child_workflow_worst_case(
+        self,
+    ) -> None:
+        """The completion-wait poll loop's own total budget (iterations *
+        sleep seconds) -- and the job's own timeout-minutes, the real
+        backstop -- must both exceed the dispatched workflow's worst-case
+        sequential duration: test-check-project-stage, then
+        check-project.yml's plan -> check -> aggregate (sequential, not
+        parallel -- check needs: plan, aggregate needs: [plan, check]), then
+        test-check-project-verify. A fixed poll bound that undersold this
+        real worst case would report a scheduler failure on an in-progress,
+        entirely healthy run (Codex review)."""
+        schedule_data = _load(SCHEDULE_CHECK_PROJECT_FAILURE_PATH)
+        job = schedule_data["jobs"]["dispatch"]
+        run_steps = " ".join(s.get("run", "") for s in _steps(job))
+
+        fixture_data = _load(TEST_CHECK_PROJECT_FAILURE_PATH)
+        stage_timeout = fixture_data["jobs"]["test-check-project-stage"]["timeout-minutes"]
+        verify_timeout = fixture_data["jobs"]["test-check-project-verify"]["timeout-minutes"]
+
+        check_project_data = _load(CHECK_PROJECT)
+        sequential_timeout = sum(
+            check_project_data["jobs"][name]["timeout-minutes"]
+            for name in ("plan", "check", "aggregate")
+        )
+
+        worst_case_minutes = stage_timeout + sequential_timeout + verify_timeout
+
+        # Parse the completion-wait loop's own `for _ in $(seq 1 N); do ...
+        # sleep S; done` shape directly out of the script, rather than
+        # hand-copying the numbers here, so this test can't itself drift
+        # out of sync with the workflow the way the workflow drifted from
+        # check-project.yml's real timeouts.
+        match = re.search(
+            r"Waiting for run.*?seq 1 (\d+).*?sleep (\d+)\n\s*done",
+            run_steps,
+            re.DOTALL,
+        )
+        assert match, "could not find the completion-wait poll loop"
+        iterations, sleep_seconds = int(match.group(1)), int(match.group(2))
+        poll_budget_minutes = iterations * sleep_seconds / 60
+
+        assert poll_budget_minutes > worst_case_minutes, (
+            poll_budget_minutes,
+            worst_case_minutes,
+        )
+        assert job["timeout-minutes"] > worst_case_minutes
+
+    def test_dispatcher_has_write_permissions_for_its_job(self) -> None:
+        data = _load(SCHEDULE_CHECK_PROJECT_FAILURE_PATH)
+        job = data["jobs"]["dispatch"]
+        assert job["permissions"]["contents"] == "write"
+        assert job["permissions"]["actions"] == "write"
+        # Read-only at the workflow level -- the elevated permissions are
+        # scoped to just this one job, not inherited as a workflow default.
+        assert data["permissions"]["contents"] == "read"
+
+    def test_dispatcher_pins_checkout_to_a_commit_sha(self) -> None:
+        """This job carries contents:write + actions:write, so AGENTS.md's
+        Action-pinning convention for a write-permission job applies: pin
+        `actions/checkout` to a full commit SHA rather than the floating
+        `v6` tag (Codex review)."""
+        data = _load(SCHEDULE_CHECK_PROJECT_FAILURE_PATH)
+        job = data["jobs"]["dispatch"]
+        checkout_step = next(
+            s for s in _steps(job) if str(s.get("uses", "")).startswith("actions/checkout@")
+        )
+        assert checkout_step["uses"] != "actions/checkout@v6"
+        # Full commit SHA, not a floating tag -- matches the pin already
+        # used by ci.yml/pages.yml/agentready.yml/dependency-review.yml.
+        sha = checkout_step["uses"].split("@", 1)[1]
+        assert re.fullmatch(r"[0-9a-f]{40}", sha), checkout_step["uses"]
 
 
 class TestEveryCheckProjectJobInstallsAbicheckFromItsOwnSource:

@@ -204,7 +204,6 @@ def parse_abi3_version(text: str) -> tuple[int, int] | None:
         # interpreter. Reject rather than certify against a floor no interpreter
         # provides and the vendored data cannot audit.
         return None
-    if minor < 2:
-        # Py_LIMITED_API=3 (or 3.0/3.1) → the 3.2 Limited-API baseline.
-        minor = 2
+    # Py_LIMITED_API=3 (or 3.0/3.1) → the 3.2 Limited-API baseline.
+    minor = max(minor, 2)
     return (major, minor)

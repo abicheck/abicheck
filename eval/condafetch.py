@@ -55,7 +55,13 @@ def _validate_tar_member(member, outdir):
 def _safe_extract_tar(tf, outdir):
     for member in tf.getmembers():
         _validate_tar_member(member, outdir)
-    tf.extractall(outdir)
+    # Every member is validated above (containment, no device/FIFO specials, no
+    # escaping links). The `data` filter is defence in depth on top of that; its
+    # `filter` kwarg postdates some 3.10.x patch releases, hence the fallback.
+    try:
+        tf.extractall(outdir, filter="data")  # nosec B202 - members validated above
+    except TypeError:
+        tf.extractall(outdir)  # noqa: S202  # nosec B202 - members validated above
 
 def _require_zstd():
     if shutil.which("zstd") is None:
@@ -73,7 +79,8 @@ def list_files(pkg, subdir="linux-64"):
     p = f"{CACHE}/{pkg}.api.json"
     if not os.path.exists(p):
         _retrieve(API.format(pkg), p)
-    d = json.load(open(p))
+    with open(p, encoding="utf-8") as fh:
+        d = json.load(fh)
     fs = [f for f in d["files"] if f["attrs"].get("subdir") == subdir]
     # newest build per (version): sort by version then build_number
     return fs

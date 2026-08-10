@@ -208,7 +208,7 @@ evidence a finding is enriched from — not as its own
 `affected_consumers`/`affected_use_cases` fields. Declared use cases
 (an optional `impact-use-cases.yaml` manifest, `abicheck.impact.use_cases`)
 are now also graph-buildable and joinable the same way — see
-[Use-Case Impact](../use/use-case-impact.md) — but, same as the consumer
+[Use-Case Impact](../contribute/use-case-impact.md) — but, same as the consumer
 graph, only as evidence, with no report field or finding reading it yet.
 Runtime-trace ingestion (for either graph) and the per-role coverage matrix
 being wired through the impact layer are the remainder of G29 Phase 4. `root_cause_id`/`impact_group_id` (documented above) are implemented,

@@ -463,7 +463,8 @@ class CaseTrajectory:
         return list(ALL_TIERS)
 
 
-def evaluate(corpus: list[TierCase] = CORPUS) -> list[CaseTrajectory]:
+def evaluate(corpus: list[TierCase] | None = None) -> list[CaseTrajectory]:
+    corpus = corpus if corpus is not None else CORPUS
     out: list[CaseTrajectory] = []
     for case in corpus:
         old, new = case.build()

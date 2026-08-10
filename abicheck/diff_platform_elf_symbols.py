@@ -122,9 +122,12 @@ def _diff_elf_symbol_versioning(old_elf: Any, new_elf: Any) -> list[Change]:
         # Compute old max PER VERSION-TAG PREFIX (e.g. "GLIBC", "GLIBCXX", "CXXABI")
         # to avoid cross-namespace bleed: GLIBCXX_3.4.32 must not suppress a
         # genuinely newer CXXABI_1.3.14 requirement.
+        # `_old_vers` is a per-iteration default-argument binding of the loop's
+        # own `old_vers` (never mutated here), not a shared mutable default.
+        # pylint: disable-next=dangerous-default-value
         def _old_max_for_prefix(
             prefix: str, _old_vers: set[str] = old_vers
-        ) -> tuple[int, ...]:  # pylint: disable=dangerous-default-value
+        ) -> tuple[int, ...]:
             matching = [
                 _parse_abi_version_tag(v)
                 for v in _old_vers
@@ -650,7 +653,7 @@ def _check_object_alignment_reduced(
         return []
     old_align = getattr(s_old, "value_alignment", 0)
     new_align = getattr(s_new, "value_alignment", 0)
-    if not (old_align > 0 and new_align > 0 and new_align < old_align):
+    if not 0 < new_align < old_align:
         return []
     declared_old = _declared_alignment_bits(old, sym_name)
     declared_new = _declared_alignment_bits(new, sym_name)

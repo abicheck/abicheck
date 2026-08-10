@@ -418,7 +418,7 @@ def _parse_macho_app_requirements(
         header = macho.headers[0]
 
         # 1. Read dependent libraries
-        for lc, cmd, data in header.commands:
+        for lc, _cmd, data in header.commands:
             if lc.cmd == LC_LOAD_DYLIB:
                 if data:
                     end = data.find(b"\x00")

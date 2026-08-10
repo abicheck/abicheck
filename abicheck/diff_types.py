@@ -13,6 +13,7 @@
 # limitations under the License.
 
 "Type-level ABI diff detectors (structs, enums, unions, typedefs, fields)."
+
 from __future__ import annotations
 
 import re
@@ -26,6 +27,7 @@ from .diff_cxx_rules import itanium_qualified_name, vtable_slot_is_override_reus
 from .diff_helpers import (
     build_type_map as _build_type_map,
     fact_known_qualified,
+    is_sentinel_enum_member,
     lookup_matched_type as _lookup_matched_type,
     make_change,
     type_map_key,
@@ -33,8 +35,32 @@ from .diff_helpers import (
 from .diff_symbols import (
     _PUBLIC_VIS,
     _public_functions,
-    _public_variables,
     _should_filter_transitive_runtime_symbols,
+)
+from .diff_types_abicc_parity import (
+    # Re-exported (`as`-aliased, not just imported) so both the registration
+    # side effect fires AND `from .diff_types import _diff_const_overloads`
+    # elsewhere (e.g. checker.py) resolves under mypy strict's
+    # implicit_reexport=false — mirrors diff_platform.py's own
+    # diff_platform_templates import block.
+    _diff_const_overloads as _diff_const_overloads,
+    _diff_reserved_fields as _diff_reserved_fields,
+    _diff_type_kind_changes as _diff_type_kind_changes,
+    _diff_var_values as _diff_var_values,
+)
+from .diff_types_field_facts import (
+    _diff_enum_deprecated as _diff_enum_deprecated,
+    _diff_enum_renames as _diff_enum_renames,
+    _diff_field_default_initializer as _diff_field_default_initializer,
+    _diff_field_deprecated as _diff_field_deprecated,
+    _diff_field_qualifiers as _diff_field_qualifiers,
+    _diff_field_renames as _diff_field_renames,
+    _diff_type_deprecated as _diff_type_deprecated,
+)
+from .diff_types_surface import (
+    _RESERVED_FIELD_RE as _RESERVED_FIELD_RE,
+    _directly_referenced as _directly_referenced,
+    _is_abi_surface_type as _is_abi_surface_type,
 )
 from .elf_symbol_filter import (
     FUNCTION_SYMBOL_TYPES,
@@ -44,7 +70,6 @@ from .elf_symbol_filter import (
 from .fact_provenance import (
     both_castxml_backed_fact,
     enum_fact_key,
-    field_fact_key,
     type_fact_key,
 )
 from .model import (
@@ -59,8 +84,6 @@ from .model import (
     is_non_abi_surface_type as _is_non_abi_surface_type,
     stdlib_namespaces_excluded as _exclude_stdlib_namespaces,
 )
-from .name_classification import STDLIB_TYPE_NAMESPACE_PREFIXES
-from .type_reachability import directly_referenced_stdlib_types
 
 
 def _field_type_genuinely_changed(
@@ -99,7 +122,9 @@ def _field_type_genuinely_changed(
     return True
 
 
-def _exported_elf_symbol_names(snap: AbiSnapshot, *, symbol_types: Collection[str]) -> set[str]:
+def _exported_elf_symbol_names(
+    snap: AbiSnapshot, *, symbol_types: Collection[str]
+) -> set[str]:
     """Return dynamic-export names from ELF metadata when available.
 
     DWARF-primary snapshots can contain public-looking subprogram DIEs that are
@@ -115,36 +140,6 @@ def _exported_elf_symbol_names(snap: AbiSnapshot, *, symbol_types: Collection[st
         abi_relevant_only=True,
         filter_transitive_runtime_symbols=filter_transitive_runtime_symbols,
     )
-
-
-def _is_abi_surface_type(
-    t: RecordType, *, exclude_stdlib: bool, directly_referenced: frozenset[str] = frozenset()
-) -> bool:
-    """True if record *t* is part of the inspected library's ABI surface.
-
-    Shared by every type-level detector (records, unions, field/kind/reserved
-    diffs) so std::/anonymous filtering (FP-1/FP-2) is applied consistently and
-    cannot be bypassed via an alternate map-construction path.
-
-    *directly_referenced* (status-review item 3, ``type_reachability.py``)
-    un-filters a std:: record a public, non-stdlib declaration names directly
-    (vs. only reachable via template-instantiation internals) -- its layout
-    changes are a real break (e.g. a libstdc++ dual-ABI flip). Keys on
-    ``qualified_name or name``, not ``name`` alone (see ``type_reachability``'s
-    identity fix for why); FP-2's anonymous-marker check keeps the bare name.
-    """
-    identity = t.qualified_name or t.name
-    is_stdlib = identity.startswith(STDLIB_TYPE_NAMESPACE_PREFIXES)
-    if exclude_stdlib and is_stdlib and identity not in directly_referenced:
-        return False
-    return not _is_non_abi_surface_type(t.name, exclude_stdlib_namespaces=False)
-
-
-def _directly_referenced(old: AbiSnapshot, new: AbiSnapshot) -> frozenset[str]:
-    """Stdlib record identities directly referenced from either snapshot's
-    public surface (status-review item 3) -- union of both sides so a type
-    used directly in only one of old/new still lifts the filter for it."""
-    return directly_referenced_stdlib_types(old) | directly_referenced_stdlib_types(new)
 
 
 def _has_type_evidence(snap: AbiSnapshot) -> bool:
@@ -203,15 +198,23 @@ def _removals_are_unconfirmed(old: AbiSnapshot, new: AbiSnapshot) -> bool:
     old_funcs = _exported_elf_symbol_names(old, symbol_types=FUNCTION_SYMBOL_TYPES)
     new_funcs = _exported_elf_symbol_names(new, symbol_types=FUNCTION_SYMBOL_TYPES)
     if not old_funcs or not new_funcs:
-        old_funcs = {k for k, v in old.function_map.items() if v.visibility in _PUBLIC_VIS}
-        new_funcs = {k for k, v in new.function_map.items() if v.visibility in _PUBLIC_VIS}
+        old_funcs = {
+            k for k, v in old.function_map.items() if v.visibility in _PUBLIC_VIS
+        }
+        new_funcs = {
+            k for k, v in new.function_map.items() if v.visibility in _PUBLIC_VIS
+        }
     if old_funcs:
         return len(old_funcs & new_funcs) / len(old_funcs) >= 0.9
     old_vars = _exported_elf_symbol_names(old, symbol_types=VARIABLE_SYMBOL_TYPES)
     new_vars = _exported_elf_symbol_names(new, symbol_types=VARIABLE_SYMBOL_TYPES)
     if not old_vars or not new_vars:
-        old_vars = {k for k, v in old.variable_map.items() if v.visibility in _PUBLIC_VIS}
-        new_vars = {k for k, v in new.variable_map.items() if v.visibility in _PUBLIC_VIS}
+        old_vars = {
+            k for k, v in old.variable_map.items() if v.visibility in _PUBLIC_VIS
+        }
+        new_vars = {
+            k for k, v in new.variable_map.items() if v.visibility in _PUBLIC_VIS
+        }
     if not old_vars:
         return True  # no exported surface to corroborate; absence of types is just stripping
     return len(old_vars & new_vars) / len(old_vars) >= 0.9
@@ -224,8 +227,20 @@ def _diff_types(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
     # TYPE_FIELD_* for unions is skipped below — handled by _diff_unions() instead.
     excl = _exclude_stdlib_namespaces(old, new)
     directly_referenced = _directly_referenced(old, new)
-    old_map = _build_type_map(t for t in old.types if _is_abi_surface_type(t, exclude_stdlib=excl, directly_referenced=directly_referenced))
-    new_map = _build_type_map(t for t in new.types if _is_abi_surface_type(t, exclude_stdlib=excl, directly_referenced=directly_referenced))
+    old_map = _build_type_map(
+        t
+        for t in old.types
+        if _is_abi_surface_type(
+            t, exclude_stdlib=excl, directly_referenced=directly_referenced
+        )
+    )
+    new_map = _build_type_map(
+        t
+        for t in new.types
+        if _is_abi_surface_type(
+            t, exclude_stdlib=excl, directly_referenced=directly_referenced
+        )
+    )
     # RD2-5: don't manufacture phantom TYPE_REMOVED when the new side is stripped.
     suppress_removed = _removals_are_unconfirmed(old, new)
 
@@ -263,16 +278,24 @@ def _diff_types(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
         if t_new is None:
             if suppress_removed:
                 continue
-            changes.append(make_change(
-                ChangeKind.TYPE_REMOVED,
-                symbol=name,
-                description=f"Type removed: {name}",
-            ))
+            changes.append(
+                make_change(
+                    ChangeKind.TYPE_REMOVED,
+                    symbol=name,
+                    description=f"Type removed: {name}",
+                )
+            )
             continue
         matched_new_ids.add(id(t_new))
         changes.extend(
             _diff_type_pair(
-                name, t_old, t_new, old_funcs, new_funcs, old_types, new_types,
+                name,
+                t_old,
+                t_new,
+                old_funcs,
+                new_funcs,
+                old_types,
+                new_types,
                 # Per-type key, not the whole-snapshot _both_castxml_backed:
                 # correctly supports a --ast-frontend hybrid snapshot (G28
                 # Phase 3), where is_abstract is castxml-backed per
@@ -286,11 +309,13 @@ def _diff_types(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
 
     for t_new in new_map.values():
         if id(t_new) not in matched_new_ids:
-            changes.append(make_change(
-                ChangeKind.TYPE_ADDED,
-                symbol=t_new.name,
-                name=t_new.name,
-            ))
+            changes.append(
+                make_change(
+                    ChangeKind.TYPE_ADDED,
+                    symbol=t_new.name,
+                    name=t_new.name,
+                )
+            )
 
     return changes
 
@@ -361,13 +386,15 @@ def _diff_overload_additions(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]
             continue  # original declaration gone → a replacement/rename, not an addition
         if not (new_mangleds - {original.mangled}):
             continue  # nothing genuinely new
-        changes.append(make_change(
-            ChangeKind.OVERLOAD_ADDED,
-            symbol=original.mangled,
-            name=key,
-            old_value="1 overload",
-            new_value=f"{len(news)} overloads",
-        ))
+        changes.append(
+            make_change(
+                ChangeKind.OVERLOAD_ADDED,
+                symbol=original.mangled,
+                name=key,
+                old_value="1 overload",
+                new_value=f"{len(news)} overloads",
+            )
+        )
     return changes
 
 
@@ -387,13 +414,15 @@ def _diff_type_pair(
 
     # TYPE_BECAME_OPAQUE: was complete, now forward-decl only
     if not t_old.is_opaque and t_new.is_opaque:
-        changes.append(make_change(
-            ChangeKind.TYPE_BECAME_OPAQUE,
-            symbol=name,
-            name=name,
-            old_value="complete",
-            new_value="opaque",
-        ))
+        changes.append(
+            make_change(
+                ChangeKind.TYPE_BECAME_OPAQUE,
+                symbol=name,
+                name=name,
+                old_value="complete",
+                new_value="opaque",
+            )
+        )
         return changes  # no further checks meaningful for opaque type
 
     _append_type_size_and_alignment_changes(changes, name, t_old, t_new)
@@ -403,7 +432,9 @@ def _diff_type_pair(
         )
     changes.extend(_diff_type_bases(name, t_old, t_new))
     changes.extend(
-        _diff_type_vtable(name, t_old, t_new, old_funcs, new_funcs, old_types, new_types)
+        _diff_type_vtable(
+            name, t_old, t_new, old_funcs, new_funcs, old_types, new_types
+        )
     )
     _append_type_finality_changes(changes, name, t_old, t_new)
     if castxml_backed:
@@ -412,7 +443,10 @@ def _diff_type_pair(
 
 
 def _append_type_abstract_changes(
-    changes: list[Change], name: str, t_old: RecordType, t_new: RecordType,
+    changes: list[Change],
+    name: str,
+    t_old: RecordType,
+    t_new: RecordType,
 ) -> None:
     """Detect `abstract` (>=1 pure virtual) transitions.
 
@@ -431,25 +465,32 @@ def _append_type_abstract_changes(
     if t_old.is_abstract == t_new.is_abstract:
         return
     if t_new.is_abstract:
-        changes.append(make_change(
-            ChangeKind.TYPE_BECAME_ABSTRACT,
-            symbol=name,
-            name=name,
-            old_value="instantiable",
-            new_value="abstract",
-        ))
+        changes.append(
+            make_change(
+                ChangeKind.TYPE_BECAME_ABSTRACT,
+                symbol=name,
+                name=name,
+                old_value="instantiable",
+                new_value="abstract",
+            )
+        )
     else:
-        changes.append(make_change(
-            ChangeKind.TYPE_LOST_ABSTRACT,
-            symbol=name,
-            name=name,
-            old_value="abstract",
-            new_value="instantiable",
-        ))
+        changes.append(
+            make_change(
+                ChangeKind.TYPE_LOST_ABSTRACT,
+                symbol=name,
+                name=name,
+                old_value="abstract",
+                new_value="instantiable",
+            )
+        )
 
 
 def _append_type_finality_changes(
-    changes: list[Change], name: str, t_old: RecordType, t_new: RecordType,
+    changes: list[Change],
+    name: str,
+    t_old: RecordType,
+    t_new: RecordType,
 ) -> None:
     """Detect `final` class-key transitions.
 
@@ -464,54 +505,62 @@ def _append_type_finality_changes(
     if t_old.is_final == t_new.is_final:
         return
     if t_new.is_final:
-        changes.append(make_change(
-            ChangeKind.TYPE_BECAME_FINAL,
-            symbol=name,
-            name=name,
-            old_value="non-final",
-            new_value="final",
-        ))
+        changes.append(
+            make_change(
+                ChangeKind.TYPE_BECAME_FINAL,
+                symbol=name,
+                name=name,
+                old_value="non-final",
+                new_value="final",
+            )
+        )
     else:
-        changes.append(make_change(
-            ChangeKind.TYPE_LOST_FINAL,
-            symbol=name,
-            name=name,
-            old_value="final",
-            new_value="non-final",
-        ))
+        changes.append(
+            make_change(
+                ChangeKind.TYPE_LOST_FINAL,
+                symbol=name,
+                name=name,
+                old_value="final",
+                new_value="non-final",
+            )
+        )
 
 
 def _append_type_size_and_alignment_changes(
-    changes: list[Change], name: str, t_old: RecordType, t_new: RecordType,
+    changes: list[Change],
+    name: str,
+    t_old: RecordType,
+    t_new: RecordType,
 ) -> None:
-    if t_old.size_bits is not None and t_new.size_bits is not None and t_old.size_bits != t_new.size_bits:
-        changes.append(make_change(
-            ChangeKind.TYPE_SIZE_CHANGED,
-            symbol=name,
-            name=name,
-            old=str(t_old.size_bits),
-            new=str(t_new.size_bits),
-        ))
+    if (
+        t_old.size_bits is not None
+        and t_new.size_bits is not None
+        and t_old.size_bits != t_new.size_bits
+    ):
+        changes.append(
+            make_change(
+                ChangeKind.TYPE_SIZE_CHANGED,
+                symbol=name,
+                name=name,
+                old=str(t_old.size_bits),
+                new=str(t_new.size_bits),
+            )
+        )
 
     if (
         t_old.alignment_bits is not None
         and t_new.alignment_bits is not None
         and t_old.alignment_bits != t_new.alignment_bits
     ):
-        changes.append(make_change(
-            ChangeKind.TYPE_ALIGNMENT_CHANGED,
-            symbol=name,
-            name=name,
-            old=str(t_old.alignment_bits),
-            new=str(t_new.alignment_bits),
-        ))
-
-
-_RESERVED_FIELD_RE = re.compile(
-    r"^_{0,2}(reserved|pad|padding|spare|unused|mbz|fill|filler)\d*$",
-    re.IGNORECASE,
-)
-
+        changes.append(
+            make_change(
+                ChangeKind.TYPE_ALIGNMENT_CHANGED,
+                symbol=name,
+                name=name,
+                old=str(t_old.alignment_bits),
+                new=str(t_new.alignment_bits),
+            )
+        )
 
 
 def _try_match_reserved_field(
@@ -554,7 +603,10 @@ def _try_match_reserved_field(
     if candidate is None and f_old.offset_bits is None:
         candidates = added_by_type.get(f_old.type, [])
         for c in candidates:
-            if c.name not in reserved_matched_added and c.name not in renamed_type_changed_added:
+            if (
+                c.name not in reserved_matched_added
+                and c.name not in renamed_type_changed_added
+            ):
                 candidate = c
                 break
     if candidate is not None and not _RESERVED_FIELD_RE.match(candidate.name):
@@ -629,8 +681,13 @@ def _diff_removed_field(
     """
     # Check if this is a reserved field put into use
     matched = _try_match_reserved_field(
-        fname, f_old, name, added_by_offset, added_by_type,
-        reserved_matched_added, renamed_type_changed_added,
+        fname,
+        f_old,
+        name,
+        added_by_offset,
+        added_by_type,
+        reserved_matched_added,
+        renamed_type_changed_added,
     )
     if matched is not None:
         return matched
@@ -702,7 +759,8 @@ def _diff_removed_field(
     return make_change(
         ChangeKind.TYPE_FIELD_REMOVED,
         symbol=name,
-        name=name, detail=fname,
+        name=name,
+        detail=fname,
     )
 
 
@@ -726,11 +784,14 @@ def _added_field_changes(
             # Skip trailing FAM additions — handled by _diff_flexible_array_member
             if fname == new_trailing_fam:
                 continue
-            changes.append(make_change(
-                _new_field_change_kind(t_new),
-                symbol=name,
-                name=name, detail=fname,
-            ))
+            changes.append(
+                make_change(
+                    _new_field_change_kind(t_new),
+                    symbol=name,
+                    name=name,
+                    detail=fname,
+                )
+            )
     return changes
 
 
@@ -760,8 +821,13 @@ def _diff_type_fields(
             if fname == old_trailing_fam:
                 continue
             removed_change = _diff_removed_field(
-                name, fname, f_old, added_by_offset, added_by_type,
-                reserved_matched_added, renamed_type_changed_added,
+                name,
+                fname,
+                f_old,
+                added_by_offset,
+                added_by_type,
+                reserved_matched_added,
+                renamed_type_changed_added,
             )
             if removed_change is not None:
                 changes.append(removed_change)
@@ -775,10 +841,17 @@ def _diff_type_fields(
             )
         )
 
-    changes.extend(_added_field_changes(
-        name, t_new, old_fields, new_fields,
-        reserved_matched_added, renamed_type_changed_added, new_trailing_fam,
-    ))
+    changes.extend(
+        _added_field_changes(
+            name,
+            t_new,
+            old_fields,
+            new_fields,
+            reserved_matched_added,
+            renamed_type_changed_added,
+            new_trailing_fam,
+        )
+    )
 
     # FLEXIBLE_ARRAY_MEMBER_CHANGED: detect changes to trailing flexible array members.
     # A FAM is the last field with type matching "T []" or "T [0]" — zero static size.
@@ -788,8 +861,12 @@ def _diff_type_fields(
 
 
 def _diff_type_field_pair(
-    name: str, fname: str, f_old: TypeField, f_new: TypeField,
-    *, cv_facts_reliable: bool = True,
+    name: str,
+    fname: str,
+    f_old: TypeField,
+    f_new: TypeField,
+    *,
+    cv_facts_reliable: bool = True,
 ) -> list[Change]:
     changes: list[Change] = []
     # Use canonical form for type comparison to avoid false positives from
@@ -803,29 +880,45 @@ def _diff_type_field_pair(
     if _field_type_genuinely_changed(
         f_old.type, f_new.type, cv_facts_reliable=cv_facts_reliable
     ):
-        changes.append(make_change(
-            ChangeKind.TYPE_FIELD_TYPE_CHANGED,
-            symbol=name,
-            name=name, detail=fname,
-            old_value=f_old.type,
-            new_value=f_new.type,
-        ))
-    if f_old.offset_bits is not None and f_new.offset_bits is not None and f_old.offset_bits != f_new.offset_bits:
-        changes.append(make_change(
-            ChangeKind.TYPE_FIELD_OFFSET_CHANGED,
-            symbol=name,
-            name=name, detail=fname,
-            old=str(f_old.offset_bits),
-            new=str(f_new.offset_bits),
-        ))
-    if f_old.is_bitfield != f_new.is_bitfield or f_old.bitfield_bits != f_new.bitfield_bits:
-        changes.append(make_change(
-            ChangeKind.FIELD_BITFIELD_CHANGED,
-            symbol=name,
-            name=name, detail=fname,
-            old_value=f"bits={f_old.bitfield_bits}",
-            new_value=f"bits={f_new.bitfield_bits}",
-        ))
+        changes.append(
+            make_change(
+                ChangeKind.TYPE_FIELD_TYPE_CHANGED,
+                symbol=name,
+                name=name,
+                detail=fname,
+                old_value=f_old.type,
+                new_value=f_new.type,
+            )
+        )
+    if (
+        f_old.offset_bits is not None
+        and f_new.offset_bits is not None
+        and f_old.offset_bits != f_new.offset_bits
+    ):
+        changes.append(
+            make_change(
+                ChangeKind.TYPE_FIELD_OFFSET_CHANGED,
+                symbol=name,
+                name=name,
+                detail=fname,
+                old=str(f_old.offset_bits),
+                new=str(f_new.offset_bits),
+            )
+        )
+    if (
+        f_old.is_bitfield != f_new.is_bitfield
+        or f_old.bitfield_bits != f_new.bitfield_bits
+    ):
+        changes.append(
+            make_change(
+                ChangeKind.FIELD_BITFIELD_CHANGED,
+                symbol=name,
+                name=name,
+                detail=fname,
+                old_value=f"bits={f_old.bitfield_bits}",
+                new_value=f"bits={f_new.bitfield_bits}",
+            )
+        )
     return changes
 
 
@@ -838,7 +931,9 @@ def _is_flexible_array_member(field: TypeField) -> bool:
 
 
 def _diff_flexible_array_member(
-    name: str, t_old: RecordType, t_new: RecordType,
+    name: str,
+    t_old: RecordType,
+    t_new: RecordType,
 ) -> list[Change]:
     """Detect changes to trailing flexible array members.
 
@@ -847,30 +942,42 @@ def _diff_flexible_array_member(
     (typical for flexible array members / zero-length arrays).
     """
     changes: list[Change] = []
-    old_fam = t_old.fields[-1] if t_old.fields and _is_flexible_array_member(t_old.fields[-1]) else None
-    new_fam = t_new.fields[-1] if t_new.fields and _is_flexible_array_member(t_new.fields[-1]) else None
+    old_fam = (
+        t_old.fields[-1]
+        if t_old.fields and _is_flexible_array_member(t_old.fields[-1])
+        else None
+    )
+    new_fam = (
+        t_new.fields[-1]
+        if t_new.fields and _is_flexible_array_member(t_new.fields[-1])
+        else None
+    )
 
     if old_fam is None and new_fam is None:
         return changes
 
     if old_fam is not None and new_fam is None:
         # FAM removed — already caught by TYPE_FIELD_REMOVED, but emit specific kind
-        changes.append(make_change(
-            ChangeKind.FLEXIBLE_ARRAY_MEMBER_CHANGED,
-            symbol=name,
-            description=f"Flexible array member removed: {name}::{old_fam.name}",
-            old_value=old_fam.type,
-            new_value="(removed)",
-        ))
+        changes.append(
+            make_change(
+                ChangeKind.FLEXIBLE_ARRAY_MEMBER_CHANGED,
+                symbol=name,
+                description=f"Flexible array member removed: {name}::{old_fam.name}",
+                old_value=old_fam.type,
+                new_value="(removed)",
+            )
+        )
     elif old_fam is None and new_fam is not None:
         # FAM added
-        changes.append(make_change(
-            ChangeKind.FLEXIBLE_ARRAY_MEMBER_CHANGED,
-            symbol=name,
-            description=f"Flexible array member added: {name}::{new_fam.name}",
-            old_value="(none)",
-            new_value=new_fam.type,
-        ))
+        changes.append(
+            make_change(
+                ChangeKind.FLEXIBLE_ARRAY_MEMBER_CHANGED,
+                symbol=name,
+                description=f"Flexible array member added: {name}::{new_fam.name}",
+                old_value="(none)",
+                new_value=new_fam.type,
+            )
+        )
     elif old_fam is not None and new_fam is not None:
         # Both have FAM — check if element type changed
         old_elem = _FAM_TYPE_RE.match(old_fam.type)
@@ -879,16 +986,18 @@ def _diff_flexible_array_member(
             old_base = canonicalize_type_name(old_elem.group(1))
             new_base = canonicalize_type_name(new_elem.group(1))
             if old_base != new_base:
-                changes.append(make_change(
-                    ChangeKind.FLEXIBLE_ARRAY_MEMBER_CHANGED,
-                    symbol=name,
-                    description=(
-                        f"Flexible array member element type changed: "
-                        f"{name}::{old_fam.name} ({old_fam.type} → {new_fam.type})"
-                    ),
-                    old_value=old_fam.type,
-                    new_value=new_fam.type,
-                ))
+                changes.append(
+                    make_change(
+                        ChangeKind.FLEXIBLE_ARRAY_MEMBER_CHANGED,
+                        symbol=name,
+                        description=(
+                            f"Flexible array member element type changed: "
+                            f"{name}::{old_fam.name} ({old_fam.type} → {new_fam.type})"
+                        ),
+                        old_value=old_fam.type,
+                        new_value=new_fam.type,
+                    )
+                )
 
     return changes
 
@@ -912,22 +1021,26 @@ def _diff_type_bases(name: str, t_old: RecordType, t_new: RecordType) -> list[Ch
     old_bases_set = set(t_old.bases)
     new_bases_set = set(t_new.bases)
     if old_bases_set == new_bases_set and t_old.bases != t_new.bases:
-        changes.append(make_change(
-            ChangeKind.BASE_CLASS_POSITION_CHANGED,
-            symbol=name,
-            name=name,
-            old_value=str(t_old.bases),
-            new_value=str(t_new.bases),
-        ))
+        changes.append(
+            make_change(
+                ChangeKind.BASE_CLASS_POSITION_CHANGED,
+                symbol=name,
+                name=name,
+                old_value=str(t_old.bases),
+                new_value=str(t_new.bases),
+            )
+        )
     elif old_bases_set != new_bases_set:
         # General base class set change (add/remove base) → TYPE_BASE_CHANGED
-        changes.append(make_change(
-            ChangeKind.TYPE_BASE_CHANGED,
-            symbol=name,
-            description=f"Base classes changed: {name}",
-            old_value=str(t_old.bases),
-            new_value=str(t_new.bases),
-        ))
+        changes.append(
+            make_change(
+                ChangeKind.TYPE_BASE_CHANGED,
+                symbol=name,
+                description=f"Base classes changed: {name}",
+                old_value=str(t_old.bases),
+                new_value=str(t_new.bases),
+            )
+        )
 
     # BASE_CLASS_VIRTUAL_CHANGED: a base moved between virtual and non-virtual
     old_virt_set = set(t_old.virtual_bases)
@@ -941,26 +1054,30 @@ def _diff_type_bases(name: str, t_old: RecordType, t_new: RecordType) -> list[Ch
             desc_parts.append(f"became virtual: {sorted(became_virtual)}")
         if lost_virtual:
             desc_parts.append(f"lost virtual: {sorted(lost_virtual)}")
-        changes.append(make_change(
-            ChangeKind.BASE_CLASS_VIRTUAL_CHANGED,
-            symbol=name,
-            name=name,
-            detail="; ".join(desc_parts),
-            old_value=str(sorted(t_old.virtual_bases)),
-            new_value=str(sorted(t_new.virtual_bases)),
-        ))
+        changes.append(
+            make_change(
+                ChangeKind.BASE_CLASS_VIRTUAL_CHANGED,
+                symbol=name,
+                name=name,
+                detail="; ".join(desc_parts),
+                old_value=str(sorted(t_old.virtual_bases)),
+                new_value=str(sorted(t_new.virtual_bases)),
+            )
+        )
     elif old_virt_set != new_virt_set:
         # Pure add/remove of a virtual base (not a migration from non-virtual):
         # e.g. class D : virtual A  →  class D : virtual A, virtual B
         # → TYPE_BASE_CHANGED (hierarchy changed, not just virtuality toggled)
         if not changes:  # don't duplicate if TYPE_BASE_CHANGED already emitted above
-            changes.append(make_change(
-                ChangeKind.TYPE_BASE_CHANGED,
-                symbol=name,
-                description=f"Virtual base classes changed: {name}",
-                old_value=str(t_old.virtual_bases),
-                new_value=str(t_new.virtual_bases),
-            ))
+            changes.append(
+                make_change(
+                    ChangeKind.TYPE_BASE_CHANGED,
+                    symbol=name,
+                    description=f"Virtual base classes changed: {name}",
+                    old_value=str(t_old.virtual_bases),
+                    new_value=str(t_new.virtual_bases),
+                )
+            )
 
     return changes
 
@@ -986,7 +1103,9 @@ def _diff_type_vtable(
     # sibling base, or a base-class swap -- can't false-suppress a genuine
     # slot replacement).
     if len(t_old.vtable) == len(t_new.vtable) and all(
-        vtable_slot_is_override_reuse(old_entry, new_entry, old_funcs, new_funcs, old_types, new_types)
+        vtable_slot_is_override_reuse(
+            old_entry, new_entry, old_funcs, new_funcs, old_types, new_types
+        )
         for old_entry, new_entry in zip(t_old.vtable, t_new.vtable)
     ):
         return []
@@ -995,13 +1114,15 @@ def _diff_type_vtable(
         if Counter(t_old.vtable) == Counter(t_new.vtable)
         else f"vtable changed: {name}"
     )
-    return [make_change(
-        ChangeKind.TYPE_VTABLE_CHANGED,
-        symbol=name,
-        description=description,
-        old_value=", ".join(t_old.vtable),
-        new_value=", ".join(t_new.vtable),
-    )]
+    return [
+        make_change(
+            ChangeKind.TYPE_VTABLE_CHANGED,
+            symbol=name,
+            description=description,
+            old_value=", ".join(t_old.vtable),
+            new_value=", ".join(t_new.vtable),
+        )
+    ]
 
 
 @registry.detector("enums")
@@ -1013,10 +1134,14 @@ def _diff_enums(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
     # sharing a bare leaf name in different namespaces must not cross-match
     # across old/new the way a plain ``{e.name: e}`` dict would.
     old_map = _build_type_map(
-        e for e in old.enums if not _is_non_abi_surface_type(e.name, exclude_stdlib_namespaces=excl)
+        e
+        for e in old.enums
+        if not _is_non_abi_surface_type(e.name, exclude_stdlib_namespaces=excl)
     )
     new_map = _build_type_map(
-        e for e in new.enums if not _is_non_abi_surface_type(e.name, exclude_stdlib_namespaces=excl)
+        e
+        for e in new.enums
+        if not _is_non_abi_surface_type(e.name, exclude_stdlib_namespaces=excl)
     )
     # A wholly-removed enum is stored in snap.enums, NOT snap.types, so the
     # TYPE_REMOVED loop in _diff_types() never sees it — the old "TYPE_REMOVED
@@ -1030,27 +1155,29 @@ def _diff_enums(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
         e_new = _lookup_matched_type(old_map, new_map, e_old)
         if e_new is None:
             if not suppress_removed:
-                changes.append(make_change(
-                    ChangeKind.TYPE_REMOVED,
-                    symbol=name,
-                    description=f"Enum removed: {name}",
-                ))
+                changes.append(
+                    make_change(
+                        ChangeKind.TYPE_REMOVED,
+                        symbol=name,
+                        description=f"Enum removed: {name}",
+                    )
+                )
             continue
         # Per-enum key, not a whole-snapshot gate: supports --ast-frontend
         # hybrid (G28 Phase 3); both backends populate is_scoped (G31 Phase C).
-        if fact_known_qualified(old, new, old_map, new_map, name, enum_fact_key(type_map_key(e_old), "is_scoped"), enum_fact_key(type_map_key(e_new), "is_scoped"), enum_fact_key(name, "is_scoped")):
+        if fact_known_qualified(
+            old,
+            new,
+            old_map,
+            new_map,
+            name,
+            enum_fact_key(type_map_key(e_old), "is_scoped"),
+            enum_fact_key(type_map_key(e_new), "is_scoped"),
+            enum_fact_key(name, "is_scoped"),
+        ):
             _append_enum_scoped_changes(changes, name, e_old, e_new)
         old_members = {m.name: m.value for m in e_old.members}
         new_members = {m.name: m.value for m in e_new.members}
-        # Sentinel detection is name-pattern based to avoid accidental
-        # downgrades of ordinary enum members with the maximum numeric value.
-        # Recognized patterns: *_last, *_max, *_count (case-insensitive).
-        _SENTINEL_SUFFIXES = ("_last", "_max", "_count")
-
-        def _is_sentinel_member(member_name: str) -> bool:
-            n = member_name.lower()
-            return n.endswith(_SENTINEL_SUFFIXES) or n in {"last", "max", "count"}
-
         # Build inverse map: new_value → new_name for values that are "new" (not in old names).
         # Only keep entries where the value maps to exactly one new name —
         # aliases (multiple names with same value) must not suppress true removals.
@@ -1059,7 +1186,8 @@ def _diff_enums(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
             if nname not in old_members:
                 _new_val_candidates.setdefault(nval, []).append(nname)
         new_val_to_newname = {
-            nval: nnames[0] for nval, nnames in _new_val_candidates.items()
+            nval: nnames[0]
+            for nval, nnames in _new_val_candidates.items()
             if len(nnames) == 1
         }
 
@@ -1069,25 +1197,31 @@ def _diff_enums(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
                 if mval in new_val_to_newname:
                     continue
                 # Value truly removed
-                changes.append(make_change(
-                    ChangeKind.ENUM_MEMBER_REMOVED,
-                    symbol=f"{name}::{mname}",
-                    name=name, detail=mname,
-                    old_value=str(mval),
-                ))
+                changes.append(
+                    make_change(
+                        ChangeKind.ENUM_MEMBER_REMOVED,
+                        symbol=f"{name}::{mname}",
+                        name=name,
+                        detail=mname,
+                        old_value=str(mval),
+                    )
+                )
             elif new_members[mname] != mval:
                 kind = (
                     ChangeKind.ENUM_LAST_MEMBER_VALUE_CHANGED
-                    if _is_sentinel_member(mname)
+                    if is_sentinel_enum_member(mname)
                     else ChangeKind.ENUM_MEMBER_VALUE_CHANGED
                 )
-                changes.append(make_change(
-                    kind,
-                    symbol=f"{name}::{mname}",
-                    name=name, detail=mname,
-                    old_value=str(mval),
-                    new_value=str(new_members[mname]),
-                ))
+                changes.append(
+                    make_change(
+                        kind,
+                        symbol=f"{name}::{mname}",
+                        name=name,
+                        detail=mname,
+                        old_value=str(mval),
+                        new_value=str(new_members[mname]),
+                    )
+                )
 
         # Skip additions whose values exist in the old enum:
         # those will be handled as ENUM_MEMBER_RENAMED by _diff_enum_renames,
@@ -1102,25 +1236,30 @@ def _diff_enums(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
             if mname_r not in new_members:
                 _removed_val_candidates.setdefault(v, []).append(mname_r)
         removed_old_values = {
-            str(v) for v, names in _removed_val_candidates.items()
-            if len(names) == 1
+            str(v) for v, names in _removed_val_candidates.items() if len(names) == 1
         }
         for mname, mval in new_members.items():
             if mname not in old_members:
                 if str(mval) in removed_old_values:
                     continue  # same value as a removed old member — rename candidate
-                changes.append(make_change(
-                    ChangeKind.ENUM_MEMBER_ADDED,
-                    symbol=f"{name}::{mname}",
-                    name=name, detail=mname,
-                    new_value=str(mval),
-                ))
+                changes.append(
+                    make_change(
+                        ChangeKind.ENUM_MEMBER_ADDED,
+                        symbol=f"{name}::{mname}",
+                        name=name,
+                        detail=mname,
+                        new_value=str(mval),
+                    )
+                )
 
     return changes
 
 
 def _append_enum_scoped_changes(
-    changes: list[Change], name: str, e_old: EnumType, e_new: EnumType,
+    changes: list[Change],
+    name: str,
+    e_old: EnumType,
+    e_new: EnumType,
 ) -> None:
     """Detect `enum class`/`enum struct` (C++11 scoped enum) transitions.
 
@@ -1138,21 +1277,25 @@ def _append_enum_scoped_changes(
     if e_old.is_scoped == e_new.is_scoped:
         return
     if e_new.is_scoped:
-        changes.append(make_change(
-            ChangeKind.ENUM_BECAME_SCOPED,
-            symbol=name,
-            name=name,
-            old_value="unscoped",
-            new_value="scoped",
-        ))
+        changes.append(
+            make_change(
+                ChangeKind.ENUM_BECAME_SCOPED,
+                symbol=name,
+                name=name,
+                old_value="unscoped",
+                new_value="scoped",
+            )
+        )
     else:
-        changes.append(make_change(
-            ChangeKind.ENUM_LOST_SCOPED,
-            symbol=name,
-            name=name,
-            old_value="scoped",
-            new_value="unscoped",
-        ))
+        changes.append(
+            make_change(
+                ChangeKind.ENUM_LOST_SCOPED,
+                symbol=name,
+                name=name,
+                old_value="scoped",
+                new_value="unscoped",
+            )
+        )
 
 
 def _sig_key(f: Function) -> tuple[str, tuple[str, ...]]:
@@ -1188,13 +1331,15 @@ def _diff_method_qualifiers(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
         f_new = new_by_mangled[mangled]
 
         if f_old.is_static != f_new.is_static:
-            changes.append(make_change(
-                ChangeKind.FUNC_STATIC_CHANGED,
-                symbol=mangled,
-                name=f_old.name,
-                old_value=str(f_old.is_static),
-                new_value=str(f_new.is_static),
-            ))
+            changes.append(
+                make_change(
+                    ChangeKind.FUNC_STATIC_CHANGED,
+                    symbol=mangled,
+                    name=f_old.name,
+                    old_value=str(f_old.is_static),
+                    new_value=str(f_new.is_static),
+                )
+            )
 
         if not f_old.is_pure_virtual and f_new.is_pure_virtual:
             kind = (
@@ -1202,11 +1347,13 @@ def _diff_method_qualifiers(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
                 if f_old.is_virtual
                 else ChangeKind.FUNC_PURE_VIRTUAL_ADDED
             )
-            changes.append(make_change(
-                kind,
-                symbol=mangled,
-                name=f_old.name,
-            ))
+            changes.append(
+                make_change(
+                    kind,
+                    symbol=mangled,
+                    name=f_old.name,
+                )
+            )
 
     # --- cv/static detection: match removed functions against added functions by sig ---
     old_mangles = set(old_by_mangled)
@@ -1226,33 +1373,41 @@ def _diff_method_qualifiers(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
         f_new = added_by_sig[key]
         # Same (name, params) — only qualifiers changed; report instead of REMOVED+ADDED
         if f_old.is_static != f_new.is_static:
-            changes.append(make_change(
-                ChangeKind.FUNC_STATIC_CHANGED,
-                symbol=f_old.mangled,
-                name=f_old.name,
-                old_value=str(f_old.is_static),
-                new_value=str(f_new.is_static),
-            ))
+            changes.append(
+                make_change(
+                    ChangeKind.FUNC_STATIC_CHANGED,
+                    symbol=f_old.mangled,
+                    name=f_old.name,
+                    old_value=str(f_old.is_static),
+                    new_value=str(f_new.is_static),
+                )
+            )
         if f_old.is_const != f_new.is_const or f_old.is_volatile != f_new.is_volatile:
-            changes.append(make_change(
-                ChangeKind.FUNC_CV_CHANGED,
-                symbol=f_old.mangled,
-                name=f_old.name,
-                old_value=f"const={f_old.is_const} volatile={f_old.is_volatile}",
-                new_value=f"const={f_new.is_const} volatile={f_new.is_volatile}",
-            ))
+            changes.append(
+                make_change(
+                    ChangeKind.FUNC_CV_CHANGED,
+                    symbol=f_old.mangled,
+                    name=f_old.name,
+                    old_value=f"const={f_old.is_const} volatile={f_old.is_volatile}",
+                    new_value=f"const={f_new.is_const} volatile={f_new.is_volatile}",
+                )
+            )
 
         # Ref-qualifier change (&/&&) — also changes mangled name
         old_rq = f_old.ref_qualifier or ""
         new_rq = f_new.ref_qualifier or ""
         if old_rq != new_rq:
-            changes.append(make_change(
-                ChangeKind.FUNC_REF_QUAL_CHANGED,
-                symbol=f_old.mangled,
-                name=f_old.name, old=repr(old_rq), new=repr(new_rq),
-                old_value=old_rq or "(none)",
-                new_value=new_rq or "(none)",
-            ))
+            changes.append(
+                make_change(
+                    ChangeKind.FUNC_REF_QUAL_CHANGED,
+                    symbol=f_old.mangled,
+                    name=f_old.name,
+                    old=repr(old_rq),
+                    new=repr(new_rq),
+                    old_value=old_rq or "(none)",
+                    new_value=new_rq or "(none)",
+                )
+            )
 
     return changes
 
@@ -1262,8 +1417,22 @@ def _diff_unions(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
     changes: list[Change] = []
     excl = _exclude_stdlib_namespaces(old, new)
     directly_referenced = _directly_referenced(old, new)
-    old_unions = _build_type_map(t for t in old.types if t.is_union and _is_abi_surface_type(t, exclude_stdlib=excl, directly_referenced=directly_referenced))
-    new_unions = _build_type_map(t for t in new.types if t.is_union and _is_abi_surface_type(t, exclude_stdlib=excl, directly_referenced=directly_referenced))
+    old_unions = _build_type_map(
+        t
+        for t in old.types
+        if t.is_union
+        and _is_abi_surface_type(
+            t, exclude_stdlib=excl, directly_referenced=directly_referenced
+        )
+    )
+    new_unions = _build_type_map(
+        t
+        for t in new.types
+        if t.is_union
+        and _is_abi_surface_type(
+            t, exclude_stdlib=excl, directly_referenced=directly_referenced
+        )
+    )
     # Same legacy-snapshot cv-fact concern as _diff_type_field_pair (Codex
     # review, PR #582).
     cv_facts_reliable = old.header_cv_facts_reliable and new.header_cv_facts_reliable
@@ -1279,31 +1448,40 @@ def _diff_unions(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
 
         for fname, f_old in old_fields.items():
             if fname not in new_fields:
-                changes.append(make_change(
-                    ChangeKind.UNION_FIELD_REMOVED,
-                    symbol=name,
-                    name=name, detail=fname,
-                    old_value=f_old.type,
-                ))
+                changes.append(
+                    make_change(
+                        ChangeKind.UNION_FIELD_REMOVED,
+                        symbol=name,
+                        name=name,
+                        detail=fname,
+                        old_value=f_old.type,
+                    )
+                )
             elif _field_type_genuinely_changed(
                 f_old.type, new_fields[fname].type, cv_facts_reliable=cv_facts_reliable
             ):
-                changes.append(make_change(
-                    ChangeKind.UNION_FIELD_TYPE_CHANGED,
-                    symbol=name,
-                    name=name, detail=fname,
-                    old_value=f_old.type,
-                    new_value=new_fields[fname].type,
-                ))
+                changes.append(
+                    make_change(
+                        ChangeKind.UNION_FIELD_TYPE_CHANGED,
+                        symbol=name,
+                        name=name,
+                        detail=fname,
+                        old_value=f_old.type,
+                        new_value=new_fields[fname].type,
+                    )
+                )
 
         for fname, f_new in new_fields.items():
             if fname not in old_fields:
-                changes.append(make_change(
-                    ChangeKind.UNION_FIELD_ADDED,
-                    symbol=name,
-                    name=name, detail=fname,
-                    new_value=f_new.type,
-                ))
+                changes.append(
+                    make_change(
+                        ChangeKind.UNION_FIELD_ADDED,
+                        symbol=name,
+                        name=name,
+                        detail=fname,
+                        new_value=f_new.type,
+                    )
+                )
 
     return changes
 
@@ -1368,631 +1546,35 @@ def _diff_typedefs(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
             # Require a same-family successor in new_typedefs to avoid hiding
             # genuine TYPEDEF_REMOVED breaks for names that merely match the
             # version-stamp pattern.
-            if _is_version_stamped_typedef(alias) and _has_version_family_successor(alias, new.typedefs):
-                changes.append(make_change(
-                    ChangeKind.TYPEDEF_VERSION_SENTINEL,
+            if _is_version_stamped_typedef(alias) and _has_version_family_successor(
+                alias, new.typedefs
+            ):
+                changes.append(
+                    make_change(
+                        ChangeKind.TYPEDEF_VERSION_SENTINEL,
+                        symbol=alias,
+                        name=alias,
+                        old_value=old_type,
+                    )
+                )
+                continue
+            # Typedef removed — breaking for consumers that used the alias
+            changes.append(
+                make_change(
+                    ChangeKind.TYPEDEF_REMOVED,
                     symbol=alias,
                     name=alias,
                     old_value=old_type,
-                ))
-                continue
-            # Typedef removed — breaking for consumers that used the alias
-            changes.append(make_change(
-                ChangeKind.TYPEDEF_REMOVED,
-                symbol=alias,
-                name=alias,
-                old_value=old_type,
-            ))
-        elif new_type != old_type:
-            changes.append(make_change(
-                ChangeKind.TYPEDEF_BASE_CHANGED,
-                symbol=alias,
-                name=alias,
-                old_value=old_type,
-                new_value=new_type,
-            ))
-    return changes
-
-
-
-# ── Sprint 7: enum rename, field qualifier, pointer level, access, param default ─
-
-
-@registry.detector("enum_renames")
-def _diff_enum_renames(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
-    """Detect enum member renames: same value present under different name."""
-    changes: list[Change] = []
-    excl = _exclude_stdlib_namespaces(old, new)
-    old_map = _build_type_map(
-        e for e in old.enums if not _is_non_abi_surface_type(e.name, exclude_stdlib_namespaces=excl)
-    )
-    new_map = _build_type_map(
-        e for e in new.enums if not _is_non_abi_surface_type(e.name, exclude_stdlib_namespaces=excl)
-    )
-
-    for e_old in old_map.values():
-        name = e_old.name
-        e_new = _lookup_matched_type(old_map, new_map, e_old)
-        if e_new is None:
-            continue
-        old_by_name = {m.name: m.value for m in e_old.members}
-        new_by_name = {m.name: m.value for m in e_new.members}
-        # One-to-one guard: only treat as rename when the value maps to
-        # exactly one new name (aliases must not collapse into renames).
-        _new_val_groups: dict[int, list[str]] = {}
-        for m in e_new.members:
-            if m.name not in old_by_name:
-                _new_val_groups.setdefault(m.value, []).append(m.name)
-        new_by_val: dict[int, str] = {
-            v: names[0] for v, names in _new_val_groups.items()
-            if len(names) == 1
-        }
-
-        for old_mname, old_mval in old_by_name.items():
-            if old_mname in new_by_name:
-                continue  # still present by name
-            # Name gone — check if the value still exists under exactly one new name
-            if old_mval in new_by_val:
-                new_mname = new_by_val[old_mval]
-                if new_mname not in old_by_name:
-                    changes.append(make_change(
-                        ChangeKind.ENUM_MEMBER_RENAMED,
-                        symbol=name,
-                        name=name, detail=str(old_mval),
-                        old=old_mname,
-                        new=new_mname,
-                    ))
-
-    return changes
-
-
-def _check_field_qualifier_pair(
-    name: str, fname: str, f_old: TypeField, f_new: TypeField,
-) -> list[Change]:
-    """Check const/volatile/mutable qualifier changes for a single field pair."""
-    changes: list[Change] = []
-
-    if not f_old.is_const and f_new.is_const:
-        changes.append(make_change(
-            ChangeKind.FIELD_BECAME_CONST,
-            symbol=name,
-            name=name, detail=fname,
-            old_value="non-const",
-            new_value="const",
-        ))
-    elif f_old.is_const and not f_new.is_const:
-        changes.append(make_change(
-            ChangeKind.FIELD_LOST_CONST,
-            symbol=name,
-            name=name, detail=fname,
-            old_value="const",
-            new_value="non-const",
-        ))
-
-    if not f_old.is_volatile and f_new.is_volatile:
-        changes.append(make_change(
-            ChangeKind.FIELD_BECAME_VOLATILE,
-            symbol=name,
-            name=name, detail=fname,
-            old_value="non-volatile",
-            new_value="volatile",
-        ))
-    elif f_old.is_volatile and not f_new.is_volatile:
-        changes.append(make_change(
-            ChangeKind.FIELD_LOST_VOLATILE,
-            symbol=name,
-            name=name, detail=fname,
-            old_value="volatile",
-            new_value="non-volatile",
-        ))
-
-    if not f_old.is_mutable and f_new.is_mutable:
-        changes.append(make_change(
-            ChangeKind.FIELD_BECAME_MUTABLE,
-            symbol=name,
-            name=name, detail=fname,
-            old_value="non-mutable",
-            new_value="mutable",
-        ))
-    elif f_old.is_mutable and not f_new.is_mutable:
-        changes.append(make_change(
-            ChangeKind.FIELD_LOST_MUTABLE,
-            symbol=name,
-            name=name, detail=fname,
-            old_value="mutable",
-            new_value="non-mutable",
-        ))
-
-    return changes
-
-
-@registry.detector("field_qualifiers")
-def _diff_field_qualifiers(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
-    """Detect field-level const/volatile/mutable qualifier changes.
-
-    Gated on ``header_cv_facts_reliable`` on both sides: a snapshot
-    persisted before the CastXML field-CV-fact fix has
-    ``is_const``/``is_volatile``/``is_mutable`` permanently False — real
-    (not absent) data that reads identically to a genuine "not const"
-    fact. Comparing such a snapshot against a fresh dump of unchanged
-    headers would otherwise misreport a false ``FIELD_BECAME_CONST``/
-    ``VOLATILE``/``MUTABLE`` purely from the tool upgrade (Codex review,
-    PR #582).
-    """
-    if not (old.header_cv_facts_reliable and new.header_cv_facts_reliable):
-        return []
-    changes: list[Change] = []
-    excl = _exclude_stdlib_namespaces(old, new)
-    directly_referenced = _directly_referenced(old, new)
-    old_map = _build_type_map(t for t in old.types if not t.is_union and _is_abi_surface_type(t, exclude_stdlib=excl, directly_referenced=directly_referenced))
-    new_map = _build_type_map(t for t in new.types if not t.is_union and _is_abi_surface_type(t, exclude_stdlib=excl, directly_referenced=directly_referenced))
-
-    for t_old in old_map.values():
-        t_new = _lookup_matched_type(old_map, new_map, t_old)
-        if t_new is None:
-            continue
-        # Bare, not the qualified matching key — see _diff_types's comment.
-        name = t_old.name
-        old_fields = {f.name: f for f in t_old.fields}
-        new_fields = {f.name: f for f in t_new.fields}
-
-        for fname, f_old in old_fields.items():
-            f_new = new_fields.get(fname)
-            if f_new is None:
-                continue
-            changes.extend(_check_field_qualifier_pair(name, fname, f_old, f_new))
-
-    return changes
-
-
-@registry.detector("field_default_initializer")
-def _diff_field_default_initializer(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
-    """Detect a field's default member initializer being removed or changed.
-
-    Header-tier only (like ``param_defaults``): the initializer expression is
-    populated solely from castxml header parsing, and ``TypeField.default``
-    is ``None`` both for "no initializer" and "the dumper doesn't capture
-    this" — see its docstring in model.py. Gaining an initializer is not
-    tracked (matches ``PARAM_DEFAULT_VALUE_*``'s convention: an added default
-    is purely additive, never itself flagged).
-
-    Gates per-field on :func:`fact_provenance.both_castxml_backed_fact` (not
-    just ``_both_header_aware``): the clang header backend does not populate
-    ``TypeField.default`` yet, so a castxml-vs-clang comparison would
-    otherwise read as every initializer having been removed (Codex review,
-    PR #582). Per-field gating (rather than the whole-snapshot
-    ``_both_castxml_backed``) is what correctly supports a ``--ast-frontend
-    hybrid`` snapshot (G28 Phase 3).
-
-    Unions are NOT excluded (unlike most field-level detectors, which leave
-    them to ``_diff_unions``): a C++ union may have a default member
-    initializer on (at most) one of its variant members
-    (``union U { int x = 1; float y; };``), CastXML parses that member's
-    ``init`` attribute the same as an ordinary struct field, and
-    ``_diff_unions`` never looks at ``default`` at all — so without this,
-    a union variant's initializer being removed or changed went completely
-    undetected (Codex review, PR #582).
-    """
-    changes: list[Change] = []
-    excl = _exclude_stdlib_namespaces(old, new)
-    directly_referenced = _directly_referenced(old, new)
-    old_map = _build_type_map(t for t in old.types if _is_abi_surface_type(t, exclude_stdlib=excl, directly_referenced=directly_referenced))
-    new_map = _build_type_map(t for t in new.types if _is_abi_surface_type(t, exclude_stdlib=excl, directly_referenced=directly_referenced))
-
-    for t_old in old_map.values():
-        t_new = _lookup_matched_type(old_map, new_map, t_old)
-        if t_new is None:
-            continue
-        # Bare, not the qualified matching key — see _diff_types's comment.
-        name = t_old.name
-        old_fields = {f.name: f for f in t_old.fields}
-        new_fields = {f.name: f for f in t_new.fields}
-
-        for fname, f_old in old_fields.items():
-            f_new = new_fields.get(fname)
-            if f_new is None or f_old.default is None:
-                continue
-            if not both_castxml_backed_fact(
-                old, new, field_fact_key(name, fname, "default")
-            ):
-                continue
-            if f_new.default is None:
-                changes.append(make_change(
-                    ChangeKind.FIELD_DEFAULT_INITIALIZER_REMOVED,
-                    symbol=name,
-                    name=name, detail=fname,
-                    old_value=f_old.default,
-                ))
-            elif f_old.default != f_new.default:
-                changes.append(make_change(
-                    ChangeKind.FIELD_DEFAULT_INITIALIZER_CHANGED,
-                    symbol=name,
-                    name=name, detail=fname,
-                    old=f_old.default,
-                    new=f_new.default,
-                ))
-
-    return changes
-
-
-@registry.detector("field_deprecated")
-def _diff_field_deprecated(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
-    """Detect a struct/class field gaining or losing `[[deprecated]]`.
-
-    ``TypeField.deprecated`` is populated and serialized (castxml's ``Field``
-    element carries the same ``deprecation``/bare-``attributes`` marker as
-    a function/variable/type/enum declaration), but — unlike those four
-    other surfaces, each of which already has its own dedicated detector —
-    nothing previously read it: a public field changing from `int x;` to
-    `[[deprecated]] int x;` (or losing the marker) went completely
-    undetected on a CastXML-backed header comparison (Codex review, PR
-    #582).
-
-    Header-tier only, gated per-field on
-    :func:`fact_provenance.both_known_backed_fact_qualified` like the other four
-    deprecated detectors (both backends populate ``TypeField.deprecated``
-    today, G31 Phase C, with directly cross-comparable values; per-field
-    gating is what correctly supports a ``--ast-frontend hybrid`` snapshot,
-    G28 Phase 3). Unions are NOT excluded — matching
-    ``FIELD_DEFAULT_INITIALIZER_REMOVED``/``_CHANGED``'s reasoning: a union
-    variant can carry `[[deprecated]]` too, and ``_diff_unions`` never
-    checks ``deprecated`` at all.
-    """
-    changes: list[Change] = []
-    excl = _exclude_stdlib_namespaces(old, new)
-    directly_referenced = _directly_referenced(old, new)
-    old_map = _build_type_map(t for t in old.types if _is_abi_surface_type(t, exclude_stdlib=excl, directly_referenced=directly_referenced))
-    new_map = _build_type_map(t for t in new.types if _is_abi_surface_type(t, exclude_stdlib=excl, directly_referenced=directly_referenced))
-
-    for t_old in old_map.values():
-        t_new = _lookup_matched_type(old_map, new_map, t_old)
-        if t_new is None:
-            continue
-        # Bare, not the qualified matching key — see _diff_types's comment.
-        name = t_old.name
-        old_fields = {f.name: f for f in t_old.fields}
-        new_fields = {f.name: f for f in t_new.fields}
-
-        for fname, f_old in old_fields.items():
-            f_new = new_fields.get(fname)
-            if f_new is None:
-                continue
-            if not fact_known_qualified(old, new, old_map, new_map, name, field_fact_key(type_map_key(t_old), fname, "deprecated"), field_fact_key(type_map_key(t_new), fname, "deprecated"), field_fact_key(name, fname, "deprecated")):
-                continue
-            if f_old.deprecated is None and f_new.deprecated is not None:
-                changes.append(make_change(
-                    ChangeKind.FIELD_DEPRECATED_ADDED,
-                    symbol=name,
-                    name=name, detail=fname,
-                    new=f_new.deprecated,
-                ))
-            elif f_old.deprecated is not None and f_new.deprecated is None:
-                changes.append(make_change(
-                    ChangeKind.FIELD_DEPRECATED_REMOVED,
-                    symbol=name,
-                    name=name, detail=fname,
-                    old_value=f_old.deprecated,
-                ))
-
-    return changes
-
-
-@registry.detector("type_deprecated")
-def _diff_type_deprecated(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
-    """Detect a class/struct/union gaining or losing `[[deprecated]]`.
-
-    Header-tier only — see ``FIELD_DEFAULT_INITIALIZER_REMOVED``'s docstring
-    above / ``Function.deprecated``'s in model.py for why this gates
-    per-type on :func:`fact_provenance.both_known_backed_fact_qualified` rather than a
-    per-pair None check or plain ``_both_header_aware`` (both backends
-    populate ``RecordType.deprecated`` today, G31 Phase C, with directly
-    cross-comparable values; per-type gating is what correctly supports a
-    ``--ast-frontend hybrid`` snapshot, G28 Phase 3).
-    """
-    changes: list[Change] = []
-    excl = _exclude_stdlib_namespaces(old, new)
-    directly_referenced = _directly_referenced(old, new)
-    old_map = _build_type_map(t for t in old.types if _is_abi_surface_type(t, exclude_stdlib=excl, directly_referenced=directly_referenced))
-    new_map = _build_type_map(t for t in new.types if _is_abi_surface_type(t, exclude_stdlib=excl, directly_referenced=directly_referenced))
-
-    for t_old in old_map.values():
-        t_new = _lookup_matched_type(old_map, new_map, t_old)
-        if t_new is None:
-            continue
-        # Bare for Change.symbol; fact_known_qualified handles the key below.
-        name = t_old.name
-        if not fact_known_qualified(old, new, old_map, new_map, name, type_fact_key(type_map_key(t_old), "deprecated"), type_fact_key(type_map_key(t_new), "deprecated"), type_fact_key(name, "deprecated")):
-            continue
-        if t_old.deprecated is None and t_new.deprecated is not None:
-            changes.append(make_change(
-                ChangeKind.TYPE_DEPRECATED_ADDED,
-                symbol=name,
-                name=name, detail=t_new.deprecated,
-                new_value=t_new.deprecated,
-            ))
-        elif t_old.deprecated is not None and t_new.deprecated is None:
-            changes.append(make_change(
-                ChangeKind.TYPE_DEPRECATED_REMOVED,
-                symbol=name,
-                name=name,
-                old_value=t_old.deprecated,
-            ))
-
-    return changes
-
-
-@registry.detector("enum_deprecated")
-def _diff_enum_deprecated(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
-    """Detect an enum gaining or losing `[[deprecated]]` (header-tier only).
-
-    Gates per-enum on :func:`fact_provenance.both_known_backed_fact_qualified` — see
-    ``TYPE_DEPRECATED_ADDED``'s docstring above (both backends populate
-    ``EnumType.deprecated`` today, G31 Phase C, with directly cross-
-    comparable values; per-enum gating supports ``--ast-frontend hybrid``).
-    """
-    changes: list[Change] = []
-    excl = _exclude_stdlib_namespaces(old, new)
-    old_map = _build_type_map(
-        e for e in old.enums if not _is_non_abi_surface_type(e.name, exclude_stdlib_namespaces=excl)
-    )
-    new_map = _build_type_map(
-        e for e in new.enums if not _is_non_abi_surface_type(e.name, exclude_stdlib_namespaces=excl)
-    )
-
-    for e_old in old_map.values():
-        name = e_old.name
-        e_new = _lookup_matched_type(old_map, new_map, e_old)
-        if e_new is None:
-            continue
-        if not fact_known_qualified(old, new, old_map, new_map, name, enum_fact_key(type_map_key(e_old), "deprecated"), enum_fact_key(type_map_key(e_new), "deprecated"), enum_fact_key(name, "deprecated")):
-            continue
-        if e_old.deprecated is None and e_new.deprecated is not None:
-            changes.append(make_change(
-                ChangeKind.ENUM_DEPRECATED_ADDED,
-                symbol=name,
-                name=name, detail=e_new.deprecated,
-                new_value=e_new.deprecated,
-            ))
-        elif e_old.deprecated is not None and e_new.deprecated is None:
-            changes.append(make_change(
-                ChangeKind.ENUM_DEPRECATED_REMOVED,
-                symbol=name,
-                name=name,
-                old_value=e_old.deprecated,
-            ))
-
-    return changes
-
-
-@registry.detector("field_renames")
-def _diff_field_renames(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
-    """Detect field renames: same offset+type, different name."""
-    changes: list[Change] = []
-    excl = _exclude_stdlib_namespaces(old, new)
-    directly_referenced = _directly_referenced(old, new)
-    old_map = _build_type_map(t for t in old.types if not t.is_union and _is_abi_surface_type(t, exclude_stdlib=excl, directly_referenced=directly_referenced))
-    new_map = _build_type_map(t for t in new.types if not t.is_union and _is_abi_surface_type(t, exclude_stdlib=excl, directly_referenced=directly_referenced))
-
-    for t_old in old_map.values():
-        t_new = _lookup_matched_type(old_map, new_map, t_old)
-        if t_new is None or t_new.is_opaque:
-            continue
-        # Bare, not the qualified matching key — see _diff_types's comment.
-        name = t_old.name
-        old_names = {f.name for f in t_old.fields}
-        new_names = {f.name for f in t_new.fields}
-
-        removed = [f for f in t_old.fields if f.name not in new_names]
-        added = [f for f in t_new.fields if f.name not in old_names]
-
-        # Match by (offset, type, bitfield width) — a rename is when the same
-        # slot has a different name. A bit-field's width is a layout property
-        # the type spelling alone doesn't capture (two "unsigned int"
-        # bit-fields at the same offset can still differ in width), so it
-        # must be part of the match key or a real width change gets masked
-        # as a bare rename (caught in review). A list per signature, not a
-        # single value: distinct added fields can share a signature (e.g.
-        # overlapping anonymous-union members collapsing to one field), and
-        # a plain single-value dict would let every removed field with that
-        # signature claim the same added field as its rename target instead
-        # of just the first (caught in review).
-        added_by_sig: dict[tuple[int, str, bool, int | None], list[TypeField]] = {}
-        for f in added:
-            if f.offset_bits is not None:
-                sig = (f.offset_bits, f.type, f.is_bitfield, f.bitfield_bits)
-                added_by_sig.setdefault(sig, []).append(f)
-        renamed_to: set[str] = set()
-        for f_old in removed:
-            if f_old.offset_bits is None:
-                continue
-            # Skip reserved→real transitions — handled by _diff_reserved_fields
-            # as USED_RESERVED_FIELD (compatible), not FIELD_RENAMED (API break).
-            if _RESERVED_FIELD_RE.match(f_old.name):
-                continue
-            sig = (f_old.offset_bits, f_old.type, f_old.is_bitfield, f_old.bitfield_bits)
-            f_new = next(
-                (c for c in added_by_sig.get(sig, []) if c.name not in renamed_to),
-                None,
+                )
             )
-            if f_new is not None:
-                renamed_to.add(f_new.name)
-                changes.append(make_change(
-                    ChangeKind.FIELD_RENAMED,
-                    symbol=name,
-                    name=name,
-                    old=f_old.name,
-                    new=f_new.name,
-                ))
-
-    return changes
-
-
-# ── ABICC full parity detectors ───────────────────────────────────────────────
-
-
-@registry.detector("var_values")
-def _diff_var_values(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
-    """Detect global data value changes (ABICC: Global_Data_Value_Changed).
-
-    When a global const variable's initial value changes, old binaries may
-    use stale compile-time-inlined values (constant propagation).
-    """
-    changes: list[Change] = []
-    old_map = _public_variables(old)
-    new_map = _public_variables(new)
-
-    for mangled, v_old in old_map.items():
-        v_new = new_map.get(mangled)
-        if v_new is None:
-            continue
-        if (
-            v_old.value is not None
-            and v_new.value is not None
-            and v_old.value != v_new.value
-        ):
-            changes.append(make_change(
-                ChangeKind.VAR_VALUE_CHANGED,
-                symbol=mangled,
-                name=v_old.name, old=repr(v_old.value), new=repr(v_new.value),
-                old_value=v_old.value,
-                new_value=v_new.value,
-            ))
-    return changes
-
-
-@registry.detector("type_kind_changes")
-def _diff_type_kind_changes(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
-    """Detect struct↔union kind changes (ABICC: StructToUnion / DataType_Type)."""
-    changes: list[Change] = []
-    excl = _exclude_stdlib_namespaces(old, new)
-    directly_referenced = _directly_referenced(old, new)
-    old_map = _build_type_map(t for t in old.types if _is_abi_surface_type(t, exclude_stdlib=excl, directly_referenced=directly_referenced))
-    new_map = _build_type_map(t for t in new.types if _is_abi_surface_type(t, exclude_stdlib=excl, directly_referenced=directly_referenced))
-
-    for t_old in old_map.values():
-        t_new = _lookup_matched_type(old_map, new_map, t_old)
-        if t_new is None:
-            continue
-        # Bare, not the qualified matching key — see _diff_types's comment.
-        name = t_old.name
-        if t_old.kind != t_new.kind:
-            # Union-involving transitions are binary-breaking (layout changes);
-            # struct↔class transitions are source-level only (identical ABI).
-            union_involved = t_old.kind == "union" or t_new.kind == "union"
-            ck = ChangeKind.TYPE_KIND_CHANGED if union_involved else ChangeKind.SOURCE_LEVEL_KIND_CHANGED
-            changes.append(make_change(
-                ck,
-                symbol=name,
-                name=name,
-                old=t_old.kind,
-                new=t_new.kind,
-            ))
-    return changes
-
-
-@registry.detector("reserved_fields")
-def _diff_reserved_fields(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
-    """Detect reserved fields put into use (ABICC: Used_Reserved_Field).
-
-    NOTE: Primary detection is now integrated into _diff_type_fields() which
-    suppresses TYPE_FIELD_REMOVED + TYPE_FIELD_ADDED for reserved-field renames.
-    This standalone detector is kept for backward compatibility but now requires
-    both offset AND type match to avoid false positives (M5 fix).
-    """
-    changes: list[Change] = []
-    excl = _exclude_stdlib_namespaces(old, new)
-    directly_referenced = _directly_referenced(old, new)
-    old_map = _build_type_map(t for t in old.types if not t.is_union and _is_abi_surface_type(t, exclude_stdlib=excl, directly_referenced=directly_referenced))
-    new_map = _build_type_map(t for t in new.types if not t.is_union and _is_abi_surface_type(t, exclude_stdlib=excl, directly_referenced=directly_referenced))
-
-    for t_old in old_map.values():
-        t_new = _lookup_matched_type(old_map, new_map, t_old)
-        if t_new is None or t_new.is_opaque:
-            continue
-        # Bare, not the qualified matching key — see _diff_types's comment.
-        name = t_old.name
-
-        old_names = {f.name for f in t_old.fields}
-        new_names = {f.name for f in t_new.fields}
-
-        removed = [f for f in t_old.fields if f.name not in new_names and _RESERVED_FIELD_RE.match(f.name)]
-        added = [f for f in t_new.fields if f.name not in old_names and not _RESERVED_FIELD_RE.match(f.name)]
-
-        added_by_offset = {f.offset_bits: f for f in added if f.offset_bits is not None}
-        # Fallback index by type for DWARF-only mode (no offsets)
-        added_by_type: dict[str, list[TypeField]] = {}
-        for f in added:
-            added_by_type.setdefault(f.type, []).append(f)
-        matched: set[str] = set()
-        for f_old in removed:
-            candidate = None
-            # Primary: match by offset + type
-            if f_old.offset_bits is not None:
-                c = added_by_offset.get(f_old.offset_bits)
-                if c is not None and f_old.type == c.type:
-                    candidate = c
-            # Fallback: match by type when offsets unavailable (DWARF-only)
-            if candidate is None and f_old.offset_bits is None:
-                for c in added_by_type.get(f_old.type, []):
-                    if c.name not in matched:
-                        candidate = c
-                        break
-            if candidate is not None:
-                matched.add(candidate.name)
-                changes.append(make_change(
-                    ChangeKind.USED_RESERVED_FIELD,
-                    symbol=name,
-                    name=name,
-                    old=f_old.name,
-                    new=candidate.name,
-                ))
-    return changes
-
-
-@registry.detector("const_overloads")
-def _diff_const_overloads(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
-    """Detect removed const method overloads (ABICC: Removed_Const_Overload).
-
-    A const overload removal occurs when both const and non-const versions
-    existed in old, but only the non-const version remains in new.
-    """
-    changes: list[Change] = []
-    old_funcs = [f for f in old.functions if f.visibility in _PUBLIC_VIS]
-    new_funcs = [f for f in new.functions if f.visibility in _PUBLIC_VIS]
-
-    # Group by (name, param_signature) to find const/non-const pairs
-    from collections import defaultdict
-
-    _ParamSig = tuple[str, int, str]  # (type, pointer_depth, kind)
-    _GroupKey = tuple[str, tuple[_ParamSig, ...]]
-
-    def _group_key(f: Function) -> _GroupKey:
-        return (f.name, tuple((p.type, p.pointer_depth, p.kind.value) for p in f.params))
-
-    old_groups: dict[_GroupKey, list[Function]] = defaultdict(list)
-    new_groups: dict[_GroupKey, list[Function]] = defaultdict(list)
-    for f in old_funcs:
-        old_groups[_group_key(f)].append(f)
-    for f in new_funcs:
-        new_groups[_group_key(f)].append(f)
-
-    for key, old_fns in old_groups.items():
-        old_const = [f for f in old_fns if f.is_const]
-        old_nonconst = [f for f in old_fns if not f.is_const]
-        if not old_const or not old_nonconst:
-            continue  # no const overload pair in old
-
-        new_fns = new_groups.get(key, [])
-        new_const = [f for f in new_fns if f.is_const]
-        new_nonconst = [f for f in new_fns if not f.is_const]
-        if not new_const and new_nonconst:
-            # Const overload removed, non-const kept
-            f_removed = old_const[0]
-            changes.append(make_change(
-                ChangeKind.REMOVED_CONST_OVERLOAD,
-                symbol=f_removed.mangled,
-                name=f_removed.name,
-                old_value="const overload present",
-                new_value="const overload removed",
-            ))
+        elif new_type != old_type:
+            changes.append(
+                make_change(
+                    ChangeKind.TYPEDEF_BASE_CHANGED,
+                    symbol=alias,
+                    name=alias,
+                    old_value=old_type,
+                    new_value=new_type,
+                )
+            )
     return changes

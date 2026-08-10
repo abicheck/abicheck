@@ -153,7 +153,7 @@ def _extract_struct_layouts(
     Also populates ``adv.all_struct_names`` and ``adv.packed_structs`` in a
     single pass (previously done in a separate ``_extract_calling_conventions``).
     """
-    for ti, cv_struct in types.all_structs().items():
+    for _ti, cv_struct in types.all_structs().items():
         if not _is_user_visible(cv_struct.name, cv_struct.is_forward_ref):
             continue
 
@@ -265,7 +265,7 @@ def _extract_enums(
     src_files: dict[str, str] | None = None,
 ) -> None:
     """Extract enum types from TPI into DwarfMetadata.enums."""
-    for ti, cv_enum in types.all_enums().items():
+    for _ti, cv_enum in types.all_enums().items():
         if not _is_user_visible(cv_enum.name, cv_enum.is_forward_ref):
             continue
 

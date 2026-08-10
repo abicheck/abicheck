@@ -573,9 +573,8 @@ def check_changekind_partition(f: Findings) -> None:
 
     # Detect overlap between buckets (each kind belongs to exactly one).
     pairs = list(buckets.items())
-    for i in range(len(pairs)):
-        for j in range(i + 1, len(pairs)):
-            (n1, s1), (n2, s2) = pairs[i], pairs[j]
+    for i, (n1, s1) in enumerate(pairs):
+        for n2, s2 in pairs[i + 1 :]:
             both = s1 & s2
             if both:
                 names = ", ".join(sorted(k.name for k in both))

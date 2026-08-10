@@ -1,0 +1,168 @@
+name: 'Schedule: check-project.yml failure-path fixture'
+
+# The automated trigger half of test-check-project-failure-path.yml -- see
+# that file's header comment for why it can no longer declare its own
+# `schedule:`/`push:main` trigger. That workflow's own run is EXPECTED to
+# conclude "failure" on every successful test run (it deliberately drives
+# check-project.yml into an operational error to prove the aggregate job's
+# failure-survival contract); running it directly against any commit SHA
+# that is part of `main`'s own history would permanently attach a red
+# check-run to that commit.
+#
+# This workflow breaks that link. It runs on its own schedule against
+# `main`, but its own job's PASS/FAIL is deliberately NOT the dispatched
+# run's overall conclusion (expected to be "failure" every time, by design)
+# -- it is the dispatched run's own `test-check-project-verify` job
+# conclusion, which is "success" exactly when the failure-survival contract
+# held and "failure" exactly when it didn't (e.g. the operational error
+# stopped reaching `aggregate`, or was silently dropped instead of reported).
+# Concretely, this job:
+#   1. creates/updates a dedicated, disposable fixture branch
+#      (`ci-fixture/check-project-failure-path`) at the current `main` tip
+#      plus one fresh empty commit, so the fixture branch's HEAD SHA is
+#      never a commit reachable from `main`'s own branch ref (an empty
+#      commit on top always mints a new SHA distinct from anything in
+#      `main`'s history -- a fast-forward with no new commit would keep the
+#      identical SHA, and GitHub's checks UI aggregates check-runs by exact
+#      commit SHA regardless of which ref points at it);
+#   2. dispatches test-check-project-failure-path.yml with
+#      `ref: ci-fixture/check-project-failure-path`, so GitHub loads and
+#      runs that workflow (and its `uses: ./.github/workflows/
+#      check-project.yml` reusable-workflow call) exactly as they exist on
+#      the fixture branch -- a byte-for-byte copy of `main` at dispatch
+#      time, since the fixture branch is always rebuilt from the current
+#      `main` tip first;
+#   3. polls for the dispatched run, waits for it to complete, and reads
+#      back that run's `test-check-project-verify` job conclusion --
+#      **not** `gh run view`'s own overall-run conclusion, which is always
+#      "failure" on a correct run (`gh workflow run` itself is
+#      fire-and-forget and does not block on the run it creates, so step 2
+#      alone would make this job report green even on a real regression --
+#      Codex review). Only that one job's conclusion decides this job's own
+#      exit code.
+# This is what actually reports this scheduler's own health separately from
+# the fixture's expected failure, and still surfaces a genuine regression
+# (Codex review) -- exactly the split "main is green" needs.
+permissions:
+  contents: read
+
+on:
+  schedule:
+    # Weekly -- enough to catch a regression in the failure-survival
+    # contract without needing a run on every push.
+    - cron: '17 6 * * 1'
+  workflow_dispatch: {}
+
+concurrency:
+  group: ${{ github.workflow }}
+  cancel-in-progress: true
+
+jobs:
+  dispatch:
+    name: 'Stage fixture ref, dispatch, and verify the failure-path fixture'
+    runs-on: ubuntu-latest
+    # Generous: this job now waits out the full dispatched run. Worst case,
+    # sequentially: test-check-project-stage (20 min) -> check-project.yml's
+    # plan -> check -> aggregate (45 min each, and they run sequentially --
+    # check needs: plan, aggregate needs: [plan, check]) -> test-check-
+    # project-verify (20 min) = 20 + 45*3 + 20 = 175 minutes, before any
+    # runner queue time (Codex review -- the previous 45-minute budget here,
+    # and the fixed poll-loop bound below, both undersold the child
+    # workflow's own real worst case). 240 minutes leaves headroom above
+    # that on top of this job's own polling overhead, comfortably inside
+    # GitHub-hosted runners' 360-minute per-job cap.
+    timeout-minutes: 240
+    permissions:
+      contents: write
+      actions: write
+    steps:
+      # Pinned to a full commit SHA, not the floating `v6` tag -- this job
+      # carries contents:write + actions:write (AGENTS.md's Action-pinning
+      # convention for a write-permission job), matching the pin already
+      # used by ci.yml/pages.yml/agentready.yml/dependency-review.yml.
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10  # v6
+        with:
+          fetch-depth: 1
+
+      - name: Create fixture ref with a fresh commit (never part of main's own history)
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email 'github-actions[bot]@users.noreply.github.com'
+          git checkout -B ci-fixture/check-project-failure-path
+          git commit --allow-empty -m "ci fixture trigger for test-check-project-failure-path.yml (run ${GITHUB_RUN_ID})"
+          git push --force origin ci-fixture/check-project-failure-path
+          echo "FIXTURE_SHA=$(git rev-parse HEAD)" >> "$GITHUB_ENV"
+
+      - name: Dispatch, wait for, and verify the failure-path fixture run
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          REPO="${GITHUB_REPOSITORY}"
+          WORKFLOW="test-check-project-failure-path.yml"
+          REF="ci-fixture/check-project-failure-path"
+
+          echo "Dispatching ${WORKFLOW} against ${REF} (sha ${FIXTURE_SHA})"
+          gh workflow run "$WORKFLOW" --repo "$REPO" --ref "$REF"
+
+          # gh workflow run only creates the workflow_dispatch event and
+          # returns immediately -- it does not wait for, or report, the run
+          # it creates. Find that specific run ourselves via its unique
+          # head SHA (the fresh commit above), since a generic "latest run
+          # of this workflow" could race with a concurrent manual dispatch.
+          echo 'Waiting for the dispatched run to appear...'
+          run_id=""
+          for _ in $(seq 1 30); do
+            run_id=$(gh run list --repo "$REPO" --workflow "$WORKFLOW" \
+              --json databaseId,headSha,event,createdAt --limit 20 \
+              --jq "[.[] | select(.headSha == \"${FIXTURE_SHA}\" and .event == \"workflow_dispatch\")] | sort_by(.createdAt) | last | .databaseId // empty")
+            if [ -n "$run_id" ]; then
+              echo "Found run: ${run_id}"
+              break
+            fi
+            sleep 10
+          done
+          if [ -z "$run_id" ]; then
+            echo "::error::Dispatched run for sha ${FIXTURE_SHA} never appeared -- treating as a scheduler failure."
+            exit 1
+          fi
+
+          echo "Waiting for run ${run_id} to complete..."
+          # 400 * 30s = 200 minutes -- comfortably above the child
+          # workflow's own realistic worst-case (see the job-level
+          # timeout-minutes comment above for the arithmetic). This is a
+          # generous ceiling to fail gracefully with a clear message on a
+          # genuinely stuck run; the job's own timeout-minutes above is the
+          # actual backstop (Codex review).
+          status=""
+          for _ in $(seq 1 400); do
+            status=$(gh run view "$run_id" --repo "$REPO" --json status --jq .status)
+            if [ "$status" = "completed" ]; then
+              break
+            fi
+            sleep 30
+          done
+          if [ "$status" != "completed" ]; then
+            echo "::error::Run ${run_id} did not complete within the wait window (last status: ${status})."
+            exit 1
+          fi
+
+          # Deliberately not reading the dispatched run's own top-level
+          # conclusion field -- that is expected to be "failure" on every
+          # correct run. The only signal this scheduler acts on is
+          # test-check-project-verify's own job conclusion, below.
+          echo "Reading test-check-project-verify's own job conclusion..."
+          verify_conclusion=$(gh run view "$run_id" --repo "$REPO" --json jobs \
+            --jq '[.jobs[] | select(.name | test("verify"))] | last | .conclusion')
+
+          run_url="https://github.com/${REPO}/actions/runs/${run_id}"
+          echo "test-check-project-verify conclusion: ${verify_conclusion} (${run_url})"
+          if [ "$verify_conclusion" != "success" ]; then
+            echo "::error::test-check-project-verify did not succeed (conclusion=${verify_conclusion}) -- the failure-survival contract may have regressed. See ${run_url}"
+            exit 1
+          fi
+
+          echo "OK: the deferred operational failure was correctly reported by aggregate."

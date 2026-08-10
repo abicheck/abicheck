@@ -1,7 +1,7 @@
 ---
-doc_type: how-to
+doc_type: contributor
 audience:
-  - library-maintainer
+  - contributor
 level: intermediate
 summarizes:
   - impact-analysis
@@ -10,6 +10,14 @@ generated: false
 ---
 
 # Use-Case Impact
+
+> **Library-only preview, no CLI/report surface yet.** This page describes a
+> graph-building capability reachable only through the Python API
+> (`abicheck.impact.use_cases`) — there is no CLI flag that reads the
+> manifest, no report field, and no finding kind. It moved here from the
+> User Guide because it isn't yet a supported end-user workflow (see "What
+> this does not cover yet" below); it will move back once at least one of
+> those surfaces exists.
 
 An optional `impact-use-cases.yaml` manifest lets you declare a project's own
 business/runtime use cases — "the training workflow", "the batch export
