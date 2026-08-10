@@ -241,59 +241,6 @@ def both_known_backed_fact_qualified(
     return old_producer is not None and new_producer is not None
 
 
-def _unrecorded_fact_is_positively_unreliable(snap: AbiSnapshot, key: str) -> bool:
-    """True if *snap* having NO recorded value for *key* is itself a sign of
-    real-but-WRONG legacy data, rather than genuinely unknown provenance.
-
-    Only meaningful to call once the caller already knows *key* resolved to
-    ``None`` (including any bare-key fallback) — this never re-derives that
-    absence itself, only judges what an absence on THIS snapshot means. See
-    :func:`same_producer_backed_fact_qualified`'s use of it (Codex review,
-    fresh evidence: that gate's "producer unknown -> permissive" branch
-    can't otherwise tell a known-wrong legacy value apart from a truly
-    unrecorded one).
-
-    Two distinct legacy shapes, both because a pre-fix parser/merge never
-    extracted or recorded a fact at all, leaving a stale-but-real ``None``:
-
-    - ``ast_producer == "clang"``: mirrors :func:`fact_producer`'s own two
-      reliability early-returns exactly. A pre-v19/v20 clang-producer
-      snapshot's value for ``deprecated``/``is_scoped``/field ``default`` is
-      unconditionally ``None``/``False`` for EVERY declaration — previously
-      let a stale pre-v20 clang field default slip through as a false
-      ``FIELD_DEFAULT_INITIALIZER_REMOVED``.
-    - ``ast_producer == "hybrid"``, field ``default`` only (Codex review,
-      second round, fresh evidence): a pre-v20 hybrid snapshot's
-      clang-only-APPENDED record types (``merge_snapshots()``'s
-      ``clang_only_types`` loop) never had ``default`` provenance stamped at
-      all under the old merge code — it only stamped ``deprecated`` for
-      those, since clang couldn't populate ``default`` yet. A MATCHED
-      field's ``default`` provenance, by contrast, is unconditionally
-      stamped "castxml" regardless of schema version (``_backfill_fact``
-      records provenance for every matched declaration; clang's own value
-      was always ``None`` pre-fix, so there was never anything to actually
-      backfill from) — such a field always resolves to a real producer via
-      :func:`resolved_fact_producer` and never reaches this function at
-      all, so this branch only ever applies to the genuinely-blank
-      clang-only-appended case.
-    """
-    if not (snap.from_headers and not snap.from_headers_inferred):
-        return False
-    if snap.ast_producer == "clang":
-        if not snap.clang_field_initializer_facts_reliable and key.endswith(":default"):
-            return True
-        if not snap.clang_deprecation_facts_reliable and (
-            key.endswith(":deprecated") or key.endswith(":is_scoped")
-        ):
-            return True
-        return False
-    if snap.ast_producer == "hybrid":
-        return not snap.clang_field_initializer_facts_reliable and key.endswith(
-            ":default"
-        )
-    return False
-
-
 def resolved_fact_producer(
     snap: AbiSnapshot,
     qualified_key: str,
@@ -327,16 +274,16 @@ def same_producer_backed_fact_qualified(
     old_bare_unambiguous: bool,
     new_bare_unambiguous: bool,
 ) -> bool:
-    """True unless *old* and *new* have POSITIVELY known but DIFFERENT
-    producers for this fact — the per-declaration form of the same-producer
-    check ``diff_symbols._diff_param_defaults`` applies inline via plain
+    """True only if *old* and *new* have the SAME POSITIVELY KNOWN producer
+    for this fact — the per-declaration form of the same-producer check
+    ``diff_symbols._diff_param_defaults`` applies inline via plain
     :func:`fact_producer` (G31 Phase C).
 
     This is the correct gate for a fact BOTH backends populate but whose
-    VALUE REPRESENTATIONS are not cross-comparable — ``Param.default`` and
-    ``TypeField.default`` alike, where castxml keeps the verbatim source
-    expression and clang falls back to a literal/structural fingerprint. It
-    sits between this module's two other gates:
+    VALUE REPRESENTATIONS are not cross-comparable — ``TypeField.default``
+    (this function's only current caller), where castxml keeps the verbatim
+    source expression and clang falls back to a literal/structural
+    fingerprint. It sits between this module's two other gates:
     :func:`both_castxml_backed_fact` (for a fact only castxml can produce at
     all — too strict here, it would decline a perfectly comparable
     clang-vs-clang pair) and :func:`both_known_backed_fact` (for a fact whose
@@ -344,22 +291,22 @@ def same_producer_backed_fact_qualified(
     source text against clang's fingerprint and read every initializer as
     changed).
 
-    Note the asymmetry with those two: this returns True when either side's
-    producer is merely *unknown*. A skip must never fire just because one
-    side lacks metadata it never had a chance to record (a legacy
-    pre-provenance baseline, or a hand-built snapshot in a test) — that would
-    regress a previously-working comparison into a silent miss, the same
-    reasoning ``_diff_param_defaults``' own docstring records.
-
-    The permissive fallback is qualified, though: a side whose producer
-    resolves to ``None`` (including any bare-key fallback) is checked
-    against :func:`_unrecorded_fact_is_positively_unreliable` — an absence
-    that is itself a sign of real-but-WRONG legacy data (not merely
-    unrecorded) forces a decline instead. The permissive branch exists for
-    "we have no information," and stale-but-present-elsewhere data is the
-    opposite of that (Codex review, fresh evidence; extended to the
-    hybrid-producer case in a second round, also Codex review, fresh
-    evidence).
+    Deliberately NOT permissive on an unknown producer, unlike
+    ``_diff_param_defaults``' own inline check (Codex review, fresh
+    evidence): a side whose producer resolves to ``None`` — including a
+    snapshot persisted before ``ast_producer`` was tracked at all — could
+    just as easily be a real castxml value the OTHER, positively-known
+    "clang" side's fingerprint is genuinely incomparable against as it could
+    be an equivalent castxml pair, and this fact's value representation
+    (unlike ``deprecated``/``is_scoped``) offers no way to tell those apart
+    from the values alone. Treating "unknown" as "assume comparable" here
+    would reintroduce exactly the false ``FIELD_DEFAULT_INITIALIZER_CHANGED``
+    this detector's PREDECESSOR gate (``both_castxml_backed_fact``, which
+    also required a POSITIVELY known ``"castxml"`` on both sides — ``None``
+    never passed it either) never produced. Requiring both producers
+    positively known restores that original guarantee while still comparing
+    a same-known-producer pair regardless of which backend it is (unlike
+    ``both_castxml_backed_fact``, which only ever accepts ``"castxml"``).
     """
     old_producer = resolved_fact_producer(
         old, old_qualified_key, bare_key, bare_unambiguous=old_bare_unambiguous
@@ -367,14 +314,8 @@ def same_producer_backed_fact_qualified(
     new_producer = resolved_fact_producer(
         new, new_qualified_key, bare_key, bare_unambiguous=new_bare_unambiguous
     )
-    if old_producer is None and _unrecorded_fact_is_positively_unreliable(
-        old, old_qualified_key
-    ):
-        return False
-    if new_producer is None and _unrecorded_fact_is_positively_unreliable(
-        new, new_qualified_key
-    ):
-        return False
-    if old_producer is None or new_producer is None:
-        return True
-    return old_producer == new_producer
+    return (
+        old_producer is not None
+        and new_producer is not None
+        and old_producer == new_producer
+    )

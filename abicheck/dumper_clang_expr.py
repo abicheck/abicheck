@@ -33,7 +33,7 @@ build-stable structural fingerprint (``"expr:" + sha256(...)[:16]``) so two
 different compound expressions compare unequal while the same one is stable
 across builds — deliberately NOT cross-comparable with castxml's verbatim
 source expression (see ``diff_types``'s/``diff_symbols``'s same-producer
-gates, and ``diff_symbols_param_defaults.py`` for the schema-version gate
+gates, and ``diff_default_value_reliability.py`` for the schema-version gate
 this fingerprint's own algorithm churn needed).
 """
 

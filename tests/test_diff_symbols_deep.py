@@ -695,6 +695,46 @@ class TestParamDefaultChanged:
         r = compare(old, new)
         assert ChangeKind.PARAM_DEFAULT_VALUE_CHANGED not in _kinds(r)
 
+    def test_real_change_from_literal_to_fingerprint_still_detected(self):
+        """Codex review, PR #687, fresh evidence: the gate above must be
+        checked PER SIDE, not "either value looks like a fingerprint ->
+        check both sides' reliability". A pre-v20 clang snapshot storing a
+        LITERAL default (``"42"``) never touched the unstable fingerprint
+        algorithm at all -- its own unreliability flag is irrelevant. When
+        the current snapshot changes that default to a non-literal
+        expression (``DEFAULT_TIMEOUT``, fingerprinted as ``"expr:..."``),
+        the change is real and must still be reported; the OLD side being a
+        legacy, algorithm-unreliable snapshot must not suppress it just
+        because the NEW value happens to be fingerprint-shaped."""
+        f_old = _pub_func(
+            "connect",
+            "_Z7connectv",
+            params=[Param(name="timeout", type="int", default="42")],
+        )
+        f_new = _pub_func(
+            "connect",
+            "_Z7connectv",
+            params=[Param(name="timeout", type="int", default="expr:newalgo5678")],
+        )
+        old = AbiSnapshot(
+            library="libtest.so.1",
+            version="1.0",
+            functions=[f_old],
+            from_headers=True,
+            ast_producer="clang",
+            clang_field_initializer_facts_reliable=False,
+        )
+        new = AbiSnapshot(
+            library="libtest.so.1",
+            version="2.0",
+            functions=[f_new],
+            from_headers=True,
+            ast_producer="clang",
+            clang_field_initializer_facts_reliable=True,
+        )
+        r = compare(old, new)
+        assert ChangeKind.PARAM_DEFAULT_VALUE_CHANGED in _kinds(r)
+
     def test_real_fingerprint_change_still_detected_when_both_reliable(self):
         """Control case: two RELIABLE (post-fix) clang snapshots with
         genuinely different non-literal defaults must still compare -- the

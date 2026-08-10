@@ -146,6 +146,7 @@ EDGE_KINDS: frozenset[str] = frozenset(
         "DECL_REFERENCES_DECL",
         "TYPE_HAS_FIELD_TYPE",
         "TYPE_INHERITS",
+        "METHOD_POSSIBLE_OVERRIDE",  # ADR-041 P2 item 1 (override_graph.py)
         "BINARY_EXPORTS_SYMBOL",
         "SOURCE_DECL_MAPS_TO_SYMBOL",
         "SOURCE_TYPE_MAPS_TO_DEBUG_TYPE",

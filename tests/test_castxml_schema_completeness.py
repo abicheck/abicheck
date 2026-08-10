@@ -567,9 +567,20 @@ class TestFieldDefaultCrossProducer:
     """G31 Phase C: TypeField.default is a different shape of cross-producer
     fix than deprecated/is_scoped above — both backends now populate it, but
     their VALUE representations are not directly comparable, so the correct
-    gate is SAME-producer (mirroring diff_symbols._diff_param_defaults for
-    Param.default), not "any known producer" (both_known_backed_fact, only
-    correct for deprecated/is_scoped's directly-comparable values)."""
+    gate is SAME positively-known producer
+    (``fact_provenance.same_producer_backed_fact_qualified``), not "any known
+    producer" (both_known_backed_fact, only correct for deprecated/is_scoped's
+    directly-comparable values).
+
+    Unlike ``Param.default``'s own inline gate
+    (``diff_symbols._diff_param_defaults``, deliberately permissive when a
+    producer is merely unknown — see that function's own docstring), this
+    gate is NOT permissive on an unknown producer (Codex review, PR #687,
+    fresh evidence): an unknown side could just as easily be castxml (real
+    source text) as it could be an equivalent castxml pair, and this fact's
+    representation offers no way to tell those apart from the values alone —
+    so "unknown" must decline here, exactly like deprecated/is_scoped's own
+    both-positively-known gate, not stay permissive."""
 
     def test_fires_across_clang_to_clang(self):
         t_old = RecordType(
@@ -609,14 +620,22 @@ class TestFieldDefaultCrossProducer:
         r = compare(_snap(types=[t_old]), _clang_snap(types=[t_new]))
         assert ChangeKind.FIELD_DEFAULT_INITIALIZER_REMOVED not in _kinds(r)
 
-    def test_fires_when_one_side_producer_is_unknown(self):
-        """Unlike deprecated/is_scoped (both_known_backed_fact — declines
-        unless BOTH sides are positively known), this mirrors
-        _diff_param_defaults' own rule exactly: the skip fires only when
-        BOTH producers are positively known and DIFFER, never merely
-        because one side's producer is unknown (a hand-built snapshot in a
-        test, or a legacy pre-provenance baseline, must not silently regress
-        a previously-working comparison into a miss)."""
+    def test_declines_when_one_side_producer_is_unknown(self):
+        """Codex review, PR #687, fresh evidence: like deprecated/is_scoped
+        (both_known_backed_fact — declines unless BOTH sides are positively
+        known), the skip must fire here too when either producer is merely
+        unknown, not only when both are positively known and differ. An
+        earlier revision of this gate stayed permissive on "unknown" the
+        same way Param.default's own inline check deliberately does — but
+        unlike Param.default, an unknown side here could just as easily be
+        a real castxml source-text value the OTHER, positively-known
+        "castxml" side is genuinely comparable against as it could be
+        something else entirely; the fact's representation gives no way to
+        tell from the values alone, so treating "unknown" as "assume
+        comparable" risked reading a representation mismatch as a real
+        change (this detector's PREDECESSOR gate, both_castxml_backed_fact,
+        required POSITIVELY confirmed castxml on both sides — None never
+        passed it either)."""
         t_old = RecordType(
             name="Cfg",
             kind="struct",
@@ -631,7 +650,7 @@ class TestFieldDefaultCrossProducer:
         )
         unknown_producer_new = _snap(types=[t_new], ast_producer="some_future_tool")
         r = compare(_snap(types=[t_old]), unknown_producer_new)
-        assert ChangeKind.FIELD_DEFAULT_INITIALIZER_REMOVED in _kinds(r)
+        assert ChangeKind.FIELD_DEFAULT_INITIALIZER_REMOVED not in _kinds(r)
 
 
 # ── Real castxml XML → model field population ───────────────────────────────

@@ -195,3 +195,31 @@ it should read in CHANGELOG.md. Delete the other sections.
   every case in this PR's own test suite) — existing test imports needed no
   changes, since the moved names are re-exported back through
   `dumper_clang`'s own namespace.
+- **Fixed a false `FIELD_DEFAULT_INITIALIZER_CHANGED` when one side's header
+  producer predates provenance tracking entirely** (Codex review, fresh
+  evidence): `fact_provenance.same_producer_backed_fact_qualified`'s
+  "producer unknown → permissive" fallback let a legacy castxml snapshot
+  (real verbatim source-expression text, but no recorded `ast_producer`)
+  compare against a fresh, confirmed direct-clang snapshot's structural
+  fingerprint for the SAME, unchanged field — reading as a false change
+  purely from the representation mismatch. This detector's predecessor gate
+  (`both_castxml_backed_fact`) required POSITIVELY confirmed castxml
+  provenance on both sides; the fix restores that same both-positively-known
+  invariant (generalized to any matching known producer, not just castxml).
+  `Param.default`'s own separate, inline gate is unaffected — it stays
+  deliberately permissive on an unknown producer, a pre-existing behavior
+  this PR didn't change.
+- **Fixed `PARAM_DEFAULT_VALUE_CHANGED`'s fingerprint-reliability gate
+  checking the WRONG side's reliability** (Codex review, fresh evidence):
+  the gate declined a comparison whenever EITHER value looked
+  fingerprint-shaped (`"expr:"`-prefixed), then checked BOTH sides'
+  reliability — so a pre-v20 clang snapshot storing a LITERAL default
+  (never touching the unstable fingerprint algorithm at all) could suppress
+  a genuine change on the OTHER side purely because its own, irrelevant
+  reliability flag was unset. Now checked per side: a side's reliability
+  only matters when THAT side's own value is fingerprint-shaped. Renamed
+  the leaf module the two gate functions live in from
+  `diff_symbols_param_defaults.py` to `diff_default_value_reliability.py`
+  (and the functions from `param_default_*` to `default_value_*`), since
+  both are now shared verbatim between `Param.default` and
+  `TypeField.default`'s own value comparison instead of being Param-only.

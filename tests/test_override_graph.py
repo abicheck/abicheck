@@ -1,0 +1,442 @@
+# Copyright 2026 Nikolay Petrov
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+"""Tests for ADR-041 P2 item 1: the Clang virtual-dispatch/class-hierarchy
+override-edge parser, graph augmentation, and graceful clang-absent degrade.
+
+The parser is exercised against hand-built ``clang -ast-dump=json`` trees
+(verified against real ``clang++ -std=c++17 -Xclang -ast-dump=json`` output
+during development — see this module's own docstring) so no compiler is
+required here; the live subprocess path is integration-only."""
+
+from __future__ import annotations
+
+from abicheck.buildsource.build_evidence import BuildEvidence, CompileUnit
+from abicheck.buildsource.override_graph import (
+    RESOLUTION_OVERRIDE_CONFIRMED,
+    RESOLUTION_OVERRIDE_SIGNATURE_MATCH,
+    ClangOverrideGraphExtractor,
+    OverrideEdge,
+    augment_graph_with_overrides,
+    parse_clang_ast_overrides,
+)
+from abicheck.buildsource.source_graph import (
+    CONF_HIGH,
+    CONF_REDUCED,
+    GraphNode,
+    SourceGraphSummary,
+)
+
+
+def _method(
+    name: str,
+    mangled: str,
+    qual_type: str,
+    *,
+    is_virtual: bool = False,
+    has_override_attr: bool = False,
+) -> dict:
+    d: dict = {
+        "kind": "CXXMethodDecl",
+        "name": name,
+        "mangledName": mangled,
+        "type": {"qualType": qual_type},
+        "inner": [],
+    }
+    if is_virtual:
+        d["virtual"] = True
+    if has_override_attr:
+        d["inner"].append({"kind": "OverrideAttr"})
+    return d
+
+
+def _record(name: str, *, bases: list[str] | None = None, inner: list[dict]) -> dict:
+    d: dict = {"kind": "CXXRecordDecl", "name": name, "inner": inner}
+    if bases:
+        d["bases"] = [{"type": {"qualType": b}} for b in bases]
+    return d
+
+
+def _tu(*decls: dict) -> dict:
+    return {"kind": "TranslationUnitDecl", "inner": list(decls)}
+
+
+# ── parse_clang_ast_overrides ────────────────────────────────────────────
+
+
+def test_confirmed_override_chain() -> None:
+    # Base::run is the introducing virtual slot; Mid::run and Derived::run
+    # both write `override` (OverrideAttr present) -- both edges must be
+    # RESOLUTION_OVERRIDE_CONFIRMED/CONF_HIGH, and edges stay consecutive
+    # (Derived->Mid, Mid->Base), not flattened to the ultimate root.
+    ast = _tu(
+        _record(
+            "Base",
+            inner=[
+                _method("run", "_ZNK4Base3runEi", "int (int) const", is_virtual=True)
+            ],
+        ),
+        _record(
+            "Mid",
+            bases=["Base"],
+            inner=[
+                _method(
+                    "run", "_ZNK3Mid3runEi", "int (int) const", has_override_attr=True
+                )
+            ],
+        ),
+        _record(
+            "Derived",
+            bases=["Mid"],
+            inner=[
+                _method(
+                    "run",
+                    "_ZNK7Derived3runEi",
+                    "int (int) const",
+                    has_override_attr=True,
+                ),
+                # Unrelated overload (different signature) must not match.
+                _method("run", "_ZN7Derived3runEif", "int (int, float)"),
+            ],
+        ),
+    )
+    edges = parse_clang_ast_overrides(ast)
+    assert set(edges) == {
+        OverrideEdge(
+            "_ZNK3Mid3runEi",
+            "_ZNK4Base3runEi",
+            CONF_HIGH,
+            RESOLUTION_OVERRIDE_CONFIRMED,
+        ),
+        OverrideEdge(
+            "_ZNK7Derived3runEi",
+            "_ZNK3Mid3runEi",
+            CONF_HIGH,
+            RESOLUTION_OVERRIDE_CONFIRMED,
+        ),
+    }
+
+
+def test_implicit_override_without_keyword_is_signature_match_only() -> None:
+    # Real C++ makes this virtual/an override regardless of the keyword, but
+    # without OverrideAttr this module cannot independently confirm it --
+    # CONF_REDUCED/RESOLUTION_OVERRIDE_SIGNATURE_MATCH, not CONFIRMED.
+    ast = _tu(
+        _record(
+            "Base",
+            inner=[
+                _method("run", "_ZNK4Base3runEi", "int (int) const", is_virtual=True)
+            ],
+        ),
+        _record(
+            "Derived",
+            bases=["Base"],
+            inner=[_method("run", "_ZNK7Derived3runEi", "int (int) const")],
+        ),
+    )
+    edges = parse_clang_ast_overrides(ast)
+    assert edges == [
+        OverrideEdge(
+            "_ZNK7Derived3runEi",
+            "_ZNK4Base3runEi",
+            CONF_REDUCED,
+            RESOLUTION_OVERRIDE_SIGNATURE_MATCH,
+        )
+    ]
+
+
+def test_multiple_inheritance_emits_edge_to_each_matching_base() -> None:
+    ast = _tu(
+        _record(
+            "Multi1",
+            inner=[_method("tick", "_ZN6Multi14tickEv", "void ()", is_virtual=True)],
+        ),
+        _record(
+            "Multi2",
+            inner=[_method("tick", "_ZN6Multi24tickEv", "void ()", is_virtual=True)],
+        ),
+        _record(
+            "MultiDerived",
+            bases=["Multi1", "Multi2"],
+            inner=[
+                _method(
+                    "tick",
+                    "_ZN12MultiDerived4tickEv",
+                    "void ()",
+                    has_override_attr=True,
+                )
+            ],
+        ),
+    )
+    edges = parse_clang_ast_overrides(ast)
+    assert set(edges) == {
+        OverrideEdge(
+            "_ZN12MultiDerived4tickEv",
+            "_ZN6Multi14tickEv",
+            CONF_HIGH,
+            RESOLUTION_OVERRIDE_CONFIRMED,
+        ),
+        OverrideEdge(
+            "_ZN12MultiDerived4tickEv",
+            "_ZN6Multi24tickEv",
+            CONF_HIGH,
+            RESOLUTION_OVERRIDE_CONFIRMED,
+        ),
+    }
+
+
+def test_non_virtual_base_method_is_not_an_override_target() -> None:
+    # Same (name, type.qualType) but the base method is never marked virtual
+    # -- an unrelated ordinary member hiding, not an override.
+    ast = _tu(
+        _record("Base", inner=[_method("run", "_ZN4Base3runEv", "void ()")]),
+        _record(
+            "Derived",
+            bases=["Base"],
+            inner=[_method("run", "_ZN7Derived3runEv", "void ()")],
+        ),
+    )
+    assert parse_clang_ast_overrides(ast) == []
+
+
+def test_different_signature_does_not_match() -> None:
+    ast = _tu(
+        _record(
+            "Base",
+            inner=[_method("run", "_ZN4Base3runEi", "void (int)", is_virtual=True)],
+        ),
+        _record(
+            "Derived",
+            bases=["Base"],
+            inner=[_method("run", "_ZN7Derived3runEf", "void (float)")],
+        ),
+    )
+    assert parse_clang_ast_overrides(ast) == []
+
+
+def test_constructors_and_destructors_excluded() -> None:
+    # Only CXXMethodDecl participates -- CXXConstructorDecl/CXXDestructorDecl
+    # are deliberately out of scope for this first slice (see the module's
+    # own docstring: the Itanium two-symbol dtor mangling needs its own rule).
+    ast = _tu(
+        _record(
+            "Base",
+            inner=[
+                {
+                    "kind": "CXXDestructorDecl",
+                    "name": "~Base",
+                    "mangledName": "_ZN4BaseD1Ev",
+                    "type": {"qualType": "void ()"},
+                    "virtual": True,
+                    "inner": [],
+                }
+            ],
+        ),
+        _record(
+            "Derived",
+            bases=["Base"],
+            inner=[
+                {
+                    "kind": "CXXDestructorDecl",
+                    "name": "~Derived",
+                    "mangledName": "_ZN7DerivedD1Ev",
+                    "type": {"qualType": "void ()"},
+                    "inner": [{"kind": "OverrideAttr"}],
+                }
+            ],
+        ),
+    )
+    assert parse_clang_ast_overrides(ast) == []
+
+
+def test_class_with_no_bases_produces_no_edges() -> None:
+    ast = _tu(
+        _record(
+            "Standalone",
+            inner=[_method("run", "_ZN10Standalone3runEv", "void ()", is_virtual=True)],
+        )
+    )
+    assert parse_clang_ast_overrides(ast) == []
+
+
+def test_method_with_no_name_is_skipped() -> None:
+    # Defensive: a malformed/synthetic node with no "name" must not crash
+    # the walk or fabricate a bogus identity.
+    ast = _tu(
+        _record(
+            "Base",
+            inner=[
+                {
+                    "kind": "CXXMethodDecl",
+                    "mangledName": "_ZN4Base3runEv",
+                    "type": {"qualType": "void ()"},
+                    "virtual": True,
+                    "inner": [],
+                }
+            ],
+        )
+    )
+    assert parse_clang_ast_overrides(ast) == []
+
+
+def test_non_dict_and_empty_ast_produce_no_edges() -> None:
+    assert parse_clang_ast_overrides({}) == []
+    assert (
+        parse_clang_ast_overrides(
+            {"kind": "TranslationUnitDecl", "inner": [None, 42, "x"]}
+        )
+        == []
+    )
+
+
+def test_namespaced_hierarchy_qualifies_class_identities() -> None:
+    ast = _tu(
+        {
+            "kind": "NamespaceDecl",
+            "name": "ns",
+            "inner": [
+                _record(
+                    "Base",
+                    inner=[
+                        _method("run", "_ZN2ns4Base3runEv", "void ()", is_virtual=True)
+                    ],
+                ),
+                _record(
+                    "Derived",
+                    bases=["ns::Base"],
+                    inner=[
+                        _method(
+                            "run",
+                            "_ZN2ns7Derived3runEv",
+                            "void ()",
+                            has_override_attr=True,
+                        )
+                    ],
+                ),
+            ],
+        }
+    )
+    edges = parse_clang_ast_overrides(ast)
+    assert edges == [
+        OverrideEdge(
+            "_ZN2ns7Derived3runEv",
+            "_ZN2ns4Base3runEv",
+            CONF_HIGH,
+            RESOLUTION_OVERRIDE_CONFIRMED,
+        )
+    ]
+
+
+# ── augment_graph_with_overrides ─────────────────────────────────────────
+
+
+def test_augment_graph_adds_decl_nodes_and_edge() -> None:
+    graph = SourceGraphSummary()
+    edges = [
+        OverrideEdge(
+            "_ZNK7Derived3runEi",
+            "_ZNK4Base3runEi",
+            CONF_HIGH,
+            RESOLUTION_OVERRIDE_CONFIRMED,
+        )
+    ]
+    added = augment_graph_with_overrides(graph, edges)
+    assert added == 1
+    assert {n.id for n in graph.nodes} == {
+        "decl://_ZNK7Derived3runEi",
+        "decl://_ZNK4Base3runEi",
+    }
+    assert all(n.kind == "source_decl" for n in graph.nodes)
+    (e,) = graph.edges
+    assert e.src == "decl://_ZNK7Derived3runEi"
+    assert e.dst == "decl://_ZNK4Base3runEi"
+    assert e.kind == "METHOD_POSSIBLE_OVERRIDE"
+    assert e.confidence == CONF_HIGH
+    assert e.attrs.get("resolution") == RESOLUTION_OVERRIDE_CONFIRMED
+
+
+def test_augment_graph_merges_onto_preexisting_decl_node() -> None:
+    # An override edge's endpoint must land on the SAME decl:// node an
+    # earlier DECL_CALLS_DECL/SOURCE_DECLARES pass already created, not a
+    # disconnected duplicate.
+    graph = SourceGraphSummary()
+    graph.add_node(GraphNode(id="decl://_ZNK4Base3runEi", kind="source_decl"))
+    edges = [
+        OverrideEdge(
+            "_ZNK7Derived3runEi",
+            "_ZNK4Base3runEi",
+            CONF_HIGH,
+            RESOLUTION_OVERRIDE_CONFIRMED,
+        )
+    ]
+    augment_graph_with_overrides(graph, edges)
+    assert len([n for n in graph.nodes if n.id == "decl://_ZNK4Base3runEi"]) == 1
+
+
+def test_augment_graph_is_idempotent_on_reregistration() -> None:
+    graph = SourceGraphSummary()
+    edges = [
+        OverrideEdge(
+            "_ZNK7Derived3runEi",
+            "_ZNK4Base3runEi",
+            CONF_HIGH,
+            RESOLUTION_OVERRIDE_CONFIRMED,
+        )
+    ]
+    first = augment_graph_with_overrides(graph, edges)
+    second = augment_graph_with_overrides(graph, edges)
+    assert first == 1
+    assert second == 0
+    assert len(graph.edges) == 1
+
+
+# ── ClangOverrideGraphExtractor: graceful degrade ────────────────────────
+
+
+def test_extractor_missing_clang_returns_empty() -> None:
+    ext = ClangOverrideGraphExtractor(clang_bin="definitely-not-a-real-clang-xyz")
+    assert ext.available() is False
+    assert ext._extract_from_safe_args(["--", "foo.cpp"]) == []
+    assert (
+        ext.extract_from_build(
+            BuildEvidence(compile_units=[CompileUnit(id="cu://x", source="x.cpp")])
+        )
+        == []
+    )
+    assert ext.diagnostics
+
+
+def test_extract_from_build_dedupes_across_compile_units(monkeypatch) -> None:
+    ext = ClangOverrideGraphExtractor(clang_bin="clang++")
+    monkeypatch.setattr(ext, "available", lambda: True)
+
+    edge = OverrideEdge(
+        "_ZNK7Derived3runEi",
+        "_ZNK4Base3runEi",
+        CONF_HIGH,
+        RESOLUTION_OVERRIDE_CONFIRMED,
+    )
+
+    def _fake_extract(cu: CompileUnit) -> list[OverrideEdge]:
+        return [edge]
+
+    monkeypatch.setattr(ext, "_extract_from_compile_unit", _fake_extract)
+    build = BuildEvidence(
+        compile_units=[
+            CompileUnit(id="cu://a", source="a.cpp"),
+            CompileUnit(id="cu://b", source="b.cpp"),
+        ]
+    )
+    edges = ext.extract_from_build(build)
+    assert edges == [edge]

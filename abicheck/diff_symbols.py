@@ -30,6 +30,9 @@ from .diff_cxx_rules import (
     owner_class_of,
     virtual_method_addition,
 )
+from .diff_default_value_reliability import (
+    default_value_fingerprint_comparison_unreliable,
+)
 from .diff_helpers import (
     TypeMap,
     bool_transition,
@@ -40,9 +43,6 @@ from .diff_helpers import (
     type_map_key,
 )
 from .diff_hidden_friends import check_hidden_friend_change, diff_inline_hidden_friends
-from .diff_symbols_param_defaults import (
-    param_default_fingerprint_comparison_unreliable,
-)
 from .diff_symbols_renames import (  # noqa: F401  (public-surface re-exports)
     _CTOR_DTOR_CODE_RE as _CTOR_DTOR_CODE_RE,
     _FUNC_LIKE_TYPES as _FUNC_LIKE_TYPES,
@@ -1271,7 +1271,7 @@ def _diff_param_defaults(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
     one side lacks metadata it never had a chance to record.
 
     A separate, narrower gate protects the VALUE-CHANGED comparison alone
-    (Codex review) — see :mod:`diff_symbols_param_defaults`'s docstring.
+    (Codex review) — see :mod:`diff_default_value_reliability`'s docstring.
     """
     if not _both_header_aware(old, new):
         return []
@@ -1310,7 +1310,7 @@ def _diff_param_defaults(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
                 and p_new.default is not None
                 and p_old.default != p_new.default
             ):
-                if param_default_fingerprint_comparison_unreliable(
+                if default_value_fingerprint_comparison_unreliable(
                     old, new, old_producer, new_producer, p_old.default, p_new.default
                 ):
                     continue

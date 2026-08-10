@@ -1626,6 +1626,69 @@ class TestFieldDefaultUnreliableLegacySnapshot:
         assert ChangeKind.FIELD_DEFAULT_INITIALIZER_REMOVED in _kinds(r)
 
 
+class TestFieldDefaultUnknownProducerDeclines:
+    """Codex review, PR #687, fresh evidence:
+    ``same_producer_backed_fact_qualified``'s permissive "producer unknown ->
+    allow compare" fallback let a legacy header snapshot predating
+    ``ast_producer`` (a genuinely castxml-produced snapshot whose provenance
+    was simply never tagged, so ``fact_producer`` resolves it to ``None``)
+    compare its verbatim source-expression default against a fresh,
+    confirmed direct-clang snapshot's structural fingerprint for the SAME,
+    unchanged field -- reading as a false FIELD_DEFAULT_INITIALIZER_CHANGED
+    purely from the representation mismatch, never a real edit. This
+    detector previously required POSITIVELY confirmed castxml provenance on
+    both sides (``both_castxml_backed_fact``); the fix restores that same
+    both-positively-known invariant (generalized to any matching known
+    producer, not just castxml)."""
+
+    def _record(self, default):
+        return RecordType(
+            name="Cfg",
+            kind="struct",
+            size_bits=32,
+            fields=[TypeField("timeout", "int", 0, default=default)],
+        )
+
+    def test_no_false_change_against_legacy_unknown_producer_side(self):
+        old = AbiSnapshot(
+            library="libtest.so.1",
+            version="1.0",
+            types=[self._record("DEFAULT_TIMEOUT")],
+            from_headers=True,
+            ast_producer=None,
+        )
+        new = AbiSnapshot(
+            library="libtest.so.1",
+            version="2.0",
+            types=[self._record("expr:abc123")],
+            from_headers=True,
+            ast_producer="clang",
+        )
+        r = compare(old, new)
+        assert ChangeKind.FIELD_DEFAULT_INITIALIZER_CHANGED not in _kinds(r)
+        assert ChangeKind.FIELD_DEFAULT_INITIALIZER_REMOVED not in _kinds(r)
+
+    def test_real_change_still_detected_when_both_sides_known_same_producer(
+        self,
+    ) -> None:
+        old = AbiSnapshot(
+            library="libtest.so.1",
+            version="1.0",
+            types=[self._record("30")],
+            from_headers=True,
+            ast_producer="castxml",
+        )
+        new = AbiSnapshot(
+            library="libtest.so.1",
+            version="2.0",
+            types=[self._record("60")],
+            from_headers=True,
+            ast_producer="castxml",
+        )
+        r = compare(old, new)
+        assert ChangeKind.FIELD_DEFAULT_INITIALIZER_CHANGED in _kinds(r)
+
+
 class TestFieldDefaultUnreliableLegacyHybridSnapshot:
     """Codex review, PR #687, second round, fresh evidence: the same false-
     removal risk as ``TestFieldDefaultUnreliableLegacySnapshot`` above, but
