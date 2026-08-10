@@ -511,7 +511,8 @@ def _collect_virtual_slots(
 
     slots: dict[_SlotKey, str] = {}
     sig_index: dict[_Signature, list[_SlotKey]] = {}
-    for base_qualname in _base_qualnames(node):
+    base_qualnames = _base_qualnames(node)
+    for base_qualname in base_qualnames:
         base_slots, base_sig_index = _collect_virtual_slots(
             base_qualname, records_by_qualname, seen
         )
@@ -521,6 +522,34 @@ def _collect_virtual_slots(
             for key in keys:
                 if key not in existing:
                     existing.append(key)
+
+    # True when at least one of this record's OWN bases couldn't be
+    # resolved to a node at all (as opposed to resolving but contributing
+    # no virtuals) -- e.g. a template-dependent base in an unparsed header,
+    # or a specialization `_specialization_spelling` declined to index
+    # (an untrusted non-type argument like `bool`, confirmed real and
+    # reproducible: Codex review, fresh evidence). In that case an own
+    # member that carries an EXPLICIT `virtual`/`override` marker but
+    # matches no known candidate is genuinely ambiguous -- it might be a
+    # real new virtual, or it might be overriding something declared on
+    # the invisible base, which this module has no way to see. Treating it
+    # as unconditionally new (the previous behavior) produces a real,
+    # reproducible false positive: an old snapshot with the unresolvable
+    # base alone has an empty vtable, a new snapshot adding only the
+    # explicit override gets one new slot, and the pair diffs as
+    # `VPTR_INTRODUCED`/`TYPE_VTABLE_CHANGED` even though nothing
+    # observable actually changed. Suppressing the addition here converts
+    # that into an accepted false negative (an own virtual member on such
+    # a class is silently left out of the vtable) -- the same
+    # false-negative-over-false-positive trade this module's degradation
+    # posture already makes everywhere else (see the module docstring's
+    # "known limitation" section, which this generalizes: that section's
+    # own claim that an unresolved-base override is "never a false
+    # positive" was true only for an IMPLICIT override -- an explicit one
+    # WAS reachable as a false positive before this fix).
+    any_base_unresolved = any(
+        records_by_qualname.get(bq) is None for bq in base_qualnames
+    )
 
     for child in node.get("inner", []) or []:
         if not isinstance(child, dict):
@@ -554,10 +583,12 @@ def _collect_virtual_slots(
         if candidates:
             for key in candidates:
                 slots[key] = mangled
-        else:
+        elif not any_base_unresolved:
             key = id(child)
             slots[key] = mangled
             sig_index.setdefault(resolved_sig, []).append(key)
+        # else: an own member with no known candidate on a class with an
+        # unresolved base -- ambiguous, suppressed (see comment above).
 
     return slots, sig_index
 
@@ -727,11 +758,62 @@ def _index_template_param_defaults(root: dict[str, Any]) -> dict[str, list[str |
     return idx
 
 
+def _template_param_names(class_template_decl: dict[str, Any]) -> list[str | None]:
+    """Per-position parameter NAME for a ``ClassTemplateDecl``'s own
+    parameter list, in the SAME order/indexing as :func:`_template_param_kinds`
+    and :func:`_template_param_defaults` -- lets :func:`_specialization_spelling`
+    recognize a DEPENDENT default (``template <class T, class U = T> struct
+    A;``) that names an earlier parameter by its bare identifier, so it can
+    substitute in that earlier parameter's own resolved argument before
+    comparing (a literal, unsubstituted ``"T"`` never equals a resolved
+    argument like ``"double"``).
+    """
+    names: list[str | None] = []
+    for child in class_template_decl.get("inner", []) or []:
+        if not isinstance(child, dict):
+            continue
+        kind = child.get("kind")
+        if kind in (
+            "TemplateTypeParmDecl",
+            "NonTypeTemplateParmDecl",
+            "TemplateTemplateParmDecl",
+        ):
+            pname = child.get("name")
+            names.append(str(pname) if pname else None)
+        else:
+            break
+    return names
+
+
+def _index_template_param_names(root: dict[str, Any]) -> dict[str, list[str | None]]:
+    """``qualified template name -> per-position parameter-name list`` (see
+    :func:`_template_param_names`), scope-tracked identically to
+    :func:`_index_template_param_kinds`.
+    """
+    idx: dict[str, list[str | None]] = {}
+
+    def walk(node: Any, scope: tuple[str, ...]) -> None:
+        if not isinstance(node, dict):
+            return
+        kind = node.get("kind")
+        name = str(node.get("name") or "")
+        if kind == "ClassTemplateDecl" and name:
+            qualname = "::".join((*scope, name)) if scope else name
+            idx.setdefault(qualname, _template_param_names(node))
+        child_scope = (*scope, name) if kind in _SCOPE_NODE_KINDS and name else scope
+        for child in node.get("inner", []) or []:
+            walk(child, child_scope)
+
+    walk(root, ())
+    return idx
+
+
 def _specialization_spelling(
     node: dict[str, Any],
     name: str,
     param_kinds: list[str | None] | None,
     param_defaults: list[str | None] | None = None,
+    param_names: list[str | None] | None = None,
 ) -> str | None:
     """A ``ClassTemplateSpecializationDecl``'s own ``Name<Arg1, Arg2>``
     spelling, reconstructed from its direct ``TemplateArgument`` children --
@@ -772,6 +854,25 @@ def _specialization_spelling(
     ``_base_qualnames`` already prefers ``desugaredQualType`` whenever
     present, so both the omitted-default and the explicit-matching-value
     spellings resolve to the identical `"A<double>"` this collapses to.
+
+    A default can also be DEPENDENT on an earlier parameter
+    (``template <class T, class U = T> struct A;``) -- its
+    *param_defaults* entry is the literal, unsubstituted text of the
+    default (``"T"``), which never equals a real resolved argument
+    (``"double"``) by plain string comparison (Codex review, fresh
+    evidence: confirmed this left `struct D : A<double> {...};`
+    unresolvable, the identical false-positive shape as the undropped-
+    default gap above). When a default spelling exactly matches an
+    EARLIER parameter's own bare name (*param_names*), it's substituted
+    with that earlier parameter's own already-resolved argument before
+    comparing -- always safe (a dependent default can only name an
+    earlier parameter, never itself or a later one, so the substitution
+    source is always already resolved in *args* by the time it's needed).
+    Anything more complex (a default that only partially depends on an
+    earlier parameter, e.g. ``std::vector<T>``) is conservatively left
+    unsubstituted, matching this module's "false negative over false
+    positive" degradation elsewhere: it just won't compare equal, so that
+    trailing argument stays rather than risking a wrong drop.
     """
     args: list[str] = []
     idx = 0
@@ -794,9 +895,19 @@ def _specialization_spelling(
     if not args:
         return None
     if param_defaults:
+        name_positions = (
+            {n: i for i, n in enumerate(param_names) if n} if param_names else {}
+        )
         while args:
             pos = len(args) - 1
-            if pos >= len(param_defaults) or param_defaults[pos] != args[-1]:
+            if pos >= len(param_defaults):
+                break
+            default = param_defaults[pos]
+            if default is not None and default in name_positions:
+                dep_pos = name_positions[default]
+                if dep_pos < len(args):
+                    default = args[dep_pos]
+            if default != args[-1]:
                 break
             args.pop()
     if not args:
@@ -808,6 +919,7 @@ def build_specialization_index(
     root: dict[str, Any],
     param_kinds_by_qualname: dict[str, list[str | None]] | None = None,
     param_defaults_by_qualname: dict[str, list[str | None]] | None = None,
+    param_names_by_qualname: dict[str, list[str | None]] | None = None,
 ) -> dict[str, dict[str, Any]]:
     """``qualified spelling -> node`` index over every concrete
     ``ClassTemplateSpecializationDecl`` reachable from the parsed AST, for
@@ -872,17 +984,19 @@ def build_specialization_index(
     wins over a forward-declaration stub for the same spelling, regardless
     of walk order, via the shared :func:`_is_record_definition`.
 
-    *param_kinds_by_qualname*/*param_defaults_by_qualname* let a caller that
-    already computed these (``dumper_clang.py``'s own ``_ClangAstParser``,
-    which needs the identical indices for its ``_walk``'s specialization
-    scoping too) pass them in rather than paying for a second whole-AST
-    pass -- computed internally when omitted, so this function stays
-    independently callable/testable.
+    *param_kinds_by_qualname*/*param_defaults_by_qualname*/*param_names_by_qualname*
+    let a caller that already computed these (``dumper_clang.py``'s own
+    ``_ClangAstParser``, which needs the identical indices for its
+    ``_walk``'s specialization scoping too) pass them in rather than paying
+    for a second whole-AST pass -- computed internally when omitted, so
+    this function stays independently callable/testable.
     """
     if param_kinds_by_qualname is None:
         param_kinds_by_qualname = _index_template_param_kinds(root)
     if param_defaults_by_qualname is None:
         param_defaults_by_qualname = _index_template_param_defaults(root)
+    if param_names_by_qualname is None:
+        param_names_by_qualname = _index_template_param_names(root)
     idx: dict[str, dict[str, Any]] = {}
 
     def walk(node: Any, scope: tuple[str, ...]) -> None:
@@ -897,6 +1011,7 @@ def build_specialization_index(
                 name,
                 param_kinds_by_qualname.get(template_qualname),
                 param_defaults_by_qualname.get(template_qualname),
+                param_names_by_qualname.get(template_qualname),
             )
             if spelling is not None:
                 qualname = "::".join((*scope, spelling)) if scope else spelling

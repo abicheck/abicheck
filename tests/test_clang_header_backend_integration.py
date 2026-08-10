@@ -634,3 +634,123 @@ def test_clang_backend_resolves_base_with_omitted_default_template_argument(
     result = compare(old_snap, new_snap)
     assert ChangeKind.VPTR_INTRODUCED not in {c.kind for c in result.changes}
     assert ChangeKind.TYPE_VTABLE_CHANGED not in {c.kind for c in result.changes}
+
+
+def test_clang_backend_bool_specialization_base_override_does_not_false_positive(
+    tmp_path: Path,
+) -> None:
+    """Codex review, fresh evidence (P1): a `bool` non-type template
+    argument's specialization is deliberately left unresolvable (its raw
+    JSON `value` doesn't reliably print the way a base reference spells
+    it), but an old snapshot alone already reads that as an empty vtable
+    -- adding only an EXPLICIT `override` on the new side used to be
+    fabricated as a brand-new slot rather than recognized as ambiguous,
+    producing a real `VPTR_INTRODUCED`/`TYPE_VTABLE_CHANGED` false
+    positive.
+    """
+    if not (_have("clang") and _have("g++")):
+        pytest.skip(
+            "clang and g++ are required for the clang L2 backend integration test"
+        )
+    old_dir = tmp_path / "old"
+    old_dir.mkdir()
+    old_header = old_dir / "api.h"
+    old_header.write_text(
+        "template <bool B>\nstruct A {\n    virtual void f();\n};\n"
+        "struct D : A<true> {\n};\n"
+    )
+    old_src = old_dir / "old.cpp"
+    old_src.write_text('#include "api.h"\ntemplate struct A<true>;\n')
+    v1_so = tmp_path / "libv1.so"
+    subprocess.run(
+        ["g++", "-shared", "-fPIC", "-o", str(v1_so), str(old_src), f"-I{old_dir}"],
+        check=True,
+        capture_output=True,
+    )
+
+    new_dir = tmp_path / "new"
+    new_dir.mkdir()
+    new_header = new_dir / "api.h"
+    new_header.write_text(
+        "template <bool B>\nstruct A {\n    virtual void f();\n};\n"
+        "struct D : A<true> {\n    void f() override;\n};\n"
+    )
+    new_src = new_dir / "new.cpp"
+    new_src.write_text('#include "api.h"\ntemplate struct A<true>;\n')
+    v2_so = tmp_path / "libv2.so"
+    subprocess.run(
+        ["g++", "-shared", "-fPIC", "-o", str(v2_so), str(new_src), f"-I{new_dir}"],
+        check=True,
+        capture_output=True,
+    )
+
+    old_snap = dump(v1_so, [old_header], header_backend="clang")
+    new_snap = dump(v2_so, [new_header], header_backend="clang")
+    old_d = next(t for t in old_snap.types if t.name == "D")
+    new_d = next(t for t in new_snap.types if t.name == "D")
+    assert old_d.vtable == []
+    assert new_d.vtable == []  # ambiguous own override, suppressed on both sides
+
+    result = compare(old_snap, new_snap)
+    assert ChangeKind.VPTR_INTRODUCED not in {c.kind for c in result.changes}
+    assert ChangeKind.TYPE_VTABLE_CHANGED not in {c.kind for c in result.changes}
+
+
+def test_clang_backend_resolves_dependent_default_template_argument(
+    tmp_path: Path,
+) -> None:
+    """Codex review, fresh evidence (P1): a default that depends on an
+    earlier parameter (`template <class T, class U = T> struct A;`)
+    reports the literal, unsubstituted default spelling (`"T"`), which
+    never equals the real resolved argument by plain string comparison,
+    leaving the base unresolvable.
+    """
+    if not (_have("clang") and _have("g++")):
+        pytest.skip(
+            "clang and g++ are required for the clang L2 backend integration test"
+        )
+    old_dir = tmp_path / "old"
+    old_dir.mkdir()
+    old_header = old_dir / "api.h"
+    old_header.write_text(
+        "template <class T, class U = T>\n"
+        "struct A {\n    virtual void f();\n};\n"
+        "struct D : A<double> {\n};\n"
+    )
+    old_src = old_dir / "old.cpp"
+    old_src.write_text('#include "api.h"\ntemplate struct A<double>;\n')
+    v1_so = tmp_path / "libv1.so"
+    subprocess.run(
+        ["g++", "-shared", "-fPIC", "-o", str(v1_so), str(old_src), f"-I{old_dir}"],
+        check=True,
+        capture_output=True,
+    )
+
+    new_dir = tmp_path / "new"
+    new_dir.mkdir()
+    new_header = new_dir / "api.h"
+    new_header.write_text(
+        "template <class T, class U = T>\n"
+        "struct A {\n    virtual void f();\n};\n"
+        "struct D : A<double> {\n    void f() override;\n};\n"
+    )
+    new_src = new_dir / "new.cpp"
+    new_src.write_text('#include "api.h"\ntemplate struct A<double>;\n')
+    v2_so = tmp_path / "libv2.so"
+    subprocess.run(
+        ["g++", "-shared", "-fPIC", "-o", str(v2_so), str(new_src), f"-I{new_dir}"],
+        check=True,
+        capture_output=True,
+    )
+
+    old_snap = dump(v1_so, [old_header], header_backend="clang")
+    new_snap = dump(v2_so, [new_header], header_backend="clang")
+    old_d = next(t for t in old_snap.types if t.name == "D")
+    new_d = next(t for t in new_snap.types if t.name == "D")
+    assert old_d.vtable != []
+    assert old_d.vptr_offset_bits == 0
+    assert new_d.vtable != []
+
+    result = compare(old_snap, new_snap)
+    assert ChangeKind.VPTR_INTRODUCED not in {c.kind for c in result.changes}
+    assert ChangeKind.TYPE_VTABLE_CHANGED not in {c.kind for c in result.changes}

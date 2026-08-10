@@ -84,6 +84,7 @@ from .dumper_clang_expr import (  # noqa: F401  (some re-exported for tests)
 from .dumper_clang_vtable import (
     _index_template_param_defaults,
     _index_template_param_kinds,
+    _index_template_param_names,
     _is_record_definition,
     _specialization_spelling,
     build_specialization_index as _build_specialization_index,
@@ -804,6 +805,7 @@ class _ClangAstParser:
         # `_id_index()` already pays lazily for a different purpose.
         self._template_param_kinds_by_qualname = _index_template_param_kinds(root)
         self._template_param_defaults_by_qualname = _index_template_param_defaults(root)
+        self._template_param_names_by_qualname = _index_template_param_names(root)
         self._walk(
             root,
             scope=(),
@@ -888,15 +890,13 @@ class _ClangAstParser:
             # back to the unscoped behavior (bare `name`, degrading the SAME
             # way an unresolvable base already degrades elsewhere in this
             # module) when the spelling can't be reconstructed.
+            template_qualname = "::".join((*scope, name)) if scope else name
             spelling = _specialization_spelling(
                 node,
                 name,
-                self._template_param_kinds_by_qualname.get(
-                    "::".join((*scope, name)) if scope else name
-                ),
-                self._template_param_defaults_by_qualname.get(
-                    "::".join((*scope, name)) if scope else name
-                ),
+                self._template_param_kinds_by_qualname.get(template_qualname),
+                self._template_param_defaults_by_qualname.get(template_qualname),
+                self._template_param_names_by_qualname.get(template_qualname),
             )
             child_scope = (*scope, spelling) if spelling else scope
         else:
@@ -1104,6 +1104,7 @@ class _ClangAstParser:
                 self._root,
                 self._template_param_kinds_by_qualname,
                 self._template_param_defaults_by_qualname,
+                self._template_param_names_by_qualname,
             )
         return self._specialization_by_qualname
 

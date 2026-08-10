@@ -1189,3 +1189,167 @@ def test_default_template_argument_explicitly_repeated_still_resolves() -> None:
     )
     types = _types(root)
     assert types["D"].vtable == ["_ZN1AIdiE1fEv"]
+
+
+# ── eighth review round: an explicit override on an unresolvable-base ─────
+# ── class must not fabricate a new slot, and a dependent default must ─────
+# ── be substituted before comparing ────────────────────────────────────────
+
+
+def test_explicit_override_on_unresolvable_base_does_not_fabricate_a_slot() -> None:
+    """Codex review, fresh evidence (P1): an unresolvable specialization
+    base (a `bool` non-type argument, deliberately left unindexed --
+    see the bool test above) used to leave `D`'s own EXPLICITLY-marked
+    override as an apparent brand-new slot, since nothing recognized it as
+    an override of anything. Confirmed end-to-end: an old `D : A<true> {}`
+    (empty vtable, unresolvable base) and a new `D` adding only `void f()
+    override;` produced a real `VPTR_INTRODUCED`/`TYPE_VTABLE_CHANGED`
+    false positive. A class with an unresolved base must not add ANY new
+    own slot (explicit or not) -- ambiguous whether it's a genuine
+    addition or an invisible override -- degrading to the same accepted
+    false negative this module's unresolvable-base handling already uses
+    elsewhere."""
+    root = _tu(
+        {
+            "kind": "ClassTemplateDecl",
+            "name": "A",
+            "inner": [
+                {
+                    "kind": "NonTypeTemplateParmDecl",
+                    "name": "B",
+                    "type": {"qualType": "bool"},
+                },
+                _record("A"),
+                _specialization(
+                    "A",
+                    {
+                        "kind": "CXXMethodDecl",
+                        "name": "f",
+                        "mangledName": "_ZN1AILb1EE1fEv",
+                        "type": {"qualType": "void ()"},
+                        "virtual": True,
+                    },
+                    type_args=[],
+                ),
+            ],
+        },
+        _record(
+            "D",
+            _method("f", "_ZN1D1fEv", override_attr=True),  # explicit override
+            bases=[_base("A<true>")],
+        ),
+    )
+    spec = root["inner"][0]["inner"][2]
+    spec["inner"].insert(0, {"kind": "TemplateArgument", "value": -1})
+
+    types = _types(root)
+    # The base stays unresolvable (same as the plain bool test), and D's
+    # own explicit override must NOT be fabricated as a new slot either.
+    assert types["D"].vtable == []
+    assert types["D"].vptr_offset_bits is None
+
+
+def test_unresolvable_base_still_suppresses_a_genuinely_unrelated_new_virtual() -> None:
+    """The suppression is deliberately coarse (per-record, not
+    per-method): a class with an unresolvable base also suppresses an own
+    virtual method that has NOTHING to do with that base, since this
+    module has no way to distinguish the two cases. Documents the accepted
+    false-negative trade explicitly, rather than leaving it implicit."""
+    root = _tu(
+        _record(
+            "D",
+            _method("unrelated", "_ZN1D9unrelatedEv", virtual=True),
+            bases=[_base("Unseen")],
+        ),
+    )
+    types = _types(root)
+    assert types["D"].vtable == []  # accepted false negative, not a crash
+
+
+def test_dependent_default_template_argument_is_substituted_before_matching() -> None:
+    """Codex review, fresh evidence (P1): a default that depends on an
+    EARLIER parameter (`template <class T, class U = T> struct A;`)
+    reports the literal, unsubstituted default spelling (`"T"`), which
+    never equals a real resolved argument (`"double"`) by plain string
+    comparison -- confirmed with a real clang build that this left `struct
+    D : A<double> {...};` unresolvable, the identical false-positive shape
+    the plain-default-collapse fix above closed for a non-dependent
+    default. Must substitute the earlier parameter's own resolved value
+    before comparing."""
+    root = _tu(
+        {
+            "kind": "ClassTemplateDecl",
+            "name": "A",
+            "inner": [
+                {"kind": "TemplateTypeParmDecl", "name": "T"},
+                {
+                    "kind": "TemplateTypeParmDecl",
+                    "name": "U",
+                    "defaultArg": {
+                        "kind": "TemplateArgument",
+                        "type": {"qualType": "T"},  # dependent on T, not a literal
+                    },
+                },
+                _record("A"),
+                _specialization(
+                    "A",
+                    {
+                        "kind": "CXXMethodDecl",
+                        "name": "f",
+                        "mangledName": "_ZN1AIddE1fEv",
+                        "type": {"qualType": "void ()"},
+                        "virtual": True,
+                    },
+                    type_args=["double", "double"],  # U resolved to T's own value
+                ),
+            ],
+        },
+        _record("D", bases=[_base("A<double>")]),
+    )
+    types = _types(root)
+    assert types["D"].vtable == ["_ZN1AIddE1fEv"]
+    assert types["D"].vptr_offset_bits == 0
+
+
+def test_partially_dependent_default_is_conservatively_not_substituted() -> None:
+    """A default only PARTIALLY dependent on an earlier parameter (e.g.
+    `U = std::vector<T>` in spirit -- modeled here as a default spelling
+    that merely CONTAINS the earlier parameter's name rather than being
+    exactly equal to it) must not be guessed at: the substitution only
+    ever fires on an EXACT match against a parameter's bare name, so this
+    stays unindexed rather than risking a wrong drop."""
+    root = _tu(
+        {
+            "kind": "ClassTemplateDecl",
+            "name": "A",
+            "inner": [
+                {"kind": "TemplateTypeParmDecl", "name": "T"},
+                {
+                    "kind": "TemplateTypeParmDecl",
+                    "name": "U",
+                    "defaultArg": {
+                        "kind": "TemplateArgument",
+                        "type": {"qualType": "Wrapper<T>"},  # not a bare "T"
+                    },
+                },
+                _record("A"),
+                _specialization(
+                    "A",
+                    {
+                        "kind": "CXXMethodDecl",
+                        "name": "f",
+                        "mangledName": "_ZN1AIdS_E1fEv",
+                        "type": {"qualType": "void ()"},
+                        "virtual": True,
+                    },
+                    type_args=["double", "Wrapper<double>"],
+                ),
+            ],
+        },
+        _record("D", bases=[_base("A<double>")]),
+    )
+    types = _types(root)
+    # Unresolvable: the reconstructed spelling stays "A<double,
+    # Wrapper<double>>", which never matches the base reference's own
+    # "A<double>" -- correctly conservative rather than guessing.
+    assert types["D"].vtable == []

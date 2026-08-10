@@ -901,6 +901,47 @@ building a second identity-resolution mechanism from scratch.
   was an O(records × index size) cost; now memoized the same way the other
   per-parse indices already are.
 
+  **An eighth review round found two more real gaps, both in the
+  unresolvable-base degradation path itself rather than in resolving a
+  new argument shape.** (1) A class deriving from an unresolvable
+  specialization (e.g. the `bool` non-type case above) is correctly
+  invisible to the reconstruction, but an own member carrying an
+  EXPLICIT `virtual`/`override` keyword was still unconditionally added
+  as a brand-new slot, since nothing recognized it as a possible override
+  of something in the invisible base. Confirmed end-to-end: an old `D :
+  A<true> {}` (empty vtable) and a new `D` adding only `void f()
+  override;` produced a real `VPTR_INTRODUCED`/`TYPE_VTABLE_CHANGED`
+  false positive — the module docstring's own "known limitation" section
+  had claimed this shape was "never a false positive," which was true
+  only for an IMPLICIT (no-keyword) override; an explicit one was
+  reachable as a genuine false positive the whole time. Fixed by tracking
+  whether ANY of a record's own bases failed to resolve to a node at all,
+  and suppressing any new (non-candidate-matching) own slot -- explicit
+  or not -- when so: ambiguous whether such a member is a genuine
+  addition or an invisible override, and this module's established
+  posture is to prefer that accepted false negative over a false
+  positive. Deliberately coarse (per-record, not per-method) — a
+  genuinely unrelated new virtual on the same class is silently
+  suppressed too, since there's no way to tell the two cases apart from
+  available data; documented with its own regression test rather than
+  left implicit. (2) A template default that depends on an EARLIER
+  parameter (`template <class T, class U = T> struct A;`) reports the
+  literal, unsubstituted default spelling (`"T"`), which never equals a
+  real resolved argument (`"double"`) by plain string comparison — the
+  identical false-positive shape the plain-default-collapse fix closed
+  one review round earlier, just for a dependent default instead of a
+  literal one. Fixed with a new `_index_template_param_names`
+  (mirroring `_index_template_param_kinds`/`_index_template_param_defaults`'s
+  own shape) recording each parameter's own bare name; when a trailing
+  argument's default spelling exactly matches an EARLIER parameter's
+  name, it's substituted with that parameter's own already-resolved
+  argument before comparing — always safe, since a dependent default can
+  only name an earlier parameter, never itself or a later one. Anything
+  more complex (a default only partially referencing an earlier
+  parameter, e.g. `U = Wrapper<T>`) is conservatively left unsubstituted
+  rather than guessed at. Both fixes verified end-to-end through
+  `dump()`/`compare()` in addition to unit and integration tests.
+
   **A later pass closed the last of this phase's four originally-listed
   facts** (`deprecated`/`is_scoped`/bitfields/default-argument facts were
   the other three, already covered above): direct-clang now populates
