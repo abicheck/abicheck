@@ -95,7 +95,24 @@ _ABI_MACRO_NAMES: frozenset[str] = frozenset(
 _ABI_MACRO_PREFIXES: tuple[str, ...] = ("_LIBCPP_ABI_", "_GLIBCXX_USE_")
 
 #: ``#define NAME`` or ``#define NAME VALUE`` as emitted by ``clang -E -dM``.
-_DEFINE_RE = re.compile(r"^\s*#\s*define\s+(\w+)(?:\(([^)]*)\))?(?:\s+(.*))?$")
+#: The trailing replacement-text group is separated from the name/param-list
+#: by ``\s*`` (zero or more), not ``\s+`` (Codex review, fresh evidence): a
+#: valid, real compact function-like definition — ``#define ATTR(x)
+#: __attribute__((x))`` written with no space after the closing ``)`` — is
+#: syntactically fine to a real preprocessor (the replacement list starts at
+#: the first character after ``)``), but the old ``\s+`` required at least
+#: one space there, so this line failed to match `_DEFINE_RE` *at all* rather
+#: than merely mis-parsing the value — `macro_graph.py`'s
+#: `_macro_definition_lines` silently dropped the macro's definition line
+#: entirely, so `find_decl_macro_uses` could never emit `DECL_USES_MACRO` for
+#: it even though the L4 `reachable_macros` extractor still seeded a
+#: `macro://ATTR` node for the same macro. `parse_defined_macros`'s own
+#: behavior is unaffected either way: it already discards the replacement
+#: text for any function-like macro (`params is not None`), so relaxing this
+#: only lets `_DEFINE_RE` recognize a line it previously silently missed —
+#: never a case that was correctly parsed before and would parse differently
+#: now.
+_DEFINE_RE = re.compile(r"^\s*#\s*define\s+(\w+)(?:\(([^)]*)\))?(?:\s*(.*))?$")
 
 
 def is_abi_macro(name: str) -> bool:

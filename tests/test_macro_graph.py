@@ -287,6 +287,21 @@ def test_macro_definition_lines_ignores_define_inside_block_comment() -> None:
     assert _macro_definition_lines(text) == {}
 
 
+def test_macro_definition_lines_recognizes_compact_function_like_macro() -> None:
+    # Codex review, fresh evidence: no space after `)` is still a valid
+    # function-like definition to a real preprocessor.
+    text = "#define ATTR(x)__attribute__((x))\n"
+    assert _macro_definition_lines(text) == {"ATTR": 1}
+
+
+def test_find_decl_macro_uses_finds_compact_function_like_macro() -> None:
+    text = "#define ATTR(x)__attribute__((x))\nvoid f() ATTR(unused);\n"
+    defines = _macro_definition_lines(text)
+    decl = DeclRange("f", "t.h", 2, 2)
+    uses = find_decl_macro_uses(text, decl, frozenset({"ATTR"}), defines)
+    assert uses == frozenset({"ATTR"})
+
+
 def test_scan_compound_condition_else_branch_also_unmodeled() -> None:
     text = "#if defined(X) && defined(Y)\nvoid a();\n#else\nvoid b();\n#endif\n"
     assert scan_conditional_regions(text) == []
