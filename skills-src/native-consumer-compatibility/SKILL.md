@@ -98,6 +98,9 @@ The host's required entrypoints are declared, not discovered:
 abicheck compare OLD NEW \
   --required-symbol plugin_init \
   --required-symbol plugin_shutdown \
+  --header old=../old-side/include/plugin_api.h \
+  --header new=include/plugin_api.h \
+  --depth headers \
   --format json \
   -o plugin.json
 ```
@@ -105,8 +108,21 @@ abicheck compare OLD NEW \
 or, from a maintained list:
 
 ```bash
-abicheck compare OLD NEW --required-symbols host-contract.txt --format json
+abicheck compare OLD NEW --required-symbols host-contract.txt \
+  --header old=../old-side/include/plugin_api.h \
+  --header new=include/plugin_api.h \
+  --depth headers --format json
 ```
+
+**Supply the entrypoint's headers, and confirm the tier.**
+`--required-symbol` scopes the comparison to the entrypoints; it does not
+establish what they *look like*. A stripped plugin can keep exporting
+`plugin_init` while its parameters, or a struct passed through it, change
+incompatibly — invisible at symbol level, and `compare` warns and proceeds on
+weaker evidence rather than failing. Require `evidence_tier: header_aware`
+before accepting a pass on this branch; anything lower means the answer is
+"the symbol is still there", not "the entrypoint still matches"
+([evidence and depth](../shared/evidence-and-depth.md)).
 
 Two failure shapes are specific to this branch, and are different findings:
 

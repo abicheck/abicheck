@@ -383,6 +383,11 @@ NON_REPORT_IDENTIFIERS = frozenset(
         # of an ELF SONAME.
         "compatibility_version",
         "current_version",
+        # Illustrative plugin entrypoint symbol names, used throughout the
+        # consumer skill's plugin branch. They are symbols a host declares,
+        # not report fields — the `_` is what makes them look like one.
+        "plugin_init",
+        "plugin_shutdown",
     }
 )
 

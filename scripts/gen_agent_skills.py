@@ -194,7 +194,9 @@ def _indented_code_spans(text: str) -> list[tuple[int, int]]:
             index += 1
             continue
         indented = line.startswith("    ") or line.startswith("\t")
-        blank_before = index > 0 and not lines[index - 1].strip()
+        # Document start is a boundary too: with front matter already split
+        # off, a reference file can legitimately open on an indented block.
+        blank_before = index == 0 or not lines[index - 1].strip()
         if indented and blank_before and not list_open:
             start = index
             while index < len(lines) and (

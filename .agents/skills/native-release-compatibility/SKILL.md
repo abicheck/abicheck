@@ -113,6 +113,24 @@ abicheck compare OLD_RELEASE NEW \
   -o release-<library>.json
 ```
 
+**The contract domain must match what the release actually promises** — it is
+step 0's question, not a fixed flag. `--contract` selects which evidence the
+decision rests on, and that selection changes the verdict and the exit code:
+
+- **`public`** (with `--scope-public-headers`, as above) when the promise is
+  the *declared* surface: what the public headers say. The default for a
+  header-driven C++ library.
+- **`exports`** when the promise is the *observed* export table — an
+  export-map or version-script library, or a C ABI whose exported symbols are
+  the contract. Use it, and drop `--scope-public-headers`, whenever a symbol
+  can be exported without appearing in a designated public header: under
+  `public` that break sits outside the domain and a complete ledger still
+  passes while a real consumer breaks.
+- **`all`** when both are promised, or when you are not yet sure which is.
+
+Say which domain the decision was made in. A `public`-domain pass is not a
+statement about exports, and vice versa.
+
 For a whole directory or package of libraries, one invocation covers the
 fan-out and reports per library:
 

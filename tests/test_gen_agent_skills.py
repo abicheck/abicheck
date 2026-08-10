@@ -378,6 +378,25 @@ def test_indented_code_block_is_masked(synthetic):
     assert "references/shared/a.md" in rendered
 
 
+def test_an_indented_block_at_the_document_start_is_masked(synthetic):
+    """Document start is a block boundary as much as a blank line is. With
+    front matter already split off, a reference file can open directly on an
+    indented code block."""
+    synthetic(
+        skills={
+            "demo": {
+                "SKILL.md": "---\nname: demo\n---\n\n[a](../shared/a.md)\n",
+                "references/r.md": (
+                    "    [example](../../docs/use/cli-usage.md)\n\nAfter.\n"
+                ),
+            }
+        },
+        shared={"a.md": "# A\n"},
+    )
+    rendered = gen.render_all(gen.SRC_DIR)["demo/references/r.md"]
+    assert "    [example](../../docs/use/cli-usage.md)" in rendered
+
+
 def test_an_indented_list_continuation_is_not_treated_as_code(synthetic):
     """The failure mode the check above must not cause. A 4-space indent under
     a list item is a *continuation*, not code — masking it would leave a real
