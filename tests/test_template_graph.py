@@ -1217,6 +1217,96 @@ def test_member_template_in_different_classes_does_not_collide_on_qname() -> Non
     assert len([n for n in tdecl_nodes if "apply" in n]) == 2  # not one shared node
 
 
+def test_member_template_in_explicit_specializations_does_not_collide_on_qname() -> (
+    None
+):
+    """Two *explicit* class-template specializations each independently
+    declaring their own same-named, same-signature member template must
+    resolve to distinct ``template_decl`` identities -- Codex review,
+    second round, fresh evidence, verified empirically against real clang
+    AST output: ``template<> struct H<int> { template<typename U> void
+    f(U); };`` and ``template<> struct H<double> { template<typename U>
+    void f(U); };`` each write their *own* ``f`` from scratch (``H`` has no
+    generic member ``f`` on its primary template at all), so ``H<int>::f``
+    and ``H<double>::f`` are genuinely unrelated declarations that merely
+    share a spelling and signature -- unlike
+    :func:`test_member_template_in_different_classes_does_not_collide_on_qname`
+    above (an *implicit* instantiation of one shared primary-pattern
+    member, which correctly keeps sharing one ``template_decl`` node), an
+    earlier revision still collapsed these two onto the identical bare
+    qname ``"H::f"``."""
+
+    def explicit_h_spec(
+        spec_id: str, arg_type: str, mangled_prefix: str
+    ) -> tuple[dict, dict]:
+        """``(stub nested under ClassTemplateDecl, full content detached
+        to a top-level sibling)`` -- the same explicit-specialization
+        detachment quirk this module's docstring documents for
+        class-level resolution. ``arg_type`` is *this* specialization's
+        own outer template argument (``H<arg_type>``), distinct per call
+        so the two specializations don't share an identity themselves."""
+        stub = {"id": spec_id, "kind": "ClassTemplateSpecializationDecl", "name": "H"}
+        full = {
+            "id": spec_id,
+            "kind": "ClassTemplateSpecializationDecl",
+            "name": "H",
+            "completeDefinition": True,
+            "inner": [
+                {"kind": "TemplateArgument", "type": {"qualType": arg_type}},
+                {
+                    "kind": "FunctionTemplateDecl",
+                    "name": "f",
+                    "inner": [
+                        {"kind": "TemplateTypeParmDecl", "name": "U"},
+                        {"kind": "FunctionDecl", "name": "f", "inner": []},
+                        {
+                            "kind": "FunctionDecl",
+                            "name": "f",
+                            "mangledName": f"_ZN1H{mangled_prefix}1fIiEEvT_",
+                            "inner": [
+                                {
+                                    "kind": "TemplateArgument",
+                                    "type": {"qualType": "int"},
+                                },
+                            ],
+                        },
+                    ],
+                },
+            ],
+        }
+        return stub, full
+
+    int_stub, int_full = explicit_h_spec("0xSPEC_HINT", "int", "IiE")
+    double_stub, double_full = explicit_h_spec("0xSPEC_HDOUBLE", "double", "IdE")
+    ast = {
+        "kind": "TranslationUnitDecl",
+        "inner": [
+            {
+                "kind": "ClassTemplateDecl",
+                "name": "H",
+                "inner": [
+                    {"kind": "TemplateTypeParmDecl", "name": "T"},
+                    {"kind": "CXXRecordDecl", "name": "H"},
+                    int_stub,
+                    double_stub,
+                ],
+            },
+            int_full,
+            double_full,
+        ],
+    }
+    out = parse_clang_ast_templates(ast)
+    function_insts = [i for i in out if i.kind == "function"]
+    assert len(function_insts) == 2
+    qnames = {i.template_qname for i in function_insts}
+    assert qnames == {"H<int>::f", "H<double>::f"}
+
+    graph = SourceGraphSummary()
+    augment_graph_with_templates(graph, out)
+    tdecl_nodes = {n.id for n in graph.nodes if n.kind == NODE_TEMPLATE_DECL}
+    assert len([n for n in tdecl_nodes if "::f" in n]) == 2  # not one shared node
+
+
 # ── graph augmentation tests ─────────────────────────────────────────────────
 
 

@@ -864,6 +864,8 @@ def _walk_function_templates(
     full_function_by_id: dict[str, dict[str, Any]],
     id_to_file: dict[str, str],
     out: list[TemplateInstantiation],
+    *,
+    via_primary_template: bool = False,
 ) -> None:
     if not isinstance(node, dict):
         return
@@ -930,14 +932,45 @@ def _walk_function_templates(
         # `apply<int>` both resolved to the identical qname "api::apply",
         # so both instantiations' DECL_INSTANTIATES_TEMPLATE edge pointed at
         # one shared template_decl node as if they instantiated the same
-        # template). The bare, unparameterized name is enough here -- this
+        # template).
+        #
+        # The bare, unparameterized name is correct *only* when this node
+        # was reached by direct nesting under its own ClassTemplateDecl
+        # (via_primary_template=True, set by that branch below) -- this
         # isn't trying to distinguish Holder<int>::apply from
         # Holder<double>::apply (both are genuinely the same syntactic
-        # template declaration, correctly sharing one template_decl node,
+        # template declaration -- apply is written once, in the primary
+        # Holder pattern -- correctly sharing one template_decl node,
         # matching how Holder's own class-template pattern is already
         # shared across all its instantiations), only Holder's own member
         # templates from an unrelated Wrapper's.
-        name = str(node.get("name") or "")
+        #
+        # When via_primary_template is False, this node was instead reached
+        # as a detached top-level sibling -- the same explicit-specialization
+        # detachment quirk this module's docstring already documents for
+        # class-level resolution (an empty stub nested under the
+        # ClassTemplateDecl, full content detached to a top-level sibling
+        # sharing the stub's id). An *explicit* specialization's own member
+        # template is a genuinely separate, independently-authored
+        # declaration, not an instantiation of one shared primary-pattern
+        # member (Codex review, second round, fresh evidence, empirically
+        # confirmed against real clang AST output): `template<> struct
+        # H<int> { template<typename U> void f(U); };` and `template<>
+        # struct H<double> { template<typename U> void f(U); };` each write
+        # their *own* `f` from scratch -- H has no generic member `f` on its
+        # primary template at all -- so H<int>::f and H<double>::f
+        # previously still collapsed onto the identical bare qname "H::f"
+        # and, sharing the same printed signature, the same template_decl
+        # id, falsely identifying two unrelated member templates as one
+        # declaration. Disambiguated the same way a nested type argument
+        # already is (:func:`_specialization_scope_name`) -- degrades to
+        # the bare name when the specialization's own args aren't
+        # resolvable, this module's usual conservative fallback.
+        name = (
+            str(node.get("name") or "")
+            if via_primary_template
+            else _specialization_scope_name(node, str(node.get("name") or ""))
+        )
         child_scope = [*scope, name] if name else scope
         for child in node.get("inner", []) or []:
             _walk_function_templates(
@@ -950,6 +983,32 @@ def _walk_function_templates(
                 full_function_by_id,
                 id_to_file,
                 out,
+            )
+        return
+
+    if kind == _CLASS_TEMPLATE_KIND:
+        # Recurse into a ClassTemplateDecl's own children (template param
+        # decls, the primary pattern's CXXRecordDecl, and any specialization
+        # stub/full-content nodes nested directly here) flagged so the
+        # _CLASS_SPECIALIZATION_KIND branch above can tell "reached by
+        # direct nesting under my own primary template" (an implicit
+        # instantiation, or a stub with no member content to find anyway)
+        # apart from "reached as a detached top-level sibling" (an explicit
+        # specialization's own independently-authored content) -- see that
+        # branch's own docstring for why the distinction matters. Does not
+        # itself change scope; a ClassTemplateDecl doesn't introduce one.
+        for child in node.get("inner", []) or []:
+            _walk_function_templates(
+                child,
+                scope,
+                id_to_qname,
+                id_to_decl_kind,
+                id_to_template_qname,
+                full_by_id,
+                full_function_by_id,
+                id_to_file,
+                out,
+                via_primary_template=True,
             )
         return
 

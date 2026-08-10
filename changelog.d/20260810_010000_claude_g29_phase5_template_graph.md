@@ -427,3 +427,36 @@
   returns unresolved (`None`, no edge) in this case instead of the
   ambiguous bare name, matching this module's usual "never guess"
   discipline.
+
+  A sixteenth review round found one more real, empirically-confirmed gap
+  in `_walk_function_templates`'s own member-template scoping. Two
+  *explicit* class-template specializations each independently declaring
+  their own same-named, same-signature member template previously
+  collided the same way the earlier "member function template nested in a
+  class specialization" fix addressed for *implicit* instantiations, but
+  for a structurally different reason this module's own established
+  design deliberately didn't cover: `template<> struct H<int> {
+  template<typename U> void f(U); };` and `template<> struct H<double> {
+  template<typename U> void f(U); };` each write their *own* `f` from
+  scratch — `H` has no generic member `f` on its primary template at all
+  — so `H<int>::f` and `H<double>::f` are genuinely unrelated
+  declarations that merely share a spelling and signature, unlike
+  `Holder<int>::apply`/`Holder<double>::apply` (an implicit instantiation
+  of one shared primary-pattern member, which the existing code correctly
+  keeps merged onto one `template_decl` node — the design decision this
+  round's fix had to preserve, not override). Both still resolved to the
+  identical bare qname `"H::f"` and, sharing the same printed pattern
+  signature, the same `template_decl` id — confirmed empirically against
+  real clang AST output, including the same explicit-specialization
+  detachment shape (an empty stub nested under the `ClassTemplateDecl`,
+  full content detached to a top-level sibling sharing the stub's id)
+  this module's docstring already documents for class-level resolution.
+  `_walk_function_templates` now threads a `via_primary_template` flag
+  set only when recursing directly from a `ClassTemplateDecl`'s own
+  children (an implicit instantiation, or a stub with no member content
+  to find anyway); reached any other way (a detached top-level sibling —
+  always an explicit specialization, per that same detachment shape), the
+  specialization's own template arguments now disambiguate its scope name
+  the same way a nested type argument already does
+  (`_specialization_scope_name`), degrading to the bare name when those
+  arguments aren't resolvable, this module's usual conservative fallback.
