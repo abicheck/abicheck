@@ -301,6 +301,7 @@ if [[ "$MODE" == "dump" ]]; then
     # Output file — required for dump in action context (otherwise stdout)
     OUTPUT_FILE="${INPUT_OUTPUT_FILE:-abicheck-baseline.json}"
     CMD+=(-o "$OUTPUT_FILE")
+    add_single_flag "--compression" "${INPUT_SNAPSHOT_COMPRESSION:-}"
   fi
 
 elif [[ "$MODE" == "compare" ]]; then

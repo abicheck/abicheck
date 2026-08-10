@@ -4,7 +4,7 @@
 
 Every `with:` input and `outputs.*` value for the [abicheck GitHub Action](../use/github-action.md), generated directly from `action.yml` — see that page for setup, mode/input compatibility, and usage recipes; this page is the exhaustive field list only.
 
-## Inputs (75)
+## Inputs (76)
 
 | Input | Required | Default | Description |
 |---|:--:|---|---|
@@ -63,6 +63,7 @@ Every `with:` input and `outputs.*` value for the [abicheck GitHub Action](../us
 | `abi-baseline` | no | — | Automatically fetch an ABI baseline snapshot for compare mode (used as old-library) or scan mode (used as the scan baseline). Values: "latest-release" fetches *.abicheck.json from the latest GitHub Release; a tag name (e.g. "v2.0.0") fetches from that release; a file path uses the file directly. Requires GITHUB_TOKEN with contents:read permission. Overrides old-library (compare) / against (scan) when set. |
 | `format` | no | — | Output format: json, sarif, html, or markdown/text (each mode's default when this input is left unset — markdown for compare/ deps-tree/deps-compare, text for scan). sarif is only supported in compare mode with a single-pair (non-directory, non-package) operand — a directory/package compare rejects it with an error. html is supported by compare (same single-pair restriction as sarif) and by deps-tree/deps-compare (a dependency-stack report). scan supports text (its default) and json only. dump ignores this input; it always writes a JSON snapshot. Requesting an unsupported format for the mode is a hard error raised before any dependency install (it used to silently fall back to a supported format with only a warning, which is unsafe for CI — see upload-sarif). Deliberately has no Action-level default (unlike most inputs): a single default here would resolve to the wrong value for scan regardless of mode, since GitHub Actions has no way to tell "left unset" from "explicitly set to the default" apart once a default is declared — each mode branch in action/run.sh supplies its own correct default instead. |
 | `output-file` | no | — | Path to write the report file. If not set, output goes to stdout and job summary. |
+| `snapshot-compression` | no | — | dump mode only (ADR-059). Storage envelope for the written snapshot: 'auto' (default) infers gzip/zstd/plain from output-file's canonical suffix (.abicheck.json.gz/.abicheck.json.zst/plain .abicheck.json); an explicit 'none', 'gzip', or 'zstd' is used as-is and is a hard error if it contradicts output-file's suffix, mirroring the CLI's own --compression flag it maps to directly. Ignored by every other mode -- compare/scan/deps-tree/deps-compare produce a report, not a stored snapshot, and transparently read a compressed snapshot operand either way via magic-byte detection regardless of this input. |
 | `policy` | no | strict_abi | Built-in policy profile: strict_abi (default), sdk_vendor, plugin_abi. |
 | `policy-file` | no | — | Path to a YAML policy file with per-kind verdict overrides. |
 | `suppress` | no | — | Path to a YAML suppression file to filter known/intentional changes. |
