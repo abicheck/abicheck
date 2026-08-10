@@ -247,20 +247,73 @@ def _function_identity(node: dict[str, Any], scope: list[str]) -> str:
     )
 
 
-def _find_referenced_decl(node: dict[str, Any]) -> dict[str, Any] | None:
-    """Depth-first search for the first ``referencedDecl`` under *node*.
+def _find_referenced_decl(
+    node: dict[str, Any], member_index: Mapping[str, dict[str, Any]]
+) -> dict[str, Any] | None:
+    """Depth-first search for the first ``referencedDecl``/``referencedMemberDecl``
+    under *node*.
 
     clang stores the callee target on a ``DeclRefExpr`` (``referencedDecl``) or,
     for member calls, on a ``MemberExpr`` (``referencedMemberDecl``). The call
     expression's callee subtree is the first inner child, so a DFS finds it
     without needing to model every wrapping cast/paren node.
+
+    ``referencedMemberDecl`` is **not** a nested compact-declaration dict the
+    way ``referencedDecl`` is — real clang emits it as a bare node-id string
+    (Codex review, fresh evidence, verified against real Clang 17/18 output
+    for ``p->f()``: ``MemberExpr`` carries ``"referencedMemberDecl":
+    "0x...")``, never a dict). An earlier version of this function only
+    checked ``isinstance(ref, dict)``, so a string ``referencedMemberDecl``
+    was silently ignored and the DFS fell through into the ``MemberExpr``'s
+    own children — finding the *receiver* expression's ``DeclRefExpr``
+    instead (e.g. the parameter ``p``) and misclassifying every virtual/
+    member method call as a ``CALL_KIND_FUNCTION_POINTER`` call through the
+    receiver, making ``VIRTUAL_CALL_MAY_DISPATCH_TO``
+    (``virtual_dispatch_graph.py``) effectively inert for this — the most
+    common — call shape. *member_index* (``id -> full decl node``, built
+    from every ``_FUNCTION_DECL_KINDS`` node seen so far during the same
+    walk, mirroring *id_index*'s identical id-keyed pattern) resolves the
+    string back to the real ``CXXMethodDecl``/... node, carrying its own
+    ``virtual``/``type.qualType``/``id`` fields ``_classify_call``/
+    ``_resolve_ref_callee_identity`` need. A member id not (yet) indexed —
+    a forward reference, or a genuinely non-function member (a plain data
+    field, e.g. a struct's own function-pointer-typed field invoked via
+    ``w->cb(x)`` — ``FieldDecl`` is never in ``_FUNCTION_DECL_KINDS``, so
+    never indexed here at all) resolves to ``None`` rather than falling
+    through to the receiver: an unresolved call is a real, honest gap (no
+    edge at all), never a *wrong* one (ADR-028 D3's "degrade to no fact,
+    never a wrong fact" authority rule) — extending this resolution to
+    data-member callback slots too is real, separately-scoped follow-up
+    work (see ``callback_graph.py``'s own docstring, which already
+    documents this exact gap from the consuming side).
     """
-    ref = node.get("referencedDecl") or node.get("referencedMemberDecl")
+    ref = node.get("referencedDecl")
     if isinstance(ref, dict):
+        # Upgrade a compact stub to the FULL declaration node when one is
+        # already indexed (Codex review, fresh evidence): a plain
+        # DeclRefExpr's own `referencedDecl` never carries `virtual`/
+        # `inner` (OverrideAttr/FinalAttr) the way the full node does --
+        # verified against real Clang 18 output for a virtual overloaded
+        # operator invoked through a base reference (`B &b; b();`), whose
+        # callee is a DeclRefExpr, not a MemberExpr, so it never went
+        # through the string-`referencedMemberDecl` resolution path below
+        # (which already upgrades to the full node). Falls back to the
+        # stub itself when nothing is indexed for this id yet -- a forward
+        # reference, or a non-function-decl-kind ref (VarDecl/ParmVarDecl/
+        # FieldDecl, never added to member_index at all) whose own `kind`
+        # the _POINTER_DECL_KINDS check downstream still needs intact.
+        ref_id = str(ref.get("id") or "")
+        if ref_id and ref_id in member_index:
+            return member_index[ref_id]
         return ref
+    member_ref = node.get("referencedMemberDecl")
+    if isinstance(member_ref, dict):
+        return member_ref
+    if isinstance(member_ref, str):
+        return member_index.get(member_ref)
     for child in node.get("inner", []) or []:
         if isinstance(child, dict):
-            found = _find_referenced_decl(child)
+            found = _find_referenced_decl(child, member_index)
             if found is not None:
                 return found
     return None
@@ -301,8 +354,214 @@ def _resolve_ref_callee_identity(
     return indexed or _identity(ref)
 
 
+#: clang AST node kinds that mark a method as overriding/finalizing a base
+#: virtual slot *without* repeating ``"virtual": true`` on the override's own
+#: declaration (see ``_ref_is_virtual``'s docstring for the empirical finding).
+_OVERRIDE_MARKER_KINDS = frozenset({"OverrideAttr", "FinalAttr"})
+
+
+def _ref_is_virtual(ref: dict[str, Any]) -> bool:
+    """Whether *ref* — a resolved callee declaration node — is virtual, own or
+    inherited.
+
+    ``bool(ref.get("virtual"))`` alone under-classifies a real, common case
+    (Codex review, fresh evidence, verified against real Clang 17 output for
+    ``struct B { virtual void f(); }; struct D : B { void f() override; void
+    h(){ f(); } };``): clang repeats ``"virtual": true`` only on the slot's
+    *original* declaring ancestor (``B::f``), never on the override's own
+    ``CXXMethodDecl`` (``D::f``) — so when the resolved static target of a
+    member call *is itself* an override, reading only ``ref["virtual"]``
+    misclassified the call as ``CALL_KIND_DIRECT``/``RESOLUTION_EXACT``,
+    excluding a real further-derived-override chain from
+    ``VIRTUAL_CALL_MAY_DISPATCH_TO`` entirely — the opposite of the
+    over-approximation this classification exists to make honest.
+
+    Fixed locally (no cross-module dependency on ``override_graph.py``'s own
+    hierarchy-walking ``parse_clang_ast_virtual_methods`` — threading its
+    output through here as a precomputed set would make ``call_graph.py``
+    import from ``override_graph.py``, which already function-locally
+    imports several helpers *from* this module; the reverse edge forms a
+    real cycle the AI-readiness ``import-cycle-growth`` gate correctly
+    rejects, confirmed empirically against this exact change): clang always
+    marks a written ``override``/``final`` keyword with an ``OverrideAttr``/
+    ``FinalAttr`` child on the override's own declaration (verified against
+    the same real AST above — ``D::f`` carries no ``"virtual": true`` but
+    does carry an ``OverrideAttr`` child), and ``ref`` here is always the
+    *full* declaration node (not a compact stub) whenever this matters: the
+    only caller (``_classify_call``) only consults this for a
+    ``CXXMemberCallExpr``, whose target always resolves through
+    ``member_index`` (see ``_find_referenced_decl``), which stores full
+    nodes. A derived method that redeclares a virtual signature with
+    *neither* the ``override``/``final`` keyword *nor* a repeated
+    ``"virtual": true`` (legal but unusual C++ style) is a documented,
+    remaining false negative — the same conservative
+    false-negative-over-false-positive default this module already uses
+    throughout (ADR-028 D3).
+    """
+    if bool(ref.get("virtual")):
+        return True
+    return any(
+        isinstance(child, dict) and child.get("kind") in _OVERRIDE_MARKER_KINDS
+        for child in ref.get("inner", []) or []
+    )
+
+
+def _find_member_expr(node: dict[str, Any]) -> dict[str, Any] | None:
+    """DFS for the first ``MemberExpr`` under *node* (mirrors
+    ``_find_referenced_decl``'s shape, but returns the call-site's own
+    ``MemberExpr`` node itself rather than resolving its callee — needed by
+    ``_member_expr_is_qualified`` for the receiver's own source range, which
+    a resolved *declaration* node never carries)."""
+    if node.get("kind") == "MemberExpr":
+        return node
+    for child in node.get("inner", []) or []:
+        if isinstance(child, dict):
+            found = _find_member_expr(child)
+            if found is not None:
+                return found
+    return None
+
+
+def _range_end_offset(range_node: Any) -> int | None:
+    """The character offset immediately past *range_node*'s last token, or
+    ``None`` if the shape is missing/incomplete."""
+    if not isinstance(range_node, dict):
+        return None
+    end = range_node.get("end")
+    if not isinstance(end, dict):
+        return None
+    offset = end.get("offset")
+    tok_len = end.get("tokLen")
+    if not isinstance(offset, int) or not isinstance(tok_len, int):
+        return None
+    return offset + tok_len
+
+
+def _range_begin_offset(range_node: Any) -> int | None:
+    """The character offset of *range_node*'s first token, or ``None`` if the
+    shape is missing/incomplete."""
+    if not isinstance(range_node, dict):
+        return None
+    begin = range_node.get("begin")
+    if not isinstance(begin, dict):
+        return None
+    offset = begin.get("offset")
+    return offset if isinstance(offset, int) else None
+
+
+def _is_implicit_this_receiver(node: Any) -> bool:
+    """Whether *node* is a synthesized (not user-written) ``this`` receiver —
+    a bare ``CXXThisExpr`` with ``"implicit": true`` (an unqualified call
+    inside a method, ``f()``), possibly wrapped in an implicit
+    derived-to-base cast (a qualified call to an inherited base method,
+    ``Base::f()``) — as opposed to an explicitly written ``this->f()``, whose
+    ``CXXThisExpr`` carries no ``implicit`` key at all (Codex review, fresh
+    evidence, verified against real Clang 18 output for all three shapes).
+    Descends through cast wrapper kinds only, mirroring
+    ``callback_graph._address_taken_function``'s own cast-unwrapping shape.
+    """
+    if not isinstance(node, dict):
+        return False
+    if node.get("kind") == "CXXThisExpr":
+        return bool(node.get("implicit"))
+    if str(node.get("kind", "")).endswith("CastExpr"):
+        inner = node.get("inner") or []
+        if inner and isinstance(inner[0], dict):
+            return _is_implicit_this_receiver(inner[0])
+    return False
+
+
+def _member_expr_is_qualified(member_expr: dict[str, Any]) -> bool:
+    """Whether *member_expr* names its member through an explicit qualifier
+    (``obj.Base::f()`` or, from inside a method, ``Base::f()``), which
+    suppresses virtual dispatch at this call site regardless of whether the
+    resolved method is itself virtual (Codex review, fresh evidence).
+
+    Clang's ``-ast-dump=json`` genuinely does not expose a qualifier the way
+    its text ``-ast-dump`` does — verified against real Clang 18 output for
+    ``obj.B::f()`` vs. ``obj.f()`` (identical static receiver type, so both
+    resolve ``referencedMemberDecl`` to the same ``B::f``): the text dump
+    shows a sibling ``NestedNameSpecifier TypeSpec 'B'`` node for the
+    qualified form, but the JSON ``MemberExpr``'s own key set — including
+    ``inner`` — is byte-for-byte identical between the two; there is no
+    ``qualifier`` field or extra child to read.
+
+    Derived instead from source-range arithmetic the JSON *does* carry: for
+    an unqualified access with a real, user-written receiver, the
+    member-name token begins immediately after the receiver sub-expression's
+    own end, plus one operator character (``.`` or ``->``, ``isArrow``) — a
+    qualifier occupies the extra bytes in between (confirmed against the
+    same real AST: the receiver-to-member gap is exactly ``len(".B::f")``
+    for the qualified form and ``len(".f")`` for the unqualified one).
+
+    A genuinely *implicit* ``this`` receiver (:func:`_is_implicit_this_receiver`)
+    needs a different measurement: clang anchors the synthesized receiver's
+    own position at the member name itself, not before a qualifier — the
+    common "call the base implementation from an override"
+    pattern, ``struct D : B { void f() override { B::f(); } };`` — so the
+    receiver-to-member gap always reads as zero regardless of whether a
+    qualifier is present. There, the ``MemberExpr``'s own begin-to-end span
+    is used instead (confirmed against the same real AST: it covers the
+    qualifier text plus the member name for ``B::f()``, and only the member
+    name for a bare ``f()``).
+
+    Only a STRICTLY LARGER-than-expected gap counts as qualified in either
+    branch — a missing offset/tokLen field (an unusual receiver shape, or a
+    hand-built test fixture) degrades to "not qualified" (the pre-existing,
+    already-accepted over-approximation), never the reverse: wrongly
+    suppressing a real virtual call's classification would silently drop a
+    genuine dispatch target from ``VIRTUAL_CALL_MAY_DISPATCH_TO`` — a worse
+    error than the over-approximation this heuristic exists to narrow.
+
+    **A known, documented false positive, not fully closeable from this
+    function's own inputs (Codex review, fresh evidence, second round):**
+    legal whitespace or comments between the receiver and the member —
+    ``obj . f()``, ``ptr /* note */ -> f()`` — also widen the receiver-to-
+    member gap, so this heuristic reports "qualified" (and therefore
+    suppresses the virtual classification) even though no ``Base::``
+    qualifier is present. Confirmed against a real Clang 18 AST for
+    ``obj . f()``: the JSON range arithmetic cannot distinguish two
+    incidental whitespace characters from a real qualifier's bytes, because
+    (as established above) the JSON AST carries no token stream and no
+    qualifier field at all — only a genuine read of the source text between
+    the two offsets could tell "  " from "B::", and this module is
+    deliberately a pure function over the AST dict alone (unlike
+    ``macro_graph.py``'s own Pass B, which has a source-file path to read
+    from). Extending ``parse_clang_ast_calls`` to accept and read source
+    text would resolve this exactly, but is a distinct, larger architectural
+    change out of scope for this fix — this gap is deliberately left open
+    rather than patched with an unsound threshold (no fixed cutoff separates
+    "a couple of stray spaces" from "a real single-letter class name plus
+    `::`" in the general case). In practice this only misfires on unusual,
+    non-idiomatic whitespace styling no common formatter (clang-format
+    included) produces; pinned by a dedicated regression test
+    (``test_parse_call_with_whitespace_around_dot_is_a_known_false_positive``)
+    documenting the current, accepted behavior rather than silently letting
+    it drift.
+    """
+    inner = member_expr.get("inner") or []
+    if not inner or not isinstance(inner[0], dict):
+        return False
+    member_end = _range_end_offset(member_expr.get("range"))
+    name_len = len(str(member_expr.get("name") or ""))
+    if member_end is None or not name_len:
+        return False
+    if _is_implicit_this_receiver(inner[0]):
+        member_begin = _range_begin_offset(member_expr.get("range"))
+        if member_begin is None:
+            return False
+        return (member_end - member_begin) > name_len
+    receiver_end = _range_end_offset(inner[0].get("range"))
+    if receiver_end is None:
+        return False
+    operator_len = 2 if member_expr.get("isArrow") else 1
+    return (member_end - receiver_end) > (operator_len + name_len)
+
+
 def _classify_call(
-    call_node: dict[str, Any], ref: dict[str, Any] | None, id_index: Mapping[str, str]
+    call_node: dict[str, Any],
+    ref: dict[str, Any] | None,
+    id_index: Mapping[str, str],
 ) -> tuple[str, str, str]:
     """Return ``(callee_identity, call_kind, resolution)`` for one call site."""
     if ref is None:
@@ -315,7 +574,25 @@ def _classify_call(
         # Called through a variable/parameter/field → a function pointer; the
         # static target is unknown (could be any compatible function).
         return callee, CALL_KIND_FUNCTION_POINTER, RESOLUTION_UNKNOWN
-    if call_node.get("kind") == "CXXMemberCallExpr" and bool(ref.get("virtual")):
+    if call_node.get("kind") in (
+        "CXXMemberCallExpr",
+        "CXXOperatorCallExpr",
+    ) and _ref_is_virtual(ref):
+        # A virtual overloaded operator invoked through a base reference/
+        # pointer (`B &b; b();`) is a CXXOperatorCallExpr, not a
+        # CXXMemberCallExpr (Codex review, fresh evidence, verified against
+        # real Clang 18 output): its own callee is a plain DeclRefExpr/
+        # FunctionToPointerDecay, not wrapped in a MemberExpr at all, so
+        # `_find_member_expr` correctly finds nothing to qualify-check for
+        # this shape -- an explicitly-qualified operator call
+        # (`b.Base::operator()()`) is a narrower, separately-verified case
+        # not attempted here (same conservative false-negative default this
+        # module already uses throughout).
+        member_expr = _find_member_expr(call_node)
+        if member_expr is not None and _member_expr_is_qualified(member_expr):
+            # An explicitly-qualified call (obj.Base::f()) suppresses virtual
+            # dispatch regardless of the resolved method's own virtuality.
+            return callee, CALL_KIND_DIRECT, RESOLUTION_EXACT
         # A virtual member call: the static target is one possible override, so
         # the edge over-approximates the real dynamic dispatch.
         return callee, CALL_KIND_VIRTUAL, RESOLUTION_OVERAPPROX
@@ -351,6 +628,7 @@ def _enter_function_scope(
     scope: list[str],
     decl_files: dict[str, str],
     id_index: dict[str, str],
+    member_index: dict[str, dict[str, Any]],
 ) -> tuple[str, str]:
     """Return the ``(caller, caller_file)`` scope after a function-decl node, recording its definition file."""
     ident = _function_identity(node, scope) or caller
@@ -381,6 +659,14 @@ def _enter_function_scope(
     real_ident = _function_identity(node, scope)
     if node_id and real_ident:
         id_index.setdefault(node_id, real_ident)
+    # Index the full node too (not just its identity string), keyed the same
+    # way, so a MemberExpr's bare-string `referencedMemberDecl` id can
+    # resolve back to the real CXXMethodDecl node itself -- carrying its own
+    # `virtual`/`type.qualType` fields `_classify_call` needs, which the
+    # id_index's flat identity string alone can't provide (Codex review,
+    # fresh evidence -- see `_find_referenced_decl`'s own docstring).
+    if node_id:
+        member_index.setdefault(node_id, node)
     return caller, caller_file
 
 
@@ -390,9 +676,10 @@ def _append_call_edge(
     caller_file: str,
     edges: list[CallEdge],
     id_index: dict[str, str],
+    member_index: dict[str, dict[str, Any]],
 ) -> None:
     """Resolve one call expression's callee and append the edge (unresolved/self calls dropped)."""
-    ref = _find_referenced_decl(node)
+    ref = _find_referenced_decl(node, member_index)
     callee, call_kind, resolution = _classify_call(node, ref, id_index)
     if callee and callee != caller:
         edges.append(CallEdge(caller, callee, call_kind, resolution, caller_file))
@@ -407,6 +694,7 @@ def _walk_calls(
     edges: list[CallEdge],
     decl_files: dict[str, str],
     id_index: dict[str, str],
+    member_index: dict[str, dict[str, Any]],
 ) -> str:
     """Recursive AST walk tracking the nearest enclosing function as the *caller*
     and the qualified-name scope (ADR-041 P1 #5), mirroring
@@ -428,10 +716,17 @@ def _walk_calls(
     name = str(node.get("name") or "")
     if kind in _FUNCTION_DECL_KINDS:
         caller, caller_file = _enter_function_scope(
-            node, caller, caller_file, cur_file, scope, decl_files, id_index
+            node,
+            caller,
+            caller_file,
+            cur_file,
+            scope,
+            decl_files,
+            id_index,
+            member_index,
         )
     if kind in _CALL_EXPR_KINDS and caller:
-        _append_call_edge(node, caller, caller_file, edges, id_index)
+        _append_call_edge(node, caller, caller_file, edges, id_index, member_index)
     child_scope = [*scope, name] if kind in _SCOPE_DECL_KINDS and name else scope
     for child in node.get("inner", []) or []:
         cur_file = _walk_calls(
@@ -443,6 +738,7 @@ def _walk_calls(
             edges,
             decl_files,
             id_index,
+            member_index,
         )
     return cur_file
 
@@ -471,6 +767,43 @@ def _dedupe_edges(edges: list[CallEdge]) -> list[CallEdge]:
     return out
 
 
+def _index_member_decls(node: Any, index: dict[str, dict[str, Any]]) -> None:
+    """Pre-index every function-decl node's ``id -> full node`` over the *whole*
+    AST, before any call site is resolved (Codex review, fresh evidence).
+
+    ``member_index`` was previously built incrementally, only as
+    :func:`_walk_calls`'s single combined pre-order walk actually reached each
+    declaration (:func:`_enter_function_scope`'s ``member_index.setdefault``).
+    That silently mis-resolves a call to a member declared *later* in the same
+    class body — verified against real Clang 17 output for
+    ``struct A { virtual void f(){ g(); } virtual void g(); };``: clang visits
+    ``f``'s body (and its call to ``g``) before ``g``'s own ``CXXMethodDecl``
+    sibling, so at the moment ``f -> g`` is resolved, ``g`` is not yet in the
+    index and the call is dropped entirely rather than misattributed —
+    consistent with this module's degrade-to-no-fact default, but still a real
+    coverage gap for an extremely common declare-after-use shape (mutually
+    calling sibling methods, a class's public API calling a private helper
+    declared below it, ...).
+
+    Fixed by running this separate, scope-tracking-free pre-pass first: a
+    plain ``id -> node`` index needs no caller/file context, so completeness
+    doesn't depend on visit order. :func:`_enter_function_scope`'s own
+    incremental population is left in place rather than removed — it costs
+    nothing extra (``setdefault`` is idempotent against this pre-pass having
+    already populated the same id) and keeps that function's index
+    self-contained for any future caller that walks without this pre-pass.
+    """
+    if not isinstance(node, dict):
+        return
+    kind = str(node.get("kind", ""))
+    if kind in _FUNCTION_DECL_KINDS:
+        node_id = str(node.get("id") or "")
+        if node_id:
+            index.setdefault(node_id, node)
+    for child in node.get("inner", []) or []:
+        _index_member_decls(child, index)
+
+
 def parse_clang_ast_calls(ast: dict[str, Any]) -> list[CallEdge]:
     """Extract static call edges from a ``clang -ast-dump=json`` tree (pure).
 
@@ -494,7 +827,17 @@ def parse_clang_ast_calls(ast: dict[str, Any]) -> list[CallEdge]:
     # referencedDecl stub can resolve its real (mangled, overload-distinct)
     # identity instead of the stub's own name-only fallback (PR1b).
     id_index: dict[str, str] = {}
-    _walk_calls(ast, "", "", "", [], edges, decl_files, id_index)
+    # clang AST node id -> the full FunctionDecl/CXXMethodDecl/... node
+    # itself (Codex review, fresh evidence), so a MemberExpr's bare-string
+    # `referencedMemberDecl` id can resolve back to a real node carrying its
+    # own `virtual`/`type.qualType` fields -- see `_find_referenced_decl`'s
+    # own docstring for the full empirical finding this closes.
+    member_index: dict[str, dict[str, Any]] = {}
+    # Pre-index every function-decl node up front (Codex review, fresh
+    # evidence) so a call to a member declared *later* in the same class body
+    # still resolves -- see `_index_member_decls`'s own docstring.
+    _index_member_decls(ast, member_index)
+    _walk_calls(ast, "", "", "", [], edges, decl_files, id_index, member_index)
     return _dedupe_edges(_fill_callee_files(edges, decl_files))
 
 

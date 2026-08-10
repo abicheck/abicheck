@@ -29,7 +29,7 @@ from pathlib import Path
 import abicheck.buildsource.inline as inline
 from abicheck.buildsource import source_replay
 from abicheck.buildsource.build_evidence import BuildEvidence, CompileUnit, LinkUnit
-from abicheck.buildsource.source_abi import SourceAbiSurface
+from abicheck.buildsource.source_abi import SourceAbiSurface, SourceEntity
 
 
 class _FakeExtractor:
@@ -752,6 +752,129 @@ def test_inline_graph_no_type_edges_when_clang_absent(monkeypatch):
     assert graph is not None
     assert not any(e.kind == "TYPE_INHERITS" for e in graph.edges)
     assert any(r.name == "type_graph:clang" and r.status == "failed" for r in rows)
+
+
+# ── G29 Phase 5 item 2: macro-dependency graph folding ──────────────────────
+
+
+def _surface_with_macro_and_function() -> SourceAbiSurface:
+    return SourceAbiSurface(
+        reachable_macros=[
+            SourceEntity(id="FEATURE_X", kind="macro", qualified_name="FEATURE_X")
+        ],
+        reachable_declarations=[
+            SourceEntity(
+                id="f",
+                kind="function",
+                qualified_name="f",
+                mangled_name="_Z1fv",
+                visibility="public_header",
+            )
+        ],
+    )
+
+
+def test_inline_graph_folds_macro_edges_when_clang_available(monkeypatch, tmp_path):
+    from abicheck.buildsource import (
+        call_graph,
+        callback_graph,
+        macro_graph,
+        override_graph,
+        template_graph,
+        type_graph,
+    )
+    from abicheck.buildsource.macro_graph import DeclRange
+
+    header = tmp_path / "t.h"
+    header.write_text(
+        "#define FEATURE_X 1\n#ifdef FEATURE_X\nvoid f() { return FEATURE_X; }\n#endif\n"
+    )
+
+    class _FakeNoEdgeExtractor:
+        def __init__(self, *a, **k):
+            self.clang_bin = "clang++"
+            self.diagnostics: list[str] = []
+            self.last_jobs = 0
+            self.last_elapsed_s = 0.0
+            # ClangOverrideGraphExtractor's own extra fields
+            # (fold_override_graph reads them after extract_from_build).
+            self.last_virtual_methods: set[str] = set()
+            self.last_virtual_destructor_owners: set[str] = set()
+
+        def available(self) -> bool:
+            return True
+
+        def extract_from_build(self, build):
+            return []
+
+    class _FakeMacroExtractor(_FakeNoEdgeExtractor):
+        def extract_from_build(self, build):
+            return [DeclRange("_Z1fv", str(header), 3, 3)]
+
+    # Codex review, fresh evidence: `with_call_graph=True` runs
+    # `fold_semantic_graphs`, which also constructs real
+    # `ClangOverrideGraphExtractor`/`ClangTemplateGraphExtractor`/
+    # `ClangCallbackGraphExtractor` instances -- previously unfaked here, so
+    # this fast (non-`integration`-marked) test could shell out to a real
+    # `clang++` if one happens to be on the runner's PATH.
+    monkeypatch.setattr(call_graph, "ClangCallGraphExtractor", _FakeNoEdgeExtractor)
+    monkeypatch.setattr(type_graph, "ClangTypeGraphExtractor", _FakeNoEdgeExtractor)
+    monkeypatch.setattr(macro_graph, "ClangMacroGraphExtractor", _FakeMacroExtractor)
+    monkeypatch.setattr(
+        override_graph, "ClangOverrideGraphExtractor", _FakeNoEdgeExtractor
+    )
+    monkeypatch.setattr(
+        template_graph, "ClangTemplateGraphExtractor", _FakeNoEdgeExtractor
+    )
+    monkeypatch.setattr(
+        callback_graph, "ClangCallbackGraphExtractor", _FakeNoEdgeExtractor
+    )
+    merged = _build_with_one_unit()
+    rows: list = []
+    graph = inline._build_inline_graph(
+        merged,
+        surface=_surface_with_macro_and_function(),
+        with_call_graph=True,
+        clang_bin="clang",
+        extractors=rows,
+    )
+    assert graph is not None
+    assert any(e.kind == "MACRO_CONTROLS_DECL" for e in graph.edges)
+    assert any(e.kind == "DECL_USES_MACRO" for e in graph.edges)
+    assert graph.extractor_passes.get("macro_graph") is True
+    assert any(r.name == "macro_graph:clang" and r.status == "ok" for r in rows)
+
+
+def test_inline_graph_no_macro_edges_when_clang_absent(monkeypatch):
+    # Best-effort: a missing clang++ records a failed extractor row and leaves
+    # the graph without macro edges — never raises.
+    from abicheck.buildsource import call_graph, macro_graph, type_graph
+
+    class _Unavailable:
+        def __init__(self, *a, **k):
+            self.clang_bin = "clang++"
+            self.diagnostics: list[str] = []
+
+        def available(self) -> bool:
+            return False
+
+    monkeypatch.setattr(call_graph, "ClangCallGraphExtractor", _Unavailable)
+    monkeypatch.setattr(type_graph, "ClangTypeGraphExtractor", _Unavailable)
+    monkeypatch.setattr(macro_graph, "ClangMacroGraphExtractor", _Unavailable)
+    merged = _build_with_one_unit()
+    rows: list = []
+    graph = inline._build_inline_graph(
+        merged,
+        surface=_surface_with_macro_and_function(),
+        with_call_graph=True,
+        clang_bin="clang",
+        extractors=rows,
+    )
+    assert graph is not None
+    assert not any(e.kind == "MACRO_CONTROLS_DECL" for e in graph.edges)
+    assert graph.extractor_passes.get("macro_graph") is not True
+    assert graph.degraded_passes.get("macro_graph") is not True
+    assert any(r.name == "macro_graph:clang" and r.status == "failed" for r in rows)
 
 
 def test_inline_type_graph_scoped_to_changed_tus(monkeypatch):

@@ -19,8 +19,8 @@ Split out of ``inline.py`` (which sits at its 2000-line hard cap) to keep
 adding scoping/coverage fields — ``narrowed_scope``, ``degraded_passes`` —
 from pushing that file over the limit (ADR-041 P0). ``inline.py`` imports
 :func:`fold_call_graph`/:func:`fold_type_graph`/:func:`fold_include_graph`/
-:func:`fold_archive_graph` and calls them exactly as it called the former
-same-module ``_fold_call_graph``/``_fold_type_graph``.
+:func:`fold_archive_graph`/:func:`fold_macro_graph` and calls them exactly as
+it called the former same-module ``_fold_call_graph``/``_fold_type_graph``.
 """
 
 from __future__ import annotations
@@ -31,6 +31,7 @@ from typing import TYPE_CHECKING, Any
 
 from .build_evidence import BuildEvidence
 from .model import ExtractorRecord
+from .virtual_dispatch_graph import augment_graph_with_virtual_dispatch
 
 if TYPE_CHECKING:
     from .source_graph import SourceGraphSummary
@@ -370,7 +371,19 @@ def fold_override_graph(
         merged, changed_paths, scoped_units
     )
     edges = extractor.extract_from_build(target)
-    added = augment_graph_with_overrides(graph, edges)
+    # `virtual_methods` closes a real gap (Codex review, fresh evidence):
+    # a virtual method with no override anywhere in the scanned codebase
+    # never appears as either endpoint of an OverrideEdge at all, so
+    # augment_graph_with_overrides also needs the extractor's own
+    # per-TU-aggregated virtual-method identity set to stamp an
+    # `is_virtual` fact for `virtual_dispatch_graph.py`'s vtable-presence
+    # seeding to read (see that function's own docstring).
+    added = augment_graph_with_overrides(
+        graph,
+        edges,
+        virtual_methods=frozenset(extractor.last_virtual_methods),
+        virtual_destructor_owners=frozenset(extractor.last_virtual_destructor_owners),
+    )
     # Recorded regardless of `added` — mirrors fold_call_graph/fold_type_graph's
     # coverage gate. project_source_files() isn't consulted here: unlike a call
     # or type/field edge, an override edge's endpoints are always declarations
@@ -402,6 +415,121 @@ def fold_override_graph(
             ),
         )
     )
+
+
+def fold_virtual_dispatch_graph(
+    graph: SourceGraphSummary,
+) -> None:
+    """Best-effort virtual-dispatch augmentation of *graph* (G29 Phase 5 item
+    3): ``VIRTUAL_CALL_MAY_DISPATCH_TO`` (Part A) + ``TYPE_HAS_VTABLE``
+    (Part B) — see ``virtual_dispatch_graph.py``'s own module docstring for
+    the full derivation.
+
+    Unlike every other ``fold_*`` function in this module, this one takes no
+    ``merged``/``clang_bin``/``extractors``/scoping arguments and never shells
+    out to ``clang`` at all: both parts are pure transformations over graph
+    state ``fold_call_graph``/``fold_type_graph``/``fold_override_graph``
+    already folded (called immediately after ``fold_override_graph`` in
+    :func:`fold_semantic_graphs`, so all three have already run). There is
+    nothing to scope narrowly and no per-TU clang diagnostics to degrade
+    on — a run over an empty/no-override graph simply adds zero edges, which
+    is not a failure to report as a ``degraded_passes`` entry.
+
+    Coverage stamping is correspondingly different from the clang-backed
+    passes: ``extractor_passes["virtual_dispatch_graph"]`` is set whenever
+    this function runs at all (it always completes — there is no subprocess
+    step that can fail), but it is only meaningful evidence when the passes
+    it *reads* — ``call_graph``/``type_graph``/``override_graph`` —
+    themselves ran (``graph_impact.py``'s derived, no-subprocess passes
+    follow the identical "ran iff its own read succeeded" shape rather than
+    a fresh coverage story of their own). A reader checking whether this
+    pass's silence ("zero edges") means anything should check those three
+    passes' own coverage, not invent a fourth clang-availability check for a
+    pass that never touches a compiler.
+
+    **``narrowed_passes``/``degraded_passes`` are propagated from the three
+    prerequisite passes, not left unstamped** (Codex review, fresh
+    evidence): an earlier version set only ``extractor_passes`` unconditionally,
+    so a run scoped to ``changed_paths``/``scoped_units`` — which correctly
+    stamps ``narrowed_passes["call_graph"]``/``["type_graph"]``/
+    ``["override_graph"]`` — let a reader see ``extractor_passes
+    ["virtual_dispatch_graph"] = True`` with no accompanying narrowed flag,
+    misreading a scoped, partial virtual-dispatch surface (candidates and
+    vtables from only the scanned TUs) as complete coverage. Since all three
+    prerequisite passes share one ``changed_paths``/``scoped_units`` call
+    from :func:`fold_semantic_graphs`, "any of the three narrowed" implies
+    the same scope, so this pass is narrowed to that same scope; "any of the
+    three degraded" (a per-TU clang failure with no explicit scope) makes
+    this pass degraded too, since a class/override missed by a failed TU
+    silently narrows what this pass can see exactly the same way an explicit
+    scope would.
+
+    **``extractor_passes``/``narrowed_passes``/``degraded_passes`` are
+    mutually exclusive for this pass, matching every clang-backed pass's own
+    if/elif stamping chain** (Codex review, fresh evidence, second round):
+    the first fix above added the narrowed/degraded propagation but left the
+    unconditional ``extractor_passes["virtual_dispatch_graph"] = True``
+    assignment in place alongside it — the persisted coverage contract
+    treats a full-coverage stamp as mutually exclusive with a narrowed one
+    (every sibling pass's own ``if fully_covered: ... elif narrowed: ...
+    elif degraded: ...`` chain, e.g. :func:`fold_call_graph`), so a reader
+    that only checks ``extractor_passes`` could still trust a scoped run as
+    complete. Fixed by only stamping ``extractor_passes`` when neither
+    condition holds.
+
+    **Full coverage requires every prerequisite to have its OWN full-coverage
+    stamp, not merely "neither narrowed nor degraded" (Codex review, fresh
+    evidence, third round).** When ``clang``/``clang++`` isn't on ``PATH`` at
+    all, each of :func:`fold_call_graph`/:func:`fold_type_graph`/
+    :func:`fold_override_graph` returns early after recording a `"failed"`
+    :class:`ExtractorRecord` — setting **none** of ``extractor_passes``/
+    ``narrowed_passes``/``degraded_passes`` for its own pass at all (there is
+    no per-TU diagnostic to attach a degraded stamp to; the extractor never
+    ran). A naive ``narrowed``/``degraded`` check both reads as ``False`` in
+    exactly this case — nothing is *narrowed*, nothing recorded a
+    *diagnostic* — which would fall through to claiming full virtual-
+    dispatch coverage from zero prerequisite facts.
+
+    **A degraded prerequisite outranks a narrowed one (Codex review, fresh
+    evidence, fourth round):** the three prerequisites stamp independently,
+    so one can land in ``narrowed_passes`` (a clean, explicitly-scoped run)
+    while another lands in ``degraded_passes`` (a per-TU clang failure) —
+    e.g. ``call_graph`` narrows cleanly while ``override_graph`` degrades. A
+    version that checked ``narrowed`` before ``degraded`` stamped only the
+    narrowed key for that mix, silently dropping the untracked gap from the
+    failed TUs — contradicting ``SourceGraphSummary.degraded_passes``'s own
+    documented precedence ("a narrowed run with diagnostics lands here too
+    ... since it is even less trustworthy than either"). Fixed by folding
+    both the "some prerequisite recorded a real diagnostic" case and the
+    "some prerequisite never ran at all" case (the third-round finding
+    above) into one ``degraded`` check, and checking it *first*: only when
+    no prerequisite is missing or degraded, and at least one is narrowed,
+    does this pass count as narrowed; only when every prerequisite has its
+    own confirmed full-coverage stamp does it count as fully covered.
+    """
+    augment_graph_with_virtual_dispatch(graph)
+    _PREREQ_PASSES = ("call_graph", "type_graph", "override_graph")
+    degraded = any(graph.degraded_passes.get(p) for p in _PREREQ_PASSES)
+    narrowed = any(graph.narrowed_passes.get(p) for p in _PREREQ_PASSES)
+    # A prerequisite that never ran at all (clang unavailable) carries none
+    # of the three stamps -- as untrustworthy as a real per-TU diagnostic.
+    missing = any(
+        p not in graph.extractor_passes
+        and p not in graph.narrowed_passes
+        and p not in graph.degraded_passes
+        for p in _PREREQ_PASSES
+    )
+    if degraded or missing:
+        graph.degraded_passes["virtual_dispatch_graph"] = True
+    elif narrowed:
+        graph.narrowed_passes["virtual_dispatch_graph"] = True
+        for p in _PREREQ_PASSES:
+            scope = graph.narrowed_scope.get(p)
+            if scope:
+                graph.narrowed_scope["virtual_dispatch_graph"] = scope
+                break
+    else:
+        graph.extractor_passes["virtual_dispatch_graph"] = True
 
 
 def fold_template_graph(
@@ -474,6 +602,227 @@ def fold_template_graph(
             detail=(
                 f"{len(instantiations)} instantiation(s), {added} edges from "
                 f"{len(target.compile_units)} compile unit(s){scoped_note}{timing}"
+            ),
+        )
+    )
+
+
+def fold_macro_graph(
+    graph: SourceGraphSummary,
+    merged: BuildEvidence,
+    clang_bin: str,
+    extractors: list[ExtractorRecord] | None,
+    changed_paths: tuple[str, ...] = (),
+    scoped_units: list[Any] | None = None,
+) -> None:
+    """Best-effort Clang macro/config-dependency augmentation of *graph*
+    (G29 Phase 5 item 2).
+
+    Mirrors :func:`fold_template_graph` exactly (same scoping precedence,
+    same graceful degradation on a missing ``clang++``) but folds
+    ``MACRO_CONTROLS_DECL``/``DECL_USES_MACRO`` edges — see
+    ``macro_graph.py``'s own module docstring for the full reasoning,
+    including a load-bearing empirical clang AST-dump finding. Run only when
+    the caller also runs the call/type graph (``with_call_graph``), sharing
+    the same scoping decision and clang-availability diagnostic story.
+
+    Unlike the AST-only passes above, this one also needs each named file's
+    *raw source text* (``macro_graph.py``'s Pass B is a text scan, not an
+    AST walk) — supplied here as a plain ``Path.read_text`` callable, whose
+    own read failures are turned into per-file diagnostics by
+    :func:`~abicheck.buildsource.macro_graph.augment_graph_with_macro_dependencies`
+    itself (never raised here).
+    """
+    from .call_graph import (
+        extractor_pass_fully_covered,
+        narrowed_pass_confirmed,
+    )
+    from .macro_graph import (
+        ClangMacroGraphExtractor,
+        augment_graph_with_macro_dependencies,
+    )
+
+    rows = extractors if extractors is not None else []
+    extractor = ClangMacroGraphExtractor(
+        clang_bin=clang_bin if clang_bin != "clang" else "clang++"
+    )
+    if not extractor.available():
+        rows.append(
+            ExtractorRecord(
+                name="macro_graph:clang",
+                status="failed",
+                detail=f"{extractor.clang_bin} not found; graph has no macro edges",
+            )
+        )
+        return
+    target, scoped_note, narrowed, scope_key = _scope_narrowed_target(
+        merged, changed_paths, scoped_units
+    )
+    decl_ranges = extractor.extract_from_build(target)
+
+    def _read_source(path: str) -> str | None:
+        return Path(path).read_text(encoding="utf-8")
+
+    result = augment_graph_with_macro_dependencies(
+        graph, decl_ranges, source_lookup=_read_source
+    )
+    added = result.controls_edges + result.uses_edges
+    # Coverage honesty mirrors fold_template_graph's clang-extractor gate,
+    # additionally requiring Pass B's own text-read diagnostics to be clean
+    # (result.complete) — a confirmed clang pass whose source-text scan hit
+    # a read failure on some file must not read as fully covered either.
+    if extractor_pass_fully_covered(target, extractor, narrowed) and result.complete:
+        graph.extractor_passes["macro_graph"] = True
+    elif narrowed and narrowed_pass_confirmed(target, extractor) and result.complete:
+        graph.narrowed_passes["macro_graph"] = True
+        graph.narrowed_scope["macro_graph"] = scope_key
+    elif extractor.diagnostics or result.diagnostics:
+        graph.degraded_passes["macro_graph"] = True
+    for diag in extractor.diagnostics:
+        merged.diagnostics.append(f"macro_graph: {diag}")
+    for diag in result.diagnostics:
+        merged.diagnostics.append(f"macro_graph: {diag}")
+    timing = (
+        f", {extractor.last_elapsed_s:.2f}s, jobs={extractor.last_jobs}"
+        if getattr(extractor, "last_jobs", 0)
+        else ""
+    )
+    rows.append(
+        ExtractorRecord(
+            name="macro_graph:clang",
+            status="ok" if added else "partial",
+            detail=(
+                f"{result.controls_edges} MACRO_CONTROLS_DECL, "
+                f"{result.uses_edges} DECL_USES_MACRO edge(s) from "
+                f"{len(target.compile_units)} compile unit(s){scoped_note}{timing}"
+            ),
+        )
+    )
+
+
+def fold_callback_graph(
+    graph: SourceGraphSummary,
+    merged: BuildEvidence,
+    clang_bin: str,
+    extractors: list[ExtractorRecord] | None,
+    changed_paths: tuple[str, ...] = (),
+    scoped_units: list[Any] | None = None,
+) -> None:
+    """Best-effort Clang callback/function-pointer augmentation of *graph*
+    (G29 Phase 5 item 4).
+
+    Mirrors :func:`fold_macro_graph`'s scoping precedence and graceful
+    degradation, but folds ``DECL_REGISTERS_CALLBACK``/``DECL_TAKES_ADDRESS_OF``
+    (Part B — a new Clang AST pass, :mod:`callback_graph`) then
+    ``CALLBACK_MAY_INVOKE`` (Part A — a pure join over the edges Part B just
+    folded plus ``call_graph.py``'s already-folded function-pointer-kind
+    ``DECL_CALLS_DECL`` edges) in the same call, unlike
+    :func:`fold_virtual_dispatch_graph`'s split shape: this family's Part A
+    needs Part B's edges to have *already* landed in *graph* before it can
+    join against them, and both parts share one clang-availability/scoping
+    story, so there is no benefit to a separate function the way
+    ``fold_virtual_dispatch_graph`` (which needs no clang/scoping arguments
+    at all) earned one. Run only when the caller also runs the call graph
+    (``with_call_graph``), sharing the same scoping decision and
+    clang-availability diagnostic story as every other Clang-backed pass —
+    see ``callback_graph.py``'s own module docstring for the full reasoning
+    (including the identity design Part A's join depends on, and the
+    empirical AST-shape findings this is grounded in).
+    """
+    from .call_graph import extractor_pass_fully_covered, narrowed_pass_confirmed
+    from .callback_graph import (
+        ClangCallbackGraphExtractor,
+        augment_graph_with_callback_invocations,
+        augment_graph_with_callback_registrations,
+    )
+
+    rows = extractors if extractors is not None else []
+    extractor = ClangCallbackGraphExtractor(
+        clang_bin=clang_bin if clang_bin != "clang" else "clang++"
+    )
+    if not extractor.available():
+        rows.append(
+            ExtractorRecord(
+                name="callback_graph:clang",
+                status="failed",
+                detail=f"{extractor.clang_bin} not found; graph has no callback edges",
+            )
+        )
+        return
+    target, scoped_note, narrowed, scope_key = _scope_narrowed_target(
+        merged, changed_paths, scoped_units
+    )
+    callback_edges = extractor.extract_from_build(target)
+    registration_result = augment_graph_with_callback_registrations(
+        graph, callback_edges
+    )
+    dispatch_result = augment_graph_with_callback_invocations(graph)
+    added = registration_result.edges_joined + dispatch_result.dispatch_edges_added
+    # This pass's own extractor run (Part B, DECL_REGISTERS_CALLBACK/
+    # DECL_TAKES_ADDRESS_OF) gives the *ceiling* on the coverage claim below;
+    # Part A's CALLBACK_MAY_INVOKE join separately depends on `call_graph`'s
+    # already-folded function-pointer-kind DECL_CALLS_DECL edges (Codex
+    # review, fresh evidence) -- a degraded or missing call_graph pass means
+    # a real CALLBACK_MAY_INVOKE dispatch target can be silently absent even
+    # when this pass's own clang run examined the whole compile DB cleanly,
+    # mirroring the same prerequisite-propagation `fold_virtual_dispatch_graph`
+    # already applies for its own three prerequisites.
+    if extractor_pass_fully_covered(target, extractor, narrowed):
+        own_state = "full"
+    elif narrowed and narrowed_pass_confirmed(target, extractor):
+        own_state = "narrowed"
+    elif extractor.diagnostics:
+        own_state = "degraded"
+    else:
+        own_state = "none"
+    if graph.degraded_passes.get("call_graph"):
+        call_graph_state = "degraded"
+    elif graph.narrowed_passes.get("call_graph"):
+        call_graph_state = "narrowed"
+    elif graph.extractor_passes.get("call_graph"):
+        call_graph_state = "full"
+    else:
+        # Never ran at all (e.g. clang unavailable) -- as untrustworthy as a
+        # real per-TU diagnostic.
+        call_graph_state = "degraded"
+    # "degraded" and "none" share the worst rank on purpose: both land in the
+    # same `degraded_passes` branch below, so which of the two `max()` picks
+    # on a tie (Python keeps the first-seen argument, i.e. `own_state`) never
+    # changes the outcome -- the branch below re-checks both states directly
+    # rather than trusting `worst_state`'s exact spelling in that case.
+    _STATE_RANK = {"full": 0, "narrowed": 1, "degraded": 2, "none": 2}
+    worst_state = max(own_state, call_graph_state, key=_STATE_RANK.__getitem__)
+    if worst_state == "full":
+        graph.extractor_passes["callback_graph"] = True
+    elif worst_state == "narrowed":
+        graph.narrowed_passes["callback_graph"] = True
+        graph.narrowed_scope["callback_graph"] = (
+            scope_key
+            if own_state == "narrowed"
+            # A real fold_call_graph run always sets narrowed_scope
+            # alongside narrowed_passes, but a hand-built/deserialized
+            # graph is not guaranteed to (CodeRabbit review, fresh
+            # evidence) -- .get() degrades to an empty scope rather than
+            # raising and aborting this whole fold.
+            else graph.narrowed_scope.get("call_graph", frozenset())
+        )
+    elif own_state != "none" or call_graph_state != "none":
+        graph.degraded_passes["callback_graph"] = True
+    for diag in extractor.diagnostics:
+        merged.diagnostics.append(f"callback_graph: {diag}")
+    timing = (
+        f", {extractor.last_elapsed_s:.2f}s, jobs={extractor.last_jobs}"
+        if getattr(extractor, "last_jobs", 0)
+        else ""
+    )
+    rows.append(
+        ExtractorRecord(
+            name="callback_graph:clang",
+            status="ok" if added else "partial",
+            detail=(
+                f"{registration_result.edges_joined} registration/address-of edge(s), "
+                f"{dispatch_result.dispatch_edges_added} CALLBACK_MAY_INVOKE edge(s) "
+                f"from {len(target.compile_units)} compile unit(s){scoped_note}{timing}"
             ),
         )
     )
@@ -568,15 +917,32 @@ def fold_semantic_graphs(
     """Run every Clang-derived L5 graph pass over *graph* in one call:
     :func:`fold_call_graph`, :func:`fold_type_graph`,
     :func:`fold_override_graph` (ADR-041 P2 item 1),
-    :func:`fold_template_graph` (G29 Phase 5 item 1), then
+    :func:`fold_virtual_dispatch_graph` (G29 Phase 5 item 3),
+    :func:`fold_template_graph` (G29 Phase 5 item 1),
+    :func:`fold_macro_graph` (G29 Phase 5 item 2),
+    :func:`fold_callback_graph` (G29 Phase 5 item 4), then
     :func:`fold_include_graph` — the exact sequence ``inline._build_inline_graph``
     ran inline before this wrapper existed, kept together here (rather than
-    five separate call sites in ``inline.py``, which sits at its own
-    line-count cap) so a future sixth pass adds one call here instead of
-    growing that file too. Each pass shares the same *changed_paths*/
-    *scoped_units* scoping precedence and clang-binary resolution, and each
-    degrades independently (a missing ``clang++`` or a per-TU parse failure
-    never aborts a later pass — ADR-028 D3).
+    one call site per pass in ``inline.py``, which sits at its own
+    line-count cap) so a future pass adds one call here instead of
+    growing that file too. ``fold_macro_graph`` sits right after
+    ``fold_template_graph`` — both are Clang-backed passes needing the same
+    scoping decision, and both close over one of G29 Phase 5's originally
+    open graph families. ``fold_virtual_dispatch_graph`` sits right after
+    ``fold_override_graph`` and takes no clang/scoping arguments of its own
+    (see its own docstring) — it is a pure transformation over the call/type/
+    override graph state the three preceding passes just folded, so it must
+    run after all three, not merely "somewhere in this sequence".
+    ``fold_callback_graph`` sits after ``fold_macro_graph`` for the identical
+    reason ``fold_virtual_dispatch_graph`` sits after ``fold_override_graph``:
+    its own internal Part A join reads ``call_graph.py``'s already-folded
+    function-pointer-kind ``DECL_CALLS_DECL`` edges, so ``fold_call_graph``
+    must have already run — any position after it works, and grouping it with
+    the other G29 Phase 5 passes keeps this family together. Each
+    clang-backed pass shares the same *changed_paths*/*scoped_units* scoping
+    precedence and clang-binary resolution, and each degrades independently
+    (a missing ``clang++`` or a per-TU parse failure never aborts a later
+    pass — ADR-028 D3).
     """
     fold_call_graph(
         graph, merged, clang_bin, extractors, changed_paths, scoped_units=scoped_units
@@ -587,7 +953,14 @@ def fold_semantic_graphs(
     fold_override_graph(
         graph, merged, clang_bin, extractors, changed_paths, scoped_units=scoped_units
     )
+    fold_virtual_dispatch_graph(graph)
     fold_template_graph(
+        graph, merged, clang_bin, extractors, changed_paths, scoped_units=scoped_units
+    )
+    fold_macro_graph(
+        graph, merged, clang_bin, extractors, changed_paths, scoped_units=scoped_units
+    )
+    fold_callback_graph(
         graph, merged, clang_bin, extractors, changed_paths, scoped_units=scoped_units
     )
     fold_include_graph(

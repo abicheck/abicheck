@@ -163,6 +163,111 @@ TEMPLATE_EDGE_KINDS: frozenset[str] = frozenset(
     }
 )
 
+#: The macro/config-dependency half of the graph vocabulary (G29 Phase 5 item
+#: 2, G29.6's second open graph family) — ``source_graph.EDGE_KINDS`` unions
+#: this in the same way ``TEMPLATE_EDGE_KINDS``/``LINK_PROVENANCE_EDGE_KINDS``
+#: above are, and ``abicheck.buildsource.macro_graph`` (which populates it)
+#: re-exports it. Same two reasons for living in this leaf module:
+#: ``source_graph.py`` is at its 2000-line hard cap, and the producer would
+#: need to import ``source_graph`` back. **No new node kind** — every edge
+#: below joins onto the existing ``macro``/``source_decl`` node kinds
+#: ``source_graph.NODE_KINDS`` already declares (same "no new node kind
+#: needed" shape as ``CONSUMER_EDGE_KINDS``'s deliberate absence of a
+#: ``consumer_required_symbol`` node kind above).
+#:
+#: Only ``MACRO_CONTROLS_DECL`` (a declaration compiled only under a simple
+#: ``#ifdef``/``#ifndef``/``#if defined``/``#if !defined`` guard) and
+#: ``DECL_USES_MACRO`` (a declaration's own text references a macro name
+#: defined earlier in the same file — a textual heuristic, not semantic
+#: preprocessing) are populated this slice — see ``macro_graph.py``'s own
+#: module docstring for the full reasoning, including a load-bearing
+#: empirical clang AST-dump finding. The rest are **reserved**, same
+#: "registered so a hand-built or newer graph naming one is never rejected,
+#: but no normalized data source yet" pattern as ``TEMPLATE_USES_DECL``/
+#: ``CONSTRAINT_DEPENDS_ON_DECL`` above: ``MACRO_EXPANDS_TO_VALUE``/
+#: ``MACRO_EXPANDS_TO_TYPE`` need real macro-expansion tracing (a full
+#: preprocessor substitution model), and ``MACRO_CONTROLS_EDGE`` needs
+#: per-edge (not per-declaration) conditional attribution — knowing that one
+#: specific call/reference *inside* a declaration's body is itself nested
+#: under a *different* macro guard than the declaration's own, a finer-
+#: grained walk than this slice's whole-declaration region join.
+MACRO_DEP_EDGE_KINDS: frozenset[str] = frozenset(
+    {
+        "MACRO_CONTROLS_DECL",
+        "DECL_USES_MACRO",
+        "MACRO_EXPANDS_TO_VALUE",
+        "MACRO_EXPANDS_TO_TYPE",
+        "MACRO_CONTROLS_EDGE",
+    }
+)
+
+#: The virtual-dispatch half of the graph vocabulary (G29 Phase 5 item 3,
+#: G29.6's third open graph family) — ``source_graph.NODE_KINDS``/
+#: ``EDGE_KINDS`` union these in the same way ``TEMPLATE_NODE_KINDS``/
+#: ``MACRO_DEP_EDGE_KINDS`` above are, and ``abicheck.buildsource.
+#: virtual_dispatch_graph`` (which populates the two live members below)
+#: re-exports them. Same two reasons for living in this leaf module:
+#: ``source_graph.py`` is at its 2000-line hard cap, and the producer would
+#: need to import ``source_graph`` back.
+#:
+#: ``DECL_OVERRIDES_DECL`` is registered but **deliberately has no producer**:
+#: it is not a gap, it is a closed one. ``override_graph.py`` (ADR-041 P2
+#: item 1, which predates this family) already emits
+#: ``METHOD_POSSIBLE_OVERRIDE`` edges whose ``attrs["resolution"]`` is either
+#: ``"override_confirmed"`` (clang's own ``OverrideAttr`` — the ``override``
+#: keyword was written and the compiler checked the override relationship
+#: against the base's virtual slot, name+signature match included) or the
+#: weaker ``"override_signature_match"`` (no compiler confirmation, a
+#: name+type match only). A confirmed edge already carries the exact fact
+#: ``DECL_OVERRIDES_DECL`` would: "this declaration overrides that one,
+#: checked by the compiler." Minting a second, redundant edge kind for the
+#: same fact would fork one piece of evidence into two, with no consumer able
+#: to tell which one is authoritative when they inevitably drift on
+#: confidence or scope — exactly the duplication ADR-046 D2's evidence-merge
+#: machinery exists to prevent, not reproduce. A reader who wants "decl X
+#: overrides decl Y, confirmed" reads a ``METHOD_POSSIBLE_OVERRIDE`` edge with
+#: ``resolution == "override_confirmed"``; ``DECL_OVERRIDES_DECL`` stays
+#: registered only so a hand-built or future graph naming it directly (e.g. an
+#: external backend, Phase 7) is never rejected as unknown vocabulary — same
+#: "registered vocabulary, no producer" pattern the reserved kinds below use,
+#: just for a different reason (satisfied by an existing kind, not deferred
+#: for missing evidence).
+#:
+#: ``VIRTUAL_CALL_MAY_DISPATCH_TO`` and ``TYPE_HAS_VTABLE`` are populated this
+#: slice — see ``virtual_dispatch_graph.py``'s own module docstring for the
+#: full reasoning. ``VIRTUAL_CALL_MAY_DISPATCH_TO`` is explicitly
+#: ``resolution: "overapprox"``, never ``"exact"`` (mirroring
+#: ``call_graph.RESOLUTION_OVERAPPROX``): it names the possible runtime
+#: dispatch *target set* a virtual call may reach, not a proof of which
+#: target a given call actually takes.
+#:
+#: ``VTABLE_SLOT_MAPS_TO_DECL`` remains **reserved, unpopulated** vocabulary:
+#: a precise per-slot Itanium vtable layout (offset-to-top and typeinfo
+#: pointer slots, primary vs. secondary vtables under multiple inheritance,
+#: virtual-inheritance vtables, covariant-return thunks shifting a slot's
+#: target) is a much harder, easy-to-get-subtly-wrong claim than "this class
+#: has a vtable" or "this call's target set may include these declarations" —
+#: exactly the distinction this family's own design brief draws between
+#: "the vtable slot provably changed" and "the possible dispatch target set
+#: changed." ``diff_elf_layout.py``'s existing binary-only vtable-slot-*count*
+#: detector (a completely different, complementary evidence source — approximates
+#: a slot count from an ELF ``_ZTV<mangled-type>`` symbol's size, with no
+#: per-slot identity at all) documents the same real-world layout complexity
+#: in its own module docstring. A naive "declaration order" per-slot model
+#: would get exactly those cases wrong, not merely approximately right, and
+#: this codebase's discipline is to degrade to no fact rather than emit a
+#: wrong one (ADR-028 D3) — so this edge waits for a real, verified Itanium
+#: layout model, not a drive-by guess.
+VIRTUAL_DISPATCH_NODE_KINDS: frozenset[str] = frozenset({"vtable"})
+VIRTUAL_DISPATCH_EDGE_KINDS: frozenset[str] = frozenset(
+    {
+        "DECL_OVERRIDES_DECL",
+        "VIRTUAL_CALL_MAY_DISPATCH_TO",
+        "VTABLE_SLOT_MAPS_TO_DECL",
+        "TYPE_HAS_VTABLE",
+    }
+)
+
 #: Object/link provenance (ADR-041 P1 #2) — ``source_graph.NODE_KINDS``/
 #: ``EDGE_KINDS`` union these in the same way the vocabulary above is;
 #: relocated here from inline additions in ``source_graph.py`` itself once
@@ -180,6 +285,52 @@ TEMPLATE_EDGE_KINDS: frozenset[str] = frozenset(
 #: introspection pass, not build-evidence alone. ``linker_script``/
 #: ``export_map``/``comdat_group`` remain reserved (no normalized data
 #: source yet) for a future linker-artifact extractor.
+#: The callback/function-pointer half of the graph vocabulary (G29 Phase 5
+#: item 4, G29.6's fourth open graph family) — ``source_graph.EDGE_KINDS``
+#: unions this in the same way ``MACRO_DEP_EDGE_KINDS``/
+#: ``VIRTUAL_DISPATCH_EDGE_KINDS`` above are, and ``abicheck.buildsource.
+#: callback_graph`` (which populates the three live members below)
+#: re-exports it. Same two reasons for living in this leaf module:
+#: ``source_graph.py`` is at its 2000-line hard cap, and the producer would
+#: need to import ``source_graph`` back. **No new node kind**: a callback
+#: slot and the function whose address flows into it are both already
+#: ``source_decl`` nodes seeded by ``call_graph.py``/``type_graph.py`` — same
+#: "no new node kind needed" shape as ``MACRO_DEP_EDGE_KINDS``'s deliberate
+#: absence of one.
+#:
+#: ``CALLBACK_MAY_INVOKE`` (a pure join, no new clang pass — reuses
+#: ``call_graph.py``'s existing function-pointer-kind ``DECL_CALLS_DECL``
+#: edges), ``DECL_REGISTERS_CALLBACK`` (a function's address taken as a
+#: direct argument to a call whose matching parameter is function-pointer
+#: typed — the plugin/event-loop/C-API registration shape), and
+#: ``DECL_TAKES_ADDRESS_OF`` (the broader case: an address-of flowing into a
+#: function-pointer-typed variable/field via assignment or initializer, not
+#: necessarily a direct call argument) are all populated — see
+#: ``callback_graph.py``'s own module docstring for the full reasoning,
+#: including the identity design Part A's join depends on and two empirical
+#: AST-shape findings (an explicit ``&func``/an implicit function-to-pointer
+#: decay, and a documented, inherited join gap for a struct-field-typed slot
+#: invoked through member-call syntax).
+#:
+#: ``FUNCTION_POINTER_HAS_SIGNATURE`` is registered but has **no edge
+#: producer** — investigated and found genuinely unmet by any pre-existing
+#: edge (unlike ``DECL_OVERRIDES_DECL`` above, which was already covered), but
+#: a function pointer's signature is a property of exactly one declaration,
+#: not a relation between two entities, so it doesn't fit this schema's edge
+#: shape at all. ``callback_graph.py`` instead populates the real data as a
+#: ``function_pointer_signature`` **node-level** fact (via
+#: :func:`register_fact`) on the callback slot's own ``source_decl`` node.
+#: Stays registered as edge vocabulary only so a hand-built or future graph
+#: naming it directly is never rejected.
+CALLBACK_EDGE_KINDS: frozenset[str] = frozenset(
+    {
+        "DECL_TAKES_ADDRESS_OF",
+        "DECL_REGISTERS_CALLBACK",
+        "CALLBACK_MAY_INVOKE",
+        "FUNCTION_POINTER_HAS_SIGNATURE",
+    }
+)
+
 LINK_PROVENANCE_NODE_KINDS: frozenset[str] = frozenset(
     {
         "object_file",

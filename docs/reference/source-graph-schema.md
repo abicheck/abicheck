@@ -278,6 +278,209 @@ Coverage is tracked at `extractor_passes["template_graph"]` /
 `degraded_passes["template_graph"]`, the same family-level contract the
 call/type/include-graph passes use.
 
+## The macro/config-dependency half of the graph (G29 Phase 5 item 2)
+
+Clang's own AST carries **no** representation of preprocessor conditionals
+at all — a `#ifdef`/`#define` leaves no trace in a `clang -ast-dump=json`
+tree; the declarations it admits or excludes simply appear or don't, with no
+marker of which guard let them through. `abicheck/buildsource/macro_graph.py`
+closes that gap with two independent passes: a Clang AST pass indexing every
+declaration's own `(file, begin_line, end_line)` span, and a pure raw-text
+scan of the same files for conditional regions and macro definitions —
+joined by line-range containment. Driven by
+`inline_graph_fold.fold_macro_graph` alongside the other Clang-backed passes
+(`with_call_graph`).
+
+| Kind | Status | Meaning |
+|---|---|---|
+| `MACRO_CONTROLS_DECL` *(edge)* | populated | `macro` → `source_decl`. A declaration is compiled only under a simple `#ifdef X` / `#ifndef X` / `#if defined(X)` / `#if !defined(X)` conditional region; `attrs.negated` is `true` for the `#else` branch of a simple guard. `CONF_HIGH` — an exact structural fact about the raw text, not a guess. |
+| `DECL_USES_MACRO` *(edge)* | populated | `source_decl` → `macro`. A declaration's own signature/body span contains a word-boundary reference to a macro name `#define`d earlier in the same file. `CONF_REDUCED` — a textual heuristic, not semantic preprocessing (see below). |
+| `MACRO_EXPANDS_TO_VALUE` / `MACRO_EXPANDS_TO_TYPE` / `MACRO_CONTROLS_EDGE` *(edges)* | reserved | See the module's own docstring for why each is deferred (real macro-*expansion* tracing for the first two; per-edge rather than per-declaration conditional attribution for the third). |
+
+No new **node** kind — both edges join onto the existing `macro`/
+`source_decl` node kinds only (join-only-onto-an-existing-node, the same
+ADR-057 D1 rule `archive_graph.py`'s `OBJECT_DEFINES_SYMBOL` reapplies): a
+macro or declaration this pass discovers in the AST/text scan but the graph
+doesn't already carry a node for mints nothing.
+
+**A compound condition (`#if defined(X) && defined(Y)`) or an `#elif` chain
+is deliberately unmodeled** — neither its own branch nor (for a compound
+condition) its `#else` branch contributes a `MACRO_CONTROLS_DECL` edge,
+though nesting depth is still tracked correctly across it (its own `#endif`
+still pops the scan's nesting stack, so a sibling or enclosing simple guard
+elsewhere in the file is never desynchronized). `DECL_USES_MACRO` is a
+textual, not semantic, scan and accepts two documented tradeoffs: it cannot
+tell an identifier that merely shares a defined macro's name from a genuine
+macro reference (a known, accepted over-match), and it is strictly
+same-file — a macro `#define`d in one header and referenced from a
+declaration in a different file/TU is not modeled.
+
+One load-bearing empirical AST-dump finding underlies the declaration-range
+pass: a declaration's `range.begin`/`range.end` objects do not reliably
+carry a `"line"` key — clang's JSON node dumper prints a single,
+whole-AST-wide sticky `(file, line)` cursor shared across *every* node's
+`loc`, then `range.begin`, then `range.end` (in that field order), printing
+a field only when it changes from the immediately preceding one. This is a
+stricter version of `type_graph._node_file`'s own file-only sticky tracking
+between siblings — the cursor here is one value threaded through the
+*entire* document-order traversal (every node, including every statement/
+expression inside a function body, not just the declarations this module
+indexes), and it tracks `line` as well as `file`. See `macro_graph.py`'s own
+module docstring for the full reasoning and verification detail.
+
+Coverage is tracked at `extractor_passes["macro_graph"]` /
+`degraded_passes["macro_graph"]`, the same family-level coverage-honesty
+contract the call/type/template/include-graph passes use — requiring both a
+clean, fully-covered Clang pass *and* a clean raw-text scan (no per-file
+read/parse diagnostic) before claiming confirmed coverage.
+
+## The virtual-dispatch half of the graph (G29 Phase 5 item 3)
+
+Unlike every sibling section above, `abicheck/buildsource/
+virtual_dispatch_graph.py` shells out to no compiler at all: both edge kinds
+below are **pure graph transformations** over `call_graph.py`/
+`type_graph.py`/`override_graph.py` facts the graph already carries, driven
+by `inline_graph_fold.fold_virtual_dispatch_graph` immediately after
+`fold_override_graph` (all three inputs must have already run).
+
+| Kind | Status | Meaning |
+|---|---|---|
+| `vtable` *(node)* | populated | One node per genuinely polymorphic class (`vtable://<record-type-identity>`) — the one new node kind this Phase 5 family introduces (items 1/2/6 all reused pre-existing kinds). Minted at most once per `record_type` node. |
+| `VIRTUAL_CALL_MAY_DISPATCH_TO` *(edge)* | populated | The calling `source_decl` → an override-candidate `source_decl`. Joins a virtual `DECL_CALLS_DECL` edge (`call_kind == "virtual"`, pointing at the statically-resolved base method) against every `METHOD_POSSIBLE_OVERRIDE` edge naming that base method as its target. `attrs.resolution` is always `"overapprox"`, never `"exact"`; `attrs.base_method` names the base method; `attrs.override_resolution` mirrors the joined override edge's own `resolution`. `CONF_REDUCED` — a static approximation of a runtime dispatch decision. |
+| `TYPE_HAS_VTABLE` *(edge)* | populated | `record_type` → `vtable`. Per the Itanium ABI rule, a class is polymorphic iff it declares or inherits ≥1 virtual function. `CONF_HIGH` — once a class is known to own or inherit a virtual slot, this is a structural, provable fact. Seeded three independent ways: an overriding/overridden method named by a `METHOD_POSSIBLE_OVERRIDE` edge; an `is_virtual`-tagged `decl://` node (a leaf virtual method with no override candidate anywhere in scope); or a `has_virtual_destructor`-tagged `record_type` node (a class whose only virtual member is its own destructor — destructors are deliberately excluded from override-EDGE matching, so this is a separate, narrower seed, `override_graph.parse_clang_ast_virtual_destructor_owners`). |
+| `DECL_OVERRIDES_DECL` *(edge)* | **satisfied by an existing kind, no producer** | `override_graph.py`'s `METHOD_POSSIBLE_OVERRIDE` edge with `attrs.resolution == "override_confirmed"` (clang's own `OverrideAttr`) already carries this exact fact — see that section above. Registered so a hand-built/future graph naming it directly is never rejected, but nothing in this codebase emits it, deliberately: minting a second edge kind for the same fact would fork one piece of evidence into two. |
+| `VTABLE_SLOT_MAPS_TO_DECL` *(edge)* | reserved | A precise per-slot Itanium vtable layout (offset-to-top/typeinfo slots, primary vs. secondary vtables under multiple inheritance, virtual-inheritance vtables, covariant-return thunks) is a much harder, easy-to-get-subtly-wrong claim than "this class has a vtable" or "this call's target set may include these declarations" — see the module's own docstring. Deliberately not attempted this slice; `diff_elf_layout.py`'s existing binary-only vtable-slot-*count* detector is unrelated, complementary infrastructure (no per-slot identity), not unified with this family. |
+
+**`VIRTUAL_CALL_MAY_DISPATCH_TO` never re-emits the base method itself as a
+target** — it is already the joined `DECL_CALLS_DECL` edge's own `dst`, so
+restating it here would be a redundant self-fact. A virtual call to a base
+method with **no** recorded override candidates (a leaf virtual method)
+emits no `VIRTUAL_CALL_MAY_DISPATCH_TO` edge at all, not a spurious
+self-edge: there is no dispatch ambiguity to represent when the call graph
+already names the only possible target directly.
+
+**`TYPE_HAS_VTABLE`'s owner join is deliberately exact-match only.** Since
+`METHOD_POSSIBLE_OVERRIDE` edges name methods, not their owning types, the
+module recovers the owner by decoding a method's own mangled identity via
+`diff_cxx_rules.itanium_scope_components`/`msvc_scope_components` (the same
+structural, no-external-demangler decoders `diff_cxx_rules.owner_class_of`
+already uses elsewhere) and dropping the leaf component. This is matched
+against a `record_type` node's identity **exactly**, never as a fuzzy/bare-
+suffix match: for a class-template specialization, the decoder keeps the
+*raw* Itanium template-argument encoding rather than the spelled form
+`type_graph.py`'s record identities use, so an exact match never fires for a
+templated owner — a silent, conservative false negative (a template-
+instantiated polymorphic class may go undetected), never a wrong claim on an
+unrelated same-named type. For every non-template class the two forms
+coincide exactly, since a plain identifier mangles to itself length-prefixed.
+
+This pass never touches a compiler itself — its coverage is entirely
+*derived* from `call_graph`/`type_graph`/`override_graph`'s own already-
+stamped coverage (worst-wins: a degraded or never-run prerequisite outranks
+a narrowed one, which outranks a fully-covered one), so a reader checking
+whether "zero edges" from this pass means anything should read this pass's
+own derived stamp, not re-check the three prerequisites by hand. The three
+resulting stamps are mutually exclusive, mirroring every other clang-backed
+pass's own `if`/`elif`/`elif` shape: `extractor_passes
+["virtual_dispatch_graph"]` only when all three prerequisites are
+themselves fully covered; `narrowed_passes["virtual_dispatch_graph"]` (plus
+`narrowed_scope["virtual_dispatch_graph"]`, copied from whichever
+prerequisite carries a scope) when none is degraded/missing but at least
+one is narrowed; `degraded_passes["virtual_dispatch_graph"]` when any
+prerequisite is degraded or never ran at all. `callback_graph.py`'s own
+Part A join propagates `call_graph`'s coverage state the identical way —
+see that family's own coverage row below.
+
+## The callback/function-pointer half of the graph (G29 Phase 5 item 4)
+
+`abicheck/buildsource/callback_graph.py` closes the plugin/event-loop/C-API
+callback blind spot: a public registration function stashing a private
+handler's address into a slot that is later invoked indirectly. Split like
+item 3, by whether new compiler evidence is needed — but unlike item 3, this
+family's Part A depends on Part B's own edges already being folded, so both
+run inside one `inline_graph_fold.fold_callback_graph` call rather than two
+separate `fold_*` functions.
+
+| Kind | Status | Meaning |
+|---|---|---|
+| `DECL_REGISTERS_CALLBACK` *(edge)* | populated | The address-taking function → the slot. A function's address is a direct argument of a plain `CallExpr`, at a position whose callee parameter is itself function-pointer-typed (`signal(SIGINT, handler)`). `CONF_HIGH` — an exact structural match. |
+| `DECL_TAKES_ADDRESS_OF` *(edge)* | populated | The address-taking function → the slot. A broader catch-all: an address-of/decay flows into a function-pointer-typed variable/field via a plain assignment or its own initializer, not necessarily a direct call argument. `CONF_REDUCED` — telling a real callback wire-up from an incidental address-of (printing/comparing it) is out of scope. |
+| `CALLBACK_MAY_INVOKE` *(edge)* | populated | The original calling `source_decl` → a registered function `source_decl`. A pure join, no new clang pass: joins `call_graph.py`'s already-folded function-pointer-kind `DECL_CALLS_DECL` edge (caller → slot) against every `DECL_REGISTERS_CALLBACK`/`DECL_TAKES_ADDRESS_OF` edge naming that same slot. `attrs.resolution` is always `"overapprox"`, never `"exact"`; `attrs.slot` names the joined slot; `attrs.registration_kind` records which of the two edge kinds contributed the candidate. `CONF_REDUCED`. A slot with no function registered anywhere this pass examined contributes no edge — not a spurious self-edge and not a "definitely unused" claim: the fact is genuinely unknown, not empty. |
+| `FUNCTION_POINTER_HAS_SIGNATURE` *(edge)* | **registered, no edge producer — populated as a node-level fact instead** | Investigated and found genuinely unmet by any pre-existing edge (unlike `DECL_OVERRIDES_DECL` in the virtual-dispatch family, which was already covered) — but a function pointer's signature is a property of exactly one declaration, not a relation between two entities, so it doesn't fit this schema's edge shape. `callback_graph.py` instead stamps a `function_pointer_signature` **node-level** fact (the slot's own desugared-preferred `qualType` spelling) on the slot's `source_decl` node whenever a `DECL_REGISTERS_CALLBACK`/`DECL_TAKES_ADDRESS_OF` join succeeds. Registered as edge vocabulary only so a hand-built or future graph naming it directly is never rejected. |
+
+No new **node** kind — both `source_decl` endpoints of `DECL_REGISTERS_CALLBACK`/
+`DECL_TAKES_ADDRESS_OF` are minted when missing rather than requiring a
+pre-existing node from `call_graph.py`/`type_graph.py` (a private
+callback-only handler, or a registration API's own callback parameter,
+routinely has neither) — the exception to the join-only-onto-an-existing-
+node discipline every sibling family in this phase otherwise reapplies, the
+same precedent `override_graph.py` already establishes for its own
+fully-resolved edge endpoints. See
+`docs/contribute/plans/g29-impact-analysis-layer.md`'s G29 Phase 5 item 4
+section for the full reasoning.
+
+**Identity design — the single load-bearing correctness property.** Part A's
+join only connects when Part B's edges land on *exactly* the same `dst`
+identity `call_graph.py` itself already used for the same slot. Investigated
+by reading `call_graph._classify_call`/`_resolve_ref_callee_identity`: a call
+through a variable/parameter/field resolves its callee identity via an
+`id_index` populated **only** for `FunctionDecl`-kind nodes — never for a
+`VarDecl`/`ParmVarDecl`/`FieldDecl` — so the lookup always misses and falls
+back to the reference stub's own bare, unqualified `mangledName or name` (a
+parameter named `h` in two unrelated functions both resolve to the identical
+bare identity `"h"`). `callback_graph.py`'s Part B deliberately computes the
+same slot identity the same way, rather than a stronger scope-qualified one
+that would simply never match anything `call_graph.py` produces — mirroring
+an existing, already-shipped limitation of the graph it joins onto, not
+inventing a new one.
+
+**A load-bearing negative empirical finding, partially closed by a later fix,
+not fully: a struct-field-typed callback slot invoked through member-call
+syntax (`w->cb(x)`) still never joins in Part A.** Originally confirmed by
+compiling real code through `call_graph.parse_clang_ast_calls`: clang emits a
+`MemberExpr`'s own callee reference as
+`"referencedMemberDecl": "<node-id-string>"` — a bare string, not a nested
+dict — which `call_graph._find_referenced_decl` did not recognize, so the
+DFS fell through to the *base object's* own reference instead (`w`, not
+`cb`) — a **wrong** edge. A later Codex-review fix (fresh evidence, same PR)
+found the identical root cause independently, for a virtual method call
+(`p->f()`) `virtual_dispatch_graph.py` depends on, and fixed it in
+`call_graph.py` itself: a new `member_index` resolves a string
+`referencedMemberDecl`, but only for `_FUNCTION_DECL_KINDS` nodes — a
+`FieldDecl` (what a callback slot's own declaration always is) is never one
+of those, so it's still never indexed. Re-verified against the identical
+repro after that fix landed: the call now resolves to no edge at all rather
+than the wrong `w`-attributed one — an improvement, not a close. Part B
+still records a real, individually correct `DECL_REGISTERS_CALLBACK`/
+`DECL_TAKES_ADDRESS_OF` edge naming the field itself, but Part A's join
+against it still only fires when some other code path calls through the
+field in a form `call_graph.py` resolves to the field directly — extending
+`member_index` to also cover `FieldDecl` stays its own scoped follow-up.
+
+Scoped to a **plain, free-function** `CallExpr` for the registration case —
+not `CXXMemberCallExpr`/`CXXOperatorCallExpr` — mirroring
+`override_graph.py`'s own "constructors/destructors deliberately out of
+scope for this first slice" precedent. See `callback_graph.py`'s own module
+docstring for the full empirical AST-shape findings (an explicit `&func`
+`UnaryOperator`, an implicit `FunctionToPointerDecay` cast, a typedef'd
+function-pointer type's `desugaredQualType`) and what's deliberately
+deferred (extending `call_graph.py`'s own identity/reference resolution,
+`CXXMemberCallExpr` registration detection).
+
+Coverage is tracked at `extractor_passes["callback_graph"]`/
+`narrowed_passes["callback_graph"]`/`degraded_passes["callback_graph"]`
+(mutually exclusive, same as every other Clang-backed pass) — driven by
+`inline_graph_fold.fold_callback_graph`, run after `fold_macro_graph` (its
+own Part A needs `fold_call_graph`'s edges already folded). Unlike a plain
+single-extractor pass, this stamp is the worst of *two* independent
+signals: this pass's own Part B clang run, and `call_graph`'s own already-
+recorded coverage state — because Part A's `CALLBACK_MAY_INVOKE` join reads
+`call_graph`'s function-pointer-kind `DECL_CALLS_DECL` edges, a degraded or
+never-run `call_graph` pass can hide a real dispatch target even when this
+pass's own clang run examined the whole compile DB cleanly, mirroring how
+`virtual_dispatch_graph.py` derives its own coverage from its three
+prerequisites (see above).
+
 ## `primary_path` / `alternative_paths` / `discarded_path_count`
 
 `select_preferred_graph_path`'s caller (`buildsource.graph_impact.attach_impact_metadata`)

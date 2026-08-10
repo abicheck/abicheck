@@ -47,6 +47,17 @@ def test_parse_defined_macros_skips_function_like() -> None:
     assert defs == {"NDEBUG": "1", "_GLIBCXX_USE_CXX11_ABI": "0", "EMPTY": ""}
 
 
+def test_parse_defined_macros_compact_function_like_no_space_after_paren() -> None:
+    # Codex review, fresh evidence: a real, valid compact function-like
+    # definition with no space after `)` must still be recognized by
+    # _DEFINE_RE (even though its replacement text is still discarded here
+    # -- function-like macros have no single ABI value to diff).
+    text = "#define ATTR(x)__attribute__((x))\n#define NDEBUG 1\n"
+    defs = parse_defined_macros(text)
+    assert defs == {"NDEBUG": "1"}
+    assert "ATTR" not in defs
+
+
 def test_is_abi_macro_name_and_prefix() -> None:
     assert is_abi_macro("NDEBUG")
     assert is_abi_macro("_GLIBCXX_USE_CXX11_ABI")  # prefix family
@@ -378,7 +389,12 @@ def test_capture_macros_stops_after_deadline_exhausted(monkeypatch) -> None:
 
     build = be.BuildEvidence(
         compile_units=[
-            be.CompileUnit(id=f"cu://{i}", source=f"{i}.cpp", language="CXX", argv=["c++", f"{i}.cpp"])
+            be.CompileUnit(
+                id=f"cu://{i}",
+                source=f"{i}.cpp",
+                language="CXX",
+                argv=["c++", f"{i}.cpp"],
+            )
             for i in range(5)
         ]
     )
@@ -610,6 +626,9 @@ def test_scan_engine_clang_bin_excludes_cl_style_drivers() -> None:
     assert _preprocessor_scan_clang_bin(CompileContext(gcc_path="clang-cl")) == (
         "clang++"
     )
-    assert _preprocessor_scan_clang_bin(
-        CompileContext(gcc_path=r"C:\llvm\bin\clang-cl.exe")
-    ) == "clang++"
+    assert (
+        _preprocessor_scan_clang_bin(
+            CompileContext(gcc_path=r"C:\llvm\bin\clang-cl.exe")
+        )
+        == "clang++"
+    )

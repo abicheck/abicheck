@@ -625,6 +625,158 @@ def test_collect_source_graph_folds_template_graph_pass(tmp_path):
 
 
 @pytest.mark.integration
+def test_collect_source_graph_folds_override_and_macro_graph_passes(tmp_path):
+    """A third round of the same gap (Codex review, fresh evidence): this
+    collect path had fallen behind ``inline_graph_fold.fold_semantic_graphs``
+    a third time -- override/virtual-dispatch/macro folding were still
+    missing here, so an otherwise-equivalent collected pack silently carried
+    no ``METHOD_POSSIBLE_OVERRIDE``/``VIRTUAL_CALL_MAY_DISPATCH_TO``/
+    ``TYPE_HAS_VTABLE``/``MACRO_CONTROLS_DECL``/``DECL_USES_MACRO`` edges (or
+    their coverage stamps) regardless of what ``--source-abi`` collected."""
+    import shutil
+
+    if shutil.which("clang++") is None:
+        pytest.skip("clang++ not found in PATH")
+    from abicheck.buildsource.source_abi import SourceAbiSurface
+    from abicheck.cli_buildsource_helpers import _collect_source_graph, _run_adapters
+
+    src = tmp_path / "t.cpp"
+    src.write_text(
+        "#ifdef FEATURE_X\n"
+        "struct Base { virtual void run(); };\n"
+        "struct Derived : Base { void run() override; };\n"
+        "#endif\n"
+        "int use(Base* b) { b->run(); return 0; }\n"
+    )
+    cdb = tmp_path / "cc.json"
+    cdb.write_text(
+        json.dumps(
+            [
+                {
+                    "directory": str(tmp_path),
+                    "file": str(src),
+                    "command": f"c++ -std=c++17 -DFEATURE_X -c {src} -o t.o",
+                }
+            ]
+        )
+    )
+    merged = BuildEvidence()
+    extractors: list[ExtractorRecord] = []
+    _run_adapters(
+        merged,
+        extractors,
+        compile_db=cdb,
+        build_dir=None,
+        cmake=False,
+        ninja=False,
+        ninja_compdb=None,
+        bazel_cquery=None,
+        bazel_aquery=None,
+        make_dry_run=None,
+        binary=None,
+        read_compiler_record=False,
+        build_system="generic",
+        record_bazel_inputs=False,
+        verbose=False,
+    )
+    surface = SourceAbiSurface(library="libfoo.so", target_id="target://libfoo")
+    graph, _detail = _collect_source_graph(
+        merged,
+        extractors,
+        source_graph="summary",
+        changed_paths=(),
+        kythe_entries=None,
+        codeql_results=None,
+        codeql_extends_results=None,
+        surface=surface,
+        clang_bin="clang",
+    )
+    assert graph is not None
+    assert graph.extractor_passes.get("override_graph") is True
+    assert graph.extractor_passes.get("virtual_dispatch_graph") is True
+    assert any(e.kind == "METHOD_POSSIBLE_OVERRIDE" for e in graph.edges)
+    # macro_graph always records its own extractor row (a coverage stamp
+    # needs at least one joinable macro/decl node this synthetic surface
+    # doesn't seed, but the row itself proves the fold actually ran).
+    assert any(r.name == "macro_graph:clang" for r in extractors)
+
+
+@pytest.mark.integration
+def test_collect_source_graph_folds_callback_graph_pass(tmp_path):
+    """G29 Phase 5 item 4 (the same now-three-times-documented recurring gap
+    above): this out-of-band `collect --source-abi --source-graph summary`
+    path must fold `fold_callback_graph` in the same commit that adds it,
+    not as a later follow-up fix -- a fourth instance of the gap ADR-041 P2
+    item 1 / G29 Phase 5 items 2/3 already found and fixed here."""
+    import shutil
+
+    if shutil.which("clang++") is None:
+        pytest.skip("clang++ not found in PATH")
+    from abicheck.buildsource.source_abi import SourceAbiSurface
+    from abicheck.cli_buildsource_helpers import _collect_source_graph, _run_adapters
+
+    src = tmp_path / "t.c"
+    src.write_text(
+        "typedef void (*handler_t)(int);\n"
+        "void my_handler(int x) {}\n"
+        "void signal_register(handler_t h);\n"
+        "void invoke_it(handler_t h) { h(1); }\n"
+        "void use(void) {\n"
+        "    my_handler(0);\n"
+        "    signal_register(&my_handler);\n"
+        "    invoke_it(my_handler);\n"
+        "}\n"
+    )
+    cdb = tmp_path / "cc.json"
+    cdb.write_text(
+        json.dumps(
+            [
+                {
+                    "directory": str(tmp_path),
+                    "file": str(src),
+                    "command": f"cc -c {src} -o t.o",
+                }
+            ]
+        )
+    )
+    merged = BuildEvidence()
+    extractors: list[ExtractorRecord] = []
+    _run_adapters(
+        merged,
+        extractors,
+        compile_db=cdb,
+        build_dir=None,
+        cmake=False,
+        ninja=False,
+        ninja_compdb=None,
+        bazel_cquery=None,
+        bazel_aquery=None,
+        make_dry_run=None,
+        binary=None,
+        read_compiler_record=False,
+        build_system="generic",
+        record_bazel_inputs=False,
+        verbose=False,
+    )
+    surface = SourceAbiSurface(library="libfoo.so", target_id="target://libfoo")
+    graph, _detail = _collect_source_graph(
+        merged,
+        extractors,
+        source_graph="summary",
+        changed_paths=(),
+        kythe_entries=None,
+        codeql_results=None,
+        codeql_extends_results=None,
+        surface=surface,
+        clang_bin="clang",
+    )
+    assert graph is not None
+    assert graph.extractor_passes.get("callback_graph") is True
+    assert any(e.kind == "DECL_REGISTERS_CALLBACK" for e in graph.edges)
+    assert any(e.kind == "CALLBACK_MAY_INVOKE" for e in graph.edges)
+
+
+@pytest.mark.integration
 def test_collect_source_graph_folds_archive_graph_pass_without_surface(tmp_path):
     """``fold_archive_graph`` needs no clang/L4 surface (unlike the other
     three clang-backed passes) and must run unconditionally whenever the
