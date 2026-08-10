@@ -150,6 +150,31 @@ def test_reference_style_link_definition_is_a_hard_error(synthetic):
         gen.render_all(gen.SRC_DIR)
 
 
+@pytest.mark.parametrize(
+    "destination",
+    ["<../../docs/use/a b.md>", "<../../docs/use/cli-usage.md>"],
+    ids=["with-space", "without-space"],
+)
+def test_angle_bracket_link_destination_is_a_hard_error(synthetic, destination):
+    """Third syntax `_MD_LINK_RE` cannot rewrite, and it fails two ways: a
+    whitespace-bearing target is skipped by the `[^)\\s]+` destination class
+    and published verbatim, while a whitespace-free one matches with the angle
+    brackets stuck to the path. Both leave a repo-relative target behind."""
+    synthetic(
+        skills={
+            "demo": {
+                "SKILL.md": (
+                    f"---\nname: demo\n---\n\n[guide]({destination})\n\n"
+                    "[a](../shared/a.md)\n"
+                )
+            }
+        },
+        shared={"a.md": "# A\n"},
+    )
+    with pytest.raises(gen.SkillGenerationError, match="angle-bracket"):
+        gen.render_all(gen.SRC_DIR)
+
+
 def test_markdown_image_is_a_hard_error(synthetic):
     """Same class as the reference-definition case: `_MD_LINK_RE`'s negative
     lookbehind skips images, and the generator copies only Markdown — so an

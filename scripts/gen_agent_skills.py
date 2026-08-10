@@ -105,6 +105,14 @@ _MD_REF_DEF_RE = re.compile(r"^ {0,3}\[([^\]^][^\]]*)\]:\s*\S+", re.MULTILINE)
 #: that makes a single skill directory installable on its own.
 _MD_IMAGE_RE = re.compile(r"!\[([^\]]*)\]\(([^)\s]+)")
 
+#: Angle-bracket link destinations (`[text](<path with spaces>)`) — the third
+#: syntax `_MD_LINK_RE` cannot rewrite, and the reason all three are rejected
+#: rather than accommodated. Its destination class is `[^)\s]+`, so a
+#: whitespace-bearing target is skipped entirely and published verbatim, while
+#: a whitespace-free one matches with the angle brackets stuck to the path.
+#: Both leave a repo-relative target in an installed skill.
+_MD_ANGLE_DEST_RE = re.compile(r"(?<!!)\[[^\]]*\]\(\s*<")
+
 _FRONT_MATTER_RE = re.compile(r"\A---\r?\n.*?\r?\n---\r?\n", re.DOTALL)
 
 
@@ -374,6 +382,14 @@ def _render(
             "`[text](target)` links only. The link rewrite does not see a "
             "reference definition, so it would be published verbatim and "
             "point outside the installed skill."
+        )
+
+    if _MD_ANGLE_DEST_RE.search(body):
+        raise SkillGenerationError(
+            f"{source_path}: angle-bracket link destination — write "
+            "`[text](target)` with a plain, space-free path. The rewrite "
+            "cannot see a `<...>` destination, so it would be published "
+            "verbatim and point outside the installed skill."
         )
 
     images = [m.group(2) for m in _MD_IMAGE_RE.finditer(body)]
