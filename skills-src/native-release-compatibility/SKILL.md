@@ -121,11 +121,26 @@ decision rests on, and that selection changes the verdict and the exit code:
   header-driven C++ library.
 - **`exports`** when the promise is the *observed* export table — an
   export-map or version-script library, or a C ABI whose exported symbols are
-  the contract. Use it, and drop `--scope-public-headers`, whenever a symbol
-  can be exported without appearing in a designated public header: under
-  `public` that break sits outside the domain and a complete ledger still
-  passes while a real consumer breaks.
+  the contract. Whenever a symbol can be exported without appearing in a
+  designated public header, `public` leaves that break outside the domain and
+  a complete ledger passes while a real consumer breaks.
 - **`all`** when both are promised, or when you are not yet sure which is.
+
+For `exports` or `all`, pass **`--no-scope-public-headers` explicitly**.
+Public-header scoping is *on by default*, so omitting `--scope-public-headers`
+does not turn it off — leave it on and header filtering can drop an exported
+change before contract evaluation ever sees it, which is the same false pass
+by another route:
+
+```bash
+abicheck compare OLD_RELEASE NEW \
+  --depth headers \
+  --no-scope-public-headers \
+  --contract-evaluation --contract exports \
+  --report-mode root-cause \
+  --format json \
+  -o release-<library>.json
+```
 
 Say which domain the decision was made in. A `public`-domain pass is not a
 statement about exports, and vice versa.
@@ -143,12 +158,16 @@ abicheck compare old_release_dir/ new_dir/ \
   --format json
 ```
 
-Carry the same `--contract-evaluation --contract public` here as in the
-per-library command above. The fan-out applies it to each library and folds
-every library's own coverage contribution into the release's exit code, so
-dropping it on this path would leave step 4 unable to see incomplete contract
-evidence — and a cell would be recorded **pass** that the per-library workflow
-would have blocked.
+Carry **the same contract domain and scoping** here as in the per-library
+command above — the example shows `public`, so substitute
+`--no-scope-public-headers --contract exports` (or `all`) when that is what
+the release promises. The fan-out applies whatever it is given to each
+library and folds every library's own coverage contribution into the
+release's exit code, so dropping `--contract-evaluation` on this path would
+leave step 4 unable to see incomplete contract evidence — and selecting a
+*different* domain here than per-library would answer a different question
+for the same release. Either mistake records a cell as **pass** that the
+per-library workflow would have blocked.
 
 `--fail-on-removed-library` matters at release time specifically: a library
 that vanished from the shipped set is a release-level break no per-library

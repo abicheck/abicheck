@@ -149,9 +149,12 @@ _FRONT_MATTER_RE = re.compile(r"\A---\r?\n.*?\r?\n---\r?\n", re.DOTALL)
 #: Two alternatives rather than one, because the delimiter character must be
 #: consistent — `~~~` may not close ```` ``` ````. The backtick variant also
 #: bars backticks from its info string, as CommonMark does.
+#: End of document closes an unterminated fence (CommonMark §4.5), so the
+#: closer alternates with `\Z` — otherwise a block running to EOF never
+#: matched and its examples were processed as prose.
 _FENCE_RE = re.compile(
-    r"^ {0,3}(?P<tick>`{3,})[^\n`]*\n.*?\n {0,3}(?P=tick)`*[ \t]*$"
-    r"|^ {0,3}(?P<tilde>~{3,})[^\n]*\n.*?\n {0,3}(?P=tilde)~*[ \t]*$",
+    r"^ {0,3}(?P<tick>`{3,})[^\n`]*\n.*?(?:\n {0,3}(?P=tick)`*[ \t]*$|\Z)"
+    r"|^ {0,3}(?P<tilde>~{3,})[^\n]*\n.*?(?:\n {0,3}(?P=tilde)~*[ \t]*$|\Z)",
     re.M | re.S,
 )
 _INLINE_CODE_RE = re.compile(r"(?<!`)(`+)(?!`)(.+?)(?<!`)\1(?!`)", re.DOTALL)

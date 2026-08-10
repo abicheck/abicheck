@@ -340,6 +340,25 @@ def test_a_closing_fence_may_be_longer_than_its_opener(synthetic, opener, closer
     assert "[example](../../docs/use/cli-usage.md)" in rendered
 
 
+@pytest.mark.parametrize("opener", ["```", "~~~"], ids=["tick", "tilde"])
+def test_a_fence_running_to_end_of_file_is_still_masked(synthetic, opener):
+    """CommonMark closes an unterminated fence at end of document. Requiring an
+    explicit closer left such a block unmasked and its examples rewritten."""
+    synthetic(
+        skills={
+            "demo": {
+                "SKILL.md": (
+                    "---\nname: demo\n---\n\n[a](../shared/a.md)\n\n"
+                    f"{opener}\n[example](../../docs/use/cli-usage.md)\n"
+                )
+            }
+        },
+        shared={"a.md": "# A\n"},
+    )
+    rendered = gen.render_all(gen.SRC_DIR)["demo/SKILL.md"]
+    assert "[example](../../docs/use/cli-usage.md)" in rendered
+
+
 def test_a_tilde_run_does_not_close_a_backtick_fence(synthetic):
     """The delimiter character must be consistent: `~~~` cannot close a
     backtick fence, so the block runs on and its content stays masked."""
