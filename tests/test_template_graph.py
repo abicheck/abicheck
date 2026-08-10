@@ -29,6 +29,7 @@ import subprocess
 
 import pytest
 
+from abicheck.buildsource.build_evidence import BuildEvidence, CompileUnit
 from abicheck.buildsource.source_graph import GraphNode, SourceGraphSummary
 from abicheck.buildsource.template_graph import (
     EDGE_DECL_INSTANTIATES_TEMPLATE,
@@ -153,7 +154,9 @@ def test_parses_implicit_class_template_instantiation() -> None:
     assert inst.kind == "record"
     assert inst.template_qname == "Wrapper"
     assert inst.label == "Wrapper<internal::Detail>"
-    assert inst.args == (TemplateArgUse("internal::Detail", "internal::Detail"),)
+    assert inst.args == (
+        TemplateArgUse("internal::Detail", "internal::Detail", "CXXRecordDecl"),
+    )
     assert inst.emitted_symbols == ("_ZNK7WrapperIN8internal6DetailEE3getEv",)
 
 
@@ -319,7 +322,85 @@ def test_typedef_alias_argument_resolves_through_to_the_real_record() -> None:
     ast["inner"][0]["inner"][0]["id"] = "0xDETAIL_ID"
     out = parse_clang_ast_templates(ast)
     assert len(out) == 1
-    assert out[0].args == (TemplateArgUse("internal::DetailAlias", "internal::Detail"),)
+    assert out[0].args == (
+        TemplateArgUse("internal::DetailAlias", "internal::Detail", "CXXRecordDecl"),
+    )
+
+
+def test_nested_specialization_argument_disambiguated_by_its_own_args() -> None:
+    """Two distinct specializations of the *same* template
+    (``Wrapper<int>``/``Wrapper<double>``), each used as a nested template
+    argument to a second template (``Outer<Wrapper<int>>``/
+    ``Outer<Wrapper<double>>``), must resolve to two distinct
+    ``target_qname``s -- not collide on the shared *bare*,
+    unparameterized ``ClassTemplateSpecializationDecl.name`` ("Wrapper") both
+    specializations carry (Codex review, empirically confirmed against real
+    clang AST output before this fix: both nested arguments resolved to the
+    identical bare ``"Wrapper"``)."""
+
+    def wrapper_spec(spec_id: str, arg_type: str) -> dict:
+        return {
+            "id": spec_id,
+            "kind": "ClassTemplateSpecializationDecl",
+            "name": "Wrapper",
+            "completeDefinition": True,
+            "inner": [
+                {"kind": "TemplateArgument", "type": {"qualType": arg_type}},
+            ],
+        }
+
+    def outer_spec(spec_id: str, arg_spelling: str, wrapper_spec_id: str) -> dict:
+        return {
+            "id": spec_id,
+            "kind": "ClassTemplateSpecializationDecl",
+            "name": "Outer",
+            "completeDefinition": True,
+            "inner": [
+                {
+                    "kind": "TemplateArgument",
+                    "type": {"qualType": arg_spelling},
+                    "inner": [
+                        {
+                            "kind": "RecordType",
+                            "decl": {
+                                "id": wrapper_spec_id,
+                                "kind": "ClassTemplateSpecializationDecl",
+                                "name": "Wrapper",
+                            },
+                        }
+                    ],
+                },
+            ],
+        }
+
+    ast = {
+        "kind": "TranslationUnitDecl",
+        "inner": [
+            {
+                "kind": "ClassTemplateDecl",
+                "name": "Wrapper",
+                "inner": [
+                    wrapper_spec("0xWINT", "int"),
+                    wrapper_spec("0xWDOUBLE", "double"),
+                ],
+            },
+            {
+                "kind": "ClassTemplateDecl",
+                "name": "Outer",
+                "inner": [
+                    outer_spec("0xOINT", "Wrapper<int>", "0xWINT"),
+                    outer_spec("0xODOUBLE", "Wrapper<double>", "0xWDOUBLE"),
+                ],
+            },
+        ],
+    }
+    out = parse_clang_ast_templates(ast)
+    by_label = {i.label: i for i in out}
+    outer_int = by_label["Outer<Wrapper<int>>"]
+    outer_double = by_label["Outer<Wrapper<double>>"]
+    assert outer_int.args[0].target_qname == "Wrapper<int>"
+    assert outer_double.args[0].target_qname == "Wrapper<double>"
+    assert outer_int.args[0].target_qname != outer_double.args[0].target_qname
 
 
 # ── graph augmentation tests ─────────────────────────────────────────────────
@@ -366,6 +447,37 @@ def test_augment_graph_creates_instantiation_and_template_decl_nodes() -> None:
     ) in edge_kinds
 
 
+def test_augment_graph_enum_argument_mints_enum_type_node_not_record_type() -> None:
+    """``TemplateArgUse.target_decl_kind`` (threaded through by
+    ``_resolve_arg_targets``) must actually be consulted -- an enum template
+    argument should mint an ``enum_type`` node, not the ``record_type``
+    fallback every resolved argument used to get unconditionally (Codex
+    review: ``_type_node_kind`` was computed but never called)."""
+    graph = SourceGraphSummary()
+    inst = TemplateInstantiation(
+        kind="record",
+        template_qname="Wrapper",
+        label="Wrapper<internal::Color>",
+        args=(TemplateArgUse("internal::Color", "internal::Color", "EnumDecl"),),
+    )
+    augment_graph_with_templates(graph, [inst])
+    node_ids = {n.id: n for n in graph.nodes}
+    assert node_ids["type://internal::Color"].kind == "enum_type"
+
+
+def test_augment_graph_typedef_argument_mints_typedef_node() -> None:
+    graph = SourceGraphSummary()
+    inst = TemplateInstantiation(
+        kind="record",
+        template_qname="Wrapper",
+        label="Wrapper<internal::Handle>",
+        args=(TemplateArgUse("internal::Handle", "internal::Handle", "TypedefDecl"),),
+    )
+    augment_graph_with_templates(graph, [inst])
+    node_ids = {n.id: n for n in graph.nodes}
+    assert node_ids["type://internal::Handle"].kind == "typedef"
+
+
 def test_augment_graph_skips_symbol_edge_when_not_exported() -> None:
     """An instantiated member the graph carries no binary_symbol node for
     (never ODR-used / inlined away / no binary evidence loaded) gets no
@@ -410,6 +522,73 @@ def test_augment_graph_two_instantiations_share_one_template_decl_node() -> None
     ]
     assert len(edges_to_tdecl) == 2
     assert {e.dst for e in edges_to_tdecl} == {tdecl_nodes[0].id}
+
+
+# ── cross-TU extraction merge ────────────────────────────────────────────────
+
+
+def test_extract_from_build_merges_richer_data_across_tus_instead_of_dropping_it(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Two TUs instantiating the identical ``(kind, template_qname, label)``
+    must merge -- not have the second TU's data silently dropped (Codex
+    review, mirrors ``type_graph.py``'s own cross-TU ``_merge_type_edges``):
+    one TU resolves an argument's ``target_qname``, another TU reaches an
+    extra instantiated member the first TU's translation unit never used."""
+    extractor = ClangTemplateGraphExtractor(clang_bin="clang++")
+    monkeypatch.setattr(extractor, "available", lambda: True)
+
+    per_unit = {
+        "a.cpp": [
+            TemplateInstantiation(
+                kind="record",
+                template_qname="Wrapper",
+                label="Wrapper<internal::Detail>",
+                args=(TemplateArgUse("internal::Detail", None),),
+                emitted_symbols=("_ZN7WrapperIN8internal6DetailEE3getEv",),
+                file="a.cpp",
+            )
+        ],
+        "b.cpp": [
+            TemplateInstantiation(
+                kind="record",
+                template_qname="Wrapper",
+                label="Wrapper<internal::Detail>",
+                args=(
+                    TemplateArgUse(
+                        "internal::Detail", "internal::Detail", "CXXRecordDecl"
+                    ),
+                ),
+                emitted_symbols=("_ZN7WrapperIN8internal6DetailEE3setEi",),
+                file="",
+            )
+        ],
+    }
+    monkeypatch.setattr(
+        extractor,
+        "_extract_from_compile_unit",
+        lambda cu: per_unit[cu.source],
+    )
+    build = BuildEvidence(
+        compile_units=[
+            CompileUnit(id="cu://a", source="a.cpp"),
+            CompileUnit(id="cu://b", source="b.cpp"),
+        ]
+    )
+    out = extractor.extract_from_build(build)
+    assert len(out) == 1
+    merged = out[0]
+    # The unresolved-in-a.cpp argument is filled in from b.cpp, not dropped.
+    assert merged.args == (
+        TemplateArgUse("internal::Detail", "internal::Detail", "CXXRecordDecl"),
+    )
+    # Both TUs' emitted members survive, a.cpp's ordered first.
+    assert merged.emitted_symbols == (
+        "_ZN7WrapperIN8internal6DetailEE3getEv",
+        "_ZN7WrapperIN8internal6DetailEE3setEi",
+    )
+    # a.cpp's non-empty file wins over b.cpp's empty one.
+    assert merged.file == "a.cpp"
 
 
 # ── real-toolchain regression (integration marker: needs clang) ─────────────

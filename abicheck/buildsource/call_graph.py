@@ -491,7 +491,8 @@ def extractor_pass_fully_covered(
     """Whether a call/type-graph extraction run may claim confirmed pass coverage.
 
     Shared by ``inline_graph_fold.fold_call_graph``/``fold_type_graph``/
-    ``fold_include_graph`` — called identically from the inline ``dump
+    ``fold_include_graph``/``fold_template_graph`` — called identically from
+    the inline ``dump
     --sources`` path and the out-of-band ``collect --source-abi
     --source-graph summary`` path (both fold automatically, no separate
     opt-in flag) — so all stamp ``SourceGraphSummary.extractor_passes`` under

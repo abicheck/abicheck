@@ -279,6 +279,23 @@ def test_gnu_symbol_index_truncated_name_table_raises() -> None:
         parse_ar_archive(BytesReader(data))
 
 
+def test_bsd_symdef_string_table_length_overruns_body_raises() -> None:
+    """The ``__.SYMDEF`` string-table byte-length field is itself part of the
+    format (see :func:`_bsd_symbol_index`'s docstring) — a member body
+    truncated after the ranlib entry table, so the declared string-table
+    length claims more bytes than the body actually has, must raise instead
+    of silently treating whatever bytes happen to remain (zero, here) as the
+    whole string table (Codex review, fresh evidence: an earlier revision
+    took every remaining byte unconditionally, so this case "successfully"
+    parsed as zero symbols instead of failing closed)."""
+    entries_placeholder = b"\x00" * 16
+    # Declares a 999-byte string table but supplies none.
+    body = struct.pack("<I", 16) + entries_placeholder + struct.pack("<I", 999)
+    data = ARCHIVE_MAGIC + _header("__.SYMDEF", len(body)) + _pad(body)
+    with pytest.raises(ArchiveFormatError, match="string table length"):
+        parse_ar_archive(BytesReader(data))
+
+
 def test_parse_index_offset_naming_no_member_is_skipped_not_raised() -> None:
     # A well-formed index whose one entry's offset resolves to nothing (e.g.
     # a stale index after member reordering) — the symbol is dropped, not an
@@ -812,7 +829,14 @@ def test_real_gnu_ar_archive_parses(tmp_path) -> None:
     (tmp_path / "a.c").write_text(
         "int alpha(void){return 1;}\nstatic int hidden(void){return 2;}\n"
     )
-    (tmp_path / "b.c").write_text("int beta(void){return 3;}\nint gamma_sym;\n")
+    # gamma_sym is *initialized* deliberately -- a tentative definition
+    # (`int gamma_sym;`) becomes a COMMON symbol, and whether a platform's
+    # ranlib/ar indexes a COMMON symbol the same way as an ordinary DEFINED
+    # one is toolchain-specific (observed: macOS's system ar/ranlib omits it
+    # from the archive's own symbol table) -- unrelated to what this test
+    # actually verifies (this module's index *parser*), so sidestep the
+    # ambiguity entirely rather than assert a platform-dependent fact.
+    (tmp_path / "b.c").write_text("int beta(void){return 3;}\nint gamma_sym = 7;\n")
     subprocess.run(
         ["gcc", "-c", "a.c", "b.c"], cwd=tmp_path, check=True, capture_output=True
     )

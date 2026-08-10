@@ -39,3 +39,37 @@
   is — a pure relocation (no behavior change) needed to keep
   `source_graph.py` under its 2000-line hard cap while adding the template
   vocabulary above.
+
+  Four more fixes from a review round on `template_graph.py` itself: a
+  `ClassTemplateSpecializationDecl` used as a *nested* template argument
+  (`Outer<Wrapper<int>>` vs. `Outer<Wrapper<double>>`) resolved its argument's
+  `target_qname` to the identical bare, unparameterized primary-template name
+  for both — empirically confirmed against real clang AST output — so the
+  two collided onto one graph node instead of staying distinct; the resolver
+  now recurses through the target's own template arguments the same way the
+  top-level per-instantiation walk already disambiguates itself. A resolved
+  argument's `TemplateArgUse` now also carries the target's own raw clang
+  decl kind, so `augment_graph_with_templates` mints the correct `enum_type`/
+  `typedef`/`record_type` graph node for it instead of defaulting every
+  resolved argument to `record_type` regardless of what it actually is (the
+  `_type_node_kind` helper existed but was never called). `ClangTemplateGraph
+  Extractor.extract_from_build`'s cross-TU dedup now merges a repeated
+  `(kind, template_qname, label)` instantiation instead of keeping whichever
+  TU happened to run first — mirrors `type_graph.py`'s own `_merge_type_edges`
+  for the identical richness gap (one TU may resolve an argument's
+  `target_qname` or reach an instantiated member another TU's translation
+  unit never used). And a dead `out` parameter threaded through
+  `_walk_class_templates` (never appended to — the function only ever
+  *registers* class-template membership) was removed, along with a
+  `_MEMBER_FUNCTION_KINDS`-equivalent tuple duplicated inline in
+  `_walk_function_templates`.
+
+  Separately, a real macOS CI failure surfaced a pre-existing test gap
+  (unrelated to any code path this feature touches): `test_archive_graph.py`'s
+  real-`ar` round-trip used an uninitialized global (`int gamma_sym;`) to
+  exercise a data-symbol export — a tentative definition becomes a COMMON
+  symbol, and whether a platform's `ranlib`/`ar` indexes a COMMON symbol the
+  same way as an ordinary defined one is toolchain-specific (macOS's system
+  `ar` omits it). The test now initializes the value, sidestepping the
+  ambiguity rather than asserting a platform-dependent fact the test was
+  never actually trying to verify.

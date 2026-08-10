@@ -50,6 +50,16 @@
   being embedded in `ExtractorRecord.detail`, since the un-redacted absolute
   path is otherwise persisted straight into build evidence.
 
+  A fourth review round (a live Codex webhook comment) found that the BSD
+  `__.SYMDEF` string table's own declared byte-length field — documented in
+  this function's docstring as part of the format — was never actually read:
+  every byte remaining in the member body after the ranlib entry table was
+  taken as the whole string table unconditionally, so a member truncated
+  right after the entry table would still parse "successfully" (as zero
+  symbols, reading identically to "confirmed, genuinely empty") instead of
+  raising. The string-table length is now read and validated, and the string
+  table is bounded by it rather than by whatever bytes happen to follow.
+
   A third review round found three more real gaps: a GNU index whose offset
   array is complete but whose trailing name table has fewer than the
   declared count of NUL-terminated names now raises instead of silently

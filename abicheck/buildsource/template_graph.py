@@ -101,6 +101,40 @@ full, honest list of what's reserved but unpopulated):
   neither decl shape is walked; both fall through as an ordinary,
   unrecognized child (no crash, no data, the same silent-skip default this
   whole module uses throughout).
+
+**Investigated and deliberately not attempted: joining a class
+instantiation's own node onto ``type_graph.py``'s record_type node for the
+identical qualified name.** A review round asked why
+``source_graph.DEPENDENCY_EDGE_KINDS``/``DECL_NODE_KINDS`` aren't extended
+with :data:`EDGE_TEMPLATE_USES_TYPE`/``template_instantiation`` — the
+naive-looking fix is giving :func:`template_instantiation_node_id` the same
+id space as ``type_graph.py``'s own ``_type_node_id(qname)`` for a class
+instantiation, so a public decl's existing ``DECL_HAS_TYPE`` edge onto
+``Wrapper<internal::Detail>`` would already reach the instantiation node
+this module also populates. Empirically disproven rather than skipped on
+suspicion: dumping a real ``Wrapper<internal::Detail> make()`` through both
+this module and ``type_graph.parse_clang_ast_types`` shows clang's printer
+spells the identical type **differently depending on where it's printed** —
+``"Wrapper<internal::Detail>"`` for ``make()``'s own return type (printed
+relative to the enclosing ``api::`` namespace, so the redundant qualifier is
+dropped), but bare ``"Wrapper<Detail>"`` for a constructor parameter printed
+from *inside* ``Wrapper``'s own scope (both ``api::`` and ``internal::``
+elided) — while this module's own :func:`_instantiation_label` always
+produces the fully-qualified ``"api::Wrapper<internal::Detail>"`` from the
+declaration's own scope chain, a third, different spelling. There is no
+single "the qname" to share a node id with; ``type_graph.py``'s own
+``_resolve_type_name`` exists specifically to reverse this print-context
+elision for its *own* edges via scope-relative lookup, and reusing that
+same resolution for a template *label* (as opposed to a plain field/param
+type spelling) is a genuinely new, unverified problem, not a one-line
+join. Left as a known, real gap: a class instantiation's own node has no
+inbound edge from a public declaration today, so :data:`EDGE_TEMPLATE_USES_TYPE`
+is not (yet) reachable from ``crosscheck.py``'s ``public_to_internal_dependency``
+or ``poi.py``'s reachability walk — the *argument* nodes it points at
+(``_type_node_id(arg.target_qname)``, keyed off the argument's own
+declaration-scope qualified name from ``id_to_qname``, not a print-context
+spelling) do correctly join onto whatever node another pass already created
+for that identity.
 """
 
 from __future__ import annotations
@@ -109,7 +143,7 @@ import shutil
 import time
 from collections.abc import Iterable
 from concurrent.futures import ThreadPoolExecutor
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from functools import partial
 from typing import TYPE_CHECKING, Any
 
@@ -186,10 +220,17 @@ class TemplateArgUse:
     non-type (literal) argument, a builtin/fundamental type, or a type
     declared outside this TU's AST (never fabricated from the spelling
     alone; this module's "degrade to no answer" discipline throughout).
+
+    ``target_decl_kind`` is the target's own raw clang decl kind (e.g.
+    ``"EnumDecl"``, ``"CXXRecordDecl"``) when ``target_qname`` resolved —
+    ``None`` otherwise. Feeds :func:`_type_node_kind` so a resolved enum/
+    typedef argument mints the correct graph node kind instead of every
+    resolved argument defaulting to ``record_type``.
     """
 
     spelling: str
     target_qname: str | None = None
+    target_decl_kind: str | None = None
 
 
 @dataclass(frozen=True)
@@ -223,10 +264,18 @@ def _node_file(node: dict[str, Any]) -> str:
     return ""
 
 
-def _index_type_decls(node: Any, scope: list[str], id_to_qname: dict[str, str]) -> None:
-    """Populate ``id_to_qname``: every record/enum/typedef declaration's
-    clang node ``id`` -> its scope-qualified name, anywhere in *node*'s
-    subtree.
+def _index_type_decls(
+    node: Any,
+    scope: list[str],
+    id_to_qname: dict[str, str],
+    id_to_decl_kind: dict[str, str],
+) -> None:
+    """Populate ``id_to_qname``/``id_to_decl_kind``: every record/enum/
+    typedef declaration's clang node ``id`` -> its scope-qualified name and
+    own AST decl kind (``"CXXRecordDecl"``/``"EnumDecl"``/…, for
+    :func:`_type_node_kind` — otherwise every resolved argument mints a
+    ``record_type`` node regardless of whether it's actually an enum or
+    typedef target), anywhere in *node*'s subtree.
 
     A small, independent AST walk rather than a reuse/extension of
     ``type_graph._index_declared_entities`` (Codex-review-shaped
@@ -247,28 +296,30 @@ def _index_type_decls(node: Any, scope: list[str], id_to_qname: dict[str, str]) 
     if kind in _RECORD_DECL_KINDS and name:
         if node_id:
             id_to_qname.setdefault(node_id, "::".join([*scope, name]))
+            id_to_decl_kind.setdefault(node_id, kind)
         child_scope = [*scope, name]
         for child in node.get("inner", []) or []:
-            _index_type_decls(child, child_scope, id_to_qname)
+            _index_type_decls(child, child_scope, id_to_qname, id_to_decl_kind)
         return
 
     if kind in _OTHER_TYPE_DECL_KINDS and name:
         if node_id:
             id_to_qname.setdefault(node_id, "::".join([*scope, name]))
+            id_to_decl_kind.setdefault(node_id, kind)
         # No new scope: an enum's own enumerators aren't qualified by its
         # name in clang's spelling (mirrors type_graph's identical choice).
         for child in node.get("inner", []) or []:
-            _index_type_decls(child, scope, id_to_qname)
+            _index_type_decls(child, scope, id_to_qname, id_to_decl_kind)
         return
 
     if kind in _SCOPE_DECL_KINDS and name:
         child_scope = [*scope, name]
         for child in node.get("inner", []) or []:
-            _index_type_decls(child, child_scope, id_to_qname)
+            _index_type_decls(child, child_scope, id_to_qname, id_to_decl_kind)
         return
 
     for child in node.get("inner", []) or []:
-        _index_type_decls(child, scope, id_to_qname)
+        _index_type_decls(child, scope, id_to_qname, id_to_decl_kind)
 
 
 def _register_class_template(
@@ -333,19 +384,92 @@ def _template_arg_use(arg_node: dict[str, Any]) -> TemplateArgUse | None:
     return TemplateArgUse(spelling=spelling, target_qname=target)
 
 
+def _resolve_specialization_qname(
+    spec_id: str,
+    id_to_qname: dict[str, str],
+    id_to_decl_kind: dict[str, str],
+    id_to_template_qname: dict[str, str],
+    full_by_id: dict[str, dict[str, Any]],
+    seen: frozenset[str] = frozenset(),
+) -> str | None:
+    """The qualified name for a resolved decl id, disambiguated by its own
+    template arguments when the id names a ``ClassTemplateSpecializationDecl``
+    itself.
+
+    ``id_to_qname`` alone gives only the *bare*, unparameterized primary-
+    template name for a specialization (the same clang quirk the top-level
+    walk already works around — see the module docstring) — so two distinct
+    specializations of the same template used as a *nested* template
+    argument (``Outer<Wrapper<int>>`` vs. ``Outer<Wrapper<double>>``) would
+    otherwise both resolve their argument's ``target_qname`` to the identical
+    bare ``"Wrapper"`` and collide onto the same graph node (Codex review,
+    empirically confirmed against real clang AST output: both instantiations'
+    resolved argument came back as plain ``"api::Wrapper"``, losing the
+    parameterization entirely). Recurses through :func:`_instantiation_label`
+    using the specialization's *own* template arguments instead, the same
+    disambiguation the top-level per-instantiation loop already applies to
+    itself. ``seen`` guards a (not known to occur, but unverified) cyclic id
+    reference so recursion still terminates; falls back to the bare name once
+    a ``spec_id`` repeats.
+    """
+    if spec_id in seen:
+        return id_to_qname.get(spec_id)
+    template_qname = id_to_template_qname.get(spec_id)
+    full = full_by_id.get(spec_id)
+    if template_qname is None or full is None:
+        # Not a (known, complete) specialization -- an ordinary record/enum/
+        # typedef target, or a specialization stub with no recorded content
+        # anywhere in this TU. The bare qname is already exact for these.
+        return id_to_qname.get(spec_id)
+    args: list[TemplateArgUse] = []
+    for child in full.get("inner", []) or []:
+        if str(child.get("kind", "")) == "TemplateArgument":
+            use = _template_arg_use(child)
+            if use is not None:
+                args.append(use)
+    resolved_args = _resolve_arg_targets(
+        args,
+        id_to_qname,
+        id_to_decl_kind,
+        id_to_template_qname,
+        full_by_id,
+        seen | {spec_id},
+    )
+    return _instantiation_label(template_qname, resolved_args)
+
+
 def _resolve_arg_targets(
-    args: list[TemplateArgUse], id_to_qname: dict[str, str]
+    args: list[TemplateArgUse],
+    id_to_qname: dict[str, str],
+    id_to_decl_kind: dict[str, str],
+    id_to_template_qname: dict[str, str],
+    full_by_id: dict[str, dict[str, Any]],
+    seen: frozenset[str] = frozenset(),
 ) -> tuple[TemplateArgUse, ...]:
     """Replace each :attr:`TemplateArgUse.target_qname` clang-id placeholder
-    (see :func:`_template_arg_use`) with the resolved qualified name, or
-    ``None`` when the id names no declaration this TU's AST carries."""
+    (see :func:`_template_arg_use`) with the resolved qualified name (and
+    :attr:`TemplateArgUse.target_decl_kind` with the target's own raw decl
+    kind), or ``None``/``None`` when the id names no declaration this TU's
+    AST carries."""
     resolved = []
     for a in args:
         if a.target_qname is None:
             resolved.append(a)
             continue
-        qname = id_to_qname.get(a.target_qname)
-        resolved.append(TemplateArgUse(spelling=a.spelling, target_qname=qname))
+        qname = _resolve_specialization_qname(
+            a.target_qname,
+            id_to_qname,
+            id_to_decl_kind,
+            id_to_template_qname,
+            full_by_id,
+            seen,
+        )
+        decl_kind = id_to_decl_kind.get(a.target_qname)
+        resolved.append(
+            TemplateArgUse(
+                spelling=a.spelling, target_qname=qname, target_decl_kind=decl_kind
+            )
+        )
     return tuple(resolved)
 
 
@@ -368,6 +492,9 @@ def _walk_function_templates(
     node: Any,
     scope: list[str],
     id_to_qname: dict[str, str],
+    id_to_decl_kind: dict[str, str],
+    id_to_template_qname: dict[str, str],
+    full_by_id: dict[str, dict[str, Any]],
     out: list[TemplateInstantiation],
 ) -> None:
     if not isinstance(node, dict):
@@ -379,12 +506,9 @@ def _walk_function_templates(
         qname = "::".join([*scope, name]) if name else ""
         if qname:
             for child in node.get("inner", []) or []:
-                if str(child.get("kind", "")) not in (
-                    "FunctionDecl",
-                    "CXXMethodDecl",
-                    "CXXConstructorDecl",
-                    "CXXDestructorDecl",
-                ):
+                if str(child.get("kind", "")) not in _MEMBER_FUNCTION_KINDS | {
+                    "FunctionDecl"
+                }:
                     continue
                 mangled = child.get("mangledName")
                 if not (isinstance(mangled, str) and mangled):
@@ -395,7 +519,9 @@ def _walk_function_templates(
                         use = _template_arg_use(grandchild)
                         if use is not None:
                             args.append(use)
-                resolved_args = _resolve_arg_targets(args, id_to_qname)
+                resolved_args = _resolve_arg_targets(
+                    args, id_to_qname, id_to_decl_kind, id_to_template_qname, full_by_id
+                )
                 out.append(
                     TemplateInstantiation(
                         kind=_FUNCTION_KIND,
@@ -414,11 +540,27 @@ def _walk_function_templates(
         name = str(node.get("name") or "")
         child_scope = [*scope, name] if name else scope
         for child in node.get("inner", []) or []:
-            _walk_function_templates(child, child_scope, id_to_qname, out)
+            _walk_function_templates(
+                child,
+                child_scope,
+                id_to_qname,
+                id_to_decl_kind,
+                id_to_template_qname,
+                full_by_id,
+                out,
+            )
         return
 
     for child in node.get("inner", []) or []:
-        _walk_function_templates(child, scope, id_to_qname, out)
+        _walk_function_templates(
+            child,
+            scope,
+            id_to_qname,
+            id_to_decl_kind,
+            id_to_template_qname,
+            full_by_id,
+            out,
+        )
 
 
 def _walk_class_templates(
@@ -426,7 +568,6 @@ def _walk_class_templates(
     scope: list[str],
     id_to_qname: dict[str, str],
     id_to_template_qname: dict[str, str],
-    out: list[TemplateInstantiation],
 ) -> None:
     if not isinstance(node, dict):
         return
@@ -449,13 +590,11 @@ def _walk_class_templates(
         name = str(node.get("name") or "")
         child_scope = [*scope, name] if name else scope
         for child in node.get("inner", []) or []:
-            _walk_class_templates(
-                child, child_scope, id_to_qname, id_to_template_qname, out
-            )
+            _walk_class_templates(child, child_scope, id_to_qname, id_to_template_qname)
         return
 
     for child in node.get("inner", []) or []:
-        _walk_class_templates(child, scope, id_to_qname, id_to_template_qname, out)
+        _walk_class_templates(child, scope, id_to_qname, id_to_template_qname)
 
 
 def parse_clang_ast_templates(ast: dict[str, Any]) -> list[TemplateInstantiation]:
@@ -481,12 +620,13 @@ def parse_clang_ast_templates(ast: dict[str, Any]) -> list[TemplateInstantiation
        per genuine instantiation.
     """
     id_to_qname: dict[str, str] = {}
-    _index_type_decls(ast, [], id_to_qname)
+    id_to_decl_kind: dict[str, str] = {}
+    _index_type_decls(ast, [], id_to_qname, id_to_decl_kind)
 
     full_by_id: dict[str, dict[str, Any]] = {}
     _collect_full_specializations(ast, full_by_id)
     id_to_template_qname: dict[str, str] = {}
-    _walk_class_templates(ast, [], id_to_qname, id_to_template_qname, out=[])
+    _walk_class_templates(ast, [], id_to_qname, id_to_template_qname)
     # _walk_class_templates above only *registers* class-template membership
     # (id_to_template_qname); the actual instantiation objects are built
     # here, once, over the join of both indices -- doing it inline in the
@@ -503,7 +643,9 @@ def parse_clang_ast_templates(ast: dict[str, Any]) -> list[TemplateInstantiation
                 use = _template_arg_use(child)
                 if use is not None:
                     args.append(use)
-        resolved_args = _resolve_arg_targets(args, id_to_qname)
+        resolved_args = _resolve_arg_targets(
+            args, id_to_qname, id_to_decl_kind, id_to_template_qname, full_by_id
+        )
         out.append(
             TemplateInstantiation(
                 kind=_RECORD_KIND,
@@ -515,7 +657,9 @@ def parse_clang_ast_templates(ast: dict[str, Any]) -> list[TemplateInstantiation
             )
         )
 
-    _walk_function_templates(ast, [], id_to_qname, out)
+    _walk_function_templates(
+        ast, [], id_to_qname, id_to_decl_kind, id_to_template_qname, full_by_id, out
+    )
     return out
 
 
@@ -626,13 +770,17 @@ def augment_graph_with_templates(
         for arg in inst.args:
             if not arg.target_qname:
                 continue
-            # The arg's own decl kind isn't threaded through TemplateArgUse
-            # (only its qualified name is) -- default to record_type, the
-            # same "can't distinguish without more context" fallback
-            # type_graph.py's own AST-only edges already use for this exact
-            # situation (see augment_graph_with_types's docstring).
+            # arg.target_decl_kind is the target's raw clang decl kind
+            # (populated by _resolve_arg_targets) -- record_type is still the
+            # right default for an unrecognized/absent kind (e.g. a nested
+            # specialization resolved via _resolve_specialization_qname,
+            # which is always itself a record), matching
+            # augment_graph_with_types's own fallback for the identical
+            # situation.
             type_id = _type_node_id(arg.target_qname)
-            ensure_node(type_id, "record_type", arg.target_qname)
+            ensure_node(
+                type_id, _type_node_kind(arg.target_decl_kind or ""), arg.target_qname
+            )
             add_edge(inst_id, type_id, EDGE_TEMPLATE_USES_TYPE, CONF_HIGH)
 
         for symbol in inst.emitted_symbols:
@@ -642,6 +790,45 @@ def augment_graph_with_templates(
             add_edge(inst_id, sid, EDGE_INSTANTIATION_EMITS_SYMBOL, CONF_REDUCED)
 
     return added
+
+
+def _merge_template_instantiations(
+    existing: TemplateInstantiation, new: TemplateInstantiation
+) -> TemplateInstantiation:
+    """Merge two instantiations sharing a ``(kind, template_qname, label)``
+    key from different TUs (mirrors ``type_graph._merge_type_edges``'s
+    identical cross-TU-richness reasoning, Codex review).
+
+    A TU that doesn't include the header declaring an argument's type sees
+    that argument's ``target_qname`` unresolved (``None``); another TU that
+    does include it resolves it fully — keeping whichever TU happened to run
+    first would silently drop the richer resolution. Likewise
+    ``emitted_symbols``: one TU may only reach a subset of the instantiated
+    members actually used project-wide (a member only called from a
+    different TU), and ``file``, the same first-non-empty-wins fallback
+    ``type_graph.py`` uses for ``dst_file``.
+    """
+    if len(existing.args) == len(new.args):
+        merged_args = tuple(
+            new_arg
+            if old_arg.target_qname is None and new_arg.target_qname
+            else old_arg
+            for old_arg, new_arg in zip(existing.args, new.args)
+        )
+    else:
+        # Argument count mismatch shouldn't occur for a genuinely identical
+        # (kind, template_qname, label) key, but degrade to the first-seen
+        # value rather than guess at a pairing (ADR-028 D3).
+        merged_args = existing.args
+    merged_symbols = existing.emitted_symbols + tuple(
+        s for s in new.emitted_symbols if s not in existing.emitted_symbols
+    )
+    return replace(
+        existing,
+        args=merged_args,
+        emitted_symbols=merged_symbols,
+        file=existing.file or new.file,
+    )
 
 
 @dataclass
@@ -709,16 +896,25 @@ class ClangTemplateGraphExtractor:
         all_instantiations: list[TemplateInstantiation] = []
         # Dedup by (kind, template_qname, label) -- two TUs instantiating the
         # identical template with the identical arguments (a shared public
-        # header) must not double the graph's edge count.
-        seen: set[tuple[str, str, str]] = set()
+        # header) must not double the graph's edge count. A later TU seeing
+        # the same instantiation is merged in (_merge_template_instantiations),
+        # not dropped -- one TU may resolve an argument's target_qname or
+        # reach more of the instantiated members than another (Codex review,
+        # mirrors type_graph.py's own cross-TU merge for the identical
+        # richness gap).
+        seen: dict[tuple[str, str, str], int] = {}
 
         def add(instantiations: Iterable[TemplateInstantiation]) -> None:
             for inst in instantiations:
                 key = (inst.kind, inst.template_qname, inst.label)
-                if key in seen:
-                    continue
-                seen.add(key)
-                all_instantiations.append(inst)
+                idx = seen.get(key)
+                if idx is None:
+                    seen[key] = len(all_instantiations)
+                    all_instantiations.append(inst)
+                else:
+                    all_instantiations[idx] = _merge_template_instantiations(
+                        all_instantiations[idx], inst
+                    )
 
         try:
             if self.last_jobs > 1 and len(units) > 1:

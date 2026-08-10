@@ -436,8 +436,19 @@ def _bsd_symbol_index(
         raise ArchiveFormatError(
             f"__.SYMDEF ranlib table length {table_bytes} is not usable"
         )
+    string_table_len = struct.unpack(fmt, body[end : end + width])[0]
     strings_at = end + width
-    strings = body[strings_at:]
+    strings_end = strings_at + string_table_len
+    if strings_end > len(body):
+        raise ArchiveFormatError(
+            f"__.SYMDEF string table length {string_table_len} runs past the "
+            f"member body ({len(body)} bytes available at offset {strings_at})"
+        )
+    # Bound the string table by its own declared length rather than taking
+    # every remaining byte in the member body — a truncated/malformed member
+    # would otherwise still "successfully" resolve offsets into whatever
+    # trailing bytes happen to follow instead of failing closed.
+    strings = body[strings_at:strings_end]
     refs: list[ArSymbolRef] = []
     for pos in range(start, end, entry_size):
         str_off = struct.unpack(fmt, body[pos : pos + width])[0]

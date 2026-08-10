@@ -123,7 +123,8 @@ def _scope_narrowed_target(
     changed_paths: tuple[str, ...],
     scoped_units: list[Any] | None,
 ) -> tuple[BuildEvidence, str, bool, frozenset[str]]:
-    """Shared scoping decision for :func:`fold_call_graph`/``fold_type_graph``.
+    """Shared scoping decision for :func:`fold_call_graph`/``fold_type_graph``/
+    ``fold_template_graph``/``fold_include_graph``.
 
     Returns ``(target, scoped_note, narrowed, scope_key)`` — ``scope_key`` is
     the actual scope a narrowed run examined (``changed_paths``, or the
