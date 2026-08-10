@@ -1403,6 +1403,72 @@ def test_fully_defaulted_specialization_still_indexes_as_empty_angle_brackets() 
     assert types["D"].vptr_offset_bits == 0
 
 
+def test_nested_specialization_with_defaulted_argument_resolves() -> None:
+    """Codex review, fresh evidence (P1, second round): a NESTED template's
+    own defaulted argument (``Outer<int>::A<>``) needs its
+    param_kinds/param_defaults/param_names looked up under the SAME
+    unspelled scope the whole-AST index functions themselves use for a
+    nested template's own ``ClassTemplateDecl`` (confirmed empirically:
+    ``_index_template_param_kinds`` registers a specialization's own
+    nested template under its bare, unqualified name -- e.g. ``"A"`` --
+    never under the outer specialization's spelled qualname
+    ``"Outer<int>::A"``, since ``ClassTemplateSpecializationDecl`` never
+    extends scope in those three index functions' own walks). Looking the
+    lookup up with the SPELLED scope (as an earlier fix here did, for
+    getting the FINAL registration qualname right) missed every entry,
+    leaving the trailing default un-trimmed and the whole nested
+    specialization unresolvable.
+    """
+    root = _tu(
+        {
+            "kind": "ClassTemplateDecl",
+            "name": "Outer",
+            "inner": [
+                {"kind": "TemplateTypeParmDecl", "name": "T"},
+                _record("Outer"),
+                {
+                    "kind": "ClassTemplateSpecializationDecl",
+                    "name": "Outer",
+                    "completeDefinition": True,
+                    "inner": [
+                        {"kind": "TemplateArgument", "type": {"qualType": "int"}},
+                        {
+                            "kind": "ClassTemplateDecl",
+                            "name": "A",
+                            "inner": [
+                                {
+                                    "kind": "TemplateTypeParmDecl",
+                                    "name": "U",
+                                    "defaultArg": {
+                                        "kind": "TemplateArgument",
+                                        "type": {"qualType": "int"},
+                                    },
+                                },
+                                _record("A"),
+                                _specialization(
+                                    "A",
+                                    {
+                                        "kind": "CXXMethodDecl",
+                                        "name": "f",
+                                        "mangledName": "_ZN5OuterIiE1AIiE1fEv",
+                                        "type": {"qualType": "void ()"},
+                                        "virtual": True,
+                                    },
+                                    type_args=["int"],
+                                ),
+                            ],
+                        },
+                    ],
+                },
+            ],
+        },
+        _record("D", bases=[_base("Outer<int>::A<>")]),
+    )
+    types = _types(root)
+    assert types["D"].vtable == ["_ZN5OuterIiE1AIiE1fEv"]
+    assert types["D"].vptr_offset_bits == 0
+
+
 def test_nested_specialization_indexes_under_outer_specialization_qualname() -> None:
     """Codex review, fresh evidence (P2): a specialization containing its
     own NESTED specialization (``struct D : Outer<int>::A<double>``) must

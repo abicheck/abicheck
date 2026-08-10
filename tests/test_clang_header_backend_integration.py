@@ -921,3 +921,73 @@ def test_clang_backend_resolves_nested_specialization_base(tmp_path: Path) -> No
     result = compare(old_snap, new_snap)
     assert ChangeKind.VPTR_INTRODUCED not in {c.kind for c in result.changes}
     assert ChangeKind.TYPE_VTABLE_CHANGED not in {c.kind for c in result.changes}
+
+
+def test_clang_backend_resolves_nested_specialization_with_defaulted_argument(
+    tmp_path: Path,
+) -> None:
+    """Codex review, fresh evidence (P1, second round): a NESTED template's
+    own defaulted argument (`Outer<int>::A<>`) needs its param_kinds/
+    param_defaults/param_names looked up under the SAME unspelled scope
+    the whole-AST index functions use for a nested template's own
+    `ClassTemplateDecl` -- both in `build_specialization_index` (the base
+    lookup) AND in `dumper_clang.py`'s own `_walk` (the override's OWN
+    owner-qualification, for `vtable_slot_is_override_reuse`'s
+    owner-descends-from check). Fixing only the former still left a
+    residual false `TYPE_VTABLE_CHANGED`, since the override's own owner
+    couldn't be matched against `RecordType.bases` either.
+    """
+    if not (_have("clang") and _have("g++")):
+        pytest.skip(
+            "clang and g++ are required for the clang L2 backend integration test"
+        )
+
+    def _header(extra: str) -> str:
+        return (
+            "template <class T>\nstruct Outer {\n"
+            "    template <class U = int>\n"
+            "    struct A {\n        virtual void f();\n    };\n};\n"
+            "struct D : Outer<int>::A<> {\n" + extra + "};\n"
+        )
+
+    old_dir = tmp_path / "old"
+    old_dir.mkdir()
+    old_header = old_dir / "api.h"
+    old_header.write_text(_header(""))
+    old_src = old_dir / "old.cpp"
+    old_src.write_text('#include "api.h"\ntemplate struct Outer<int>::A<>;\n')
+    v1_so = tmp_path / "libv1.so"
+    subprocess.run(
+        ["g++", "-shared", "-fPIC", "-o", str(v1_so), str(old_src), f"-I{old_dir}"],
+        check=True,
+        capture_output=True,
+    )
+
+    new_dir = tmp_path / "new"
+    new_dir.mkdir()
+    new_header = new_dir / "api.h"
+    new_header.write_text(_header("    void f() override;\n"))
+    new_src = new_dir / "new.cpp"
+    new_src.write_text('#include "api.h"\ntemplate struct Outer<int>::A<>;\n')
+    v2_so = tmp_path / "libv2.so"
+    subprocess.run(
+        ["g++", "-shared", "-fPIC", "-o", str(v2_so), str(new_src), f"-I{new_dir}"],
+        check=True,
+        capture_output=True,
+    )
+
+    old_snap = dump(v1_so, [old_header], header_backend="clang")
+    new_snap = dump(v2_so, [new_header], header_backend="clang")
+    old_d = next(t for t in old_snap.types if t.name == "D")
+    new_d = next(t for t in new_snap.types if t.name == "D")
+    assert old_d.vtable != []
+    assert old_d.vptr_offset_bits == 0
+    assert new_d.vtable != []
+
+    # An explicit `override` on a nested-specialization base must reuse
+    # the same slot rather than reading as a brand-new one -- confirms
+    # the owner-qualification path (dumper_clang.py's _walk), not just
+    # the base-lookup path (build_specialization_index).
+    result = compare(old_snap, new_snap)
+    assert ChangeKind.VPTR_INTRODUCED not in {c.kind for c in result.changes}
+    assert ChangeKind.TYPE_VTABLE_CHANGED not in {c.kind for c in result.changes}

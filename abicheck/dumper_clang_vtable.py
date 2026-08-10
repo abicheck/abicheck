@@ -1012,13 +1012,37 @@ def build_specialization_index(
         param_names_by_qualname = _index_template_param_names(root)
     idx: dict[str, dict[str, Any]] = {}
 
-    def walk(node: Any, scope: tuple[str, ...]) -> None:
+    def walk(
+        node: Any, scope: tuple[str, ...], lookup_scope: tuple[str, ...]
+    ) -> None:
         if not isinstance(node, dict):
             return
         kind = node.get("kind")
         name = str(node.get("name") or "")
         if kind == "ClassTemplateSpecializationDecl" and name:
-            template_qualname = "::".join((*scope, name)) if scope else name
+            # *lookup_scope* -- deliberately the ORIGINAL, unextended scope
+            # convention (grows only through `_SCOPE_NODE_KINDS`, exactly
+            # like `_index_template_param_kinds`/`_index_template_param_
+            # defaults`/`_index_template_param_names`'s own walks) -- is
+            # used ONLY for the param_kinds/defaults/names lookup below,
+            # kept deliberately separate from *scope* (Codex review, fresh
+            # evidence, second round): those three index functions register
+            # a NESTED template's own `ClassTemplateDecl` under ITS
+            # natural, unspelled scope (confirmed empirically: nested `A`
+            # inside `Outer<int>`'s specialization body registers under
+            # bare `"A"`, since `ClassTemplateSpecializationDecl` doesn't
+            # extend scope in THEIR walks at all), never under the outer
+            # specialization's SPELLED qualname (`"Outer<int>::A"`).
+            # Looking it up with the spelled *scope* (as an earlier fix
+            # here did) missed every entry, silently degrading a nested
+            # specialization with DEFAULTED arguments back to the same
+            # unresolvable-base false negative this whole mechanism exists
+            # to close (`Outer<int>::A<>`'s own trailing default couldn't
+            # be trimmed without a param_defaults hit) -- confirmed with a
+            # real clang build reproducing the exact mismatch.
+            template_qualname = (
+                "::".join((*lookup_scope, name)) if lookup_scope else name
+            )
             spelling = _specialization_spelling(
                 node,
                 name,
@@ -1047,14 +1071,19 @@ def build_specialization_index(
             # identical shape for scoping a specialization's own members).
             # Falls back to the unscoped behavior (bare `name`) when the
             # spelling can't be reconstructed, same as every other
-            # unresolvable-specialization degradation in this module.
+            # unresolvable-specialization degradation in this module. Only
+            # *scope* (the registration/descent scope) extends this way --
+            # *lookup_scope* never does, per the note above.
             child_scope = (*scope, spelling) if spelling else scope
+            child_lookup_scope = lookup_scope
         elif kind in _SCOPE_NODE_KINDS and name:
             child_scope = (*scope, name)
+            child_lookup_scope = (*lookup_scope, name)
         else:
             child_scope = scope
+            child_lookup_scope = lookup_scope
         for child in node.get("inner", []) or []:
-            walk(child, child_scope)
+            walk(child, child_scope, child_lookup_scope)
 
-    walk(root, ())
+    walk(root, (), ())
     return idx
