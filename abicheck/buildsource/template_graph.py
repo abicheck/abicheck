@@ -149,13 +149,12 @@ full, honest list of what's reserved but unpopulated):
   scoped piece of work, not attempted here.
 - **A template declared inside an anonymous namespace loses that scoping,
   merging distinct TUs' own anonymous-namespace templates of the same
-  name** (Codex review: an anonymous namespace's own ``NamespaceDecl``
-  carries ``name: None``, indistinguishable to ``_SCOPE_DECL_KINDS``'s
-  ``[*scope, name] if name else scope`` from no namespace at all, despite
-  C++'s internal linkage being unique per TU). Needs a TU-unique
+  name** (Codex review: ``NamespaceDecl.name`` is ``None`` there,
+  indistinguishable to ``_SCOPE_DECL_KINDS`` from no namespace at all,
+  despite C++'s internal linkage being unique per TU). Needs a TU-unique
   discriminator threaded from the caller plus a merge-policy change -- an
-  architecture change, not a drive-by fix; see this change's changelog
-  for why a narrower, file-keyed fix doesn't address the cross-TU case.
+  architecture change; see this change's changelog for why a narrower,
+  file-keyed fix doesn't address the cross-TU case.
 
 **Investigated and deliberately not attempted: joining a class
 instantiation's own node onto ``type_graph.py``'s record_type node for the
@@ -279,6 +278,15 @@ def _normalize_mangled(mangled: str) -> str:
     carry the already-stripped, one-underscore form (``macho_metadata.py``
     strips it before a symbol becomes a graph node) — left unstripped, every
     instantiated member's emitted symbol silently fails to join on Mach-O.
+
+    **Not applied unconditionally at symbol-collection time** — see
+    :func:`augment_graph_with_templates`'s join loop, the only caller, which
+    applies this only as a guarded fallback after an exact-spelling join
+    attempt fails (Codex review: an ELF/Linux function given an explicit
+    GNU ``asm("__Zfake")`` label reports ``mangledName: "__Zfake"``
+    verbatim — a real, literal symbol only *looking* like the Mach-O
+    artifact, not an instance of it; unconditional stripping missed the
+    real export, or wrongly joined an unrelated ``_Zfake`` if one existed).
     """
     if mangled.startswith("__Z"):
         return mangled[1:]
@@ -388,31 +396,26 @@ def _index_type_decls(
     regardless of kind) its declaring file, anywhere in *node*'s subtree.
 
     A small, independent AST walk rather than a reuse/extension of
-    ``type_graph._index_declared_entities`` (Codex-review-shaped
-    precedent: that function's own docstring already accepts "duplicates
-    the one AST walk rather than threading an output parameter through the
-    hardened, heavily-reviewed" pair, for ``index_declared_type_files``'s
-    identical situation) — that function does not build an id-keyed index
-    for type declarations at all (only for var/enum-constant references),
-    so there is nothing to reuse here, only a risk of destabilizing an
-    already-hardened function for an unrelated caller's need.
+    ``type_graph._index_declared_entities`` (Codex-review-shaped precedent:
+    that function's docstring already accepts duplicating the walk rather
+    than threading an output parameter through it, for
+    ``index_declared_type_files``'s identical situation) — that function
+    builds no id-keyed index for type declarations at all, so there is
+    nothing to reuse here, only a risk of destabilizing an already-hardened
+    function for an unrelated caller's need.
 
     Returns the last-seen file after visiting *node* and its whole subtree,
     same sticky-file threading contract as ``type_graph._index_declared_
     entities``: clang emits ``loc.file`` only on the very *first* node with
-    a location in a TU — verified empirically against real clang output
-    (Codex review, fresh evidence): a two-declaration single-file TU records
-    ``loc.file`` on the *first* top-level declaration only, and every
-    subsequent node -- including every ``ClassTemplateSpecializationDecl``/
-    ``FunctionDecl`` this module cares about -- carries none at all. An
-    earlier revision called the stateless :func:`_node_file` directly at
-    each instantiation site, which is correct only for the file's very
-    first declaration and answers "" for every other one, in practice
-    leaving ``TemplateInstantiation.file`` unset for nearly every real
-    instantiation. Every caller loop below must thread the returned
-    ``cur_file`` from one sibling call into the next, not just pass down the
-    parent's own value independently to each child, or every sibling after
-    the first loses the file.
+    a location in a TU (verified empirically) -- every subsequent node,
+    including every ``ClassTemplateSpecializationDecl``/``FunctionDecl``
+    this module cares about, carries none at all. An earlier revision
+    called the stateless :func:`_node_file` directly at each instantiation
+    site, correct only for the file's first declaration, leaving
+    ``TemplateInstantiation.file`` unset for nearly every real one. Every
+    caller loop must thread the returned ``cur_file`` from one sibling call
+    into the next, not the parent's own value independently, or every
+    sibling after the first loses the file.
     """
     if not isinstance(node, dict):
         return cur_file
@@ -813,42 +816,34 @@ def _flatten_template_args(
 
     *ambiguous_value_args* — set by the caller when the enclosing class
     template declares an ``auto`` NTTP parameter (see
-    :func:`_class_template_has_auto_nttp`'s own docstring) — treats a
-    bare, type-less ``{"value": N}`` argument the same way an opaque
-    template-template argument is already treated: identity untrustworthy,
-    skip the whole instantiation rather than record a wrong one. Default
-    ``False`` everywhere else (an ordinary, non-``auto`` NTTP's bare value
-    shape is unambiguous on its own, see that function's docstring for why
+    :func:`_class_template_has_auto_nttp`) — treats a bare, type-less
+    ``{"value": N}`` argument the same way an opaque template-template
+    argument is already treated: identity untrustworthy, skip the whole
+    instantiation rather than record a wrong one. Default ``False``
+    everywhere else (an ordinary, non-``auto`` NTTP's bare value shape is
+    unambiguous on its own, see that function's docstring for why
     only the ``auto`` case is checked).
 
     A variadic template's pack argument is *itself* one ``TemplateArgument``
     node (``isPack: true``, no ``type``/``value`` of its own) whose real
-    per-element arguments are nested one level deeper in its own ``inner`` —
-    empirically confirmed against real clang AST output (Codex review):
-    ``Pack<int>`` and ``Pack<double>`` both produce a pack-wrapper
-    ``TemplateArgument`` with no ``type``/``value``, and the actual
-    ``int``/``double`` argument nested inside it. :func:`_template_arg_use`
-    alone treats that wrapper as an unspellable node (its own documented
-    "a pack expansion's own wrapper" skip case) and drops it entirely, so a
-    caller that only ever called it on each *direct* child lost the whole
-    pack — both instantiations reduced to the identical, argument-less label
-    ``"Pack"`` and collided onto one graph node. Recurses (rather than a
-    single flattening pass) in case a pack itself nests another pack node,
-    though not empirically observed.
+    per-element arguments nest one level deeper in its own ``inner`` —
+    confirmed against real clang AST output: ``Pack<int>``/``Pack<double>``
+    both produce a pack-wrapper with no ``type``/``value``, the actual
+    argument nested inside. :func:`_template_arg_use` alone treats that
+    wrapper as unspellable and drops it, so a direct-children-only caller
+    loses the whole pack -- both instantiations reduce to the identical,
+    argument-less label ``"Pack"`` and collide. Recurses in case a pack
+    itself nests another pack, though not empirically observed.
 
-    Returns ``None`` — instead of the args collected so far — when any
+    Returns ``None`` -- instead of the args collected so far -- when any
     argument is :func:`_is_opaque_template_argument` (a template-template
-    argument is the confirmed real case, see that function's docstring):
-    silently dropping just that one argument would still let the caller
-    build a `TemplateInstantiation` for this decl, but with a label/args
-    that omit it entirely — so two genuinely distinct instantiations
-    differing *only* in that one opaque argument (``Use<A>`` vs. ``Use<B>``)
-    would collide onto one shared graph-node identity, merging their real,
-    distinct emitted-symbol/type-dependency edges (Codex review, empirically
-    confirmed: both instantiations reduce to the identical label ``"Use"``).
-    The caller must treat ``None`` as "skip this instantiation entirely",
-    never as "empty argument list" — the same "degrade rather than fabricate
-    an identity" discipline this whole module already applies elsewhere.
+    argument is the confirmed real case): silently dropping just that
+    argument would still build a label/args that omit it, so two distinct
+    instantiations differing *only* in that argument (``Use<A>``/``Use<B>``)
+    would collide onto one shared node, merging their real, distinct edges
+    (confirmed: both reduce to the identical label ``"Use"``). The caller
+    must treat ``None`` as "skip entirely", never "empty argument list" --
+    the same "degrade rather than fabricate" discipline used throughout.
     """
     out: list[TemplateArgUse] = []
     for child in children:
@@ -1045,25 +1040,19 @@ def _ctor_dtor_symbol_variants(mangled: str, *, is_ctor: bool) -> tuple[str, ...
     Locates the real ctor/dtor code via :func:`~abicheck.diff_cxx_rules.
     itanium_ctor_dtor_marker_span`'s structural (length-prefix-aware) walk
     and substitutes each sibling code in its place -- **not** a naive
-    substring search (Codex review, second round, fresh evidence, a real
-    correctness bug in an earlier revision of this function): a class named
-    ``C1Evil<int>`` mangles to ``_ZN6C1EvilIiEC1Ev``, and a bare
-    ``"C1E"`` text search finds the *class name*'s own embedded ``"C1E"``
-    first, not the real ctor code that follows it -- deriving
-    ``_ZN6C2EvilIiEC1Ev``, which is the genuinely different class
-    ``C2Evil<int>``'s own *real* constructor mangling if that class also
-    exists and is exported, a false positive rather than merely a missed
-    one (the join-only-onto-an-existing-node safety net this module relies
-    on elsewhere does not save this case, since the corrupted string can
-    coincidentally *be* a real, different symbol). ``mangled`` does not need
-    to be pre-normalized for the Mach-O double-underscore prefix -- see
-    ``itanium_ctor_dtor_marker_span``'s own docstring, which confirms
-    empirically that it handles an unnormalized ``__Z...`` input correctly.
-    This function's own caller still normalizes first anyway (see
-    ``_member_symbols``), purely so the *substituted* sibling manglings this
-    function returns come out in the same normalized form as every other
-    symbol this module joins against, not because normalizing first is
-    required for correctness here.
+    substring search (Codex review, second round, a real bug in an earlier
+    revision): a class named ``C1Evil<int>`` mangles to
+    ``_ZN6C1EvilIiEC1Ev``, and a bare ``"C1E"`` text search finds the
+    *class name*'s own embedded ``"C1E"`` first, deriving
+    ``_ZN6C2EvilIiEC1Ev`` -- a false positive (the genuinely different
+    class ``C2Evil<int>``'s own real ctor mangling, if exported) rather
+    than merely a missed one, since the join-only-onto-an-existing-node
+    safety net doesn't save a corrupted string that coincidentally *is* a
+    real symbol. ``mangled`` does not need pre-normalizing for the Mach-O
+    double-underscore prefix -- ``itanium_ctor_dtor_marker_span`` handles
+    an unnormalized ``__Z...`` input correctly, and its own caller
+    (``_member_symbols``) passes clang's raw spelling through unmodified
+    anyway -- see :func:`_normalize_mangled` for why.
 
     Returns ``()`` when the marker parser doesn't recognize *mangled* as a
     ctor/dtor mangling at all (an unmangled or non-Itanium name, or a form
@@ -1095,26 +1084,25 @@ def _member_symbols(node: dict[str, Any]) -> tuple[str, ...]:
 
     A constructor/destructor child additionally contributes its sibling
     Itanium manglings (``C2``, and for a destructor ``D0``/``D2``) -- see
-    :func:`_ctor_dtor_symbol_variants`."""
+    :func:`_ctor_dtor_symbol_variants`.
+
+    Returns clang's own, **unmodified** ``mangledName`` spelling -- no
+    Mach-O double-underscore stripping here (Codex review): eager
+    normalization can't tell a real Mach-O artifact from a literal
+    ``__Z``-prefixed symbol via an explicit ``asm(...)`` label (see
+    :func:`_normalize_mangled`). The join loop applies the strip only as a
+    guarded fallback."""
     symbols: list[str] = []
     for child in node.get("inner", []) or []:
         kind = str(child.get("kind", ""))
         if kind in _MEMBER_FUNCTION_KINDS | {"VarDecl"}:
             mangled = child.get("mangledName")
             if isinstance(mangled, str) and mangled:
-                # Normalize (strip a Mach-O double-underscore) once, up
-                # front: not required for _ctor_dtor_symbol_variants's own
-                # offset arithmetic (it handles an unnormalized "__Z..."
-                # input correctly -- see its docstring), but doing it here
-                # keeps every symbol this function returns, including the
-                # substituted siblings, in the same normalized form the
-                # rest of this module joins binary_symbol nodes against.
-                normalized = _normalize_mangled(mangled)
-                symbols.append(normalized)
+                symbols.append(mangled)
                 if kind in ("CXXConstructorDecl", "CXXDestructorDecl"):
                     symbols.extend(
                         _ctor_dtor_symbol_variants(
-                            normalized, is_ctor=kind == "CXXConstructorDecl"
+                            mangled, is_ctor=kind == "CXXConstructorDecl"
                         )
                     )
     return tuple(symbols)
@@ -1297,7 +1285,7 @@ def _walk_function_templates(
                         continue  # the pattern itself; no detached content anywhere
                     child = full
                     mangled = child.get("mangledName")
-                mangled = _normalize_mangled(mangled)
+                # Raw spelling -- see _normalize_mangled's own docstring.
                 args = _flatten_template_args(child.get("inner", []) or [])
                 if args is None:
                     # An opaque argument (e.g. a template-template argument
@@ -1748,7 +1736,11 @@ def augment_graph_with_templates(
     mechanism" rule :mod:`archive_graph` already applies: an instantiated
     member the linker discarded (never ODR-used, or inlined away) has no
     export-table entry and no finding can ever be about it, so minting a
-    symbol node for it would inflate the graph for no analytical gain.
+    symbol node for it would inflate the graph for no analytical gain. The
+    join tries the raw spelling first, falling back to
+    :func:`_normalize_mangled`'s Mach-O-stripped form only when unmatched
+    (a literal ``__Z``-prefixed ``asm(...)`` label is indistinguishable
+    from the Mach-O artifact by spelling alone).
 
     Returns the number of edges added.
     """
@@ -1834,9 +1826,16 @@ def augment_graph_with_templates(
 
         for symbol in inst.emitted_symbols:
             sid = _symbol_node_id(symbol)
-            if sid not in known_symbols:
+            if sid in known_symbols:
+                add_edge(inst_id, sid, EDGE_INSTANTIATION_EMITS_SYMBOL, CONF_REDUCED)
                 continue
-            add_edge(inst_id, sid, EDGE_INSTANTIATION_EMITS_SYMBOL, CONF_REDUCED)
+            # Guarded fallback -- see this function's own docstring.
+            normalized = _normalize_mangled(symbol)
+            if normalized == symbol:
+                continue
+            nid = _symbol_node_id(normalized)
+            if nid in known_symbols:
+                add_edge(inst_id, nid, EDGE_INSTANTIATION_EMITS_SYMBOL, CONF_REDUCED)
 
     return added
 

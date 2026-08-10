@@ -1314,21 +1314,20 @@ def test_overloaded_function_templates_get_distinct_instantiation_nodes() -> Non
     }
 
 
-def test_darwin_double_underscore_mangled_name_normalized() -> None:
-    """On Darwin, clang's AST reports a mangled name with the platform's
-    extra Mach-O leading underscore still attached (``__Z...``) -- but the
-    ``binary_symbol`` node this module's EDGE_INSTANTIATION_EMITS_SYMBOL join
-    must match carries the already-stripped, one-underscore form
-    (``macho_metadata.py`` strips it before minting the node). Left
-    unstripped, the join silently fails on every Mach-O build (Codex
-    review)."""
+def test_darwin_double_underscore_mangled_name_joins_via_fallback() -> None:
+    """On Darwin, clang's AST reports a mangled name with the extra Mach-O
+    leading underscore attached (``__Z...``), but a ``binary_symbol`` node
+    carries the already-stripped form. ``emitted_symbols`` now keeps
+    clang's raw spelling; the strip happens as a guarded fallback inside
+    :func:`augment_graph_with_templates` itself, not at collection time --
+    see ``test_template_graph_identity.py``'s asm-label regression."""
     ast = _function_template_ast()
     # Simulate the Darwin mangling convention on the one instantiation
     # (inner[0]=TemplateTypeParmDecl, inner[1]=pattern, inner[2]=instantiation).
     ast["inner"][0]["inner"][0]["inner"][2]["mangledName"] = "__Z8identityIiET_S0_"
     out = parse_clang_ast_templates(ast)
     assert len(out) == 1
-    assert out[0].emitted_symbols == ("_Z8identityIiET_S0_",)  # one underscore, not two
+    assert out[0].emitted_symbols == ("__Z8identityIiET_S0_",)  # raw, not stripped
 
     graph = SourceGraphSummary()
     graph.add_node(

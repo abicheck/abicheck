@@ -844,3 +844,24 @@
   (vtable/typeinfo symbol discovery, anonymous-namespace cross-TU merging)
   are the same deliberately-deferred, already-documented known gaps this
   changelog's earlier rounds describe.
+
+  A twenty-eighth round found and fixed a real gap in `_normalize_mangled`'s
+  own unconditional application, confirmed empirically (Codex review).
+  `_member_symbols`/`_walk_function_templates` stripped a Mach-O double-
+  underscore prefix eagerly at symbol-collection time -- but a function
+  given an explicit GNU `asm("__Zfake")` label reports `mangledName:
+  "__Zfake"` verbatim on *any* platform, confirmed via a real compiled/
+  dumped repro: a real, literal linker symbol that only *looks* like the
+  Mach-O artifact this stripping targets, not an instance of it.
+  Unconditional stripping silently missed the real `__Zfake` export (no
+  `binary_symbol` node exists for the corrupted `_Zfake`), or worse, wrongly
+  joined onto an unrelated `_Zfake` export if one happened to exist too.
+  Fixed by moving the strip out of collection (`emitted_symbols` now keeps
+  clang's raw, unmodified spelling) and into `augment_graph_with_templates`'s
+  join loop as a guarded fallback: try the exact spelling first, only fall
+  back to the Mach-O-stripped form when the exact spelling has no matching
+  `binary_symbol` node. The pre-existing Darwin double-underscore regression
+  test (`test_darwin_double_underscore_mangled_name_normalized`, renamed to
+  `..._joins_via_fallback`) was updated to match the new raw-storage
+  contract; a new regression test confirms the asm-label case joins the
+  real, exact export and never the unrelated one.

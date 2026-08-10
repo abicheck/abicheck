@@ -25,9 +25,11 @@ the parent file's broader AST-shape/parsing coverage.
 
 from __future__ import annotations
 
+from abicheck.buildsource.graph_facts import GraphNode
 from abicheck.buildsource.source_graph import SourceGraphSummary
 from abicheck.buildsource.template_graph import (
     EDGE_DECL_INSTANTIATES_TEMPLATE,
+    EDGE_INSTANTIATION_EMITS_SYMBOL,
     NODE_TEMPLATE_DECL,
     augment_graph_with_templates,
     parse_clang_ast_templates,
@@ -254,3 +256,57 @@ def test_partial_specialization_offset_match_is_scoped_by_file() -> None:
     # B<int> must NOT inherit A's partial-spec signature just because their
     # declarations share a numeric offset in different files.
     assert record_insts["B<int>"].template_signature == ""
+
+
+def test_literal_asm_label_mangled_name_is_not_mach_o_stripped_at_collection() -> None:
+    """A function given an explicit GNU ``asm("__Zfake")`` label reports
+    ``mangledName: "__Zfake"`` verbatim, on any platform -- confirmed
+    empirically against real clang output (``template <class T> void f(T)
+    asm("__Zfake");``). This is a real, literal linker symbol name that
+    only *looks* like the Mach-O double-underscore artifact
+    :func:`~abicheck.buildsource.template_graph._normalize_mangled` exists
+    to strip -- it is not an instance of it (Codex review, fresh evidence).
+    An earlier revision stripped unconditionally at collection time, so
+    ``emitted_symbols`` recorded the wrong, corrupted ``_Zfake`` -- silently
+    missing the real ``__Zfake`` export, or worse, wrongly joining onto an
+    unrelated ``_Zfake`` export if one happened to exist too. The strip is
+    now a guarded fallback inside ``augment_graph_with_templates`` itself,
+    tried only once the exact spelling fails to join."""
+    pattern = {"kind": "FunctionDecl", "name": "f", "inner": []}
+    instantiation = {
+        "kind": "FunctionDecl",
+        "name": "f",
+        "mangledName": "__Zfake",
+        "inner": [
+            {"kind": "TemplateArgument", "type": {"qualType": "int"}, "inner": []},
+        ],
+    }
+    function_template = {
+        "kind": "FunctionTemplateDecl",
+        "name": "f",
+        "inner": [
+            {"kind": "TemplateTypeParmDecl", "name": "T"},
+            pattern,
+            instantiation,
+        ],
+    }
+    ast = {"kind": "TranslationUnitDecl", "inner": [function_template]}
+
+    out = parse_clang_ast_templates(ast)
+    assert len(out) == 1
+    # Raw, unmodified spelling -- not corrupted to "_Zfake".
+    assert out[0].emitted_symbols == ("__Zfake",)
+
+    # The real ELF export is the literal "__Zfake" -- an unrelated "_Zfake"
+    # also happens to exist (e.g. some other symbol's own real export).
+    graph = SourceGraphSummary()
+    graph.add_node(GraphNode(id="binary_symbol://__Zfake", kind="binary_symbol"))
+    graph.add_node(GraphNode(id="binary_symbol://_Zfake", kind="binary_symbol"))
+    augment_graph_with_templates(graph, out)
+    emits_edges = {
+        (e.src, e.dst) for e in graph.edges if e.kind == EDGE_INSTANTIATION_EMITS_SYMBOL
+    }
+    # Must join the real, exact "__Zfake" export -- never the unrelated
+    # "_Zfake" one, even though it also exists in the graph.
+    targets = {dst for _src, dst in emits_edges}
+    assert targets == {"binary_symbol://__Zfake"}
