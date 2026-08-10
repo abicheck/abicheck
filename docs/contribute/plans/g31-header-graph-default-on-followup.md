@@ -494,6 +494,45 @@ building a second identity-resolution mechanism from scratch.
   unequally correct) implementations. New regression test with the exact
   namespaced repro shape.
 
+  **A review round found the earlier "no cache bump needed" conclusion
+  above was wrong, and fixed it.** The very first note on this DWARF vptr
+  fix (above) concluded "No schema or whole-snapshot disk-cache version
+  bump: this DWARF-only fix doesn't touch the header-AST cache path
+  (`snapshot_cache.py` caches only castxml/clang header dumps, not
+  binary/DWARF extraction)" — that premise turned out to be false.
+  `dumper_layout_backfill.backfill_dwarf_layout()` backfills a header-AST
+  (castxml/clang) snapshot's `vptr_offset_bits` from real DWARF whenever
+  the header-derived value is `None`, and it runs on the ordinary,
+  cacheable "binary + public headers" dump shape, not only the always-
+  uncacheable `--dwarf-only` path this note originally had in mind — so
+  the DWARF-side fix reaches a cacheable snapshot indirectly, through the
+  backfill step, even though `dwarf_snapshot.py` itself is never on the
+  cache-key-computing path. A warm cache entry from before this fix would
+  have kept serving the old, less-accurate backfilled value indefinitely,
+  matching the same "stale `None`/heuristic misread as a reliably-known
+  answer" precedent this section already required a bump for elsewhere.
+  Fixed by bumping `_SNAPSHOT_CACHE_VERSION` 8 → 9, following the
+  identical v7/v8 precedent already documented in `snapshot_cache.py`
+  itself.
+
+  **A review round found the virtual-only fallback tier (the fifth/sixth
+  findings above) had the same single-pass-vs-fixed-point gap the
+  non-virtual primary-base walk's own loop was built to avoid.** A
+  multi-level virtual-inheritance chain — `struct A { virtual void a(); };
+  struct E : virtual A {}; struct F : virtual E {};`, neither E nor F
+  adding a virtual method of its own — needs E resolved before F can
+  resolve through it, but the fallback tier was a single
+  `for rec in self.types:` pass, and `self.types` iteration order follows
+  DWARF emission order, not dependency order. Reproduced empirically with
+  real GCC output: `self.types` came out as `[F, A, E]`, so the single
+  pass checked F while `E.vptr_offset_bits` was still `None`, resolved E
+  to `0` moments later in the very same pass, and left F stuck at `None`
+  with no second pass to pick it back up. Fixed by converting the tier
+  into the identical `while progressed and unresolved:` fixed-point loop
+  shape the primary-base walk already uses just above it in the same
+  function, rather than a bespoke single pass with its own, narrower
+  correctness envelope. New regression test with this exact A/E/F chain.
+
   **A later pass closed the last of this phase's four originally-listed
   facts** (`deprecated`/`is_scoped`/bitfields/default-argument facts were
   the other three, already covered above): direct-clang now populates

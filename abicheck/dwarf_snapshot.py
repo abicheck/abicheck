@@ -1341,16 +1341,35 @@ class _DwarfSnapshotBuilder:
         # entry) -- this tier only ever answers "0 or unknown," never a real
         # non-zero offset, so it has no arithmetic to do once a candidate
         # resolves.
-        for rec in self.types:
-            if rec.vptr_offset_bits is not None or not rec.virtual_bases:
-                continue
-            virtual_edges = self._virtual_base_edges_by_record.get(id(rec), [])
-            if any(
-                (vbase := _resolve_base_record(vbase_name, vbase_key)) is not None
-                and vbase.vptr_offset_bits is not None
-                for vbase_name, vbase_key in virtual_edges
-            ):
-                rec.vptr_offset_bits = 0
+        #
+        # This must be a fixed-point loop, not a single pass, for the same
+        # reason the primary-base walk above is one: a multi-level virtual
+        # chain (`struct F : virtual E {}; struct E : virtual A {};`) needs
+        # E resolved before F can resolve through it, and `self.types`
+        # iteration order follows DWARF emission order, not dependency
+        # order (Codex review, reproduced against real GCC AND Clang output
+        # with exactly this A/E/F shape: `self.types` came out as
+        # `[F, A, E]` under GCC, so a single pass checked F while E was
+        # still `None`, set E to 0, and left F unresolved).
+        virtual_unresolved = [
+            t for t in self.types if t.vptr_offset_bits is None and t.virtual_bases
+        ]
+        progressed = True
+        while progressed and virtual_unresolved:
+            progressed = False
+            still_unresolved = []
+            for rec in virtual_unresolved:
+                virtual_edges = self._virtual_base_edges_by_record.get(id(rec), [])
+                if any(
+                    (vbase := _resolve_base_record(vbase_name, vbase_key)) is not None
+                    and vbase.vptr_offset_bits is not None
+                    for vbase_name, vbase_key in virtual_edges
+                ):
+                    rec.vptr_offset_bits = 0
+                    progressed = True
+                else:
+                    still_unresolved.append(rec)
+            virtual_unresolved = still_unresolved
 
     def _resolve_decl_file(self, die: Any, CU: Any) -> str | None:
         """Resolve DW_AT_decl_file to a source file path.

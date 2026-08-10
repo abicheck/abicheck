@@ -437,3 +437,49 @@ extern "C" ns::E* get_e() { return &g_e; }
         assert types["ns::E"].virtual_bases == ["A"]
         assert types["ns::A"].vptr_offset_bits == 0
         assert types["ns::E"].vptr_offset_bits == 0
+
+    @pytest.fixture()
+    def multi_level_virtual_chain_lib(self, tmp_path: Path) -> Path:
+        """Two-level virtual-inheritance chain -- F : virtual E : virtual A,
+        neither E nor F adding a virtual method of its own. Reproduces the
+        gap Codex review found in the virtual-only fallback tier's single
+        `for rec in self.types:` pass: `self.types` iteration order follows
+        DWARF emission order, not dependency order, so a single pass can
+        check F before E has been resolved within that same pass, leaving F
+        stuck at None even though E resolves to 0 moments later in the same
+        pass. Confirmed empirically with real GCC output: `self.types` came
+        out as `[F, A, E]`, so F was checked while E.vptr_offset_bits was
+        still None."""
+        cpp_src = tmp_path / "multi_level_virtual_chain.cpp"
+        cpp_src.write_text("""\
+struct A { virtual void a(); };
+struct E : virtual A {};
+struct F : virtual E {};
+
+void A::a() {}
+static F g_f;
+extern "C" F* get_f() { return &g_f; }
+""")
+        so_path = tmp_path / "libmultilevelvirtualchain.so"
+        result = subprocess.run(
+            [_GPP, "-shared", "-fPIC", "-g", "-O0", "-o", str(so_path), str(cpp_src)],
+            capture_output=True, text=True, timeout=30,
+        )
+        assert result.returncode == 0, f"Compilation failed: {result.stderr}"
+        return so_path
+
+    def test_multi_level_virtual_chain_resolves(
+        self, multi_level_virtual_chain_lib: Path
+    ) -> None:
+        """F's only path to a resolved vptr offset goes through E, which
+        itself only resolves through A -- the virtual-only fallback tier
+        must iterate to a fixed point (like the primary-base walk already
+        does) rather than stopping after one pass over self.types."""
+        types = self._types_by_name(multi_level_virtual_chain_lib)
+        assert not types["F"].vtable
+        assert not types["F"].bases
+        assert types["F"].virtual_bases == ["E"]
+        assert types["E"].virtual_bases == ["A"]
+        assert types["A"].vptr_offset_bits == 0
+        assert types["E"].vptr_offset_bits == 0
+        assert types["F"].vptr_offset_bits == 0
