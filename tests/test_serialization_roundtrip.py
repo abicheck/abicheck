@@ -438,15 +438,31 @@ class TestClangFieldInitializerFactsReliableRoundTrip:
         restored = snapshot_from_dict(d)
         assert restored.clang_field_initializer_facts_reliable is True
 
-    def test_legacy_header_snapshot_predating_ast_producer_stays_reliable(
+    def test_legacy_header_snapshot_predating_ast_producer_loads_as_unreliable(
         self,
     ) -> None:
-        """Same reasoning as clang_deprecation_facts_reliable's identical
-        test: an absent/unknown ast_producer already fails fact_producer()'s
-        check on its own, so this flag's own value is moot for it."""
+        """Codex review, fresh evidence, third round: unlike
+        clang_deprecation_facts_reliable (whose one consumer requires an
+        EXACT ``ast_producer == "clang"`` match, so an absent/unknown
+        producer already fails that check on its own regardless of this
+        flag's value), this flag's own consumer
+        (``default_value_representation_unreliable``) treats a producer of
+        ``None`` as clang-family RISK, not exclusion -- deliberately, since
+        `ast_producer` has always had exactly three real values
+        (`"clang"`/`"castxml"`/`"hybrid"`) and a pre-v10 snapshot missing
+        the key entirely could be a legacy direct-clang dump with the old
+        unstable ``"expr:"`` fingerprint. This flag's OWN derivation must
+        agree with that consumer's promise: only a POSITIVELY known
+        `"castxml"` producer is safe to trust, never an absent one. Before
+        this fix, `ast_producer_value not in ("clang", "hybrid")` treated a
+        `None` producer as "definitely not clang/hybrid" -- the opposite of
+        the correct, conservative answer -- silently letting a legacy
+        direct-clang snapshot's stale fingerprint compare against a fresh
+        one and report a false PARAM_DEFAULT_VALUE_CHANGED/
+        FIELD_DEFAULT_INITIALIZER_CHANGED for an unchanged default."""
         d = _minimal_dict(schema_version=19, from_headers=True)
         assert "ast_producer" not in d
-        assert snapshot_from_dict(d).clang_field_initializer_facts_reliable is True
+        assert snapshot_from_dict(d).clang_field_initializer_facts_reliable is False
 
     def test_legacy_dwarf_only_snapshot_stays_reliable(self) -> None:
         d = _minimal_dict(schema_version=19, from_headers=False)

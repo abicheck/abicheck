@@ -733,6 +733,58 @@ class TestParamDefaultChanged:
         r = compare(old, new)
         assert ChangeKind.PARAM_DEFAULT_VALUE_CHANGED not in _kinds(r)
 
+    def test_no_false_change_against_snapshot_from_dict_producer_less_legacy(
+        self,
+    ):
+        """Codex review, PR #687, fresh evidence, fourth round: the test
+        above constructs ``clang_field_initializer_facts_reliable=False``
+        directly on the ``AbiSnapshot`` -- it never exercises
+        ``serialization.snapshot_from_dict``'s own DERIVATION of that flag
+        from a raw, producer-less legacy dict, which is where the actual bug
+        was: ``ast_producer_value not in ("clang", "hybrid")`` treated an
+        absent producer as "definitely not clang/hybrid" (i.e. reliable) --
+        backwards, since ``ast_producer`` has always had exactly three real
+        values and an absent one means unknown, not confirmed-castxml. This
+        end-to-end test goes through the real ``snapshot_from_dict`` load
+        path a persisted pre-v10 baseline would actually take."""
+        from abicheck.serialization import snapshot_from_dict, snapshot_to_dict
+
+        f_old = _pub_func(
+            "connect",
+            "_Z7connectv",
+            params=[Param(name="timeout", type="int", default="expr:oldalgo1234")],
+        )
+        f_new = _pub_func(
+            "connect",
+            "_Z7connectv",
+            params=[Param(name="timeout", type="int", default="expr:newalgo5678")],
+        )
+        legacy_dict = snapshot_to_dict(
+            AbiSnapshot(
+                library="libtest.so.1",
+                version="1.0",
+                functions=[f_old],
+                from_headers=True,
+                ast_producer="clang",
+            )
+        )
+        legacy_dict["schema_version"] = 9
+        del legacy_dict["ast_producer"]
+        legacy_dict.pop("clang_field_initializer_facts_reliable", None)
+        old = snapshot_from_dict(legacy_dict)
+        assert old.ast_producer is None
+        assert old.clang_field_initializer_facts_reliable is False
+
+        new = AbiSnapshot(
+            library="libtest.so.1",
+            version="2.0",
+            functions=[f_new],
+            from_headers=True,
+            ast_producer="clang",
+        )
+        r = compare(old, new)
+        assert ChangeKind.PARAM_DEFAULT_VALUE_CHANGED not in _kinds(r)
+
     def test_real_change_from_literal_to_fingerprint_still_detected(self):
         """Codex review, PR #687, fresh evidence: the gate above must be
         checked PER SIDE, not "either value looks like a fingerprint ->

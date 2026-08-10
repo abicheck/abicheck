@@ -1093,9 +1093,33 @@ def snapshot_from_dict(d: dict[str, Any]) -> AbiSnapshot:
         # unconditional None -- see AbiSnapshot.clang_field_initializer_
         # facts_reliable's own docstring for the full reasoning, including
         # why a MATCHED field's own provenance is unaffected either way.
+        #
+        # `ast_producer_value == "castxml"` (Codex review, fresh evidence,
+        # third round), not `not in ("clang", "hybrid")`: a snapshot
+        # persisted before `ast_producer` was tracked at all (e.g. schema
+        # v9) has `ast_producer_value is None`, which `not in (...)` treated
+        # as "definitely not clang/hybrid" -- i.e. reliable -- when it is
+        # exactly the reverse. `ast_producer` has always had exactly three
+        # real producers (`"clang"`/`"castxml"`/`"hybrid"`, verified against
+        # every write site), so a `None` here means "unknown," not
+        # "castxml." This function's own consumer,
+        # `default_value_representation_unreliable`
+        # (diff_default_value_reliability.py), already treats a per-
+        # declaration producer of `None` as clang-family risk for the exact
+        # same reason -- only `"castxml"` is excluded there too. Reproduced
+        # empirically: loading a from_headers=True, schema-v9 dict with no
+        # `ast_producer` key yielded `clang_field_initializer_facts_reliable
+        # =True` before this fix, silently trusting a legacy direct-clang
+        # snapshot's pre-stabilization `"expr:"` fingerprint and reporting a
+        # false PARAM_DEFAULT_VALUE_CHANGED/FIELD_DEFAULT_INITIALIZER_CHANGED
+        # against an unchanged default after upgrading. Safe for a genuine
+        # legacy castxml snapshot too: castxml never produces an `"expr:"`-
+        # prefixed value (it keeps the verbatim source expression instead),
+        # so the reliability flag is never even consulted for one -- both
+        # gate functions above check the VALUE's own `"expr:"` prefix first.
         clang_field_initializer_facts_reliable_value = (
             not from_headers
-            or ast_producer_value not in ("clang", "hybrid")
+            or ast_producer_value == "castxml"
             or _schema_version >= _MIN_SCHEMA_VERSION_FOR_CLANG_FIELD_INITIALIZER_FACTS
         )
 

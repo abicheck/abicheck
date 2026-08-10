@@ -289,3 +289,20 @@ it should read in CHANGELOG.md. Delete the other sections.
   `true`, since value-initialization zero-initializes `S`'s scalar members
   first) were both dropped by `_canonical_expr`'s whitelist, verified
   against real Clang 18 output before fixing. Both are now kept verbatim.
+- **Fixed `clang_field_initializer_facts_reliable` loading as `True` for a
+  snapshot persisted before `ast_producer` provenance was tracked at all**
+  (Codex review, fresh evidence, third round): `serialization.
+  snapshot_from_dict()`'s derivation checked `ast_producer_value not in
+  ("clang", "hybrid")`, which treated an absent (unknown) producer as
+  "definitely not clang/hybrid" — the opposite of correct, since
+  `ast_producer` has always had exactly three real values and a pre-v10
+  snapshot missing the key entirely could be a legacy direct-clang dump
+  carrying the old, unstable `"expr:"` fingerprint. This flag's own
+  consumer (`default_value_representation_unreliable`) already treats a
+  per-declaration producer of `None` as clang-family risk for the identical
+  reason; the derivation now agrees with it, checking
+  `ast_producer_value == "castxml"` instead — only a POSITIVELY known
+  castxml producer is exempted. Reproduced empirically (a `from_headers`
+  schema-v9 dict with no `ast_producer` key loaded as reliable before this
+  fix) before fixing; safe for a genuine legacy castxml snapshot, since
+  castxml never produces an `"expr:"`-prefixed value in the first place.
