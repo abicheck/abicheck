@@ -250,6 +250,8 @@ Every live run persists a **transcript bundle**:
 agent-evals/skills/runs/<run-id>/<scenario>/<k>/
   meta.json          agent, model, versions, skill-tree content hash, seed/temperature
   prompt.txt         the verbatim user request
+  events.jsonl       normalized agent events: which skill activated, which skill files
+                     were read, tool calls in order — the L1l evidence (see below)
   calls.jsonl        one record per recorded abicheck invocation: argv, cwd, exit code,
                      stdout/stderr digests, and the path of every artifact the call
                      produced — both a `-o`/`--output` file and the captured stdout
@@ -309,6 +311,29 @@ provisional record in place rather than nothing: a call that happened and was
 lost would read to a grader as a call that never happened, which is the false
 direction to fail in for dimension 3.
 
+**Skill activation is its own recorded fact, not an inference from argv
+(`events.jsonl`).** An abicheck command line cannot tell a skill-driven run
+from a bare model that happened to reach the same command, and it cannot say
+*which* skill ran when several teach a similar `compare` invocation — so
+neither L1l's activation precision/recall nor dimension 1's "right skill,
+right branch" is derivable from `calls.jsonl`. The runner therefore emits a
+normalized event stream, and because vendors expose very different amounts of
+this, the contract is explicitly two-tier:
+
+- **Tier 1 — the vendor reports activation.** The runner maps its native
+  events onto one vocabulary (`skill_activated`, `skill_file_read`,
+  `tool_call`) and L1l is graded deterministically from the bundle, same as
+  every other replayed dimension.
+- **Tier 2 — the vendor reports nothing usable.** Reads of files inside the
+  installed skill tree are still observable from the sandbox, which
+  distinguishes a progressive-disclosure run from a bare one but cannot
+  attribute an eagerly-injected skill. Where even that is unavailable, **L1l
+  degrades to the manual cross-agent log for that vendor rather than being
+  graded from argv** — the same line G36 P0.8 already drew between scriptable
+  and non-scriptable agents. Dimension 1 falls back to its invocation-class
+  check alone, and the bundle records which tier produced it so a scorecard
+  never presents a tier-2 activation number as if it were measured.
+
 **The shim persists the teed stdout itself, not only its digest.**
 `--output` defaults to stdout (`cli_options.py`: "Write output to this path
 (default: stdout)"), and the skills genuinely use that form — `shared/
@@ -330,7 +355,7 @@ zero-tolerance and baseline is its safety model.
 
 | # | Dimension | Grader | Gating |
 |---|---|---|---|
-| 1 | Correct workflow chosen (right skill, right branch within it) | deterministic — recorded argv shape vs. the scenario's expected invocation class | baseline / non-regression |
+| 1 | Correct workflow chosen (right skill, right branch within it) | deterministic — `events.jsonl`'s activation record for *which* skill, plus recorded argv shape vs. the scenario's expected invocation class for *which branch*; degrades to the argv half alone under D3's tier 2 | baseline / non-regression |
 | 2 | **Uncertainty preserved** | deterministic — a `NOT_COMPARABLE`/incomplete-evidence/coverage-failure artifact must not be answered with a definite verdict | **zero tolerance, all `k` runs** |
 | 3 | Deterministic evidence obtained | deterministic — at least one real abicheck run over the right two sides; a claim with an empty `calls.jsonl` fails outright | baseline / non-regression |
 | 4 | Root-cause explanation correct | judged (LLM panel) against the fixture's `expected_kinds` | baseline / non-regression |
@@ -560,10 +585,36 @@ Per live run: ~4–8 agent turns over a small fixture repository. At 24 scenario
 × `k=3` that is ~72 agent sessions per full pass. Two knobs shrink a PR-label
 run, and **`k` is deliberately not one of them**:
 
-- `--suite smoke` — 6 scenarios (safety-critical Category B only), still at
-  `k=3` (18 sessions), for PR-label runs.
-- `--suite full` — all 24 scenarios at `k=3` (72 sessions), on the weekly cron
-  and before publication.
+- `--suite risk` — the PR-label suite, at `k=3`: every Category B scenario,
+  **plus every Category A scenario whose ground-truth `expected` is not a
+  compatible verdict**, restricted to the skills the PR's diff actually
+  touches. Typically ~8–12 scenarios (24–36 sessions).
+- `--suite full` — all 24 scenarios at `k=3` (72 sessions), on the weekly cron,
+  before publication, and on any PR touching `skills-src/shared/`.
+- Judged dimensions (4, 5) are skippable via `--no-judge`, leaving the four
+  deterministic dimensions — which include both zero-tolerance ones — at
+  near-zero marginal cost.
+
+**The PR suite is risk-selected, not a fixed sample, and that is what makes
+acceptance criterion 1 true.** An earlier draft ran only Category B before
+merge, which quietly contradicted the plan's own goal: a skill change that
+manufactures a green result for a routine catalog case — a removed export, a
+signature change — would have passed the only pre-merge live lane and been
+caught a week later by the cron, after merge. The selection rule closes that
+by construction: dimension 6 can only fail where a green claim would be wrong,
+so **every scenario whose ground truth is non-compatible is exactly the set
+where a false green is reachable**, and the pre-merge suite contains all of
+them for the changed skills. Category A scenarios whose ground truth is
+`COMPATIBLE`/`NO_CHANGE` carry no false-green risk by definition and are what
+the cron adds back for the process dimensions.
+
+A diff touching `skills-src/shared/` escalates to `full` rather than
+risk-selecting: a shared fragment is cited by every skill, so "which skills
+does this change affect" has the answer "all of them," and the honest response
+to the highest-blast-radius change is the whole suite, not a rotated sample of
+it. Deterministic rotation was considered and rejected for this case — a
+rotating subset would make the gate's strength depend on which week the PR
+landed in.
 - Judged dimensions (4, 5) are skippable via `--no-judge`, leaving the four
   deterministic dimensions — which include both zero-tolerance ones — at
   near-zero marginal cost.
