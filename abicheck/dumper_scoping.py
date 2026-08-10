@@ -95,7 +95,7 @@ import dataclasses
 import functools
 import inspect
 from collections import deque
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Mapping, Sequence, Set as AbstractSet
 from pathlib import Path
 from typing import Any
 
@@ -417,7 +417,7 @@ def _raw_candidate_spellings(candidate: RecordType | EnumType, identity: str) ->
 
 
 def _kept_touched_alias_names(
-    reachable_by_alias: dict[str, set[str]], kept_spellings: set[str]
+    reachable_by_alias: Mapping[str, AbstractSet[str]], kept_spellings: set[str]
 ) -> set[str]:
     """Alias names whose reachable set touches a kept type's/enum's spelling.
 
@@ -482,7 +482,8 @@ def _typedef_alias_name_spellings(typedefs: dict[str, str]) -> set[str]:
 
 
 def _alias_reach_identities(
-    reachable_by_alias: dict[str, set[str]], key_owners: dict[str, set[str]]
+    reachable_by_alias: Mapping[str, AbstractSet[str]],
+    key_owners: Mapping[str, set[str]],
 ) -> dict[str, set[str]]:
     """Per alias, the dependency-candidate identities its own reachability resolves to.
 
