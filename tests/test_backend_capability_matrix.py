@@ -117,9 +117,7 @@ def _mismatches(caps, rows) -> list[str]:
             ("castxml", row.castxml),
             ("clang", row.clang),
         ):
-            observed = evidence[backend][row.owner].get(
-                row.field, caps.Evidence.ABSENT
-            )
+            observed = evidence[backend][row.owner].get(row.field, caps.Evidence.ABSENT)
             claims_extraction = capability in extracting
             really_extracts = observed is caps.Evidence.EXTRACTED
             if claims_extraction != really_extracts:
@@ -187,9 +185,7 @@ def test_hybrid_backfilled_rows_match_the_merge_layout_list(caps) -> None:
     """``_LAYOUT_SCALAR_ATTRS`` is imported, so it cannot drift silently."""
     from abicheck.dumper_hybrid import _LAYOUT_SCALAR_ATTRS
 
-    backfilled = {
-        r.field for r in caps.rows_for("RecordType") if r.hybrid_backfilled
-    }
+    backfilled = {r.field for r in caps.rows_for("RecordType") if r.hybrid_backfilled}
     assert set(_LAYOUT_SCALAR_ATTRS) <= backfilled, (
         "dumper_hybrid backfills a RecordType layout attr the matrix does not "
         f"mark: {sorted(set(_LAYOUT_SCALAR_ATTRS) - backfilled)}"
