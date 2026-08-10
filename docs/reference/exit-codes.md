@@ -564,21 +564,22 @@ one of those.
 |-----------------|------------------------|--------------------------|-------------|-------------------|----------------------|---------------|
 | `NO_CHANGE` / `PASS` / compatible | `0` | `0` | `0` | `0` | `0` | `0` |
 | `COMPATIBLE` | `0` | `0` | `0`‡ | — | — | `0` |
-| `COMPATIBLE_WITH_RISK` | `0` | `0`–`2`* | `0`–`2`‡ | — | — | `0` |
-| Additions only | `0` | `0`–`1`* | `0`–`1`‡ | — | — | n/a |
-| Quality issues only | `0` | `0`–`1`* | `0`–`1`‡ | — | — | n/a |
+| `COMPATIBLE_WITH_RISK` | `0` | `0`–`2`* | `0` / `0`–`2`*‡ | — | — | `0` |
+| Additions only | `0` | `0`–`1`* | `0` / `0`–`1`*‡ | — | — | n/a |
+| Quality issues only | `0` | `0`–`1`* | `0` / `0`–`1`*‡ | — | — | n/a |
 | `WARN` (ABI risk) | — | — | — | — | `1` | — |
-| `API_BREAK` | `2` | `0`–`2`* | `2` | — | — | `2` |
-| `BREAKING` / `FAIL` | `4` | `4` | `4` | — | `4` | `1` |
+| `API_BREAK` | `2` | `0`–`2`* | `2` / `0`–`2`*‡ | — | — | `2` |
+| `BREAKING` / `FAIL` | `4` | `0`–`4`* | `4` / `0`–`4`*‡ | — | `4` | `1` |
 | `--budget` overflow | — | — | `5` | — | — | — |
 | Missing dependencies/symbols | — | — | — | `1` | — | — |
 | Load failure | — | — | — | — | `4` | — |
 | Invalid invocation / tool error | `64`† | `64`† | `64`† | `64`† | `64`† | `3/4/5/6/7/8/10/11` |
 
-The `scan` column shows the legacy (verdict-based) mapping — `scan --against`
-also accepts `--severity-preset`/`--severity-*`/`--exit-code-scheme` and,
-under the resolved `severity` scheme, follows the same `compare` exit
-(severity) column instead; see
+In the `scan` column, the value left of the `/` is the legacy (verdict-based)
+mapping — the default — and the value right of it applies once `scan
+--against` resolves the `severity` scheme (any `--severity-preset`/
+`--severity-*`/`--exit-code-scheme severity`, or a config `severity:` block),
+where it follows the same `compare` exit (severity) column; see
 ["`scan --against` and severity"](#scan-against-and-severity-mirrors-compare)
 above.
 
@@ -592,9 +593,15 @@ see [`abicheck aggregate`](#abicheck-aggregate).
 none of these rows — it always exits `0`/`1`/`64`; see
 [`--dry-run`](#-dry-run-dump-compare-scan-deps-tree-deps-compare) above.
 
-\* Severity exit codes depend on the configuration. For example, with
+\* Severity exit codes depend on the configuration, and the range covers the
+whole configuration space — **including demotion of a real break**. With
 `--severity-addition error`, additions exit `1`; with `--severity-preset
-info-only`, everything exits `0`.
+info-only` every category is `info`, so *everything* exits `0`, a `BREAKING`
+comparison included. The default preset leaves `potential_breaking` at
+`warning`, so an `API_BREAK` exits `0` unless `--severity-preset strict` (or
+`--severity-potential-breaking error`) raises it to `2`. Read the report's
+own `severity` gate block — `exit_code`/`blocking`/`blocking_categories` —
+rather than inferring the cause from the code.
 
 † Every command exits `64` for an invalid invocation — bad arguments/options
 or an unreadable/unrecognised input — deliberately outside the verdict/result
@@ -602,14 +609,15 @@ space so a usage error is never mistaken for a compatibility result. To
 reliably distinguish verdicts from errors in a script, use `--format json` and
 read the `verdict` field where available.
 
-‡ `scan`'s **legacy** scheme (the default) collapses every
-compatible/advisory-only state (no break, deployment risk, additions,
-quality signals) to exit `0` — read `--format json` if your pipeline needs
-to distinguish them. Under a resolved `severity` scheme (`scan --against`
-with any `--severity-*`/`--exit-code-scheme severity`, or a config
-`severity:` block), `scan` follows the `compare` exit (severity) column
-instead, so these rows become `0`–`1`/`0`–`2` on the same `*` terms — e.g.
-`--severity-addition error` exits `1` on an additions-only diff. See
+‡ Two schemes, shown as `legacy / severity`. `scan`'s **legacy** scheme (the
+default) collapses every compatible/advisory-only state (no break,
+deployment risk, additions, quality signals) to exit `0` — read `--format
+json` if your pipeline needs to distinguish them. Under a resolved
+`severity` scheme (`scan --against` with any `--severity-*`/
+`--exit-code-scheme severity`, or a config `severity:` block) `scan` follows
+the `compare` exit (severity) column on the same `*` terms, in **both**
+directions: `--severity-addition error` exits `1` on an additions-only diff,
+and `--severity-preset info-only` exits `0` on a `BREAKING` one. See
 ["`scan --against` and severity"](#scan-against-and-severity-mirrors-compare).
 
 ---
