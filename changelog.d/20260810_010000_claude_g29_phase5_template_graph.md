@@ -616,3 +616,80 @@
   and known from the parameter declaration itself, so a blanket "any bare
   value" check would have needlessly discarded the far more common,
   unambiguous case too.
+
+  A twenty-second round found and fixed six more real gaps, all confirmed
+  empirically against real compiled/hand-assembled fixtures, plus resolved
+  a real merge conflict against `main`'s concurrent `override_graph.py`
+  (ADR-041 P2 item 1) landing. First, the merge: `main` refactored
+  `inline._build_inline_graph`'s four Clang-backed fold calls into one
+  `inline_graph_fold.fold_semantic_graphs()` wrapper and added
+  `fold_override_graph`, occupying the same call sites this branch's
+  `fold_template_graph`/`fold_archive_graph` (G29 Phase 5) independently
+  added. Resolved by keeping both new fold functions, extending
+  `fold_semantic_graphs` to run all five Clang-backed passes (call, type,
+  override, template, include), and keeping `fold_archive_graph` as the
+  unconditional, non-clang pass alongside it.
+
+  Then, six Codex-confirmed real gaps. (1) `archive_graph.py`: a `/`/`//`/
+  `__.SYMDEF` special-member header could declare an arbitrarily large
+  size, read via a single unbounded `reader.read(data_offset, size)` call
+  before any content validation — over a *sparse* file whose reported
+  logical size can cheaply match an inflated header claim (`truncate
+  --size=10G evil.a` costs near-zero real disk), an ordinary dump attempt
+  could try to materialize gigabytes as one Python `bytes` object. Fixed
+  with a new `_MAX_SPECIAL_MEMBER_BYTES` (1 GiB) ceiling checked before
+  each of the three full-body reads, and a smaller `_MAX_BSD_NAME_BYTES`
+  (64 KiB) ceiling on a BSD `#1/<len>` extended-name length (reachable on
+  *any* member, not just an index, since a member's own `size` is equally
+  attacker/corruption-controlled). (2) `archive_graph.py`: a `__.SYMDEF`
+  string-table offset pointing into the *middle* of another entry's name
+  (e.g. offset 1 into `"xfoo\0"`) decoded as the plausible-looking but
+  spoofed `"foo"` — real ranlib output never does this (an entry's offset
+  always names a string's start), so a malformed/hostile one is now
+  rejected unless `str_off == 0` or immediately follows a NUL. (3)
+  `diff_cxx_rules.py`: the ABI-tag ordering fix flattened a tag into the
+  identity as bare `name + "B" + tag`, so `C[abi_tag("tag")]<int>` and an
+  unrelated, plainly-named `CBtag<int>` both flattened to the identical
+  `"CBtagIiE"` — confirmed against two real compiled symbols
+  (`_ZN1CB3tagIiE1fEv` vs. `_ZN5CBtagIiE1fEv`). Now delimited as
+  `"[abi:tag]"`, which no real C++ identifier can contain. (4)
+  `template_graph.py`: the sticky-file mechanism (`id_to_file.setdefault`)
+  let a loc-less header stub permanently lock a specialization's `file` to
+  the *header*, even when the detached full definition carries its own
+  explicit `.cpp` location — confirmed via a real clang dump of a header-
+  declared template explicitly specialized in a `.cpp`. Now an explicit
+  own `loc.file` always overwrites a prior (inherited) mapping for the
+  same id. (5) `template_graph.py`: a namespace-scoped explicit
+  instantiation written with a *qualified* name outside its namespace
+  (`template struct api::Holder<int>;`) detaches its full content as a
+  direct `TranslationUnitDecl` child, not nested inside the namespace at
+  all — confirmed against real clang 18 output — so the member-scoping
+  fix's own structural-scope computation produced the bare `"Holder"`
+  instead of `"api::Holder"`, wrongly splitting a shared member. Fixed by
+  preferring the id-keyed `id_to_template_qname` registration (set
+  correctly from the stub, always reached nested inside its own
+  `ClassTemplateDecl`) over this walk's own structural scope, for both the
+  member-locs lookup and the scope prefix used to build child qnames. (6)
+  `template_graph.py`: an out-of-line member-template *definition*
+  (`template <class T> void C::f(T) {}`) detaches as a separate, top-level
+  `FunctionTemplateDecl` whose own children resolve (via the existing
+  id-keyed join) to the same instantiated symbols the correctly-scoped
+  in-class declaration already captures — confirmed against real clang
+  output — so without a fix the graph carried the instantiation twice,
+  once correctly under `"C::f"` and once wrongly under a bare `"f"` that
+  could coincidentally merge with an unrelated global template. Fixed by
+  resolving the node's `parentDeclContextId` (emitted by clang precisely
+  on this node shape, confirmed absent on an ordinary in-class
+  declaration) through `id_to_qname` and preferring it unconditionally
+  when present.
+
+  Two more findings were investigated and deliberately documented rather
+  than fixed: extending the `auto`-NTTP class-instantiation guard to
+  function templates (CodeRabbit nitpick) is unnecessary in practice — a
+  function instantiation's own graph-node identity already keys on its
+  mangled name, not the ambiguous label, so the only residual effect is a
+  cosmetic label collision between two instantiations that (being
+  ambiguous same-valued `auto` NTTPs of one template) correctly share one
+  `template_decl` node anyway; documented in
+  `_class_template_has_auto_nttp`'s own docstring rather than adding an
+  unverified parallel check.

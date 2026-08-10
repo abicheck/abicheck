@@ -634,7 +634,7 @@ class TestItaniumScopeParser:
                 "_ZN5ArrayILi4EE4sizeEv",
                 ["ArrayILi4EE", "size"],
             ),  # Array<4>::size (non-type arg)
-            ("_ZN1C3getB5cxx11Ev", ["C", "getBcxx11"]),  # C::get[abi:cxx11]()
+            ("_ZN1C3getB5cxx11Ev", ["C", "get[abi:cxx11]"]),  # C::get[abi:cxx11]()
             ("_ZSt5touchv", ["std", "touch"]),  # std::touch(), no N...E wrapper
             ("_ZNSt6detail3fooEv", ["std", "detail", "foo"]),  # std::detail::foo()
             # Mach-O direct-clang mangled names carry an extra platform leading
@@ -821,6 +821,22 @@ class TestItaniumScopeParser:
     )
     def test_ctor_dtor_marker_span_none_when_not_a_ctor_dtor(self, mangled):
         assert itanium_ctor_dtor_marker_span(mangled) is None
+
+    def test_abi_tag_boundary_does_not_collide_with_a_plain_class_name(self):
+        """An ABI-tagged class template's flattened identity must not
+        collide with an unrelated, plainly-spelled class merely starting
+        with the same letters (Codex review, fresh evidence): confirmed
+        against two real compiled symbols -- `C[abi_tag("tag")]<int>::f()`
+        (`_ZN1CB3tagIiE1fEv`) and an unrelated `CBtag<int>::f()`
+        (`_ZN5CBtagIiE1fEv`) -- both flattened to the identical
+        `"CBtagIiE"` before the `[abi:tag]` delimiter fix."""
+        tagged = itanium_scope_components("_ZN1CB3tagIiE1fEv")
+        plain = itanium_scope_components("_ZN5CBtagIiE1fEv")
+        assert tagged is not None
+        assert plain is not None
+        assert tagged != plain
+        assert tagged == ["C[abi:tag]IiE", "f"]
+        assert plain == ["CBtagIiE", "f"]
 
 
 class TestMsvcScopeParser:

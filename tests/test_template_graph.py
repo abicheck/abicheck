@@ -677,6 +677,73 @@ def test_plain_int_nttp_bare_value_argument_still_resolves() -> None:
     assert labels == {"A<1>", "A<2>"}
 
 
+def test_out_of_line_member_template_definition_recovers_owner_scope() -> None:
+    """An out-of-line member-template *definition* (``template <class T>
+    void C::f(T) {}``, the class's own declaration ``template <class T>
+    void f(T);`` staying in-class) detaches as a *separate*, top-level
+    ``FunctionTemplateDecl`` -- not nested inside ``CXXRecordDecl:C`` at
+    all -- confirmed empirically against real clang AST output (Codex
+    review, fresh evidence): its own children resolve (via the existing
+    id-keyed join) to the identical instantiated symbols the correctly-
+    scoped in-class declaration already captures, so this node's own bare
+    structural scope (``[]``) would otherwise mint a *second*,
+    incorrectly-scoped ``"f"`` template_qname that could coincidentally
+    merge with an unrelated global template also named ``f``. Clang emits
+    ``parentDeclContextId`` on exactly this node shape -- the real
+    semantic owner's own id -- which this module must resolve through
+    ``id_to_qname`` the same way any other decl id already is."""
+    in_class_decl = {
+        "kind": "FunctionTemplateDecl",
+        "name": "f",
+        "inner": [
+            {"kind": "TemplateTypeParmDecl", "name": "T"},
+            {"kind": "CXXMethodDecl", "name": "f", "inner": []},
+            {
+                "kind": "CXXMethodDecl",
+                "name": "f",
+                "mangledName": "_ZN1C1fIiEEvT_",
+                "inner": [{"kind": "TemplateArgument", "type": {"qualType": "int"}}],
+            },
+        ],
+    }
+    # The out-of-line definition: a separate, top-level FunctionTemplateDecl
+    # carrying parentDeclContextId pointing at C's own id -- its own child
+    # is directly mangled (bypassing the unmangled-stub join, which is
+    # already covered elsewhere) so this test stays focused on the qname
+    # recovery mechanism itself.
+    out_of_line_def = {
+        "kind": "FunctionTemplateDecl",
+        "name": "f",
+        "parentDeclContextId": "0xC_ID",
+        "inner": [
+            {"kind": "TemplateTypeParmDecl", "name": "T"},
+            {
+                "kind": "CXXMethodDecl",
+                "name": "f",
+                "mangledName": "_ZN1C1fIiEEvT_",
+                "inner": [{"kind": "TemplateArgument", "type": {"qualType": "int"}}],
+            },
+        ],
+    }
+    ast = {
+        "kind": "TranslationUnitDecl",
+        "inner": [
+            {
+                "kind": "CXXRecordDecl",
+                "name": "C",
+                "id": "0xC_ID",
+                "inner": [in_class_decl],
+            },
+            out_of_line_def,
+        ],
+    }
+    out = parse_clang_ast_templates(ast)
+    function_insts = [i for i in out if i.kind == "function"]
+    assert function_insts
+    qnames = {i.template_qname for i in function_insts}
+    assert qnames == {"C::f"}  # never the bare, unowned "f"
+
+
 def test_typedef_alias_argument_resolves_through_to_the_real_record() -> None:
     """clang's own printer resolves a ``using``/typedef alias argument
     straight to the underlying record's ``decl`` -- no typedef-chain
@@ -1001,6 +1068,57 @@ def test_instantiation_file_inherits_sticky_location_from_an_earlier_sibling() -
     out = parse_clang_ast_templates(ast)
     assert len(out) == 1
     assert out[0].file == "t.cpp"
+
+
+def test_specialization_file_prefers_the_full_definition_over_the_header_stub() -> None:
+    """When a template is declared in a header but explicitly specialized in
+    a ``.cpp``, clang emits the header-located, loc-less stub (nested under
+    the primary ``ClassTemplateDecl``, whose own inherited sticky file is
+    the *header*, since the header's declarations are visited first) before
+    the detached full specialization -- which DOES carry its own explicit
+    ``loc.file`` (the real ``.cpp``) -- confirmed empirically against a real
+    clang dump of ``template <typename T> struct C { ... };`` (header) plus
+    ``template <> struct C<int> { ... };`` (cpp): the id-keyed file index
+    must prefer the full definition's own explicit location over the stub's
+    inherited one, or the specialization is permanently misattributed to
+    the header and loses its ``defined_in_project`` provenance entirely
+    (Codex review, fresh evidence)."""
+    ast = {
+        "kind": "TranslationUnitDecl",
+        "inner": [
+            {
+                "kind": "ClassTemplateDecl",
+                "name": "C",
+                "loc": {"file": "prim.hpp"},
+                "inner": [
+                    {"kind": "TemplateTypeParmDecl", "name": "T"},
+                    {"kind": "CXXRecordDecl", "name": "C"},
+                    # The stub: same id as the full definition below, no
+                    # loc of its own -- inherits the header's sticky file.
+                    {
+                        "id": "0xSPEC",
+                        "kind": "ClassTemplateSpecializationDecl",
+                        "name": "C",
+                    },
+                ],
+            },
+            # The detached full definition: same id, but its OWN explicit
+            # loc.file is the real .cpp where the specialization is written.
+            {
+                "id": "0xSPEC",
+                "kind": "ClassTemplateSpecializationDecl",
+                "name": "C",
+                "completeDefinition": True,
+                "loc": {"file": "impl.cpp"},
+                "inner": [
+                    {"kind": "TemplateArgument", "type": {"qualType": "int"}},
+                ],
+            },
+        ],
+    }
+    out = parse_clang_ast_templates(ast)
+    assert len(out) == 1
+    assert out[0].file == "impl.cpp"
 
 
 def test_nested_type_inside_specialization_disambiguated_by_its_own_args() -> None:
@@ -1508,6 +1626,121 @@ def test_explicit_instantiation_definition_member_still_shares_the_primary_decl(
     assert len(function_insts) == 2
     qnames = {i.template_qname for i in function_insts}
     assert qnames == {"Holder::apply"}  # shared, not split by detachment
+
+    graph = SourceGraphSummary()
+    augment_graph_with_templates(graph, out)
+    tdecl_nodes = {n.id for n in graph.nodes if n.kind == NODE_TEMPLATE_DECL}
+    assert len([n for n in tdecl_nodes if "apply" in n]) == 1  # one shared node
+
+
+def test_namespace_scoped_explicit_instantiation_detached_outside_namespace_still_shares() -> (
+    None
+):
+    """A namespace-scoped explicit instantiation written with a *qualified*
+    name outside its namespace (``template struct api::Holder<int>;``)
+    detaches its full-content sibling as a direct ``TranslationUnitDecl``
+    child -- not nested inside ``NamespaceDecl:api`` at all -- confirmed
+    empirically against real clang 18 AST output. The stub (always reached
+    correctly nested inside its own ``ClassTemplateDecl``, itself correctly
+    nested inside the namespace) already registers the right id ->
+    ``"api::Holder"`` mapping; this module must reuse that registration for
+    both the shared-member lookup *and* the scope prefix used to build the
+    member's own qname, rather than trusting this walk's own structural
+    scope (``[]`` for a node reached outside the namespace) -- otherwise
+    ``api::Holder<int>::apply`` and ``api::Holder<double>::apply`` (the
+    same syntactic, shared member) wrongly split onto two different
+    qnames (Codex review, fresh evidence)."""
+    pattern_apply = {
+        "kind": "FunctionTemplateDecl",
+        "name": "apply",
+        "loc": {"offset": 100},
+        "inner": [{"kind": "TemplateTypeParmDecl", "name": "U"}],
+    }
+
+    def holder_member(mangled_prefix: str) -> dict:
+        return {
+            "kind": "FunctionTemplateDecl",
+            "name": "apply",
+            "loc": {"offset": 100},  # same source position as the pattern's own
+            "inner": [
+                {"kind": "TemplateTypeParmDecl", "name": "U"},
+                {"kind": "FunctionDecl", "name": "apply", "inner": []},
+                {
+                    "kind": "FunctionDecl",
+                    "name": "apply",
+                    "mangledName": f"_ZN3api6Holder{mangled_prefix}5applyI{mangled_prefix[1]}EET_S3_",
+                    "inner": [
+                        {"kind": "TemplateArgument", "type": {"qualType": "int"}}
+                    ],
+                },
+            ],
+        }
+
+    # The explicit-instantiation stub for api::Holder<int>: nested normally
+    # inside its own ClassTemplateDecl, which is itself nested inside the
+    # api namespace.
+    int_stub = {
+        "id": "0xSPEC_INT",
+        "kind": "ClassTemplateSpecializationDecl",
+        "name": "Holder",
+    }
+    # The detached full content: same id, but placed as a DIRECT
+    # TranslationUnitDecl child -- outside NamespaceDecl:api entirely,
+    # matching real clang output for the qualified-name-outside-namespace
+    # explicit instantiation syntax.
+    int_full = {
+        "id": "0xSPEC_INT",
+        "kind": "ClassTemplateSpecializationDecl",
+        "name": "Holder",
+        "completeDefinition": True,
+        "inner": [
+            {"kind": "TemplateArgument", "type": {"qualType": "int"}},
+            holder_member("IiE"),
+        ],
+    }
+    # api::Holder<double>: an ordinary implicit instantiation, nested
+    # normally inside the namespace.
+    double_full = {
+        "id": "0xSPEC_DOUBLE",
+        "kind": "ClassTemplateSpecializationDecl",
+        "name": "Holder",
+        "completeDefinition": True,
+        "inner": [
+            {"kind": "TemplateArgument", "type": {"qualType": "double"}},
+            holder_member("IdE"),
+        ],
+    }
+    ast = {
+        "kind": "TranslationUnitDecl",
+        "inner": [
+            {
+                "kind": "NamespaceDecl",
+                "name": "api",
+                "inner": [
+                    {
+                        "kind": "ClassTemplateDecl",
+                        "name": "Holder",
+                        "inner": [
+                            {"kind": "TemplateTypeParmDecl", "name": "T"},
+                            {
+                                "kind": "CXXRecordDecl",
+                                "name": "Holder",
+                                "inner": [pattern_apply],
+                            },
+                            int_stub,
+                            double_full,
+                        ],
+                    },
+                ],
+            },
+            int_full,  # detached OUTSIDE the namespace
+        ],
+    }
+    out = parse_clang_ast_templates(ast)
+    function_insts = [i for i in out if i.kind == "function"]
+    assert len(function_insts) == 2
+    qnames = {i.template_qname for i in function_insts}
+    assert qnames == {"api::Holder::apply"}  # shared, not split by detachment
 
     graph = SourceGraphSummary()
     augment_graph_with_templates(graph, out)

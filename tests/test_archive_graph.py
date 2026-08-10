@@ -31,6 +31,8 @@ from pathlib import Path
 import pytest
 
 from abicheck.buildsource.archive_graph import (
+    _MAX_BSD_NAME_BYTES,
+    _MAX_SPECIAL_MEMBER_BYTES,
     ARCHIVE_MAGIC,
     THIN_ARCHIVE_MAGIC,
     ArchiveFormatError,
@@ -365,6 +367,58 @@ def test_bsd_symdef_string_table_length_overruns_body_raises() -> None:
         parse_ar_archive(BytesReader(data))
 
 
+def test_gnu_index_declaring_oversized_body_raises_before_reading() -> None:
+    """A ``/`` index header declaring a size over the special-member byte
+    cap must raise before the full body is read into memory -- a real
+    archive's index is never remotely this large, so a declared size this
+    big can only be corrupt or hostile (Codex review, fresh evidence: over
+    a *sparse* file whose reported logical size legitimately matches an
+    inflated header claim, reading it unconditionally is a real
+    resource-exhaustion path, not just a correctness one). The header's
+    declared size is checked directly, independent of how much real data
+    backs it in this test."""
+    huge = _MAX_SPECIAL_MEMBER_BYTES + 1
+    data = ARCHIVE_MAGIC + _header("/", huge)
+    with pytest.raises(ArchiveFormatError, match="byte cap"):
+        parse_ar_archive(BytesReader(data))
+
+
+def test_gnu_long_name_table_declaring_oversized_body_raises_before_reading() -> None:
+    huge = _MAX_SPECIAL_MEMBER_BYTES + 1
+    data = ARCHIVE_MAGIC + _header("//", huge)
+    with pytest.raises(ArchiveFormatError, match="byte cap"):
+        parse_ar_archive(BytesReader(data))
+
+
+def test_bsd_symdef_declaring_oversized_body_raises_before_reading() -> None:
+    huge = _MAX_SPECIAL_MEMBER_BYTES + 1
+    data = ARCHIVE_MAGIC + _header("__.SYMDEF", huge)
+    with pytest.raises(ArchiveFormatError, match="byte cap"):
+        parse_ar_archive(BytesReader(data))
+
+
+def test_bsd_extended_name_length_over_cap_is_unresolved_not_read() -> None:
+    """A ``#1/<len>`` name length over :data:`_MAX_BSD_NAME_BYTES`, paired
+    with a matching huge ``size`` so the existing ``n > size`` guard alone
+    wouldn't catch it -- reachable on *any* member, not just an index
+    (Codex review, fresh evidence). Degrades to an unresolved name (the
+    member still counted, per this module's usual policy), not a read
+    attempt at that length."""
+    huge = _MAX_BSD_NAME_BYTES + 1
+    b_data = b"OBJB"
+    data = (
+        ARCHIVE_MAGIC
+        + _header(f"#1/{huge}", huge + 4)
+        + _pad(b"x" * (huge + 4))
+        + _header("b.o", len(b_data))
+        + _pad(b_data)
+    )
+    contents = parse_ar_archive(BytesReader(data))
+    # The oversized-name member is skipped (unresolved), not misparsed or
+    # OOM-inducing; the well-formed member after it still parses.
+    assert [m.name for m in contents.members] == ["b.o"]
+
+
 def test_parse_index_offset_naming_no_member_is_skipped_not_raised() -> None:
     # A well-formed index whose one entry's offset resolves to nothing (e.g.
     # a stale index after member reordering) — the symbol is dropped, not an
@@ -411,6 +465,32 @@ def test_bsd_symdef_index() -> None:
         ("alpha", "a.o"),
         ("beta", "b.o"),
     ]
+
+
+def test_bsd_symdef_offset_into_middle_of_another_name_is_rejected() -> None:
+    """A real ranlib-written ``str_off`` always names the *start* of a
+    string-table entry -- either offset 0 or immediately after a preceding
+    NUL. A malformed/hostile entry pointing one byte into ``xfoo\\0``
+    would otherwise decode as the plausible-looking but spoofed name
+    ``"foo"`` -- if that coincidentally matches a real, unrelated
+    ``binary_symbol`` node, it produces a false ``OBJECT_DEFINES_SYMBOL``
+    edge (Codex review, fresh evidence)."""
+    strtab = b"xfoo\x00"
+    a_data = b"OBJA"
+    a_offset = len(ARCHIVE_MAGIC)
+    # str_off = 1 points into the middle of "xfoo\0", not at its start.
+    entries = struct.pack("<II", 1, a_offset)
+    body = struct.pack("<I", 8) + entries + struct.pack("<I", len(strtab)) + strtab
+    data = (
+        ARCHIVE_MAGIC
+        + _header("a.o", len(a_data))
+        + _pad(a_data)
+        + _header("__.SYMDEF", len(body))
+        + _pad(body)
+    )
+    contents = parse_ar_archive(BytesReader(data))
+    assert {m.name for m in contents.members} == {"a.o"}
+    assert contents.symbols == ()
 
 
 def test_bsd_symdef_unterminated_string_table_entry_is_skipped_not_accepted() -> None:

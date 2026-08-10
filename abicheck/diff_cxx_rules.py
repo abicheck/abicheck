@@ -213,7 +213,17 @@ def _parse_source_name_component(s: str, i: int) -> tuple[str | None, int]:
         tag, j = _read_length_prefixed_name(s, i + 1)
         if tag is None:
             break
-        name = f"{name}B{tag}"
+        # Delimited as "[abi:tag]" -- not the raw "B<tag>" the mangling
+        # itself uses -- so a flattened identity can't collide with an
+        # unrelated, plainly-spelled class merely starting with the same
+        # letters (Codex review, fresh evidence): `C[abi_tag("tag")]<int>`
+        # (mangled ...CB3tagIiE...) and a class literally named `CBtag<int>`
+        # (mangled ...CBtagIiE...) both flattened to the identical
+        # "CBtagIiE" before this fix, confirmed against two real compiled
+        # symbols -- `_ZN1CB3tagIiE1fEv` vs. `_ZN5CBtagIiE1fEv`, genuinely
+        # different classes' own `f()`. No real C++ identifier can contain
+        # `[`/`:`/`]`, so this delimiter can never collide with a real name.
+        name = f"{name}[abi:{tag}]"
         i = j
     # A directly-attached template-argument list belongs to this
     # component; keep it raw so Box<int> and Box<float> stay distinct.

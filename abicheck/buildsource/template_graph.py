@@ -407,7 +407,29 @@ def _index_type_decls(
     name = str(node.get("name") or "")
     node_id = str(node.get("id") or "")
     if node_id:
-        id_to_file.setdefault(node_id, cur_file)
+        if f:
+            # This node carries its own explicit loc.file -- authoritative
+            # for this exact id, so it always wins over whatever an earlier
+            # occurrence of the same id recorded (Codex review, fresh
+            # evidence): the explicit-instantiation/specialization
+            # detachment quirk means the same id can appear twice -- an
+            # empty, loc-less stub nested under the primary ClassTemplateDecl
+            # (which inherits the *header*'s sticky file, since the header's
+            # own top-level declarations are visited first) and a detached
+            # full-content sibling elsewhere that DOES carry its own loc
+            # (the actual .cpp where the specialization/instantiation is
+            # written). A plain setdefault let whichever occurrence was
+            # visited first win — for this exact shape, the loc-less stub
+            # always wins, permanently misattributing the specialization to
+            # the header. project_source_files() then excludes it (public
+            # headers aren't "project" sources), silently dropping the
+            # instantiation's own defined_in_project provenance. An inherited
+            # (non-own) file still only sets if absent, so a later
+            # loc-less occurrence of an id already resolved by an explicit
+            # one can't un-set it.
+            id_to_file[node_id] = cur_file
+        else:
+            id_to_file.setdefault(node_id, cur_file)
 
     if kind in _RECORD_DECL_KINDS and name:
         if node_id:
@@ -566,7 +588,23 @@ def _class_template_has_auto_nttp(class_template_node: dict[str, Any]) -> bool:
     ``auto`` case is deliberately checked, not every bare-``value`` shape
     (that would needlessly discard the common, unambiguous case too, the
     opposite of this module's usual false-negative-over-false-positive
-    default)."""
+    default).
+
+    **Class instantiations only** -- a ``FunctionTemplateDecl`` with its own
+    ``auto`` NTTP parameter (``template <auto V> void f();``) has the
+    identical ambiguity, and this helper is not applied there (CodeRabbit
+    nitpick, confirmed real but low-impact): unlike a class instantiation, a
+    function instantiation's own graph-node identity
+    (:func:`template_instantiation_node_id`) already keys on its unique
+    mangled name when available, not the label, so two ambiguous NTTP
+    arguments still mint distinct, correctly-joined instantiation nodes --
+    only the cosmetic ``label``/``args`` spelling collides, and (when both
+    instantiate the same underlying template, which an ambiguous same-
+    valued ``auto`` NTTP always does) the shared ``template_decl`` node is
+    the semantically correct outcome anyway, not a merge bug. A
+    ``FunctionTemplateDecl`` equivalent of this helper would need its own
+    verification pass before being wired in, deferred rather than added
+    as a drive-by extension of the class-only fix above."""
     for child in class_template_node.get("inner", []) or []:
         if str(child.get("kind", "")) != "NonTypeTemplateParmDecl":
             continue
@@ -1033,7 +1071,33 @@ def _walk_function_templates(
 
     if kind == _FUNCTION_TEMPLATE_KIND:
         name = str(node.get("name") or "")
-        qname = "::".join([*scope, name]) if name else ""
+        # An out-of-line member-template *definition* (`template <class T>
+        # void C::f(T) {}`, the class's own declaration `template <class T>
+        # void f(T);` staying in-class) detaches as a *separate*, top-level
+        # FunctionTemplateDecl -- not nested inside CXXRecordDecl:C at all
+        # -- confirmed empirically against real clang AST output (Codex
+        # review, fresh evidence): this node's own structural `scope` is
+        # therefore `[]`, computing the bare "f" instead of "C::f", and its
+        # own children happen to resolve (via full_function_by_id's id
+        # join) to the identical instantiated symbols the correctly-scoped
+        # in-class declaration already captures -- so without this fix the
+        # graph would carry the same instantiation twice, once correctly
+        # under "C::f" and once wrongly under a bare "f" that could
+        # coincidentally merge with an unrelated global template also named
+        # "f". Clang emits `parentDeclContextId` on exactly this node shape
+        # (confirmed absent on the ordinary, correctly-nested in-class
+        # declaration) -- the id of the *real* semantic owner, resolvable
+        # through id_to_qname the same way a template argument's `decl`
+        # cross-reference already is. Preferred unconditionally when
+        # present, since clang only emits it to correct a structural
+        # mismatch in the first place.
+        owner_id = str(node.get("parentDeclContextId") or "")
+        owner_qname = id_to_qname.get(owner_id) if owner_id else None
+        qname = (
+            f"{owner_qname}::{name}"
+            if owner_qname and name
+            else ("::".join([*scope, name]) if name else "")
+        )
         if qname:
             signature = _function_template_pattern_signature(node)
             for child in node.get("inner", []) or []:
@@ -1126,8 +1190,41 @@ def _walk_function_templates(
         # bare qname "H::f", sharing one template_decl id). Decided per
         # member (not per specialization) since only a FunctionTemplateDecl
         # child's own identity is in question here.
+        #
+        # class_qname prefers the id-keyed registration (id_to_template_qname,
+        # set from the *stub* occurrence nested under the real ClassTemplateDecl)
+        # over this walk's own structural scope (Codex review, fresh evidence,
+        # confirmed against real clang AST output): a namespace-scoped explicit
+        # instantiation written with a qualified name *outside* its namespace
+        # (`template struct api::Holder<int>;`) detaches its full-content
+        # sibling as a direct TranslationUnitDecl child -- not nested inside
+        # NamespaceDecl:api at all -- so this walk's own scope is `[]` there,
+        # computing the bare "Holder" instead of "api::Holder". The stub,
+        # always reached correctly nested inside its own ClassTemplateDecl
+        # (itself correctly nested inside NamespaceDecl:api), already
+        # registered the right id -> "api::Holder" mapping; reusing it here
+        # means the member-locs lookup below stays correct regardless of
+        # where clang chose to detach this occurrence's full content.
+        # Structural scope is still the fallback for a specialization id
+        # this module never resolved via the stub path (an unmodeled shape).
+        node_id = str(node.get("id") or "")
         bare_name = str(node.get("name") or "")
-        class_qname = "::".join([*scope, bare_name]) if bare_name else ""
+        resolved_qname = id_to_template_qname.get(node_id)
+        if resolved_qname:
+            class_qname = resolved_qname
+            # The scope *above* this class (what children get appended
+            # onto) -- drop the class's own trailing bare_name back off
+            # resolved_qname, mirroring how class_qname was itself built
+            # ("::".join([*parent_scope, bare_name])) without needing to
+            # trust this walk's own (possibly wrong, see below) `scope`.
+            class_parent_scope = (
+                resolved_qname.rsplit("::", 1)[0].split("::")
+                if "::" in resolved_qname
+                else []
+            )
+        else:
+            class_qname = "::".join([*scope, bare_name]) if bare_name else ""
+            class_parent_scope = scope
         member_locs = qname_to_member_locs.get(class_qname, {})
         disambiguated_name: str | None = None
         for child in node.get("inner", []) or []:
@@ -1153,7 +1250,12 @@ def _walk_function_templates(
                     name = disambiguated_name
             else:
                 name = bare_name
-            child_scope = [*scope, name] if name else scope
+            # The scope prefix for this child comes from class_parent_scope
+            # (the id-corrected value above), not the raw structural `scope`
+            # -- same reasoning as class_qname itself: a detached-to-top-level
+            # occurrence's structural scope can be wrong even though its id
+            # was already correctly resolved.
+            child_scope = [*class_parent_scope, name] if name else class_parent_scope
             _walk_function_templates(
                 child,
                 child_scope,

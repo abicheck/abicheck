@@ -153,10 +153,11 @@ def _is_bsd_index_wide(stripped: str) -> bool:
 
 
 #: Cap on how much of one archive this module will read. Only member
-#: *headers* and the two small special members are ever read (see
-#: :class:`FileReader`), so this is a guard against a pathological
-#: member count / corrupt size field looping, not against a large archive:
-#: a 500 MiB static library with a thousand members costs ~60 KiB of reads.
+#: *headers* and the special members (bounded by :data:`_MAX_SPECIAL_MEMBER_BYTES`
+#: below, not assumed small — Codex review, fresh evidence) are ever read
+#: (see :class:`FileReader`), so this is a guard against a pathological
+#: member count looping, not against a large archive: a 500 MiB static
+#: library with a thousand members costs ~60 KiB of header reads.
 _MAX_MEMBERS = 100_000
 
 #: A separate, much more generous sanity cap for the *symbol* count declared
@@ -171,9 +172,39 @@ _MAX_MEMBERS = 100_000
 #: reliably exceeds any real body before the expensive per-entry loop
 #: runs), so this cap only needs to stop a pathologically large *declared*
 #: count from building an oversized Python list when the body genuinely is
-#: that large — a scenario already bounded by real file size, not an
-#: amplification attack.
+#: that large. Reading ``body`` itself into memory in the first place is
+#: bounded separately, by :data:`_MAX_SPECIAL_MEMBER_BYTES` below, checked
+#: *before* the read (not "already bounded by real file size" — a sparse
+#: file's reported size can match an inflated header claim while consuming
+#: almost no real disk, so that assumption alone doesn't hold; Codex
+#: review, fresh evidence).
 _MAX_INDEXED_SYMBOLS = 50_000_000
+
+#: Hard ceiling on the declared ``size`` of a special member (the ``//``
+#: long-name table, or a GNU/BSD symbol index) this module reads in full via
+#: a single ``reader.read(data_offset, size)`` call, checked *before* that
+#: read (Codex review, fresh evidence): the "bounded by real file size, not
+#: an amplification attack" assumption the count cap above relies on does
+#: not hold for a *sparse* file, whose ``os.fstat``-reported logical size
+#: (what :class:`FileReader` uses as its own ``size()``) can legitimately
+#: match an inflated header claim while consuming almost no real disk —
+#: `truncate --size=10G evil.a` costs near-zero disk space but reports a
+#: real 10 GiB length, so a "declares a size that fits within the file"
+#: check alone doesn't catch it. Comfortably above what a real archive ever
+#: needs (even :data:`_MAX_INDEXED_SYMBOLS` worth of GNU index entries plus
+#: generous per-symbol name bytes fits well under this), but finite: a
+#: declared size this large can only be a corrupt or hostile header, so it's
+#: rejected before the read that would otherwise attempt to materialize
+#: that many bytes as a single Python `bytes` object.
+_MAX_SPECIAL_MEMBER_BYTES = 1024 * 1024 * 1024
+
+#: Hard ceiling on a BSD ``#1/<len>`` inline extended-name length -- the
+#: same read-before-validating shape as the special-member cap above, but
+#: reachable on *any* member (not just an index), since every member's own
+#: name can use this encoding (Codex review, fresh evidence). A real
+#: filesystem path is at most a few thousand bytes; this is far more
+#: generous than that while still bounding the read.
+_MAX_BSD_NAME_BYTES = 65536
 
 #: ``provenance`` tag on every node/edge this module creates, so an
 #: archive-introspection fact is distinguishable from the ``build_evidence``
@@ -447,12 +478,19 @@ def _resolve_member_name(
         if not digits.isdigit():
             return None, 0
         n = int(digits)
-        if n > size:
+        if n > size or n > _MAX_BSD_NAME_BYTES:
             # A declared name length that overruns the member's own data
             # would previously silently clamp to `size` (`min(n, size)`),
             # fabricating a truncated name out of what is actually the
             # member's real content instead of reporting the malformed
             # header. Treat it the same as any other unresolvable name.
+            # The separate _MAX_BSD_NAME_BYTES bound (Codex review, fresh
+            # evidence) closes a real resource-exhaustion path this `n >
+            # size` check alone doesn't: `size` itself is attacker/
+            # corruption-controlled too, so a member declaring both a huge
+            # `size` and a matching huge `#1/<len>` name would otherwise
+            # pass this check and reach the read below with an unbounded
+            # length.
             return None, 0
         raw = reader.read(data_offset, n)
         return raw.split(b"\x00", 1)[0].decode("utf-8", "replace"), n
@@ -575,6 +613,17 @@ def _bsd_symbol_index(
         member = offsets_by_member.get(mem_off)
         if member is None or str_off >= len(strings):
             continue
+        if str_off != 0 and strings[str_off - 1] != 0:
+            # A real ranlib-written entry's str_off always names the START
+            # of a string-table entry -- either offset 0 or immediately
+            # after a preceding NUL terminator. A malformed/hostile entry
+            # pointing into the *middle* of another name (e.g. offset 1
+            # into "xfoo\0") would otherwise decode as "foo" -- a
+            # plausible-looking but spoofed name that, if it coincidentally
+            # matches a real unrelated binary_symbol node, produces a false
+            # OBJECT_DEFINES_SYMBOL edge (Codex review, fresh evidence).
+            # Reject rather than accept a boundary-violating suffix.
+            continue
         terminator = strings.find(b"\x00", str_off)
         if terminator == -1:
             # Every real BSD/Mach-O __.SYMDEF string-table entry is
@@ -669,12 +718,22 @@ def parse_ar_archive(reader: ByteReader) -> ArchiveContents:
         if stripped == _GNU_LONG_NAME_TABLE:
             # A special member's data is always stored inline, thin archive
             # or not; only a *regular* member is bodiless in a thin archive.
+            if size > _MAX_SPECIAL_MEMBER_BYTES:
+                raise ArchiveFormatError(
+                    f"long-name table at offset {offset} declares a size "
+                    f"({size}) over the {_MAX_SPECIAL_MEMBER_BYTES}-byte cap"
+                )
             long_names = reader.read(data_offset, size)
             stored = size
         elif stripped in _GNU_INDEX_NAMES:
             # GNU never extended-encodes its own index name — it is always
             # the literal "/" or "/SYM64/", so the raw field is authoritative
             # here (unlike the BSD case below).
+            if size > _MAX_SPECIAL_MEMBER_BYTES:
+                raise ArchiveFormatError(
+                    f"{stripped!r} index at offset {offset} declares a size "
+                    f"({size}) over the {_MAX_SPECIAL_MEMBER_BYTES}-byte cap"
+                )
             if stripped not in seen_index_names:
                 seen_index_names.add(stripped)
                 pending_index.append((stripped, reader.read(data_offset, size)))
@@ -700,6 +759,12 @@ def parse_ar_archive(reader: ByteReader) -> ArchiveContents:
                 name_field, reader, data_offset, size, long_names
             )
             if name and _is_bsd_index_name(name):
+                if size - name_bytes > _MAX_SPECIAL_MEMBER_BYTES:
+                    raise ArchiveFormatError(
+                        f"__.SYMDEF index at offset {offset} declares a size "
+                        f"({size - name_bytes}) over the "
+                        f"{_MAX_SPECIAL_MEMBER_BYTES}-byte cap"
+                    )
                 if _BSD_INDEX_PREFIX not in seen_index_names:
                     seen_index_names.add(_BSD_INDEX_PREFIX)
                     pending_index.append(
