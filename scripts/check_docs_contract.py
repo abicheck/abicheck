@@ -69,12 +69,16 @@ DOCS = ROOT / "docs"
 
 #: Trees outside `docs/` whose Markdown may be registered as a topic's
 #: `task_pages`/`allowed_summaries` entry (ADR-058 / G36 P0.6). Only
-#: `skills-src/` qualifies today: its `shared/*.md` fragments are genuine
-#: summary owners that live outside the published tree by design. Kept as an
-#: explicit list rather than "any existing file" so a registry entry cannot be
-#: satisfied by a source or data file, which carries no front matter and so
-#: would pass the ownership round-trip vacuously.
-EXTERNAL_PAGE_ROOTS = ("skills-src",)
+#: `skills-src/shared/` qualifies: those fragments are genuine summary owners
+#: that live outside the published tree by design.
+#:
+#: Deliberately the fragment directory, not `skills-src/` as a whole. Every
+#: other Markdown in that tree would satisfy the registry *vacuously* — a
+#: `native-*/SKILL.md` carries no `summarizes` front matter for the round-trip
+#: to check, and `skills-src/CLAUDE.md` is excluded from front-matter scanning
+#: outright. The same reasoning bars a non-Markdown target: no front matter
+#: means nothing for the ownership check to contradict.
+EXTERNAL_PAGE_ROOTS = ("skills-src/shared",)
 
 TOPICS_FILE = DOCS / "_meta" / "topics.yaml"
 TERMINOLOGY_FILE = DOCS / "_meta" / "terminology.yaml"

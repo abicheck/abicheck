@@ -32,7 +32,11 @@ carries:
 - `evidence_tier` — the canonical ordered scalar (`elf_only`,
   `dwarf_aware`, `header_aware`). **Key trust decisions off this.**
 - `evidence_tiers` — the raw list of sources that were available.
-- `coverage_warnings` — where coverage fell short.
+
+and, **only when there were coverage gaps**:
+
+- `coverage_warnings` — where coverage fell short. A clean run omits the key
+  entirely; that is good news, not a malformed or under-evidenced report.
 
 You will not find a "depth achieved" echo alongside them: `requested_depth`
 and `effective_depth` are in the report schema but only the GitHub Action's

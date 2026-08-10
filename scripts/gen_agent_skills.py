@@ -119,6 +119,14 @@ _MD_IMAGE_RE = re.compile(r"!\[([^\]]*)\]\(([^)\s]+)")
 #: rewrite", and that is checkable directly.
 _MD_LINK_LIKE_RE = re.compile(r"\]\(")
 
+#: Raw-HTML link/asset attributes. Markdown permits inline HTML, and an
+#: `<a href="../../docs/foo.md">` carries a destination with no `](` in it at
+#: all — so it is invisible both to `_MD_LINK_RE` and to the inverted guard
+#: above, which only reasons about Markdown link syntax. Rejected for the same
+#: single reason as every other variant: the rewrite cannot see it, so it
+#: would ship a repo-relative target into an installed skill.
+_HTML_LINK_ATTR_RE = re.compile(r"<[a-zA-Z][^>]*\s(?:href|src)\s*=", re.DOTALL)
+
 _FRONT_MATTER_RE = re.compile(r"\A---\r?\n.*?\r?\n---\r?\n", re.DOTALL)
 
 
@@ -148,6 +156,16 @@ def _reject_unrewritable_links(source_path: Path, body: str) -> None:
                 "the target, so the rewrite cannot resolve it and publishes "
                 "it verbatim."
             )
+
+    html = _HTML_LINK_ATTR_RE.search(body)
+    if html is not None:
+        line = body.count("\n", 0, html.start()) + 1
+        raise SkillGenerationError(
+            f"{source_path}: line ~{line}: raw-HTML link or asset attribute "
+            f"(`{body[html.start() : html.start() + 50].splitlines()[0]}`). "
+            "Skill sources link in Markdown; the rewrite does not read HTML, "
+            "so an `href`/`src` here would be published verbatim."
+        )
 
     covered = [
         match.span()

@@ -195,6 +195,29 @@ def test_a_double_quoted_title_is_still_accepted(synthetic):
     assert "demo/references/shared/a.md" in rendered
 
 
+@pytest.mark.parametrize(
+    "markup",
+    ['<a href="../../docs/use/cli-usage.md">guide</a>', '<img src="../x.png">'],
+    ids=["anchor", "img"],
+)
+def test_raw_html_link_is_a_hard_error(synthetic, markup):
+    """Markdown permits inline HTML, and an HTML destination carries no `](`
+    at all — so it escapes both `_MD_LINK_RE` and the inverted guard, which
+    only reasons about Markdown link syntax."""
+    synthetic(
+        skills={
+            "demo": {
+                "SKILL.md": (
+                    f"---\nname: demo\n---\n\n{markup}\n\n[a](../shared/a.md)\n"
+                )
+            }
+        },
+        shared={"a.md": "# A\n"},
+    )
+    with pytest.raises(gen.SkillGenerationError, match="raw-HTML"):
+        gen.render_all(gen.SRC_DIR)
+
+
 def test_markdown_image_is_a_hard_error(synthetic):
     """Same class as the reference-definition case: `_MD_LINK_RE`'s negative
     lookbehind skips images, and the generator copies only Markdown — so an
