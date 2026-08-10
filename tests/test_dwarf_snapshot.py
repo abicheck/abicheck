@@ -1259,7 +1259,7 @@ extern "C" SensorData make_sensor(int c, int s) {
 class TestDwarfSnapshotVptrOffset:
     """Real bit offset of a class's vtable pointer, read from DWARF's own
     artificial ``_vptr.<Class>`` member instead of assumed to be 0 for any
-    polymorphic type -- see ``_resolve_vptr_offset_bits``'s docstring.
+    polymorphic type -- see ``_finalize_vptr_offsets``'s docstring.
     """
 
     @pytest.fixture()
@@ -1381,6 +1381,64 @@ extern "C" Y* get_y() { return &g_y; }
         types = self._types_by_name(vptr_lib)
         assert types["Y"].base_offsets.get("X") != 0
         assert types["Y"].vptr_offset_bits == 0
+
+    @pytest.fixture()
+    def namespaced_vptr_lib(self, tmp_path: Path) -> Path:
+        """Namespaced inherited-only classes, plus an unrelated type sharing
+        the same bare name in a different namespace -- reproduces the gap
+        Codex review found: ``RecordType.bases`` stores each base's *bare*
+        name, but ``self.types`` is keyed by *qualified* name once a
+        namespace is involved, so a name-only lookup can silently fail (or,
+        worse, resolve to the wrong same-named type in a different scope)."""
+        cpp_src = tmp_path / "ns_vptr.cpp"
+        cpp_src.write_text("""\
+namespace ns {
+struct A { virtual void a(); int ai; };
+struct N : A { int ni; };      // inherited-only, same shape as the plain
+                                // (non-namespaced) N case above
+struct M : N { int mi; };      // two-level chain, still namespaced
+}
+
+// A DIFFERENT, non-polymorphic type sharing the bare name "A" in another
+// namespace -- must never be confused with ns::A during resolution.
+namespace other { struct A { int x; }; }
+
+void ns::A::a() {}
+
+static ns::N g_n;
+static ns::M g_m;
+static other::A g_other_a;
+extern "C" ns::N* get_n() { return &g_n; }
+extern "C" ns::M* get_m() { return &g_m; }
+extern "C" other::A* get_other_a() { return &g_other_a; }
+""")
+        so_path = tmp_path / "libnsvptr.so"
+        result = subprocess.run(
+            [_GPP, "-shared", "-fPIC", "-g", "-O0", "-o", str(so_path), str(cpp_src)],
+            capture_output=True, text=True, timeout=30,
+        )
+        assert result.returncode == 0, f"Compilation failed: {result.stderr}"
+        return so_path
+
+    def test_namespaced_inherited_vtable_resolves(
+        self, namespaced_vptr_lib: Path
+    ) -> None:
+        """A namespaced class whose vtable is entirely inherited still
+        resolves -- the base-name lookup must not be defeated by
+        RecordType.bases storing a bare name while self.types is keyed by
+        the qualified name."""
+        types = self._types_by_name(namespaced_vptr_lib)
+        assert types["ns::N"].vptr_offset_bits == 0
+        assert types["ns::M"].vptr_offset_bits == 0
+
+    def test_same_bare_base_name_in_different_namespace_not_confused(
+        self, namespaced_vptr_lib: Path
+    ) -> None:
+        """other::A (non-polymorphic) must never satisfy ns::N's lookup for
+        its base "A" just because the bare names collide."""
+        types = self._types_by_name(namespaced_vptr_lib)
+        assert types["other::A"].vptr_offset_bits is None
+        assert types["ns::N"].vptr_offset_bits == 0
 
 
 # ── CLI tests via CliRunner (in-process for coverage) ────────────────────────

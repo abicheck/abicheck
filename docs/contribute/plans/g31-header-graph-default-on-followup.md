@@ -339,6 +339,37 @@ building a second identity-resolution mechanism from scratch.
   single `vptr_offset_bits` scalar), not the inherited-only case this pass
   closed for DWARF.
 
+  **A review round found a real gap in the inherited-vptr resolution
+  itself, once a namespace is involved.** `RecordType.bases` stores each
+  base's *bare* `DW_AT_name` (unrelated, pre-existing convention this fix
+  doesn't change — every other bare-name-keyed field in this codebase does
+  the same), but `self.types` — and therefore the `by_name` lookup
+  `_finalize_vptr_offsets` used — is keyed by *qualified* name the moment a
+  namespace or enclosing class is involved. `ns::N : ns::A`'s inherited
+  vptr silently failed to resolve (stayed `None`) even though `ns::A`'s own
+  offset was already known, because the lookup searched for a type named
+  bare `"A"` and never found `"ns::A"` — reproduced against a real
+  GCC-compiled namespaced example before fixing (Codex review). Fixed by
+  resolving each inheritance edge to the base type DIE's own identity
+  (`(CU.cu_offset, base_die.offset)`, matching `_type_cache`'s existing
+  convention) at the point the edge is processed — while the DIE is still
+  directly at hand — rather than only by name: `_resolve_base_name` became
+  `_resolve_base_name_and_key`, `_collect_record_type_children` threads a
+  new `base_die_keys` map alongside `bases`/`base_offsets`, and
+  `_process_record_type_named` registers every built `RecordType` by its
+  own DIE identity (`_record_die_index`), independent of vptr resolution,
+  so a later-processed derived class can look its base up unambiguously.
+  `_finalize_vptr_offsets` now resolves by DIE identity first, falling back
+  to the original bare-name lookup only when a base DIE didn't resolve to a
+  key at all. Verified this doesn't just fix the missing case but avoids a
+  worse one: a same-bare-name base in an *unrelated* namespace
+  (`other::A`, non-polymorphic, sharing the bare name `"A"` with `ns::A`)
+  is never mistakenly treated as `ns::N`'s base — the DIE-identity lookup
+  is exact, not a name collision waiting to happen the way the pure-name
+  fallback would be on its own. New regression tests compile a real
+  namespaced GCC binary covering both the resolution case and the
+  same-bare-name non-confusion case.
+
   **A later pass closed the last of this phase's four originally-listed
   facts** (`deprecated`/`is_scoped`/bitfields/default-argument facts were
   the other three, already covered above): direct-clang now populates
