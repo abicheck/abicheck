@@ -615,6 +615,113 @@ def _old_public_symbol_count(old: AbiSnapshot) -> int | None:
     return count if count > 0 else None
 
 
+def _contract_coverage_status(
+    old: AbiSnapshot, new: AbiSnapshot
+) -> Literal["partial"] | None:
+    """ADR-050 D2 — ``"partial"`` when an axis of the comparability contract
+    was never actually checked because exactly one side carries it.
+
+    Mirrors :func:`check_contracts_comparable`'s own per-fingerprint-independent
+    gating (Codex review, PR #624): a per-``contract``-object check misses the
+    case where both sides carry a real contract but only one has a
+    ``profile_fingerprint`` — e.g. a symbols-only side with only scope
+    provenance compared against a full L2 side — which
+    ``check_contracts_comparable`` correctly skips the profile check for, but a
+    coarse "contract is None" comparison would still report as fully covered
+    even though that axis was never checked.
+
+    ``dependency_scope`` is included for the same reason (Codex review, fresh
+    evidence): ``_check_dependency_scope_comparable`` deliberately permits a
+    ``None`` (pre-v18/genuinely-untagged) side against an explicitly-tagged one
+    rather than raising, since there is no way to recover which mode the
+    untagged side actually used — but that means the comparison silently
+    proceeds without ever having verified this axis matches, and a legacy
+    "full"-mode snapshot compared against a freshly "filtered" one could
+    produce a wrong verdict with the report still reading as fully verified.
+
+    Report-level metadata, not a ``Change``/``ChangeKind`` finding.
+    """
+    old_profile = old.contract.profile_fingerprint if old.contract else None
+    new_profile = new.contract.profile_fingerprint if new.contract else None
+    old_scope = old.contract.scope_fingerprint if old.contract else None
+    new_scope = new.contract.scope_fingerprint if new.contract else None
+    mixed = (
+        (old_profile is None) != (new_profile is None)
+        or (old_scope is None) != (new_scope is None)
+        or (old.dependency_scope is None) != (new.dependency_scope is None)
+    )
+    return "partial" if mixed else None
+
+
+def _env_matrix_contract_changes(
+    new: AbiSnapshot,
+    kept: list[Change],
+    verdict_redundant: list[Change],
+    suppression: SuppressionList | None,
+    suppressed: list[Change],
+    env_matrix: EnvironmentMatrix | None,
+) -> list[Change]:
+    """Every declared-runtime-floor / wheel-packaging check, run under one
+    ``env_matrix.runtime_floors`` gate.
+
+    Two different things happen here, in this order:
+
+    * ``apply_runtime_floor_contract`` *reclassifies in place* — it only
+      touches an existing version-requirement *delta* finding already in
+      ``kept``/``verdict_redundant`` (ADR-020b), producing nothing new.
+    * every other check is standalone: it reads the new binary's own evidence
+      and can fire even when the floor never moved between old and new, which
+      is exactly the manylinux-tag violation case (a binary that has always
+      required a newer glibc than its wheel tag promises). Their findings are
+      returned, suppression-filtered, for the caller to fold into ``kept``.
+
+    The wheel checks (``G27``) each additionally require the dedicated
+    ``runtime_floors["WHEEL_CONTEXT"]`` key *inside themselves* — not just any
+    declared floor, since GLIBC/GLIBCXX/CXXABI are a general-purpose ADR-020b
+    mechanism unrelated to wheel packaging, so an ordinary non-wheel DSO
+    declaring one of those must not get wheel-portability findings it never
+    opted into (Codex review #583). The gate here is just the cheap "any floors
+    declared at all" pre-filter.
+    """
+    if env_matrix is None or not env_matrix.runtime_floors:
+        return []
+    floors = env_matrix.runtime_floors
+
+    from .diff_versioning import (
+        apply_runtime_floor_contract,
+        check_musllinux_glibc_dependency,
+        check_platform_baseline_floor,
+    )
+    from .diff_wheel_deployment import (
+        check_macos_deployment_target_floor,
+        check_wheel_closure_dependency_violation,
+        check_wheel_rpath_not_portable,
+        check_wheel_tag_architecture_mismatch,
+    )
+    from .elf_metadata import ElfMetadata
+
+    apply_runtime_floor_contract(kept + verdict_redundant, floors)
+
+    new_elf = getattr(new, "elf", None)
+    new_macho = getattr(new, "macho", None)
+    # The floor checks substitute an empty ElfMetadata for a missing one (they
+    # answer "does this binary's own declared requirement violate the floor",
+    # which an absent ELF answers "no"); the wheel checks take the raw value,
+    # since a non-ELF input has no wheel-portability claim to check at all.
+    return _filter_suppressed_changes(
+        [
+            *check_platform_baseline_floor(new_elf or ElfMetadata(), floors),
+            *check_musllinux_glibc_dependency(new_elf or ElfMetadata(), floors),
+            *check_macos_deployment_target_floor(new_macho, floors),
+            *check_wheel_tag_architecture_mismatch(new_elf, new_macho, floors),
+            *check_wheel_rpath_not_portable(new_elf, floors),
+            *check_wheel_closure_dependency_violation(new_elf, floors),
+        ],
+        suppression,
+        suppressed,
+    )
+
+
 def compare(
     old: AbiSnapshot,
     new: AbiSnapshot,
@@ -740,38 +847,7 @@ def compare(
     # of the escape hatch ("the caller can still see a result but knows not
     # to trust it").
     comparability_warnings = [mismatch.reason] if mismatch is not None else []
-    # ADR-050 D2 — set when either fingerprint is mixed (exactly one side
-    # has it) between old and new, mirroring check_contracts_comparable's
-    # own per-fingerprint-independent gating (Codex review, PR #624: a
-    # per-``contract``-object check misses the case where both sides carry
-    # a real contract but only one has a profile_fingerprint — e.g. a
-    # symbols-only side with only scope provenance compared against a full
-    # L2 side — which check_contracts_comparable correctly skips the
-    # profile check for, but a coarse "contract is None" comparison would
-    # still report as fully covered even though that axis was never
-    # actually checked). Report-level metadata, not a Change/ChangeKind
-    # finding.
-    old_profile = old.contract.profile_fingerprint if old.contract else None
-    new_profile = new.contract.profile_fingerprint if new.contract else None
-    old_scope = old.contract.scope_fingerprint if old.contract else None
-    new_scope = new.contract.scope_fingerprint if new.contract else None
-    # Mirrors the profile/scope-fingerprint mixed-presence check above for the
-    # dependency_scope axis: check_contracts_comparable deliberately permits a
-    # None (pre-v18/genuinely-untagged) side against an explicitly-tagged one
-    # (see _check_dependency_scope_comparable's own docstring) rather than
-    # raising, since there is no way to recover which mode the untagged side
-    # actually used — but that means the comparison silently proceeds without
-    # ever having verified this axis matches. Without this, a legacy
-    # "full"-mode snapshot compared against a freshly "filtered" one could
-    # produce a wrong verdict with the report still reading as fully verified
-    # (Codex review, fresh evidence).
-    contract_coverage: Literal["partial"] | None = (
-        "partial"
-        if (old_profile is None) != (new_profile is None)
-        or (old_scope is None) != (new_scope is None)
-        or (old.dependency_scope is None) != (new.dependency_scope is None)
-        else None
-    )
+    contract_coverage = _contract_coverage_status(old, new)
 
     # Discover any diff_* detector modules not already imported above, then run
     # all registered detectors via the self-registering registry. ensure_loaded
@@ -863,121 +939,22 @@ def compare(
     if reconcile_build_context:
         kept, reconciled = reconcile_build_context_findings(kept, old, new)
 
-    # Declared-runtime-floor contract (ADR-020b): before the SONAME policy so
-    # a floor-decided BREAKING finding also drives the soname_bump_recommended
-    # advisory (check_soname_bump_policy honors effective_verdict), and so the
-    # internal-node demotion inside _apply_soname_policy — which skips findings
-    # already carrying an effective_verdict — cannot race it (Codex review #510).
-    if env_matrix is not None and env_matrix.runtime_floors:
-        from .diff_versioning import apply_runtime_floor_contract
-
-        apply_runtime_floor_contract(
-            kept + verdict_redundant, env_matrix.runtime_floors
+    # Declared-runtime-floor and wheel-packaging contracts (ADR-020b / G10 /
+    # G27). Before the SONAME policy so a floor-decided BREAKING finding also
+    # drives the soname_bump_recommended advisory (check_soname_bump_policy
+    # honors effective_verdict), and so the internal-node demotion inside
+    # _apply_soname_policy — which skips findings already carrying an
+    # effective_verdict — cannot race it (Codex review #510).
+    kept.extend(
+        _env_matrix_contract_changes(
+            new,
+            kept,
+            verdict_redundant,
+            suppression,
+            suppressed,
+            env_matrix,
         )
-
-    # Platform-baseline floor check (G10, ADR-020b runtime_floors reused):
-    # unlike apply_runtime_floor_contract above (which only reclassifies an
-    # existing version-requirement *delta* finding), this is a standalone
-    # check of the new binary's own required floor against the declared
-    # baseline — it fires even when the floor never moved between old and
-    # new, which is exactly the manylinux-tag violation case (a binary that
-    # has always required a newer glibc than its wheel tag promises).
-    if env_matrix is not None and env_matrix.runtime_floors:
-        from .diff_versioning import check_platform_baseline_floor
-        from .elf_metadata import ElfMetadata as _ElfMetadataFloor
-
-        new_elf_for_floor = getattr(new, "elf", None) or _ElfMetadataFloor()
-        floor_changes = check_platform_baseline_floor(
-            new_elf_for_floor, env_matrix.runtime_floors
-        )
-        floor_changes = _filter_suppressed_changes(
-            floor_changes, suppression, suppressed
-        )
-        if floor_changes:
-            kept.extend(floor_changes)
-
-    # musllinux glibc-dependency check (G27): same declared-floor gate as the
-    # platform-baseline check above, but a yes/no compatibility check rather
-    # than a numeric floor comparison — see check_musllinux_glibc_dependency's
-    # docstring for why musl has no version-floor concept to compare against.
-    if env_matrix is not None and env_matrix.runtime_floors:
-        from .diff_versioning import check_musllinux_glibc_dependency
-        from .elf_metadata import ElfMetadata as _ElfMetadataMusl
-
-        new_elf_for_musl = getattr(new, "elf", None) or _ElfMetadataMusl()
-        musllinux_changes = check_musllinux_glibc_dependency(
-            new_elf_for_musl, env_matrix.runtime_floors
-        )
-        musllinux_changes = _filter_suppressed_changes(
-            musllinux_changes, suppression, suppressed
-        )
-        if musllinux_changes:
-            kept.extend(musllinux_changes)
-
-    # macOS deployment-target floor check (G27, the macOS half of G10's
-    # manylinux glibc-floor idea): same declared-floor gate, checked against
-    # the new snapshot's Mach-O evidence instead of ELF.
-    if env_matrix is not None and env_matrix.runtime_floors:
-        from .diff_wheel_deployment import check_macos_deployment_target_floor
-
-        macos_floor_changes = check_macos_deployment_target_floor(
-            getattr(new, "macho", None), env_matrix.runtime_floors
-        )
-        macos_floor_changes = _filter_suppressed_changes(
-            macos_floor_changes, suppression, suppressed
-        )
-        if macos_floor_changes:
-            kept.extend(macos_floor_changes)
-
-    # Wheel-tag architecture-mismatch check (G27): same declared-claim gate,
-    # checked against whichever of ELF/Mach-O evidence the new snapshot
-    # carries.
-    if env_matrix is not None and env_matrix.runtime_floors:
-        from .diff_wheel_deployment import check_wheel_tag_architecture_mismatch
-
-        arch_mismatch_changes = check_wheel_tag_architecture_mismatch(
-            getattr(new, "elf", None),
-            getattr(new, "macho", None),
-            env_matrix.runtime_floors,
-        )
-        arch_mismatch_changes = _filter_suppressed_changes(
-            arch_mismatch_changes, suppression, suppressed
-        )
-        if arch_mismatch_changes:
-            kept.extend(arch_mismatch_changes)
-
-    # RPATH/RUNPATH portability + vendored-dependency-closure checks (G27):
-    # ELF-only; each check function requires the dedicated
-    # runtime_floors["WHEEL_CONTEXT"] key itself (not just any declared
-    # floor — GLIBC/GLIBCXX/CXXABI are a general-purpose ADR-020b mechanism
-    # unrelated to wheel packaging, so an ordinary non-wheel DSO declaring
-    # one of those must not get wheel-portability findings it never opted
-    # into; Codex review #583). This outer check is just the cheap
-    # "any floors declared at all" pre-filter.
-    if env_matrix is not None and env_matrix.runtime_floors:
-        from .diff_wheel_deployment import (
-            check_wheel_closure_dependency_violation,
-            check_wheel_rpath_not_portable,
-        )
-
-        new_elf_for_rpath = getattr(new, "elf", None)
-        rpath_changes = check_wheel_rpath_not_portable(
-            new_elf_for_rpath, env_matrix.runtime_floors
-        )
-        rpath_changes = _filter_suppressed_changes(
-            rpath_changes, suppression, suppressed
-        )
-        if rpath_changes:
-            kept.extend(rpath_changes)
-
-        closure_changes = check_wheel_closure_dependency_violation(
-            new_elf_for_rpath, env_matrix.runtime_floors
-        )
-        closure_changes = _filter_suppressed_changes(
-            closure_changes, suppression, suppressed
-        )
-        if closure_changes:
-            kept.extend(closure_changes)
+    )
 
     # NumPy C-API compatibility-envelope delta (G26): needs only the two
     # snapshots' own numpy_capi field (no external wheel metadata), so this
@@ -988,14 +965,15 @@ def compare(
     # precedent as G10's package.parse_manylinux_glibc_floor).
     from .diff_numpy_capi import diff_numpy_capi_surfaces
 
-    numpy_capi_changes = diff_numpy_capi_surfaces(
-        getattr(old, "numpy_capi", None), getattr(new, "numpy_capi", None)
+    kept.extend(
+        _filter_suppressed_changes(
+            diff_numpy_capi_surfaces(
+                getattr(old, "numpy_capi", None), getattr(new, "numpy_capi", None)
+            ),
+            suppression,
+            suppressed,
+        )
     )
-    numpy_capi_changes = _filter_suppressed_changes(
-        numpy_capi_changes, suppression, suppressed
-    )
-    if numpy_capi_changes:
-        kept.extend(numpy_capi_changes)
 
     # Post-detector: SONAME bump policy check.  Runs after post-processing so
     # rename collapsing and other dedup is already settled before reading `kept`.
