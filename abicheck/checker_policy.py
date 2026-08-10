@@ -51,11 +51,6 @@ class ChangeKind(str, Enum):
     FUNC_REMOVED_ELF_ONLY = (
         "func_removed_elf_only"  # exported ELF-only function removed -> binary break
     )
-    # A *vague-linkage* (weak/COMDAT) export disappeared while the new side's
-    # headers still define the entity inline → COMPATIBLE_WITH_RISK, not
-    # BREAKING. See diff_symbols._vague_linkage_export_dropped for the argument
-    # and for what it deliberately does not claim.
-    FUNC_EXPORT_DROPPED_INLINE_AVAILABLE = "func_export_dropped_inline_available"
     FUNC_ADDED = "func_added"  # new public symbol → COMPATIBLE
     FUNC_RETURN_CHANGED = "func_return_changed"  # return type changed → BREAKING
     FUNC_PARAMS_CHANGED = "func_params_changed"  # parameter types changed → BREAKING

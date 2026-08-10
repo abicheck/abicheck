@@ -30,7 +30,6 @@ from .model import (
     AbiSnapshot,
     AccessLevel,
     DependencyInfo,
-    ElfBinding,
     ElfVisibility,
     EnumMember,
     EnumType,
@@ -211,7 +210,7 @@ from .model import (
 #     rather than reusing v19's: a v19 snapshot has reliable
 #     deprecated/is_scoped but unreliable field defaults, which one shared
 #     flag could not express.
-SCHEMA_VERSION: int = 21
+SCHEMA_VERSION: int = 20
 
 # Schema version at which CastXML field CV facts became reliable (see v9 above).
 _MIN_SCHEMA_VERSION_FOR_CV_FACTS = 9
@@ -799,11 +798,6 @@ def snapshot_from_dict(d: dict[str, Any]) -> AbiSnapshot:
             elf_visibility=ElfVisibility(f["elf_visibility"])
             if f.get("elf_visibility")
             else None,
-            # Tri-state (v21): a missing key on an older snapshot loads as
-            # None -- "not captured" -- which keeps the vague-linkage
-            # demotion in diff_symbols inert rather than letting schema
-            # evolution turn a removal into a non-break.
-            elf_binding=ElfBinding(f["elf_binding"]) if f.get("elf_binding") else None,
             ref_qualifier=f.get("ref_qualifier", ""),
             # Tri-state: a missing key (older snapshot) loads as None,
             # which suppresses CTOR_EXPLICIT_ADDED/_REMOVED in the diff
@@ -843,7 +837,6 @@ def snapshot_from_dict(d: dict[str, Any]) -> AbiSnapshot:
             elf_visibility=ElfVisibility(v["elf_visibility"])
             if v.get("elf_visibility")
             else None,
-            elf_binding=ElfBinding(v["elf_binding"]) if v.get("elf_binding") else None,
             source_header=v.get("source_header"),
             origin=_scope_origin_or_unknown(v.get("origin")),
             alignment_bits=v.get("alignment_bits"),

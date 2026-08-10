@@ -115,28 +115,6 @@ class ElfVisibility(str, Enum):
     INTERNAL = "internal"  # STV_INTERNAL
 
 
-class ElfBinding(str, Enum):
-    """ELF st_info binding from .dynsym — separate from visibility above.
-
-    The distinction that matters to the diff is strong vs. *vague* linkage. A
-    ``WEAK`` definition of a C++ entity is what the compiler emits for
-    something the language requires every using translation unit to define
-    for itself — an inline function, a template instantiation, an implicit
-    special member — placed in a COMDAT group so the linker keeps one copy.
-    A consumer of such an entity therefore carries its own definition, which
-    is why that export disappearing is not the same event as a strong
-    definition disappearing.
-
-    ``UNIQUE`` (STB_GNU_UNIQUE) is deliberately *not* folded into WEAK: it is
-    a strong, process-wide-unique definition, and the GNU extension exists
-    precisely to stop each consumer using its own copy.
-    """
-
-    GLOBAL = "global"  # STB_GLOBAL — strong definition
-    WEAK = "weak"  # STB_WEAK — vague/COMDAT linkage
-    UNIQUE = "unique"  # STB_GNU_UNIQUE — strong, process-wide unique
-
-
 class AccessLevel(str, Enum):
     PUBLIC = "public"
     PROTECTED = "protected"
@@ -273,15 +251,6 @@ class Function:
     # silently rebind existing positional-constructor arguments instead of
     # failing).
     hidden_friend_owner: str | None = None
-    # ELF st_info binding (populated from .dynsym, same entry as
-    # elf_visibility above). Tri-state: None = not captured (non-ELF
-    # platforms, header-only declarations, older snapshots), so a detector
-    # must treat it as "unknown" and never as "strong" -- see ElfBinding
-    # for why WEAK is the load-bearing value. Appended after all
-    # pre-existing fields for the same reason hidden_friend_owner above is
-    # (Codex review): inserting it next to elf_visibility would silently
-    # rebind every positional-constructor argument from that slot onward.
-    elf_binding: ElfBinding | None = None
 
 
 @dataclass
@@ -305,9 +274,6 @@ class Variable:
     alignment_bits: int | None = None
     # See Function.deprecated for the message-string convention.
     deprecated: str | None = None
-    # ELF st_info binding -- see Function.elf_binding. Appended last for
-    # the same positional-argument reason (Codex review).
-    elf_binding: ElfBinding | None = None
 
 
 @dataclass

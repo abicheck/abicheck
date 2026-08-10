@@ -51,7 +51,6 @@ These changes are immediately incompatible with existing compiled binaries.
 |------|-------------|
 | `func_removed` | Public function removed from the exported symbol table. Callers crash at load time with an undefined symbol error. |
 | `func_removed_elf_only` | Exported function symbol removed in binary-only/symbols-only mode. Header evidence is unavailable, so strict ABI policy treats the removed dynamic export as a binary break. |
-| `func_export_dropped_inline_available` | A weak (vague-linkage/COMDAT) symbol — an inline function, a template instantiation, an implicit special member — is no longer exported, but the new headers still define it inline. The language requires every translation unit that uses such an entity to define it for itself, so a consumer carries its own copy and keeps resolving. Reported as a risk rather than a break: a consumer built against a header that only *declared* it, or one comparing its address across the library boundary expecting a single shared instance, can still be affected. |
 | `func_return_changed` | Function return type changed. Callers reading the return value will interpret the wrong bytes — silent data corruption or crashes. |
 | `func_params_changed` | Function parameter types or count changed. The calling convention breaks: arguments are placed in wrong registers/stack slots. |
 | `func_virtual_added` | A non-virtual method became virtual. Changes the vtable layout: any class with this as a base will have a different vtable offset for all methods after this one. |

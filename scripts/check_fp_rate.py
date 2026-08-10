@@ -53,15 +53,9 @@ from abicheck.buildsource.source_graph import (  # noqa: E402
 )
 from abicheck.checker import Verdict, compare  # noqa: E402
 from abicheck.checker_policy import ChangeKind  # noqa: E402
-from abicheck.elf_metadata import (  # noqa: E402
-    ElfMetadata,
-    ElfSymbol,
-    SymbolBinding,
-    SymbolType,
-)
+from abicheck.elf_metadata import ElfMetadata, ElfSymbol  # noqa: E402
 from abicheck.model import (  # noqa: E402
     AbiSnapshot,
-    ElfBinding,
     EnumMember,
     EnumType,
     Function,
@@ -834,6 +828,7 @@ def _ext_snap(version, *, stub, extra_syms=()) -> AbiSnapshot:
     Python-visible API (from *stub*) plus its load contract; *extra_syms* are
     additional exported C/C++ symbols (internal implementation detail).
     """
+    from abicheck.elf_metadata import SymbolBinding, SymbolType
     from abicheck.python_api import surface_from_stub_source
     from abicheck.python_ext import detect_python_extension
 
@@ -861,103 +856,6 @@ def _python_ext_internal_symbol_churn() -> tuple[AbiSnapshot, AbiSnapshot]:
     old = _ext_snap("1", stub=stub, extra_syms=["_Z8internalv"])
     new = _ext_snap("2", stub=stub)
     return old, new
-
-
-def _linkage_snap(version, funcs, exported):
-    """A snapshot whose ELF export set narrows the public function map.
-
-    Without a populated ``elf`` that narrowing never runs, so a pair built
-    with the plain ``_snap`` helper cannot reach the removal path at all.
-    """
-    snap = _snap(version, functions=funcs)
-    snap.elf = ElfMetadata(
-        soname="libfp.so.1",
-        symbols=[
-            ElfSymbol(name=n, binding=SymbolBinding.WEAK, sym_type=SymbolType.FUNC)
-            for n in exported
-        ],
-    )
-    return snap
-
-
-def _linkage_fn(*, binding=None, inline=False):
-    fn = _fn("inlined")
-    fn.is_inline = inline
-    fn.elf_binding = binding
-    return fn
-
-
-def _weak_export_dropped_stays_nonbreaking() -> tuple[AbiSnapshot, AbiSnapshot]:
-    # A weak (vague-linkage/COMDAT) export -- what the compiler emits for an
-    # inline function, a template instantiation, or an implicit special member
-    # -- disappeared, while the new headers still define the entity inline. The
-    # language requires every using translation unit to define such an entity
-    # for itself, so a consumer carries its own copy and keeps resolving. The
-    # export table alone cannot tell this from a strong definition vanishing,
-    # and both detectors that see the event called it BREAKING.
-    mangled = _linkage_fn().mangled
-    return (
-        _linkage_snap("1", [_linkage_fn(binding=ElfBinding.WEAK, inline=True)], [mangled]),
-        _linkage_snap("2", [_linkage_fn(inline=True)], ["_Z5otherv"]),
-    )
-
-
-def _out_of_line_weak_export_dropped_stays_breaking() -> tuple[AbiSnapshot, AbiSnapshot]:
-    # WEAK does not imply vague linkage: an ordinary out-of-line function
-    # marked __attribute__((weak)) is WEAK too. A consumer compiled against
-    # that declaration holds only an undefined dynamic reference -- no copy of
-    # its own -- so making it inline on the new side and dropping the export
-    # breaks it at load time. Only the *old* side can establish the demotion,
-    # and a first revision keyed on the new side alone (Codex review).
-    mangled = _linkage_fn().mangled
-    return (
-        _linkage_snap("1", [_linkage_fn(binding=ElfBinding.WEAK, inline=False)], [mangled]),
-        _linkage_snap("2", [_linkage_fn(inline=True)], ["_Z5otherv"]),
-    )
-
-
-def _demoted_export_with_signature_break_stays_breaking() -> tuple[AbiSnapshot, AbiSnapshot]:
-    # The demotion replaces the *removal* finding, not the signature check.
-    # The declaration is still there on the new side -- that is the basis for
-    # demoting -- so it can have changed too, and returning the risk finding
-    # early swallowed every such break (Codex review). This is the one path
-    # where a symbol leaves the public map yet still has a new-side
-    # declaration worth comparing.
-    mangled = _linkage_fn().mangled
-
-    def fn(ret, *, binding=None):
-        f = _linkage_fn(binding=binding, inline=True)
-        f.return_type = ret
-        return f
-
-    return (
-        _linkage_snap("1", [fn("int", binding=ElfBinding.WEAK)], [mangled]),
-        _linkage_snap("2", [fn("long")], ["_Z5otherv"]),
-    )
-
-
-def _strong_export_dropped_stays_breaking() -> tuple[AbiSnapshot, AbiSnapshot]:
-    # The FN sentinel for the demotion above, and the whole reason it keys on
-    # the binding: an identical-looking event on a *strong* definition really
-    # does break every consumer, because none of them has a copy of its own.
-    mangled = _linkage_fn().mangled
-    return (
-        _linkage_snap("1", [_linkage_fn(binding=ElfBinding.GLOBAL)], [mangled]),
-        _linkage_snap("2", [_linkage_fn(inline=True)], ["_Z5otherv"]),
-    )
-
-
-def _uncaptured_binding_export_dropped_stays_breaking() -> tuple[AbiSnapshot, AbiSnapshot]:
-    # The second FN sentinel: `elf_binding` is tri-state, and None means the
-    # binding was not captured (non-ELF, header-only, a pre-v21 snapshot).
-    # Absence of evidence must not demote a real removal, so this pair -- which
-    # differs from the demoted one only in that the binding is unknown -- has
-    # to stay breaking.
-    mangled = _linkage_fn().mangled
-    return (
-        _linkage_snap("1", [_linkage_fn()], [mangled]),
-        _linkage_snap("2", [_linkage_fn(inline=True)], ["_Z5otherv"]),
-    )
 
 
 def _vtable_capture_asymmetry_stays_filtered() -> tuple[AbiSnapshot, AbiSnapshot]:
@@ -1140,23 +1038,6 @@ def _python_api_function_dropped() -> tuple[AbiSnapshot, AbiSnapshot]:
 
 CORPUS: list[Case] = [
     Case("internal_struct_size", True, _internal_struct_size),
-    Case("weak_export_dropped_stays_nonbreaking", True, _weak_export_dropped_stays_nonbreaking),
-    Case("strong_export_dropped_stays_breaking", False, _strong_export_dropped_stays_breaking),
-    Case(
-        "demoted_export_with_signature_break_stays_breaking",
-        False,
-        _demoted_export_with_signature_break_stays_breaking,
-    ),
-    Case(
-        "out_of_line_weak_export_dropped_stays_breaking",
-        False,
-        _out_of_line_weak_export_dropped_stays_breaking,
-    ),
-    Case(
-        "uncaptured_binding_export_dropped_stays_breaking",
-        False,
-        _uncaptured_binding_export_dropped_stays_breaking,
-    ),
     Case("ambiguous_namespaced_leaf", False, _ambiguous_namespaced_leaf),
     # G23 Python-surface oracle: internal native churn scoped away (FP guard);
     # a real Python-API break stays breaking (FN sentinel / authority rule).
@@ -1681,11 +1562,6 @@ CASE_CATEGORY: dict[str, str] = {
     "public_std_string_typedef_alias_layout_changed": "stdlib-direct-reference",
     "stdlib_internal_owner_method_stays_filtered": "stdlib-direct-reference",
     # evidence-absence vs. real change (a finding must rest on evidence)
-    "weak_export_dropped_stays_nonbreaking": "evidence-absence",
-    "strong_export_dropped_stays_breaking": "evidence-absence",
-    "demoted_export_with_signature_break_stays_breaking": "evidence-absence",
-    "out_of_line_weak_export_dropped_stays_breaking": "evidence-absence",
-    "uncaptured_binding_export_dropped_stays_breaking": "evidence-absence",
     "vtable_capture_asymmetry_stays_filtered": "evidence-absence",
     "vtable_became_polymorphic_stays_breaking": "evidence-absence",
     "vtable_reorder_stays_breaking": "evidence-absence",

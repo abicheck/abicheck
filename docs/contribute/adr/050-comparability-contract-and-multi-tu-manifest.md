@@ -1130,7 +1130,7 @@ schemes. `docs/reference/exit-codes.md`'s `scan` table gains this row.
 exception, including these new ones, into an undifferentiated `None`:
 `stack_checker.py`'s `_run_abi_diff`, driving `abicheck deps compare`.**
 `stack_checker.py:32` imports `compare` from `checker` (not through
-`service.compare_snapshots`), and `_run_abi_diff` (`:397-410`) wraps its
+`service.compare_snapshots`), and `_run_abi_diff` (`:396-410`) wraps its
 whole body — the `dump()` calls *and* the `compare()` call — in one broad
 `except Exception as exc: log.warning(...); return None`. A
 `ProfileMismatchError`/`ScopeMismatchError` from a changed dependency DSO
