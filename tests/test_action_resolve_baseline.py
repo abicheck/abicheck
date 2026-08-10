@@ -400,6 +400,50 @@ class TestFailureTaxonomy:
             baseline_dir / "libpvxs.abicheck.json"
         )
 
+    @pytest.mark.parametrize(
+        ("suffix", "compression"),
+        [(".abicheck.json.gz", "gzip"), (".abicheck.json.zst", "zstd")],
+    )
+    def test_resolved_with_compressed_snapshot(
+        self, tmp_path: Path, suffix: str, compression: str
+    ) -> None:
+        """ADR-059: resolve-baseline's bash orchestration layer needs no
+        code of its own for compressed snapshots -- it only stages a
+        directory/archive and delegates to resolve_baseline.py's real
+        resolve_target() (fixed to decode through abicheck.snapshot_io).
+        Exercised here through the real end-to-end script, digest
+        verification included, not just at the Python-unit level."""
+        from abicheck.buildsource.baseline_set import compute_snapshot_content_hash
+        from abicheck.snapshot_io import SnapshotCompression, write_snapshot_text
+
+        baseline_dir = tmp_path / "baseline"
+        baseline_dir.mkdir()
+        snapshot_content = {"library": "libpvxs", "schema_version": 9}
+        real_digest = compute_snapshot_content_hash(snapshot_content)
+        artifact = _target_artifact("libpvxs")
+        artifact["snapshot"] = f"libpvxs{suffix}"
+        artifact["sha256"] = real_digest
+        artifact["compression"] = compression
+        _write_manifest(baseline_dir, artifacts=[artifact])
+        write_snapshot_text(
+            json.dumps(snapshot_content),
+            baseline_dir / f"libpvxs{suffix}",
+            compression=SnapshotCompression(compression),
+        )
+
+        result, outputs = _run_action(
+            {
+                "INPUT_BASELINE_PATH": str(baseline_dir),
+                "INPUT_CHANNEL": "accepted-main",
+                "INPUT_TARGET": "libpvxs",
+                "INPUT_PROFILE": PROFILE,
+            },
+            tmp_path,
+        )
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert outputs.get("outcome") == "resolved"
+        assert outputs.get("snapshot-path") == str(baseline_dir / f"libpvxs{suffix}")
+
 
 @pytest.mark.skipif(
     not RUN_SH.is_file(), reason="actions/resolve-baseline/run.sh not found"
@@ -667,9 +711,7 @@ class TestArchiveExtraction:
         assert result.returncode == 1
         assert outputs.get("outcome") == "ambiguous"
 
-    def test_tar_gz_archive_rejects_path_traversal_member(
-        self, tmp_path: Path
-    ) -> None:
+    def test_tar_gz_archive_rejects_path_traversal_member(self, tmp_path: Path) -> None:
         # Plain .tar.gz/.tar inputs now route through the same
         # TarExtractor._safe_extract member validation as the .tar.zst
         # branch above, instead of a bare `tar -x` with no member
