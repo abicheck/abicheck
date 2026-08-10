@@ -39,8 +39,10 @@ Three layers are covered here, mirroring ``test_clang_param_restrict.py``:
 from __future__ import annotations
 
 import json
+import platform
 import shutil
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -114,9 +116,24 @@ class TestClangParamIsVaListAgainstRealClang:
     ``test_clang_param_restrict.py``'s identical class docstring for why:
     that marker's Linux gate requires castxml, which this predicate does not
     need. Each test self-skips on its own real requirement instead.
+
+    **Also requires x86-64 Linux specifically** — unlike ``is_restrict``
+    (portable across every clang target), ``_clang_param_is_va_list`` is
+    verified ONLY for the x86-64 System V ABI's decayed pointer spelling
+    (its own docstring is explicit about this). Clang desugars ``va_list``
+    completely differently elsewhere — e.g. a bare ``char *`` on the
+    Windows MSVC target, ``struct __va_list`` on AArch64 Linux (Codex
+    review, fresh evidence) — so asserting the x86-64 spellings
+    unconditionally would genuinely FAIL (not just skip) on this repo's own
+    macOS/Windows unit-test CI lanes wherever clang happens to be present.
     """
 
     def _parse(self, tmp_path: Path, source: str, cpp: bool) -> dict:
+        if sys.platform != "linux" or platform.machine() not in ("x86_64", "AMD64"):
+            pytest.skip(
+                "va_list spellings verified for x86-64 Linux only "
+                f"(platform={sys.platform!r}, machine={platform.machine()!r})"
+            )
         binary = "clang++" if cpp else "clang"
         if shutil.which(binary) is None:
             pytest.skip(f"{binary} not installed")
