@@ -262,3 +262,22 @@ it should read in CHANGELOG.md. Delete the other sections.
   that prefix — an unresolved producer is now treated the same as a
   known-clang one for this check (only `"castxml"` is excluded, since it
   never produces that prefix at all).
+- **Documented a third known, deliberately-deferred fingerprint gap**
+  (Codex review, fresh evidence): `offsetof(A, x)` vs. `offsetof(A, y)` —
+  clang's `OffsetOfExpr` node carries no `inner` children and no key
+  identifying which member the offset walk selects, verified against real
+  Clang 18 output (both `-ast-dump=json` and the plain `-ast-dump` text
+  form) that both calls reduce to the byte-identical structural form.
+  Pinned with a regression test rather than guessed at.
+- **Fixed a missed `FIELD_DEFAULT_INITIALIZER_CHANGED`/
+  `PARAM_DEFAULT_VALUE_CHANGED` for a `new`-expression allocation-function
+  change** (Codex review, fresh evidence): `new S()` vs. `::new S()` when
+  `S` declares its own `operator new` previously fingerprinted identically
+  — clang's `CXXNewExpr` node's `isGlobal`/`operatorNewDecl`/
+  `operatorDeleteDecl` keys, which are what distinguish a class-member
+  allocation from a global one, were dropped by `_canonical_expr`'s
+  whitelist entirely, verified against real Clang 18 output before fixing.
+  `operatorNewDecl`/`operatorDeleteDecl` now reduce through the same
+  stable `kind`/`name`/`type`(/`qualified_name`-via-id-index) stub
+  `referencedDecl` already used, factored into a shared `_decl_stub()`
+  helper.

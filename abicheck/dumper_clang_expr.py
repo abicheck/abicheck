@@ -424,11 +424,24 @@ def _canonical_expr(node: Any, id_index: _IdIndexProvider | None = None) -> Any:
     dependent-scope case above, the component list genuinely isn't exposed
     anywhere in the compact JSON AST — there is no key this function is
     failing to read. Left as the same kind of silent false negative.
+
+    A third gap, found and fixed rather than deferred (Codex review, fresh
+    evidence): a ``CXXNewExpr`` (``new S()`` vs. ``::new S()`` when ``S``
+    declares its own ``operator new``) previously dropped ``isGlobal`` and
+    ``operatorNewDecl``/``operatorDeleteDecl`` entirely, even though real
+    Clang 18 output shows they're exactly what distinguishes the two calls
+    (verified: the class-member form has no ``isGlobal`` key and an
+    ``operatorNewDecl.kind`` of ``CXXMethodDecl``; the global form has
+    ``isGlobal: true`` and ``FunctionDecl``) — both reduced to the
+    byte-identical ``{"kind": "CXXNewExpr", "type": "S *"}`` before this fix.
+    Fixed by keeping ``isGlobal`` verbatim and reusing the same decl-stub
+    reduction ``referencedDecl`` already gets (below) for both operator
+    fields.
     """
     if not isinstance(node, dict):
         return node
     out: dict[str, Any] = {}
-    for key in ("kind", "value", "opcode", "name", "castKind"):
+    for key in ("kind", "value", "opcode", "name", "castKind", "isGlobal"):
         if key in node:
             out[key] = node[key]
     type_obj = node.get("type")
@@ -443,40 +456,53 @@ def _canonical_expr(node: Any, id_index: _IdIndexProvider | None = None) -> Any:
     arg_type_obj = node.get("argType")
     if isinstance(arg_type_obj, dict) and "qualType" in arg_type_obj:
         out["argType"] = _normalize_qual_type(arg_type_obj["qualType"])
-    referenced = node.get("referencedDecl")
-    if isinstance(referenced, dict):
-        # A DeclRefExpr's own top-level keys never identify WHICH declaration
-        # it names -- that lives only in this compact stub, previously
-        # dropped entirely (Codex review: `int x = DEFAULT_A;` vs `int x =
-        # DEFAULT_B;` fingerprinted identically without this -- affects both
-        # TypeField.default and the pre-existing Param.default, which share
-        # this helper). Its own "id" is a compile-time memory address, never
-        # stable across builds, so only "kind"/"name"/"type" are kept.
-        ref_out: dict[str, Any] = {}
-        for key in ("kind", "name"):
-            if key in referenced:
-                ref_out[key] = referenced[key]
-        ref_type = referenced.get("type")
-        if isinstance(ref_type, dict) and "qualType" in ref_type:
-            ref_out["type"] = _normalize_qual_type(ref_type["qualType"])
-        # The bare "name" above collides across scopes (Codex review, second
-        # round): `a::VALUE` vs `b::VALUE` share it. Resolve via id_index
-        # when available -- falls back to bare-name-only (still better than
-        # nothing) when the id isn't found, e.g. a builtin.
-        ref_id = referenced.get("id")
-        if id_index is not None and isinstance(ref_id, str):
-            # Called lazily, right here -- not by the caller -- so a literal
-            # default (the common case, which never reaches this branch at
-            # all) never pays for the index build; only a real
-            # referencedDecl does. The provider itself is expected to be
-            # memoized (_ClangAstParser._id_index()), so repeated resolution
-            # within one parse is still a single AST walk.
-            qualified = id_index().get(ref_id)
-            if qualified is not None:
-                ref_out["qualified_name"] = qualified
-        if ref_out:
-            out["referencedDecl"] = ref_out
+    for decl_key in ("referencedDecl", "operatorNewDecl", "operatorDeleteDecl"):
+        decl_out = _decl_stub(node.get(decl_key), id_index)
+        if decl_out is not None:
+            out[decl_key] = decl_out
     inner = node.get("inner")
     if isinstance(inner, list):
         out["inner"] = [_canonical_expr(c, id_index) for c in inner]
     return out
+
+
+def _decl_stub(decl: Any, id_index: _IdIndexProvider | None) -> dict[str, Any] | None:
+    """Reduce a nested declaration reference (``referencedDecl``,
+    ``operatorNewDecl``, ``operatorDeleteDecl``) to a small, stable stub.
+
+    A referenced declaration's own top-level keys never identify WHICH
+    declaration it names -- that lives only in this compact sub-object,
+    previously dropped entirely for ``referencedDecl`` (Codex review:
+    `int x = DEFAULT_A;` vs `int x = DEFAULT_B;` fingerprinted identically
+    without this -- affects both TypeField.default and the pre-existing
+    Param.default, which share this helper) and, in a later round, for
+    ``operatorNewDecl``/``operatorDeleteDecl`` too (`new S()` vs `::new
+    S()` when `S` declares its own `operator new` -- see `_canonical_expr`'s
+    own docstring). Its own "id" is a compile-time memory address, never
+    stable across builds, so only "kind"/"name"/"type" are kept verbatim.
+    """
+    if not isinstance(decl, dict):
+        return None
+    stub: dict[str, Any] = {}
+    for key in ("kind", "name"):
+        if key in decl:
+            stub[key] = decl[key]
+    decl_type = decl.get("type")
+    if isinstance(decl_type, dict) and "qualType" in decl_type:
+        stub["type"] = _normalize_qual_type(decl_type["qualType"])
+    # The bare "name" above collides across scopes (Codex review, second
+    # round): `a::VALUE` vs `b::VALUE` share it. Resolve via id_index
+    # when available -- falls back to bare-name-only (still better than
+    # nothing) when the id isn't found, e.g. a builtin.
+    decl_id = decl.get("id")
+    if id_index is not None and isinstance(decl_id, str):
+        # Called lazily, right here -- not by the caller -- so a literal
+        # default (the common case, which never reaches this branch at
+        # all) never pays for the index build; only a real referenced
+        # declaration does. The provider itself is expected to be memoized
+        # (_ClangAstParser._id_index()), so repeated resolution within one
+        # parse is still a single AST walk.
+        qualified = id_index().get(decl_id)
+        if qualified is not None:
+            stub["qualified_name"] = qualified
+    return stub or None

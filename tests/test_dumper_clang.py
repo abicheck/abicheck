@@ -1560,6 +1560,65 @@ def test_offsetof_initializer_documents_known_gap() -> None:
     assert value_x == value_y
 
 
+def test_new_expr_allocation_semantics_distinguish_fingerprints() -> None:
+    """Codex review, PR #687, fresh evidence: ``S* p = new S();`` vs.
+    ``S* p = ::new S();`` when ``S`` declares its own ``operator new`` --
+    ``CXXNewExpr``'s ``isGlobal``/``operatorNewDecl``/``operatorDeleteDecl``
+    keys are what distinguish a class-member allocation from a global one,
+    and were previously dropped by ``_canonical_expr``'s whitelist entirely.
+    Node shapes below are trimmed verbatim from real
+    ``clang++ --std=c++17 -Xclang -ast-dump=json`` output (Clang 18) for
+    exactly this pair -- the member form has no ``isGlobal`` key and an
+    ``operatorNewDecl.kind`` of ``CXXMethodDecl``; the global form has
+    ``isGlobal: true`` and ``FunctionDecl``."""
+    from abicheck.dumper_clang_expr import _field_initializer_value
+
+    def _new_field(*, is_global: bool) -> dict:
+        new_expr: dict = {
+            "kind": "CXXNewExpr",
+            "type": {"qualType": "S *"},
+            "valueCategory": "prvalue",
+            "initStyle": "call",
+            "operatorNewDecl": {
+                "kind": "FunctionDecl" if is_global else "CXXMethodDecl",
+                "name": "operator new",
+                "type": {"qualType": "void *(unsigned long)"},
+            },
+            "operatorDeleteDecl": {
+                "kind": "FunctionDecl",
+                "name": "operator delete",
+                "type": {"qualType": "void (void *) noexcept"},
+            },
+            "inner": [
+                {
+                    "kind": "CXXConstructExpr",
+                    "type": {"qualType": "S"},
+                    "valueCategory": "prvalue",
+                    "ctorType": {"qualType": "void () noexcept"},
+                }
+            ],
+        }
+        if is_global:
+            new_expr["isGlobal"] = True
+        return {
+            "kind": "FieldDecl",
+            "name": "p",
+            "type": {"qualType": "S *"},
+            "hasInClassInitializer": True,
+            "inner": [new_expr],
+        }
+
+    field_member = _new_field(is_global=False)
+    field_global = _new_field(is_global=True)
+
+    value_member = _field_initializer_value(field_member)
+    value_global = _field_initializer_value(field_global)
+
+    assert value_member is not None
+    assert value_global is not None
+    assert value_member != value_global
+
+
 def test_parse_enums_is_scoped_false_for_plain_enum() -> None:
     root = _tu(
         {
