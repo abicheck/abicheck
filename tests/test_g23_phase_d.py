@@ -138,6 +138,30 @@ class TestUnnamedTypeLeak:
 
         assert _unnamed_kind("_Z" + "9" * 5000) is None
         assert _unnamed_kind("_Z9abc") is None
+
+    def test_seq_id_digit_not_misread_as_source_name_length(self):
+        # A substitution's seq-id and an array-type's bound are digits that must
+        # NOT be read as a <source-name> length prefix. Without the dedicated
+        # skips, `S`/`A` is stepped over, the following `3` is taken as a
+        # length-3 identifier, and the real `Ut_` token right after it is
+        # consumed as part of that phantom name -- so the leak goes unreported.
+        # These two inputs are exactly that case: they only resolve when the
+        # seq-id/bound is skipped as its own production.
+        from abicheck.diff_unnamed_types import _unnamed_kind
+
+        assert _unnamed_kind("_Z1fS3_Ut_E") == "unnamed struct/enum"
+        assert _unnamed_kind("_Z1fA3_Ut_E") == "unnamed struct/enum"
+
+    def test_substitution_and_template_param_shapes_skipped(self):
+        # The remaining production shapes the scanner must step over before it
+        # can see a structural `Ut_`: a 2-char std abbreviation (`St`), a bare
+        # back-reference (`S_`), and a template-param with and without a number.
+        from abicheck.diff_unnamed_types import _unnamed_kind
+
+        assert _unnamed_kind("_Z1fSt3barUt_E") == "unnamed struct/enum"
+        assert _unnamed_kind("_Z1fS_Ut_E") == "unnamed struct/enum"
+        assert _unnamed_kind("_Z1fT1_Ut_E") == "unnamed struct/enum"
+        assert _unnamed_kind("_Z1fT_Ut_E") == "unnamed struct/enum"
         assert _unnamed_kind("_Z0Ut_") is None
 
     def test_malformed_huge_source_name_length_not_flagged_end_to_end(self):
