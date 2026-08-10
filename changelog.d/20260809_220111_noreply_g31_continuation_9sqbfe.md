@@ -337,3 +337,12 @@ it should read in CHANGELOG.md. Delete the other sections.
   uses — verified against the pre-existing
   `TestProducerMismatchDoesNotFalsePositive` regression, which a first,
   unscoped version of this fix broke.
+- **Fixed a missed `FIELD_DEFAULT_INITIALIZER_CHANGED`/
+  `PARAM_DEFAULT_VALUE_CHANGED` for a discarded increment/decrement's
+  pre/post form** (Codex review, fresh evidence): `(g++, 1)` vs. `(++g, 1)`
+  — both reduce to the same literal overall value `1`, so only the SIDE
+  EFFECT differs — previously fingerprinted identically too. A pre/post
+  increment/decrement `UnaryOperator` shares the same `opcode` (`"++"`) for
+  both forms; the only structural distinction is a separate `isPostfix`
+  boolean key, verified against real Clang 17 output, which
+  `_canonical_expr`'s whitelist didn't read. Now kept verbatim.

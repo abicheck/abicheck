@@ -1725,6 +1725,81 @@ def test_typeid_operand_distinguishes_fingerprints() -> None:
     assert value_int != value_long
 
 
+def test_postfix_increment_distinguishes_fingerprints() -> None:
+    """Codex review, PR #687, fresh evidence: ``(g++, 1)`` vs. ``(++g, 1)``
+    -- a discarded increment inside a larger expression whose overall VALUE
+    is the same literal ``1`` in both forms, so only the SIDE EFFECT
+    differs -- previously fingerprinted identically. Confirmed against real
+    Clang 17 output: a pre/post increment ``UnaryOperator`` shares the same
+    ``opcode`` (``"++"``) for both forms; the only structural distinction is
+    a separate ``isPostfix`` boolean key, which ``_canonical_expr`` didn't
+    read. Node shape below is trimmed verbatim from real
+    ``clang++ --std=c++17 -Xclang -ast-dump=json`` output for exactly this
+    pair."""
+    from abicheck.dumper_clang_expr import _field_initializer_value
+
+    def _increment_field(is_postfix: bool) -> dict:
+        return {
+            "kind": "FieldDecl",
+            "name": "x",
+            "type": {"qualType": "int"},
+            "hasInClassInitializer": True,
+            "inner": [
+                {
+                    "kind": "ParenExpr",
+                    "type": {"qualType": "int"},
+                    "valueCategory": "prvalue",
+                    "inner": [
+                        {
+                            "kind": "BinaryOperator",
+                            "type": {"qualType": "int"},
+                            "valueCategory": "prvalue",
+                            "opcode": ",",
+                            "inner": [
+                                {
+                                    "kind": "UnaryOperator",
+                                    "type": {"qualType": "int"},
+                                    "valueCategory": "prvalue"
+                                    if is_postfix
+                                    else "lvalue",
+                                    "isPostfix": is_postfix,
+                                    "opcode": "++",
+                                    "inner": [
+                                        {
+                                            "kind": "DeclRefExpr",
+                                            "type": {"qualType": "int"},
+                                            "valueCategory": "lvalue",
+                                            "referencedDecl": {
+                                                "kind": "VarDecl",
+                                                "name": "g",
+                                            },
+                                        }
+                                    ],
+                                },
+                                {
+                                    "kind": "IntegerLiteral",
+                                    "type": {"qualType": "int"},
+                                    "valueCategory": "prvalue",
+                                    "value": "1",
+                                },
+                            ],
+                        }
+                    ],
+                }
+            ],
+        }
+
+    field_postfix = _increment_field(True)
+    field_prefix = _increment_field(False)
+
+    value_postfix = _field_initializer_value(field_postfix)
+    value_prefix = _field_initializer_value(field_prefix)
+
+    assert value_postfix is not None
+    assert value_prefix is not None
+    assert value_postfix != value_prefix
+
+
 def test_parse_enums_is_scoped_false_for_plain_enum() -> None:
     root = _tu(
         {

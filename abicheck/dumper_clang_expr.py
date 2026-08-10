@@ -457,6 +457,15 @@ def _canonical_expr(node: Any, id_index: _IdIndexProvider | None = None) -> Any:
     same "result type, not operand type" trap ``argType`` was already added
     for ``sizeof``/``alignof`` above, except clang spells this one's operand
     key differently: ``typeArg``, not ``argType``. Now read alongside it.
+
+    A sixth gap, also found and fixed (Codex review, fresh evidence): a
+    discarded increment/decrement inside a larger expression, e.g. ``(g++,
+    1)`` vs. ``(++g, 1)`` (both reduce to the literal value ``1``, so only
+    the SIDE EFFECT differs) — previously fingerprinted identically.
+    Confirmed against real Clang 17 output: a pre/post increment/decrement
+    ``UnaryOperator`` shares the same ``opcode`` (``"++"``) for both forms;
+    the ONLY structural distinction is a separate ``isPostfix`` boolean key,
+    which wasn't in this function's whitelist. Now kept verbatim.
     """
     if not isinstance(node, dict):
         return node
@@ -470,6 +479,7 @@ def _canonical_expr(node: Any, id_index: _IdIndexProvider | None = None) -> Any:
         "isGlobal",
         "initStyle",
         "zeroing",
+        "isPostfix",
     ):
         if key in node:
             out[key] = node[key]
