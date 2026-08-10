@@ -15,6 +15,7 @@ from abicheck.checker_policy import ChangeKind
 from abicheck.diff_templates import (
     _count_top_level_template_args,
     _return_is_unspecified,
+    _strip_param_signature,
     _strip_template_args,
     detect_cpo_kind_changed,
     detect_internal_template_leaks,
@@ -119,6 +120,39 @@ class TestReturnIsUnspecified:
     ])
     def test_classification(self, rt: str, expected: bool) -> None:
         assert _return_is_unspecified(rt) is expected
+
+
+# ---------------------------------------------------------------------------
+# _strip_param_signature
+# ---------------------------------------------------------------------------
+
+
+class TestStripParamSignature:
+    """Codex review: a call operator's own name is spelled ``operator()`` —
+    naively stopping at the first top-level ``(`` corrupted
+    ``ns::C::operator()(ns::T const&) const`` down to ``ns::C::operator``,
+    losing the ``()`` that is actually part of the identifier.
+    """
+
+    def test_call_operator_keeps_its_parentheses(self) -> None:
+        sig = "ns::experimental::C::operator()(ns::detail::T const&) const"
+        assert _strip_param_signature(sig) == "ns::experimental::C::operator()"
+
+    def test_zero_arg_call_operator(self) -> None:
+        assert _strip_param_signature("ns::C::operator()() const") == "ns::C::operator()"
+
+    def test_plain_function_unaffected(self) -> None:
+        assert _strip_param_signature("lib::sort(int*, int*)") == "lib::sort"
+
+    def test_symbolic_operator_unaffected(self) -> None:
+        assert _strip_param_signature("ns::C::operator+(int)") == "ns::C::operator+"
+
+    def test_conversion_operator_unaffected(self) -> None:
+        sig = "ns::C::operator ns::Bar() const"
+        assert _strip_param_signature(sig) == "ns::C::operator ns::Bar"
+
+    def test_no_parens_returns_unchanged(self) -> None:
+        assert _strip_param_signature("lib::sort") == "lib::sort"
 
 
 # ---------------------------------------------------------------------------

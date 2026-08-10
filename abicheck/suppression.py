@@ -88,7 +88,7 @@ def _compile_glob(glob: str | None, field_name: str) -> re.Pattern[str] | None:
         raise ValueError(f"Invalid {field_name} {glob!r}: {e}") from e
 
 
-_SEGMENT_RE_WRAPPER = re.compile(r"^\(\?s:(.*)\)\\Z$")
+_SEGMENT_RE_WRAPPER = re.compile(r"^\(\?s:(.*)\)\\[Zz]$")
 
 
 def _fnmatch_segment_regex(segment: str) -> str:
@@ -97,6 +97,15 @@ def _fnmatch_segment_regex(segment: str) -> str:
     Uses the same fnmatch semantics a single ``*``/``?`` has always had —
     only :func:`_translate_namespace_glob`'s handling of a whole ``**``
     segment changes.
+
+    ``fnmatch.translate``'s end-of-string anchor is not stable across
+    Python versions — Python 3.14 emits ``\\z`` where earlier versions
+    emit ``\\Z`` (Codex review, verified against 3.14.4: an unmatched
+    wrapper made this function return the *whole* anchored translation
+    unstripped, so composing it mid-pattern anchored that one segment to
+    the end of the string instead of just contributing a fragment —
+    ``namespace="ns::*"`` stopped matching any ``ns::...`` name at all).
+    Accept either spelling rather than depend on one.
     """
     translated = fnmatch.translate(segment)
     m = _SEGMENT_RE_WRAPPER.match(translated)
@@ -126,9 +135,17 @@ def _translate_namespace_glob(pattern: str) -> str:
     fnmatch behavior unchanged, via :func:`_fnmatch_segment_regex`.
     """
     # A run of adjacent "**" segments means the same thing as one — collapse
-    # "a::**::**::b" to "a::**::b" before translating.
-    pattern = re.sub(r"(?:\*\*::)+\*\*", "**", pattern)
-    segments = pattern.split("::")
+    # "a::**::**::b" to "a::**::b". Done on the already-split segment list,
+    # not the raw string (Codex review): a substring-level regex here would
+    # also fire inside a non-globstar segment ending in "**" (e.g.
+    # "foo**::**" contains the literal substring "**::**" starting mid-
+    # segment), silently rewriting it to "foo**" and dropping the "::"
+    # boundary the fnmatch-style pattern still required.
+    segments: list[str] = []
+    for seg in pattern.split("::"):
+        if seg == "**" and segments and segments[-1] == "**":
+            continue
+        segments.append(seg)
     parts: list[str] = []
     for i, seg in enumerate(segments):
         if seg == "**":

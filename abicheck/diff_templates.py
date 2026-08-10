@@ -136,15 +136,23 @@ def _strip_param_signature(qualified: str) -> str:
     correlated *by their full qualified name*, not just a bare leaf — two
     unrelated namespaces reusing the same leaf identifier (``ns1::sort`` vs
     ``ns2::sort``) must never collapse together (see :func:`detect_cpo_kind_changed`).
+
+    A call operator's own name is spelled ``operator()`` — those parentheses
+    are the identifier, not an argument list. Naively stopping at the first
+    top-level ``(`` corrupts ``ns::C::operator()(ns::T const&) const`` down
+    to just ``ns::C::operator`` (Codex review). When the text immediately
+    before a ``(`` is the ``operator`` token, that pair is skipped and the
+    search continues for the real parameter-list opener.
     """
-    depth = 0
-    for i, ch in enumerate(qualified):
-        if ch == "(":
-            if depth == 0:
-                return qualified[:i]
-            depth += 1
-        elif ch == ")":
-            depth = max(0, depth - 1)
+    i = qualified.find("(")
+    while i != -1:
+        if qualified[:i].endswith("operator"):
+            close = qualified.find(")", i)
+            if close == -1:
+                return qualified
+            i = qualified.find("(", close)
+            continue
+        return qualified[:i]
     return qualified
 
 

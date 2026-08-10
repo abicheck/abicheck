@@ -328,6 +328,51 @@ class TestNamespaceGlobstarSemantics:
         s = Suppression(namespace="**::**", reachability="any", reason="catch-all")
         assert s.matches(self._change("oneapi::dal::foo"))
 
+    def test_collapse_does_not_span_into_a_non_globstar_segment(self):
+        # Codex review: the original collapse ran on the raw string via
+        # re.sub(r"(?:\*\*::)+\*\*", "**", pattern) — a substring match, so
+        # "foo**::**" (segments ["foo**", "**"], nothing to collapse) got
+        # corrupted to "foo**" because the literal substring "**::**" starts
+        # mid-way through "foo**" and spans into the next segment, silently
+        # dropping the "::" boundary the fnmatch-style prefix segment still
+        # required. The collapse must only fire on segments that are
+        # exactly "**", found by first splitting on "::".
+        s = Suppression(namespace="foo**::**", reachability="any", reason="x")
+        # Whatever "foo**" matches on its own (plain fnmatch semantics,
+        # unaffected by this fix), the trailing "::**" must still be a
+        # genuinely separate, non-corrupting segment — verified indirectly
+        # by confirming the translated regex keeps both segments distinct
+        # rather than collapsing to the bare single segment "foo**".
+        from abicheck.suppression import _translate_namespace_glob
+        translated = _translate_namespace_glob("foo**::**")
+        assert "(?:::.*)?" in translated
+        assert s.matches(self._change("foo::bar"))
+
+    def test_python314_fnmatch_end_anchor_variant_is_accepted(self):
+        # Codex review, verified against Python 3.14.4: fnmatch.translate()
+        # ends its result with "\z" there instead of "\Z". The wrapper that
+        # strips fnmatch's own "(?s: ... )\\Z" packaging around one segment
+        # must accept either spelling, or a multi-segment pattern like
+        # "ns::*" silently degrades to matching nothing at all (each
+        # segment stays wrapped and self-anchored instead of contributing a
+        # fragment). Exercised directly against the wrapper/segment helper
+        # rather than depending on which anchor the *running* interpreter's
+        # fnmatch happens to emit.
+        from abicheck.suppression import _SEGMENT_RE_WRAPPER, _fnmatch_segment_regex
+
+        assert _SEGMENT_RE_WRAPPER.match("(?s:ns)\\Z") is not None
+        assert _SEGMENT_RE_WRAPPER.match("(?s:ns)\\z") is not None
+        # Simulate the 3.14 anchor spelling directly, independent of which
+        # one the local interpreter actually produces.
+        m = _SEGMENT_RE_WRAPPER.match("(?s:ns)\\z")
+        assert m is not None
+        assert m.group(1) == "ns"
+        # And end to end: a multi-segment pattern must still match a real
+        # name regardless of which anchor spelling fnmatch used internally.
+        s = Suppression(namespace="ns::*", reachability="any", reason="x")
+        assert s.matches(self._change("ns::foo"))
+        assert _fnmatch_segment_regex("ns") == "ns"
+
 
 # ═══════════════════════════════════════════════════════════════════════════
 # Type Pattern Matching
