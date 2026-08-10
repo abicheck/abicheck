@@ -107,6 +107,19 @@ def envelope(**fields) -> str:
     return "Here is the answer.\n\n```json\n" + json.dumps(fields) + "\n```\n"
 
 
+def a_not_comparable_answer(evidence: list[int] | None = None) -> str:
+    """The one uncertainty shape that carries a `null` verdict and no caveat."""
+    return envelope(
+        verdict=None,
+        evidence=[0] if evidence is None else evidence,
+        confident=False,
+        uncertainty={
+            "reason": "not_comparable",
+            "unresolved": "the two sides were built for different architectures",
+        },
+    )
+
+
 class TestClaimExtraction:
     def test_a_well_formed_envelope_is_extracted(self):
         parsed, status = claim_mod.extract(
@@ -874,6 +887,73 @@ class TestDimensionSix:
         assert result.status == "pass"
         assert any("suppression-shaped flags" in r for r in result.reasons)
 
+    def test_a_not_comparable_claim_resting_on_nothing_fails(self, tmp_path):
+        """A `null` verdict is still a claim about the pair, and the null branch
+        used to skip the evidence check entirely — so an empty citation against
+        an empty call log passed both zero-tolerance dimensions by making the
+        `not-comparable-pair` scenario's expected answer with no run behind it."""
+        result = self._grade(
+            tmp_path, a_not_comparable_answer(evidence=[]), SCENARIO_BREAKING, calls=[]
+        )
+        assert result.status == "fail"
+        assert any("resting on no recorded call" in r for r in result.reasons)
+
+    def test_a_not_comparable_claim_citing_a_call_that_never_happened_fails(
+        self, tmp_path
+    ):
+        result = self._grade(
+            tmp_path, a_not_comparable_answer(), SCENARIO_BREAKING, calls=[]
+        )
+        assert result.status == "fail"
+        assert any("no recorded call matches" in r for r in result.reasons)
+
+    def test_a_not_comparable_claim_citing_a_completed_comparison_fails(self, tmp_path):
+        """Citing a call that *did* produce a verdict does not support "these two
+        cannot be compared" — the tool answered, so the citation refutes it."""
+        result = self._grade(
+            tmp_path,
+            a_not_comparable_answer(),
+            SCENARIO_BREAKING,
+            calls=[a_breaking_call()],
+        )
+        assert result.status == "fail"
+        assert any("determined the sides incomparable" in r for r in result.reasons)
+
+    @pytest.mark.parametrize(
+        ("argv", "exit_code"),
+        [
+            (["compare", "old.so", "new.so"], 16),
+            (["scan", "new.so", "--against", "old.json"], 6),
+            (["compat", "check", "-old", "a.xml", "-new", "b.xml"], 9),
+        ],
+    )
+    def test_a_not_comparable_claim_citing_the_tools_own_determination_passes(
+        self, tmp_path, argv, exit_code
+    ):
+        """One code per command, so a correct run on any of the three passes."""
+        call = {"seq": 0, "call_id": "c0", "argv": argv, "exit_code": exit_code}
+        result = self._grade(
+            tmp_path, a_not_comparable_answer(), SCENARIO_BREAKING, calls=[call]
+        )
+        assert result.status == "pass"
+
+    def test_the_other_uncertainty_kinds_are_not_asked_for_a_citation(self, tmp_path):
+        """A run that stops on shallow evidence may legitimately have produced
+        neither a verdict nor a non-comparability determination. Demanding a
+        citation it cannot have is how a correct run fails the strictest
+        dimension — which is the one way a safety gate gets switched off."""
+        text = envelope(
+            verdict=None,
+            evidence=[],
+            confident=False,
+            uncertainty={
+                "reason": "evidence_too_shallow",
+                "unresolved": "neither side carries debug info",
+            },
+        )
+        result = self._grade(tmp_path, text, SCENARIO_BREAKING, calls=[])
+        assert result.status == "pass"
+
 
 class TestGradeRunEndToEnd:
     def test_a_correct_grounded_answer_passes_everything(self, tmp_path):
@@ -899,6 +979,23 @@ class TestGradeRunEndToEnd:
         assert grade["zero_tolerance_failed"] == [6]
         statuses = {d["dimension"]: d["status"] for d in grade["dimensions"]}
         assert statuses[1] == "fail" and statuses[3] == "fail"
+
+    def test_the_expected_uncertainty_answer_still_has_to_be_earned(self, tmp_path):
+        """Dimension 2 accepts the shape of this claim — it *is* the answer the
+        scenario expects — and dimensions 1 and 3 do not gate. So without
+        dimension 6 asking for the tool's own determination, a run that recorded
+        nothing scores clean by naming the outcome it was going to be graded
+        against."""
+        scenario = {
+            "skill": "native-binary-compatibility-review",
+            "expected": {"verdict": None, "uncertainty": "not_comparable"},
+        }
+        run = build_run(tmp_path, final=a_not_comparable_answer(evidence=[]), calls=[])
+        grade = dim.grade_run(run, scenario)
+        assert grade["correct"] is True
+        assert grade["zero_tolerance_failed"] == [6]
+        statuses = {d["dimension"]: d["status"] for d in grade["dimensions"]}
+        assert statuses[2] == "pass"
 
 
 class TestShim:

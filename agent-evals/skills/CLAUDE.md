@@ -67,6 +67,28 @@ fixture already exists is a scenario silently not being run. Flip it to `ready`
 in the same change that lands its fixture; `tests/test_skill_eval_scenarios.py`
 fails if you don't.
 
+## A `null` verdict is a claim too
+
+Dimension 6 asks a claim to cite a call that could have produced it. That
+applies to a stated verdict, and — since a review found the null branch skipping
+the check entirely — to a `null` verdict given for `not_comparable`, which must
+cite a call that *determined* non-comparability (`compare` 16, `scan --against`
+6, `compat check` 9). Without it, a run that recorded nothing scored clean on
+the `not-comparable-pair` scenario by naming the outcome it was about to be
+graded against. The other three uncertainty kinds are exempt on purpose: a run
+that stops on shallow evidence may honestly have produced neither a verdict nor
+a determination, and demanding a citation it cannot have fails correct runs.
+
+**One real consequence, worth knowing before reading a grade.** The four
+uncertainty reasons describe things the *comparison* could not settle. None of
+them says "the environment failed the skill's own precondition" — so the pilot's
+skill-arm runs, stopped by the published skills' `abicheck-version-range`
+preflight, reached for `not_comparable` as the nearest term and now fail
+dimension 6 for citing only `abicheck --version`. The grader is right on its own
+terms; the vocabulary is short a term. Resolve that in the rubric deliberately,
+not by relaxing the rule — the run genuinely did not establish that the pair was
+incomparable.
+
 ## Adding a scenario
 
 1. Category A if `examples/ground_truth.json` can answer it — name the case,

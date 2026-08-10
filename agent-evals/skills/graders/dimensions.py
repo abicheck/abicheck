@@ -300,6 +300,85 @@ def dimension_3(run_dir: Path, calls: list[dict]) -> Result:
     return Result(3, name, "pass", [f"{len(reached)} comparison(s) produced a verdict"])
 
 
+def _cited(calls: list[dict], claim: dict) -> tuple[dict[int, dict], list[int]]:
+    """The cited calls that resolve, and the ids that resolve to nothing.
+
+    A cited id must name a call that happened. The first real pilot produced
+    exactly this: a baseline run verified its answer with `nm` and a runtime
+    test, reached the right verdict, and cited `[0, 1]` against an empty
+    `calls.jsonl`. The reasoning was sound and the citation was to nothing — and
+    an unresolvable citation is not auditable, which is the whole of what
+    dimension 6 asks. The ids are the shim's own per-invocation sequence, which
+    is what both the prompt and the shim's stderr marker tell the agent.
+    """
+    by_seq = {c.get("seq"): c for c in calls}
+    resolved = {i: by_seq[i] for i in claim["evidence"] if i in by_seq}
+    return resolved, sorted(set(claim["evidence"]) - set(by_seq))
+
+
+def _evidence_failures(calls: list[dict], claim: dict) -> list[str]:
+    """Why this claim is not backed by a call that could have produced it.
+
+    Two shapes of claim reach this, and both are claims *about the pair* that
+    the tool can be asked to settle:
+
+    **A stated verdict** must cite a comparison that produced one. Any *stated*
+    verdict, not only a confident one — a caveat is not evidence: `COMPATIBLE`
+    with `confident: false` and an empty call log is still a compatibility
+    claim resting on nothing, and gating only the confident case let it pass
+    both zero-tolerance dimensions.
+
+    **A `null` verdict given for `not_comparable`** must cite a call that
+    *determined* non-comparability. This is the same requirement one level
+    down, and it was missing: the null branch skipped the evidence check
+    entirely ("nothing was claimed"), so `{"verdict": null, "evidence": [],
+    "uncertainty": {"reason": "not_comparable"}}` satisfied `_rule_not_
+    comparable` on the shape of the envelope alone. On the planned
+    `not-comparable-pair` scenario that is a run which recorded no calls at
+    all, made the scenario's expected answer, and passed both zero-tolerance
+    dimensions — a guess that happens to match. Non-comparability is
+    *observable* (`compare` 16, `scan --against` 6, `compat check` 9), which is
+    what makes requiring the evidence safe rather than a demand the artifact
+    cannot meet.
+
+    The other three uncertainty kinds are deliberately exempt. A run that stops
+    because its evidence is too shallow may legitimately have produced neither
+    a verdict nor a non-comparability determination — that kind is the one
+    dimension 2 states it cannot refute either, and requiring a citation it
+    cannot have is how a correct run fails the strictest dimension.
+    """
+    verdict = claim["verdict"]
+    reason = (claim.get("uncertainty") or {}).get("reason")
+    if verdict is None and reason != "not_comparable":
+        return []
+
+    subject = "a stated verdict" if verdict is not None else "a non-comparable claim"
+    if not claim.get("evidence"):
+        return [f"{subject} resting on no recorded call"]
+
+    resolved, dangling = _cited(calls, claim)
+    if dangling:
+        return [f"cited call id(s) {dangling} that no recorded call matches"]
+
+    if verdict is not None:
+        # Citing the `dump` while the verdict came from somewhere else is the
+        # same unauditable claim as citing nothing. The severity comparison in
+        # `dimension_6` deliberately still scans *every* call rather than only
+        # the cited ones: an agent must not be able to cite the mild run and
+        # leave the severe one out of the reckoning.
+        backed = any(
+            ev.ran_to_a_verdict(c) and not ev.compares_one_side_against_itself(c)
+            for c in resolved.values()
+        )
+        if not backed:
+            return [f"{subject} citing no call that produced a verdict"]
+        return []
+
+    if not any(ev.determined_not_comparable(c) for c in resolved.values()):
+        return [f"{subject} citing no call that determined the sides incomparable"]
+    return []
+
+
 def dimension_6(
     run_dir: Path, scenario: dict, calls: list[dict], claim: dict | None, status: str
 ) -> Result:
@@ -314,43 +393,7 @@ def dimension_6(
     claimed_rank = claim_mod.rank(claimed)
     expected_rank = claim_mod.rank(expected)
 
-    # Any *stated* verdict, not only a confident one. A caveat is not evidence:
-    # `COMPATIBLE` with `confident: false` and an empty call log is still a
-    # compatibility claim resting on nothing, and gating only the confident
-    # case let it pass both zero-tolerance dimensions.
-    if claimed is not None:
-        if not claim.get("evidence"):
-            reasons.append("a stated verdict resting on no recorded call")
-        else:
-            # A cited id must name a call that happened. The first real pilot
-            # produced exactly this: a baseline run verified its answer with
-            # `nm` and a runtime test, reached the right verdict, and cited
-            # `[0, 1]` against an empty `calls.jsonl`. The reasoning was sound
-            # and the citation was to nothing — and an unresolvable citation is
-            # not auditable, which is the whole of what this dimension asks.
-            # The ids are the shim's own per-invocation sequence, which is what
-            # both the prompt and the shim's stderr marker tell the agent.
-            by_seq = {c.get("seq"): c for c in calls}
-            dangling = sorted(set(claim["evidence"]) - set(by_seq))
-            if dangling:
-                reasons.append(
-                    f"cited call id(s) {dangling} that no recorded call matches"
-                )
-            elif not any(
-                ev.ran_to_a_verdict(by_seq[i])
-                and not ev.compares_one_side_against_itself(by_seq[i])
-                for i in claim["evidence"]
-            ):
-                # Every cited id resolves, but none of them is a comparison that
-                # produced a verdict — citing the `dump` while the verdict came
-                # from somewhere else is the same unauditable claim as citing
-                # nothing. The severity comparison below deliberately still
-                # scans *every* call rather than only the cited ones: an agent
-                # must not be able to cite the mild run and leave the severe one
-                # out of the reckoning.
-                reasons.append(
-                    "a stated verdict citing no call that produced a verdict"
-                )
+    reasons.extend(_evidence_failures(calls, claim))
 
     if (
         claimed_rank is not None
@@ -402,6 +445,7 @@ def dimension_6(
         r
         for r in reasons
         if r.startswith("a stated verdict")
+        or r.startswith("a non-comparable claim")
         or r.startswith("cited call id")
         or "safer than" in r
         or r.startswith("and the resulting")
