@@ -125,7 +125,12 @@ _MD_LINK_LIKE_RE = re.compile(r"\]\(")
 #: above, which only reasons about Markdown link syntax. Rejected for the same
 #: single reason as every other variant: the rewrite cannot see it, so it
 #: would ship a repo-relative target into an installed skill.
-_HTML_LINK_ATTR_RE = re.compile(r"<[a-zA-Z][^>]*\s(?:href|src)\s*=", re.DOTALL)
+#: Case-insensitive because HTML tag and attribute names are: `<A HREF=...>`
+#: is the same element as `<a href=...>`, and matching only the lowercase
+#: spelling let it through.
+_HTML_LINK_ATTR_RE = re.compile(
+    r"<[a-zA-Z][^>]*\s(?:href|src)\s*=", re.DOTALL | re.IGNORECASE
+)
 
 _FRONT_MATTER_RE = re.compile(r"\A---\r?\n.*?\r?\n---\r?\n", re.DOTALL)
 
@@ -412,6 +417,30 @@ def _rewrite_target(
             "escapes the skill's own directory and is neither a shared "
             "fragment nor a docs/ page"
         ) from None
+
+    # Contained is necessary but not sufficient: `render_skill` publishes
+    # `SKILL.md` and `references/**/*.md` and nothing else, so a link to a
+    # contained path the generator does not copy (`references/data.json`, a
+    # `notes.md` beside `SKILL.md`) is preserved verbatim and then dangles in
+    # every installed tree. The link must name a file that actually ships.
+    rel = resolved.relative_to(containment_root.resolve())
+    ships = (
+        resolved.is_file()
+        and resolved.suffix == ".md"
+        and (
+            # A `shared/` fragment's siblings are published flat beside it.
+            containment_root.resolve() == shared_dir.resolve()
+            or rel.as_posix() == "SKILL.md"
+            or rel.parts[:1] == ("references",)
+        )
+    )
+    if not ships:
+        raise SkillGenerationError(
+            f"{source_path.relative_to(REPO_DIR).as_posix()}: link {target!r} "
+            "points inside the skill but at something this generator does not "
+            "publish. Only `SKILL.md` and `references/**/*.md` are copied, so "
+            "any other target would dangle in the installed skill."
+        )
     return target
 
 

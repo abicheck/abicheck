@@ -196,9 +196,36 @@ def test_a_double_quoted_title_is_still_accepted(synthetic):
 
 
 @pytest.mark.parametrize(
+    "link,extra",
+    [
+        ("[d](references/data.json)", {"references/data.json": "{}\n"}),
+        ("[n](notes.md)", {"notes.md": "# Notes\n"}),
+        ("[g](references/gone.md)", {}),
+    ],
+    ids=["non-markdown-asset", "unpublished-markdown", "missing-file"],
+)
+def test_contained_link_to_something_unpublished_is_a_hard_error(
+    synthetic, link, extra
+):
+    """Containment is necessary but not sufficient. Only `SKILL.md` and
+    `references/**/*.md` are copied, so a link to a contained asset the
+    generator does not publish passes the escape check and then dangles in
+    every installed skill."""
+    files = {"SKILL.md": f"---\nname: demo\n---\n\n{link}\n\n[a](../shared/a.md)\n"}
+    files.update(extra)
+    synthetic(skills={"demo": files}, shared={"a.md": "# A\n"})
+    with pytest.raises(gen.SkillGenerationError, match="does not\npublish|publish"):
+        gen.render_all(gen.SRC_DIR)
+
+
+@pytest.mark.parametrize(
     "markup",
-    ['<a href="../../docs/use/cli-usage.md">guide</a>', '<img src="../x.png">'],
-    ids=["anchor", "img"],
+    [
+        '<a href="../../docs/use/cli-usage.md">guide</a>',
+        '<img src="../x.png">',
+        '<A HREF="../../docs/use/cli-usage.md">guide</A>',
+    ],
+    ids=["anchor", "img", "uppercase-anchor"],
 )
 def test_raw_html_link_is_a_hard_error(synthetic, markup):
     """Markdown permits inline HTML, and an HTML destination carries no `](`
