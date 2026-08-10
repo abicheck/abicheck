@@ -382,6 +382,55 @@ def check_platform_baseline_floor(
     return changes
 
 
+class _FloorScan:
+    """The highest observed version for one prefix, the tag that carried it,
+    and which libraries provide a version above the declared floor."""
+
+    def __init__(self, floor_tuple: tuple[int, ...]) -> None:
+        self.best: tuple[int, ...] = (0,)
+        self.best_tag = ""
+        self.providers: set[str] = set()
+        self._floor = floor_tuple
+        self._relr = _parse_abi_version_tag(_DT_RELR_GLIBC_FLOOR_TAG)
+
+    def observe(self, version: tuple[int, ...], tag: str, provider: str) -> None:
+        """Fold one observed version tag in. The two comparisons are
+        independent: a tag can raise the observed maximum without exceeding the
+        declared floor, and vice versa."""
+        if _version_gt(version, self.best):
+            self.best, self.best_tag = version, tag
+        if _version_gt(version, self._floor):
+            self.providers.add(provider)
+
+    def observe_dt_relr(self, provider: str) -> None:
+        """Fold in the floor implied by DT_RELR support, however it was
+        observed -- the dedicated ``has_dt_relr`` flag, or the synthetic
+        ``GLIBC_ABI_DT_RELR`` verneed marker a legacy snapshot carries
+        instead."""
+        self.observe(self._relr, _DT_RELR_GLIBC_FLOOR_TAG, provider)
+
+
+def _scan_verneed_tags(elf: ElfMetadata, prefix: str, scan: _FloorScan) -> None:
+    """Fold every ``prefix``-matching verneed tag on *elf* into *scan*."""
+    tag_prefix = f"{prefix}_"
+    for lib, tags in (getattr(elf, "versions_required", None) or {}).items():
+        for tag in tags:
+            if prefix == "GLIBC" and tag == "GLIBC_ABI_DT_RELR":
+                # Legacy snapshots predating the has_dt_relr field may still
+                # carry this synthetic verneed marker directly — treat it as
+                # implying the same floor the has_dt_relr fallback applies,
+                # so an older snapshot isn't under-called just because the
+                # dedicated flag wasn't captured (Codex review).
+                scan.observe_dt_relr(lib)
+                continue
+            if not tag.startswith(tag_prefix):
+                continue
+            parsed = _parse_abi_version_tag(tag)
+            if parsed == _UNPARSEABLE_VERSION:
+                continue
+            scan.observe(parsed, tag, lib)
+
+
 def _check_baseline_floor_for_prefix(
     elf: ElfMetadata, prefix: str, floor_raw: str
 ) -> Change | None:
@@ -389,47 +438,19 @@ def _check_baseline_floor_for_prefix(
     floor_tuple = _parse_dotted_numeric_version(floor_raw)
     if floor_tuple is None:
         return None
-    best: tuple[int, ...] = (0,)
-    best_tag = ""
-    providers: set[str] = set()
-    relr_tuple = _parse_abi_version_tag(_DT_RELR_GLIBC_FLOOR_TAG)
-    tag_prefix = f"{prefix}_"
-    for lib, tags in (getattr(elf, "versions_required", None) or {}).items():
-        for tag in tags:
-            if prefix == "GLIBC" and tag == "GLIBC_ABI_DT_RELR":
-                # Legacy snapshots predating the has_dt_relr field may still
-                # carry this synthetic verneed marker directly — treat it as
-                # implying the same floor the has_dt_relr fallback below
-                # applies, so an older snapshot isn't under-called just
-                # because the dedicated flag wasn't captured (Codex review).
-                if _version_gt(relr_tuple, best):
-                    best, best_tag = relr_tuple, _DT_RELR_GLIBC_FLOOR_TAG
-                if _version_gt(relr_tuple, floor_tuple):
-                    providers.add(lib)
-                continue
-            if not tag.startswith(tag_prefix):
-                continue
-            parsed = _parse_abi_version_tag(tag)
-            if parsed == _UNPARSEABLE_VERSION:
-                continue
-            if _version_gt(parsed, best):
-                best, best_tag = parsed, tag
-            if _version_gt(parsed, floor_tuple):
-                providers.add(lib)
+    scan = _FloorScan(floor_tuple)
+    _scan_verneed_tags(elf, prefix, scan)
     if prefix == "GLIBC" and getattr(elf, "has_dt_relr", False):
-        if _version_gt(relr_tuple, best):
-            best, best_tag = relr_tuple, _DT_RELR_GLIBC_FLOOR_TAG
-        if _version_gt(relr_tuple, floor_tuple):
-            providers.add(getattr(elf, "soname", "") or "<binary>")
-    if best == (0,) or _version_le(best, floor_tuple):
+        scan.observe_dt_relr(getattr(elf, "soname", "") or "<binary>")
+    if scan.best == (0,) or _version_le(scan.best, floor_tuple):
         return None
     return make_change(
         ChangeKind.PLATFORM_BASELINE_FLOOR_RAISED,
         symbol="<platform-baseline>",
-        name=", ".join(sorted(providers)) or "(no provider evidence captured)",
+        name=", ".join(sorted(scan.providers)) or "(no provider evidence captured)",
         detail=prefix,
         old=f"{prefix}_{floor_raw}",
-        new=best_tag,
+        new=scan.best_tag,
     )
 
 

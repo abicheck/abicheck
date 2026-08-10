@@ -317,6 +317,113 @@ class TestBuildManifestBasics:
             build_manifest_module.build_manifest(tmp_path, "", "", entries, None)
 
 
+def _write_compressed_snapshot(
+    path: Path,
+    *,
+    library: str,
+    compression: str,
+    schema_version: int = 9,
+) -> None:
+    """Like ``_write_snapshot``, but through the real ADR-059 storage
+    envelope -- used to verify build_manifest.py discovers and decodes a
+    gzip/zstd-compressed dump the same way it reads a plain one."""
+    from abicheck.snapshot_io import SnapshotCompression, write_snapshot_text
+
+    data = {
+        "library": library,
+        "version": "1.0.0",
+        "schema_version": schema_version,
+        "git_commit": None,
+        "git_tag": None,
+        "created_at": "2026-07-17T00:00:00+00:00",
+        "build_id": None,
+    }
+    write_snapshot_text(
+        json.dumps(data), path, compression=SnapshotCompression(compression)
+    )
+
+
+class TestBuildManifestCompressedSnapshots:
+    """ADR-059 (baseline-set manifest v2 slice): a dumped snapshot may be
+    gzip/zstd-compressed (``dump --compression``) rather than plain JSON --
+    build_manifest.py must discover it under any canonical suffix and read
+    it the same way a plain snapshot is read."""
+
+    @pytest.mark.parametrize(
+        ("suffix", "compression"),
+        [(".abicheck.json.gz", "gzip"), (".abicheck.json.zst", "zstd")],
+    )
+    def test_discovers_and_decodes_compressed_snapshot(
+        self, tmp_path: Path, suffix: str, compression: str
+    ) -> None:
+        _write_compressed_snapshot(
+            tmp_path / f"libfoo{suffix}", library="libfoo", compression=compression
+        )
+        entries = [{"name": "libfoo", "artifact": "build/libfoo.so"}]
+        manifest = build_manifest_module.build_manifest(
+            tmp_path, "v1.0.0", "linux-x86_64", entries, None
+        )
+        artifact = manifest["artifacts"][0]
+        assert artifact["snapshot"] == f"libfoo{suffix}"
+        assert artifact["compression"] == compression
+        assert artifact["sha256"]
+
+    def test_plain_snapshot_records_none_compression(self, tmp_path: Path) -> None:
+        _write_snapshot(tmp_path / "libfoo.abicheck.json", library="libfoo")
+        entries = [{"name": "libfoo", "artifact": "build/libfoo.so"}]
+        manifest = build_manifest_module.build_manifest(
+            tmp_path, "v1.0.0", "linux-x86_64", entries, None
+        )
+        assert manifest["artifacts"][0]["compression"] == "none"
+
+    def test_content_hash_matches_across_encodings(self, tmp_path: Path) -> None:
+        """The same logical snapshot, dumped plain vs. compressed, must
+        produce the identical recorded sha256 -- ADR-059 keeps compression a
+        pure storage envelope, and the manifest's freshness/digest checks
+        must not become encoding-sensitive."""
+        plain_dir = tmp_path / "plain"
+        gz_dir = tmp_path / "gz"
+        plain_dir.mkdir()
+        gz_dir.mkdir()
+        _write_snapshot(
+            plain_dir / "libfoo.abicheck.json",
+            library="libfoo",
+            created_at="2026-07-17T00:00:00+00:00",
+        )
+        _write_compressed_snapshot(
+            gz_dir / "libfoo.abicheck.json.gz", library="libfoo", compression="gzip"
+        )
+        entries = [{"name": "libfoo", "artifact": "build/libfoo.so"}]
+        plain_manifest = build_manifest_module.build_manifest(
+            plain_dir, "", "", entries, None
+        )
+        gz_manifest = build_manifest_module.build_manifest(
+            gz_dir, "", "", entries, None
+        )
+        assert (
+            plain_manifest["artifacts"][0]["sha256"]
+            == gz_manifest["artifacts"][0]["sha256"]
+        )
+
+    def test_multiple_encodings_present_is_rejected_as_ambiguous(
+        self, tmp_path: Path
+    ) -> None:
+        """Codex review: if a stray plain snapshot and a real compressed one
+        coexist (e.g. an incomplete cleanup from a previous run using a
+        different --compression setting, or a caller invoking this script
+        directly without run.sh's own cleanup), discovery must not silently
+        prefer one over the other -- that risks recording a stale snapshot
+        in the manifest without it being regenerated/validated this run.
+        This is stale state to fail loudly on, not a priority order."""
+        _write_snapshot(tmp_path / "libfoo.abicheck.json", library="libfoo")
+        _write_compressed_snapshot(
+            tmp_path / "libfoo.abicheck.json.zst", library="libfoo", compression="zstd"
+        )
+        entries = [{"name": "libfoo", "artifact": "build/libfoo.so"}]
+        with pytest.raises(SystemExit, match="more than one dumped snapshot"):
+            build_manifest_module.build_manifest(tmp_path, "", "", entries, None)
+
+
 class TestFreshness:
     def test_no_previous_manifest_means_not_required(self, tmp_path: Path) -> None:
         _write_snapshot(tmp_path / "libfoo.abicheck.json", library="libfoo")

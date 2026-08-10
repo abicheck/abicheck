@@ -328,128 +328,140 @@ def check_wheel_tag_architecture_mismatch(
         return []
     claimed = claimed.lower()
     if elf is not None:
-        elf_machine = getattr(elf, "machine", "")
-        if elf_machine:
-            expected = _ARCH_CLAIM_TO_ELF_MACHINE.get(claimed)
-            if expected is None:
-                return []
-            if elf_machine not in expected:
-                return [
-                    make_change(
-                        ChangeKind.WHEEL_TAG_ARCHITECTURE_MISMATCH,
-                        symbol="<platform-baseline>",
-                        name=getattr(elf, "soname", "") or "<binary>",
-                        detail="architecture",
-                        old=claimed,
-                        new=elf_machine,
-                    )
-                ]
-            expected_ei_data = _ARCH_CLAIM_TO_ELF_EI_DATA.get(claimed)
-            elf_ei_data = getattr(elf, "ei_data", "")
-            if (
-                expected_ei_data is not None
-                and elf_ei_data
-                and elf_ei_data != expected_ei_data
-            ):
-                return [
-                    make_change(
-                        ChangeKind.WHEEL_TAG_ARCHITECTURE_MISMATCH,
-                        symbol="<platform-baseline>",
-                        name=getattr(elf, "soname", "") or "<binary>",
-                        detail="architecture",
-                        old=claimed,
-                        new=f"{elf_machine} ({elf_ei_data})",
-                    )
-                ]
-            expected_class = _ARCH_CLAIM_TO_ELF_CLASS.get(claimed)
-            elf_class = getattr(elf, "elf_class", 64)
-            if expected_class is not None and elf_class != expected_class:
-                # riscv64/loongarch64/s390x share one e_machine value across
-                # both word sizes (RV32/RV64, LoongArch32/64, 31/32-bit
-                # S/390 vs. 64-bit s390x) — a 32-bit ELF would otherwise
-                # pass a "*64" claim purely because e_machine matched
-                # (Codex review #583).
-                return [
-                    make_change(
-                        ChangeKind.WHEEL_TAG_ARCHITECTURE_MISMATCH,
-                        symbol="<platform-baseline>",
-                        name=getattr(elf, "soname", "") or "<binary>",
-                        detail="architecture",
-                        old=claimed,
-                        new=f"{elf_machine} ({elf_class}-bit)",
-                    )
-                ]
-            if claimed == "armv7l":
-                # manylinux's armv7l tag specifically means the hard-float
-                # armhf ABI: EABI version 5 AND EF_ARM_ABI_FLOAT_HARD
-                # (packaging._manylinux._is_linux_armhf) — a soft-float
-                # binary, a binary with neither float-ABI e_flags bit set,
-                # or a hard-float binary built against an older EABI (e.g.
-                # eabi4) all share the same e_machine/EI_DATA but cannot
-                # satisfy an armv7l-tagged wheel's runtime expectations.
-                # _decode_abi_flags always evaluates both the float e_flags
-                # bits AND the EABI-version field for EM_ARM, so once
-                # abi_flags is non-empty at all (decode actually ran), a
-                # missing "float-hard" token, or a missing "eabiN" token
-                # (which means the real e_flags EABI-version field is
-                # exactly 0 — GNU/"bare" EABI, not 5), is definitive
-                # contradicting evidence, not merely an absence of
-                # confirming evidence — only a fully empty abi_flags (no
-                # decode ran at all, e.g. a legacy/undecoded snapshot)
-                # degrades safely and skips the check entirely (Codex
-                # review #583, four rounds).
-                abi_flags: frozenset[str] = getattr(elf, "abi_flags", frozenset())
-                violation: str | None = None
-                if abi_flags:
-                    if "float-hard" in abi_flags:
-                        eabi_tokens = sorted(
-                            t for t in abi_flags if t.startswith("eabi")
-                        )
-                        if "eabi5" not in eabi_tokens:
-                            violation = eabi_tokens[0] if eabi_tokens else "eabi0"
-                    elif "float-soft" in abi_flags:
-                        violation = "soft-float"
-                    else:
-                        violation = "no hard-float ABI marker"
-                if violation is not None:
-                    return [
-                        make_change(
-                            ChangeKind.WHEEL_TAG_ARCHITECTURE_MISMATCH,
-                            symbol="<platform-baseline>",
-                            name=getattr(elf, "soname", "") or "<binary>",
-                            detail="architecture",
-                            old=claimed,
-                            new=f"{elf_machine} ({violation})",
-                        )
-                    ]
-            return []
+        elf_result = _elf_arch_mismatch(elf, claimed)
+        if elf_result is not None:
+            return elf_result
     if macho is not None:
-        cpu_type = getattr(macho, "cpu_type", "")
-        # cpu_types (all slices) is the primary evidence; cpu_type (the
-        # single host-selected slice) is only a fallback for a snapshot
-        # predating that field. Checking `cpu_type` truthiness first would
-        # bypass a snapshot that has `cpu_types` populated but an empty
-        # `cpu_type` (Codex review #583).
-        slices: list[str] = getattr(macho, "cpu_types", None) or (
-            [cpu_type] if cpu_type else []
-        )
-        if slices:
-            expected = _ARCH_CLAIM_TO_MACHO_CPU_TYPE.get(claimed)
-            if expected is None:
-                return []
-            if any(s.upper() in expected for s in slices):
-                return []
-            return [
-                make_change(
-                    ChangeKind.WHEEL_TAG_ARCHITECTURE_MISMATCH,
-                    symbol="<platform-baseline>",
-                    name=macho.install_name or "<binary>",
-                    detail="architecture",
-                    old=claimed,
-                    new=", ".join(slices),
-                )
-            ]
+        return _macho_arch_mismatch(macho, claimed)
     return []
+
+
+def _arch_mismatch(name: str, claimed: str, observed: str) -> list[Change]:
+    """The one finding every architecture check here produces, differing only
+    in what it observed."""
+    return [
+        make_change(
+            ChangeKind.WHEEL_TAG_ARCHITECTURE_MISMATCH,
+            symbol="<platform-baseline>",
+            name=name,
+            detail="architecture",
+            old=claimed,
+            new=observed,
+        )
+    ]
+
+
+def _armv7l_abi_violation(abi_flags: frozenset[str]) -> str | None:
+    """Why *abi_flags* fails manylinux's ``armv7l`` (armhf) tag, or ``None``.
+
+    That tag specifically means the hard-float armhf ABI: EABI version 5 AND
+    EF_ARM_ABI_FLOAT_HARD (``packaging._manylinux._is_linux_armhf``). A
+    soft-float binary, one with neither float-ABI e_flags bit set, or a
+    hard-float binary built against an older EABI (e.g. eabi4) all share the
+    same e_machine/EI_DATA but cannot satisfy an armv7l-tagged wheel's runtime
+    expectations.
+
+    ``_decode_abi_flags`` always evaluates both the float e_flags bits AND the
+    EABI-version field for EM_ARM, so once *abi_flags* is non-empty at all
+    (decode actually ran) a missing ``"float-hard"`` token, or a missing
+    ``"eabiN"`` token (meaning the real EABI-version field is exactly 0 --
+    GNU/"bare" EABI, not 5), is definitive contradicting evidence, not merely
+    an absence of confirming evidence. Only a fully empty *abi_flags* (no
+    decode ran at all, e.g. a legacy/undecoded snapshot) degrades safely and
+    skips the check entirely (Codex review #583, four rounds).
+    """
+    if not abi_flags:
+        return None
+    if "float-hard" not in abi_flags:
+        return "soft-float" if "float-soft" in abi_flags else "no hard-float ABI marker"
+    eabi_tokens = sorted(t for t in abi_flags if t.startswith("eabi"))
+    if "eabi5" in eabi_tokens:
+        return None
+    return eabi_tokens[0] if eabi_tokens else "eabi0"
+
+
+def _elf_arch_mismatch(elf: ElfMetadata, claimed: str) -> list[Change] | None:
+    """The ELF half: ``e_machine``, then byte order, word size and armhf ABI.
+
+    Returns ``None`` -- distinct from ``[]`` -- when this ELF records no
+    machine at all, so the caller falls through to the Mach-O evidence rather
+    than concluding the claim is satisfied.
+    """
+    elf_machine = getattr(elf, "machine", "")
+    if not elf_machine:
+        return None
+    name = getattr(elf, "soname", "") or "<binary>"
+    expected = _ARCH_CLAIM_TO_ELF_MACHINE.get(claimed)
+    if expected is None:
+        return []
+    if elf_machine not in expected:
+        return _arch_mismatch(name, claimed, elf_machine)
+
+    observed = _elf_byte_order_or_word_size_violation(elf, claimed, elf_machine)
+    if observed is not None:
+        return _arch_mismatch(name, claimed, observed)
+
+    if claimed == "armv7l":
+        violation = _armv7l_abi_violation(getattr(elf, "abi_flags", frozenset()))
+        if violation is not None:
+            return _arch_mismatch(name, claimed, f"{elf_machine} ({violation})")
+    return []
+
+
+def _elf_byte_order_or_word_size_violation(
+    elf: ElfMetadata, claimed: str, elf_machine: str
+) -> str | None:
+    """What contradicts *claimed* beyond ``e_machine``, spelled for the finding.
+
+    A matching ``e_machine`` alone proves neither byte order nor word size.
+    ``ppc64``/``ppc64le`` share one ``e_machine`` value, and even an
+    unambiguous one (``x86_64``, always little-endian) could pass a claim it
+    does not satisfy if the captured evidence carries the opposite endianness
+    -- a strong signal of a corrupted or misidentified snapshot. Likewise
+    ``riscv64``/``loongarch64``/``s390x`` each share one ``e_machine`` across a
+    32- and a 64-bit variant, as do ``x86_64``/``aarch64`` via the x86-64 x32
+    and AArch64 ILP32 ABIs -- distinct, non-interchangeable ABIs a plain
+    64-bit claim must reject, distinguished only by ``elf_class`` (Codex review
+    #583). ``i686``/``armv7l`` are deliberately absent from
+    :data:`_ARCH_CLAIM_TO_ELF_CLASS`, where the field's 64 default would
+    false-positive an unset-``elf_class`` legacy snapshot.
+    """
+    expected_ei_data = _ARCH_CLAIM_TO_ELF_EI_DATA.get(claimed)
+    elf_ei_data = getattr(elf, "ei_data", "")
+    if expected_ei_data is not None and elf_ei_data and elf_ei_data != expected_ei_data:
+        return f"{elf_machine} ({elf_ei_data})"
+    expected_class = _ARCH_CLAIM_TO_ELF_CLASS.get(claimed)
+    elf_class = getattr(elf, "elf_class", 64)
+    if expected_class is not None and elf_class != expected_class:
+        return f"{elf_machine} ({elf_class}-bit)"
+    return None
+
+
+def _macho_arch_mismatch(macho: MachoMetadata, claimed: str) -> list[Change]:
+    """The Mach-O half, checked against EVERY slice a fat binary carries.
+
+    :attr:`MachoMetadata.cpu_type` is only the one slice
+    ``parse_macho_metadata`` selected for the host running abicheck (arm64
+    preferred on Apple Silicon, x86_64 otherwise) -- not necessarily the slice
+    the wheel tag claims, so a single-arch tag on a still-fat binary would
+    false-positive purely on which host ran the parse. ``cpu_types`` (all
+    slices) is the primary evidence and ``cpu_type`` only a fallback for a
+    snapshot predating that field; checking ``cpu_type`` truthiness first would
+    bypass a snapshot with ``cpu_types`` populated but an empty ``cpu_type``
+    (Codex review #583).
+    """
+    cpu_type = getattr(macho, "cpu_type", "")
+    slices: list[str] = getattr(macho, "cpu_types", None) or (
+        [cpu_type] if cpu_type else []
+    )
+    if not slices:
+        return []
+    expected = _ARCH_CLAIM_TO_MACHO_CPU_TYPE.get(claimed)
+    if expected is None:
+        return []
+    if any(s.upper() in expected for s in slices):
+        return []
+    return _arch_mismatch(macho.install_name or "<binary>", claimed, ", ".join(slices))
 
 
 def _elf_rpath_entries(elf: ElfMetadata) -> list[str]:

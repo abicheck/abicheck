@@ -427,7 +427,12 @@ Core pipeline (in order of data flow):
    - `classify.py` — symbol classification
    - `annotations.py` — annotation handling
    - `errors.py` — exception types
-   - `serialization.py` — snapshot serialization
+   - `serialization.py` — snapshot serialization (`load_snapshot`/
+     `save_snapshot`/`write_snapshot` — the public compatibility surface)
+   - `snapshot_io.py` — ADR-059's canonical snapshot *storage envelope* I/O:
+     plain/gzip/zstd detection (magic bytes), atomic + deterministic
+     compressed writes, decompression-bomb limits. A dependency-free leaf
+     module `serialization.py`/`snapshot_cache.py`/CLI code build on it
    - `package.py` — package/archive handling
    - `debian_symbols.py` — Debian symbols file adapter
    - `environment_matrix.py` — multi-env comparison
@@ -473,6 +478,13 @@ Core pipeline (in order of data flow):
 9. **Build-source evidence (optional L3–L5 layers)** — `buildsource/` package
    (collect/merge/source-ABI replay/source graph; ADR-028…033). See
    `abicheck/buildsource/CLAUDE.md` for its module map.
+
+10. **Published Agent Skills (ADR-058)** — `skills-src/` is the one
+   hand-authored source (four `SKILL.md` files in Layer A, one `shared/`
+   tree of Layer-B domain fragments); `scripts/gen_agent_skills.py`
+   publishes it into three committed, self-contained trees
+   (`.agents/skills/`, `.claude/skills/`, `.gemini/skills/`). Never
+   hand-edit the generated trees. See `skills-src/CLAUDE.md`.
 
 Beyond the core package: `.github/AGENTS.md` (CI/workflow architecture),
 `action/AGENTS.md` (the composite GitHub Action's shell-script layer), and
@@ -534,10 +546,10 @@ CI runs `mypy abicheck/` as a required gate. The baseline is currently **0 error
 | Check | Severity | What it enforces |
 |-------|----------|------------------|
 | `file-size` | ERROR > 2000 lines, WARN > 1500 | Every first-party Python tree (`abicheck/`, `scripts/`, `tests/`, `eval/`, `validation/`, `action/`, the clang plugin's `tests/` — `FIRST_PARTY_PY_ROOTS`) stays legible. `LARGE_FILE_ALLOWLIST` downgrades a specific pre-existing violator to WARN with a reviewed reason — it is not a way to silently exempt a new file |
-| `claude-md-coverage` | ERROR | `CLAUDE.md` exists in each original major sub-tree (`REQUIRED_CLAUDE_MD_DIRS`) |
+| `claude-md-coverage` | ERROR | `CLAUDE.md` exists in each original major sub-tree (`REQUIRED_CLAUDE_MD_DIRS`, which now also covers `skills-src/`) |
 | `agent-instructions-coverage` | ERROR | `AGENTS.md` or `CLAUDE.md` exists in `.github/`, `action/`, `contrib/abicheck-clang-plugin/` (`REQUIRED_AGENT_INSTRUCTION_DIRS`) |
 | `script-inventory` | WARN | Every `scripts/*.py` is named in `scripts/CLAUDE.md`'s inventory table — an unlisted script is invisible to that discovery path |
-| `generated-file-ownership` | ERROR | A known-generated file (`GENERATED_FILE_MARKERS`, plus every `docs/reference/examples/case*.md`) still carries its "this is generated, don't hand-edit" marker comment |
+| `generated-file-ownership` | ERROR | A known-generated file (`GENERATED_FILE_MARKERS`, plus every `docs/reference/examples/case*.md`, plus every `*.md` under the three generated agent-skill trees — `.agents/skills/`, `.claude/skills/`, `.gemini/skills/` — scoped to the skill directories `scripts/gen_agent_skills.py` actually owns, so a hand-authored skill sharing an output root is not flagged) still carries its "this is generated, don't hand-edit" marker comment |
 | `test-ratio` | WARN | At least 20% test-to-source file ratio; test files are discovered recursively under `tests/` (not just top-level) |
 | `future-annotations` | WARN | `from __future__ import annotations` per this file's convention |
 | `changekind-partition` | ERROR | Every `ChangeKind` is in exactly one of `BREAKING_KINDS` / `API_BREAK_KINDS` / `COMPATIBLE_KINDS` / `RISK_KINDS` |
@@ -699,7 +711,7 @@ Once a root command genuinely clears the bar above, pick the right home:
 
 - `compare` command (legacy, without `--severity-*` flags): 0 = compatible, 2 = source break, 4 = ABI break
 - `compare` command (severity-aware, with any `--severity-*` flag): 0 = no error-level findings, 1 = error in addition/quality only, 2 = error in potential_breaking, 4 = error in abi_breaking
-- `scan --against`: 0 = compatible, 2 = API break, 4 = ABI break, 5 = budget overflow, 6 = NOT_COMPARABLE
+- `scan --against`: 0 = compatible, 2 = API break, 4 = ABI break, 5 = budget overflow, 6 = NOT_COMPARABLE (legacy scheme). Like `compare`, it also accepts `--severity-preset`/`--severity-*`/`--exit-code-scheme` (and `.abicheck.yml`'s `severity:`/`exit_code_scheme`); under the resolved `severity` scheme the 0/2/4 portion is computed by `severity.compute_exit_code` instead of the raw verdict, same as `compare`'s severity-aware row above. `--pack` gate-severity folding is not yet extended to `scan` — pass severity settings directly.
 - **Orthogonal contract-coverage axis (ADR-049 Phase 7), on `compare` and
   `scan --against` alike:** under `--contract-evaluation`, a selected
   `--contract` domain whose required evidence is incomplete contributes
@@ -962,6 +974,109 @@ Once a root command genuinely clears the bar above, pick the right home:
     a broad task suite plus a scoring/leaderboard story, which should grow
     from real usage of the one-task harness rather than being speculatively
     built out now.
+- **Findings emitted from absent evidence — `type_vtable_changed` fixed;
+  `type_base_changed` carries the identical shape and is not.** A list-valued
+  `RecordType` field cannot express "not captured", so an empty-vs-non-empty
+  difference conflates a real change with one side's debug info simply not
+  covering the declaring TU. Confirmed for `vtable`: identical headers, no
+  DWARF vtable, and zero `_ZTV` symbols on either side still produced a
+  `BREAKING` `type_vtable_changed`, because `_diff_type_vtable` guarded on
+  `t_old.vtable == t_new.vtable` and nothing else. Fixed by requiring an
+  independent layout signal (a size change — the vptr a genuinely polymorphic
+  class gains — or a virtual-base change) before an empty↔non-empty
+  transition is reported; both-sides-captured differences are untouched, and
+  an unknown size on either side keeps the finding, since the suppression
+  needs positive evidence that layout held still rather than being a fallback
+  for missing information. This is the discipline `diff_vtable_layout.py`
+  (tri-state `None`, "degrading to B1's L0 view rather than fabricating a
+  break") and `diff_elf_layout.py` (compare only a `_ZTV` present on *both*
+  sides) already state in their own docstrings; the type-level detector had
+  neither. **Two things remain open.** (1) `_diff_type_bases`
+  (`set(t_old.bases) != set(t_new.bases)`, and its virtual-base half) has the
+  same unguarded shape and **stays that way — an attempted guard was written
+  and reverted before merge, and the reason is worth not rediscovering.**
+  Every layout-based premise for it is false: an *empty* base is invisible by
+  the empty-base optimization, and — the one that killed the attempt — a
+  *storage-contributing* base can be added without moving the derived class's
+  size at all when the class is over-aligned (verified against g++:
+  `struct alignas(8) D {}` and `struct alignas(8) D : B {}` with
+  `struct B { int y; }` are both 8 bytes, as are the `alignas(16)` pair at
+  16). So "size held still" proves nothing about a base list, in either
+  direction. Unlike the vtable case there is no independent evidence stream
+  to fall back on — `snapshot.functions` answers "did this class's virtuals
+  change" but nothing answers "did this class's bases change" except
+  `RecordType.bases` itself. Guarding it therefore needs evidence the model
+  does not currently carry (per-finding provenance, or a captured base-layout
+  fact such as `base_offsets` corroboration), not a cleverer reading of
+  `size_bits`. Until then a fabricated `type_base_changed` from a capture gap
+  is the accepted cost, because the alternative — suppressing a real
+  hierarchy change, which is sometimes the *only* breaking finding a
+  same-size base addition produces — is strictly worse. (2) The vtable guard is **narrower than
+  a first reading suggests, and its own docstring used to overclaim it.** The
+  class's virtual functions and its `RecordType.vtable` are two projections of
+  the same DWARF evidence (both trace to `DW_TAG_subprogram`), not independent
+  streams — so a translation unit whose coverage vanishes can take both, the
+  two sides' signature sets then differ, and the guard declines to suppress.
+  The false positive survives in that shape. That is the failure direction to
+  have (it leaves a pre-existing false positive standing rather than hiding a
+  real break), but it means the guard covers the *reported* case — identical
+  headers, no DWARF vtable, no `_ZTV` anywhere, virtuals absent from both
+  sides — and not every capture gap. Closing the rest needs artifact or
+  provenance evidence (`_ZTV` presence, per-finding providers) the type-level
+  detector does not receive today. (3) One accepted
+  false negative in the
+  fix itself: a class already polymorphic *through a base*, declaring no
+  virtuals of its own, that gains one — its vtable grows while its object
+  size does not, making it indistinguishable from capture noise without a
+  real polymorphism walk over both sides' base chains
+  (`diff_vtable_layout._is_polymorphic`) plus the per-finding provenance the
+  entry below describes. (4) A *pure* virtual reaches that same size backstop
+  for a different reason: it has no out-of-line definition, so
+  `dwarf_snapshot` drops its declaration-only DIE from `snapshot.functions`
+  while still counting it as a vtable child of the class, leaving both
+  owned-signature sets empty — and with `alignas` absorbing the new vptr the
+  size does not move either. Reproduced against g++
+  (`struct alignas(8) A { virtual void f() = 0; }` compiled alongside a
+  concrete derived class, which is what makes GCC emit A's complete DIE
+  rather than a `DW_AT_declaration` stub): old vtable `[]`, new vtable
+  `['_ZN1A1fEv']`, both 8 bytes, `_ZN1A1fEv` absent from the function map on
+  both sides. **An attempt to close this one was written, merged into the
+  branch, and then reverted — the reason is the most useful thing in this
+  entry.** The fix consulted `RecordType.vptr_offset_bits` as "the layout
+  descriptor's own witness, the only signal here that is not another
+  projection of the same subprogram DIEs." That claim was false, and
+  checkably so: **both** producers assign the field as `0 if vtable else
+  None` (`dwarf_snapshot.py`, `dumper_castxml.py`), so on every real DWARF
+  or CastXML snapshot `(old.vptr is None) != (new.vptr is None)` is
+  *identical to* the empty↔non-empty vtable transition being guarded. It was
+  therefore true by construction for every input that reached it, which did
+  not merely weaken the guard — it made the guard **inert**, restoring the
+  original capture-gap false positive in full (Codex review). Only the
+  optional `ABICHECK_CLANG_LAYOUT_TOOL` path computes a real vptr, and
+  nothing in the model distinguishes that value from the derived one, so the
+  field cannot be trusted here at all. Reverted; case (4) joins case (3) as
+  an accepted false negative. **The tests are the second lesson**: the
+  guard's unit tests built `RecordType`s with `vptr_offset_bits` left `None`
+  on both sides — a record no backend can emit — so the entire suite,
+  including the pre-existing test for the guard's whole purpose, passed
+  against a guard that suppressed nothing on real input. The helper now
+  derives the field the way the producers do, one test pins that derivation
+  in the producers' own source (so the reasoning fails loudly if a producer
+  ever computes a real vptr), and five of these tests fail against the
+  reverted revision. Worth recording for both (3) and (4) that the break is
+  **not** hidden: `diff_layout._check_vptr_introduced` fires independently
+  on the same `None → 0` transition and the verdict stays `BREAKING`
+  (verified end to end, and now pinned by its own test) — which is also why
+  the FP-rate corpus, a verdict-level gate, could not catch either the
+  original false positive or the inert-guard regression, and why the
+  regression coverage is a direct unit test on the predicate
+  (`tests/test_vtable_evidence_guard.py`) instead. Leaning on a sibling
+  detector remains uncomfortable, but the alternative on offer was a witness
+  that only appeared independent. Guarded by four FP-corpus cases under the
+  `evidence-absence` axis (one FP guard, three FN sentinels), the unit tests
+  above, and three Hypothesis properties in
+  `tests/test_detector_properties.py`.
+
 - **Evidence-provider model — investigated, found not to reproduce as
   described; no fix applied.** A status-review follow-up asked whether
   `evidence_status_for_result`'s report-level downgrade (kind-level

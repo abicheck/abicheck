@@ -1837,3 +1837,95 @@ def test_repo_facts_json_exists_and_is_fresh():
         "canonical_python",
     ):
         assert key in facts, f"repo_facts.json missing {key!r}"
+
+
+# ---------------------------------------------------------------------------
+# ADR-058 / G36 P0.6: gate coverage for the agent-skill trees
+# ---------------------------------------------------------------------------
+
+
+def test_skills_src_is_a_required_claude_md_dir(car):
+    """`skills-src/` is a new major sub-tree; without registration it would
+    silently fall outside `claude-md-coverage`."""
+    assert car.SKILLS_SRC in car.REQUIRED_CLAUDE_MD_DIRS
+    assert (car.SKILLS_SRC / "CLAUDE.md").is_file()
+
+
+def test_generated_skill_roots_cover_all_three_publication_trees(car):
+    names = {p.relative_to(car.ROOT).as_posix() for p in car.GENERATED_SKILL_ROOTS}
+    assert names == {".agents/skills", ".claude/skills", ".gemini/skills"}
+
+
+def test_generated_file_ownership_flags_every_level_in_every_skill_tree(
+    car, tmp_path, monkeypatch
+):
+    """The ownership check must cover a skill's own `SKILL.md`, its
+    skill-specific `references/*.md`, and every copied `shared/*.md` fragment,
+    in all three committed trees — nine (3 levels x 3 trees) marker-less files,
+    each of which must be flagged."""
+    fake_root = tmp_path / "repo"
+    # A minimal skills-src/ so the owned-skill discovery finds exactly "demo".
+    src = fake_root / "skills-src" / "demo"
+    src.mkdir(parents=True)
+    (src / "SKILL.md").write_text("---\nname: demo\n---\n", encoding="utf-8")
+
+    roots = tuple(
+        fake_root / part / "skills" for part in (".agents", ".claude", ".gemini")
+    )
+    levels = (
+        "SKILL.md",
+        "references/skill-specific.md",
+        "references/shared/fragment.md",
+    )
+    for root in roots:
+        for rel in levels:
+            path = root / "demo" / rel
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text("# no marker here\n", encoding="utf-8")
+        # A hand-authored skill under the same root is NOT generator output
+        # and must not be flagged.
+        foreign = root / "hand-authored" / "SKILL.md"
+        foreign.parent.mkdir(parents=True, exist_ok=True)
+        foreign.write_text("# hand written\n", encoding="utf-8")
+
+    monkeypatch.setattr(car, "ROOT", fake_root)
+    monkeypatch.setattr(car, "SKILLS_SRC", fake_root / "skills-src")
+    monkeypatch.setattr(car, "GENERATED_SKILL_ROOTS", roots)
+    monkeypatch.setattr(car, "GENERATED_FILE_MARKERS", ())
+    monkeypatch.setattr(car, "DOCS", fake_root / "docs")
+
+    f = car.Findings()
+    car.check_generated_file_ownership(f)
+    messages = [str(e) for e in f.errors]
+    assert len(messages) == len(roots) * len(levels), messages
+    for root in roots:
+        for rel in levels:
+            needle = (root / "demo" / rel).relative_to(fake_root).as_posix()
+            assert any(needle in m for m in messages), f"{needle} not flagged"
+    assert not any("hand-authored" in m for m in messages)
+
+
+def test_generated_file_ownership_accepts_the_real_marker(car, tmp_path, monkeypatch):
+    """Negative control for the test above: with the generator's own marker
+    present, nothing is flagged — so the check is testing the marker, not
+    merely the file's existence."""
+    import gen_agent_skills
+
+    fake_root = tmp_path / "repo"
+    src = fake_root / "skills-src" / "demo"
+    src.mkdir(parents=True)
+    (src / "SKILL.md").write_text("---\nname: demo\n---\n", encoding="utf-8")
+    root = fake_root / ".agents" / "skills"
+    path = root / "demo" / "SKILL.md"
+    path.parent.mkdir(parents=True)
+    path.write_text(gen_agent_skills.GENERATED_MARKER + "\n", encoding="utf-8")
+
+    monkeypatch.setattr(car, "ROOT", fake_root)
+    monkeypatch.setattr(car, "SKILLS_SRC", fake_root / "skills-src")
+    monkeypatch.setattr(car, "GENERATED_SKILL_ROOTS", (root,))
+    monkeypatch.setattr(car, "GENERATED_FILE_MARKERS", ())
+    monkeypatch.setattr(car, "DOCS", fake_root / "docs")
+
+    f = car.Findings()
+    car.check_generated_file_ownership(f)
+    assert f.errors == []

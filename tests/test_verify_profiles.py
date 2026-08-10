@@ -233,8 +233,8 @@ def test_ci_ai_readiness_job_calls_verify_py() -> None:
         and "docs-contract" in ci
     )
     assert (
-        "scripts/verify.py --profile pr --only fp-rate,tier-accuracy,usecase-docs-sync,docs-contract,repo-facts"
-        in ci
+        "scripts/verify.py --profile pr --only fp-rate,tier-accuracy,"
+        "usecase-docs-sync,docs-contract,agent-skills-generated,repo-facts" in ci
     )
 
 
@@ -329,3 +329,57 @@ def test_other_agent_adapters_point_at_agents_md() -> None:
             f"{adapter_path}: the fast-lane pytest marker expression is a "
             "volatile AGENTS.md-owned detail — it must not be duplicated here"
         )
+
+
+# --- every pr-profile step is actually reachable from CI -------------------
+
+#: `pr`-profile steps that CI deliberately does not invoke through a
+#: `verify.py --only` list, each with the reason. This is an explicit,
+#: reviewed list rather than a wildcard: a step added to the `pr` profile but
+#: wired into no CI job is invisible in CI while `--profile pr` reports it
+#: locally, which is exactly how `agent-skills-generated` shipped unreachable.
+_PR_STEPS_NOT_IN_A_CI_ONLY_LIST = {
+    # ci.yml runs the same pytest command directly as its own matrix job
+    # (asserted by test_ci_unit_lane_matches_verify_unit_pr above), because
+    # the lane spans several OS/Python combinations that one Step can't model.
+    "unit-pr": "run directly as the unit-tests matrix job",
+    # KNOWN GAP, pre-existing and not introduced here: `ruff format --check`
+    # runs in `--profile pr`/`pixi run check` and in pre-commit, but no CI job
+    # invokes it. Recorded so it stays visible rather than being mistaken for
+    # a deliberate exemption.
+    "fmt-check": "NOT RUN IN CI — pre-existing gap, tracked here",
+}
+
+
+def _ci_only_step_names() -> set[str]:
+    """Every step name CI passes to `verify.py --only`, across all jobs."""
+    import re
+
+    ci = _read(".github/workflows/ci.yml")
+    names: set[str] = set()
+    for match in re.finditer(r"verify\.py\s+--profile\s+\w+\s+--only\s+([\w,-]+)", ci):
+        names.update(match.group(1).split(","))
+    return names
+
+
+def test_every_pr_profile_step_is_reachable_from_a_ci_job():
+    pr_steps = {s.name for s in verify.STEPS if verify.PR in s.profiles}
+    covered = _ci_only_step_names()
+    unreachable = pr_steps - covered - set(_PR_STEPS_NOT_IN_A_CI_ONLY_LIST)
+    assert unreachable == set(), (
+        f"pr-profile step(s) {sorted(unreachable)} run in `verify.py --profile pr` "
+        "but are invoked by no CI job — add them to a job's `--only` list, or "
+        "record why not in _PR_STEPS_NOT_IN_A_CI_ONLY_LIST"
+    )
+
+
+def test_the_ci_reachability_exemptions_are_still_real_steps():
+    """A stale exemption would silently widen the check above."""
+    pr_steps = {s.name for s in verify.STEPS if verify.PR in s.profiles}
+    assert set(_PR_STEPS_NOT_IN_A_CI_ONLY_LIST) <= pr_steps
+
+
+def test_agent_skills_drift_gate_runs_in_ci():
+    """ADR-058's generated trees are committed; without a CI-reachable drift
+    gate, a stale publication tree merges silently."""
+    assert "agent-skills-generated" in _ci_only_step_names()

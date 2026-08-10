@@ -16,6 +16,7 @@ Covers:
 - Headers-list resolution
 - Full ABICC flag acceptance (no unknown option errors)
 """
+
 from __future__ import annotations
 
 import errno
@@ -48,6 +49,7 @@ from abicheck.serialization import save_snapshot
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
+
 def _make_result(
     changes: list[Change] | None = None,
     verdict: Verdict = Verdict.COMPATIBLE,
@@ -76,8 +78,12 @@ def _make_snapshot(version: str = "1.0") -> AbiSnapshot:
         library="libtest.so",
         version=version,
         functions=[
-            Function(name="foo", mangled="_Z3foov", return_type="void",
-                     visibility=Visibility.PUBLIC),
+            Function(
+                name="foo",
+                mangled="_Z3foov",
+                return_type="void",
+                visibility=Visibility.PUBLIC,
+            ),
         ],
         variables=[],
         types=[],
@@ -85,6 +91,7 @@ def _make_snapshot(version: str = "1.0") -> AbiSnapshot:
 
 
 # ── _build_whitelist_suppression ──────────────────────────────────────────────
+
 
 class TestWhitelistSuppression:
     def test_whitelist_suppresses_non_listed(self, tmp_path: Path) -> None:
@@ -125,6 +132,7 @@ class TestWhitelistSuppression:
 
 # ── _build_internal_suppression ───────────────────────────────────────────────
 
+
 class TestInternalSuppression:
     def test_skip_internal_symbols(self) -> None:
         sl = _build_internal_suppression("_ZN.*internal.*", None)
@@ -147,6 +155,7 @@ class TestInternalSuppression:
 
 
 # ── _apply_warn_newsym ────────────────────────────────────────────────────────
+
 
 class TestWarnNewsym:
     def test_func_added_becomes_breaking(self) -> None:
@@ -192,11 +201,10 @@ class TestWarnNewsym:
 
 # ── _limit_affected_changes ───────────────────────────────────────────────────
 
+
 class TestLimitAffected:
     def test_limits_per_kind(self) -> None:
-        changes = [
-            _change(ChangeKind.FUNC_REMOVED, f"sym_{i}") for i in range(10)
-        ]
+        changes = [_change(ChangeKind.FUNC_REMOVED, f"sym_{i}") for i in range(10)]
         result = _make_result(changes=changes, verdict=Verdict.BREAKING)
         limited = _limit_affected_changes(result, limit=3)
         assert len(limited.changes) == 3
@@ -209,9 +217,7 @@ class TestLimitAffected:
         assert len(limited.changes) == 1
 
     def test_limits_different_kinds_independently(self) -> None:
-        changes = [
-            _change(ChangeKind.FUNC_REMOVED, f"r_{i}") for i in range(5)
-        ] + [
+        changes = [_change(ChangeKind.FUNC_REMOVED, f"r_{i}") for i in range(5)] + [
             _change(ChangeKind.FUNC_ADDED, f"a_{i}") for i in range(5)
         ]
         result = _make_result(changes=changes, verdict=Verdict.BREAKING)
@@ -224,13 +230,16 @@ class TestLimitAffected:
 
 # ── _write_affected_list ──────────────────────────────────────────────────────
 
+
 class TestWriteAffectedList:
     def test_writes_sorted_symbols(self, tmp_path: Path) -> None:
-        result = _make_result(changes=[
-            _change(ChangeKind.FUNC_REMOVED, "zebra"),
-            _change(ChangeKind.FUNC_ADDED, "alpha"),
-            _change(ChangeKind.TYPE_SIZE_CHANGED, "middle"),
-        ])
+        result = _make_result(
+            changes=[
+                _change(ChangeKind.FUNC_REMOVED, "zebra"),
+                _change(ChangeKind.FUNC_ADDED, "alpha"),
+                _change(ChangeKind.TYPE_SIZE_CHANGED, "middle"),
+            ]
+        )
         out = tmp_path / "affected.txt"
         _write_affected_list(result, out)
         lines = out.read_text(encoding="utf-8").strip().split("\n")
@@ -249,10 +258,12 @@ class TestWriteAffectedList:
         assert out.exists()
 
     def test_deduplicates_symbols(self, tmp_path: Path) -> None:
-        result = _make_result(changes=[
-            _change(ChangeKind.FUNC_REMOVED, "same_sym"),
-            _change(ChangeKind.FUNC_RETURN_CHANGED, "same_sym"),
-        ])
+        result = _make_result(
+            changes=[
+                _change(ChangeKind.FUNC_REMOVED, "same_sym"),
+                _change(ChangeKind.FUNC_RETURN_CHANGED, "same_sym"),
+            ]
+        )
         out = tmp_path / "affected.txt"
         _write_affected_list(result, out)
         lines = out.read_text(encoding="utf-8").strip().split("\n")
@@ -261,6 +272,7 @@ class TestWriteAffectedList:
 
 # ── _load_descriptor_or_dump ──────────────────────────────────────────────────
 
+
 class TestLoadDescriptorOrDump:
     def test_loads_json_dump(self, tmp_path: Path) -> None:
         snap = _make_snapshot()
@@ -268,23 +280,29 @@ class TestLoadDescriptorOrDump:
         save_snapshot(snap, path)
         result = _load_descriptor_or_dump(path)
         from abicheck.model import AbiSnapshot
+
         assert isinstance(result, AbiSnapshot)
         assert result.version == "1.0"
 
     def test_loads_xml_descriptor(self, tmp_path: Path) -> None:
-        xml = _write_file(tmp_path, "desc.xml", """
+        xml = _write_file(
+            tmp_path,
+            "desc.xml",
+            """
             <descriptor>
               <version>2.0</version>
               <libs>/usr/lib/libfoo.so</libs>
             </descriptor>
-        """)
+        """,
+        )
         result = _load_descriptor_or_dump(xml)
         assert isinstance(result, CompatDescriptor)
         assert result.version == "2.0"
 
     def test_loads_abicc_perl_dump_by_extension(self, tmp_path: Path) -> None:
         dump_file = tmp_path / "old.dump"
-        dump_file.write_text("""
+        dump_file.write_text(
+            """
             $VAR1 = {
               'LibraryName' => 'libfoo',
               'LibraryVersion' => '1.2.3',
@@ -295,10 +313,13 @@ class TestLoadDescriptorOrDump:
                 '1' => { 'MnglName' => 'foo', 'ShortName' => 'foo', 'Return' => '0' }
               }
             };
-        """, encoding="utf-8")
+        """,
+            encoding="utf-8",
+        )
 
         result = _load_descriptor_or_dump(dump_file)
         from abicheck.model import AbiSnapshot
+
         assert isinstance(result, AbiSnapshot)
         assert result.library == "libfoo"
         assert result.version == "1.2.3"
@@ -306,7 +327,8 @@ class TestLoadDescriptorOrDump:
 
     def test_loads_abicc_perl_dump_by_content(self, tmp_path: Path) -> None:
         dump_file = tmp_path / "old.txt"
-        dump_file.write_text("""
+        dump_file.write_text(
+            """
             $VAR1 = {
               'LibraryName' => 'libbar',
               'LibraryVersion' => '9',
@@ -317,10 +339,13 @@ class TestLoadDescriptorOrDump:
                 '1' => { 'MnglName' => 'bar', 'ShortName' => 'bar', 'Return' => '0' }
               }
             };
-        """, encoding="utf-8")
+        """,
+            encoding="utf-8",
+        )
 
         result = _load_descriptor_or_dump(dump_file)
         from abicheck.model import AbiSnapshot
+
         assert isinstance(result, AbiSnapshot)
         assert result.library == "libbar"
 
@@ -333,11 +358,50 @@ class TestLoadDescriptorOrDump:
         with pytest.raises(ValueError, match="ABICC XML dump format detected"):
             _load_descriptor_or_dump(dump_file)
 
-    def test_error_message_for_abicc_xml_dump_mentions_current_support(self, tmp_path: Path) -> None:
+    def test_error_message_for_abicc_xml_dump_mentions_current_support(
+        self, tmp_path: Path
+    ) -> None:
         dump_file = tmp_path / "dump.xml"
         dump_file.write_text("<?xml version='1.0'?><ABI_dump_1.0/>", encoding="utf-8")
         with pytest.raises(ValueError, match="supports ABICC Perl Data::Dumper dumps"):
             _load_descriptor_or_dump(dump_file)
+
+    @pytest.mark.parametrize(
+        ("suffix", "compression"), [(".json.gz", "gzip"), (".json.zst", "zstd")]
+    )
+    def test_loads_compressed_json_dump_by_canonical_suffix(
+        self, tmp_path: Path, suffix: str, compression: str
+    ) -> None:
+        """Codex review, PR #699: `compat dump -dump-path v1.json.gz`/`.zst`
+        writes a valid compressed snapshot -- Path.suffix only sees the
+        *last* component ("gz"/"zst"), so this used to miss the
+        `path.suffix == ".json"` heuristic entirely and fall through to
+        the XML-descriptor branch, failing before reaching load_snapshot()."""
+        snap = _make_snapshot()
+        path = tmp_path / f"dump{suffix}"
+        save_snapshot(snap, path, compression=compression)
+        result = _load_descriptor_or_dump(path)
+        from abicheck.model import AbiSnapshot
+
+        assert isinstance(result, AbiSnapshot)
+        assert result.version == "1.0"
+
+    @pytest.mark.parametrize("compression", ["gzip", "zstd"])
+    def test_loads_compressed_json_dump_under_neutral_name(
+        self, tmp_path: Path, compression: str
+    ) -> None:
+        """Same gap, but for a compressed snapshot written under a name
+        that's neither `.json` (the plain heuristic) nor a canonical
+        compressed suffix -- must still be recognized via magic-byte
+        detection alone, not just filename matching."""
+        snap = _make_snapshot()
+        path = tmp_path / "dump.bin"  # deliberately no suffix hint at all
+        save_snapshot(snap, path, compression=compression)
+        result = _load_descriptor_or_dump(path)
+        from abicheck.model import AbiSnapshot
+
+        assert isinstance(result, AbiSnapshot)
+        assert result.version == "1.0"
 
 
 class TestAbiccPerlDumpInfoMessage:
@@ -418,6 +482,7 @@ class TestAbiccPerlDumpInfoMessage:
 
 # ── HTML title wiring ─────────────────────────────────────────────────────────
 
+
 class TestHtmlTitle:
     def _fake_result(self, verdict: str = "COMPATIBLE") -> object:
         v = SimpleNamespace(value=verdict)
@@ -456,6 +521,7 @@ class TestHtmlTitle:
 
 
 # ── CI cross-validation infrastructure ────────────────────────────────────────
+
 
 class TestCrossValidationHelpers:
     """Tests for the building blocks used in CI cross-validation.
@@ -536,6 +602,7 @@ class TestCrossValidationHelpers:
 
 # ── compat-dump JSON round-trip ───────────────────────────────────────────────
 
+
 class TestCompatDumpRoundTrip:
     """Verify that JSON dumps produced by compat-dump can be loaded and compared."""
 
@@ -546,6 +613,7 @@ class TestCompatDumpRoundTrip:
 
         loaded = _load_descriptor_or_dump(path)
         from abicheck.model import AbiSnapshot
+
         assert isinstance(loaded, AbiSnapshot)
         assert loaded.version == "3.0"
         assert len(loaded.functions) == 1
@@ -564,45 +632,66 @@ class TestCompatDumpRoundTrip:
 
 # ── Relpath support ──────────────────────────────────────────────────────────
 
+
 class TestRelpathDescriptor:
     def test_relpath_replaces_macro_in_libs(self, tmp_path: Path) -> None:
-        xml = _write_file(tmp_path, "desc.xml", """
+        xml = _write_file(
+            tmp_path,
+            "desc.xml",
+            """
             <descriptor>
               <version>1.0</version>
               <libs>{RELPATH}/lib/libfoo.so</libs>
             </descriptor>
-        """)
+        """,
+        )
         desc = parse_descriptor(xml, relpath="/opt/myproject")
-        assert re.fullmatch(r"([A-Za-z]:)?/opt/myproject/lib/libfoo\.so", desc.libs[0].as_posix())
+        assert re.fullmatch(
+            r"([A-Za-z]:)?/opt/myproject/lib/libfoo\.so", desc.libs[0].as_posix()
+        )
 
     def test_relpath_replaces_macro_in_headers(self, tmp_path: Path) -> None:
-        xml = _write_file(tmp_path, "desc.xml", """
+        xml = _write_file(
+            tmp_path,
+            "desc.xml",
+            """
             <descriptor>
               <version>1.0</version>
               <libs>/usr/lib/libfoo.so</libs>
               <headers>{RELPATH}/include</headers>
             </descriptor>
-        """)
+        """,
+        )
         desc = parse_descriptor(xml, relpath="/opt/myproject")
-        assert re.fullmatch(r"([A-Za-z]:)?/opt/myproject/include", desc.headers[0].as_posix())
+        assert re.fullmatch(
+            r"([A-Za-z]:)?/opt/myproject/include", desc.headers[0].as_posix()
+        )
 
     def test_no_relpath_leaves_macros(self, tmp_path: Path) -> None:
-        xml = _write_file(tmp_path, "desc.xml", """
+        xml = _write_file(
+            tmp_path,
+            "desc.xml",
+            """
             <descriptor>
               <version>1.0</version>
               <libs>/usr/lib/libfoo.so</libs>
             </descriptor>
-        """)
+        """,
+        )
         desc = parse_descriptor(xml)
         assert desc.version == "1.0"
 
     def test_load_descriptor_or_dump_passes_relpath(self, tmp_path: Path) -> None:
-        xml = _write_file(tmp_path, "desc.xml", """
+        xml = _write_file(
+            tmp_path,
+            "desc.xml",
+            """
             <descriptor>
               <version>1.0</version>
               <libs>{RELPATH}/lib/libfoo.so</libs>
             </descriptor>
-        """)
+        """,
+        )
         result = _load_descriptor_or_dump(xml, relpath="/opt/build")
         assert isinstance(result, CompatDescriptor)
         posix = result.libs[0].as_posix()
@@ -611,6 +700,7 @@ class TestRelpathDescriptor:
 
 
 # ── Headers list resolution ──────────────────────────────────────────────────
+
 
 class TestHeadersListResolution:
     def test_headers_list_file(self, tmp_path: Path) -> None:
@@ -646,6 +736,7 @@ class TestHeadersListResolution:
 
 # ── P2 stub flag warnings ───────────────────────────────────────────────────
 
+
 class TestStubFlagWarnings:
     def test_stub_flag_emits_warning(self, capsys: pytest.CaptureFixture) -> None:
         _warn_stub_flags(quiet=False, mingw_compatible=True)
@@ -663,7 +754,9 @@ class TestStubFlagWarnings:
         assert captured.err == ""
 
     def test_multiple_stubs_all_warned(self, capsys: pytest.CaptureFixture) -> None:
-        _warn_stub_flags(quiet=False, mingw_compatible=True, static_libs=True, quick=True)
+        _warn_stub_flags(
+            quiet=False, mingw_compatible=True, static_libs=True, quick=True
+        )
         captured = capsys.readouterr()
         assert "-mingw-compatible" in captured.err
         assert "-static" in captured.err
@@ -671,6 +764,7 @@ class TestStubFlagWarnings:
 
 
 # ── Logging setup ────────────────────────────────────────────────────────────
+
 
 class TestLoggingSetup:
     def test_log_to_file(self, tmp_path: Path) -> None:
@@ -708,6 +802,7 @@ class TestLoggingSetup:
 
 # ── Full ABICC flag acceptance (CLI integration) ─────────────────────────────
 
+
 class TestAllAbiccFlagsAccepted:
     """Verify that every known ABICC flag is accepted by the CLI without error.
 
@@ -730,24 +825,46 @@ class TestAllAbiccFlagsAccepted:
                 encoding="utf-8",
             )
 
-        base_args = ["compat", "check", "-lib", "test", "-old", str(tmp_path / "old.xml"),
-                      "-new", str(tmp_path / "new.xml")]
+        base_args = [
+            "compat",
+            "check",
+            "-lib",
+            "test",
+            "-old",
+            str(tmp_path / "old.xml"),
+            "-new",
+            str(tmp_path / "new.xml"),
+        ]
         runner = CliRunner()
         return runner.invoke(main, base_args + args)
 
     def test_p2_stub_flags_accepted(self, tmp_path: Path) -> None:
         """All P2 stub flags should be accepted (not 'unknown option')."""
         flags = [
-            "-mingw-compatible", "-cxx-incompatible", "-cpp-compatible",
-            "-static", "-ext", "-quick", "-force", "-check",
-            "-extra-dump", "-sort", "-xml",
-            "-skip-typedef-uncover", "-check-private-abi", "-skip-unidentified",
-            "-tolerant", "-disable-constants-check",
-            "-skip-added-constants", "-skip-removed-constants",
+            "-mingw-compatible",
+            "-cxx-incompatible",
+            "-cpp-compatible",
+            "-static",
+            "-ext",
+            "-quick",
+            "-force",
+            "-check",
+            "-extra-dump",
+            "-sort",
+            "-xml",
+            "-skip-typedef-uncover",
+            "-check-private-abi",
+            "-skip-unidentified",
+            "-tolerant",
+            "-disable-constants-check",
+            "-skip-added-constants",
+            "-skip-removed-constants",
         ]
         for flag in flags:
             result = self._invoke_compat([flag], tmp_path)
-            assert "No such option" not in (result.output or ""), f"{flag} should be accepted"
+            assert "No such option" not in (result.output or ""), (
+                f"{flag} should be accepted"
+            )
 
     def test_cross_compilation_flags_accepted(self, tmp_path: Path) -> None:
         flags = [
@@ -761,7 +878,9 @@ class TestAllAbiccFlagsAccepted:
         ]
         for flag_args in flags:
             result = self._invoke_compat(flag_args, tmp_path)
-            assert "No such option" not in (result.output or ""), f"{flag_args} should be accepted"
+            assert "No such option" not in (result.output or ""), (
+                f"{flag_args} should be accepted"
+            )
 
     def test_relpath_flags_accepted(self, tmp_path: Path) -> None:
         flags = [
@@ -771,7 +890,9 @@ class TestAllAbiccFlagsAccepted:
         ]
         for flag_args in flags:
             result = self._invoke_compat(flag_args, tmp_path)
-            assert "No such option" not in (result.output or ""), f"{flag_args} should be accepted"
+            assert "No such option" not in (result.output or ""), (
+                f"{flag_args} should be accepted"
+            )
 
     def test_logging_flags_accepted(self, tmp_path: Path) -> None:
         log_file = tmp_path / "test.log"
@@ -783,7 +904,9 @@ class TestAllAbiccFlagsAccepted:
         ]
         for flag_args in flags:
             result = self._invoke_compat(flag_args, tmp_path)
-            assert "No such option" not in (result.output or ""), f"{flag_args} should be accepted"
+            assert "No such option" not in (result.output or ""), (
+                f"{flag_args} should be accepted"
+            )
 
     def test_report_flags_accepted(self, tmp_path: Path) -> None:
         flags = [
@@ -797,7 +920,9 @@ class TestAllAbiccFlagsAccepted:
         ]
         for flag_args in flags:
             result = self._invoke_compat(flag_args, tmp_path)
-            assert "No such option" not in (result.output or ""), f"{flag_args} should be accepted"
+            assert "No such option" not in (result.output or ""), (
+                f"{flag_args} should be accepted"
+            )
 
     def test_filtering_flags_accepted(self, tmp_path: Path) -> None:
         skip_file = tmp_path / "skip.txt"
@@ -814,7 +939,9 @@ class TestAllAbiccFlagsAccepted:
         ]
         for flag_args in flags:
             result = self._invoke_compat(flag_args, tmp_path)
-            assert "No such option" not in (result.output or ""), f"{flag_args} should be accepted"
+            assert "No such option" not in (result.output or ""), (
+                f"{flag_args} should be accepted"
+            )
 
     def test_version_aliases_accepted(self, tmp_path: Path) -> None:
         flags = [
@@ -827,7 +954,9 @@ class TestAllAbiccFlagsAccepted:
         ]
         for flag_args in flags:
             result = self._invoke_compat(flag_args, tmp_path)
-            assert "No such option" not in (result.output or ""), f"{flag_args} should be accepted"
+            assert "No such option" not in (result.output or ""), (
+                f"{flag_args} should be accepted"
+            )
 
     def test_use_dumps_flag_accepted(self, tmp_path: Path) -> None:
         result = self._invoke_compat(["-use-dumps"], tmp_path)
@@ -842,7 +971,9 @@ class TestAllAbiccFlagsAccepted:
         ]
         for flag_args in flags:
             result = self._invoke_compat(flag_args, tmp_path)
-            assert "No such option" not in (result.output or ""), f"{flag_args} should be accepted"
+            assert "No such option" not in (result.output or ""), (
+                f"{flag_args} should be accepted"
+            )
 
 
 class TestCompatExtendedExitCodeMapping:
@@ -853,17 +984,35 @@ class TestCompatExtendedExitCodeMapping:
             (FileNotFoundError("castxml: command not found"), "during castxml run", 3),
             (PermissionError("denied"), "parsing descriptor", 4),
             (OSError(errno.ENOENT, "missing input"), "during dump", 4),
-            (OSError(errno.ENOENT, "castxml not found in PATH"), "during castxml run", 3),
+            (
+                OSError(errno.ENOENT, "castxml not found in PATH"),
+                "during castxml run",
+                3,
+            ),
             (OSError(errno.EACCES, "permission denied"), "during dump", 4),
             (OSError(errno.EPERM, "operation not permitted"), "during dump", 4),
             (RuntimeError("castxml not found in PATH"), "during dump", 3),
             (RuntimeError("cannot compile headers"), "during dump", 5),
-            (RuntimeError("castxml failed (exit 1): fatal error: foo.h: No such file or directory"), "during dump", 5),
-            (RuntimeError("castxml failed (exit 1): compilation terminated"), "during dump", 5),
+            (
+                RuntimeError(
+                    "castxml failed (exit 1): fatal error: foo.h: No such file or directory"
+                ),
+                "during dump",
+                5,
+            ),
+            (
+                RuntimeError("castxml failed (exit 1): compilation terminated"),
+                "during dump",
+                5,
+            ),
             (RuntimeError("command not found"), "during dump", 3),
             (RuntimeError("No such file or directory"), "other", 3),
             (ValueError("invalid regex"), "in skip-symbols/skip-types", 6),
-            (ValueError("invalid regex"), "in skip-internal-symbols/skip-internal-types", 6),
+            (
+                ValueError("invalid regex"),
+                "in skip-internal-symbols/skip-internal-types",
+                6,
+            ),
             (ValueError("bad descriptor"), "parsing descriptor", 6),
             (ValueError("bad logging mode"), "setting up logging", 6),
             (RuntimeError("cannot write"), "report generation", 7),
@@ -873,7 +1022,9 @@ class TestCompatExtendedExitCodeMapping:
             (KeyboardInterrupt(), "during dump", 11),
         ],
     )
-    def test_classify_compat_error_exit_code(self, exc: BaseException, context: str, expected: int) -> None:
+    def test_classify_compat_error_exit_code(
+        self, exc: BaseException, context: str, expected: int
+    ) -> None:
         from abicheck.compat.cli import _classify_compat_error_exit_code
 
         assert _classify_compat_error_exit_code(exc, context=context) == expected
@@ -889,5 +1040,3 @@ class TestCompatFailHelper:
         assert excinfo.value.code == 6
         err = capsys.readouterr().err
         assert "Error parsing descriptor" in err
-
-

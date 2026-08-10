@@ -57,6 +57,7 @@ JSON and printing ``GITHUB_OUTPUT`` lines.
 from __future__ import annotations
 
 import re
+from collections.abc import Mapping
 from typing import Any
 
 from ..checker_types import validate_check_id, validate_evidence_depth
@@ -239,6 +240,16 @@ def _neutralize_gate(report: dict[str, Any]) -> None:
         }
     elif "scan_schema_version" in report and "exit_code" in report:
         report["exit_code"] = 0
+    # A severity-scheme `scan --against` (scan schema 1.9+) publishes a real
+    # gate at `diff.severity`, and `aggregate.GateInfo.from_scan_report`
+    # *prefers* it over the top-level `exit_code` zeroed just above -- so
+    # zeroing only that left an explicitly advisory check blocking the
+    # trailing aggregate anyway (Codex review). Same shape, same remedy, and
+    # deliberately the same shared-path discipline as the coverage axis
+    # below: the traversal is imported, never re-derived here, because a
+    # local copy is precisely what let the scan-shaped block slip through
+    # once already.
+    _zero_nested_severity_gates(report)
     # ADR-049 Phase 7's contract-coverage axis is a *second* way this report
     # can raise an exit code, orthogonal to the compatibility gate above and
     # folded separately by `aggregate` -- so zeroing only the gate left an
@@ -297,6 +308,46 @@ def _neutralize_gate(report: dict[str, Any]) -> None:
             node.get("contract_coverage_exit_contribution")
         ):
             node["contract_coverage_exit_contribution"] = 0
+
+
+def _zero_nested_severity_gates(report: dict[str, Any]) -> None:
+    """Zero a scan report's nested ``diff.severity`` gate for advisory mode.
+
+    The compatibility-axis counterpart of the coverage loop in
+    :func:`_neutralize_gate`, and written the same way for the same two
+    reasons that loop documents:
+
+    * the path set is **imported** from ``aggregate``
+      (:func:`~abicheck.aggregate.scan_severity_gate_paths`) rather than
+      re-derived, so the writer here and the reader there cannot disagree
+      about where the block lives; and
+    * each container along a path is **rebound to a copy** before anything is
+      written, because ``augment_report`` copies only the top level -- writing
+      through a nested mapping in place would reach back into the caller's own
+      report and rewrite its authoritative gate, breaking this module's
+      "*report* itself is never mutated" contract.
+
+    Unlike the coverage contribution, the gate's fields are *replaced* rather
+    than conditionally rewritten: an advisory check gates nothing, so a
+    published gate must say so outright, exactly as the root ``severity``
+    branch above already does for a ``compare`` report.
+    """
+    from ..aggregate import scan_severity_gate_paths
+
+    for path in scan_severity_gate_paths(report):
+        node: dict[str, Any] = report
+        for key in path:
+            copied = dict(node[key])
+            node[key] = copied
+            node = copied
+        gate = node.get("severity")
+        if isinstance(gate, Mapping):
+            node["severity"] = {
+                **gate,
+                "exit_code": 0,
+                "blocking": False,
+                "blocking_categories": [],
+            }
 
 
 def _is_valid_coverage_contribution(raw: object) -> bool:

@@ -37,6 +37,7 @@ import click
 
 from .buildsource.build_query import PRUNED_HEADER_DIR_SEGMENTS
 from .compat.abicc_dump_import import looks_like_perl_dump
+from .errors import SnapshotError
 from .header_utils import iter_directory_headers
 
 if TYPE_CHECKING:
@@ -100,7 +101,25 @@ def _expand_header_inputs(inputs: list[Path]) -> list[Path]:
 
 
 def _sniff_text_format(path: Path) -> str:
-    """Read a small header chunk and return 'json', 'perl', or 'unknown'."""
+    """Read a small header chunk and return 'json', 'perl', or 'unknown'.
+
+    ADR-059: a gzip/zstd-compressed snapshot is recognized via a bounded
+    decoded prefix, mirroring ``service.sniff_text_format`` (kept as a
+    separate copy here rather than importing that one, matching this
+    module's existing "no cross-import for this exact helper" shape)."""
+    from .snapshot_io import bounded_decoded_prefix, detect_snapshot_compression
+
+    try:
+        compression = detect_snapshot_compression(path)
+    except SnapshotError:
+        return "unknown"
+    if compression.value != "none":
+        prefix = bounded_decoded_prefix(path)
+        if prefix is None:
+            return "unknown"
+        head = prefix.decode("utf-8", errors="replace").lstrip()
+        return "json" if head.startswith("{") else "unknown"
+
     try:
         with open(path, "rb") as f:
             raw = f.read(_SNIFF_BYTES)

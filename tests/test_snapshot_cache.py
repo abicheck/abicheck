@@ -333,7 +333,9 @@ class TestLookupStore:
         snap = _sample_snap()
         store(snap, binary, [], [], "1.0", "c++")
         assert cache_dir.exists()
-        assert len(list(cache_dir.glob("*.json"))) == 1
+        # ADR-059: new entries are written zstd-compressed.
+        assert len(list(cache_dir.glob("*.json.zst"))) == 1
+        assert len(list(cache_dir.glob("*.json"))) == 0
 
         result = lookup(binary, [], [], "1.0", "c++")
         assert result is not None
@@ -384,9 +386,9 @@ class TestLookupStore:
         snap = _sample_snap()
         store(snap, binary, [], [], "1.0", "c++")
 
-        # Corrupt the cached file
-        for f in cache_dir.glob("*.json"):
-            f.write_text("{ invalid json")
+        # Corrupt the cached (zstd-compressed) file
+        for f in cache_dir.glob("*.json.zst"):
+            f.write_bytes(b"not a valid zstd frame at all")
 
         result = lookup(binary, [], [], "1.0", "c++")
         assert result is None
@@ -407,8 +409,10 @@ class TestEviction:
             binary.write_bytes(f"content {i}".encode())
             store(snap, binary, [], [], "1.0", "c++")
 
-        # Should have at most MAX_ENTRIES files
-        entries = list(cache_dir.glob("*.json"))
+        # Should have at most MAX_ENTRIES files (ADR-059: new entries are
+        # *.json.zst, not plain *.json).
+        entries = list(cache_dir.glob("*.json.zst"))
+        assert entries, "eviction test produced zero entries -- glob is stale"
         assert len(entries) <= 3
 
 
@@ -481,7 +485,9 @@ class TestStoreErrorPaths:
         snap = _sample_snap()
         store(snap, binary, [], [], "1.0", "c++")  # should not raise
         # Serialization failed before the temp file could be renamed into
-        # place, so no (partial/corrupt) cache entry should be left behind.
+        # place, so no (partial/corrupt) cache entry should be left behind
+        # -- neither the current *.json.zst shape nor a legacy plain *.json.
+        assert list(cache_dir.glob("*.json.zst")) == []
         assert list(cache_dir.glob("*.json")) == []
 
 

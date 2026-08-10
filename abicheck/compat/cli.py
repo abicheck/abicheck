@@ -33,7 +33,7 @@ import click
 
 from ..checker import compare
 from ..dumper import dump
-from ..errors import ProfileMismatchError, ScopeMismatchError
+from ..errors import ProfileMismatchError, ScopeMismatchError, SnapshotError
 from ..html_report import write_html_report
 from ..reporter import to_json, to_markdown
 from ..serialization import load_snapshot, save_snapshot
@@ -967,7 +967,9 @@ def compat_check_cmd(  # noqa: PLR0913
     )
 
     try:
-        result = compare(old_snap, new_snap, suppression=suppression, policy="strict_abi")
+        result = compare(
+            old_snap, new_snap, suppression=suppression, policy="strict_abi"
+        )
     except (ProfileMismatchError, ScopeMismatchError) as exc:
         _compat_fail("comparing snapshots", exc)
 
@@ -1180,6 +1182,26 @@ def _load_descriptor_or_dump(
 
     # Heuristic: if the file is JSON, load as a dump
     if path.suffix == ".json":
+        return load_snapshot(path)
+
+    # ADR-059 (Codex review): `compat dump -dump-path v1.json.gz`/`.json.zst`
+    # writes a valid compressed snapshot (its documented companion command,
+    # AGENTS.md), but Path.suffix only sees the *last* component ("gz"/
+    # "zst"), so those fell through to the XML-descriptor heuristic below
+    # and failed before ever reaching load_snapshot(). Recognize the
+    # canonical compressed suffixes directly, and fall back to magic-byte
+    # detection (never trusts the filename either way) so a compressed
+    # snapshot written under a neutral name is still dispatched correctly.
+    name = path.name.lower()
+    if name.endswith((".json.gz", ".json.zst")):
+        return load_snapshot(path)
+    from ..snapshot_io import SnapshotCompression, detect_snapshot_compression
+
+    try:
+        compression_hint = detect_snapshot_compression(path)
+    except SnapshotError:
+        compression_hint = SnapshotCompression.NONE
+    if compression_hint is not SnapshotCompression.NONE:
         return load_snapshot(path)
 
     # For XML files, peek at content to detect ABICC Perl dump disguised as .xml

@@ -358,7 +358,7 @@ class TestBaselineLibrariesDerivation:
     docstring). Not a CLI command (ADR-054): `build-output baseline-libraries`
     was a wire-format adapter for exactly this call site, not general
     project-integration CLI surface, so both workflows call
-    `derive_baseline_libraries()` directly via `python3 -c`."""
+    `derive_baseline_libraries()` directly via isolated `python3 -I -c`."""
 
     def test_publish_baseline_calls_the_library_function(self) -> None:
         data = _load(PUBLISH_BASELINE)
@@ -382,6 +382,22 @@ class TestBaselineLibrariesDerivation:
         assert "derive_baseline_libraries" in step["run"]
         assert "abicheck build-output" not in step["run"]
 
+    def test_library_imports_use_isolated_python(self) -> None:
+        """The caller checkout must not shadow the installed abicheck package."""
+        for path, job_name in (
+            (PUBLISH_BASELINE, "publish"),
+            (UPDATE_MAIN_BASELINE, "refresh"),
+        ):
+            data = _load(path)
+            steps = _steps(data["jobs"][job_name])
+            step = next(
+                s
+                for s in steps
+                if s.get("name") == "Derive baseline libraries from build-output.json"
+            )
+            assert step["run"].count('python3 -I -c "') == 2
+            assert 'python3 -c "' not in step["run"]
+
     def test_libraries_output_feeds_the_baseline_action_input(self) -> None:
         for path, job_name in (
             (PUBLISH_BASELINE, "publish"),
@@ -393,6 +409,30 @@ class TestBaselineLibrariesDerivation:
             assert (
                 dump_step["with"]["libraries"]
                 == "${{ steps.libraries.outputs.libraries }}"
+            )
+
+    def test_snapshot_compression_input_forwarded_to_baseline_action(self) -> None:
+        """ADR-059: each workflow declares its own ``snapshot-compression``
+        ``workflow_call`` input (default ``none``, unchanged behavior) and
+        forwards it verbatim to the nested ``actions/baseline`` call -- the
+        same declare-then-forward shape ``validation``/``depth`` already use
+        above, so a caller can opt a published or accepted-main baseline-set
+        into per-snapshot compression without either reusable workflow
+        hardcoding a choice."""
+        for path, job_name in (
+            (PUBLISH_BASELINE, "publish"),
+            (UPDATE_MAIN_BASELINE, "refresh"),
+        ):
+            data = _load(path)
+            inputs = data[True]["workflow_call"]["inputs"]
+            assert inputs["snapshot-compression"]["default"] == "none"
+            assert inputs["snapshot-compression"]["type"] == "string"
+
+            steps = _steps(data["jobs"][job_name])
+            dump_step = next(s for s in steps if s.get("name") == "Dump baseline-set")
+            assert (
+                dump_step["with"]["snapshot-compression"]
+                == "${{ inputs.snapshot-compression }}"
             )
 
 

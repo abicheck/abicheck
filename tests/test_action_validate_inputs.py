@@ -90,6 +90,7 @@ _VALIDATOR_INPUT_VARS = (
     "INPUT_GCC_OPTIONS",
     "INPUT_SYSROOT",
     "INPUT_NOSTDINC",
+    "INPUT_SNAPSHOT_COMPRESSION",
 )
 
 
@@ -180,6 +181,44 @@ class TestDumpRejectsDirectoryOrPackage:
         # dump's new-library is optional (source-only dump); the required-
         # ness check lives in run.sh, not this validator.
         result = _run_validate({"INPUT_MODE": "dump"})
+        assert result.returncode == 0, result.stdout + result.stderr
+
+
+@pytest.mark.skipif(
+    not VALIDATE_SH.is_file(), reason="action/validate-inputs.sh not found"
+)
+class TestDumpSnapshotCompressionIsValidated:
+    """ADR-059 (Codex review): an invalid snapshot-compression value used to
+    surface only from the CLI's own Click validation in the final run.sh
+    step -- after Python setup and a potentially multi-minute toolchain
+    install/build had already completed. Fail fast here instead, mirroring
+    every other choice-shaped input this validator pre-checks."""
+
+    @pytest.mark.parametrize("value", ["auto", "none", "gzip", "zstd"])
+    def test_recognized_values_pass(self, value: str) -> None:
+        result = _run_validate(
+            {"INPUT_MODE": "dump", "INPUT_SNAPSHOT_COMPRESSION": value}
+        )
+        assert result.returncode == 0, result.stdout + result.stderr
+
+    def test_unset_passes(self) -> None:
+        result = _run_validate({"INPUT_MODE": "dump"})
+        assert result.returncode == 0, result.stdout + result.stderr
+
+    def test_unrecognized_value_is_rejected(self) -> None:
+        result = _run_validate(
+            {"INPUT_MODE": "dump", "INPUT_SNAPSHOT_COMPRESSION": "bz2"}
+        )
+        assert result.returncode == 1
+        assert "snapshot-compression 'bz2' is not recognized" in result.stdout
+
+    def test_only_checked_for_dump_mode(self) -> None:
+        """Sanity: the input is dump-only (AGENTS.md/action.yml both
+        document it as ignored elsewhere) -- an invalid value on another
+        mode is not this validator's concern."""
+        result = _run_validate(
+            {"INPUT_MODE": "compare", "INPUT_SNAPSHOT_COMPRESSION": "bz2"}
+        )
         assert result.returncode == 0, result.stdout + result.stderr
 
 

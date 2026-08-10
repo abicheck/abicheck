@@ -338,17 +338,38 @@ class GateInfo:
 
     @classmethod
     def from_scan_report(cls, data: Mapping[str, Any]) -> GateInfo | None:
-        """Read a ``scan`` report's own top-level ``exit_code`` as the gate.
+        """Read a ``scan`` report's gate.
 
-        A ``scan`` JSON report records its gate as a top-level ``exit_code``
-        (scheme 0 pass / 2 source break / 4 abi break / 5 budget overflow)
-        rather than a ``compare``-style ``severity`` block. Keyed on
+        A legacy-scheme ``scan`` JSON report records its gate only as a
+        top-level ``exit_code`` (scheme 0 pass / 2 source break / 4 abi break /
+        5 budget overflow / 6 not-comparable) rather than a ``compare``-style
+        ``severity`` block. A severity-scheme ``scan --against`` (scan schema
+        1.9+) additionally publishes that block at ``diff.severity``, which is
+        preferred when present -- see the body. Keyed on
         ``scan_schema_version`` so arbitrary JSON that merely happens to carry
         an ``exit_code`` is not mistaken for a scan gate. Fails closed on a
-        scan report whose ``exit_code`` is unusable.
+        scan report whose gate is unusable, by either route.
         """
         if "scan_schema_version" not in data:
             return None
+        # A severity-scheme `scan --against` (scan schema 1.9+) publishes a
+        # real `compare`-shaped gate at `diff.severity`, whose `exit_code` is
+        # this run's *pre-coverage* compatibility contribution. Prefer it, and
+        # validate it through the very same strict reader a `compare` report
+        # goes through, so the two commands' gates are read identically rather
+        # than by two validators that can disagree.
+        #
+        # This is not an optimization -- it is what keeps the raw-code branch
+        # below sound. That branch separates the coverage contribution by
+        # arguing scan "has no native 1", which stopped being true once
+        # severity reached scan: an error-level addition/quality finding is a
+        # native compatibility 1, and folded with a coverage 1 it produced a
+        # top-level 1 that the branch below would attribute entirely to
+        # coverage and pass (Codex review). A severity-scheme report answers
+        # the question directly, so it never reaches that argument.
+        nested = _scan_severity_gate(data)
+        if nested is not None:
+            return nested
         code = data.get("exit_code")
         if not isinstance(code, int) or isinstance(code, bool):
             raise _MalformedGate("scan report 'exit_code' is missing or not an integer")
@@ -953,19 +974,35 @@ class AggregateResult:
         lines.append("Compatibility:")
         lines.append("  " + self._render_compatibility_line())
 
+        lines.extend(self._render_contract_coverage_lines())
+        lines.extend(self._render_profile_matrix_lines())
+        lines.extend(render_finding_matrix_lines(self.finding_matrix))
+
+        lines.extend(self._render_coverage_and_gate_lines())
+
+        return "\n".join(lines)
+
+    def _render_contract_coverage_lines(self) -> list[str]:
+        """The ADR-049 contract-coverage block, empty when every domain closed.
+
+        Named separately from the required-target coverage line for the same
+        reason the JSON block is: a bare exit 1 with neither of them explained
+        is the failure this axis most easily causes.
+        """
+        out: list[str] = []
         # Named separately from the required-target coverage line above for
         # the same reason the JSON block is: a bare exit 1 with neither of
         # them explained is the failure this axis most easily causes.
         incomplete = self.contract_coverage_targets
         if incomplete:
-            lines.append("")
-            lines.append("Contract coverage:")
+            out.append("")
+            out.append("Contract coverage:")
             # The contribution is stated separately from the target list
             # rather than folded into one clause: with `contract.unresolved=
             # warn` a listed target contributes 0, so "incomplete on X —
             # contributes 0" would read as a contradiction rather than as the
             # acceptance it is.
-            lines.append(f"  incomplete on {', '.join(incomplete)}")
+            out.append(f"  incomplete on {', '.join(incomplete)}")
             accepted = tuple(
                 t.target_id
                 for t in list(self.analyzed) + list(self._gated_unexpected)
@@ -981,91 +1018,104 @@ class AggregateResult:
                 # _neutralize_gate`), and this side cannot tell them apart --
                 # both look like "declared 0 with failures listed". Naming
                 # one of them was wrong for the other (Codex review).
-                lines.append(
+                out.append(
                     f"  not gated on {', '.join(sorted(accepted))} "
                     "(that run contributed 0; listed, not gated)"
                 )
-            lines.append(
+            out.append(
                 f"  contributes {self.contract_coverage_exit} to the exit code "
                 "(ADR-049 contract-coverage axis)"
             )
 
+        return out
+
+    def _render_profile_matrix_lines(self) -> list[str]:
+        """The per-base-target profile matrix, empty when no profiles ran."""
+        out: list[str] = []
         matrix = self.profile_matrix
         if matrix:
-            lines.append("")
-            lines.append("Profile matrix:")
+            out.append("")
+            out.append("Profile matrix:")
             for entry in matrix:
-                unanalyzed = entry.unanalyzed_profiles
-                if entry.affected_profiles:
-                    line = (
-                        f"  {entry.base_target}: affected on "
-                        f"{', '.join(entry.affected_profiles)} "
-                        f"(checked on {', '.join(entry.profiles)})"
-                    )
-                    if unanalyzed:
-                        # An affected profile and an unanalyzed one can
-                        # coexist on the same target -- don't let "checked
-                        # on" imply the unanalyzed one produced a result too
-                        # (Codex review).
-                        line += f"; no analyzed result on {', '.join(unanalyzed)}"
-                elif not unanalyzed:
-                    line = (
-                        f"  {entry.base_target}: clean on all checked profiles "
-                        f"({', '.join(entry.profiles)})"
-                    )
-                elif len(unanalyzed) < len(entry.profiles):
-                    # Some profiles are clean, others never produced an
-                    # analyzed result at all -- never call the latter
-                    # "clean" (Codex review).
-                    clean = [p for p in entry.profiles if p not in unanalyzed]
-                    line = (
-                        f"  {entry.base_target}: clean on {', '.join(clean)} "
-                        f"(checked on {', '.join(entry.profiles)}); "
-                        f"no analyzed result on {', '.join(unanalyzed)}"
-                    )
-                else:
-                    line = (
-                        f"  {entry.base_target}: no analyzed result on any "
-                        f"checked profile ({', '.join(entry.profiles)})"
-                    )
-                if entry.incomplete_profiles:
-                    line += (
-                        f" [incomplete coverage on "
-                        f"{', '.join(entry.incomplete_profiles)}]"
-                    )
-                if entry.contract_incomplete_profiles:
-                    # Qualifies whatever precedes it, exactly as the
-                    # incomplete-coverage suffix above does -- including a
-                    # "clean" line, which stays accurate: clean is a
-                    # statement about compatibility, and this is the
-                    # orthogonal evidence axis saying the domain never
-                    # closed. Without it a profile that raised the exit to 1
-                    # on contract coverage alone read as flatly clean.
-                    line += (
-                        f" [contract evidence incomplete on "
-                        f"{', '.join(entry.contract_incomplete_profiles)}]"
-                    )
-                lines.append(line)
+                out.append(self._render_profile_entry_line(entry))
 
-        lines.extend(render_finding_matrix_lines(self.finding_matrix))
+        return out
 
-        lines.append("Coverage:")
+    def _render_profile_entry_line(self, entry: ProfileMatrixEntry) -> str:
+        """One base target's row in the profile matrix.
+
+        Four mutually exclusive shapes -- affected, clean everywhere, partly
+        clean with some profile never producing an analyzed result, and
+        nothing analyzed at all -- then two independent suffixes that qualify
+        whichever shape was chosen.
+        """
+        unanalyzed = entry.unanalyzed_profiles
+        if entry.affected_profiles:
+            line = (
+                f"  {entry.base_target}: affected on "
+                f"{', '.join(entry.affected_profiles)} "
+                f"(checked on {', '.join(entry.profiles)})"
+            )
+            if unanalyzed:
+                # An affected profile and an unanalyzed one can
+                # coexist on the same target -- don't let "checked
+                # on" imply the unanalyzed one produced a result too
+                # (Codex review).
+                line += f"; no analyzed result on {', '.join(unanalyzed)}"
+        elif not unanalyzed:
+            line = (
+                f"  {entry.base_target}: clean on all checked profiles "
+                f"({', '.join(entry.profiles)})"
+            )
+        elif len(unanalyzed) < len(entry.profiles):
+            # Some profiles are clean, others never produced an
+            # analyzed result at all -- never call the latter
+            # "clean" (Codex review).
+            clean = [p for p in entry.profiles if p not in unanalyzed]
+            line = (
+                f"  {entry.base_target}: clean on {', '.join(clean)} "
+                f"(checked on {', '.join(entry.profiles)}); "
+                f"no analyzed result on {', '.join(unanalyzed)}"
+            )
+        else:
+            line = (
+                f"  {entry.base_target}: no analyzed result on any "
+                f"checked profile ({', '.join(entry.profiles)})"
+            )
+        if entry.incomplete_profiles:
+            line += f" [incomplete coverage on {', '.join(entry.incomplete_profiles)}]"
+        if entry.contract_incomplete_profiles:
+            # Qualifies whatever precedes it, exactly as the
+            # incomplete-coverage suffix above does -- including a
+            # "clean" line, which stays accurate: clean is a
+            # statement about compatibility, and this is the
+            # orthogonal evidence axis saying the domain never
+            # closed. Without it a profile that raised the exit to 1
+            # on contract coverage alone read as flatly clean.
+            line += (
+                f" [contract evidence incomplete on "
+                f"{', '.join(entry.contract_incomplete_profiles)}]"
+            )
+        return line
+
+    def _render_coverage_and_gate_lines(self) -> list[str]:
+        """The closing Coverage: and Gate: blocks."""
+        out: list[str] = []
+        out.append("Coverage:")
         if self.coverage is CoverageStatus.COMPLETE:
-            lines.append("  Complete — every required target was analyzed.")
+            out.append("  Complete — every required target was analyzed.")
         else:
             missing = ", ".join(self.missing_required) or "(none)"
             gated = "" if self.coverage_blocking else " (advisory)"
-            lines.append(
-                f"  Incomplete — required target(s) unknown: {missing}.{gated}"
-            )
+            out.append(f"  Incomplete — required target(s) unknown: {missing}.{gated}")
 
-        lines.append("Gate:")
+        out.append("Gate:")
         if self.passed:
             # Deliberately does NOT claim "coverage complete": under
             # --on-missing-required warn a required gap is reported above but
             # does not fail the gate, so a passing result can still have an
             # (advisory) coverage gap.
-            lines.append(
+            out.append(
                 "  Passed — no gate-blocking findings under the configured policies."
             )
         else:
@@ -1081,9 +1131,9 @@ class AggregateResult:
             ):
                 ids = ", ".join(t.target_id for t in self.unexpected_targets)
                 parts.append(f"unexpected target(s) present: {ids}")
-            lines.append("  Failed — " + "; ".join(parts) + ".")
+            out.append("  Failed — " + "; ".join(parts) + ".")
 
-        return "\n".join(lines)
+        return out
 
     def _render_target_line(self, t: TargetReport) -> str:
         tag = "" if t.required else " (optional)"
@@ -1244,6 +1294,34 @@ def _contract_coverage_declared(data: Mapping[str, Any]) -> bool:
     )
 
 
+def _scan_severity_gate(data: Mapping[str, Any]) -> GateInfo | None:
+    """A severity-scheme scan report's own ``diff.severity`` gate, if it has one.
+
+    ``None`` for a legacy-scheme scan (which runs no severity gate and so
+    publishes no block), leaving :meth:`GateInfo.from_scan_report`'s raw
+    top-level ``exit_code`` path to answer.
+
+    Delegates to :meth:`GateInfo.from_report_data` rather than re-validating:
+    ``cli_scan_baseline`` builds this block with the same
+    ``reporter._build_severity_json`` that writes ``compare``'s, so a second
+    validator here could only ever disagree with the first. That also means a
+    *corrupt* scan gate block fails closed (``_MalformedGate``) exactly as a
+    corrupt ``compare`` one does, instead of silently falling through to the
+    greener raw-code path -- the same fail-closed principle the surrounding
+    reader already applies.
+    """
+    # Through the shared path definition, so the reader and
+    # `_neutralize_gate`'s writer cannot disagree about where the block lives
+    # (the coverage axis learned this the hard way -- see
+    # `contract_coverage_block_paths`).
+    for path in scan_severity_gate_paths(data):
+        node: Any = data
+        for key in path:
+            node = node[key]
+        return GateInfo.from_report_data(node)
+    return None
+
+
 def _contract_coverage_exit(data: Mapping[str, Any]) -> int:
     """The report's own ADR-049 contract-coverage contribution (``0``/``1``).
 
@@ -1279,6 +1357,43 @@ def _contract_coverage_exit(data: Mapping[str, Any]) -> int:
         if _is_valid_contribution(raw):
             return raw
     return 0
+
+
+def scan_severity_gate_paths(data: Mapping[str, Any]) -> list[tuple[str, ...]]:
+    """Key paths within a *scan* report that may carry a ``severity`` gate block.
+
+    :func:`contract_coverage_block_paths`' sibling, for the other axis and for
+    the same reason: two consumers must agree exactly on where the block
+    lives. :func:`_scan_severity_gate` reads it as the target's compatibility
+    gate, and ``buildsource.check_report._neutralize_gate`` must zero it for
+    ``gate-mode: advisory``. Zeroing only the top-level scan ``exit_code`` left
+    an explicitly advisory report's nested gate blocking the trailing
+    aggregate (Codex review) -- the identical bug the coverage axis already
+    had, so it gets the identical remedy rather than a second hand-written
+    traversal.
+
+    Returns the paths to the *containers* of a ``severity`` key, so a writer
+    can rebind each one it touches; ``augment_report`` copies only the top
+    level, so writing through a nested mapping in place would reach back into
+    the caller's own report.
+
+    Unlike the coverage paths this never includes the document root: a root
+    ``severity`` block is a ``compare`` report's own gate, which
+    ``_neutralize_gate`` already handles directly and which a scan never
+    writes.
+    """
+    if "scan_schema_version" not in data:
+        return []
+    paths: list[tuple[str, ...]] = []
+    diff = data.get("diff")
+    if isinstance(diff, Mapping) and isinstance(diff.get("severity"), Mapping):
+        paths.append(("diff",))
+    report = data.get("report")
+    if isinstance(report, Mapping):
+        inner = report.get("diff")
+        if isinstance(inner, Mapping) and isinstance(inner.get("severity"), Mapping):
+            paths.append(("report", "diff"))
+    return paths
 
 
 def contract_coverage_block_paths(data: Mapping[str, Any]) -> list[tuple[str, ...]]:

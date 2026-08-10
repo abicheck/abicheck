@@ -42,11 +42,24 @@ have been invisible:
 exist. ``scan`` shares ``compare``'s policy/suppression/scope surface
 (``--policy``/``--policy-file``/``--suppress``/``--scope-public-headers``/
 ``--public-symbol``/``--public-symbols-list``/``--contract``), so those
-resolve from real flags with real D7 layers. It has **no severity or
-exit-code-scheme flags** -- a scan's exit code follows its verdict -- so
-those fields resolve as built-in defaults. That is accurate rather than an
-under-claim, and it is the same shape the MCP receipt documents for its own
-missing parameters: nothing was passed, so nobody chose.
+resolve from real flags with real D7 layers.
+
+``scan --against`` *does* now accept ``--severity-preset``/``--severity-*``/
+``--exit-code-scheme`` (mirroring ``compare``, since the fix that closed the
+"scan never consults severity" gap documented in AGENTS.md's "Known gaps"),
+and those flags really do drive a severity-scheme run's exit code -- see
+:func:`abicheck.cli_scan_baseline._run_baseline_compare`. This ADR-049
+receipt is a **separate, narrower resolution** from the one that actually
+scores the run (``cli_scan.scan_cmd``'s own ``resolve_compare_config`` call),
+the same split ``compare`` avoids via one combined ``resolve_and_apply``
+call. Unifying the two here needs the same combined-resolution machinery
+``compare`` has, not a drive-by field addition that risks a receipt silently
+diverging from what actually scored the run -- so this receipt still
+deliberately blanks the severity/exit-code-scheme fields to their built-in
+defaults (:func:`_without_gate_settings`) rather than guess. That is an
+honest under-claim, not a claim that the flags don't exist; it is the same
+shape the MCP receipt documents for its own missing parameters: nothing
+*this resolver* was fed, so it records nothing.
 
 A **leaf**, like its two siblings: it imports nothing from ``cli_scan`` or
 ``cli_scan_baseline``, so no cycle forms. "Which flags did the user really
@@ -197,20 +210,30 @@ def resolve_scan_config(
 
 
 def _without_gate_settings(project: Any) -> Any:
-    """*project* with its gate fields blanked, for a front end that ignores them.
+    """*project* with its gate fields blanked, for a resolver that ignores them.
 
-    A ``scan``'s exit code follows its compatibility verdict directly: it has
-    no severity or exit-code-scheme flags, and it never consults the project
-    config's ``severity``/``exit_code_scheme`` either. Passing them through
-    anyway produced a receipt that *claimed* a gate the run did not use --
-    an ``info-only`` preset in ``.abicheck.yml`` would be recorded with every
-    level at ``info`` while the scan still exited 4 on a breaking diff
-    (Codex review).
+    ``scan --against`` now has real severity/exit-code-scheme flags and a
+    real config-driven gate (module docstring above) -- but *this specific
+    resolver* (:func:`resolve_scan_config`'s ADR-049 receipt path) is not the
+    one that scores the run; ``cli_scan.scan_cmd``'s own
+    ``resolve_compare_config`` call is. Passing this project's gate fields
+    through here would make the persisted receipt claim a value this
+    resolver never actually applied to anything -- e.g. it could record an
+    ``info-only`` preset from ``.abicheck.yml`` while the scan that produced
+    this very report exited 4 on a breaking diff, if the two resolutions
+    ever disagreed (Codex review; the original version of this fix predates
+    scan having severity flags at all, when the two resolutions could not
+    yet disagree because neither one used the config's gate fields).
 
     Blanked rather than left out of the receipt entirely: the fields still
-    resolve, to their built-in defaults, which is the true statement --
-    nothing selected them for this run. That is the same answer the MCP
-    receipt gives for the parameters ``abi_compare`` does not have.
+    resolve, to their built-in defaults, which is the true statement about
+    *this resolver* -- nothing selected them here. That is the same answer
+    the MCP receipt gives for the parameters ``abi_compare`` does not have.
+    A future change threading one combined resolution through both the
+    scoring path and this receipt (the way ``compare``'s own
+    ``resolve_and_apply`` does) could record the real values instead; until
+    then, an honest "not stated here" beats a value that might not match
+    what actually scored the run.
     """
     if project is None:
         return None
@@ -231,10 +254,16 @@ def record_resolved_config(result: Any, config: Any) -> None:
     """Install *config* on *result*'s persisted context, if it has one.
 
     A no-op unless ``--contract-evaluation`` produced a context. Unlike
-    ``compare``'s equivalent there is no gate half to reconcile: ``scan`` has
-    no severity or exit-code-scheme flags, so the gate resolves entirely from
-    built-in defaults and the "values from the run, provenance from the
-    resolver" split those two front ends need does not arise here.
+    ``compare``'s equivalent there is no gate half to reconcile *for this
+    receipt specifically*: ``config`` (from :func:`resolve_scan_config`) has
+    its severity/exit-code-scheme fields blanked to built-in defaults
+    regardless of what real ``--severity-*``/``--exit-code-scheme`` flags the
+    run was given (see :func:`_without_gate_settings`), so there is nothing
+    to reconcile with -- it is inert by construction, not because ``scan``
+    lacks a gate (it has one; see the module docstring). The "values from
+    the run, provenance from the resolver" split ``compare`` needs would only
+    arise once this receipt's severity fields are wired to the resolution
+    that actually scores the run.
     """
     from .contract_evidence import PersistedContractContext
 

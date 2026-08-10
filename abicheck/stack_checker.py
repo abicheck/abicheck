@@ -141,6 +141,37 @@ def _breaking_change_touches_imports(change: StackChange) -> bool:
     return bool(imported_symbols & breaking_symbols)
 
 
+def _abi_diff_risk(change: StackChange) -> tuple[bool, bool]:
+    """``(breaking, risk)`` for a change whose ABI diff actually resolved.
+
+    Whether the root *imports* anything the break touches is what separates a
+    confirmed impact from an environment observation.
+    """
+    assert change.abi_diff is not None  # narrowed by the caller
+    verdict = change.abi_diff.verdict.value
+    if not change.impacted_imports:
+        return False, verdict == "BREAKING"
+    if verdict == "BREAKING":
+        if _breaking_change_touches_imports(change):
+            return True, False
+        # The DSO is broken, but not by anything this root
+        # imports — real "environment contains a broken DSO"
+        # signal, but not a confirmed impact on this root.
+        return False, True
+    return False, verdict in ("API_BREAK", "COMPATIBLE_WITH_RISK")
+
+
+def _stack_change_risk(change: StackChange) -> tuple[bool, bool]:
+    """``(breaking, risk)`` contributed by one stack change."""
+    if change.change_type == "removed":
+        return True, False
+    if change.abi_diff is None:
+        # ABI diff failed (unreadable file or diff error) — treat as risk
+        # since we can't confirm compatibility.
+        return False, change.change_type == "content_changed"
+    return _abi_diff_risk(change)
+
+
 def _compute_abi_risk(
     stack_changes: list[StackChange],
     binding_changes: list[Change] | None = None,
@@ -150,26 +181,9 @@ def _compute_abi_risk(
     has_risk = False
 
     for change in stack_changes:
-        if change.change_type == "removed":
-            has_breaking = True
-        elif change.abi_diff is None and change.change_type == "content_changed":
-            # ABI diff failed (unreadable file or diff error) — treat as risk
-            # since we can't confirm compatibility.
-            has_risk = True
-        elif change.abi_diff is not None and change.impacted_imports:
-            if change.abi_diff.verdict.value == "BREAKING":
-                if _breaking_change_touches_imports(change):
-                    has_breaking = True
-                else:
-                    # The DSO is broken, but not by anything this root
-                    # imports — real "environment contains a broken DSO"
-                    # signal, but not a confirmed impact on this root.
-                    has_risk = True
-            elif change.abi_diff.verdict.value in ("API_BREAK", "COMPATIBLE_WITH_RISK"):
-                has_risk = True
-        elif change.abi_diff is not None and not change.impacted_imports:
-            if change.abi_diff.verdict.value == "BREAKING":
-                has_risk = True
+        breaking, risk = _stack_change_risk(change)
+        has_breaking = has_breaking or breaking
+        has_risk = has_risk or risk
 
     for bchange in binding_changes or []:
         if bchange.kind in BREAKING_KINDS:

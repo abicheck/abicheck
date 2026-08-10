@@ -1,8 +1,19 @@
 # ADR-058: Native Compatibility Agent Skills — User-Task-First Domain Layer
 
 **Date:** 2026-08-09
-**Status:** Accepted — not implemented. See [G36](../plans/g36-native-compatibility-agent-skills.md)
-for the phased implementation plan.
+**Status:** Accepted — partially implemented. G36 P0.1–P0.3 and P0.6–P0.9
+have landed: `skills-src/` with the four `SKILL.md` files and Layer-B
+fragments, `scripts/gen_agent_skills.py` generating the three publication
+trees (`.agents/skills/`, `.claude/skills/`, `.gemini/skills/`), AI-readiness
+and docs-contract gate coverage, structural/tool-API-drift/trigger tests, and
+the `docs/use/agent-skills.md` catalog page. Still open: P0.4 (`abicheck
+info`, blocked on an explicit maintainer decision between the two design
+paths G36 records) and P0.5 (typed comparability `reason.codes`), both
+independent product-surface changes; and all of P1 (behavioral evaluation
+against the examples corpus, cross-agent validation, and public publication
+channels), none of which have run yet. See
+[G36](../plans/g36-native-compatibility-agent-skills.md) for phase-by-phase
+status.
 **Decision maker:** (pending — recorded per repository convention)
 
 > **Amendment (2026-08-09, same date — MCP retired hours after this ADR was

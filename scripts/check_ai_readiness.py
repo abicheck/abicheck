@@ -50,6 +50,18 @@ ACTION = ROOT / "action"
 CONTRIB_CLANG_PLUGIN = ROOT / "contrib" / "abicheck-clang-plugin"
 GITHUB_DIR = ROOT / ".github"
 AGENT_EVALS = ROOT / "agent-evals"
+SKILLS_SRC = ROOT / "skills-src"
+
+# ADR-058's generated agent-skill publication trees. Every Markdown file under
+# each of these is `scripts/gen_agent_skills.py` output, at arbitrary depth and
+# growing count (per skill: its SKILL.md, its own references/*.md, and every
+# copied shared/*.md fragment) -- which is why the ownership check below walks
+# them instead of enumerating individual paths in GENERATED_FILE_MARKERS.
+GENERATED_SKILL_ROOTS: tuple[Path, ...] = (
+    ROOT / ".agents" / "skills",
+    ROOT / ".claude" / "skills",
+    ROOT / ".gemini" / "skills",
+)
 
 # Sibling gate module (imported after the sys.path setup above). It owns the
 # ADR Status *parsing* helpers as well as its own check, so `adr-index-nav-sync`
@@ -60,6 +72,17 @@ from adr_status_sync import (  # noqa: E402
     check_adr_status_sync,
 )
 from findings_report import Findings as _SharedFindings  # noqa: E402
+
+# The generated-skill publication trees' own generator (ADR-058 / G36 P0.3).
+# Imported for `discover_skills` alone, so the ownership check below asks the
+# generator which directories it owns rather than keeping a second, drifting
+# copy of that rule -- an output root may also hold hand-authored skills this
+# generator never produced. Pure-stdlib at import time, same constraint as
+# this script.
+from gen_agent_skills import (  # noqa: E402
+    GENERATED_MARKER_SUBSTRING as _SKILL_MARKER,
+    discover_skills as _discover_generated_skills,
+)
 
 # ---------------------------------------------------------------------------
 # Tunables
@@ -159,6 +182,7 @@ REQUIRED_CLAUDE_MD_DIRS: tuple[Path, ...] = (
     SCRIPTS,
     EVAL,
     VALIDATION,
+    SKILLS_SRC,
 )
 
 # Directories added later (CLAUDE.md "M1-1"/"M1-2") that use the canonical
@@ -418,6 +442,23 @@ def check_generated_file_ownership(f: Findings) -> None:
                 f"{_rel(path)}: missing its generated-file marker — regenerate "
                 "with `python scripts/gen_examples_docs.py` rather than hand-editing.",
             )
+    # ADR-058's agent-skill trees: an arbitrary-depth, growing set of generated
+    # Markdown across three roots, so this walks them (like the case*.md loop
+    # above) rather than registering one GENERATED_FILE_MARKERS entry per file.
+    # Scoped to the skill directories `gen_agent_skills.py` actually owns --
+    # `.claude/skills/` legitimately also holds hand-authored skills, which are
+    # not generator output and must not be flagged.
+    owned = [d.name for d in _discover_generated_skills(SKILLS_SRC)]
+    for root in GENERATED_SKILL_ROOTS:
+        for name in owned:
+            for path in sorted((root / name).rglob("*.md")):
+                if _SKILL_MARKER not in _read(path).lower():
+                    f.err(
+                        "generated-file-ownership",
+                        f"{_rel(path)}: missing its generated-file marker — "
+                        "regenerate with `python scripts/gen_agent_skills.py` "
+                        "rather than hand-editing (edit skills-src/ instead).",
+                    )
 
 
 # ---------------------------------------------------------------------------

@@ -25,7 +25,13 @@
 #                       may restate a short (a paragraph or a few rows)
 #                       summary of this topic with a link back to
 #                       canonical_page. Anything longer belongs on
-#                       canonical_page itself.
+#                       canonical_page itself. May also name a repo-relative
+#                       path OUTSIDE docs/ (ADR-058 / G36 P0.6): a
+#                       `skills-src/shared/*.md` Layer-B fragment is a real
+#                       summary owner that lives outside the published tree
+#                       by design, and is held to the same `summarizes`
+#                       round-trip (front matter must name the topic; the
+#                       fragment must link back to canonical_page).
 #
 # Started as a *pilot* covering the handful of topics that already had an
 # explicit ownership split documented in docs/CLAUDE.md before this file
@@ -52,18 +58,23 @@ topics:
       - start/choose-your-workflow.md
       - use/tool-modes.md
       - learn/architecture.md
+      - skills-src/shared/evidence-and-depth.md
 
   verdicts:
     canonical_page: learn/verdicts.md
     fact_sources:
       - abicheck/change_registry.py
       - abicheck/checker_policy.py
+      - abicheck/severity.py
+      - abicheck/cli_scan.py
+      - abicheck/cli_scan_baseline.py
     reference_page: reference/exit-codes.md
     task_pages:
       - use/ci-gating.md
       - use/severity.md
     allowed_summaries:
       - start/first-report.md
+      - skills-src/shared/compatibility-contracts.md
 
   baseline-lifecycle:
     canonical_page: use/baseline-management.md
@@ -75,6 +86,16 @@ topics:
       - use/baseline-storage.md
     allowed_summaries:
       - start/getting-started.md
+      - skills-src/shared/baseline-and-comparability.md
+
+  snapshot-storage-compression:
+    canonical_page: reference/snapshot-format.md
+    fact_sources:
+      - abicheck/snapshot_io.py
+      - abicheck/serialization.py
+      - abicheck/snapshot_cache.py
+    task_pages:
+      - use/baseline-storage.md
 
   public-surface:
     canonical_page: learn/abi-surface.md
@@ -82,6 +103,8 @@ topics:
       - abicheck/surface.py
     task_pages:
       - use/api-surface-intelligence.md
+    allowed_summaries:
+      - skills-src/shared/public-surface-and-scoping.md
 
   change-kinds:
     canonical_page: reference/change-kinds.md
@@ -89,6 +112,8 @@ topics:
       - abicheck/change_registry.py
       - abicheck/checker_policy.py
     reference_page: reference/detector-spec.md
+    allowed_summaries:
+      - skills-src/shared/remediation-catalog.md
 
   platform-support-matrix:
     canonical_page: learn/limitations.md
@@ -125,6 +150,8 @@ topics:
     fact_sources:
       - abicheck/buildsource/inline.py
     reference_page: reference/config-keys-reference.md
+    allowed_summaries:
+      - skills-src/shared/compiler-and-build-profiles.md
 
   impact-analysis:
     canonical_page: learn/impact-analysis.md
@@ -141,6 +168,9 @@ topics:
     task_pages:
       - contribute/detector-impact-contract.md
       - contribute/use-case-impact.md
+    allowed_summaries:
+      - skills-src/shared/consumer-scoping.md
+      - skills-src/shared/root-cause-grouping.md
 
   policies:
     canonical_page: use/policies.md
@@ -154,6 +184,8 @@ topics:
   # `policies` (which owns policy files as a user-facing feature): this topic
   # is about how every input across CLI/API/config/pack resolves into one
   # typed configuration and one provenance receipt.
+    allowed_summaries:
+      - skills-src/shared/policies-and-suppressions.md
   compatibility-evaluation-config:
     canonical_page: reference/compatibility-evaluation-config.md
     fact_sources:
@@ -205,6 +237,8 @@ topics:
     canonical_page: use/suppressions.md
     fact_sources:
       - abicheck/suppression.py
+    allowed_summaries:
+      - skills-src/shared/policies-and-suppressions.md
 
   output-formats:
     canonical_page: use/output-formats.md
@@ -216,6 +250,7 @@ topics:
     allowed_summaries:
       - start/first-report.md
       - start/choose-your-workflow.md
+      - skills-src/shared/report-interpretation.md
 
   github-actions-surface:
     canonical_page: use/github-action.md
@@ -226,6 +261,8 @@ topics:
       - use/github-action-recipes.md
       - use/github-action-source-scans.md
       - use/annotations.md
+    allowed_summaries:
+      - skills-src/shared/ci-wiring.md
 
   project-integration:
     canonical_page: integration/concepts.md

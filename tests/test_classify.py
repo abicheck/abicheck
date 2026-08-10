@@ -7,6 +7,7 @@ covering all real-world false-positive patterns found in wave-2 wheel scans:
   - Jinja templates  (pandas)
   - Parquet files    (pyarrow — 'some' substring in filename)
 """
+
 from __future__ import annotations
 
 import re
@@ -25,23 +26,29 @@ from abicheck.serialization import snapshot_to_json
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
+
 def _write_abi_snapshot(path: Path) -> Path:
     snap = AbiSnapshot(
         library="libfoo.so",
         version="1.0",
         functions=[
-            Function(name="foo", mangled="_Z3foov", return_type="int",
-                     visibility=Visibility.PUBLIC)
+            Function(
+                name="foo",
+                mangled="_Z3foov",
+                return_type="int",
+                visibility=Visibility.PUBLIC,
+            )
         ],
     )
     path.write_text(snapshot_to_json(snap), encoding="utf-8")
     return path
 
 
-ELF_MAGIC = b"\x7fELF" + b"\x00" * 12   # minimal ELF header prefix
+ELF_MAGIC = b"\x7fELF" + b"\x00" * 12  # minimal ELF header prefix
 
 
 # ── BinaryExtensionClassifier ─────────────────────────────────────────────────
+
 
 class TestBinaryExtensionClassifier:
     clf = BinaryExtensionClassifier()
@@ -80,6 +87,7 @@ class TestBinaryExtensionClassifier:
 
 # ── MagicByteClassifier ───────────────────────────────────────────────────────
 
+
 class TestMagicByteClassifier:
     clf = MagicByteClassifier()
 
@@ -102,6 +110,7 @@ class TestMagicByteClassifier:
 
 
 # ── AbiJsonClassifier ─────────────────────────────────────────────────────────
+
 
 class TestAbiJsonClassifier:
     clf = AbiJsonClassifier()
@@ -131,7 +140,7 @@ class TestAbiJsonClassifier:
 
     def test_non_json_ext_passthrough(self, tmp_path: Path) -> None:
         p = tmp_path / "libfoo.xml"
-        p.write_text('<root/>')
+        p.write_text("<root/>")
         assert self.clf.accepts(p) is None
 
     def test_fingerprint_registry_extensible(self) -> None:
@@ -146,6 +155,7 @@ class TestAbiJsonClassifier:
 
 
 # ── PerlDumpClassifier ────────────────────────────────────────────────────────
+
 
 class TestPerlDumpClassifier:
     clf = PerlDumpClassifier()
@@ -168,6 +178,7 @@ class TestPerlDumpClassifier:
 
 
 # ── FallbackSniffClassifier ───────────────────────────────────────────────────
+
 
 class TestFallbackSniffClassifier:
     clf = FallbackSniffClassifier()
@@ -195,6 +206,7 @@ class TestFallbackSniffClassifier:
 
 # ── Integrated pipeline (is_supported_compare_input) ─────────────────────────
 
+
 class TestPipeline:
     def test_abi_snapshot_json_accepted(self, tmp_path: Path) -> None:
         p = _write_abi_snapshot(tmp_path / "libfoo.json")
@@ -217,7 +229,9 @@ class TestPipeline:
         p.write_bytes(b"binary content")
         assert is_supported_compare_input(p) is True
 
-    def test_node_extension_elf_accepted_via_magic(self, tmp_path: Path, monkeypatch) -> None:
+    def test_node_extension_elf_accepted_via_magic(
+        self, tmp_path: Path, monkeypatch
+    ) -> None:
         p = tmp_path / "addon.node"
         p.write_bytes(b"binary content")
         monkeypatch.setattr("abicheck.classify._detect_binary_format", lambda _p: "elf")
@@ -250,3 +264,103 @@ class TestPipeline:
 
     def test_nonexistent_rejected(self, tmp_path: Path) -> None:
         assert is_supported_compare_input(tmp_path / "ghost.so") is False
+
+
+class TestCompressedAbiJsonClassifier:
+    """ADR-059: gzip/zstd-compressed ABI snapshots in a compare-release directory."""
+
+    def test_gzip_snapshot_accepted(self, tmp_path: Path) -> None:
+        from abicheck.serialization import write_snapshot
+
+        snap = AbiSnapshot(
+            library="libfoo.so",
+            version="1.0",
+            functions=[
+                Function(
+                    name="foo",
+                    mangled="_Z3foov",
+                    return_type="int",
+                    visibility=Visibility.PUBLIC,
+                )
+            ],
+        )
+        p = tmp_path / "libfoo.abicheck.json.gz"
+        write_snapshot(snap, p)
+        assert is_supported_compare_input(p) is True
+
+    def test_zstd_snapshot_accepted(self, tmp_path: Path) -> None:
+        from abicheck.serialization import write_snapshot
+
+        snap = AbiSnapshot(
+            library="libfoo.so",
+            version="1.0",
+            functions=[
+                Function(
+                    name="foo",
+                    mangled="_Z3foov",
+                    return_type="int",
+                    visibility=Visibility.PUBLIC,
+                )
+            ],
+        )
+        p = tmp_path / "libfoo.abicheck.json.zst"
+        write_snapshot(snap, p)
+        assert is_supported_compare_input(p) is True
+
+    def test_tar_zst_archive_not_misclassified_as_snapshot(
+        self, tmp_path: Path
+    ) -> None:
+        import io
+        import tarfile
+
+        import zstandard
+
+        inner = tmp_path / "inner.txt"
+        inner.write_text("hi")
+        buf = io.BytesIO()
+        with tarfile.open(fileobj=buf, mode="w") as tf:
+            tf.add(str(inner), arcname="inner.txt")
+        cctx = zstandard.ZstdCompressor()
+        p = tmp_path / "bundle.tar.zst"
+        p.write_bytes(cctx.compress(buf.getvalue()))
+        assert is_supported_compare_input(p) is False
+
+    def test_gzip_non_snapshot_rejected(self, tmp_path: Path) -> None:
+        import gzip
+
+        p = tmp_path / "notes.txt.gz"
+        p.write_bytes(gzip.compress(b'{"rows": [[1, 2, 3]]}'))
+        assert is_supported_compare_input(p) is False
+
+    def test_compressed_snapshot_under_neutral_dot_json_name_accepted(
+        self, tmp_path: Path
+    ) -> None:
+        """Codex review, PR #699: `dump --compression gzip|zstd -o out.json`
+        explicitly permits writing compressed bytes under a plain `.json`
+        name (resolve_write_compression() only rejects a *canonical*
+        suffix that contradicts an explicit --compression, not a neutral
+        one) -- but AbiJsonClassifier used to run first for any `.json`
+        path, read the raw (still-compressed) bytes as text, never match
+        the fingerprint regex, and return False rather than abstaining --
+        ending the "first non-None wins" pipeline before
+        CompressedAbiJsonClassifier ever got a chance to decode it. A
+        compare-release directory scan would then silently skip this
+        supported snapshot."""
+        from abicheck.serialization import write_snapshot
+
+        snap = AbiSnapshot(
+            library="libfoo.so",
+            version="1.0",
+            functions=[
+                Function(
+                    name="foo",
+                    mangled="_Z3foov",
+                    return_type="int",
+                    visibility=Visibility.PUBLIC,
+                )
+            ],
+        )
+        for suffix, compression in ((".json", "gzip"), (".json", "zstd")):
+            p = tmp_path / f"libfoo{suffix}"
+            write_snapshot(snap, p, compression=compression)
+            assert is_supported_compare_input(p) is True, (compression, p)

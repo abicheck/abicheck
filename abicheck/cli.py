@@ -43,6 +43,7 @@ from .cli_dump_helpers import (
     handle_non_elf_dump,
     has_other_l3_source,
     perform_elf_dump,
+    reject_snapshot_compression_conflict,
     resolve_compile_db_l3_reuse,
     resolve_dump_collect_context,
     resolve_dump_compile_context,
@@ -87,6 +88,7 @@ from .cli_options import (
     scope_options,
     set_input_options,
     severity_options,
+    snapshot_compression_option,
     two_sided_input_options,
     verbose_option,
 )
@@ -392,6 +394,7 @@ def _resolve_and_check_dump_debug_format(
 @lang_option
 @click.option("-o", "--output", "output", type=click.Path(path_type=Path), default=None,
               help="Output JSON file. Defaults to stdout.")
+@snapshot_compression_option
 # ── L2 compile context (shared with `scan` — ADR-037 D3 parity) ──────────────
 # --ast-frontend / --gcc-path / --gcc-prefix / --gcc-options / --gcc-option /
 # --sysroot / --nostdinc are defined once in cli_options.compile_context_options
@@ -470,6 +473,7 @@ def dump_cmd(so_path: Path | None, headers: tuple[Path, ...], includes: tuple[Pa
              public_headers: tuple[Path, ...], public_header_dirs: tuple[Path, ...],
              include_dependencies: bool,
              version: str, lang: str, header_backend: str, output: Path | None,
+             snapshot_compression: str,
              gcc_path: str | None, gcc_prefix: str | None, gcc_options: str | None,
              gcc_option_tokens: tuple[str, ...],
              sysroot: Path | None, nostdinc: bool, pdb_path: Path | None,
@@ -517,6 +521,14 @@ def dump_cmd(so_path: Path | None, headers: tuple[Path, ...], includes: tuple[Pa
     )
 
     reject_dry_run_with_output(dry_run, output)
+    if output is None and snapshot_compression not in ("auto", "none"):
+        raise click.UsageError(
+            f"--compression {snapshot_compression} requires -o/--output -- "
+            "stdout is always plain JSON (auto resolves to 'none' without "
+            "-o/--output; pass an explicit output file to write compressed "
+            "output)."
+        )
+    reject_snapshot_compression_conflict(output, snapshot_compression)
     _setup_verbosity(verbose)
 
     # ADR-050 D3: parsed before the collect/compile-context resolution below so
@@ -657,6 +669,7 @@ def dump_cmd(so_path: Path | None, headers: tuple[Path, ...], includes: tuple[Pa
                 build_info=build_info, build_config=build_config,
                 depth=depth, collect_mode=collect_mode,
                 header_backend=header_backend, output=output,
+                snapshot_compression=snapshot_compression,
                 has_compile_db=bool(compile_db_path or compile_db_path_alt),
                 # External review: dry-run previously only checked bare -p/
                 # --compile-db presence; loading it and matching against the
@@ -679,7 +692,7 @@ def dump_cmd(so_path: Path | None, headers: tuple[Path, ...], includes: tuple[Pa
     # Source-only dump (no binary) for the parallel-baseline flow.
     if so_path is None:
         from .cli_buildsource import dump_source_only
-        dump_source_only(sources, build_info, version, output, build_config, allow_build_query, git_tag, build_id, no_git, collect_mode, build_query=build_query, build_compile_db=build_compile_db, extractor=header_backend, depth=depth, include_dependencies=include_dependencies, gcc_path=gcc_path, gcc_prefix=gcc_prefix)
+        dump_source_only(sources, build_info, version, output, build_config, allow_build_query, git_tag, build_id, no_git, collect_mode, build_query=build_query, build_compile_db=build_compile_db, extractor=header_backend, depth=depth, include_dependencies=include_dependencies, gcc_path=gcc_path, gcc_prefix=gcc_prefix, snapshot_compression=snapshot_compression)
         return
 
     effective_compile_db = resolve_dump_compile_db(compile_db_path, compile_db_path_alt, headers)
@@ -745,6 +758,7 @@ def dump_cmd(so_path: Path | None, headers: tuple[Path, ...], includes: tuple[Pa
             header_backend=header_backend, compile_context=native_cc,
             depth=depth, compile_db_context_matched=compile_db_matched,
             include_dependencies=include_dependencies,
+            snapshot_compression=snapshot_compression,
         )
         return
 
@@ -807,6 +821,7 @@ def dump_cmd(so_path: Path | None, headers: tuple[Path, ...], includes: tuple[Pa
         dump_manifest=parsed_dump_manifest,
         include_labels=_resolved_include_labels,
         include_dependencies=include_dependencies,
+        snapshot_compression=snapshot_compression,
     )
 
 

@@ -1,3 +1,15 @@
+---
+doc_type: reference
+audience:
+  - library-maintainer
+  - ci-owner
+level: intermediate
+canonical_for:
+  - snapshot-storage-compression
+lifecycle: active
+generated: false
+---
+
 # Snapshot Format (`.abi.json`)
 
 `abicheck dump` writes a **snapshot** — a serializable, JSON representation of a
@@ -91,6 +103,33 @@ Two consequences worth internalising:
   guard's introduction onward; see the `SCHEMA_VERSION` history comment for
   the full explanation of what it can and cannot retroactively protect.
   Upgrade abicheck to read a newer snapshot faithfully.
+
+---
+
+## Storage encoding (ADR-059)
+
+Everything above describes the **logical** snapshot — the decoded JSON
+payload. On disk, that payload may be stored plain, gzip-compressed, or
+zstd-compressed; compression is a storage/transport envelope around the
+identical JSON, never a new schema, and never changes `schema_version`,
+`AbiSnapshot.contract`, evidence depth, `build_source`, or the verdict two
+snapshots produce when compared.
+
+| Encoding | Canonical suffix | Notes |
+|---|---|---|
+| plain | `.abicheck.json` / `.abi.json` | debugging, small Git-reviewable snapshots |
+| gzip | `.abicheck.json.gz` / `.abi.json.gz` | universal interoperability |
+| zstd | `.abicheck.json.zst` / `.abi.json.zst` | **preferred** for baseline/release/cache storage |
+
+`compare`, `scan --against`, and the Python API
+(`abicheck.serialization.load_snapshot`) all *read* every encoding
+transparently — detected from magic bytes, not just the filename suffix.
+`abicheck dump` *produces* one: it infers the encoding from `-o/--output`'s
+suffix by default (`--compression auto`), or accepts an explicit
+`--compression {none,gzip,zstd}`; `write_snapshot` is the Python API
+equivalent for writing. See [ADR-059](../contribute/adr/059-compressed-snapshot-storage.md)
+for the full storage-envelope model (determinism, atomic writes,
+decompression limits, and what's still deferred).
 
 ---
 
@@ -268,3 +307,4 @@ contract and its stability policy, see
 
 - [Baseline Management](../use/baseline-management.md) — producing, storing, and comparing snapshots as ABI baselines.
 - [Output Formats](../use/output-formats.md) — the comparison-report JSON and `report_schema_version`.
+- [ADR-059](../contribute/adr/059-compressed-snapshot-storage.md) — the compressed storage envelope (plain/gzip/zstd).

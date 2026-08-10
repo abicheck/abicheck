@@ -1,0 +1,71 @@
+---
+doc_type: reference
+level: advanced
+lifecycle: active
+summarizes:
+  - impact-analysis
+---
+
+# Root-cause grouping
+
+One source change routinely produces dozens of findings — adding a field to a
+struct emits a size change, an alignment change, and one offset change per
+member after it, times every type that embeds it. Summarizing the flat list
+misrepresents the change as dozens of problems instead of one.
+
+## Use abicheck's own grouping, not your own
+
+```bash
+abicheck compare OLD NEW --report-mode root-cause --format json
+```
+
+The report then carries `root_causes` (findings grouped by
+`Change.caused_by_type`, falling back to the change's own symbol for an
+ungrouped singleton) and `root_cause_count`, alongside the flat `changes`
+array. Each finding also carries `caused_by_type` and `caused_count`
+directly.
+
+**Do not re-derive a grouping in prose from the flat `changes` list.** A
+skill-side heuristic diverges from abicheck's own answer, and the divergence
+is invisible to the user — they see a confident grouping that the tool would
+not reproduce. Read `root_causes` first; only reason beyond it for what it
+demonstrably does not cover.
+
+Other report modes exist for different jobs: `--report-mode leaf` for the
+individual findings, `--report-mode impact` for the impact-analysis view, and
+the default `full`. The impact model is owned by
+[the impact analysis page](../../docs/learn/impact-analysis.md).
+
+## What to do with the groups
+
+For each root cause, in descending order of severity:
+
+1. **Name the single underlying change** in source terms ("`struct Config`
+   gained a member before `timeout`"), not in finding terms.
+2. **State the blast radius** — how many findings the group holds
+   (`root_causes[].finding_count`), which public roots it reaches
+   (`affected_public_roots`). Not `caused_count`: that is a *per-finding*
+   count of derived changes collapsed during filtering, optional and absent
+   on many ordinary findings, so reading it as the group size understates the
+   radius or reports nothing at all.
+3. **Attribute it.** A group whose members are all standard-library or
+   toolchain-instantiated types is toolchain churn, not a library change —
+   see [compiler-and-build-profiles.md](compiler-and-build-profiles.md) and
+   [public-surface-and-scoping.md](public-surface-and-scoping.md).
+4. **Give the remediation for the cause, not each symptom** —
+   [remediation-catalog.md](remediation-catalog.md).
+
+## Residual cases grouping does not answer
+
+- **Unrelated findings that share a symbol.** Grouping keys on the causing
+  type; two independent changes to the same class land together. Read the
+  `kind`s before treating a group as one change.
+- **A cause outside the compared surface.** When the real cause is a
+  dependency's type or a build-flag change, `caused_by_type` names the
+  visible symptom. Deeper evidence (`--depth build`) is what attributes it.
+- **Cross-group ordering.** `root_cause_count` says how many causes, not
+  which matters most. Rank by the severity and reachability of each group's
+  members, and say what ranking you used.
+
+Whatever grouping you present, every claim must remain traceable to specific
+findings — [safety-invariants.md](safety-invariants.md) item 11.

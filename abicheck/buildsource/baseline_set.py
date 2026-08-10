@@ -621,17 +621,27 @@ def _snapshot_digest_issue(
     resolver's typed ``stale_schema`` outcome (Codex review). Returns the
     ``stale_schema`` outcome for that case; every other issue here returns
     ``ambiguous``, matching this function's previous behavior.
+
+    Reads through :func:`~abicheck.snapshot_io.read_snapshot_bytes` (ADR-059)
+    so a gzip/zstd-compressed baseline snapshot -- ``actions/baseline``'s
+    ``snapshot-compression`` input, or a hand-published compressed baseline
+    -- verifies exactly the same way a plain one does; magic-byte detection
+    means the recorded ``artifacts[].snapshot`` filename's suffix never has
+    to be trusted.
     """
+    from ..errors import SnapshotError
+    from ..snapshot_io import read_snapshot_bytes
+
     try:
-        with snapshot_path.open(encoding="utf-8") as fh:
-            raw = json.load(fh)
-    # UnicodeDecodeError (the text-mode read itself, e.g. the snapshot was
-    # replaced by non-UTF-8/binary garbage) is a ValueError subclass, not a
-    # json.JSONDecodeError -- must be caught alongside it, or exactly the
-    # corrupted-baseline case this check exists to catch escapes as an
-    # unhandled exception instead of this typed ambiguous outcome (Codex
-    # review).
-    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raw = json.loads(read_snapshot_bytes(snapshot_path).decode("utf-8"))
+    # UnicodeDecodeError (the decoded content wasn't valid UTF-8, e.g. the
+    # snapshot was replaced by non-UTF-8/binary garbage) is a ValueError
+    # subclass, not a json.JSONDecodeError -- must be caught alongside it, or
+    # exactly the corrupted-baseline case this check exists to catch escapes
+    # as an unhandled exception instead of this typed ambiguous outcome
+    # (Codex review). SnapshotError covers a compressed-but-corrupt/truncated
+    # stream (ADR-059) the same way.
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError, SnapshotError) as exc:
         return ResolveOutcome.AMBIGUOUS, (
             f"target {target!r}'s snapshot {snapshot_path.name!r} could not "
             f"be read to verify its digest: {exc} -- the baseline-set is "
