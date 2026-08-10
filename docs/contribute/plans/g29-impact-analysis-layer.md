@@ -673,6 +673,26 @@ which all depend on a Clang AST pass.
    (not just file-only sibling tracking, the way the pre-existing
    `type_graph.py` pass already threads) — printed only when it changes
    from the immediately preceding node's, in document-traversal order.
+   Post-merge Codex review (PR #708) found and fixed three real bugs in the
+   first cut: `_LocationCursor` didn't unwrap clang's nested
+   `spellingLoc`/`expansionLoc` shape for a macro-generated declaration's own
+   location (only the flat `file`/`line` keys), desyncing the sticky cursor
+   for every later sibling too; `ClangMacroGraphExtractor` read a compile
+   unit's out-of-source relative `file` spelling against the process's own
+   cwd instead of that compile unit's replayed cwd, silently finding no
+   source text (or, worse, the wrong file); and `extract_from_build`'s
+   `(identity, file)` dedup discarded a real definition's span whenever its
+   forward declaration was visited first (now `(identity, file, begin_line,
+   end_line)`). One further finding was accepted as a **documented, known
+   gap rather than fixed**: `MACRO_CONTROLS_DECL` rarely fires for the two
+   negated guard forms (`#ifndef X`/`#if !defined(X)`/an `#ifdef X`'s
+   `#else` branch), since the guard macro is by definition typically
+   undefined in the scanned configuration and so was never seeded as a
+   `macro` node to join onto — fixing that for real would mean overriding
+   the join-only-onto-an-existing-node invariant this module's own test
+   suite pins down (`test_augment_never_mints_new_nodes`), which is its own
+   scoped design decision, not a drive-by override; see the module
+   docstring's `EDGE_MACRO_CONTROLS_DECL` entry for the full reasoning.
 3. **Virtual dispatch**: `DECL_OVERRIDES_DECL`, `VIRTUAL_CALL_MAY_DISPATCH_TO`
    (explicitly `overapprox`, never `exact`), `VTABLE_SLOT_MAPS_TO_DECL`,
    `TYPE_HAS_VTABLE` — distinguishes "the vtable slot provably changed" from

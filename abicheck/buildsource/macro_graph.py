@@ -23,7 +23,26 @@ family (:data:`~abicheck.buildsource.graph_facts.MACRO_DEP_EDGE_KINDS`):
   declaration is compiled only under a simple ``#ifdef X`` / ``#ifndef X`` /
   ``#if defined(X)`` / ``#if !defined(X)`` conditional region. Structural,
   ``CONF_HIGH``: this is a pure textual fact about the raw source (which
-  ``#if``/``#endif`` pair a line falls inside), not a guess.
+  ``#if``/``#endif`` pair a line falls inside), not a guess. **A known,
+  accepted gap for the two negated forms** (``#ifndef X``/``#if !defined(X)``,
+  and the ``#else`` branch of a plain ``#ifdef X``) (Codex review, PR #708):
+  this edge only fires when the graph already carries a ``macro`` node for
+  ``X`` (the join-only-onto-an-existing-node rule two paragraphs below), and
+  a ``macro`` node is only ever seeded from an L4 ``SourceAbiSurface``'s
+  *reachable, defined* macros — a guard macro that is genuinely undefined in
+  the build being scanned (the common real case for a negated region: that's
+  exactly why the negated branch was taken) was never observed as a
+  ``#define`` in this configuration at all, so no node exists for it to
+  join onto. Deliberately not "fixed" by minting a speculative node here —
+  that would override the same join-only invariant this module's own test
+  suite pins down (``test_augment_never_mints_new_nodes``), and would need
+  its own scoped design decision (macro nodes are cheap/bounded unlike the
+  thousands of internal-only symbols ``archive_graph.py``'s identical rule
+  guards against, so the tradeoff may differ — but that is a decision for a
+  follow-up, not a drive-by override of a tested invariant). In practice this
+  edge still fires reliably whenever the *same* macro is also referenced
+  positively somewhere reachable elsewhere (seeding the node), just not for
+  a guard macro that is negated-only across the whole reachable surface.
 - :data:`EDGE_DECL_USES_MACRO` (source_decl node -> macro node) — a
   declaration's own signature/body span contains a word-boundary reference to
   a macro name that is ``#define``d earlier in the same file. A textual
@@ -124,12 +143,13 @@ following it, all resolving to their correct source lines end to end.
 
 from __future__ import annotations
 
+import os
 import re
 import shutil
 import time
 from collections.abc import Callable, Mapping
 from concurrent.futures import ThreadPoolExecutor
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from functools import partial
 from typing import TYPE_CHECKING, Any
 
@@ -179,6 +199,25 @@ class _LocationCursor:
     line: int = 0
 
     def advance(self, loc: dict[str, Any]) -> tuple[str, int]:
+        # A location produced by macro expansion nests as
+        # ``{"spellingLoc": {...}, "expansionLoc": {...}}`` instead of the
+        # flat ``file``/``line`` keys handled below — confirmed against real
+        # clang output for a macro-generated declaration (Codex review, PR
+        # #708). Prefer ``expansionLoc`` (the point in the *real* source
+        # text a caller's Pass-B raw-text scan actually indexes — where the
+        # macro was invoked) over ``spellingLoc`` (where the macro's own
+        # replacement text is defined, which can be a different file
+        # entirely, e.g. a function-like macro from another header).
+        # Unwrapping here — rather than adding a special case at each call
+        # site — keeps the cursor in sync for every later sibling too,
+        # exactly like the flat-key sticky tracking below.
+        exp = loc.get("expansionLoc")
+        if isinstance(exp, dict):
+            loc = exp
+        else:
+            spell = loc.get("spellingLoc")
+            if isinstance(spell, dict):
+                loc = spell
         if "file" in loc:
             self.file = str(loc["file"])
         if "line" in loc:
@@ -655,15 +694,41 @@ class ClangMacroGraphExtractor:
         from .call_graph import _replay_cwd, _safe_clang_args_from_compile_unit
 
         argv = _safe_clang_args_from_compile_unit(cu)
-        return self._extract_from_safe_args(argv, cwd=_replay_cwd(cu))
+        cwd = _replay_cwd(cu)
+        ranges = self._extract_from_safe_args(argv, cwd=cwd)
+        if not cwd:
+            return ranges
+        # clang echoes a relative source path (e.g. an out-of-source build's
+        # ``../src/a.cpp``) back into the AST dump's ``file`` fields exactly
+        # as given on the command line — it never resolves it against *cwd*
+        # itself (Codex review, PR #708). augment_graph_with_macro_dependencies's
+        # caller (fold_macro_graph) reads source text by that same ``file``
+        # string against the *process*'s cwd, not this compile unit's own —
+        # so a relative path here would silently resolve to nothing (or, far
+        # worse, to an unrelated file that happens to exist at that relative
+        # path from the process cwd) unless resolved against the *replayed*
+        # cwd right here, while we still know it. An already-absolute path
+        # (the common case — most compile DBs record one) is left untouched.
+        return [
+            r
+            if os.path.isabs(r.file)
+            else replace(r, file=os.path.normpath(os.path.join(cwd, r.file)))
+            for r in ranges
+        ]
 
     def extract_from_build(self, build: BuildEvidence) -> list[DeclRange]:
         """Extract decl ranges across every compile unit in *build* (best
-        effort), deduped by ``(identity, file)`` — the first-seen span for a
-        repeated declaration (e.g. a forward declaration + its definition,
-        or the same header seen from two TUs) wins; a later duplicate is
-        harmless either way since :func:`augment_graph_with_macro_dependencies`
-        only reads the joined declaration's own line span to test region
+        effort), deduped by ``(identity, file, begin_line, end_line)`` — the
+        first-seen span for an exact repeat (e.g. the same header parsed
+        identically from two TUs) wins, but two declarations sharing an
+        identity with *different* spans (a forward declaration and its own
+        later definition in the same file) are both kept, since only the
+        definition's span may carry the real macro guard/reference this
+        module exists to find (Codex review, PR #708 — a same-``(identity,
+        file)`` dedup discarded the definition's span whenever the forward
+        declaration was visited first). A later exact duplicate is harmless
+        either way since :func:`augment_graph_with_macro_dependencies` only
+        reads each joined declaration's own line span to test region
         containment, not accumulate a range union.
         """
         from .call_graph import _call_graph_jobs, _deadline_bound_worker
@@ -680,11 +745,11 @@ class ClangMacroGraphExtractor:
             return []
 
         all_ranges: list[DeclRange] = []
-        seen: set[tuple[str, str]] = set()
+        seen: set[tuple[str, str, int, int]] = set()
 
         def add_ranges(ranges: list[DeclRange]) -> None:
             for r in ranges:
-                key = (r.identity, r.file)
+                key = (r.identity, r.file, r.begin_line, r.end_line)
                 if key not in seen:
                     seen.add(key)
                     all_ranges.append(r)

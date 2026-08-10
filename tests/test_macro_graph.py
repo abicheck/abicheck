@@ -113,6 +113,19 @@ def _tu(*decls: dict) -> dict:
     return {"kind": "TranslationUnitDecl", "inner": list(decls)}
 
 
+def _expansion_loc(file: str, line: int) -> dict:
+    """A clang-macro-generated location: nested ``spellingLoc``/
+    ``expansionLoc`` instead of flat ``file``/``line`` keys (Codex review, PR
+    #708 — confirmed against real clang output for a macro-generated
+    declaration). ``spellingLoc`` points at the macro's own replacement text
+    (deliberately a different, irrelevant file here, to prove
+    ``_LocationCursor`` prefers ``expansionLoc``)."""
+    return {
+        "spellingLoc": {"file": "macros.h", "line": 1, "offset": 0},
+        "expansionLoc": {"file": file, "line": line, "offset": 0},
+    }
+
+
 # ── scan_conditional_regions ─────────────────────────────────────────────
 
 
@@ -348,6 +361,42 @@ def test_parse_decl_ranges_sticky_cursor_matches_real_clang_shape() -> None:
     assert DeclRange("_Z3barv", "t.h", 7, 7) in ranges
 
 
+def test_parse_decl_ranges_macro_generated_decl_uses_expansion_loc() -> None:
+    """A declaration produced by a macro carries nested ``spellingLoc``/
+    ``expansionLoc`` dicts instead of flat ``file``/``line`` keys (Codex
+    review, PR #708). ``_LocationCursor`` must prefer ``expansionLoc`` (the
+    real source file/line — where Pass B's raw-text scan can actually find
+    it) and keep tracking the cursor correctly for the sibling that follows,
+    which relies on the sticky ``file`` this node resolved."""
+    generated = {
+        "kind": "FunctionDecl",
+        "name": "generated",
+        "mangledName": "_Z9generatedv",
+        "loc": _expansion_loc("t.h", 10),
+        "range": {
+            "begin": _expansion_loc("t.h", 10),
+            "end": _expansion_loc("t.h", 10),
+        },
+        "type": {"qualType": "void ()"},
+    }
+    after = {
+        "kind": "FunctionDecl",
+        "name": "after",
+        "mangledName": "_Z5afterv",
+        "loc": {"offset": 90, "line": 12, "col": 6},  # no file: sticky from `generated`
+        "range": {"begin": {"offset": 85, "col": 1}, "end": {"offset": 94, "col": 10}},
+        "type": {"qualType": "void ()"},
+    }
+    ast = _tu(generated, after)
+    ranges = parse_clang_ast_decl_ranges(ast)
+    assert DeclRange("_Z9generatedv", "t.h", 10, 10) in ranges
+    # The sticky cursor must resolve to the real source file (t.h, from
+    # expansionLoc), never the macro-definition file spellingLoc names —
+    # otherwise this and every later sibling would desync onto "macros.h".
+    assert not any(r.file == "macros.h" for r in ranges)
+    assert DeclRange("_Z5afterv", "t.h", 12, 12) in ranges
+
+
 # ── find_decl_macro_uses ──────────────────────────────────────────────────
 
 
@@ -439,6 +488,28 @@ def test_augment_skips_macro_not_already_in_graph() -> None:
     assert graph.edges == []
 
 
+def test_augment_negated_guard_produces_no_edge_when_macro_node_absent() -> None:
+    """Documents a known, accepted gap (Codex review, PR #708 — see
+    ``EDGE_MACRO_CONTROLS_DECL``'s docstring entry): a negated guard
+    (``#ifndef X``/``#if !defined(X)``/an ``#ifdef X``'s ``#else`` branch)
+    only produces a ``MACRO_CONTROLS_DECL`` edge when the graph already
+    carries a ``macro`` node for ``X`` — but ``X`` is by definition typically
+    *undefined* in the scanned configuration for a negated region to be the
+    active branch at all, so no ``macro`` node was ever seeded for it. This
+    is the same join-only-onto-an-existing-node behavior
+    ``test_augment_skips_macro_not_already_in_graph`` already pins for the
+    positive form, deliberately not overridden for the negated form either."""
+    graph = SourceGraphSummary()
+    graph.add_node(_decl_node("f"))  # no macro node for NEVER_DEFINED at all
+    text = "#ifndef NEVER_DEFINED\nvoid f();\n#endif\n"
+    decls = [DeclRange("f", "t.h", 2, 2)]
+    result = augment_graph_with_macro_dependencies(
+        graph, decls, source_lookup={"t.h": text}
+    )
+    assert result.controls_edges == 0
+    assert graph.edges == []
+
+
 def test_augment_never_mints_new_nodes() -> None:
     graph = _seeded_graph()
     text = "#define FEATURE_X 1\n#ifdef FEATURE_X\nvoid f() { return FEATURE_X; }\n#endif\n"
@@ -492,6 +563,106 @@ def test_augment_result_complete_when_clean() -> None:
 
 
 # ── ClangMacroGraphExtractor availability degrade ────────────────────────
+
+
+def test_extract_from_compile_unit_resolves_relative_file_against_own_cwd(
+    monkeypatch,
+) -> None:
+    """Codex review, PR #708: clang echoes a relative source path (an
+    out-of-source build's ``directory`` + relative ``source``) back into the
+    AST dump's ``file`` fields exactly as given on the command line -- it
+    never resolves that against the compile unit's own ``directory`` itself.
+    ``_extract_from_compile_unit`` must resolve a relative ``DeclRange.file``
+    against the compile unit's *own* replayed cwd, not the process cwd."""
+    import abicheck.buildsource.call_graph as call_graph_mod
+    from abicheck.buildsource.build_evidence import CompileUnit
+
+    extractor = ClangMacroGraphExtractor(clang_bin="clang++")
+    monkeypatch.setattr(
+        call_graph_mod,
+        "_safe_clang_args_from_compile_unit",
+        lambda cu: ["--", cu.source],
+    )
+    monkeypatch.setattr(call_graph_mod, "_replay_cwd", lambda cu: "/build/out")
+    monkeypatch.setattr(
+        extractor,
+        "_extract_from_safe_args",
+        lambda argv, cwd=None: [DeclRange("f", "../src/a.h", 3, 3)],
+    )
+    cu = CompileUnit(
+        id="cu://a",
+        source="../src/a.cpp",
+        input_files=["../src/a.cpp"],
+        directory="/build/out",
+    )
+    ranges = extractor._extract_from_compile_unit(cu)
+    assert ranges == [DeclRange("f", "/build/src/a.h", 3, 3)]
+
+
+def test_extract_from_compile_unit_leaves_absolute_file_untouched(monkeypatch) -> None:
+    import abicheck.buildsource.call_graph as call_graph_mod
+    from abicheck.buildsource.build_evidence import CompileUnit
+
+    extractor = ClangMacroGraphExtractor(clang_bin="clang++")
+    monkeypatch.setattr(
+        call_graph_mod,
+        "_safe_clang_args_from_compile_unit",
+        lambda cu: ["--", cu.source],
+    )
+    monkeypatch.setattr(call_graph_mod, "_replay_cwd", lambda cu: "/build/out")
+    monkeypatch.setattr(
+        extractor,
+        "_extract_from_safe_args",
+        lambda argv, cwd=None: [DeclRange("f", "/abs/a.h", 3, 3)],
+    )
+    cu = CompileUnit(
+        id="cu://a", source="a.cpp", input_files=["a.cpp"], directory="/build/out"
+    )
+    ranges = extractor._extract_from_compile_unit(cu)
+    assert ranges == [DeclRange("f", "/abs/a.h", 3, 3)]
+
+
+def test_extract_from_build_keeps_distinct_spans_for_same_identity(monkeypatch) -> None:
+    """Codex review, PR #708: a forward declaration and its own later
+    definition share ``(identity, file)`` but have distinct spans -- the
+    definition's span (which may carry the real macro guard/reference) must
+    survive even though the forward declaration is also seen."""
+    from abicheck.buildsource.build_evidence import BuildEvidence, CompileUnit
+
+    extractor = ClangMacroGraphExtractor(clang_bin="clang++")
+    monkeypatch.setattr(extractor, "available", lambda: True)
+    forward = DeclRange("Widget", "t.h", 2, 2)
+    definition = DeclRange("Widget", "t.h", 10, 14)
+    per_unit = {"cu://a": [forward], "cu://b": [definition]}
+    monkeypatch.setattr(
+        extractor, "_extract_from_compile_unit", lambda cu: per_unit[cu.id]
+    )
+    build = BuildEvidence(
+        compile_units=[
+            CompileUnit(id="cu://a", source="a.cpp", input_files=["a.cpp"]),
+            CompileUnit(id="cu://b", source="b.cpp", input_files=["b.cpp"]),
+        ]
+    )
+    ranges = extractor.extract_from_build(build)
+    assert forward in ranges
+    assert definition in ranges
+
+
+def test_extract_from_build_dedups_exact_duplicate_span(monkeypatch) -> None:
+    from abicheck.buildsource.build_evidence import BuildEvidence, CompileUnit
+
+    extractor = ClangMacroGraphExtractor(clang_bin="clang++")
+    monkeypatch.setattr(extractor, "available", lambda: True)
+    same = DeclRange("Widget", "t.h", 2, 2)
+    monkeypatch.setattr(extractor, "_extract_from_compile_unit", lambda cu: [same])
+    build = BuildEvidence(
+        compile_units=[
+            CompileUnit(id="cu://a", source="a.cpp", input_files=["a.cpp"]),
+            CompileUnit(id="cu://b", source="b.cpp", input_files=["b.cpp"]),
+        ]
+    )
+    ranges = extractor.extract_from_build(build)
+    assert ranges == [same]
 
 
 def test_extractor_unavailable_records_diagnostic() -> None:
