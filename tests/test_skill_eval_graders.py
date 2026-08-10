@@ -1084,6 +1084,49 @@ class TestRunnerTreatment:
         )
         return out_dir
 
+    def test_an_unknown_scenario_id_is_rejected_not_dropped(self):
+        """Silently filtering a typo produced an apparently complete
+        experiment that omitted an explicitly requested case."""
+        pack = {
+            "scenarios": {
+                "removed-export": {"status": "ready"},
+                "planned-one": {"status": "planned"},
+            }
+        }
+        assert runner.unknown_scenarios(["removed-export"], pack) == []
+        assert runner.unknown_scenarios(["removed-exprot"], pack) == ["removed-exprot"]
+        assert runner.unknown_scenarios(["planned-one"], pack) == ["planned-one"]
+
+    def test_a_module_entry_invocation_is_detected_as_a_bypass(self, tmp_path):
+        """`python -m abicheck` does not pass through a PATH shim named
+        `abicheck`, so its evidence is missing rather than absent — and an
+        empty call log reads identically to "never ran the tool"."""
+        events = [
+            {
+                "type": "assistant",
+                "message": {
+                    "content": [
+                        {
+                            "type": "tool_use",
+                            "name": "Bash",
+                            "input": {"command": "python -m abicheck compare a b"},
+                        }
+                    ]
+                },
+            }
+        ]
+        calls = tmp_path / "calls.jsonl"
+        assert runner._bypassed_the_recorder(events, calls)
+        calls.write_text(json.dumps({"seq": 0, "argv": ["compare"]}) + "\n")
+        assert not runner._bypassed_the_recorder(events, calls)
+
+    def test_the_interposer_only_redirects_the_module_entry_form(self):
+        """It sits on PATH as `python`; everything else must exec untouched."""
+        script = runner._PYTHON_INTERPOSER
+        assert script.startswith("#!/bin/sh")
+        assert '"$1" = "-m"' in script and '"$2" = "abicheck"' in script
+        assert 'exec "$SKILL_EVAL_REAL_PYTHON" "$@"' in script
+
     def test_a_run_that_completed_but_was_never_indexed_is_recovered(self, tmp_path):
         out_dir = self._unindexed_run(tmp_path, [SCENARIO_BREAKING["skill"]])
         record = runner._recovered_record(out_dir, "sid", "skill", 0, SCENARIO_BREAKING)

@@ -100,6 +100,27 @@ If `confident` is false, add an `"uncertainty"` object with `"reason"` (one of
 unresolved. Give exactly one such block.
 """
 
+#: `python -m abicheck ...` is a documented, supported entry point
+#: (`abicheck/__main__.py`), and it does not go through a `PATH` shim named
+#: `abicheck` — so a run that reaches the tool that way records no calls at
+#: all, and dimensions 3 and 6 then reject a correctly evidenced answer. That
+#: biases the *baseline* arm in particular, which is not handed the skill's
+#: own spelling of the command, and a biased control is worse than a noisy
+#: measurement. This interposer sits on PATH as `python`/`python3` and
+#: re-dispatches only that one form through the shim; everything else execs
+#: the real interpreter untouched.
+#:
+#: Written as `/bin/sh` rather than Python on purpose: a Python script named
+#: `python3` in the first PATH entry whose shebang is `/usr/bin/env python3`
+#: would re-resolve to itself.
+_PYTHON_INTERPOSER = """#!/bin/sh
+if [ "$1" = "-m" ] && [ "$2" = "abicheck" ]; then
+  shift 2
+  exec "$SKILL_EVAL_SHIM" "$@"
+fi
+exec "$SKILL_EVAL_REAL_PYTHON" "$@"
+"""
+
 #: `platform.system()` -> the spelling `examples/ground_truth.json` uses.
 _HOST_PLATFORM = {"Linux": "linux", "Darwin": "macos", "Windows": "windows"}
 
@@ -118,6 +139,45 @@ def supported_here(scenario: dict) -> bool:
     """
     platforms = scenario.get("platforms") or []
     return not platforms or host_platform() in platforms
+
+
+def missing_toolchain(scenarios: dict[str, dict]) -> list[str]:
+    """What this host lacks for the selected scenarios to be runnable at all.
+
+    Every ready fixture ships *source*, not prebuilt libraries, so a host with
+    `abicheck` but no compiler cannot produce the two sides — and the run would
+    spend real model calls grading tool failures against fixed compatibility
+    verdicts, which is a corrupted experiment rather than a missing one. An L2
+    scenario additionally needs a header extractor.
+    """
+    missing: list[str] = []
+    if not any(shutil.which(cc) for cc in ("gcc", "cc", "clang")):
+        missing.append("a C compiler (gcc/cc/clang)")
+    if not any(shutil.which(cxx) for cxx in ("g++", "c++", "clang++")):
+        missing.append("a C++ compiler (g++/c++/clang++)")
+    needs_headers = [
+        sid
+        for sid, entry in scenarios.items()
+        if (entry.get("expected") or {}).get("min_evidence") == "L2"
+    ]
+    if needs_headers and not any(shutil.which(t) for t in ("castxml", "clang")):
+        missing.append(
+            f"a header extractor (castxml or clang) for {', '.join(sorted(needs_headers))}"
+        )
+    return missing
+
+
+def unknown_scenarios(requested: list[str], pack: dict) -> list[str]:
+    """Requested ids that name no ready scenario.
+
+    Silently dropping a typo produced an apparently complete experiment that
+    omitted an explicitly requested case — the run exits 0 having measured
+    less than was asked for.
+    """
+    ready = {
+        sid for sid, entry in pack["scenarios"].items() if entry["status"] == "ready"
+    }
+    return sorted(set(requested) - ready)
 
 
 def is_inside_repo(path: Path) -> bool:
@@ -202,8 +262,9 @@ def _run_once(
 
     bin_dir = out_dir / "bin"
     bin_dir.mkdir()
-    shutil.copy2(SHIM, bin_dir / "abicheck")
-    (bin_dir / "abicheck").chmod(0o755)
+    shim = bin_dir / "abicheck"
+    shutil.copy2(SHIM, shim)
+    shim.chmod(0o755)
 
     real = shutil.which("abicheck")
     if real is None:  # checked again in main() before any model call
@@ -213,7 +274,19 @@ def _run_once(
         "PATH": f"{bin_dir}{os.pathsep}{os.environ['PATH']}",
         "SKILL_EVAL_CALLS": str(out_dir / "calls.jsonl"),
         "SKILL_EVAL_REAL_ABICHECK": real,
+        "SKILL_EVAL_SHIM": str(shim),
     }
+
+    # The supported module entry point, routed back through the recorder. Only
+    # where a POSIX shell exists; elsewhere `_bypassed_the_recorder` below is
+    # the backstop, so the failure is visible rather than a silent empty log.
+    real_python = shutil.which("python3") or shutil.which("python")
+    if os.name != "nt" and real_python:
+        for name in ("python", "python3"):
+            interposer = bin_dir / name
+            interposer.write_text(_PYTHON_INTERPOSER, encoding="utf-8")
+            interposer.chmod(0o755)
+        env["SKILL_EVAL_REAL_PYTHON"] = real_python
 
     prompt = scenario["prompt"] + ANSWER_CONTRACT
     (out_dir / "prompt.txt").write_text(prompt, encoding="utf-8")
@@ -266,6 +339,14 @@ def _run_once(
     usage = _usage(events, elapsed)
     (out_dir / "usage.json").write_text(json.dumps(usage, indent=2), encoding="utf-8")
 
+    if _bypassed_the_recorder(events, out_dir / "calls.jsonl"):
+        raise RuntimeError(
+            f"{scenario_id}/{arm}/{rep}: the run reached the tool through "
+            f"`python -m abicheck`, which the recorder never saw, so its "
+            f"evidence is missing rather than absent. Re-run on a host where "
+            f"the PATH interposer applies."
+        )
+
     visible = visible_native_skills(events)
     problem = check_treatment(arm, scenario, visible)
     if problem is not None:
@@ -283,6 +364,28 @@ def _run_once(
         "visible_skills": visible,
         "wall_clock_seconds": usage["wall_clock_seconds"],
     }
+
+
+def _bypassed_the_recorder(events: list[dict], calls: Path) -> bool:
+    """Whether the run invoked the tool by a route the shim does not wrap.
+
+    The interposer prevents this where a POSIX shell exists; this backstop is
+    what makes the remaining case *visible*. An empty call log otherwise reads
+    identically whether the agent never reached the tool or reached it by a
+    route the recorder does not wrap — and those grade the same (dimensions 3
+    and 6 both fail) while meaning opposite things about the agent.
+    """
+    if calls.is_file() and calls.read_text(encoding="utf-8").strip():
+        return False
+    for event in events:
+        if event.get("type") != "assistant":
+            continue
+        for block in (event.get("message") or {}).get("content") or []:
+            if not isinstance(block, dict) or block.get("type") != "tool_use":
+                continue
+            if "-m abicheck" in json.dumps(block.get("input") or {}):
+                return True
+    return False
 
 
 def _recovered_record(
@@ -383,6 +486,14 @@ def main(argv: list[str] | None = None) -> int:
 
     pack = json.loads(PACK.read_text(encoding="utf-8"))
     wanted = [s for s in args.scenarios.split(",") if s]
+    bad = unknown_scenarios(wanted, pack)
+    if bad:
+        print(
+            f"no ready scenario named: {', '.join(bad)} — refusing to run a "
+            f"subset of what was asked for",
+            file=sys.stderr,
+        )
+        return 1
     scenarios = {
         sid: entry
         for sid, entry in sorted(pack["scenarios"].items())
@@ -390,6 +501,16 @@ def main(argv: list[str] | None = None) -> int:
     }
     if not scenarios:
         print("no ready scenarios selected", file=sys.stderr)
+        return 1
+
+    runnable = {sid: entry for sid, entry in scenarios.items() if supported_here(entry)}
+    lacking = missing_toolchain(runnable)
+    if lacking:
+        print(
+            "this host cannot build the fixtures, so every run would grade a "
+            f"tool failure against a fixed verdict. Missing: {'; '.join(lacking)}.",
+            file=sys.stderr,
+        )
         return 1
 
     out_root.mkdir(parents=True, exist_ok=True)
@@ -425,7 +546,14 @@ def main(argv: list[str] | None = None) -> int:
                     index.append(_recovered_record(out_dir, sid, arm, rep, scenario))
                     flush()
                     continue
-                out_dir.mkdir(parents=True, exist_ok=True)
+                if out_dir.exists():
+                    # A repetition interrupted after `workspace/` was created
+                    # but before `final.md` was written is unfinished, and
+                    # `_run_once`'s own mkdir would raise on it forever —
+                    # making that repetition unresumable without manual
+                    # deletion. Nothing here is evidence yet, so clear it.
+                    shutil.rmtree(out_dir)
+                out_dir.mkdir(parents=True)
                 print(f"run  {sid}/{arm}/{rep}", flush=True)
                 try:
                     record = _run_once(sid, scenario, arm, rep, out_dir, args.timeout)
