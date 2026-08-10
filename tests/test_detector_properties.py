@@ -60,6 +60,7 @@ from abicheck.checker_policy import (
     BREAKING_KINDS,
     COMPATIBLE_KINDS,
     RISK_KINDS,
+    ChangeKind,
     Verdict,
 )
 from abicheck.model import (
@@ -502,3 +503,122 @@ def test_real_snapshot_touched_symbols_symmetric(pair: tuple[Path, Path]) -> Non
     forward = {c.symbol for c in compare(a, b).changes}
     backward = {c.symbol for c in compare(b, a).changes}
     assert forward == backward
+
+
+# --- Evidence-absence invariants (generalized, not example-shaped) -----------
+#
+# A finding must rest on evidence. `RecordType.vtable` is a plain list and so
+# cannot express "not captured", which let an asymmetric DWARF capture look
+# like a whole vtable appearing -- BREAKING, with no `_ZTV` symbol anywhere and
+# no layout movement. These state the rule over *arbitrary* generated classes
+# rather than one fixture, in both directions: the artifact is never reported,
+# and a genuine polymorphism change always is.
+
+
+@st.composite
+def _vtable_capture_pair(draw: st.DrawFn) -> tuple[AbiSnapshot, AbiSnapshot]:
+    """One class, identical in every respect except a vtable list one side lost.
+
+    The shape of an asymmetric capture: same size, same virtual bases, one
+    side's own virtual-method DIEs simply absent.
+    """
+    name = draw(_ident)
+    size = draw(st.sampled_from([32, 64, 128, 256]))
+    vbases = draw(st.lists(_ident, max_size=2, unique=True))
+    slots = draw(st.lists(_ident, min_size=1, max_size=4, unique=True))
+    captured = RecordType(
+        name=name, kind="class", size_bits=size,
+        vtable=list(slots), virtual_bases=list(vbases),
+    )
+    missing = RecordType(
+        name=name, kind="class", size_bits=size,
+        vtable=[], virtual_bases=list(vbases),
+    )
+    old, new = (missing, captured) if draw(st.booleans()) else (captured, missing)
+    return (
+        AbiSnapshot(library="l", version="1", types=[old]),
+        AbiSnapshot(library="l", version="2", types=[new]),
+    )
+
+
+@given(pair=_vtable_capture_pair())
+@_HSETTINGS
+def test_vtable_capture_asymmetry_is_never_reported(
+    pair: tuple[AbiSnapshot, AbiSnapshot],
+) -> None:
+    """No `type_vtable_changed` when nothing but the capture differs.
+
+    Holds in both directions -- losing the capture is as much a non-event as
+    gaining it -- which is why the strategy shuffles which side is which.
+    """
+    old, new = pair
+    kinds = {c.kind for c in compare(old, new).changes}
+    assert ChangeKind.TYPE_VTABLE_CHANGED not in kinds
+
+
+@st.composite
+def _became_polymorphic_pair(draw: st.DrawFn) -> tuple[AbiSnapshot, AbiSnapshot]:
+    """A class that genuinely gains its first virtual function.
+
+    It also gains a vptr, so it grows -- that size movement is precisely the
+    independent evidence the capture-artifact shape lacks.
+    """
+    name = draw(_ident)
+    size = draw(st.sampled_from([32, 64, 128]))
+    growth = draw(st.sampled_from([32, 64]))
+    slots = draw(st.lists(_ident, min_size=1, max_size=4, unique=True))
+    return (
+        AbiSnapshot(library="l", version="1", types=[
+            RecordType(name=name, kind="class", size_bits=size, vtable=[])]),
+        AbiSnapshot(library="l", version="2", types=[
+            RecordType(name=name, kind="class", size_bits=size + growth,
+                       vtable=list(slots))]),
+    )
+
+
+@given(pair=_became_polymorphic_pair())
+@_HSETTINGS
+def test_a_real_polymorphism_gain_is_always_reported(
+    pair: tuple[AbiSnapshot, AbiSnapshot],
+) -> None:
+    """The under-call guard: the evidence rule must not swallow real breaks."""
+    old, new = pair
+    kinds = {c.kind for c in compare(old, new).changes}
+    assert ChangeKind.TYPE_VTABLE_CHANGED in kinds
+
+
+@st.composite
+def _both_captured_vtable_pair(draw: st.DrawFn) -> tuple[AbiSnapshot, AbiSnapshot]:
+    """Two *different*, both-non-empty vtables on an otherwise identical class."""
+    name = draw(_ident)
+    size = draw(st.sampled_from([64, 128]))
+    a = draw(st.lists(_ident, min_size=1, max_size=3, unique=True))
+    b = draw(st.lists(_ident, min_size=1, max_size=3, unique=True))
+    assume(a != b)
+    return (
+        AbiSnapshot(library="l", version="1", types=[
+            RecordType(name=name, kind="class", size_bits=size, vtable=a)]),
+        AbiSnapshot(library="l", version="2", types=[
+            RecordType(name=name, kind="class", size_bits=size, vtable=b)]),
+    )
+
+
+@given(pair=_both_captured_vtable_pair())
+@_HSETTINGS
+def test_both_sides_captured_still_diffs_normally(
+    pair: tuple[AbiSnapshot, AbiSnapshot],
+) -> None:
+    """When both sides captured a vtable there is no missing evidence to reason
+    about, so the guard must stay out of the way entirely.
+
+    Deliberately asserts only that the evidence guard did not swallow the
+    difference -- `_diff_type_vtable`'s own override-reuse exemption (case185)
+    may still legitimately clear a slot-for-slot rename, so this checks the
+    weaker, real invariant: *something* is reported, or the exemption applied.
+    """
+    old, new = pair
+    result = compare(old, new)
+    kinds = {c.kind for c in result.changes}
+    if ChangeKind.TYPE_VTABLE_CHANGED not in kinds:
+        # The only sanctioned reason to stay silent here.
+        assert len(old.types[0].vtable) == len(new.types[0].vtable)

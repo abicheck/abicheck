@@ -95,6 +95,7 @@ from .cli_options import (
     policy_options,
     resolve_compile_context,
     scope_options,
+    severity_options,
     split_sided_paths,
     verbose_option,
 )
@@ -376,6 +377,54 @@ def _scan_explicit_flags(
     return level_explicit, pinned_explicit
 
 
+def _dry_run_exit_code_lines(
+    scheme_label: str, sev_config: Any, against: Path | None
+) -> list[str]:
+    """The dry-run's exit-code preview, for the scheme this run actually resolved.
+
+    Split out of :func:`render_scan_dry_run` so the two schemes' wording sits
+    side by side rather than inside an already-long renderer.
+
+    *scheme_label* is the caller's already-resolved label (from
+    ``cli_compare_receipt.dry_run_scheme_label``, the same one ``compare
+    --dry-run`` prints); the severity branch keys off *sev_config* being
+    present, which is exactly when the caller resolved that scheme.
+
+    That branch is reachable only with ``--against``: every severity flag is a
+    comparison-only flag, and without a baseline there is no comparison to
+    gate, so an audit-only run always previews the legacy codes.
+    """
+    tail = "5 budget overflow, 6 not_comparable"
+    lines = [
+        "dry-run exit codes: 0 valid, 1 requested depth not satisfiable, "
+        "64 usage error",
+        f"exit-code scheme: {scheme_label}",
+    ]
+    if sev_config is not None and against is not None:
+        levels = ", ".join(
+            f"{attr}={getattr(getattr(sev_config, attr, None), 'value', '?')}"
+            for attr in (
+                "abi_breaking", "potential_breaking", "quality_issues", "addition",
+            )
+        )
+        lines.append(f"resolved severity: {levels}")
+        lines.append(
+            "a real scan run's exit codes are 0 no error-level findings, "
+            "1 error-level addition/quality findings (or incomplete contract "
+            "coverage under --contract-evaluation), 2 error-level "
+            "potential_breaking, 4 error-level abi_breaking, "
+            f"{tail} -- a category set to warning/info never gates, so a "
+            "breaking comparison can exit 0"
+        )
+        return lines
+    lines.append(
+        "a real scan run's exit codes are 0 compatible, "
+        "1 incomplete contract coverage (--contract-evaluation only), "
+        f"2 API break, 4 ABI break, {tail}"
+    )
+    return lines
+
+
 def render_scan_dry_run(
     *,
     artifact: Path,
@@ -395,12 +444,24 @@ def render_scan_dry_run(
     lang: str,
     header_backend: str,
     fmt: str,
+    scheme_label: str = "legacy (0/2/4)",
+    sev_config: Any = None,
 ) -> Any:
     """Build the ``scan --dry-run`` report (ADR-043 D4): resolve, never scan.
 
     Reuses :func:`service.estimate_scan`'s per-layer cost/TU-count probe (the
     same read-only projection ``--estimate`` used to provide) so the report
     also states how many translation units the resolved level would touch.
+
+    *scheme_label*/*sev_config* describe this invocation's **already-resolved**
+    gate (the caller resolves them before emitting), so the preview states the
+    contract the real run would actually use. Stating the legacy codes
+    unconditionally was wrong once `scan --against` gained a severity gate --
+    `--severity-preset info-only` previewed "0 compatible / 4 ABI break" for a
+    run that exits 0 on a breaking comparison (Codex review). Same defect
+    `compare --dry-run` already had and fixed, which is why the scheme label
+    comes from its :func:`~abicheck.cli_compare_receipt.dry_run_scheme_label`
+    rather than a second spelling of the same idea.
     """
     from .dry_run import DryRunResult, tool_status
     from .service import Budget, ScanRequest, estimate_scan
@@ -436,11 +497,7 @@ def render_scan_dry_run(
     result.add(
         "Output and exit-code behavior",
         f"format: {fmt}",
-        "dry-run exit codes: 0 valid, 1 requested depth not satisfiable, "
-        "64 usage error (a real scan run's exit codes are 0 compatible, "
-        "1 incomplete contract coverage (--contract-evaluation only), "
-        "2 API break, 4 ABI break, 5 budget overflow, "
-        "6 not_comparable)",
+        *_dry_run_exit_code_lines(scheme_label, sev_config, against),
     )
     try:
         req = ScanRequest(
@@ -472,6 +529,29 @@ def render_scan_dry_run(
     return result
 
 
+def _scan_pre_coverage_base_exit(outcome: ScanOutcome) -> int:
+    """This run's compatibility exit code *before* the coverage floor was folded.
+
+    The number ADR-049 §7's coverage diagnostic must explain itself against.
+    Under a resolved ``severity`` scheme that base is the severity gate's own
+    exit code -- which ``_run_baseline_compare`` publishes as
+    ``diff_summary["severity"]["exit_code"]``, taken from the very
+    ``compute_gate_decision`` result it also gated on -- and only otherwise the
+    verdict's legacy ``{0,2,4}`` mapping. Read back rather than recomputed so
+    the published explanation cannot disagree with the exit code the process
+    actually returned (Codex review).
+    """
+    from .cli_compare_helpers import _verdict_exit_code
+
+    summary = outcome.diff_summary or {}
+    gate = summary.get("severity")
+    if isinstance(gate, dict):
+        code = gate.get("exit_code")
+        if isinstance(code, int):
+            return code
+    return _verdict_exit_code(outcome.verdict)
+
+
 def _emit_scan_report(outcome: ScanOutcome, fmt: str, output: Path | None) -> None:
     """Render the scan outcome, write/echo it, and exit non-zero on a verdict."""
     text = (
@@ -490,18 +570,26 @@ def _emit_scan_report(outcome: ScanOutcome, fmt: str, output: Path | None) -> No
     # those keys, so without this the command prints "Verdict: NO_CHANGE"
     # and then fails with no explanation (Codex review).
     if fmt != "json":
-        from .cli_compare_helpers import _verdict_exit_code
         from .contract_coverage_exit import coverage_diagnostic_from_summary
 
         # `outcome.exit_code` has ALREADY had the coverage floor folded in
         # by `_run_baseline_compare`, so passing it would make the notice
         # say "contributes 1 to an exit that was already 1" for a run where
-        # coverage is exactly what raised 0 to 1 (Codex review). The
-        # pre-coverage value is the verdict's own code, which is what that
-        # fold took as its base.
+        # coverage is exactly what raised 0 to 1 (Codex review).
+        #
+        # The pre-coverage base is the *severity* gate's exit code when this
+        # run resolved the severity scheme, and only otherwise the verdict's
+        # own code. Re-deriving `_verdict_exit_code(verdict)` unconditionally
+        # misreported the severity case: a COMPATIBLE_WITH_RISK diff promoted
+        # to 2 by `--severity-potential-breaking error` alongside a coverage
+        # failure exits 2, but the notice claimed coverage floored it to 1
+        # (Codex review). `_run_baseline_compare` emits the gate block from
+        # the same `compute_gate_decision` result it took its own base from,
+        # so this reads back the number that actually gated, rather than a
+        # second guess at it.
         notice = coverage_diagnostic_from_summary(
             outcome.diff_summary,
-            base_exit=_verdict_exit_code(outcome.verdict),
+            base_exit=_scan_pre_coverage_base_exit(outcome),
         )
         if notice is not None:
             click.echo(notice, err=True)
@@ -614,6 +702,12 @@ _COMPARISON_ONLY_FLAGS = {
     "policy_file_path": "--policy-file",
     "policy": "--policy",
     "scope_public_headers": "--scope-public-headers/--no-scope-public-headers",
+    "severity_preset": "--severity-preset",
+    "severity_abi_breaking": "--severity-abi-breaking",
+    "severity_potential_breaking": "--severity-potential-breaking",
+    "severity_quality_issues": "--severity-quality-issues",
+    "severity_addition": "--severity-addition",
+    "exit_code_scheme": "--exit-code-scheme",
     "strict_suppressions": "--strict-suppressions",
     "public_symbols": "--public-symbol",
     "public_symbols_list": "--public-symbols-list",
@@ -896,9 +990,12 @@ def _resolve_scan_evaluation_config(
                 resolved_config,
                 gate_supported=False,
                 gate_reason=(
-                    "a scan's exit code follows its compatibility verdict "
-                    "directly, so it has no severity or exit-code scheme "
-                    "for a gate pack to move (compare does)"
+                    "a scan's exit code now honors --severity-*/--exit-code-"
+                    "scheme (direct CLI flags and .abicheck.yml's `severity:`/"
+                    "`exit_code_scheme` config), but does not yet fold a gate "
+                    "pack's `gate.*` assignments the way `compare --pack` "
+                    "does; pass the severity/exit-code-scheme settings "
+                    "directly instead of via --pack"
                 ),
                 contract_evaluation=contract_evaluation,
             )
@@ -1155,6 +1252,17 @@ def _discover_scan_project_config(
 )
 @policy_options  # ADR-049 Phase 5: --against config-surface parity with `compare`
 @scope_options  # (--policy/--policy-file/--suppress/--scope-public-headers)
+@severity_options  # With --against: severity preset + per-category overrides, mirrors `compare`
+@click.option(
+    "--exit-code-scheme",
+    "exit_code_scheme",
+    type=click.Choice(["auto", "legacy", "severity"], case_sensitive=True),
+    default=None,
+    help="With --against: exit-code scheme (mirrors `compare --exit-code-scheme`): "
+    "'legacy' (0/2/4 verdict), 'severity' (per-category error levels), or 'auto' "
+    "(severity when a severity setting is in effect, else legacy). Default: "
+    "config's exit_code_scheme, else auto.",
+)
 @click.option(
     "--strict-suppressions",
     is_flag=True,
@@ -1273,6 +1381,12 @@ def scan_cmd(
     policy_file_path: Path | None,
     policy: str,
     scope_public_headers: bool,
+    severity_preset: str | None,
+    severity_abi_breaking: str | None,
+    severity_potential_breaking: str | None,
+    severity_quality_issues: str | None,
+    severity_addition: str | None,
+    exit_code_scheme: str | None,
     strict_suppressions: bool,
     public_symbols: tuple[str, ...],
     public_symbols_list: Path | None,
@@ -1305,7 +1419,7 @@ def scan_cmd(
     `--against` already means a one-build audit; it is not a separate mode flag.
 
     \b
-    Exit codes:
+    Exit codes (legacy scheme — the default):
       0  compatible (or advisory-only findings)
       1  incomplete contract coverage (ADR-049 Phase 7): with
          --contract-evaluation, the selected --contract domain's required
@@ -1317,6 +1431,17 @@ def scan_cmd(
       5  --budget overflow
       6  NOT_COMPARABLE (ADR-050 D2): ARTIFACT and --against were not
          extracted under a comparable profile/scope contract
+
+    \b
+    With --against, --severity-preset/--severity-*/--exit-code-scheme (or
+    .abicheck.yml's severity:/exit_code_scheme) select the severity-aware
+    scheme instead, exactly as for `compare`: the 0/2/4 codes above are then
+    computed from the per-category error levels rather than the verdict, so
+    --severity-preset info-only can exit 0 on a breaking comparison, and an
+    error-level addition or quality finding can exit 1 on an otherwise
+    compatible one. The report states which — a `severity gate:` line in the
+    text output, a `diff.severity` block in --format json. 5/6 are unaffected
+    (both are decided before the comparison runs).
 
     \b
     Examples:
@@ -1478,10 +1603,14 @@ def scan_cmd(
     # this, a project config's `suppression.strict`/`scope.public`/
     # `scope.public_symbols`/`scope.collapse_versioned_symbols`/
     # `suppression.require_justification` applied to `compare` but silently
-    # had no effect on `scan --against`. Severity/debug/exit-code-scheme
-    # config keys are also resolved here (required positional args of the
-    # shared function) but deliberately discarded -- `scan` has no
-    # equivalent flags for them.
+    # had no effect on `scan --against`. Severity + exit-code-scheme config
+    # keys are resolved here too and now DO feed `scan --against`'s own exit
+    # code the same way `compare`'s does (see `sev_config`/`resolved_exit_
+    # scheme` below) -- previously they were required positional args of the
+    # shared function but deliberately discarded, which meant
+    # `.abicheck.yml`'s `severity:`/`exit_code_scheme` block, and every
+    # `--severity-*`/`--exit-code-scheme` flag, silently had no effect on
+    # `scan --against`, unlike `compare`.
     #
     # Gated on `against is not None`: every field this resolves only means
     # anything for a baseline comparison (mirrors the "reject comparison-only
@@ -1490,22 +1619,29 @@ def scan_cmd(
     # affects an audit-only run.
     collapse_versioned_symbols = False
     require_justification = False
+    sev_config = None
+    resolved_exit_scheme = "legacy"
+    # What `--dry-run` previews as the exit-code contract. Defaults match an
+    # audit-only run, which has no baseline comparison and therefore no gate.
+    scheme_label = "legacy (0/2/4)"
+    sev_config_for_preview = None
     if against is not None:
         from .cli_helpers_compare import resolve_compare_config
 
         resolved_cfg = resolve_compare_config(
             project_cfg,
-            cli_severity_preset=None,
-            cli_severity_abi_breaking=None,
-            cli_severity_potential_breaking=None,
-            cli_severity_quality_issues=None,
-            cli_severity_addition=None,
+            cli_severity_preset=severity_preset,
+            cli_severity_abi_breaking=severity_abi_breaking,
+            cli_severity_potential_breaking=severity_potential_breaking,
+            cli_severity_quality_issues=severity_quality_issues,
+            cli_severity_addition=severity_addition,
             cli_scope_public=_cli_flag("scope_public_headers", scope_public_headers),
             cli_collapse_versioned_symbols=None,
             cli_public_symbols=public_symbols,
             cli_strict_suppressions=_cli_flag(
                 "strict_suppressions", strict_suppressions
             ),
+            cli_exit_code_scheme=exit_code_scheme,
         )
         scope_public_headers = resolved_cfg.scope_public
         strict_suppressions = resolved_cfg.strict_suppressions
@@ -1516,6 +1652,30 @@ def scan_cmd(
         # default resolution with no CLI override to consider.
         collapse_versioned_symbols = resolved_cfg.collapse_versioned_symbols
         require_justification = resolved_cfg.require_justification
+        # Mirrors `compare`'s own `sev_config = resolved_cfg.severity` (a gate
+        # pack may have moved a severity level; `resolved_cfg` already carries
+        # that) -- fed to `run_scan_core` below so the baseline comparison's
+        # exit code honors the same severity/exit-code-scheme contract as
+        # `compare`, closing the asymmetry documented in AGENTS.md's "Known
+        # gaps" (scan previously computed its exit code from the verdict
+        # alone, never consulting severity).
+        sev_config = resolved_cfg.severity
+        resolved_exit_scheme = resolved_cfg.exit_code_scheme
+        # The same label `compare --dry-run` prints, from the same function
+        # and the same *resolved* config -- so a `.abicheck.yml`-only severity
+        # setup previews correctly, which is the case that function was
+        # itself fixed for. `pack_paths=()` deliberately: a `kind: gate` pack
+        # is rejected outright on `scan`, so nothing can move this scheme
+        # after resolution and the "a pack may adjust it" caveat would be
+        # false here.
+        from .cli_compare_receipt import dry_run_scheme_label
+
+        scheme_label = dry_run_scheme_label(resolved_cfg, ())
+        # Only a severity-scheme run has a gate to describe; under `legacy`
+        # the severity values still resolve but never score anything, so
+        # previewing them would imply a gate the run will not run.
+        if resolved_exit_scheme == "severity":
+            sev_config_for_preview = sev_config
 
     # ADR-049 Phase 5: --against reuses `compare`'s own suppression/policy
     # loader (`_load_suppression_and_policy`) so a scan baseline comparison
@@ -1658,6 +1818,8 @@ def scan_cmd(
                 lang=lang,
                 header_backend=header_backend,
                 fmt=fmt,
+                scheme_label=scheme_label,
+                sev_config=sev_config_for_preview,
             )
         )
 
@@ -1734,6 +1896,8 @@ def scan_cmd(
             contract_evaluation=contract_evaluation,
             contract_mode=contract_mode,
             resolved_config=resolved_config,
+            sev_config=sev_config,
+            exit_code_scheme=resolved_exit_scheme,
             compile_context=None if compile_context.is_default else compile_context,
             defer_cleanup=build_dir_cleanups,
             abi3_floor=abi3_floor,

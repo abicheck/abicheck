@@ -48,6 +48,112 @@ class TestPackCoverage:
         ]
 
 
+class TestSeverityBlockingCompatibleFindings:
+    """`_add_severity_blocking_compatible_findings` — naming the actual blocker.
+
+    Codex review: under `--severity-addition error` a compatible diff exits 1
+    and the report named only the blocking category and count.
+    """
+
+    @staticmethod
+    def _diff(n_adds: int = 3, n_breaks: int = 0):
+        from abicheck.checker_policy import ChangeKind
+        from abicheck.checker_types import Change, DiffResult
+
+        adds = [
+            Change(kind=ChangeKind.FUNC_ADDED, symbol=f"_Z3n{i:02d}v", description="add")
+            for i in range(n_adds)
+        ]
+        breaks = [
+            Change(kind=ChangeKind.FUNC_REMOVED, symbol=f"_Z3r{i:02d}v", description="rm")
+            for i in range(n_breaks)
+        ]
+        return DiffResult(
+            changes=breaks + adds, old_version="1", new_version="2", library="l"
+        ), breaks
+
+    def _apply(self, summary, diff, categories=("addition",)):
+        from abicheck.cli_scan_baseline import (
+            _add_severity_blocking_compatible_findings,
+        )
+
+        _add_severity_blocking_compatible_findings(
+            summary, diff, {"blocking": True, "blocking_categories": list(categories)}
+        )
+
+    def test_the_blocking_finding_is_named(self):
+        diff, _ = self._diff()
+        summary: dict = {}
+        self._apply(summary, diff)
+        named = [f for f in summary["findings"] if f["bucket"] == "compatible"]
+        assert [f["symbol"] for f in named] == ["_Z3n00v", "_Z3n01v", "_Z3n02v"]
+
+    def test_blocking_findings_reserve_slots_under_cap_pressure(self):
+        # The cap is spent first by the legacy buckets, and under a demoting
+        # preset those are exactly the findings that did *not* gate -- a plain
+        # append handed all 20 slots to them and dropped the real blocker.
+        from abicheck.cli_scan_baseline import _MAX_BASELINE_FINDINGS
+
+        diff, breaks = self._diff(n_adds=3, n_breaks=25)
+        summary = {
+            "findings": [
+                {"bucket": "breaking", "kind": "func_removed", "symbol": c.symbol}
+                for c in breaks[:_MAX_BASELINE_FINDINGS]
+            ]
+        }
+        self._apply(summary, diff)
+        findings = summary["findings"]
+        assert len(findings) <= _MAX_BASELINE_FINDINGS
+        assert [f["symbol"] for f in findings if f["bucket"] == "compatible"] == [
+            "_Z3n00v",
+            "_Z3n01v",
+            "_Z3n02v",
+        ]
+        assert summary["findings_truncated"] is True
+
+    def test_breaking_findings_are_not_evicted_by_many_blockers(self):
+        # The mirror of the reservation test above, and the failure the
+        # reservation itself caused: 20+ error-level additions alongside an
+        # ABI break exited 4 while itemizing only additions (Codex review).
+        # Both are causes of the exit code; naming only one is wrong either
+        # way round.
+        from abicheck.cli_scan_baseline import _MAX_BASELINE_FINDINGS
+
+        diff, breaks = self._diff(n_adds=25, n_breaks=25)
+        summary = {
+            "findings": [
+                {"bucket": "breaking", "kind": "func_removed", "symbol": c.symbol}
+                for c in breaks[:_MAX_BASELINE_FINDINGS]
+            ]
+        }
+        self._apply(summary, diff)
+        buckets = [f["bucket"] for f in summary["findings"]]
+        assert len(summary["findings"]) <= _MAX_BASELINE_FINDINGS
+        assert buckets.count("breaking") > 0, "the higher-exit cause must survive"
+        assert buckets.count("compatible") > 0, "the blocking additions must too"
+
+    def test_only_the_blamed_category_is_pulled_in(self):
+        # `--severity-addition error` makes additions block; a quality finding
+        # is equally compatible but did not fail the run, so spending report
+        # slots on it would crowd out the one that did.
+        diff, _ = self._diff()
+        summary: dict = {}
+        self._apply(summary, diff, categories=("quality_issues",))
+        assert not summary.get("findings")
+
+    def test_a_non_blocking_gate_adds_nothing(self):
+        from abicheck.cli_scan_baseline import (
+            _add_severity_blocking_compatible_findings,
+        )
+
+        diff, _ = self._diff()
+        summary: dict = {}
+        _add_severity_blocking_compatible_findings(
+            summary, diff, {"blocking": False, "blocking_categories": []}
+        )
+        assert not summary.get("findings")
+
+
 class TestPublicProvenanceSet:
     def test_directory_activates_provenance(self, tmp_path: Path) -> None:
         d = tmp_path / "include"

@@ -520,6 +520,53 @@ def _crosscheck_severity_exit(findings: list[Any], severities: dict[str, str]) -
     return 0
 
 
+#: The ``blocking_categories`` member naming a promoted cross-check, for a
+#: published gate that a ``--crosscheck KEY=error`` raised rather than a
+#: severity category. Deliberately outside ``IssueCategory``'s vocabulary,
+#: because it is not one: no severity level produced it. That is already the
+#: established shape rather than a new invention -- ``aggregate`` itself
+#: publishes ``operational_error`` and ``not_comparable`` the same way, and
+#: ``GateInfo.from_report_data`` validates the field as strings, not against a
+#: closed set.
+CROSSCHECK_BLOCKING_CATEGORY = "promoted_crosscheck"
+
+
+def _promote_published_gate(diff_summary: dict[str, Any] | None, sev_exit: int) -> None:
+    """Raise the published ``diff.severity`` gate to a promoted cross-check's exit.
+
+    A no-op unless this run published a gate at all (severity scheme only).
+
+    Without this the block was written by ``_run_baseline_compare`` from the
+    *baseline diff alone* and then contradicted by the promotion just above:
+    a passing baseline gate alongside an error-level cross-check published
+    ``exit_code: 0, blocking: false`` while the process exited 2. That is not
+    merely a cosmetic disagreement -- ``aggregate.GateInfo.from_scan_report``
+    now *prefers* this block, so the explicitly gated target read as
+    nonblocking and dropped out of ``blocking_targets`` (Codex review). It is
+    the same un-blocking failure the nested-block preference was introduced to
+    fix, reached by the other route.
+
+    Raises only, and only to ``max``: a cross-check promotion is a floor
+    (:func:`_crosscheck_severity_exit`), so it can add a blocking reason to a
+    gate but never clear one a severity category already raised.
+    """
+    if not isinstance(diff_summary, dict):
+        return
+    gate = diff_summary.get("severity")
+    if not isinstance(gate, dict):
+        return
+    current = gate.get("exit_code")
+    if not isinstance(current, int) or sev_exit <= current:
+        return
+    gate["exit_code"] = sev_exit
+    gate["blocking"] = True
+    cats = gate.get("blocking_categories")
+    cats = list(cats) if isinstance(cats, list) else []
+    if CROSSCHECK_BLOCKING_CATEGORY not in cats:
+        cats.append(CROSSCHECK_BLOCKING_CATEGORY)
+    gate["blocking_categories"] = cats
+
+
 def _audit_exit_code(
     findings: list[Any], severities: dict[str, str]
 ) -> tuple[str, int]:
@@ -801,6 +848,8 @@ def run_scan_core(
     contract_evaluation: bool = False,
     contract_mode: str | None = None,
     resolved_config: Any = None,
+    sev_config: Any = None,
+    exit_code_scheme: str = "legacy",
     sibling_exported_symbols: frozenset[str] | None = None,
 ) -> ScanCoreResult:
     """The shared scan orchestration (classify → always-on tier → level → compare).
@@ -815,6 +864,18 @@ def run_scan_core(
     tier's ``CrosscheckConfig`` unchanged — see
     :class:`~abicheck.buildsource.crosscheck.CrosscheckConfig` for what it
     does. ``None``/empty for the single-binary ``scan``/``compare`` paths.
+
+    ``sev_config``/``exit_code_scheme`` are forwarded, unchanged, to
+    ``_run_baseline_compare`` when a ``baseline`` is given — closing the
+    asymmetry documented in AGENTS.md's "Known gaps": `scan --against` used
+    to compute its exit code from the verdict alone (``legacy_exit_code``)
+    regardless of any ``--severity-*``/``.abicheck.yml`` ``severity:``
+    setting, unlike `compare`. ``exit_code_scheme == "severity"`` there now
+    uses ``severity.compute_exit_code`` the same way `compare` does; the
+    default ``"legacy"`` reproduces the prior, unchanged behavior exactly.
+    Orthogonal to the budget/evidence-contract/NOT_COMPARABLE exit codes
+    this function already special-cases (5/1/6) — those are returned before
+    ever reaching the baseline comparison.
     """
     stage_timings: dict[str, float] = {}
 
@@ -1035,6 +1096,8 @@ def run_scan_core(
                     contract_evaluation=contract_evaluation,
                     contract_mode=contract_mode,
                     resolved_config=resolved_config,
+                    sev_config=sev_config,
+                    exit_code_scheme=exit_code_scheme,
                 )
         except deadline.DeadlineExceeded as exc:
             elapsed = time.monotonic() - start
@@ -1062,13 +1125,26 @@ def run_scan_core(
                 exit_code = sev_exit
                 # Keep the reported verdict in sync with the promoted exit code so a
                 # consumer keying off the verdict string isn't misled (Codex review).
-                # `_run_baseline_compare` ties exit_code to verdict exactly
-                # (BREAKING->4, API_BREAK->2, else->0), and `sev_exit` is at
-                # most 2, so `sev_exit > exit_code` only holds when
-                # exit_code was 0 -- i.e. verdict is already one of these
-                # three non-breaking values. Never downgrades a real
-                # BREAKING/API_BREAK from the artifact diff.
-                verdict = "API_BREAK"
+                # `_run_baseline_compare` used to tie exit_code to verdict exactly
+                # (BREAKING->4, API_BREAK->2, else->0), so `sev_exit > exit_code`
+                # only held when exit_code was 0 -- i.e. verdict was already one of
+                # the three non-breaking values, and relabeling it "API_BREAK" was
+                # always a genuine promotion.
+                #
+                # That invariant broke once `exit_code_scheme == "severity"`
+                # started feeding `_run_baseline_compare` (Codex review): a
+                # `--severity-preset info-only` run can leave a genuinely
+                # BREAKING/API_BREAK diff at exit 0, so `exit_code == 0` no longer
+                # implies the verdict was non-breaking. Raise the promoted exit
+                # code either way (a maintainer-promoted cross-check must still
+                # gate), but only relabel the verdict when it wasn't already
+                # BREAKING/API_BREAK -- else a severity-demoted BREAKING diff
+                # would be misreported as the *less* severe API_BREAK merely
+                # because its own severity-gated exit happened to be lower than
+                # the cross-check's.
+                if verdict not in ("BREAKING", "API_BREAK"):
+                    verdict = "API_BREAK"
+                _promote_published_gate(diff_summary, sev_exit)
         _record_stage("baseline_compare", _stage)
     else:
         if baseline is not None:

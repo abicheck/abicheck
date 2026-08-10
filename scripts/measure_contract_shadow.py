@@ -151,9 +151,63 @@ FACT_LOSS_BASELINE = 0
 #: check reports a drop as well as a rise.
 UNRESOLVED_LOSS_BASELINE: dict[str, int] = {
     "public": 1,
-    "exports": 20,
+    "exports": 30,
     "all": 0,
 }
+#: `exports` moved 20 -> 23 -> 26 -> 27 -> 29 -> 31 -> 30. The +2 to 31 was
+#: `overaligned_pure_virtual_stays_breaking`, an FN sentinel for a pure
+#: virtual whose declaration-only DIE never reaches `snapshot.functions`, so
+#: the owned-signature check cannot see it; the guard answered from
+#: `vptr_offset_bits` instead. That witness turned out to be circular -- both
+#: producers derive it as `0 if vtable else None`, so reading it made the
+#: whole evidence guard inert (see `diff_types._vtable_transition_is_evidenced`)
+#: -- and reverting it takes one of those two back off: the sentinel's
+#: `type_vtable_changed` is now an accepted false negative, still `BREAKING`
+#: via `diff_layout`'s independent `vptr_introduced`. Same reading as every
+#: step below -- a real break with no export table to resolve against. The
+#: step before that +2 is
+#: `namespaced_leaf_vtable_removal_stays_breaking`, another FN sentinel --
+#: a real vtable removal an exact owner comparison had been suppressing) as the `evidence-absence` corpus cases
+#: landed (vtable first, then bases). Attribution for the second step, same
+#: method as the first:
+#:
+#:   nonempty_base_added_stays_breaking         +2
+#:   empty_base_added_stays_breaking            +1
+#:
+#: Both are FN sentinels -- real breaks with no export table to resolve
+#: against -- so the same reading applies. There is deliberately no base FP
+#: guard alongside them: the guard that would have justified one was written
+#: and reverted (see AGENTS.md), because over-alignment lets even a
+#: storage-contributing base be added without moving the derived class's
+#: size, so `size_bits` cannot separate a capture gap from a real hierarchy
+#: change. These two sentinels stay as the standing proof that base changes
+#: are still reported.
+#:
+#: The +1 third step is `overaligned_first_vptr_stays_breaking`, another FN
+#: sentinel (a real first-vptr addition an over-aligned class absorbs into
+#: padding), so the same reading applies.
+#:
+#: The first step's attribution follows.
+#: `exports` moved 20 -> 23 when the `evidence-absence` corpus cases landed.
+#: Measured per case rather than assumed, since a budget raised without
+#: attribution is indistinguishable from one hiding a regression:
+#:
+#:   vtable_became_polymorphic_stays_breaking   +2
+#:   vtable_reorder_stays_breaking              +1
+#:   vtable_capture_asymmetry_stays_filtered     0
+#:
+#: Both contributors are the FN *sentinels* -- real breaks, which under
+#: `--contract exports` cannot resolve against a corpus that carries no
+#: export tables. That is exactly the benign reason this domain has a
+#: standing budget at all (see the module docstring's item 5), not a new
+#: defect: the same finding under `public` resolves fine, which is why that
+#: domain's budget did not move.
+#:
+#: The third case contributing **0** is the load-bearing part. It is the FP
+#: guard, and it emits no finding at all after `diff_types.
+#: _vtable_transition_is_evidenced` -- so this budget doubles as independent
+#: end-to-end confirmation that the suppression really reaches the contract
+#: pipeline, not just the detector's own unit tests.
 #: The `public` entry's remaining case, named so the budget cannot be
 #: mistaken for "nothing left to do".
 #:

@@ -199,6 +199,94 @@ def _load_risk_rules(path: Path | None) -> RiskRules:
 _MAX_BASELINE_FINDINGS = 20
 
 
+#: The two severity categories made up of findings ``_baseline_summary``
+#: deliberately does not itemize -- they carry no verdict, so under the legacy
+#: scheme they are exactly the "additions/quality noise" that comment names.
+_COMPATIBLE_SEVERITY_CATEGORIES = frozenset({"addition", "quality_issues"})
+
+
+def _add_severity_blocking_compatible_findings(
+    summary: dict[str, Any], diff: Any, gate: dict[str, Any]
+) -> None:
+    """Itemize compatible findings when severity made *them* the blocking cause.
+
+    ``_baseline_summary`` omits ``diff.compatible`` from ``findings`` because
+    under the legacy scheme those findings never gate -- so naming them would
+    be noise. Severity inverts that for two categories: with
+    ``--severity-addition error`` a compatible diff exits 1, and the report
+    then named the blocking *category* and count while giving no symbol, kind,
+    or description for the finding that actually failed the scan (Codex
+    review).
+
+    Only the blocking case is added, and only for the two categories that can
+    be blocking-yet-compatible, so every other run's summary is byte-identical.
+    The cap is the shared ``_MAX_BASELINE_FINDINGS`` budget the gating buckets
+    already spent from -- an addition that blocks is worth naming, but not at
+    the price of unbounded output.
+    """
+    if not gate.get("blocking"):
+        return
+    blamed = set(gate.get("blocking_categories") or ())
+    if not (blamed & _COMPATIBLE_SEVERITY_CATEGORIES):
+        return
+    blocking = _blocking_compatible_changes(diff, blamed)
+    if not blocking:
+        return
+    findings: list[dict[str, Any]] = list(summary.get("findings") or [])
+    added = _baseline_finding_dicts(blocking, "compatible")
+    # Both groups get a share; neither may evict the other outright. Two
+    # opposite failures were found here in successive reviews, and each fix
+    # caused the next:
+    #
+    # - appending only if there was room let the legacy buckets spend all 20
+    #   slots on findings a demoting preset had made non-blocking, dropping
+    #   the compatible finding that actually failed the run; then
+    # - reserving the whole cap for the compatible blockers did the mirror
+    #   image -- 20+ error-level additions alongside an ABI break exited 4
+    #   while itemizing only additions (Codex review).
+    #
+    # So severity decides the *order* (the legacy buckets are already sorted
+    # breaking -> api_break -> risk, and drive the higher exit), while a
+    # reserved floor guarantees the compatible blockers are represented at
+    # all. Both are causes of the exit code; a report that names only one is
+    # wrong whichever one it names.
+    reserved = min(len(added), max(1, _MAX_BASELINE_FINDINGS // 4))
+    head = findings[: _MAX_BASELINE_FINDINGS - reserved]
+    tail = added[: _MAX_BASELINE_FINDINGS - len(head)]
+    summary["findings"] = head + tail
+    if len(findings) > len(head) or len(added) > len(tail):
+        summary["findings_truncated"] = True
+
+
+def _blocking_compatible_changes(diff: Any, blamed: set[str]) -> list[Any]:
+    """The compatible findings whose own category is one severity blamed.
+
+    Slicing all of ``diff.compatible`` spent the report's budget on the
+    *non-blocking* compatible category too -- with ``--severity-addition
+    error`` a quality finding is as compatible as an addition, but only the
+    addition failed the run (Codex review). Classified through
+    ``classify_change_object`` -- the same ``classify_effective_change`` the
+    gate itself routed through -- so the two cannot disagree about which
+    category a finding belongs to, and an ADR-027 per-finding demotion is
+    honoured identically in both.
+    """
+    from .severity import classify_change_object
+
+    kept: list[Any] = []
+    for change in list(getattr(diff, "compatible", ()) or ()):
+        try:
+            category = classify_change_object(
+                change,
+                policy=getattr(diff, "policy", None),
+                kind_sets=diff._effective_kind_sets(),
+            )
+        except Exception:  # pragma: no cover - duck-typed stand-ins in tests
+            continue
+        if getattr(category, "value", str(category)) in blamed:
+            kept.append(change)
+    return kept
+
+
 def _baseline_finding_dicts(changes: list[Any], bucket: str) -> list[dict[str, Any]]:
     """Project *changes* (one verdict bucket) into small, renderable dicts.
 
@@ -543,6 +631,8 @@ def _run_baseline_compare(
     contract_evaluation: bool = False,
     contract_mode: str | None = None,
     resolved_config: Any = None,
+    sev_config: Any = None,
+    exit_code_scheme: str = "legacy",
 ) -> tuple[str, int, dict[str, Any]]:
     """Compare *new_snap* against *baseline*, preserving scan authority.
 
@@ -560,6 +650,16 @@ def _run_baseline_compare(
     library is header-scoped symmetrically — else the old side stays
     symbol/DWARF-only and the compare drops old type evidence or invents spurious
     API diffs (Codex review). They are inert for a JSON-snapshot baseline.
+
+    *sev_config*/*exit_code_scheme* mirror ``compare``'s own severity gate
+    (``severity.compute_exit_code``/``legacy_exit_code``): with
+    ``exit_code_scheme == "severity"``, the returned exit code is the worst
+    category with both a finding and an ``error``-level setting, rather than
+    the verdict alone. ``exit_code_scheme == "legacy"`` (the default)
+    reproduces the prior, unconditional ``verdict → {0,2,4}`` mapping. The
+    caller (:func:`~abicheck.scan_engine.run_scan_core`) still folds the
+    orthogonal contract-coverage floor and the cross-check severity
+    promotion on top of whichever value this returns, exactly as before.
 
     The embedded L3/L4/L5 build/source packs on either snapshot are diffed via
     :func:`prepare_embedded_build_source` — the same path ``abicheck compare``
@@ -668,9 +768,54 @@ def _run_baseline_compare(
     from .contract_coverage_exit import fold_coverage_exit
 
     verdict = diff.verdict.value
-    # ADR-049 §7/§6.4: the coverage axis is orthogonal to the verdict and is
-    # folded identically here and in `compare`. Parity is the point -- a
-    # ledger that gated one command and not the other would be exactly the
-    # cross-command divergence §6.4's Gate exists to catch.
-    exit_code = fold_coverage_exit(_verdict_exit_code(diff.verdict), diff)
+    # Mirrors `compare`'s own `_exit_with_severity_or_verdict` (cli.py):
+    # `exit_code_scheme == "severity"` computes the worst error-level
+    # category among *diff.changes* instead of mapping the overall verdict
+    # straight to {0,2,4} -- e.g. `--severity-preset info-only` can leave a
+    # BREAKING verdict at exit 0. Default ("legacy") is the prior,
+    # unconditional verdict->exit mapping, unchanged.
+    if exit_code_scheme == "severity" and sev_config is not None:
+        from .reporter import _build_severity_json
+
+        # §6.4 cross-command parity, and the reason this block is not
+        # optional: under the severity scheme a *compatible* diff can exit
+        # non-zero (`--severity-addition error` on an additions-only diff
+        # exits 1), and without the gate block the report said `COMPATIBLE`
+        # with exit 1 and no stated cause -- indistinguishable from ADR-049's
+        # orthogonal contract-coverage 1 (Codex review). Built by
+        # `reporter._build_severity_json`, the same function that produces
+        # `compare`'s own `severity` block, so the two commands' gate
+        # receipts are comparable field-by-field rather than merely both
+        # present. Emitted only under the severity scheme: a legacy-scheme
+        # scan has no gate to report, so its summary stays byte-identical
+        # to before.
+        gate = _build_severity_json(
+            list(diff.changes),
+            sev_config,
+            policy=diff.policy,
+            kind_sets=diff._effective_kind_sets(),
+            policy_file=diff.policy_file,
+        )
+        summary["severity"] = gate
+        _add_severity_blocking_compatible_findings(summary, diff, gate)
+        # Taken *off the emitted block* rather than computed alongside it:
+        # `_build_severity_json` routes through `severity.compute_gate_decision`,
+        # whose whole purpose is that an exit code and the categories blamed
+        # for it cannot disagree (see its docstring -- it exists because two
+        # independently-computed values did drift, twice). Calling
+        # `compute_exit_code` separately here would reintroduce exactly that
+        # second computation. It is also what lets `_emit_scan_report` and
+        # `render_baseline_lines` recover this run's *pre-coverage* base from
+        # the summary alone, instead of re-deriving a verdict-based one that
+        # is wrong under this scheme (Codex review).
+        gate_exit = gate["exit_code"]
+        assert isinstance(gate_exit, int)  # compute_gate_decision.exit_code
+        base_exit = gate_exit
+    else:
+        base_exit = _verdict_exit_code(diff.verdict)
+    # ADR-049 §7/§6.4: the coverage axis is orthogonal to the verdict/severity
+    # exit code and is folded identically here and in `compare`. Parity is
+    # the point -- a ledger that gated one command and not the other would be
+    # exactly the cross-command divergence §6.4's Gate exists to catch.
+    exit_code = fold_coverage_exit(base_exit, diff)
     return verdict, exit_code, summary

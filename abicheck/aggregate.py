@@ -338,17 +338,38 @@ class GateInfo:
 
     @classmethod
     def from_scan_report(cls, data: Mapping[str, Any]) -> GateInfo | None:
-        """Read a ``scan`` report's own top-level ``exit_code`` as the gate.
+        """Read a ``scan`` report's gate.
 
-        A ``scan`` JSON report records its gate as a top-level ``exit_code``
-        (scheme 0 pass / 2 source break / 4 abi break / 5 budget overflow)
-        rather than a ``compare``-style ``severity`` block. Keyed on
+        A legacy-scheme ``scan`` JSON report records its gate only as a
+        top-level ``exit_code`` (scheme 0 pass / 2 source break / 4 abi break /
+        5 budget overflow / 6 not-comparable) rather than a ``compare``-style
+        ``severity`` block. A severity-scheme ``scan --against`` (scan schema
+        1.9+) additionally publishes that block at ``diff.severity``, which is
+        preferred when present -- see the body. Keyed on
         ``scan_schema_version`` so arbitrary JSON that merely happens to carry
         an ``exit_code`` is not mistaken for a scan gate. Fails closed on a
-        scan report whose ``exit_code`` is unusable.
+        scan report whose gate is unusable, by either route.
         """
         if "scan_schema_version" not in data:
             return None
+        # A severity-scheme `scan --against` (scan schema 1.9+) publishes a
+        # real `compare`-shaped gate at `diff.severity`, whose `exit_code` is
+        # this run's *pre-coverage* compatibility contribution. Prefer it, and
+        # validate it through the very same strict reader a `compare` report
+        # goes through, so the two commands' gates are read identically rather
+        # than by two validators that can disagree.
+        #
+        # This is not an optimization -- it is what keeps the raw-code branch
+        # below sound. That branch separates the coverage contribution by
+        # arguing scan "has no native 1", which stopped being true once
+        # severity reached scan: an error-level addition/quality finding is a
+        # native compatibility 1, and folded with a coverage 1 it produced a
+        # top-level 1 that the branch below would attribute entirely to
+        # coverage and pass (Codex review). A severity-scheme report answers
+        # the question directly, so it never reaches that argument.
+        nested = _scan_severity_gate(data)
+        if nested is not None:
+            return nested
         code = data.get("exit_code")
         if not isinstance(code, int) or isinstance(code, bool):
             raise _MalformedGate("scan report 'exit_code' is missing or not an integer")
@@ -1273,6 +1294,34 @@ def _contract_coverage_declared(data: Mapping[str, Any]) -> bool:
     )
 
 
+def _scan_severity_gate(data: Mapping[str, Any]) -> GateInfo | None:
+    """A severity-scheme scan report's own ``diff.severity`` gate, if it has one.
+
+    ``None`` for a legacy-scheme scan (which runs no severity gate and so
+    publishes no block), leaving :meth:`GateInfo.from_scan_report`'s raw
+    top-level ``exit_code`` path to answer.
+
+    Delegates to :meth:`GateInfo.from_report_data` rather than re-validating:
+    ``cli_scan_baseline`` builds this block with the same
+    ``reporter._build_severity_json`` that writes ``compare``'s, so a second
+    validator here could only ever disagree with the first. That also means a
+    *corrupt* scan gate block fails closed (``_MalformedGate``) exactly as a
+    corrupt ``compare`` one does, instead of silently falling through to the
+    greener raw-code path -- the same fail-closed principle the surrounding
+    reader already applies.
+    """
+    # Through the shared path definition, so the reader and
+    # `_neutralize_gate`'s writer cannot disagree about where the block lives
+    # (the coverage axis learned this the hard way -- see
+    # `contract_coverage_block_paths`).
+    for path in scan_severity_gate_paths(data):
+        node: Any = data
+        for key in path:
+            node = node[key]
+        return GateInfo.from_report_data(node)
+    return None
+
+
 def _contract_coverage_exit(data: Mapping[str, Any]) -> int:
     """The report's own ADR-049 contract-coverage contribution (``0``/``1``).
 
@@ -1308,6 +1357,43 @@ def _contract_coverage_exit(data: Mapping[str, Any]) -> int:
         if _is_valid_contribution(raw):
             return raw
     return 0
+
+
+def scan_severity_gate_paths(data: Mapping[str, Any]) -> list[tuple[str, ...]]:
+    """Key paths within a *scan* report that may carry a ``severity`` gate block.
+
+    :func:`contract_coverage_block_paths`' sibling, for the other axis and for
+    the same reason: two consumers must agree exactly on where the block
+    lives. :func:`_scan_severity_gate` reads it as the target's compatibility
+    gate, and ``buildsource.check_report._neutralize_gate`` must zero it for
+    ``gate-mode: advisory``. Zeroing only the top-level scan ``exit_code`` left
+    an explicitly advisory report's nested gate blocking the trailing
+    aggregate (Codex review) -- the identical bug the coverage axis already
+    had, so it gets the identical remedy rather than a second hand-written
+    traversal.
+
+    Returns the paths to the *containers* of a ``severity`` key, so a writer
+    can rebind each one it touches; ``augment_report`` copies only the top
+    level, so writing through a nested mapping in place would reach back into
+    the caller's own report.
+
+    Unlike the coverage paths this never includes the document root: a root
+    ``severity`` block is a ``compare`` report's own gate, which
+    ``_neutralize_gate`` already handles directly and which a scan never
+    writes.
+    """
+    if "scan_schema_version" not in data:
+        return []
+    paths: list[tuple[str, ...]] = []
+    diff = data.get("diff")
+    if isinstance(diff, Mapping) and isinstance(diff.get("severity"), Mapping):
+        paths.append(("diff",))
+    report = data.get("report")
+    if isinstance(report, Mapping):
+        inner = report.get("diff")
+        if isinstance(inner, Mapping) and isinstance(inner.get("severity"), Mapping):
+            paths.append(("report", "diff"))
+    return paths
 
 
 def contract_coverage_block_paths(data: Mapping[str, Any]) -> list[tuple[str, ...]]:

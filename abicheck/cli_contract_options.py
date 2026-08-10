@@ -82,9 +82,10 @@ def pack_option(f: F) -> F:
                        "(release) comparison, whose per-library fan-out dispatches "
                        "before the effective configuration is resolved. On `scan` "
                        "this requires --against (a pack's only application there is "
-                       "the baseline comparison) and a 'kind: gate' pack is rejected, "
-                       "since a scan's exit code follows its verdict directly and has "
-                       "no gate to move.")(f)
+                       "the baseline comparison) and a 'kind: gate' pack is rejected: "
+                       "`scan --against` does honour --severity-*/--exit-code-scheme "
+                       "given directly, but does not yet fold a gate pack's gate.* "
+                       "assignments, so pass those settings directly instead.")(f)
     return f
 
 
