@@ -719,6 +719,46 @@ def test_write_through_dangling_symlink_creates_target(tmp_path):
     assert target.read_text() == '{"a": 3}'
 
 
+@pytest.mark.skipif(os.name == "nt", reason="POSIX device files only")
+def test_write_through_character_device_does_not_replace_it(tmp_path):
+    """Codex review, PR #699: an existing non-regular destination (here a
+    character device, /dev/null) has no meaningful "atomic replace" --
+    os.replace() would swap it out for a brand-new regular file, destroying
+    the special file. The previous open(path, "w") behavior wrote directly
+    through it instead; verify write_snapshot does the same (no error, and
+    /dev/null is still a character device afterward, not a regular file)."""
+    import stat as stat_mod
+    from pathlib import Path
+
+    dev_null = Path("/dev/null")
+    if not dev_null.exists() or not stat_mod.S_ISCHR(dev_null.stat().st_mode):
+        pytest.skip("/dev/null is not a character device on this system")
+
+    snap = _sample_snapshot()
+    write_snapshot(snap, dev_null, compression="none")  # must not raise
+    assert stat_mod.S_ISCHR(dev_null.stat().st_mode)  # still a char device
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX FIFOs only")
+def test_write_through_fifo_does_not_replace_it(tmp_path):
+    """Same regression as the character-device test above, for a named
+    pipe. A FIFO's write-end open() blocks until a reader has opened the
+    read end -- opening the read end non-blocking *first* (the standard
+    POSIX trick) lets the write-side open proceed without a concurrent
+    reader thread."""
+    import stat as stat_mod
+
+    fifo_path = tmp_path / "pipe.abicheck.json"
+    os.mkfifo(fifo_path)
+    read_fd = os.open(fifo_path, os.O_RDONLY | os.O_NONBLOCK)
+    try:
+        snap = _sample_snapshot()
+        write_snapshot(snap, fifo_path, compression="none")  # must not raise
+        assert stat_mod.S_ISFIFO(fifo_path.stat().st_mode)  # still a FIFO
+    finally:
+        os.close(read_fd)
+
+
 def test_failed_write_preserves_existing_destination(tmp_path, monkeypatch):
     snap = _sample_snapshot()
     p = tmp_path / "x.abicheck.json.zst"

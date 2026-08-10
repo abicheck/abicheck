@@ -37,6 +37,7 @@ import gzip
 import hashlib
 import io
 import os
+import stat
 from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
@@ -689,8 +690,32 @@ def _atomic_write_bytes(data: bytes, path: Path) -> None:
     to the real target first so an atomic write behaves the same way: the
     symlink survives, and what actually gets atomically replaced is the
     file it points to.
+
+    Non-regular destinations (Codex review): an existing FIFO, character/
+    block device, or socket at *path* (e.g. ``/dev/stdout``, a named pipe
+    in a streaming pipeline) has no meaningful "atomic replace" -- the
+    previous ``open(path, "w")`` behavior wrote directly *through* it,
+    while ``os.replace()`` would instead swap it out for a brand-new
+    regular file, destroying the special file it was. None of this
+    function's atomicity/mode/ownership machinery is meaningful for a
+    FIFO/device either, so a pre-existing non-regular destination is
+    written to directly, bypassing the temp-file-and-rename dance
+    entirely.
     """
     target = Path(os.path.realpath(path)) if os.path.islink(path) else path
+    try:
+        existing_mode_bits = target.stat().st_mode
+    except OSError:
+        existing_mode_bits = None
+    if existing_mode_bits is not None and not stat.S_ISREG(existing_mode_bits):
+        with open(target, "wb") as f:
+            f.write(data)
+            f.flush()
+            try:
+                os.fsync(f.fileno())
+            except OSError:
+                pass  # best-effort; not meaningful for most non-regular files
+        return
     parent = target.parent
     parent.mkdir(parents=True, exist_ok=True)
     fd, tmp_path = _open_unique_temp(parent, f".{target.name}.", ".tmp")
