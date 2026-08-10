@@ -454,7 +454,7 @@
         "native-consumer-compatibility",
         "native-release-compatibility"
       ],
-      "digest": "sha256:274e6a6241e838cdd449d4265e6f32cf53bb66541cfdb2d07540a6485266e826",
+      "digest": "sha256:84f9d4a5dd12a0deda9927608bdb526fa76529532086237e707fd98178a36966",
       "roots": [
         "abicheck/change_registry.py",
         "abicheck/checker_policy.py",
