@@ -195,7 +195,9 @@ examples/ground_truth.json            ├─► skill-eval-pack.json ──► s
 agent-evals/skills/scenarios.yaml     │   + fixtures manifest      arms run: baseline | docs | skill | skill-agent
 transcript bundles + rubric schema    ┘   + content hash           tasks run: harness × model matrix
         │                                                                   │
-        └──► L0/L1s/L2/L4 gates (this repo, pr + skill-eval lanes)          └──► L3 scorecard + dashboard
+        │  off-CI: run_skill_eval.py ──► committed evidence bundles         │
+        │  CI (pr): L0/L1s/L4 + replay-grade that evidence + freshness      │
+        └──► no model ever runs in this repo's CI (D2)                      └──► L3 scorecard (off-CI)
 ```
 
 The pack is a single JSON file plus a fixture manifest: skill identities and
@@ -569,12 +571,22 @@ wrong evidence depth, and three that exercise the envelope's fail-closed path
 (no envelope, two envelopes, a verdict outside the vocabulary). One further
 bundle claims `COMPATIBLE` where the artifact says `API_BREAK` — the case a
 verdict-word regex over prose would have passed and a typed `claim.verdict`
-catches, which is the whole reason the envelope exists. Each must be caught by
-the named dimension.
+catches, which is the whole reason the envelope exists.
 
-**Done when:** every golden bad bundle fails exactly the dimension it was
-authored to fail, and every golden good bundle passes all four deterministic
-dimensions — with no model call, inside `pr`. Dimensions 4 and 5 are *replayed*
+**Each bundle asserts an expected failure *set*, not a single dimension.** The
+dimensions genuinely overlap, and that overlap is correct behaviour rather than
+double-counting: a false green over a not-comparable artifact violates both
+dimension 2 (uncertainty not preserved) and dimension 6 (claim inconsistent
+with artifact); a definite verdict with an empty `calls.jsonl` violates both 3
+and 6. Demanding exactly one failure per bundle would either make these fixtures
+unwritable or push the grader toward suppressing real findings to keep the
+count at one — a grader teaching itself to under-report is the last thing this
+corpus should incentivize. Each bundle names the dimension it primarily
+exercises and lists every dimension it is expected to trip.
+
+**Done when:** every golden bad bundle fails **at least its named dimension**,
+with its full expected failure set asserted, and every golden good bundle
+passes all four deterministic dimensions — with no model call, inside `pr`. Dimensions 4 and 5 are *replayed*
 out of each golden bundle's `judgments.json` (D3), which checks the replay path
 and the schema but deliberately does not re-derive a judge verdict; the golden
 corpus therefore also carries one bundle whose `judgments.json` records a
@@ -618,14 +630,20 @@ hand-maintained.
 Pack consumption, the four arms, the loader `references/` fix, the scorecard
 and its dashboard row.
 
-**Done when:** each skill has a published quality-per-cost number against both
-`baseline` and `docs` arms — whichever direction it comes out.
+**Done when:** each skill has a published quality-per-cost number on both
+comparisons — the gating `skill-agent:` vs `baseline` and the reported
+`skill:` vs `docs` — whichever direction each comes out.
 
 ### Phase 6 — Publication gate *(S)*
 
 G36 P1.4's publication precondition becomes a check: publication requires a
 fresh pack hash, zero failures on dimensions 2 and 6, dimensions 1/3/4/5 at or
-above baseline, and a Phase 5 scorecard showing non-negative lift over `docs`.
+above baseline, and a Phase 5 scorecard showing non-negative lift on
+**`skill-agent:` vs `baseline`** — D7's declared deployment comparator. The
+`skill:` vs `docs` number is published alongside it and never gates: gating on
+it here would have blocked exactly the skill D7 describes as legitimate — one
+that wins the progressive-disclosure comparison it is deployed under and loses
+the content comparison it is not.
 
 ## Cost model
 
