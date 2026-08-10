@@ -434,7 +434,7 @@ class TestDiffImpactAgainstNew:
             tmp_path, "old", with_train_function=True
         )
         same_snapshot = _snapshot_with_walkable_graph(
-            tmp_path, "old", with_train_function=True
+            tmp_path, "old-copy", with_train_function=True
         )
         res = _run(
             [
