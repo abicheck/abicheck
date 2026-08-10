@@ -362,9 +362,7 @@ def read_snapshot_bytes(
     # anyway (compression never expands a snapshot's own JSON payload by
     # orders of magnitude), so there's no legitimate case this rejects that
     # the post-read checks below wouldn't have rejected regardless; it just
-    # avoids buffering the whole oversized file first. Best-effort: a stat()
-    # failure here falls through to read_bytes() below, which raises the
-    # same OSError either way.
+    # avoids buffering the whole oversized file first.
     #
     # Codex review: for a *compressed* file this comparison must not be
     # exact -- gzip/zstd framing (headers, footers, block overhead) adds a
@@ -377,26 +375,38 @@ def read_snapshot_bytes(
     # absorb any realistic container overhead, but trivially small next to
     # a genuine decompression-bomb-sized stored file, which this precheck
     # still catches before a full read.
-    try:
-        stored_size = p.stat().st_size
-        with open(p, "rb") as f:
-            compression_hint = detect_compression_from_bytes(f.read(4))
+    #
+    # CodeRabbit review: the size probe and the actual content read must
+    # come from the *same* open file descriptor. An earlier version stat()'d
+    # the pathname, then separately open()'d it again for the magic-byte
+    # probe, then read it a third time via Path.read_bytes() -- three
+    # separate opens of the same *pathname*, not the same file. A concurrent
+    # rename or symlink swap between any of those opens could substitute an
+    # oversized file after the size check already passed, defeating the
+    # precheck and buffering unbounded content. A single fd refers to the
+    # underlying inode for its whole lifetime, so once opened it cannot be
+    # swapped out from under us by a pathname-level change; bounding the
+    # read itself to one byte past the cap (rather than trusting fstat()
+    # alone) additionally guards against the file growing through that same
+    # fd after the size check, e.g. a concurrent writer sharing the inode.
+    with open(p, "rb") as f:
+        stored_size = os.fstat(f.fileno()).st_size
+        prefix = f.read(4)
+        compression_hint = detect_compression_from_bytes(prefix)
         margin = (
             0
             if compression_hint is SnapshotCompression.NONE
-            else (_STORED_SIZE_PRECHECK_MARGIN)
+            else _STORED_SIZE_PRECHECK_MARGIN
         )
-        if stored_size > limit + margin:
+        cap = limit + margin
+        if stored_size > cap:
             raise SnapshotError(
                 f"{p}: stored file exceeds the {limit} byte safety limit."
             )
-    except OSError:
-        pass
-    # Deliberately not wrapped in SnapshotError: a missing/unreadable file is
-    # a plain OSError (FileNotFoundError, PermissionError, ...) and
-    # load_snapshot() historically let that propagate as-is -- only actual
-    # decompression corruption (below) is a new, snapshot-specific error.
-    raw = p.read_bytes()
+        f.seek(0)
+        raw = f.read(cap + 1)
+    if len(raw) > cap:
+        raise SnapshotError(f"{p}: stored file exceeds the {limit} byte safety limit.")
 
     compression = detect_compression_from_bytes(raw[:4])
     suffix_hint = suffix_compression(p)
@@ -593,10 +603,20 @@ def _atomic_write_bytes(data: bytes, path: Path) -> None:
     not racy), so re-dumping a shared, group/world-readable baseline does
     not silently strip its permissions down to whatever the current umask
     happens to be.
+
+    Symlink destinations (Codex review): if *path* is itself a symlink,
+    ``os.replace(tmp_path, path)`` would swap the symlink's own directory
+    entry for a regular file, destroying the link -- the previous plain
+    ``open(path, "w")`` behavior instead follows the link and writes through
+    it, leaving the link intact and updating its target's content. Resolve
+    to the real target first so an atomic write behaves the same way: the
+    symlink survives, and what actually gets atomically replaced is the
+    file it points to.
     """
-    parent = path.parent
+    target = Path(os.path.realpath(path)) if os.path.islink(path) else path
+    parent = target.parent
     parent.mkdir(parents=True, exist_ok=True)
-    fd, tmp_path = _open_unique_temp(parent, f".{path.name}.", ".tmp")
+    fd, tmp_path = _open_unique_temp(parent, f".{target.name}.", ".tmp")
     try:
         with os.fdopen(fd, "wb") as f:
             f.write(data)
@@ -606,12 +626,12 @@ def _atomic_write_bytes(data: bytes, path: Path) -> None:
             except OSError:
                 pass  # best-effort; some filesystems/platforms don't support it
         try:
-            existing_mode = path.stat().st_mode & 0o777
+            existing_mode = target.stat().st_mode & 0o777
         except OSError:
             existing_mode = None
         if existing_mode is not None:
             os.chmod(tmp_path, existing_mode)
-        os.replace(tmp_path, path)
+        os.replace(tmp_path, target)
     except BaseException:
         try:
             tmp_path.unlink(missing_ok=True)

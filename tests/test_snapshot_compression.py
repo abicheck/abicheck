@@ -472,6 +472,46 @@ def test_existing_file_mode_is_preserved_across_rewrite(tmp_path):
     assert oct(p.stat().st_mode & 0o777) == oct(0o640)
 
 
+@pytest.mark.skipif(
+    os.name == "nt", reason="symlinks need elevated privileges on Windows"
+)
+def test_write_through_symlink_preserves_the_link(tmp_path):
+    """Codex review, PR #699: os.replace(tmp_path, path) swaps *path*'s own
+    directory entry, so writing to a symlinked destination used to destroy
+    the link -- regressing the previous open(path, "w") behavior, which
+    follows a symlink and writes through it. Writing to a path that is a
+    symlink must update the link's *target* and leave the link itself
+    intact, exactly like the plain-open behavior it replaced."""
+    real = tmp_path / "real.abicheck.json"
+    write_snapshot_text('{"a": 1}', real, compression=SnapshotCompression.NONE)
+    link = tmp_path / "link.abicheck.json"
+    link.symlink_to(real)
+
+    write_snapshot_text('{"a": 2}', link, compression=SnapshotCompression.NONE)
+
+    assert link.is_symlink()
+    assert os.readlink(link) == str(real)
+    assert real.read_text() == '{"a": 2}'
+    assert link.read_text() == '{"a": 2}'
+
+
+@pytest.mark.skipif(
+    os.name == "nt", reason="symlinks need elevated privileges on Windows"
+)
+def test_write_through_dangling_symlink_creates_target(tmp_path):
+    """A symlink whose target doesn't exist yet must still resolve -- the
+    write creates the target file, not a plain file at the link's own
+    path."""
+    target = tmp_path / "does_not_exist_yet.abicheck.json"
+    link = tmp_path / "link.abicheck.json"
+    link.symlink_to(target)
+
+    write_snapshot_text('{"a": 3}', link, compression=SnapshotCompression.NONE)
+
+    assert link.is_symlink()
+    assert target.read_text() == '{"a": 3}'
+
+
 def test_failed_write_preserves_existing_destination(tmp_path, monkeypatch):
     snap = _sample_snapshot()
     p = tmp_path / "x.abicheck.json.zst"
