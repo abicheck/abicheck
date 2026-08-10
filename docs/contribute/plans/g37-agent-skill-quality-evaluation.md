@@ -232,9 +232,13 @@ changes":
 2. CI re-grades those committed bundles deterministically — the four
    deterministic dimensions, including both zero-tolerance ones — runs the D6
    freshness check, and **verifies the evidence set is complete**:
-   `check_skill_eval_evidence.py` derives the expected (scenario, repetition)
-   pairs from the same risk-selection rule the runner used and rejects any
-   missing scenario id or repetition index. Without that step the gate reads
+   `check_skill_eval_evidence.py` derives the expected set for **both bundle
+   kinds** — `(scenario, repetition)` pairs from the same risk-selection rule
+   the runner used, and `(prompt, repetition)` pairs covering every entry in
+   `trigger_corpus.yaml`, negatives included — and rejects any missing id or
+   index. The trigger half matters for the same reason as the behavioral half
+   and is easier to overlook: an absent false-triggering negative prompt
+   inflates activation precision while every committed bundle stays fresh. Without that step the gate reads
    only what was committed, so omitting one failing scenario — or one failing
    run out of `k` — would turn `pass^k` into pass-on-whatever-was-uploaded,
    and the two zero-tolerance dimensions would be satisfiable by selective
@@ -346,8 +350,10 @@ agent-evals/skills/runs/<run-id>/<scenario>/<k>/
                      exercised (scenario record + fixture closure), the live-trigger
                      corpus hash, the abicheck build-surface hash, and the harness
                      hash (runner instructions, launch configuration, agent/model
-                     identifiers, recording shim); plus the runner-declared input
-                     set D6's completeness and mapping checks run against
+                     identifiers, recording shim); plus the **observed** input set —
+                     what the centralized accessor recorded this run reading (D6),
+                     not a self-report — which the completeness and mapping checks
+                     run against
   prompt.txt         the verbatim user request
   events.jsonl       normalized agent events: which skill activated, which skill files
                      were read, tool calls in order — the L1l evidence (see below)
@@ -411,7 +417,11 @@ evidence. Concretely: write a provisional record with argv/cwd, spawn, tee
 stdout and stderr through to the caller's own streams while digesting them,
 then rewrite the record with exit code and digests and propagate the child's
 exit status verbatim. Teeing rather than capturing is the invariant — the agent
-must see byte-identical output on both streams, and the shim must exit with the
+must see output that is byte-identical **modulo the recorded path mapping**
+(D3's output-isolation section: a run using the filesystem-view mechanism has
+an empty mapping and is byte-identical outright; one using path substitution
+differs only by that substitution, which the call record states so the
+difference is auditable rather than invisible), the shim must exit with the
 child's own status, because a shim that can change a result invalidates the
 measurement it exists to produce. A shim crash after spawn must leave the
 provisional record in place rather than nothing: a call that happened and was
@@ -542,10 +552,11 @@ zero-tolerance and baseline is its safety model.
 | 5 | Appropriate remediation proposed | judged | baseline / non-regression, **at publication only** |
 | 6 | **No compatibility claim without sufficient evidence** | deterministic — claim-vs-artifact-vs-ground-truth consistency, plus suppression-flag inspection | **zero tolerance, all `k` runs** |
 
-**Dimension 2 grades three different uncertainties by three different rules,
-because collapsing them would penalize a correct answer.** An earlier draft
-required simply that no definite verdict follow any of them, which is wrong for
-the third and would have failed an agent for being right:
+**Dimension 2 grades four distinct uncertainties by four distinct rules —
+one rule per kind, enumerated below — because collapsing them would penalize a
+correct answer.** An earlier draft required simply that no definite verdict
+follow any of them, which is wrong for two of the four and would have failed
+an agent for being right:
 
 - **Not comparable** — the verdict genuinely does not exist. `claim.verdict`
   must be `null` with the reason carried; any ordinal verdict fails.

@@ -1492,12 +1492,13 @@ P0/P1.1 establish the skills are actually correct.
 
 **Change:** Submit the four P0 skills to `skills.sh`'s directory once the
 publication gate passes. **That gate is
-[G37](g37-agent-skill-quality-evaluation.md) Phase 6 — four explicit
-conditions (fresh per-skill hashes, zero failures on the two safety
-dimensions, the other four at or above baseline, and a scorecard showing
-non-negative lift on the gating comparator) — not the "P1.1 baseline pass
-rate is acceptable" wording this item originally carried**, which named no
-threshold and no artifact to check it against. Then verify GitHub's own
+[G37](g37-agent-skill-quality-evaluation.md) Phase 6 in full — not the "P1.1
+baseline pass rate is acceptable" wording this item originally carried**,
+which named no threshold and no artifact to check it against. Its conditions
+are deliberately *not* restated here: they have already grown once (a build
+digest and an evidence-completeness requirement were added after this pointer
+was written), and a second copy that lags the first is how someone publishes
+against a gate G37 would reject. Read them there. Then verify GitHub's own
 skill-discovery
 surfaces (Copilot reads `.agents/skills` directly, per ADR-058's ecosystem
 research, so no separate submission step should be needed there beyond the
