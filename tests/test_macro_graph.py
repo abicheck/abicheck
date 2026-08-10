@@ -952,7 +952,15 @@ def test_parse_real_clang_ast_decl_ranges_end_to_end(tmp_path) -> None:
     # the real definition is always visited before the implicit one); this
     # pure-parser call intentionally doesn't dedup, so check "any" instead of
     # a single dict entry.
-    guarded = [r for r in ranges if r.identity.startswith("_Z7guardedv")]
+    # Matched by substring, not a literal Itanium-mangled prefix (Codex
+    # review, fresh evidence: a Windows CI runner's real `clang` targets the
+    # MSVC ABI by default, mangling `guarded` as `?guarded@@YAXXZ` rather
+    # than Itanium's `_Z7guardedv` -- the earlier `startswith("_Z7guardedv")`
+    # check made this test unconditionally fail on that platform even
+    # though `parse_clang_ast_decl_ranges` itself worked correctly. Both
+    # mangling schemes embed the plain identifier as a literal substring, so
+    # this check is mangling-scheme-agnostic instead of Itanium-only.
+    guarded = [r for r in ranges if "guarded" in r.identity]
     assert guarded and guarded[0].begin_line == 3
     widget = [r for r in ranges if r.identity == "Widget"]
     assert any(r.begin_line == 6 and r.end_line == 8 for r in widget)

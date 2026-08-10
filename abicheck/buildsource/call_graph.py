@@ -390,6 +390,132 @@ def _ref_is_virtual(ref: dict[str, Any]) -> bool:
     )
 
 
+def _find_member_expr(node: dict[str, Any]) -> dict[str, Any] | None:
+    """DFS for the first ``MemberExpr`` under *node* (mirrors
+    ``_find_referenced_decl``'s shape, but returns the call-site's own
+    ``MemberExpr`` node itself rather than resolving its callee — needed by
+    ``_member_expr_is_qualified`` for the receiver's own source range, which
+    a resolved *declaration* node never carries)."""
+    if node.get("kind") == "MemberExpr":
+        return node
+    for child in node.get("inner", []) or []:
+        if isinstance(child, dict):
+            found = _find_member_expr(child)
+            if found is not None:
+                return found
+    return None
+
+
+def _range_end_offset(range_node: Any) -> int | None:
+    """The character offset immediately past *range_node*'s last token, or
+    ``None`` if the shape is missing/incomplete."""
+    if not isinstance(range_node, dict):
+        return None
+    end = range_node.get("end")
+    if not isinstance(end, dict):
+        return None
+    offset = end.get("offset")
+    tok_len = end.get("tokLen")
+    if not isinstance(offset, int) or not isinstance(tok_len, int):
+        return None
+    return offset + tok_len
+
+
+def _range_begin_offset(range_node: Any) -> int | None:
+    """The character offset of *range_node*'s first token, or ``None`` if the
+    shape is missing/incomplete."""
+    if not isinstance(range_node, dict):
+        return None
+    begin = range_node.get("begin")
+    if not isinstance(begin, dict):
+        return None
+    offset = begin.get("offset")
+    return offset if isinstance(offset, int) else None
+
+
+def _is_implicit_this_receiver(node: Any) -> bool:
+    """Whether *node* is a synthesized (not user-written) ``this`` receiver —
+    a bare ``CXXThisExpr`` with ``"implicit": true`` (an unqualified call
+    inside a method, ``f()``), possibly wrapped in an implicit
+    derived-to-base cast (a qualified call to an inherited base method,
+    ``Base::f()``) — as opposed to an explicitly written ``this->f()``, whose
+    ``CXXThisExpr`` carries no ``implicit`` key at all (Codex review, fresh
+    evidence, verified against real Clang 18 output for all three shapes).
+    Descends through cast wrapper kinds only, mirroring
+    ``callback_graph._address_taken_function``'s own cast-unwrapping shape.
+    """
+    if not isinstance(node, dict):
+        return False
+    if node.get("kind") == "CXXThisExpr":
+        return bool(node.get("implicit"))
+    if str(node.get("kind", "")).endswith("CastExpr"):
+        inner = node.get("inner") or []
+        if inner and isinstance(inner[0], dict):
+            return _is_implicit_this_receiver(inner[0])
+    return False
+
+
+def _member_expr_is_qualified(member_expr: dict[str, Any]) -> bool:
+    """Whether *member_expr* names its member through an explicit qualifier
+    (``obj.Base::f()`` or, from inside a method, ``Base::f()``), which
+    suppresses virtual dispatch at this call site regardless of whether the
+    resolved method is itself virtual (Codex review, fresh evidence).
+
+    Clang's ``-ast-dump=json`` genuinely does not expose a qualifier the way
+    its text ``-ast-dump`` does — verified against real Clang 18 output for
+    ``obj.B::f()`` vs. ``obj.f()`` (identical static receiver type, so both
+    resolve ``referencedMemberDecl`` to the same ``B::f``): the text dump
+    shows a sibling ``NestedNameSpecifier TypeSpec 'B'`` node for the
+    qualified form, but the JSON ``MemberExpr``'s own key set — including
+    ``inner`` — is byte-for-byte identical between the two; there is no
+    ``qualifier`` field or extra child to read.
+
+    Derived instead from source-range arithmetic the JSON *does* carry: for
+    an unqualified access with a real, user-written receiver, the
+    member-name token begins immediately after the receiver sub-expression's
+    own end, plus one operator character (``.`` or ``->``, ``isArrow``) — a
+    qualifier occupies the extra bytes in between (confirmed against the
+    same real AST: the receiver-to-member gap is exactly ``len(".B::f")``
+    for the qualified form and ``len(".f")`` for the unqualified one).
+
+    A genuinely *implicit* ``this`` receiver (:func:`_is_implicit_this_receiver`)
+    needs a different measurement: clang anchors the synthesized receiver's
+    own position at the member name itself, not before a qualifier — the
+    common "call the base implementation from an override"
+    pattern, ``struct D : B { void f() override { B::f(); } };`` — so the
+    receiver-to-member gap always reads as zero regardless of whether a
+    qualifier is present. There, the ``MemberExpr``'s own begin-to-end span
+    is used instead (confirmed against the same real AST: it covers the
+    qualifier text plus the member name for ``B::f()``, and only the member
+    name for a bare ``f()``).
+
+    Only a STRICTLY LARGER-than-expected gap counts as qualified in either
+    branch — a missing offset/tokLen field (an unusual receiver shape, or a
+    hand-built test fixture) degrades to "not qualified" (the pre-existing,
+    already-accepted over-approximation), never the reverse: wrongly
+    suppressing a real virtual call's classification would silently drop a
+    genuine dispatch target from ``VIRTUAL_CALL_MAY_DISPATCH_TO`` — a worse
+    error than the over-approximation this heuristic exists to narrow.
+    """
+    inner = member_expr.get("inner") or []
+    if not inner or not isinstance(inner[0], dict):
+        return False
+    member_end = _range_end_offset(member_expr.get("range"))
+    name_len = len(str(member_expr.get("name") or ""))
+    if member_end is None or not name_len:
+        return False
+    if _is_implicit_this_receiver(inner[0]):
+        member_begin = _range_begin_offset(member_expr.get("range"))
+        if member_begin is None:
+            return False
+        return (member_end - member_begin) > name_len
+    receiver_end = _range_end_offset(inner[0].get("range"))
+    if receiver_end is None:
+        return False
+    operator_len = 2 if member_expr.get("isArrow") else 1
+    return (member_end - receiver_end) > (operator_len + name_len)
+
+
 def _classify_call(
     call_node: dict[str, Any],
     ref: dict[str, Any] | None,
@@ -407,6 +533,11 @@ def _classify_call(
         # static target is unknown (could be any compatible function).
         return callee, CALL_KIND_FUNCTION_POINTER, RESOLUTION_UNKNOWN
     if call_node.get("kind") == "CXXMemberCallExpr" and _ref_is_virtual(ref):
+        member_expr = _find_member_expr(call_node)
+        if member_expr is not None and _member_expr_is_qualified(member_expr):
+            # An explicitly-qualified call (obj.Base::f()) suppresses virtual
+            # dispatch regardless of the resolved method's own virtuality.
+            return callee, CALL_KIND_DIRECT, RESOLUTION_EXACT
         # A virtual member call: the static target is one possible override, so
         # the edge over-approximates the real dynamic dispatch.
         return callee, CALL_KIND_VIRTUAL, RESOLUTION_OVERAPPROX

@@ -106,6 +106,16 @@ def _decay(func_node: dict) -> dict:
     }
 
 
+def _cast(kind: str, func_node: dict) -> dict:
+    """An explicit cast (``(handler_t)func``/``static_cast<handler_t>(func)``/
+    ...) wrapping the identical decay shape -- real Clang 18 output for a
+    C-style cast is ``CStyleCastExpr`` (``castKind: "NoOp"``) over
+    ``ImplicitCastExpr``/``FunctionToPointerDecay``; the named C++ casts
+    (``CXXStaticCastExpr``/``CXXReinterpretCastExpr``/...) wrap the same
+    shape under their own node kind."""
+    return {"kind": kind, "castKind": "NoOp", "inner": [_decay(func_node)]}
+
+
 def _call(callee_func_node: dict, args: list[dict]) -> dict:
     return {"kind": "CallExpr", "inner": [_decay(callee_func_node), *args]}
 
@@ -161,6 +171,50 @@ class TestParseCallbacksRegistersCallback:
         assert edges == [
             CallbackEdge(
                 "_Z13other_handleri",
+                "h",
+                EDGE_DECL_REGISTERS_CALLBACK,
+                CONF_HIGH,
+                "void (*)(int)",
+            )
+        ]
+
+    @pytest.mark.parametrize(
+        "cast_kind",
+        [
+            "CStyleCastExpr",
+            "CXXStaticCastExpr",
+            "CXXReinterpretCastExpr",
+            "CXXConstCastExpr",
+            "CXXFunctionalCastExpr",
+        ],
+    )
+    def test_explicit_cast_around_decay_registers_callback(
+        self, cast_kind: str
+    ) -> None:
+        """Codex review, fresh evidence, verified against real Clang 18
+        output for ``register_cb((handler_t)handler)`` and
+        ``register_cb(static_cast<handler_t>(handler))``: a callback
+        argument explicitly converted to its target function-pointer type
+        wraps the identical ``FunctionToPointerDecay`` in a
+        ``CStyleCastExpr``/named ``CXX*CastExpr``, which an earlier version
+        of ``_address_taken_function`` did not unwrap (only ``ParenExpr``),
+        silently omitting the registration for any API that requires or
+        commonly receives a cast callback argument."""
+        handler = _func_decl(
+            "handler", "F1", [_param("x", "int")], mangled="_Z7handleri"
+        )
+        register_cb = _func_decl("register_cb", "F2", [_param("h", "void (*)(int)")])
+        call = _call(register_cb, [_cast(cast_kind, handler)])
+        use = _func_decl(
+            "use", "F3", extra_inner=[{"kind": "CompoundStmt", "inner": [call]}]
+        )
+        ast = _tu(handler, register_cb, use)
+
+        edges = parse_clang_ast_callbacks(ast)
+
+        assert edges == [
+            CallbackEdge(
+                "_Z7handleri",
                 "h",
                 EDGE_DECL_REGISTERS_CALLBACK,
                 CONF_HIGH,
@@ -696,9 +750,24 @@ class TestFoldCallbackGraphEndToEnd:
 @pytest.mark.integration
 @pytest.mark.skipif(shutil.which("clang") is None, reason="clang not installed")
 def test_extractor_unavailable_returns_empty_and_records_diagnostic() -> None:
+    """Codex review, fresh evidence: an earlier version of this test passed
+    an empty ``BuildEvidence()`` (no compile units), which hits
+    ``extract_from_build``'s own "nothing to do" early return *before* its
+    availability check ever runs -- the same ordering
+    ``ClangCallGraphExtractor.extract_from_build``/
+    ``ClangTypeGraphExtractor.extract_from_build``/
+    ``ClangOverrideGraphExtractor.extract_from_build`` all share, and whose
+    own sibling tests (e.g. ``test_call_graph.
+    test_extractor_missing_clang_returns_empty``) accordingly always pass at
+    least one real compile unit for exactly this reason. With no work to
+    attempt at all, recording a diagnostic would be noise, not signal --
+    this test's own intent (confirm a genuinely *missing* clang is
+    diagnosed) needs a real compile unit present, matching the established
+    sibling convention."""
     extractor = ClangCallbackGraphExtractor(clang_bin="clang-does-not-exist")
     assert extractor.available() is False
-    from abicheck.buildsource.build_evidence import BuildEvidence
+    from abicheck.buildsource.build_evidence import BuildEvidence, CompileUnit
 
-    assert extractor.extract_from_build(BuildEvidence()) == []
+    build = BuildEvidence(compile_units=[CompileUnit(id="cu://x", source="x.cpp")])
+    assert extractor.extract_from_build(build) == []
     assert extractor.diagnostics

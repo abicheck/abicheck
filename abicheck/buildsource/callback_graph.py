@@ -468,6 +468,29 @@ def _resolve_func_ref(node: Any, id_index: dict[str, str]) -> str | None:
     return None
 
 
+#: Explicit cast node kinds that can wrap a function-to-pointer decay without
+#: changing which function's address is being taken -- a C-style cast
+#: (``(handler_t)my_handler``) or any of C++'s named casts
+#: (``static_cast``/``reinterpret_cast``/``const_cast``, and a functional-
+#: style cast ``handler_t(my_handler)``). Confirmed empirically against real
+#: Clang 18 output for both ``(handler_t)my_handler`` (a ``CStyleCastExpr``,
+#: ``castKind == "NoOp"``, wrapping the identical ``ImplicitCastExpr``/
+#: ``FunctionToPointerDecay`` this function already recognized) and
+#: ``static_cast``/``reinterpret_cast`` (``CXXStaticCastExpr``/
+#: ``CXXReinterpretCastExpr`` over the same shape) -- see
+#: ``_address_taken_function``'s own docstring.
+_EXPLICIT_CAST_KINDS = frozenset(
+    {
+        "CStyleCastExpr",
+        "CXXStaticCastExpr",
+        "CXXReinterpretCastExpr",
+        "CXXConstCastExpr",
+        "CXXFunctionalCastExpr",
+        "CXXDynamicCastExpr",
+    }
+)
+
+
 def _address_taken_function(node: Any, id_index: dict[str, str]) -> str | None:
     """Whether *node* is a function-address-taking expression (empirical
     findings 1/2 in the module docstring): an explicit ``&func``
@@ -476,7 +499,17 @@ def _address_taken_function(node: Any, id_index: dict[str, str]) -> str | None:
     ``castKind == "FunctionToPointerDecay"``). Returns the addressed
     function's identity, or ``None`` when *node* is neither shape (including
     an address-of/decay of something other than a function -- e.g. taking
-    the address of an ordinary variable, which is not a callback wire-up)."""
+    the address of an ordinary variable, which is not a callback wire-up).
+
+    Also unwraps an explicit cast around either shape (Codex review, fresh
+    evidence): a callback argument converted to its target function-pointer
+    type -- ``register_cb((handler_t)handler)`` or
+    ``register_cb(static_cast<handler_t>(handler))`` -- wraps the same
+    ``FunctionToPointerDecay`` in a ``CStyleCastExpr``/``CXX*CastExpr``
+    (:data:`_EXPLICIT_CAST_KINDS`), which an earlier version of this function
+    did not unwrap (only ``ParenExpr``), silently omitting the registration
+    for any API that requires or commonly receives a cast callback argument.
+    """
     if not isinstance(node, dict):
         return None
     kind = node.get("kind")
@@ -484,7 +517,7 @@ def _address_taken_function(node: Any, id_index: dict[str, str]) -> str | None:
         return _resolve_func_ref(node, id_index)
     if kind == "ImplicitCastExpr" and node.get("castKind") == "FunctionToPointerDecay":
         return _resolve_func_ref(node, id_index)
-    if kind == "ParenExpr":
+    if kind == "ParenExpr" or kind in _EXPLICIT_CAST_KINDS:
         inner = node.get("inner") or []
         if inner and isinstance(inner[0], dict):
             return _address_taken_function(inner[0], id_index)

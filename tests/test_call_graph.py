@@ -521,6 +521,192 @@ def test_parse_call_to_override_without_own_virtual_flag_is_still_virtual() -> N
     ]
 
 
+def _qualified_call_ast(
+    *, name_len: int = 1, member_begin: int = 67, member_end: int = 70
+) -> dict:
+    """A ``struct D : B { void f() override { B::f(); } };``-shaped AST:
+    an explicitly-qualified call to a virtual base method through the
+    implicit ``this`` receiver, mirroring the real Clang 18 offsets
+    recorded in the module's own ``_member_expr_is_qualified`` docstring
+    (``B::f()`` spans offsets 67-70, receiver is a zero-width implicit
+    ``CXXThisExpr`` wrapped in an ``UncheckedDerivedToBase`` cast)."""
+    return {
+        "kind": "TranslationUnitDecl",
+        "inner": [
+            {
+                "kind": "CXXRecordDecl",
+                "name": "B",
+                "inner": [
+                    {
+                        "kind": "CXXMethodDecl",
+                        "id": "0xb",
+                        "name": "f",
+                        "mangledName": "_ZN1B1fEv",
+                        "type": {"qualType": "void ()"},
+                        "virtual": True,
+                    }
+                ],
+            },
+            {
+                "kind": "CXXRecordDecl",
+                "name": "D",
+                "bases": [{"type": {"qualType": "B"}}],
+                "inner": [
+                    {
+                        "kind": "CXXMethodDecl",
+                        "id": "0xd",
+                        "name": "f",
+                        "mangledName": "_ZN1D1fEv",
+                        "type": {"qualType": "void ()"},
+                        "inner": [
+                            {
+                                "kind": "CompoundStmt",
+                                "inner": [
+                                    {
+                                        "kind": "CXXMemberCallExpr",
+                                        "inner": [
+                                            {
+                                                "kind": "MemberExpr",
+                                                "range": {
+                                                    "begin": {"offset": member_begin},
+                                                    "end": {
+                                                        "offset": member_end,
+                                                        "tokLen": 1,
+                                                    },
+                                                },
+                                                "name": "f",
+                                                "isArrow": True,
+                                                "referencedMemberDecl": "0xb",
+                                                "inner": [
+                                                    {
+                                                        "kind": "ImplicitCastExpr",
+                                                        "castKind": "UncheckedDerivedToBase",
+                                                        "range": {
+                                                            "begin": {
+                                                                "offset": member_end
+                                                            },
+                                                            "end": {
+                                                                "offset": member_end,
+                                                                "tokLen": 1,
+                                                            },
+                                                        },
+                                                        "inner": [
+                                                            {
+                                                                "kind": "CXXThisExpr",
+                                                                "implicit": True,
+                                                            }
+                                                        ],
+                                                    }
+                                                ],
+                                            }
+                                        ],
+                                    }
+                                ],
+                            }
+                        ],
+                    },
+                ],
+            },
+        ],
+    }
+
+
+def test_parse_qualified_call_via_implicit_this_suppresses_virtual_dispatch() -> None:
+    """Codex review, fresh evidence, verified against real Clang 18 output
+    for ``struct D : B { void f() override { B::f(); } };`` -- the common
+    "call the base implementation from an override" pattern. clang's JSON
+    AST carries no ``qualifier``/``NestedNameSpecifier`` field the way its
+    text ``-ast-dump`` does, so this is derived from the ``MemberExpr``'s
+    own begin-to-end span (67-70, covering ``B::f``) exceeding its bare
+    member-name length (``len("f") == 1``) -- an explicit ``B::`` qualifier
+    suppresses virtual dispatch regardless of ``B::f`` being virtual, so
+    this must classify as ``direct``/``exact``, not ``virtual``/``overapprox``.
+    """
+    edges = parse_clang_ast_calls(_qualified_call_ast())
+    assert edges == [
+        CallEdge("_ZN1D1fEv", "_ZN1B1fEv", CALL_KIND_DIRECT, RESOLUTION_EXACT)
+    ]
+
+
+def test_parse_unqualified_call_via_implicit_this_stays_virtual() -> None:
+    """The same shape as the qualified case above but with no extra span
+    (``member_begin == member_end``, matching a bare ``f()`` call where
+    clang's own implicit-``this`` anchor coincides with the member name) --
+    must still classify as ``virtual``/``overapprox``, confirming the
+    qualified-call fix doesn't over-fire on the ordinary unqualified case.
+    """
+    edges = parse_clang_ast_calls(_qualified_call_ast(member_begin=70, member_end=70))
+    assert edges == [
+        CallEdge("_ZN1D1fEv", "_ZN1B1fEv", CALL_KIND_VIRTUAL, RESOLUTION_OVERAPPROX)
+    ]
+
+
+def test_parse_qualified_call_via_explicit_receiver_suppresses_virtual_dispatch() -> (
+    None
+):
+    """Codex review, fresh evidence, verified against real Clang 18 output
+    for ``obj.B::f()`` (an explicit, non-``this`` receiver) -- the
+    receiver-to-member gap (5: ``.B::f``) exceeds the expected unqualified
+    gap (2: ``.f``), so this must classify as ``direct``/``exact``."""
+    ast = {
+        "kind": "TranslationUnitDecl",
+        "inner": [
+            {
+                "kind": "CXXRecordDecl",
+                "name": "B",
+                "inner": [
+                    {
+                        "kind": "CXXMethodDecl",
+                        "id": "0xb",
+                        "name": "f",
+                        "mangledName": "_ZN1B1fEv",
+                        "type": {"qualType": "void ()"},
+                        "virtual": True,
+                    }
+                ],
+            },
+            _func(
+                "call_it",
+                "_Z7call_itR1B",
+                [
+                    {
+                        "kind": "CXXMemberCallExpr",
+                        "inner": [
+                            {
+                                "kind": "MemberExpr",
+                                "range": {
+                                    "begin": {"offset": 82},
+                                    "end": {"offset": 89, "tokLen": 1},
+                                },
+                                "name": "f",
+                                "isArrow": False,
+                                "referencedMemberDecl": "0xb",
+                                "inner": [
+                                    {
+                                        "kind": "DeclRefExpr",
+                                        "range": {
+                                            "begin": {"offset": 82},
+                                            "end": {"offset": 82, "tokLen": 3},
+                                        },
+                                        "referencedDecl": {
+                                            "kind": "ParmVarDecl",
+                                            "name": "obj",
+                                        },
+                                    }
+                                ],
+                            }
+                        ],
+                    }
+                ],
+            ),
+        ],
+    }
+    edges = parse_clang_ast_calls(ast)
+    assert edges == [
+        CallEdge("_Z7call_itR1B", "_ZN1B1fEv", CALL_KIND_DIRECT, RESOLUTION_EXACT)
+    ]
+
+
 def test_parse_function_pointer_call_is_unknown() -> None:
     ast = {
         "kind": "TranslationUnitDecl",

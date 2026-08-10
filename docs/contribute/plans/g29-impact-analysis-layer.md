@@ -851,6 +851,99 @@ which all depend on a Clang AST pass.
      false-negative-over-false-positive default this module already uses
      throughout (ADR-028 D3), and out of scope for a fix that specifically
      targets the empirically-confirmed common case.
+   - **A sixth and seventh Codex-review round, on the same `bb7d139` push,
+     found the fourth/fifth rounds' own fixes were each themselves too
+     aggressive in one real case, both verified against real Clang 18
+     output.** (1) The inherited-virtual fix from the fourth/fifth rounds
+     made `_classify_call` classify **every** `CXXMemberCallExpr` whose
+     resolved target is virtual (own or via `OverrideAttr`/`FinalAttr`) as
+     `virtual`/`overapprox` — but an **explicitly qualified** call,
+     `obj.Base::f()`, suppresses virtual dispatch by C++ rule regardless of
+     `Base::f`'s own virtuality; clang's static resolution still names
+     `Base::f` as the target either way, so nothing in `ref` alone
+     distinguishes the two. Confirmed clang's JSON AST dump carries **no**
+     qualifier information at all — its text `-ast-dump` shows a sibling
+     `NestedNameSpecifier TypeSpec 'B'` node for `obj.B::f()` that is
+     entirely absent from the identical AST's JSON form (byte-for-byte
+     identical `MemberExpr` key sets, including `inner`, between
+     `obj.B::f()` and `obj.f()`). Fixed by deriving qualification from
+     source-range arithmetic the JSON *does* carry instead
+     (`_member_expr_is_qualified`): an unqualified access's member-name
+     token begins immediately after the receiver's own end plus one
+     operator character (`.`/`->`); a qualifier occupies the extra bytes in
+     between. A **second** real gap surfaced while verifying this against
+     the common "call the base implementation from an override" pattern,
+     `struct D : B { void f() override { B::f(); } };` — clang anchors a
+     genuinely *implicit* `this` receiver's own synthesized position at the
+     member name itself (not before a written qualifier), so the
+     receiver-to-member gap always reads as zero for this shape regardless
+     of whether `B::` is present. `_is_implicit_this_receiver` distinguishes
+     a synthesized `this` (`CXXThisExpr` with `"implicit": true`, optionally
+     wrapped in an `UncheckedDerivedToBase` cast) from an explicitly written
+     `this->f()` (no `implicit` key at all) — verified against three
+     distinct real ASTs (implicit unqualified `f()`, implicit qualified
+     `B::f()`, explicit `this->f()`/`this->B::f()`) — and for the implicit
+     case measures the `MemberExpr`'s own begin-to-end span against the bare
+     member-name length instead. Only a strictly-larger-than-expected gap
+     counts as qualified in either branch; a missing offset/tokLen field
+     degrades to "not qualified" (the pre-existing over-approximation),
+     never the reverse — wrongly suppressing a real virtual call would
+     silently drop a genuine dispatch target, a worse error than the
+     over-approximation this narrows. (2) Separately, in `callback_graph.py`
+     (not `call_graph.py`): `_address_taken_function` only unwrapped
+     `ParenExpr` around a `&func`/decay shape, so an explicitly cast
+     callback argument — `register_cb((handler_t)handler)` (`CStyleCastExpr`,
+     `castKind == "NoOp"`, wrapping the identical
+     `ImplicitCastExpr`/`FunctionToPointerDecay`) or
+     `register_cb(static_cast<handler_t>(handler))`
+     (`CXXStaticCastExpr`/`CXXReinterpretCastExpr` over the same shape) —
+     silently produced no `DECL_REGISTERS_CALLBACK` edge, for any API that
+     requires or commonly receives a cast callback argument. Fixed by also
+     unwrapping the named-cast kinds (`CStyleCastExpr`/`CXXStaticCastExpr`/
+     `CXXReinterpretCastExpr`/`CXXConstCastExpr`/`CXXFunctionalCastExpr`/
+     `CXXDynamicCastExpr`) the same way `ParenExpr` already was.
+   - **An eighth finding was a genuine, pre-existing, unrelated test bug
+     surfaced by CI running the sixth/seventh rounds' own new code on
+     platforms this session's Linux sandbox can't reach.** Windows CI
+     failed `test_callback_graph.py::test_extractor_unavailable_returns_empty_and_records_diagnostic`:
+     it passed an empty `BuildEvidence()` (no compile units) to
+     `extract_from_build`, which hits that method's own "nothing to do"
+     early return *before* its availability check ever runs — the identical
+     ordering `ClangCallGraphExtractor`/`ClangTypeGraphExtractor`/
+     `ClangOverrideGraphExtractor.extract_from_build` all share, and whose
+     own sibling tests always pass at least one real compile unit for
+     exactly this reason (confirmed by reading
+     `test_call_graph.test_extractor_missing_clang_returns_empty`). This
+     test alone used an empty `BuildEvidence()`, which happened to still
+     record a diagnostic on this session's Linux sandbox's earlier ad hoc
+     verification (a real, present `clang` on that machine took a different
+     code path than the CI runner's `clang-does-not-exist`), masking the gap
+     until CI's genuinely-missing-binary case exercised it. Fixed the test to
+     match the established sibling convention (one real `CompileUnit`), not
+     the shared production ordering — with no work to attempt, recording a
+     diagnostic would be noise, not signal, so the production behavior is
+     correct as-is. A **second**, separately-triaged Windows CI failure in
+     the same run, `test_macro_graph.py::test_parse_real_clang_ast_decl_ranges_end_to_end`,
+     was a genuine, pre-existing, unrelated test bug: it filtered ranges by
+     an Itanium-mangled prefix (`identity.startswith("_Z7guardedv")`), but a
+     Windows runner's real `clang` targets the MSVC ABI by default, mangling
+     the same function as `?guarded@@YAXXZ` — both schemes embed the plain
+     identifier as a literal substring, so the filter was changed to
+     `"guarded" in r.identity` (mangling-scheme-agnostic) instead of an
+     Itanium-only prefix match. A **third** Windows-only failure in the same
+     run, `test_build_source_cli.py::test_collect_source_graph_folds_override_and_macro_graph_passes`
+     showing `override_graph`/`virtual_dispatch_graph` as `degraded_passes`
+     rather than fully covered, was investigated but **not fixed this
+     round**: the job log shows the derived `virtual_dispatch_graph`
+     correctly propagating `override_graph`'s own degraded state — this
+     session's inline_graph_fold.py fix (documented above under Codex-review
+     finding "Preserve narrowed coverage for derived virtual passes")
+     working exactly as designed — but the *cause* of `override_graph`
+     itself degrading is a real Clang/MSVC-target compiler behavior on the
+     Windows CI runner this session's Linux sandbox cannot reproduce or
+     safely guess at (the extractor's own per-TU diagnostic text wasn't
+     captured in the truncated CI log excerpt read during triage). Left
+     open, flagged in the PR thread rather than blind-patched.
    - **`DECL_OVERRIDES_DECL` needed no new producer at all — a closed gap,
      not a deferred one.** `override_graph.py` (ADR-041 P2 item 1, which
      predates this item) already emits `METHOD_POSSIBLE_OVERRIDE` edges whose
