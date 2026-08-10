@@ -149,6 +149,29 @@ false negative (an inherited slot silently not recognized as inherited,
 so it might get double-counted as new), never a false positive — the same
 conservative-degradation posture this codebase's other clang-side fixes
 already use throughout (see ``type_reachability.py``'s own docstring).
+
+A second known limitation, confirmed real but deliberately NOT attempted
+here: a **non-virtual diamond** -- ``struct X { virtual void q(); };
+struct L : X {}; struct R : X {}; struct Z : L, R {};`` (compiles fine;
+only an unqualified, ambiguous call to `z.q()` would error, and nothing
+here constructs one) -- genuinely gives `Z` TWO physical `X::q` vtable-group
+slots, one per `X` subobject. This module's `seen` set (and physical-slot
+identity, ``id(child)``) is global across the whole recursion, keyed on
+the single AST node that declares `X::q` -- there is only ONE such node in
+the whole translation unit regardless of how many derived paths reach it,
+so both the `Z->L->X` and `Z->R->X` paths resolve to the identical
+physical key and collapse onto one slot instead of two. Confirmed this is
+NOT a clang-specific regression: castxml's own ``_collect_virtual_methods``
+(``dumper_castxml.py``) shares the identical shape of limitation -- its
+`seen` set is likewise threaded globally through `_inherited_vtable_slots`,
+and its own per-method identity (`_virtual_methods_by_class`) is populated
+once per XML `Method` element in a single pass over the whole document, so
+`X::q`'s single XML element is equally reachable-once regardless of path.
+Fixing this for real needs path-local (not global) slot identity threaded
+through the recursion, for BOTH backends together -- fixing only this one
+would trade one asymmetry (a total gap, closed) for a new one (clang more
+precise than castxml on this specific shape), which is its own scoped
+follow-up, not a drive-by extension of this pass.
 """
 
 from __future__ import annotations
