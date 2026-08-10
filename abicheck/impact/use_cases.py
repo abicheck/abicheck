@@ -781,16 +781,22 @@ def explain_use_case_impact(
     if not use_case_entries:
         return {}
 
-    # decl node id -> symbol name (restricted to *wanted*), and the reverse
-    # symbol id -> decl id -- the latter to resolve a coalesced
-    # ``binary_symbol://`` entry (`_public_entry_index` prefers the mapped
-    # symbol id over the declaring decl id, see its own docstring) back to
-    # the decl node the call-graph's own edges are keyed on: a
-    # ``DECL_CALLS_DECL``/``DECL_REFERENCES_DECL`` edge's src/dst is always a
-    # decl (or type) node id, never a bare exported-symbol one, so walking
-    # from the coalesced binary_symbol id directly would find no outgoing
-    # edges at all and silently explain nothing.
-    decl_to_symbol: dict[str, str] = {}
+    # decl node id -> every *wanted* symbol name it maps to (plural -- Codex
+    # review, fresh evidence: a single declaration can map to more than one
+    # exported symbol, e.g. two versioned exports foo@V1/foo@V2 of the same
+    # definition; a plain dict[str, str] here silently kept only the last
+    # one seen, so a change to foo@V2 could be mis-attributed through
+    # decl://foo to a use case that named foo@V1 specifically, or a genuine
+    # foo@V1 change could vanish if foo@V2's edge happened to be visited
+    # later), and the reverse symbol id -> decl id -- the latter to resolve
+    # a coalesced ``binary_symbol://`` entry (`_public_entry_index` prefers
+    # the mapped symbol id over the declaring decl id, see its own
+    # docstring) back to the decl node the call-graph's own edges are keyed
+    # on: a ``DECL_CALLS_DECL``/``DECL_REFERENCES_DECL`` edge's src/dst is
+    # always a decl (or type) node id, never a bare exported-symbol one, so
+    # walking from the coalesced binary_symbol id directly would find no
+    # outgoing edges at all and silently explain nothing.
+    decl_to_symbols: dict[str, set[str]] = {}
     symbol_to_decl: dict[str, str] = {}
     for edge in library_graph.edges:
         if edge.kind != "SOURCE_DECL_MAPS_TO_SYMBOL":
@@ -798,7 +804,7 @@ def explain_use_case_impact(
         symbol_to_decl.setdefault(edge.dst, edge.src)
         name = edge.dst.removeprefix("binary_symbol://")
         if name in wanted:
-            decl_to_symbol[edge.src] = name
+            decl_to_symbols.setdefault(edge.src, set()).add(name)
 
     def walk_root(entry: str) -> str:
         return symbol_to_decl.get(entry, entry)
@@ -827,20 +833,30 @@ def explain_use_case_impact(
     result: dict[str, set[str]] = {}
     for use_case, entry_ids in use_case_entries.items():
         for entry in entry_ids:
-            # walk_root(entry) is *entry* itself for an entry that is
-            # already a decl id (or an unmapped binary_symbol id), and the
-            # declaring decl id for a coalesced binary_symbol one -- either
-            # way, decl_to_symbol (keyed by decl id) answers the direct
-            # case uniformly.
-            direct_symbol = decl_to_symbol.get(walk_root(entry))
-            if direct_symbol is not None:
-                result.setdefault(direct_symbol, set()).add(use_case)
+            # An entry that names one *exact* binary_symbol id directly
+            # (the manifest wrote the versioned symbol itself, or
+            # _public_entry_index left it uncoalesced because the owning
+            # decl maps to more than one symbol -- see that function's own
+            # ambiguity rule) is attributed to exactly that symbol alone,
+            # never the decl's whole symbol set (Codex review, fresh
+            # evidence): a use case that named foo@V1 specifically must not
+            # also pick up a foo@V2-only change just because they share one
+            # declaration.
+            if entry.startswith("binary_symbol://"):
+                exact_symbol = entry.removeprefix("binary_symbol://")
+                if exact_symbol in wanted:
+                    result.setdefault(exact_symbol, set()).add(use_case)
+            else:
+                # A decl-shaped entry (or a label that coalesced onto one)
+                # didn't disambiguate a specific version at all, so every
+                # wanted symbol that decl maps to counts.
+                for direct_symbol in decl_to_symbols.get(entry, ()):
+                    result.setdefault(direct_symbol, set()).add(use_case)
             seen, _came_from, _degraded = reachability.get(
                 walk_root(entry), (frozenset(), {}, frozenset())
             )
             for decl in seen:
-                sym = decl_to_symbol.get(decl)
-                if sym is not None:
+                for sym in decl_to_symbols.get(decl, ()):
                     result.setdefault(sym, set()).add(use_case)
 
     return {symbol: tuple(sorted(names)) for symbol, names in result.items()}

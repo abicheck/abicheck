@@ -791,6 +791,78 @@ def test_explain_use_case_impact_type_shaped_symbol_never_attributed() -> None:
     assert result == {}
 
 
+def _versioned_symbol_library_graph() -> SourceGraphSummary:
+    """One declaration mapping to two versioned exports (`foo@V1`/`foo@V2`)
+    -- the shape a single ``foo`` definition symbol-versioned across two
+    releases produces."""
+    g = SourceGraphSummary()
+    g.add_node(
+        GraphNode(
+            id="decl://foo",
+            kind="source_decl",
+            label="foo",
+            attrs={"visibility": "public_header"},
+        )
+    )
+    g.add_node(
+        GraphNode(id="binary_symbol://foo@V1", kind="binary_symbol", label="foo@V1")
+    )
+    g.add_node(
+        GraphNode(id="binary_symbol://foo@V2", kind="binary_symbol", label="foo@V2")
+    )
+    g.add_edge(
+        GraphEdge(
+            src="decl://foo",
+            dst="binary_symbol://foo@V1",
+            kind="SOURCE_DECL_MAPS_TO_SYMBOL",
+        )
+    )
+    g.add_edge(
+        GraphEdge(
+            src="decl://foo",
+            dst="binary_symbol://foo@V2",
+            kind="SOURCE_DECL_MAPS_TO_SYMBOL",
+        )
+    )
+    return g
+
+
+def test_explain_use_case_impact_exact_versioned_entrypoint_stays_pinned() -> None:
+    # Codex review, fresh evidence: a use case naming one exact versioned
+    # export must be attributed to that version alone -- not the other
+    # version merely because they share a declaration.
+    library = _versioned_symbol_library_graph()
+    definitions = [UseCaseDefinition(use_case="v1 caller", entrypoints=("foo@V1",))]
+    result = explain_use_case_impact(definitions, library, symbols=["foo@V1", "foo@V2"])
+    assert result == {"foo@V1": ("v1 caller",)}
+
+
+def test_explain_use_case_impact_bare_decl_entrypoint_covers_every_version() -> None:
+    # The undisambiguated counterpart: a use case naming the shared
+    # declaration itself (no specific version) legitimately covers every
+    # version it maps to.
+    library = _versioned_symbol_library_graph()
+    definitions = [UseCaseDefinition(use_case="either version", entrypoints=("foo",))]
+    result = explain_use_case_impact(definitions, library, symbols=["foo@V1", "foo@V2"])
+    assert result == {
+        "foo@V1": ("either version",),
+        "foo@V2": ("either version",),
+    }
+
+
+def test_explain_use_case_impact_two_use_cases_pin_different_versions() -> None:
+    library = _versioned_symbol_library_graph()
+    definitions = [
+        UseCaseDefinition(use_case="v1 caller", entrypoints=("foo@V1",)),
+        UseCaseDefinition(use_case="v2 caller", entrypoints=("foo@V2",)),
+    ]
+    result = explain_use_case_impact(definitions, library, symbols=["foo@V1", "foo@V2"])
+    assert result == {
+        "foo@V1": ("v1 caller",),
+        "foo@V2": ("v2 caller",),
+    }
+
+
 # ── join_use_case_graph ───────────────────────────────────────────────────
 
 
