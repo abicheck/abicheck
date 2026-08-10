@@ -247,12 +247,24 @@ class SnapshotStorageInfo:
 
 
 def read_snapshot_storage_info(path: str | Path) -> SnapshotStorageInfo:
+    """Report a stored snapshot's compression, size, and content hash.
+
+    Opens the file exactly once (Codex review, #699): a concurrent
+    atomic replace (``os.replace()``, the write path this module itself
+    uses) between separate open()s could otherwise make the magic-byte
+    probe, the stat()'d size, and the hashed content each describe a
+    different file generation, producing an internally inconsistent
+    :class:`SnapshotStorageInfo`. All three are derived from one fd's
+    ``fstat()``/read stream instead.
+    """
     p = Path(path)
-    compression = detect_snapshot_compression(p)
     try:
-        stored_size = p.stat().st_size
-        digest = hashlib.sha256()
         with open(p, "rb") as f:
+            stored_size = os.fstat(f.fileno()).st_size
+            prefix = f.read(4)
+            compression = detect_compression_from_bytes(prefix)
+            digest = hashlib.sha256()
+            digest.update(prefix)
             for chunk in iter(lambda: f.read(1024 * 1024), b""):
                 digest.update(chunk)
     except OSError as exc:

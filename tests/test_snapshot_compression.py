@@ -201,6 +201,31 @@ def test_bounded_decoded_prefix_escalates_for_low_compression_content(tmp_path):
 
 def test_detect_compression_from_bytes_plain():
     assert detect_compression_from_bytes(b"{not compressed") == SnapshotCompression.NONE
+
+
+@pytest.mark.parametrize("compression", ["none", "gzip", "zstd"])
+def test_read_snapshot_storage_info_matches_actual_file(tmp_path, compression):
+    """Codex review (#699): ``read_snapshot_storage_info`` derives
+    compression, size, and hash from one open() rather than three separate
+    pathname operations -- verify all three still describe the one real
+    file on disk (size/hash against a direct re-read, not just internal
+    self-consistency)."""
+    from abicheck.snapshot_io import read_snapshot_storage_info
+
+    snap = _sample_snapshot()
+    path = (
+        tmp_path
+        / f"lib.abicheck.json{'' if compression == 'none' else '.' + ('gz' if compression == 'gzip' else 'zst')}"
+    )
+    write_snapshot(snap, path, compression=compression)
+
+    info = read_snapshot_storage_info(path)
+    raw = path.read_bytes()
+
+    assert info.path == path
+    assert info.compression == SnapshotCompression(compression)
+    assert info.stored_size_bytes == len(raw)
+    assert info.stored_sha256 == hashlib.sha256(raw).hexdigest()
     assert (
         detect_compression_from_bytes(GZIP_MAGIC + b"rest") == SnapshotCompression.GZIP
     )
