@@ -1892,3 +1892,70 @@ def test_default_added_by_legal_redeclaration_still_resolves_dependent_default()
     types = _types(root)
     assert types["D"].vtable == ["_ZN1AIddE1fEv"]
     assert types["D"].vptr_offset_bits == 0
+
+
+def test_added_default_with_renamed_params_translates_through_positions() -> None:
+    """Codex review, fresh evidence (eighth round): the sixth round's merge
+    logic adopted a newly-added default's raw text as-is, but when the
+    redeclaration that adds the default ALSO renames its parameters (
+    ``template<class T, class U> struct A;`` followed by ``template<class
+    X, class Y=X> struct A {...};``), that raw text ("X") names one of the
+    REDECLARATION's own (renamed) parameters, not the tracked/original
+    names ("T"/"U") :func:`_specialization_spelling` looks the dependent
+    reference up against -- so the substitution silently failed to find
+    "X" in the tracked names index, leaving the trailing argument
+    untrimmed. Fixed by translating a newly adopted default's dependent
+    reference through the CONTRIBUTING declaration's own positional name
+    list into the FIRST declaration's name at that same position before
+    merging it in.
+    """
+    root = _tu(
+        {
+            "kind": "ClassTemplateDecl",
+            "name": "A",
+            "id": "0x1",
+            "inner": [
+                {"kind": "TemplateTypeParmDecl", "name": "T"},
+                {"kind": "TemplateTypeParmDecl", "name": "U"},
+            ],
+        },
+        {
+            "kind": "ClassTemplateDecl",
+            "name": "A",
+            "id": "0x2",
+            "previousDecl": "0x1",
+            "inner": [
+                {"kind": "TemplateTypeParmDecl", "name": "X"},
+                {
+                    "kind": "TemplateTypeParmDecl",
+                    "name": "Y",
+                    "defaultArg": {
+                        "kind": "TemplateArgument",
+                        "type": {"qualType": "X"},
+                    },
+                },
+                _record("A"),
+                _specialization(
+                    "A",
+                    {
+                        "kind": "CXXMethodDecl",
+                        "name": "f",
+                        "mangledName": "_ZN1AIddE1fEv",
+                        "type": {"qualType": "void ()"},
+                        "virtual": True,
+                    },
+                    type_args=["double", "double"],
+                ),
+            ],
+        },
+        _record("D", bases=[_base("A<double>")]),
+    )
+    from abicheck.dumper_clang_vtable import _index_template_param_defaults
+
+    # The added default is translated to the FIRST declaration's own
+    # parameter name ("T"), matching the tracked names index used by
+    # _specialization_spelling's dependent-default substitution.
+    assert _index_template_param_defaults(root).get("A") == [None, "T"]
+    types = _types(root)
+    assert types["D"].vtable == ["_ZN1AIddE1fEv"]
+    assert types["D"].vptr_offset_bits == 0

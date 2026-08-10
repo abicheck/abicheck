@@ -855,10 +855,35 @@ def _index_template_param_defaults(root: dict[str, Any]) -> dict[str, list[str |
     and the same conflicting-registration-is-ambiguous discipline for a
     same-named member template nested in two DIFFERENT explicit outer
     specializations -- see that function's own docstring).
+
+    A dependent default's raw spelling (``"T"`` in ``template<class T,
+    class U=T> struct A;``) names an EARLIER parameter of the SAME
+    declaration it appears on -- :func:`_specialization_spelling` resolves
+    it by looking up that text in the *tracked* (frozen-at-first-
+    -declaration) names index. When a CONFIRMED redeclaration (the sixth
+    round's merge) contributes a NEWLY adopted default and that
+    redeclaration also renamed its parameters, the raw text it carries
+    names one of ITS OWN (renamed) parameters, not the tracked/original
+    ones -- e.g. ``template<class T, class U> struct A;`` followed by
+    ``template<class X, class Y=X> struct A {...};`` spells the added
+    default as literal ``"X"``, but the tracked names index still holds
+    ``["T", "U"]`` from the first declaration, so ``"X"`` is never found
+    there and the substitution silently fails (Codex review, fresh
+    evidence, eighth round; confirmed end to end this left the base
+    unresolvable and a real virtual-method addition undetected). Fixed by
+    translating a newly adopted default's dependent reference through
+    THIS declaration's own positional name list into the FIRST
+    declaration's name at that same position (parameter order/count can't
+    legally change across a redeclaration of the same template, so
+    position always lines up) before merging it in -- keeping every
+    stored default spelled in terms of the one, tracked name convention
+    :func:`_specialization_spelling` already expects, regardless of which
+    declaration in the chain actually contributed it.
     """
     idx: dict[str, list[str | None]] = {}
     ambiguous: set[str] = set()
     node_ids: dict[str, str] = {}
+    first_names: dict[str, list[str | None]] = {}
 
     def walk(node: Any, scope: tuple[str, ...]) -> None:
         if not isinstance(node, dict):
@@ -868,8 +893,24 @@ def _index_template_param_defaults(root: dict[str, Any]) -> dict[str, list[str |
         if kind == "ClassTemplateDecl" and name and (
             qualname := ("::".join((*scope, name)) if scope else name)
         ) not in ambiguous:
+            this_names = _template_param_names(node)
+            defaults = _template_param_defaults(node)
+            tracked_names = first_names.get(qualname)
+            if tracked_names is None:
+                first_names[qualname] = this_names
+            else:
+                own_positions = {n: i for i, n in enumerate(this_names) if n}
+                defaults = [
+                    tracked_names[own_positions[d]]
+                    if d is not None
+                    and d in own_positions
+                    and own_positions[d] < len(tracked_names)
+                    and tracked_names[own_positions[d]]
+                    else d
+                    for d in defaults
+                ]
             _register_template_param_metadata(
-                idx, ambiguous, node_ids, qualname, node, _template_param_defaults(node)
+                idx, ambiguous, node_ids, qualname, node, defaults
             )
         child_scope = (*scope, name) if kind in _SCOPE_NODE_KINDS and name else scope
         for child in node.get("inner", []) or []:
