@@ -610,6 +610,70 @@ building a second identity-resolution mechanism from scratch.
   this pass gave clang PARITY with castxml's existing primary-vptr
   heuristic, not a capability neither backend has.
 
+  **A review round found six real gaps in the clang vtable reconstruction
+  above, all fixed with real-compiler verification.** In descending order
+  of severity:
+  1. A forward declaration (`struct A;`) followed by its complete
+     definition (`struct A { virtual void f(); };`) — a real, common
+     shape confirmed with clang emitting BOTH `CXXRecordDecl` nodes for
+     it — made the record index's first-registration-wins policy keep
+     the empty forward-decl stub whenever it preceded the definition in
+     source order, silently losing every virtual method. Fixed by
+     preferring a complete definition over a forward-decl stub
+     regardless of walk order (`_is_record_definition`, the same guard
+     `parse_types` already uses).
+  2. The ordinary unqualified spelling for a base declared in the SAME
+     namespace as the derived class (`namespace ns { struct C : A {}; }`
+     where `A` is `ns::A`) reports `qualType: "A"` (bare), not `"ns::A"`
+     — confirmed with a real clang build, along with the equivalent gap
+     for a type-alias base. Both carry the fully-qualified spelling in a
+     separate `desugaredQualType` field (absent, not merely identical,
+     whenever nothing needs desugaring). Fixed by preferring
+     `desugaredQualType` when present.
+  3. Two UNRELATED bases independently declaring an identically-signed
+     virtual method (`struct D : B1, B2` where both declare
+     `virtual void q();`, no inheritance relationship between them) is a
+     real, compiling shape with two genuinely separate vtable-group
+     slots — the first version's single signature-keyed dict collapsed
+     them onto one, silently discarding one slot. Fixed by splitting
+     "signature" from "physical slot identity": an ordered
+     `slots: dict[key, mangled]` (one key per real vtable-group entry,
+     keyed on Python object identity) plus a
+     `sig_index: dict[signature, list[key]]` tracking every currently-live
+     key a signature resolves to, unioned across bases rather than
+     overwritten. A genuine override (`D`'s own `void q() override;`)
+     correctly replaces BOTH physical keys at once — verified this
+     compiles and is the valid final overrider for both per
+     [class.virtual], the same "non-virtual multiple inheritance" case
+     castxml's own `_resolved_override_keys` already documents.
+  4. The signature key's cv-qualifier field was a single `is_const`
+     boolean, so a ref-qualifier (`virtual void f() &;`) or `volatile`
+     mismatch was invisible to it — confirmed both compile with distinct
+     manglings, so an unrelated re-declaration could have falsely
+     replaced a ref-/volatile-qualified base slot. Fixed by keeping the
+     full, whitespace-normalized qualifier tail string in the key instead
+     of reducing it to one boolean.
+  5. A virtual conversion operator (`virtual operator int() const;`) is a
+     separate clang node kind, `CXXConversionDecl`, not `CXXMethodDecl`
+     — confirmed with a real clang build — so it was silently excluded
+     from the vtable entirely regardless of virtuality. Fixed by handling
+     both kinds identically everywhere in the walk.
+  6. Top-level cv-qualification on a by-value parameter doesn't
+     participate in override identity in real C++ (`virtual void
+     f(const int)` and a derived `void f(int)` ARE the same override) —
+     confirmed both mangle to an identical parameter-encoding tail — but
+     the signature key used each parameter's raw `qualType` string
+     verbatim, so this case fell through as an unrelated new method.
+     Fixed with `_normalize_param_type`, stripping a top-level leading
+     (`"const int"`) or trailing-after-pointer (`"int *const"`) qualifier
+     word while leaving a *pointee*-level one (`"const int *"`,
+     confirmed this DOES survive mangling) untouched — verified against
+     six real clang parameter spellings, including the nested
+     pointer-to-const-pointer case (`"int *const *"`) that a naive
+     strip-anywhere approach would have corrupted.
+  New regression tests for all six, each traced back to a real clang
+  compile before being reduced to a hand-built fixture.
+
   **A later pass closed the last of this phase's four originally-listed
   facts** (`deprecated`/`is_scoped`/bitfields/default-argument facts were
   the other three, already covered above): direct-clang now populates

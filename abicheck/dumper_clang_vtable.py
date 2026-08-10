@@ -54,7 +54,7 @@ specifically a gap in the JSON serializer, not a fact clang's semantic
 analysis lacks.) So this module reconstructs virtuality itself via
 signature matching: a method is virtual if explicitly marked (`virtual`
 keyword or ``OverrideAttr``), OR if its (name, parameter types,
-const-qualifier) identity matches an already-known virtual slot inherited
+cv/ref-qualifier) identity matches an already-known virtual slot inherited
 from a base — the same test C++ override resolution itself applies.
 
 A second, structurally different gap: a class's own destructor is
@@ -81,6 +81,59 @@ position) rather than appended. This exactly matches what castxml's own
 stable sort over all-equal keys is a no-op), so the two backends produce
 identically-shaped output whenever castxml also lacks index data.
 
+**Signature identity is NOT slot identity** (Codex review, fresh evidence,
+real gap found and fixed after the first version of this module landed): a
+signature match is only a *candidate for* an override, never the slot
+itself, because two UNRELATED bases can independently declare an
+identically-signed virtual method — ``struct D : B1, B2`` where both `B1`
+and `B2` declare `virtual void q();` with no inheritance relationship
+between them. Confirmed with a minimal repro that the naive "one dict keyed
+by signature" design from the first version collapsed these onto ONE slot,
+silently discarding one of the two real, independent vtable-group entries.
+Per [class.virtual], a *further* override in `D` — `void q() override;` —
+is actually valid and becomes the final overrider for BOTH slots at once
+(the same "non-virtual multiple inheritance" case castxml's own
+``_resolved_override_keys`` docstring documents handling via a multi-id
+``overrides`` attribute). So this module tracks two structures together: an
+ordered ``slots: dict[key, mangled]`` (the actual per-physical-slot
+occupant, one key per real vtable-group entry — keyed on Python object
+identity of the introducing node, ``id(child)``, guaranteed unique and
+free within one parse) and a ``sig_index: dict[signature, list[key]]``
+(which currently-live physical keys a given signature answers to, unioned
+across bases without collapsing). A signature match resolves through
+``sig_index`` to every matching physical key and replaces all of them —
+one new key when the signature is unseen, N replacements when N unrelated
+bases already answer to it.
+
+Two more real gaps found in the same review round, both in what counts as
+matching *identity*, not in the slot-vs-signature distinction above:
+
+1. **Base name resolution must prefer clang's own desugared spelling.**
+   `namespace ns { struct A {...}; struct C : A {...}; }` — the ordinary,
+   idiomatic unqualified spelling for a base declared in the SAME namespace
+   as the derived class — reports `type.qualType == "A"` (bare), not
+   `"ns::A"`, confirmed with a real clang build; a type-alias base
+   (`using AliasA = ns::A; struct D : AliasA {...};`) reports
+   `qualType == "AliasA"` similarly. Both cases carry a SEPARATE
+   `desugaredQualType` field with the fully-resolved `"ns::A"` spelling
+   whenever it differs from `qualType` (confirmed absent when a base is
+   already spelled fully-qualified, e.g. `struct C : ns::A {...}` written
+   explicitly — no redundant field when there's nothing to desugar). Since
+   ``records_by_qualname`` is keyed on the fully-qualified form
+   (``dumper_clang._record_index``), reading only `qualType` silently
+   failed to resolve either of these common shapes. Fixed by preferring
+   `desugaredQualType` when present, falling back to `qualType`.
+2. **CV/ref-qualifiers beyond `const` participate in override identity
+   too.** `virtual void f() &;` / `virtual void g() volatile;` are real,
+   confirmed-compiling declarations (ref-qualified and volatile-qualified
+   member functions), and a derived re-declaration that drops the
+   qualifier is a DIFFERENT signature, not an override — matching on a
+   bare `is_const: bool` (the first version of this module) would have
+   incorrectly treated `void f() &&` or unqualified `void f()` as
+   overriding `virtual void f() &`. Fixed by keeping the qualifier tail as
+   a full normalized string (whitespace-collapsed) in the signature key
+   instead of reducing it to a single boolean.
+
 Known limitation, accepted rather than solved here: a covariant return
 type is deliberately excluded from the signature key (return type is never
 part of override *identity* — C++ allows a covariant return, and the whole
@@ -103,12 +156,12 @@ from __future__ import annotations
 from typing import Any
 
 #: Sentinel signature key for a destructor slot -- unifies a base's own
-#: `~Base` and a derived class's own `~Derived` under one dict key, since
-#: their literal names never match but they occupy the SAME vtable slot
-#: whenever either is virtual. No real method can be named this (a C++
-#: identifier can't start with `~` followed by this exact spelling), so
-#: there is no risk of an ordinary method colliding with it.
-_DTOR_SLOT_KEY: tuple[str, tuple[str, ...], bool] = ("~dtor~", (), False)
+#: `~Base` and a derived class's own `~Derived` under one signature-index
+#: entry, since their literal names never match but they occupy the SAME
+#: vtable slot whenever either is virtual. No real method can be named
+#: this (a C++ identifier can't start with `~` followed by this exact
+#: spelling), so there is no risk of an ordinary method colliding with it.
+_DTOR_SLOT_KEY: tuple[str, tuple[str, ...], str] = ("~dtor~", (), "")
 
 #: Node kinds that can occupy a vtable slot. Constructors, fields, and
 #: everything else are structurally excluded (a constructor is never
@@ -116,24 +169,86 @@ _DTOR_SLOT_KEY: tuple[str, tuple[str, ...], bool] = ("~dtor~", (), False)
 #: "Destructor")`` gate in ``dumper_castxml.py``).
 _METHOD_KIND = "CXXMethodDecl"
 _DESTRUCTOR_KIND = "CXXDestructorDecl"
+#: A virtual conversion operator (``operator int() const``, ...) is a
+#: separate clang node kind, not a ``CXXMethodDecl`` -- confirmed with a
+#: real clang build that ``struct A { virtual operator int() const; };``
+#: emits a ``CXXConversionDecl`` carrying the same ``name``/``mangledName``/
+#: ``type``/``virtual`` shape a method does (``name`` is the spelled target,
+#: e.g. ``"operator int"``, which already makes two different conversion
+#: targets distinct signatures for free). Handled identically to
+#: ``_METHOD_KIND`` everywhere below (Codex review, fresh evidence: this
+#: kind was silently excluded entirely, so a virtual conversion operator
+#: never entered the vtable regardless of virtuality).
+_CONVERSION_KIND = "CXXConversionDecl"
+
+#: A physical vtable-slot identity: unique per introducing declaration
+#: within one parse (``id(child)``, Python object identity -- not clang's
+#: own hex-string "id" attribute, which this module never needs).
+_SlotKey = object
+_Signature = tuple[str, tuple[str, ...], str]
 
 
-def _method_signature_key(
-    node: dict[str, Any],
-) -> tuple[str, tuple[str, ...], bool] | None:
-    """``(name, param_qualtypes, is_const)`` identity for a ``CXXMethodDecl``.
+def _normalize_param_type(qualtype: str) -> str:
+    """Strip a *top-level* cv-qualifier from a parameter's spelling, the
+    same normalization the Itanium mangler itself performs on a by-value
+    parameter (confirmed empirically: ``void f(const int)`` and
+    ``void f(int)`` both mangle to the identical ``...fEi`` tail, and
+    ``void a(int* const p)``/``void d(int* volatile p)`` both mangle
+    without any C/V marker on the pointer). A *pointee*-level qualifier
+    (``const int *``, ``const int &``) is never top-level and must NOT be
+    stripped -- confirmed it DOES survive mangling (``...bEPKi``). Two
+    shapes, both confirmed against real clang spellings:
+
+    - a LEADING ``"const "``/``"volatile "`` word applies to a plain
+      (non-pointer, non-reference) value type -- stripped, looping to
+      handle both stacked together (``"const volatile int"``);
+    - a TRAILING ``" const"``/``" volatile"`` word applies to the pointer
+      itself (``"int *const"``) -- stripped once, checked by exact suffix
+      so a *nested* one-level-in pointer-to-const-pointer
+      (``"int *const *"``, mangles to ``PKPi`` -- the K survives) is never
+      touched, since that string doesn't end with the word at all.
+
+    Deliberately conservative beyond these two shapes: a type this doesn't
+    fully canonicalize just stays as its own (still internally consistent)
+    key rather than risking a wrong strip -- the goal is base and derived
+    agreeing on a matching key for a genuinely equal signature, not a
+    complete canonical-type printer.
+    """
+    s = qualtype.strip()
+    for word in (" const", " volatile"):
+        if s.endswith(word):
+            s = s[: -len(word)].rstrip()
+            break
+    if "*" not in s and "&" not in s:
+        changed = True
+        while changed:
+            changed = False
+            for prefix in ("const ", "volatile "):
+                if s.startswith(prefix):
+                    s = s[len(prefix) :]
+                    changed = True
+    return s
+
+
+def _method_signature_key(node: dict[str, Any]) -> _Signature | None:
+    """``(name, param_qualtypes, qualifier_tail)`` identity for a
+    ``CXXMethodDecl``/``CXXConversionDecl``.
 
     Deliberately excludes the return type (covariant returns are a
-    different spelling for the SAME slot, never a different slot) and any
-    ref-qualifier/``noexcept`` suffix (neither participates in override
-    identity). ``None`` for an unnamed node (shouldn't occur for a real
-    method, but keeps this total rather than raising).
+    different spelling for the SAME slot, never a different slot).
+    ``qualifier_tail`` keeps the full cv/ref-qualifier suffix
+    (``"const"``, ``"volatile"``, ``"&"``, ``"const &&"``, ...) since all
+    of it participates in override identity — reducing this to a single
+    ``is_const`` boolean (an earlier version of this function) incorrectly
+    treated a ref-qualifier or `volatile`-qualifier mismatch as a match
+    (Codex review, fresh evidence). ``None`` for an unnamed node (shouldn't
+    occur for a real method, but keeps this total rather than raising).
     """
     name = node.get("name")
     if not name:
         return None
     params = tuple(
-        str(child["type"]["qualType"])
+        _normalize_param_type(str(child["type"]["qualType"]))
         for child in node.get("inner", []) or []
         if isinstance(child, dict)
         and child.get("kind") == "ParmVarDecl"
@@ -147,11 +262,13 @@ def _method_signature_key(
     # parameter type (e.g. a function-pointer parameter) closes strictly
     # before it. Everything after it is the cv/ref/noexcept qualifier
     # suffix; splitting off a trailing `noexcept(...)` defensively before
-    # checking for "const" avoids a false match from noexcept's own operand
-    # (not observed in this clang version's output, but cheap to guard).
+    # keeping the rest avoids folding noexcept's own operand into the
+    # qualifier identity (not observed in this clang version's output, but
+    # cheap to guard). Whitespace-collapsed so "const  &" and "const &"
+    # (if either ever occurs) compare equal.
     tail = qual_type[qual_type.rfind(")") + 1 :] if ")" in qual_type else ""
-    is_const = "const" in tail.split("noexcept", 1)[0]
-    return (str(name), params, is_const)
+    qualifier_tail = " ".join(tail.split("noexcept", 1)[0].split())
+    return (str(name), params, qualifier_tail)
 
 
 def _has_override_attr(node: dict[str, Any]) -> bool:
@@ -164,19 +281,30 @@ def _has_override_attr(node: dict[str, Any]) -> bool:
 def _base_qualnames(node: dict[str, Any]) -> list[str]:
     """Direct + virtual base qualified names, in ``bases`` array order.
 
-    Mirrors ``dumper_clang._parse_bases``'s own extraction of
-    ``type.qualType`` from each ``bases`` entry, but doesn't distinguish
-    virtual from non-virtual -- castxml's own inherited-slot walk
-    (``_inherited_vtable_slots``) doesn't either, since every base
-    contributes to the derived class's *set of virtual methods it must
-    provide slots for*, regardless of how that base is placed at runtime.
+    Prefers ``type.desugaredQualType`` over ``type.qualType`` when clang
+    supplies both: an ordinary unqualified base spelling inside the SAME
+    namespace as the derived class (`struct C : A {...}` where `A` is
+    `ns::A`), or a type-alias base (`struct D : AliasA {...}`), reports the
+    written, non-canonical spelling in `qualType` and only carries the
+    fully-qualified form in `desugaredQualType` -- confirmed with real
+    clang builds of both shapes. `desugaredQualType` is absent (not merely
+    identical) whenever a base is already written fully-qualified, so
+    preferring it never loses information.
+
+    Doesn't distinguish virtual from non-virtual bases -- castxml's own
+    inherited-slot walk (``_inherited_vtable_slots``) doesn't either, since
+    every base contributes to the derived class's *set of virtual methods
+    it must provide slots for*, regardless of how that base is placed at
+    runtime.
     """
     out: list[str] = []
     for b in node.get("bases", []) or []:
         if not isinstance(b, dict):
             continue
         type_obj = b.get("type")
-        bname = str(type_obj.get("qualType", "")) if isinstance(type_obj, dict) else ""
+        if not isinstance(type_obj, dict):
+            continue
+        bname = str(type_obj.get("desugaredQualType") or type_obj.get("qualType") or "")
         if bname:
             out.append(bname)
     return out
@@ -186,24 +314,42 @@ def _collect_virtual_slots(
     qualname: str,
     records_by_qualname: dict[str, dict[str, Any]],
     seen: set[str],
-) -> dict[tuple[str, tuple[str, ...], bool], str]:
-    """Ordered ``signature-key -> mangled name`` for *qualname*'s vtable.
+) -> tuple[dict[_SlotKey, str], dict[_Signature, list[_SlotKey]]]:
+    """``(slots, sig_index)`` for *qualname*'s vtable.
 
-    Recurses into bases first (their own slots seed the result), then walks
-    this record's own children in declaration order, replacing an inherited
-    key in place on an override (preserving the base's insertion position,
-    same as castxml) or appending a genuinely new virtual at the end.
+    ``slots`` is the ordered physical-slot-key -> mangled-name occupant map
+    (the actual vtable content, one entry per real vtable-group slot).
+    ``sig_index`` is signature -> every currently-live physical key that
+    signature resolves to (kept as a list, not a single key, so two
+    unrelated bases sharing a signature stay two distinct slots until a
+    genuine override collapses them -- see module docstring).
+
+    Recurses into bases first (their own slots/sig_index seed the result,
+    unioned rather than overwritten), then walks this record's own
+    children in declaration order: a signature match replaces every
+    candidate physical key's occupant in place (preserving each one's own
+    insertion position, same as castxml), a genuinely new virtual creates
+    one fresh physical key and appends.
     """
     if qualname in seen:
-        return {}
+        return {}, {}
     seen.add(qualname)
     node = records_by_qualname.get(qualname)
     if node is None:
-        return {}
+        return {}, {}
 
-    slots: dict[tuple[str, tuple[str, ...], bool], str] = {}
+    slots: dict[_SlotKey, str] = {}
+    sig_index: dict[_Signature, list[_SlotKey]] = {}
     for base_qualname in _base_qualnames(node):
-        slots.update(_collect_virtual_slots(base_qualname, records_by_qualname, seen))
+        base_slots, base_sig_index = _collect_virtual_slots(
+            base_qualname, records_by_qualname, seen
+        )
+        slots.update(base_slots)
+        for sig, keys in base_sig_index.items():
+            existing = sig_index.setdefault(sig, [])
+            for key in keys:
+                if key not in existing:
+                    existing.append(key)
 
     for child in node.get("inner", []) or []:
         if not isinstance(child, dict):
@@ -212,23 +358,37 @@ def _collect_virtual_slots(
         mangled = str(child.get("mangledName", "")) or str(child.get("name", ""))
         if not mangled:
             continue
+        sig_or_none: _Signature | None
         if kind == _DESTRUCTOR_KIND:
-            # Implicitly virtual the moment ANY base contributed the
-            # destructor slot, or explicitly marked -- name comparison
-            # never applies to destructors (see module docstring).
-            if child.get("virtual") or _DTOR_SLOT_KEY in slots:
-                slots[_DTOR_SLOT_KEY] = mangled
-        elif kind == _METHOD_KIND:
-            key = _method_signature_key(child)
-            if key is None:
+            sig_or_none = _DTOR_SLOT_KEY
+            candidates = sig_index.get(sig_or_none, [])
+            if not (child.get("virtual") or candidates):
                 continue
+        elif kind in (_METHOD_KIND, _CONVERSION_KIND):
+            sig_or_none = _method_signature_key(child)
+            if sig_or_none is None:
+                continue
+            candidates = sig_index.get(sig_or_none, [])
             is_virtual = (
-                bool(child.get("virtual")) or _has_override_attr(child) or key in slots
+                bool(child.get("virtual"))
+                or _has_override_attr(child)
+                or bool(candidates)
             )
-            if is_virtual:
-                slots[key] = mangled
+            if not is_virtual:
+                continue
+        else:
+            continue
+        resolved_sig: _Signature = sig_or_none
 
-    return slots
+        if candidates:
+            for key in candidates:
+                slots[key] = mangled
+        else:
+            key = id(child)
+            slots[key] = mangled
+            sig_index.setdefault(resolved_sig, []).append(key)
+
+    return slots, sig_index
 
 
 def build_vtable(
@@ -238,7 +398,9 @@ def build_vtable(
 
     ``records_by_qualname`` is the caller's own ``"::".join(scope + [name])
     -> node`` index over every parsed ``CXXRecordDecl``/``RecordDecl`` in
-    this translation unit (``dumper_clang.py``'s ``_record_index()``).
+    this translation unit (``dumper_clang.py``'s ``_record_index()``,
+    which itself prefers a complete definition over a forward-declaration
+    stub sharing the same qualname).
     """
-    slots = _collect_virtual_slots(qualname, records_by_qualname, set())
+    slots, _ = _collect_virtual_slots(qualname, records_by_qualname, set())
     return list(slots.values())

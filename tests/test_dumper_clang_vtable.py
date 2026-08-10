@@ -273,3 +273,204 @@ def test_unresolvable_base_degrades_without_crashing() -> None:
     # -- correctly NOT recognized as virtual.
     assert types["D"].vtable == []
     assert types["D"].vptr_offset_bits is None
+
+
+# ── second review round: forward-decl records, base-name resolution, ──────
+# ── cross-base signature collisions, remaining qualifiers, conversion ─────
+# ── operators, and top-level param-const normalization ────────────────────
+
+
+def test_forward_declaration_does_not_shadow_the_complete_definition() -> None:
+    """`struct A; struct A { virtual void f(); };` -- clang emits BOTH
+    CXXRecordDecl nodes for this real, common shape (confirmed against
+    real clang). The record index must prefer the complete definition
+    regardless of which one was walked first, or the forward decl's empty
+    node wins and every virtual method is silently lost."""
+    forward_decl = {
+        "kind": "CXXRecordDecl",
+        "name": "A",
+        "tagUsed": "struct",
+        "loc": {"file": "include/foo.h", "line": 1},
+        # no completeDefinition, no inner -- pure forward declaration
+    }
+    root = _tu(
+        forward_decl,
+        _record("A", _method("f", "_ZN1A1fEv", virtual=True)),
+    )
+    types = _types(root)
+    assert types["A"].vtable == ["_ZN1A1fEv"]
+
+
+def test_base_resolved_via_desugared_qualtype_same_namespace() -> None:
+    """The ordinary unqualified spelling for a base declared in the SAME
+    namespace as the derived class (`struct C : A {}` where A is `ns::A`)
+    reports the bare, non-canonical `qualType: "A"` with the fully
+    qualified form only in `desugaredQualType` -- confirmed against real
+    clang. Reading `qualType` alone can never resolve it against the
+    qualname-keyed record index."""
+    root = _tu(
+        {
+            "kind": "NamespaceDecl",
+            "name": "ns",
+            "inner": [
+                _record("A", _method("a", "_ZN2ns1A1aEv", virtual=True)),
+                _record(
+                    "C",
+                    _method("a", "_ZN2ns1C1aEv"),
+                    bases=[
+                        {
+                            "type": {"qualType": "A", "desugaredQualType": "ns::A"},
+                            "access": "public",
+                            "isVirtual": False,
+                        }
+                    ],
+                ),
+            ],
+        }
+    )
+    types = _types(root)
+    assert types["C"].vtable == ["_ZN2ns1C1aEv"]
+
+
+def test_base_resolved_via_desugared_qualtype_type_alias() -> None:
+    """A type-alias base (`using AliasA = ns::A; struct D : AliasA {};`)
+    spells `qualType` as the alias name, with `desugaredQualType` again
+    carrying the real target -- confirmed against real clang."""
+    root = _tu(
+        _record("A", _method("a", "_ZN1A1aEv", virtual=True)),
+        _record(
+            "D",
+            _method("a", "_ZN1D1aEv"),
+            bases=[
+                {
+                    "type": {"qualType": "AliasA", "desugaredQualType": "A"},
+                    "access": "public",
+                    "isVirtual": False,
+                }
+            ],
+        ),
+    )
+    types = _types(root)
+    assert types["D"].vtable == ["_ZN1D1aEv"]
+
+
+def test_two_unrelated_bases_sharing_a_signature_stay_two_slots() -> None:
+    """`struct D : B1, B2` where B1 and B2 independently declare an
+    identically-signed `virtual void q();` with NO inheritance relationship
+    between them -- confirmed against real clang that these are two
+    genuinely separate vtable-group slots. A signature-keyed dict without
+    per-physical-slot identity collapses them onto one, silently discarding
+    one of the two real slots."""
+    root = _tu(
+        _record("B1", _method("q", "_ZN2B11qEv", virtual=True)),
+        _record("B2", _method("q", "_ZN2B21qEv", virtual=True)),
+        _record("D", bases=[_base("B1"), _base("B2")]),
+    )
+    types = _types(root)
+    assert types["D"].vtable == ["_ZN2B11qEv", "_ZN2B21qEv"]
+
+
+def test_override_of_cross_base_shared_signature_replaces_both_slots() -> None:
+    """Per [class.virtual], D's own `void q() override;` becomes the final
+    overrider for BOTH B1::q and B2::q at once (they share a signature) --
+    confirmed against real clang this compiles. Both physical slots must
+    end up occupied by D's own q, not just one."""
+    root = _tu(
+        _record("B1", _method("q", "_ZN2B11qEv", virtual=True)),
+        _record("B2", _method("q", "_ZN2B21qEv", virtual=True)),
+        _record(
+            "D",
+            _method("q", "_ZN1D1qEv", override_attr=True),
+            bases=[_base("B1"), _base("B2")],
+        ),
+    )
+    types = _types(root)
+    assert types["D"].vtable == ["_ZN1D1qEv", "_ZN1D1qEv"]
+
+
+def test_ref_qualifier_mismatch_is_not_an_override() -> None:
+    """`virtual void f() &;` vs. an unqualified `void f();` in a derived
+    class are DIFFERENT signatures -- confirmed against real clang both
+    compile with distinct manglings. A signature key reduced to a plain
+    `is_const` boolean (an earlier version of this module) would have
+    incorrectly matched them."""
+    root = _tu(
+        _record(
+            "A",
+            {
+                "kind": "CXXMethodDecl",
+                "name": "f",
+                "mangledName": "_ZNR1A1fEv",
+                "type": {"qualType": "void () &"},
+                "virtual": True,
+            },
+        ),
+        _record("D", _method("f", "_ZN1D1fEv"), bases=[_base("A")]),
+    )
+    types = _types(root)
+    assert types["D"].vtable == ["_ZNR1A1fEv"]  # unchanged, inherited as-is
+
+
+def test_conversion_operator_is_included_in_vtable() -> None:
+    """A virtual conversion operator (`operator int() const`) is a separate
+    clang node kind, CXXConversionDecl, not CXXMethodDecl -- confirmed
+    against real clang. Must still enter the vtable and be overridable the
+    same way an ordinary virtual method is."""
+    root = _tu(
+        _record(
+            "A",
+            {
+                "kind": "CXXConversionDecl",
+                "name": "operator int",
+                "mangledName": "_ZNK1AcviEv",
+                "type": {"qualType": "int () const"},
+                "virtual": True,
+            },
+        ),
+        _record(
+            "D",
+            {
+                "kind": "CXXConversionDecl",
+                "name": "operator int",
+                "mangledName": "_ZNK1DcviEv",
+                "type": {"qualType": "int () const"},
+            },
+            bases=[_base("A")],
+        ),
+    )
+    types = _types(root)
+    assert types["A"].vptr_offset_bits == 0
+    assert types["D"].vtable == ["_ZNK1DcviEv"]
+
+
+def test_top_level_param_const_is_normalized_for_override_matching() -> None:
+    """`virtual void f(const int x);` vs. a derived `void f(int x);` are
+    the SAME signature -- top-level cv on a by-value parameter doesn't
+    participate in override identity (confirmed against real clang: both
+    mangle to an identical parameter-encoding tail). Must be recognized as
+    an override, not treated as an unrelated new method."""
+    root = _tu(
+        _record(
+            "A",
+            _method("f", "_ZN1A1fEi", virtual=True, params=["const int"]),
+        ),
+        _record("D", _method("f", "_ZN1D1fEi", params=["int"]), bases=[_base("A")]),
+    )
+    types = _types(root)
+    assert types["D"].vtable == ["_ZN1D1fEi"]  # replaced, not appended
+
+
+def test_pointee_level_const_is_not_normalized_away() -> None:
+    """`virtual void b(const int* p);` vs. a derived `void b(int* p);` are
+    genuinely DIFFERENT signatures -- the const applies to the pointee, not
+    the pointer itself, and DOES survive Itanium mangling (confirmed against
+    real clang: `...bEPKi` keeps the K). Must NOT be treated as an override."""
+    root = _tu(
+        _record(
+            "A",
+            _method("b", "_ZN1A1bEPKi", virtual=True, params=["const int *"]),
+        ),
+        _record("D", _method("b", "_ZN1D1bEPi", params=["int *"]), bases=[_base("A")]),
+    )
+    types = _types(root)
+    assert types["D"].vtable == ["_ZN1A1bEPKi"]  # unchanged, inherited as-is

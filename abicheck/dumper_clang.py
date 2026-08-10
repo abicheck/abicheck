@@ -978,11 +978,23 @@ class _ClangAstParser:
     def _record_index(self) -> dict[str, dict[str, Any]]:
         """Lazily-built ``qualified name -> node`` index over every parsed
         record, for ``dumper_clang_vtable.build_vtable``'s base-lookup
-        recursion. First-registration wins on a qualname collision (an ODR
-        duplicate across TUs isn't possible within one TU's own AST; a
-        genuine same-name-different-scope collision can't occur since the
-        key IS the full scope path) -- ``setdefault`` rather than overwrite
-        is just defensive, not load-bearing here.
+        recursion.
+
+        A forward declaration (``struct A;``) and its later complete
+        definition (``struct A { ... };``) share the same qualname and both
+        land in ``self._records`` -- confirmed with a real clang build that
+        clang emits BOTH `CXXRecordDecl` nodes for exactly this shape, the
+        forward one carrying neither `completeDefinition` nor any member
+        children. A plain first-registration-wins policy silently kept
+        whichever was encountered first, which is the forward decl whenever
+        one precedes the definition in source order -- the common style --
+        losing every virtual method the real definition carries (Codex
+        review, fresh evidence: `struct A; struct A { virtual void f(); };`
+        resolved to an empty `vtable` for A and any of its derived classes).
+        A complete definition always wins over a forward-declaration stub
+        for the same qualname, regardless of which one was walked first;
+        ties among non-definitions (there's at most one real forward decl
+        in practice, but this stays defensive) keep the first seen.
         """
         if self._record_by_qualname is None:
             idx: dict[str, dict[str, Any]] = {}
@@ -990,7 +1002,13 @@ class _ClangAstParser:
                 name = str(entry.node.get("name") or "")
                 if not name:
                     continue
-                idx.setdefault(self._qualified(entry), entry.node)
+                qualname = self._qualified(entry)
+                existing = idx.get(qualname)
+                if existing is None or (
+                    not _is_record_definition(existing)
+                    and _is_record_definition(entry.node)
+                ):
+                    idx[qualname] = entry.node
             self._record_by_qualname = idx
         return self._record_by_qualname
 
