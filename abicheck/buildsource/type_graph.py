@@ -1299,12 +1299,43 @@ def _emit_template_parameter_edges(
     src, edge_kind = _templated_entity_src(node, scope)
     if not src:
         return
+    _emit_template_parm_list_edges(node, src, edge_kind, scope, edges, idx)
+
+
+def _emit_template_parm_list_edges(
+    node: Any,
+    src: str,
+    edge_kind: str,
+    scope: list[str],
+    edges: list[TypeEdge],
+    idx: _AstIndexes,
+) -> None:
+    """Emit ``template_param``/``default_template_arg`` edges for every
+    parameter in *node*'s own ``inner`` children, recursing into a
+    ``TemplateTemplateParmDecl`` child's *own* parameter list too.
+
+    ``template <template <detail::Handle H> class C> struct Outer`` nests
+    the non-type parameter ``H`` — typed by the private ``detail::Handle`` —
+    directly inside the outer ``TemplateTemplateParmDecl`` node, verified
+    against real Clang 18 output (Codex review, fresh evidence): the
+    original single-level loop checked each direct child's own kind against
+    ``NonTypeTemplateParmDecl`` but never descended into a
+    ``TemplateTemplateParmDecl`` child's ``inner``, so this dependency was
+    invisible. C++ permits an arbitrarily deep chain of template-template
+    parameters (``template <template <template <class> class> class> ...``),
+    so this recurses rather than unrolling one extra level — every nested
+    parameter still attributes its edge to the *same* ``src``/``edge_kind``
+    the outermost templated entity uses (:func:`_templated_entity_src`),
+    since a nested parameter's own type dependency is exactly as much a
+    dependency of the outer entity as a top-level one.
+    """
     for child in node.get("inner", []) or []:
         if not isinstance(child, dict):
             continue
-        if str(child.get("kind", "")) not in _TEMPLATE_PARM_DECL_KINDS:
+        kind = str(child.get("kind", ""))
+        if kind not in _TEMPLATE_PARM_DECL_KINDS:
             continue
-        if child.get("kind") == "NonTypeTemplateParmDecl":
+        if kind == "NonTypeTemplateParmDecl":
             _emit_type_edges(
                 edges,
                 src,
@@ -1315,6 +1346,8 @@ def _emit_template_parameter_edges(
                 idx.name_index,
                 idx.decl_file,
             )
+        elif kind == "TemplateTemplateParmDecl":
+            _emit_template_parm_list_edges(child, src, edge_kind, scope, edges, idx)
         default = child.get("defaultArg")
         default_type = default.get("type") if isinstance(default, dict) else None
         if isinstance(default_type, dict):

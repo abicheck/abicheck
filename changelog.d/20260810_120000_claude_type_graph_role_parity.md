@@ -12,13 +12,15 @@ A new changelog fragment. See changelog.d/README.md for the workflow.
   type** (`enum class Color : detail::Handle`) emitted no edge at all,
   because a clang `EnumDecl` carries no `type` key and the shared typedef
   code path read an empty spelling; a **non-type template parameter**'s own
-  type (`template <detail::Handle H> struct Slot`) and a template
-  parameter's **default type argument** (`template <class T = detail::Impl>
-  struct Box`) had no producer either. Each lands on the same graph node the
-  templated entity's own field/signature edges already use — a class or
-  alias template's `record_type` node, a function or variable template's
-  `source_decl` one — so a template's constraint is reachable from the
-  entity it constrains rather than sitting on an orphan node.
+  type (`template <detail::Handle H> struct Slot`, including one nested
+  inside a template-template parameter, `template <template <detail::Handle
+  H> class C> struct Outer`) and a template parameter's **default type
+  argument** (`template <class T = detail::Impl> struct Box`) had no
+  producer either. Each lands on the same graph node the templated entity's
+  own field/signature edges already use — a class or alias template's
+  `record_type` node, a function or variable template's `source_decl` one —
+  so a template's constraint is reachable from the entity it constrains
+  rather than sitting on an orphan node.
   `ROLE_COVERAGE_MATRIX` (ADR-046 D3) claims the three new roles alongside
   the existing ones, and
   [Source Graph Schema](https://abicheck.github.io/abicheck/reference/source-graph-schema/)

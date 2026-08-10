@@ -233,6 +233,75 @@ def test_type_template_parameter_alone_emits_no_template_param_edge() -> None:
     assert _find(ast, "template_param") == []
 
 
+def _template_template_parm(name: str, *nested_params: dict, **extra: object) -> dict:
+    return {
+        "kind": "TemplateTemplateParmDecl",
+        "name": name,
+        "inner": list(nested_params),
+        **extra,
+    }
+
+
+def test_non_type_parameter_nested_in_a_template_template_parameter_resolves() -> None:
+    """``template <template <detail::Handle H> class C> struct Outer`` —
+    clang nests ``H`` directly inside the ``TemplateTemplateParmDecl`` node,
+    not the outer template's own children (Codex review, fresh evidence: the
+    original single-level loop never descended into a
+    ``TemplateTemplateParmDecl`` child's own ``inner``). The edge must still
+    land on ``api::Outer`` — the same node the outer template's own field
+    edges use — not on the wrapper ``C``, which is not a node in this graph.
+    """
+    ast = _tu(
+        _detail_ns(),
+        _namespace(
+            "api",
+            _class_template(
+                "Outer",
+                _template_template_parm("C", _non_type_parm("H", "detail::Handle")),
+            ),
+        ),
+    )
+    assert _find(ast, "template_param") == [
+        (EDGE_TYPE_HAS_FIELD_TYPE, "api::Outer", "detail::Handle", CONF_HIGH)
+    ]
+
+
+def test_non_type_parameter_nested_two_levels_deep_still_resolves() -> None:
+    """C++ permits an arbitrarily deep chain of template-template
+    parameters; the recursive walk must not stop after one level."""
+    ast = _tu(
+        _detail_ns(),
+        _namespace(
+            "api",
+            _class_template(
+                "TwoDeep",
+                _template_template_parm(
+                    "Outer2",
+                    _template_template_parm(
+                        "Inner", _non_type_parm("D", "detail::Handle")
+                    ),
+                ),
+            ),
+        ),
+    )
+    assert _find(ast, "template_param") == [
+        (EDGE_TYPE_HAS_FIELD_TYPE, "api::TwoDeep", "detail::Handle", CONF_HIGH)
+    ]
+
+
+def test_template_template_parameter_with_only_a_type_parameter_emits_nothing() -> None:
+    """A nested ``TemplateTypeParmDecl`` (no non-type parameter anywhere in
+    the chain) still names no type of its own — mirrors the top-level case."""
+    ast = _tu(
+        _detail_ns(),
+        _namespace(
+            "api",
+            _class_template("TT", _template_template_parm("C", _type_parm("T"))),
+        ),
+    )
+    assert _find(ast, "template_param") == []
+
+
 def test_function_template_parameter_edge_shares_the_signature_node() -> None:
     """A function template's parameter edge is a ``DECL_HAS_TYPE`` landing on
     the identical identity the templated ``FunctionDecl``'s own signature
@@ -653,6 +722,7 @@ template <template <class> class C = detail::Def> struct TT { int v; };
 template <detail::Handle H, class U = detail::Impl> void slot();
 int detail::Impl::*pm;
 void (detail::Impl::*pmf)(int);
+template <template <detail::Handle H> class C> struct Outer { C<0> c; };
 }
 """
 
@@ -695,6 +765,10 @@ def test_real_clang_emits_every_new_role_end_to_end(tmp_path) -> None:
     assert ("alias", "api::Ptr", "detail::Impl") in edges
     assert any(role == "var" and dst == "detail::Impl" for role, _, dst in edges), (
         "member-pointer owner types resolve through the existing nested walk"
+    )
+    assert ("template_param", "api::Outer", "detail::Handle") in edges, (
+        "a non-type parameter nested inside a template-template parameter "
+        "still resolves onto the outer templated entity"
     )
 
 
