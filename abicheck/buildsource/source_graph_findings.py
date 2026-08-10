@@ -460,6 +460,54 @@ def _dependency_kinds_covered(
     )
 
 
+def _role_coverage_disagrees(
+    old: SourceGraphSummary, new: SourceGraphSummary, pass_name: str, kind: str
+) -> bool:
+    """Whether *old* and *new* disagree on which of *kind*'s
+    :data:`~abicheck.buildsource.inline_graph_fold.ROLE_COVERAGE_MATRIX`
+    roles *pass_name* actually examined (ADR-046 D3, Codex review, fresh
+    evidence).
+
+    Deliberately stricter than
+    :func:`~abicheck.buildsource.inline_graph_fold.role_pass_covered` — that
+    function's family-flag fallback ("no finer key recorded -> defer to the
+    coarse pass-level flag") exists for a hand-built or pre-D3 graph, but is
+    exactly wrong for the question this function answers: a graph collected
+    by an *earlier abicheck version* that stamped the coarse family flag
+    before some of today's ``ROLE_COVERAGE_MATRIX`` roles existed would fall
+    back to "yes, covered" for a role its own producer code never knew to
+    look for — the version-skew case this check exists to catch. So this
+    reads the role key directly, with no fallback: an absent key means "not
+    confirmed on this side," full stop.
+
+    Checked across ``extractor_passes`` and ``narrowed_passes`` together,
+    since :func:`~abicheck.buildsource.inline_graph_fold._mark_role_coverage`
+    stamps a role key into whichever of the two dicts the pass's own outcome
+    populates (full vs. narrowed) — this question is "did this pass version
+    know about this role at all," independent of whether it happened to run
+    full or narrowed on this particular side.
+
+    Returns ``False`` (no disagreement — safe to trust normally) whenever
+    *kind* has no roles registered in the matrix at all, so a kind
+    :data:`~abicheck.buildsource.inline_graph_fold.ROLE_COVERAGE_MATRIX`
+    doesn't track (e.g. ``DECL_CALLS_DECL``, outside this file's own
+    ``_DEPENDENCY_EDGE_FAMILIES``) is unaffected.
+    """
+    from .inline_graph_fold import ROLE_COVERAGE_MATRIX, _role_coverage_key
+
+    for role in ROLE_COVERAGE_MATRIX.get(kind, ()):
+        key = _role_coverage_key(pass_name, kind, role)
+        old_covered = old.extractor_passes.get(key, False) or old.narrowed_passes.get(
+            key, False
+        )
+        new_covered = new.extractor_passes.get(key, False) or new.narrowed_passes.get(
+            key, False
+        )
+        if old_covered != new_covered:
+            return True
+    return False
+
+
 def _common_dependency_edge_kinds(
     old: SourceGraphSummary, new: SourceGraphSummary
 ) -> frozenset[str]:
@@ -635,6 +683,30 @@ def _common_dependency_edge_kinds(
             new_has = new_present or (kind in new_trusted)
             if old_has and new_has:
                 common.add(kind)
+    # A final, isolated filter (Codex review, fresh evidence) rather than
+    # threading role-awareness through every branch above: a kind admitted
+    # by either the whole-family-widening or per-kind-fallback path is still
+    # only trustworthy if both sides' *producer versions* agree on which
+    # ROLE_COVERAGE_MATRIX roles they examined for it. A collector upgrade
+    # that adds a genuinely new role under an *already-populated* kind (e.g.
+    # G29 Phase 5 item 5's `template_param`/`default_template_arg`/
+    # `enum_underlying`, all riding the pre-existing `TYPE_HAS_FIELD_TYPE`/
+    # `DECL_HAS_TYPE` kinds) is exactly what every check above this one is
+    # blind to: both sides can confirm the coarse family/kind flag while
+    # only the newer side's producer ever looked for the new role,
+    # manufacturing a false `PUBLIC_API_INTERNAL_DEPENDENCY_ADDED` the
+    # moment abicheck itself is upgraded, with no real code change at all
+    # (confirmed by direct reproduction — see ``_role_coverage_disagrees``'s
+    # own docstring and this fix's test coverage). This filter can only ever
+    # *remove* a kind neither branch above would otherwise have admitted,
+    # never add one, so it cannot introduce a new false positive of its own
+    # — and it is a no-op for the overwhelming common case (both sides
+    # collected by the same abicheck version, so every role key already
+    # agrees).
+    for pass_name, family in _DEPENDENCY_EDGE_FAMILIES.items():
+        for kind in family & common:
+            if _role_coverage_disagrees(old, new, pass_name, kind):
+                common.discard(kind)
     return frozenset(common)
 
 

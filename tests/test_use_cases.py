@@ -35,10 +35,12 @@ from abicheck.impact.use_cases import (
     USE_CASE_NODE_KINDS,
     USE_CASE_PROVENANCE,
     UseCaseDefinition,
+    UseCaseResolution,
     build_use_case_graph,
     join_use_case_graph,
     load_use_case_manifest,
     parse_use_case_manifest,
+    resolve_use_case_entrypoints,
     test_case_node_id as make_test_case_node_id,
     use_case_node_id,
 )
@@ -553,6 +555,81 @@ def test_build_use_case_graph_handles_several_use_cases_independently() -> None:
     assert [e.src for e in edges] == [use_case_node_id("uc1")]
 
 
+# ── resolve_use_case_entrypoints ────────────────────────────────────────────
+
+
+def test_resolve_use_case_entrypoints_splits_resolved_and_unresolved() -> None:
+    library = _library_graph()
+    resolutions = resolve_use_case_entrypoints(
+        [
+            UseCaseDefinition(
+                use_case="uc1",
+                entrypoints=("train", "does_not_exist"),
+                tests=("test_train",),
+            )
+        ],
+        library,
+    )
+    assert len(resolutions) == 1
+    r = resolutions[0]
+    assert r.use_case == "uc1"
+    assert r.resolved_entrypoints == ("train",)
+    assert r.unresolved_entrypoints == ("does_not_exist",)
+    assert r.tests == ("test_train",)
+
+
+def test_resolve_use_case_entrypoints_agrees_with_build_use_case_graph() -> None:
+    """The load-bearing property: this function can never disagree with what
+    :func:`build_use_case_graph` actually records — same resolution
+    mechanism (:func:`_public_entry_index`), just surfaced instead of
+    silently applied."""
+    library = _library_graph()
+    definitions = [
+        UseCaseDefinition(use_case="uc1", entrypoints=("train", "does_not_exist")),
+    ]
+    resolution = resolve_use_case_entrypoints(definitions, library)[0]
+    graph = build_use_case_graph(definitions, library)
+    graph_resolved = {
+        e.dst
+        for e in graph.edges
+        if e.kind == "USE_CASE_USES_ENTRY" and e.src == use_case_node_id("uc1")
+    }
+    # Every entrypoint this function reports resolved must be an id the
+    # graph actually joined onto (label vs. id doesn't matter here since
+    # "train" resolves to its own id, `decl://train`).
+    assert graph_resolved == {"decl://train"}
+    assert resolution.resolved_entrypoints == ("train",)
+
+
+def test_resolve_use_case_entrypoints_empty_definitions_list_returns_empty() -> None:
+    assert resolve_use_case_entrypoints([], _library_graph()) == []
+
+
+def test_resolve_use_case_entrypoints_no_entrypoints_declared() -> None:
+    library = _library_graph()
+    resolutions = resolve_use_case_entrypoints(
+        [UseCaseDefinition(use_case="uc1")], library
+    )
+    assert resolutions == [UseCaseResolution(use_case="uc1")]
+
+
+def test_resolve_use_case_entrypoints_preserves_manifest_declared_order() -> None:
+    library = _library_graph()
+    resolution = resolve_use_case_entrypoints(
+        [
+            UseCaseDefinition(
+                use_case="uc1",
+                entrypoints=("does_not_exist_a", "train", "does_not_exist_b"),
+            )
+        ],
+        library,
+    )[0]
+    assert resolution.unresolved_entrypoints == (
+        "does_not_exist_a",
+        "does_not_exist_b",
+    )
+
+
 # ── join_use_case_graph ───────────────────────────────────────────────────
 
 
@@ -604,9 +681,9 @@ def test_join_never_flips_an_unproven_node_to_consumer_compiled() -> None:
     joined_node_by_id = {n.id: n for n in joined.nodes}
     entry = joined_node_by_id["decl://dispatch"]
     assert {f.producer for f in entry.facts} >= {USE_CASE_PROVENANCE, "call_graph"}
-    assert (
-        is_consumer_compiled_node("decl://dispatch", joined_node_by_id) is False
-    ), "a use-case reference must never make an unproven node look consumer-compiled"
+    assert is_consumer_compiled_node("decl://dispatch", joined_node_by_id) is False, (
+        "a use-case reference must never make an unproven node look consumer-compiled"
+    )
 
 
 def test_join_never_flips_a_tied_unknown_confidence_node_either() -> None:
@@ -644,9 +721,9 @@ def test_join_never_flips_a_tied_unknown_confidence_node_either() -> None:
     entry = joined_node_by_id["decl://dispatch"]
     assert {f.producer for f in entry.facts} >= {USE_CASE_PROVENANCE, "kythe"}
     assert entry.provenance == "kythe"
-    assert (
-        is_consumer_compiled_node("decl://dispatch", joined_node_by_id) is False
-    ), "a tied-confidence use-case placeholder must never win the provenance tiebreak"
+    assert is_consumer_compiled_node("decl://dispatch", joined_node_by_id) is False, (
+        "a tied-confidence use-case placeholder must never win the provenance tiebreak"
+    )
 
 
 def test_join_does_not_mutate_the_library_graph() -> None:

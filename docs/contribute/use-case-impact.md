@@ -11,13 +11,15 @@ generated: false
 
 # Use-Case Impact
 
-> **Library-only preview, no CLI/report surface yet.** This page describes a
-> graph-building capability reachable only through the Python API
-> (`abicheck.impact.use_cases`) — there is no CLI flag that reads the
-> manifest, no report field, and no finding kind. It moved here from the
-> User Guide because it isn't yet a supported end-user workflow (see "What
-> this does not cover yet" below); it will move back once at least one of
-> those surfaces exists.
+> **Preview: manifest validation has a CLI front door, graph enrichment does
+> not yet.** `abicheck project validate-use-cases` (below) checks a
+> manifest's structure and, given a snapshot, reports which entrypoints
+> resolve — but there is still no `dump`/`compare` flag that folds the
+> manifest into a comparison, no report field, and no finding kind. It stays
+> here rather than moving to the User Guide because it isn't yet a
+> supported end-user *impact-analysis* workflow (see "What this does not
+> cover yet" below); it will move back once at least one of those surfaces
+> exists.
 
 An optional `impact-use-cases.yaml` manifest lets you declare a project's own
 business/runtime use cases — "the training workflow", "the batch export
@@ -28,11 +30,45 @@ promotes the manifest to graph facts and joins them onto the library's own
 
 This is [G29 Phase 4 slice 2](../contribute/plans/g29-impact-analysis-layer.md),
 amending [ADR-057](../contribute/adr/057-consumer-graph-and-impact-join.md).
-It is a **graph-building** feature only: `abicheck.impact.use_cases` parses
-the manifest and builds/joins the graph facts. There is no CLI flag reading
-this manifest yet, no `affected_use_cases` report field, and no
-`USE_CASE_IMPACT_CONFIRMED` finding — see "What this does not cover yet"
-below.
+It is primarily a **graph-building** feature: `abicheck.impact.use_cases`
+parses the manifest and builds/joins the graph facts. `abicheck project
+validate-use-cases <manifest> [--against <snapshot>]` is its first CLI
+surface — it validates the manifest and, given `--against`, reports which
+declared entrypoints resolve against a real snapshot's source graph, but it
+does not fold the manifest into a `compare`/`dump` run. There is still no
+`affected_use_cases` report field and no `USE_CASE_IMPACT_CONFIRMED`
+finding — see "What this does not cover yet" below.
+
+## Checking a manifest with the CLI
+
+```console
+$ abicheck project validate-use-cases impact-use-cases.yaml
+use-case manifest validation: impact-use-cases.yaml
+OK — 2 use case(s), structurally well-formed.
+
+$ abicheck project validate-use-cases impact-use-cases.yaml --against libtraining.abi.json
+use-case manifest validation: impact-use-cases.yaml
+OK — 2 use case(s), structurally well-formed.
+Resolved against: libtraining.abi.json
+  training workflow:
+    resolved: train, evaluate
+    unresolved (not evidence they don't exist): legacy_train_v1
+    tests: test_train_e2e
+```
+
+Without `--against`, only the manifest's own structure is checked (a
+non-mapping entry, an unrecognized field, or a missing `use_case` name is a
+usage error, exit 64). With `--against <snapshot>` — a `dump --sources`/
+`--build-info` snapshot, or any snapshot carrying the always-on header-only
+graph — each use case's `entrypoints` are resolved against that snapshot's
+own source graph, reusing the exact same join `build_use_case_graph`
+performs internally, so the report can never disagree with what a real
+comparison would see. An unresolved entrypoint is reported, never treated
+as a command failure — the same "absence is not evidence of a wrong answer"
+discipline the rest of this page documents (see "Declared vs. observed
+use" below); only a malformed manifest or a graph-less/unreadable
+`--against` snapshot exits non-zero. `--format json` emits the same report
+as structured JSON.
 
 ## Why a separate manifest from `usecase-registry.yaml`
 
@@ -187,9 +223,11 @@ governs everything").
 
 ## What this does not cover yet
 
-- **No CLI wiring.** There is no `dump`/`compare` flag that reads
-  `impact-use-cases.yaml` today. The Python API above is the only way to
-  build and join a use-case graph in this slice.
+- **No `dump`/`compare` wiring.** `abicheck project validate-use-cases`
+  (above) validates a manifest and resolves entrypoints against one
+  snapshot, but no `dump`/`compare` flag folds the manifest into an actual
+  ABI comparison — the Python API is still the only way to build and join a
+  use-case graph as part of a real diff in this slice.
 - **No report field.** `impact_assessment` (see
   [Unified Impact Assessment](../learn/impact-analysis.md)) has no
   `affected_use_cases` field yet — the use-case graph exists as evidence a

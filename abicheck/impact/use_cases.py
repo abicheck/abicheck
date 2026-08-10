@@ -412,6 +412,61 @@ def _public_entry_index(library_graph: SourceGraphSummary) -> dict[str, str]:
     return index
 
 
+@dataclass(frozen=True)
+class UseCaseResolution:
+    """Per-use-case entrypoint resolution against a real library graph —
+    the read view :func:`resolve_use_case_entrypoints` returns.
+
+    Deliberately a *report*, not a graph: ``build_use_case_graph`` already
+    silently skips an unresolvable ``entrypoints`` value by design (this
+    module's own "absence, never a wrong answer" discipline — see its
+    docstring), which is correct for graph construction but leaves a
+    manifest author with zero visibility into *which* of their declared
+    entrypoints actually matched anything. This dataclass is that missing
+    visibility, for a caller (``project validate-use-cases``) that wants to
+    report it without changing what the graph itself records.
+    """
+
+    use_case: str
+    resolved_entrypoints: tuple[str, ...] = ()
+    unresolved_entrypoints: tuple[str, ...] = ()
+    tests: tuple[str, ...] = ()
+
+
+def resolve_use_case_entrypoints(
+    definitions: list[UseCaseDefinition], library_graph: SourceGraphSummary
+) -> list[UseCaseResolution]:
+    """Resolve every definition's ``entrypoints`` against *library_graph*,
+    reporting which matched and which didn't — a read-only companion to
+    :func:`build_use_case_graph`, not a replacement for it.
+
+    Reuses :func:`_public_entry_index` (the exact same resolution
+    :func:`build_use_case_graph` performs) so this can never disagree with
+    what the graph actually ends up recording — a manifest entrypoint this
+    function reports as resolved is guaranteed to be exactly the set
+    :func:`build_use_case_graph` would silently keep, and one reported
+    unresolved is exactly the set it would silently skip. Order preserved
+    from *definitions*; a use case's own ``resolved_entrypoints``/
+    ``unresolved_entrypoints`` preserve the manifest's declared order too
+    (not sorted), so a report reads in the same order the manifest author
+    wrote it.
+    """
+    entries = _public_entry_index(library_graph)
+    resolutions: list[UseCaseResolution] = []
+    for definition in definitions:
+        resolved = tuple(e for e in definition.entrypoints if e in entries)
+        unresolved = tuple(e for e in definition.entrypoints if e not in entries)
+        resolutions.append(
+            UseCaseResolution(
+                use_case=definition.use_case,
+                resolved_entrypoints=resolved,
+                unresolved_entrypoints=unresolved,
+                tests=definition.tests,
+            )
+        )
+    return resolutions
+
+
 def build_use_case_graph(
     definitions: list[UseCaseDefinition], library_graph: SourceGraphSummary
 ) -> SourceGraphSummary:

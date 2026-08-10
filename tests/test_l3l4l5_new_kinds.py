@@ -28,6 +28,7 @@ import pytest
 from abicheck.buildsource.adapters.base import derive_build_options
 from abicheck.buildsource.build_diff import diff_build_evidence
 from abicheck.buildsource.build_evidence import BuildEvidence, CompileUnit
+from abicheck.buildsource.inline_graph_fold import _role_coverage_key
 from abicheck.buildsource.source_abi import SourceAbiSurface, SourceEntity
 from abicheck.buildsource.source_diff import diff_source_abi
 from abicheck.buildsource.source_graph import GraphEdge, GraphNode, SourceGraphSummary
@@ -313,9 +314,7 @@ def test_l4_scoped_cxx_name_without_mangled_name_still_reports_removal() -> None
         reachable_declarations=[_keeper()],
         roots={"exported_symbols": ["Widget::helper"]},
     )
-    assert ChangeKind.INLINE_FUNCTION_REMOVED.value in _kinds(
-        diff_source_abi(old, new)
-    )
+    assert ChangeKind.INLINE_FUNCTION_REMOVED.value in _kinds(diff_source_abi(old, new))
 
 
 def test_l4_inline_to_out_of_line_is_not_a_removal() -> None:
@@ -782,6 +781,118 @@ def test_l5_internal_dep_flags_new_kind_within_already_covered_family() -> None:
         nodes=nodes,
         edges=base + [_E("pub", "priv_type", "TYPE_HAS_FIELD_TYPE")],
         extractor_passes={"type_graph": True},
+    )
+    kinds = _graph_kinds(old, new)
+    assert ChangeKind.PUBLIC_API_INTERNAL_DEPENDENCY_ADDED.value in kinds
+
+
+def test_l5_internal_dep_skipped_on_new_role_within_already_covered_kind() -> None:
+    # Codex P1 review on PR #712: the *kind*-level family flag confirms
+    # nothing about which ROLE_COVERAGE_MATRIX roles a given producer version
+    # actually looked for under that kind. The old side here is a graph
+    # collected before G29 Phase 5 item 5 added the `template_param` role to
+    # DECL_HAS_TYPE — it confirms the type-graph pass ran (the coarse family
+    # flag), but its own extractor_passes carries no
+    # "type_graph:DECL_HAS_TYPE:template_param" key at all, since that
+    # producer version never emitted or tracked that role. The new side is
+    # collected by a version that does, and for the first time emits a
+    # DECL_HAS_TYPE edge to a previously-unreached private type via that new
+    # role. Reported unchanged, this is a false PUBLIC_API_INTERNAL_DEPENDENCY_
+    # ADDED purely from the collector upgrade — no real code change.
+    nodes = [
+        _N("hdr", "header", "api.h"),
+        _N("pub", "source_decl", "pub()"),
+        _N("sym", "binary_symbol", "pub"),
+        _N(
+            "priv_type",
+            "record_type",
+            "detail::PrivateType",
+            visibility="private_header",
+        ),
+    ]
+    base = [
+        _E("pub", "sym", "SOURCE_DECL_MAPS_TO_SYMBOL"),
+        _E("hdr", "pub", "SOURCE_DECLARES"),
+    ]
+    old = SourceGraphSummary(
+        # Pre-G29-Phase-5-item-5 producer: family flag only, no role keys.
+        nodes=nodes,
+        edges=base,
+        extractor_passes={"type_graph": True},
+    )
+    new = SourceGraphSummary(
+        # Post-item-5 producer: family flag plus the new role's own key,
+        # and a first-ever edge riding that new role.
+        nodes=nodes,
+        edges=base + [_E("pub", "priv_type", "DECL_HAS_TYPE")],
+        extractor_passes={
+            "type_graph": True,
+            _role_coverage_key("type_graph", "DECL_HAS_TYPE", "template_param"): True,
+        },
+    )
+    kinds = _graph_kinds(old, new)
+    assert ChangeKind.PUBLIC_API_INTERNAL_DEPENDENCY_ADDED.value not in kinds
+
+
+def test_l5_internal_dep_flags_new_edge_when_role_coverage_agrees() -> None:
+    # The positive counterpart: when both sides confirm the *same* role key
+    # (same abicheck version on both sides, or two independently-run same-
+    # version collections), a first-ever edge under that role is a genuine
+    # new dependency, not a coverage artifact — the role-coverage filter must
+    # not blanket-suppress every DECL_HAS_TYPE addition, only the ones where
+    # old and new disagree on whether the role was even examined.
+    nodes = [
+        _N("hdr", "header", "api.h"),
+        _N("pub", "source_decl", "pub()"),
+        _N("sym", "binary_symbol", "pub"),
+        _N(
+            "priv_type",
+            "record_type",
+            "detail::PrivateType",
+            visibility="private_header",
+        ),
+    ]
+    base = [
+        _E("pub", "sym", "SOURCE_DECL_MAPS_TO_SYMBOL"),
+        _E("hdr", "pub", "SOURCE_DECLARES"),
+    ]
+    passes = {
+        "type_graph": True,
+        _role_coverage_key("type_graph", "DECL_HAS_TYPE", "template_param"): True,
+    }
+    old = SourceGraphSummary(nodes=nodes, edges=base, extractor_passes=dict(passes))
+    new = SourceGraphSummary(
+        nodes=nodes,
+        edges=base + [_E("pub", "priv_type", "DECL_HAS_TYPE")],
+        extractor_passes=dict(passes),
+    )
+    kinds = _graph_kinds(old, new)
+    assert ChangeKind.PUBLIC_API_INTERNAL_DEPENDENCY_ADDED.value in kinds
+
+
+def test_role_coverage_disagrees_is_a_noop_for_kinds_outside_the_matrix() -> None:
+    # DECL_CALLS_DECL (the call_graph family) has no ROLE_COVERAGE_MATRIX
+    # entry at all, so a version-skew scenario identical in shape to the
+    # DECL_HAS_TYPE case above must still be flagged normally — the new
+    # role-coverage filter only ever narrows the type_graph family kinds it
+    # actually tracks, never call_graph's.
+    nodes = [
+        _N("hdr", "header", "api.h"),
+        _N("pub", "source_decl", "pub()"),
+        _N("sym", "binary_symbol", "pub"),
+        _N("intn", "source_decl", "intn()", visibility="private_header"),
+    ]
+    base = [
+        _E("pub", "sym", "SOURCE_DECL_MAPS_TO_SYMBOL"),
+        _E("hdr", "pub", "SOURCE_DECLARES"),
+    ]
+    old = SourceGraphSummary(
+        nodes=nodes, edges=base, extractor_passes={"call_graph": True}
+    )
+    new = SourceGraphSummary(
+        nodes=nodes,
+        edges=base + [_E("pub", "intn", "DECL_CALLS_DECL")],
+        extractor_passes={"call_graph": True},
     )
     kinds = _graph_kinds(old, new)
     assert ChangeKind.PUBLIC_API_INTERNAL_DEPENDENCY_ADDED.value in kinds

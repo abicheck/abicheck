@@ -392,6 +392,25 @@ Validate DIRECTORY's build-output.json (ADR-047 §11.1).
 | `--output`, `-o` | no | — | Write output to this path (default: stdout). |
 | `--verbose`, `-v` | no | `False` | Enable verbose/debug output. |
 
+### `project validate-use-cases`
+
+Validate MANIFEST, an ``impact-use-cases.yaml`` file (G29 Phase 4, ADR-057 amendment; see docs/contribute/use-case-impact.md).
+
+**Arguments**
+
+| Name | Required | Description |
+|---|:--:|---|
+| `manifest` | yes |  |
+
+**Options**
+
+| Option | Required | Default | Description |
+|---|:--:|---|---|
+| `--against` | no | — | A dumped .abi.json snapshot (dump --sources/--build-info, or one carrying the always-on header-only graph) to resolve MANIFEST's entrypoints against. Without it, only the manifest's own structure is checked — no entrypoint is resolved or reported as unresolved. |
+| `--format` | no | `text` | Output format for the validation report. Choices: `text`, `json`. |
+| `--output`, `-o` | no | — | Write output to this path (default: stdout). |
+| `--verbose`, `-v` | no | `False` | Enable verbose/debug output. |
+
 ## `scan`
 
 Deterministic source-intelligence scan (classify → always-on tier → level).

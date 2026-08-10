@@ -283,6 +283,150 @@ def project_validate_build_cmd(
 
 
 # --------------------------------------------------------------------------
+# project validate-use-cases  (G29 Phase 4, ADR-057 amendment)
+# --------------------------------------------------------------------------
+
+
+@project_group.command("validate-use-cases")
+@click.argument(
+    "manifest",
+    type=click.Path(exists=True, dir_okay=False, path_type=Path),
+)
+@click.option(
+    "--against",
+    "against",
+    type=click.Path(exists=True, dir_okay=False, path_type=Path),
+    default=None,
+    help="A dumped .abi.json snapshot (dump --sources/--build-info, or one "
+    "carrying the always-on header-only graph) to resolve MANIFEST's "
+    "entrypoints against. Without it, only the manifest's own structure is "
+    "checked — no entrypoint is resolved or reported as unresolved.",
+)
+@output_options(
+    ["text", "json"],
+    default="text",
+    format_help="Output format for the validation report.",
+)
+@verbose_option
+def project_validate_use_cases_cmd(
+    manifest: Path,
+    against: Path | None,
+    fmt: str,
+    output: Path | None,
+    verbose: bool,
+) -> None:
+    """Validate MANIFEST, an ``impact-use-cases.yaml`` file (G29 Phase 4,
+    ADR-057 amendment; see docs/contribute/use-case-impact.md).
+
+    Checks the manifest is a well-formed YAML list of use cases (a
+    non-mapping entry, an unrecognized field, or a missing/blank
+    ``use_case`` name is a usage error). With ``--against``, additionally
+    resolves each use case's declared ``entrypoints`` against the
+    snapshot's own source graph and reports, per use case, which
+    entrypoints matched a real public entry point and which didn't —
+    exactly the resolution :func:`abicheck.impact.use_cases.
+    build_use_case_graph` performs silently when folding the manifest into
+    a real comparison, given visibility here for the first time. An
+    unresolved entrypoint is reported, never treated as a failure: per
+    this manifest format's own documented discipline, an entrypoint the
+    graph can't yet resolve is not evidence the entrypoint doesn't exist
+    (a header-only graph, a not-yet-covered declaration, or simply a typo
+    all look identical from here) — see the module's own docstring.
+
+    \b
+    Exit codes:
+      0   Valid — manifest is well-formed (some entrypoints may be
+          unresolved; that is reported, not a failure).
+      64  Usage error (MANIFEST is malformed, or AGAINST has no source
+          graph to resolve against).
+    """
+    _setup_verbosity(verbose)
+
+    from .errors import UseCaseManifestError
+    from .impact.use_cases import (
+        UseCaseResolution,
+        load_use_case_manifest,
+        resolve_use_case_entrypoints,
+    )
+
+    try:
+        definitions = load_use_case_manifest(manifest)
+    except UseCaseManifestError as exc:
+        raise click.UsageError(str(exc)) from exc
+
+    resolutions: list[UseCaseResolution] | None = None
+    if against is not None:
+        from .serialization import load_snapshot
+
+        try:
+            snapshot = load_snapshot(against)
+        except Exception as exc:
+            # Broad by necessity, not laziness: AGAINST is arbitrary
+            # user-supplied JSON, and snapshot_from_dict's own raise surface
+            # for a malformed document isn't a closed set (KeyError for a
+            # missing required field, TypeError/ValueError for a wrong-typed
+            # one, json.JSONDecodeError for invalid JSON, OSError for a
+            # read failure) — every one of them means the same thing here:
+            # a usage error, not an internal crash to show a traceback for.
+            raise click.UsageError(f"cannot read {against}: {exc}") from exc
+        build_source = getattr(snapshot, "build_source", None)
+        library_graph = getattr(build_source, "source_graph", None)
+        if library_graph is None:
+            raise click.UsageError(
+                f"{against} carries no source graph to resolve against "
+                "(dump with --sources/--build-info, or ensure the "
+                "always-on header-only graph attached)."
+            )
+        resolutions = resolve_use_case_entrypoints(definitions, library_graph)
+
+    if fmt == "json":
+        payload: dict[str, object] = {
+            "manifest": str(manifest),
+            "ok": True,
+            "use_case_count": len(definitions),
+        }
+        if against is not None:
+            payload["against"] = str(against)
+        if resolutions is not None:
+            payload["use_cases"] = [
+                {
+                    "use_case": r.use_case,
+                    "resolved_entrypoints": list(r.resolved_entrypoints),
+                    "unresolved_entrypoints": list(r.unresolved_entrypoints),
+                    "tests": list(r.tests),
+                }
+                for r in resolutions
+            ]
+        text = json.dumps(payload, indent=2)
+    else:
+        lines = [f"use-case manifest validation: {manifest}"]
+        lines.append(f"OK — {len(definitions)} use case(s), structurally well-formed.")
+        if resolutions is not None:
+            lines.append(f"Resolved against: {against}")
+            for r in resolutions:
+                lines.append(f"  {r.use_case}:")
+                if r.resolved_entrypoints:
+                    lines.append(f"    resolved: {', '.join(r.resolved_entrypoints)}")
+                if r.unresolved_entrypoints:
+                    lines.append(
+                        "    unresolved (not evidence they don't exist): "
+                        f"{', '.join(r.unresolved_entrypoints)}"
+                    )
+                if not r.resolved_entrypoints and not r.unresolved_entrypoints:
+                    lines.append("    (no entrypoints declared)")
+                if r.tests:
+                    lines.append(f"    tests: {', '.join(r.tests)}")
+        text = "\n".join(lines)
+
+    if output is not None:
+        _safe_write_output(output, text)
+    else:
+        click.echo(text)
+
+    sys.exit(0)
+
+
+# --------------------------------------------------------------------------
 # project plan  (was: run-plan generate)
 # --------------------------------------------------------------------------
 

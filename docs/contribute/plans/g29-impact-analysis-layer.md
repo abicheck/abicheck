@@ -659,9 +659,21 @@ decisions.
   (deep-copy join, mirroring `consumer_graph`'s slice 1 API/discipline
   exactly). Only `USE_CASE_USES_ENTRY`/`TEST_COVERS_USE_CASE` are populated;
   `TRACE_OBSERVED_ENTRY`/`TRACE_OBSERVED_EDGE` stay reserved — **runtime-trace
-  ingestion itself is still not implemented**, and neither is any CLI flag
-  reading the manifest or report-level field/finding consuming the joined
-  graph (that's G29 Phase 6's `USE_CASE_IMPACT_CONFIRMED`).
+  ingestion itself is still not implemented**. **Done** (this pass): the
+  manifest's first CLI front door, `abicheck project validate-use-cases
+  <manifest> [--against <snapshot>]` (`cli_project.py`) — without `--against`
+  it only validates the manifest's own structure (malformed document, exit
+  64); with it, it resolves each declared use case's entrypoints against a
+  real embedded L5 graph and reports resolved vs. unresolved per use case
+  (text or `--format json`), reusing the new
+  `resolve_use_case_entrypoints()` wrapper around
+  `build_use_case_graph`'s own internal join so the CLI can never disagree
+  with what the graph actually records. An unresolved entrypoint is never a
+  command failure (only a malformed manifest or a graph-less/unreadable
+  `--against` snapshot is), matching the manifest format's own
+  absence-is-not-evidence discipline. Still not done: any report-level
+  field/finding actually *consuming* the joined graph (that's G29 Phase 6's
+  `USE_CASE_IMPACT_CONFIRMED`) and runtime-trace ingestion.
 - `docs/contribute/use-case-impact.md` (new, **done**): manifest format, entrypoint
   mapping, test association, declared-vs-observed use (**trace ingestion
   itself remains unimplemented** — documented honestly as not-yet-built, not
@@ -1569,6 +1581,36 @@ the existing `type_graph.py` walk.
      non-emissions are pinned by integration tests against the compiler
      itself, so a future clang that *does* carry them fails a test instead of
      leaving a silent gap.
+   - **A real collector-upgrade false positive was found and fixed as a
+     direct consequence of adding these three roles (Codex P1 review on PR
+     #712, confirmed by direct reproduction).** `ROLE_COVERAGE_MATRIX`/
+     `role_pass_covered()` (ADR-046 D3, Phase 2) was built for exactly this
+     situation but had **zero production consumers** — only ever stamped by
+     `inline_graph_fold._mark_role_coverage`, never read by
+     `source_graph_findings._common_dependency_edge_kinds()`, the function
+     that actually decides which dependency-edge kinds are safe to
+     version-diff. That function trusts a whole `TYPE_HAS_FIELD_TYPE`/
+     `DECL_HAS_TYPE` family once both sides confirm the coarse
+     `extractor_passes["type_graph"]` flag — so a persisted graph collected
+     *before* this item's three new roles existed (flag set, no role key,
+     since that producer version never emitted or tracked them) compared
+     against one collected *after* (flag set, role key set, first-ever edge
+     riding the new role) reported a false `PUBLIC_API_INTERNAL_DEPENDENCY_
+     ADDED` purely from re-running a newer abicheck version over unchanged
+     source. Fixed with `_role_coverage_disagrees()`, a final, isolated,
+     monotonic (subtraction-only) filter over
+     `_common_dependency_edge_kinds()`'s existing result: a kind stays
+     trusted only when both sides' `extractor_passes`/`narrowed_passes`
+     agree, role key by role key, on which `ROLE_COVERAGE_MATRIX` roles were
+     actually examined — read directly with no family-flag fallback, since
+     that fallback is exactly what let an absent role key silently read as
+     "covered." Verified: the version-skew repro now produces zero findings;
+     a same-version repro (both sides confirm the same role key) still
+     correctly produces one; the full relevant test suite (683 pre-existing
+     tests across 12 files) shows zero regressions; three new dedicated
+     regression tests pin both directions plus a control case (a kind
+     outside `ROLE_COVERAGE_MATRIX`, e.g. `DECL_CALLS_DECL`, is unaffected)
+     in `tests/test_l3l4l5_new_kinds.py`.
    - **Concept/constraint dependency — investigated, deliberately NOT
      implemented, evidence recorded so the follow-up doesn't re-derive it.**
      A public template constrained by an internal concept (`template
