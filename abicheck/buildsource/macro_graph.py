@@ -407,6 +407,40 @@ _ELIF_RE = re.compile(r"^\s*#\s*elif\b")
 _ELSE_RE = re.compile(r"^\s*#\s*else\b")
 _ENDIF_RE = re.compile(r"^\s*#\s*endif\b")
 
+#: A same-line-CLOSED leading block comment, greedy-minimal so
+#: ``/* a */ /* b */ #ifdef X`` strips both in one pass via repeated
+#: application (see :func:`_strip_leading_inline_comment`). Deliberately
+#: does not attempt a ``//`` line comment: a genuine ``// #ifdef X`` line
+#: has its directive commented out for real (nothing follows to strip down
+#: to), unlike a real compiler which still parses whatever text follows a
+#: ``/* ... */`` that closes on the same line.
+_LEADING_INLINE_BLOCK_COMMENT_RE = re.compile(r"^\s*/\*.*?\*/")
+
+
+def _strip_leading_inline_comment(line: str) -> str:
+    """Strip every same-line-closed leading ``/* ... */`` block comment (and
+    the whitespace around it) from *line* (Codex review, fresh evidence): a
+    real compiler treats a comment as whitespace, so ``/* note */ #ifdef
+    X`` is a perfectly live directive -- but every directive-family regex
+    in this module is anchored ``^\\s*#``, which a leading, still-present
+    comment defeats outright. Reproduced empirically: this silently omitted
+    the guarded declaration's macro edge, and — worse — when nested, left
+    no stack frame for the un-recognized inner directive, so its own
+    ``#endif`` popped the *enclosing* guard's frame instead, truncating it
+    early (the same class of desync the ``#ifdef``/``#ifndef`` fallback fix
+    closed for a differently-shaped input). Only ever strips a comment that
+    both opens and closes on this one line — cross-line block-comment state
+    is :func:`_lines_starting_inside_block_comment`'s own, separate job,
+    already applied by every caller before this function ever runs, so a
+    comment left open past this line was already skipped upstream.
+    """
+    stripped = line
+    while True:
+        new = _LEADING_INLINE_BLOCK_COMMENT_RE.sub("", stripped, count=1)
+        if new == stripped:
+            return stripped
+        stripped = new
+
 
 def _lines_starting_inside_block_comment(text: str) -> list[bool]:
     """For each line of *text* (1-indexed, matching
@@ -540,6 +574,7 @@ def scan_conditional_regions(text: str) -> list[ConditionalRegion]:
     for lineno, line in enumerate(text.splitlines(), start=1):
         if in_comment[lineno - 1]:
             continue
+        line = _strip_leading_inline_comment(line)
         m = _IFDEF_RE.match(line)
         if m:
             stack.append(_GuardFrame(False, m.group(1), False, lineno + 1))
@@ -629,13 +664,18 @@ def _macro_definition_lines(text: str) -> dict[str, int]:
     here too): a ``#define`` line that starts inside an unterminated
     ``/* ... */`` block comment is not a real definition and must not be
     recorded, or a later real declaration could be treated as textually
-    "using" a macro that was only ever mentioned in a comment.
+    "using" a macro that was only ever mentioned in a comment. Also strips a
+    same-line-closed leading block comment (:func:`_strip_leading_inline_
+    comment`) before matching, so ``/* note */ #define X 1`` is recognized
+    the same way a real compiler (which treats the comment as whitespace)
+    would.
     """
     out: dict[str, int] = {}
     in_comment = _lines_starting_inside_block_comment(text)
     for lineno, line in enumerate(text.splitlines(), start=1):
         if in_comment[lineno - 1]:
             continue
+        line = _strip_leading_inline_comment(line)
         m = _DEFINE_RE.match(line)
         if m is None:
             continue

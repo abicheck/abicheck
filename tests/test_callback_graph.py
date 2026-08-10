@@ -178,6 +178,69 @@ class TestParseCallbacksRegistersCallback:
             )
         ]
 
+    def test_unnamed_parameter_gets_a_position_derived_identity(self) -> None:
+        """Codex review, fresh evidence: an unnamed callback parameter
+        (``void reg(void (*)(int));`` -- a common prototype-only
+        registration-API shape) has no ``mangledName``/``name`` for
+        ``call_graph._identity`` to read, so it resolved to the empty
+        string -- every unnamed callback slot in the whole codebase then
+        collapsed onto the SAME ``decl://`` node, making the otherwise
+        high-confidence registration edge ambiguous across unrelated APIs.
+        The slot identity is now derived from the callee's own identity plus
+        the parameter's 0-based position when the parameter itself is
+        unnamed."""
+        my_handler = _func_decl(
+            "my_handler", "F1", [_param("x", "int")], mangled="_Z10my_handleri"
+        )
+        reg = _func_decl(
+            "reg", "F2", [_param("", "void (*)(int)")], mangled="_Z3regPFviE"
+        )
+        call = _call(reg, [_addr_of(my_handler)])
+        use = _func_decl(
+            "use", "F3", extra_inner=[{"kind": "CompoundStmt", "inner": [call]}]
+        )
+        ast = _tu(my_handler, reg, use)
+
+        edges = parse_clang_ast_callbacks(ast)
+
+        assert edges == [
+            CallbackEdge(
+                "_Z10my_handleri",
+                "_Z3regPFviE#param0",
+                EDGE_DECL_REGISTERS_CALLBACK,
+                CONF_HIGH,
+                "void (*)(int)",
+            )
+        ]
+
+    def test_unnamed_parameters_at_different_callees_do_not_collide(self) -> None:
+        my_handler = _func_decl(
+            "my_handler", "F1", [_param("x", "int")], mangled="_Z10my_handleri"
+        )
+        other_handler = _func_decl(
+            "other_handler", "F2", [_param("x", "int")], mangled="_Z13other_handleri"
+        )
+        reg_a = _func_decl(
+            "reg_a", "F3", [_param("", "void (*)(int)")], mangled="_Z5reg_aPFviE"
+        )
+        reg_b = _func_decl(
+            "reg_b", "F4", [_param("", "void (*)(int)")], mangled="_Z5reg_bPFviE"
+        )
+        call_a = _call(reg_a, [_addr_of(my_handler)])
+        call_b = _call(reg_b, [_addr_of(other_handler)])
+        use = _func_decl(
+            "use",
+            "F5",
+            extra_inner=[{"kind": "CompoundStmt", "inner": [call_a, call_b]}],
+        )
+        ast = _tu(my_handler, other_handler, reg_a, reg_b, use)
+
+        edges = parse_clang_ast_callbacks(ast)
+
+        dsts = {e.dst for e in edges}
+        assert len(dsts) == 2, "unnamed slots at different callees must not collide"
+        assert dsts == {"_Z5reg_aPFviE#param0", "_Z5reg_bPFviE#param0"}
+
     @pytest.mark.parametrize(
         "cast_kind",
         [

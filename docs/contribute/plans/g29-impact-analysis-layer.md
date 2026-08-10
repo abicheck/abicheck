@@ -1294,6 +1294,38 @@ which all depend on a Clang AST pass.
      shape already failed to seed a plain `virtual void run()` with no
      override or inheritance anywhere in scope, via the pre-existing
      leaf-virtual-method seed, before this fix touched anything.
+   - **A seventeenth finding, confirmed real and fixed: a leading same-line
+     block comment before a real directive was never recognized.** A real
+     compiler treats `/* note */ #ifdef X` as a live directive (the comment
+     is whitespace to it), but `scan_conditional_regions`'s directive-family
+     regexes are all anchored `^\s*#`, so a leading, still-present comment
+     defeated every one of them — not just missing the guarded declaration's
+     macro edge, but, when nested, leaving no stack frame for the
+     un-recognized inner directive so its own `#endif` popped the enclosing
+     guard's frame instead (reproduced empirically: an `#ifdef OUTER` /
+     `/* note */ #ifdef INNER` / `#endif` / `#endif` nest truncated `OUTER`'s
+     region three lines early). Fixed with a new `_strip_leading_inline_
+     comment()`, applied identically in both `scan_conditional_regions` and
+     `_macro_definition_lines` — deliberately scoped to a comment that both
+     opens and closes on the same line (cross-line block-comment state is
+     `_lines_starting_inside_block_comment`'s own, separate, already-applied
+     job) and deliberately not `//` (a genuine `// #ifdef X` line has its
+     directive commented out for real, unlike a same-line-closed `/* */`).
+   - **An eighteenth finding, confirmed real and fixed: an unnamed callback
+     parameter collapsed every unrelated registration API onto one node.**
+     `void reg(void (*)(int));` — a common prototype-only registration
+     shape — has no `mangledName`/`name` for `call_graph._identity` to read,
+     so `_index_walk`'s per-parameter identity resolved to `""`; every
+     unnamed callback slot in the whole codebase then joined onto the
+     identical `decl://` node, making the otherwise high-confidence
+     `DECL_REGISTERS_CALLBACK` edge ambiguous across unrelated APIs.
+     Reproduced empirically (a hand-built two-callee fixture: both
+     `reg_a`/`reg_b`'s own unnamed slots joined onto one node before the
+     fix). Fixed by falling back to `f"{callee_identity}#param{position}"`
+     when the parameter's own identity is empty — safe because an unnamed
+     parameter can never be referenced by name from within its own function
+     body (or anywhere else), so the fallback only needs to be stably unique
+     per callee, never to match some other module's own identity scheme.
 5. **Full type-role coverage** to parity: variable type, typedef target,
    alias-template target, enum underlying type, non-type template argument,
    default template argument, concept/constraint dependency, function-pointer

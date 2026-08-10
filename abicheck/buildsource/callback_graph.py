@@ -459,9 +459,27 @@ def _index_walk(
             for child in node.get("inner", []) or []:
                 if isinstance(child, dict) and child.get("kind") == "ParmVarDecl":
                     type_obj = child.get("type")
+                    # An unnamed parameter (`void reg(void (*)(int));`, a
+                    # common prototype-only registration-API shape) has no
+                    # `mangledName`/`name` for call_graph._identity to read,
+                    # so it resolves to "" -- every unnamed callback slot in
+                    # the whole codebase would then collapse onto the SAME
+                    # decl://  node, making the otherwise high-confidence
+                    # registration edge ambiguous across unrelated APIs
+                    # (Codex review, fresh evidence). An unnamed parameter
+                    # can never be referenced by name from within its own
+                    # function body either, so nothing else in this module
+                    # (or call_graph.py's own function-pointer DECL_CALLS_
+                    # DECL resolution) can ever need this identity to MATCH
+                    # anything -- it only needs to be stably unique per
+                    # callee, which the callee's own identity plus this
+                    # parameter's 0-based position provides.
+                    param_ident = call_graph._identity(child) or (
+                        f"{ident}#param{len(params)}"
+                    )
                     params.append(
                         _ParamInfo(
-                            call_graph._identity(child),
+                            param_ident,
                             _effective_qualtype(type_obj),
                             _is_function_pointer(type_obj),
                         )
