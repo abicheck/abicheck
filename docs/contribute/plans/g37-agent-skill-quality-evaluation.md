@@ -144,9 +144,19 @@ envelope, and the runner extracts it into `claim.json`:
   of each, so an unrun cell is a recorded fact rather than an omission. Absent
   for a single-pair question, which has no matrix.
 - `evidence`, the call IDs from `calls.jsonl` the claim rests on.
-- `confident`, and when false, what is unresolved — this is what dimension 2
-  grades against, so an agent that correctly declines to answer has a way to
-  say so that scores as a pass rather than as a missing verdict.
+- `confident`, and when it is false, `uncertainty` — a **closed-vocabulary
+  reason**, one value per D4 uncertainty kind (`not_comparable`,
+  `evidence_too_shallow`, `matrix_target_unrun`, `contract_coverage_
+  incomplete`), plus the specific unresolved thing it refers to. A bare
+  boolean is not enough and would have quietly broken the zero-tolerance
+  gate: dimension 2 has to tell a *correctly caveated* shallow-evidence
+  answer from an arbitrary `confident: false`, and with only a flag the sole
+  way to do that is to read `final.md` — a prose parse, in the one place this
+  design least tolerates one. The typed reason is graded against the
+  artifact: the reason a claim gives must be one the recorded run actually
+  exhibits, so "unconfident for the wrong reason" fails rather than passing
+  as caution. Same lesson as `claim.verdict` — a field the grader must
+  interpret has to carry the distinction in its type, not in its prose.
 
 **Absent or ambiguous envelope fails dimension 6, closed.** Two envelopes, a
 verdict outside the vocabulary, or no envelope at all is "no verifiable claim,"
@@ -883,11 +893,20 @@ The shim, the four deterministic graders, `grade_bundle.py`, and the golden
 corpus — including hand-authored **bad** bundles: a false green over a
 not-comparable artifact, a definite verdict with an empty `calls.jsonl`, a run
 that reached green by adding a suppression, a correct verdict reached with the
-wrong evidence depth, and three that exercise the envelope's fail-closed path
+wrong evidence depth, one that silently drops an unrun matrix target while
+reporting the executed cells' verdict, one that silently drops a
+contract-coverage failure, and three that exercise the envelope's fail-closed
+path
 (no envelope, two envelopes, a verdict outside the vocabulary). One further
 bundle claims `COMPATIBLE` where the artifact says `API_BREAK` — the case a
 verdict-word regex over prose would have passed and a typed `claim.verdict`
-catches, which is the whole reason the envelope exists.
+catches, which is the whole reason the envelope exists. The two
+uncertainty-branch bundles are there for the same reason and are easy to skip:
+D5 gives each of dimension 2's four kinds a *correct* scenario, which proves
+only that valid output passes — nothing there demonstrates the grader rejects
+the matching false-green, so a regression in either branch would survive both
+L4 and committed-evidence replay. Every zero-tolerance branch needs a negative
+fixture, not just a positive one.
 
 **Each bundle asserts an expected failure *set*, not a single dimension.** The
 dimensions genuinely overlap, and that overlap is correct behaviour rather than
@@ -1075,8 +1094,10 @@ So Phase 0 carries **two** round-trip checks over one list of inputs:
 2. **Mapping** — every such hash resolves to a set of skills, so a moved hash
    always nominates something to re-run.
 
-Both derive from the same declared input list, so an input added later fails
-one check or the other rather than silently escaping both — which is what
+Completeness is derived from the **accessor-observed** set, never from a
+declaration; the declared mapping is used only to resolve each observed input
+to a hash and to the skills it affects. So an input added later fails one
+check or the other rather than silently escaping both — which is what
 stops this class recurring, having now recurred twice in each direction.
 
 Deterministic rotation was considered and rejected for the wide cases: a
