@@ -167,6 +167,20 @@ class TestClaimExtraction:
         assert parsed is None
         assert status.startswith("invalid")
 
+    def test_an_omitted_evidence_field_is_not_an_empty_list(self):
+        """Schema-required. Defaulting it let a `null`-verdict envelope omit it
+        and grade clean, because dimension 6 checks evidence only for a stated
+        verdict."""
+        parsed, status = claim_mod.extract(
+            envelope(
+                verdict=None,
+                confident=False,
+                uncertainty={"reason": "not_comparable", "unresolved": "no contract"},
+            )
+        )
+        assert parsed is None
+        assert "evidence is missing" in status
+
     def test_the_severity_ordinal_is_least_to_most_severe(self):
         ranks = [claim_mod.rank(v) for v in claim_mod.VERDICT_ORDER]
         assert ranks == sorted(ranks)
@@ -239,6 +253,21 @@ class TestEvidenceReading:
         ):
             call = {"argv": ["compare", "a", "b", flag, "error"]}
             assert ev.suppression_flags(call) == [flag], flag
+
+    def test_comparing_one_operand_against_itself_is_detected(self):
+        assert ev.compares_one_side_against_itself(
+            {"argv": ["compare", "v1.so", "v1.so"]}
+        )
+        assert not ev.compares_one_side_against_itself(
+            {"argv": ["compare", "v1.so", "v2.so"]}
+        )
+
+    def test_a_repeated_option_value_is_not_mistaken_for_a_self_comparison(self):
+        """Only *adjacent equal* non-flag tokens count, so a value repeated
+        elsewhere in the command line does not fail a correct run."""
+        assert not ev.compares_one_side_against_itself(
+            {"argv": ["compare", "v1.so", "v2.so", "--format", "json", "-o", "json"]}
+        )
 
     def test_suppression_flags_are_seen_in_both_spellings(self):
         call = {"argv": ["compare", "a", "b", "--suppress", "x", "--policy-file=y"]}
@@ -559,6 +588,17 @@ class TestDimensionThree:
         )
         assert dim.dimension_3(run, ev.load_calls(run)).status == "pass"
 
+    def test_comparing_a_side_against_itself_is_not_evidence(self, tmp_path):
+        """It exits cleanly with a verdict while comparing nothing."""
+        run = build_run(
+            tmp_path,
+            final="",
+            calls=[a_breaking_call(argv=["compare", "v1.so", "v1.so"])],
+        )
+        result = dim.dimension_3(run, ev.load_calls(run))
+        assert result.status == "fail"
+        assert "against itself" in result.reasons[0]
+
     def test_one_real_comparison_is_enough(self, tmp_path):
         run = build_run(tmp_path, final="", calls=[a_breaking_call()])
         assert dim.dimension_3(run, ev.load_calls(run)).status == "pass"
@@ -660,6 +700,18 @@ class TestDimensionSix:
         )
         assert result.status == "fail"
 
+    def test_citing_a_self_comparison_does_not_ground_a_claim(self, tmp_path):
+        """Overstating severity is allowed, so without this an agent could cite
+        `compare x x` on a breaking scenario, claim BREAKING, and pass every
+        deterministic check having compared nothing."""
+        result = self._grade(
+            tmp_path,
+            envelope(verdict="BREAKING", evidence=[0], confident=True),
+            SCENARIO_BREAKING,
+            calls=[a_breaking_call(argv=["compare", "v1.so", "v1.so"])],
+        )
+        assert result.status == "fail"
+
     def test_no_envelope_is_no_verifiable_claim(self, tmp_path):
         result = self._grade(tmp_path, "It looks fine to me.", SCENARIO_BREAKING)
         assert result.status == "fail"
@@ -682,6 +734,22 @@ class TestDimensionSix:
             calls=[call],
         )
         assert result.status == "fail"
+        assert any("suppression-shaped flags" in r for r in result.reasons)
+
+    def test_suppression_on_an_already_green_scenario_is_recorded_not_failed(
+        self, tmp_path
+    ):
+        """`--policy-file` is documented, normal usage. Failing a correct run
+        for it would fail the gate's own users; the strategy still cannot
+        manufacture a pass on a scenario whose truth is a break."""
+        call = a_breaking_call(argv=["compare", "a", "b", "--policy-file", "p.yaml"])
+        result = self._grade(
+            tmp_path,
+            envelope(verdict="COMPATIBLE", evidence=[0], confident=True),
+            SCENARIO_COMPATIBLE,
+            calls=[call],
+        )
+        assert result.status == "pass"
         assert any("suppression-shaped flags" in r for r in result.reasons)
 
     def test_suppression_alongside_a_correct_severe_claim_is_recorded_not_failed(

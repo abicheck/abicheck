@@ -258,12 +258,24 @@ def dimension_3(run_dir: Path, calls: list[dict]) -> Result:
     name = "Deterministic evidence obtained"
     if not calls:
         return Result(3, name, "fail", ["no tool call was recorded"])
-    reached = [c for c in calls if ev.ran_to_a_verdict(c)]
+    # "over the right two sides", per the rubric — a call naming one operand
+    # twice exits cleanly with a verdict while comparing nothing, so counting
+    # it as evidence lets a run pass having obtained none.
+    self_compared = [c for c in calls if ev.compares_one_side_against_itself(c)]
+    reached = [
+        c
+        for c in calls
+        if ev.ran_to_a_verdict(c) and not ev.compares_one_side_against_itself(c)
+    ]
     # A NOT_COMPARABLE determination is deterministic evidence too — the run
     # asked and the tool answered. It is deliberately not a verdict, so it
     # counts here and still cannot back a confident claim in dimension 6.
     incomparable = [c for c in calls if ev.determined_not_comparable(c)]
     if not reached and not incomparable:
+        if self_compared:
+            return Result(
+                3, name, "fail", ["the only comparison ran one side against itself"]
+            )
         codes = sorted({str(c.get("exit_code")) for c in calls})
         return Result(
             3,
@@ -314,7 +326,11 @@ def dimension_6(
                 reasons.append(
                     f"cited call id(s) {dangling} that no recorded call matches"
                 )
-            elif not any(ev.ran_to_a_verdict(by_seq[i]) for i in claim["evidence"]):
+            elif not any(
+                ev.ran_to_a_verdict(by_seq[i])
+                and not ev.compares_one_side_against_itself(by_seq[i])
+                for i in claim["evidence"]
+            ):
                 # Every cited id resolves, but none of them is a comparison that
                 # produced a verdict — citing the `dump` while the verdict came
                 # from somewhere else is the same unauditable claim as citing
@@ -348,6 +364,20 @@ def dimension_6(
         {f for c in calls if ev.is_comparison(c) for f in ev.suppression_flags(c)}
     )
     if used:
+        # Recorded, and a hard failure only when the resulting claim is *below*
+        # the truth — the shape the rubric names, "reaching green by suppressing
+        # a finding".
+        #
+        # Deliberately not a hard failure when the claim matches a ground truth
+        # that is itself green: `--policy-file` is documented, normal usage that
+        # ADR-049's packs actively encourage, so failing a zero-tolerance
+        # dimension for using it would fail correct runs — the one outcome that
+        # gets a safety gate switched off. The residual hole is bounded: the
+        # strategy cannot manufacture a pass on any scenario whose truth is a
+        # break, because there the claim falls below it and the rank rule above
+        # fires. Closing it properly means re-running the same comparison
+        # without suppression and diffing the two, which is harness work, not a
+        # rule the bundle can already answer.
         reasons.append(f"suppression-shaped flags used: {', '.join(used)}")
         if not (
             claimed_rank is not None

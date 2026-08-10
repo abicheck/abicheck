@@ -98,7 +98,13 @@ def validate(claim: dict) -> str | None:
         return f"verdict {verdict!r} is outside the vocabulary"
     if "confident" not in claim or not isinstance(claim["confident"], bool):
         return "confident is missing or not a boolean"
-    evidence = claim.get("evidence", [])
+    if "evidence" not in claim:
+        # Required by the schema, and defaulting it to `[]` turned an omission
+        # into a valid empty list: a `null`-verdict claim then stated no
+        # evidence, dimension 6 ran no evidence check (nothing was claimed),
+        # and a malformed envelope graded clean.
+        return "evidence is missing"
+    evidence = claim["evidence"]
     if not isinstance(evidence, list) or any(
         not isinstance(item, int) or isinstance(item, bool) or item < 0
         for item in evidence

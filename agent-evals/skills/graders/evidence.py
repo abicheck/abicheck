@@ -185,6 +185,27 @@ def determined_not_comparable(call: dict) -> bool:
     )
 
 
+def compares_one_side_against_itself(call: dict) -> bool:
+    """Whether this call names the same operand twice in a row (`compare x x`).
+
+    A deliberately narrow check for a real hole: such a call exits cleanly with
+    a verdict, so citing it satisfied every evidence rule while comparing
+    nothing. Overstating severity is not a dimension-6 failure, so an agent
+    could cite `compare x x` on a breaking scenario, claim BREAKING, and pass.
+
+    Narrow because the general question — did this call compare the scenario's
+    two sides? — is not answerable from argv. Identifying which tokens are
+    operands needs the option table (`--format json` contributes a non-flag
+    token too), and guessing wrong fails correct runs. Two *adjacent, equal*
+    non-flag tokens is unambiguous and has no legitimate spelling. Binding a
+    call to the fixture properly needs the dump provenance Phase 4 persists,
+    not a cleverer read of the command line.
+    """
+    argv = call.get("argv", [])
+    words = [(i, t) for i, t in enumerate(argv) if not t.startswith("-")]
+    return any(b == a and j == i + 1 for (i, a), (j, b) in zip(words, words[1:]))
+
+
 def suppression_flags(call: dict) -> list[str]:
     """Suppression-shaped flags this call passed, if any."""
     used = []
