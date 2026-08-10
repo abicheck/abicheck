@@ -1056,7 +1056,7 @@ one hand-authored probe, not a procedure for synthesizing the right consumer
 automatically per finding; the open blocker is that synthesis-strategy
 design (plus evidence-model placement, verdict mapping, trust/sandboxing —
 see the ADR for detail), not the absence of a motivating case. Recorded as
-[ADR-059](../adr/059-synthetic-consumer-compile-probe-deferral.md), the
+[ADR-060](../adr/060-synthetic-consumer-compile-probe-deferral.md), the
 same discipline G28 Phase 5 used when deferring concepts/`requires`
 handling to [G4](g4-header-ast-extractor.md) instead of quietly not doing
 it. Revisit once a scoped synthesis-strategy design exists, per the ADR's

@@ -1,4 +1,4 @@
-# ADR-059: Synthetic-Consumer Compile-Probe Layer — Deferred
+# ADR-060: Synthetic-Consumer Compile-Probe Layer — Deferred
 
 **Date:** 2026-08-10
 **Status:** Accepted (decision to defer) — not implemented; no future phase is
