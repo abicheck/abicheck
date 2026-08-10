@@ -739,11 +739,16 @@ def _atomic_write_bytes(data: bytes, path: Path) -> None:
     copying only the mode would silently revoke a shared baseline's
     deliberately-assigned owner/group (e.g. a service-account UID or an
     ``abi-readers`` GID, with no setgid parent directory to inherit either
-    from). ``os.chown`` is best-effort: an unprivileged writer generally
-    can't change a file's uid at all, and can only change gid to a group
-    it belongs to, so the destination simply keeps the writer's own
-    uid/gid where the kernel refuses the change -- the same outcome as
-    before this fix, not a new failure mode.
+    from). ``os.chown`` is attempted, but NOT best-effort (two rounds of
+    Codex review found the opposite framing wrong): a writer that isn't
+    the destination's current owner can't restore its uid without
+    CAP_CHOWN/root, and a writer that IS the owner but doesn't belong to
+    its assigned group can't restore that gid either -- either failure
+    aborts the whole write (raising before ``os.replace()`` runs, so the
+    *existing* destination is untouched) rather than silently publishing
+    the replacement under the writer's own uid/gid, which could revoke
+    real group-based read access for a shared baseline's other readers,
+    not just cosmetically differ from before.
 
     Symlink destinations (Codex review): if *path* is itself a symlink,
     ``os.replace(tmp_path, path)`` would swap the symlink's own directory
@@ -856,28 +861,33 @@ def _atomic_write_bytes(data: bytes, path: Path) -> None:
                     existing_gid if existing_gid is not None else -1,
                 )
             except OSError:
-                # Codex review: a failure here must not always be silently
-                # swallowed the way it was. chown(uid, gid) is all-or-
-                # nothing -- if the *owner* genuinely needed to change (an
-                # unprivileged writer that isn't the destination's current
-                # owner can never restore a different uid without
-                # CAP_CHOWN/root), the combined call fails entirely, so a
-                # legitimate gid restoration silently fails right along
-                # with it too. Proceeding to os.replace() in that case
-                # would silently transfer ownership of a shared baseline
-                # to whoever last wrote it -- exactly the class of silent
-                # attribute loss the unguarded os.chmod() call just above
-                # already refuses to tolerate (a real chmod failure is
-                # never caught here either). Abort the replacement instead
-                # of publishing it under a changed owner; the *existing*
-                # destination is untouched either way (this runs before
-                # os.replace()). Only a gid-only restoration failure
-                # (the writer already owns the file, or there was no uid
-                # to preserve at all) stays best-effort -- matching this
-                # docstring's own "can only change gid to a group it
-                # belongs to" rationale above.
-                if existing_uid is not None and existing_uid != os.getuid():
-                    raise
+                # Codex review, two rounds: a failure here must not be
+                # silently swallowed the way it originally was. chown(uid,
+                # gid) is all-or-nothing -- if the *owner* genuinely needed
+                # to change (an unprivileged writer that isn't the
+                # destination's current owner can never restore a
+                # different uid without CAP_CHOWN/root), the combined call
+                # fails entirely, so a legitimate gid restoration silently
+                # fails right along with it too. The first round's fix
+                # only re-raised when the uid itself needed changing, on
+                # the assumption that a *gid-only* restoration failure (the
+                # writer already owns the file, just isn't a member of its
+                # assigned group) was lower-stakes and could stay
+                # best-effort -- but fresh evidence showed that's wrong
+                # too: the writer owning the file and simply not
+                # belonging to its reader group is exactly the case where
+                # silently falling back to the writer's own primary group
+                # can revoke real access for that group's other readers,
+                # not just cosmetically differ. Proceeding to os.replace()
+                # after *any* failed ownership restoration would silently
+                # change a shared baseline's owner and/or group access --
+                # exactly the class of silent attribute loss the unguarded
+                # os.chmod() call just above already refuses to tolerate
+                # (a real chmod failure is never caught here either).
+                # Abort the replacement unconditionally instead; the
+                # *existing* destination is untouched either way (this
+                # runs before os.replace()).
+                raise
         os.replace(tmp_path, target)
         # CodeRabbit review: os.replace()'s directory-entry update is not
         # itself durable across a crash until the *parent* directory is

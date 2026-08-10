@@ -776,6 +776,44 @@ def test_owner_restoration_failure_aborts_the_replacement(tmp_path, monkeypatch)
     assert leftovers == []
 
 
+@pytest.mark.skipif(os.name == "nt", reason="POSIX chown/gid semantics only")
+def test_group_only_restoration_failure_also_aborts_the_replacement(
+    tmp_path, monkeypatch
+):
+    """Codex review, PR #699 (fourth finding on the same fix): the previous
+    round's fix only re-raised a chown() failure when the *uid* itself
+    needed changing, on the assumption that a writer who already owns the
+    destination but isn't a member of its assigned group is a lower-
+    stakes, best-effort-tolerable case. Fresh evidence showed that's
+    wrong: silently falling back to the writer's own primary group in
+    that case can revoke real group-based read access for a shared
+    baseline's other readers, not just cosmetically differ. A gid-only
+    restoration failure must abort the replacement exactly like a uid
+    one does."""
+    import errno
+
+    import abicheck.snapshot_io as snapshot_io_mod
+
+    snap = _sample_snapshot()
+    p = tmp_path / "existing.abicheck.json"
+    p.write_text("placeholder")
+    original_bytes = p.read_bytes()
+    # The writer owns this file (default ownership) -- existing_uid ==
+    # os.getuid(), the exact case the previous fix's condition let through
+    # without re-raising.
+    assert p.stat().st_uid == os.getuid()
+
+    def _eperm_chown(path, uid, gid):
+        raise OSError(errno.EPERM, "Operation not permitted")
+
+    monkeypatch.setattr(snapshot_io_mod.os, "chown", _eperm_chown)
+    with pytest.raises(OSError):
+        write_snapshot(snap, p)
+    assert p.read_bytes() == original_bytes
+    leftovers = [f for f in tmp_path.iterdir() if f != p]
+    assert leftovers == []
+
+
 @pytest.mark.skipif(
     os.name == "nt", reason="symlinks need elevated privileges on Windows"
 )
