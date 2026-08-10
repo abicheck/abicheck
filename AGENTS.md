@@ -769,12 +769,25 @@ Once a root command genuinely clears the bar above, pick the right home:
   linker-artifact extractor. It is simply not sufficient for the demotion.
 
   **Separately open, and independent of the above:** the L3 collection path
-  does not deliver usable object paths. `CompileDbAdapter` never assigns
-  `CompileUnit.output` (discarding the compile database's `output` field and
-  `-o` alike), and where an adapter does set it the value is normalized for
-  persistence — home paths redacted to `~/...`, Ninja/Make/Bazel outputs
-  relative to `CompileUnit.directory`. Scanning needs raw resolved paths
-  before redaction, inside the adapters.
+  does not deliver usable object paths. `CompileUnit.output` is a label
+  normalized *for persistence*, not a path — home paths redacted to `~/...`
+  (ADR-032 D7), Ninja/Make/Bazel outputs relative to `CompileUnit.directory` —
+  and `CompileDbAdapter` never assigns it at all, discarding the compile
+  database's `output` field and `-o` alike. **Half-closed on the reading
+  side:** `build_evidence._resolved_object` now expands `~` and joins a
+  relative label onto the unit's own `directory`, and skips a label naming no
+  file that exists, so an adapter that *does* record an output is readable
+  from outside the build directory. That also makes the scan conservative
+  where it used to be destructive: a build whose objects resolve to nothing
+  leaves `comdat` untouched rather than replacing a scan loaded from an
+  existing pack with an empty, unresolvable one, and a fresh scan that
+  established nothing never displaces one that did. **Still open:** the
+  producing side — `CompileDbAdapter` recording an output at all, and every
+  adapter keeping the raw resolved path alongside the redacted label, so a
+  pack collected on one machine can be scanned on another. Until then the
+  scan is opt-in (`ABICHECK_COLLECT_COMDAT=1` at `inline.py`'s call site):
+  parsing every object's symbol table is real I/O, and no detector consumes
+  the result.
 
 - **Default dependency scoping (PR #649) vs. contextual reachability
   (`type_reachability.py`) — the direct-reference conflict is fixed; the

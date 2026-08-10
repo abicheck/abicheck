@@ -58,7 +58,7 @@ from pathlib import Path, PurePosixPath
 from typing import TYPE_CHECKING, Any, ClassVar
 
 from .. import deadline
-from .build_evidence import BuildEvidence
+from .build_evidence import BuildEvidence, comdat_scan_requested
 from .model import (
     CoverageStatus,
     DataLayer,
@@ -820,9 +820,9 @@ def collect_inline_pack(
         if compile_db is not None:
             _run_compile_db(compile_db, cfg.system, merged, extractors, build_cache_dir)
 
-        # Needs the *merged* compile-unit set, so it cannot live in an
-        # adapter (see BuildEvidence.scan_comdat).
-        merged.scan_comdat()
+        # Opt-in; needs the *merged* compile-unit set (BuildEvidence.scan_comdat).
+        if comdat_scan_requested():
+            merged.scan_comdat()
 
         # A4: with both a --sources tree and L3 compile units, flag when the build
         # metadata describes a different checkout than the source tree (decoupled

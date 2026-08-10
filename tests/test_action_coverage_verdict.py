@@ -567,6 +567,11 @@ class TestCompareTellsTheTwoAxesApart:
         )
         assert outputs["verdict"] == "API_BREAK", outputs
         assert "Also blocked by severity policy" in outputs["_summary"]
+        # Unlike compare, scan's final branch sets FINAL_EXIT=1 on a configured
+        # severity category at *every* tier, so the note must not tell the
+        # reader that fail-on-api-break still decides (Codex review).
+        assert "independently of" in outputs["_summary"], outputs["_summary"]
+        assert "still follows" not in outputs["_summary"], outputs["_summary"]
 
     def test_a_scan_exit_one_with_neither_signal_stays_an_error(
         self, tmp_path: Path

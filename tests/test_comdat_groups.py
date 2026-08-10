@@ -339,6 +339,104 @@ class TestItRidesTheL3Evidence:
         assert a.comdat is not None and a.comdat.symbols == frozenset({"a"})
 
 
+class TestItResolvesOutputLabelsBackToFiles:
+    """`CompileUnit.output` is normalized for *persistence*, not for reading.
+
+    Opening it verbatim marks real objects unreadable whenever collection runs
+    outside the build directory or under the user's home, silently turning
+    "this build has objects" into "nothing scanned".
+    """
+
+    @staticmethod
+    def _unit(**kw: str):
+        from abicheck.buildsource.build_evidence import CompileUnit
+
+        return CompileUnit(id="cu://1", **kw)
+
+    @staticmethod
+    def _ev(units: list):
+        from abicheck.buildsource.build_evidence import BuildEvidence
+
+        return BuildEvidence(compile_units=units)
+
+    def test_an_output_relative_to_its_directory_is_found(self, tmp_path: Path) -> None:
+        """Ninja/Make/Bazel record the output relative to `directory`."""
+        (tmp_path / "obj").mkdir()
+        (tmp_path / "obj" / "foo.o").write_bytes(_synthetic_object())
+        ev = self._ev([self._unit(output="obj/foo.o", directory=str(tmp_path))])
+        ev.scan_comdat()
+        assert ev.comdat is not None
+        assert ev.comdat.symbols == frozenset({"_Z3foov"})
+
+    def test_a_home_redacted_output_is_expanded(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """ADR-032 D7 rewrites a home-rooted path to `~/...`; `open()` does
+        not expand that, so the redacted label must be expanded back."""
+        monkeypatch.setenv("HOME", str(tmp_path))
+        monkeypatch.setenv("USERPROFILE", str(tmp_path))
+        (tmp_path / "foo.o").write_bytes(_synthetic_object())
+        ev = self._ev([self._unit(output="~/foo.o")])
+        ev.scan_comdat()
+        assert ev.comdat is not None
+        assert ev.comdat.symbols == frozenset({"_Z3foov"})
+
+    def test_a_label_naming_no_file_leaves_the_build_unscanned(
+        self, tmp_path: Path
+    ) -> None:
+        """Not an empty scan: an unresolvable label established nothing, and
+        an empty-but-resolvable scan is exactly what licenses a demotion."""
+        ev = self._ev([self._unit(output="obj/gone.o", directory=str(tmp_path))])
+        ev.scan_comdat()
+        assert ev.comdat is None
+
+    def test_a_reused_pack_keeps_its_loaded_scan(self, tmp_path: Path) -> None:
+        """The `base_build` path: `merge()` restores a pack's own scan, and a
+        rescan over persisted labels that resolve to nothing must not replace
+        it with an empty, unresolvable one."""
+        ev = self._ev([self._unit(output="obj/gone.o", directory=str(tmp_path))])
+        ev.comdat = ComdatScan(frozenset({"_Z1fv"}), objects_scanned=3)
+        ev.scan_comdat()
+        assert ev.comdat is not None
+        assert ev.comdat.symbols == frozenset({"_Z1fv"})
+        assert ev.comdat.objects_scanned == 3
+
+    def test_an_unreadable_object_does_not_displace_a_loaded_scan(
+        self, tmp_path: Path
+    ) -> None:
+        """The file exists, so it is opened — but it parses as nothing, and a
+        scan that established nothing must not overwrite one that did."""
+        (tmp_path / "cut.o").write_bytes(_synthetic_object()[:40])
+        ev = self._ev([self._unit(output=str(tmp_path / "cut.o"))])
+        ev.comdat = ComdatScan(frozenset({"_Z1fv"}), objects_scanned=3)
+        ev.scan_comdat()
+        assert ev.comdat is not None and ev.comdat.symbols == frozenset({"_Z1fv"})
+
+    def test_collection_does_not_scan_unless_asked(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """No detector consumes this evidence yet, so parsing every object's
+        symbol table on every collection would be cost with no result."""
+        from abicheck.buildsource.build_evidence import comdat_scan_requested
+
+        monkeypatch.delenv("ABICHECK_COLLECT_COMDAT", raising=False)
+        assert comdat_scan_requested() is False
+        for on in ("1", "true", "YES", " true "):
+            monkeypatch.setenv("ABICHECK_COLLECT_COMDAT", on)
+            assert comdat_scan_requested() is True, on
+        monkeypatch.setenv("ABICHECK_COLLECT_COMDAT", "0")
+        assert comdat_scan_requested() is False
+
+    def test_the_collection_call_site_is_behind_that_gate(self) -> None:
+        """The gate only means anything if `collect_inline_pack` reads it."""
+        import inspect
+
+        from abicheck.buildsource import inline
+
+        src = inspect.getsource(inline.collect_inline_pack)
+        assert "if comdat_scan_requested():\n            merged.scan_comdat()" in src
+
+
 @pytest.mark.integration
 @requires_elf_toolchain
 def test_scan_build_evidence_reads_compile_unit_outputs(tmp_path: Path) -> None:

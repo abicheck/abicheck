@@ -33,6 +33,16 @@
   claiming the build has nothing vague. Mach-O and PE express the same idea
   through different structures and would need their own extractor.
 
+  Opt-in (`ABICHECK_COLLECT_COMDAT=1`), because parsing every object file's
+  symbol table is real I/O on a large build and no detector consumes the
+  result yet. When it does run it resolves `CompileUnit.output` back to a real
+  path first — that field is normalized for *persistence* (`~/...` redaction,
+  Ninja/Make/Bazel outputs relative to the unit's `directory`), so opening it
+  verbatim marked real objects unreadable whenever collection ran outside the
+  build directory. A build whose objects resolve to nothing now leaves the
+  field untouched instead of replacing a scan loaded from an existing pack
+  with an empty, unresolvable one.
+
   Collected but not yet consumed by any detector. A demotion built on it was
   attempted and reverted: COMDAT membership proves the *library* used vague
   linkage, not that its *consumers* emitted their own copies — `extern

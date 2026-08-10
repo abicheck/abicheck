@@ -23,8 +23,10 @@ inside an evidence pack.
 
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass, field
 from enum import Enum
+from pathlib import Path
 from typing import Any
 
 #: Build-evidence schema version, independent of the pack/snapshot versions.
@@ -309,6 +311,49 @@ class BuildOption:
         )
 
 
+def comdat_scan_requested() -> bool:
+    """Whether a collection run should sweep object files for COMDAT groups.
+
+    Off by default. Parsing every object file's symbol table is real I/O on a
+    large build, and no detector consumes the result yet — the demotion built
+    on it was attempted and reverted (see AGENTS.md), so scanning by default
+    would be an unbounded cost with no user-visible outcome (CodeRabbit
+    review). Lives here rather than at the call site so ``inline.py``, which
+    sits on its line-count cap, spends one line on the gate.
+    """
+    return os.environ.get("ABICHECK_COLLECT_COMDAT", "").strip().lower() in {
+        "1",
+        "true",
+        "yes",
+    }
+
+
+def _resolved_object(cu: CompileUnit) -> Path | None:
+    """The object file *cu* emitted, as a path that can actually be opened.
+
+    ``CompileUnit.output`` is normalized *for persistence*, not for reading
+    back: a home-rooted path is redacted to ``~/...`` (ADR-032 D7), and the
+    Ninja/Make/Bazel adapters record an output relative to ``directory``. So a
+    consumer that opens the field verbatim marks real objects unreadable
+    whenever collection runs outside the build directory or under the user's
+    home — silently turning "this build has objects" into "nothing scanned"
+    (Codex/CodeRabbit review).
+
+    ``None`` when the label names no file that exists, which is also what
+    keeps the scan free on the common path: nothing is opened, and no ELF is
+    parsed, for a build whose objects are gone or were never recorded.
+    """
+    if not cu.output:
+        return None
+    path = Path(cu.output).expanduser()
+    if not path.is_absolute() and cu.directory:
+        path = Path(cu.directory).expanduser() / path
+    try:
+        return path if path.is_file() else None
+    except OSError:
+        return None
+
+
 @dataclass
 class BuildEvidence:
     """Top-level normalized build evidence (ADR-029 D1)."""
@@ -388,18 +433,27 @@ class BuildEvidence:
         Reads ``CompileUnit.output`` — already the normalized "this TU produced
         this object" fact, and the same field ``source_graph``'s link
         provenance mints its ``object_file`` nodes from — so no new discovery
-        step is introduced. Objects that no longer exist (a cleaned build tree,
-        a compile DB describing a build never run) fail their read and are
-        counted, which is why consumers must check ``resolvable`` rather than
-        the symbol set alone.
+        step is introduced. That field is a *persisted label*, though, not a
+        usable path (see ``_resolved_object``), so it is resolved back to a
+        real file before anything is opened.
 
-        A no-op when the build recorded no object outputs: leaving ``comdat``
-        as ``None`` keeps "no scan ran" distinct from "scanned, found nothing
-        vague", and only the latter may license a demotion.
+        A no-op when no output resolves to a file on disk — a cleaned build
+        tree, a compile DB describing a build never run, or a pack collected
+        on another machine. Leaving ``comdat`` untouched there keeps "no scan
+        ran" distinct from "scanned, found nothing vague" (only the latter may
+        license a demotion) and, on the ``base_build`` path, keeps a scan
+        loaded from an existing pack rather than replacing it with an empty
+        one. For the same reason a fresh scan that established nothing never
+        displaces one that did.
         """
-        objects = [cu.output for cu in self.compile_units if cu.output]
-        if objects:
-            self.comdat = collect_vague_linkage_symbols(list(objects))
+        objects = [
+            p for cu in self.compile_units if (p := _resolved_object(cu)) is not None
+        ]
+        if not objects:
+            return
+        scan = collect_vague_linkage_symbols(list(objects))
+        if scan.resolvable or self.comdat is None:
+            self.comdat = scan
 
     def merge(self, other: BuildEvidence) -> None:
         """Fold another adapter's output into this one (in place).
