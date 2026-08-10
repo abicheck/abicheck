@@ -37,6 +37,14 @@ dependencies = [
     "packaging>=21.0",    # Version comparison for suppression version_range
     "pefile>=2023.2.7",   # Windows PE/COFF parsing
     "macholib>=1.16",     # macOS Mach-O parsing
+    # Core snapshot storage (ADR-059): first-class `.abicheck.json.zst`
+    # support for `dump`/`compare`/`scan --against`/baseline-set snapshots
+    # needs one zstd backend that works identically across every supported
+    # Python (3.10-3.14 have no stdlib zstd) and OS, without depending on a
+    # system `zstd` binary. Previously scoped only to the `validation`
+    # extra (conda-forge `.conda` archive extraction); that usage still
+    # applies but no longer needs its own extra now that it's core.
+    "zstandard>=0.21",
 ]
 
 [project.scripts]
@@ -66,13 +74,12 @@ dev = [
     "scriv[toml]>=1.5",  # changelog-fragment tool, see changelog.d/README.md
 ]
 # Real-world validation harness (validation/): fetches + extracts conda-forge
-# packages. Modern conda-forge ships `.conda` (zstd-compressed) artifacts, so a
-# pure-Python zstd backend is needed to extract them without a system `zstd`
-# binary (Python <3.14 has no stdlib zstd). Kept out of `dev`/core to honour the
-# lightweight-core rule — only the validation lane needs it.
-validation = [
-    "zstandard>=0.21",
-]
+# packages. Modern conda-forge ships `.conda` (zstd-compressed) artifacts, so
+# this lane also needs a zstd backend -- `zstandard` is now a core dependency
+# (ADR-059) and this extra is kept empty rather than removed, so an existing
+# `pip install "abicheck[validation]"` invocation in a script/CI job doesn't
+# start failing on an unknown extra.
+validation = []
 # Mirrors [tool.pixi.feature.docs.pypi-dependencies] and the `lint-and-types`
 # CI job's docs install — `pip install -e ".[dev,docs]"` is what
 # `scripts/verify.py --profile pr`'s docs-build step needs to actually run

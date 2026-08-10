@@ -17,6 +17,7 @@
 from __future__ import annotations
 
 import dataclasses
+import json
 import logging
 import sys
 from pathlib import Path
@@ -41,7 +42,7 @@ from .cli_audit import echo_filtered_surface, echo_reconciled
 from .cli_dump_helpers import (
     _dump_will_attempt_hybrid_l4_extraction,
     check_requested_depth_satisfied,
-    fold_dump_provenance_into_json,
+    fold_dump_provenance_into_dict,
     handle_non_elf_dump,
     has_other_l3_source,
     perform_elf_dump,
@@ -50,6 +51,7 @@ from .cli_dump_helpers import (
     resolve_dump_compile_context,
     resolve_dump_compile_db,
     resolve_dump_debug_format,
+    write_snapshot_and_report,
 )
 from .cli_help import compare_help_options, configure_rich_help
 from .cli_helpers_compare import (  # noqa: F401  — re-exported to keep cli import sites stable
@@ -89,6 +91,7 @@ from .cli_options import (
     scope_options,
     set_input_options,
     severity_options,
+    snapshot_compression_option,
     two_sided_input_options,
     verbose_option,
 )
@@ -114,7 +117,7 @@ from .cli_resolve import (
     classify_compare_operand,
 )
 from .compat.cli import compat_group
-from .serialization import snapshot_to_json
+from .serialization import snapshot_to_dict
 
 if TYPE_CHECKING:
     from .buildsource.pack import BuildSourcePack
@@ -310,6 +313,7 @@ def _write_snapshot_output(
     include_dependencies: bool = False,
     header_roots: tuple[Path, ...] = (),
     clang_bin: str = "clang",
+    snapshot_compression: str = "auto",
 ) -> None:
     """Serialize snapshot and write to file or stdout.
 
@@ -391,28 +395,20 @@ def _write_snapshot_output(
     check_requested_depth_satisfied(depth, snap)
     from .dumper_scoping import resolve_dependency_scope
     snap = resolve_dependency_scope(snap, include_dependencies, header_roots)
-    result = snapshot_to_json(snap)
-    # Audit finding: dump/baseline provenance didn't record requested vs.
-    # effective depth anywhere a later reader could inspect -- fold it into
-    # the written JSON now that the strict gate above has had its say.
-    result, resolved_depth_label = fold_dump_provenance_into_json(result, depth, snap)
+    # ADR-059: one payload dict, one JSON encode -- previously this built a
+    # full JSON *string* via snapshot_to_json(), then fold_dump_provenance_
+    # into_json() re-parsed and re-serialized that entire string just to
+    # attach one key. For a 100+ MB snapshot that's a second full parse and
+    # a second full encode for no reason; fold_dump_provenance_into_dict()
+    # does the same augmentation on the already-decoded payload dict.
+    payload = snapshot_to_dict(snap)
+    payload, resolved_depth_label = fold_dump_provenance_into_dict(payload, depth, snap)
     if output:
-        _safe_write_output(output, result)
-        click.echo(f"Snapshot written to {output}", err=True)
-        # Self-describing output (CLI-audit P2): report the evidence depth
-        # this snapshot actually reached -- computed from what it carries,
-        # not the requested --depth, so an explicit --depth source that
-        # collected nothing usable is never silently reported as if it had
-        # succeeded. Only alongside the file-write notice above (never for
-        # bare stdout output, which callers may pipe/parse as pure JSON).
-        # Reuses fold_dump_provenance_into_json's own returned label (the
-        # strict _gated_source_label, not the plain evidence_depth_label)
-        # so this line can never disagree with the JSON's effective_depth
-        # for the same dump -- they previously could, on the documented
-        # zero-match-source-only case (external review).
-        click.echo(f"Resolved evidence depth: {resolved_depth_label}", err=True)
+        write_snapshot_and_report(
+            payload, output, snapshot_compression, resolved_depth_label
+        )
     else:
-        click.echo(result)
+        click.echo(json.dumps(payload, indent=2))
 
 
 def _collect_metadata(path: Path) -> LibraryMetadata | None:
@@ -530,6 +526,7 @@ def main() -> None:
 @lang_option
 @click.option("-o", "--output", "output", type=click.Path(path_type=Path), default=None,
               help="Output JSON file. Defaults to stdout.")
+@snapshot_compression_option
 # ── L2 compile context (shared with `scan` — ADR-037 D3 parity) ──────────────
 # --ast-frontend / --gcc-path / --gcc-prefix / --gcc-options / --gcc-option /
 # --sysroot / --nostdinc are defined once in cli_options.compile_context_options
@@ -608,6 +605,7 @@ def dump_cmd(so_path: Path | None, headers: tuple[Path, ...], includes: tuple[Pa
              public_headers: tuple[Path, ...], public_header_dirs: tuple[Path, ...],
              include_dependencies: bool,
              version: str, lang: str, header_backend: str, output: Path | None,
+             snapshot_compression: str,
              gcc_path: str | None, gcc_prefix: str | None, gcc_options: str | None,
              gcc_option_tokens: tuple[str, ...],
              sysroot: Path | None, nostdinc: bool, pdb_path: Path | None,
@@ -647,6 +645,13 @@ def dump_cmd(so_path: Path | None, headers: tuple[Path, ...], includes: tuple[Pa
     )
 
     reject_dry_run_with_output(dry_run, output)
+    if output is None and snapshot_compression not in ("auto", "none"):
+        raise click.UsageError(
+            f"--compression {snapshot_compression} requires -o/--output -- "
+            "stdout is always plain JSON (auto resolves to 'none' without "
+            "-o/--output; pass an explicit output file to write compressed "
+            "output)."
+        )
     _setup_verbosity(verbose)
 
     # ADR-050 D3: parsed before the collect/compile-context resolution below so
@@ -819,6 +824,7 @@ def dump_cmd(so_path: Path | None, headers: tuple[Path, ...], includes: tuple[Pa
                 build_info=build_info, build_config=build_config,
                 depth=depth, collect_mode=collect_mode,
                 header_backend=header_backend, output=output,
+                snapshot_compression=snapshot_compression,
                 has_compile_db=bool(compile_db_path or compile_db_path_alt),
                 # External review: dry-run previously only checked bare -p/
                 # --compile-db presence; loading it and matching against the
@@ -907,6 +913,7 @@ def dump_cmd(so_path: Path | None, headers: tuple[Path, ...], includes: tuple[Pa
             header_backend=header_backend, compile_context=native_cc,
             depth=depth, compile_db_context_matched=compile_db_matched,
             include_dependencies=include_dependencies,
+            snapshot_compression=snapshot_compression,
         )
         return
 
@@ -969,6 +976,7 @@ def dump_cmd(so_path: Path | None, headers: tuple[Path, ...], includes: tuple[Pa
         dump_manifest=parsed_dump_manifest,
         include_labels=_resolved_include_labels,
         include_dependencies=include_dependencies,
+        snapshot_compression=snapshot_compression,
     )
 
 

@@ -293,6 +293,7 @@ Dump ABI snapshot of a shared library to JSON.
 | `--version` | no | `unknown` | Library version string to embed in snapshot. |
 | `--lang` | no | `c++` | Language mode for the header backend. Choices: `c++`, `c`. |
 | `--output`, `-o` | no | — | Output JSON file. Defaults to stdout. |
+| `--compression` | no | `auto` | Snapshot storage envelope: 'auto' infers gzip/zstd/plain from -o/--output's suffix (.json.gz/.json.zst/plain .json); an explicit value is used as-is and errors if it contradicts the output suffix. Compression is a storage detail only -- it never changes the decoded snapshot content. Choices: `auto`, `none`, `gzip`, `zstd`. |
 | `--pdb-path` | no | — | Explicit path to PDB file for Windows PE debug info. Overrides automatic PDB discovery from the PE debug directory. |
 | `--follow-deps` | no | `False` | Resolve transitive DT\_NEEDED dependencies and include the full dependency graph and symbol binding status in the snapshot. ELF only. |
 | `--search-path` | no | — | Additional directory to search for shared libraries (with --follow-deps). |

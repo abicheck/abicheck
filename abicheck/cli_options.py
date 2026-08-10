@@ -468,6 +468,29 @@ def severity_options(func: F) -> F:
     return func
 
 
+def snapshot_compression_option(func: F) -> F:
+    """``--compression``, currently used by ``dump`` (ADR-059).
+
+    ``auto`` (default) infers the storage envelope from ``-o/--output``'s
+    canonical suffix (``.json.gz``/``.json.zst`` -> gzip/zstd, anything
+    else -> plain); an explicit value is honored, and hard-errors if it
+    contradicts a canonical output suffix rather than silently renaming or
+    silently overriding. See ``abicheck/snapshot_io.py``."""
+    func = click.option(
+        "--compression",
+        "snapshot_compression",
+        type=click.Choice(["auto", "none", "gzip", "zstd"], case_sensitive=False),
+        default="auto",
+        show_default=True,
+        help="Snapshot storage envelope: 'auto' infers gzip/zstd/plain from "
+        "-o/--output's suffix (.json.gz/.json.zst/plain .json); an "
+        "explicit value is used as-is and errors if it contradicts the "
+        "output suffix. Compression is a storage detail only -- it never "
+        "changes the decoded snapshot content.",
+    )(func)
+    return func
+
+
 def include_dependencies_option(func: F) -> F:
     """``--include-dependencies``, shared by ``dump`` and ``compare``
     (dumper_scoping.py): by default, toolchain/system-header declarations

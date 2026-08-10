@@ -427,7 +427,12 @@ Core pipeline (in order of data flow):
    - `classify.py` — symbol classification
    - `annotations.py` — annotation handling
    - `errors.py` — exception types
-   - `serialization.py` — snapshot serialization
+   - `serialization.py` — snapshot serialization (`load_snapshot`/
+     `save_snapshot`/`write_snapshot` — the public compatibility surface)
+   - `snapshot_io.py` — ADR-059's canonical snapshot *storage envelope* I/O:
+     plain/gzip/zstd detection (magic bytes), atomic + deterministic
+     compressed writes, decompression-bomb limits. A dependency-free leaf
+     module `serialization.py`/`snapshot_cache.py`/CLI code build on
    - `package.py` — package/archive handling
    - `debian_symbols.py` — Debian symbols file adapter
    - `environment_matrix.py` — multi-env comparison

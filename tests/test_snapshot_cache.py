@@ -333,7 +333,9 @@ class TestLookupStore:
         snap = _sample_snap()
         store(snap, binary, [], [], "1.0", "c++")
         assert cache_dir.exists()
-        assert len(list(cache_dir.glob("*.json"))) == 1
+        # ADR-059: new entries are written zstd-compressed.
+        assert len(list(cache_dir.glob("*.json.zst"))) == 1
+        assert len(list(cache_dir.glob("*.json"))) == 0
 
         result = lookup(binary, [], [], "1.0", "c++")
         assert result is not None
@@ -384,9 +386,9 @@ class TestLookupStore:
         snap = _sample_snap()
         store(snap, binary, [], [], "1.0", "c++")
 
-        # Corrupt the cached file
-        for f in cache_dir.glob("*.json"):
-            f.write_text("{ invalid json")
+        # Corrupt the cached (zstd-compressed) file
+        for f in cache_dir.glob("*.json.zst"):
+            f.write_bytes(b"not a valid zstd frame at all")
 
         result = lookup(binary, [], [], "1.0", "c++")
         assert result is None

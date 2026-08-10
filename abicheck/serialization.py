@@ -23,6 +23,7 @@ from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from .build_mode import BuildMode
+    from .snapshot_io import SnapshotWriteResult
 
 from .errors import IncompatibleSnapshotSchemaError, SnapshotError
 from .model import (
@@ -1389,10 +1390,48 @@ def _build_mode_from_dict(raw: Any) -> BuildMode | None:
 
 
 def load_snapshot(path: str | Path) -> AbiSnapshot:
-    with open(path, encoding="utf-8") as f:
-        return snapshot_from_dict(json.load(f))
+    """Load a snapshot from *path*, transparently handling plain, gzip, and
+    zstd storage (ADR-059) — detected from magic bytes, not the filename."""
+    from .snapshot_io import read_snapshot_text
+
+    return snapshot_from_dict(json.loads(read_snapshot_text(path)))
 
 
-def save_snapshot(snap: AbiSnapshot, path: str | Path) -> None:
-    with open(path, "w", encoding="utf-8") as f:
-        f.write(snapshot_to_json(snap))
+def save_snapshot(
+    snap: AbiSnapshot,
+    path: str | Path,
+    *,
+    compression: str = "auto",
+) -> None:
+    """Save *snap* to *path*.
+
+    *compression* is one of ``"auto"`` (default; inferred from *path*'s
+    canonical suffix — ``.json.gz``/``.json.zst``, else plain),
+    ``"none"``, ``"gzip"``, or ``"zstd"`` (ADR-059). Keyword-only so every
+    existing positional ``save_snapshot(snap, path)`` call keeps working
+    unchanged.
+
+    Returns nothing, matching the historical signature; use
+    :func:`write_snapshot` for the richer :class:`SnapshotWriteResult`.
+    """
+    write_snapshot(snap, path, compression=compression)
+
+
+def write_snapshot(
+    snap: AbiSnapshot,
+    path: str | Path,
+    *,
+    compression: str = "auto",
+    zstd_level: int | None = None,
+) -> SnapshotWriteResult:
+    """Save *snap* to *path* and return a :class:`SnapshotWriteResult`
+    (compression used, decoded/stored sizes, stored digest) — ADR-059.
+    """
+    from .snapshot_io import SnapshotCompression, write_snapshot_text
+
+    return write_snapshot_text(
+        snapshot_to_json(snap),
+        path,
+        compression=SnapshotCompression(compression),
+        zstd_level=zstd_level,
+    )
