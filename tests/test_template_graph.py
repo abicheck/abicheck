@@ -231,6 +231,45 @@ def test_function_template_pattern_itself_is_not_an_instantiation() -> None:
     assert all(i.label != "api::identity" for i in out)
 
 
+def test_explicit_function_specialization_detached_from_its_template_decl() -> None:
+    """An *explicit* function-template specialization (``template<> int
+    foo<int>(int)``) exhibits the same detachment quirk this module's
+    docstring already documents for class templates: clang nests an
+    unmangled stub (no ``TemplateArgument`` child, no content) under the
+    ``FunctionTemplateDecl``, then detaches the real, mangled content as a
+    top-level sibling sharing the stub's own id (Codex review, empirically
+    confirmed against real clang AST output). Must still resolve to one
+    instantiation, not be silently skipped as "the pattern itself"."""
+    stub = {"kind": "FunctionDecl", "name": "foo", "id": "0xSPEC_FOO"}
+    pattern = {"kind": "FunctionDecl", "name": "foo", "inner": []}
+    function_template = {
+        "kind": "FunctionTemplateDecl",
+        "name": "foo",
+        "inner": [
+            {"kind": "TemplateTypeParmDecl", "name": "T"},
+            pattern,
+            stub,
+        ],
+    }
+    detached_full = {
+        "kind": "FunctionDecl",
+        "name": "foo",
+        "id": "0xSPEC_FOO",  # same id as the nested stub above
+        "mangledName": "_Z3fooIiEiT_",
+        "inner": [
+            {"kind": "TemplateArgument", "type": {"qualType": "int"}},
+        ],
+    }
+    ast = {"kind": "TranslationUnitDecl", "inner": [function_template, detached_full]}
+    out = parse_clang_ast_templates(ast)
+    assert len(out) == 1
+    inst = out[0]
+    assert inst.kind == "function"
+    assert inst.template_qname == "foo"
+    assert inst.label == "foo<int>"
+    assert inst.emitted_symbols == ("_Z3fooIiEiT_",)
+
+
 def test_non_type_template_argument_has_no_target() -> None:
     """A literal (non-type) template argument -- ``value`` present, no
     ``type``/``decl`` -- resolves to a TemplateArgUse with no target."""

@@ -119,3 +119,31 @@
   tests that guarded only on `ar`'s presence, then unconditionally invoked
   `gcc`, now guard on both (a runner with binutils but no `gcc` would error
   instead of skip).
+
+  A fourth review round found three more real gaps. `cli_buildsource_helpers.
+  _collect_source_graph` (the out-of-band `collect --source-abi --source-
+  graph summary` path) folded only three of the four clang-backed passes
+  `inline._build_inline_graph`'s own `with_call_graph` block runs together,
+  and never called `fold_archive_graph` at all — an otherwise-equivalent
+  collected pack silently carried no template nodes/edges/coverage stamp,
+  and its `static_library` nodes got no archive-member/symbol-definition
+  edges regardless of whether `--source-abi` was given; both passes are now
+  folded the same way the inline path already does. `source_graph.
+  _augment_with_source_abi` minted a `binary_symbol` node only from
+  `source_decl_to_binary_symbol` — `source_link.py` accounts for a real
+  export under several other mappings too (a template-instantiation export
+  matched only through an erased-pattern attribution, a synthesized
+  vtable/typeinfo/thunk, an allocator interposer, a genuinely undocumented/
+  leaked export), each keyed *by* the symbol; omitting them left no node for
+  archive_graph.py's/template_graph.py's own join-only-onto-an-existing-node
+  rule to find, so a real archive member defining an undocumented export, or
+  a template instantiation's own emitted member matched only through this
+  attribution tier, silently went unjoined — all four mappings are now
+  seeded. And an *explicit* function-template specialization
+  (`template<> int foo<int>(int)`) exhibits the identical detachment quirk
+  this module's docstring already documents for class templates — an
+  unmangled stub nested under the `FunctionTemplateDecl`, full mangled
+  content detached as a top-level sibling sharing the stub's id — but only
+  the class-template path had the two-pass id-indexed join needed to
+  resolve it; `_walk_function_templates` now has the same join
+  (`_collect_full_function_defs`), verified against real clang AST output.

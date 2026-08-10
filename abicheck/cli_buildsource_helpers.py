@@ -88,9 +88,7 @@ def _resolve_side_pack(
     # top-level import would re-form that cycle.
     from .cli_buildsource_merge import _exported_symbols_from_snapshot
 
-    exported = (
-        _exported_symbols_from_snapshot(snap) if snap is not None else ()
-    )
+    exported = _exported_symbols_from_snapshot(snap) if snap is not None else ()
     bi_pack = _load_side_pack_input(build_info, exported_symbols=exported)
     src_pack = _load_side_pack_input(sources, exported_symbols=exported)
     embedded = snap.build_source if snap is not None else None
@@ -799,12 +797,30 @@ def _collect_source_graph(
         from .buildsource.inline_graph_fold import (
             fold_call_graph,
             fold_include_graph,
+            fold_template_graph,
             fold_type_graph,
         )
 
         fold_call_graph(graph, merged, clang_bin, extractors, changed_paths)
         fold_type_graph(graph, merged, clang_bin, extractors, changed_paths)
         fold_include_graph(graph, merged, clang_bin, extractors, changed_paths)
+        # G29 Phase 5 item 1 (Codex review, fresh evidence): this out-of-band
+        # `collect --source-abi --source-graph summary` path previously
+        # folded only three of the four clang-backed passes `inline.
+        # _build_inline_graph`'s own `with_call_graph` block runs together --
+        # an otherwise-equivalent collected pack silently carried no template
+        # nodes/edges/coverage stamp at all.
+        fold_template_graph(graph, merged, clang_bin, extractors, changed_paths)
+    # fold_archive_graph needs no clang/L4 surface (unlike the three passes
+    # above) -- it runs unconditionally whenever the graph carries a
+    # static_library node, mirroring inline._build_inline_graph's identical
+    # unconditional call (Codex review, fresh evidence: this collect path
+    # never called it at all, so a collected pack's static_library nodes
+    # never got archive-member/symbol-definition edges or a coverage stamp,
+    # regardless of whether --source-abi was given).
+    from .buildsource.inline_graph_fold import fold_archive_graph
+
+    fold_archive_graph(graph, merged, extractors)
     if kythe_entries or codeql_results or codeql_extends_results:
         _ingest_graph_backends(
             graph,
@@ -1357,6 +1373,6 @@ def _ingest_graph_backends(
                         name="graph_backend:codeql_extends",
                         status="failed",
                         inputs=[DEFAULT_REDACTION.path(str(codeql_extends_results))],
-                        detail="expected a JSON object with a top-level \"#select\"",
+                        detail='expected a JSON object with a top-level "#select"',
                     )
                 )

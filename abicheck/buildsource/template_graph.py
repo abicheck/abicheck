@@ -375,6 +375,34 @@ def _collect_full_specializations(
         _collect_full_specializations(child, full_by_id)
 
 
+def _collect_full_function_defs(
+    node: Any, full_by_id: dict[str, dict[str, Any]]
+) -> None:
+    """Record ``id -> node`` for every function-shaped decl carrying a
+    ``mangledName``, anywhere in the tree — the content half of a two-pass
+    join an *explicit* function-template specialization needs, mirroring
+    :func:`_collect_full_specializations`'s identical join for class
+    templates. An explicit specialization (``template<> int foo<int>(int)``)
+    produces the same detachment quirk this module's docstring already
+    documents for class templates: an unmangled stub nested under the
+    ``FunctionTemplateDecl`` (no ``TemplateArgument`` child, no content) and
+    a full-content ``FunctionDecl`` sharing that id, detached as a top-level
+    sibling — empirically confirmed against real clang AST output (Codex
+    review). Without this join, ``_walk_function_templates``'s own
+    ``if not mangled: continue`` guard silently skips the stub and the
+    specialization's instantiation and emitted symbol are never recorded."""
+    if not isinstance(node, dict):
+        return
+    kind = str(node.get("kind", ""))
+    if kind in _MEMBER_FUNCTION_KINDS | {"FunctionDecl"}:
+        mangled = node.get("mangledName")
+        node_id = str(node.get("id") or "")
+        if isinstance(mangled, str) and mangled and node_id:
+            full_by_id.setdefault(node_id, node)
+    for child in node.get("inner", []) or []:
+        _collect_full_function_defs(child, full_by_id)
+
+
 def _template_arg_use(arg_node: dict[str, Any]) -> TemplateArgUse | None:
     """Parse one ``TemplateArgument`` child into a :class:`TemplateArgUse`,
     or ``None`` if it isn't a spellable argument at all (a pack expansion's
@@ -515,6 +543,7 @@ def _walk_function_templates(
     id_to_decl_kind: dict[str, str],
     id_to_template_qname: dict[str, str],
     full_by_id: dict[str, dict[str, Any]],
+    full_function_by_id: dict[str, dict[str, Any]],
     out: list[TemplateInstantiation],
 ) -> None:
     if not isinstance(node, dict):
@@ -532,7 +561,17 @@ def _walk_function_templates(
                     continue
                 mangled = child.get("mangledName")
                 if not (isinstance(mangled, str) and mangled):
-                    continue  # the pattern itself, or an unmangled instantiation
+                    # An unmangled stub -- either the pattern itself, or an
+                    # *explicit* specialization whose real, mangled content
+                    # clang detached to a top-level sibling sharing this
+                    # child's own id (the same quirk _collect_full_
+                    # specializations already resolves for class templates).
+                    child_id = str(child.get("id") or "")
+                    full = full_function_by_id.get(child_id) if child_id else None
+                    if full is None:
+                        continue  # the pattern itself; no detached content anywhere
+                    child = full
+                    mangled = child.get("mangledName")
                 mangled = _normalize_mangled(mangled)
                 args: list[TemplateArgUse] = []
                 for grandchild in child.get("inner", []) or []:
@@ -585,6 +624,7 @@ def _walk_function_templates(
                 id_to_decl_kind,
                 id_to_template_qname,
                 full_by_id,
+                full_function_by_id,
                 out,
             )
         return
@@ -600,6 +640,7 @@ def _walk_function_templates(
                 id_to_decl_kind,
                 id_to_template_qname,
                 full_by_id,
+                full_function_by_id,
                 out,
             )
         return
@@ -612,6 +653,7 @@ def _walk_function_templates(
             id_to_decl_kind,
             id_to_template_qname,
             full_by_id,
+            full_function_by_id,
             out,
         )
 
@@ -712,8 +754,17 @@ def parse_clang_ast_templates(ast: dict[str, Any]) -> list[TemplateInstantiation
             )
         )
 
+    full_function_by_id: dict[str, dict[str, Any]] = {}
+    _collect_full_function_defs(ast, full_function_by_id)
     _walk_function_templates(
-        ast, [], id_to_qname, id_to_decl_kind, id_to_template_qname, full_by_id, out
+        ast,
+        [],
+        id_to_qname,
+        id_to_decl_kind,
+        id_to_template_qname,
+        full_by_id,
+        full_function_by_id,
+        out,
     )
     return out
 

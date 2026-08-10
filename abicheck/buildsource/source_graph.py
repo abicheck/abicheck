@@ -1455,6 +1455,20 @@ def _augment_with_source_abi(
     for symbol in decl_to_sym.values():
         if symbol:
             export_symbol(symbol, CONF_REDUCED)
+    # source_link.py accounts for a real export under several other mappings
+    # too (each keyed *by* the symbol, unlike decl_to_sym): template-
+    # instantiation/synthesized/allocator-interposer/undocumented exports.
+    # Omitting these left no binary_symbol node for a downstream pass's
+    # join-only-onto-an-existing-node rule to find (Codex review).
+    for mapping_name in (
+        "template_instantiation_symbol_to_decl",
+        "synthesized_symbol_to_owner",
+        "allocator_interposer_symbol_to_owner",
+        "non_public_symbol_to_reason",
+    ):
+        for symbol in surface.mappings.get(mapping_name, {}):
+            if symbol:
+                export_symbol(symbol, CONF_REDUCED)
 
     declarations = (
         *surface.reachable_declarations,
