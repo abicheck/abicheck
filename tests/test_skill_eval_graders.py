@@ -218,6 +218,29 @@ class TestClaimExtraction:
         assert status == "ok"
         assert parsed["matrix"]["targets"][0]["state"] == "not_run"
 
+    def test_a_confident_null_verdict_is_rejected(self):
+        """`{"verdict": null, "evidence": [], "confident": true}` skipped
+        dimension 6's evidence block (nothing claimed) *and* read as
+        not_applicable in dimension 2 (it was confident), so a run that
+        compared nothing graded clean against a BREAKING scenario."""
+        parsed, status = claim_mod.extract(
+            envelope(verdict=None, evidence=[], confident=True)
+        )
+        assert parsed is None
+        assert "statement of uncertainty" in status
+
+    def test_a_caveated_null_verdict_is_still_accepted(self):
+        parsed, status = claim_mod.extract(
+            envelope(
+                verdict=None,
+                evidence=[0],
+                confident=False,
+                uncertainty={"reason": "not_comparable", "unresolved": "no contract"},
+            )
+        )
+        assert status == "ok"
+        assert parsed["verdict"] is None
+
     def test_the_severity_ordinal_is_least_to_most_severe(self):
         ranks = [claim_mod.rank(v) for v in claim_mod.VERDICT_ORDER]
         assert ranks == sorted(ranks)
@@ -433,6 +456,31 @@ class TestDimensionOne:
         ]
         run = build_run(tmp_path, final="", calls=[a_breaking_call()], events=events)
         result = dim.dimension_1(run, SCENARIO_BREAKING, ev.load_calls(run))
+        assert result.status == "fail"
+
+    def test_reading_a_skill_file_is_not_activating_it(self, tmp_path):
+        """A `Read` of `.claude/skills/<name>/SKILL.md` counted as activation,
+        which masks a skill-arm run that never invoked the skill."""
+        events = [
+            {
+                "type": "assistant",
+                "message": {
+                    "content": [
+                        {
+                            "type": "tool_use",
+                            "name": "Read",
+                            "input": {
+                                "file_path": ".claude/skills/"
+                                "native-binary-compatibility-review/SKILL.md"
+                            },
+                        }
+                    ]
+                },
+            }
+        ]
+        run = build_run(tmp_path, final="", calls=[a_breaking_call()], events=events)
+        assert dim.activated_skills(dim.load_events(run)) == []
+        result = dim.dimension_1(run, SCENARIO_BREAKING, ev.load_calls(run), "skill")
         assert result.status == "fail"
 
     def test_activating_the_right_skill_and_comparing_passes(self, tmp_path):

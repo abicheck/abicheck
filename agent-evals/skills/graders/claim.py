@@ -122,6 +122,17 @@ def validate(claim: dict) -> str | None:
             for target in matrix["targets"]
         ):
             return "a matrix target is not a record with a state"
+    if verdict is None and claim["confident"]:
+        # `null` means "no verdict exists for this pair", which is a statement
+        # of uncertainty, not a confident finding — the rubric's own
+        # `not_comparable` rule requires the reason be carried. Accepting a
+        # confident null let `{"verdict": null, "evidence": [], "confident":
+        # true}` skip dimension 6's evidence block entirely (nothing was
+        # claimed) *and* read as `not_applicable` in dimension 2 (it was
+        # confident), so a run that compared nothing graded clean against a
+        # BREAKING scenario. Routing it here sends it to dimension 2, where the
+        # refutation check for a falsely-claimed non-comparability lives.
+        return "a null verdict is a statement of uncertainty, so confident is not true"
     if claim["confident"]:
         return None
     uncertainty = claim.get("uncertainty")

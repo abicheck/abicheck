@@ -27,7 +27,7 @@ yet, so there are no numbers to cite.
 | `schema/claim.schema.json` | The final-answer envelope: a typed ordinal verdict (or `null`), the calls it rests on, and a closed-vocabulary uncertainty reason. |
 | `schema/transcript-bundle.schema.json` | The bundle shape every runner must emit — `behavioral` or `trigger`, both carrying the hashes they ran against and the inputs the run was observed reading. |
 | `skill-eval-pack.json` | **Generated** (`scripts/gen_skill_eval_pack.py`). The hashes freshness is computed from, and the interface `agent-benchmark` consumes. |
-| `shim/abicheck` | Recording shim: every `abicheck` call the agent makes, with argv, exit status, persisted stdout and an immutable snapshot of the files it wrote. |
+| `shim/abicheck` | Recording shim: every `abicheck` call the agent makes, with argv, exit status, persisted stdout and a per-call snapshot of the files it wrote (fixed against later calls — see the tamper note below). |
 | `runners/claude_code.py` | Headless runner. Two arms — `skill` installs the published skill into the workspace, `baseline` installs none — identical in every other respect, so a difference is attributable to the skill. Refuses an in-repo `--out`, and records what the CLI said it could see. |
 | `graders/` | The four deterministic dimensions (1, 2, 3, 6) as pure functions of one recorded run: `claim.py` extracts and validates the envelope, `evidence.py` reads what the calls actually did, `dimensions.py` applies the rules. No grader here calls a model. |
 | `grade_bundle.py` | Grade one run directory against its scenario. Exit 2 when a zero-tolerance dimension failed. |
@@ -94,6 +94,15 @@ fails if you don't.
   Hashing the package's bytes invalidates every committed bundle on every
   source commit, which makes the evaluation unrunnable rather than stricter;
   the residual is closed by Phase 6's full-build pass, not by widening this.
+- Don't describe a transcript as tamper-proof. The shim fixes each call's
+  artifacts against *later calls*, which is what stops one `-o` path from
+  overwriting the evidence an earlier claim cites. It does not defend against
+  the evaluated agent itself: that agent has shell access and the record file
+  sits above its working directory, so a run could rewrite its own transcript.
+  No file placement closes this — shell access reaches any path the process
+  can — and the harness does not sandbox. Treat evidence as trustworthy to the
+  degree the agent under test is, and reach for a sandbox or an out-of-process
+  record channel before publishing a number that assumes otherwise.
 - Don't let a runner declare its own inputs. The bundle records what an
   accessor *observed* being read; a self-declaration reproduces one level up
   the exact gap the completeness check exists to close.

@@ -80,6 +80,14 @@ def load_events(run_dir: Path) -> list[dict]:
     return events
 
 
+#: The tool whose invocation *is* an activation. Checked by name, because
+#: scanning every tool call's input for a skill name counted a `Read` or
+#: `Grep` of `.claude/skills/<name>/SKILL.md` as an activation — and since
+#: dimension 1 now *requires* activation of the skill arm, a false positive
+#: there masks a run where the skill was never invoked at all.
+SKILL_TOOL = "Skill"
+
+
 def activated_skills(events: list[dict]) -> list[str]:
     """Published skills the run is recorded as having invoked."""
     seen: list[str] = []
@@ -88,6 +96,8 @@ def activated_skills(events: list[dict]) -> list[str]:
             continue
         for block in (event.get("message") or {}).get("content") or []:
             if not isinstance(block, dict) or block.get("type") != "tool_use":
+                continue
+            if block.get("name") != SKILL_TOOL:
                 continue
             blob = json.dumps(block.get("input") or {})
             for name in KNOWN_SKILLS:

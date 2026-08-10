@@ -32,9 +32,22 @@ else and a digest alone cannot be re-read at grading time.
 
 **Snapshots the call's file outputs immediately.** An agent that reuses one
 `-o` path across iterations would otherwise leave a claim citing call 2
-pointing at call 5's report. Copying at the moment the child exits makes each
-call's artifacts immutable without redirecting the agent's own argument, so
-what the agent sees and what the transcript holds stay the same paths.
+pointing at call 5's report. Copying at the moment the child exits fixes each
+call's artifacts against *later calls* without redirecting the agent's own
+argument, so what the agent sees and what the transcript holds stay the same
+paths.
+
+That is the whole of the guarantee, and it is worth stating precisely rather
+than as "immutable": the evaluated agent is given shell access and the record
+file sits one directory above its working directory, so nothing here prevents
+a run from rewriting its own transcript. The harness does not sandbox the
+agent, and no placement of the file would close that — shell access reaches
+any path the process can. The property this buys is protection against the
+*accidental* case (one call overwriting another's evidence), which is the one
+that actually occurs when the subject is a cooperating agent rather than an
+attacker. Closing the deliberate case needs a filesystem sandbox or an
+out-of-process record channel; until then, evidence from a run is trustworthy
+exactly to the degree the agent under test is.
 
 **Allocates its sequence number under a lock.** The agent can run two Bash
 calls concurrently; two shims counting the same file would pick the same `seq`,
