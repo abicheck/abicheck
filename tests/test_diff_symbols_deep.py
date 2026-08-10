@@ -695,6 +695,44 @@ class TestParamDefaultChanged:
         r = compare(old, new)
         assert ChangeKind.PARAM_DEFAULT_VALUE_CHANGED not in _kinds(r)
 
+    def test_no_false_change_against_producer_less_legacy_clang_snapshot(self):
+        """Codex review, PR #687, fresh evidence, third round: a direct-clang
+        snapshot persisted BEFORE ast_producer provenance was tracked at all
+        (e.g. schema v9) has its per-function producer resolve to None, not
+        "clang" -- but its real value is still an "expr:"-shaped fingerprint
+        from that same unstable pre-v20 _canonical_expr algorithm. The
+        stricter `producer == "clang"` equality check let this producer-less
+        legacy fingerprint compare directly against a freshly-stabilized one
+        and report a false PARAM_DEFAULT_VALUE_CHANGED."""
+        f_old = _pub_func(
+            "connect",
+            "_Z7connectv",
+            params=[Param(name="timeout", type="int", default="expr:oldalgo1234")],
+        )
+        f_new = _pub_func(
+            "connect",
+            "_Z7connectv",
+            params=[Param(name="timeout", type="int", default="expr:newalgo5678")],
+        )
+        old = AbiSnapshot(
+            library="libtest.so.1",
+            version="1.0",
+            functions=[f_old],
+            from_headers=True,
+            ast_producer=None,
+            clang_field_initializer_facts_reliable=False,
+        )
+        new = AbiSnapshot(
+            library="libtest.so.1",
+            version="2.0",
+            functions=[f_new],
+            from_headers=True,
+            ast_producer="clang",
+            clang_field_initializer_facts_reliable=True,
+        )
+        r = compare(old, new)
+        assert ChangeKind.PARAM_DEFAULT_VALUE_CHANGED not in _kinds(r)
+
     def test_real_change_from_literal_to_fingerprint_still_detected(self):
         """Codex review, PR #687, fresh evidence: the gate above must be
         checked PER SIDE, not "either value looks like a fingerprint ->

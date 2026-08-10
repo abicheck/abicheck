@@ -66,9 +66,25 @@ def default_value_representation_unreliable(
     a FINGERPRINT-shaped value (the ``"expr:"`` prefix) -- a literal
     default's plain value never touches ``_canonical_expr`` at all, so it
     stays fully comparable regardless of schema version or producer.
+
+    *producer* being ``None`` (unresolved/unrecorded) is ALSO treated as
+    clang-family risk, not excluded (Codex review, fresh evidence, third
+    round): a direct-clang snapshot persisted before ``ast_producer`` was
+    tracked at all (e.g. schema v9) still has real ``"expr:"``-prefixed
+    values from that same unstable pre-v20 ``_canonical_expr`` -- its
+    per-declaration producer resolves to ``None`` (unknown), not ``"clang"``,
+    so the stricter equality check let its legacy fingerprint compare
+    directly against a freshly-stabilized one and report a false CHANGED.
+    Since the caller already restricts every call here to a value that
+    starts with ``"expr:"`` (:func:`default_value_fingerprint_comparison_unreliable`),
+    and ONLY the direct-clang backend ever produces that prefix (castxml
+    always keeps the verbatim source expression instead), a producer of
+    ``None`` at this point is presumptively clang-authored regardless of
+    whether provenance was tracked at dump time -- ``"castxml"`` is the only
+    producer value this check must still exclude.
     """
     return (
-        producer == "clang"
+        producer != "castxml"
         and snap.from_headers
         and not snap.from_headers_inferred
         and not snap.clang_field_initializer_facts_reliable

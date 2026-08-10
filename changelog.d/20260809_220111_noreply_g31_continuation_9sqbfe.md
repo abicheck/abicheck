@@ -249,3 +249,16 @@ it should read in CHANGELOG.md. Delete the other sections.
   mode or reading the raw source text at the node's range offsets, neither
   a narrow extension of this pure AST-JSON-only fingerprint chain; pinned
   with a regression test rather than guessed at.
+- **Fixed a false `PARAM_DEFAULT_VALUE_CHANGED` against a direct-clang
+  snapshot persisted BEFORE `ast_producer` provenance was tracked at all**
+  (Codex review, fresh evidence, third round): such a snapshot's
+  per-declaration producer resolves to `None` (unknown), not `"clang"`, but
+  its real value can still be an `"expr:"`-shaped fingerprint from that
+  same unstable pre-v20 `_canonical_expr` algorithm. The reliability gate's
+  strict `producer == "clang"` equality check let this producer-less
+  legacy fingerprint compare directly against a freshly-stabilized one.
+  Since the caller already restricts every check here to a value that
+  starts with `"expr:"` — and only the direct-clang backend ever produces
+  that prefix — an unresolved producer is now treated the same as a
+  known-clang one for this check (only `"castxml"` is excluded, since it
+  never produces that prefix at all).

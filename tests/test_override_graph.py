@@ -111,6 +111,28 @@ def test_strip_exception_spec_no_qualifiers_and_no_parens() -> None:
 # ── parse_clang_ast_overrides ────────────────────────────────────────────
 
 
+def test_strips_macos_mach_o_underscore_from_mangled_names() -> None:
+    # Codex review, fresh evidence, verified against real
+    # `clang++ --target=x86_64-apple-darwin` output: on Darwin, clang's own
+    # -ast-dump=json reports mangledName with the Mach-O ABI's extra
+    # linker-symbol-table underscore still attached ("__ZN..." not
+    # "_ZN..."). Left unstripped, an override edge's identity would never
+    # join the call/type graph's own node for the SAME method (both already
+    # normalize via this exact helper) -- a disconnected duplicate node.
+    ast = _tu(
+        _record("B", inner=[_method("f", "__ZN1B1fEv", "void ()", is_virtual=True)]),
+        _record(
+            "D",
+            bases=["B"],
+            inner=[_method("f", "__ZN1D1fEv", "void ()", has_override_attr=True)],
+        ),
+    )
+    edges = parse_clang_ast_overrides(ast)
+    assert edges == [
+        OverrideEdge("_ZN1D1fEv", "_ZN1B1fEv", CONF_HIGH, RESOLUTION_OVERRIDE_CONFIRMED)
+    ]
+
+
 def test_confirmed_override_chain() -> None:
     # Base::run is the introducing virtual slot; Mid::run and Derived::run
     # both write `override` (OverrideAttr present) -- both edges must be

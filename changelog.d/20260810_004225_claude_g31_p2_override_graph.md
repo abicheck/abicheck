@@ -33,8 +33,15 @@
   directly (`type.qualType` differs even though clang accepts the
   override) — both verified against real Clang 17 output and pinned with
   regression tests rather than guessed at (Codex review, fresh evidence).
-  Folded automatically alongside the existing call/type-graph
-  passes whenever `dump --sources`/`--build-info` builds the L5 graph with
-  Clang available (`inline_graph_fold.fold_semantic_graphs`) —
-  best-effort, degrading gracefully (no edges, an extractor row recorded)
-  when `clang++` is unavailable, never aborting collection.
+  A mangled-name identity is normalized the same way the call/type graph
+  already does (`type_graph._normalize_mangled`, reused directly) — on
+  macOS clang reports a Mach-O ABI leading underscore (`__ZN...`) that,
+  left unstripped, would leave an override edge's endpoint a disconnected
+  duplicate of the SAME method's call/type-graph node instead of merging
+  onto it (Codex review, fresh evidence, verified against real
+  `clang++ --target=x86_64-apple-darwin` output). Folded automatically
+  alongside the existing call/type-graph passes whenever
+  `dump --sources`/`--build-info` builds the L5 graph with Clang available
+  (`inline_graph_fold.fold_semantic_graphs`) — best-effort, degrading
+  gracefully (no edges, an extractor row recorded) when `clang++` is
+  unavailable, never aborting collection.
