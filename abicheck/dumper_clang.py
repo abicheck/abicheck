@@ -62,8 +62,6 @@ lives in :func:`abicheck.dumper._clang_header_dump`.
 
 from __future__ import annotations
 
-import hashlib
-import json
 import os
 import re
 import shlex
@@ -71,6 +69,18 @@ import shutil
 from pathlib import Path
 from typing import Any
 
+from .dumper_clang_expr import (  # noqa: F401  (some re-exported for tests)
+    _SCOPE_NODE_KINDS,
+    _canonical_expr,
+    _expr_fingerprint,
+    _field_initializer_value,
+    _index_decl_id_qualified_names,
+    _init_expr,
+    _initializer_value,
+    _normalize_qual_type,
+    _specialization_scope_key,
+    _unwrap_expr,
+)
 from .errors import AstContextMissingError, SnapshotError
 from .model import (
     AccessLevel,
@@ -415,35 +425,6 @@ _FUNCTION_NODE_KINDS = frozenset(
         "CXXConversionDecl",
     }
 )
-#: Decl contexts we descend into, tracking the enclosing scope name so a
-#: namespace/class-qualified constant key is built (``ns::C::kLimit``).
-_SCOPE_NODE_KINDS = frozenset(
-    {"NamespaceDecl", "CXXRecordDecl", "RecordDecl", "LinkageSpecDecl"}
-)
-#: Literal node kinds whose ``value`` is a stable, human-meaningful constant.
-_LITERAL_NODE_KINDS = frozenset(
-    {
-        "IntegerLiteral",
-        "FloatingLiteral",
-        "CharacterLiteral",
-        "StringLiteral",
-        "CXXBoolLiteralExpr",
-        "FixedPointLiteral",
-    }
-)
-#: Single-child wrapper expressions to descend through before reading a literal.
-_WRAPPER_EXPR_KINDS = frozenset(
-    {
-        "ImplicitCastExpr",
-        "CStyleCastExpr",
-        "CXXStaticCastExpr",
-        "ConstantExpr",
-        "ExprWithCleanups",
-        "ParenExpr",
-        "CXXFunctionalCastExpr",
-        "MaterializeTemporaryExpr",
-    }
-)
 #: Pseudo-files clang attributes builtin / command-line declarations to.
 _BUILTIN_FILES = frozenset(
     {"<built-in>", "<builtin>", "<command line>", "<scratch space>"}
@@ -775,6 +756,11 @@ class _ClangAstParser:
         self._records: list[_Decl] = []
         self._enums: list[_Decl] = []
         self._typedefs: list[_Decl] = []
+        # Built lazily (on first param-default/field-default extraction that
+        # needs it, via _id_index()) -- a full extra tree walk isn't worth
+        # paying on every dump when nothing in this TU has a referenced-decl
+        # initializer to fingerprint.
+        self._decl_id_qualified_names: dict[str, str] | None = None
         self._walk(
             root,
             scope=(),
@@ -975,6 +961,13 @@ class _ClangAstParser:
         name = entry.node.get("name", "")
         return "::".join([*entry.scope, name]) if entry.scope else name
 
+    def _id_index(self) -> dict[str, str]:
+        """Lazily-built, memoized :func:`_index_decl_id_qualified_names`
+        over this parser's own AST root — computed at most once per parse."""
+        if self._decl_id_qualified_names is None:
+            self._decl_id_qualified_names = _index_decl_id_qualified_names(self._root)
+        return self._decl_id_qualified_names
+
     # ── parse_* (mirror _CastxmlParser's public surface) ─────────────────────
 
     def parse_functions(self) -> list[Function]:
@@ -998,7 +991,7 @@ class _ClangAstParser:
                     # Preserve the actual default-argument value (so a changed
                     # default fires PARAM_DEFAULT_VALUE_CHANGED); fall back to a
                     # bare presence marker when the value can't be evaluated.
-                    default=(_initializer_value(p) or "default")
+                    default=(_initializer_value(p, self._id_index) or "default")
                     if _param_has_default(p)
                     else None,
                 )
@@ -1186,7 +1179,7 @@ class _ClangAstParser:
             else ("struct" if node.get("tagUsed") == "struct" else "class")
         )
         fields = self._parse_fields(node)
-        bases, virtual_bases, base_access = _parse_bases(node)
+        bases, virtual_bases, _base_access = _parse_bases(node)
         injected = _anonymous_member_names(node)
         own_name = override_name or str(node.get("name", ""))
         is_standard_layout, is_trivially_copyable = _clang_record_type_traits(node)
@@ -1297,6 +1290,23 @@ class _ClangAstParser:
             is_volatile=bool(re.search(r"\bvolatile\b", cv_type)),
             is_mutable=bool(child.get("mutable")),
             access=self._access_level(access),
+            # self._id_index (uncalled -- a bound-method reference, matching
+            # _IdIndexProvider's lazy contract) is only actually invoked deep
+            # inside _canonical_expr, and only for a real referencedDecl --
+            # never for an ordinary literal default or a field with no
+            # initializer at all (Codex review, two rounds: passing the
+            # CALLED self._id_index() built the whole-AST index eagerly for
+            # every field regardless; gating only on hasInClassInitializer
+            # still left every LITERAL default, e.g. `int timeout = 30;`,
+            # paying for it too, since that never reaches the referencedDecl
+            # branch either). The hasInClassInitializer ternary itself stays,
+            # to skip the function call entirely for a field with no
+            # initializer.
+            default=(
+                _field_initializer_value(child, self._id_index)
+                if child.get("hasInClassInitializer")
+                else None
+            ),
             deprecated=_clang_deprecated_message(child),
         )
 
@@ -1660,71 +1670,6 @@ def _enum_constant_value(node: dict[str, Any]) -> int | None:
         if value is not None:
             return value
     return None
-
-
-def _unwrap_expr(node: dict[str, Any]) -> dict[str, Any]:
-    """Descend through single-child wrapper expressions (casts, ConstantExpr…)."""
-    cur = node
-    while isinstance(cur, dict) and cur.get("kind") in _WRAPPER_EXPR_KINDS:
-        inner = [c for c in cur.get("inner", []) or [] if isinstance(c, dict)]
-        if len(inner) != 1:
-            break
-        cur = inner[0]
-    return cur
-
-
-def _initializer_value(node: dict[str, Any]) -> str | None:
-    """A stable value string for a variable's initializer, or ``None`` if absent.
-
-    A lone literal (after stripping wrapper casts) keeps its human-readable value
-    (``42``); any compound initializer is reduced to a short deterministic
-    fingerprint so two different compound expressions compare unequal while the
-    same one is stable across builds. Mirrors the castxml ``init`` value as a
-    same-backend comparison key (cross-backend constant *values* are not
-    expected to match — the snapshots are still per-backend parity oracles for
-    presence/scope).
-    """
-    init = _init_expr(node)
-    if init is None:
-        return None
-    core = _unwrap_expr(init)
-    if core.get("kind") in _LITERAL_NODE_KINDS and "value" in core:
-        return str(core["value"])
-    return _expr_fingerprint(init)
-
-
-def _init_expr(node: dict[str, Any]) -> dict[str, Any] | None:
-    """The initializer expression child of a Var/Field decl, or ``None``."""
-    candidates = [
-        c
-        for c in node.get("inner", []) or []
-        if isinstance(c, dict)
-        and not str(c.get("kind", "")).endswith(("Decl", "Attr", "Comment"))
-    ]
-    return candidates[-1] if candidates else None
-
-
-def _expr_fingerprint(node: dict[str, Any]) -> str:
-    """A short, build-stable structural fingerprint of an expression subtree."""
-    blob = json.dumps(_canonical_expr(node), sort_keys=True).encode("utf-8")
-    return "expr:" + hashlib.sha256(blob).hexdigest()[:16]
-
-
-def _canonical_expr(node: Any) -> Any:
-    """Reduce an expression node to a structural form (drop ids/locations)."""
-    if not isinstance(node, dict):
-        return node
-    out: dict[str, Any] = {}
-    for key in ("kind", "value", "opcode", "name", "castKind"):
-        if key in node:
-            out[key] = node[key]
-    type_obj = node.get("type")
-    if isinstance(type_obj, dict) and "qualType" in type_obj:
-        out["type"] = type_obj["qualType"]
-    inner = node.get("inner")
-    if isinstance(inner, list):
-        out["inner"] = [_canonical_expr(c) for c in inner]
-    return out
 
 
 def _owned_tag_id(typedef_node: dict[str, Any]) -> str:

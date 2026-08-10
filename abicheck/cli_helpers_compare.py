@@ -29,6 +29,7 @@ from __future__ import annotations
 import dataclasses
 import re
 from dataclasses import dataclass
+from functools import partial
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -437,7 +438,10 @@ def _build_match_map(paths: list[Path]) -> tuple[dict[str, Path], list[str]]:
     mapping: dict[str, Path] = {}
     warnings: list[str] = []
     for key, vals in buckets.items():
-        ordered = sorted(vals, key=lambda x: _version_sort_key(x, key))
+        # `partial` binds this iteration's key rather than closing over the
+        # loop variable (the sort runs eagerly here, but the explicit binding
+        # keeps that independent of when the key function is called).
+        ordered = sorted(vals, key=partial(_version_sort_key, canonical_key=key))
         selected = ordered[-1]
         mapping[key] = selected
         if len(ordered) > 1:
@@ -679,8 +683,7 @@ def discover_project_config(start: Path | None = None) -> Path | None:
 def _merge_redundant_changes(result: DiffResult) -> None:
     """Re-merge redundant changes back into the main change list."""
     for c in result.changes:
-        if c.caused_count > 0:
-            c.caused_count = 0
+        c.caused_count = 0
     for c in result.redundant_changes:
         c.caused_by_type = None
     result.changes = result.changes + result.redundant_changes

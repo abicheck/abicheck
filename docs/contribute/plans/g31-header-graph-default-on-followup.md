@@ -275,8 +275,56 @@ building a second identity-resolution mechanism from scratch.
   **Still open** for this fact-completeness pass: vptr placement remains
   only a `0`-if-polymorphic heuristic on castxml (no real multi-inheritance
   secondary-vtable placement) and is not populated by the clang backend at
-  all; `TypeField.default` (member initializer *value*, not the
-  default-argument facts above) remains castxml-only.
+  all — the one fact-completeness item from this phase's original list that
+  remains genuinely unstarted. `TypeField.default` (member initializer
+  *value*, not the default-argument facts above) was the other item on this
+  list still marked castxml-only here; closed in a later pass — see the new
+  entry below, appended rather than edited in place so this section stays
+  an accurate as-of-time record of what each review round actually found.
+
+  **A later pass closed the last of this phase's four originally-listed
+  facts** (`deprecated`/`is_scoped`/bitfields/default-argument facts were
+  the other three, already covered above): direct-clang now populates
+  `TypeField.default` too, via `dumper_clang_expr._field_initializer_value`,
+  verified against real Clang 18 `-ast-dump=json` output before wiring it
+  up. The one real trap found and fixed while verifying: a `FieldDecl`'s
+  `inner` list is overloaded — a **bitfield width** is nested there as a
+  `ConstantExpr` too (`int bf : 3;` has no initializer at all, but nests
+  exactly one `ConstantExpr` child, structurally identical to what an
+  initializer expression looks like). Presence is taken from clang's own
+  `hasInClassInitializer` flag (present-only-when-true, matching
+  `scopedEnumTag`'s convention) rather than "any non-attribute child" the
+  way `_param_has_default` reads a `ParmVarDecl` — that heuristic would
+  have fabricated an initializer of `3` for `bf` above. Unlike
+  `deprecated`/`is_scoped` (directly cross-comparable values — a plain
+  message string / bool), `TypeField.default`'s two backends are
+  cross-*producer* without being cross-*comparable*: castxml keeps the
+  verbatim source expression, clang falls back to a literal or a
+  structural fingerprint for anything non-trivial — the same shape
+  `Param.default` already has. So its detector
+  (`_diff_field_default_initializer`) needed the SAME-producer gate
+  `_diff_param_defaults` already uses (`fact_provenance.
+  same_producer_backed_fact_qualified`, `diff_helpers.
+  fact_same_producer_qualified`), not the any-known-producer gate
+  (`both_known_backed_fact`) `deprecated`/`is_scoped` correctly use — using
+  the wrong one here would compare castxml's source text against clang's
+  fingerprint and read every initializer as changed. Two follow-on
+  bookkeeping gaps closed in the same pass, both exactly the shape prior
+  rounds on this same fact-completeness effort already found for
+  `deprecated`/`is_scoped`: (1) schema bumped to **v20**
+  (`AbiSnapshot.clang_field_initializer_facts_reliable`, mirroring
+  `clang_deprecation_facts_reliable`'s v19 shape one version and one fact
+  later — tracked as its own flag since a v19 snapshot has reliable
+  deprecated/is_scoped but unreliable field defaults) and the whole-snapshot
+  disk cache bumped to **v8**; (2) the hybrid merge's field `default`
+  provenance key is now namespace-qualified (previously deliberately kept
+  bare, since it never got a clang-only-append write — that exemption no
+  longer holds now that a clang-only field's `default` is stamped too), with
+  the existing bare-key fallback covering a pre-fix persisted hybrid
+  baseline. Verified end-to-end against a real compiled library through the
+  actual `dump()`/`compare()` pipeline
+  (`test_clang_header_backend_integration.py`), not just at the
+  parser-unit or hand-built-snapshot detector level.
 
   **Two more real gaps found and fixed in the same pass** (Codex review,
   fresh evidence, both confirmed against real code before fixing): (1) the

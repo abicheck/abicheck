@@ -27,11 +27,14 @@
 #                       canonical_page. Anything longer belongs on
 #                       canonical_page itself.
 #
-# This is a *pilot* covering the handful of topics that already had an
+# Started as a *pilot* covering the handful of topics that already had an
 # explicit ownership split documented in docs/CLAUDE.md before this file
 # existed (the evidence-model trio, the verdict/exit-code split, the
-# curated-vs-generated change-kinds split). Extending it to the rest of
-# docs/ is deliberately incremental — see docs/AGENTS.md's rollout note.
+# curated-vs-generated change-kinds split). It has since grown to 20+
+# registered topics covering most major product surfaces -- see
+# docs/AGENTS.md's "Topic ownership registry" section for the current,
+# normative registration policy (not restated here; this file is the
+# schema/data, not the canonical instruction source).
 
 schema_version: 1
 
@@ -134,7 +137,7 @@ topics:
     reference_page: reference/source-graph-schema.md
     task_pages:
       - contribute/detector-impact-contract.md
-      - use/use-case-impact.md
+      - contribute/use-case-impact.md
 
   policies:
     canonical_page: use/policies.md

@@ -581,6 +581,1225 @@ def test_parse_types_and_enums_populate_deprecated() -> None:
     assert enums["Mode"].is_scoped is True
 
 
+def test_parse_types_populates_field_default_initializer() -> None:
+    """G31 Phase C's last direct-clang fact-completeness gap:
+    TypeField.default (the default member initializer) previously stayed
+    None unconditionally on this backend -- verified against real
+    Clang 18 ``-ast-dump=json`` output before wiring this up (see
+    dumper_clang_expr._field_initializer_value's docstring for the exact shapes
+    below)."""
+    root = _tu(
+        {
+            "kind": "CXXRecordDecl",
+            "name": "S",
+            "tagUsed": "struct",
+            "loc": {"file": "include/foo.h", "line": 1},
+            "completeDefinition": True,
+            "inner": [
+                # int bf : 3; -- a bitfield width with NO initializer. The
+                # width is nested as a ConstantExpr child, structurally
+                # identical to how an initializer would be nested, but
+                # hasInClassInitializer is absent -- must NOT be read as a
+                # default value of "3".
+                {
+                    "kind": "FieldDecl",
+                    "name": "bf",
+                    "type": {"qualType": "int"},
+                    "isBitfield": True,
+                    "inner": [{"kind": "ConstantExpr", "value": "3"}],
+                },
+                # int bfi : 3 = 2; -- a bitfield WITH an initializer. The
+                # width comes first, the initializer second; _init_expr's
+                # "last non-Decl/Attr/Comment child" rule must pick the
+                # initializer, not the width.
+                {
+                    "kind": "FieldDecl",
+                    "name": "bfi",
+                    "type": {"qualType": "int"},
+                    "isBitfield": True,
+                    "hasInClassInitializer": True,
+                    "inner": [
+                        {"kind": "ConstantExpr", "value": "3"},
+                        {"kind": "IntegerLiteral", "value": "2"},
+                    ],
+                },
+                # [[deprecated("old")]] int d = 7; -- initializer followed
+                # by a trailing DeprecatedAttr (real clang ordering); the
+                # attr must not be mistaken for the initializer either.
+                {
+                    "kind": "FieldDecl",
+                    "name": "d",
+                    "type": {"qualType": "int"},
+                    "hasInClassInitializer": True,
+                    "inner": [
+                        {"kind": "IntegerLiteral", "value": "7"},
+                        {"kind": "DeprecatedAttr", "message": "old"},
+                    ],
+                },
+                # int plain; -- no initializer, no bitfield.
+                {
+                    "kind": "FieldDecl",
+                    "name": "plain",
+                    "type": {"qualType": "int"},
+                },
+            ],
+        },
+    )
+    (t,) = _ClangAstParser(root, set(), set()).parse_types()
+    fields = {f.name: f for f in t.fields}
+    assert fields["bf"].default is None
+    assert fields["bfi"].default == "2"
+    assert fields["d"].default == "7"
+    assert fields["plain"].default is None
+
+
+def _decl_ref_initializer(field_name: str, referenced_name: str) -> dict:
+    """A synthetic ``FieldDecl`` shaped like ``int <field_name> =
+    <referenced_name>;`` -- the real Clang 18 ``DeclRefExpr``/
+    ``referencedDecl`` nesting confirmed in
+    ``dumper_clang._canonical_expr``'s own docstring."""
+    return {
+        "kind": "FieldDecl",
+        "name": field_name,
+        "type": {"qualType": "int"},
+        "hasInClassInitializer": True,
+        "inner": [
+            {
+                "kind": "ImplicitCastExpr",
+                "type": {"qualType": "int"},
+                "castKind": "LValueToRValue",
+                "inner": [
+                    {
+                        "kind": "DeclRefExpr",
+                        "type": {"qualType": "const int"},
+                        "referencedDecl": {
+                            "kind": "VarDecl",
+                            "name": referenced_name,
+                            "type": {"qualType": "const int"},
+                        },
+                    }
+                ],
+            }
+        ],
+    }
+
+
+def test_field_default_fingerprint_distinguishes_referenced_declarations() -> None:
+    """Codex review, PR #687, fresh evidence: ``_canonical_expr`` dropped
+    ``DeclRefExpr``'s ``referencedDecl`` sibling entirely, so ``int x =
+    DEFAULT_A;`` and ``int x = DEFAULT_B;`` (or two different function
+    calls) fingerprinted identically -- a real
+    ``FIELD_DEFAULT_INITIALIZER_CHANGED`` (and, since ``Param.default``
+    shares the same ``_canonical_expr``/``_expr_fingerprint`` helper, a real
+    ``PARAM_DEFAULT_VALUE_CHANGED``) would go completely undetected on this
+    backend whenever both initializers were declaration references."""
+    root = _tu(
+        {
+            "kind": "CXXRecordDecl",
+            "name": "S",
+            "tagUsed": "struct",
+            "loc": {"file": "include/foo.h", "line": 1},
+            "completeDefinition": True,
+            "inner": [
+                _decl_ref_initializer("a", "DEFAULT_A"),
+                _decl_ref_initializer("b", "DEFAULT_B"),
+                _decl_ref_initializer("a_again", "DEFAULT_A"),
+            ],
+        },
+    )
+    (t,) = _ClangAstParser(root, set(), set()).parse_types()
+    fields = {f.name: f for f in t.fields}
+
+    assert fields["a"].default is not None
+    assert fields["a"].default != fields["b"].default
+    # The SAME referenced declaration still fingerprints identically --
+    # this fix must not turn every decl-ref initializer into a fresh,
+    # nondeterministic value.
+    assert fields["a"].default == fields["a_again"].default
+
+
+def _namespaced_var_decl(namespace: str, var_name: str, decl_id: str) -> dict:
+    return {
+        "kind": "NamespaceDecl",
+        "name": namespace,
+        "inner": [
+            {
+                "kind": "VarDecl",
+                "id": decl_id,
+                "name": var_name,
+                "type": {"qualType": "const int"},
+            }
+        ],
+    }
+
+
+def _decl_ref_initializer_by_id(field_name: str, referenced_id: str) -> dict:
+    """Same shape as ``_decl_ref_initializer``, but the ``referencedDecl``
+    stub's ``id`` is caller-supplied (so it can be made to resolve, via
+    ``_index_decl_id_qualified_names``, to a real namespaced declaration
+    planted elsewhere in the same synthetic AST) rather than sharing
+    ``referenced_name`` as both the bare stub name AND the lookup key --
+    two DIFFERENT namespaced declarations sharing the same bare leaf name
+    is exactly the case this test targets."""
+    return {
+        "kind": "FieldDecl",
+        "name": field_name,
+        "type": {"qualType": "int"},
+        "hasInClassInitializer": True,
+        "inner": [
+            {
+                "kind": "ImplicitCastExpr",
+                "type": {"qualType": "int"},
+                "castKind": "LValueToRValue",
+                "inner": [
+                    {
+                        "kind": "DeclRefExpr",
+                        "type": {"qualType": "const int"},
+                        "referencedDecl": {
+                            "kind": "VarDecl",
+                            "name": "VALUE",
+                            "type": {"qualType": "const int"},
+                            "id": referenced_id,
+                        },
+                    }
+                ],
+            }
+        ],
+    }
+
+
+def test_field_default_fingerprint_distinguishes_namespaced_same_name_referents() -> (
+    None
+):
+    """Codex review, PR #687, second round, fresh evidence: a
+    ``referencedDecl`` stub carries only a BARE, unqualified name -- real
+    Clang 17/18 output confirmed ``a::VALUE`` and ``b::VALUE`` share the
+    byte-identical stub ``{"kind": "VarDecl", "name": "VALUE", ...}``, so
+    ``int x = a::VALUE;`` vs ``int x = b::VALUE;`` still fingerprinted
+    identically after the first round's fix (which only distinguished
+    referenced declarations by bare name/kind/type, not by scope). The
+    fix resolves each reference's ``id`` through
+    ``_index_decl_id_qualified_names``'s namespace-qualified index instead."""
+    root = _tu(
+        _namespaced_var_decl("a", "VALUE", "0x1"),
+        _namespaced_var_decl("b", "VALUE", "0x2"),
+        {
+            "kind": "CXXRecordDecl",
+            "name": "S",
+            "tagUsed": "struct",
+            "loc": {"file": "include/foo.h", "line": 1},
+            "completeDefinition": True,
+            "inner": [
+                _decl_ref_initializer_by_id("x", "0x1"),
+                _decl_ref_initializer_by_id("y", "0x2"),
+                _decl_ref_initializer_by_id("x_again", "0x1"),
+            ],
+        },
+    )
+    (t,) = _ClangAstParser(root, set(), set()).parse_types()
+    fields = {f.name: f for f in t.fields}
+
+    assert fields["x"].default is not None
+    assert fields["x"].default != fields["y"].default
+    # The SAME referenced declaration (by id) still fingerprints
+    # identically, even though this fix resolves scope through it.
+    assert fields["x"].default == fields["x_again"].default
+
+
+def test_id_index_falls_back_to_bare_name_for_unresolved_reference() -> None:
+    """A referencedDecl id absent from the index (e.g. a builtin, or a
+    declaration genuinely outside this AST root) must not crash or drop
+    the fingerprint entirely -- it falls back to the bare-name/kind/type
+    identity the first round's fix already established."""
+    root = _tu(
+        {
+            "kind": "CXXRecordDecl",
+            "name": "S",
+            "tagUsed": "struct",
+            "loc": {"file": "include/foo.h", "line": 1},
+            "completeDefinition": True,
+            "inner": [_decl_ref_initializer_by_id("x", "0xDEADBEEF")],
+        },
+    )
+    (t,) = _ClangAstParser(root, set(), set()).parse_types()
+    assert t.fields[0].default is not None
+
+
+def test_id_index_not_built_for_field_without_initializer() -> None:
+    """Codex review, PR #687, fresh evidence: ``self._id_index()`` used to be
+    a plain function-call ARGUMENT to ``_field_initializer_value(child,
+    self._id_index())`` in ``_make_field``, so Python evaluated it eagerly
+    regardless of whether ``child`` even has an initializer -- the first
+    field processed in nearly every direct-clang dump paid the one-time
+    whole-AST index-build walk for nothing. Gated on
+    ``hasInClassInitializer`` first, matching the sibling ``Param.default``
+    call site's own short-circuiting ternary."""
+    import abicheck.dumper_clang as dumper_clang_module
+
+    root = _tu(
+        {
+            "kind": "CXXRecordDecl",
+            "name": "S",
+            "tagUsed": "struct",
+            "loc": {"file": "include/foo.h", "line": 1},
+            "completeDefinition": True,
+            "inner": [
+                {"kind": "FieldDecl", "name": "plain", "type": {"qualType": "int"}},
+            ],
+        },
+    )
+    parser = _ClangAstParser(root, set(), set())
+    calls: list[int] = []
+    orig = dumper_clang_module._index_decl_id_qualified_names
+
+    def _spy(*args: object, **kwargs: object) -> dict[str, str]:
+        calls.append(1)
+        return orig(*args, **kwargs)  # type: ignore[arg-type]
+
+    dumper_clang_module._index_decl_id_qualified_names = _spy  # type: ignore[assignment]
+    try:
+        (t,) = parser.parse_types()
+    finally:
+        dumper_clang_module._index_decl_id_qualified_names = orig
+
+    assert t.fields[0].default is None
+    assert calls == []
+
+
+def test_field_default_fingerprint_distinguishes_template_specializations() -> None:
+    """Codex review, PR #687, second round, fresh evidence: distinct
+    specializations of the same template (``A<int>`` vs. ``A<long>``) are
+    separate ``ClassTemplateSpecializationDecl`` nodes sharing the bare
+    primary-template name ``"A"`` -- verified against real Clang 17 output
+    that the node itself carries no template-argument spelling at all, and
+    that kind is absent from ``_SCOPE_NODE_KINDS``. Without the fix, both
+    specializations' ``VALUE`` members indexed to the identical bare
+    ``"VALUE"`` (not even qualified by ``"A"``), so ``int x = A<int>::VALUE;``
+    vs. ``int x = A<long>::VALUE;`` fingerprinted identically."""
+    root = _tu(
+        {
+            "kind": "ClassTemplateSpecializationDecl",
+            "name": "A",
+            "completeDefinition": True,
+            "inner": [
+                {
+                    "kind": "VarDecl",
+                    "id": "0x1",
+                    "name": "VALUE",
+                    "mangledName": "_ZN1AIiE5VALUEE",
+                    "type": {"qualType": "const int"},
+                },
+            ],
+        },
+        {
+            "kind": "ClassTemplateSpecializationDecl",
+            "name": "A",
+            "completeDefinition": True,
+            "inner": [
+                {
+                    "kind": "VarDecl",
+                    "id": "0x2",
+                    "name": "VALUE",
+                    "mangledName": "_ZN1AIlE5VALUEE",
+                    "type": {"qualType": "const int"},
+                },
+            ],
+        },
+        {
+            "kind": "CXXRecordDecl",
+            "name": "S1",
+            "tagUsed": "struct",
+            "loc": {"file": "include/foo.h", "line": 1},
+            "completeDefinition": True,
+            "inner": [_decl_ref_initializer_by_id("x", "0x1")],
+        },
+        {
+            "kind": "CXXRecordDecl",
+            "name": "S2",
+            "tagUsed": "struct",
+            "loc": {"file": "include/foo.h", "line": 2},
+            "completeDefinition": True,
+            "inner": [_decl_ref_initializer_by_id("x", "0x2")],
+        },
+    )
+    types = {t.name: t for t in _ClangAstParser(root, set(), set()).parse_types()}
+
+    assert types["S1"].fields[0].default is not None
+    assert types["S1"].fields[0].default != types["S2"].fields[0].default
+
+
+def test_field_default_fingerprint_stable_across_unrelated_member_insertion() -> None:
+    """Codex review, PR #687, third round, fresh evidence: end-to-end
+    version of the order-independence guarantee. `S1.x = A<int>::VALUE`
+    must fingerprint identically whether or not an unrelated `AAA` member
+    was inserted earlier in the SAME specialization -- the earlier
+    "first mangled child" disambiguator broke this (adding `AAA` ahead of
+    `VALUE` changed the computed disambiguator from `VALUE`'s own mangled
+    name to `AAA`'s), producing a false `FIELD_DEFAULT_INITIALIZER_CHANGED`
+    purely from an unrelated addition."""
+
+    def _snap(with_aaa: bool):
+        members = []
+        if with_aaa:
+            members.append(
+                {
+                    "kind": "VarDecl",
+                    "id": "0xAAA",
+                    "name": "AAA",
+                    "mangledName": "_ZN1AIiE3AAAE",
+                    "type": {"qualType": "const int"},
+                }
+            )
+        members.append(
+            {
+                "kind": "VarDecl",
+                "id": "0x1",
+                "name": "VALUE",
+                "mangledName": "_ZN1AIiE5VALUEE",
+                "type": {"qualType": "const int"},
+            }
+        )
+        root = _tu(
+            {
+                "kind": "ClassTemplateSpecializationDecl",
+                "name": "A",
+                "completeDefinition": True,
+                "inner": members,
+            },
+            {
+                "kind": "CXXRecordDecl",
+                "name": "S1",
+                "tagUsed": "struct",
+                "loc": {"file": "include/foo.h", "line": 1},
+                "completeDefinition": True,
+                "inner": [_decl_ref_initializer_by_id("x", "0x1")],
+            },
+        )
+        (t,) = _ClangAstParser(root, set(), set()).parse_types()
+        return t.fields[0].default
+
+    before = _snap(with_aaa=False)
+    after = _snap(with_aaa=True)
+    assert before is not None
+    assert before == after
+
+
+def test_field_default_fingerprint_distinguishes_sizeof_operand_type() -> None:
+    """Codex review, PR #687, third round, fresh evidence: a
+    ``UnaryExprOrTypeTraitExpr`` (``sizeof``/``alignof``/...) stores its
+    TYPE operand exclusively in ``argType`` -- its own ``type`` key is just
+    the trait's result type (always ``unsigned long`` for ``sizeof``,
+    identical regardless of operand) and ``name`` only says which trait, not
+    what it was applied to. Verified against real Clang 18 output that
+    ``sizeof(int)`` and ``sizeof(long long)`` produced byte-identical nodes
+    apart from ``argType`` before this fix."""
+
+    def _sizeof_field(field_name: str, arg_qual_type: str) -> dict:
+        return {
+            "kind": "FieldDecl",
+            "name": field_name,
+            "type": {"qualType": "unsigned long"},
+            "hasInClassInitializer": True,
+            "inner": [
+                {
+                    "kind": "UnaryExprOrTypeTraitExpr",
+                    "type": {"qualType": "unsigned long"},
+                    "name": "sizeof",
+                    "argType": {"qualType": arg_qual_type},
+                }
+            ],
+        }
+
+    root = _tu(
+        {
+            "kind": "CXXRecordDecl",
+            "name": "S",
+            "tagUsed": "struct",
+            "loc": {"file": "include/foo.h", "line": 1},
+            "completeDefinition": True,
+            "inner": [
+                _sizeof_field("a", "int"),
+                _sizeof_field("b", "long long"),
+                _sizeof_field("a_again", "int"),
+            ],
+        },
+    )
+    (t,) = _ClangAstParser(root, set(), set()).parse_types()
+    fields = {f.name: f for f in t.fields}
+
+    assert fields["a"].default is not None
+    assert fields["a"].default != fields["b"].default
+    assert fields["a"].default == fields["a_again"].default
+
+
+def test_normalize_qual_type_strips_anonymous_type_location() -> None:
+    from abicheck.dumper_clang import _normalize_qual_type
+
+    assert _normalize_qual_type("(unnamed enum at t.hpp:1:1)") == "(unnamed enum)"
+    assert (
+        _normalize_qual_type("union (unnamed union at t.hpp:2:5)")
+        == "union (unnamed union)"
+    )
+    assert (
+        _normalize_qual_type("struct (unnamed struct at /abs/other/path/t.hpp:9:1)")
+        == "struct (unnamed struct)"
+    )
+    # A named type (the overwhelming common case) passes through unchanged.
+    assert _normalize_qual_type("const int") == "const int"
+    assert _normalize_qual_type("std::vector<int>") == "std::vector<int>"
+
+
+def test_normalize_qual_type_strips_lambda_location() -> None:
+    """Codex review, PR #687, fourth round, fresh evidence: a lambda's
+    closure type is spelled ``"(lambda at <file>:<line>:<col>)"`` -- also
+    location-bearing, but a DIFFERENT shape than the "(unnamed <kind> at
+    ...)" pattern the anonymous-tag fix above handles (no "unnamed" word).
+    Verified against real Clang 17 output that this spelling appears
+    repeatedly throughout a ``std::function<...>``-wrapped lambda's whole
+    template instantiation chain, so every occurrence must be normalized,
+    not just the first/outermost."""
+    from abicheck.dumper_clang import _normalize_qual_type
+
+    assert _normalize_qual_type("(lambda at t.hpp:2:38)") == "(lambda)"
+    assert _normalize_qual_type("S::(lambda at t.hpp:2:38)") == "S::(lambda)"
+    assert _normalize_qual_type("S::(lambda at t.hpp:2:38) &&") == "S::(lambda) &&"
+    # Repeated occurrences within one complex template spelling.
+    assert (
+        _normalize_qual_type(
+            "std::is_nothrow_constructible<(lambda at t.hpp:2:38), "
+            "(lambda at t.hpp:2:38)>"
+        )
+        == "std::is_nothrow_constructible<(lambda), (lambda)>"
+    )
+
+
+def test_field_default_fingerprint_stable_across_lambda_location() -> None:
+    """End-to-end version of the lambda-location test above: a field
+    initialized with ``std::function<void()> f = []{};`` must fingerprint
+    identically whether parsed from ``t.hpp:2:38`` or a completely
+    different checkout path/line."""
+
+    def _lambda_field(loc: str) -> dict:
+        return {
+            "kind": "FieldDecl",
+            "name": "f",
+            "type": {"qualType": "std::function<void ()>"},
+            "hasInClassInitializer": True,
+            "inner": [
+                {
+                    "kind": "CXXConstructExpr",
+                    "type": {"qualType": "std::function<void ()>"},
+                    "inner": [
+                        {
+                            "kind": "LambdaExpr",
+                            "type": {"qualType": f"(lambda at {loc})"},
+                        }
+                    ],
+                }
+            ],
+        }
+
+    def _snap(loc: str):
+        root = _tu(
+            {
+                "kind": "CXXRecordDecl",
+                "name": "S",
+                "tagUsed": "struct",
+                "loc": {"file": "include/foo.h", "line": 1},
+                "completeDefinition": True,
+                "inner": [_lambda_field(loc)],
+            },
+        )
+        (t,) = _ClangAstParser(root, set(), set()).parse_types()
+        return t.fields[0].default
+
+    same_checkout = _snap("t.hpp:2:38")
+    different_checkout = _snap("/different/tree/t.hpp:9:99")
+    assert same_checkout is not None
+    assert same_checkout == different_checkout
+
+
+def test_field_default_fingerprint_stable_across_anonymous_type_location() -> None:
+    """Codex review, PR #687, fourth round, fresh evidence: clang spells an
+    anonymous enum/struct/union's type as ``"(unnamed <kind> at <file>:
+    <line>:<col>)"`` -- an absolute path and line embedded directly in the
+    ``qualType`` string. Verified against real Clang 17 output that parsing
+    identical source from two different checkout paths, or merely inserting
+    a blank line before an anonymous ``enum { VALUE = 3 };``, produced two
+    DIFFERENT ``TypeField.default`` fingerprints for an unrelated, unchanged
+    initializer referencing it -- a false
+    ``FIELD_DEFAULT_INITIALIZER_CHANGED`` purely from where/how the source
+    was checked out."""
+
+    def _anon_enum_ref_field(loc: str) -> dict:
+        return {
+            "kind": "FieldDecl",
+            "name": "x",
+            "type": {"qualType": "int"},
+            "hasInClassInitializer": True,
+            "inner": [
+                {
+                    "kind": "DeclRefExpr",
+                    "type": {"qualType": f"(unnamed enum at {loc})"},
+                    "referencedDecl": {
+                        "kind": "EnumConstantDecl",
+                        "name": "VALUE",
+                        "type": {"qualType": f"(unnamed enum at {loc})"},
+                    },
+                }
+            ],
+        }
+
+    def _snap(loc: str):
+        root = _tu(
+            {
+                "kind": "CXXRecordDecl",
+                "name": "S",
+                "tagUsed": "struct",
+                "loc": {"file": "include/foo.h", "line": 1},
+                "completeDefinition": True,
+                "inner": [_anon_enum_ref_field(loc)],
+            },
+        )
+        (t,) = _ClangAstParser(root, set(), set()).parse_types()
+        return t.fields[0].default
+
+    same_checkout = _snap("t.hpp:1:1")
+    different_checkout = _snap("/different/checkout/path/t.hpp:2:1")
+    assert same_checkout is not None
+    assert same_checkout == different_checkout
+
+
+def test_index_disambiguates_specializations_via_scope_key() -> None:
+    """Codex review, PR #687, third round, fresh evidence: an earlier
+    version derived the specialization disambiguator from whichever direct
+    child happened to be first with a mangled name -- unstable to an
+    unrelated member being inserted earlier in the same specialization
+    (see the dedicated order-independence test below). Fixed via
+    ``_specialization_scope_key``, which extracts only the SCOPE portion of
+    a representative member's mangled name (``itanium_scope_components``,
+    dropping the trailing leaf/member component) -- identical regardless of
+    which member of the SAME specialization contributed it."""
+    from abicheck.dumper_clang import _index_decl_id_qualified_names
+
+    root = _tu(
+        {
+            "kind": "ClassTemplateSpecializationDecl",
+            "name": "A",
+            "inner": [
+                {
+                    "kind": "VarDecl",
+                    "id": "0x1",
+                    "name": "VALUE",
+                    "mangledName": "_ZN1AIiE5VALUEE",
+                }
+            ],
+        },
+        {
+            "kind": "ClassTemplateSpecializationDecl",
+            "name": "A",
+            "inner": [
+                {
+                    "kind": "VarDecl",
+                    "id": "0x2",
+                    "name": "VALUE",
+                    "mangledName": "_ZN1AIlE5VALUEE",
+                }
+            ],
+        },
+        # No mangled child at all -- falls back to the bare (collision-
+        # prone) name rather than crashing or fabricating a value.
+        {
+            "kind": "ClassTemplateSpecializationDecl",
+            "name": "B",
+            "inner": [{"kind": "VarDecl", "id": "0x3", "name": "VALUE"}],
+        },
+    )
+    index = _index_decl_id_qualified_names(root)
+
+    assert index["0x1"] == "A#AIiE::VALUE"
+    assert index["0x2"] == "A#AIlE::VALUE"
+    assert index["0x1"] != index["0x2"]
+    assert index["0x3"] == "B::VALUE"
+
+
+def test_index_specialization_key_stable_across_member_insertion() -> None:
+    """The order-independence guarantee directly, at the index level: two
+    members of the SAME specialization (`VALUE` and a newly-inserted `AAA`
+    ahead of it) must resolve to the identical scope-key prefix, so adding
+    one never perturbs the other's already-computed identity."""
+    from abicheck.dumper_clang import _index_decl_id_qualified_names
+
+    root = _tu(
+        {
+            "kind": "ClassTemplateSpecializationDecl",
+            "name": "A",
+            "inner": [
+                {
+                    "kind": "VarDecl",
+                    "id": "0xAAA",
+                    "name": "AAA",
+                    "mangledName": "_ZN1AIiE3AAAE",
+                },
+                {
+                    "kind": "VarDecl",
+                    "id": "0x1",
+                    "name": "VALUE",
+                    "mangledName": "_ZN1AIiE5VALUEE",
+                },
+            ],
+        },
+    )
+    index = _index_decl_id_qualified_names(root)
+
+    assert index["0xAAA"] == "A#AIiE::AAA"
+    assert index["0x1"] == "A#AIiE::VALUE"
+
+
+def test_specialization_scope_key_documents_msvc_gap() -> None:
+    """Codex review, PR #687, third round, fresh evidence: a real
+    ``clang-cl``/``--target=*-windows-msvc`` snapshot mangles a
+    specialization member as e.g. ``?VALUE@?$A@H@@2HB``, which neither
+    ``itanium_scope_components`` NOR ``diff_cxx_rules.msvc_scope_components``
+    can parse (both return ``None`` -- the latter by its own documented
+    design, since a specialization's class-name component always starts
+    with the ``?$`` template marker it deliberately rejects). This is a
+    KNOWN, deliberately deferred gap (see ``_specialization_scope_key``'s
+    own docstring) -- this test pins the current, honest behavior (falls
+    back to the bare, collision-prone name; never crashes or fabricates a
+    value) so a future fix has a concrete regression to flip, and so this
+    doesn't silently regress further (e.g. start raising)."""
+    from abicheck.dumper_clang import _index_decl_id_qualified_names
+
+    root = _tu(
+        {
+            "kind": "ClassTemplateSpecializationDecl",
+            "name": "A",
+            "inner": [
+                {
+                    "kind": "VarDecl",
+                    "id": "0x1",
+                    "name": "VALUE",
+                    "mangledName": "?VALUE@?$A@H@@2HB",
+                },
+            ],
+        },
+        {
+            "kind": "ClassTemplateSpecializationDecl",
+            "name": "A",
+            "inner": [
+                {
+                    "kind": "VarDecl",
+                    "id": "0x2",
+                    "name": "VALUE",
+                    "mangledName": "?VALUE@?$A@J@@2JB",
+                },
+            ],
+        },
+    )
+    index = _index_decl_id_qualified_names(root)
+
+    # Both fall back to the same bare, undisambiguated key -- the documented
+    # collision, not a crash.
+    assert index["0x1"] == "A::VALUE"
+    assert index["0x2"] == "A::VALUE"
+
+
+def test_index_disambiguates_function_template_specializations() -> None:
+    """Codex review, PR #687, fourth round, fresh evidence: ``f<int>()``/
+    ``f<long>()`` both report a ``FunctionDecl`` named ``"f"`` -- no
+    template-argument spelling on the node itself, verified against real
+    Clang 17 output -- so both used to resolve to the identical index entry
+    ``"f"``. Each specialization DOES carry its own build-stable
+    ``mangledName`` directly (unlike a class specialization), so it's used
+    outright instead of the bare name."""
+    from abicheck.dumper_clang import _index_decl_id_qualified_names
+
+    root = _tu(
+        {
+            "kind": "FunctionDecl",
+            "id": "0x1",
+            "name": "f",
+            "mangledName": "_Z1fIiEiv",
+            "type": {"qualType": "int ()"},
+            "inner": [{"kind": "TemplateArgument", "type": {"qualType": "int"}}],
+        },
+        {
+            "kind": "FunctionDecl",
+            "id": "0x2",
+            "name": "f",
+            "mangledName": "_Z1fIlEiv",
+            "type": {"qualType": "int ()"},
+            "inner": [{"kind": "TemplateArgument", "type": {"qualType": "long"}}],
+        },
+    )
+    index = _index_decl_id_qualified_names(root)
+
+    assert index["0x1"] == "_Z1fIiEiv"
+    assert index["0x2"] == "_Z1fIlEiv"
+    assert index["0x1"] != index["0x2"]
+
+
+def test_index_does_not_use_mangled_name_for_a_plain_function() -> None:
+    """The disambiguation above must stay scoped to an actual template
+    specialization (a ``FunctionDecl`` with a ``TemplateArgument`` child) --
+    an ordinary, non-template ``FunctionDecl`` has no such child and keeps
+    the existing scope+name index value."""
+    from abicheck.dumper_clang import _index_decl_id_qualified_names
+
+    root = _tu(
+        {
+            "kind": "FunctionDecl",
+            "id": "0x1",
+            "name": "plain",
+            "mangledName": "_Z5plainv",
+            "type": {"qualType": "void ()"},
+            "inner": [],
+        },
+    )
+    index = _index_decl_id_qualified_names(root)
+
+    assert index["0x1"] == "plain"
+
+
+def test_index_disambiguates_variable_template_specializations() -> None:
+    """Same collision, one level down, for a VARIABLE template
+    specialization: ``V<int>``/``V<long>`` both report a
+    ``VarTemplateSpecializationDecl`` named ``"V"``, verified against real
+    Clang 17 output."""
+    from abicheck.dumper_clang import _index_decl_id_qualified_names
+
+    root = _tu(
+        {
+            "kind": "VarTemplateSpecializationDecl",
+            "id": "0x1",
+            "name": "V",
+            "mangledName": "_Z1VIiE",
+            "type": {"qualType": "const int"},
+        },
+        {
+            "kind": "VarTemplateSpecializationDecl",
+            "id": "0x2",
+            "name": "V",
+            "mangledName": "_Z1VIlE",
+            "type": {"qualType": "const int"},
+        },
+    )
+    index = _index_decl_id_qualified_names(root)
+
+    assert index["0x1"] == "_Z1VIiE"
+    assert index["0x2"] == "_Z1VIlE"
+    assert index["0x1"] != index["0x2"]
+
+
+def test_field_default_changes_across_function_template_specializations() -> None:
+    """End-to-end: a field default referencing distinct specializations of
+    the same function template must fingerprint distinctly (Codex review,
+    PR #687, fourth round, fresh evidence)."""
+    from abicheck.dumper_clang_expr import (
+        _field_initializer_value,
+        _index_decl_id_qualified_names,
+    )
+
+    def _cfg(mangled: str) -> dict:
+        return {
+            "kind": "CXXRecordDecl",
+            "name": "Cfg",
+            "tagUsed": "struct",
+            "completeDefinition": True,
+            "inner": [
+                {
+                    "kind": "FieldDecl",
+                    "name": "x",
+                    "type": {"qualType": "int"},
+                    "hasInClassInitializer": True,
+                    "inner": [
+                        {
+                            "kind": "CallExpr",
+                            "inner": [
+                                {
+                                    "kind": "ImplicitCastExpr",
+                                    "inner": [
+                                        {
+                                            "kind": "DeclRefExpr",
+                                            "referencedDecl": {
+                                                "kind": "FunctionDecl",
+                                                "name": "f",
+                                                "id": "0x1",
+                                            },
+                                        }
+                                    ],
+                                }
+                            ],
+                        }
+                    ],
+                }
+            ],
+        }
+
+    root_int = _tu(
+        {
+            "kind": "FunctionDecl",
+            "id": "0x1",
+            "name": "f",
+            "mangledName": "_Z1fIiEiv",
+            "type": {"qualType": "int ()"},
+            "inner": [{"kind": "TemplateArgument", "type": {"qualType": "int"}}],
+        },
+        _cfg("_Z1fIiEiv"),
+    )
+    root_long = _tu(
+        {
+            "kind": "FunctionDecl",
+            "id": "0x1",
+            "name": "f",
+            "mangledName": "_Z1fIlEiv",
+            "type": {"qualType": "int ()"},
+            "inner": [{"kind": "TemplateArgument", "type": {"qualType": "long"}}],
+        },
+        _cfg("_Z1fIlEiv"),
+    )
+    field_int = root_int["inner"][1]["inner"][0]
+    field_long = root_long["inner"][1]["inner"][0]
+    idx_int = _index_decl_id_qualified_names(root_int)
+    idx_long = _index_decl_id_qualified_names(root_long)
+
+    value_int = _field_initializer_value(field_int, lambda: idx_int)
+    value_long = _field_initializer_value(field_long, lambda: idx_long)
+    assert value_int is not None
+    assert value_long is not None
+    assert value_int != value_long
+
+
+def test_dependent_scope_initializer_documents_known_gap() -> None:
+    """Codex review, PR #687, fourth round, fresh evidence: a template-
+    DEPENDENT operand inside an uninstantiated class template pattern (e.g.
+    ``T::template value<1>()`` vs. ``T::template value<2>()``) is a
+    ``DependentScopeDeclRefExpr`` that clang's ``-ast-dump=json`` prints
+    with no ``name``, no ``value``, and no children at all -- verified
+    against real Clang 17 output that BOTH instances reduce to the
+    byte-identical ``{"kind": "DependentScopeDeclRefExpr", "type":
+    "<dependent type>"}``. This is a KNOWN, deliberately deferred gap (see
+    ``_canonical_expr``'s own docstring) -- this test pins the current,
+    honest collision behavior (never crashes or fabricates a value) so a
+    future fix has a concrete regression to flip, and so this doesn't
+    silently regress further."""
+    from abicheck.dumper_clang_expr import _field_initializer_value
+
+    def _dependent_field(kind: str) -> dict:
+        return {
+            "kind": "FieldDecl",
+            "name": "x",
+            "type": {"qualType": "int"},
+            "hasInClassInitializer": True,
+            "inner": [
+                {
+                    "kind": "CallExpr",
+                    "type": {"qualType": "<dependent type>"},
+                    "inner": [
+                        {
+                            "kind": kind,
+                            "type": {"qualType": "<dependent type>"},
+                        }
+                    ],
+                }
+            ],
+        }
+
+    field_1 = _dependent_field("DependentScopeDeclRefExpr")
+    field_2 = _dependent_field("DependentScopeDeclRefExpr")
+
+    value_1 = _field_initializer_value(field_1)
+    value_2 = _field_initializer_value(field_2)
+
+    # The documented collision, not a crash -- pinned so a real fix (which
+    # needs source-text or a different clang dump mode, per the docstring)
+    # has a concrete regression to flip.
+    assert value_1 is not None
+    assert value_1 == value_2
+
+
+def test_offsetof_initializer_documents_known_gap() -> None:
+    """Codex review, PR #687, fresh evidence: ``offsetof(A, x)`` vs.
+    ``offsetof(A, y)`` -- clang's ``OffsetOfExpr`` node, verified against
+    real ``clang++ --std=c++17 -Xclang -ast-dump=json`` output (Clang 18),
+    carries no ``inner`` children and no key identifying which member the
+    offset walk selects; both reduce to the byte-identical
+    ``{"kind": "OffsetOfExpr", "type": "unsigned long"}`` real-world AST
+    node shape reproduced verbatim here. This is a KNOWN, deliberately
+    deferred gap (see ``_canonical_expr``'s own docstring) -- pinned so a
+    future fix has a concrete regression to flip, and so this doesn't
+    silently regress further."""
+    from abicheck.dumper_clang_expr import _field_initializer_value
+
+    def _offsetof_field() -> dict:
+        # Real clang output has no reference to the selected member (`x` vs.
+        # `y`) anywhere on this node -- there is nothing here to vary
+        # between the two call sites below, which is exactly the gap.
+        return {
+            "kind": "FieldDecl",
+            "name": "v",
+            "type": {"qualType": "const unsigned long"},
+            "hasInClassInitializer": True,
+            "inner": [
+                {
+                    "kind": "OffsetOfExpr",
+                    "type": {"qualType": "unsigned long"},
+                    "valueCategory": "prvalue",
+                }
+            ],
+        }
+
+    field_x = _offsetof_field()  # stands in for `offsetof(A, x)`
+    field_y = _offsetof_field()  # stands in for `offsetof(A, y)`
+
+    value_x = _field_initializer_value(field_x)
+    value_y = _field_initializer_value(field_y)
+
+    assert value_x is not None
+    assert value_x == value_y
+
+
+def test_new_expr_allocation_semantics_distinguish_fingerprints() -> None:
+    """Codex review, PR #687, fresh evidence: ``S* p = new S();`` vs.
+    ``S* p = ::new S();`` when ``S`` declares its own ``operator new`` --
+    ``CXXNewExpr``'s ``isGlobal``/``operatorNewDecl``/``operatorDeleteDecl``
+    keys are what distinguish a class-member allocation from a global one,
+    and were previously dropped by ``_canonical_expr``'s whitelist entirely.
+    Node shapes below are trimmed verbatim from real
+    ``clang++ --std=c++17 -Xclang -ast-dump=json`` output (Clang 18) for
+    exactly this pair -- the member form has no ``isGlobal`` key and an
+    ``operatorNewDecl.kind`` of ``CXXMethodDecl``; the global form has
+    ``isGlobal: true`` and ``FunctionDecl``."""
+    from abicheck.dumper_clang_expr import _field_initializer_value
+
+    def _new_field(*, is_global: bool) -> dict:
+        new_expr: dict = {
+            "kind": "CXXNewExpr",
+            "type": {"qualType": "S *"},
+            "valueCategory": "prvalue",
+            "initStyle": "call",
+            "operatorNewDecl": {
+                "kind": "FunctionDecl" if is_global else "CXXMethodDecl",
+                "name": "operator new",
+                "type": {"qualType": "void *(unsigned long)"},
+            },
+            "operatorDeleteDecl": {
+                "kind": "FunctionDecl",
+                "name": "operator delete",
+                "type": {"qualType": "void (void *) noexcept"},
+            },
+            "inner": [
+                {
+                    "kind": "CXXConstructExpr",
+                    "type": {"qualType": "S"},
+                    "valueCategory": "prvalue",
+                    "ctorType": {"qualType": "void () noexcept"},
+                }
+            ],
+        }
+        if is_global:
+            new_expr["isGlobal"] = True
+        return {
+            "kind": "FieldDecl",
+            "name": "p",
+            "type": {"qualType": "S *"},
+            "hasInClassInitializer": True,
+            "inner": [new_expr],
+        }
+
+    field_member = _new_field(is_global=False)
+    field_global = _new_field(is_global=True)
+
+    value_member = _field_initializer_value(field_member)
+    value_global = _field_initializer_value(field_global)
+
+    assert value_member is not None
+    assert value_global is not None
+    assert value_member != value_global
+
+
+def test_new_expr_init_style_distinguishes_fingerprints() -> None:
+    """Codex review, PR #687, fresh evidence: ``S* p = new S;`` (default-
+    initialization) vs. ``S* p = new S();`` (value-initialization, which
+    zero-initializes ``S``'s scalar members) previously fingerprinted
+    identically -- ``CXXNewExpr.initStyle`` (absent vs. ``"call"``) and the
+    nested ``CXXConstructExpr``'s ``zeroing`` (absent vs. ``true``) were both
+    dropped by ``_canonical_expr``'s whitelist. Node shapes below are
+    trimmed verbatim from real ``clang++ --std=c++17 -Xclang
+    -ast-dump=json`` output (Clang 18) for exactly this pair."""
+    from abicheck.dumper_clang_expr import _field_initializer_value
+
+    def _new_field(*, value_init: bool) -> dict:
+        construct_expr: dict = {
+            "kind": "CXXConstructExpr",
+            "type": {"qualType": "S"},
+            "valueCategory": "prvalue",
+            "ctorType": {"qualType": "void () noexcept"},
+        }
+        new_expr: dict = {
+            "kind": "CXXNewExpr",
+            "type": {"qualType": "S *"},
+            "valueCategory": "prvalue",
+            "operatorNewDecl": {
+                "kind": "FunctionDecl",
+                "name": "operator new",
+                "type": {"qualType": "void *(unsigned long)"},
+            },
+            "operatorDeleteDecl": {
+                "kind": "FunctionDecl",
+                "name": "operator delete",
+                "type": {"qualType": "void (void *) noexcept"},
+            },
+        }
+        if value_init:
+            new_expr["initStyle"] = "call"
+            construct_expr["zeroing"] = True
+        new_expr["inner"] = [construct_expr]
+        return {
+            "kind": "FieldDecl",
+            "name": "p",
+            "type": {"qualType": "S *"},
+            "hasInClassInitializer": True,
+            "inner": [new_expr],
+        }
+
+    field_default_init = _new_field(value_init=False)
+    field_value_init = _new_field(value_init=True)
+
+    value_default = _field_initializer_value(field_default_init)
+    value_value = _field_initializer_value(field_value_init)
+
+    assert value_default is not None
+    assert value_value is not None
+    assert value_default != value_value
+
+
+def test_typeid_operand_distinguishes_fingerprints() -> None:
+    """Codex review, PR #687, fresh evidence: ``typeid(int)`` vs.
+    ``typeid(long)`` -- clang's ``CXXTypeidExpr`` node applied to a TYPE
+    operand -- previously fingerprinted identically. Confirmed against real
+    Clang 18 output: this node is childless and its own ``type`` is always
+    the fixed result type ``"const std::type_info"`` regardless of operand;
+    the real operand lives exclusively in a separate ``typeArg`` key
+    (a different key than sizeof/alignof's ``argType``), which
+    ``_canonical_expr`` didn't read. Node shape below is trimmed verbatim
+    from real ``clang++ --std=c++17 -Xclang -ast-dump=json`` output for
+    exactly this pair."""
+    from abicheck.dumper_clang_expr import _field_initializer_value
+
+    def _typeid_field(type_arg: str) -> dict:
+        return {
+            "kind": "FieldDecl",
+            "name": "t",
+            "type": {"qualType": "const std::type_info *"},
+            "hasInClassInitializer": True,
+            "inner": [
+                {
+                    "kind": "UnaryOperator",
+                    "type": {"qualType": "const std::type_info *"},
+                    "valueCategory": "prvalue",
+                    "isPostfix": False,
+                    "opcode": "&",
+                    "canOverflow": False,
+                    "inner": [
+                        {
+                            "kind": "CXXTypeidExpr",
+                            "type": {"qualType": "const std::type_info"},
+                            "valueCategory": "lvalue",
+                            "typeArg": {"qualType": type_arg},
+                        }
+                    ],
+                }
+            ],
+        }
+
+    field_int = _typeid_field("int")
+    field_long = _typeid_field("long")
+
+    value_int = _field_initializer_value(field_int)
+    value_long = _field_initializer_value(field_long)
+
+    assert value_int is not None
+    assert value_long is not None
+    assert value_int != value_long
+
+
+def test_postfix_increment_distinguishes_fingerprints() -> None:
+    """Codex review, PR #687, fresh evidence: ``(g++, 1)`` vs. ``(++g, 1)``
+    -- a discarded increment inside a larger expression whose overall VALUE
+    is the same literal ``1`` in both forms, so only the SIDE EFFECT
+    differs -- previously fingerprinted identically. Confirmed against real
+    Clang 17 output: a pre/post increment ``UnaryOperator`` shares the same
+    ``opcode`` (``"++"``) for both forms; the only structural distinction is
+    a separate ``isPostfix`` boolean key, which ``_canonical_expr`` didn't
+    read. Node shape below is trimmed verbatim from real
+    ``clang++ --std=c++17 -Xclang -ast-dump=json`` output for exactly this
+    pair."""
+    from abicheck.dumper_clang_expr import _field_initializer_value
+
+    def _increment_field(is_postfix: bool) -> dict:
+        return {
+            "kind": "FieldDecl",
+            "name": "x",
+            "type": {"qualType": "int"},
+            "hasInClassInitializer": True,
+            "inner": [
+                {
+                    "kind": "ParenExpr",
+                    "type": {"qualType": "int"},
+                    "valueCategory": "prvalue",
+                    "inner": [
+                        {
+                            "kind": "BinaryOperator",
+                            "type": {"qualType": "int"},
+                            "valueCategory": "prvalue",
+                            "opcode": ",",
+                            "inner": [
+                                {
+                                    "kind": "UnaryOperator",
+                                    "type": {"qualType": "int"},
+                                    "valueCategory": "prvalue"
+                                    if is_postfix
+                                    else "lvalue",
+                                    "isPostfix": is_postfix,
+                                    "opcode": "++",
+                                    "inner": [
+                                        {
+                                            "kind": "DeclRefExpr",
+                                            "type": {"qualType": "int"},
+                                            "valueCategory": "lvalue",
+                                            "referencedDecl": {
+                                                "kind": "VarDecl",
+                                                "name": "g",
+                                            },
+                                        }
+                                    ],
+                                },
+                                {
+                                    "kind": "IntegerLiteral",
+                                    "type": {"qualType": "int"},
+                                    "valueCategory": "prvalue",
+                                    "value": "1",
+                                },
+                            ],
+                        }
+                    ],
+                }
+            ],
+        }
+
+    field_postfix = _increment_field(True)
+    field_prefix = _increment_field(False)
+
+    value_postfix = _field_initializer_value(field_postfix)
+    value_prefix = _field_initializer_value(field_prefix)
+
+    assert value_postfix is not None
+    assert value_prefix is not None
+    assert value_postfix != value_prefix
+
+
 def test_parse_enums_is_scoped_false_for_plain_enum() -> None:
     root = _tu(
         {
@@ -1276,7 +2495,9 @@ def test_clang_self_heal_auto_detected_is_debug(
     header = tmp_path / "umbrella.h"
     header.write_text("int foo(void);\n")
     with caplog.at_level(logging.DEBUG, logger="abicheck.dumper"):
-        root, _resolved_kind = _clang_header_dump([header], [])  # lang=None → auto-detect
+        root, _resolved_kind = _clang_header_dump(
+            [header], []
+        )  # lang=None → auto-detect
     assert root["kind"] == "TranslationUnitDecl"
     assert not any(r.levelno == logging.WARNING for r in caplog.records)
     assert any(
@@ -2631,9 +3852,7 @@ def test_clang_header_dump_device_context_selects_real_fixture(
         return _fake_proc(stderr=stderr_text, returncode=0)
 
     monkeypatch.setattr(dumper.deadline, "run_bounded", _run)
-    root, resolved_kind = _clang_header_dump(
-        [header], [], frontend_context="device"
-    )
+    root, resolved_kind = _clang_header_dump([header], [], frontend_context="device")
     assert resolved_kind == "device"
     assert root["kind"] == "TranslationUnitDecl"
 
@@ -2759,7 +3978,9 @@ def test_clang_header_dump_non_host_on_plain_frontend_raises_immediately(
     header = tmp_path / "foo.h"
     header.write_text("int foo(void);\n")
     monkeypatch.setattr(dumper_clang, "_clang_available", lambda *a, **k: True)
-    monkeypatch.setattr(dumper, "_resolve_clang_bin", lambda *a, **k: "/usr/bin/clang++")
+    monkeypatch.setattr(
+        dumper, "_resolve_clang_bin", lambda *a, **k: "/usr/bin/clang++"
+    )
     calls = {"n": 0}
 
     def _run(cmd, **kwargs):
@@ -3490,6 +4711,42 @@ def test_canonical_expr_and_typedef_underlying_edges() -> None:
     assert out == {"kind": "X", "type": "int", "inner": ["y"]}
     # Typedef with a non-dict type → empty underlying.
     assert _typedef_underlying({"type": None}) == ""
+
+
+def test_index_decl_id_qualified_names() -> None:
+    from abicheck.dumper_clang import _index_decl_id_qualified_names
+
+    root = _tu(
+        _namespaced_var_decl("a", "VALUE", "0x1"),
+        _namespaced_var_decl("b", "VALUE", "0x2"),
+        {
+            "kind": "CXXRecordDecl",
+            "name": "Outer",
+            "inner": [
+                {"kind": "VarDecl", "id": "0x3", "name": "member"},
+                {
+                    "kind": "CXXRecordDecl",
+                    "name": "Inner",
+                    "inner": [{"kind": "VarDecl", "id": "0x4", "name": "member"}],
+                },
+            ],
+        },
+        # An anonymous scope (no name) contributes no scope segment, but its
+        # own children are still indexed.
+        {
+            "kind": "LinkageSpecDecl",
+            "inner": [{"kind": "VarDecl", "id": "0x5", "name": "global"}],
+        },
+    )
+    index = _index_decl_id_qualified_names(root)
+
+    assert index["0x1"] == "a::VALUE"
+    assert index["0x2"] == "b::VALUE"
+    assert index["0x3"] == "Outer::member"
+    assert index["0x4"] == "Outer::Inner::member"
+    assert index["0x5"] == "global"
+    # A non-dict node anywhere in the tree is skipped, not a crash.
+    assert _index_decl_id_qualified_names({"inner": ["not-a-dict", None]}) == {}
 
 
 def test_owned_tag_id_nested_and_non_dict() -> None:

@@ -370,6 +370,24 @@ class PublicSurface:
     # within their own kind, but still collide in the single ``origin_by_key``
     # both kinds share (Codex review, thirteenth round).
     ambiguous_type_names: set[str] = field(default_factory=set)
+    # Qualified (or, when a type carries no ``qualified_name``, bare) identity
+    # of every record/enum reached by :func:`_walk_exact_type_closure` -- a
+    # chain from a seed where *every* step resolved to exactly one candidate,
+    # never through an ambiguous ``::``-tail fork (see that function's own
+    # docstring for why this needs its own, separate, ambiguity-vetoing walk
+    # rather than a flag computed inside :func:`_walk_type_closure`).
+    # Distinguishes "this qualified identity was itself directly,
+    # unambiguously referenced" from "this qualified identity was only swept
+    # in because an unrelated sibling shares its bare tail" — the anti-hiding
+    # rule means both routes leave an *identical* footprint in ``public_types``/
+    # ``ambiguous_type_names`` alone, which is exactly the missing provenance
+    # ``_confirmed_type_matches``'s docstring (contract_evaluation.py) named as
+    # needed for a real fix (Codex review, fifteenth round's known gap; ADR-049).
+    # Monotonic: once a spelling resolves an identity exactly, it stays here
+    # even if that same identity is *also* later swept in ambiguously via a
+    # different, colliding spelling (during the *other*, ambiguity-tolerant
+    # walk -- this set itself never records an ambiguous route at all).
+    exact_type_identities: set[str] = field(default_factory=set)
     # True when *any* declaration carried a non-UNKNOWN origin — i.e. the
     # snapshot was dumped with a public-header set so provenance is available.
     # Lets the classifier distinguish a confident reachability demotion from one
@@ -439,6 +457,21 @@ def _index_surface_types(
             tail = rec.name.rsplit("::", 1)[1]
             record_by_name.setdefault(tail, []).append(rec)
             keys.add(tail)
+        # castxml/clang convention: `.name` is deliberately bare (the
+        # record's own leaf), with the qualified spelling recorded
+        # separately in `.qualified_name` -- index that too, so a queued
+        # spelling that IS the qualified form (a genuinely exact reference,
+        # from whichever producer supplies one) resolves here the same way
+        # DWARF's `.name` -- which already *is* the qualified string --
+        # always could (Codex review; mirrors export_surface.py's own local
+        # augmentation of this same index). Guarded against the value
+        # already being a registered key for this record (DWARF leaves
+        # `qualified_name` unset; an unnamespaced castxml/clang record's
+        # `qualified_name` often equals its own bare `.name`) so a genuinely
+        # unique record is never double-counted into `combined_counts`
+        # below and wrongly marked ambiguous.
+        if rec.qualified_name and rec.qualified_name not in keys:
+            record_by_name.setdefault(rec.qualified_name, []).append(rec)
         origin = getattr(rec, "origin", ScopeOrigin.UNKNOWN)
         _record_origin(surface, keys, origin)
         if rec.qualified_name:
@@ -454,6 +487,10 @@ def _index_surface_types(
             tail = en.name.rsplit("::", 1)[1]
             enum_by_name.setdefault(tail, []).append(en)
             keys.add(tail)
+        # Same qualified-spelling indexing as records above, for the same
+        # reason.
+        if en.qualified_name and en.qualified_name not in keys:
+            enum_by_name.setdefault(en.qualified_name, []).append(en)
         origin = getattr(en, "origin", ScopeOrigin.UNKNOWN)
         _record_origin(surface, keys, origin)
         if en.qualified_name:
@@ -534,7 +571,11 @@ def _walk_type_closure(
     Follows typedef targets, record fields, and base classes from each seed
     type, marking every reachable known type as part of the public surface.
     A name may resolve to *several* types (an ambiguous ``::`` tail shared by
-    two namespaces); every match is marked public and walked.
+    two namespaces); every match is marked public and walked -- the anti-
+    hiding, never-lose-a-real-dependency direction. ``exact_type_identities``
+    is deliberately NOT filled here: see :func:`_walk_exact_type_closure`'s
+    docstring for why an ambiguity-tolerant walk cannot also answer "was this
+    reached without ever passing through an ambiguous fork".
     """
     queue = list(seed_types)
     seen: set[str] = set()
@@ -557,9 +598,17 @@ def _walk_type_closure(
         # so a scoped enum-member finding is not hidden (mirrors the record alias
         # handling below). Enums have no fields or bases, so nothing is queued.
         # An ambiguous tail may match enums in several namespaces — mark them all.
-        for en_node in enum_by_name.get(name, ()):
+        en_nodes = enum_by_name.get(name, ())
+        rec_nodes = record_by_name.get(name, [])
+        for en_node in en_nodes:
             surface.public_types.add(en_node.name)
-        rec_nodes = record_by_name.get(name)
+            # Also record the qualified spelling itself (castxml/clang
+            # convention: `.name` is deliberately bare, so a qualified
+            # candidate would otherwise never appear in `public_types` at
+            # all -- unconditional, matching the existing anti-hiding "mark
+            # every match public" rule for the bare `.name` (Codex review).
+            if en_node.qualified_name:
+                surface.public_types.add(en_node.qualified_name)
         if not rec_nodes:
             continue
         # A short alias (``A``) reached inside its namespace resolves here to the
@@ -570,6 +619,9 @@ def _walk_type_closure(
         # tail shared by two namespaces resolves to several records — walk each.
         for rec_node in rec_nodes:
             surface.public_types.add(rec_node.name)
+            # See the equivalent enum comment above.
+            if rec_node.qualified_name:
+                surface.public_types.add(rec_node.qualified_name)
             for f in rec_node.fields:
                 for ident in _type_identifiers(f.type):
                     if ident not in seen:
@@ -581,6 +633,156 @@ def _walk_type_closure(
                 for ident in _type_identifiers(base):
                     if ident not in seen:
                         queue.append(ident)
+
+
+def _mark_identity_forms_if_unambiguous(
+    surface: PublicSurface,
+    node: RecordType | EnumType,
+    record_by_name: dict[str, list[RecordType]],
+    enum_by_name: dict[str, list[EnumType]],
+) -> None:
+    """Adds *node*'s bare ``.name`` and (if present) its ``.qualified_name``
+    to ``exact_type_identities`` -- but only each form that is *itself*
+    independently unambiguous.
+
+    The queued spelling that led here was already confirmed to resolve to
+    exactly *node* -- but that spelling might not be either of ``node``'s own
+    two identity forms: castxml/clang's convention means the queued spelling
+    is very often the bare ``.name`` (that's the only form a real
+    castxml/clang-produced signature can ever spell -- confirmed against
+    ``dumper_castxml.py``'s ``_type_name``, which never prints a
+    namespace-qualified record reference), while ``diff_types.py`` also
+    always emits a type-level finding's own candidate as the bare ``.name``
+    (Codex review) -- so a caller that only ever recorded the *qualified*
+    form here would leave the overwhelmingly common castxml/clang bare-name
+    finding unconfirmable. Trusting ``node.name`` just because *some* route
+    to ``node`` was exact would be unsound on its own, though: a namespaced
+    sibling sharing the *same* bare tail elsewhere in the snapshot (the
+    ``ambiguous_namespaced_leaf`` shape) makes that bare spelling genuinely
+    ambiguous regardless of how *this* node was reached -- so each form is
+    independently re-resolved and checked for its own uniqueness before
+    being trusted, rather than inherited from whichever spelling arrived
+    here. ``node.qualified_name``, by construction, names exactly one
+    record/enum (two distinct declarations sharing one fully-qualified name
+    would be a real ODR violation, not a modeled ambiguity), but is checked
+    the same way for consistency and defense-in-depth.
+    """
+    if _combined_match_count(node.name, record_by_name, enum_by_name) == 1:
+        surface.exact_type_identities.add(node.name)
+    if node.qualified_name and (
+        _combined_match_count(node.qualified_name, record_by_name, enum_by_name) == 1
+    ):
+        surface.exact_type_identities.add(node.qualified_name)
+
+
+def _combined_match_count(
+    key: str,
+    record_by_name: dict[str, list[RecordType]],
+    enum_by_name: dict[str, list[EnumType]],
+) -> int:
+    """Records plus enums matching *key* -- the same cross-kind combination
+    ``_index_surface_types`` uses to compute ``ambiguous_type_names`` (a
+    record and an enum can each look unique within their own map while
+    still colliding once combined)."""
+    return len(record_by_name.get(key, ())) + len(enum_by_name.get(key, ()))
+
+
+def _walk_exact_type_closure(
+    snap: AbiSnapshot,
+    surface: PublicSurface,
+    record_by_name: dict[str, list[RecordType]],
+    enum_by_name: dict[str, list[EnumType]],
+    seed_types: set[str],
+) -> None:
+    """Fills ``surface.exact_type_identities``: every record/enum (and
+    typedef alias name) reachable from a seed via a chain where *every* step
+    resolved to precisely one candidate -- never through an ambiguous
+    ``::``-tail fork.
+
+    A separate walk from :func:`_walk_type_closure`, not a flag threaded
+    through it, because the two questions need opposite behavior at an
+    ambiguous fork. ``_walk_type_closure`` must *keep walking* every
+    colliding candidate (anti-hiding: a real dependency of either sibling
+    must not be lost just because the reference couldn't disambiguate them).
+    This walk must *stop* at that exact point: once a queued spelling
+    resolves to more than one record/enum, nothing reachable only through
+    one of those candidates can be trusted "exact" -- the public API might
+    just as well have meant the *other* one, which may not even declare the
+    field/base being asked about.
+
+    **The bug this replaced** (Codex review): an earlier version computed
+    "exact" per queued spelling in the *same* ambiguity-tolerant walk --
+    correct for a spelling that is itself an original seed (a signature
+    naming a type directly), but wrong once a field/base type discovered
+    *while walking one of several ambiguous candidates* happened to be
+    locally unique on its own. A ``Container`` that collides between two
+    namespaces, where only one sibling happens to declare a field of a
+    genuinely unique type ``one::Point``, is the reproducer: that field's
+    own spelling resolves to exactly one record, so the old per-spelling
+    check marked it exact even though the path to it runs through an
+    *unconfirmed* branch (the public reference never said which
+    ``Container`` it meant). This walk never even enters either
+    ``Container`` candidate's fields, since the moment it pops the
+    ambiguous spelling ``"Container"`` it sees more than one match and
+    stops right there -- so ``one::Point`` is correctly never marked exact,
+    while still being conservatively kept in ``public_types`` by the other
+    walk.
+
+    Safe to dedupe visited spellings permanently (unlike a general fixpoint
+    over a monotonically-increasing confidence lattice): a name is only ever
+    enqueued here *after* its parent already resolved exactly, so by
+    construction nothing reachable through an ambiguous fork is ever queued
+    in the first place -- a later, independent exact route to the same name
+    would confirm the same (or a redundant) fact, never a new one.
+    """
+    queue = list(seed_types)
+    seen: set[str] = set()
+    while queue:
+        name = queue.pop()
+        if name in seen:
+            continue
+        seen.add(name)
+        target = snap.typedefs.get(name)
+        if target:
+            # A typedef alias is a 1:1 mapping (``snap.typedefs`` is
+            # ``dict[str, str]``) -- there is no ambiguity concept for it the
+            # way a bare record/enum tail can collide, so reaching *this*
+            # name at all (which, by this walk's own invariant, only ever
+            # happens via an already-all-exact chain) makes the alias name
+            # itself exact too, not just whatever record/enum its target
+            # eventually resolves to. Confirms a ``TYPEDEF_REMOVED``/
+            # ``TYPEDEF_BASE_CHANGED``-shaped finding whose own candidate
+            # *is* the alias name (Codex review -- omitting this made such a
+            # finding on a publicly-reachable alias wrongly UNKNOWN_UNRESOLVED,
+            # since public-mode confirmation now checks only this set).
+            surface.exact_type_identities.add(name)
+            for ident in _type_identifiers(target):
+                if ident not in seen:
+                    queue.append(ident)
+        en_nodes = enum_by_name.get(name, ())
+        rec_nodes = record_by_name.get(name, [])
+        if len(en_nodes) + len(rec_nodes) != 1:
+            # Absent, or ambiguous: stop here either way -- do not expand,
+            # do not mark exact.
+            continue
+        if en_nodes:
+            en_node = en_nodes[0]
+            _mark_identity_forms_if_unambiguous(
+                surface, en_node, record_by_name, enum_by_name
+            )
+            continue  # enums have no fields/bases to expand.
+        rec_node = rec_nodes[0]
+        _mark_identity_forms_if_unambiguous(
+            surface, rec_node, record_by_name, enum_by_name
+        )
+        for f in rec_node.fields:
+            for ident in _type_identifiers(f.type):
+                if ident not in seen:
+                    queue.append(ident)
+        for base in (*rec_node.bases, *rec_node.virtual_bases):
+            for ident in _type_identifiers(base):
+                if ident not in seen:
+                    queue.append(ident)
 
 
 def compute_public_surface(snap: AbiSnapshot) -> PublicSurface:
@@ -640,6 +842,9 @@ def compute_public_surface(snap: AbiSnapshot) -> PublicSurface:
 
     # Transitive closure over the record/typedef graph.
     _walk_type_closure(snap, surface, record_by_name, enum_by_name, seed_types)
+    # Separate, ambiguity-vetoing closure -- see its own docstring for why
+    # this can't be folded into the walk above.
+    _walk_exact_type_closure(snap, surface, record_by_name, enum_by_name, seed_types)
     return surface
 
 

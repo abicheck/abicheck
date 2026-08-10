@@ -150,7 +150,21 @@ ABI-sensitive types you want to guarantee are tracked.
 - Enum member addition is `COMPATIBLE` but can affect exhaustive `switch` statements
 
 For `abicheck compat` pipelines, use `-s` to treat `COMPATIBLE` as blocking.
-For `abicheck compare` pipelines, enforce via CI exit code logic (treat exit `2` as failure).
+For `abicheck compare` pipelines, a bare `compare` never fails on
+`COMPATIBLE`/addition findings at all (legacy exit scheme: `0` compatible,
+`2` source break, `4` ABI break — additions don't raise either). To block
+on them, add any `--severity-*` flag (e.g. `--severity-addition error`),
+which switches `compare` to the severity-aware exit scheme and makes an
+error-level addition finding exit `1` — **but only when nothing already
+pins the scheme explicitly.** If a project's `.abicheck.yml` sets
+`exit_code_scheme: legacy` (auto-discovered or via `--config`), that
+explicit project-config value outranks the implicit severity-flag
+inference and the legacy scheme stays in effect; a `--severity-*` flag
+alone won't switch it. In that case also pass `--exit-code-scheme severity`
+explicitly (the CLI flag outranks project config), or remove the config's
+`legacy` pin. See [Exit Codes](../reference/exit-codes.md) for the full
+contract — exit `2` under the severity-aware scheme means an error-level
+`potential_breaking` finding, not a `COMPATIBLE` addition.
 
 ---
 
@@ -172,7 +186,7 @@ in the `.so` symbol table. By **default** (binary + headers only, no `--sources`
 abicheck analyzes the public exported ABI — header-only changes that don't affect
 exported symbols will not be detected.
 
-With **L4 source ABI replay** (`--sources`/`--source-abi`, ADR-030), this gap is
+With **L4 source ABI replay** (`--sources`, ADR-030), this gap is
 substantially closed: inline/template **body** changes, macro constants, default
 arguments, and `constexpr` values are recovered even though they never become a
 symbol. See [Source & Build Data](build-source-data.md#source-abi-replay-findings-l4)
@@ -204,7 +218,7 @@ everywhere else in the docs (see
 
 So whether a change is detectable depends on the evidence you give abicheck. The
 first three columns are the **artifact tiers** (L0–L2, no source parsing); the
-fourth is abicheck's own **L4 source ABI replay** (`--sources`/`--source-abi`,
+fourth is abicheck's own **L4 source ABI replay** (`--sources`,
 ADR-030) — not a separate external tool:
 
 | Change | object/DWARF | header (castxml) | abicheck L4 (`--sources`) |

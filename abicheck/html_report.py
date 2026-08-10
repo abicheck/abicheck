@@ -1103,13 +1103,13 @@ def _build_sections_html(
         rows = []
         for ch in not_evaluated:
             relevance = relevance_of(ch) if relevance_of is not None else None
+            symbol = html.escape(str(getattr(ch, "symbol", "") or ""))
+            kind = html.escape(str(getattr(getattr(ch, "kind", None), "value", "")))
+            rel = html.escape(str(getattr(relevance, "value", "") or ""))
+            reason = html.escape(str(getattr(ch, "contract_reason_code", "") or ""))
             rows.append(
-                "<tr><td><code>{}</code></td><td>{}</td><td>{}</td><td>{}</td></tr>".format(
-                    html.escape(str(getattr(ch, "symbol", "") or "")),
-                    html.escape(str(getattr(getattr(ch, "kind", None), "value", ""))),
-                    html.escape(str(getattr(relevance, "value", "") or "")),
-                    html.escape(str(getattr(ch, "contract_reason_code", "") or "")),
-                )
+                f"<tr><td><code>{symbol}</code></td><td>{kind}</td>"
+                f"<td>{rel}</td><td>{reason}</td></tr>"
             )
         sections.append(
             "<div class='section section-suppressed' id='not-evaluated'>"

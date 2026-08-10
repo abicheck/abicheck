@@ -727,7 +727,7 @@ def _stable_leading_template_args(old_args: str, new_args: str) -> bool:
         (i for i in range(len(old_list)) if old_list[i] != new_list[i]),
         len(old_list),
     )
-    return diff_idx >= 1 and diff_idx < len(old_list)
+    return 1 <= diff_idx < len(old_list)
 
 
 def _split_top_level_commas_local(s: str) -> list[str]:

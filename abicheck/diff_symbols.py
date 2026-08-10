@@ -30,6 +30,9 @@ from .diff_cxx_rules import (
     owner_class_of,
     virtual_method_addition,
 )
+from .diff_default_value_reliability import (
+    default_value_fingerprint_comparison_unreliable,
+)
 from .diff_helpers import (
     TypeMap,
     bool_transition,
@@ -1248,31 +1251,27 @@ def _diff_param_defaults(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
     both sides are header-aware.
 
     Additionally gated per-function-pair, whenever either side has a known
-    header-AST producer (castxml, clang, or a hybrid merge — G28 Phase 3): the
-    two backends' default VALUE representations are not cross-comparable
+    header-AST producer (castxml, clang, or a hybrid merge — G28 Phase 3):
+    the two backends' default VALUE representations are not cross-comparable
     (castxml keeps the real source expression; clang's is a placeholder/
-    fingerprint for anything non-trivial) even though both now capture
-    presence/absence correctly. This applies not only to a hybrid snapshot
-    mixing both backends internally, but equally to a comparison between two
-    pure single-backend snapshots — e.g. a pure ``--ast-frontend clang`` run
-    on one side against a pure ``--ast-frontend castxml`` run on the other —
-    since ``fact_producer`` already returns the (unconditional) producer for
-    those non-hybrid cases too (Codex review). Requiring the SAME producer on
-    both sides of a pair (not "castxml on both sides", which would wrongly
-    suppress a same-producer clang-vs-clang pair that a plain
-    ``--ast-frontend clang`` run compares just fine) avoids a false
-    CHANGED/REMOVED from a representation mismatch while still catching a
-    real change on either same-producer pairing.
+    fingerprint for anything non-trivial), even between two pure
+    single-backend snapshots (a pure ``--ast-frontend clang`` run vs. a pure
+    ``--ast-frontend castxml`` run — ``fact_producer`` returns the producer
+    for those too). Requiring the SAME producer on both sides (not "castxml
+    on both sides", which would wrongly suppress a same-producer
+    clang-vs-clang pair) avoids a false CHANGED/REMOVED from a
+    representation mismatch while still catching a real change.
 
-    The per-pair skip itself only fires when BOTH producers are POSITIVELY
-    known and DIFFER — never merely because one side's producer is unknown.
-    An unset/``None`` ``ast_producer`` (e.g. a hand-built snapshot in a test,
-    or a legacy pre-provenance baseline) makes ``fact_producer(...) is None``,
-    so comparing it against a genuinely castxml-backed function on the other
-    side is a perfectly legitimate same-producer comparison that must not be
-    silently dropped just because one side lacks metadata it never had a
-    chance to record — that would regress a previously-working legacy-
-    baseline comparison into a silent miss (Codex review).
+    The per-pair skip only fires when BOTH producers are POSITIVELY known
+    and DIFFER — never merely because one side's producer is unknown. An
+    unset ``ast_producer`` (a hand-built test snapshot, or a legacy
+    pre-provenance baseline) makes ``fact_producer(...) is None``, so
+    comparing it against a genuinely castxml-backed function is a legitimate
+    same-producer comparison that must not be silently dropped just because
+    one side lacks metadata it never had a chance to record.
+
+    A separate, narrower gate protects the VALUE-CHANGED comparison alone
+    (Codex review) — see :mod:`diff_default_value_reliability`'s docstring.
     """
     if not _both_header_aware(old, new):
         return []
@@ -1311,6 +1310,10 @@ def _diff_param_defaults(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
                 and p_new.default is not None
                 and p_old.default != p_new.default
             ):
+                if default_value_fingerprint_comparison_unreliable(
+                    old, new, old_producer, new_producer, p_old.default, p_new.default
+                ):
+                    continue
                 changes.append(
                     make_change(
                         ChangeKind.PARAM_DEFAULT_VALUE_CHANGED,

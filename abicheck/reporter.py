@@ -1597,8 +1597,6 @@ def _classify_changes_by_kind(
 
 def appcompat_to_json(result: object, indent: int = 2) -> str:
     """Render an AppCompatResult as JSON."""
-    import json as _json
-
     verdict = getattr(result, "verdict", None)
     full_diff = getattr(result, "full_diff", None)
 
@@ -1669,7 +1667,7 @@ def appcompat_to_json(result: object, indent: int = 2) -> str:
             if cov_warns:
                 d["coverage_warnings"] = list(cov_warns)
 
-    return _json.dumps(d, indent=indent)
+    return json.dumps(d, indent=indent)
 
 
 def appcompat_to_markdown(result: object, *, show_irrelevant: bool = False) -> str:

@@ -20,7 +20,11 @@ duplicating low-level DIE attribute extraction logic.
 # pylint: disable=invalid-name  # CU is the standard DWARF term (Compilation Unit)
 from __future__ import annotations
 
+import logging
+import os
 from typing import Any
+
+log = logging.getLogger(__name__)
 
 
 def has_real_dwarf_info(elf: Any) -> bool:
@@ -288,3 +292,104 @@ def resolve_type_die(die: Any, CU: Any) -> Any | None:
         return resolve_die_ref(die, "DW_AT_type", CU)
     except Exception:  # noqa: BLE001
         return None
+
+
+# ---------------------------------------------------------------------------
+# Low-memory DIE-cache management
+#
+# pyelftools permanently caches every DIE object it has ever parsed inside
+# ``CompileUnit._dielist``/``_diemap`` (see ``compileunit.py``'s
+# ``_get_cached_DIE``/``iter_DIEs``) for as long as the ``CU``/``DWARFInfo``
+# objects stay alive — there is no built-in eviction. A single full-tree
+# walk of one CU therefore leaves every DIE it visited resident afterwards,
+# and abicheck's ``DwarfSession`` (dwarf_unified.py) deliberately shares one
+# ``DWARFInfo`` across up to three separate full-tree walks (basic metadata,
+# advanced metadata, snapshot build/layout backfill) specifically so later
+# walks hit that cache instead of re-parsing. For a small binary this is a
+# clear win; for a template-heavy C++ library with millions of DIEs, the
+# per-DIE Python object overhead (each DIE holds an attributes dict of
+# ``AttributeValue`` records, plus CU/offset/parent bookkeeping) inflates the
+# resident set to 50-100x the raw ``.debug_info``/``.debug_loc`` section
+# bytes — a real dump measured 108 MB of ``.debug_info`` peaking above 12 GB
+# of RSS purely from this. ``free_cu_die_cache``/``dwarf_low_memory_mode``
+# let a walk trade the session-cache reuse's "zero re-parse" benefit for
+# bounded peak memory on binaries large enough that the trade is worth it.
+# ---------------------------------------------------------------------------
+
+#: Default ``.debug_info`` size (MiB) above which DWARF walks free each
+#: CompileUnit's DIE cache as soon as they finish with it, instead of
+#: leaving it cached for the rest of the process (see module docstring
+#: above). Override with ``ABICHECK_DWARF_LOW_MEMORY_MB`` (a negative value
+#: disables low-memory mode entirely -- every ``.debug_info`` size is >= 0,
+#: so it can never exceed a negative threshold).
+DEFAULT_DWARF_LOW_MEMORY_THRESHOLD_MB = 32
+
+
+def dwarf_low_memory_mode(dwarf_info: Any) -> bool:
+    """Return True when *dwarf_info*'s ``.debug_info`` is large enough that
+    DWARF walks over it should free each CU's DIE cache as they finish with
+    it (see :func:`free_cu_die_cache`), rather than retaining the whole
+    binary's DIE tree simultaneously for the F5b cross-pass cache reuse.
+
+    Threshold is ``ABICHECK_DWARF_LOW_MEMORY_MB``
+    (default :data:`DEFAULT_DWARF_LOW_MEMORY_THRESHOLD_MB`), compared
+    against the raw ``.debug_info`` section size in MiB -- the same section
+    whose in-memory DIE representation is what actually drives peak RSS on
+    a large binary (see module docstring). A negative override always
+    returns False (documented disable switch -- a plain ``>`` comparison
+    alone would do the opposite, since every real size is >= 0 and so
+    would compare greater than any negative threshold). An unparsable
+    override falls back to the default rather than raising.
+    """
+    threshold_mb: float = DEFAULT_DWARF_LOW_MEMORY_THRESHOLD_MB
+    env = os.environ.get("ABICHECK_DWARF_LOW_MEMORY_MB")
+    if env:
+        try:
+            threshold_mb = float(env)
+        except ValueError:
+            log.warning(
+                "ABICHECK_DWARF_LOW_MEMORY_MB=%r is not a valid number; "
+                "falling back to the default (%s MiB).",
+                env,
+                DEFAULT_DWARF_LOW_MEMORY_THRESHOLD_MB,
+            )
+            threshold_mb = DEFAULT_DWARF_LOW_MEMORY_THRESHOLD_MB
+    if threshold_mb < 0:
+        return False
+    debug_info_sec = getattr(dwarf_info, "debug_info_sec", None)
+    try:
+        size = int(getattr(debug_info_sec, "size", 0) or 0)
+    except (TypeError, ValueError):
+        # A test double (e.g. MagicMock) or otherwise non-numeric ``.size``
+        # carries no real size signal — treat as unknown/small rather than
+        # raise, matching every other "never raise" DWARF helper here.
+        size = 0
+    return (size / (1024 * 1024)) > threshold_mb
+
+
+def free_cu_die_cache(CU: Any) -> None:
+    """Drop a CompileUnit's cached DIE objects so the GC can reclaim them.
+
+    Clears (rather than reassigns) the two pyelftools cache containers in
+    place, so this works regardless of the exact container type a given
+    pyelftools release uses internally (parallel lists as of the versions
+    this project has checked, but ``.clear()`` degrades safely instead of
+    raising ``AttributeError``/type-mismatches if that ever changes) --
+    every DIE accessor (``get_top_DIE``, ``iter_DIEs``, ``_get_cached_DIE``,
+    ``get_DIE_from_refaddr``) re-parses transparently from the underlying
+    stream on a cache miss once cleared, so a caller that revisits this CU
+    later gets a byte-for-byte identical (if freshly allocated) DIE tree --
+    the cost is pure CPU (re-decoding), never a correctness change. See the
+    module docstring above for why this trade is worth making on a large
+    binary.
+
+    No-ops if *CU* doesn't carry the private pyelftools cache attributes (a
+    version mismatch, or a CU that hasn't cached anything yet) rather than
+    raising -- freeing is always best-effort.
+    """
+    dielist = getattr(CU, "_dielist", None)
+    if dielist is not None:
+        dielist.clear()
+    diemap = getattr(CU, "_diemap", None)
+    if diemap is not None:
+        diemap.clear()

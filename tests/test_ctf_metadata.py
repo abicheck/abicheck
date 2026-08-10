@@ -22,6 +22,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from abicheck import ctf_metadata
 from abicheck.ctf_metadata import (
     _CTF_V2_LSTRUCT_THRESH,
     CTF_F_COMPRESS,
@@ -515,8 +516,10 @@ class TestDecompression:
         result = _decompress_if_needed(data, hdr)
         assert result == data
 
-    def test_decompress_exceeds_size_limit(self) -> None:
-        """Zip bomb guard: decompression must fail when output exceeds 256 MiB."""
+    def test_decompress_exceeds_size_limit(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Zip bomb guard: decompression must fail when output exceeds the cap."""
         from abicheck.ctf_metadata import CtfHeader
 
         hdr = CtfHeader(
@@ -532,16 +535,19 @@ class TestDecompression:
             str_off=0,
             str_len=0,
         )
-        # Build a zlib-compressed blob of zeros that decompresses to just over
-        # the 256 MiB guard. The decompressor caps output at the limit and only
-        # needs to see unconsumed_tail, so 257 MiB is enough — no need to
-        # allocate/compress 300 MiB. level=1 keeps the (CPU-bound) compression
-        # of zeros fast; default level 6 here was a multi-second hotspot.
-        big_data = b"\x00" * (257 * 1024 * 1024)
+        # What is under test is the unconsumed_tail guard, not the production
+        # value of the cap. Crossing the real 256 MiB ceiling meant allocating
+        # 257 MiB of zeros and zlib-compressing them, which cost ~4.4s and made
+        # this the second-slowest test in the suite (an earlier pass had already
+        # dropped it from compression level 6 to 1 for the same reason). The cap
+        # is now a module-level constant read at call time, so lowering it to
+        # 1 MiB exercises the identical branch with a 2 MiB payload.
+        monkeypatch.setattr(ctf_metadata, "_MAX_DECOMPRESS", 1024 * 1024)
+        big_data = b"\x00" * (2 * 1024 * 1024)
         compressed = zlib.compress(big_data, 1)
         preamble = struct.pack("<HBB", CTF_MAGIC, CTF_VERSION_3, CTF_F_COMPRESS)
         data = preamble + compressed
-        with pytest.raises(ValueError, match="exceeds 256 MiB limit"):
+        with pytest.raises(ValueError, match="exceeds 1 MiB limit"):
             _decompress_if_needed(data, hdr)
 
     def test_decompress_bad_data(self) -> None:

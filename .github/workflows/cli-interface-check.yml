@@ -26,6 +26,7 @@ permissions:
 jobs:
   cli-interface-diff:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v6
         with:

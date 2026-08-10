@@ -187,7 +187,7 @@ def _ctor_dtor_demangle_fallback(symbol: str) -> str:
     # Constructor: leaf name == class name (ignoring template args on either).
     base_cls = cls.split("<", 1)[0]
     base_name = name.split("<", 1)[0]
-    if base_name == base_cls or base_name == "~" + base_cls:
+    if base_name in (base_cls, "~" + base_cls):
         return f"ctordtor:{qualified}"
     return symbol
 

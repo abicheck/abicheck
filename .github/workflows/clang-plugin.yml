@@ -45,6 +45,7 @@ jobs:
   conformance:
     name: C.6 + scan (LLVM ${{ matrix.llvm }}, host ${{ matrix.host_cxx }})
     runs-on: ${{ matrix.runner }}
+    timeout-minutes: 45
     strategy:
       fail-fast: false
       # Two dimensions:

@@ -45,7 +45,7 @@ MAX_ENTRIES: int = 100
 #: key invalidates all previously-cached entries on upgrade rather than risk
 #: serving a stale snapshot computed by an older, behaviorally-different
 #: abicheck version.
-_SNAPSHOT_CACHE_VERSION: str = "7"
+_SNAPSHOT_CACHE_VERSION: str = "8"
 # v2: castxml's CvQualifiedType type-name spelling changed for a
 # volatile-qualified pointer/reference VALUE (now a suffix, "T * volatile",
 # matching clang's own convention, rather than always a prefix) -- an
@@ -106,6 +106,16 @@ _SNAPSHOT_CACHE_VERSION: str = "7"
 # ``fact_provenance``) until the entry happened to expire or was manually
 # cleared, silently suppressing every newly-added detector this PR wires up.
 # Bumped so the upgrade forces re-extraction instead.
+#
+# v8 (G31 Phase C continuation): the direct-clang backend started extracting
+# ``TypeField.default`` (default member initializer) too, the one remaining
+# fact-completeness gap from the same phase's list that backend can close.
+# Identical reasoning to v7, one fact later -- an upgrading user's warm
+# clang/hybrid cache entry would keep replaying the old snapshot (every
+# field's initializer missing, or a hybrid entry's field ``default``
+# provenance still bare-keyed from before the qualification fix that landed
+# alongside this extraction) until it happened to expire or was manually
+# cleared. Bumped so the upgrade forces re-extraction instead.
 
 
 def _get_cache_dir() -> Path:
@@ -117,8 +127,6 @@ def _get_cache_dir() -> Path:
         try:
             base = Path.home() / ".cache"
         except RuntimeError:
-            import tempfile
-
             base = Path(tempfile.gettempdir())
     return base / "abi_check" / "snapshots"
 

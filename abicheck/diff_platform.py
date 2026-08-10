@@ -23,7 +23,7 @@ from .binary_utils import strip_vendor_hash
 from .checker_policy import ChangeKind
 from .checker_types import SYMBOL_VERSION_ALIAS_NOT_RETAINED_MARKER, Change
 from .detector_registry import registry
-from .diff_helpers import make_change
+from .diff_helpers import is_sentinel_enum_member, make_change
 from .diff_platform_elf_dynamic import (
     _INTERNAL_NAME_PATTERNS as _INTERNAL_NAME_PATTERNS,
     _RELRO_RANK as _RELRO_RANK,
@@ -1069,8 +1069,6 @@ def _diff_inline_namespace(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
     Uses demangled function names to identify namespace-only changes where the
     function signature is otherwise identical.
     """
-    import re
-
     changes: list[Change] = []
     old_map = {
         f.mangled: f
@@ -1469,17 +1467,15 @@ def _normalize_type_name(name: str) -> str:
     Note: this normalizer is intentionally lossy for comparison purposes only.
     The original type names are still preserved in Change.old_value/new_value.
     """
-    import re as _re
-
     s = name.strip()
     # Remove trailing pointer/reference decorators and CV-qualifiers
-    s = _re.sub(r"[\s*&]+$", "", s).strip()
+    s = re.sub(r"[\s*&]+$", "", s).strip()
     # Remove leading CV-qualifiers
-    s = _re.sub(r"^(const|volatile)(\s+(const|volatile))?\s+", "", s).strip()
+    s = re.sub(r"^(const|volatile)(\s+(const|volatile))?\s+", "", s).strip()
     # Remove struct/class/union tag keyword, remembering it: for an anonymous
     # placeholder spelled with a *leading* tag ("union <anonymous>") the tag
     # carries the aggregate kind, which must survive the collapse below.
-    lead = _re.match(r"^(struct|class|union)\s+", s)
+    lead = re.match(r"^(struct|class|union)\s+", s)
     lead_kind = lead.group(1) if lead else None
     if lead:
         s = s[lead.end() :].strip()
@@ -1790,19 +1786,11 @@ def _diff_enum_layouts(o: object, n: object) -> list[Change]:
             )
 
         # 3. Changed values
-        # Sentinel detection: name-pattern based (*_last, *_max, *_count).
-        # More robust than max-value heuristics for evolving enums.
-        _SENTINEL_SUFFIXES = ("_last", "_max", "_count")
-
-        def _is_sentinel_member(member_name: str) -> bool:
-            n = member_name.lower()
-            return n.endswith(_SENTINEL_SUFFIXES) or n in {"last", "max", "count"}
-
         for mname, old_val in old_e.members.items():
             if mname in new_e.members and new_e.members[mname] != old_val:
                 kind = (
                     ChangeKind.ENUM_LAST_MEMBER_VALUE_CHANGED
-                    if _is_sentinel_member(mname)
+                    if is_sentinel_enum_member(mname)
                     else ChangeKind.ENUM_MEMBER_VALUE_CHANGED
                 )
                 changes.append(

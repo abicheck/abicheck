@@ -165,7 +165,7 @@ class CMakeFileApiAdapter:
             for a in detail.get("artifacts", [])
         ]
         deps = [
-            f"target://{str(d.get('id', '')).split('::')[0]}"
+            f"target://{str(d.get('id', '')).split('::', 1)[0]}"
             for d in detail.get("dependencies", [])
         ]
         public_headers, private_headers, sources = self._partition_sources(detail)

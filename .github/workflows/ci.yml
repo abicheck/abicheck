@@ -44,16 +44,21 @@ jobs:
           # docstring for what was actually tried.
           python-version: '3.13'
           cache: 'pip'
-      - name: Install mypy (for baseline-drift check)
+      # One install, not two. This job used to `pip install "mypy==1.19.1"`
+      # standalone before the ai-readiness step and only then install `[dev]`
+      # for the later gates — two full pip resolutions of an overlapping
+      # dependency set. `[dev]` already pins the *same* exact mypy
+      # (pyproject.toml's "mypy==1.19.1", for the same reproducible-drift-gate
+      # reason the standalone pin cited), so installing it up front satisfies
+      # both steps. `[dev]` (not the bare package) is also what repo-facts'
+      # fast_test_cases_collected needs, since it runs pytest --collect-only
+      # (see scripts/gen_repo_facts.py).
+      - name: Install package (mypy drift gate + FP-rate / tier-accuracy / doc-sync / repo-facts gates)
         run: |
           python -m pip install --upgrade pip
-          pip install "mypy==1.19.1"  # pin so the drift gate is reproducible (field-eval CI gap)
+          pip install -e ".[dev]"
       - name: AI-readiness checks (file size, CLAUDE.md coverage, ChangeKind invariants, mypy drift, import cycles)
         run: python scripts/verify.py --profile pr --only ai-readiness
-      # `[dev]` (not just the bare package): repo-facts' fast_test_cases_collected
-      # needs pytest to run `--collect-only` (see scripts/gen_repo_facts.py).
-      - name: Install package (for FP-rate / tier-accuracy / doc-sync / repo-facts gates)
-        run: pip install -e ".[dev]"
       # Scoping FP-rate gate (ADR-024 §7), per-tier accuracy gate, the use-case
       # docs sync gate, the docs/AGENTS.md ownership contract gate, and
       # repo_facts.json freshness — routed through scripts/verify.py, the
@@ -198,6 +203,20 @@ jobs:
           fail_ci_if_error: false
 
   integration-tests:
+    # Path-gated through the existing heavy-parity-gate rather than a
+    # trigger-level `paths:` filter, for the same reason libabigail-parity and
+    # abicc-parity already are: the gate job itself always runs and reports, so
+    # branch protection keeps a stable check to require. This is the most
+    # expensive always-on job in the repo — three OS legs, each doing
+    # apt/brew/choco + castxml + a full editable install, with macOS billed at
+    # 10x and Windows at 2x runner minutes — and it was running in full on
+    # documentation-only PRs. The gate's filter set (abicheck/**, tests/**,
+    # examples/**, .github/workflows/**) is exactly the input set that can
+    # change what these tests observe. Note this is deliberately NOT the same
+    # call as cross-platform-e2e below, which stays always-on: that one is ~1
+    # minute, so its runner cost never justified the skipped-check friction.
+    needs: [heavy-parity-gate]
+    if: needs.heavy-parity-gate.outputs.run-heavy == 'true'
     runs-on: ${{ matrix.os }}
     timeout-minutes: 30
     permissions:
@@ -220,7 +239,7 @@ jobs:
           sudo apt-get install -y gcc g++ cmake clang curl ca-certificates
       - name: Set up pinned CastXML (Linux)
         if: runner.os == 'Linux'
-        run: bash action/install-castxml.sh
+        uses: ./.github/actions/setup-castxml
       - name: Install system deps (macOS)
         if: runner.os == 'macOS'
         run: brew install castxml cmake
@@ -294,8 +313,7 @@ jobs:
         run: |
           sudo apt-get update -qq
           sudo apt-get install -y zlib1g-dev curl ca-certificates
-      - name: Set up pinned CastXML
-        run: bash action/install-castxml.sh
+      - uses: ./.github/actions/setup-castxml
       - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1  # v6
         with:
           python-version: '3.14'
@@ -369,6 +387,7 @@ jobs:
 
   heavy-parity-gate:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     outputs:
       run-heavy: ${{ steps.resolve.outputs.run-heavy }}
       reason: ${{ steps.resolve.outputs.reason }}
@@ -386,6 +405,21 @@ jobs:
               - 'tests/**'
               - 'examples/**'
               - '.github/workflows/**'
+              # The gated jobs' *infrastructure*, not just their inputs. Every
+              # one of them does `pip install -e ".[dev]"` and sets up CastXML
+              # through the composite action, and the two parity lanes are
+              # driven by scripts/verify.py's step catalog — so a PR touching
+              # only those would skip the very jobs that validate them. The
+              # sharpest case: re-pinning CastXML in action/install-castxml.sh
+              # (asset names, SHA256s, expected versions) would otherwise land
+              # without a single job that uses CastXML having run.
+              # (Codex review on PR #685; the gap predates this PR for the two
+              # parity lanes, and integration-tests inherited it when it moved
+              # behind this gate.)
+              - 'pyproject.toml'
+              - 'action/**'
+              - '.github/actions/**'
+              - 'scripts/verify.py'
 
       - name: Resolve parity gate output
         id: resolve
@@ -413,8 +447,7 @@ jobs:
           sudo apt-get update -qq
           sudo apt-get install -y gcc g++ curl ca-certificates
           sudo apt-get install -y abigail-tools || sudo apt-get install -y libabigail-tools
-      - name: Set up pinned CastXML
-        run: bash action/install-castxml.sh
+      - uses: ./.github/actions/setup-castxml
       - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1  # v6
         with:
           python-version: '3.14'
@@ -443,8 +476,7 @@ jobs:
         run: |
           sudo apt-get update -qq
           sudo apt-get install -y gcc g++ abi-compliance-checker curl ca-certificates
-      - name: Set up pinned CastXML
-        run: bash action/install-castxml.sh
+      - uses: ./.github/actions/setup-castxml
       - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1  # v6
         with:
           python-version: '3.14'

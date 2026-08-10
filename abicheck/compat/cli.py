@@ -1413,16 +1413,16 @@ def _write_all_reports(
     gcc_path: str | None,
 ) -> None:
     """Write primary report, optional split reports, affected-symbols list, and stdout echo."""
-    _report_kwargs: dict[str, Any] = dict(
-        fmt=fmt,
-        lib_name=lib_name,
-        old_version=old_version,
-        new_version=new_version,
-        effective_title=effective_title,
-        compat_html=compat_html,
-        arch=arch,
-        gcc_path=gcc_path,
-    )
+    _report_kwargs: dict[str, Any] = {
+        "fmt": fmt,
+        "lib_name": lib_name,
+        "old_version": old_version,
+        "new_version": new_version,
+        "effective_title": effective_title,
+        "compat_html": compat_html,
+        "arch": arch,
+        "gcc_path": gcc_path,
+    }
     try:
         _generate_compat_report(result, report_path, **_report_kwargs)
 

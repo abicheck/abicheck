@@ -788,8 +788,6 @@ def _ingest_query_output(
         )
         return None
     if system == "bazel":
-        import tempfile
-
         from .adapters.bazel import BazelAdapter
 
         with tempfile.NamedTemporaryFile(

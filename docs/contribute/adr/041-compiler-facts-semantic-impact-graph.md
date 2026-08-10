@@ -9,9 +9,10 @@ now also reachable from the standalone `dump --header-graph` CLI, not just
 `compare`), and P1 items 1, 2, 3, 4, 5 (plugin injection, object/link
 provenance graph, public-entry impact closure — now wired into `scan`'s
 PR-scoped replay-seed focusing via `resolve_changed_paths_public_impact` —
-per-edge confidence/provenance, and stable cross-clang-version identity)
-implemented; the rest of this ADR is a roadmap, not a commitment to ship on
-any timeline.
+per-edge confidence/provenance, and stable cross-clang-version identity),
+and P2 item 1 (virtual-dispatch/class-hierarchy graph with possible-override
+edges, `override_graph.py`) implemented; the rest of this ADR is a roadmap,
+not a commitment to ship on any timeline.
 **Decision maker:** Nikolay Petrov (@napetrov)
 
 ---
@@ -1359,9 +1360,28 @@ there is no equivalent "should this be automatic" question for them.
 
 ### P2 — advanced / differentiating
 
-1. Virtual-dispatch/class-hierarchy graph with possible-override edges (the
-   call graph already labels a virtual call `CALL_KIND_VIRTUAL` /
-   `RESOLUTION_OVERAPPROX`; this closes the loop to the actual override set).
+1. ~~Virtual-dispatch/class-hierarchy graph with possible-override edges~~ —
+   **done** (`abicheck/buildsource/override_graph.py`): a new
+   `METHOD_POSSIBLE_OVERRIDE` edge kind closes the loop the call graph's
+   `CALL_KIND_VIRTUAL`/`RESOLUTION_OVERAPPROX` opened. Built from the class
+   hierarchy `type_graph.py`'s own resolved `TYPE_INHERITS` edges already
+   provide (reused rather than re-derived) plus each class's own methods,
+   matched against the NEAREST ancestor that actually declares a
+   same-signature method — walking past an intermediate class that doesn't
+   redeclare it at all — with the exception specification normalized out of
+   the `(name, type.qualType)` match first, since an override may legally
+   strengthen it (both verified against real Clang 17 output, Codex review);
+   an edge is `override_confirmed` when the overriding declaration wrote the
+   `override` keyword (clang's `OverrideAttr`, compiler-checked) or the
+   weaker `override_signature_match` otherwise. Multiple inheritance emits
+   an edge to each matching ancestor. Deliberately scoped out of this first
+   slice: constructors/destructors (the Itanium two-symbol dtor mangling
+   needs its own matching rule), class-template specializations, and
+   covariant-return overrides (a documented false negative — a covariant
+   override's `type.qualType` genuinely differs from its base's, so this
+   matcher correctly declines rather than risk a wrong match). Folded
+   automatically alongside the call/type/template/include graph via
+   `inline_graph_fold.fold_semantic_graphs` — no separate opt-in flag.
 2. ~~Template pattern ↔ instantiation ↔ exported-symbol graph~~ — **done
    (G29 Phase 5 item 1)**. `source_link.py`'s `template_instantiation_symbol_to_decl`
    attribution predates this and stays as-is (a different layer, L4's own
@@ -1370,14 +1390,15 @@ there is no equivalent "should this be automatic" question for them.
    `clang -ast-dump=json` pass minting `template_decl`/
    `template_instantiation` nodes and `DECL_INSTANTIATES_TEMPLATE`/
    `TEMPLATE_USES_TYPE`/`INSTANTIATION_EMITS_SYMBOL` edges, driven by
-   `inline_graph_fold.fold_template_graph` alongside the call/type graph
-   passes. `TEMPLATE_USES_DECL`/`INSTANTIATION_MAPS_TO_EXPORT`/
-   `DECL_USES_DEFAULT_TEMPLATE_ARG`/`CONSTRAINT_DEPENDS_ON_DECL` remain
-   reserved, unpopulated vocabulary — see the module's own docstring for
-   why each is deferred (a non-type/function-pointer argument needing its
-   own AST verification, redundancy with `BINARY_EXPORTS_SYMBOL` on the
-   already-joined symbol node, explicit-vs-defaulted argument detection,
-   and C++20 concepts needing a separate AST subsystem, respectively). See
+   `inline_graph_fold.fold_semantic_graphs` (via `fold_template_graph`)
+   alongside the call/type/override graph passes. `TEMPLATE_USES_DECL`/
+   `INSTANTIATION_MAPS_TO_EXPORT`/`DECL_USES_DEFAULT_TEMPLATE_ARG`/
+   `CONSTRAINT_DEPENDS_ON_DECL` remain reserved, unpopulated vocabulary —
+   see the module's own docstring for why each is deferred (a non-type/
+   function-pointer argument needing its own AST verification, redundancy
+   with `BINARY_EXPORTS_SYMBOL` on the already-joined symbol node,
+   explicit-vs-defaulted argument detection, and C++20 concepts needing a
+   separate AST subsystem, respectively). See
    `docs/reference/source-graph-schema.md` for the field-level detail.
 3. Macro expansion/reference graph for public headers (`DECL_USES_MACRO`) —
    `preprocessor_scan.py` (ADR-035 D2) already captures macro facts at the S2

@@ -328,6 +328,82 @@ def fold_type_graph(
     )
 
 
+def fold_override_graph(
+    graph: SourceGraphSummary,
+    merged: BuildEvidence,
+    clang_bin: str,
+    extractors: list[ExtractorRecord] | None,
+    changed_paths: tuple[str, ...] = (),
+    scoped_units: list[Any] | None = None,
+) -> None:
+    """Best-effort Clang virtual-dispatch/class-hierarchy augmentation of
+    *graph* (ADR-041 P2 item 1).
+
+    Mirrors :func:`fold_type_graph` exactly (same scoping precedence, same
+    graceful degradation on a missing ``clang++``) but folds
+    ``METHOD_POSSIBLE_OVERRIDE`` edges instead — the possible-override
+    candidate set a virtual call's ``CALL_KIND_VIRTUAL``/
+    ``RESOLUTION_OVERAPPROX`` (``call_graph.py``) can be resolved against.
+    Run only when the caller also runs the call/type graph
+    (``with_call_graph``), same as the other Clang passes.
+    """
+    from .call_graph import extractor_pass_fully_covered, narrowed_pass_confirmed
+    from .override_graph import (
+        ClangOverrideGraphExtractor,
+        augment_graph_with_overrides,
+    )
+
+    rows = extractors if extractors is not None else []
+    extractor = ClangOverrideGraphExtractor(
+        clang_bin=clang_bin if clang_bin != "clang" else "clang++"
+    )
+    if not extractor.available():
+        rows.append(
+            ExtractorRecord(
+                name="override_graph:clang",
+                status="failed",
+                detail=f"{extractor.clang_bin} not found; graph has no override edges",
+            )
+        )
+        return
+    target, scoped_note, narrowed, scope_key = _scope_narrowed_target(
+        merged, changed_paths, scoped_units
+    )
+    edges = extractor.extract_from_build(target)
+    added = augment_graph_with_overrides(graph, edges)
+    # Recorded regardless of `added` — mirrors fold_call_graph/fold_type_graph's
+    # coverage gate. project_source_files() isn't consulted here: unlike a call
+    # or type/field edge, an override edge's endpoints are always declarations
+    # that already carry their own identity (no third-party-vs-project
+    # ambiguity this pass itself introduces) — augment_graph_with_overrides
+    # merges onto whatever provenance an earlier call/type-graph pass already
+    # attached to the same decl:// node.
+    if extractor_pass_fully_covered(target, extractor, narrowed):
+        graph.extractor_passes["override_graph"] = True
+    elif narrowed and narrowed_pass_confirmed(target, extractor):
+        graph.narrowed_passes["override_graph"] = True
+        graph.narrowed_scope["override_graph"] = scope_key
+    elif extractor.diagnostics:
+        graph.degraded_passes["override_graph"] = True
+    for diag in extractor.diagnostics:
+        merged.diagnostics.append(f"override_graph: {diag}")
+    timing = (
+        f", {extractor.last_elapsed_s:.2f}s, jobs={extractor.last_jobs}"
+        if getattr(extractor, "last_jobs", 0)
+        else ""
+    )
+    rows.append(
+        ExtractorRecord(
+            name="override_graph:clang",
+            status="ok" if added else "partial",
+            detail=(
+                f"{added} override edges from {len(target.compile_units)} compile "
+                f"unit(s){scoped_note}{timing}"
+            ),
+        )
+    )
+
+
 def fold_template_graph(
     graph: SourceGraphSummary,
     merged: BuildEvidence,
@@ -478,6 +554,44 @@ def fold_include_graph(
                 f"unit(s){scoped_note}"
             ),
         )
+    )
+
+
+def fold_semantic_graphs(
+    graph: SourceGraphSummary,
+    merged: BuildEvidence,
+    clang_bin: str,
+    extractors: list[ExtractorRecord] | None,
+    changed_paths: tuple[str, ...] = (),
+    scoped_units: list[Any] | None = None,
+) -> None:
+    """Run every Clang-derived L5 graph pass over *graph* in one call:
+    :func:`fold_call_graph`, :func:`fold_type_graph`,
+    :func:`fold_override_graph` (ADR-041 P2 item 1),
+    :func:`fold_template_graph` (G29 Phase 5 item 1), then
+    :func:`fold_include_graph` — the exact sequence ``inline._build_inline_graph``
+    ran inline before this wrapper existed, kept together here (rather than
+    five separate call sites in ``inline.py``, which sits at its own
+    line-count cap) so a future sixth pass adds one call here instead of
+    growing that file too. Each pass shares the same *changed_paths*/
+    *scoped_units* scoping precedence and clang-binary resolution, and each
+    degrades independently (a missing ``clang++`` or a per-TU parse failure
+    never aborts a later pass — ADR-028 D3).
+    """
+    fold_call_graph(
+        graph, merged, clang_bin, extractors, changed_paths, scoped_units=scoped_units
+    )
+    fold_type_graph(
+        graph, merged, clang_bin, extractors, changed_paths, scoped_units=scoped_units
+    )
+    fold_override_graph(
+        graph, merged, clang_bin, extractors, changed_paths, scoped_units=scoped_units
+    )
+    fold_template_graph(
+        graph, merged, clang_bin, extractors, changed_paths, scoped_units=scoped_units
+    )
+    fold_include_graph(
+        graph, merged, clang_bin, extractors, changed_paths, scoped_units=scoped_units
     )
 
 

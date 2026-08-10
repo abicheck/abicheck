@@ -106,7 +106,7 @@ def _contiguous_subsequence(needle: tuple[str, ...], hay: tuple[str, ...]) -> bo
 def _suffix_match(needle: tuple[str, ...], hay: tuple[str, ...]) -> bool:
     """True if *hay* ends with the segments of *needle* (a path-suffix match)."""
     n = len(needle)
-    return n > 0 and len(hay) >= n and hay[-n:] == needle
+    return 0 < n <= len(hay) and hay[-n:] == needle
 
 
 def _matches_public(

@@ -41,7 +41,10 @@ from typing import Any, Protocol, TypeVar, cast
 from .change_registry import REGISTRY
 from .checker_policy import ChangeKind
 from .checker_types import Change
-from .fact_provenance import both_known_backed_fact_qualified
+from .fact_provenance import (
+    both_known_backed_fact_qualified,
+    same_producer_backed_fact_qualified,
+)
 from .model import AbiSnapshot
 
 K = TypeVar("K")
@@ -58,6 +61,24 @@ W = TypeVar("W")
 #   {new}    — new value (also populates Change.new_value unless overridden)
 #   {detail} — any extra computed snippet the template wants to interpolate
 TEMPLATE_VOCAB = frozenset({"symbol", "name", "old", "new", "detail"})
+
+# Sentinel detection for enum members is name-pattern based, not value based:
+# a max-value heuristic accidentally downgrades an ordinary member that merely
+# happens to hold the largest value in an evolving enum.
+_SENTINEL_SUFFIXES = ("_last", "_max", "_count")
+_SENTINEL_NAMES = frozenset({"last", "max", "count"})
+
+
+def is_sentinel_enum_member(member_name: str) -> bool:
+    """True for a conventional enum *sentinel* member (``*_LAST``/``*_MAX``/``*_COUNT``).
+
+    Shared by the enum-member detectors in ``diff_types`` (header/DWARF enums)
+    and ``diff_platform`` (platform enums) so both classify the same names as
+    sentinels; each previously carried its own byte-identical copy, redefined
+    once per loop iteration.
+    """
+    n = member_name.lower()
+    return n.endswith(_SENTINEL_SUFFIXES) or n in _SENTINEL_NAMES
 
 
 def make_change(
@@ -391,6 +412,31 @@ def fact_known_qualified(
     *name* alone) since a matched pair's two sides can carry different
     qualified identities."""
     return both_known_backed_fact_qualified(
+        old, new, old_qualified_key, new_qualified_key, bare_key,
+        old_bare_unambiguous=old_map.bare_name_is_unambiguous(name),
+        new_bare_unambiguous=new_map.bare_name_is_unambiguous(name),
+    )
+
+
+def fact_same_producer_qualified(
+    old: AbiSnapshot,
+    new: AbiSnapshot,
+    old_map: TypeMap[Any],
+    new_map: TypeMap[Any],
+    name: str,
+    old_qualified_key: str,
+    new_qualified_key: str,
+    bare_key: str,
+) -> bool:
+    """:func:`fact_provenance.same_producer_backed_fact_qualified`, deriving
+    its ambiguity flags exactly as :func:`fact_known_qualified` above does.
+
+    The gate for a fact both header backends populate with values that are
+    NOT cross-comparable (``TypeField.default``) rather than one whose values
+    are (``deprecated``/``is_scoped``) — see that function's own docstring for
+    why the two need different answers.
+    """
+    return same_producer_backed_fact_qualified(
         old, new, old_qualified_key, new_qualified_key, bare_key,
         old_bare_unambiguous=old_map.bare_name_is_unambiguous(name),
         new_bare_unambiguous=new_map.bare_name_is_unambiguous(name),

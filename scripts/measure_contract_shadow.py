@@ -537,9 +537,11 @@ def _merge(into: ModeMeasurement, other: ModeMeasurement) -> None:
 
 
 def measure(
-    corpus: Iterable[Case] = CORPUS, modes: Iterable[ContractMode] = MEASURED_MODES
+    corpus: Iterable[Case] | None = None,
+    modes: Iterable[ContractMode] = MEASURED_MODES,
 ) -> dict[str, ModeMeasurement]:
     """Measure the whole corpus in every domain, keyed by mode value."""
+    corpus = list(corpus) if corpus is not None else CORPUS
     out: dict[str, ModeMeasurement] = {}
     for mode in modes:
         total = ModeMeasurement(mode=mode.value)

@@ -186,7 +186,7 @@ def _compute_abi_risk(
 
 def _compute_risk_score(loadability: StackVerdict, abi_risk: StackVerdict) -> str:
     """Compute risk score from loadability and ABI risk verdicts."""
-    if loadability == StackVerdict.FAIL or abi_risk == StackVerdict.FAIL:
+    if StackVerdict.FAIL in (loadability, abi_risk):
         return "high"
     if abi_risk == StackVerdict.WARN:
         return "medium"
@@ -366,7 +366,7 @@ def _diff_stacks(
             continue
 
         assert base_entry is not None and cand_entry is not None
-        base_key, base_node = base_entry
+        _base_key, base_node = base_entry
         cand_key, cand_node = cand_entry
 
         # Check if the file content changed (by file hash).
