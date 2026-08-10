@@ -28,10 +28,11 @@ from __future__ import annotations
 
 import dataclasses
 import re
+from collections.abc import Iterable
 from dataclasses import dataclass
 from functools import partial
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 import click
 
@@ -44,6 +45,7 @@ if TYPE_CHECKING:
     from .checker_types import Change, DiffResult
     from .compatibility_evaluation_frontend import PublicSymbolsList
     from .model import AbiSnapshot
+    from .policy_file import PolicyFile
     from .service_scan import CompileContext
     from .severity import SeverityConfig
 
@@ -803,3 +805,464 @@ def fold_l0_hard_removals(
 
     l0_hard_removals = collect_l0_export_delta(Path(old_path), Path(new_path), lang)
     return [*(extra_changes or []), *l0_hard_removals]
+
+
+# ---------------------------------------------------------------------------
+# ADR-043 scoped gating (--used-by / --required-symbol(s))
+#
+# Relocated here from ``cli_compare_helpers`` (which sits at the AI-readiness
+# 2000-line hard cap) as one self-contained family: the per-app/per-contract
+# scoping passes, the runtime-probe overlay, the worst-wins exit-code and
+# verdict ranking, and the JSON-safe summaries the renderer reads back off
+# ``result``. A pure relocation -- ``cli_compare_helpers`` re-exports every name
+# below, so ``cli_compare_helpers._verdict_exit_code`` (which
+# ``cli_scan_baseline`` imports) and the existing test patch targets keep
+# resolving unchanged, and a bare-name call there still goes through that
+# module's namespace. This module, not a new one, because a *new* module
+# reaching ``service``/``appcompat`` would join the allowlisted CLI
+# import-cycle SCC, which CLAUDE.md "M1-3" forbids extending; this one is
+# already a member.
+# ---------------------------------------------------------------------------
+
+
+def _app_compat_summary(result: object) -> dict[str, Any]:
+    """Project an :class:`appcompat.AppCompatResult` into a small JSON-safe dict."""
+    return {
+        "app": result.app_path,  # type: ignore[attr-defined]
+        "verdict": result.verdict.value,  # type: ignore[attr-defined]
+        "required_symbol_count": result.required_symbol_count,  # type: ignore[attr-defined]
+        "missing_symbols": result.missing_symbols,  # type: ignore[attr-defined]
+        "missing_versions": result.missing_versions,  # type: ignore[attr-defined]
+        "relevant_change_count": len(result.breaking_for_app),  # type: ignore[attr-defined]
+        "symbol_coverage": round(result.symbol_coverage, 1),  # type: ignore[attr-defined]
+    }
+
+
+def _plugin_contract_summary(result: object) -> dict[str, Any]:
+    """Project a :class:`appcompat.PluginHostContractResult` into a small dict."""
+    return {
+        "verdict": result.verdict.value,  # type: ignore[attr-defined]
+        "required_entrypoints": sorted(result.required_entrypoints),  # type: ignore[attr-defined]
+        "missing_entrypoints": result.missing_entrypoints,  # type: ignore[attr-defined]
+        "relevant_change_count": len(result.breaking_for_host),  # type: ignore[attr-defined]
+        "coverage": round(result.coverage, 1),  # type: ignore[attr-defined]
+    }
+
+
+def _verdict_exit_code(verdict: object) -> int:
+    """Map a scoped-comparison Verdict to its floor exit code (ADR-043)."""
+    value = getattr(verdict, "value", verdict)
+    if value == "BREAKING":
+        return 4
+    if value == "API_BREAK":
+        return 2
+    return 0
+
+
+_VERDICT_SEVERITY_RANK = {
+    "BREAKING": 3, "API_BREAK": 2, "COMPATIBLE_WITH_RISK": 1,
+    "COMPATIBLE": 0, "NO_CHANGE": 0,
+}
+
+
+def _verdict_severity_rank(verdict: object) -> int:
+    """Rank a Verdict by severity, independent of any exit-code scheme.
+
+    Under a severity scheme, a BREAKING app can carry exit code 0 (e.g.
+    ``--severity-preset info-only``) -- ranking "worst app" by exit code
+    would then let a later COMPATIBLE app (also exit code 0) overwrite the
+    reported scoped verdict, so JSON/HTML/SARIF could claim COMPATIBLE while
+    an earlier --used-by summary is still BREAKING (Codex review). Verdict
+    selection for reporting must stay keyed on verdict severity, not on the
+    (independently correct) max-exit-code computation used for gating.
+    """
+    value = getattr(verdict, "value", verdict)
+    return _VERDICT_SEVERITY_RANK.get(value, 0) if isinstance(value, str) else 0
+
+
+def _scoped_exit_code(
+    scoped: Any, relevant_changes: list[Any],
+    result: Any, exit_code_scheme: str, sev_config: Any,
+    policy: str, policy_file: PolicyFile | None,
+    *, has_missing_contract: bool = False,
+) -> int:
+    """Compute a scoped result's exit code under the active exit-code scheme.
+
+    ADR-043's --used-by/--required-symbol(s) floor the exit code on the
+    *scoped* verdict rather than the full library's -- but that floor must
+    still respect ``--exit-code-scheme severity``/``--severity-*``: without
+    this, a scoped compare silently reverted to the legacy 0/2/4 mapping no
+    matter what severity configuration the caller passed, because the scoped
+    branch returned straight to ``sys.exit`` before the severity-aware exit
+    handler ever ran.
+
+    *has_missing_contract* (a required symbol/version/entrypoint absent from
+    the new library) floors the severity-scheme exit code separately from
+    *relevant_changes*: a missing contract symbol is BREAKING but is not a
+    diff ``Change``, so ``compute_exit_code`` never sees it and would
+    otherwise return 0 (Codex review).
+    """
+    if exit_code_scheme == "severity":
+        from .severity import compute_exit_code, missing_contract_exit_code
+
+        code = compute_exit_code(
+            relevant_changes, sev_config,
+            policy=policy,
+            kind_sets=result._effective_kind_sets(),
+            policy_file=policy_file,
+        )
+        if has_missing_contract:
+            code = max(code, missing_contract_exit_code(sev_config))
+        return code
+    return _verdict_exit_code(scoped.verdict)
+
+
+def _scoped_severity_summary(
+    relevant_changes: list[Any], missing: Iterable[str],
+    result: Any, sev_config: Any, policy: str, policy_file: PolicyFile | None,
+) -> tuple[tuple[str, ...], dict[str, int]]:
+    """(blocking_categories, per-category counts) for one scoped result.
+
+    Mirrors ``_scoped_exit_code``'s missing-contract floor: a missing
+    symbol/version/entrypoint with no matching diff Change is folded into
+    ``abi_breaking`` directly here -- both into the blocking-categories set
+    (when abi_breaking is severity-configured as error, matching the exit
+    -code floor) and into the count (always, since a count is a factual
+    tally, not a gate decision) -- otherwise a missing-contract-only scoped
+    BREAKING would report an empty ``blocking_categories`` alongside a
+    nonzero exit code, or a ``categories.abi_breaking.count`` of 0 alongside
+    a blocking ``abi_breaking`` category (Codex review). A *missing* entry
+    that already has a matching Change in *relevant_changes* (e.g. a removed
+    symbol is both "missing" from the new export table and a ``FUNC_REMOVED``
+    Change) is excluded via ``uncovered_missing_symbols`` -- otherwise that
+    single ABI break would be counted twice (Codex review follow-up).
+    """
+    from .appcompat import uncovered_missing_symbols
+    from .severity import (
+        IssueCategory,
+        SeverityLevel,
+        categorize_changes,
+        compute_gate_decision,
+    )
+
+    categorized = categorize_changes(
+        relevant_changes, policy=policy,
+        kind_sets=result._effective_kind_sets(), policy_file=policy_file,
+    )
+    counts = {
+        "abi_breaking": len(categorized.abi_breaking),
+        "potential_breaking": len(categorized.potential_breaking),
+        "quality_issues": len(categorized.quality_issues),
+        "addition": len(categorized.addition),
+    }
+    gate = compute_gate_decision(
+        relevant_changes, sev_config,
+        policy=policy, kind_sets=result._effective_kind_sets(), policy_file=policy_file,
+    )
+    categories = list(gate.blocking_categories)
+    uncovered = uncovered_missing_symbols(missing, relevant_changes)
+    if uncovered:
+        counts["abi_breaking"] += len(uncovered)
+        if (
+            sev_config.abi_breaking == SeverityLevel.ERROR
+            and IssueCategory.ABI_BREAKING.value not in categories
+        ):
+            categories.append(IssueCategory.ABI_BREAKING.value)
+    return tuple(categories), counts
+
+
+def _require_used_by_binary_evidence(
+    old_lib: Any, new_lib: Any, old_input: Path, new_input: Path,
+) -> None:
+    """Reject a ``--used-by`` run whose OLD/NEW side carries no binary evidence.
+
+    A real library path always qualifies; a JSON snapshot qualifies only when it
+    carries an ``elf``/``pe``/``macho`` block (i.e. it is a ``dump`` of a real
+    library, not a headers-only one) -- that is what supplies the SONAME/export
+    table/version list/PE ordinal table the scoping needs.
+    """
+    for lib, path, label in (
+        (old_lib, old_input, "OLD"), (new_lib, new_input, "NEW"),
+    ):
+        has_binary_evidence = isinstance(lib, Path) or any(
+            getattr(lib, field, None) is not None for field in ("elf", "pe", "macho")
+        )
+        if not has_binary_evidence:
+            raise click.UsageError(
+                f"--used-by requires OLD/NEW to be real library binaries, or "
+                f"JSON snapshots carrying binary evidence (a `dump` of a real "
+                f"library, not headers-only); {label} ({path}) is neither."
+            )
+
+
+def _apply_runtime_probe(
+    scoped: Any, app: Path, old_lib: Path, new_lib: Path,
+    suppression: Any, policy: str, policy_file: PolicyFile | None,
+) -> None:
+    """Run *app* against both libraries and fold a load regression into *scoped*.
+
+    ADR-044 P2 item 2. Mutates *scoped* in place: appends a
+    ``CONSUMER_RUNTIME_LOAD_FAILED`` finding (unless a suppression rule removes
+    it) and recomputes the app verdict, since ``scope_diff_to_app`` computed it
+    before this RISK-tier finding existed.
+    """
+    from .checker_policy import ChangeKind, ReachabilityState
+    from .diff_helpers import make_change
+    from .runtime_probe import run_runtime_probe
+
+    probe = run_runtime_probe(app, old_lib, new_lib)
+    regressed_symbol = probe.regressed_symbol
+    if not regressed_symbol:
+        return
+    # public_reachable=True (Codex review, fresh evidence, mirrors
+    # appcompat.scope_diff_to_app's identical fix for
+    # CONSUMER_REQUIRED_SYMBOL_REMOVED): this finding only exists
+    # because the dynamic linker itself failed to resolve a
+    # symbol for a real, executed --used-by consumer binary --
+    # left at the dataclass default (False), a broad
+    # namespace/source_location suppression rule's default
+    # "unreachable-only" reachability would read it as
+    # unreachable and silently suppress a runtime regression that
+    # is, by construction, always consumer-proven real.
+    runtime_change = make_change(
+        ChangeKind.CONSUMER_RUNTIME_LOAD_FAILED,
+        symbol=regressed_symbol,
+        name=app.name,
+        public_reachable=True,
+        reachability_kind="consumer_proven",
+        reachability_state=ReachabilityState.PROVEN_REACHABLE,
+    )
+    add_finding = suppression is None
+    if suppression is not None:
+        outcome = suppression.evaluate(runtime_change)
+        add_finding = not outcome.suppressed
+        # outcome.withheld_unknown_rule is never set here:
+        # runtime_change is always constructed with
+        # reachability_state=PROVEN_REACHABLE above (it is by
+        # construction consumer-proven), and
+        # would_withhold_unknown_reachability only ever fires on
+        # UNKNOWN.
+        if add_finding and outcome.withheld_rule is not None:
+            from .post_processing import _build_suppression_overreach_change
+
+            scoped.breaking_for_app.append(
+                _build_suppression_overreach_change(
+                    runtime_change, outcome.withheld_rule
+                )
+            )
+    if not add_finding:
+        return
+    scoped.breaking_for_app.append(runtime_change)
+    # scope_diff_to_app already computed scoped.verdict before
+    # this RISK-tier finding existed -- recompute so a clean
+    # static scope plus a runtime regression reports
+    # COMPATIBLE_WITH_RISK instead of a stale COMPATIBLE
+    # (Codex review).
+    from .appcompat import _compute_appcompat_verdict
+
+    scoped.verdict = _compute_appcompat_verdict(
+        scoped.missing_symbols, scoped.missing_versions,
+        scoped.breaking_for_app, scoped.required_symbol_count,
+        policy, policy_file,
+    )
+
+
+def _apply_used_by_scoping(
+    result: Any, used_by_apps: tuple[Path, ...],
+    old_input: Path, new_input: Path,
+    old_snapshot: Any, new_snapshot: Any,
+    policy: str, policy_file: PolicyFile | None,
+    exit_code_scheme: str = "legacy", sev_config: Any = None,
+    verify_runtime: bool = False,
+    suppression: Any = None,
+) -> int:
+    """Scope *result* to each ``--used-by`` app; worst-wins (ADR-043).
+
+    OLD/NEW may be real library binaries or JSON snapshots (e.g. a saved
+    ``dump`` output): a recognized binary is parsed directly; otherwise the
+    already-loaded snapshot (``old_snapshot``/``new_snapshot``, from
+    ``compare``'s own pipeline) is used instead, since a snapshot's
+    ``elf``/``pe``/``macho`` fields already carry the SONAME/export table/
+    version list/PE ordinal table :func:`~abicheck.appcompat.scope_diff_to_app`
+    needs. Attaches a JSON-safe summary to ``result.used_by`` for the
+    renderer and returns the worst app's exit code, computed under
+    *exit_code_scheme* (legacy verdict floor, or severity-aware over each
+    app's relevant changes when the caller passed --severity-*).
+
+    *verify_runtime* (ADR-044 P2 item 2) additionally runs each app once
+    against the old library and once against the new one
+    (:func:`~abicheck.runtime_probe.run_runtime_probe`) when both are real
+    binaries — a JSON-snapshot side has no file to execute against, so the
+    probe is silently skipped for that app, same as the static check's own
+    snapshot fallback degrades gracefully.
+
+    *suppression* (ADR-044 P2, Codex review) is forwarded to
+    :func:`~abicheck.appcompat.scope_diff_to_app` and also consulted here
+    directly for the ``CONSUMER_RUNTIME_LOAD_FAILED`` overlay: both findings
+    are synthesized *after* the pipeline's own suppression pass already ran
+    over ``result.changes``, so without this they would be unsuppressible
+    even by an exact rule.
+    """
+    from .appcompat import scope_diff_to_app
+    from .service import detect_binary_format
+
+    old_lib = old_input if detect_binary_format(old_input) is not None else old_snapshot
+    new_lib = new_input if detect_binary_format(new_input) is not None else new_snapshot
+
+    _require_used_by_binary_evidence(old_lib, new_lib, old_input, new_input)
+
+    from .appcompat import uncovered_missing_symbols
+    from .reporter import _finding_id
+
+    summaries = []
+    worst_exit = 0
+    worst_verdict = None
+    worst_verdict_rank = -1
+    # Keyed by the change's semantic identity (kind/symbol/old/new/location/
+    # description, via `_finding_id`) -- not id(change) -- so a Change or
+    # missing symbol shared by two tied apps (e.g. both import the same
+    # removed symbol) collapses to one entry instead of being tallied once
+    # per app (Codex review) -- `_scoped_severity_summary` runs once at the
+    # end over this deduplicated union, not per app summed together.
+    # `id()` alone under-deduplicates PE_ORDINAL_RETARGETED findings:
+    # `scope_diff_to_app` synthesizes a fresh `Change` object per app (via
+    # `_check_pe_ordinal_imports`), so two apps hitting the same ordinal
+    # retarget produce structurally-identical but object-distinct `Change`s
+    # that `id()` would double-count in the severity summary.
+    worst_changes: dict[str, Any] = {}
+    worst_missing: set[str] = set()
+    # Union across ALL apps (not just the worst-exit-code one) of which
+    # findings this --used-by gate actually cares about -- SARIF/JUnit
+    # consult this to make their own result levels/failure counts follow
+    # the scoped gate instead of the full, unscoped library diff (CLI-audit
+    # P1: "SARIF/JUnit computing pass/fail from the full library diff").
+    relevant_finding_ids: set[str] = set()
+    # Union across ALL apps of relevant Change objects, keyed by finding id --
+    # not just their ids -- so scoped-only changes (e.g. PE_ORDINAL_RETARGETED,
+    # which scope_diff_to_app synthesizes fresh per app and never adds to
+    # result.changes) can still be rendered by SARIF/JUnit instead of only
+    # contributing to the gate's exit code with nothing to explain it (Codex
+    # review).
+    relevant_changes_by_id: dict[str, Any] = {}
+    missing_labels: set[str] = set()
+    for app in used_by_apps:
+        scoped = scope_diff_to_app(
+            result, app, old_lib, new_lib,
+            policy=policy, policy_file=policy_file, suppression=suppression,
+            # ADR-057: old_lib above is the *path* whenever OLD is a real
+            # binary, and a path carries no L5 graph -- pass the snapshot
+            # compare's own pipeline already resolved so the consumer-impact
+            # join can explain why a consumer required a removed symbol.
+            # Graph lookup only; old_lib still owns every export/version read.
+            old_snapshot=old_snapshot,
+        )
+        if verify_runtime and isinstance(old_lib, Path) and isinstance(new_lib, Path):
+            _apply_runtime_probe(
+                scoped, app, old_lib, new_lib, suppression, policy, policy_file,
+            )
+        summaries.append(_app_compat_summary(scoped))
+        relevant_finding_ids.update(_finding_id(c) for c in scoped.breaking_for_app)
+        relevant_changes_by_id.update(
+            {_finding_id(c): c for c in scoped.breaking_for_app}
+        )
+        # A missing symbol/version already covered by a relevant Change (e.g.
+        # FUNC_REMOVED) must not also become a synthetic missing-contract
+        # finding -- that would double-report the same ABI break (Codex
+        # review, mirrors _scoped_severity_summary's own dedup below).
+        missing_labels.update(
+            uncovered_missing_symbols(
+                list(scoped.missing_symbols) + list(scoped.missing_versions),
+                scoped.breaking_for_app,
+            )
+        )
+        exit_code = _scoped_exit_code(
+            scoped, scoped.breaking_for_app, result, exit_code_scheme, sev_config,
+            policy, policy_file,
+            has_missing_contract=bool(scoped.missing_symbols or scoped.missing_versions),
+        )
+        # exit code (gating) and verdict (reporting) are maxed/ranked
+        # independently: under a severity scheme the two can disagree (a
+        # BREAKING app can carry exit code 0 under e.g. `--severity-preset
+        # info-only`), so picking the reported scoped_verdict by exit code
+        # could let a later, less-severe app overwrite an earlier BREAKING
+        # one merely because their exit codes tied at 0 (Codex review).
+        if exit_code_scheme == "severity":
+            if exit_code > worst_exit:
+                worst_changes = {_finding_id(c): c for c in scoped.breaking_for_app}
+                worst_missing = set(scoped.missing_symbols) | set(scoped.missing_versions)
+            elif exit_code == worst_exit:
+                worst_changes.update({_finding_id(c): c for c in scoped.breaking_for_app})
+                worst_missing |= set(scoped.missing_symbols) | set(scoped.missing_versions)
+        worst_exit = max(worst_exit, exit_code)
+        rank = _verdict_severity_rank(scoped.verdict)
+        if worst_verdict is None or rank >= worst_verdict_rank:
+            worst_verdict_rank = rank
+            worst_verdict = scoped.verdict
+    result.used_by = summaries  # type: ignore[attr-defined]
+    result.scoped_verdict = worst_verdict  # type: ignore[attr-defined]
+    result.scoped_exit_code = worst_exit  # type: ignore[attr-defined]
+    result.scoped_exit_code_scheme = exit_code_scheme  # type: ignore[attr-defined]
+    result.gate_scope = "used_by"  # type: ignore[attr-defined]
+    result.scoped_relevant_finding_ids = frozenset(relevant_finding_ids)  # type: ignore[attr-defined]
+    result.scoped_missing_labels = tuple(sorted(missing_labels))  # type: ignore[attr-defined]
+    _existing_ids = {_finding_id(c) for c in result.changes}
+    result.scoped_only_changes = tuple(  # type: ignore[attr-defined]
+        c for fid, c in relevant_changes_by_id.items() if fid not in _existing_ids
+    )
+    if exit_code_scheme == "severity":
+        categories, counts = _scoped_severity_summary(
+            list(worst_changes.values()), worst_missing,
+            result, sev_config, policy, policy_file,
+        )
+        result.scoped_blocking_categories = categories  # type: ignore[attr-defined]
+        result.scoped_severity_counts = counts  # type: ignore[attr-defined]
+    return worst_exit
+
+
+def _apply_required_symbol_scoping(
+    result: Any, required_symbols: tuple[str, ...],
+    old: Any, new: Any,
+    policy: str, policy_file: PolicyFile | None,
+    exit_code_scheme: str = "legacy", sev_config: Any = None,
+) -> int:
+    """Scope *result* to an explicit ``--required-symbol(s)`` contract (ADR-043)."""
+    from .appcompat import scope_diff_to_required_symbols, uncovered_missing_symbols
+    from .reporter import _finding_id
+
+    scoped = scope_diff_to_required_symbols(
+        result, old, new, required_symbols,
+        policy=policy, policy_file=policy_file,
+    )
+    result.required_symbols = _plugin_contract_summary(scoped)  # type: ignore[attr-defined]
+    result.scoped_verdict = scoped.verdict  # type: ignore[attr-defined]
+    result.gate_scope = "required_symbol"  # type: ignore[attr-defined]
+    result.scoped_relevant_finding_ids = frozenset(  # type: ignore[attr-defined]
+        _finding_id(c) for c in scoped.breaking_for_host
+    )
+    # An entrypoint already covered by a relevant Change must not also
+    # become a synthetic missing-contract finding (Codex review, mirrors
+    # _apply_used_by_scoping's identical dedup).
+    result.scoped_missing_labels = tuple(sorted(  # type: ignore[attr-defined]
+        uncovered_missing_symbols(scoped.missing_entrypoints, scoped.breaking_for_host)
+    ))
+    # Scoped-only changes: relevant to the host contract but never added to
+    # result.changes (mirrors _apply_used_by_scoping's identical handling).
+    _existing_ids = {_finding_id(c) for c in result.changes}
+    result.scoped_only_changes = tuple(  # type: ignore[attr-defined]
+        c for c in scoped.breaking_for_host if _finding_id(c) not in _existing_ids
+    )
+    exit_code = _scoped_exit_code(
+        scoped, scoped.breaking_for_host, result, exit_code_scheme, sev_config,
+        policy, policy_file,
+        has_missing_contract=bool(scoped.missing_entrypoints),
+    )
+    result.scoped_exit_code = exit_code  # type: ignore[attr-defined]
+    result.scoped_exit_code_scheme = exit_code_scheme  # type: ignore[attr-defined]
+    if exit_code_scheme == "severity":
+        categories, counts = _scoped_severity_summary(
+            scoped.breaking_for_host, scoped.missing_entrypoints,
+            result, sev_config, policy, policy_file,
+        )
+        result.scoped_blocking_categories = categories  # type: ignore[attr-defined]
+        result.scoped_severity_counts = counts  # type: ignore[attr-defined]
+    return exit_code
