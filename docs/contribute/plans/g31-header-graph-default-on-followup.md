@@ -1468,16 +1468,50 @@ building a second identity-resolution mechanism from scratch.
   `void (*restrict cb)(int)` and `int *(*restrict cb)(void)` are rejected
   outright by clang in C and C++ alike, which also retired an "accepted
   false negative" note an earlier draft had written for that shape.
-  (2) *Detector registration order is user-visible.* Registering the new
-  module from `checker.py`'s top import block pulled `diff_symbols` (and its
-  `diff_symbols_renames` sibling, which owns `fingerprint_renames`) forward
-  from its own import much further down the file, moving those detectors
-  ahead of `diff_elf_layout`'s and reordering the coverage-gap rows in every
-  report. Five golden-output tests caught it — a marker the everyday fast
-  command excludes, which is the case for running `verify.py --profile pr`
-  before opening a PR rather than the four-command inner loop. Fixed by
-  importing the two shared helpers *inside* the detectors, the remedy the
-  root `AGENTS.md` already names for this class of coupling.
+  A third round found the mirror-image case one level out: `int *__restrict &`
+  (a *reference* to a restrict-qualified pointer) is legal C++ whose
+  qualifier clang still prints, but castxml's walk follows only
+  `CvQualifiedType`/`Typedef`/`ElaboratedType` and stops dead at the outer
+  `ReferenceType`, reporting False. Matching the visible qualifier would
+  therefore have re-created the cross-backend disagreement from the other
+  side, so a top-level `&` after the parameter's own pointer answers False —
+  matching castxml deliberately rather than the spelling. Confirmed against
+  real clang for the lvalue-reference, rvalue-reference, plain-reference and
+  reference-to-array-of-pointers spellings.
+  (2) *Detector registration order is user-visible, and a split must not
+  change it.* `registry.detector()` stamps an incrementing counter and
+  `run_all()` executes in that order, so registration order fixes the order
+  findings appear in every JSON/text report. Registering the new module from
+  `checker.py`'s top import block broke this **twice over**, and the two
+  halves were found by different means. First, it pulled `diff_symbols` (and
+  its `diff_symbols_renames` sibling, which owns `fingerprint_renames`)
+  forward from its own import much further down `checker.py`, moving those
+  detectors ahead of `diff_elf_layout`'s and reordering the coverage-gap rows
+  — caught by five golden-output tests, a marker the everyday fast command
+  excludes, which is the case for running `verify.py --profile pr` before
+  opening a PR. Making the shared-helper imports function-local fixed that
+  half. It did **not** fix the second half, which no test covered: the two
+  *moved* detectors themselves went from indices 16 and 20 to 5 and 6,
+  because they now registered with the new module at the top of `checker.py`
+  rather than from `diff_symbols` in the middle (Codex review; measured by
+  dumping `registry.detector_names` against a worktree at the base commit —
+  note that comparison is only valid with `PYTHONPATH` pointed at the
+  worktree, since the editable install otherwise shadows it and reports a
+  false "identical").
+
+  The shape that preserves order exactly: the **registrations stay in
+  `diff_symbols.py`** at their original source positions, and only the loop
+  bodies moved. Each detector applies its snapshot-level gates and hands
+  `diff_param_qualifiers` the already-selected public-function maps, so the
+  new module takes `dict[str, Function]` and imports nothing from
+  `diff_symbols` at all. That last point is a constraint, not a preference:
+  once `diff_symbols` imports the new module, a back-import would be a real
+  cycle, and the AI-readiness import-cycle gate walks *every* AST import —
+  a function-local one included — so the "function-local import" escape
+  hatch is not available in that direction. `checker.py` is left untouched;
+  `ensure_loaded`'s prefix discovery imports the new `diff_*` module anyway,
+  and it registers nothing. Verified by re-measuring: all 65 detectors, same
+  order as base, with `param_restrict` back at 16 and `param_va_list` at 20.
 
 - ~~Single-AST reuse for the direct-clang backend~~ **Done** (see above) —
   via in-process memoization of `_clang_header_dump`'s result, not by

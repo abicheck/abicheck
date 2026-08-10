@@ -189,6 +189,15 @@ def _clang_param_is_restrict(node: dict[str, Any]) -> bool:
       castxml does see. Every spelling in this docstring was confirmed
       against real clang 18 output.
 
+    - **A reference wrapper answers False**, matching castxml rather than the
+      qualifier that is still visible in the spelling. `int *__restrict &`
+      is a reference to a restrict-qualified pointer; castxml's walk follows
+      only ``CvQualifiedType``/``Typedef``/``ElaboratedType`` and stops dead
+      at the outer ``ReferenceType``, so it reports False. Reporting True
+      here would put the two backends in disagreement on an unchanged header
+      — the same cross-backend false positive this extraction exists to
+      remove, just arriving from the other side (Codex review).
+
     A function-pointer parameter answers False, and that costs nothing even
     though it looks like the same shape as the array case: a pointer to a
     *function* may not be ``restrict``-qualified at all (C11 6.7.3p2 —
@@ -211,4 +220,15 @@ def _clang_param_is_restrict(node: dict[str, Any]) -> bool:
     end = _last_top_level_ptr_end(scope)
     if end < 0:
         return False
-    return bool(re.search(r"\b(?:__)?restrict(?:__)?\b", scope[end:]))
+    own = scope[end:]
+    if "&" in own:
+        # A REFERENCE to a restrict-qualified pointer (`int *__restrict &`).
+        # castxml's walk follows only CvQualifiedType/Typedef/ElaboratedType
+        # and stops at the outer ReferenceType, so it answers False; matching
+        # here on the qualifier it can still see would put the two backends in
+        # disagreement on an unchanged header -- the false positive this whole
+        # extraction exists to remove (Codex review). Everything after the
+        # last depth-0 `*` is at depth 0 by construction, so this `&` is the
+        # declared entity's own, never a nested one.
+        return False
+    return bool(re.search(r"\b(?:__)?restrict(?:__)?\b", own))

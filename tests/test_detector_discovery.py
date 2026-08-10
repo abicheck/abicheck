@@ -116,3 +116,37 @@ def test_ensure_loaded_concurrent_calls_are_safe() -> None:
 
     assert not errors
     assert fresh._discovered is True
+
+
+def test_param_qualifier_detectors_keep_their_registration_position() -> None:
+    """G31 Phase C: moving a detector's BODY must not move its registration.
+
+    ``registry.detector()`` stamps an incrementing counter and ``run_all()``
+    executes in that order, so registration order fixes the order findings
+    appear in every JSON/text report. When ``param_restrict``/``param_va_list``
+    had their loop bodies split out to ``diff_param_qualifiers`` (``diff_symbols``
+    is at the 2000-line hard cap), registering them from the new module moved
+    them from indices 16/20 to 5/6 — a silent report-ordering change that no
+    golden fixture covered, since none carries a restrict or va_list finding
+    (Codex review).
+
+    The registrations therefore stayed in ``diff_symbols`` at their original
+    source positions. This pins the relative order that encodes, rather than
+    the literal indices, which any unrelated new detector would shift.
+    """
+    registry.ensure_loaded()
+    names = registry.detector_names
+    order = {name: i for i, name in enumerate(names)}
+
+    for required in ("functions", "fingerprint_renames", "param_restrict",
+                     "param_va_list", "constants"):
+        assert required in order, f"{required} is not registered"
+
+    # Both run after the core function/rename detectors...
+    assert order["param_restrict"] > order["functions"]
+    assert order["param_restrict"] > order["fingerprint_renames"]
+    # ...in their original relative order...
+    assert order["param_va_list"] > order["param_restrict"]
+    # ...and both still precede the header-tier constants detector that
+    # followed them in diff_symbols' source.
+    assert order["constants"] > order["param_va_list"]

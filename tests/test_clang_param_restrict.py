@@ -77,8 +77,14 @@ class TestClangParamIsRestrict:
             # Qualifier on the TOP-LEVEL pointer, alongside another qualifier.
             ("int *const restrict", True),
             ("int **restrict", True),
-            # Reference to a restrict-qualified pointer.
-            ("int *__restrict &", True),
+            # A REFERENCE to a restrict-qualified pointer. castxml stops at
+            # the outer ReferenceType and reports False, so matching on the
+            # qualifier still visible in clang's spelling would disagree
+            # across backends on an unchanged header (Codex review).
+            ("int *__restrict &", False),
+            ("int *__restrict &&", False),
+            ("int *&", False),
+            ("int *(&)[3]", False),
             # Pointer whose POINTEE is restrict-qualified: the parameter
             # itself is a plain pointer. Scanning the whole spelling (rather
             # than only the part after the last top-level `*`) would wrongly
@@ -294,6 +300,30 @@ class TestClangParamIsRestrictAgainstRealClang:
         assert (params["takes_cb"][0].get("type") or {}).get(
             "qualType"
         ) == "void (*)(int *restrict)"
+
+    def test_reference_wrappers_match_castxml(self, tmp_path: Path) -> None:
+        """castxml's `_resolve_cv_restrict` stops at the outer ReferenceType,
+        so a reference to a restrict-qualified pointer is False there. clang
+        still prints the qualifier, so matching it would disagree across
+        backends on an unchanged header (Codex review)."""
+        root = self._parse(
+            tmp_path,
+            """
+            void lref(int *__restrict &p);
+            void rref(int *__restrict &&p);
+            void plain_ref(int *&p);
+            void ptr(int *__restrict p);
+            """,
+            cpp=True,
+        )
+        params = self._params_by_function(root)
+        expected = {"lref": False, "rref": False, "plain_ref": False, "ptr": True}
+        for fn, want in expected.items():
+            assert fn in params, f"clang emitted no ParmVarDecl for {fn}"
+            assert _clang_param_is_restrict(params[fn][0]) is want, fn
+        # The qualifier really is still in the spelling clang printed — the
+        # False above is a deliberate match to castxml, not a parse miss.
+        assert "__restrict" in (params["lref"][0].get("type") or {}).get("qualType", "")
 
     def test_parenthesized_object_pointers(self, tmp_path: Path) -> None:
         """The other half of the declarator story: a pointer to an ARRAY is

@@ -1693,6 +1693,47 @@ def _diff_symbol_renames(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
     return _emit_batch_rename(rename_pairs)
 
 
+@registry.detector("param_restrict")
+def _diff_param_restrict(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
+    """Detect restrict qualifier changes on parameters (ABICC: Parameter_Became_Restrict).
+
+    Header-tier only, and gated at the snapshot level for the same reason
+    ``param_defaults`` is (G31 Phase C). ``Param.is_restrict`` is a plain
+    bool with no "not collected" state, and it is populated ONLY by the two
+    header-AST backends — DWARF, PDB, and the symbol-table paths never set
+    it at all — so a side that was not (confirmed) parsed from headers reads
+    as "no parameter is restrict-qualified" rather than "unknown", and
+    comparing it against a header-parsed side reports every real ``restrict``
+    as removed/added purely from an evidence-tier difference.
+
+    Additionally declined when either side's restrict facts are marked
+    unreliable (``AbiSnapshot.clang_restrict_facts_reliable``): the
+    direct-clang backend populated this fact for the first time in schema
+    v22, so a persisted pre-v22 clang/hybrid baseline's blanket ``False``
+    is real-but-WRONG data — indistinguishable by value from a genuinely
+    unqualified parameter, exactly like the pre-v21 clang vtable case.
+
+    Two *reliable* header sides may safely be compared across producers:
+    since v22 both backends populate this fact, and unlike ``Param.default``
+    its value representation is directly cross-comparable (a plain bool,
+    not a backend-specific encoding), so no same-producer check is needed —
+    the same reasoning ``fact_provenance.both_known_backed_fact`` encodes
+    for ``deprecated``/``is_scoped``.
+
+    The loop itself lives in ``diff_param_qualifiers`` (this file is at the
+    2000-line hard cap); the registration stays HERE so the detector keeps
+    its original position in the registry, which orders findings in every
+    report. See that module's docstring.
+    """
+    from .diff_param_qualifiers import param_restrict_changes
+
+    if not _both_header_aware(old, new):
+        return []
+    if not (old.clang_restrict_facts_reliable and new.clang_restrict_facts_reliable):
+        return []
+    return param_restrict_changes(_public_functions(old), _public_functions(new))
+
+
 @registry.detector("func_deprecated")
 def _diff_func_deprecated(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
     """Detect a function gaining or losing `[[deprecated]]`.
@@ -1842,6 +1883,18 @@ def _diff_var_deprecated(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
                 )
             )
     return changes
+
+
+@registry.detector("param_va_list")
+def _diff_param_va_list(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
+    """Detect va_list parameter changes (ABICC: Parameter_Became_VaList/Non_VaList).
+
+    Loop body in ``diff_param_qualifiers``; registered here to keep its
+    original registry position (see ``param_restrict`` above).
+    """
+    from .diff_param_qualifiers import param_va_list_changes
+
+    return param_va_list_changes(_public_functions(old), _public_functions(new))
 
 
 @registry.detector("constants")

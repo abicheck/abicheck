@@ -22,69 +22,45 @@ means both "not qualified" and "this producer never collected the fact", so
 each needs an evidence gate rather than a bare value comparison — the same
 distinction ``diff_default_value_reliability.py`` draws for ``Param.default``.
 
-Import direction: this module depends on ``diff_symbols`` (for the shared
-``_public_functions``/``_both_header_aware`` helpers), never the reverse —
-the same direction ``diff_filtering.py``/``diff_types.py`` already take.
-Registration happens through ``checker.py``'s detector-import block, not
-through a back-import from ``diff_symbols``, so no cycle is introduced.
+**This module holds the loop bodies, not the detectors.** The
+``@registry.detector`` registrations stay in ``diff_symbols.py``, at the
+exact source positions they have always occupied, and each hands this module
+the already-selected public-function maps. That split is load-bearing, not
+stylistic:
 
-Those two helpers are imported **inside** the detectors rather than at
-module scope, and that is load-bearing rather than stylistic: this module is
-imported near the top of ``checker.py``, while ``diff_symbols`` is imported
-much further down, so a module-scope import would pull ``diff_symbols`` (and
-its ``diff_symbols_renames`` sibling) forward and register their detectors
-ahead of ``diff_elf_layout``'s. Detector registration order is user-visible
-— it orders the coverage-gap rows in a report — and the golden output tests
-caught exactly that reordering. A function-local import is also the remedy
-the root ``AGENTS.md`` names for this class of coupling.
+- **Registration order is user-visible.** ``registry.detector()`` stamps an
+  incrementing counter and ``run_all()`` executes in that order, so it fixes
+  the order findings appear in every JSON/text report. Registering these two
+  from a new module moved ``param_restrict`` from index 16 to 5 and
+  ``param_va_list`` from 20 to 6 — measured, not theorised (Codex review).
+  Since a module split should change no behaviour at all, the registration
+  had to stay put; only the bodies moved.
+- **The maps come in as arguments** rather than this module importing
+  ``diff_symbols._public_functions`` itself. A back-import would be a real
+  cycle once ``diff_symbols`` imports this module, and the AI-readiness
+  import-cycle gate walks *every* AST import — a function-local one included
+  — so it would flag it. Taking ``dict[str, Function]`` keeps this module a
+  leaf, which is the other remedy the root ``AGENTS.md`` names.
 """
 
 from __future__ import annotations
 
 from .checker_policy import ChangeKind
 from .checker_types import Change
-from .detector_registry import registry
 from .diff_helpers import make_change
-from .model import AbiSnapshot
+from .model import Function
 
 
-@registry.detector("param_restrict")
-def _diff_param_restrict(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
-    """Detect restrict qualifier changes on parameters (ABICC: Parameter_Became_Restrict).
+def param_restrict_changes(
+    old_map: dict[str, Function], new_map: dict[str, Function]
+) -> list[Change]:
+    """``PARAM_RESTRICT_CHANGED`` for every parameter whose qualifier flipped.
 
-    Header-tier only, and gated at the snapshot level for the same reason
-    ``param_defaults`` is (G31 Phase C). ``Param.is_restrict`` is a plain
-    bool with no "not collected" state, and it is populated ONLY by the two
-    header-AST backends — DWARF, PDB, and the symbol-table paths never set
-    it at all — so a side that was not (confirmed) parsed from headers reads
-    as "no parameter is restrict-qualified" rather than "unknown", and
-    comparing it against a header-parsed side reports every real ``restrict``
-    as removed/added purely from an evidence-tier difference.
-
-    Additionally declined when either side's restrict facts are marked
-    unreliable (``AbiSnapshot.clang_restrict_facts_reliable``): the
-    direct-clang backend populated this fact for the first time in schema
-    v22, so a persisted pre-v22 clang/hybrid baseline's blanket ``False``
-    is real-but-WRONG data — indistinguishable by value from a genuinely
-    unqualified parameter, exactly like the pre-v21 clang vtable case.
-
-    Two *reliable* header sides may safely be compared across producers:
-    since v22 both backends populate this fact, and unlike ``Param.default``
-    its value representation is directly cross-comparable (a plain bool,
-    not a backend-specific encoding), so no same-producer check is needed —
-    the same reasoning ``fact_provenance.both_known_backed_fact`` encodes
-    for ``deprecated``/``is_scoped``.
+    The evidence gates live with the registration in ``diff_symbols.py``, not
+    here, since they are snapshot-level questions; by the time this runs both
+    sides are known to be header-derived with reliable restrict facts.
     """
-    from .diff_symbols import _both_header_aware, _public_functions
-
-    if not _both_header_aware(old, new):
-        return []
-    if not (old.clang_restrict_facts_reliable and new.clang_restrict_facts_reliable):
-        return []
     changes: list[Change] = []
-    old_map = _public_functions(old)
-    new_map = _public_functions(new)
-
     for mangled, f_old in old_map.items():
         f_new = new_map.get(mangled)
         if f_new is None:
@@ -106,25 +82,21 @@ def _diff_param_restrict(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
     return changes
 
 
-@registry.detector("param_va_list")
-def _diff_param_va_list(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
-    """Detect va_list parameter changes (ABICC: Parameter_Became_VaList/Non_VaList).
+def param_va_list_changes(
+    old_map: dict[str, Function], new_map: dict[str, Function]
+) -> list[Change]:
+    """``PARAM_BECAME_VA_LIST``/``PARAM_LOST_VA_LIST`` for flipped parameters.
 
-    Unlike ``param_restrict`` above, this one carries no evidence gate — and
+    Unlike ``param_restrict``, its detector carries no evidence gate — and
     needs none today for a reason worth stating rather than leaving implicit:
     **no producer on any layer populates** ``Param.is_va_list`` (see
     ``docs/reference/header-backend-capabilities.md``'s Known gaps), so both
-    sides are always ``False`` and this detector cannot fire on real input.
-    Should a backend start extracting it, it inherits ``param_restrict``'s
-    problem exactly — a cross-producer or legacy-baseline comparison reading
-    a blanket ``False`` as "not a va_list" — and will need the same gate.
+    sides are always ``False`` and it cannot fire on real input. Should a
+    backend start extracting it, it inherits ``param_restrict``'s problem
+    exactly — a cross-producer or legacy-baseline comparison reading a
+    blanket ``False`` as "not a va_list" — and will need the same gate.
     """
-    from .diff_symbols import _public_functions
-
     changes: list[Change] = []
-    old_map = _public_functions(old)
-    new_map = _public_functions(new)
-
     for mangled, f_old in old_map.items():
         f_new = new_map.get(mangled)
         if f_new is None:
