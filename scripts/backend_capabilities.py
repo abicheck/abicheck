@@ -643,9 +643,19 @@ def scan_backend_evidence(module_path: Path) -> dict[str, dict[str, Evidence]]:
 
     A field constructed in more than one place counts as ``EXTRACTED`` if ANY
     construction extracts it (``dumper_castxml`` builds ``TypeField`` from two
-    call sites). An attribute assignment (``field.access = ...``) counts as
-    evidence too, since a backend may finish a declaration after constructing
-    it.
+    call sites).
+
+    **Constructor keywords only.** An earlier version also counted an
+    attribute assignment (``field.access = ...``) as evidence, on the theory
+    that a backend might finish a declaration after constructing it. Static
+    analysis cannot tell *which* class such a target belongs to, so that
+    evidence was applied to every covered class carrying a same-named field —
+    real cross-class contamination (CodeRabbit review). It was also inert:
+    removing it changes no verdict for either backend today. Should a backend
+    start populating a field post-construction, this scanner reports the
+    constructor's answer and the row's claim fails
+    ``test_matrix_claims_match_parser_source`` — a loud, locatable failure
+    rather than a silently wrong published matrix.
     """
     tree = ast.parse(module_path.read_text(encoding="utf-8"))
     out: dict[str, dict[str, Evidence]] = {c: {} for c in COVERED_MODEL_CLASSES}
@@ -654,12 +664,7 @@ def scan_backend_evidence(module_path: Path) -> dict[str, dict[str, Evidence]]:
         if out[cls].get(field) is not Evidence.EXTRACTED:
             out[cls][field] = evidence
 
-    assigned_attrs: set[str] = set()
     for node in ast.walk(tree):
-        if isinstance(node, ast.Assign):
-            for target in node.targets:
-                if isinstance(target, ast.Attribute):
-                    assigned_attrs.add(target.attr)
         if (
             isinstance(node, ast.Call)
             and isinstance(node.func, ast.Name)
@@ -675,11 +680,6 @@ def scan_backend_evidence(module_path: Path) -> dict[str, dict[str, Evidence]]:
                     if _is_placeholder_literal(kw.value)
                     else Evidence.EXTRACTED,
                 )
-
-    for cls in out:
-        for attr in assigned_attrs:
-            if attr in out[cls]:
-                record(cls, attr, Evidence.EXTRACTED)
     return out
 
 

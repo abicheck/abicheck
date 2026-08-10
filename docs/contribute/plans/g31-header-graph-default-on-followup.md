@@ -1405,9 +1405,11 @@ building a second identity-resolution mechanism from scratch.
   typedef whose qualification is only visible in `desugaredQualType`, and
   the `int *restrict *` vs `int **restrict` split where the qualifier
   belongs to the pointee rather than the parameter). Reuses
-  `_field_own_cv_source`/`_last_top_level_ptr_end`, the top-level-qualifier
-  helpers the cv-qualifier work already needed, so the two questions are
-  answered by one mechanism.
+  `_desugared_qualtype`/`_last_top_level_ptr_end`, the typedef-unwrapping and
+  top-level-qualifier helpers the cv-qualifier work already needed, and adds
+  `_declarator_group` for the parenthesized-declarator rule the review rounds
+  below forced. (An early cut reused `_field_own_cv_source` as well; that is
+  the discarded approach finding (1) below describes, not what shipped.)
 
   Two gates came with it, both following precedent already set in this
   phase rather than inventing a third pattern. (1) A **header-tier gate**
@@ -1424,7 +1426,7 @@ building a second identity-resolution mechanism from scratch.
   function's parameters as they are). Snapshot disk cache bumped to v10 on
   the v7/v8 precedent. Both `dumper_clang.py` and `diff_symbols.py` were
   within 30 lines of the 2000-line hard cap, so this landed with two
-  splits: `dumper_clang_qualifiers.py` (the four top-level-qualifier
+  splits: `dumper_clang_qualifiers.py` (the top-level-qualifier
   helpers, re-exported so existing import paths resolve) and
   `diff_param_qualifiers.py` (the `param_restrict` + `param_va_list`
   detectors, registered through `checker.py`'s import block so no cycle is
@@ -1478,6 +1480,27 @@ building a second identity-resolution mechanism from scratch.
   matching castxml deliberately rather than the spelling. Confirmed against
   real clang for the lvalue-reference, rvalue-reference, plain-reference and
   reference-to-array-of-pointers spellings.
+
+  A fourth round found two more, and the method matters more than either
+  fix. Hand-picking spellings had by then failed three times running, so
+  this round built a *systematic* corpus instead: every declarator shape,
+  each compiled twice — once with `restrict` on the parameter's own pointer
+  and once without — with the expected answer encoded in the function's own
+  name (`_r`/`_n`). That corpus isolated exactly one wrong case out of
+  fifteen, and in doing so revealed the actual rule rather than another
+  patch: **the parameter's own declarator is the INNERMOST parenthesized
+  `(*…)` group**. `int (*(*restrict p)[3])[2]` (p IS restrict) and
+  `int (*restrict (*p)[3])[2]` (p is plain; the qualifier is on the array's
+  element type) print as `int (*(*restrict)[3])[2]` and
+  `int (*restrict (*)[3])[2]` — taking the outer group answers both alike
+  and gets the second wrong. Descending to the innermost group is correct
+  for all fifteen. The second finding was narrower: `decltype(*gp + 0)
+  *__restrict` opens a depth-0 `(` whose contents begin with `*` — a
+  dereference, not a declarator — so the group selection now rejects a `(`
+  that directly follows an identifier character, which separates a
+  call-like operand (`decltype(`, `typeof(`) from a declarator exactly. The
+  corpus itself is now a live-clang test, so a future shape has to be added
+  with its expected answer rather than argued about.
   (2) *Detector registration order is user-visible, and a split must not
   change it.* `registry.detector()` stamps an incrementing counter and
   `run_all()` executes in that order, so registration order fixes the order
@@ -1512,6 +1535,19 @@ building a second identity-resolution mechanism from scratch.
   `ensure_loaded`'s prefix discovery imports the new `diff_*` module anyway,
   and it registers nothing. Verified by re-measuring: all 65 detectors, same
   order as base, with `param_restrict` back at 16 and `param_va_list` at 20.
+
+  (3) *A documentation claim that was not verified.* The capability page's
+  graph-edge table asserted that a `hybrid` dump pays a second `clang`
+  invocation for the graph attach, "same as castxml". It does not, normally:
+  `service._run_dump_uncached` runs the clang sub-dump inside
+  `dumper_cache.ast_memoize_scope()`, and the memo slot outlives that scope
+  (it is cleared only on failure), so the `_attach_header_graph` that follows
+  consumes the same parsed AST whenever its own resolved headers/includes/
+  toolchain hash to the same key (Codex review). Corrected to describe the
+  handoff and the one condition it depends on. Worth noting as a category:
+  this was the only finding in four rounds that landed on *prose* rather than
+  code — the generated half of that page is machine-checked against the
+  parsers, and the hand-authored half is not.
 
 - ~~Single-AST reuse for the direct-clang backend~~ **Done** (see above) —
   via in-process memoization of `_clang_header_dump`'s result, not by

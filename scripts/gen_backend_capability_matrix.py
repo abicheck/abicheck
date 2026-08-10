@@ -111,15 +111,17 @@ def _render_owner(owner: str) -> str:
 def _render_summary() -> str:
     header_facts = [r for r in FACT_ROWS if r.populated_by_any_backend]
     divergent = [r for r in header_facts if r.castxml is not r.clang]
+    # "Only X populates it" means X's OWN PARSE does. A companion-tool row is
+    # deliberately excluded from both counts: `RecordType.data_size_bits` is
+    # NONE/COMPANION, and counting it as direct-clang-only would contradict
+    # its own note, which says neither backend's parse computes it
+    # (CodeRabbit review).
+    own_parse = (Capability.FULL, Capability.PARTIAL)
     castxml_only = [
-        r
-        for r in header_facts
-        if r.clang is Capability.NONE and r.castxml is not Capability.NONE
+        r for r in header_facts if r.castxml in own_parse and r.clang not in own_parse
     ]
     clang_only = [
-        r
-        for r in header_facts
-        if r.castxml is Capability.NONE and r.clang is not Capability.NONE
+        r for r in header_facts if r.clang in own_parse and r.castxml not in own_parse
     ]
     return "\n".join(
         [
@@ -127,9 +129,11 @@ def _render_summary() -> str:
             f"{len(COVERED_MODEL_CLASSES)} declaration types the two header-AST "
             f"backends build, {len(header_facts)} are facts a header parse can "
             f"carry at all. Of those, **{len(divergent)} differ between the two "
-            f"backends**: {len(castxml_only)} that only CastXML populates, "
-            f"{len(clang_only)} that only direct-clang does, and the rest a "
-            "difference of precision rather than presence.",
+            f"backends**: {len(castxml_only)} only CastXML's own parse "
+            f"populates, {len(clang_only)} only direct-clang's does, and the "
+            "rest a difference of precision rather than presence. (A 🔧 row "
+            "counts for neither — the plain parse computes it on neither "
+            "backend.)",
             "",
             _LEGEND,
         ]

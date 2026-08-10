@@ -16,17 +16,22 @@
 """Type-spelling qualifier helpers for the ``clang -ast-dump=json`` backend.
 
 Split out of ``dumper_clang.py``, which sits at the 2000-line hard cap the
-AI-readiness gate enforces. These four functions answer one question between
-them — *does this declaration's own (top-level) type carry qualifier X?* —
-against clang's **printed** type spelling, which is the only form the JSON
-AST offers:
+AI-readiness gate enforces. They answer one question between them — *does
+this declaration's own (top-level) type carry qualifier X?* — against
+clang's **printed** type spelling, which is the only form the JSON AST
+offers:
 
 - :func:`_desugared_qualtype` unwraps a typedef, since a qualifier can hide
   behind an alias;
 - :func:`_last_top_level_ptr_end` finds the depth-0 pointer boundary, so a
   qualifier belonging to a pointee is not read as the declaration's own;
-- :func:`_field_own_cv_source` is the substring those two produce together;
-- :func:`_clang_param_is_restrict` is one concrete question asked of it.
+- :func:`_field_own_cv_source` is the substring those two produce together,
+  and is what the const/volatile *field* question uses;
+- :func:`_declarator_group` (with :func:`_follows_identifier`) finds the
+  parenthesized declarator when C's precedence rules put the declared
+  entity's own pointer inside parentheses, where depth 0 describes
+  something else entirely;
+- :func:`_clang_param_is_restrict` is one concrete question asked of them.
 
 Pure and leaf: takes plain AST dicts, imports nothing from ``dumper_clang``,
 and is unit-testable with no clang installed.
@@ -104,6 +109,20 @@ def _field_own_cv_source(desugared: str) -> str:
     return desugared[end:] if end >= 0 else desugared
 
 
+def _follows_identifier(type_str: str, paren_index: int) -> bool:
+    """Whether the ``(`` at *paren_index* directly follows an identifier.
+
+    That is what separates a call-like *expression* operand — ``decltype(``,
+    ``typeof(`` — from a parenthesized *declarator*. A declarator's ``(`` is
+    always preceded by whitespace, another opener, a ``*``, or the start of
+    the string; never by a name character.
+    """
+    k = paren_index - 1
+    if k < 0:
+        return False
+    return type_str[k].isalnum() or type_str[k] == "_"
+
+
 def _declarator_group(type_str: str) -> str | None:
     """Contents of *type_str*'s parenthesized declarator group, or ``None``.
 
@@ -114,13 +133,31 @@ def _declarator_group(type_str: str) -> str | None:
     returns that group's contents (``"*restrict"``, ``"*"``) so a caller can
     ask its question there instead.
 
-    The group is identified as the first depth-0 parenthesized group whose
-    contents begin with ``*``. That distinguishes it from the trailing
-    parameter list of a function pointer (``(int *restrict)``, which begins
-    with a type name) and from an array extent (``[3]``, not parenthesized
-    at all) — confirmed against real clang 18 output for the pointer-to-
-    array, pointer-to-function, pointer-to-pointer-to-array, and
-    array-of-pointers spellings.
+    A candidate group is a depth-0 parenthesized span whose contents begin
+    with ``*``. Two refinements make that identification correct rather than
+    merely usually-right, each found by a counterexample rather than by
+    reasoning (Codex review):
+
+    - **The INNERMOST such group wins.** Declarators nest, and the declared
+      entity's own pointer is the most deeply nested one. Both of these are
+      real clang output, and they differ only in which level carries the
+      qualifier: ``int (*(*restrict p)[3])[2]`` (``p`` IS restrict) prints as
+      ``int (*(*restrict)[3])[2]``, while ``int (*restrict (*p)[3])[2]``
+      (``p`` is a plain pointer; the qualifier belongs to the array's element
+      type) prints as ``int (*restrict (*)[3])[2]``. Taking the outer group
+      answers both the same way and gets the second one wrong.
+    - **An expression operand is not a declarator.** ``decltype(*gp + 0)
+      *__restrict`` opens a depth-0 ``(`` whose contents begin with ``*`` —
+      a dereference, not a pointer declarator — and treating it as the group
+      searches ``*gp + 0`` and misses the real qualifier. A declarator
+      group's ``(`` is never immediately preceded by an identifier
+      character; a call-like operand (``decltype(``, ``typeof(``) always is,
+      which separates the two exactly.
+
+    Both refinements leave the simpler cases untouched: the trailing
+    parameter list of a function pointer (``(int *restrict)``) still fails
+    the leading-``*`` test, and an array extent (``[3]``) is not
+    parenthesized at all.
 
     ``None`` when the spelling has no such group, i.e. an ordinary
     unparenthesized declarator like ``int *restrict``, where depth 0 is
@@ -131,7 +168,7 @@ def _declarator_group(type_str: str) -> str | None:
     while i < len(type_str):
         ch = type_str[i]
         if ch in "<([":
-            if ch == "(" and depth == 0:
+            if ch == "(" and depth == 0 and not _follows_identifier(type_str, i):
                 j = i + 1
                 while j < len(type_str) and type_str[j] == " ":
                     j += 1
@@ -144,7 +181,10 @@ def _declarator_group(type_str: str) -> str | None:
                         elif type_str[k] in ">)]":
                             inner -= 1
                         k += 1
-                    return type_str[i + 1 : k - 1]
+                    group = type_str[i + 1 : k - 1]
+                    # Descend: the declared entity's own pointer is the
+                    # innermost declarator, not this enclosing one.
+                    return _declarator_group(group) or group
             depth += 1
         elif ch in ">)]":
             depth = max(0, depth - 1)

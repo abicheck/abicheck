@@ -128,6 +128,23 @@ class TestClangParamIsRestrict:
             # depth-0 `*` (from `int *`), so searching after it would scan
             # the callback's parameter list and match its `restrict`.
             ("int *(*)(int *restrict)", False),
+            # ── Nested declarators: the INNERMOST group is the parameter's
+            # own. These two differ only in which level carries the
+            # qualifier, so taking the outer group answers both alike and
+            # gets the second wrong (Codex review, round 4).
+            #
+            # `int (*(*restrict p)[3])[2]` — p IS the restrict pointer.
+            ("int (*(*restrict)[3])[2]", True),
+            # `int (*restrict (*p)[3])[2]` — p is a PLAIN pointer; the
+            # qualifier belongs to the array's element type.
+            ("int (*restrict (*)[3])[2]", False),
+            # An expression operand is not a declarator: `decltype(`'s span
+            # opens with a dereference, not a pointer declarator, and
+            # treating it as the group searches `*gp + 0` and misses the
+            # real qualifier (Codex review, round 4).
+            ("decltype(*gp + 0) *__restrict", True),
+            ("decltype(*gp + 0) *", False),
+            ("typeof(*gp) *__restrict", True),
         ],
     )
     def test_spellings(self, qual_type: str, expected: bool) -> None:
@@ -164,11 +181,15 @@ class TestDeclaratorGroup:
             # A template argument list is not a declarator group either
             # (nor is a `(` nested inside one at depth > 0).
             ("std::function<void(int *)>", None),
-            # A declarator group may itself contain a nested group — a
-            # pointer to an array of pointers to arrays. Real clang output:
-            # `int (*(*restrict p)[3])[2]` prints exactly this.
-            ("int (*(*restrict)[3])[2]", "*(*restrict)[3]"),
-            ("void (*(*restrict)[3])(int)", "*(*restrict)[3]"),
+            # A nested declarator resolves to the INNERMOST group, which is
+            # the declared entity's own pointer.
+            ("int (*(*restrict)[3])[2]", "*restrict"),
+            ("void (*(*restrict)[3])(int)", "*restrict"),
+            ("int (*restrict (*)[3])[2]", "*"),
+            # A call-like expression operand is not a declarator group, even
+            # though its span begins with `*`.
+            ("decltype(*gp + 0) *__restrict", None),
+            ("typeof(*gp) *__restrict", None),
         ],
     )
     def test_group(self, spelling: str, expected: str | None) -> None:
@@ -228,8 +249,16 @@ class TestClangParamIsRestrictAgainstRealClang:
             cmd += ["-x", "c"]
         cmd.append(str(src))
         proc = subprocess.run(cmd, capture_output=True, text=True)
-        if proc.returncode != 0 or not proc.stdout:
-            pytest.skip("clang did not produce an AST dump")
+        # Skip ONLY for a missing binary (handled above). Once clang is found,
+        # every fixture in this file is expected to compile, so a failure here
+        # is a regression — a future clang rejecting one of these spellings, or
+        # changing the dump flag — and turning it into a skip would make the
+        # whole class silently green (CodeRabbit review; the repo's own
+        # silent-skip guard exists for exactly this).
+        assert proc.returncode == 0, (
+            f"{binary} failed on the fixture source: {proc.stderr}"
+        )
+        assert proc.stdout, f"{binary} produced no AST dump: {proc.stderr}"
         return json.loads(proc.stdout)
 
     def _params_by_function(self, root: dict) -> dict[str, list[dict]]:
@@ -300,6 +329,47 @@ class TestClangParamIsRestrictAgainstRealClang:
         assert (params["takes_cb"][0].get("type") or {}).get(
             "qualType"
         ) == "void (*)(int *restrict)"
+
+    def test_declarator_corpus(self, tmp_path: Path) -> None:
+        """Every declarator shape, against the compiler, in one sweep.
+
+        Each function's name declares the expected answer — ``_r`` means the
+        PARAMETER ITSELF is restrict-qualified, ``_n`` means it is not — so a
+        case cannot be added without saying what it should do. This corpus is
+        what actually found the nested-declarator bug that four rounds of
+        hand-picked examples had each missed in a different way; the shapes
+        below are exactly the ones where a plausible-sounding rule and the C
+        declarator rules disagree.
+        """
+        root = self._parse(
+            tmp_path,
+            """
+            void a_r(int *restrict p);              void a_n(int *p);
+            void b_r(int **restrict p);             void b_n(int **p);
+            void c_r(int (*restrict p)[3]);         void c_n(int (*p)[3]);
+            void d_r(int *(*restrict p)[3]);        void d_n(int *(*p)[3]);
+            void e_r(int (*(*restrict p)[3])[2]);   void e_n(int (*(*p)[3])[2]);
+            /* p is a plain pointer: the qualifier is on the element type. */
+            void f_n(int (*restrict (*p)[3])[2]);
+            /* p is a plain pointer: the INNER pointer is qualified. */
+            void g_n(int *restrict *p);
+            void h_n(int (*restrict *p)[3]);
+            /* callback: the qualifier belongs to the callback's argument. */
+            void i_n(void (*p)(int *restrict));
+            void j_n(int *(*p)(int *restrict));
+            """,
+            cpp=False,
+        )
+        params = self._params_by_function(root)
+        checked = 0
+        for fn, nodes in params.items():
+            if not nodes or not fn.endswith(("_r", "_n")):
+                continue
+            want = fn.endswith("_r")
+            spelling = (nodes[0].get("type") or {}).get("qualType")
+            assert _clang_param_is_restrict(nodes[0]) is want, f"{fn}: {spelling!r}"
+            checked += 1
+        assert checked == 15, f"corpus shrank to {checked} parameters"
 
     def test_reference_wrappers_match_castxml(self, tmp_path: Path) -> None:
         """castxml's `_resolve_cv_restrict` stops at the outer ReferenceType,

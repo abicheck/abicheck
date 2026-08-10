@@ -790,6 +790,15 @@ class TestClangRestrictFactsReliableRoundTrip:
         d = _minimal_dict(schema_version=22, from_headers=True, ast_producer="clang")
         assert snapshot_from_dict(d).clang_restrict_facts_reliable is True
 
+    def test_current_hybrid_header_snapshot_loads_as_reliable(self) -> None:
+        """The other half of the hybrid case: a v22 hybrid snapshot's
+        clang-only appended functions carry real restrict facts, so it must
+        load as reliable. Without this, a regression that left hybrid
+        permanently unreliable would still pass the legacy test above
+        (CodeRabbit review)."""
+        d = _minimal_dict(schema_version=22, from_headers=True, ast_producer="hybrid")
+        assert snapshot_from_dict(d).clang_restrict_facts_reliable is True
+
     def test_legacy_castxml_header_snapshot_stays_reliable(self) -> None:
         """castxml's own ``_resolve_cv_restrict`` extraction predates this
         field entirely, so its values were never blanket-False."""
