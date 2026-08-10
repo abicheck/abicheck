@@ -313,6 +313,340 @@ def _candidate_identity(candidate: RecordType | EnumType) -> str:
     return getattr(candidate, "qualified_name", None) or candidate.name
 
 
+def _kept_signature_haystack(
+    kept_functions: Sequence[Function],
+    kept_variables: Sequence[Variable],
+    kept_types: Sequence[RecordType],
+) -> str:
+    """The joined signature text of everything scoping is keeping anyway.
+
+    Deliberately single-hop: only the kept, already-retained declarations' own
+    return/parameter/variable types and field/base spellings, never a
+    *dependency* candidate's own fields/bases -- chasing further would re-admit
+    the transitive implementation closure (e.g. ``std::string``'s own
+    ``_Alloc_hider`` field) this scoping exists to drop.
+    """
+    texts: list[str] = []
+    for fn in kept_functions:
+        texts.append(fn.return_type)
+        texts.extend(p.type for p in fn.params)
+    for var in kept_variables:
+        texts.append(var.type)
+    for rec in kept_types:
+        texts.extend(f.type for f in rec.fields)
+        texts.extend(rec.bases)
+        texts.extend(rec.virtual_bases)
+    return "\n".join(t for t in texts if t)
+
+
+def _kept_type_spellings(
+    kept_types: Sequence[RecordType], kept_enums: Sequence[EnumType]
+) -> set[str]:
+    """Every spelling a *kept* type or enum could be named by.
+
+    Elaborated-type-specifier spellings (``struct Foo``, ``union Foo``, ``enum
+    Foo``) must collision-guard against a kept type's/enum's own spelling the
+    same way a dependency candidate's own elaborated spelling does (Codex
+    review, fresh evidence): a kept ``api::Foo`` and an unrelated
+    dependency-header global ``struct Foo`` share the bare tag name ``Foo``,
+    and a declaration inside ``api::`` can spell a reference to the kept type
+    as bare ``struct Foo *`` (the same namespace-dropping convention accounted
+    for everywhere else in this module) -- but only the bare ``Foo`` suffix was
+    ever added here, never its elaborated form, so ``struct Foo`` slipped past
+    this guard and let the unrelated dependency ``struct Foo`` be retained as
+    if the signature's elaborated reference named it.
+
+    Kept enums were missed entirely by an earlier version of the same guard
+    (it checked only *kept_types*); both are included here.
+    """
+    spellings: set[str] = set()
+    for rec in kept_types:
+        suffixes = _namespace_suffix_spellings(_candidate_identity(rec))
+        spellings.update(suffixes)
+        for keyword in _elaborated_tag_keywords(rec):
+            spellings.update(f"{keyword} {s}" for s in suffixes)
+    for enum in kept_enums:
+        suffixes = _namespace_suffix_spellings(_candidate_identity(enum))
+        spellings.update(suffixes)
+        spellings.update(f"enum {s}" for s in suffixes)
+    return spellings
+
+
+def _raw_candidate_spellings(candidate: RecordType | EnumType, identity: str) -> set[str]:
+    """Every spelling one dependency candidate could be named by, unguarded.
+
+    Full identity, namespace-suffix spellings, the stdlib-stripped form, the
+    globally-qualified form, and the elaborated tag forms of all of those. The
+    caller applies the collision guards.
+
+    The global-scope entry exists because direct-clang preserves a signature's
+    explicit global-scope qualifier in its printed ``qualType`` (``void
+    f(::dep::Thing *)`` keeps the leading ``::``, and this applies just as much
+    to an unnamespaced type -- ``void f(::Foo *)`` -- as to a namespaced one; an
+    earlier revision only handled the namespaced case, Codex review, fresh
+    evidence). The boundary-aware matcher's negative lookbehind treats ``:`` as
+    a non-boundary character (so a spelling can't accidentally match a *partial*
+    scope, e.g. ``Thing`` inside ``ns::Thing``), which also means it rejects the
+    bare-qualified spelling when immediately preceded by the extra ``:`` of a
+    leading ``::``. Registering the fully global-qualified spelling explicitly
+    lets it match on its own, without weakening the boundary check. Namespace-
+    suffix spellings are never meaningfully global-qualified this way
+    (``::Thing`` alone isn't how a backend spells a qualifier-dropped
+    reference), so only the full identity gets this treatment.
+
+    An elaborated-type-specifier spelling (``struct Handle``, ``union
+    Handle``, ``enum Handle``) is unambiguous in both C and C++ regardless of
+    any colliding typedef alias of the same bare name (Codex review, fresh
+    evidence): tag names and typedef names occupy separate namespaces, and the
+    elaborated keyword is exactly what disambiguates a signature writing
+    ``struct Handle *`` even when ``typedefs["Handle"] = "int"`` also exists.
+    These are added as distinct spellings (never equal to the bare
+    identity/suffix string a colliding typedef alias name could match), so they
+    naturally fall outside every typedef-alias veto without special-casing.
+    """
+    stripped = _stripped_signature_spelling(identity)
+    spellings = {identity, *_namespace_suffix_spellings(identity)}
+    if stripped:
+        spellings.add(stripped)
+    spellings.add(f"::{identity}")
+    tag_keywords = _elaborated_tag_keywords(candidate)
+    spellings.update(
+        f"{keyword} {s}" for keyword in tag_keywords for s in set(spellings)
+    )
+    return spellings
+
+
+def _kept_touched_alias_names(
+    reachable_by_alias: dict[str, set[str]], kept_spellings: set[str]
+) -> set[str]:
+    """Alias names whose reachable set touches a kept type's/enum's spelling.
+
+    Deliberately **not** folded into the shared *kept_spellings* set (Codex
+    review, fresh evidence): a compound alias like ``using Alias = Pair<api::Own,
+    dep::Thing>;`` reaches *both* a kept type and a real, distinct dependency
+    candidate in the same target; blanket-excluding the alias's own name via
+    *kept_spellings* -- which the final guard checks unconditionally for every
+    spelling -- would also erase the alias's legitimate use as ``dep::Thing``'s
+    own spelling, not just protect against a coincidental collision. Used
+    narrowly instead: only to keep a candidate's *own* bare-suffix spelling from
+    coincidentally matching an unrelated kept-pointing alias's name (an
+    unrelated ``dep::Handle`` deriving the same bare ``Handle`` as a typedef
+    alias pointing at a kept ``api::Own``).
+
+    The derived suffixes matter as much as the literal key (Codex review, fresh
+    evidence): a real backend's namespace-dropping convention makes a
+    kept-pointing alias's own bare-suffix spelling exactly as capable of
+    colliding as its qualified name, and an earlier guard excluded only the
+    literal key (``api::Handle``), never its derived suffix (``Handle``).
+    """
+    names: set[str] = set()
+    for alias, reached in reachable_by_alias.items():
+        if reached & kept_spellings:
+            names.add(alias)
+            names.update(_namespace_suffix_spellings(alias)[1:])
+    return names
+
+
+def _typedef_alias_name_spellings(typedefs: dict[str, str]) -> set[str]:
+    """Every spelling any typedef alias could be known by, resolving or not.
+
+    A typedef alias's own name is a collision claim on its spelling regardless
+    of what its target resolves to (Codex review, fresh evidence):
+    :func:`_kept_touched_alias_names` records only an alias whose target reaches
+    a kept type/enum, and :func:`_alias_spelling_owners` only one reaching a
+    dependency candidate -- an alias to a primitive (``typedefs["Handle"] =
+    "int"``) reaches neither, so it was never recorded anywhere, and an
+    unrelated ``dep::Handle`` deriving the identical bare suffix ``Handle`` was
+    retained as if the signature's ``Handle`` genuinely named it, even though it
+    unambiguously names the primitive alias instead. A typedef alias existing
+    under a given name at all means a signature spelling that name means *that
+    alias* first; only when the alias's own reachability separately resolves to
+    a candidate does that candidate still get credit for the spelling.
+
+    Applied only as a *final* veto on a candidate's weakest-tier (derived-only)
+    claim -- never folded into the per-candidate spellings upstream the way
+    :func:`_kept_touched_alias_names` is: a self-referential alias (``typedefs =
+    {"Foo0": "struct Foo0"}``) legitimately reaches its own matching candidate
+    via the alias-reach lookup, and that lookup keys off the candidate spelling
+    index -- blanket-stripping every typedef-alias-named spelling upstream would
+    remove the very key it needs to rediscover that legitimate self-reference,
+    silently losing the candidate entirely (confirmed empirically: doing so
+    broke the existing self-referential-typedef regression test).
+    """
+    names: set[str] = set()
+    for alias in typedefs:
+        names.add(alias)
+        names.add(f"::{alias}")
+        names.update(_namespace_suffix_spellings(alias)[1:])
+    return names
+
+
+def _alias_reach_identities(
+    reachable_by_alias: dict[str, set[str]], key_owners: dict[str, set[str]]
+) -> dict[str, set[str]]:
+    """Per alias, the dependency-candidate identities its own reachability resolves to.
+
+    Computed for *every* alias in ``typedefs``, not only ones already known to
+    reach something (Codex review, fresh evidence: an earlier revision built
+    this per-identity, from only the aliases that already resolved to one, which
+    made a *different*, colliding alias of the same spelling that reaches
+    nothing retainable at all -- an alias to a primitive, or one whose only
+    reached key is itself already ambiguous among dep_candidates -- invisible to
+    the ambiguity check; a genuinely ambiguous spelling was then retained as if
+    only the resolving alias existed).
+
+    A reached key that is itself already ambiguous among dep_candidates (more
+    than one owner -- e.g. a namespace-stripped target token ``Thing`` shared by
+    both ``dep1::Thing`` and ``dep2::Thing``) is excluded the same way the
+    candidate spelling sets already exclude a colliding key: the alias's target
+    contained one ambiguous token, not two distinct ones the way a genuine
+    compound alias (``Pair<dep::A, dep::B>``) does.
+    """
+    reach: dict[str, set[str]] = {}
+    for alias, reached in reachable_by_alias.items():
+        identities: set[str] = set()
+        for key in reached & key_owners.keys():
+            owners = key_owners[key]
+            if len(owners) == 1:
+                identities |= owners
+        reach[alias] = identities
+    return reach
+
+
+def _alias_spelling_owners(
+    typedefs: dict[str, str], alias_reach: dict[str, set[str]]
+) -> dict[str, set[str]]:
+    """Spelling -> identities every alias contributing that spelling agrees on.
+
+    A spelling maps back to *every* alias in ``typedefs`` that could produce it
+    -- literal name, namespace suffix, or globally-qualified form (direct-clang
+    preserves an explicit global-scope qualifier, ``void f(::Handle);``, the
+    same way it does for a direct type reference) -- regardless of whether that
+    alias resolves to anything, so a non-resolving alias's collision is never
+    invisible here.
+
+    The result is the *intersection* of each contributing alias's own reach
+    (Codex review, fresh evidence: an earlier revision required every
+    contributing alias's reach to be the *identical* set, which incorrectly
+    dropped merely *partial* agreement -- ``api::Handle -> Pair<dep::A,
+    dep::B>`` and ``vendor::Handle -> dep::A`` both, unambiguously, could mean
+    ``dep::A`` regardless of which alias ``Handle`` denotes, even though only
+    one also reaches ``dep::B``). Intersecting subsumes the single-alias case
+    (nothing to intersect against, so the alias's own reach passes through
+    unchanged -- exactly how a genuine compound alias still retains both) and
+    naturally empties out whenever any contributing alias reaches nothing at all
+    (a primitive, or an alias whose only reached key was itself ambiguous) --
+    the same conservative outcome a separate non-resolving-alias veto previously
+    enforced, now free.
+    """
+    sources: dict[str, set[str]] = {}
+    for alias in typedefs:
+        for spelling in {alias, f"::{alias}", *_namespace_suffix_spellings(alias)[1:]}:
+            sources.setdefault(spelling, set()).add(alias)
+    owners: dict[str, set[str]] = {}
+    for spelling, aliases in sources.items():
+        common = set.intersection(*(alias_reach[a] for a in aliases))
+        if common:
+            owners[spelling] = common
+    return owners
+
+
+def _resolve_spelling_index(
+    own_spelling_owners: dict[str, set[str]],
+    alias_spelling_owners: dict[str, set[str]],
+    kept_spellings: set[str],
+    typedef_alias_names: set[str],
+) -> dict[str, set[str]]:
+    """spelling -> the identities that spelling may be trusted to name.
+
+    A spelling that is some candidate's own identity/suffix is trusted only when
+    unambiguous among all owners of that same category, and not colliding with a
+    kept type's/enum's own spelling; a spelling reached via alias reachability
+    keeps every distinct owner the alias legitimately reaches.
+
+    A typedef alias existing under a given spelling **always** takes precedence
+    over any of a candidate's own claims on that spelling -- exact identity match
+    or merely derived -- never merged or compared against them (Codex review,
+    fresh evidence, generalizing an earlier, narrower rule that deferred only a
+    *derived* own-claim, not an *exact* one): in C, tag names (``struct
+    Handle``) and typedef names occupy separate namespaces, so a signature
+    spelling the bare, unqualified ``Handle`` can only mean an existing typedef
+    of that name -- a same-named tag is never reachable that way at all,
+    regardless of whether its own identity happens to be an exact or
+    merely-derived match for the same string. Concretely: ``typedef struct
+    Actual Handle;`` alongside an unrelated ``struct Handle`` must retain
+    ``Actual`` through the alias, and never conflate that with the unrelated
+    tag's own exact-identity claim on the same spelling. When the existing
+    typedef doesn't itself resolve to anything retainable (an alias to a
+    primitive, or one dropped as genuinely ambiguous among colliding aliases),
+    the spelling contributes nothing at all -- not even the runner-up
+    own-identity claim, unconditionally.
+
+    Only when *no* typedef exists under a spelling at all does this fall back to
+    plain own-identity resolution: a claim is trusted only when it is the
+    spelling's sole owner (two identities colliding is still genuine,
+    unresolvable ambiguity).
+    """
+    index: dict[str, set[str]] = {}
+    for spelling in own_spelling_owners.keys() | alias_spelling_owners.keys():
+        if spelling in kept_spellings:
+            continue
+        if spelling in typedef_alias_names:
+            alias_owners = alias_spelling_owners.get(spelling, set())
+            if alias_owners:
+                index[spelling] = set(alias_owners)
+            # else: the typedef exists but resolves to nothing retainable
+            # -- drop, no credit to any own-identity claim either.
+            continue
+        own_owners = own_spelling_owners.get(spelling, set())
+        if len(own_owners) == 1:
+            index[spelling] = set(own_owners)
+    return index
+
+
+def _referenced_from_haystack(
+    haystack: str, spelling_index: dict[str, set[str]]
+) -> set[str]:
+    """Scan *haystack* once and collect every identity its spellings name.
+
+    One compiled multi-spelling pattern
+    (:func:`abicheck.type_reachability._compile_spelling_pattern`) rather than
+    re-scanning once per candidate spelling (Codex review: the naive
+    per-spelling scan is O(candidate count x signature size), which becomes
+    seconds-to-minutes on the large transitive dependency surfaces --
+    SYCL/heavily-templated C++ headers -- this filter exists to make manageable
+    in the first place), turning the scan into one O(signature size) pass
+    regardless of candidate count.
+
+    A typedef alias (or any other bare spelling) nested strictly inside an
+    already-matched elaborated ``struct``/``union``/``enum <name>`` span must not
+    contribute its own resolution (Codex review, fresh evidence): ``typedef
+    struct Other Foo; void f(struct Foo *);`` means only the tag ``Foo``, never
+    the typedef -- in C/C++ an elaborated-type-specifier resolves exclusively
+    through the tag namespace, so the compiler never even considers a same-named
+    typedef there. Both ``"struct Foo"`` and the bare ``"Foo"`` can match the
+    identical text at once via nested matching, and without this filter the bare
+    match's alias resolution incorrectly pulled in the typedef's unrelated
+    target alongside the correctly-resolved tag.
+    """
+    pattern = _compile_spelling_pattern(spelling_index)
+    if pattern is None:
+        return set()
+    matches = _finditer_allow_nested(pattern, haystack)
+    elaborated_ends = {
+        m.end() for m in matches if m.group().partition(" ")[0] in _TAG_KEYWORDS
+    }
+    referenced: set[str] = set()
+    for match in matches:
+        if (
+            match.end() in elaborated_ends
+            and match.group().partition(" ")[0] not in _TAG_KEYWORDS
+        ):
+            continue
+        referenced.update(spelling_index[match.group()])
+    return referenced
+
+
 def _directly_referenced_dependency_names(
     kept_functions: Sequence[Function],
     kept_variables: Sequence[Variable],
@@ -465,342 +799,61 @@ def _directly_referenced_dependency_names(
     ``parse_typedefs()`` root cause, same declined fix, same blast radius
     as above.
     """
-    signature_texts: list[str] = []
-    for fn in kept_functions:
-        signature_texts.append(fn.return_type)
-        signature_texts.extend(p.type for p in fn.params)
-    for var in kept_variables:
-        signature_texts.append(var.type)
-    for rec in kept_types:
-        signature_texts.extend(f.type for f in rec.fields)
-        signature_texts.extend(rec.bases)
-        signature_texts.extend(rec.virtual_bases)
-    haystack = "\n".join(t for t in signature_texts if t)
-
+    haystack = _kept_signature_haystack(kept_functions, kept_variables, kept_types)
     typedefs = typedefs or {}
-
-    # Elaborated-type-specifier spellings (``struct Foo``, ``union Foo``,
-    # ``enum Foo``) must collision-guard against a kept type's/enum's own
-    # spelling the same way a dependency candidate's own elaborated
-    # spelling does (Codex review, fresh evidence): a kept ``api::Foo``
-    # and an unrelated dependency-header global ``struct Foo`` share the
-    # bare tag name ``Foo``, and a declaration inside ``api::`` can spell
-    # a reference to the kept type as bare ``struct Foo *`` (the same
-    # namespace-dropping convention already accounted for everywhere
-    # else in this module) -- but only the bare ``Foo`` suffix was ever
-    # added to *kept_spellings*, never its elaborated form, so ``struct
-    # Foo`` slipped past this guard and let the unrelated dependency
-    # ``struct Foo`` be retained as if the signature's elaborated
-    # reference named it.
-    kept_spellings = set()
-    for rec in kept_types:
-        suffixes = _namespace_suffix_spellings(_candidate_identity(rec))
-        kept_spellings.update(suffixes)
-        for keyword in _elaborated_tag_keywords(rec):
-            kept_spellings.update(f"{keyword} {s}" for s in suffixes)
-    for enum in kept_enums:
-        suffixes = _namespace_suffix_spellings(_candidate_identity(enum))
-        kept_spellings.update(suffixes)
-        kept_spellings.update(f"enum {s}" for s in suffixes)
+    kept_spellings = _kept_type_spellings(kept_types, kept_enums)
 
     identity_of: dict[int, str] = {}
     raw_own_spellings_of: dict[int, set[str]] = {}
-    # matching key (any of a candidate's own spellings -- full identity,
-    # namespace suffix, or stdlib-stripped form) -> every identity it could
-    # belong to -- built once so resolved typedef targets are scanned once
-    # in total (below), not once per dependency candidate (Codex review,
-    # fresh evidence: the naive per-candidate scan over every resolved
-    # target is O(dep_candidates x typedefs), confirmed empirically at
-    # ~5.6s for 3,000 candidates x 3,000 typedefs). Namespace-suffix
-    # spellings are included here, not just the full identity/stdlib-
-    # stripped form (Codex review, fresh evidence): castxml's own
-    # ``_underlying_type_name()`` stores a namespaced typedef target bare
-    # (``Thing`` for an underlying ``dep::Thing``), which only a suffix key
-    # can match -- the same bare-vs-qualified split already applied to a
-    # kept signature's own spelling of a candidate. This first pass excludes
-    # only keys colliding with the base *kept_spellings*; a second pass
-    # below additionally excludes keys colliding with a *kept-touched
-    # typedef alias name* once that's known (this preliminary key_owners
-    # only feeds the reachability computation).
+    # matching key (any of a candidate's own spellings) -> every identity it
+    # could belong to -- built once so resolved typedef targets are scanned once
+    # in total, not once per dependency candidate (Codex review, fresh evidence:
+    # the naive per-candidate scan over every resolved target is
+    # O(dep_candidates x typedefs), confirmed empirically at ~5.6s for 3,000
+    # candidates x 3,000 typedefs). This first pass excludes only keys colliding
+    # with the base *kept_spellings*; the second pass below additionally excludes
+    # keys colliding with a kept-touched typedef alias name once that is known
+    # (this preliminary map only feeds the reachability computation).
     prelim_key_owners: dict[str, set[str]] = {}
     for candidate in dep_candidates:
         identity = _candidate_identity(candidate)
         identity_of[id(candidate)] = identity
-        stripped = _stripped_signature_spelling(identity)
-        spellings = {identity, *_namespace_suffix_spellings(identity)}
-        if stripped:
-            spellings.add(stripped)
-        # direct-clang preserves a signature's explicit global-scope
-        # qualifier in its printed ``qualType`` (``void f(::dep::Thing *)``
-        # keeps the leading ``::``, and this applies just as much to an
-        # unnamespaced type -- ``void f(::Foo *)`` -- as to a namespaced
-        # one; an earlier revision of this fix only handled the namespaced
-        # case, Codex review, fresh evidence) -- but the boundary-aware
-        # matcher's negative lookbehind treats ``:`` as a non-boundary
-        # character (so a spelling can't accidentally match a *partial*
-        # scope, e.g. matching ``Thing`` inside ``ns::Thing``), which also
-        # means it rejects the bare-qualified spelling (``dep::Thing`` or
-        # bare ``Foo``) when it's immediately preceded by the extra ``:``
-        # of a leading ``::``. Registering the fully global-qualified
-        # spelling explicitly lets it match on its own, without weakening
-        # the boundary check itself. Namespace-suffix spellings are never
-        # meaningfully global-qualified this way (``::Thing`` alone isn't
-        # how a backend spells a qualifier-dropped reference), so only the
-        # full identity gets this treatment.
-        spellings.add(f"::{identity}")
-        # An elaborated-type-specifier spelling (``struct Handle``,
-        # ``union Handle``, ``enum Handle``) is unambiguous in both C and
-        # C++ regardless of any colliding typedef alias of the same bare
-        # name (Codex review, fresh evidence): tag names and typedef
-        # names occupy separate namespaces, and the elaborated keyword is
-        # exactly what disambiguates a signature that writes ``struct
-        # Handle *`` even when ``typedefs["Handle"] = "int"`` also
-        # exists. These are added as distinct spellings (never equal to
-        # the bare identity/suffix string a colliding typedef alias name
-        # could ever match), so they naturally fall outside every
-        # typedef-alias veto below without needing any special-casing
-        # there.
-        tag_keywords = _elaborated_tag_keywords(candidate)
-        spellings.update(
-            f"{keyword} {s}" for keyword in tag_keywords for s in set(spellings)
-        )
+        spellings = _raw_candidate_spellings(candidate, identity)
         raw_own_spellings_of[id(candidate)] = spellings
         for key in spellings:
-            if key in kept_spellings:
-                continue
-            prelim_key_owners.setdefault(key, set()).add(identity)
+            if key not in kept_spellings:
+                prelim_key_owners.setdefault(key, set()).add(identity)
 
     # Which of each typedef alias's transitively-reachable keys are
     # dependency-candidate keys vs. kept-type/enum spellings -- computed by
-    # reachability (see _typedef_alias_reachability), never by
-    # materializing expanded text.
+    # reachability (see _typedef_alias_reachability), never by materializing
+    # expanded text.
     reachable_by_alias = _typedef_alias_reachability(
         typedefs, set(prelim_key_owners) | kept_spellings
     )
-    # An alias whose reachable set touches any kept spelling is recorded
-    # here (not folded into the shared *kept_spellings* set -- Codex
-    # review, fresh evidence: a compound alias like ``using Alias =
-    # Pair<api::Own, dep::Thing>;`` reaches *both* a kept type and a real,
-    # distinct dependency candidate in the same target; blanket-excluding
-    # the alias's own name via *kept_spellings* -- which the final guard
-    # below checks unconditionally for every spelling -- would also erase
-    # the alias's legitimate use as ``dep::Thing``'s own spelling, not just
-    # protect against a coincidental collision). *kept_touched_aliases* is
-    # instead used narrowly: only to keep a candidate's *own* bare-suffix
-    # spelling from coincidentally matching an unrelated kept-pointing
-    # alias's name (the actual bug this guard exists for -- an unrelated
-    # ``dep::Handle`` deriving the same bare ``Handle`` as a typedef alias
-    # that points at a kept ``api::Own``) -- an alias's legitimate
-    # reachability-derived contribution to a genuinely-referenced
-    # candidate's spellings, below, is never subject to this exclusion.
-    kept_touched_aliases: set[str] = set()
-    for alias, reached in reachable_by_alias.items():
-        if reached & kept_spellings:
-            kept_touched_aliases.add(alias)
-            # A real backend's namespace-dropping convention means a
-            # kept-pointing alias's own bare-suffix spelling is exactly as
-            # capable of coincidentally colliding with an unrelated
-            # candidate's own bare-suffix spelling as its literal
-            # qualified name is (Codex review, fresh evidence): the
-            # earlier guard only ever excluded the literal alias key
-            # (``api::Handle``), never its derived suffix (``Handle``),
-            # so a signature spelling the bare-dropped form let an
-            # unrelated ``dep::Handle`` slip past this guard entirely.
-            kept_touched_aliases.update(_namespace_suffix_spellings(alias)[1:])
-
-    # Every typedef alias's own name is a collision claim on its spelling
-    # regardless of what its target resolves to (Codex review, fresh
-    # evidence): ``kept_touched_aliases`` above only recorded an alias
-    # whose target reaches a kept type/enum or a dependency candidate --
-    # an alias to a primitive (``typedefs["Handle"] = "int"`` or ``"void
-    # *"``) reaches neither, so it was never recorded anywhere, and an
-    # unrelated ``dep::Handle`` deriving the identical bare suffix
-    # ``Handle`` was retained as if the signature's ``Handle`` genuinely
-    # named it -- even though it unambiguously names the primitive alias
-    # instead. A typedef alias existing under a given name at all means a
-    # signature spelling that name means *that alias* first; only when
-    # the alias's own reachability separately, legitimately resolves to a
-    # candidate (via *alias_spelling_owners*, below) does that candidate
-    # still get credit for the spelling.
-    #
-    # This must be applied only as a *final* veto on a candidate's own
-    # weakest-tier (derived-only, no alias resolution) spelling claim
-    # below -- not folded into *own_spellings_of*/*key_owners* above the
-    # way *kept_touched_aliases* is: a self-referential alias (``typedefs
-    # = {"Foo0": "struct Foo0"}``) legitimately reaches its own matching
-    # candidate via *alias_reach*/*alias_spelling_owners* below, but that
-    # reachability lookup keys off ``key_owners`` -- blanket-stripping
-    # every typedef-alias-named spelling from ``own_spellings_of``
-    # upstream would remove the very key that lookup needs to rediscover
-    # that legitimate self-reference, silently losing the candidate
-    # entirely (confirmed empirically: doing so broke the existing
-    # self-referential-typedef regression test).
-    all_typedef_alias_names: set[str] = set()
-    for alias in typedefs:
-        all_typedef_alias_names.add(alias)
-        all_typedef_alias_names.add(f"::{alias}")
-        all_typedef_alias_names.update(_namespace_suffix_spellings(alias)[1:])
+    kept_touched_aliases = _kept_touched_alias_names(reachable_by_alias, kept_spellings)
+    typedef_alias_names = _typedef_alias_name_spellings(typedefs)
 
     key_owners: dict[str, set[str]] = {}
-    own_spellings_of: dict[int, set[str]] = {}
-    for candidate in dep_candidates:
-        identity = identity_of[id(candidate)]
-        kept_spellings_and_aliases = kept_spellings | kept_touched_aliases
-        spellings = {
-            s
-            for s in raw_own_spellings_of[id(candidate)]
-            if s not in kept_spellings_and_aliases
-        }
-        own_spellings_of[id(candidate)] = spellings
-        for key in spellings:
-            key_owners.setdefault(key, set()).add(identity)
-
-    # Every dependency-candidate identity a typedef alias's own
-    # reachability resolves to, computed directly per alias -- for *every*
-    # alias in ``typedefs``, not only ones already known to reach
-    # something (Codex review, fresh evidence: an earlier revision built
-    # this per-identity, from only the aliases that already resolved to
-    # one, which made a *different*, colliding alias of the same spelling
-    # that reaches nothing retainable at all -- an alias to a primitive,
-    # or one whose only reached key is itself already ambiguous among
-    # dep_candidates -- invisible to the ambiguity check below; a
-    # genuinely ambiguous spelling was then retained as if only the
-    # resolving alias existed). A reached key that is itself already
-    # ambiguous among dep_candidates (``key_owners[key]`` has more than
-    # one owner -- e.g. a namespace-stripped target token ``Thing``
-    # shared by both ``dep1::Thing`` and ``dep2::Thing``) is excluded the
-    # same way ``own_spellings_of``'s own construction already excludes a
-    # colliding key -- the alias's target contained one ambiguous token,
-    # not two distinct ones the way a genuine compound alias
-    # (``Pair<dep::A, dep::B>``) does.
-    alias_reach: dict[str, set[str]] = {}
-    for alias, reached in reachable_by_alias.items():
-        identities: set[str] = set()
-        for key in reached & key_owners.keys():
-            owners = key_owners[key]
-            if len(owners) == 1:
-                identities |= owners
-        alias_reach[alias] = identities
-
-    # Every spelling a typedef alias could be known by -- literal name,
-    # namespace suffix, or globally-qualified form (direct-clang preserves
-    # an explicit global-scope qualifier, ``void f(::Handle);``, the same
-    # way it does for a direct type reference) -- mapped back to *every*
-    # alias in ``typedefs`` that could produce it, regardless of whether
-    # that alias resolves to anything (built from ``typedefs`` directly,
-    # same universe as *alias_reach* above, so a non-resolving alias's
-    # collision is never invisible here).
-    alias_spelling_sources: dict[str, set[str]] = {}
-    for alias in typedefs:
-        spellings = {alias, f"::{alias}", *_namespace_suffix_spellings(alias)[1:]}
-        for spelling in spellings:
-            alias_spelling_sources.setdefault(spelling, set()).add(alias)
-
-    # spelling -> identities every contributing alias agrees the spelling
-    # could mean -- the *intersection* of each contributing alias's own
-    # reach (Codex review, fresh evidence: an earlier revision required
-    # every contributing alias's reach to be the *identical* set, which
-    # incorrectly dropped a merely *partial* agreement -- ``api::Handle ->
-    # Pair<dep::A, dep::B>`` and ``vendor::Handle -> dep::A`` both,
-    # unambiguously, could mean ``dep::A`` regardless of which alias
-    # ``Handle`` denotes, even though only one of them also reaches
-    # ``dep::B``). Intersecting also subsumes the single-alias case
-    # (nothing to intersect against, so the alias's own reach passes
-    # through unchanged -- this is exactly how a genuine compound alias
-    # like ``Pair<dep::A, dep::B>`` still retains both) and naturally
-    # empties out whenever any contributing alias reaches nothing at all
-    # (a primitive, or an alias whose only reached key was itself
-    # ambiguous) -- the same conservative outcome a separate
-    # non-resolving-alias veto previously existed to enforce, now free.
-    alias_spelling_owners: dict[str, set[str]] = {}
-    for spelling, aliases in alias_spelling_sources.items():
-        common = set.intersection(*(alias_reach[a] for a in aliases))
-        if common:
-            alias_spelling_owners[spelling] = common
-
     own_spelling_owners: dict[str, set[str]] = {}
+    kept_spellings_and_aliases = kept_spellings | kept_touched_aliases
     for candidate in dep_candidates:
         identity = identity_of[id(candidate)]
-        own = own_spellings_of[id(candidate)]
-        for spelling in own:
+        for spelling in raw_own_spellings_of[id(candidate)]:
+            if spelling in kept_spellings_and_aliases:
+                continue
+            key_owners.setdefault(spelling, set()).add(identity)
             own_spelling_owners.setdefault(spelling, set()).add(identity)
 
-    # spelling -> {identity, ...}: a spelling that is some candidate's own
-    # identity/suffix is trusted only when unambiguous among all owners of
-    # that same category, and not colliding with a kept type's/enum's own
-    # spelling; a spelling reached via alias reachability keeps every
-    # distinct owner the alias legitimately reaches.
-    #
-    # A typedef alias existing under a given spelling **always** takes
-    # precedence over any of a candidate's own claims on that spelling --
-    # exact identity match or merely derived (namespace-suffix/stdlib-
-    # stripped) -- never merged or compared against them (Codex review,
-    # fresh evidence, generalizing an earlier, narrower version of this
-    # rule that only deferred a *derived* own-claim, not an *exact* one):
-    # in C, tag names (``struct Handle``) and typedef names occupy
-    # separate namespaces, so a signature spelling the bare, unqualified
-    # ``Handle`` can only mean an existing typedef of that name -- a
-    # same-named tag is never reachable that way at all, regardless of
-    # whether its own identity happens to be an exact or merely-derived
-    # match for the same string. Concretely: ``typedef struct Actual
-    # Handle;`` alongside an unrelated ``struct Handle`` must retain
-    # ``Actual`` through the alias, and never conflate that with the
-    # unrelated tag's own exact-identity claim on the same spelling.
-    # When the existing typedef doesn't itself resolve to anything
-    # retainable (an alias to a primitive, or one dropped as genuinely
-    # ambiguous among colliding aliases), the spelling contributes
-    # nothing at all -- not even the runner-up own-identity claim,
-    # unconditionally.
-    #
-    # Only when *no* typedef exists under a spelling at all does this
-    # fall back to plain own-identity resolution: an exact-identity claim
-    # is trusted only when it is the spelling's sole owner (two exact
-    # identities colliding is still genuine, unresolvable ambiguity), and
-    # a purely-derived claim is trusted only when it, too, is the sole
-    # owner among dep_candidates.
-    spelling_index: dict[str, set[str]] = {}
-    for spelling in own_spelling_owners.keys() | alias_spelling_owners.keys():
-        if spelling in kept_spellings:
-            continue
-        if spelling in all_typedef_alias_names:
-            alias_owners = alias_spelling_owners.get(spelling, set())
-            if alias_owners:
-                spelling_index[spelling] = set(alias_owners)
-            # else: the typedef exists but resolves to nothing retainable
-            # -- drop, no credit to any own-identity claim either.
-            continue
-        own_owners = own_spelling_owners.get(spelling, set())
-        if len(own_owners) == 1:
-            spelling_index[spelling] = set(own_owners)
-
-    pattern = _compile_spelling_pattern(spelling_index)
-    if pattern is None:
-        return set()
-    matches = _finditer_allow_nested(pattern, haystack)
-    # A typedef alias (or any other bare spelling) nested strictly inside
-    # an already-matched elaborated ``struct``/``union``/``enum <name>``
-    # span must not contribute its own resolution (Codex review, fresh
-    # evidence): ``typedef struct Other Foo; void f(struct Foo *);`` means
-    # only the tag ``Foo``, never the typedef -- in C/C++, an elaborated-
-    # type-specifier resolves exclusively through the tag namespace, so
-    # the compiler never even considers a same-named typedef there. Both
-    # ``"struct Foo"`` (the elaborated spelling) and the bare ``"Foo"``
-    # (the typedef alias's own spelling) can match the identical text at
-    # once via nested matching, and without this filter the bare match's
-    # alias resolution incorrectly pulled in the typedef's unrelated
-    # target alongside the correctly-resolved tag.
-    elaborated_ends = {
-        m.end() for m in matches if m.group().partition(" ")[0] in _TAG_KEYWORDS
-    }
-    referenced: set[str] = set()
-    for match in matches:
-        if (
-            match.end() in elaborated_ends
-            and match.group().partition(" ")[0] not in _TAG_KEYWORDS
-        ):
-            continue
-        referenced.update(spelling_index[match.group()])
-    return referenced
+    spelling_index = _resolve_spelling_index(
+        own_spelling_owners,
+        _alias_spelling_owners(
+            typedefs, _alias_reach_identities(reachable_by_alias, key_owners)
+        ),
+        kept_spellings,
+        typedef_alias_names,
+    )
+    return _referenced_from_haystack(haystack, spelling_index)
 
 
 def _name_matches(name: str, kept_identifiers: set[str]) -> bool:
