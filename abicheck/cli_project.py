@@ -431,7 +431,33 @@ def project_validate_use_cases_cmd(
                 ) from exc
             total_changes = len(diff.changes)
             symbols = {c.symbol for c in diff.changes if c.symbol}
-            mapping = explain_use_case_impact(definitions, library_graph, symbols)
+            # Codex review, fresh evidence: a symbol *added* on the NEW side
+            # (e.g. a use case's own entrypoint just introduced) never
+            # existed in OLD's graph at all, so resolving only against
+            # library_graph (OLD) could never attribute it -- every added
+            # change would silently read as "unattributed" regardless of
+            # whether the NEW side's own graph proves it reachable. Explains
+            # against each side's own graph independently (an added
+            # declaration's edges only ever exist on the NEW side; a removed
+            # one's only on OLD) and unions the two per symbol, mirroring
+            # post_processing_reachability.MarkReachability's own
+            # old_paths+new_paths merge for the identical asymmetry.
+            new_library_graph = getattr(
+                getattr(new_snapshot, "build_source", None), "source_graph", None
+            )
+            mapping_old = explain_use_case_impact(definitions, library_graph, symbols)
+            mapping_new = (
+                explain_use_case_impact(definitions, new_library_graph, symbols)
+                if new_library_graph is not None
+                else {}
+            )
+            mapping: dict[str, tuple[str, ...]] = {}
+            for symbol in symbols:
+                names = set(mapping_old.get(symbol, ())) | set(
+                    mapping_new.get(symbol, ())
+                )
+                if names:
+                    mapping[symbol] = tuple(sorted(names))
             diff_by_use_case = {}
             for change in diff.changes:
                 for use_case in mapping.get(change.symbol, ()):

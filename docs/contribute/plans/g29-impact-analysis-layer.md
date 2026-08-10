@@ -686,7 +686,14 @@ decisions.
   `--against`) is its CLI front door: diffs OLD against NEW via the Tier-2
   `service.compare_snapshots` (same routing every other front end uses,
   `cli-contract` AI-readiness check), then reports which use case each
-  resulting change reaches, per use case, text or JSON. Deliberately a
+  resulting change reaches, per use case, text or JSON. Explains against
+  **both** sides' own graphs and unions the per-symbol result (Codex
+  review, fresh evidence: a symbol added on NEW never existed in OLD's own
+  graph at all — e.g. a use case's own entrypoint just introduced — so
+  resolving only against OLD's graph silently read every added change as
+  unattributed regardless of what NEW's graph could prove; mirrors
+  `post_processing_reachability.MarkReachability`'s own `old_paths +
+  new_paths` merge for the identical old/new asymmetry). Deliberately a
   **read-only report view**, not a `Change` mutation or a `compare`-native
   surface — no new node/edge, no field set on any `Change` object, no
   schema bump, no effect on any exit code — the same scope boundary D9's
@@ -740,6 +747,54 @@ the existing `type_graph.py` walk.
    `docs/reference/source-graph-schema.md` for the field-level detail,
    including the two load-bearing empirical AST findings (the explicit-
    instantiation detachment quirk, and typedef-alias argument resolution).
+   **`TEMPLATE_USES_DECL` — re-investigated (2026-08, G29 Phase 5
+   follow-up), the "own AST verification" this needed now done, and a
+   second, deeper blocker found in the process; still deliberately not
+   implemented.** Confirmed against real Clang 18: the canonical
+   `ClassTemplateSpecializationDecl`'s own `TemplateArgument` child for a
+   declaration-valued NTTP (`template <auto Fn> struct Holder;` /
+   `Holder<&detail::f>`) is exactly `{"kind": "TemplateArgument", "decl":
+   {"id": "...", "kind": "FunctionDecl", "name": "f", "type": {"qualType":
+   "void ()"}}}` — no `type`/`value` key at the `TemplateArgument`'s own
+   top level, so `_template_arg_use` (which requires one or the other)
+   currently returns `None` for it: the argument is silently dropped, not
+   mis-typed. `_first_decl_id` (used for the type-argument case) already
+   finds this shape correctly, since it checks `node.get("decl")` first,
+   pre-order — resolving *that* half is not the blocker. The real blocker
+   is downstream: `_resolve_arg_targets`/`_resolve_specialization_qname`
+   answer "what is this id's *qualified name*" by reading `id_to_qname`,
+   populated by `_index_type_decls` for `_RECORD_DECL_KINDS` only — a
+   `FunctionDecl`/`VarDecl` id is never indexed there at all, so even a
+   correctly-extracted `target_qname` would resolve to `None` downstream
+   today. Closing this needs a **second**, function/variable-scoped index
+   built the same way (own scope-qualified name, from the same whole-TU
+   walk) — not a trivial widen of `_RECORD_DECL_KINDS`, since
+   `_index_type_decls`'s own nested-specialization scoping logic (the
+   "Wrapper<int>::Nested vs Wrapper<double>::Nested" disambiguation
+   immediately below in the same function) is written specifically for
+   record-shaped children and would need its own audit for a
+   function/variable child before trusting it. A second, independent risk
+   found while investigating the fix rather than the gap itself: unlike a
+   type argument (whose `spelling` is clang's own pre-qualified `qualType`
+   printer output, e.g. `"internal::Detail"`), a decl reference's `name` is
+   **bare** (`"f"`, never `"detail::f"`) — `_template_arg_use` itself has
+   no access to the whole-TU scope index needed to qualify it at the point
+   it runs, so a naive `f"&{name}"` spelling would let two distinct
+   decl-valued instantiations that merely *share* an unqualified callee
+   name (`Holder<&ns1::f>` vs. `Holder<&ns2::f>`, or any two same-named
+   functions in different namespaces) collide onto one `template_instantiation`
+   node — silently merging two distinct instantiations' edges, exactly the
+   failure class `_flatten_template_args`'s own opaque-argument guard
+   exists to prevent for a different shape. Fixing the spelling right needs
+   the same new index the target-resolution half needs, threaded back into
+   the label-construction step, not a separate patch. Left unimplemented
+   rather than shipped with a known collision risk on this project's own
+   standard (contrast `type_graph.py`'s equally-investigated
+   `template_param`/`default_template_arg` roles, which had no such risk
+   once implemented) — this is real, scoped follow-up work (a new
+   function/variable qname index, threaded through both target resolution
+   and label construction, verified against an overload/namespace-collision
+   test case before landing), not a drive-by extension of this item.
 2. **Macro/config dependency — done.** `abicheck/buildsource/macro_graph.py`
    is a two-pass extractor (a Clang AST pass indexing every declaration's
    own `(file, begin_line, end_line)` span, plus a pure raw-text scan for
@@ -1675,6 +1730,45 @@ the existing `type_graph.py` walk.
      Registering a new node kind is exactly the step item 3 treated as
      notable when it introduced `vtable`, so this gets its own scoped
      decision rather than a drive-by addition here.
+   - **Wrapper-to-entity bridge — a real, pre-existing gap, found by Codex
+     review on PR #712 during this item, recorded as follow-up work rather
+     than attempted as a side effect of a role-coverage change.** When the
+     build-integrated graph has L4 source evidence but no pre-attached L2
+     header graph, `source_extractors/clang.py`'s `_emit_template`
+     represents a class/function template *wrapper* itself
+     (`ClassTemplateDecl`/`FunctionTemplateDecl`) as an L4 `template`-kind
+     `SourceEntity`, joined onto the L5 graph as `decl://<qualified-name>`
+     — but `type_graph.py`'s own field/base/role edges for the identical
+     templated entity (including this item's three new roles) all land on
+     `type://<qualified-name>` (for a class template) or a
+     signature-hashed child declaration (for a function template), via the
+     *ordinary* record/function walk `_walk_types` already does regardless
+     of the entity being templated. The two never join: a standalone
+     build-source-collection or directory/package `compare` that only has
+     the L4-attached wrapper node public, with no L2 header graph also
+     attached, cannot reach the L5 field/role edges from it —
+     `public_to_internal_dependency` (`crosscheck.py`) misses exactly the
+     template-parameterized private-type dependency this item's new roles
+     exist to detect, for that one collection shape. **Confirmed
+     pre-existing, not introduced by this item**: checked against real
+     Clang 18 for the item's own headline case (`template <detail::Handle
+     H> struct Slot { detail::Impl member; };`) — both the new
+     `template_param` role and the pre-existing `field` role emit their
+     edges from the identical `type://api::Slot` node (`_walk_types`
+     reaches a class template's inner `CXXRecordDecl` through the ordinary
+     record branch regardless of whether it's templated), so a public
+     class template's plain, non-template-parameterized private field is
+     equally unreachable from the L4 wrapper today, with or without this
+     item's new roles. A fix is worth having — `_templated_entity_src`
+     (this item's own machinery) already proves the *identity derivation*
+     for "which node does a templated entity's own edges land on" is
+     already correct and shared; what's missing is a bridge edge from the
+     L4 `template`-kind entity's `decl://` node to that same
+     `type://`/`decl://` identity — but it changes how *every* L4
+     `template`-kind `SourceEntity` joins the L5 graph, not just the three
+     roles this item added, so it needs verification against the
+     pre-existing class-template field/base edges and the FP-rate gate
+     before landing, not a drive-by addition to a role-coverage change.
 6. **Object/link provenance — done.** `abicheck/buildsource/archive_graph.py`
    is the real `ar`-index introspection pass: a pure parser over the
    archive's own linker-written symbol index (GNU `/`/`/SYM64/` and

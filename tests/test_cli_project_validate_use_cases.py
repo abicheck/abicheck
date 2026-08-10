@@ -113,6 +113,43 @@ def _snapshot_with_walkable_graph(
     return out
 
 
+def _snapshot_with_or_without_train(
+    tmp_path: Path, name: str, *, present: bool
+) -> Path:
+    """A snapshot that either fully carries `train` (function + graph node)
+    or has neither — unlike `_snapshot_with_walkable_graph`, the graph node
+    itself is absent too when `present=False`, so this can build a genuinely
+    OLD-side-blind pair for testing NEW-side-only attribution (Codex
+    review)."""
+    graph = SourceGraphSummary()
+    functions: list[Function] = []
+    if present:
+        graph.add_node(
+            GraphNode(
+                id="decl://train",
+                kind="source_decl",
+                label="train",
+                attrs={"visibility": "public_header"},
+            )
+        )
+        graph.add_node(
+            GraphNode(id="binary_symbol://train", kind="binary_symbol", label="train")
+        )
+        graph.add_edge(
+            GraphEdge(
+                src="decl://train",
+                dst="binary_symbol://train",
+                kind="SOURCE_DECL_MAPS_TO_SYMBOL",
+            )
+        )
+        functions = [Function(name="train", mangled="train", return_type="void")]
+    snap = AbiSnapshot(library="libfoo.so", version=name, functions=functions)
+    snap.build_source = BuildSourcePack(root="", source_graph=graph)
+    out = tmp_path / f"{name}.json"
+    save_snapshot(snap, out)
+    return out
+
+
 class TestStructuralValidationOnly:
     """No ``--against``: only the manifest's own structure is checked."""
 
@@ -410,6 +447,32 @@ class TestDiffImpactAgainstNew:
         )
         assert res.exit_code == 0, res.output
         assert "0 change(s), 0 attributed" in res.output
+
+    def test_added_function_attributed_via_the_new_side_graph(
+        self, tmp_path: Path
+    ) -> None:
+        # Codex review, fresh evidence: a symbol added on the NEW side never
+        # existed in OLD's own graph, so attribution must also try NEW's
+        # graph, not only OLD's -- an added declared entrypoint must not
+        # silently read as unattributed just because it's new.
+        manifest = _write_manifest(
+            tmp_path, "- use_case: training workflow\n  entrypoints: [train]\n"
+        )
+        old_snapshot = _snapshot_with_or_without_train(tmp_path, "old", present=False)
+        new_snapshot = _snapshot_with_or_without_train(tmp_path, "new", present=True)
+        res = _run(
+            [
+                str(manifest),
+                "--against",
+                str(old_snapshot),
+                "--against-new",
+                str(new_snapshot),
+            ]
+        )
+        assert res.exit_code == 0, res.output
+        assert "1 change(s), 1 attributed" in res.output
+        assert "training workflow:" in res.output
+        assert "func_added: train" in res.output
 
     def test_malformed_against_new_snapshot_is_a_usage_error(
         self, tmp_path: Path
