@@ -52,13 +52,13 @@
   decl kind, so `augment_graph_with_templates` mints the correct `enum_type`/
   `typedef`/`record_type` graph node for it instead of defaulting every
   resolved argument to `record_type` regardless of what it actually is (the
-  `_type_node_kind` helper existed but was never called). `ClangTemplateGraph
-  Extractor.extract_from_build`'s cross-TU dedup now merges a repeated
-  `(kind, template_qname, label)` instantiation instead of keeping whichever
-  TU happened to run first — mirrors `type_graph.py`'s own `_merge_type_edges`
-  for the identical richness gap (one TU may resolve an argument's
-  `target_qname` or reach an instantiated member another TU's translation
-  unit never used). And a dead `out` parameter threaded through
+  `_type_node_kind` helper existed but was never called).
+  `ClangTemplateGraphExtractor.extract_from_build`'s cross-TU dedup now
+  merges a repeated `(kind, template_qname, label)` instantiation instead of
+  keeping whichever TU happened to run first — mirrors `type_graph.py`'s own
+  `_merge_type_edges` for the identical richness gap (one TU may resolve an
+  argument's `target_qname` or reach an instantiated member another TU's
+  translation unit never used). And a dead `out` parameter threaded through
   `_walk_class_templates` (never appended to — the function only ever
   *registers* class-template membership) was removed, along with a
   `_MEMBER_FUNCTION_KINDS`-equivalent tuple duplicated inline in
@@ -73,3 +73,49 @@
   `ar` omits it). The test now initializes the value, sidestepping the
   ambiguity rather than asserting a platform-dependent fact the test was
   never actually trying to verify.
+
+  A second review round found three more real gaps, all empirically
+  confirmed against real clang AST output before fixing: two distinct
+  overloads of the same function template (`f<T>(T)` vs. `f<T>(T,T)`), both
+  instantiated with identical template arguments, produce the identical
+  *label* (built only from template arguments, never arity/signature) — so
+  `template_instantiation_node_id` collapsed both onto one graph node,
+  attributing both overloads' emitted symbols to a single instantiation
+  identity; it now additionally keys a function-kind instantiation by its
+  own unique mangled name, which always differs between overloads even when
+  the label doesn't. A class template specialization's own nested member
+  function template (e.g. `Holder::apply`) needs the specialization's own
+  name added to scope, or two *unrelated* classes sharing a member-template
+  name in the same enclosing scope collapse onto one `template_decl` node as
+  if they instantiated the same template — confirmed with two sibling class
+  templates (`Holder`/`Wrapper`) each declaring their own `apply` member,
+  both resolving to the identical bare `api::apply` before this fix. And on
+  Darwin, clang's AST reports a mangled name with the platform's extra
+  Mach-O leading underscore still attached (`__Z...`), the same
+  `call_graph.py`/`type_graph.py` quirk their own `_normalize_mangled`
+  already strips — left unstripped here, every `INSTANTIATION_EMITS_SYMBOL`
+  edge silently failed to join on Mach-O; this module now carries its own
+  independent copy of the same one-line fix.
+
+  A third review round, on `archive_graph.py`: `ar` permits two members
+  sharing one name in the same archive (e.g. `ar rc lib.a sub1/util.o
+  sub2/util.o`) — `archive_member_node_id` keyed only on `(archive label,
+  member name)`, so both members collapsed onto one graph node, and every
+  symbol the index attributed to either member attached to that single node
+  instead of its own. `ArSymbolRef` now also carries the defining member's
+  own `header_offset` (the join key the symbol-index parsers already had in
+  hand), and both `archive_member_node_id` and the per-archive member lookup
+  key on it, disambiguating without inventing new state. Also:
+  `FileReader.__init__` now reads size via `os.fstat` on the already-open
+  descriptor instead of a fresh `path.stat()` (which re-resolves the path a
+  second time, and whose failure would leak the just-opened handle since a
+  raising `__init__` never reaches `__exit__`); `inline.py`'s
+  `fold_archive_graph` import moved from eager/top-level into the same
+  deferred-import block as the other three fold passes, for one consistent
+  import pattern; two stale code comments (`_walk_class_templates` claiming
+  recursion it never performs; this fragment's own now-corrected "last
+  of"/"first of" wording contradiction against the archive-graph fragment
+  covering the same PR) were corrected; and three real-`ar` integration
+  tests that guarded only on `ar`'s presence, then unconditionally invoked
+  `gcc`, now guard on both (a runner with binutils but no `gcc` would error
+  instead of skip).

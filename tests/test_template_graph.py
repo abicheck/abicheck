@@ -403,6 +403,197 @@ def test_nested_specialization_argument_disambiguated_by_its_own_args() -> None:
     assert outer_int.args[0].target_qname != outer_double.args[0].target_qname
 
 
+def _overloaded_function_template_ast() -> dict:
+    """Two distinct ``FunctionTemplateDecl`` nodes both named ``f`` (real
+    overloads, differing by arity), each instantiated with ``T=int`` --
+    matches real clang output (verified empirically): the parser gives both
+    the identical *label* ``"f<int>"`` since a label is built only from
+    template arguments, never arity/signature."""
+    one_arg = {
+        "kind": "FunctionTemplateDecl",
+        "name": "f",
+        "inner": [
+            {"kind": "TemplateTypeParmDecl", "name": "T"},
+            {"kind": "FunctionDecl", "name": "f", "inner": []},
+            {
+                "kind": "FunctionDecl",
+                "name": "f",
+                "mangledName": "_Z1fIiET_S0_",
+                "inner": [
+                    {"kind": "TemplateArgument", "type": {"qualType": "int"}},
+                ],
+            },
+        ],
+    }
+    two_arg = {
+        "kind": "FunctionTemplateDecl",
+        "name": "f",
+        "inner": [
+            {"kind": "TemplateTypeParmDecl", "name": "T"},
+            {"kind": "FunctionDecl", "name": "f", "inner": []},
+            {
+                "kind": "FunctionDecl",
+                "name": "f",
+                "mangledName": "_Z1fIiET_S0_S0_",
+                "inner": [
+                    {"kind": "TemplateArgument", "type": {"qualType": "int"}},
+                ],
+            },
+        ],
+    }
+    return {"kind": "TranslationUnitDecl", "inner": [one_arg, two_arg]}
+
+
+def test_overloaded_function_templates_get_distinct_instantiation_nodes() -> None:
+    """Two overloads of the same function template (``f<T>(T)`` vs.
+    ``f<T>(T,T)``), both instantiated with identical template arguments,
+    produce the identical *label* -- but must not collapse onto one graph
+    node (Codex review, empirically confirmed against real clang output:
+    before this fix, only one DECL_INSTANTIATES_TEMPLATE edge survived for
+    two genuinely distinct instantiations)."""
+    ast = _overloaded_function_template_ast()
+    out = parse_clang_ast_templates(ast)
+    assert len(out) == 2
+    assert {i.label for i in out} == {"f<int>"}  # identical label, by design
+    assert {i.emitted_symbols for i in out} == {
+        ("_Z1fIiET_S0_",),
+        ("_Z1fIiET_S0_S0_",),
+    }
+
+    graph = SourceGraphSummary()
+    graph.add_node(GraphNode(id="binary_symbol://_Z1fIiET_S0_", kind="binary_symbol"))
+    graph.add_node(
+        GraphNode(id="binary_symbol://_Z1fIiET_S0_S0_", kind="binary_symbol")
+    )
+    augment_graph_with_templates(graph, out)
+    inst_nodes = [n for n in graph.nodes if n.kind == NODE_TEMPLATE_INSTANTIATION]
+    assert len(inst_nodes) == 2  # not collapsed onto one node
+    assert {n.id for n in inst_nodes} == {
+        template_instantiation_node_id("f<int>", "_Z1fIiET_S0_"),
+        template_instantiation_node_id("f<int>", "_Z1fIiET_S0_S0_"),
+    }
+    emits_edges = {
+        (e.src, e.dst) for e in graph.edges if e.kind == EDGE_INSTANTIATION_EMITS_SYMBOL
+    }
+    assert emits_edges == {
+        (
+            template_instantiation_node_id("f<int>", "_Z1fIiET_S0_"),
+            "binary_symbol://_Z1fIiET_S0_",
+        ),
+        (
+            template_instantiation_node_id("f<int>", "_Z1fIiET_S0_S0_"),
+            "binary_symbol://_Z1fIiET_S0_S0_",
+        ),
+    }
+
+
+def test_darwin_double_underscore_mangled_name_normalized() -> None:
+    """On Darwin, clang's AST reports a mangled name with the platform's
+    extra Mach-O leading underscore still attached (``__Z...``) -- but the
+    ``binary_symbol`` node this module's EDGE_INSTANTIATION_EMITS_SYMBOL join
+    must match carries the already-stripped, one-underscore form
+    (``macho_metadata.py`` strips it before minting the node). Left
+    unstripped, the join silently fails on every Mach-O build (Codex
+    review)."""
+    ast = _function_template_ast()
+    # Simulate the Darwin mangling convention on the one instantiation
+    # (inner[0]=TemplateTypeParmDecl, inner[1]=pattern, inner[2]=instantiation).
+    ast["inner"][0]["inner"][0]["inner"][2]["mangledName"] = "__Z8identityIiET_S0_"
+    out = parse_clang_ast_templates(ast)
+    assert len(out) == 1
+    assert out[0].emitted_symbols == ("_Z8identityIiET_S0_",)  # one underscore, not two
+
+    graph = SourceGraphSummary()
+    graph.add_node(
+        GraphNode(id="binary_symbol://_Z8identityIiET_S0_", kind="binary_symbol")
+    )
+    added = augment_graph_with_templates(graph, out)
+    assert any(e.kind == EDGE_INSTANTIATION_EMITS_SYMBOL for e in graph.edges)
+    assert added >= 1
+
+
+def _cross_class_member_template_ast() -> dict:
+    """Two unrelated class templates, each with an identically-named member
+    function template ``apply``, both instantiated with the same argument --
+    matches real clang output (verified empirically): a
+    ``ClassTemplateSpecializationDecl``'s own nested ``FunctionTemplateDecl``
+    needs the specialization's name in scope, or the two collapse onto one
+    qname."""
+
+    def holder(class_name: str, mangled_prefix: str) -> dict:
+        spec = {
+            "id": f"0xSPEC_{class_name}",
+            "kind": "ClassTemplateSpecializationDecl",
+            "name": class_name,
+            "completeDefinition": True,
+            "inner": [
+                {"kind": "TemplateArgument", "type": {"qualType": "int"}},
+                {
+                    "kind": "FunctionTemplateDecl",
+                    "name": "apply",
+                    "inner": [
+                        {"kind": "TemplateTypeParmDecl", "name": "U"},
+                        {"kind": "FunctionDecl", "name": "apply", "inner": []},
+                        {
+                            "kind": "FunctionDecl",
+                            "name": "apply",
+                            "mangledName": f"_ZN3api{mangled_prefix}5applyIiEET_S3_",
+                            "inner": [
+                                {
+                                    "kind": "TemplateArgument",
+                                    "type": {"qualType": "int"},
+                                },
+                            ],
+                        },
+                    ],
+                },
+            ],
+        }
+        return {
+            "kind": "ClassTemplateDecl",
+            "name": class_name,
+            "inner": [
+                {"kind": "TemplateTypeParmDecl", "name": "T"},
+                {"kind": "CXXRecordDecl", "name": class_name},
+                spec,
+            ],
+        }
+
+    ns = {
+        "kind": "NamespaceDecl",
+        "name": "api",
+        "inner": [
+            holder("Holder", "6HolderIiE"),
+            holder("Wrapper", "7WrapperIiE"),
+        ],
+    }
+    return {"kind": "TranslationUnitDecl", "inner": [ns]}
+
+
+def test_member_template_in_different_classes_does_not_collide_on_qname() -> None:
+    """``api::Holder``'s and ``api::Wrapper``'s own member function template
+    ``apply`` must resolve to distinct qnames -- both instantiated with the
+    same argument previously resolved to the identical bare ``"api::apply"``
+    (ClassTemplateSpecializationDecl isn't in _SCOPE_DECL_KINDS, so the
+    specialization's own name never entered scope), so both instantiations'
+    DECL_INSTANTIATES_TEMPLATE edge pointed at one shared template_decl node
+    as if they instantiated the same template (Codex review, empirically
+    confirmed against real clang output)."""
+    ast = _cross_class_member_template_ast()
+    out = parse_clang_ast_templates(ast)
+    function_insts = [i for i in out if i.kind == "function"]
+    assert len(function_insts) == 2
+    qnames = {i.template_qname for i in function_insts}
+    assert qnames == {"api::Holder::apply", "api::Wrapper::apply"}
+
+    graph = SourceGraphSummary()
+    augment_graph_with_templates(graph, out)
+    tdecl_nodes = {n.id for n in graph.nodes if n.kind == NODE_TEMPLATE_DECL}
+    assert template_decl_node_id("api::Holder::apply") in tdecl_nodes
+    assert template_decl_node_id("api::Wrapper::apply") in tdecl_nodes
+    assert len([n for n in tdecl_nodes if "apply" in n]) == 2  # not one shared node
+
+
 # ── graph augmentation tests ─────────────────────────────────────────────────
 
 
@@ -633,6 +824,7 @@ def test_real_clang_class_and_function_template_instantiations(tmp_path) -> None
         capture_output=True,
         text=True,
         check=True,
+        timeout=60,  # a hung compiler invocation must not hold CI (Codex review)
     )
     import json
 

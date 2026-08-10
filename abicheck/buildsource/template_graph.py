@@ -210,6 +210,26 @@ def _type_node_kind(decl_kind: str) -> str:
     return _TYPE_NODE_KIND_BY_DECL.get(decl_kind, "record_type")
 
 
+def _normalize_mangled(mangled: str) -> str:
+    """Strip a spurious macOS Mach-O ABI leading underscore from an Itanium
+    mangled name clang reports (``__ZN...`` -> ``_ZN...``).
+
+    Independent duplicate of ``call_graph._normalize_mangled``/
+    ``type_graph._normalize_mangled`` (same bug, same fix, kept undependent
+    — see this module's own ``_SCOPE_DECL_KINDS`` docstring for why: two
+    independent AST passes, no import between them). On Darwin, clang's AST
+    dump reports a ``mangledName`` with the platform's extra linker-symbol-
+    table underscore still attached, but the ``binary_symbol`` nodes this
+    module's :data:`EDGE_INSTANTIATION_EMITS_SYMBOL` join must match against
+    carry the already-stripped, one-underscore form (``macho_metadata.py``
+    strips it before a symbol becomes a graph node) — left unstripped, every
+    instantiated member's emitted symbol silently fails to join on Mach-O.
+    """
+    if mangled.startswith("__Z"):
+        return mangled[1:]
+    return mangled
+
+
 @dataclass(frozen=True)
 class TemplateArgUse:
     """One template argument, as spelled at the instantiation site.
@@ -484,7 +504,7 @@ def _member_symbols(node: dict[str, Any]) -> tuple[str, ...]:
         if str(child.get("kind", "")) in _MEMBER_FUNCTION_KINDS:
             mangled = child.get("mangledName")
             if isinstance(mangled, str) and mangled:
-                symbols.append(mangled)
+                symbols.append(_normalize_mangled(mangled))
     return tuple(symbols)
 
 
@@ -513,6 +533,7 @@ def _walk_function_templates(
                 mangled = child.get("mangledName")
                 if not (isinstance(mangled, str) and mangled):
                     continue  # the pattern itself, or an unmangled instantiation
+                mangled = _normalize_mangled(mangled)
                 args: list[TemplateArgUse] = []
                 for grandchild in child.get("inner", []) or []:
                     if str(grandchild.get("kind", "")) == "TemplateArgument":
@@ -534,6 +555,38 @@ def _walk_function_templates(
                 )
         # Don't recurse into a FunctionTemplateDecl's own children again --
         # already fully handled above.
+        return
+
+    if kind == _CLASS_SPECIALIZATION_KIND:
+        # A class template specialization's own member function templates
+        # need the specialization's name added to scope, or two unrelated
+        # classes sharing a member-template name in the same enclosing
+        # scope collapse onto one qname -- ClassTemplateSpecializationDecl
+        # isn't in _SCOPE_DECL_KINDS, so the generic fallback below leaves
+        # scope unchanged (Codex review, empirically confirmed against real
+        # clang output: api::Holder's and api::Wrapper's own member
+        # `apply<int>` both resolved to the identical qname "api::apply",
+        # so both instantiations' DECL_INSTANTIATES_TEMPLATE edge pointed at
+        # one shared template_decl node as if they instantiated the same
+        # template). The bare, unparameterized name is enough here -- this
+        # isn't trying to distinguish Holder<int>::apply from
+        # Holder<double>::apply (both are genuinely the same syntactic
+        # template declaration, correctly sharing one template_decl node,
+        # matching how Holder's own class-template pattern is already
+        # shared across all its instantiations), only Holder's own member
+        # templates from an unrelated Wrapper's.
+        name = str(node.get("name") or "")
+        child_scope = [*scope, name] if name else scope
+        for child in node.get("inner", []) or []:
+            _walk_function_templates(
+                child,
+                child_scope,
+                id_to_qname,
+                id_to_decl_kind,
+                id_to_template_qname,
+                full_by_id,
+                out,
+            )
         return
 
     if kind in _SCOPE_DECL_KINDS:
@@ -578,12 +631,14 @@ def _walk_class_templates(
         qname = "::".join([*scope, name]) if name else ""
         if qname:
             _register_class_template(node, qname, id_to_template_qname)
-        # A ClassTemplateDecl's own pattern CXXRecordDecl child would open a
-        # scope for its own members if recursed into generically -- skip it
-        # explicitly and only recurse into further nested templates (a
-        # template nested inside a template pattern), matching the "member
-        # function template nested in a class template instantiation" gap
-        # this module's docstring already names as unhandled either way.
+        # Stop here: a ClassTemplateDecl's own pattern CXXRecordDecl child
+        # would open a scope for its own members if recursed into
+        # generically. A template nested inside a template pattern is
+        # therefore not registered either -- the same "member function
+        # template nested in a class template instantiation" gap this
+        # module's docstring already names as unhandled (Codex review: an
+        # earlier revision of this comment claimed recursion into nested
+        # templates that the code never actually performs).
         return
 
     if kind in _SCOPE_DECL_KINDS:
@@ -670,12 +725,24 @@ def template_decl_node_id(qname: str) -> str:
     return f"template_decl://{qname}"
 
 
-def template_instantiation_node_id(label: str) -> str:
-    """Node id for one concrete instantiation, keyed by its own human label
-    (``"Wrapper<internal::Detail>"``) — unlike a function instantiation
-    (which could be keyed by its unique mangled name), a class
-    instantiation has no single symbol of its own, so the label is the only
-    identity both kinds share."""
+def template_instantiation_node_id(label: str, mangled: str | None = None) -> str:
+    """Node id for one concrete instantiation.
+
+    A class instantiation is keyed by its own human label
+    (``"Wrapper<internal::Detail>"``) — it has no single symbol of its own
+    (it emits one per instantiated member), so the label is the only
+    identity available. A **function** instantiation is keyed by its own
+    unique mangled name instead, when known (*mangled* set): two distinct
+    overloads of the same function template (``f<T>(T)`` vs. ``f<T>(T,T)``)
+    both instantiated with ``T=int`` produce the identical *label* (built
+    only from template arguments — arity/signature isn't one), so keying by
+    label alone collapsed both overloads onto a single node (Codex review,
+    empirically confirmed against real clang AST output: only one
+    ``DECL_INSTANTIATES_TEMPLATE`` edge survived for two genuinely distinct
+    instantiations). The mangled name always differs between overloads, so
+    it's the correct, collision-free identity for this kind."""
+    if mangled:
+        return f"template_instantiation://{mangled}"
     return f"template_instantiation://{label}"
 
 
@@ -751,7 +818,12 @@ def augment_graph_with_templates(
         template_id = template_decl_node_id(inst.template_qname)
         ensure_node(template_id, NODE_TEMPLATE_DECL, inst.template_qname)
 
-        inst_id = template_instantiation_node_id(inst.label)
+        function_mangled = (
+            inst.emitted_symbols[0]
+            if inst.kind == _FUNCTION_KIND and inst.emitted_symbols
+            else None
+        )
+        inst_id = template_instantiation_node_id(inst.label, function_mangled)
         dst_in_project = bool(
             project_files and inst.file and _file_in_project(inst.file, project_files)
         )
@@ -894,6 +966,7 @@ class ClangTemplateGraphExtractor:
             return []
 
         all_instantiations: list[TemplateInstantiation] = []
+
         # Dedup by (kind, template_qname, label) -- two TUs instantiating the
         # identical template with the identical arguments (a shared public
         # header) must not double the graph's edge count. A later TU seeing
@@ -902,11 +975,26 @@ class ClangTemplateGraphExtractor:
         # reach more of the instantiated members than another (Codex review,
         # mirrors type_graph.py's own cross-TU merge for the identical
         # richness gap).
+        # For a function-kind instantiation, disambiguate by its own mangled
+        # name (falling back to label only when unavailable) rather than
+        # (kind, template_qname, label) alone -- two distinct overloads of
+        # the same function template (`f<T>(T)` vs `f<T>(T,T)`) instantiated
+        # with identical template arguments produce the identical label
+        # (arity isn't a template argument), so the plain 3-tuple key would
+        # merge them into one instantiation here too, the same collision
+        # template_instantiation_node_id's own fix addresses (Codex review).
+        # A class-kind instantiation has no such ambiguity (a class template
+        # can't be overloaded), so it keeps the plain key.
+        def dedup_key(inst: TemplateInstantiation) -> tuple[str, str, str]:
+            if inst.kind == _FUNCTION_KIND and inst.emitted_symbols:
+                return (inst.kind, inst.template_qname, inst.emitted_symbols[0])
+            return (inst.kind, inst.template_qname, inst.label)
+
         seen: dict[tuple[str, str, str], int] = {}
 
         def add(instantiations: Iterable[TemplateInstantiation]) -> None:
             for inst in instantiations:
-                key = (inst.kind, inst.template_qname, inst.label)
+                key = dedup_key(inst)
                 idx = seen.get(key)
                 if idx is None:
                     seen[key] = len(all_instantiations)

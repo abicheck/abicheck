@@ -46,6 +46,7 @@ diagnostic, never an exception out of :func:`augment_graph_with_archives`.
 
 from __future__ import annotations
 
+import os
 import struct
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -204,7 +205,13 @@ class FileReader:
     def __init__(self, path: Path) -> None:
         self._path = path
         self._fh = path.open("rb")
-        self._size = path.stat().st_size
+        # Read the size off the already-open descriptor (os.fstat), not a
+        # fresh path.stat() -- the latter re-resolves the path a second
+        # time, so a replaced file between the open() above and the stat()
+        # would record the wrong size, and if stat() itself raised, the
+        # already-open handle would leak (this constructor raising means
+        # __enter__/__exit__ never run to close it) (Codex review).
+        self._size = os.fstat(self._fh.fileno()).st_size
 
     def __enter__(self) -> FileReader:
         return self
@@ -250,10 +257,23 @@ class ArSymbolRef:
     member (two members defining it — the linker resolves to whichever it
     pulls in first), and collapsing that into a mapping would silently drop
     one member's real claim.
+
+    ``member_offset`` is the member's own ``header_offset`` (``-1`` when
+    unknown, e.g. a hand-built ``ArSymbolRef`` in a test that only cares
+    about ``symbol``/``member``) — the join key ``augment_graph_with_archives``
+    actually uses to attribute a symbol to a graph node. ``ar`` permits two
+    members sharing one name in the same archive (e.g. ``ar rc lib.a
+    sub1/util.o sub2/util.o``), and a name-keyed join collapses them onto one
+    node, silently misattributing every symbol either member defines to
+    whichever one a name-keyed dict happened to keep last (Codex review,
+    fresh evidence). ``member`` itself stays the resolved display name — it's
+    what a human-readable diagnostic/label wants — while ``member_offset`` is
+    what disambiguates identity.
     """
 
     symbol: str
     member: str
+    member_offset: int = -1
 
 
 @dataclass(frozen=True)
@@ -403,7 +423,7 @@ def _gnu_symbol_index(
             continue  # index points at no member we walked — skip, never guess
         symbol = names[i].decode("utf-8", "replace")
         if symbol:
-            refs.append(ArSymbolRef(symbol=symbol, member=member))
+            refs.append(ArSymbolRef(symbol=symbol, member=member, member_offset=offset))
     return refs
 
 
@@ -460,7 +480,9 @@ def _bsd_symbol_index(
         raw = strings[str_off:] if terminator == -1 else strings[str_off:terminator]
         symbol = raw.decode("utf-8", "replace")
         if symbol:
-            refs.append(ArSymbolRef(symbol=symbol, member=member))
+            refs.append(
+                ArSymbolRef(symbol=symbol, member=member, member_offset=mem_off)
+            )
     return refs
 
 
@@ -651,15 +673,30 @@ def read_archive(path: Path) -> ArchiveContents:
 # ── graph augmentation ───────────────────────────────────────────────────────
 
 
-def archive_member_node_id(archive_path: str, member: str) -> str:
+def archive_member_node_id(
+    archive_path: str, member: str, header_offset: int | None = None
+) -> str:
     """Node id for one member of one archive.
 
     Scoped by the owning archive, not global: two static libraries routinely
     contain a member with the same short name (``util.o``), and collapsing
     them onto one node would claim a symbol is defined in an archive that
     never contained it.
+
+    *header_offset*, when given, additionally disambiguates two members of
+    the *same* archive sharing one name — ``ar`` permits this (e.g. ``ar rc
+    lib.a sub1/util.o sub2/util.o``), and a name-only id would collapse them
+    onto one node, misattributing whichever member's symbols got recorded
+    second (Codex review, fresh evidence). Each member's own
+    :attr:`ArMember.header_offset` is already the unique join key the symbol-
+    index parsers resolve against (see :class:`ArSymbolRef`), so reusing it
+    here disambiguates without inventing new state. Omitted (``None``) keeps
+    the plain name-only id — used by callers that only ever see one member
+    per name (tests, mainly) and by any future caller not yet offset-aware.
     """
-    return f"archive_member://{archive_path}::{member}"
+    if header_offset is None:
+        return f"archive_member://{archive_path}::{member}"
+    return f"archive_member://{archive_path}::{member}@{header_offset}"
 
 
 def _symbol_node_ids(graph: SourceGraphSummary) -> frozenset[str]:
@@ -898,10 +935,16 @@ def augment_graph_with_archives(
                 f"{label}: no symbol index (built without 'ar s'/ranlib); "
                 "members recorded, no symbol edges"
             )
-        member_ids: dict[str, str] = {}
+        # Keyed by header_offset, not name -- `ar` permits two members
+        # sharing one name in the same archive (e.g. `ar rc lib.a
+        # sub1/util.o sub2/util.o`), and a name-keyed dict would collapse
+        # them onto one node, misattributing every symbol either member
+        # defines to whichever one was recorded last (Codex review, fresh
+        # evidence).
+        member_ids: dict[int, str] = {}
         for member in contents.members:
-            mid = archive_member_node_id(label, member.name)
-            member_ids[member.name] = mid
+            mid = archive_member_node_id(label, member.name, member.header_offset)
+            member_ids[member.header_offset] = mid
             graph.add_node(
                 GraphNode(
                     id=mid,
@@ -923,7 +966,7 @@ def augment_graph_with_archives(
             )
             result.members += 1
         for ref in contents.symbols:
-            member_id = member_ids.get(ref.member)
+            member_id = member_ids.get(ref.member_offset)
             if member_id is None:
                 continue
             sid = _symbol_node_id(ref.symbol)

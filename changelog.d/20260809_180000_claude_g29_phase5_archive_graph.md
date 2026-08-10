@@ -17,10 +17,11 @@
   so an archive's internal-only indexed symbols mint no new node. Degrades
   to a diagnostic (`degraded_passes["archive_graph"]`), never an exception,
   for a missing/unreadable/malformed archive or one built without a symbol
-  index (`ar rc` with no `s`). This closes the last of G29 Phase 5's five
-  named open graph families (object/archive link provenance); the other
-  four (template instantiation, virtual dispatch, macro/config,
-  callback/function-pointer) remain open. No new `ChangeKind`, no report
+  index (`ar rc` with no `s`). This closes one of G29 Phase 5's five named
+  open graph families (object/archive link provenance; template
+  instantiation is the other one closed this same PR — see this release's
+  `..._template_graph.md` fragment); virtual dispatch, macro/config, and
+  callback/function-pointer remain open. No new `ChangeKind`, no report
   schema change, no verdict/exit-code effect.
 
   Hardened against four real-world parsing/resolution gaps found in review

@@ -59,7 +59,6 @@ from typing import TYPE_CHECKING, Any, ClassVar
 
 from .. import deadline
 from .build_evidence import BuildEvidence
-from .inline_graph_fold import fold_archive_graph
 from .model import (
     CoverageStatus,
     DataLayer,
@@ -1809,6 +1808,8 @@ def _build_inline_graph(
                 changed_paths,
                 scoped_units=call_graph_units,
             )
+    from .inline_graph_fold import fold_archive_graph
+
     fold_archive_graph(graph, merged, extractors)
     graph.finalize()
     return graph

@@ -1015,19 +1015,21 @@ def test_inline_graph_archive_symbol_edge_joins_binary_symbol_node(
     # review's "only join onto a node the graph already carries" rule).
     assert not any(e.kind == "OBJECT_DEFINES_SYMBOL" for e in graph.edges)
 
+    from abicheck.buildsource.archive_graph import augment_graph_with_archives
     from abicheck.buildsource.source_graph import GraphNode
 
-    graph2 = inline._build_inline_graph(merged, surface=None, with_call_graph=False)
-    assert graph2 is not None
-    graph2.add_node(
-        GraphNode(id="binary_symbol://train_dispatch", kind="binary_symbol")
-    )
-    from abicheck.buildsource.archive_graph import augment_graph_with_archives
-
-    augment_graph_with_archives(graph2)
+    # Re-augment the same graph (not a second one) now that a binary_symbol
+    # node exists, with an explicit search root rather than relying on
+    # _build_with_archive_link_unit's absolute-path detail (Codex review: a
+    # second `_build_inline_graph` call re-ran the whole archive pass over
+    # an already-populated graph, re-adding every archive_member node/edge
+    # -- the `any(...)` assertion below still passed either way, but that
+    # wasn't what this test meant to verify).
+    graph.add_node(GraphNode(id="binary_symbol://train_dispatch", kind="binary_symbol"))
+    augment_graph_with_archives(graph, search_roots=(tmp_path,))
     assert any(
         e.kind == "OBJECT_DEFINES_SYMBOL" and e.dst == "binary_symbol://train_dispatch"
-        for e in graph2.edges
+        for e in graph.edges
     )
 
 

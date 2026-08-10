@@ -36,7 +36,6 @@ from abicheck.buildsource.archive_graph import (
     ArchiveFormatError,
     ArchiveGraphResult,
     BytesReader,
-    archive_member_node_id,
     augment_graph_with_archives,
     defining_members,
     parse_ar_archive,
@@ -95,19 +94,26 @@ def build_gnu_archive(
     # First lay out members to learn header offsets (needed for the index).
     # Two passes: sizes only depend on names+data, not offsets, so a single
     # pass with placeholder offsets works, then we patch the index in place.
-    def member_header(name: str) -> bytes:
+    #
+    # Indexed by *position*, not name (Codex review, fresh evidence): `ar`
+    # permits two members sharing one name in the same archive (e.g. `ar rc
+    # lib.a sub1/util.o sub2/util.o`) -- a name-keyed dict silently collapsed
+    # onto whichever same-named member was recorded last, so a fixture built
+    # from `[("util.o", data1), ("util.o", data2)]` could never actually
+    # produce two distinct members with their own correct data/offset in the
+    # first place, independent of anything the parser under test does.
+    def member_header(i: int) -> bytes:
+        name = members[i][0]
         if name in long_name_offsets:
-            return _header(f"/{long_name_offsets[name]}", len(data_of[name]))
-        return _header(name + "/", len(data_of[name]))
-
-    data_of = dict(members)
+            return _header(f"/{long_name_offsets[name]}", len(members[i][1]))
+        return _header(name + "/", len(members[i][1]))
 
     body_start = len(magic)
     # Reserve space for the index member (patched after we know offsets).
-    symbol_entries: list[tuple[str, str]] = []  # (symbol, member_name)
-    for name, data in members:
+    symbol_entries: list[tuple[str, int]] = []  # (symbol, member_index)
+    for i, (_name, data) in enumerate(members):
         for sym in extract_symbols(data):
-            symbol_entries.append((sym, name))
+            symbol_entries.append((sym, i))
 
     names_blob = b"\x00".join(s.encode("ascii") for s, _ in symbol_entries) + (
         b"\x00" if symbol_entries else b""
@@ -125,11 +131,11 @@ def build_gnu_archive(
         long_name_total = 60 + len(long_name_table) + (len(long_name_table) % 2)
     pos += long_name_total
 
-    header_offsets: dict[str, int] = {}
+    header_offsets: list[int] = []
     member_blob = b""
-    for name, data in members:
-        header_offsets[name] = pos
-        h = member_header(name)
+    for i, (name, data) in enumerate(members):
+        header_offsets.append(pos)
+        h = member_header(i)
         stored = b"" if (thin and not name.startswith("/")) else data
         member_blob += h + _pad(stored)
         pos += 60 + (len(stored) + (len(stored) % 2))
@@ -138,7 +144,7 @@ def build_gnu_archive(
     if with_index:
         offsets = struct.pack(
             f">{len(symbol_entries)}I",
-            *(header_offsets[m] for _, m in symbol_entries),
+            *(header_offsets[i] for _, i in symbol_entries),
         )
         index_body = struct.pack(">I", len(symbol_entries)) + offsets + names_blob
         out += _header("/", len(index_body)) + _pad(index_body)
@@ -206,7 +212,13 @@ def test_parse_rejects_bad_magic() -> None:
 
 
 def test_parse_rejects_truncated_header() -> None:
-    with pytest.raises(ArchiveFormatError, match="truncated"):
+    # Only 5 bytes follow the magic -- too few to even attempt a header read
+    # (offset + _HEADER_SIZE > total), so this exercises the trailing-bytes
+    # guard at the end of the header-chain loop, not _parse_header's own
+    # truncation check (which the loop's own size guard makes unreachable
+    # for a BytesReader whose declared size matches what it can actually
+    # read -- Codex review).
+    with pytest.raises(ArchiveFormatError, match="do not form a complete member"):
         parse_ar_archive(BytesReader(ARCHIVE_MAGIC + b"short"))
 
 
@@ -310,16 +322,16 @@ def test_parse_index_offset_naming_no_member_is_skipped_not_raised() -> None:
 
 def test_bsd_symdef_index() -> None:
     strtab = b"alpha\x00beta\x00"
-    entries_placeholder = b"\x00" * 16
-    body = (
-        struct.pack("<I", 16)
-        + entries_placeholder
-        + struct.pack("<I", len(strtab))
-        + strtab
-    )
-    symdef_header = _header("__.SYMDEF", len(body))
     a_data, b_data = b"OBJA", b"OBJB"
-    member_start = 8 + 60 + len(_pad(body))
+    # 16 == one 16-byte (str_off, mem_off) entry pair (32-bit width) per
+    # member below (2 members -> 2 entries -> 16 bytes). Computed from the
+    # known header/body sizes directly, not from a placeholder body's
+    # length (Codex review: an earlier revision built a throwaway
+    # placeholder body only to overwrite it, and offsets happened to be
+    # correct only because the placeholder and the real body were the same
+    # length by coincidence).
+    body_len = 4 + 16 + 4 + len(strtab)
+    member_start = 8 + 60 + body_len + (body_len % 2)
     a_offset = member_start
     b_offset = a_offset + 60 + len(_pad(a_data))
     entries = struct.pack("<II", 0, a_offset) + struct.pack(
@@ -486,24 +498,26 @@ def test_augment_graph_creates_members_and_symbol_edges(tmp_path) -> None:
     assert result.diagnostics == []
     assert result.complete
 
-    member_ids = {n.id for n in g.nodes if n.kind == "archive_member"}
-    assert member_ids == {
-        archive_member_node_id("libtest.a", "a.o"),
-        archive_member_node_id("libtest.a", "b.o"),
-    }
+    # Node ids are offset-qualified now (archive_member_node_id(..., header_
+    # offset=...), Codex review -- disambiguates two same-named members in
+    # one archive), so look them up from the graph itself rather than
+    # reconstructing the id from the name alone.
+    member_nodes = {n.label: n.id for n in g.nodes if n.kind == "archive_member"}
+    assert set(member_nodes) == {"a.o", "b.o"}
+    a_id, b_id = member_nodes["a.o"], member_nodes["b.o"]
     contains_edges = {
         (e.src, e.dst) for e in g.edges if e.kind == "ARCHIVE_CONTAINS_OBJECT"
     }
     assert contains_edges == {
-        ("static_library://libtest.a", archive_member_node_id("libtest.a", "a.o")),
-        ("static_library://libtest.a", archive_member_node_id("libtest.a", "b.o")),
+        ("static_library://libtest.a", a_id),
+        ("static_library://libtest.a", b_id),
     }
     defines_edges = {
         (e.src, e.dst) for e in g.edges if e.kind == "OBJECT_DEFINES_SYMBOL"
     }
     assert defines_edges == {
-        (archive_member_node_id("libtest.a", "a.o"), "binary_symbol://alpha"),
-        (archive_member_node_id("libtest.a", "b.o"), "binary_symbol://beta"),
+        (a_id, "binary_symbol://alpha"),
+        (b_id, "binary_symbol://beta"),
     }
 
 
@@ -602,13 +616,39 @@ def test_two_archives_same_member_name_do_not_collide(tmp_path) -> None:
     result = augment_graph_with_archives(g, search_roots=(tmp_path,))
 
     assert result.archives_read == 2
+    # Two distinct nodes, one per archive -- offset-qualified ids (Codex
+    # review) mean they no longer collide even though this test's own two
+    # archives already each carried the disambiguating archive label too.
     member_ids = {n.id for n in g.nodes if n.kind == "archive_member"}
-    assert member_ids == {
-        archive_member_node_id("liba.a", "util.o"),
-        archive_member_node_id("libb.a", "util.o"),
-    }
+    assert len(member_ids) == 2
+    assert all(n.label == "util.o" for n in g.nodes if n.kind == "archive_member")
     assert defining_members(g, "foo_impl") == [("liba.a", "util.o")]
     assert defining_members(g, "bar_impl") == [("libb.a", "util.o")]
+
+
+def test_augment_graph_duplicate_member_name_within_one_archive_stays_distinct(
+    tmp_path,
+) -> None:
+    """``ar`` permits two members sharing one name in the same archive (e.g.
+    ``ar rc lib.a sub1/util.o sub2/util.o``) -- a name-keyed node id/lookup
+    would collapse them onto one node, misattributing whichever member's
+    symbols got recorded last (Codex review, fresh evidence). Offset-
+    qualified node ids keep them distinct."""
+    data = build_gnu_archive(
+        [("util.o", b"SYM:foo_impl\n"), ("util.o", b"SYM:bar_impl\n")]
+    )
+    (tmp_path / "libboth.a").write_bytes(data)
+    g = _graph_with_archive("libboth.a", ["foo_impl", "bar_impl"])
+
+    result = augment_graph_with_archives(g, search_roots=(tmp_path,))
+
+    assert result.archives_read == 1
+    assert result.members == 2
+    member_nodes = [n for n in g.nodes if n.kind == "archive_member"]
+    assert len(member_nodes) == 2  # not collapsed onto one node
+    assert {n.label for n in member_nodes} == {"util.o"}
+    assert defining_members(g, "foo_impl") == [("libboth.a", "util.o")]
+    assert defining_members(g, "bar_impl") == [("libboth.a", "util.o")]
 
 
 def test_augment_graph_expands_redacted_home_placeholder(tmp_path, monkeypatch) -> None:
@@ -818,14 +858,24 @@ def _platform_symbol_names(names: set[tuple[str, str]]) -> set[tuple[str, str]]:
     return {(sym[1:] if sym.startswith("_") else sym, member) for sym, member in names}
 
 
+def _require_toolchain(*tools: str) -> None:
+    """Skip the test when any of *tools* isn't on PATH -- guarding on ``ar``
+    alone and then unconditionally invoking ``gcc`` errors instead of
+    skipping on a runner that has binutils but no ``gcc`` (macOS runners are
+    the likely case, since ``gcc`` there is often absent or a ``clang``
+    shim) (Codex review)."""
+    for tool in tools:
+        if shutil.which(tool) is None:
+            pytest.skip(f"{tool} not found in PATH")
+
+
 @pytest.mark.integration
 def test_real_gnu_ar_archive_parses(tmp_path) -> None:
     """Round-trips a real ``gcc``-compiled, ``ar rcs``-indexed archive —
     confirms this module's hand-rolled GNU index parser against actual
     binutils output, not just the byte-shape fixtures above.
     """
-    if shutil.which("ar") is None:
-        pytest.skip("ar not found in PATH")
+    _require_toolchain("ar", "gcc")
     (tmp_path / "a.c").write_text(
         "int alpha(void){return 1;}\nstatic int hidden(void){return 2;}\n"
     )
@@ -857,8 +907,7 @@ def test_real_gnu_ar_archive_parses(tmp_path) -> None:
 
 @pytest.mark.integration
 def test_real_gnu_ar_thin_archive_parses(tmp_path) -> None:
-    if shutil.which("ar") is None:
-        pytest.skip("ar not found in PATH")
+    _require_toolchain("ar", "gcc")
     (tmp_path / "a.c").write_text("int alpha(void){return 1;}\n")
     subprocess.run(["gcc", "-c", "a.c"], cwd=tmp_path, check=True, capture_output=True)
     subprocess.run(
@@ -886,8 +935,7 @@ def test_real_gnu_ar_thin_archive_parses(tmp_path) -> None:
 
 @pytest.mark.integration
 def test_real_gnu_ar_archive_without_index(tmp_path) -> None:
-    if shutil.which("ar") is None:
-        pytest.skip("ar not found in PATH")
+    _require_toolchain("ar", "gcc")
     (tmp_path / "a.c").write_text("int alpha(void){return 1;}\n")
     subprocess.run(["gcc", "-c", "a.c"], cwd=tmp_path, check=True, capture_output=True)
     subprocess.run(
