@@ -84,10 +84,18 @@ A release shipping several libraries has a **per-library** ABI answer and a
 Whether the whole release shares one version number or each library carries
 its own is a project convention; state which one you assumed.
 
-## Runtime floors are not ABI
+## Runtime floors are not ABI — but `compare` still reports them
 
 A perfectly ABI-compatible library still fails on an older system if the new
-build raised its glibc or libstdc++ requirement. `compare` does not judge
-this. Use `abicheck deps compare` and `abicheck deps tree`, and report the
-floor as a separate, explicitly-scoped statement — never as part of the ABI
-verdict ([compatibility contracts](../../shared/compatibility-contracts.md)).
+build raised its glibc or libstdc++ requirement. That is a different contract
+from ABI, and it does not by itself force a SONAME bump.
+
+It is **not** invisible to `compare`, though. A raised `GLIBC_*`/`GLIBCXX_*`/
+`CXXABI_*` symbol version is emitted as `runtime_floor_raised` — a risk on
+its own, promoted to a break where it exceeds a declared floor. Read it from
+the findings; do not defer it and then omit it.
+
+`abicheck deps compare` and `abicheck deps tree` cover what `compare` does
+not: the wider dependency graph. Report the floor as a separate,
+explicitly-scoped statement rather than folding it into the ABI verdict
+([compatibility contracts](../../shared/compatibility-contracts.md)).

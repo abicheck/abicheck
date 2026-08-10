@@ -43,9 +43,14 @@ carries:
 You will not find a "depth achieved" echo alongside them: `requested_depth`
 and `effective_depth` are in the report schema but only the GitHub Action's
 `check-target` envelope populates them, never a direct `abicheck compare`.
-Nothing is lost — `compare` **fails** rather than silently downgrading when an
-explicit `--depth` cannot be reached, so a report that exists reached the
-depth it was asked for. Confirm the tier; that is the real evidence claim.
+That makes `evidence_tier` the only answer to "what depth did this reach",
+and reading it is **mandatory**: unlike `dump`, `compare` does *not* fail
+when an explicit `--depth` cannot be reached. It emits a warning and
+silently downgrades — a headerless `--depth headers` run produces an exit-`0`
+report at `elf_only` or `dwarf_aware`. Require `evidence_tier: header_aware`
+before treating a `--depth headers` verdict as one, and rerun with the
+headers supplied (`-H/--header`, `-I/--include`) rather than reporting the
+downgraded result.
 
 Per finding, `changes[].evidence_status` records what backed that specific
 finding.

@@ -130,6 +130,43 @@ def test_missing_shared_fragment_is_a_hard_error(synthetic):
         gen.render_all(gen.SRC_DIR)
 
 
+def test_reference_style_link_definition_is_a_hard_error(synthetic):
+    """The link rewrite only sees inline `[text](target)`, so a reference-style
+    definition would be published verbatim — leaving an installed skill
+    pointing at a repo path that does not exist there. Generation must refuse
+    it rather than pass it through."""
+    synthetic(
+        skills={
+            "demo": {
+                "SKILL.md": (
+                    "---\nname: demo\n---\n\nSee [guide][docs] and "
+                    "[a](../shared/a.md).\n\n[docs]: ../../docs/use/cli-usage.md\n"
+                )
+            }
+        },
+        shared={"a.md": "# A\n"},
+    )
+    with pytest.raises(gen.SkillGenerationError, match="reference-style"):
+        gen.render_all(gen.SRC_DIR)
+
+
+def test_footnote_definition_is_not_mistaken_for_a_reference_link(synthetic):
+    """`[^1]:` is a footnote, not a link definition — the rewrite has nothing
+    to do with it, so it must not trip the guard above."""
+    synthetic(
+        skills={
+            "demo": {
+                "SKILL.md": (
+                    "---\nname: demo\n---\n\nText[^1] and [a](../shared/a.md).\n\n"
+                    "[^1]: the note\n"
+                )
+            }
+        },
+        shared={"a.md": "# A\n"},
+    )
+    assert "demo/SKILL.md" in gen.render_all(gen.SRC_DIR)
+
+
 def test_orphaned_shared_fragment_is_a_hard_error(synthetic):
     synthetic(
         skills={"demo": {"SKILL.md": "---\nname: demo\n---\n\n[a](../shared/a.md)\n"}},
