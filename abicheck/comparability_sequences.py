@@ -261,14 +261,79 @@ def _slot_indices_match_position(slots: list[str]) -> bool:
         if (
             rest.startswith(_OWNED_HEADER_TOKEN_PREFIX)
             and rest != _OWNED_HEADER_SINGLE_SENTINEL
+            and _owned_header_pairs(rest) is None
         ):
-            pairs = _json_load_list(rest[len(_OWNED_HEADER_TOKEN_PREFIX) :])
-            if pairs is None or not all(_is_owned_header_pair(p) for p in pairs):
-                return False
-            pair_tuples = [tuple(p) for p in pairs]
-            if len(pair_tuples) != len(set(pair_tuples)):
-                return False
+            return False
     return True
+
+
+def _owned_header_pairs(token_rest: str) -> set[tuple[str, ...]] | None:
+    """Decode one owned ``"hdrs:"`` slot token's pair list into a set, or
+    ``None`` when the token isn't a decodable owned pair list at all.
+
+    ``None`` covers four distinct "no usable per-header evidence here" cases,
+    all of which callers treat identically (fail closed):
+
+    * the ``<single-header>`` sentinel -- no real per-header identity to verify
+      a superset against, mirroring the scope-side carve-out's own sentinel
+      handling;
+    * a non-owned token shape (``ext:``/``label:``) -- a differing one is real,
+      unrelated profile drift no carve-out here has business waiving;
+    * a payload that isn't a JSON list, or a member that isn't an exact
+      two-string list (Codex review, PR #641 follow-up, third P2) -- ``tuple(p)``
+      alone doesn't reject a malformed member the way it looks like it should:
+      a bare string like ``"xx"`` is itself iterable, so ``tuple("xx")``
+      silently succeeds as ``("x", "x")`` instead of raising, letting malformed
+      evidence masquerade as a legitimate owned-header pair;
+    * a *duplicated* pair (Codex review, PR #641 follow-up, fourteenth P2):
+      ``_slot_token_for_ancestor``'s real ``owned`` construction always emits a
+      deduplicated pair list, so a duplicate -- e.g. a newly appended
+      ``("c.h", "c.h")`` listed twice -- is never genuine evidence, and the set
+      conversion here would otherwise silently collapse it away.
+    """
+    if token_rest == _OWNED_HEADER_SINGLE_SENTINEL or not token_rest.startswith(
+        _OWNED_HEADER_TOKEN_PREFIX
+    ):
+        return None
+    pairs = _json_load_list(token_rest[len(_OWNED_HEADER_TOKEN_PREFIX) :])
+    if pairs is None or not all(_is_owned_header_pair(p) for p in pairs):
+        return None
+    pair_tuples = [tuple(p) for p in pairs]
+    owned = set(pair_tuples)
+    if len(pair_tuples) != len(owned):
+        return None
+    return owned
+
+
+def _owned_slot_growth_is_additive(
+    old_slot: str, new_slot: str, scope_new_headers: set[str] | None
+) -> bool:
+    """Whether one differing ``"<slot-index>:<token>"`` pair differs only in its
+    owned header list growing to include headers *scope_new_headers* confirms
+    were genuinely newly added.
+
+    Declines when the slot index moved, when either side's token isn't a
+    decodable owned pair list (see :func:`_owned_header_pairs`), when the new
+    list isn't a superset of the old, or when a newly-owned pair's global
+    identity (its first element; see ``_slot_token_for_ancestor``) isn't among
+    the scope-confirmed new headers.
+    """
+    old_idx, _, old_rest = old_slot.partition(":")
+    new_idx, _, new_rest = new_slot.partition(":")
+    if old_idx != new_idx:
+        return False
+    old_owned = _owned_header_pairs(old_rest)
+    new_owned = _owned_header_pairs(new_rest)
+    if old_owned is None or new_owned is None:
+        return False
+    if not new_owned >= old_owned:
+        return False
+    newly_owned = new_owned - old_owned
+    if not newly_owned:
+        return True
+    if scope_new_headers is None:
+        return False
+    return all(pair[0] in scope_new_headers for pair in newly_owned)
 
 
 def _include_sequence_is_additive_owned_growth(
@@ -314,58 +379,8 @@ def _include_sequence_is_additive_owned_growth(
         and _slot_indices_match_position(new_slots)
     ):
         return False
-    for old_slot, new_slot in zip(old_slots, new_slots):
-        if old_slot == new_slot:
-            continue
-        old_idx, _, old_rest = old_slot.partition(":")
-        new_idx, _, new_rest = new_slot.partition(":")
-        if old_idx != new_idx:
-            return False
-        if _OWNED_HEADER_SINGLE_SENTINEL in (old_rest, new_rest):
-            return False
-        if not (
-            old_rest.startswith(_OWNED_HEADER_TOKEN_PREFIX)
-            and new_rest.startswith(_OWNED_HEADER_TOKEN_PREFIX)
-        ):
-            return False
-        old_pairs = _json_load_list(old_rest[len(_OWNED_HEADER_TOKEN_PREFIX) :])
-        new_pairs = _json_load_list(new_rest[len(_OWNED_HEADER_TOKEN_PREFIX) :])
-        if old_pairs is None or new_pairs is None:
-            return False
-        # Every owned pair must be an exact two-string list (Codex review,
-        # PR #641 follow-up, third P2) -- `tuple(p)` alone doesn't reject a
-        # malformed member the way it looks like it should: a bare string
-        # like "xx" is itself iterable, so `tuple("xx")` silently succeeds
-        # as `("x", "x")` instead of raising, letting malformed evidence
-        # masquerade as a legitimate owned-header pair and potentially make
-        # a bogus set comparison look like real superset growth.
-        if not (
-            all(_is_owned_header_pair(p) for p in old_pairs)
-            and all(_is_owned_header_pair(p) for p in new_pairs)
-        ):
-            return False
-        # Reject a duplicated pair before the set conversion below collapses
-        # it away (Codex review, PR #641 follow-up, fourteenth P2):
-        # `_slot_token_for_ancestor`'s real `owned` construction always
-        # emits a deduplicated pair list, so a duplicate -- e.g. a newly
-        # appended ("c.h", "c.h") listed twice -- is never genuine evidence.
-        # `{tuple(p) for p in pairs}` silently discards that duplication,
-        # so without this check a malformed, duplicated newly-owned pair
-        # would still authorize the waiver instead of failing closed.
-        old_tuples = [tuple(p) for p in old_pairs]
-        new_tuples = [tuple(p) for p in new_pairs]
-        if len(old_tuples) != len(set(old_tuples)) or len(new_tuples) != len(
-            set(new_tuples)
-        ):
-            return False
-        old_owned = set(old_tuples)
-        new_owned = set(new_tuples)
-        if not new_owned >= old_owned:
-            return False
-        newly_owned = new_owned - old_owned
-        if newly_owned:
-            if scope_new_headers is None:
-                return False
-            if not all(pair[0] in scope_new_headers for pair in newly_owned):
-                return False
-    return True
+    return all(
+        old_slot == new_slot
+        or _owned_slot_growth_is_additive(old_slot, new_slot, scope_new_headers)
+        for old_slot, new_slot in zip(old_slots, new_slots)
+    )
