@@ -95,6 +95,7 @@ from .cli_options import (
     policy_options,
     resolve_compile_context,
     scope_options,
+    severity_options,
     split_sided_paths,
     verbose_option,
 )
@@ -614,6 +615,12 @@ _COMPARISON_ONLY_FLAGS = {
     "policy_file_path": "--policy-file",
     "policy": "--policy",
     "scope_public_headers": "--scope-public-headers/--no-scope-public-headers",
+    "severity_preset": "--severity-preset",
+    "severity_abi_breaking": "--severity-abi-breaking",
+    "severity_potential_breaking": "--severity-potential-breaking",
+    "severity_quality_issues": "--severity-quality-issues",
+    "severity_addition": "--severity-addition",
+    "exit_code_scheme": "--exit-code-scheme",
     "strict_suppressions": "--strict-suppressions",
     "public_symbols": "--public-symbol",
     "public_symbols_list": "--public-symbols-list",
@@ -896,9 +903,12 @@ def _resolve_scan_evaluation_config(
                 resolved_config,
                 gate_supported=False,
                 gate_reason=(
-                    "a scan's exit code follows its compatibility verdict "
-                    "directly, so it has no severity or exit-code scheme "
-                    "for a gate pack to move (compare does)"
+                    "a scan's exit code now honors --severity-*/--exit-code-"
+                    "scheme (direct CLI flags and .abicheck.yml's `severity:`/"
+                    "`exit_code_scheme` config), but does not yet fold a gate "
+                    "pack's `gate.*` assignments the way `compare --pack` "
+                    "does; pass the severity/exit-code-scheme settings "
+                    "directly instead of via --pack"
                 ),
                 contract_evaluation=contract_evaluation,
             )
@@ -1155,6 +1165,17 @@ def _discover_scan_project_config(
 )
 @policy_options  # ADR-049 Phase 5: --against config-surface parity with `compare`
 @scope_options  # (--policy/--policy-file/--suppress/--scope-public-headers)
+@severity_options  # With --against: severity preset + per-category overrides, mirrors `compare`
+@click.option(
+    "--exit-code-scheme",
+    "exit_code_scheme",
+    type=click.Choice(["auto", "legacy", "severity"], case_sensitive=True),
+    default=None,
+    help="With --against: exit-code scheme (mirrors `compare --exit-code-scheme`): "
+    "'legacy' (0/2/4 verdict), 'severity' (per-category error levels), or 'auto' "
+    "(severity when a severity setting is in effect, else legacy). Default: "
+    "config's exit_code_scheme, else auto.",
+)
 @click.option(
     "--strict-suppressions",
     is_flag=True,
@@ -1273,6 +1294,12 @@ def scan_cmd(
     policy_file_path: Path | None,
     policy: str,
     scope_public_headers: bool,
+    severity_preset: str | None,
+    severity_abi_breaking: str | None,
+    severity_potential_breaking: str | None,
+    severity_quality_issues: str | None,
+    severity_addition: str | None,
+    exit_code_scheme: str | None,
     strict_suppressions: bool,
     public_symbols: tuple[str, ...],
     public_symbols_list: Path | None,
@@ -1478,10 +1505,14 @@ def scan_cmd(
     # this, a project config's `suppression.strict`/`scope.public`/
     # `scope.public_symbols`/`scope.collapse_versioned_symbols`/
     # `suppression.require_justification` applied to `compare` but silently
-    # had no effect on `scan --against`. Severity/debug/exit-code-scheme
-    # config keys are also resolved here (required positional args of the
-    # shared function) but deliberately discarded -- `scan` has no
-    # equivalent flags for them.
+    # had no effect on `scan --against`. Severity + exit-code-scheme config
+    # keys are resolved here too and now DO feed `scan --against`'s own exit
+    # code the same way `compare`'s does (see `sev_config`/`resolved_exit_
+    # scheme` below) -- previously they were required positional args of the
+    # shared function but deliberately discarded, which meant
+    # `.abicheck.yml`'s `severity:`/`exit_code_scheme` block, and every
+    # `--severity-*`/`--exit-code-scheme` flag, silently had no effect on
+    # `scan --against`, unlike `compare`.
     #
     # Gated on `against is not None`: every field this resolves only means
     # anything for a baseline comparison (mirrors the "reject comparison-only
@@ -1490,22 +1521,25 @@ def scan_cmd(
     # affects an audit-only run.
     collapse_versioned_symbols = False
     require_justification = False
+    sev_config = None
+    resolved_exit_scheme = "legacy"
     if against is not None:
         from .cli_helpers_compare import resolve_compare_config
 
         resolved_cfg = resolve_compare_config(
             project_cfg,
-            cli_severity_preset=None,
-            cli_severity_abi_breaking=None,
-            cli_severity_potential_breaking=None,
-            cli_severity_quality_issues=None,
-            cli_severity_addition=None,
+            cli_severity_preset=severity_preset,
+            cli_severity_abi_breaking=severity_abi_breaking,
+            cli_severity_potential_breaking=severity_potential_breaking,
+            cli_severity_quality_issues=severity_quality_issues,
+            cli_severity_addition=severity_addition,
             cli_scope_public=_cli_flag("scope_public_headers", scope_public_headers),
             cli_collapse_versioned_symbols=None,
             cli_public_symbols=public_symbols,
             cli_strict_suppressions=_cli_flag(
                 "strict_suppressions", strict_suppressions
             ),
+            cli_exit_code_scheme=exit_code_scheme,
         )
         scope_public_headers = resolved_cfg.scope_public
         strict_suppressions = resolved_cfg.strict_suppressions
@@ -1516,6 +1550,15 @@ def scan_cmd(
         # default resolution with no CLI override to consider.
         collapse_versioned_symbols = resolved_cfg.collapse_versioned_symbols
         require_justification = resolved_cfg.require_justification
+        # Mirrors `compare`'s own `sev_config = resolved_cfg.severity` (a gate
+        # pack may have moved a severity level; `resolved_cfg` already carries
+        # that) -- fed to `run_scan_core` below so the baseline comparison's
+        # exit code honors the same severity/exit-code-scheme contract as
+        # `compare`, closing the asymmetry documented in AGENTS.md's "Known
+        # gaps" (scan previously computed its exit code from the verdict
+        # alone, never consulting severity).
+        sev_config = resolved_cfg.severity
+        resolved_exit_scheme = resolved_cfg.exit_code_scheme
 
     # ADR-049 Phase 5: --against reuses `compare`'s own suppression/policy
     # loader (`_load_suppression_and_policy`) so a scan baseline comparison
@@ -1734,6 +1777,8 @@ def scan_cmd(
             contract_evaluation=contract_evaluation,
             contract_mode=contract_mode,
             resolved_config=resolved_config,
+            sev_config=sev_config,
+            exit_code_scheme=resolved_exit_scheme,
             compile_context=None if compile_context.is_default else compile_context,
             defer_cleanup=build_dir_cleanups,
             abi3_floor=abi3_floor,

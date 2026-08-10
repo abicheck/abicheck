@@ -144,6 +144,65 @@ def test_scan_breaking_exits_four(runner, baseline_snap, new_snap_breaking):
     assert "Verdict: BREAKING" in res.output
 
 
+def test_scan_breaking_with_severity_info_only_exits_zero(
+    runner, baseline_snap, new_snap_breaking
+):
+    # AGENTS.md "Known gaps": `scan --against` used to compute its exit code
+    # from the verdict alone, ignoring `--severity-*`/`--exit-code-scheme` --
+    # unlike `compare`, where `--severity-preset info-only` can leave a
+    # BREAKING verdict at exit 0. Same BREAKING fixture as
+    # test_scan_breaking_exits_four above, but now severity-gated to 0.
+    res = runner.invoke(
+        main,
+        [
+            "scan",
+            str(new_snap_breaking),
+            "--against",
+            str(baseline_snap),
+            "--severity-preset",
+            "info-only",
+        ],
+    )
+    assert res.exit_code == 0, res.output
+    assert "Verdict: BREAKING" in res.output
+
+
+def test_scan_breaking_with_severity_default_still_exits_four(
+    runner, baseline_snap, new_snap_breaking
+):
+    # `--exit-code-scheme severity` with the *default* severity preset keeps
+    # abi_breaking at error level, so the exit code is unchanged from the
+    # legacy scheme's 4 -- the severity path is a strict superset of the
+    # legacy one, not merely "different".
+    res = runner.invoke(
+        main,
+        [
+            "scan",
+            str(new_snap_breaking),
+            "--against",
+            str(baseline_snap),
+            "--exit-code-scheme",
+            "severity",
+        ],
+    )
+    assert res.exit_code == 4, res.output
+
+
+def test_scan_severity_preset_without_against_is_usage_error(tmp_path: Path):
+    # --severity-preset only configures the --against baseline comparison,
+    # like the rest of _COMPARISON_ONLY_FLAGS (test_scan_rejects_comparison_
+    # only_flags_without_against in test_scan_baseline_headers.py covers the
+    # pre-existing members of that set).
+    snap = tmp_path / "artifact.so"
+    snap.write_bytes(b"\x7fELF\x02\x01\x01\x00" + b"\x00" * 56)
+
+    res = CliRunner().invoke(
+        main, ["scan", str(snap), "--severity-preset", "info-only"]
+    )
+    assert res.exit_code == 64, res.output
+    assert "only take effect with --against" in res.output
+
+
 def test_scan_json_format_is_structured(runner, baseline_snap, new_snap_compatible):
     res = runner.invoke(
         main,

@@ -254,6 +254,24 @@ audit/hygiene/source-consistency scan only; pass it and `scan` also compares
 > ever exits `0`/`1`/`64`, never a verdict code; see
 > [`--dry-run`](#-dry-run-dump-compare-scan-deps-tree-deps-compare) below.
 
+### `scan --against` and severity (mirrors `compare`)
+
+`scan --against` accepts the same severity surface as `compare` —
+`--severity-preset`, the hidden per-category `--severity-*` overrides, and
+`--exit-code-scheme` (plus `.abicheck.yml`'s `severity:`/`exit_code_scheme`
+keys) — and, like `compare`, uses them to compute the `0`/`2`/`4` portion of
+the exit code above from `severity.compute_exit_code` instead of the raw
+verdict when the resolved scheme is `severity`. A `BREAKING` verdict under
+`--severity-preset info-only` can therefore exit `0`, exactly as it can with
+`compare`. This is CLI/config-level parity only — a gate pack (`--pack`)
+does not yet fold a `gate.*` assignment into a scan's severity the way it
+does for `compare`; pass `--severity-*`/`--exit-code-scheme` directly
+instead. Every flag in this family is a comparison-only flag (rejected as a
+usage error without `--against`, exit `64`) — see the table above. The
+budget (`5`), `NOT_COMPARABLE` (`6`), and evidence-contract-error exit codes
+are unaffected: they are returned before the baseline comparison — and
+therefore before any severity computation — ever runs.
+
 ---
 
 ## `abicheck aggregate`
@@ -513,6 +531,13 @@ one of those.
 | Missing dependencies/symbols | — | — | — | `1` | — | — |
 | Load failure | — | — | — | — | `4` | — |
 | Invalid invocation / tool error | `64`† | `64`† | `64`† | `64`† | `64`† | `3/4/5/6/7/8/10/11` |
+
+The `scan` column shows the legacy (verdict-based) mapping — `scan --against`
+also accepts `--severity-preset`/`--severity-*`/`--exit-code-scheme` and,
+under the resolved `severity` scheme, follows the same `compare` exit
+(severity) column instead; see
+["`scan --against` and severity"](#scan-against-and-severity-mirrors-compare)
+above.
 
 App/plugin-scoped comparisons (`compare --used-by`/`--required-symbol`) reuse
 the `compare` columns above — see

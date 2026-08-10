@@ -801,6 +801,8 @@ def run_scan_core(
     contract_evaluation: bool = False,
     contract_mode: str | None = None,
     resolved_config: Any = None,
+    sev_config: Any = None,
+    exit_code_scheme: str = "legacy",
     sibling_exported_symbols: frozenset[str] | None = None,
 ) -> ScanCoreResult:
     """The shared scan orchestration (classify → always-on tier → level → compare).
@@ -815,6 +817,18 @@ def run_scan_core(
     tier's ``CrosscheckConfig`` unchanged — see
     :class:`~abicheck.buildsource.crosscheck.CrosscheckConfig` for what it
     does. ``None``/empty for the single-binary ``scan``/``compare`` paths.
+
+    ``sev_config``/``exit_code_scheme`` are forwarded, unchanged, to
+    ``_run_baseline_compare`` when a ``baseline`` is given — closing the
+    asymmetry documented in AGENTS.md's "Known gaps": `scan --against` used
+    to compute its exit code from the verdict alone (``legacy_exit_code``)
+    regardless of any ``--severity-*``/``.abicheck.yml`` ``severity:``
+    setting, unlike `compare`. ``exit_code_scheme == "severity"`` there now
+    uses ``severity.compute_exit_code`` the same way `compare` does; the
+    default ``"legacy"`` reproduces the prior, unchanged behavior exactly.
+    Orthogonal to the budget/evidence-contract/NOT_COMPARABLE exit codes
+    this function already special-cases (5/1/6) — those are returned before
+    ever reaching the baseline comparison.
     """
     stage_timings: dict[str, float] = {}
 
@@ -1035,6 +1049,8 @@ def run_scan_core(
                     contract_evaluation=contract_evaluation,
                     contract_mode=contract_mode,
                     resolved_config=resolved_config,
+                    sev_config=sev_config,
+                    exit_code_scheme=exit_code_scheme,
                 )
         except deadline.DeadlineExceeded as exc:
             elapsed = time.monotonic() - start

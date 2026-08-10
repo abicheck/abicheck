@@ -543,6 +543,8 @@ def _run_baseline_compare(
     contract_evaluation: bool = False,
     contract_mode: str | None = None,
     resolved_config: Any = None,
+    sev_config: Any = None,
+    exit_code_scheme: str = "legacy",
 ) -> tuple[str, int, dict[str, Any]]:
     """Compare *new_snap* against *baseline*, preserving scan authority.
 
@@ -560,6 +562,16 @@ def _run_baseline_compare(
     library is header-scoped symmetrically — else the old side stays
     symbol/DWARF-only and the compare drops old type evidence or invents spurious
     API diffs (Codex review). They are inert for a JSON-snapshot baseline.
+
+    *sev_config*/*exit_code_scheme* mirror ``compare``'s own severity gate
+    (``severity.compute_exit_code``/``legacy_exit_code``): with
+    ``exit_code_scheme == "severity"``, the returned exit code is the worst
+    category with both a finding and an ``error``-level setting, rather than
+    the verdict alone. ``exit_code_scheme == "legacy"`` (the default)
+    reproduces the prior, unconditional ``verdict → {0,2,4}`` mapping. The
+    caller (:func:`~abicheck.scan_engine.run_scan_core`) still folds the
+    orthogonal contract-coverage floor and the cross-check severity
+    promotion on top of whichever value this returns, exactly as before.
 
     The embedded L3/L4/L5 build/source packs on either snapshot are diffed via
     :func:`prepare_embedded_build_source` — the same path ``abicheck compare``
@@ -668,9 +680,27 @@ def _run_baseline_compare(
     from .contract_coverage_exit import fold_coverage_exit
 
     verdict = diff.verdict.value
-    # ADR-049 §7/§6.4: the coverage axis is orthogonal to the verdict and is
-    # folded identically here and in `compare`. Parity is the point -- a
-    # ledger that gated one command and not the other would be exactly the
-    # cross-command divergence §6.4's Gate exists to catch.
-    exit_code = fold_coverage_exit(_verdict_exit_code(diff.verdict), diff)
+    # Mirrors `compare`'s own `_exit_with_severity_or_verdict` (cli.py):
+    # `exit_code_scheme == "severity"` computes the worst error-level
+    # category among *diff.changes* instead of mapping the overall verdict
+    # straight to {0,2,4} -- e.g. `--severity-preset info-only` can leave a
+    # BREAKING verdict at exit 0. Default ("legacy") is the prior,
+    # unconditional verdict->exit mapping, unchanged.
+    if exit_code_scheme == "severity" and sev_config is not None:
+        from .severity import compute_exit_code
+
+        base_exit = compute_exit_code(
+            diff.changes,
+            sev_config,
+            policy=diff.policy,
+            kind_sets=diff._effective_kind_sets(),
+            policy_file=diff.policy_file,
+        )
+    else:
+        base_exit = _verdict_exit_code(diff.verdict)
+    # ADR-049 §7/§6.4: the coverage axis is orthogonal to the verdict/severity
+    # exit code and is folded identically here and in `compare`. Parity is
+    # the point -- a ledger that gated one command and not the other would be
+    # exactly the cross-command divergence §6.4's Gate exists to catch.
+    exit_code = fold_coverage_exit(base_exit, diff)
     return verdict, exit_code, summary
