@@ -824,6 +824,35 @@ def test_directory_fsync_real_failure_propagates_but_content_is_already_live(
     assert load_snapshot(p).library == "libbar.so.2"
 
 
+@pytest.mark.skipif(os.name == "nt", reason="no O_DIRECTORY on Windows")
+def test_directory_open_real_failure_propagates(tmp_path, monkeypatch):
+    """Codex review, PR #699: a real failure *opening* the parent directory
+    (EMFILE, EIO, a permissions change mid-run) must propagate the same way
+    a real fsync failure does -- an earlier version wrapped the open() call
+    itself in a blanket `except OSError: dir_fd = None`, silently skipping
+    the durability fsync entirely and reporting a successful write even
+    when the directory couldn't be opened for a genuine, non-"unsupported"
+    reason."""
+    import errno
+
+    import abicheck.snapshot_io as snapshot_io_mod
+
+    snap = _sample_snapshot()
+    p = tmp_path / "existing.abicheck.json"
+    write_snapshot(snap, p)
+
+    real_open = os.open
+
+    def _fail_directory_open(path, flags, *a, **kw):
+        if flags & os.O_DIRECTORY:
+            raise OSError(errno.EMFILE, "Too many open files")
+        return real_open(path, flags, *a, **kw)
+
+    monkeypatch.setattr(snapshot_io_mod.os, "open", _fail_directory_open)
+    with pytest.raises(OSError):
+        write_snapshot(snap, p)
+
+
 # ── Content ──────────────────────────────────────────────────────────────
 
 

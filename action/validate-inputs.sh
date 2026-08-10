@@ -34,6 +34,7 @@ GCC_PREFIX="${INPUT_GCC_PREFIX:-}"
 GCC_OPTIONS="${INPUT_GCC_OPTIONS:-}"
 SYSROOT="${INPUT_SYSROOT:-}"
 NOSTDINC="${INPUT_NOSTDINC:-false}"
+SNAPSHOT_COMPRESSION="${INPUT_SNAPSHOT_COMPRESSION:-}"
 
 # A directory, or a file whose name/magic bytes match a recognized package
 # format (RPM, Deb, tar, conda, wheel) — mirrors action/run.sh's
@@ -75,6 +76,18 @@ case "$MODE" in
   dump)
     if [[ -n "$NEW_LIBRARY" ]] && _is_release_style_operand "$NEW_LIBRARY"; then
       _fail "mode: dump does not accept a directory or package for new-library ('$NEW_LIBRARY') — dump snapshots exactly one library, it has no per-library fan-out. Dump each library individually (one step per binary, or a matrix), or switch to mode: compare with a directory/package operand, which fans out to a per-library comparison automatically."
+    fi
+    # ADR-059: mirrors the CLI's own --compression choices
+    # (cli_options.snapshot_compression_option) -- forwarded to `dump`
+    # unvalidated otherwise, so a typo'd value would only surface after a
+    # multi-minute toolchain install and build (Codex review).
+    if [[ -n "$SNAPSHOT_COMPRESSION" ]]; then
+      case "$SNAPSHOT_COMPRESSION" in
+        auto | none | gzip | zstd) ;;
+        *)
+          _fail "snapshot-compression '$SNAPSHOT_COMPRESSION' is not recognized. Use 'auto', 'none', 'gzip', or 'zstd'."
+          ;;
+      esac
     fi
     ;;
   scan)

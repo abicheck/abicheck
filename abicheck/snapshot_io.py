@@ -750,29 +750,38 @@ def _atomic_write_bytes(data: bytes, path: Path) -> None:
         # new data reaches storage, not that the rename pointing at it
         # survives a power loss. Best-effort in the same narrow sense as
         # the file fsync above: some platforms/filesystems don't support
-        # fsync on a directory fd at all (Windows has no directory fd
+        # *fsync* on a directory fd at all (Windows has no directory fd
         # concept here), which is not a storage failure to propagate --
         # but a real one (EIO/ENOSPC/EROFS) means the rename may not
         # actually be durable, which this function should surface rather
         # than silently claim success for. Never blocks on a missing
         # `target.parent` (`hasattr(os, "O_DIRECTORY")` gates POSIX-only).
+        #
+        # Codex review: opening `parent` itself (not the later fsync) must
+        # NOT be wrapped in the same "swallow, treat as unsupported"
+        # handling -- unlike fsync-on-a-directory, which some real
+        # filesystems genuinely don't support, opening a directory we just
+        # wrote *through* moments ago has no legitimate "unsupported"
+        # failure mode on any platform that reaches this branch at all
+        # (Windows, the one platform without O_DIRECTORY, is already
+        # excluded by the hasattr() gate above). A real failure here
+        # (EMFILE out of descriptors, EIO, a permissions change mid-run)
+        # must propagate the same way a real fsync failure does, not be
+        # silently downgraded into an unconfirmed-but-reported-successful
+        # write.
         if hasattr(os, "O_DIRECTORY"):
+            dir_fd = os.open(parent, os.O_RDONLY | os.O_DIRECTORY)
             try:
-                dir_fd = os.open(parent, os.O_RDONLY | os.O_DIRECTORY)
-            except OSError:
-                dir_fd = None
-            if dir_fd is not None:
-                try:
-                    os.fsync(dir_fd)
-                except OSError as exc:
-                    if exc.errno not in (
-                        errno.EINVAL,
-                        errno.ENOTSUP,
-                        errno.EOPNOTSUPP,
-                    ):
-                        raise
-                finally:
-                    os.close(dir_fd)
+                os.fsync(dir_fd)
+            except OSError as exc:
+                if exc.errno not in (
+                    errno.EINVAL,
+                    errno.ENOTSUP,
+                    errno.EOPNOTSUPP,
+                ):
+                    raise
+            finally:
+                os.close(dir_fd)
     except BaseException:
         try:
             tmp_path.unlink(missing_ok=True)
