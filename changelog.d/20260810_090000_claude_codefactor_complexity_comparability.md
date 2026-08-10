@@ -1,8 +1,8 @@
 ### Changed
 
 - **Split seven CodeFactor "Complex Method" findings across the comparability,
-  contract-evidence and core-compare modules.** `comparability.
-  check_contracts_comparable` now dispatches to one checker per axis
+  contract-evidence and core-compare modules.** `comparability.check_contracts_comparable`
+  now dispatches to one checker per axis
   (`dependency_scope`/`scope_fingerprint`/`profile_fingerprint`), and
   `compute_extraction_contract` to one builder per fields dict; the field layer
   moved to a new leaf module `abicheck/comparability_fields.py` to keep

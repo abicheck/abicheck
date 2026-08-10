@@ -382,5 +382,8 @@ def _include_sequence_is_additive_owned_growth(
     return all(
         old_slot == new_slot
         or _owned_slot_growth_is_additive(old_slot, new_slot, scope_new_headers)
-        for old_slot, new_slot in zip(old_slots, new_slots)
+        # strict=True documents the invariant the length check above already
+        # enforces -- zip cannot truncate here, and if that check is ever
+        # weakened this raises rather than silently skipping trailing slots.
+        for old_slot, new_slot in zip(old_slots, new_slots, strict=True)
     )

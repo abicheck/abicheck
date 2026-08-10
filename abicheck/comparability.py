@@ -765,6 +765,44 @@ def _check_dependency_scope_comparable(
     return ComparabilityMismatch(kind="dependency_scope", reason=reason)
 
 
+#: Every key set :func:`compute_extraction_contract` may have hashed a
+#: ``profile_fingerprint``/``scope_fingerprint`` over. Each fingerprint is
+#: computed over the base set, *or* over the extended one when that dump
+#: carried the extra field (``frontend_context_kind`` for a DPC++-capable
+#: frontend, ADR-050 D5; ``translation_units`` for a ``--dump-manifest`` dump,
+#: D6) -- so authenticating against the base set alone declared every such
+#: contract inauthentic (CodeRabbit review; confirmed by direct repro: a
+#: `frontend_context_kind="device"` contract's own fingerprint did not
+#: reproduce under `PROFILE_FIELD_KEYS`, and a `manifest_tu_scope` one's did
+#: not reproduce under `SCOPE_FIELD_KEYS`).
+_PROFILE_FINGERPRINT_KEY_SETS = (
+    PROFILE_FIELD_KEYS,
+    _FRONTEND_CONTEXT_PROFILE_FIELD_KEYS,
+)
+_SCOPE_FINGERPRINT_KEY_SETS = (SCOPE_FIELD_KEYS, _MANIFEST_SCOPE_FIELD_KEYS)
+
+
+def _fingerprint_is_authentic(
+    fingerprint: str, fields: dict[str, str], key_sets: Sequence[tuple[str, ...]]
+) -> bool:
+    """Whether *fingerprint* reproduces from *fields* under any of *key_sets*.
+
+    Which set a given contract's fingerprint was hashed over is not always
+    recoverable from the stored fields: ``profile_fields`` records
+    ``frontend_context_kind`` as ``""`` both when the dump passed ``None``
+    (base key set) and when it passed an empty string (extended set), so the
+    gate cannot re-derive the choice and must accept either.
+
+    That is no weaker than knowing the answer. This check exists to catch a
+    *fabricated or stale* fingerprint sitting alongside fields that merely look
+    additive (:func:`_fingerprint_matches_fields`); accepting one of two
+    specific SHA-256 values instead of one leaves it exactly as hard to forge.
+    """
+    return any(
+        _fingerprint_matches_fields(fingerprint, fields, keys) for keys in key_sets
+    )
+
+
 def _differing_keys(
     old_fields: dict[str, str], new_fields: dict[str, str], keys: Sequence[str]
 ) -> set[str]:
@@ -872,15 +910,15 @@ def _check_scope_fingerprint_comparable(
         return None
 
     if not (
-        _fingerprint_matches_fields(
+        _fingerprint_is_authentic(
             old_contract.scope_fingerprint,
             old_contract.scope_fields,
-            SCOPE_FIELD_KEYS,
+            _SCOPE_FINGERPRINT_KEY_SETS,
         )
-        and _fingerprint_matches_fields(
+        and _fingerprint_is_authentic(
             new_contract.scope_fingerprint,
             new_contract.scope_fields,
-            SCOPE_FIELD_KEYS,
+            _SCOPE_FINGERPRINT_KEY_SETS,
         )
     ):
         # The carve-out below may not be trusted: at least one side's
@@ -1134,11 +1172,11 @@ def _check_profile_fingerprint_comparable(
     old_fields = old_contract.profile_fields
     new_fields = new_contract.profile_fields
     if not (
-        _fingerprint_matches_fields(
-            old_contract.profile_fingerprint, old_fields, PROFILE_FIELD_KEYS
+        _fingerprint_is_authentic(
+            old_contract.profile_fingerprint, old_fields, _PROFILE_FINGERPRINT_KEY_SETS
         )
-        and _fingerprint_matches_fields(
-            new_contract.profile_fingerprint, new_fields, PROFILE_FIELD_KEYS
+        and _fingerprint_is_authentic(
+            new_contract.profile_fingerprint, new_fields, _PROFILE_FINGERPRINT_KEY_SETS
         )
     ):
         # No carve-out below may be trusted: at least one side's
@@ -1160,8 +1198,15 @@ def _check_profile_fingerprint_comparable(
     differing = _differing_keys(
         old_fields, new_fields, _FRONTEND_CONTEXT_PROFILE_FIELD_KEYS
     )
+    # `_FRONTEND_CONTEXT_PROFILE_FIELD_KEYS`, not `PROFILE_FIELD_KEYS`
+    # (CodeRabbit review): `frontend_context_kind` is a field this build knows
+    # about -- `differing` directly above iterates it -- so reporting it as one
+    # "this version does not recognize" was simply wrong. The outcome for a
+    # differing `frontend_context_kind` is unchanged, only its reason: no
+    # carve-out's field-set contains it, so it stays in `unexplained` and the
+    # pair is still not comparable.
     unknown_differing = _unknown_differing_keys(
-        old_fields, new_fields, PROFILE_FIELD_KEYS
+        old_fields, new_fields, _FRONTEND_CONTEXT_PROFILE_FIELD_KEYS
     )
     unexplained = _unexplained_profile_fields(
         old, new, old_contract, new_contract, differing
