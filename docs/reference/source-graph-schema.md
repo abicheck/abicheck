@@ -535,19 +535,14 @@ is not a node): a class/alias template's parameter dependency lands on its
 `record_type` node, a function/variable template's on its `source_decl` one
 — the same nodes those entities' own field/signature edges already use.
 
-Two shapes are deliberately **not** emitted, because clang's JSON carries no
-dependency to emit (verified against real Clang 18, and pinned by
-`tests/test_type_graph_roles.py`'s integration tests so a future clang that
-*does* carry them shows up as a failure rather than a silent gap): a
-*non-type* parameter's default **value** (`template <detail::Handle H =
-detail::K>` dumps as `{"kind": "TemplateArgument", "isExpr": true}` with no
-`type` — the referenced constant is a `DeclRefExpr`, a `DECL_REFERENCES_DECL`
-question rather than a type role), and a *template template* parameter's
-default (`template <template <class> class C = detail::Def>` dumps as a bare
-`{"kind": "TemplateArgument"}` — neither a type nor a name). The remaining
-role from the plan item, **concept/constraint dependency**, is not
-implemented — see the G29 plan's Phase 5 item 5 for the AST evidence and
-what closing it needs.
+Three type dependencies are **not** represented as edges here: a *non-type*
+template parameter's default **value**, a *template template* parameter's
+default, and a **concept/constraint** dependency. The first two are absent
+because clang's JSON carries nothing to resolve; the third needs a graph node
+kind that does not exist yet. The AST evidence for each, and what closing the
+third would take, is recorded once in
+[G29 Phase 5 item 5](../contribute/plans/g29-impact-analysis-layer.md#phase-5--new-semantic-graph-families)
+— the rationale owner for these decisions — rather than restated here.
 
 ## `EntityResolver` (ADR-046 D4, scoped implementation)
 

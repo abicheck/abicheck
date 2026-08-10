@@ -329,6 +329,57 @@ def test_template_with_no_recognized_templated_child_emits_nothing() -> None:
     assert _find(ast, "template_param") == []
 
 
+@pytest.mark.parametrize(
+    "inner",
+    [
+        pytest.param(["not-a-dict", 42, None], id="non-dict-children"),
+        pytest.param(
+            [{"kind": "CXXRecordDecl"}, {"kind": "TypeAliasDecl"}],
+            id="unnamed-children",
+        ),
+    ],
+)
+def test_malformed_template_children_emit_nothing(inner: list) -> None:
+    """A hand-edited or truncated AST must degrade to no edge, not raise —
+    the same defensive-parsing discipline the rest of this module uses."""
+    ast = _tu(
+        _detail_ns(),
+        _namespace(
+            "api",
+            {
+                "kind": "ClassTemplateDecl",
+                "name": "Broken",
+                "inner": [*inner, _non_type_parm("H", "detail::Handle")],
+            },
+        ),
+    )
+    assert _find(ast, "template_param") == []
+
+
+def test_non_dict_template_parameter_child_is_skipped() -> None:
+    """A recognized templated entity plus junk siblings: the junk is skipped
+    and the real parameter still resolves."""
+    ast = _tu(
+        _detail_ns(),
+        _namespace(
+            "api",
+            {
+                "kind": "ClassTemplateDecl",
+                "name": "Slot",
+                "inner": [
+                    "junk",
+                    None,
+                    _non_type_parm("H", "detail::Handle"),
+                    _record("Slot"),
+                ],
+            },
+        ),
+    )
+    assert _find(ast, "template_param") == [
+        (EDGE_TYPE_HAS_FIELD_TYPE, "api::Slot", "detail::Handle", CONF_HIGH)
+    ]
+
+
 # ── default_template_arg ───────────────────────────────────────────────────
 
 
