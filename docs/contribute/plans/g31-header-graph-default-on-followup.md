@@ -1386,6 +1386,50 @@ building a second identity-resolution mechanism from scratch.
   functions' key shape, not a drive-by extension of the ambiguity guard.
   Left as a documented, tracked limitation rather than attempted here.
 
+  **A later pass closed one more fact-completeness gap — `Param.is_restrict`
+  — and it was found by building Phase D's capability matrix rather than by
+  reading this list.** The matrix's own drift check (an `ast` pass over both
+  parsers, see Phase D below) reported a divergence this plan had never
+  recorded: castxml populated `Param.is_restrict` from the day it shipped
+  (`_resolve_cv_restrict`), the clang backend never did, and unlike
+  `deprecated`/`is_scoped` before this phase, `_diff_param_restrict` had
+  **no producer gate at all** — it compares the two bools directly. So a
+  castxml-vs-clang comparison of unchanged headers reported
+  `param_restrict_changed` for every `restrict`-qualified parameter, and had
+  since the fact was introduced. Closed the same way this phase closed
+  `deprecated`/`is_scoped`: extract it on the clang side rather than gate it,
+  since the value representation is a plain bool that is directly
+  cross-comparable (`dumper_clang_qualifiers._clang_param_is_restrict`,
+  verified against real clang 18 output for the C `restrict`, the C++
+  `__restrict`/`__restrict__` spellings clang normalizes to one form, a
+  typedef whose qualification is only visible in `desugaredQualType`, and
+  the `int *restrict *` vs `int **restrict` split where the qualifier
+  belongs to the pointee rather than the parameter). Reuses
+  `_field_own_cv_source`/`_last_top_level_ptr_end`, the top-level-qualifier
+  helpers the cv-qualifier work already needed, so the two questions are
+  answered by one mechanism.
+
+  Two gates came with it, both following precedent already set in this
+  phase rather than inventing a third pattern. (1) A **header-tier gate**
+  (`_both_header_aware`, as `param_defaults` uses): DWARF, PDB and the
+  symbol-table paths never populate this fact, so a non-header side's
+  `False` means "not collected" — comparing it against a header-parsed side
+  manufactured the same finding from an evidence-tier difference alone.
+  This gate can only ever remove findings that were false, since a
+  non-header side is unconditionally `False`. (2) A **legacy-baseline
+  flag**, schema **v22**'s `clang_restrict_facts_reliable` — the fourth
+  instance of the shape v19/v20/v21 established, and covering `"hybrid"`
+  alongside `"clang"` for the same reason v20 did (a merge keeps castxml's
+  `params` verbatim for a matched function, but appends a clang-ONLY
+  function's parameters as they are). Snapshot disk cache bumped to v10 on
+  the v7/v8 precedent. Both `dumper_clang.py` and `diff_symbols.py` were
+  within 30 lines of the 2000-line hard cap, so this landed with two
+  splits: `dumper_clang_qualifiers.py` (the four top-level-qualifier
+  helpers, re-exported so existing import paths resolve) and
+  `diff_param_qualifiers.py` (the `param_restrict` + `param_va_list`
+  detectors, registered through `checker.py`'s import block so no cycle is
+  introduced).
+
 - ~~Single-AST reuse for the direct-clang backend~~ **Done** (see above) —
   via in-process memoization of `_clang_header_dump`'s result, not by
   threading the parser's already-consumed AST object through
@@ -1442,7 +1486,8 @@ each new fact family from Phase C's schema audit, at least one case per new
 `ChangeKind` above, and a header-only-vs-build-integrated collector-upgrade
 case exercising the reconciliation path end-to-end.
 
-**Full documentation rewrite** covering:
+**Full documentation rewrite — done.** All three bullets below shipped as
+`docs/reference/header-backend-capabilities.md`:
 - A backend capability matrix (CastXML vs. direct-clang vs. hybrid, which
   facts/edges each can and cannot see).
 - "Why CastXML can't do all graph edges" (the schema-limit findings from
@@ -1453,6 +1498,48 @@ case exercising the reconciliation path end-to-end.
   `VTableContext` — when each is the right tool, referencing G28 Phase 4's
   own LibTooling companion-tool experience (`tools/clang-layout-tool/`) as
   a worked example of the LibTooling option's cost/benefit.
+
+**What shipped, and the one design decision worth recording.** The matrix is
+**not prose**: `scripts/backend_capabilities.py` carries one `FactRow` per
+field of the six declaration dataclasses the two backends build (95 rows),
+`scripts/gen_backend_capability_matrix.py` renders them into the page's
+generated section (the `gen_platform_matrix.py`/`platform_capabilities.py`
+splice pattern, one sibling over), and the hybrid column is **derived** from
+`dumper_hybrid.py`'s real backfill lists rather than hand-typed. The reason
+for that shape is this plan's own history: several rounds recorded here
+found a fact's real backend coverage had moved on while a document still
+described the old world, so `tests/test_backend_capability_matrix.py`
+re-derives every published claim by reading `dumper_castxml.py`/
+`dumper_clang.py` with `ast` — asking not "is this keyword passed?" but
+"is it passed a real expression, or a placeholder like `size_bits=None`
+/`is_opaque=False`?" — and fails when the claim and the code disagree. That
+check is what found the `Param.is_restrict` gap recorded under Phase C
+above; it was written to prevent drift and immediately paid for itself by
+catching a live false positive.
+
+**Gaps the matrix surfaced and documented rather than fixed** (each needs
+its own verification, and castxml was not installable in the environment
+this pass ran in — the same "verify before claiming" bar the rest of this
+phase held to):
+- `EnumType.underlying_type` is clang-only; a castxml (and therefore
+  hybrid) enum keeps the model default `int` whatever the header declared.
+  No diff detector reads it — `enum_underlying_size_changed` comes from
+  DWARF — but `tu_merge.py`'s ODR-conflict check does.
+- A hybrid merge is castxml-based, so a clang-only fact it does not
+  explicitly backfill (`is_template_pattern`,
+  `has_anonymous_aggregate_fields`, `underlying_type`) is dropped for any
+  declaration both backends saw. Both of the first two look benign on
+  inspection (castxml never emits an uninstantiated pattern, and supplies
+  the real offsets the anonymous-aggregate flag exists to help find), but
+  "looks benign" is the claim that needs a castxml host to check.
+- An opaque handle type is **absent** from a clang snapshot rather than
+  opaque: `parse_types` skips every non-definition, so `is_opaque=False` is
+  correct by construction while the type itself never appears.
+- `Variable.value`, `Variable.access` and `Param.is_va_list` have no
+  producer on any layer, which makes `param_became_va_list`/
+  `param_lost_va_list` unreachable on real input. Recorded in
+  `diff_param_qualifiers.py`'s own docstring too, since a backend that
+  later populates `is_va_list` inherits `param_restrict`'s exact problem.
 
 **Performance benchmarks + regression gate — done.** Now that the
 header-only graph is always-on rather than opt-in, its per-dump cost is paid

@@ -1693,34 +1693,6 @@ def _diff_symbol_renames(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
     return _emit_batch_rename(rename_pairs)
 
 
-@registry.detector("param_restrict")
-def _diff_param_restrict(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
-    """Detect restrict qualifier changes on parameters (ABICC: Parameter_Became_Restrict)."""
-    changes: list[Change] = []
-    old_map = _public_functions(old)
-    new_map = _public_functions(new)
-
-    for mangled, f_old in old_map.items():
-        f_new = new_map.get(mangled)
-        if f_new is None:
-            continue
-        for i, (p_old, p_new) in enumerate(zip(f_old.params, f_new.params)):
-            if p_old.is_restrict != p_new.is_restrict:
-                direction = "added" if p_new.is_restrict else "removed"
-                changes.append(
-                    make_change(
-                        ChangeKind.PARAM_RESTRICT_CHANGED,
-                        symbol=mangled,
-                        name=f_old.name,
-                        detail=direction,
-                        old=str(p_old.name or i),
-                        old_value=f"restrict={p_old.is_restrict}",
-                        new_value=f"restrict={p_new.is_restrict}",
-                    )
-                )
-    return changes
-
-
 @registry.detector("func_deprecated")
 def _diff_func_deprecated(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
     """Detect a function gaining or losing `[[deprecated]]`.
@@ -1869,43 +1841,6 @@ def _diff_var_deprecated(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
                     old_value=v_old.deprecated,
                 )
             )
-    return changes
-
-
-@registry.detector("param_va_list")
-def _diff_param_va_list(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
-    """Detect va_list parameter changes (ABICC: Parameter_Became_VaList/Non_VaList)."""
-    changes: list[Change] = []
-    old_map = _public_functions(old)
-    new_map = _public_functions(new)
-
-    for mangled, f_old in old_map.items():
-        f_new = new_map.get(mangled)
-        if f_new is None:
-            continue
-        for i, (p_old, p_new) in enumerate(zip(f_old.params, f_new.params)):
-            if not p_old.is_va_list and p_new.is_va_list:
-                changes.append(
-                    make_change(
-                        ChangeKind.PARAM_BECAME_VA_LIST,
-                        symbol=mangled,
-                        name=f_old.name,
-                        detail=str(p_old.name or i),
-                        old_value=p_old.type,
-                        new_value="va_list",
-                    )
-                )
-            elif p_old.is_va_list and not p_new.is_va_list:
-                changes.append(
-                    make_change(
-                        ChangeKind.PARAM_LOST_VA_LIST,
-                        symbol=mangled,
-                        name=f_old.name,
-                        detail=str(p_old.name or i),
-                        old_value="va_list",
-                        new_value=p_new.type,
-                    )
-                )
     return changes
 
 

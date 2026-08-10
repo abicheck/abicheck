@@ -21,6 +21,7 @@ from abicheck.model import (
     Function,
 )
 from abicheck.serialization import (
+    SCHEMA_VERSION,
     load_snapshot,
     save_snapshot,
     snapshot_from_dict,
@@ -220,11 +221,9 @@ class TestHeaderCvFactsReliableRoundTrip:
         assert snap.header_cv_facts_reliable is True
 
     def test_fresh_dump_serializes_current_schema_version(self) -> None:
-        from abicheck.serialization import SCHEMA_VERSION
-
         snap = _make_snap()
         j = json.loads(snapshot_to_json(snap))
-        assert j["schema_version"] == SCHEMA_VERSION == 21
+        assert j["schema_version"] == SCHEMA_VERSION == 22
 
     def test_legacy_castxml_header_snapshot_loads_as_unreliable(self) -> None:
         d = _minimal_dict(schema_version=8, from_headers=True, ast_producer="castxml")
@@ -293,7 +292,7 @@ class TestHeaderCvFactsReliableRoundTrip:
         assert legacy.header_cv_facts_reliable is False
 
         reserialized = snapshot_to_dict(legacy)
-        assert reserialized["schema_version"] == 21
+        assert reserialized["schema_version"] == SCHEMA_VERSION
         assert reserialized["header_cv_facts_reliable"] is False
 
         reloaded = snapshot_from_dict(reserialized)
@@ -383,7 +382,7 @@ class TestClangDeprecationFactsReliableRoundTrip:
         assert legacy.clang_deprecation_facts_reliable is False
 
         reserialized = snapshot_to_dict(legacy)
-        assert reserialized["schema_version"] == 21
+        assert reserialized["schema_version"] == SCHEMA_VERSION
         assert reserialized["clang_deprecation_facts_reliable"] is False
 
         reloaded = snapshot_from_dict(reserialized)
@@ -510,7 +509,7 @@ class TestClangFieldInitializerFactsReliableRoundTrip:
         assert legacy.clang_field_initializer_facts_reliable is False
 
         reserialized = snapshot_to_dict(legacy)
-        assert reserialized["schema_version"] == 21
+        assert reserialized["schema_version"] == SCHEMA_VERSION
         assert reserialized["clang_field_initializer_facts_reliable"] is False
 
         reloaded = snapshot_from_dict(reserialized)
@@ -754,11 +753,91 @@ class TestClangVtableFactsReliableRoundTrip:
         assert legacy.clang_vtable_facts_reliable is False
 
         reserialized = snapshot_to_dict(legacy)
-        assert reserialized["schema_version"] == 21
+        assert reserialized["schema_version"] == SCHEMA_VERSION
         assert reserialized["clang_vtable_facts_reliable"] is False
 
         reloaded = snapshot_from_dict(reserialized)
         assert reloaded.clang_vtable_facts_reliable is False
+
+
+class TestClangRestrictFactsReliableRoundTrip:
+    """AbiSnapshot.clang_restrict_facts_reliable (schema v22, G31 Phase C,
+    ``dumper_clang._clang_param_is_restrict``).
+
+    Same real-but-WRONG shape as the three flags above: ``Param.is_restrict``
+    is a plain bool with no "not collected" state, so a pre-v22
+    clang-producer parameter's blanket ``False`` cannot be told from a
+    genuinely unqualified parameter by value alone. Covers ``"hybrid"`` as
+    well as ``"clang"`` (a hybrid merge appends clang-only functions with
+    clang's own parameters verbatim), and — like
+    ``clang_field_initializer_facts_reliable`` — treats an ABSENT
+    ``ast_producer`` as unknown rather than as castxml.
+    """
+
+    def test_legacy_clang_header_snapshot_loads_as_unreliable(self) -> None:
+        d = _minimal_dict(schema_version=21, from_headers=True, ast_producer="clang")
+        assert snapshot_from_dict(d).clang_restrict_facts_reliable is False
+
+    def test_legacy_hybrid_header_snapshot_loads_as_unreliable(self) -> None:
+        """Unlike clang_vtable_facts_reliable, hybrid IS affected: a merge
+        keeps castxml's params for a matched function, but appends a
+        clang-ONLY function's parameters verbatim — blanket-False on a
+        pre-v22 snapshot."""
+        d = _minimal_dict(schema_version=21, from_headers=True, ast_producer="hybrid")
+        assert snapshot_from_dict(d).clang_restrict_facts_reliable is False
+
+    def test_current_clang_header_snapshot_loads_as_reliable(self) -> None:
+        d = _minimal_dict(schema_version=22, from_headers=True, ast_producer="clang")
+        assert snapshot_from_dict(d).clang_restrict_facts_reliable is True
+
+    def test_legacy_castxml_header_snapshot_stays_reliable(self) -> None:
+        """castxml's own ``_resolve_cv_restrict`` extraction predates this
+        field entirely, so its values were never blanket-False."""
+        d = _minimal_dict(schema_version=21, from_headers=True, ast_producer="castxml")
+        assert snapshot_from_dict(d).clang_restrict_facts_reliable is True
+
+    def test_legacy_header_snapshot_predating_ast_producer_is_unreliable(
+        self,
+    ) -> None:
+        """A snapshot persisted before ``ast_producer`` was tracked has an
+        UNKNOWN producer, not a castxml one — so it must not be silently
+        trusted (the same lesson ``clang_field_initializer_facts_reliable``
+        records, spelled as ``== "castxml"`` rather than
+        ``not in ("clang", "hybrid")``)."""
+        d = _minimal_dict(schema_version=21, from_headers=True)
+        assert "ast_producer" not in d
+        assert snapshot_from_dict(d).clang_restrict_facts_reliable is False
+
+    def test_legacy_dwarf_only_snapshot_stays_reliable(self) -> None:
+        """No header AST produced it, so the flag does not describe it. The
+        detector's own header-tier gate is what keeps such a side out."""
+        d = _minimal_dict(schema_version=21, from_headers=False)
+        assert snapshot_from_dict(d).clang_restrict_facts_reliable is True
+
+    def test_missing_schema_version_key_on_clang_header_snapshot_is_legacy(
+        self,
+    ) -> None:
+        d = _minimal_dict(from_headers=True, ast_producer="clang")
+        assert "schema_version" not in d
+        assert snapshot_from_dict(d).clang_restrict_facts_reliable is False
+
+    def test_round_trip_preserves_reliable_true(self) -> None:
+        snap = _make_snap()
+        j = json.loads(snapshot_to_json(snap))
+        assert snapshot_from_dict(j).clang_restrict_facts_reliable is True
+
+    def test_reserialized_legacy_snapshot_stays_unreliable(self) -> None:
+        legacy = snapshot_from_dict(
+            _minimal_dict(schema_version=21, from_headers=True, ast_producer="clang")
+        )
+        assert legacy.clang_restrict_facts_reliable is False
+
+        reserialized = snapshot_to_dict(legacy)
+        assert reserialized["schema_version"] == SCHEMA_VERSION
+        assert reserialized["clang_restrict_facts_reliable"] is False
+
+        reloaded = snapshot_from_dict(reserialized)
+        assert reloaded.clang_restrict_facts_reliable is False
 
 
 class TestDependencyScopeRoundtrip:

@@ -35,7 +35,7 @@ from abicheck.dumper import (
 )
 from abicheck.dumper_toolchain import _extract_explicit_std_value
 from abicheck.model import AbiSnapshot
-from abicheck.serialization import snapshot_from_dict, snapshot_to_dict
+from abicheck.serialization import SCHEMA_VERSION, snapshot_from_dict, snapshot_to_dict
 
 
 class TestCplusplusMacroForStandard:
@@ -164,7 +164,7 @@ class TestSnapshotSerializationRoundTrip:
             ast_sysroot="/opt/sysroot",
         )
         d = snapshot_to_dict(snap)
-        assert d["schema_version"] == 21
+        assert d["schema_version"] == SCHEMA_VERSION
         back = snapshot_from_dict(d)
         assert back.ast_resolved_standard == "gnu++17"
         assert back.ast_cplusplus_macro == "201703L"

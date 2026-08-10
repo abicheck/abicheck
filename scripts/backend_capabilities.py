@@ -1,0 +1,695 @@
+#!/usr/bin/env python3
+# Copyright 2026 Nikolay Petrov
+# SPDX-License-Identifier: Apache-2.0
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+"""backend_capabilities.py — the L2 header-backend x ABI-fact capability matrix.
+
+G31 Phase D asks for "a backend capability matrix (CastXML vs. direct-clang
+vs. hybrid, which facts/edges each can and cannot see)". This module is that
+matrix's source of truth: a hand-curated, pure-stdlib data structure (the same
+pattern as ``platform_capabilities.py``/``evidence_tiers.py``), rendered into
+``docs/reference/header-backend-capabilities.md`` by
+``scripts/gen_backend_capability_matrix.py``.
+
+**Why the data lives here and not in prose.** A hand-typed table of "which
+backend populates which field" is exactly the kind of documentation that goes
+stale silently — the G31 plan records several rounds where a fact's real
+backend coverage had moved on while a doc (or the plan itself) still described
+the old world. So this module carries two halves that a test cross-checks
+against each other:
+
+1. :data:`FACT_ROWS` — the curated claim, one row per field of the six
+   declaration dataclasses, with the reasoning a table cell can't hold.
+2. :func:`scan_backend_evidence` — the *observed* answer, read straight out of
+   ``dumper_castxml.py``/``dumper_clang.py`` with :mod:`ast`: which keyword
+   each backend actually passes when it constructs one of those dataclasses,
+   and whether the value is a real expression or a hardcoded literal (a
+   ``size_bits=None`` or ``is_opaque=False`` is *not* extraction).
+
+``tests/test_backend_capability_matrix.py`` asserts the two agree, and that
+every model field is covered exactly once — so a backend that starts (or stops)
+populating a fact fails a test rather than quietly contradicting the published
+matrix.
+
+The hybrid column is **derived, never hand-typed** — see
+:func:`hybrid_capability`.
+"""
+
+from __future__ import annotations
+
+import ast
+from dataclasses import dataclass
+from enum import Enum
+from pathlib import Path
+
+REPO_DIR = Path(__file__).resolve().parent.parent
+PKG_DIR = REPO_DIR / "abicheck"
+
+#: The six declaration dataclasses this matrix covers — the model types the two
+#: header-AST backends construct. Everything else in ``AbiSnapshot`` is either
+#: whole-snapshot metadata or a binary-format sub-model no header parse touches.
+COVERED_MODEL_CLASSES: tuple[str, ...] = (
+    "Function",
+    "Variable",
+    "TypeField",
+    "RecordType",
+    "EnumType",
+    "Param",
+)
+
+
+class Capability(str, Enum):
+    """What one backend can say about one fact."""
+
+    #: The backend's own parse populates it.
+    FULL = "full"
+    #: Populated, but narrower/less precise than the sibling backend's value.
+    #: The row's note says exactly how.
+    PARTIAL = "partial"
+    #: Populated only when the optional LibTooling companion tool
+    #: (``ABICHECK_CLANG_LAYOUT_TOOL``, G28 Phase 4) is configured — the plain
+    #: ``clang -ast-dump=json`` parse computes no record layout at all.
+    COMPANION = "companion"
+    #: Never populated by this backend; the field keeps its model default.
+    NONE = "none"
+    #: No header-AST backend populates it. Another layer owns the fact
+    #: (DWARF, the ELF symbol table, or the post-parse provenance pass) — or,
+    #: for a few fields, nothing does. The note says which.
+    OTHER_LAYER = "other_layer"
+
+
+#: Ranking used to derive the hybrid column. Only meaningful between the three
+#: "this backend does populate it" values; the two absent states never win.
+_RANK: dict[Capability, int] = {
+    Capability.NONE: 0,
+    Capability.COMPANION: 1,
+    Capability.PARTIAL: 2,
+    Capability.FULL: 3,
+}
+
+
+@dataclass(frozen=True)
+class FactRow:
+    """One model field's capability across the two header-AST backends."""
+
+    owner: str  # one of COVERED_MODEL_CLASSES
+    field: str  # the dataclass field name
+    castxml: Capability
+    clang: Capability
+    #: True when ``dumper_hybrid.py`` explicitly backfills this field from the
+    #: clang side of a merge. A hybrid snapshot is castxml-based, so a field
+    #: NOT on that list keeps castxml's answer even when clang knows better —
+    #: which is a real, documented consequence, not an oversight to paper over
+    #: (see the generated "not inherited" note and the doc's Known gaps).
+    hybrid_backfilled: bool = False
+    note: str = ""
+
+    def __post_init__(self) -> None:
+        if self.owner not in COVERED_MODEL_CLASSES:
+            raise ValueError(f"unknown owner {self.owner!r}")
+        other = Capability.OTHER_LAYER
+        if (self.castxml is other) != (self.clang is other):
+            raise ValueError(
+                f"{self.owner}.{self.field}: OTHER_LAYER describes a fact no "
+                "header backend populates, so it must hold for both columns"
+            )
+        if self.castxml is other and self.hybrid_backfilled:
+            raise ValueError(
+                f"{self.owner}.{self.field}: a non-header fact cannot be "
+                "backfilled by the hybrid merge"
+            )
+        if not self.note and (self.castxml is not self.clang):
+            raise ValueError(
+                f"{self.owner}.{self.field}: a row whose two backends differ "
+                "must explain the difference in its note"
+            )
+
+    @property
+    def populated_by_any_backend(self) -> bool:
+        return Capability.OTHER_LAYER not in (self.castxml, self.clang)
+
+
+def hybrid_capability(row: FactRow) -> Capability:
+    """The ``--ast-frontend hybrid`` column, derived from the other two.
+
+    ``dumper_hybrid.merge_snapshots`` is castxml-based by construction: it
+    walks castxml's declarations and takes clang's value only for the specific
+    facts its backfill lists name (``_backfill_function_facts``,
+    ``_merge_variable``, ``_merge_field``, ``_merge_record_type``'s
+    ``_LAYOUT_SCALAR_ATTRS``, ``_merge_enum_type``). So:
+
+    - a backfilled field resolves to whichever backend knows more, since
+      castxml wins when it has a value and clang fills in when it doesn't;
+    - every other field keeps **castxml's** answer, even one clang populates
+      and castxml doesn't.
+
+    The second rule is the one worth reading twice: hybrid is not the union of
+    the two backends. A clang-only fact that nothing backfills reaches a hybrid
+    snapshot **only** for a declaration clang alone saw (those are appended
+    verbatim); for a declaration both backends saw — the common case — it is
+    dropped.
+    """
+    if not row.populated_by_any_backend:
+        return Capability.OTHER_LAYER
+    if row.hybrid_backfilled:
+        return max((row.castxml, row.clang), key=lambda c: _RANK[c])
+    return row.castxml
+
+
+# ---------------------------------------------------------------------------
+# The curated matrix
+# ---------------------------------------------------------------------------
+
+_FULL = Capability.FULL
+_PARTIAL = Capability.PARTIAL
+_COMPANION = Capability.COMPANION
+_NONE = Capability.NONE
+_OTHER = Capability.OTHER_LAYER
+
+_PROVENANCE_PASS = (
+    "Set after parsing by `provenance.apply_provenance()` from the "
+    "`--public-header`/`--public-header-dir` sets, not by either backend."
+)
+_DYNSYM = "Read from the binary's own symbol table (`dumper_elf_symbols.py`)."
+
+#: One row per field of every class in :data:`COVERED_MODEL_CLASSES`, in
+#: declaration order. Verified against the two parsers by
+#: :func:`scan_backend_evidence` (see this module's docstring).
+FACT_ROWS: tuple[FactRow, ...] = (
+    # ── Function ───────────────────────────────────────────────────────────
+    FactRow("Function", "name", _FULL, _FULL),
+    FactRow(
+        "Function",
+        "mangled",
+        _FULL,
+        _FULL,
+        note=(
+            "castxml cannot always recover a real mangled name for a "
+            "constructor/destructor and synthesizes a placeholder key; a "
+            "hybrid merge reconciles those against clang's real Itanium name "
+            "(`dumper_hybrid._match_synthetic_ctor_dtor`)."
+        ),
+    ),
+    FactRow("Function", "return_type", _FULL, _FULL),
+    FactRow("Function", "params", _FULL, _FULL),
+    FactRow("Function", "visibility", _FULL, _FULL),
+    FactRow("Function", "is_virtual", _FULL, _FULL),
+    FactRow("Function", "is_noexcept", _FULL, _FULL),
+    FactRow("Function", "is_extern_c", _FULL, _FULL),
+    FactRow(
+        "Function",
+        "vtable_index",
+        _FULL,
+        _NONE,
+        note=(
+            "castxml numbers each virtual's slot; the clang backend passes "
+            "`None` even though it reconstructs the vtable itself "
+            "(`dumper_clang_vtable.py`), so slot-order findings need castxml."
+        ),
+    ),
+    FactRow("Function", "source_location", _FULL, _FULL),
+    FactRow("Function", "is_static", _FULL, _FULL),
+    FactRow("Function", "is_const", _FULL, _FULL),
+    FactRow("Function", "is_volatile", _FULL, _FULL),
+    FactRow("Function", "is_pure_virtual", _FULL, _FULL),
+    FactRow("Function", "is_deleted", _FULL, _FULL),
+    FactRow(
+        "Function",
+        "deleted_from_dwarf",
+        _OTHER,
+        _OTHER,
+        note="Set from DWARF's `DW_AT_deleted` (`dwarf_snapshot.py`).",
+    ),
+    FactRow("Function", "is_inline", _FULL, _FULL),
+    FactRow("Function", "access", _FULL, _FULL),
+    FactRow("Function", "return_pointer_depth", _FULL, _FULL),
+    FactRow("Function", "elf_visibility", _OTHER, _OTHER, note=_DYNSYM),
+    FactRow("Function", "ref_qualifier", _FULL, _FULL),
+    FactRow("Function", "is_explicit", _FULL, _FULL),
+    FactRow("Function", "is_hidden_friend", _FULL, _FULL),
+    FactRow("Function", "source_header", _OTHER, _OTHER, note=_PROVENANCE_PASS),
+    FactRow("Function", "origin", _OTHER, _OTHER, note=_PROVENANCE_PASS),
+    FactRow("Function", "is_variadic", _FULL, _FULL),
+    FactRow("Function", "contract_attributes", _FULL, _FULL),
+    FactRow("Function", "exception_spec", _FULL, _FULL),
+    FactRow(
+        "Function",
+        "deprecated",
+        _FULL,
+        _FULL,
+        hybrid_backfilled=True,
+        note="clang side wired in G31 Phase C (schema v19).",
+    ),
+    FactRow(
+        "Function",
+        "is_override",
+        _FULL,
+        _NONE,
+        hybrid_backfilled=True,
+        note=(
+            "No clang-side extraction exists, so the hybrid backfill for this "
+            "fact is inert — it is listed as backfilled because "
+            "`dumper_hybrid._backfill_function_facts` does name it."
+        ),
+    ),
+    FactRow("Function", "hidden_friend_owner", _FULL, _FULL),
+    # ── Variable ───────────────────────────────────────────────────────────
+    FactRow("Variable", "name", _FULL, _FULL),
+    FactRow("Variable", "mangled", _FULL, _FULL),
+    FactRow("Variable", "type", _FULL, _FULL),
+    FactRow("Variable", "visibility", _FULL, _FULL),
+    FactRow("Variable", "source_location", _FULL, _FULL),
+    FactRow("Variable", "is_const", _FULL, _FULL),
+    FactRow(
+        "Variable",
+        "value",
+        _OTHER,
+        _OTHER,
+        note=(
+            "**No producer on any layer today** — only the JSON round-trip "
+            "reads it back. A public constant's value reaches a snapshot "
+            "through `AbiSnapshot.constants`, not through this field."
+        ),
+    ),
+    FactRow(
+        "Variable",
+        "access",
+        _OTHER,
+        _OTHER,
+        note=(
+            "**No producer on any layer today**; every variable keeps the "
+            "`public` default. (`Function.access`/`TypeField.access` *are* "
+            "populated — this is the one access field nothing sets.)"
+        ),
+    ),
+    FactRow("Variable", "elf_visibility", _OTHER, _OTHER, note=_DYNSYM),
+    FactRow("Variable", "source_header", _OTHER, _OTHER, note=_PROVENANCE_PASS),
+    FactRow("Variable", "origin", _OTHER, _OTHER, note=_PROVENANCE_PASS),
+    FactRow(
+        "Variable",
+        "alignment_bits",
+        _FULL,
+        _PARTIAL,
+        note=(
+            "castxml reports the compiler-computed alignment for any variable; "
+            "clang reads only an explicit `alignas`/`__attribute__((aligned))` "
+            "override, never a type's natural alignment — a tracked gap that "
+            "leaves `exported_object_alignment_reduced` without corroboration "
+            "on a clang-only host (see `dumper_clang.py`'s module docstring)."
+        ),
+    ),
+    FactRow(
+        "Variable",
+        "deprecated",
+        _FULL,
+        _FULL,
+        hybrid_backfilled=True,
+        note="clang side wired in G31 Phase C (schema v19).",
+    ),
+    # ── TypeField ──────────────────────────────────────────────────────────
+    FactRow("TypeField", "name", _FULL, _FULL),
+    FactRow("TypeField", "type", _FULL, _FULL),
+    FactRow(
+        "TypeField",
+        "offset_bits",
+        _FULL,
+        _COMPANION,
+        hybrid_backfilled=True,
+        note=(
+            "clang's JSON AST computes no record layout; the field offset "
+            "arrives only from the optional layout companion tool, or from "
+            "DWARF via `dumper_layout_backfill.py`."
+        ),
+    ),
+    FactRow("TypeField", "is_bitfield", _FULL, _FULL),
+    FactRow("TypeField", "bitfield_bits", _FULL, _FULL),
+    FactRow("TypeField", "is_const", _FULL, _FULL),
+    FactRow("TypeField", "is_volatile", _FULL, _FULL),
+    FactRow("TypeField", "is_mutable", _FULL, _FULL),
+    FactRow("TypeField", "access", _FULL, _FULL),
+    FactRow(
+        "TypeField",
+        "default",
+        _FULL,
+        _PARTIAL,
+        hybrid_backfilled=True,
+        note=(
+            "Both populate it (clang side in G31 Phase C, schema v20), but the "
+            "VALUES are not cross-comparable: castxml keeps the verbatim "
+            "source expression where clang falls back to a structural "
+            "fingerprint, so the detector requires the same producer on both "
+            "sides rather than merely a known one."
+        ),
+    ),
+    FactRow(
+        "TypeField",
+        "deprecated",
+        _FULL,
+        _FULL,
+        hybrid_backfilled=True,
+        note="clang side wired in G31 Phase C (schema v19).",
+    ),
+    # ── RecordType ─────────────────────────────────────────────────────────
+    FactRow("RecordType", "name", _FULL, _FULL),
+    FactRow("RecordType", "kind", _FULL, _FULL),
+    FactRow(
+        "RecordType",
+        "size_bits",
+        _FULL,
+        _COMPANION,
+        hybrid_backfilled=True,
+        note=(
+            "castxml runs a real compiler and computes layout; the plain clang "
+            "AST parse leaves it `None` so the layout detectors skip an "
+            "unknown-vs-unknown comparison (DWARF stays the layout authority)."
+        ),
+    ),
+    FactRow(
+        "RecordType",
+        "alignment_bits",
+        _FULL,
+        _COMPANION,
+        hybrid_backfilled=True,
+        note="Same layout split as `size_bits`.",
+    ),
+    FactRow("RecordType", "fields", _FULL, _FULL),
+    FactRow("RecordType", "bases", _FULL, _FULL),
+    FactRow("RecordType", "virtual_bases", _FULL, _FULL),
+    FactRow(
+        "RecordType",
+        "vtable",
+        _FULL,
+        _FULL,
+        note=(
+            "clang's is a reconstruction over the AST "
+            "(`dumper_clang_vtable.py`, G31 Phase C, schema v21) rather than a "
+            "compiler-emitted table; castxml's comes from its own bundled "
+            "compiler. Both are transitively inherited across bases."
+        ),
+    ),
+    FactRow("RecordType", "source_location", _FULL, _FULL),
+    FactRow("RecordType", "is_union", _FULL, _FULL),
+    FactRow(
+        "RecordType",
+        "is_opaque",
+        _FULL,
+        _NONE,
+        note=(
+            "Correct by construction rather than a gap: clang's `parse_types` "
+            "skips every non-definition, so `_build_record` never sees an "
+            "incomplete record and hardcodes `False`. The consequence is still "
+            "real — an opaque handle type (`struct A;` alone) is *absent* from "
+            "a clang snapshot where castxml emits it with `is_opaque=True`."
+        ),
+    ),
+    FactRow("RecordType", "is_final", _FULL, _FULL),
+    FactRow(
+        "RecordType",
+        "is_template_pattern",
+        _NONE,
+        _FULL,
+        note=(
+            "castxml emits template *instantiations*, never the uninstantiated "
+            "pattern, so it has nothing to mark. Not backfilled by the hybrid "
+            "merge — but a pattern reaches a hybrid snapshot only through the "
+            "clang-only append path, which preserves the flag."
+        ),
+    ),
+    FactRow(
+        "RecordType",
+        "has_anonymous_aggregate_fields",
+        _NONE,
+        _FULL,
+        note=(
+            "clang flattens an anonymous struct/union into its parent and "
+            "records that it did, which `dumper_layout_backfill.py` uses when "
+            "matching DWARF fields. Not backfilled: a record both backends saw "
+            "keeps castxml's `False` (harmless in practice, since castxml also "
+            "supplies the real offsets that backfill would otherwise seek)."
+        ),
+    ),
+    FactRow("RecordType", "source_header", _OTHER, _OTHER, note=_PROVENANCE_PASS),
+    FactRow("RecordType", "origin", _OTHER, _OTHER, note=_PROVENANCE_PASS),
+    FactRow(
+        "RecordType",
+        "data_size_bits",
+        _NONE,
+        _COMPANION,
+        hybrid_backfilled=True,
+        note=(
+            "The tail-padding-excluded size. Neither backend's own parse "
+            "computes it; it arrives from the layout companion tool or DWARF."
+        ),
+    ),
+    FactRow(
+        "RecordType",
+        "is_standard_layout",
+        _NONE,
+        _FULL,
+        hybrid_backfilled=True,
+        note=(
+            "A semantic trait clang computes independent of any layout pass "
+            "(`definitionData.isStandardLayout`, present only when true), and "
+            "one castxml's schema genuinely does not expose. Wiring it in G31 "
+            "Phase C activated `STANDARD_LAYOUT_LOST`, dead code until then."
+        ),
+    ),
+    FactRow(
+        "RecordType",
+        "is_trivially_copyable",
+        _NONE,
+        _FULL,
+        hybrid_backfilled=True,
+        note="Same shape as `is_standard_layout`; activated `TRIVIALLY_COPYABLE_LOST`.",
+    ),
+    FactRow(
+        "RecordType",
+        "vptr_offset_bits",
+        _PARTIAL,
+        _PARTIAL,
+        hybrid_backfilled=True,
+        note=(
+            "Both backends apply the same `0`-if-polymorphic heuristic — the "
+            "Itanium primary-base rule — so neither tracks a secondary "
+            "vtable's placement under multiple inheritance. Only DWARF reads "
+            "the compiler's own artificial vptr member for a real offset."
+        ),
+    ),
+    FactRow(
+        "RecordType",
+        "base_offsets",
+        _FULL,
+        _COMPANION,
+        hybrid_backfilled=True,
+        note="Same layout split as `size_bits`.",
+    ),
+    FactRow("RecordType", "qualified_name", _FULL, _FULL),
+    FactRow(
+        "RecordType",
+        "is_abstract",
+        _FULL,
+        _NONE,
+        hybrid_backfilled=True,
+        note=(
+            "No clang-side extraction exists, so the hybrid backfill for this "
+            "fact is inert (same shape as `Function.is_override`)."
+        ),
+    ),
+    FactRow(
+        "RecordType",
+        "deprecated",
+        _FULL,
+        _FULL,
+        hybrid_backfilled=True,
+        note="clang side wired in G31 Phase C (schema v19).",
+    ),
+    # ── EnumType ───────────────────────────────────────────────────────────
+    FactRow("EnumType", "name", _FULL, _FULL),
+    FactRow("EnumType", "members", _FULL, _FULL),
+    FactRow(
+        "EnumType",
+        "underlying_type",
+        _NONE,
+        _FULL,
+        note=(
+            "clang reads `fixedUnderlyingType`; castxml never populates it, so "
+            "a castxml (and therefore hybrid) enum keeps the model default "
+            "`int` whatever the header declared. No diff detector reads this "
+            "field — `enum_underlying_size_changed` is computed from DWARF — "
+            "but `tu_merge.py`'s ODR conflict check does."
+        ),
+    ),
+    FactRow("EnumType", "source_location", _FULL, _FULL),
+    FactRow("EnumType", "source_header", _OTHER, _OTHER, note=_PROVENANCE_PASS),
+    FactRow("EnumType", "origin", _OTHER, _OTHER, note=_PROVENANCE_PASS),
+    FactRow(
+        "EnumType",
+        "is_scoped",
+        _FULL,
+        _FULL,
+        hybrid_backfilled=True,
+        note="clang side wired in G31 Phase C (schema v19).",
+    ),
+    FactRow(
+        "EnumType",
+        "deprecated",
+        _FULL,
+        _FULL,
+        hybrid_backfilled=True,
+        note="clang side wired in G31 Phase C (schema v19).",
+    ),
+    FactRow("EnumType", "qualified_name", _FULL, _FULL),
+    # ── Param ──────────────────────────────────────────────────────────────
+    FactRow("Param", "name", _FULL, _FULL),
+    FactRow("Param", "type", _FULL, _FULL),
+    FactRow(
+        "Param",
+        "kind",
+        _OTHER,
+        _OTHER,
+        note=(
+            "The value/pointer/reference/rvalue-ref classification is derived "
+            "from DWARF type tags (`dwarf_snapshot.py`); a header-parsed "
+            "parameter keeps the `value` default and is distinguished by "
+            "`pointer_depth` and its type spelling instead."
+        ),
+    ),
+    FactRow(
+        "Param",
+        "default",
+        _FULL,
+        _PARTIAL,
+        note=(
+            "Same representation split as `TypeField.default`: a real source "
+            "expression from castxml, a placeholder/fingerprint from clang. "
+            "Parameters are never merged field-by-field, so a hybrid snapshot "
+            "carries castxml's `params` verbatim for any matched function."
+        ),
+    ),
+    FactRow("Param", "pointer_depth", _FULL, _FULL),
+    FactRow(
+        "Param",
+        "is_restrict",
+        _FULL,
+        _FULL,
+        note=(
+            "clang side wired in G31 Phase C (schema v22). castxml was the "
+            "only producer before that, so a cross-backend comparison of "
+            "unchanged headers reported `param_restrict_changed` for every "
+            "`restrict` parameter."
+        ),
+    ),
+    FactRow(
+        "Param",
+        "is_va_list",
+        _OTHER,
+        _OTHER,
+        note=(
+            "**No producer on any layer today** — `diff_symbols` has a "
+            "detector reading it (`param_became_va_list`), but nothing ever "
+            "sets it, so that detector is unreachable on real input."
+        ),
+    ),
+)
+
+
+# ---------------------------------------------------------------------------
+# Observed evidence — what the two parsers actually do
+# ---------------------------------------------------------------------------
+
+
+class Evidence(str, Enum):
+    """What a backend's source says about one field, structurally."""
+
+    #: The backend passes this keyword with a real expression.
+    EXTRACTED = "extracted"
+    #: The keyword is passed, but as a hardcoded literal (``None``/``False``/
+    #: ``[]``), which is a placeholder rather than an extracted fact.
+    LITERAL = "literal"
+    #: The backend never passes this keyword at all.
+    ABSENT = "absent"
+
+
+def _is_placeholder_literal(node: ast.expr) -> bool:
+    if isinstance(node, ast.Constant):
+        return True
+    if isinstance(node, (ast.List, ast.Tuple, ast.Set)):
+        return not node.elts
+    if isinstance(node, ast.Dict):
+        return not node.keys
+    return False
+
+
+def scan_backend_evidence(module_path: Path) -> dict[str, dict[str, Evidence]]:
+    """``{class name: {field: Evidence}}`` for one backend module.
+
+    Reads the module with :mod:`ast` rather than by regex: a keyword's value
+    spans several lines often enough (``bases=[] if is_opaque else [...]``)
+    that a line-oriented match reports the wrong answer — an early version of
+    this scanner called both `bases` and `virtual_bases` hardcoded-empty on the
+    castxml backend for exactly that reason.
+
+    A field constructed in more than one place counts as ``EXTRACTED`` if ANY
+    construction extracts it (``dumper_castxml`` builds ``TypeField`` from two
+    call sites). An attribute assignment (``field.access = ...``) counts as
+    evidence too, since a backend may finish a declaration after constructing
+    it.
+    """
+    tree = ast.parse(module_path.read_text(encoding="utf-8"))
+    out: dict[str, dict[str, Evidence]] = {c: {} for c in COVERED_MODEL_CLASSES}
+
+    def record(cls: str, field: str, evidence: Evidence) -> None:
+        if out[cls].get(field) is not Evidence.EXTRACTED:
+            out[cls][field] = evidence
+
+    assigned_attrs: set[str] = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Assign):
+            for target in node.targets:
+                if isinstance(target, ast.Attribute):
+                    assigned_attrs.add(target.attr)
+        if (
+            isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Name)
+            and node.func.id in out
+        ):
+            for kw in node.keywords:
+                if kw.arg is None:
+                    continue
+                record(
+                    node.func.id,
+                    kw.arg,
+                    Evidence.LITERAL
+                    if _is_placeholder_literal(kw.value)
+                    else Evidence.EXTRACTED,
+                )
+
+    for cls in out:
+        for attr in assigned_attrs:
+            if attr in out[cls]:
+                record(cls, attr, Evidence.EXTRACTED)
+    return out
+
+
+def castxml_evidence() -> dict[str, dict[str, Evidence]]:
+    return scan_backend_evidence(PKG_DIR / "dumper_castxml.py")
+
+
+def clang_evidence() -> dict[str, dict[str, Evidence]]:
+    return scan_backend_evidence(PKG_DIR / "dumper_clang.py")
+
+
+def rows_for(owner: str) -> tuple[FactRow, ...]:
+    return tuple(r for r in FACT_ROWS if r.owner == owner)

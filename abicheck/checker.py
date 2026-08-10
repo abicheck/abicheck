@@ -24,6 +24,7 @@ from . import (
     diff_bit_int,  # noqa: F401 — triggers detector registration
     diff_char8t,  # noqa: F401 — triggers detector registration
     diff_integer_model,  # noqa: F401 — triggers detector registration
+    diff_param_qualifiers,  # noqa: F401 — triggers detector registration
 )
 from .checker_policy import (
     API_BREAK_KINDS as _API_BREAK_KINDS,

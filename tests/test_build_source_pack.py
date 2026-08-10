@@ -54,7 +54,7 @@ from abicheck.checker_policy import (
     ChangeKind,
 )
 from abicheck.model import AbiSnapshot
-from abicheck.serialization import snapshot_from_dict, snapshot_to_dict
+from abicheck.serialization import SCHEMA_VERSION, snapshot_from_dict, snapshot_to_dict
 
 # ── Pack model & content addressing ──────────────────────────────────────────
 
@@ -209,7 +209,7 @@ def test_snapshot_v7_evidence_ref_roundtrip():
         build_source_pack=BuildSourceRef(content_hash="sha256:abc", path_hint="e/"),
     )
     d = snapshot_to_dict(snap)
-    assert d["schema_version"] == 21
+    assert d["schema_version"] == SCHEMA_VERSION
     assert d["build_source_pack"]["content_hash"] == "sha256:abc"
     back = snapshot_from_dict(d)
     assert back.build_source_pack is not None

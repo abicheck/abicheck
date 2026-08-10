@@ -758,6 +758,32 @@ class AbiSnapshot:
     # flag does not describe.
     clang_vtable_facts_reliable: bool = field(default=True, kw_only=True)
 
+    # True when this snapshot's Param.is_restrict facts are known-reliable
+    # when its own ``ast_producer`` is ``"clang"`` OR ``"hybrid"`` -- G31
+    # Phase C (schema v22) wired real extraction into the direct-clang
+    # backend (``dumper_clang._clang_param_is_restrict``), previously
+    # unconditionally False for EVERY parameter regardless of its actual
+    # qualification. Same "real but WRONG data" shape as the three flags
+    # above: ``Param.is_restrict`` is a plain bool with no "not collected"
+    # state, so a pre-v22 clang-producer parameter's blanket False is
+    # indistinguishable by value alone from a genuine "not restrict-
+    # qualified" parameter, and comparing a fresh clang dump of UNCHANGED
+    # headers against a persisted pre-v22 clang baseline reads as every
+    # restrict qualifier having been ADDED (and, in the other direction,
+    # REMOVED). Covers "hybrid" too, for the same reason as
+    # ``clang_field_initializer_facts_reliable``: a hybrid merge keeps
+    # castxml's own ``params`` verbatim for every MATCHED function (there is
+    # no per-param backfill), so only a clang-ONLY function -- appended
+    # verbatim by ``dumper_hybrid._merge_functions`` -- carries clang's
+    # parameters, and on a pre-v22 hybrid snapshot those are exactly the
+    # blanket-False ones. Not needed for "castxml": its own
+    # ``_resolve_cv_restrict`` extraction predates this field entirely.
+    # False only for a snapshot rehydrated from a persisted pre-v22,
+    # clang/hybrid-producer schema (see serialization.SCHEMA_VERSION); a
+    # freshly-built in-memory snapshot defaults True, since it was
+    # necessarily produced by the current, fixed parser.
+    clang_restrict_facts_reliable: bool = field(default=True, kw_only=True)
+
     # Phase 3: binary format platform — detected from ELF/PE/MachO metadata.
     # None = unknown / not yet detected.
     # Populated by detect_platform() in pipeline or by the dumper.
