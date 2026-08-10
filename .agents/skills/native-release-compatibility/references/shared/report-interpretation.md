@@ -22,16 +22,26 @@ reason.message     the specific mismatch, in prose
 
 ## 2. What evidence backed it?
 
+Everything below belongs to a **completed** comparison. A refused one
+(`verdict: null`, section 1) carries only the schema version, the library and
+versions, `verdict`, and `reason` — no evidence fields at all. That is the
+documented shape of a not-comparable report, not a malformed one: stop and
+remediate the inputs rather than looking for evidence that is not there.
+
 ```
-evidence_tier       elf_only | dwarf_aware | header_aware  — always present
-evidence_tiers      raw sources available                  — always present
+evidence_tier       elf_only | dwarf_aware | header_aware  — every completed run
+evidence_tiers      raw sources available                  — every completed run
+layer_coverage      per-layer L0-L5 status — the only field that can confirm
+                    build/source depth was collected
 coverage_warnings   where coverage fell short — present only when non-empty
 scope.resolved      false → fell back to the full export table
 contract_coverage   "partial" → only one side had a fingerprint
 ```
 
-`evidence_tier` is the one to key trust decisions off, and on this path it is
-the *only* thing that answers "what depth did this actually reach". There is
+`evidence_tier` is the one to key trust decisions off **for `binary`/`headers`
+depth**; its scale stops at `header_aware`, so for `--depth build`/`source`
+read `layer_coverage` instead
+([evidence and depth](evidence-and-depth.md)). There is
 no depth echo to read: `requested_depth` and `effective_depth` exist in the
 report schema but are populated only by the GitHub Action's `check-target`
 envelope, never by a direct `abicheck compare`.

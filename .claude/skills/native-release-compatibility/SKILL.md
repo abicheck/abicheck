@@ -216,7 +216,10 @@ Then check the axes that are not per-finding, reading each report per
 - `evidence_tier` — did every cell reach the evidence this decision
   requires? A cell run at a shallower depth is diagnostic, not a gate result
   ([evidence and depth](references/shared/evidence-and-depth.md)). Compare the tier
-  across cells; there is no per-report depth echo to read.
+  across cells; there is no per-report depth echo to read. For a cell run at
+  `--depth build`/`source`, the tier cannot answer this — it stops at
+  `header_aware` — so read that cell's `layer_coverage` and require the
+  layers it depends on to be `present`, not `not_collected`.
 - `contract_coverage_failures` and `contract_coverage_exit_contribution` —
   the orthogonal coverage axis. A `1` means the contract this release was
   judged against was never fully established. It is unsuppressible; report

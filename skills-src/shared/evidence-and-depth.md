@@ -47,14 +47,25 @@ and, **only when there were coverage gaps**:
 You will not find a "depth achieved" echo alongside them: `requested_depth`
 and `effective_depth` are in the report schema but only the GitHub Action's
 `check-target` envelope populates them, never a direct `abicheck compare`.
-That makes `evidence_tier` the only answer to "what depth did this reach",
-and reading it is **mandatory**: unlike `dump`, `compare` does *not* fail
-when an explicit `--depth` cannot be reached. It emits a warning and
-silently downgrades — a headerless `--depth headers` run produces an exit-`0`
-report at `elf_only` or `dwarf_aware`. Require `evidence_tier: header_aware`
-before treating a `--depth headers` verdict as one, and rerun with the
-headers supplied (`-H/--header`, `-I/--include`) rather than reporting the
-downgraded result.
+Confirming the depth is **mandatory**, because `compare` does *not* fail when
+an explicit `--depth` cannot be reached — unlike `dump`, it warns and
+silently downgrades. Which field confirms it depends on the depth asked for:
+
+- **`binary` / `headers`** — `evidence_tier`. A headerless `--depth headers`
+  run produces an exit-`0` report at `elf_only` or `dwarf_aware`; require
+  `header_aware` before treating that verdict as a header-depth answer.
+- **`build` / `source`** — **`layer_coverage`**, not `evidence_tier`. The
+  tier scale stops at `header_aware` and has no value for build context,
+  source replay, or a call graph, so it cannot express whether L3–L5 were
+  collected. A `--depth source` run over header-only snapshots completes at
+  exit `0` with `evidence_tier: header_aware` while `layer_coverage` shows
+  `L3_build` and `L4_source_abi` as `not_collected`. Read the entry for each
+  layer the workflow depends on and require `status: present`; a reachability
+  claim resting on a `not_collected` layer is unbacked.
+
+In either case, rerun with the missing evidence supplied — headers via
+`-H/--header`/`-I/--include`, build/source evidence via its own flags —
+rather than reporting the downgraded result.
 
 Per finding, `changes[].evidence_status` records what backed that specific
 finding.

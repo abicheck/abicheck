@@ -30,8 +30,13 @@ from the plugin's own imports.
 Deeper evidence sharpens the answer. At `--depth source`, reachability is
 call-graph proven rather than surface-level; at shallower depths the answer
 is "this symbol is imported", which is sound for removals but weaker for
-"does the changed field actually reach this consumer". Say which you have —
-see [evidence-and-depth.md](evidence-and-depth.md).
+"does the changed field actually reach this consumer". Say which you have.
+
+Asking for `--depth source` does not establish you got it: the run completes
+at exit `0` with the source layers uncollected, and `evidence_tier` cannot
+show the difference. Confirm `layer_coverage` reports the source layers
+`present` before claiming a call-graph-proven answer — see
+[evidence-and-depth.md](evidence-and-depth.md).
 
 ## Reading the result
 

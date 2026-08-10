@@ -18,10 +18,11 @@ found nothing".
 
 Check `evidence_tier`, `evidence_tiers`, and `coverage_warnings` in the JSON
 report before summarizing anything — and, when public-header scoping was
-requested, `scope.resolved`. **Asking for `--depth headers` is not evidence
-that headers were read**: `compare` warns and proceeds on weaker evidence
-rather than failing, so `evidence_tier` must confirm the depth you requested
-before its verdict is reported as one. See
+requested, `scope.resolved`. **Asking for a `--depth` is not evidence that it
+was reached**: `compare` warns and proceeds on weaker evidence rather than
+failing, so the report must confirm the depth before its verdict is reported
+as one — `evidence_tier` for `binary`/`headers`, and `layer_coverage` for
+`build`/`source`, whose collection the tier scale cannot express at all. See
 [report-interpretation.md](report-interpretation.md) for which blocks a given
 invocation actually produces: an absent block means the run did not produce
 it, never that it was clean.
