@@ -200,8 +200,17 @@ model:
   `degraded_passes["macro_graph"]` — see Phase 5 item 2 above), for the two
   populated edge kinds (`MACRO_CONTROLS_DECL`/`DECL_USES_MACRO`); the three
   reserved ones (`MACRO_EXPANDS_TO_VALUE` etc.) remain open, each its own
-  follow-up. Virtual dispatch and callback/function-pointer remain fully
-  open — each needs its own Clang AST pass this phase has not added.
+  follow-up. **Virtual dispatch is partially done**
+  (`virtual_dispatch_graph.py`, `extractor_passes["virtual_dispatch_graph"]`
+  — see Phase 5 item 3 above): `VIRTUAL_CALL_MAY_DISPATCH_TO`/
+  `TYPE_HAS_VTABLE` are populated (needing no new clang invocation at all —
+  a pure transform over already-folded call/type/override graph state);
+  `DECL_OVERRIDES_DECL` needed no producer (already satisfied by
+  `override_graph.py`'s existing confirmed-override edges) and
+  `VTABLE_SLOT_MAPS_TO_DECL` remains reserved (needs a real per-slot Itanium
+  layout model, deliberately not attempted). Callback/function-pointer
+  remains fully open — it needs its own Clang AST pass this phase has not
+  added.
 - **G29.7** — The minimal new user-facing detector set from the review
   (8 detector surfaces: 6 `ChangeKind`s and 2 report-level overlays — see
   Phase 6) plus `case194`-`case205` positive/negative example pairs and the
@@ -693,10 +702,71 @@ which all depend on a Clang AST pass.
    suite pins down (`test_augment_never_mints_new_nodes`), which is its own
    scoped design decision, not a drive-by override; see the module
    docstring's `EDGE_MACRO_CONTROLS_DECL` entry for the full reasoning.
-3. **Virtual dispatch**: `DECL_OVERRIDES_DECL`, `VIRTUAL_CALL_MAY_DISPATCH_TO`
-   (explicitly `overapprox`, never `exact`), `VTABLE_SLOT_MAPS_TO_DECL`,
-   `TYPE_HAS_VTABLE` — distinguishes "the vtable slot provably changed" from
-   "the possible runtime dispatch target set changed".
+3. **Virtual dispatch — partially done.** `abicheck/buildsource/
+   virtual_dispatch_graph.py` populates two of the four edge kinds this item
+   originally sketched, both as **pure graph transformations** — unlike every
+   other item in this phase, it shells out to no compiler at all, since both
+   parts read already-collected `call_graph.py`/`type_graph.py`/
+   `override_graph.py` facts and write more graph. Driven by
+   `inline_graph_fold.fold_virtual_dispatch_graph`, run immediately after
+   `fold_override_graph` in `fold_semantic_graphs` (all three of its inputs
+   must have already run).
+   - `VIRTUAL_CALL_MAY_DISPATCH_TO` (`CONF_REDUCED`, explicitly
+     `resolution: "overapprox"`, never `"exact"` — the design brief's own
+     instruction) joins a virtual `DECL_CALLS_DECL` edge (`call_kind ==
+     "virtual"`, pointing at the statically-resolved base method) against
+     every `METHOD_POSSIBLE_OVERRIDE` edge naming that same base method as
+     its target, re-pointing from the original *caller* to each override
+     candidate. A leaf virtual method with no recorded override candidates
+     emits nothing — no spurious self-edge back to the base method, since the
+     `DECL_CALLS_DECL` edge already names it and there is no dispatch
+     ambiguity to represent.
+   - `TYPE_HAS_VTABLE` (`CONF_HIGH`, the one genuinely **new node kind** this
+     phase introduces — items 1/2/6 all reused pre-existing node kinds)
+     derives, per the Itanium ABI rule "a class is polymorphic iff it
+     declares or inherits ≥1 virtual function", which `record_type` nodes are
+     polymorphic: seeded from a `record_type`'s exact-match ownership of a
+     method appearing in a `METHOD_POSSIBLE_OVERRIDE` edge (decoded from the
+     method's own Itanium/MSVC mangled identity via
+     `diff_cxx_rules.itanium_scope_components`/`msvc_scope_components` — the
+     same structural, no-external-demangler decoders
+     `diff_cxx_rules.owner_class_of` already uses elsewhere), then closed
+     transitively over `TYPE_INHERITS`. Mints at most one `vtable` node per
+     polymorphic class (`vtable://<record-type-identity>`), bounded by class
+     count. The owner-join is deliberately **exact-match only** (a known,
+     conservative false negative for a class-template specialization, whose
+     raw Itanium encoding doesn't equal `type_graph.py`'s spelled record
+     identity — never a wrong match on an unrelated same-named type).
+   - **`DECL_OVERRIDES_DECL` needed no new producer at all — a closed gap,
+     not a deferred one.** `override_graph.py` (ADR-041 P2 item 1, which
+     predates this item) already emits `METHOD_POSSIBLE_OVERRIDE` edges whose
+     `resolution` is `"override_confirmed"` when clang's own `OverrideAttr`
+     (the `override` keyword, compiler-checked) is present — that edge
+     already carries the exact fact `DECL_OVERRIDES_DECL` would. Minting a
+     second, redundant edge kind for the same fact would fork one piece of
+     evidence into two with no consumer able to tell which is authoritative —
+     the same "closed a gap by discovering pre-existing coverage" pattern
+     this plan used for ADR-057 D6's tier-1 finding. `DECL_OVERRIDES_DECL`
+     stays registered in `graph_facts.VIRTUAL_DISPATCH_EDGE_KINDS` so a
+     hand-built or future graph naming it directly is never rejected, but no
+     producer emits it.
+   - **`VTABLE_SLOT_MAPS_TO_DECL` remains reserved, deliberately not
+     attempted.** A precise per-slot Itanium vtable layout (offset-to-top and
+     typeinfo pointer slots, primary vs. secondary vtables under multiple
+     inheritance, virtual-inheritance vtables, covariant-return thunks
+     shifting a slot's target) is exactly the class of ABI-layout complexity
+     `diff_elf_layout.py`'s own binary-only vtable-slot-*count* detector
+     documents in its own module docstring — a much harder, easy-to-get-
+     subtly-wrong claim than "this class has a vtable" or "this call's
+     target set may include these declarations." A naive "declaration order"
+     per-slot model would get exactly those cases wrong, not merely
+     approximately right, and this codebase's discipline is to degrade to no
+     fact rather than emit a wrong one (ADR-028 D3) — so this edge waits for
+     a real, verified Itanium layout model, matching this item's own design
+     brief's distinction between "the vtable slot provably changed" and "the
+     possible runtime dispatch target set changed". `diff_elf_layout.py`
+     itself is unrelated infrastructure (binary-only, no per-slot identity)
+     and is not unified with this family.
 4. **Callback/function-pointer**: `DECL_TAKES_ADDRESS_OF`,
    `DECL_REGISTERS_CALLBACK`, `CALLBACK_MAY_INVOKE`,
    `FUNCTION_POINTER_HAS_SIGNATURE` — closes the plugin/event-loop/C-API
@@ -783,6 +853,7 @@ abicheck/buildsource/entity_resolver.py  # EntityResolver/EntityConflict (Phase 
 abicheck/buildsource/archive_graph.py  # ar-index introspection (Phase 5 item 6, DONE — archive_member/ARCHIVE_CONTAINS_OBJECT/OBJECT_DEFINES_SYMBOL)
 abicheck/buildsource/template_graph.py  # Clang template-instantiation pass (Phase 5 item 1, DONE — template_decl/template_instantiation, DECL_INSTANTIATES_TEMPLATE/TEMPLATE_USES_TYPE/INSTANTIATION_EMITS_SYMBOL)
 abicheck/buildsource/macro_graph.py  # Clang + raw-text macro/config-dependency pass (Phase 5 item 2, DONE — MACRO_CONTROLS_DECL/DECL_USES_MACRO)
+abicheck/buildsource/virtual_dispatch_graph.py  # pure graph transform, no clang (Phase 5 item 3, PARTIAL — VIRTUAL_CALL_MAY_DISPATCH_TO/TYPE_HAS_VTABLE; DECL_OVERRIDES_DECL already satisfied by override_graph.py, VTABLE_SLOT_MAPS_TO_DECL reserved)
 abicheck/internal_leak.py   # TraversalPolicy + effect_transitions (Phase 2 D5, DONE — landed here, not a separate impact/traversal.py)
 abicheck/impact/
     model.py           # ImpactAssessment, GraphProofPath, FindingDecision (Phase 3 slices 1/7, DONE — ADR-052)

@@ -334,6 +334,54 @@ contract the call/type/template/include-graph passes use — requiring both a
 clean, fully-covered Clang pass *and* a clean raw-text scan (no per-file
 read/parse diagnostic) before claiming confirmed coverage.
 
+## The virtual-dispatch half of the graph (G29 Phase 5 item 3)
+
+Unlike every sibling section above, `abicheck/buildsource/
+virtual_dispatch_graph.py` shells out to no compiler at all: both edge kinds
+below are **pure graph transformations** over `call_graph.py`/
+`type_graph.py`/`override_graph.py` facts the graph already carries, driven
+by `inline_graph_fold.fold_virtual_dispatch_graph` immediately after
+`fold_override_graph` (all three inputs must have already run).
+
+| Kind | Status | Meaning |
+|---|---|---|
+| `vtable` *(node)* | populated | One node per genuinely polymorphic class (`vtable://<record-type-identity>`) — the one new node kind this Phase 5 family introduces (items 1/2/6 all reused pre-existing kinds). Minted at most once per `record_type` node. |
+| `VIRTUAL_CALL_MAY_DISPATCH_TO` *(edge)* | populated | The calling `source_decl` → an override-candidate `source_decl`. Joins a virtual `DECL_CALLS_DECL` edge (`call_kind == "virtual"`, pointing at the statically-resolved base method) against every `METHOD_POSSIBLE_OVERRIDE` edge naming that base method as its target. `attrs.resolution` is always `"overapprox"`, never `"exact"`; `attrs.base_method` names the base method; `attrs.override_resolution` mirrors the joined override edge's own `resolution`. `CONF_REDUCED` — a static approximation of a runtime dispatch decision. |
+| `TYPE_HAS_VTABLE` *(edge)* | populated | `record_type` → `vtable`. Per the Itanium ABI rule, a class is polymorphic iff it declares or inherits ≥1 virtual function. `CONF_HIGH` — once a class is known to own or inherit a virtual slot, this is a structural, provable fact. |
+| `DECL_OVERRIDES_DECL` *(edge)* | **satisfied by an existing kind, no producer** | `override_graph.py`'s `METHOD_POSSIBLE_OVERRIDE` edge with `attrs.resolution == "override_confirmed"` (clang's own `OverrideAttr`) already carries this exact fact — see that section above. Registered so a hand-built/future graph naming it directly is never rejected, but nothing in this codebase emits it, deliberately: minting a second edge kind for the same fact would fork one piece of evidence into two. |
+| `VTABLE_SLOT_MAPS_TO_DECL` *(edge)* | reserved | A precise per-slot Itanium vtable layout (offset-to-top/typeinfo slots, primary vs. secondary vtables under multiple inheritance, virtual-inheritance vtables, covariant-return thunks) is a much harder, easy-to-get-subtly-wrong claim than "this class has a vtable" or "this call's target set may include these declarations" — see the module's own docstring. Deliberately not attempted this slice; `diff_elf_layout.py`'s existing binary-only vtable-slot-*count* detector is unrelated, complementary infrastructure (no per-slot identity), not unified with this family. |
+
+**`VIRTUAL_CALL_MAY_DISPATCH_TO` never re-emits the base method itself as a
+target** — it is already the joined `DECL_CALLS_DECL` edge's own `dst`, so
+restating it here would be a redundant self-fact. A virtual call to a base
+method with **no** recorded override candidates (a leaf virtual method)
+emits no `VIRTUAL_CALL_MAY_DISPATCH_TO` edge at all, not a spurious
+self-edge: there is no dispatch ambiguity to represent when the call graph
+already names the only possible target directly.
+
+**`TYPE_HAS_VTABLE`'s owner join is deliberately exact-match only.** Since
+`METHOD_POSSIBLE_OVERRIDE` edges name methods, not their owning types, the
+module recovers the owner by decoding a method's own mangled identity via
+`diff_cxx_rules.itanium_scope_components`/`msvc_scope_components` (the same
+structural, no-external-demangler decoders `diff_cxx_rules.owner_class_of`
+already uses elsewhere) and dropping the leaf component. This is matched
+against a `record_type` node's identity **exactly**, never as a fuzzy/bare-
+suffix match: for a class-template specialization, the decoder keeps the
+*raw* Itanium template-argument encoding rather than the spelled form
+`type_graph.py`'s record identities use, so an exact match never fires for a
+templated owner — a silent, conservative false negative (a template-
+instantiated polymorphic class may go undetected), never a wrong claim on an
+unrelated same-named type. For every non-template class the two forms
+coincide exactly, since a plain identifier mangles to itself length-prefixed.
+
+Coverage is tracked at `extractor_passes["virtual_dispatch_graph"]`, set
+whenever the pass runs at all — there is no subprocess step here that can
+fail, so this coverage flag is only meaningful evidence in conjunction with
+`call_graph`/`type_graph`/`override_graph`'s own coverage: a reader checking
+whether "zero edges" from this pass means anything should check those three
+passes' coverage, not a fourth clang-availability signal a pass that never
+touches a compiler cannot produce.
+
 ## `primary_path` / `alternative_paths` / `discarded_path_count`
 
 `select_preferred_graph_path`'s caller (`buildsource.graph_impact.attach_impact_metadata`)

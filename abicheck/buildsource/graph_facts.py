@@ -201,6 +201,73 @@ MACRO_DEP_EDGE_KINDS: frozenset[str] = frozenset(
     }
 )
 
+#: The virtual-dispatch half of the graph vocabulary (G29 Phase 5 item 3,
+#: G29.6's third open graph family) — ``source_graph.NODE_KINDS``/
+#: ``EDGE_KINDS`` union these in the same way ``TEMPLATE_NODE_KINDS``/
+#: ``MACRO_DEP_EDGE_KINDS`` above are, and ``abicheck.buildsource.
+#: virtual_dispatch_graph`` (which populates the two live members below)
+#: re-exports them. Same two reasons for living in this leaf module:
+#: ``source_graph.py`` is at its 2000-line hard cap, and the producer would
+#: need to import ``source_graph`` back.
+#:
+#: ``DECL_OVERRIDES_DECL`` is registered but **deliberately has no producer**:
+#: it is not a gap, it is a closed one. ``override_graph.py`` (ADR-041 P2
+#: item 1, which predates this family) already emits
+#: ``METHOD_POSSIBLE_OVERRIDE`` edges whose ``attrs["resolution"]`` is either
+#: ``"override_confirmed"`` (clang's own ``OverrideAttr`` — the ``override``
+#: keyword was written and the compiler checked the override relationship
+#: against the base's virtual slot, name+signature match included) or the
+#: weaker ``"override_signature_match"`` (no compiler confirmation, a
+#: name+type match only). A confirmed edge already carries the exact fact
+#: ``DECL_OVERRIDES_DECL`` would: "this declaration overrides that one,
+#: checked by the compiler." Minting a second, redundant edge kind for the
+#: same fact would fork one piece of evidence into two, with no consumer able
+#: to tell which one is authoritative when they inevitably drift on
+#: confidence or scope — exactly the duplication ADR-046 D2's evidence-merge
+#: machinery exists to prevent, not reproduce. A reader who wants "decl X
+#: overrides decl Y, confirmed" reads a ``METHOD_POSSIBLE_OVERRIDE`` edge with
+#: ``resolution == "override_confirmed"``; ``DECL_OVERRIDES_DECL`` stays
+#: registered only so a hand-built or future graph naming it directly (e.g. an
+#: external backend, Phase 7) is never rejected as unknown vocabulary — same
+#: "registered vocabulary, no producer" pattern the reserved kinds below use,
+#: just for a different reason (satisfied by an existing kind, not deferred
+#: for missing evidence).
+#:
+#: ``VIRTUAL_CALL_MAY_DISPATCH_TO`` and ``TYPE_HAS_VTABLE`` are populated this
+#: slice — see ``virtual_dispatch_graph.py``'s own module docstring for the
+#: full reasoning. ``VIRTUAL_CALL_MAY_DISPATCH_TO`` is explicitly
+#: ``resolution: "overapprox"``, never ``"exact"`` (mirroring
+#: ``call_graph.RESOLUTION_OVERAPPROX``): it names the possible runtime
+#: dispatch *target set* a virtual call may reach, not a proof of which
+#: target a given call actually takes.
+#:
+#: ``VTABLE_SLOT_MAPS_TO_DECL`` remains **reserved, unpopulated** vocabulary:
+#: a precise per-slot Itanium vtable layout (offset-to-top and typeinfo
+#: pointer slots, primary vs. secondary vtables under multiple inheritance,
+#: virtual-inheritance vtables, covariant-return thunks shifting a slot's
+#: target) is a much harder, easy-to-get-subtly-wrong claim than "this class
+#: has a vtable" or "this call's target set may include these declarations" —
+#: exactly the distinction this family's own design brief draws between
+#: "the vtable slot provably changed" and "the possible dispatch target set
+#: changed." ``diff_elf_layout.py``'s existing binary-only vtable-slot-*count*
+#: detector (a completely different, complementary evidence source — approximates
+#: a slot count from an ELF ``_ZTV<mangled-type>`` symbol's size, with no
+#: per-slot identity at all) documents the same real-world layout complexity
+#: in its own module docstring. A naive "declaration order" per-slot model
+#: would get exactly those cases wrong, not merely approximately right, and
+#: this codebase's discipline is to degrade to no fact rather than emit a
+#: wrong one (ADR-028 D3) — so this edge waits for a real, verified Itanium
+#: layout model, not a drive-by guess.
+VIRTUAL_DISPATCH_NODE_KINDS: frozenset[str] = frozenset({"vtable"})
+VIRTUAL_DISPATCH_EDGE_KINDS: frozenset[str] = frozenset(
+    {
+        "DECL_OVERRIDES_DECL",
+        "VIRTUAL_CALL_MAY_DISPATCH_TO",
+        "VTABLE_SLOT_MAPS_TO_DECL",
+        "TYPE_HAS_VTABLE",
+    }
+)
+
 #: Object/link provenance (ADR-041 P1 #2) — ``source_graph.NODE_KINDS``/
 #: ``EDGE_KINDS`` union these in the same way the vocabulary above is;
 #: relocated here from inline additions in ``source_graph.py`` itself once

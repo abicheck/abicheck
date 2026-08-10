@@ -61,6 +61,8 @@ from .graph_facts import (
     TEMPLATE_NODE_KINDS,
     USE_CASE_EDGE_KINDS,  # G29 Phase 4 slice 2 (ADR-057 amendment)
     USE_CASE_NODE_KINDS,
+    VIRTUAL_DISPATCH_EDGE_KINDS,  # G29 Phase 5 item 3
+    VIRTUAL_DISPATCH_NODE_KINDS,
     FactConflict as FactConflict,
     GraphEdge as GraphEdge,
     GraphFact as GraphFact,
@@ -119,6 +121,7 @@ NODE_KINDS: frozenset[str] = frozenset(
     | USE_CASE_NODE_KINDS
     | TEMPLATE_NODE_KINDS
     | LINK_PROVENANCE_NODE_KINDS
+    | VIRTUAL_DISPATCH_NODE_KINDS
 )
 
 #: Edge kinds the graph schema understands (ADR-031 D2).
@@ -152,6 +155,7 @@ EDGE_KINDS: frozenset[str] = frozenset(
     | TEMPLATE_EDGE_KINDS
     | LINK_PROVENANCE_EDGE_KINDS
     | MACRO_DEP_EDGE_KINDS
+    | VIRTUAL_DISPATCH_EDGE_KINDS
 )
 
 #: L5 edge kinds that express a decl/type dependency (ADR-041 P0): a call, a
@@ -173,9 +177,8 @@ DEPENDENCY_EDGE_KINDS: frozenset[str] = frozenset(
 
 #: ``fact_set["producer"]`` id of the one ``source_edges`` producer whose
 #: coverage genuinely matches a full, unfiltered call/type-graph replay (Codex
-#: review, PR #555): the Python inline extractor
-#: (``source_extractors/clang.py``) reuses ``call_graph.py``'s/
-#: ``type_graph.py``'s pure AST walk with no public/private filtering. The
+#: review, PR #555): the Python inline extractor (``source_extractors/clang.py``)
+#: reuses ``call_graph.py``'s/``type_graph.py``'s pure AST walk with no public/private filtering. The
 #: ADR-038 C.8 clang plugin's own producer id (``"abicheck-clang-plugin"``)
 #: is deliberately NOT this constant: it only walks call/reference bodies for
 #: functions ``classify()`` accepts (public-header-declared), and never emits
@@ -625,6 +628,10 @@ def _type_node_id(identity: str) -> str:
     return f"type://{identity}"
 
 
+def _vtable_node_id(identity: str) -> str:
+    return f"vtable://{identity}"
+
+
 def function_decl_identity(
     mangled_name: str, name: str, qualified_name: str, type_qual: str
 ) -> str:
@@ -687,15 +694,13 @@ def _version_script_node_id(path: str) -> str:
 
 
 #: Suffixes identifying a static-library archive among a LinkUnit's inputs
-#: (ADR-041 P1 #2). Lowercase only — compared case-insensitively below
-#: (Codex review): Windows evidence can spell this uppercase (``FOO.LIB``),
-#: hidden from ``archive_graph.py`` otherwise, same as ``adapters/make.py``.
+#: (ADR-041 P1 #2). Lowercase only — compared case-insensitively below (Codex
+#: review): Windows evidence can spell this uppercase (``FOO.LIB``), hidden from ``archive_graph.py`` otherwise, same as ``adapters/make.py``.
 _STATIC_LIBRARY_SUFFIXES = (".a", ".lib")
 
 
 #: SourceEntity.kind → graph type-node kind. Records/classes/unions all map to
-#: ``record_type``; enums and typedefs get their own node kind so reachability
-#: queries can distinguish them (ADR-031 D2).
+#: ``record_type``; enums and typedefs get their own node kind so reachability queries can distinguish them (ADR-031 D2).
 _TYPE_NODE_KINDS: dict[str, str] = {"enum": "enum_type", "typedef": "typedef"}
 
 
@@ -704,8 +709,7 @@ def _type_node_kind(decl_kind: str) -> str:
 
 
 #: Graph node kinds a type entity (as opposed to a function/variable
-#: ``source_decl``) can carry. Mirrors ``crosscheck._DECL_NODE_KINDS`` minus
-#: ``source_decl``.
+#: ``source_decl``) can carry. Mirrors ``crosscheck._DECL_NODE_KINDS`` minus ``source_decl``.
 _TYPE_ENTITY_KINDS: frozenset[str] = frozenset({"record_type", "enum_type", "typedef"})
 
 #: Graph node kinds that carry a declaration/type visibility we can classify as
@@ -717,8 +721,7 @@ DECL_NODE_KINDS: frozenset[str] = frozenset({"source_decl"}) | _TYPE_ENTITY_KIND
 #: Node visibilities that put an entity *on* the public source surface. Mirrors
 #: ``source_link._is_public`` (which the L5 graph's ``visibility`` attr is
 #: derived from): ``generated`` means a generated header **under the public
-#: roots** — a public, consumer-visible entity — so it is NOT an internal
-#: dependency.
+#: roots** — a public, consumer-visible entity — so it is NOT an internal dependency.
 PUBLIC_VISIBILITIES: frozenset[str] = frozenset({"public_header", "generated"})
 
 #: Node visibilities that make an entity *internal* (not public surface): a

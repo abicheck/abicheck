@@ -31,6 +31,7 @@ from typing import TYPE_CHECKING, Any
 
 from .build_evidence import BuildEvidence
 from .model import ExtractorRecord
+from .virtual_dispatch_graph import augment_graph_with_virtual_dispatch
 
 if TYPE_CHECKING:
     from .source_graph import SourceGraphSummary
@@ -404,6 +405,40 @@ def fold_override_graph(
     )
 
 
+def fold_virtual_dispatch_graph(
+    graph: SourceGraphSummary,
+) -> None:
+    """Best-effort virtual-dispatch augmentation of *graph* (G29 Phase 5 item
+    3): ``VIRTUAL_CALL_MAY_DISPATCH_TO`` (Part A) + ``TYPE_HAS_VTABLE``
+    (Part B) — see ``virtual_dispatch_graph.py``'s own module docstring for
+    the full derivation.
+
+    Unlike every other ``fold_*`` function in this module, this one takes no
+    ``merged``/``clang_bin``/``extractors``/scoping arguments and never shells
+    out to ``clang`` at all: both parts are pure transformations over graph
+    state ``fold_call_graph``/``fold_type_graph``/``fold_override_graph``
+    already folded (called immediately after ``fold_override_graph`` in
+    :func:`fold_semantic_graphs`, so all three have already run). There is
+    nothing to scope narrowly and no per-TU clang diagnostics to degrade
+    on — a run over an empty/no-override graph simply adds zero edges, which
+    is not a failure to report as a ``degraded_passes`` entry.
+
+    Coverage stamping is correspondingly different from the clang-backed
+    passes: ``extractor_passes["virtual_dispatch_graph"]`` is set whenever
+    this function runs at all (it always completes — there is no subprocess
+    step that can fail), but it is only meaningful evidence when the passes
+    it *reads* — ``call_graph``/``type_graph``/``override_graph`` —
+    themselves ran (``graph_impact.py``'s derived, no-subprocess passes
+    follow the identical "ran iff its own read succeeded" shape rather than
+    a fresh coverage story of their own). A reader checking whether this
+    pass's silence ("zero edges") means anything should check those three
+    passes' own coverage, not invent a fourth clang-availability check for a
+    pass that never touches a compiler.
+    """
+    augment_graph_with_virtual_dispatch(graph)
+    graph.extractor_passes["virtual_dispatch_graph"] = True
+
+
 def fold_template_graph(
     graph: SourceGraphSummary,
     merged: BuildEvidence,
@@ -661,19 +696,25 @@ def fold_semantic_graphs(
     """Run every Clang-derived L5 graph pass over *graph* in one call:
     :func:`fold_call_graph`, :func:`fold_type_graph`,
     :func:`fold_override_graph` (ADR-041 P2 item 1),
+    :func:`fold_virtual_dispatch_graph` (G29 Phase 5 item 3),
     :func:`fold_template_graph` (G29 Phase 5 item 1),
     :func:`fold_macro_graph` (G29 Phase 5 item 2), then
     :func:`fold_include_graph` — the exact sequence ``inline._build_inline_graph``
     ran inline before this wrapper existed, kept together here (rather than
     six separate call sites in ``inline.py``, which sits at its own
-    line-count cap) so a future seventh pass adds one call here instead of
+    line-count cap) so a future eighth pass adds one call here instead of
     growing that file too. ``fold_macro_graph`` sits right after
     ``fold_template_graph`` — both are Clang-backed passes needing the same
     scoping decision, and both close over one of G29 Phase 5's originally
-    open graph families. Each pass shares the same *changed_paths*/
-    *scoped_units* scoping precedence and clang-binary resolution, and each
-    degrades independently (a missing ``clang++`` or a per-TU parse failure
-    never aborts a later pass — ADR-028 D3).
+    open graph families. ``fold_virtual_dispatch_graph`` sits right after
+    ``fold_override_graph`` and takes no clang/scoping arguments of its own
+    (see its own docstring) — it is a pure transformation over the call/type/
+    override graph state the three preceding passes just folded, so it must
+    run after all three, not merely "somewhere in this sequence". Each
+    clang-backed pass shares the same *changed_paths*/*scoped_units* scoping
+    precedence and clang-binary resolution, and each degrades independently
+    (a missing ``clang++`` or a per-TU parse failure never aborts a later
+    pass — ADR-028 D3).
     """
     fold_call_graph(
         graph, merged, clang_bin, extractors, changed_paths, scoped_units=scoped_units
@@ -684,6 +725,7 @@ def fold_semantic_graphs(
     fold_override_graph(
         graph, merged, clang_bin, extractors, changed_paths, scoped_units=scoped_units
     )
+    fold_virtual_dispatch_graph(graph)
     fold_template_graph(
         graph, merged, clang_bin, extractors, changed_paths, scoped_units=scoped_units
     )
