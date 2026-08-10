@@ -784,6 +784,35 @@ class AbiSnapshot:
     # necessarily produced by the current, fixed parser.
     clang_restrict_facts_reliable: bool = field(default=True, kw_only=True)
 
+    # True when this snapshot's Param.is_va_list facts are known-reliable
+    # when its own ``ast_producer`` is ``"clang"`` OR ``"hybrid"`` -- G31
+    # Phase C continued (schema v23) wired real extraction into the
+    # direct-clang backend (``dumper_clang._clang_param_is_va_list``, x86-64
+    # System V spelling only), previously unconditionally False for EVERY
+    # parameter on every backend (see ``diff_param_qualifiers.
+    # param_va_list_changes``'s own docstring on this, written before this
+    # field existed). Identical "real but WRONG data" shape as
+    # ``clang_restrict_facts_reliable`` immediately above, for the identical
+    # reason: ``Param.is_va_list`` is a plain bool with no "not collected"
+    # state, so a pre-v23 clang-producer parameter's blanket False is
+    # indistinguishable by value alone from a genuine non-``va_list``
+    # parameter, and comparing a fresh clang dump of UNCHANGED headers
+    # against a persisted pre-v23 clang baseline would read as every
+    # ``va_list`` parameter having just been added. Covers "hybrid" for the
+    # same reason ``clang_restrict_facts_reliable`` does: a hybrid merge
+    # keeps castxml's own ``params`` verbatim for every matched function, so
+    # only a clang-only function carries clang's parameters, and on a
+    # pre-v23 hybrid snapshot those are exactly the blanket-False ones. Not
+    # needed for "castxml": it has never populated this fact at all (still
+    # true after this change — see ``dumper_castxml.py``), so a castxml
+    # snapshot's blanket False is unconditionally correct-as-"not
+    # collected" the same way it always was, on any schema version. False
+    # only for a snapshot rehydrated from a persisted pre-v23,
+    # clang/hybrid-producer schema (see serialization.SCHEMA_VERSION); a
+    # freshly-built in-memory snapshot defaults True, since it was
+    # necessarily produced by the current, fixed parser.
+    clang_va_list_facts_reliable: bool = field(default=True, kw_only=True)
+
     # Phase 3: binary format platform — detected from ELF/PE/MachO metadata.
     # None = unknown / not yet detected.
     # Populated by detect_platform() in pipeline or by the dumper.

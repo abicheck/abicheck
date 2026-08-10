@@ -31,7 +31,8 @@ offers:
   parenthesized declarator when C's precedence rules put the declared
   entity's own pointer inside parentheses, where depth 0 describes
   something else entirely;
-- :func:`_clang_param_is_restrict` is one concrete question asked of them.
+- :func:`_clang_param_is_restrict` is one concrete question asked of them;
+  :func:`_clang_param_is_va_list` is another.
 
 Pure and leaf: takes plain AST dicts, imports nothing from ``dumper_clang``,
 and is unit-testable with no clang installed.
@@ -299,3 +300,54 @@ def _clang_param_is_restrict(node: dict[str, Any]) -> bool:
         # declared entity's own, never a nested one.
         return False
     return bool(re.search(r"\b(?:__)?restrict(?:__)?\b", own))
+
+
+#: The x86-64 System V (Itanium C++ ABI) spelling of ``__builtin_va_list``
+#: once decayed to a function parameter and fully desugared: a pointer to
+#: (optionally cv-qualified) ``__va_list_tag``. C keeps the elaborated
+#: ``struct`` keyword in the printed spelling; C++ drops it (confirmed
+#: against real clang 18 output in both language modes) -- see
+#: :func:`_clang_param_is_va_list`.
+_VA_LIST_TAG_PTR_RE = re.compile(
+    r"^(?:(?:const|volatile)\s+)*(?:struct\s+)?__va_list_tag\s*\*$"
+)
+
+
+def _clang_param_is_va_list(node: dict[str, Any]) -> bool:
+    """Whether *node* (a ``ParmVarDecl``) is a ``va_list`` parameter.
+
+    ``va_list`` is itself an array-of-one-struct typedef
+    (``__builtin_va_list`` on x86-64 System V, the ABI this environment can
+    verify against), so a ``va_list`` PARAMETER decays to a pointer the
+    moment it crosses a function boundary -- there is no ``VaListType`` node
+    or dedicated keyword in the AST to key on, only the decayed pointer's own
+    printed spelling. Confirmed against real ``clang -ast-dump=json`` output
+    (Clang 18) that this decayed spelling survives BOTH a further user
+    typedef (``typedef va_list my_va_list;``) and a top-level ``const``
+    (``const va_list ap`` -- the array-level qualifier reappears as a
+    pointee-level one on the decayed pointer) with no ``desugaredQualType``
+    needed in either case; :func:`_desugared_qualtype` is still used for
+    consistency with :func:`_clang_param_is_restrict` and in case a deeper
+    indirection someday needs it.
+
+    **Scope, stated rather than silently assumed**: this matches ONLY the
+    x86-64 System V spelling (``(const )?(struct )?__va_list_tag *``), the
+    one ABI verified here. ``va_list``'s underlying representation is
+    genuinely target-defined -- AArch64 AAPCS uses a different multi-field
+    struct, and other targets differ again -- and guessing an unverified
+    spelling risks a false positive worse than the pre-existing "never
+    populated" gap this closes (the same "verify before claiming" discipline
+    ``AGENTS.md`` documents throughout G31 Phase C). A parameter on an
+    unrecognized target's real ``va_list`` type answers ``False`` here,
+    exactly as every backend already did before this function existed --
+    a conservative false negative, never a fabricated positive.
+
+    A pointer-TO-``va_list`` (``va_list *``, two stars once decayed) is
+    deliberately NOT matched: it names a parameter that forwards a caller's
+    already-decayed ``va_list`` by reference (e.g. ``vsnprintf``-style
+    wrappers), which is a plain pointer parameter, not a ``va_list``
+    parameter itself -- the regex's anchored single trailing ``*`` already
+    excludes it.
+    """
+    desugared = _desugared_qualtype(node)
+    return bool(_VA_LIST_TAG_PTR_RE.match(desugared.strip()))

@@ -1680,6 +1680,24 @@ phase held to):
   `diff_param_qualifiers.py`'s own docstring too, since a backend that
   later populates `is_va_list` inherits `param_restrict`'s exact problem.
 
+  **Closed for `Param.is_va_list` in a later pass, exactly inheriting
+  `param_restrict`'s gate shape as predicted above.** The direct-clang
+  backend now extracts it (`dumper_clang_qualifiers._clang_param_is_va_list`,
+  schema v23), verified against real clang 18 output for the x86-64 System V
+  spelling — the one ABI verified in this environment; an unrecognized
+  target's real `va_list` still reads `False` (a conservative false
+  negative, not a guessed spelling, matching this whole phase's "verify
+  before claiming" discipline). Unlike `is_restrict`, this fact is **not**
+  symmetric across producers: castxml has never populated it and always
+  reports `False`, so `diff_symbols._diff_param_va_list` requires both sides
+  to be `ast_producer in ("clang", "hybrid")` specifically, not merely
+  header-aware — pairing a castxml side with a clang/hybrid side would read
+  every genuine `va_list` parameter as added/removed purely from which
+  backend parsed which side. `AbiSnapshot.clang_va_list_facts_reliable`
+  covers the separate pre-v23-baseline case the same way
+  `clang_restrict_facts_reliable` does. `Variable.value`/`Variable.access`
+  remain genuinely unstarted.
+
 **Performance benchmarks + regression gate — done.** Now that the
 header-only graph is always-on rather than opt-in, its per-dump cost is paid
 on every run, not just when a user explicitly asked for it.

@@ -15,6 +15,7 @@ Covers:
 
 All tests build AbiSnapshot objects directly (no castxml required).
 """
+
 from __future__ import annotations
 
 from abicheck.checker import (
@@ -38,7 +39,9 @@ from abicheck.model import (
 
 
 def _snap(**kwargs: object) -> AbiSnapshot:
-    defaults: dict[str, object] = dict(library="lib.so", version="1.0", from_headers=True)
+    defaults: dict[str, object] = dict(
+        library="lib.so", version="1.0", from_headers=True
+    )
     defaults.update(kwargs)
     return AbiSnapshot(**defaults)  # type: ignore[arg-type]
 
@@ -76,7 +79,9 @@ class TestVarValueChanged:
         new = _snap(variables=[_var("buf_size", "_buf_size", "const int", value="100")])
         result = compare(old, new)
         assert ChangeKind.VAR_VALUE_CHANGED in _kinds(result)
-        change = next(c for c in result.changes if c.kind == ChangeKind.VAR_VALUE_CHANGED)
+        change = next(
+            c for c in result.changes if c.kind == ChangeKind.VAR_VALUE_CHANGED
+        )
         assert change.old_value == "42"
         assert change.new_value == "100"
 
@@ -110,16 +115,22 @@ class TestVarValueChanged:
 
     def test_multiple_value_changes(self) -> None:
         """Multiple variables can change value independently."""
-        old = _snap(variables=[
-            _var("a", "_a", "int", value="1"),
-            _var("b", "_b", "int", value="2"),
-        ])
-        new = _snap(variables=[
-            _var("a", "_a", "int", value="10"),
-            _var("b", "_b", "int", value="20"),
-        ])
+        old = _snap(
+            variables=[
+                _var("a", "_a", "int", value="1"),
+                _var("b", "_b", "int", value="2"),
+            ]
+        )
+        new = _snap(
+            variables=[
+                _var("a", "_a", "int", value="10"),
+                _var("b", "_b", "int", value="20"),
+            ]
+        )
         result = compare(old, new)
-        val_changes = [c for c in result.changes if c.kind == ChangeKind.VAR_VALUE_CHANGED]
+        val_changes = [
+            c for c in result.changes if c.kind == ChangeKind.VAR_VALUE_CHANGED
+        ]
         assert len(val_changes) == 2
 
 
@@ -135,17 +146,36 @@ class TestTypeKindChanged:
     """Detect struct↔union aggregate kind changes."""
 
     def test_struct_to_union(self) -> None:
-        old = _snap(types=[RecordType(name="Data", kind="struct", fields=[
-            TypeField(name="x", type="int", offset_bits=0),
-            TypeField(name="y", type="int", offset_bits=32),
-        ])])
-        new = _snap(types=[RecordType(name="Data", kind="union", is_union=True, fields=[
-            TypeField(name="x", type="int", offset_bits=0),
-            TypeField(name="y", type="int", offset_bits=0),
-        ])])
+        old = _snap(
+            types=[
+                RecordType(
+                    name="Data",
+                    kind="struct",
+                    fields=[
+                        TypeField(name="x", type="int", offset_bits=0),
+                        TypeField(name="y", type="int", offset_bits=32),
+                    ],
+                )
+            ]
+        )
+        new = _snap(
+            types=[
+                RecordType(
+                    name="Data",
+                    kind="union",
+                    is_union=True,
+                    fields=[
+                        TypeField(name="x", type="int", offset_bits=0),
+                        TypeField(name="y", type="int", offset_bits=0),
+                    ],
+                )
+            ]
+        )
         result = compare(old, new)
         assert ChangeKind.TYPE_KIND_CHANGED in _kinds(result)
-        change = next(c for c in result.changes if c.kind == ChangeKind.TYPE_KIND_CHANGED)
+        change = next(
+            c for c in result.changes if c.kind == ChangeKind.TYPE_KIND_CHANGED
+        )
         assert change.old_value == "struct"
         assert change.new_value == "union"
 
@@ -154,7 +184,9 @@ class TestTypeKindChanged:
         new = _snap(types=[RecordType(name="U", kind="struct")])
         result = compare(old, new)
         assert ChangeKind.TYPE_KIND_CHANGED in _kinds(result)
-        change = next(c for c in result.changes if c.kind == ChangeKind.TYPE_KIND_CHANGED)
+        change = next(
+            c for c in result.changes if c.kind == ChangeKind.TYPE_KIND_CHANGED
+        )
         assert change.old_value == "union"
         assert change.new_value == "struct"
 
@@ -194,72 +226,170 @@ class TestUsedReservedField:
     """Detect reserved fields being put into real use."""
 
     def test_reserved_to_real_field(self) -> None:
-        old = _snap(types=[RecordType(name="S", kind="struct", fields=[
-            TypeField(name="flags", type="int", offset_bits=0),
-            TypeField(name="__reserved", type="int", offset_bits=32),
-        ])])
-        new = _snap(types=[RecordType(name="S", kind="struct", fields=[
-            TypeField(name="flags", type="int", offset_bits=0),
-            TypeField(name="priority", type="int", offset_bits=32),
-        ])])
+        old = _snap(
+            types=[
+                RecordType(
+                    name="S",
+                    kind="struct",
+                    fields=[
+                        TypeField(name="flags", type="int", offset_bits=0),
+                        TypeField(name="__reserved", type="int", offset_bits=32),
+                    ],
+                )
+            ]
+        )
+        new = _snap(
+            types=[
+                RecordType(
+                    name="S",
+                    kind="struct",
+                    fields=[
+                        TypeField(name="flags", type="int", offset_bits=0),
+                        TypeField(name="priority", type="int", offset_bits=32),
+                    ],
+                )
+            ]
+        )
         result = compare(old, new)
         assert ChangeKind.USED_RESERVED_FIELD in _kinds(result)
-        change = next(c for c in result.changes if c.kind == ChangeKind.USED_RESERVED_FIELD)
+        change = next(
+            c for c in result.changes if c.kind == ChangeKind.USED_RESERVED_FIELD
+        )
         assert change.old_value == "__reserved"
         assert change.new_value == "priority"
 
     def test_pad_field_to_real(self) -> None:
         """_pad fields should also be detected."""
-        old = _snap(types=[RecordType(name="S", kind="struct", fields=[
-            TypeField(name="_pad", type="char", offset_bits=0),
-        ])])
-        new = _snap(types=[RecordType(name="S", kind="struct", fields=[
-            TypeField(name="mode", type="char", offset_bits=0),
-        ])])
+        old = _snap(
+            types=[
+                RecordType(
+                    name="S",
+                    kind="struct",
+                    fields=[
+                        TypeField(name="_pad", type="char", offset_bits=0),
+                    ],
+                )
+            ]
+        )
+        new = _snap(
+            types=[
+                RecordType(
+                    name="S",
+                    kind="struct",
+                    fields=[
+                        TypeField(name="mode", type="char", offset_bits=0),
+                    ],
+                )
+            ]
+        )
         result = compare(old, new)
         assert ChangeKind.USED_RESERVED_FIELD in _kinds(result)
 
     def test_reserved_with_number_suffix(self) -> None:
         """reserved1, __pad2, etc."""
-        old = _snap(types=[RecordType(name="S", kind="struct", fields=[
-            TypeField(name="reserved1", type="int", offset_bits=0),
-        ])])
-        new = _snap(types=[RecordType(name="S", kind="struct", fields=[
-            TypeField(name="new_field", type="int", offset_bits=0),
-        ])])
+        old = _snap(
+            types=[
+                RecordType(
+                    name="S",
+                    kind="struct",
+                    fields=[
+                        TypeField(name="reserved1", type="int", offset_bits=0),
+                    ],
+                )
+            ]
+        )
+        new = _snap(
+            types=[
+                RecordType(
+                    name="S",
+                    kind="struct",
+                    fields=[
+                        TypeField(name="new_field", type="int", offset_bits=0),
+                    ],
+                )
+            ]
+        )
         result = compare(old, new)
         assert ChangeKind.USED_RESERVED_FIELD in _kinds(result)
 
     def test_no_reserved_no_detection(self) -> None:
         """Normal field rename should NOT trigger Used_Reserved."""
-        old = _snap(types=[RecordType(name="S", kind="struct", fields=[
-            TypeField(name="count", type="int", offset_bits=0),
-        ])])
-        new = _snap(types=[RecordType(name="S", kind="struct", fields=[
-            TypeField(name="total", type="int", offset_bits=0),
-        ])])
+        old = _snap(
+            types=[
+                RecordType(
+                    name="S",
+                    kind="struct",
+                    fields=[
+                        TypeField(name="count", type="int", offset_bits=0),
+                    ],
+                )
+            ]
+        )
+        new = _snap(
+            types=[
+                RecordType(
+                    name="S",
+                    kind="struct",
+                    fields=[
+                        TypeField(name="total", type="int", offset_bits=0),
+                    ],
+                )
+            ]
+        )
         result = compare(old, new)
         assert ChangeKind.USED_RESERVED_FIELD not in _kinds(result)
 
     def test_unused_pattern_to_real(self) -> None:
         """'unused' pattern detected."""
-        old = _snap(types=[RecordType(name="S", kind="struct", fields=[
-            TypeField(name="__unused", type="int", offset_bits=0),
-        ])])
-        new = _snap(types=[RecordType(name="S", kind="struct", fields=[
-            TypeField(name="feature_flags", type="int", offset_bits=0),
-        ])])
+        old = _snap(
+            types=[
+                RecordType(
+                    name="S",
+                    kind="struct",
+                    fields=[
+                        TypeField(name="__unused", type="int", offset_bits=0),
+                    ],
+                )
+            ]
+        )
+        new = _snap(
+            types=[
+                RecordType(
+                    name="S",
+                    kind="struct",
+                    fields=[
+                        TypeField(name="feature_flags", type="int", offset_bits=0),
+                    ],
+                )
+            ]
+        )
         result = compare(old, new)
         assert ChangeKind.USED_RESERVED_FIELD in _kinds(result)
 
     def test_reserved_is_compatible(self) -> None:
         """Using a reserved field is compatible (field was unused before)."""
-        old = _snap(types=[RecordType(name="S", kind="struct", fields=[
-            TypeField(name="__reserved", type="int", offset_bits=0),
-        ])])
-        new = _snap(types=[RecordType(name="S", kind="struct", fields=[
-            TypeField(name="priority", type="int", offset_bits=0),
-        ])])
+        old = _snap(
+            types=[
+                RecordType(
+                    name="S",
+                    kind="struct",
+                    fields=[
+                        TypeField(name="__reserved", type="int", offset_bits=0),
+                    ],
+                )
+            ]
+        )
+        new = _snap(
+            types=[
+                RecordType(
+                    name="S",
+                    kind="struct",
+                    fields=[
+                        TypeField(name="priority", type="int", offset_bits=0),
+                    ],
+                )
+            ]
+        )
         result = compare(old, new)
         # Should also trigger FIELD_RENAMED (source break), but USED_RESERVED itself is compatible
         assert ChangeKind.USED_RESERVED_FIELD in _kinds(result)
@@ -278,61 +408,81 @@ class TestRemovedConstOverload:
 
     def test_const_overload_removed(self) -> None:
         """Widget::get() and Widget::get() const → only Widget::get()."""
-        old = _snap(functions=[
-            _func("Widget::get", "_ZN6Widget3getEv", is_const=False),
-            _func("Widget::get", "_ZNK6Widget3getEv", is_const=True),
-        ])
-        new = _snap(functions=[
-            _func("Widget::get", "_ZN6Widget3getEv", is_const=False),
-        ])
+        old = _snap(
+            functions=[
+                _func("Widget::get", "_ZN6Widget3getEv", is_const=False),
+                _func("Widget::get", "_ZNK6Widget3getEv", is_const=True),
+            ]
+        )
+        new = _snap(
+            functions=[
+                _func("Widget::get", "_ZN6Widget3getEv", is_const=False),
+            ]
+        )
         result = compare(old, new)
         assert ChangeKind.REMOVED_CONST_OVERLOAD in _kinds(result)
-        change = next(c for c in result.changes if c.kind == ChangeKind.REMOVED_CONST_OVERLOAD)
+        change = next(
+            c for c in result.changes if c.kind == ChangeKind.REMOVED_CONST_OVERLOAD
+        )
         assert "const" in change.description.lower()
 
     def test_both_versions_present_no_change(self) -> None:
         """Both const and non-const still present → no change."""
-        old = _snap(functions=[
-            _func("Foo::bar", "_ZN3Foo3barEv", is_const=False),
-            _func("Foo::bar", "_ZNK3Foo3barEv", is_const=True),
-        ])
-        new = _snap(functions=[
-            _func("Foo::bar", "_ZN3Foo3barEv", is_const=False),
-            _func("Foo::bar", "_ZNK3Foo3barEv", is_const=True),
-        ])
+        old = _snap(
+            functions=[
+                _func("Foo::bar", "_ZN3Foo3barEv", is_const=False),
+                _func("Foo::bar", "_ZNK3Foo3barEv", is_const=True),
+            ]
+        )
+        new = _snap(
+            functions=[
+                _func("Foo::bar", "_ZN3Foo3barEv", is_const=False),
+                _func("Foo::bar", "_ZNK3Foo3barEv", is_const=True),
+            ]
+        )
         result = compare(old, new)
         assert ChangeKind.REMOVED_CONST_OVERLOAD not in _kinds(result)
 
     def test_nonconst_removed_not_const_overload(self) -> None:
         """Non-const removed with const kept is NOT a const overload removal."""
-        old = _snap(functions=[
-            _func("Foo::bar", "_ZN3Foo3barEv", is_const=False),
-            _func("Foo::bar", "_ZNK3Foo3barEv", is_const=True),
-        ])
-        new = _snap(functions=[
-            _func("Foo::bar", "_ZNK3Foo3barEv", is_const=True),
-        ])
+        old = _snap(
+            functions=[
+                _func("Foo::bar", "_ZN3Foo3barEv", is_const=False),
+                _func("Foo::bar", "_ZNK3Foo3barEv", is_const=True),
+            ]
+        )
+        new = _snap(
+            functions=[
+                _func("Foo::bar", "_ZNK3Foo3barEv", is_const=True),
+            ]
+        )
         result = compare(old, new)
         assert ChangeKind.REMOVED_CONST_OVERLOAD not in _kinds(result)
 
     def test_only_const_method_no_overload(self) -> None:
         """Only const method existed (no overload pair) → not a const overload removal."""
-        old = _snap(functions=[
-            _func("Foo::get", "_ZNK3Foo3getEv", is_const=True),
-        ])
+        old = _snap(
+            functions=[
+                _func("Foo::get", "_ZNK3Foo3getEv", is_const=True),
+            ]
+        )
         new = _snap(functions=[])
         result = compare(old, new)
         assert ChangeKind.REMOVED_CONST_OVERLOAD not in _kinds(result)
 
     def test_const_overload_removed_is_source_break(self) -> None:
         """Removing const overload is a source-level break (callers with const ref break)."""
-        old = _snap(functions=[
-            _func("Foo::get", "_ZN3Foo3getEv", is_const=False),
-            _func("Foo::get", "_ZNK3Foo3getEv", is_const=True),
-        ])
-        new = _snap(functions=[
-            _func("Foo::get", "_ZN3Foo3getEv", is_const=False),
-        ])
+        old = _snap(
+            functions=[
+                _func("Foo::get", "_ZN3Foo3getEv", is_const=False),
+                _func("Foo::get", "_ZNK3Foo3getEv", is_const=True),
+            ]
+        )
+        new = _snap(
+            functions=[
+                _func("Foo::get", "_ZN3Foo3getEv", is_const=False),
+            ]
+        )
         result = compare(old, new)
         assert result.verdict in (Verdict.BREAKING, Verdict.API_BREAK)
 
@@ -349,49 +499,117 @@ class TestParamRestrictChanged:
     """Detect restrict qualifier changes on parameters."""
 
     def test_restrict_added(self) -> None:
-        old = _snap(functions=[_func("memcpy", "_memcpy", params=[
-            Param(name="dst", type="void*", is_restrict=False),
-            Param(name="src", type="const void*", is_restrict=False),
-        ])])
-        new = _snap(functions=[_func("memcpy", "_memcpy", params=[
-            Param(name="dst", type="void*", is_restrict=True),
-            Param(name="src", type="const void*", is_restrict=True),
-        ])])
+        old = _snap(
+            functions=[
+                _func(
+                    "memcpy",
+                    "_memcpy",
+                    params=[
+                        Param(name="dst", type="void*", is_restrict=False),
+                        Param(name="src", type="const void*", is_restrict=False),
+                    ],
+                )
+            ]
+        )
+        new = _snap(
+            functions=[
+                _func(
+                    "memcpy",
+                    "_memcpy",
+                    params=[
+                        Param(name="dst", type="void*", is_restrict=True),
+                        Param(name="src", type="const void*", is_restrict=True),
+                    ],
+                )
+            ]
+        )
         result = compare(old, new)
         assert ChangeKind.PARAM_RESTRICT_CHANGED in _kinds(result)
-        restrict_changes = [c for c in result.changes if c.kind == ChangeKind.PARAM_RESTRICT_CHANGED]
+        restrict_changes = [
+            c for c in result.changes if c.kind == ChangeKind.PARAM_RESTRICT_CHANGED
+        ]
         assert len(restrict_changes) == 2
 
     def test_restrict_removed(self) -> None:
-        old = _snap(functions=[_func("f", "_f", params=[
-            Param(name="p", type="int*", is_restrict=True),
-        ])])
-        new = _snap(functions=[_func("f", "_f", params=[
-            Param(name="p", type="int*", is_restrict=False),
-        ])])
+        old = _snap(
+            functions=[
+                _func(
+                    "f",
+                    "_f",
+                    params=[
+                        Param(name="p", type="int*", is_restrict=True),
+                    ],
+                )
+            ]
+        )
+        new = _snap(
+            functions=[
+                _func(
+                    "f",
+                    "_f",
+                    params=[
+                        Param(name="p", type="int*", is_restrict=False),
+                    ],
+                )
+            ]
+        )
         result = compare(old, new)
         assert ChangeKind.PARAM_RESTRICT_CHANGED in _kinds(result)
-        change = next(c for c in result.changes if c.kind == ChangeKind.PARAM_RESTRICT_CHANGED)
+        change = next(
+            c for c in result.changes if c.kind == ChangeKind.PARAM_RESTRICT_CHANGED
+        )
         assert "removed" in change.description
 
     def test_restrict_unchanged(self) -> None:
-        old = _snap(functions=[_func("f", "_f", params=[
-            Param(name="p", type="int*", is_restrict=True),
-        ])])
-        new = _snap(functions=[_func("f", "_f", params=[
-            Param(name="p", type="int*", is_restrict=True),
-        ])])
+        old = _snap(
+            functions=[
+                _func(
+                    "f",
+                    "_f",
+                    params=[
+                        Param(name="p", type="int*", is_restrict=True),
+                    ],
+                )
+            ]
+        )
+        new = _snap(
+            functions=[
+                _func(
+                    "f",
+                    "_f",
+                    params=[
+                        Param(name="p", type="int*", is_restrict=True),
+                    ],
+                )
+            ]
+        )
         result = compare(old, new)
         assert ChangeKind.PARAM_RESTRICT_CHANGED not in _kinds(result)
 
     def test_restrict_is_compatible(self) -> None:
         """restrict change is compatible (optimization hint only)."""
-        old = _snap(functions=[_func("f", "_f", params=[
-            Param(name="p", type="int*", is_restrict=False),
-        ])])
-        new = _snap(functions=[_func("f", "_f", params=[
-            Param(name="p", type="int*", is_restrict=True),
-        ])])
+        old = _snap(
+            functions=[
+                _func(
+                    "f",
+                    "_f",
+                    params=[
+                        Param(name="p", type="int*", is_restrict=False),
+                    ],
+                )
+            ]
+        )
+        new = _snap(
+            functions=[
+                _func(
+                    "f",
+                    "_f",
+                    params=[
+                        Param(name="p", type="int*", is_restrict=True),
+                    ],
+                )
+            ]
+        )
         result = compare(old, new)
         assert result.verdict == Verdict.COMPATIBLE
 
@@ -404,37 +622,95 @@ class TestParamRestrictChanged:
 
 
 class TestParamVaList:
-    """Detect va_list parameter transitions."""
+    """Detect va_list parameter transitions.
+
+    ``Param.is_va_list`` is populated only by the direct-clang header-AST
+    backend (G31 Phase C continued, schema v23) — see
+    ``diff_symbols._diff_param_va_list``'s own docstring — so both sides need
+    ``ast_producer="clang"``, unlike this module's other ``_snap()`` calls.
+    """
 
     def test_param_became_va_list(self) -> None:
-        old = _snap(functions=[_func("vprintf", "_vprintf", params=[
-            Param(name="fmt", type="const char*"),
-            Param(name="args", type="int*", is_va_list=False),
-        ])])
-        new = _snap(functions=[_func("vprintf", "_vprintf", params=[
-            Param(name="fmt", type="const char*"),
-            Param(name="args", type="va_list", is_va_list=True),
-        ])])
+        old = _snap(
+            ast_producer="clang",
+            functions=[
+                _func(
+                    "vprintf",
+                    "_vprintf",
+                    params=[
+                        Param(name="fmt", type="const char*"),
+                        Param(name="args", type="int*", is_va_list=False),
+                    ],
+                )
+            ],
+        )
+        new = _snap(
+            ast_producer="clang",
+            functions=[
+                _func(
+                    "vprintf",
+                    "_vprintf",
+                    params=[
+                        Param(name="fmt", type="const char*"),
+                        Param(name="args", type="va_list", is_va_list=True),
+                    ],
+                )
+            ],
+        )
         result = compare(old, new)
         assert ChangeKind.PARAM_BECAME_VA_LIST in _kinds(result)
 
     def test_param_lost_va_list(self) -> None:
-        old = _snap(functions=[_func("f", "_f", params=[
-            Param(name="args", type="va_list", is_va_list=True),
-        ])])
-        new = _snap(functions=[_func("f", "_f", params=[
-            Param(name="args", type="int*", is_va_list=False),
-        ])])
+        old = _snap(
+            ast_producer="clang",
+            functions=[
+                _func(
+                    "f",
+                    "_f",
+                    params=[
+                        Param(name="args", type="va_list", is_va_list=True),
+                    ],
+                )
+            ],
+        )
+        new = _snap(
+            ast_producer="clang",
+            functions=[
+                _func(
+                    "f",
+                    "_f",
+                    params=[
+                        Param(name="args", type="int*", is_va_list=False),
+                    ],
+                )
+            ],
+        )
         result = compare(old, new)
         assert ChangeKind.PARAM_LOST_VA_LIST in _kinds(result)
 
     def test_va_list_unchanged(self) -> None:
-        old = _snap(functions=[_func("f", "_f", params=[
-            Param(name="args", type="va_list", is_va_list=True),
-        ])])
-        new = _snap(functions=[_func("f", "_f", params=[
-            Param(name="args", type="va_list", is_va_list=True),
-        ])])
+        old = _snap(
+            functions=[
+                _func(
+                    "f",
+                    "_f",
+                    params=[
+                        Param(name="args", type="va_list", is_va_list=True),
+                    ],
+                )
+            ]
+        )
+        new = _snap(
+            functions=[
+                _func(
+                    "f",
+                    "_f",
+                    params=[
+                        Param(name="args", type="va_list", is_va_list=True),
+                    ],
+                )
+            ]
+        )
         result = compare(old, new)
         assert ChangeKind.PARAM_BECAME_VA_LIST not in _kinds(result)
         assert ChangeKind.PARAM_LOST_VA_LIST not in _kinds(result)
@@ -442,6 +718,7 @@ class TestParamVaList:
     def test_va_list_transition_is_compatible_kind(self) -> None:
         """va_list ChangeKind itself is classified as compatible."""
         from abicheck.checker import _COMPATIBLE_KINDS
+
         assert ChangeKind.PARAM_BECAME_VA_LIST in _COMPATIBLE_KINDS
         assert ChangeKind.PARAM_LOST_VA_LIST in _COMPATIBLE_KINDS
 
@@ -462,7 +739,9 @@ class TestPreprocessorConstants:
         new = _snap(constants={"MAX_SIZE": "2048", "VERSION": "1"})
         result = compare(old, new)
         assert ChangeKind.CONSTANT_CHANGED in _kinds(result)
-        change = next(c for c in result.changes if c.kind == ChangeKind.CONSTANT_CHANGED)
+        change = next(
+            c for c in result.changes if c.kind == ChangeKind.CONSTANT_CHANGED
+        )
         assert change.old_value == "1024"
         assert change.new_value == "2048"
 
@@ -479,7 +758,9 @@ class TestPreprocessorConstants:
         new = _snap(constants={"A": "1"})
         result = compare(old, new)
         assert ChangeKind.CONSTANT_REMOVED in _kinds(result)
-        change = next(c for c in result.changes if c.kind == ChangeKind.CONSTANT_REMOVED)
+        change = next(
+            c for c in result.changes if c.kind == ChangeKind.CONSTANT_REMOVED
+        )
         assert change.old_value == "2"
 
     def test_no_constants_no_change(self) -> None:
@@ -537,22 +818,30 @@ class TestVarAccessChanged:
 
     def test_var_became_private(self) -> None:
         old = _snap(variables=[_var("data", "_data", "int", access=AccessLevel.PUBLIC)])
-        new = _snap(variables=[_var("data", "_data", "int", access=AccessLevel.PRIVATE)])
+        new = _snap(
+            variables=[_var("data", "_data", "int", access=AccessLevel.PRIVATE)]
+        )
         result = compare(old, new)
         assert ChangeKind.VAR_ACCESS_CHANGED in _kinds(result)
-        change = next(c for c in result.changes if c.kind == ChangeKind.VAR_ACCESS_CHANGED)
+        change = next(
+            c for c in result.changes if c.kind == ChangeKind.VAR_ACCESS_CHANGED
+        )
         assert change.old_value == "public"
         assert change.new_value == "private"
 
     def test_var_became_protected(self) -> None:
         old = _snap(variables=[_var("data", "_data", "int", access=AccessLevel.PUBLIC)])
-        new = _snap(variables=[_var("data", "_data", "int", access=AccessLevel.PROTECTED)])
+        new = _snap(
+            variables=[_var("data", "_data", "int", access=AccessLevel.PROTECTED)]
+        )
         result = compare(old, new)
         assert ChangeKind.VAR_ACCESS_CHANGED in _kinds(result)
 
     def test_var_widened_no_change(self) -> None:
         """private→public is widening, should NOT be flagged."""
-        old = _snap(variables=[_var("data", "_data", "int", access=AccessLevel.PRIVATE)])
+        old = _snap(
+            variables=[_var("data", "_data", "int", access=AccessLevel.PRIVATE)]
+        )
         new = _snap(variables=[_var("data", "_data", "int", access=AccessLevel.PUBLIC)])
         result = compare(old, new)
         assert ChangeKind.VAR_ACCESS_CHANGED not in _kinds(result)
@@ -566,7 +855,9 @@ class TestVarAccessChanged:
     def test_var_access_narrowed_is_source_break(self) -> None:
         """Narrowing access is a source-level break."""
         old = _snap(variables=[_var("data", "_data", "int", access=AccessLevel.PUBLIC)])
-        new = _snap(variables=[_var("data", "_data", "int", access=AccessLevel.PRIVATE)])
+        new = _snap(
+            variables=[_var("data", "_data", "int", access=AccessLevel.PRIVATE)]
+        )
         result = compare(old, new)
         assert result.verdict == Verdict.API_BREAK
 
@@ -581,14 +872,33 @@ class TestCrossDetectorIntegration:
 
     def test_struct_to_union_with_field_changes(self) -> None:
         """struct→union also triggers field-level changes."""
-        old = _snap(types=[RecordType(name="Mix", kind="struct", size_bits=64, fields=[
-            TypeField(name="a", type="int", offset_bits=0),
-            TypeField(name="b", type="int", offset_bits=32),
-        ])])
-        new = _snap(types=[RecordType(name="Mix", kind="union", is_union=True, size_bits=32, fields=[
-            TypeField(name="a", type="int", offset_bits=0),
-            TypeField(name="b", type="int", offset_bits=0),
-        ])])
+        old = _snap(
+            types=[
+                RecordType(
+                    name="Mix",
+                    kind="struct",
+                    size_bits=64,
+                    fields=[
+                        TypeField(name="a", type="int", offset_bits=0),
+                        TypeField(name="b", type="int", offset_bits=32),
+                    ],
+                )
+            ]
+        )
+        new = _snap(
+            types=[
+                RecordType(
+                    name="Mix",
+                    kind="union",
+                    is_union=True,
+                    size_bits=32,
+                    fields=[
+                        TypeField(name="a", type="int", offset_bits=0),
+                        TypeField(name="b", type="int", offset_bits=0),
+                    ],
+                )
+            ]
+        )
         result = compare(old, new)
         kinds = _kinds(result)
         assert ChangeKind.TYPE_KIND_CHANGED in kinds
@@ -599,12 +909,28 @@ class TestCrossDetectorIntegration:
         USED_RESERVED_FIELD because the type differs (M5 fix: require offset
         AND type match to avoid silent data truncation with COPY relocations).
         Falls through to TYPE_FIELD_REMOVED + TYPE_FIELD_ADDED."""
-        old = _snap(types=[RecordType(name="S", kind="struct", fields=[
-            TypeField(name="__reserved", type="int", offset_bits=0),
-        ])])
-        new = _snap(types=[RecordType(name="S", kind="struct", fields=[
-            TypeField(name="flags", type="unsigned int", offset_bits=0),
-        ])])
+        old = _snap(
+            types=[
+                RecordType(
+                    name="S",
+                    kind="struct",
+                    fields=[
+                        TypeField(name="__reserved", type="int", offset_bits=0),
+                    ],
+                )
+            ]
+        )
+        new = _snap(
+            types=[
+                RecordType(
+                    name="S",
+                    kind="struct",
+                    fields=[
+                        TypeField(name="flags", type="unsigned int", offset_bits=0),
+                    ],
+                )
+            ]
+        )
         result = compare(old, new)
         kinds = _kinds(result)
         assert ChangeKind.USED_RESERVED_FIELD not in kinds
@@ -645,42 +971,54 @@ class TestSymbolRenamedBatch:
 
     def test_batch_rename_detected(self) -> None:
         """3 symbols renamed with common prefix → SYMBOL_RENAMED_BATCH."""
-        old = _snap(functions=[
-            _func("init", "init"),
-            _func("process", "process"),
-            _func("cleanup", "cleanup"),
-        ])
-        new = _snap(functions=[
-            _func("mylib_init", "mylib_init"),
-            _func("mylib_process", "mylib_process"),
-            _func("mylib_cleanup", "mylib_cleanup"),
-        ])
+        old = _snap(
+            functions=[
+                _func("init", "init"),
+                _func("process", "process"),
+                _func("cleanup", "cleanup"),
+            ]
+        )
+        new = _snap(
+            functions=[
+                _func("mylib_init", "mylib_init"),
+                _func("mylib_process", "mylib_process"),
+                _func("mylib_cleanup", "mylib_cleanup"),
+            ]
+        )
         result = compare(old, new)
         assert ChangeKind.SYMBOL_RENAMED_BATCH in _kinds(result)
 
     def test_single_rename_not_batch(self) -> None:
         """Renaming only 1 function must NOT trigger batch detection."""
-        old = _snap(functions=[
-            _func("init", "init"),
-            _func("process", "process"),
-        ])
-        new = _snap(functions=[
-            _func("mylib_init", "mylib_init"),
-            _func("process", "process"),
-        ])
+        old = _snap(
+            functions=[
+                _func("init", "init"),
+                _func("process", "process"),
+            ]
+        )
+        new = _snap(
+            functions=[
+                _func("mylib_init", "mylib_init"),
+                _func("process", "process"),
+            ]
+        )
         result = compare(old, new)
         assert ChangeKind.SYMBOL_RENAMED_BATCH not in _kinds(result)
 
     def test_batch_rename_is_breaking(self) -> None:
         """Batch rename breaks all existing consumers (undefined symbols)."""
-        old = _snap(functions=[
-            _func("open", "open"),
-            _func("close", "close"),
-        ])
-        new = _snap(functions=[
-            _func("mylib_open", "mylib_open"),
-            _func("mylib_close", "mylib_close"),
-        ])
+        old = _snap(
+            functions=[
+                _func("open", "open"),
+                _func("close", "close"),
+            ]
+        )
+        new = _snap(
+            functions=[
+                _func("mylib_open", "mylib_open"),
+                _func("mylib_close", "mylib_close"),
+            ]
+        )
         result = compare(old, new)
         assert ChangeKind.SYMBOL_RENAMED_BATCH in _kinds(result)
         assert result.verdict == Verdict.BREAKING

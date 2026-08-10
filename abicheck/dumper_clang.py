@@ -87,6 +87,7 @@ from .dumper_clang_expr import (  # noqa: F401  (some re-exported for tests)
 # tests and sibling modules already use keep resolving.
 from .dumper_clang_qualifiers import (  # noqa: F401  (compatibility re-exports)
     _clang_param_is_restrict,
+    _clang_param_is_va_list,
     _desugared_qualtype,
     _field_own_cv_source,
     _last_top_level_ptr_end,
@@ -1254,6 +1255,13 @@ class _ClangAstParser:
                     # the two bools directly, with no producer gate to decline
                     # on (unlike `deprecated`/`is_scoped` before this phase).
                     is_restrict=_clang_param_is_restrict(p),
+                    # G31 Phase C continued: same shape as `is_restrict` above
+                    # — castxml never populated this fact either, so a bare
+                    # comparison of the two bools needs the identical
+                    # producer-reliability gate (`param_va_list`'s registration
+                    # in diff_symbols.py). See
+                    # `dumper_clang_qualifiers._clang_param_is_va_list`.
+                    is_va_list=_clang_param_is_va_list(p),
                     # Preserve the actual default-argument value (so a changed
                     # default fires PARAM_DEFAULT_VALUE_CHANGED); fall back to a
                     # bare presence marker when the value can't be evaluated.

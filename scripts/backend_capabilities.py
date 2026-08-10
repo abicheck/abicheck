@@ -602,12 +602,16 @@ FACT_ROWS: tuple[FactRow, ...] = (
     FactRow(
         "Param",
         "is_va_list",
-        _OTHER,
-        _OTHER,
+        _NONE,
+        _PARTIAL,
         note=(
-            "**No producer on any layer today** — `diff_symbols` has a "
-            "detector reading it (`param_became_va_list`), but nothing ever "
-            "sets it, so that detector is unreachable on real input."
+            "clang side wired in G31 Phase C continued (schema v23), "
+            "x86-64 System V spelling only — the one ABI verified there; "
+            "an unrecognized target's real `va_list` still reads `False`. "
+            "castxml has never populated this fact, so "
+            "`diff_symbols._diff_param_va_list` only trusts a clang/hybrid "
+            "pair (see its own docstring), unlike the now-symmetric "
+            "`is_restrict` above."
         ),
     ),
 )

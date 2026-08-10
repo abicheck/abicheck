@@ -87,14 +87,14 @@ def param_va_list_changes(
 ) -> list[Change]:
     """``PARAM_BECAME_VA_LIST``/``PARAM_LOST_VA_LIST`` for flipped parameters.
 
-    Unlike ``param_restrict``, its detector carries no evidence gate — and
-    needs none today for a reason worth stating rather than leaving implicit:
-    **no producer on any layer populates** ``Param.is_va_list`` (see
-    ``docs/reference/header-backend-capabilities.md``'s Known gaps), so both
-    sides are always ``False`` and it cannot fire on real input. Should a
-    backend start extracting it, it inherits ``param_restrict``'s problem
-    exactly — a cross-producer or legacy-baseline comparison reading a
-    blanket ``False`` as "not a va_list" — and will need the same gate.
+    The evidence gates live with the registration in ``diff_symbols.py``, not
+    here (same split as ``param_restrict_changes`` above): by the time this
+    runs both sides are known to be header-derived, clang/hybrid-produced,
+    and carry reliable va_list facts (G31 Phase C continued —
+    ``dumper_clang_qualifiers._clang_param_is_va_list``, x86-64 System V
+    spelling only; castxml never populates this fact). See
+    ``diff_symbols._diff_param_va_list``'s own docstring for why this one is
+    NOT symmetric across producers the way ``param_restrict`` is.
     """
     changes: list[Change] = []
     for mangled, f_old in old_map.items():

@@ -45,7 +45,7 @@ MAX_ENTRIES: int = 100
 #: key invalidates all previously-cached entries on upgrade rather than risk
 #: serving a stale snapshot computed by an older, behaviorally-different
 #: abicheck version.
-_SNAPSHOT_CACHE_VERSION: str = "10"
+_SNAPSHOT_CACHE_VERSION: str = "11"
 # v2: castxml's CvQualifiedType type-name spelling changed for a
 # volatile-qualified pointer/reference VALUE (now a suffix, "T * volatile",
 # matching clang's own convention, rather than always a prefix) -- an
@@ -141,6 +141,17 @@ _SNAPSHOT_CACHE_VERSION: str = "10"
 # ``is_restrict=False`` until the entry happened to expire or was manually
 # cleared, silently preserving the cross-backend false positive this
 # extraction closes. Bumped so the upgrade forces re-extraction instead.
+#
+# v11 (G31 Phase C continuation): the direct-clang backend started
+# extracting ``Param.is_va_list`` (``dumper_clang_qualifiers.
+# _clang_param_is_va_list``, x86-64 System V spelling only), until now
+# populated by no backend at all. Identical reasoning to v10 -- an
+# upgrading user's warm clang/hybrid cache entry, keyed on the same
+# headers/includes/version/lang/``extra`` inputs a pre-upgrade dump already
+# covers, would keep replaying a snapshot whose every parameter reads
+# ``is_va_list=False`` until the entry happened to expire or was manually
+# cleared, silently keeping ``PARAM_BECAME_VA_LIST``/``PARAM_LOST_VA_LIST``
+# unreachable. Bumped so the upgrade forces re-extraction instead.
 
 
 def _get_cache_dir() -> Path:

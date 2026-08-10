@@ -417,7 +417,24 @@ class TestParamRestrictChanged:
 
 
 class TestParamVaListChanged:
-    """va_list parameter changes."""
+    """va_list parameter changes.
+
+    ``Param.is_va_list`` is populated only by the direct-clang header-AST
+    backend (G31 Phase C continued, schema v23) — see
+    ``diff_symbols._diff_param_va_list``'s own docstring, and
+    ``tests/test_clang_param_va_list.py`` for the full gate coverage — so
+    both sides here must be tagged ``ast_producer="clang"``, not the plain
+    ``_snap()`` helper's producer-less default.
+    """
+
+    def _clang_snap(self, functions):
+        return AbiSnapshot(
+            library="libtest.so.1",
+            version="1.0",
+            functions=functions,
+            from_headers=True,
+            ast_producer="clang",
+        )
 
     def test_param_became_va_list(self):
         f_v1 = _pub_func(
@@ -430,7 +447,7 @@ class TestParamVaListChanged:
             "_Z7vformatv",
             params=[Param(name="args", type="va_list", is_va_list=True)],
         )
-        r = compare(_snap(functions=[f_v1]), _snap(functions=[f_v2]))
+        r = compare(self._clang_snap([f_v1]), self._clang_snap([f_v2]))
         assert ChangeKind.PARAM_BECAME_VA_LIST in _kinds(r)
 
     def test_param_lost_va_list(self):
@@ -444,7 +461,7 @@ class TestParamVaListChanged:
             "_Z7vformatv",
             params=[Param(name="args", type="int", is_va_list=False)],
         )
-        r = compare(_snap(functions=[f_v1]), _snap(functions=[f_v2]))
+        r = compare(self._clang_snap([f_v1]), self._clang_snap([f_v2]))
         assert ChangeKind.PARAM_LOST_VA_LIST in _kinds(r)
 
 

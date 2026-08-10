@@ -1889,11 +1889,24 @@ def _diff_var_deprecated(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
 def _diff_param_va_list(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
     """Detect va_list parameter changes (ABICC: Parameter_Became_VaList/Non_VaList).
 
-    Loop body in ``diff_param_qualifiers``; registered here to keep its
-    original registry position (see ``param_restrict`` above).
+    Header-tier, clang/hybrid-producer-only, and reliability-gated -- see
+    ``diff_param_qualifiers.param_va_list_changes`` (G31 Phase C continued)
+    for the full reasoning, including why this is NOT symmetric across
+    producers the way ``param_restrict`` just above is.
+
+    The loop lives in ``diff_param_qualifiers`` (this file is at the
+    2000-line hard cap); registration stays HERE for registry ordering.
     """
     from .diff_param_qualifiers import param_va_list_changes
 
+    if not _both_header_aware(old, new):
+        return []
+    if old.ast_producer not in ("clang", "hybrid"):
+        return []
+    if new.ast_producer not in ("clang", "hybrid"):
+        return []
+    if not (old.clang_va_list_facts_reliable and new.clang_va_list_facts_reliable):
+        return []
     return param_va_list_changes(_public_functions(old), _public_functions(new))
 
 
