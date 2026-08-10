@@ -521,8 +521,15 @@ def read_snapshot_bytes(
             raise SnapshotError(
                 f"{p}: stored file exceeds the {cap} byte safety limit."
             )
-        f.seek(0)
-        raw = f.read(cap + 1)
+        # Codex review: don't rewind via f.seek(0) to reread the magic-byte
+        # prefix -- a FIFO/pipe (a named pipe, or /dev/stdin) is not
+        # seekable, so a rewind raises io.UnsupportedOperation, regressing
+        # the previous json.load(open(...)) implementation, which could
+        # consume such a stream just fine (no rewind needed there since it
+        # never separately sniffed a prefix first). Build the full read
+        # from the prefix bytes already consumed plus whatever remains,
+        # never re-reading the same bytes twice.
+        raw = prefix + f.read(cap + 1 - len(prefix))
     if len(raw) > cap:
         raise SnapshotError(f"{p}: stored file exceeds the {cap} byte safety limit.")
 

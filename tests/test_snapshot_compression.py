@@ -894,6 +894,34 @@ def test_write_through_fifo_does_not_replace_it(tmp_path):
         os.close(read_fd)
 
 
+@pytest.mark.skipif(os.name == "nt", reason="POSIX FIFOs only")
+def test_read_snapshot_from_a_fifo(tmp_path):
+    """Codex review, PR #699: read_snapshot_bytes() used to rewind via
+    f.seek(0) after sniffing the 4-byte magic prefix -- a FIFO/pipe (or
+    /dev/stdin) is not seekable, so the rewind raised
+    io.UnsupportedOperation, regressing the previous json.load(open(...))
+    implementation, which could consume such a stream just fine. Confirm
+    a snapshot can be read from a real FIFO end to end (the read-open of
+    a FIFO blocks until a writer appears, so the payload is fed from a
+    background thread rather than pre-buffered)."""
+    import threading
+
+    payload = json.dumps({"library": "libpipe", "version": "1.0"}).encode()
+    fifo_path = tmp_path / "in.abicheck.json"
+    os.mkfifo(fifo_path)
+
+    def _feed():
+        with open(fifo_path, "wb") as w:
+            w.write(payload)
+
+    writer = threading.Thread(target=_feed)
+    writer.start()
+    try:
+        assert read_snapshot_bytes(fifo_path) == payload
+    finally:
+        writer.join(timeout=5)
+
+
 @pytest.mark.skipif(os.name == "nt", reason="POSIX hard links only")
 def test_hard_linked_destination_is_rejected(tmp_path):
     """Codex review, PR #699: os.replace() installs the new content under
