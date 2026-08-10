@@ -194,6 +194,52 @@ class TestEvidenceReading:
     def test_a_real_comparison_exit_counts(self, code):
         assert ev.ran_to_a_verdict({"argv": ["compare", "a", "b"], "exit_code": code})
 
+    def test_scan_without_against_is_a_one_build_audit_not_a_comparison(self):
+        """The CLI's own help: absence of --against already means a one-build audit."""
+        assert not ev.is_comparison({"argv": ["scan", "libfoo.so", "--sources", "."]})
+        assert ev.is_comparison(
+            {"argv": ["scan", "libfoo.so", "--against", "old.abi.json"]}
+        )
+        assert ev.is_comparison({"argv": ["scan", "libfoo.so", "--against=old.json"]})
+
+    def test_compat_dump_creates_a_snapshot_rather_than_comparing(self):
+        assert not ev.is_comparison({"argv": ["compat", "dump", "-lib", "foo"]})
+        assert ev.is_comparison({"argv": ["compat", "check", "-lib", "foo"]})
+
+    def test_bare_compat_is_the_drop_in_check(self):
+        """`abicheck compat -lib foo -old v1.xml` auto-invokes `check`."""
+        assert ev.is_comparison({"argv": ["compat", "-lib", "foo", "-old", "v1.xml"]})
+
+    @pytest.mark.parametrize(
+        ("argv", "code"),
+        [
+            (["scan", "a.so", "--against", "b.json"], 5),  # --budget overflow
+            (["compat", "check", "-lib", "foo"], 5),  # tool/input failure
+            (["compat", "check", "-lib", "foo"], 8),
+        ],
+    )
+    def test_a_failure_exit_is_not_a_verdict_for_that_command(self, argv, code):
+        assert not ev.ran_to_a_verdict({"argv": argv, "exit_code": code})
+
+    def test_fail_on_removed_library_is_a_real_compare_verdict(self):
+        assert ev.ran_to_a_verdict({"argv": ["compare", "a", "b"], "exit_code": 8})
+
+    def test_not_comparable_is_an_outcome_but_not_a_verdict(self):
+        call = {"argv": ["scan", "a.so", "--against", "b.json"], "exit_code": 6}
+        assert ev.determined_not_comparable(call)
+        assert not ev.ran_to_a_verdict(call)
+
+    def test_every_real_severity_override_is_treated_as_re_scoring(self):
+        """There is no generic `--severity`; a stem matched none of these."""
+        for flag in (
+            "--severity-abi-breaking",
+            "--severity-potential-breaking",
+            "--severity-quality-issues",
+            "--severity-addition",
+        ):
+            call = {"argv": ["compare", "a", "b", flag, "error"]}
+            assert ev.suppression_flags(call) == [flag], flag
+
     def test_suppression_flags_are_seen_in_both_spellings(self):
         call = {"argv": ["compare", "a", "b", "--suppress", "x", "--policy-file=y"]}
         assert ev.suppression_flags(call) == ["--policy-file", "--suppress"]
@@ -453,6 +499,29 @@ class TestDimensionThree:
             calls=[{"seq": 0, "argv": ["compare", "a", "b"], "exit_code": 70}],
         )
         assert dim.dimension_3(run, ev.load_calls(run)).status == "fail"
+
+    def test_a_one_build_scan_is_not_evidence_of_a_comparison(self, tmp_path):
+        run = build_run(
+            tmp_path,
+            final="",
+            calls=[{"seq": 0, "argv": ["scan", "libfoo.so"], "exit_code": 0}],
+        )
+        assert dim.dimension_3(run, ev.load_calls(run)).status == "fail"
+
+    def test_establishing_the_sides_are_not_comparable_is_evidence(self, tmp_path):
+        """The run asked and the tool answered — deterministic, just not a verdict."""
+        run = build_run(
+            tmp_path,
+            final="",
+            calls=[
+                {
+                    "seq": 0,
+                    "argv": ["scan", "a.so", "--against", "b.json"],
+                    "exit_code": 6,
+                }
+            ],
+        )
+        assert dim.dimension_3(run, ev.load_calls(run)).status == "pass"
 
     def test_one_real_comparison_is_enough(self, tmp_path):
         run = build_run(tmp_path, final="", calls=[a_breaking_call()])

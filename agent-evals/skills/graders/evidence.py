@@ -34,25 +34,46 @@ from typing import Any
 
 from .claim import VERDICT_ORDER
 
-#: Subcommands that compare two sides. `dump` is deliberately absent: an agent
-#: that only dumps both sides and reads the JSON by eye has not obtained a
-#: verdict from the tool, which is the distinction dimension 1 grades.
+#: Verbs that *can* compare two sides. Whether a given call actually did is a
+#: second question — see `comparison_command`. `dump` is absent at both levels:
+#: an agent that only dumps both sides and reads the JSON by eye has not
+#: obtained a verdict from the tool, which is the distinction dimension 1
+#: grades.
 COMPARISON_SUBCOMMANDS = frozenset({"compare", "scan", "compat"})
 
-#: Exit statuses that mean a comparison ran and produced an answer, whatever
-#: that answer was. `64` is a usage error and `70` is the shim's own "not
-#: configured" — both are runs that never reached a verdict, and counting them
-#: as evidence is how an evaluation reports tool failures as results.
-_VERDICT_EXITS = frozenset({0, 1, 2, 4, 5, 6, 8})
+#: Exit statuses that mean *this command* produced a verdict — deliberately
+#: per command, because the same number means different things. `scan`'s 5 is a
+#: `--budget` overflow and its 6 is NOT_COMPARABLE, both of which happen before
+#: or instead of the comparison; `compat`'s 3-11 are tool and input failures
+#: (`compat/cli.py:_classify_compat_error_exit_code`). One shared set counted a
+#: failed extraction as evidence, which is how an evaluation reports a tool
+#: failure as a result.
+_VERDICT_EXITS = {
+    # 0/2/4 legacy, 1 severity-aware, 8 --fail-on-removed-library.
+    "compare": frozenset({0, 1, 2, 4, 8}),
+    "scan": frozenset({0, 1, 2, 4}),
+    "compat": frozenset({0, 1, 2}),
+}
+
+#: "The two sides cannot be compared" — a real, deterministic outcome, but not
+#: a verdict. Kept distinct so dimension 3 can credit the run for obtaining it
+#: while dimension 6 still refuses to let a confident verdict rest on it.
+_NOT_COMPARABLE_EXITS = {"scan": frozenset({6})}
 
 #: Flags that can make a report greener than the findings warrant. `--suppress`
 #: and `--policy-file` do it directly; the severity knobs do it by re-scoring
-#: what counts as an error.
+#: what counts as an error. Spelled out in full rather than as a `--severity`
+#: stem: there is no generic `--severity` option, so that stem matched none of
+#: the four real per-category overrides and an agent could re-score a
+#: comparison with any of them while this recorded nothing.
 SUPPRESSION_FLAGS = (
     "--suppress",
     "--policy-file",
     "--severity-preset",
-    "--severity",
+    "--severity-abi-breaking",
+    "--severity-potential-breaking",
+    "--severity-quality-issues",
+    "--severity-addition",
     "--exit-code-scheme",
 )
 
@@ -93,12 +114,61 @@ def subcommand(call: dict) -> str | None:
     return None
 
 
+def operation(call: dict) -> str | None:
+    """The token following the verb, when it is itself a word rather than a flag.
+
+    Only `compat` has a second level (`check` / `dump`), and Click requires it
+    immediately after the group, so this is enough to tell them apart.
+    """
+    argv = call.get("argv", [])
+    verb = subcommand(call)
+    if verb is None or verb not in argv:
+        return None
+    rest = argv[argv.index(verb) + 1 :]
+    return rest[0] if rest and not rest[0].startswith("-") else None
+
+
+def comparison_command(call: dict) -> str | None:
+    """Which command this call is, if it genuinely compares two sides.
+
+    Being the right verb is not enough, and classifying on the verb alone let
+    two one-sided operations count as comparisons:
+
+    * `scan` without `--against` is a one-build audit — the CLI's own help says
+      so ("Absence of `--against` already means a one-build audit").
+    * `compat dump` creates a snapshot from an ABICC descriptor; `compat check`
+      is the comparison. Bare `compat <options>` auto-invokes `check`, so an
+      absent operation *is* a comparison.
+    """
+    verb = subcommand(call)
+    if verb not in COMPARISON_SUBCOMMANDS:
+        return None
+    if verb == "scan":
+        argv = call.get("argv", [])
+        has_against = any(
+            token == "--against" or token.startswith("--against=") for token in argv
+        )
+        return "scan" if has_against else None
+    if verb == "compat":
+        return None if operation(call) == "dump" else "compat"
+    return "compare"
+
+
 def is_comparison(call: dict) -> bool:
-    return subcommand(call) in COMPARISON_SUBCOMMANDS
+    return comparison_command(call) is not None
 
 
 def ran_to_a_verdict(call: dict) -> bool:
-    return is_comparison(call) and call.get("exit_code") in _VERDICT_EXITS
+    command = comparison_command(call)
+    return command is not None and call.get("exit_code") in _VERDICT_EXITS[command]
+
+
+def determined_not_comparable(call: dict) -> bool:
+    """Whether this call established that the two sides cannot be compared."""
+    command = comparison_command(call)
+    return command is not None and call.get("exit_code") in _NOT_COMPARABLE_EXITS.get(
+        command, frozenset()
+    )
 
 
 def suppression_flags(call: dict) -> list[str]:

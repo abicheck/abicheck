@@ -259,13 +259,21 @@ def dimension_3(run_dir: Path, calls: list[dict]) -> Result:
     if not calls:
         return Result(3, name, "fail", ["no tool call was recorded"])
     reached = [c for c in calls if ev.ran_to_a_verdict(c)]
-    if not reached:
+    # A NOT_COMPARABLE determination is deterministic evidence too — the run
+    # asked and the tool answered. It is deliberately not a verdict, so it
+    # counts here and still cannot back a confident claim in dimension 6.
+    incomparable = [c for c in calls if ev.determined_not_comparable(c)]
+    if not reached and not incomparable:
         codes = sorted({str(c.get("exit_code")) for c in calls})
         return Result(
             3,
             name,
             "fail",
             [f"no comparison reached a verdict (exit codes seen: {', '.join(codes)})"],
+        )
+    if not reached:
+        return Result(
+            3, name, "pass", ["a comparison established the sides are not comparable"]
         )
     return Result(3, name, "pass", [f"{len(reached)} comparison(s) produced a verdict"])
 
