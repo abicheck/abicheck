@@ -1296,8 +1296,8 @@ def test_overloaded_function_templates_get_distinct_instantiation_nodes() -> Non
     decl_nodes = {n.id for n in graph.nodes if n.kind == NODE_TEMPLATE_DECL}
     assert len(decl_nodes) == 2
     assert decl_nodes == {
-        template_decl_node_id("f", "T (T)"),
-        template_decl_node_id("f", "T (T, T)"),
+        template_decl_node_id("f", "TemplateTypeParmDecl|T (T)"),
+        template_decl_node_id("f", "TemplateTypeParmDecl|T (T, T)"),
     }
     instantiates_edges = {
         (e.src, e.dst) for e in graph.edges if e.kind == EDGE_DECL_INSTANTIATES_TEMPLATE
@@ -1305,11 +1305,11 @@ def test_overloaded_function_templates_get_distinct_instantiation_nodes() -> Non
     assert instantiates_edges == {
         (
             template_instantiation_node_id("f<int>", "_Z1fIiET_S0_"),
-            template_decl_node_id("f", "T (T)"),
+            template_decl_node_id("f", "TemplateTypeParmDecl|T (T)"),
         ),
         (
             template_instantiation_node_id("f<int>", "_Z1fIiET_S0_S0_"),
-            template_decl_node_id("f", "T (T, T)"),
+            template_decl_node_id("f", "TemplateTypeParmDecl|T (T, T)"),
         ),
     }
 
@@ -1429,8 +1429,14 @@ def test_member_template_in_different_classes_does_not_collide_on_qname() -> Non
     graph = SourceGraphSummary()
     augment_graph_with_templates(graph, out)
     tdecl_nodes = {n.id for n in graph.nodes if n.kind == NODE_TEMPLATE_DECL}
-    assert template_decl_node_id("api::Holder::apply") in tdecl_nodes
-    assert template_decl_node_id("api::Wrapper::apply") in tdecl_nodes
+    assert (
+        template_decl_node_id("api::Holder::apply", "TemplateTypeParmDecl|")
+        in tdecl_nodes
+    )
+    assert (
+        template_decl_node_id("api::Wrapper::apply", "TemplateTypeParmDecl|")
+        in tdecl_nodes
+    )
     assert len([n for n in tdecl_nodes if "apply" in n]) == 2  # not one shared node
 
 

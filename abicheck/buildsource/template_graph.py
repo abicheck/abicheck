@@ -1013,35 +1013,72 @@ def _member_symbols(node: dict[str, Any]) -> tuple[str, ...]:
     return tuple(symbols)
 
 
-def _function_template_pattern_signature(node: dict[str, Any]) -> str:
-    """A ``FunctionTemplateDecl``'s own pattern signature (clang's printed,
-    unspecialized function type, e.g. ``"T (T, T)"``) -- the discriminator
-    :func:`template_decl_node_id` needs between two overloaded function
-    templates sharing one name (``f<T>(T)`` vs. ``f<T>(T,T)``), verified
-    empirically against real clang AST output: each overload's own pattern
-    ``FunctionDecl`` child (no ``mangledName``) carries a distinct ``type.
-    qualType`` -- ``"T (T)"``/``"T (T, T)"`` -- reliably differing between
-    overloads without depending on any particular instantiation's argument
-    substitution. Returns the first such spelling found among *node*'s
-    direct function-shaped children that carries no ``mangledName``; ``""``
-    when none qualify (degrade to the bare-qname identity, this module's
-    usual discipline).
+#: A FunctionTemplateDecl's own template-parameter declaration kinds --
+#: what :func:`_function_template_pattern_signature` additionally counts
+#: to discriminate two templates that share both a qualified name and an
+#: identical *function* signature but differ in their own template
+#: parameter list (see that function's docstring for the confirmed
+#: real-world case this closes).
+_TEMPLATE_PARAM_DECL_KINDS = frozenset(
+    {"TemplateTypeParmDecl", "NonTypeTemplateParmDecl", "TemplateTemplateParmDecl"}
+)
 
-    Skipping a ``mangledName``-carrying child is defense-in-depth, not a
-    fix for an observed collision (CodeRabbit review): empirically, across
-    every AST shape checked against real clang output -- a plain overload
-    pair, multiple instantiations of one overload, an explicit full
-    specialization's detached unmangled stub, a forward-declared-then-
-    defined template, and an out-of-line class-member template -- the
-    unmangled pattern child is always clang's *first* function-shaped
-    child, so the prior first-match behavior already returned it in every
-    case tried. There is no structural AST reason this could differ (a
-    primary template must be declared before anything instantiates or
-    specializes it, so its pattern child is always emitted first), but
-    filtering explicitly removes the dependency on that ordering rather
-    than relying on it implicitly."""
+
+def _function_template_pattern_signature(node: dict[str, Any]) -> str:
+    """A ``FunctionTemplateDecl``'s own pattern signature -- the
+    discriminator :func:`template_decl_node_id` needs between two function
+    templates sharing one qualified name, combining two independently
+    confirmed collision sources into one string:
+
+    1. Clang's printed, unspecialized function type (e.g. ``"T (T, T)"``),
+       distinguishing two *overloads* (``f<T>(T)`` vs. ``f<T>(T,T)``,
+       verified empirically against real clang AST output: each overload's
+       own pattern ``FunctionDecl`` child, no ``mangledName``, carries a
+       distinct ``type.qualType`` reliably differing between overloads
+       without depending on any particular instantiation's argument
+       substitution).
+    2. The ordered kinds of *this* ``FunctionTemplateDecl``'s own leading
+       template-parameter children (Codex review, fresh evidence beyond
+       the overload fix above): ``template <class T> void f()`` and
+       ``template <class T, class U> void f()`` both print the *identical*
+       function-type spelling ``"void ()"`` -- the function parameter list
+       is genuinely empty for both, and clang's printer never reflects the
+       *template* parameter list in that spelling at all -- so (1) alone
+       still collapsed both onto one shared ``template_decl`` node despite
+       their concrete instantiations correctly staying separate (distinct
+       mangled names), falsely making every ``DECL_INSTANTIATES_TEMPLATE``
+       edge from either one point at a declaration the other didn't
+       actually come from. Confirmed via a real compiled/dumped
+       `template<class T> void f()` / `template<class T,class U> void f()`
+       pair reducing to the identical `"void ()"` printed type.
+
+    Returns ``"<param-kinds>|<pattern-type>"`` (the param-kind half always
+    present even when no pattern spelling is found, so two templates
+    differing only in parameter *count* still discriminate); ``""`` only
+    when *node* has neither -- degrade to the bare-qname identity, this
+    module's usual discipline.
+
+    Skipping a ``mangledName``-carrying child for the pattern-type half is
+    defense-in-depth, not a fix for an observed collision (CodeRabbit
+    review): empirically, across every AST shape checked against real
+    clang output -- a plain overload pair, multiple instantiations of one
+    overload, an explicit full specialization's detached unmangled stub, a
+    forward-declared-then-defined template, and an out-of-line class-member
+    template -- the unmangled pattern child is always clang's *first*
+    function-shaped child, so the prior first-match behavior already
+    returned it in every case tried. There is no structural AST reason
+    this could differ (a primary template must be declared before
+    anything instantiates or specializes it, so its pattern child is
+    always emitted first), but filtering explicitly removes the dependency
+    on that ordering rather than relying on it implicitly."""
+    param_kinds: list[str] = []
+    pattern_type = ""
     for child in node.get("inner", []) or []:
-        if str(child.get("kind", "")) not in _MEMBER_FUNCTION_KINDS | {"FunctionDecl"}:
+        child_kind = str(child.get("kind", ""))
+        if child_kind in _TEMPLATE_PARAM_DECL_KINDS:
+            param_kinds.append(child_kind)
+            continue
+        if pattern_type or child_kind not in _MEMBER_FUNCTION_KINDS | {"FunctionDecl"}:
             continue
         if child.get("mangledName"):
             continue
@@ -1049,8 +1086,10 @@ def _function_template_pattern_signature(node: dict[str, Any]) -> str:
         if isinstance(qual_type, dict):
             spelling = qual_type.get("qualType")
             if isinstance(spelling, str) and spelling:
-                return spelling
-    return ""
+                pattern_type = spelling
+    if not param_kinds and not pattern_type:
+        return ""
+    return f"{','.join(param_kinds)}|{pattern_type}"
 
 
 def _walk_function_templates(

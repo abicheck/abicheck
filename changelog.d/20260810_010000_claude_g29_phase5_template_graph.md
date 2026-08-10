@@ -693,3 +693,27 @@
   `template_decl` node anyway; documented in
   `_class_template_has_auto_nttp`'s own docstring rather than adding an
   unverified parallel check.
+
+  A twenty-third round found and fixed one more real gap in
+  `template_graph.py`, confirmed empirically. `_function_template_pattern_
+  signature`'s discriminator relied solely on clang's printed function
+  type (e.g. `"void ()"`), but two function templates can share both a
+  qualified name and an identical *function* signature while differing
+  only in their own *template* parameter list -- `template <class T> void
+  f()` and `template <class T, class U> void f()` both print the identical
+  `"void ()"`, since the function parameter list is genuinely empty for
+  both and clang's printer never reflects the template parameter list in
+  that spelling at all (Codex review, fresh evidence). The pattern-type
+  discriminator alone therefore still collapsed both onto one shared
+  `template_decl` node despite their own instantiations correctly staying
+  separate (distinct mangled names), falsely making every
+  `DECL_INSTANTIATES_TEMPLATE` edge from either one point at a declaration
+  the other didn't actually come from. Fixed by additionally counting each
+  `FunctionTemplateDecl`'s own leading template-parameter-declaration
+  kinds (`TemplateTypeParmDecl`/`NonTypeTemplateParmDecl`/
+  `TemplateTemplateParmDecl`) and folding that into the discriminator
+  alongside the existing pattern-type spelling. `tests/test_template_graph.py`
+  crossed the 2000-line AI-readiness hard cap while adding this
+  regression test; split identity-discriminator tests into a new sibling
+  `tests/test_template_graph_identity.py` rather than further growing the
+  parent file, per this repo's own file-size guidance.
