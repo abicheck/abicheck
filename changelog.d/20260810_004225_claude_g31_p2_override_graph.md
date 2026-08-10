@@ -28,7 +28,12 @@
   first slice (constructors/destructors and class-template specializations
   are deliberately out of scope — see the module's own docstring); a
   covariant return type is a documented false negative, not a false
-  positive. Folded automatically alongside the existing call/type-graph
+  positive, and so is a base method spelling a parameter/return type
+  through a typedef that the override spells as the underlying type
+  directly (`type.qualType` differs even though clang accepts the
+  override) — both verified against real Clang 17 output and pinned with
+  regression tests rather than guessed at (Codex review, fresh evidence).
+  Folded automatically alongside the existing call/type-graph
   passes whenever `dump --sources`/`--build-info` builds the L5 graph with
   Clang available (`inline_graph_fold.fold_semantic_graphs`) —
   best-effort, degrading gracefully (no edges, an extractor row recorded)

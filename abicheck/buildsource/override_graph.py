@@ -76,6 +76,20 @@ omissions):
   return type has a DIFFERENT ``type.qualType`` than its base (the return
   type differs), so this genuinely misses it (a known false negative, not a
   false positive) rather than risk a wrong match.
+- KNOWN, deliberately-deferred gap (Codex review, fresh evidence): a base
+  method spelling a parameter/return type through a TYPEDEF, overridden by
+  a derived method spelling the underlying type directly (e.g. ``typedef
+  int I; virtual void f(I);`` overridden by ``void f(int) override;``) is a
+  real, clang-confirmed override (``OverrideAttr`` present) that this
+  matcher misses — ``type.qualType`` spells ``"void (I)"`` vs. ``"void
+  (int)"``, verified against real Clang 17 output. Each ``ParmVarDecl``
+  child DOES carry its own ``desugaredQualType`` when its type is a
+  typedef, but the enclosing METHOD's own ``type.qualType`` never does
+  (verified: a typedef'd RETURN type has no desugared form anywhere in this
+  compact JSON shape at all) — a real fix needs re-assembling the
+  signature from each parameter's desugared type plus a return-type
+  typedef resolution this format cannot provide, not a narrow extension of
+  the current whole-qualType string comparison.
 """
 
 from __future__ import annotations

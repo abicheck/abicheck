@@ -279,6 +279,34 @@ def test_multiple_inheritance_skips_the_non_virtual_sibling_base() -> None:
     ]
 
 
+def test_typedef_aliased_parameter_documents_known_gap() -> None:
+    # Codex review, fresh evidence, verified against real Clang 17 output:
+    # `typedef int I; virtual void f(I);` overridden by `void f(int)
+    # override;` is a real, clang-confirmed override (OverrideAttr present)
+    # that this matcher currently misses -- type.qualType spells "void (I)"
+    # vs. "void (int)". A real fix needs re-assembling the signature from
+    # each parameter's own desugaredQualType (only available per-parameter,
+    # never at the whole-method level -- see the module's own docstring);
+    # this test pins the current, honest miss (no edge, not a crash) so a
+    # future fix has a concrete regression to flip.
+    ast = _tu(
+        _record(
+            "Base",
+            inner=[
+                _method("f", "_ZN4Base1fEi", "void (I)", is_virtual=True),
+            ],
+        ),
+        _record(
+            "Derived",
+            bases=["Base"],
+            inner=[
+                _method("f", "_ZN7Derived1fEi", "void (int)", has_override_attr=True)
+            ],
+        ),
+    )
+    assert parse_clang_ast_overrides(ast) == []
+
+
 def test_override_reaches_through_non_redeclaring_intermediate_class() -> None:
     # Codex review, fresh evidence, verified against real Clang 17 output:
     # Base declares a virtual run(); Mid : Base does NOT redeclare it at
