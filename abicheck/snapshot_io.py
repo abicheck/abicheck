@@ -602,7 +602,14 @@ def _atomic_write_bytes(data: bytes, path: Path) -> None:
     ``os.chmod`` on our own just-created temp file -- not process-global,
     not racy), so re-dumping a shared, group/world-readable baseline does
     not silently strip its permissions down to whatever the current umask
-    happens to be.
+    happens to be. Group ownership (Codex review) is preserved the same
+    way: the fresh temp file inherits the writer's own default group, not
+    an existing destination's -- copying only the mode would silently
+    revoke a shared baseline's deliberately-assigned group (e.g. an
+    ``abi-readers`` group with no setgid parent directory to inherit it
+    from). ``os.chown`` is best-effort (a non-privileged writer generally
+    can't change group anyway; the destination simply keeps the writer's
+    own group in that case, the same outcome as before this fix).
 
     Symlink destinations (Codex review): if *path* is itself a symlink,
     ``os.replace(tmp_path, path)`` would swap the symlink's own directory
@@ -626,11 +633,19 @@ def _atomic_write_bytes(data: bytes, path: Path) -> None:
             except OSError:
                 pass  # best-effort; some filesystems/platforms don't support it
         try:
-            existing_mode = target.stat().st_mode & 0o777
+            existing_stat = target.stat()
+            existing_mode: int | None = existing_stat.st_mode & 0o777
+            existing_gid: int | None = existing_stat.st_gid
         except OSError:
             existing_mode = None
+            existing_gid = None
         if existing_mode is not None:
             os.chmod(tmp_path, existing_mode)
+        if existing_gid is not None and hasattr(os, "chown"):
+            try:
+                os.chown(tmp_path, -1, existing_gid)
+            except OSError:
+                pass  # best-effort; not group-privileged, or platform has no chown
         os.replace(tmp_path, target)
     except BaseException:
         try:

@@ -473,6 +473,38 @@ def test_existing_file_mode_is_preserved_across_rewrite(tmp_path):
 
 
 @pytest.mark.skipif(
+    os.name == "nt", reason="os.chown/getgrall not available on Windows"
+)
+def test_existing_file_group_is_preserved_across_rewrite(tmp_path):
+    """Codex review, PR #699: rewriting an existing snapshot used to
+    silently revoke a deliberately-assigned group owner (e.g. an
+    `abi-readers` group with no setgid parent directory) -- the fresh temp
+    file inherits the writer's own default group, and only the mode was
+    carried over to the replacement, not the group. Requires root or
+    CAP_CHOWN to reassign an arbitrary group, so this is best-effort like
+    the write path itself."""
+    import grp
+
+    try:
+        target_gid = grp.getgrnam("daemon").gr_gid
+    except KeyError:
+        pytest.skip("no 'daemon' group on this system")
+
+    snap = _sample_snapshot()
+    p = tmp_path / "existing.abicheck.json"
+    p.write_text("placeholder")
+    try:
+        os.chown(p, -1, target_gid)
+    except (OSError, AttributeError):
+        pytest.skip("cannot chown to an arbitrary group in this environment")
+    if p.stat().st_gid != target_gid:
+        pytest.skip("chown did not take effect (insufficient privileges)")
+
+    write_snapshot(snap, p)
+    assert p.stat().st_gid == target_gid
+
+
+@pytest.mark.skipif(
     os.name == "nt", reason="symlinks need elevated privileges on Windows"
 )
 def test_write_through_symlink_preserves_the_link(tmp_path):

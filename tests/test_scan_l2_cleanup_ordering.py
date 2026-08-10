@@ -121,9 +121,7 @@ def test_scan_returns_seeded_includes_for_baseline(monkeypatch, tmp_path):
         return [seeded], []  # seed adds a build-derived dir, no cleanup
 
     monkeypatch.setattr("abicheck.buildsource.l2_seed.seed_l2_includes", fake_seed)
-    monkeypatch.setattr(
-        "abicheck.service.resolve_input", lambda *a, **k: object()
-    )
+    monkeypatch.setattr("abicheck.service.resolve_input", lambda *a, **k: object())
     monkeypatch.setattr(
         "abicheck.cli_buildsource.embed_build_source", lambda *a, **k: None
     )
@@ -336,3 +334,61 @@ class TestScanCandidateIncludeDependencies:
             encoding="utf-8",
         )
         assert _scan_candidate_include_dependencies(baseline) is True
+
+
+class TestScanCandidateIncludeDependenciesCompressed:
+    """Codex review, PR #699 (ADR-059): a compressed baseline's raw stored
+    bytes aren't JSON text, so neither the tail-byte-scan heuristic nor a
+    plain-text json.load could ever find dependency_scope in them -- both
+    silently failed closed to the filtered default regardless of the real
+    tag, hard-failing the inverse "candidate implicitly matches an
+    unfiltered baseline" workflow via NOT_COMPARABLE."""
+
+    def test_gzip_baseline_tagged_full_matches_full(self, tmp_path):
+        import json as json_mod
+
+        from abicheck.scan_engine import _scan_candidate_include_dependencies
+        from abicheck.snapshot_io import SnapshotCompression, write_snapshot_text
+
+        baseline = tmp_path / "baseline.abicheck.json.gz"
+        write_snapshot_text(
+            json_mod.dumps({"dependency_scope": "full", "schema_version": 18}),
+            baseline,
+            compression=SnapshotCompression.GZIP,
+        )
+        assert _scan_candidate_include_dependencies(baseline) is True
+
+    def test_zstd_baseline_tagged_full_matches_full(self, tmp_path):
+        import json as json_mod
+
+        from abicheck.scan_engine import _scan_candidate_include_dependencies
+        from abicheck.snapshot_io import SnapshotCompression, write_snapshot_text
+
+        baseline = tmp_path / "baseline.abicheck.json.zst"
+        write_snapshot_text(
+            json_mod.dumps({"dependency_scope": "full", "schema_version": 18}),
+            baseline,
+            compression=SnapshotCompression.ZSTD,
+        )
+        assert _scan_candidate_include_dependencies(baseline) is True
+
+    def test_compressed_baseline_tagged_filtered_stays_filtered(self, tmp_path):
+        import json as json_mod
+
+        from abicheck.scan_engine import _scan_candidate_include_dependencies
+        from abicheck.snapshot_io import SnapshotCompression, write_snapshot_text
+
+        baseline = tmp_path / "baseline.abicheck.json.gz"
+        write_snapshot_text(
+            json_mod.dumps({"dependency_scope": "filtered", "schema_version": 18}),
+            baseline,
+            compression=SnapshotCompression.GZIP,
+        )
+        assert _scan_candidate_include_dependencies(baseline) is False
+
+    def test_corrupt_compressed_baseline_falls_back_to_filtered(self, tmp_path):
+        from abicheck.scan_engine import _scan_candidate_include_dependencies
+
+        baseline = tmp_path / "baseline.abicheck.json.gz"
+        baseline.write_bytes(b"\x1f\x8b\x08\x00not a real gzip stream")
+        assert _scan_candidate_include_dependencies(baseline) is False
