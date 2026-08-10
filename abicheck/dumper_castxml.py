@@ -659,6 +659,19 @@ class _CastxmlParser:
             return AccessLevel.PRIVATE
         return AccessLevel.PUBLIC
 
+    def _variable_value_eligible(self, el: Element) -> bool:
+        """``init`` eligible for ``Variable.value``? Mirrors
+        ``_iter_public_constants`` below (Codex review, 3 rounds): top-level
+        constness (not the loose whole-spelling ``is_const``), public
+        access, public header provenance if configured -- but not gated on
+        ``_have_public_set`` outright, unlike that opt-in-only method.
+        """
+        if el.get("access") in ("private", "protected"):
+            return False
+        if self._have_public_set and not self._decl_is_public(el):
+            return False
+        return self._resolve_cv_restrict(el.get("type", ""))[0]
+
     def _visibility(self, mangled: str, name: str = "") -> Visibility:
         """Determine visibility based on ELF symbol tables."""
         # Check dynamic symbols (.dynsym) — truly exported
@@ -1272,25 +1285,10 @@ class _CastxmlParser:
                     type=type_name,
                     visibility=vis,
                     is_const=is_const,
-                    # G31 Phase C continued: reuses `_access_level`, already
-                    # used for `Field`, for the identical attribute a static
-                    # class member's `<Variable>` also carries.
+                    # G31: reuses `_access_level` (already used for `Field`).
                     access=self._access_level(el),
-                    # G31 Phase C continued: `init` is verbatim/unevaluated,
-                    # like `TypeField.default`. Gated on TOP-LEVEL constness
-                    # (stops at `PointerType`, unlike the loose `is_const`
-                    # above -- a mutable `const int *p`'s address-of
-                    # initializer is not a contract) AND public access,
-                    # mirroring `_iter_public_constants` below (both gates
-                    # from Codex review).
-                    value=(
-                        el.get("init")
-                        if (
-                            el.get("access") not in ("private", "protected")
-                            and self._resolve_cv_restrict(el.get("type", ""))[0]
-                        )
-                        else None
-                    ),
+                    # G31: `init`, gated by `_variable_value_eligible`.
+                    value=el.get("init") if self._variable_value_eligible(el) else None,
                     source_location=self._source_location(el),
                     # Explicit alignas/aligned override when castxml emits an
                     # ``align`` attribute on the Variable itself; falls back to

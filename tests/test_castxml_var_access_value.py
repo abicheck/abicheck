@@ -351,6 +351,66 @@ class TestCastxmlVariableAccessAndValue:
         assert v.access == AccessLevel.PRIVATE
         assert v.value is None
 
+    def test_value_scoped_to_public_header_provenance(self) -> None:
+        """A public, top-level-const, exported variable declared in a
+        PRIVATE/internal header is outside the configured public-header
+        contract -- the identical reasoning `_iter_public_constants`
+        already applies via `_decl_is_public` (Codex review, third round:
+        the first two fixes gated on constness and C++ access but not
+        header provenance). Only checked when a public-header set is
+        actually configured, matching `_decl_is_public`'s own "opt-in"
+        semantics -- see `test_const_variable_value_is_extracted` for the
+        unscoped (no `--public-header` flags) case, which must still work."""
+        root = Element("CastXML", attrib={"format": "1.4.0"})
+        f_pub = SubElement(root, "File")
+        f_pub.set("id", "fpub")
+        f_pub.set("name", "/repo/include/public.h")
+        f_priv = SubElement(root, "File")
+        f_priv.set("id", "fpriv")
+        f_priv.set("name", "/repo/src/internal.h")
+        SubElement(root, "Namespace", attrib={"id": "_1", "name": "::"})
+        SubElement(root, "FundamentalType", attrib={"id": "_23", "name": "int"})
+        SubElement(
+            root, "CvQualifiedType", attrib={"id": "_23c", "type": "_23", "const": "1"}
+        )
+        SubElement(
+            root,
+            "Variable",
+            attrib={
+                "id": "_20",
+                "name": "kPub",
+                "type": "_23c",
+                "context": "_1",
+                "init": "1",
+                "file": "fpub",
+                "line": "1",
+                "location": "fpub:1",
+            },
+        )
+        SubElement(
+            root,
+            "Variable",
+            attrib={
+                "id": "_21",
+                "name": "kInternal",
+                "type": "_23c",
+                "context": "_1",
+                "init": "2",
+                "file": "fpriv",
+                "line": "1",
+                "location": "fpriv:1",
+            },
+        )
+        parser = _CastxmlParser(
+            root,
+            exported_dynamic=set(),
+            exported_static=set(),
+            public_header_paths=["/repo/include/public.h"],
+        )
+        by_name = {v.name: v for v in parser.parse_variables()}
+        assert by_name["kPub"].value == "1"
+        assert by_name["kInternal"].value is None
+
 
 @pytest.mark.integration
 class TestCastxmlVariableAccessAndValueAgainstRealCastxml:
