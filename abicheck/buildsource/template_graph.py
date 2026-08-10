@@ -510,11 +510,10 @@ def _partial_specialization_pattern_signature(node: dict[str, Any]) -> str:
     spelling, joined into one discriminator string. Built the same way a
     concrete instantiation's own argument list is (:func:`_template_arg_use`),
     but over the partial spec's own *dependent* pattern arguments (e.g.
-    ``struct C<T*> {...}``'s own argument spells as the dependent type
-    ``"type-parameter-0-0 *"``, verified empirically). Stable across
-    TUs/recompiles, unlike the ``loc.offset`` used only to *detect* which
-    pattern a specialization came from -- see
-    :func:`_collect_partial_specialization_signatures`."""
+    ``struct C<T*> {...}``'s own argument spells as ``"type-parameter-0-0
+    *"``, verified empirically). Stable across TUs/recompiles, unlike the
+    ``loc.offset`` used only to *detect* which pattern a specialization
+    came from -- see :func:`_collect_partial_specialization_signatures`."""
     parts = []
     for child in node.get("inner", []) or []:
         if str(child.get("kind", "")) != "TemplateArgument":
@@ -781,15 +780,12 @@ def _template_arg_use(arg_node: dict[str, Any]) -> TemplateArgUse | None:
 
 def _is_opaque_template_argument(node: dict[str, Any]) -> bool:
     """Whether a ``TemplateArgument`` node carries none of the fields this
-    module can ever spell anything from — no ``type``, no ``value``, not a
-    pack wrapper (``isPack``). A **template-template argument** (a template
-    passed as a template argument, e.g. ``Use<A>``/``Use<B>`` for
-    ``template <template <typename> class C> struct Use;``) produces exactly
-    this shape — empirically confirmed against real clang AST output (Codex
-    review): the ``TemplateArgument`` node is entirely bare (``{"kind":
-    "TemplateArgument"}``, no ``id``, no ``inner``, nothing distinguishing
-    ``A`` from ``B``) with clang's own ``-ast-dump=json`` serializing zero
-    identifying information for it at all."""
+    module can spell anything from — no ``type``, no ``value``, not a pack
+    wrapper (``isPack``). A **template-template argument** (e.g.
+    ``Use<A>``/``Use<B>`` for ``template <template <typename> class C>
+    struct Use;``) produces exactly this shape (Codex review, confirmed
+    against real clang AST output): the node is entirely bare (``{"kind":
+    "TemplateArgument"}``), nothing distinguishing ``A`` from ``B``."""
     return not node.get("isPack") and node.get("type") is None and "value" not in node
 
 
@@ -1684,20 +1680,31 @@ def _resolve_emitted_symbol(
     :func:`_normalize_mangled` form -- that has a matching ``binary_symbol``
     node, or ``None`` if neither does. Returns the **spelling**, not the
     node id: a caller needing the node id derives it with
-    ``symbol_node_id(result)``, and a caller needing a stable per-
-    instantiation identity (:func:`augment_graph_with_templates`'s
-    ``function_mangled``) shares this same resolution rather than computing
-    it twice and risking disagreement (Codex review, second round: an
-    earlier revision separately, unconditionally normalized
-    ``function_mangled``, merging two genuinely distinct instantiations --
-    each with its own real, independently exported asm-labeled symbol,
-    ``__Zfake``/``_Zfake`` -- onto one node, since normalizing both
-    collapsed them to the identical spelling).
+    ``symbol_node_id(result)``, and a caller needing a stable identity
+    (``function_mangled``) shares this resolution instead of computing it
+    twice and risking disagreement (Codex review, second round: an earlier
+    revision separately normalized ``function_mangled``, merging two
+    distinct instantiations -- each with its own real, independently
+    exported asm-labeled symbol, ``__Zfake``/``_Zfake`` -- onto one node).
 
     Tries *symbol* exactly first; only when unmatched does it retry the
     Mach-O-stripped form. **Narrower than** :mod:`archive_graph`'s own
     fallback (gates on real object-magic evidence); this one falls back
-    unconditionally, though still safer than the pre-fix strip."""
+    unconditionally, though still safer than the pre-fix strip.
+
+    **Known residual gap, investigated and deliberately not closed**
+    (Codex review, third round, confirmed via a real repro): a hidden/
+    discarded ``__Zfake``-labeled instantiation with no real export still
+    triggers this fallback on ELF, wrongly attributing an unrelated,
+    genuinely-exported ``_Zfake``. Gating on real platform evidence
+    (mirroring :mod:`archive_graph`) was investigated and rejected: the one
+    cheap candidate, ``CompileUnit.target_triple``, is unreliable for
+    exactly the case that matters -- a real macOS build using the default
+    system ``clang++`` with no explicit ``--target=`` leaves it empty, so
+    gating on it would reintroduce the original Mach-O join *failures*
+    this fix closed, in the common case. A real fix needs a genuine
+    toolchain-identity probe -- already tracked as separate, deferred work
+    (AGENTS.md's "toolchain profile" known-gaps entry)."""
     if symbol_node_id(symbol) in known_symbols:
         return symbol
     normalized = _normalize_mangled(symbol)
@@ -1777,16 +1784,10 @@ def augment_graph_with_templates(
         )
         ensure_node(template_id, NODE_TEMPLATE_DECL, inst.template_qname)
 
-        # The instantiation's own *resolved* symbol identity (self-review
-        # round, second pass) -- NOT an independent, unconditional
-        # normalization, which merged two distinct instantiations each
-        # with their own real, independently exported asm-labeled symbol
-        # (__Zfake/_Zfake) onto one node (Codex review). Sharing
-        # _resolve_emitted_symbol with the join loop below keeps the
-        # node's identity matching whichever spelling actually has a real
-        # export -- stable across Mach-O builds, without merging two
-        # instantiations that each resolve to their own export. Falls back
-        # to the raw spelling only when nothing resolves (never exported).
+        # The instantiation's own *resolved* symbol identity, NOT an
+        # independent normalization (self-review round, second pass;
+        # see _resolve_emitted_symbol's own docstring for why). Falls
+        # back to the raw spelling only when nothing resolves.
         function_mangled = None
         if inst.kind == _FUNCTION_KIND and inst.emitted_symbols:
             primary_symbol = inst.emitted_symbols[0]

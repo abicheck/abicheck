@@ -948,3 +948,19 @@
   root through as the adapter's `workspace`, mirroring the inferred-query
   path's existing precedent -- a no-op when no `--sources` tree is given
   (an out-of-tree `--build-info` with no source tree), same as before.
+
+  A third Codex round confirmed, via a real repro, a residual gap already
+  acknowledged in `_resolve_emitted_symbol`'s own docstring: a hidden/
+  discarded `__Zfake`-labeled instantiation with no real export still
+  triggers the guarded fallback on ELF, wrongly attributing an unrelated,
+  genuinely-exported `_Zfake`. Investigated closing it by gating on real
+  platform evidence (mirroring `archive_graph.py`'s object-magic gate) and
+  rejected: the one cheap candidate signal, `CompileUnit.target_triple`,
+  is unreliable for exactly the case that matters -- a real macOS build
+  using the default system `clang++` with no explicit `--target=` leaves
+  it empty, so gating on it would reintroduce the original Mach-O join
+  *failures* this whole fix line closed, in the common case (trading one
+  failure mode for a worse one). A real fix needs a genuine toolchain-
+  identity probe, already tracked as separate, deferred work (AGENTS.md's
+  "toolchain profile" known-gaps entry). Strengthened the docstring with
+  the concrete repro rather than leaving the gap only abstractly described.
