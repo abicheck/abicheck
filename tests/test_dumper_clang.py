@@ -1519,6 +1519,47 @@ def test_dependent_scope_initializer_documents_known_gap() -> None:
     assert value_1 == value_2
 
 
+def test_offsetof_initializer_documents_known_gap() -> None:
+    """Codex review, PR #687, fresh evidence: ``offsetof(A, x)`` vs.
+    ``offsetof(A, y)`` -- clang's ``OffsetOfExpr`` node, verified against
+    real ``clang++ --std=c++17 -Xclang -ast-dump=json`` output (Clang 18),
+    carries no ``inner`` children and no key identifying which member the
+    offset walk selects; both reduce to the byte-identical
+    ``{"kind": "OffsetOfExpr", "type": "unsigned long"}`` real-world AST
+    node shape reproduced verbatim here. This is a KNOWN, deliberately
+    deferred gap (see ``_canonical_expr``'s own docstring) -- pinned so a
+    future fix has a concrete regression to flip, and so this doesn't
+    silently regress further."""
+    from abicheck.dumper_clang_expr import _field_initializer_value
+
+    def _offsetof_field() -> dict:
+        # Real clang output has no reference to the selected member (`x` vs.
+        # `y`) anywhere on this node -- there is nothing here to vary
+        # between the two call sites below, which is exactly the gap.
+        return {
+            "kind": "FieldDecl",
+            "name": "v",
+            "type": {"qualType": "const unsigned long"},
+            "hasInClassInitializer": True,
+            "inner": [
+                {
+                    "kind": "OffsetOfExpr",
+                    "type": {"qualType": "unsigned long"},
+                    "valueCategory": "prvalue",
+                }
+            ],
+        }
+
+    field_x = _offsetof_field()  # stands in for `offsetof(A, x)`
+    field_y = _offsetof_field()  # stands in for `offsetof(A, y)`
+
+    value_x = _field_initializer_value(field_x)
+    value_y = _field_initializer_value(field_y)
+
+    assert value_x is not None
+    assert value_x == value_y
+
+
 def test_parse_enums_is_scoped_false_for_plain_enum() -> None:
     root = _tu(
         {

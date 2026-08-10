@@ -354,6 +354,7 @@ class ReportFinding:
                 # round-trip it back out as a JSON boolean, which neither
                 # this schema nor compare_report.schema.json's own
                 # gate_contribution allow (Codex/CodeRabbit review).
+                # pylint: disable-next=unidiomatic-typecheck
                 gate_contribution if type(gate_contribution) is int else None
             ),
         )

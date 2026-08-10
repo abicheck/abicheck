@@ -619,21 +619,21 @@ def _run_dump_uncached(
                 else CompileContext(frontend=frontend)
             )
 
-        common_kwargs: dict[str, Any] = dict(
-            headers=headers,
-            includes=includes,
-            version=version,
-            lang=lang,
-            pdb_path=pdb_path,
-            dwarf_only=dwarf_only,
-            debug_roots=debug_roots,
-            enable_debuginfod=enable_debuginfod,
-            debuginfod_url=debuginfod_url,
-            debug_format=debug_format,
-            symbols_only=symbols_only,
-            debug_presence_only=debug_presence_only,
-            public_headers=public_headers,
-            public_header_dirs=public_header_dirs,
+        common_kwargs: dict[str, Any] = {
+            "headers": headers,
+            "includes": includes,
+            "version": version,
+            "lang": lang,
+            "pdb_path": pdb_path,
+            "dwarf_only": dwarf_only,
+            "debug_roots": debug_roots,
+            "enable_debuginfod": enable_debuginfod,
+            "debuginfod_url": debuginfod_url,
+            "debug_format": debug_format,
+            "symbols_only": symbols_only,
+            "debug_presence_only": debug_presence_only,
+            "public_headers": public_headers,
+            "public_header_dirs": public_header_dirs,
             # The header-graph attach is deliberately SKIPPED on either
             # recursive sub-dump below (each would otherwise attach its OWN
             # graph, seeded from only ITS OWN backend's declarations, before
@@ -643,11 +643,11 @@ def _run_dump_uncached(
             # ``_skip_header_graph_attach`` replaces the old "just don't
             # forward header_graph=True" mechanism now that the attach is
             # unconditional rather than flag-gated).
-            notify=notify,
-            _skip_header_graph_attach=True,
-            include_labels=include_labels,
-            dump_manifest=dump_manifest,
-        )
+            "notify": notify,
+            "_skip_header_graph_attach": True,
+            "include_labels": include_labels,
+            "dump_manifest": dump_manifest,
+        }
         # In-process AST memoization (G31 Phase C) is only worthwhile inside
         # this scope: the _attach_header_graph call below is a real
         # downstream consumer, unlike a direct dumper.dump() caller with no

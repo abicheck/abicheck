@@ -1179,7 +1179,7 @@ class _ClangAstParser:
             else ("struct" if node.get("tagUsed") == "struct" else "class")
         )
         fields = self._parse_fields(node)
-        bases, virtual_bases, base_access = _parse_bases(node)
+        bases, virtual_bases, _base_access = _parse_bases(node)
         injected = _anonymous_member_names(node)
         own_name = override_name or str(node.get("name", ""))
         is_standard_layout, is_trivially_copyable = _clang_record_type_traits(node)

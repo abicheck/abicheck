@@ -62,6 +62,24 @@ W = TypeVar("W")
 #   {detail} — any extra computed snippet the template wants to interpolate
 TEMPLATE_VOCAB = frozenset({"symbol", "name", "old", "new", "detail"})
 
+# Sentinel detection for enum members is name-pattern based, not value based:
+# a max-value heuristic accidentally downgrades an ordinary member that merely
+# happens to hold the largest value in an evolving enum.
+_SENTINEL_SUFFIXES = ("_last", "_max", "_count")
+_SENTINEL_NAMES = frozenset({"last", "max", "count"})
+
+
+def is_sentinel_enum_member(member_name: str) -> bool:
+    """True for a conventional enum *sentinel* member (``*_LAST``/``*_MAX``/``*_COUNT``).
+
+    Shared by the enum-member detectors in ``diff_types`` (header/DWARF enums)
+    and ``diff_platform`` (platform enums) so both classify the same names as
+    sentinels; each previously carried its own byte-identical copy, redefined
+    once per loop iteration.
+    """
+    n = member_name.lower()
+    return n.endswith(_SENTINEL_SUFFIXES) or n in _SENTINEL_NAMES
+
 
 def make_change(
     kind: ChangeKind,

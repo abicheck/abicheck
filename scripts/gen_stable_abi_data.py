@@ -152,15 +152,16 @@ def main(argv: list[str] | None = None) -> int:
     )
     args = parser.parse_args(argv)
 
+    if not args.url and not args.toml:
+        parser.error("provide a TOML path or --url")
+
     if args.url:
         if not args.url.startswith("https://"):
             parser.error("--url must be an https:// URL")
         with urllib.request.urlopen(args.url) as resp:  # noqa: S310  # nosec B310 - https enforced above
             toml_bytes = resp.read()
-    elif args.toml:
-        toml_bytes = Path(args.toml).read_bytes()
     else:
-        parser.error("provide a TOML path or --url")
+        toml_bytes = Path(args.toml).read_bytes()
 
     symbols = extract(toml_bytes)
     _OUT.write_text(render(symbols, args.version), encoding="utf-8")

@@ -1164,7 +1164,9 @@ def handle_non_elf_dump(
             header_backend=header_backend,
             compile=compile_context,
         )
-    except click.ClickException:
+    # A ClickException already carries its user-facing message; it must reach
+    # Click as itself rather than be re-wrapped by the handler below.
+    except click.ClickException:  # pylint: disable=try-except-raise
         raise
     except (AbicheckError, RuntimeError, OSError, ValueError) as exc:
         raise click.ClickException(str(exc)) from exc

@@ -533,28 +533,28 @@ def _release_lib_row(
         if src:
             categories.add("potential_breaking")
             severities.add("api_break")
-        nb, nr = nb + src, nr
+        nb += src
     else:
-        nb, nr = nb, nr + src
+        nr += src
     if pot_err:
         if risk:
             categories.add("potential_breaking")
             severities.add("risk")
-        nb, nr = nb + risk, nr
+        nb += risk
     else:
-        nb, nr = nb, nr + risk
+        nr += risk
     if add_err:
         if additions:
             categories.add("addition")
-        nb, ns = nb + additions, ns
+        nb += additions
     else:
-        nb, ns = nb, ns + additions
+        ns += additions
     if qual_err:
         if quality:
             categories.add("quality_issues")
-        nb, ns = nb + quality, ns
+        nb += quality
     else:
-        nb, ns = nb, ns + quality
+        ns += quality
     return name, verdict, nb, nr, ns
 
 

@@ -85,6 +85,7 @@ jobs:
   build-fixture:
     name: 'Build two library versions'
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     outputs:
       profile-id: ${{ steps.profile.outputs.id }}
     steps:
@@ -169,6 +170,7 @@ jobs:
     name: 'Verify: run #1 and run #2 wrote two distinct, independently-tracked cache entries'
     needs: [build-fixture, run-1, run-2]
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     permissions:
       contents: read
       actions: read
@@ -251,6 +253,7 @@ jobs:
     needs: [build-fixture, run-1, run-2, verify]
     if: always()
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     permissions:
       contents: read
       actions: write

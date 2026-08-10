@@ -30,13 +30,27 @@ jobs:
   # GCC is the historical lane; Clang is promoted to a first-class validator so
   # producer-sensitive cases (e.g. case64 ms_abi calling convention, which GCC
   # cannot emit DW_AT_calling_convention for) are gated, not just benchmarked.
+  #
+  # Sharded 3 ways per toolchain. The cross-check step below runs the ~195-case
+  # catalog through one sequential process; measured on real runs it took
+  # 5m21s (gcc) / 8m10s (clang), and once the artifact-mode job was split it
+  # became this workflow's critical path. The runner needs no changes to be
+  # shardable -- it already takes a positional case-name filter -- so a shard
+  # is just "the same command over a third of the names".
+  # tests/example_shards.py owns which names those are (round-robin over the
+  # sorted catalog, so each leg gets a mix of cheap and expensive cases rather
+  # than one leg inheriting the whole expensive tail), and the
+  # merge-validate-examples job below reassembles the pieces into the single
+  # whole-catalog artifact the downstream collector requires.
   validate-examples:
-    name: Validate examples (${{ matrix.toolchain }}, debug-headers)
+    name: Validate examples (${{ matrix.toolchain }}, debug-headers, shard ${{ matrix.shard }}/3)
     runs-on: ubuntu-24.04
+    timeout-minutes: 45
     strategy:
       fail-fast: false
       matrix:
         toolchain: [gcc, clang]
+        shard: [1, 2, 3]
 
     steps:
       # fetch-depth: 0 (full history) is required by the AST-cache step below:
@@ -56,12 +70,13 @@ jobs:
           sudo apt-get update -qq
           sudo apt-get install -y gcc g++ clang cmake curl ca-certificates
 
-      - name: Set up pinned CastXML
-        run: bash action/install-castxml.sh
+      - uses: ./.github/actions/setup-castxml
 
+      # Per-shard cache key: the six legs dump disjoint case sets, so a shared
+      # key would have them overwrite each other's cache every run.
       - uses: ./.github/actions/cache-ast-dumps
         with:
-          key-suffix: ${{ matrix.toolchain }}
+          key-suffix: ${{ matrix.toolchain }}-shard${{ matrix.shard }}
 
       - name: Set up Python
         uses: actions/setup-python@v6
@@ -89,31 +104,156 @@ jobs:
           test -f examples/ground_truth.json || { echo "::error::ground_truth.json missing"; exit 1; }
           python -c "import json; d=json.load(open('examples/ground_truth.json')); print('ground_truth.json OK:', len(d['verdicts']), 'cases')"
 
+      # Both consumers below take the *same* shard assignment from one source,
+      # so the pytest lane and the cross-check lane can never drift onto
+      # different case subsets.
+      - name: Resolve this shard's case list
+        run: |
+          # Assign first, THEN echo. `echo "V=$(cmd)" >> $GITHUB_ENV` exits 0
+          # even when cmd fails -- the echo succeeds -- so a failing resolver
+          # would silently export an EMPTY value. Empty is the worst possible
+          # value here: an empty positional filter means "the whole catalog"
+          # and an empty -k means "every test", so all six legs would quietly
+          # run all 195 cases and still report green, turning the shard split
+          # into a 6x duplication. It would also defeat example_shards.py's own
+          # assert_names_are_unambiguous guard, whose whole job is to fail
+          # loudly here rather than as a puzzling "duplicate case ids" error in
+          # the merge two jobs later. A plain assignment propagates the
+          # command's exit status under the default `bash -e`, and the explicit
+          # emptiness check covers a resolver that exits 0 with no output.
+          cases="$(python tests/example_shards.py list --shard ${{ matrix.shard }} --of 3)"
+          pytest_k="$(python tests/example_shards.py list --shard ${{ matrix.shard }} --of 3 --pytest-k)"
+          if [ -z "$cases" ] || [ -z "$pytest_k" ]; then
+            echo "::error::shard ${{ matrix.shard }}/3 resolved to an empty case list"
+            exit 1
+          fi
+          echo "resolved $(printf '%s' "$cases" | wc -w) cases for shard ${{ matrix.shard }}/3"
+          echo "SHARD_CASES=$cases" >> "$GITHUB_ENV"
+          echo "SHARD_K=$pytest_k" >> "$GITHUB_ENV"
+
+      # NOTE on the -k filter's source of truth: the shard list comes from
+      # examples/ground_truth.json, while test_example_pipeline is parametrized
+      # from the examples/case*/ directory listing. Those agree today, and the
+      # ai-readiness `examples-ground-truth` check (ERROR severity) is what
+      # keeps them agreeing — it fails when a case directory has no ground-truth
+      # entry. Without that check a case dir missing from ground truth would be
+      # deselected in *every* shard, i.e. silently lose coverage rather than
+      # fail. Don't relax that check without giving this filter its own guard.
       - name: Run example cases (pytest autodiscovery)
         env:
           # This workflow checks out and executes repository-owned fixtures only.
           ABICHECK_TRUSTED_SOURCE_SMOKE_RUN: "1"
         run: |
           PYTHONPATH=. pytest tests/test_example_autodiscovery.py -v --tb=short -m integration \
-            --junit-xml=results/examples-autodiscovery-${{ matrix.toolchain }}.xml
+            -k "$SHARD_K" \
+            --junit-xml=results/examples-autodiscovery-${{ matrix.toolchain }}-shard${{ matrix.shard }}.xml
 
-      - name: Cross-check via validate_examples.py (full catalog)
+      - name: Cross-check via validate_examples.py (this shard)
         if: always()
         env:
           # Preserve the safe default for all other validator invocations.
           ABICHECK_TRUSTED_SOURCE_SMOKE_RUN: "1"
         run: |
-          PYTHONPATH=. python tests/validate_examples.py --toolchain ${{ matrix.toolchain }} --json \
-            > results/validate_examples-${{ matrix.toolchain }}.json
-          cp results/validate_examples-${{ matrix.toolchain }}.json results/validate_examples.json
+          PYTHONPATH=. python tests/validate_examples.py $SHARD_CASES --toolchain ${{ matrix.toolchain }} --json \
+            > results/validate_examples-${{ matrix.toolchain }}-shard${{ matrix.shard }}.json
+          # check_validate_results.py / summarize_validate_results.py both read
+          # this fixed path; per-shard it gives each leg its own fail-fast.
+          cp results/validate_examples-${{ matrix.toolchain }}-shard${{ matrix.shard }}.json results/validate_examples.json
           python tests/check_validate_results.py
 
+      # Not sharded: this walks its own case list, costs under a minute, and
+      # produces one artifact the collector reads whole.
       - name: Runtime smoke examples
-        if: ${{ always() && matrix.toolchain == 'gcc' }}
+        if: ${{ always() && matrix.toolchain == 'gcc' && matrix.shard == 1 }}
         run: |
           PYTHONPATH=. python validation/scripts/run_example_runtime_smoke.py --json > results/example-runtime-smoke.json
 
-      - name: Upload results
+      - name: Upload shard results
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: examples-shard-${{ matrix.toolchain }}-${{ matrix.shard }}
+          path: results/
+          retention-days: 14
+
+      - name: Job summary
+        if: always()
+        run: |
+          echo "## Examples Validation (${{ matrix.toolchain }}, shard ${{ matrix.shard }}/3)" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          test -f results/validate_examples.json && python tests/summarize_validate_results.py >> $GITHUB_STEP_SUMMARY || true
+
+  # Reassembles the sharded legs into the one whole-catalog artifact per
+  # toolchain that everything downstream expects. This is not bookkeeping:
+  # validation/scripts/collect_full_example_matrix.py deliberately rejects an
+  # artifact whose case set isn't exactly the catalog (no missing ids, no
+  # duplicates, selected_cases == catalog size), so a bare shard artifact
+  # cannot be consumed and the merge is what restores that contract.
+  # Artifact names are unchanged from before the split, so the collector and
+  # the README-sync check needed no edits.
+  merge-validate-examples:
+    name: Merge example shards (${{ matrix.toolchain }})
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    needs: [validate-examples]
+    # Merge whatever the legs produced even if one *failed* — a failed leg
+    # still uploads its artifact, the collector re-derives pass/fail from the
+    # recorded per-case statuses, and a genuinely missing shard fails the merge
+    # loudly (missing case ids). Deliberately `!cancelled()` and not
+    # `always()`: always() also fires when the whole run is superseded by a
+    # newer push (concurrency cancel-in-progress), where every shard is
+    # cancelled and no artifact exists at all — that turned an ordinary
+    # superseded run into two spurious red checks.
+    if: ${{ !cancelled() }}
+    strategy:
+      fail-fast: false
+      matrix:
+        toolchain: [gcc, clang]
+
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.14"
+          cache: "pip"
+
+      - name: Create results dir
+        run: mkdir -p results shards
+
+      - name: Download this toolchain's shards
+        uses: actions/download-artifact@v8
+        with:
+          path: shards
+          pattern: examples-shard-${{ matrix.toolchain }}-*
+
+      - name: Merge shard artifacts into the whole-catalog artifact
+        run: |
+          # Carried through untouched: the per-shard junit XMLs (named per
+          # shard, so they don't collide) and the gcc runtime-smoke JSON the
+          # collector reads. Deliberately NOT copied: each shard's own
+          # results/validate_examples.json, which is the same fixed filename in
+          # every shard and is superseded by the merged file written below.
+          cp shards/*/examples-autodiscovery-*.xml results/ 2>/dev/null || true
+          cp shards/*/example-runtime-smoke.json results/ 2>/dev/null || true
+          # nullglob + an explicit count: without it a non-matching glob is
+          # passed through literally and surfaces as a FileNotFoundError naming
+          # a path with a '*' in it, which says nothing about what went wrong.
+          shopt -s nullglob
+          shard_files=(shards/*/validate_examples-${{ matrix.toolchain }}-shard*.json)
+          if [ ${#shard_files[@]} -eq 0 ]; then
+            echo "::error::no ${{ matrix.toolchain }} shard artifacts were downloaded — every shard leg must upload one"
+            exit 1
+          fi
+          echo "merging ${#shard_files[@]} shard artifact(s): ${shard_files[*]}"
+          python tests/example_shards.py merge "${shard_files[@]}" \
+            --out results/validate_examples-${{ matrix.toolchain }}.json
+          cp results/validate_examples-${{ matrix.toolchain }}.json results/validate_examples.json
+
+      - name: Upload merged results
         if: always()
         uses: actions/upload-artifact@v7
         with:
@@ -124,13 +264,14 @@ jobs:
       - name: Job summary
         if: always()
         run: |
-          echo "## Examples Validation Summary (${{ matrix.toolchain }})" >> $GITHUB_STEP_SUMMARY
+          echo "## Examples Validation Summary (${{ matrix.toolchain }}, merged)" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           test -f results/validate_examples.json && python tests/summarize_validate_results.py >> $GITHUB_STEP_SUMMARY || true
 
   clang-header-fallback:
     name: Clang header fallback regressions
     runs-on: ubuntu-24.04
+    timeout-minutes: 45
 
     steps:
       - uses: actions/checkout@v6
@@ -146,8 +287,7 @@ jobs:
           sudo apt-get update -qq
           sudo apt-get install -y gcc g++ clang cmake curl ca-certificates
 
-      - name: Set up pinned CastXML
-        run: bash action/install-castxml.sh
+      - uses: ./.github/actions/setup-castxml
 
       - uses: ./.github/actions/cache-ast-dumps
         with:
@@ -211,6 +351,7 @@ jobs:
   artifact-modes:
     name: Artifact modes (${{ matrix.mode }})
     runs-on: ubuntu-24.04
+    timeout-minutes: 45
     strategy:
       fail-fast: false
       matrix:
@@ -230,8 +371,7 @@ jobs:
           sudo apt-get update -qq
           sudo apt-get install -y gcc g++ clang cmake binutils curl ca-certificates
 
-      - name: Set up pinned CastXML
-        run: bash action/install-castxml.sh
+      - uses: ./.github/actions/setup-castxml
 
       - uses: ./.github/actions/cache-ast-dumps
         with:
@@ -295,8 +435,16 @@ jobs:
   full-example-matrix:
     name: Full example matrix
     runs-on: ubuntu-24.04
-    needs: [validate-examples, artifact-modes, clang-header-fallback]
-    if: always()
+    timeout-minutes: 45
+    needs: [merge-validate-examples, artifact-modes, clang-header-fallback]
+    # Same reasoning as merge-validate-examples above: still collect when an
+    # upstream job *failed* (the collector re-derives pass/fail from the
+    # recorded per-case statuses, which is the whole point of running anyway),
+    # but not when the run was cancelled. `always()` fires on cancellation too,
+    # so a run superseded by a newer push reached this job with no artifacts at
+    # all and turned an ordinary supersede into a red check. Pre-dates the
+    # sharding work, but it is the identical failure mode fixed one job up.
+    if: ${{ !cancelled() }}
 
     steps:
       - uses: actions/checkout@v6
@@ -318,8 +466,7 @@ jobs:
           sudo apt-get update -qq
           sudo apt-get install -y gcc g++ clang cmake binutils curl ca-certificates
 
-      - name: Set up pinned CastXML
-        run: bash action/install-castxml.sh
+      - uses: ./.github/actions/setup-castxml
 
       # The owner-proofs/bundle/special-cli validators below also dump
       # bundle/G20/special-shape example headers through the same castxml/

@@ -468,7 +468,7 @@ def run_full_catalog(toolchain: str, results_dir: Path) -> dict[str, Any]:
     )
 
     (results_dir / f"validate-examples-{toolchain}.json").write_text(
-        json.dumps({name: r for name, r in compiler_by_case.items()}, indent=2)
+        json.dumps(dict(compiler_by_case), indent=2)
     )
     (results_dir / "validate-examples-build-source.json").write_text(
         json.dumps(build_source, indent=2)

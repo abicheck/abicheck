@@ -410,6 +410,20 @@ def _canonical_expr(node: Any, id_index: _IdIndexProvider | None = None) -> Any:
     false negative — the same conservative default this fingerprint chain
     already uses throughout (a wrong guess here is worse than the
     pre-existing gap).
+
+    A second, independently verified gap of the same shape (Codex review,
+    fresh evidence): ``offsetof(A, x)`` vs. ``offsetof(A, y)`` — clang's
+    ``OffsetOfExpr`` node. Confirmed against real Clang 18 output (both
+    ``-ast-dump=json`` and the plain ``-ast-dump`` text form): the node
+    carries no ``inner`` children, no ``name``, and no other key naming
+    which member(s) the offset walk selects — only ``kind``/``range``/
+    ``type``/``valueCategory``, and ``type`` is always the fixed
+    ``"unsigned long"`` regardless of the member, so two different
+    ``offsetof`` calls on the same struct reduce to the byte-identical
+    ``{"kind": "OffsetOfExpr", "type": "unsigned long"}``. As with the
+    dependent-scope case above, the component list genuinely isn't exposed
+    anywhere in the compact JSON AST — there is no key this function is
+    failing to read. Left as the same kind of silent false negative.
     """
     if not isinstance(node, dict):
         return node

@@ -321,10 +321,7 @@ def _include_sequence_is_additive_owned_growth(
         new_idx, _, new_rest = new_slot.partition(":")
         if old_idx != new_idx:
             return False
-        if (
-            old_rest == _OWNED_HEADER_SINGLE_SENTINEL
-            or new_rest == _OWNED_HEADER_SINGLE_SENTINEL
-        ):
+        if _OWNED_HEADER_SINGLE_SENTINEL in (old_rest, new_rest):
             return False
         if not (
             old_rest.startswith(_OWNED_HEADER_TOKEN_PREFIX)

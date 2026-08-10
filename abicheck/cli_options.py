@@ -1327,8 +1327,6 @@ def build_source_dump_options(func: F) -> F:
     with no out-of-band directories. Applied bottom-up, so listed in reverse of
     display.
     """
-    from pathlib import Path
-
     func = click.option(
         "--depth",
         "depth",
@@ -1573,8 +1571,6 @@ def _profile_targets_set_input(kwargs: dict[str, object]) -> bool:
     so profile handling matches how ``run_compare`` will actually route the
     comparison, without duplicating the classification rules.
     """
-    from pathlib import Path
-
     from .cli_resolve import classify_compare_operand
 
     kinds: set[str] = set()
@@ -1622,7 +1618,6 @@ def apply_compare_profile(ctx: object, kwargs: dict[str, object]) -> None:
     name = kwargs.pop("profile", None)
     if not name:
         return
-    import click
     from click.core import ParameterSource
 
     if _profile_targets_set_input(kwargs):

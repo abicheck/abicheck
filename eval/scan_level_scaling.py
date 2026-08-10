@@ -548,7 +548,7 @@ def main() -> int:
     if args.json_out:
         Path(args.json_out).parent.mkdir(parents=True, exist_ok=True)
         Path(args.json_out).write_text(
-            json.dumps([asdict(p) for p in points], indent=2)
+            json.dumps([asdict(p) for p in points], indent=2), encoding="utf-8"
         )
         print(f"\nwrote {args.json_out}")
     return 0

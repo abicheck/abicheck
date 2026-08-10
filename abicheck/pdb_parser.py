@@ -545,8 +545,8 @@ def parse_dbi_stream(data: bytes) -> DbiStream:
         # Layout: Unused1(4) + SectionContribEntry(28) + rest(32)
         (_unused1, _sec, _pad1, _offset, _size, _chars,
          _mod_idx, _pad2, _data_crc, _reloc_crc,
-         mod_flags, mod_sym_stream,
-         sym_byte_size, c11_byte_size, c13_byte_size,
+         _mod_flags, mod_sym_stream,
+         sym_byte_size, _c11_byte_size, c13_byte_size,
          source_file_count, _pad3, _unused2,
          _src_name_idx, _pdb_path_idx,
          ) = struct.unpack_from("<IHHiiIHHIIHHIIIHHIII", data, pos)
@@ -991,7 +991,7 @@ class TypeDatabase:
     def _parse_procedure(self, ti: int, d: bytes) -> None:
         if len(d) < 12:
             return
-        (rvtype, calltype, funcattr, parmcount, arglist) = struct.unpack_from(
+        (rvtype, calltype, _funcattr, parmcount, arglist) = struct.unpack_from(
             "<IBBHI", d, 0)
         self._procedures[ti] = CvProcedure(
             type_index=ti,
@@ -1004,7 +1004,7 @@ class TypeDatabase:
     def _parse_mfunction(self, ti: int, d: bytes) -> None:
         if len(d) < 24:
             return
-        (rvtype, classtype, thistype, calltype, funcattr,
+        (rvtype, classtype, thistype, calltype, _funcattr,
          parmcount, arglist, thisadjust) = struct.unpack_from(
             "<IIIBBHIi", d, 0)
         self._mfunctions[ti] = CvMemberFunction(

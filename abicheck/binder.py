@@ -172,7 +172,7 @@ def _try_versioned_match(
 
     Returns a SymbolBinding on match, or None to continue searching.
     """
-    for ver, is_default, vis in versions:
+    for ver, _is_default, vis in versions:
         if vis in ("hidden", "internal"):
             continue
         if ver == required_version:

@@ -220,7 +220,7 @@ def deps_compare_cmd(
     # -- a stat/magic-byte check is itself cheap, read-only resolution, so a
     # dry run must agree with the real run instead of reporting "ok" for a
     # non-ELF binary the real run immediately rejects (Codex review).
-    for label, root in [("old", old_root), ("new", new_root)]:
+    for _label, root in [("old", old_root), ("new", new_root)]:
         resolved = under_sysroot(root, binary)
         if resolved.exists():
             fmt_detected = _detect_binary_format(resolved)

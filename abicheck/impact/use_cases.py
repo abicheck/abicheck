@@ -281,7 +281,12 @@ def load_use_case_manifest(path: str | Path) -> list[UseCaseDefinition]:
     """
     try:
         text = Path(path).read_text(encoding="utf-8")
-        raw = yaml.load(text, Loader=_DuplicateKeyCheckingLoader)
+        # `_DuplicateKeyCheckingLoader` subclasses `yaml.SafeLoader` and only
+        # replaces its mapping constructor with the duplicate-key check;
+        # bandit's B506 flags every `Loader=` it cannot name-match against
+        # `SafeLoader`/`CSafeLoader`, subclasses included (same annotation as
+        # `dump_manifest._load_strict_yaml`).
+        raw = yaml.load(text, Loader=_DuplicateKeyCheckingLoader)  # nosec B506
     except UnicodeError as exc:
         raise UseCaseManifestError(
             f"impact-use-cases.yaml: {path}: not valid UTF-8: {exc}"
