@@ -222,6 +222,49 @@ class TestParseCallbacksRegistersCallback:
             )
         ]
 
+    def test_cv_qualified_function_pointer_parameter_is_registered(self) -> None:
+        """Codex review, fresh evidence, second round, verified against real
+        Clang 18 output for ``using H = void (*)(int); void reg(H const h);
+        reg(handler);``: the desugared parameter type is ``"void
+        (*const)(int)"`` -- a top-level ``const`` on the pointer itself --
+        which the shape regex previously rejected (only whitespace allowed
+        between ``*`` and ``)``), so the registration was silently omitted
+        for any cv-qualified function-pointer parameter."""
+        handler = _func_decl(
+            "handler", "F1", [_param("x", "int")], mangled="_Z7handleri"
+        )
+        reg = _func_decl(
+            "reg",
+            "F2",
+            [
+                {
+                    "kind": "ParmVarDecl",
+                    "name": "h",
+                    "type": {
+                        "qualType": "const H",
+                        "desugaredQualType": "void (*const)(int)",
+                    },
+                }
+            ],
+        )
+        call = _call(reg, [_decay(handler)])
+        use = _func_decl(
+            "use", "F3", extra_inner=[{"kind": "CompoundStmt", "inner": [call]}]
+        )
+        ast = _tu(handler, reg, use)
+
+        edges = parse_clang_ast_callbacks(ast)
+
+        assert edges == [
+            CallbackEdge(
+                "_Z7handleri",
+                "h",
+                EDGE_DECL_REGISTERS_CALLBACK,
+                CONF_HIGH,
+                "void (*const)(int)",
+            )
+        ]
+
     def test_argument_at_a_non_function_pointer_parameter_is_not_registered(
         self,
     ) -> None:

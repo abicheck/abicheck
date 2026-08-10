@@ -944,6 +944,53 @@ which all depend on a Clang AST pass.
      safely guess at (the extractor's own per-TU diagnostic text wasn't
      captured in the truncated CI log excerpt read during triage). Left
      open, flagged in the PR thread rather than blind-patched.
+   - **A ninth, tenth, and eleventh finding, on the very push that added the
+     sixth/seventh rounds' own qualified-call/cast-unwrap fixes, found two
+     more real gaps and one real bug in that same code.** (9) The
+     qualified-call heuristic (`_member_expr_is_qualified`) also misfires on
+     legal whitespace/comments between the receiver and the member —
+     `obj . f()`, `ptr /* note */ -> f()` — since the JSON offset arithmetic
+     cannot distinguish two incidental whitespace bytes from a real
+     `Base::` qualifier's bytes; confirmed against a real Clang 18 AST for
+     `obj . f()`. **Investigated and deliberately left open, not patched**:
+     closing this exactly needs the actual source text between the two
+     offsets, which `parse_clang_ast_calls` (a pure function over the AST
+     dict alone, by design — unlike `macro_graph.py`'s own Pass B, which has
+     a source-file path to read from) does not have; no fixed numeric
+     threshold soundly separates "a couple of stray spaces" from "a real
+     single-letter class name plus `::`" in the general case, and giving
+     this module source-text access is a distinct, larger architectural
+     change out of scope for a drive-by fix. Documented in
+     `_member_expr_is_qualified`'s own docstring and pinned by a dedicated
+     regression test
+     (`test_parse_call_with_whitespace_around_dot_is_a_known_false_positive`)
+     recording the current, accepted behavior — this only misfires on
+     non-idiomatic whitespace styling no common formatter (clang-format
+     included) produces. (10) Separately, in `callback_graph.py`:
+     `_FUNCTION_POINTER_TYPE_RE` only allowed whitespace between `*` and `)`
+     in a function-pointer declarator (`"(*)("`), so a top-level
+     cv-qualifier on the pointer itself — `void (*const)(int)`, the
+     desugared spelling of `using H = void (*)(int); void reg(H const h);`
+     — was rejected outright, silently omitting the registration for any
+     cv-qualified function-pointer parameter. Confirmed against a real
+     Clang 18 AST (`desugaredQualType` is exactly `"void (*const)(int)"`
+     for a `const`-qualified typedef'd parameter). Fixed by extending the
+     regex to accept `const`/`volatile` (in either order, or both) between
+     `*` and `)`. (11) A genuine mutual-exclusion bug in
+     `fold_virtual_dispatch_graph` itself: the seventh round's own
+     narrowed/degraded-propagation fix *added* the propagation but left the
+     prior unconditional `graph.extractor_passes["virtual_dispatch_graph"]
+     = True` assignment in place alongside it — so a narrowed or degraded
+     run stamped BOTH the narrowed/degraded key AND the full-coverage key
+     for the same pass, contradicting the persisted coverage contract every
+     other clang-backed pass's own `if fully_covered: ... elif narrowed:
+     ... elif degraded: ...` chain already enforces (confirmed against real
+     data: the Windows CI log from the eighth finding's own investigation
+     already showed exactly this — `virtual_dispatch_graph` present in both
+     `extractor_passes` and `degraded_passes` simultaneously, which the
+     eighth finding's triage read past without flagging as its own separate
+     bug). Fixed by converting to the same mutually-exclusive if/elif/else
+     shape as the sibling passes.
    - **`DECL_OVERRIDES_DECL` needed no new producer at all — a closed gap,
      not a deferred one.** `override_graph.py` (ADR-041 P2 item 1, which
      predates this item) already emits `METHOD_POSSIBLE_OVERRIDE` edges whose

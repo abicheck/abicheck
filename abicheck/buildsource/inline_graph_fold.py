@@ -460,19 +460,35 @@ def fold_virtual_dispatch_graph(
     this pass degraded too, since a class/override missed by a failed TU
     silently narrows what this pass can see exactly the same way an explicit
     scope would.
+
+    **``extractor_passes``/``narrowed_passes``/``degraded_passes`` are
+    mutually exclusive for this pass, matching every clang-backed pass's own
+    if/elif stamping chain** (Codex review, fresh evidence, second round):
+    the first fix above added the narrowed/degraded propagation but left the
+    unconditional ``extractor_passes["virtual_dispatch_graph"] = True``
+    assignment in place alongside it — the persisted coverage contract
+    treats a full-coverage stamp as mutually exclusive with a narrowed one
+    (every sibling pass's own ``if fully_covered: ... elif narrowed: ...
+    elif degraded: ...`` chain, e.g. :func:`fold_call_graph`), so a reader
+    that only checks ``extractor_passes`` could still trust a scoped run as
+    complete. Fixed by only stamping ``extractor_passes`` when neither
+    condition holds.
     """
     augment_graph_with_virtual_dispatch(graph)
-    graph.extractor_passes["virtual_dispatch_graph"] = True
     _PREREQ_PASSES = ("call_graph", "type_graph", "override_graph")
-    if any(graph.narrowed_passes.get(p) for p in _PREREQ_PASSES):
+    narrowed = any(graph.narrowed_passes.get(p) for p in _PREREQ_PASSES)
+    degraded = any(graph.degraded_passes.get(p) for p in _PREREQ_PASSES)
+    if narrowed:
         graph.narrowed_passes["virtual_dispatch_graph"] = True
         for p in _PREREQ_PASSES:
             scope = graph.narrowed_scope.get(p)
             if scope:
                 graph.narrowed_scope["virtual_dispatch_graph"] = scope
                 break
-    if any(graph.degraded_passes.get(p) for p in _PREREQ_PASSES):
+    elif degraded:
         graph.degraded_passes["virtual_dispatch_graph"] = True
+    else:
+        graph.extractor_passes["virtual_dispatch_graph"] = True
 
 
 def fold_template_graph(

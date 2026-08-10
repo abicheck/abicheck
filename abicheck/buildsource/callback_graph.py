@@ -298,10 +298,16 @@ RESOLUTION_OVERAPPROX = "overapprox"
 
 #: A plain function-pointer or pointer-to-member-function declarator inside a
 #: (possibly desugared) ``qualType`` spelling: ``"(*)("`` (``void (*)(int)``)
-#: or ``"(Owner::*)("`` (``void (Owner::*)(int)``). Best-effort textual
-#: matching, mirroring ``type_graph.py``'s own accepted approximate-lookup
-#: tradeoff — not a real declarator parse.
-_FUNCTION_POINTER_TYPE_RE = re.compile(r"\(\s*(?:[\w:]+::\s*)?\*\s*\)\s*\(")
+#: or ``"(Owner::*)("`` (``void (Owner::*)(int)``), optionally with a
+#: top-level cv-qualifier on the pointer itself (``"(*const)("``/
+#: ``"(*volatile)("``/``"(*const volatile)("``, ``void reg(H const h)``'s
+#: desugared spelling — Codex review, fresh evidence, verified against real
+#: Clang 18 output for a typedef'd function-pointer parameter declared
+#: ``const``). Best-effort textual matching, mirroring ``type_graph.py``'s
+#: own accepted approximate-lookup tradeoff — not a real declarator parse.
+_FUNCTION_POINTER_TYPE_RE = re.compile(
+    r"\(\s*(?:[\w:]+::\s*)?\*\s*(?:const\s*|volatile\s*)*\)\s*\("
+)
 
 #: clang AST decl kinds that introduce a callable scope, mirroring
 #: ``call_graph._FUNCTION_DECL_KINDS`` (duplicated rather than imported: the

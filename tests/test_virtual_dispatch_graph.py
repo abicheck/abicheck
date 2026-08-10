@@ -519,6 +519,11 @@ class TestFoldVirtualDispatchGraph:
         assert g.narrowed_passes.get("virtual_dispatch_graph") is True
         assert g.narrowed_scope.get("virtual_dispatch_graph") == frozenset({"a.cpp"})
         assert not g.degraded_passes.get("virtual_dispatch_graph")
+        # Mutually exclusive with the full-coverage stamp (Codex review,
+        # fresh evidence, second round): a narrowed run must not also claim
+        # complete coverage, matching every clang-backed pass's own
+        # if/elif/elif stamping chain.
+        assert "virtual_dispatch_graph" not in g.extractor_passes
 
     def test_degraded_prerequisite_propagates_to_this_pass(self) -> None:
         g = _multi_override_graph()
@@ -529,6 +534,7 @@ class TestFoldVirtualDispatchGraph:
 
         assert g.degraded_passes.get("virtual_dispatch_graph") is True
         assert not g.narrowed_passes.get("virtual_dispatch_graph")
+        assert "virtual_dispatch_graph" not in g.extractor_passes
 
     def test_unscoped_prerequisites_leave_this_pass_unnarrowed(self) -> None:
         g = _multi_override_graph()
@@ -538,3 +544,4 @@ class TestFoldVirtualDispatchGraph:
 
         assert "virtual_dispatch_graph" not in g.narrowed_passes
         assert "virtual_dispatch_graph" not in g.degraded_passes
+        assert g.extractor_passes.get("virtual_dispatch_graph") is True

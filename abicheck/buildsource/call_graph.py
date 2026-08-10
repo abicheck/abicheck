@@ -496,6 +496,32 @@ def _member_expr_is_qualified(member_expr: dict[str, Any]) -> bool:
     suppressing a real virtual call's classification would silently drop a
     genuine dispatch target from ``VIRTUAL_CALL_MAY_DISPATCH_TO`` — a worse
     error than the over-approximation this heuristic exists to narrow.
+
+    **A known, documented false positive, not fully closeable from this
+    function's own inputs (Codex review, fresh evidence, second round):**
+    legal whitespace or comments between the receiver and the member —
+    ``obj . f()``, ``ptr /* note */ -> f()`` — also widen the receiver-to-
+    member gap, so this heuristic reports "qualified" (and therefore
+    suppresses the virtual classification) even though no ``Base::``
+    qualifier is present. Confirmed against a real Clang 18 AST for
+    ``obj . f()``: the JSON range arithmetic cannot distinguish two
+    incidental whitespace characters from a real qualifier's bytes, because
+    (as established above) the JSON AST carries no token stream and no
+    qualifier field at all — only a genuine read of the source text between
+    the two offsets could tell "  " from "B::", and this module is
+    deliberately a pure function over the AST dict alone (unlike
+    ``macro_graph.py``'s own Pass B, which has a source-file path to read
+    from). Extending ``parse_clang_ast_calls`` to accept and read source
+    text would resolve this exactly, but is a distinct, larger architectural
+    change out of scope for this fix — this gap is deliberately left open
+    rather than patched with an unsound threshold (no fixed cutoff separates
+    "a couple of stray spaces" from "a real single-letter class name plus
+    `::`" in the general case). In practice this only misfires on unusual,
+    non-idiomatic whitespace styling no common formatter (clang-format
+    included) produces; pinned by a dedicated regression test
+    (``test_parse_call_with_whitespace_around_dot_is_a_known_false_positive``)
+    documenting the current, accepted behavior rather than silently letting
+    it drift.
     """
     inner = member_expr.get("inner") or []
     if not inner or not isinstance(inner[0], dict):

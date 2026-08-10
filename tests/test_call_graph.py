@@ -707,6 +707,87 @@ def test_parse_qualified_call_via_explicit_receiver_suppresses_virtual_dispatch(
     ]
 
 
+def test_parse_call_with_whitespace_around_dot_is_a_known_false_positive() -> None:
+    """Codex review, fresh evidence, second round, verified against real
+    Clang 18 output for ``obj . f()`` (legal, if unusual, whitespace around
+    the ``.``): the receiver-to-member gap arithmetic
+    (``_member_expr_is_qualified``) cannot distinguish incidental whitespace
+    from a real ``Base::`` qualifier without reading the source text between
+    the two offsets, which this pure-AST-dict function does not have access
+    to. This pins the CURRENT, documented, accepted behavior (misclassified
+    as ``direct``/``exact`` instead of the semantically-correct
+    ``virtual``/``overapprox``) so a future change to this heuristic doesn't
+    silently alter it without updating this test -- see
+    ``_member_expr_is_qualified``'s own docstring for why this isn't closed
+    from this function's own inputs.
+    """
+    ast = {
+        "kind": "TranslationUnitDecl",
+        "inner": [
+            {
+                "kind": "CXXRecordDecl",
+                "name": "B",
+                "inner": [
+                    {
+                        "kind": "CXXMethodDecl",
+                        "id": "0xb",
+                        "name": "f",
+                        "mangledName": "_ZN1B1fEv",
+                        "type": {"qualType": "void ()"},
+                        "virtual": True,
+                    }
+                ],
+            },
+            _func(
+                "call_it",
+                "_Z7call_itR1B",
+                [
+                    {
+                        "kind": "CXXMemberCallExpr",
+                        "inner": [
+                            {
+                                "kind": "MemberExpr",
+                                # Real Clang 18 offsets for "obj . f()": the
+                                # receiver "obj" ends at 85, but the member
+                                # name "f" starts at 88 (two stray spaces
+                                # around the "."), inflating the gap to 4
+                                # against an expected unqualified gap of 2.
+                                "range": {
+                                    "begin": {"offset": 82},
+                                    "end": {"offset": 88, "tokLen": 1},
+                                },
+                                "name": "f",
+                                "isArrow": False,
+                                "referencedMemberDecl": "0xb",
+                                "inner": [
+                                    {
+                                        "kind": "DeclRefExpr",
+                                        "range": {
+                                            "begin": {"offset": 82},
+                                            "end": {"offset": 82, "tokLen": 3},
+                                        },
+                                        "referencedDecl": {
+                                            "kind": "ParmVarDecl",
+                                            "name": "obj",
+                                        },
+                                    }
+                                ],
+                            }
+                        ],
+                    }
+                ],
+            ),
+        ],
+    }
+    edges = parse_clang_ast_calls(ast)
+    # Documented false positive: semantically this should be
+    # virtual/overapprox (no real qualifier), but the heuristic can't tell
+    # whitespace from "B::" without source text.
+    assert edges == [
+        CallEdge("_Z7call_itR1B", "_ZN1B1fEv", CALL_KIND_DIRECT, RESOLUTION_EXACT)
+    ]
+
+
 def test_parse_function_pointer_call_is_unknown() -> None:
     ast = {
         "kind": "TranslationUnitDecl",
