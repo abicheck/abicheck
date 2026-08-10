@@ -126,6 +126,33 @@ def _qualified_function_name(name: str, mangled: str) -> str:
     return name
 
 
+def _opens_declarator_wrapper(qualified: str, paren_index: int) -> bool:
+    """Return True if the ``(`` at *paren_index* opens a function-pointer or
+    member-function-pointer declarator wrapping a return type around the
+    real name and arguments, rather than a genuine parameter list.
+
+    Distinguishing signal: the group reaches a ``*``/``&`` (optionally
+    preceded by a scope like ``Class::`` for a member-pointer wrapper) and
+    *then* a further ``(`` — the real call — before the next ``,``/``)`` at
+    this position. An ordinary parameter list can also contain a bare
+    ``*``/``&`` (a pointer/reference parameter type, e.g.
+    ``lib::sort(int*, int*)``), but never followed by another ``(`` before
+    that parameter ends — only a wrapper's declarator has that shape.
+    Deliberately not a full C++ declarator parser (e.g. a callback
+    *parameter* — ``f(int (*cb)(int))`` — is out of scope, same as this
+    module's other narrowly-scoped text heuristics).
+    """
+    saw_star = False
+    for ch in qualified[paren_index + 1:]:
+        if ch in "*&":
+            saw_star = True
+        elif ch == "(" and saw_star:
+            return True
+        elif ch in ",)":
+            return False
+    return False
+
+
 def _strip_param_signature(qualified: str) -> str:
     """Strip a function's parameter-list signature (from its own top-level
     ``(``), preserving any ``::`` namespace/class qualification.
@@ -137,8 +164,8 @@ def _strip_param_signature(qualified: str) -> str:
     unrelated namespaces reusing the same leaf identifier (``ns1::sort`` vs
     ``ns2::sort``) must never collapse together (see :func:`detect_cpo_kind_changed`).
 
-    Two shapes make "the first top-level ``(`` in the string" the wrong
-    thing to stop at (both Codex review, both verified with real c++filt
+    Three shapes make "the first top-level ``(`` in the string" the wrong
+    thing to stop at (all Codex review, all verified with real c++filt
     output shapes):
 
     * A call operator's own name is spelled ``operator()`` — those
@@ -154,19 +181,24 @@ def _strip_param_signature(qualified: str) -> str:
       return type's own declarator wrapped *around* the name and its real
       arguments — ``int (*ns::f<int>(int))()`` — so the very first ``(``
       opens that wrapping group, not ``f``'s own parameter list; truncating
-      there left a leaf of ``"int "`` instead of ``"f"``. A ``(`` that
-      opens a declarator wrapper is recognized by what immediately follows
-      it (``*``/``&``, never how a real call's parameter list starts);
-      everything else, including every well-formed argument list and every
-      symbolic operator's own (``operator+(int)`` and friends), is
-      unaffected.
+      there left a leaf of ``"int "`` instead of ``"f"``.
+    * The same wrapping shape recurs for a return type that is a pointer to
+      *member* function — ``int (ns::C::*ns::f<int>(int))()`` — where the
+      ``*`` is preceded by the owning class's own scope, not glued directly
+      to ``(``.
+
+    :func:`_opens_declarator_wrapper` recognizes both wrapper shapes by a
+    single signal — the group reaches a ``*``/``&`` and *then* a further
+    ``(`` (the real call) before a ``,``/``)`` — which does not misfire on
+    an ordinary pointer/reference *parameter* (``lib::sort(int*, int*)``):
+    there the ``*`` is followed by ``,``/``)``, never another ``(``.
     """
     i = qualified.find("(")
     while i != -1:
-        if i + 1 < len(qualified) and qualified[i + 1] in "*&":
+        if _opens_declarator_wrapper(qualified, i):
             # Not a parameter list at all — the opening paren of a
-            # function-pointer/reference declarator wrapping the return
-            # type around the real name. Keep looking.
+            # function-pointer/member-function-pointer declarator wrapping
+            # the return type around the real name. Keep looking.
             i = qualified.find("(", i + 1)
             continue
         prefix = qualified[:i]

@@ -182,6 +182,23 @@ class TestStripParamSignature:
         result = _strip_param_signature(sig)
         assert result.endswith("operator()")
 
+    def test_member_function_pointer_return_type_does_not_truncate(self) -> None:
+        # Codex review, fresh evidence after the plain-pointer-wrapper fix:
+        # a template returning a pointer to *member* function has the "*"
+        # preceded by the owning class's own scope ("ns::C::*"), not glued
+        # directly to "(" — the plain "qualified[i+1] in '*&'" check missed
+        # this shape entirely.
+        sig = "int (ns::C::*ns::experimental::bar<int>(int))()"
+        result = _strip_param_signature(sig)
+        from abicheck.diff_namespaces import _segments
+        assert _segments(result)[-1] == "bar"
+
+    def test_pointer_parameter_is_not_mistaken_for_a_wrapper(self) -> None:
+        # A "*" in the parameter list itself (not a return-type wrapper)
+        # must not trip the wrapper heuristic — it's followed by ","/")",
+        # never a further "(".
+        assert _strip_param_signature("lib::sort(int*, int*)") == "lib::sort"
+
 
 # ---------------------------------------------------------------------------
 # INTERNAL_TEMPLATE_LEAKS_VIA_PUBLIC_API

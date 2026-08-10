@@ -939,7 +939,21 @@ class AbiSnapshot:
     )
 
     def index(self) -> None:
-        """Build lookup indexes. Uses first-wins for duplicate mangled names."""
+        """Build lookup indexes. Uses first-wins for duplicate mangled names.
+
+        Idempotent — a second call is a no-op. ``function_map``/
+        ``variable_map``/``type_by_name`` already guard their own lazy
+        ``self.index()`` call on ``is None``, but several detector modules
+        (``diff_cpp_patterns.py``, ``diff_templates.py``, ``diff_filtering.py``,
+        ``post_processing.py``) call ``index()`` directly, once per detector,
+        without knowing whether an earlier detector already indexed this same
+        snapshot. Without this guard, ``index()`` unconditionally rebuilt all
+        three maps *and re-logged* every duplicate-name warning below on each
+        call — for one compare/scan run with a genuine duplicate type name,
+        the identical warning could log up to ~7 times per side.
+        """
+        if self._type_by_name is not None:
+            return
         func_map: dict[str, Function] = {}
         dup_funcs: dict[str, int] = {}
         for f in self.functions:

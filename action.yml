@@ -105,6 +105,14 @@ inputs:
   new-header:
     description: 'Public header(s) for the new side only (overrides header for new). Space-separated.'
     required: false
+  public-header-dir:
+    description: >
+      Directory whose headers are treated as public for provenance
+      classification (repeatable, space-separated) — establishes the
+      public/internal boundary so leakage/RTTI/exported-vs-public
+      cross-checks run instead of skipping. dump and scan modes only
+      (`--public-header-dir` on the CLI); compare has no equivalent flag.
+    required: false
 
   # ── Include directories ─────────────────────────────────────────────────────
   include:
@@ -788,6 +796,7 @@ runs:
         INPUT_HEADER: ${{ inputs.header }}
         INPUT_OLD_HEADER: ${{ inputs.old-header }}
         INPUT_NEW_HEADER: ${{ inputs.new-header }}
+        INPUT_PUBLIC_HEADER_DIR: ${{ inputs.public-header-dir }}
         INPUT_INCLUDE: ${{ inputs.include }}
         INPUT_OLD_INCLUDE: ${{ inputs.old-include }}
         INPUT_NEW_INCLUDE: ${{ inputs.new-include }}
