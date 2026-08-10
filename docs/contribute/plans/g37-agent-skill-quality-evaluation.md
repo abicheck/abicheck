@@ -180,12 +180,30 @@ committed, and `--check`-able the same way `.agents/skills/` already is.
 | `skill-eval` | `skill-eval` PR label, nightly `workflow_dispatch`, weekly cron | agent binary + model credentials + network | L1l, L2 live runs at `k=3` | safety dimensions: yes, hard. Process dimensions: baseline/non-regression |
 | agent-benchmark `agent-quality` | weekly cron + dispatch | full LLM provider matrix | L3 arms, cost, cross-model variance, scorecard | no — informational, but a publication precondition |
 
-The `skill-eval` lane follows the established `mutation.yml`/`eval-suite.yml`
-pattern exactly: `pull_request: types: [labeled]` with no `paths` filter (a
-paths filter would gate the whole `pull_request` trigger and break label
-opt-in — `eval-suite.yml` documents this trap), plus cron and dispatch. It
-exports `ABICHECK_MIN_EXECUTED` so a missing agent binary or expired credential
-cannot turn the lane green with zero scenarios run — the silent-skip hole
+The `skill-eval` lane follows `eval-suite.yml`'s trigger shape — **not
+`mutation.yml`'s**, and the difference is load-bearing:
+`pull_request: types: [opened, reopened, synchronize, labeled]` with no `paths`
+filter, plus cron and dispatch. Two separate traps are being avoided here, and
+conflating them is how an earlier draft of this section got the trigger list
+wrong:
+
+- **No `paths` filter.** A paths filter gates the whole `pull_request` trigger,
+  including `labeled`, which would stop the label from opting in a PR that
+  changes skill content but not the eval tree. `eval-suite.yml` documents this
+  one in its own header comment.
+- **`synchronize` is required, unlike `mutation.yml`.** `mutation.yml` gets away
+  with `types: [labeled]` alone because it is an informational, non-blocking
+  weekly measurement — running once per label is enough. A safety gate cannot
+  be: with `labeled` alone, the lane runs against the head that existed when
+  the label was applied, and every subsequent push to the same PR ships
+  unexercised. That is precisely the "evaluated tree ≠ published tree" failure
+  D6 exists to prevent, reintroduced at the CI-trigger level. The job's `if`
+  condition therefore tests label *presence* (`contains(github.event.
+  pull_request.labels.*.name, 'skill-eval')`), not the triggering event type,
+  so it reruns on every push while the label remains.
+
+The lane exports `ABICHECK_MIN_EXECUTED` so a missing agent binary or expired
+credential cannot turn it green with zero scenarios run — the silent-skip hole
 `tests/conftest.py` already closes for the external-tool lanes.
 
 ### D3 — Replay-first: grade artifacts, not prose
@@ -201,22 +219,56 @@ agent-evals/skills/runs/<run-id>/<scenario>/<k>/
   reports/*.json     the actual abicheck reports the agent produced
   final.md           the agent's final answer text
   usage.json         turns, tool calls, tokens in/out, wall clock, retries
+  judgments.json     persisted judge verdicts for dimensions 4 and 5: judge model
+                     + version, rubric version, prompt hash, score, rationale
 ```
 
-Grading is a **pure function of the bundle**. Consequences, all of which matter:
+Grading over dimensions 1, 2, 3 and 6 is a **pure function of the bundle** —
+those four graders read `calls.jsonl`, `reports/`, and `final.md` and call no
+model. Dimensions 4 and 5 are judged, so their *first* evaluation is not
+reproducible from the bundle alone; what the bundle carries is their **recorded
+verdict**, stamped with the judge model and rubric version that produced it.
 
-- Rubric changes are re-gradable against stored transcripts — no re-running
-  models to re-score.
-- The grader is unit-testable in `pr` with zero model calls (that is L4).
-- Publication (G36 P1.4) gets an auditable evidence trail rather than a claim.
+The distinction matters, so it is stated as two separate operations rather than
+one word:
+
+- **Replay** re-derives dimensions 1/2/3/6 from the bundle and reads 4/5 out of
+  `judgments.json`. Deterministic, offline, no credentials — this is what `pr`
+  runs and what an auditor re-runs.
+- **Re-judge** re-invokes the panel for 4/5 and appends a new, separately
+  stamped `judgments.json` entry. Explicitly not deterministic, never run in
+  `pr`, and never silently substituted for a replay: a rubric change that
+  affects 4/5 requires a re-judge pass and is visible as such, because the old
+  and new entries carry different rubric versions.
+
+Consequences, all of which matter:
+
+- A rubric change to the deterministic dimensions is re-gradable against stored
+  transcripts with no model calls at all; a change to 4/5 needs an explicit,
+  budgeted re-judge pass, and the plan does not pretend otherwise.
+- The deterministic graders — which include *both* zero-tolerance safety
+  dimensions — are unit-testable in `pr` with zero model calls (that is L4).
+- Publication (G36 P1.4) gets an auditable evidence trail rather than a claim,
+  including which judge model signed off on 4/5.
 - Cross-agent comparison is apples-to-apples: same bundle schema for Claude
   Code, Codex, and Gemini CLI, so only the *runner* is vendor-specific, not the
   grading.
 
 The recording shim is a small executable placed first on `PATH` inside the
-scenario sandbox. It appends to `calls.jsonl`, then `exec`s the real abicheck.
-It never alters behavior or output — a shim that could change a result would
-invalidate the measurement.
+scenario sandbox. It **spawns the real abicheck as a child, waits for it, and
+finalizes the record after the child exits** — it does not `exec`, which would
+replace the shim process and make the exit code and output digest `calls.jsonl`
+requires unobservable, leaving every deterministic grader with incomplete
+evidence. Concretely: write a provisional record with argv/cwd, spawn, tee
+stdout and stderr through to the caller's own streams while digesting them,
+then rewrite the record with exit code and digests and propagate the child's
+exit status verbatim. Teeing rather than capturing is the invariant — the agent
+must see byte-identical output on both streams, and the shim must exit with the
+child's own status, because a shim that can change a result invalidates the
+measurement it exists to produce. A shim crash after spawn must leave the
+provisional record in place rather than nothing: a call that happened and was
+lost would read to a grader as a call that never happened, which is the false
+direction to fail in for dimension 3.
 
 ### D4 — The rubric, and which dimensions gate how
 
@@ -394,8 +446,13 @@ run that reached green by adding a suppression, and a correct verdict reached
 with the wrong evidence depth. Each must be caught by the named dimension.
 
 **Done when:** every golden bad bundle fails exactly the dimension it was
-authored to fail, and every golden good bundle passes all six — with no model
-call, inside `pr`.
+authored to fail, and every golden good bundle passes all four deterministic
+dimensions — with no model call, inside `pr`. Dimensions 4 and 5 are *replayed*
+out of each golden bundle's `judgments.json` (D3), which checks the replay path
+and the schema but deliberately does not re-derive a judge verdict; the golden
+corpus therefore also carries one bundle whose `judgments.json` records a
+*failing* judge verdict, so the replay path is proven to propagate a judged
+failure rather than only ever reading passes.
 
 This phase is where most of the value lands. After it, the repository can
 detect ADR-058's non-negotiable failure mode from a recorded transcript, and
@@ -442,17 +499,27 @@ above baseline, and a Phase 5 scorecard showing non-negative lift over `docs`.
 ## Cost model
 
 Per live run: ~4–8 agent turns over a small fixture repository. At 24 scenarios
-× `k=3` that is ~72 agent sessions per full pass. Knobs, so a PR-label run is
-not a full pass:
+× `k=3` that is ~72 agent sessions per full pass. Two knobs shrink a PR-label
+run, and **`k` is deliberately not one of them**:
 
-- `--suite smoke` — 6 scenarios (safety-critical Category B only), `k=1`, for
-  PR-label runs.
-- Full pass (24 × 3) on the weekly cron and before publication.
+- `--suite smoke` — 6 scenarios (safety-critical Category B only), still at
+  `k=3` (18 sessions), for PR-label runs.
+- `--suite full` — all 24 scenarios at `k=3` (72 sessions), on the weekly cron
+  and before publication.
 - Judged dimensions (4, 5) are skippable via `--no-judge`, leaving the four
   deterministic dimensions — which include both zero-tolerance ones — at
   near-zero marginal cost.
 
-The last point is the intended everyday posture: the checks that block are the
+**`k` stays at 3 in every lane, and the suite size is what varies.** These are
+not interchangeable ways to buy the same saving. Dropping to `k=1` would keep
+scenario coverage while silently converting the `pass^k` safety gate into a
+single-sample check — and `k` exists precisely to catch run-to-run variance,
+which is the failure mode a stochastic agent has and a scenario list does not.
+Dropping scenarios costs coverage, which is honest, visible in the run's own
+manifest, and recoverable on the next cron. So the PR lane runs fewer scenarios
+at full repetition rather than every scenario once.
+
+The last bullet is the intended everyday posture: the checks that block are the
 cheap ones.
 
 ## Risks
