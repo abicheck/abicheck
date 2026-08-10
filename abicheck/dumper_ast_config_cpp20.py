@@ -405,6 +405,65 @@ def _has_abbreviated_unconstrained_auto_param(lookahead: bytes) -> bool:
 _QUALIFIED_IDENTIFIER_TAIL_PATTERN = re.compile(rb"(?:[A-Za-z_]\w*::)*[A-Za-z_]\w*\Z")
 
 
+def _strip_leading_decl_noise(before_ident: bytes) -> bytes:
+    """Strip trailing declarator specifiers, attributes and decl-specifier words.
+
+    Applied to a fixed point and in any order: ordinary leading decl-specifier
+    keywords (``inline``, ``static``, ``virtual``, ...) and attributes routinely
+    precede a return type (``inline MyConcept auto f();``, ``[[nodiscard]]
+    MyConcept auto f();`` — Codex review), so what remains is the real enclosing
+    punctuation the boundary check needs to see.
+    """
+    while True:
+        stripped = _strip_trailing_declarator_specifiers(before_ident)
+        stripped = _strip_trailing_attributes(stripped)
+        stripped = _strip_trailing_leading_decl_specifier_words(stripped)
+        if stripped == before_ident:
+            return before_ident
+        before_ident = stripped
+
+
+def _constrained_auto_at(
+    lookahead: bytes, auto_start: int, prev_nonblank_code: bytes
+) -> bool:
+    """True if the ``auto`` at *auto_start* is a concept-constrained placeholder.
+
+    Two accepted positions: inside a parameter list (the identifier is separated
+    from its enclosing ``(``/``,`` by nothing but cv-qualifiers/attributes), or a
+    declaration-start return type (nothing but whitespace separates the
+    identifier from a genuine statement boundary, or from a trailing-return-type
+    arrow directly following a function declarator's ``)`` -- the ``auto f() ->
+    MyConcept auto;`` shape, Codex review).
+
+    A ``decltype(`` open paren is excluded: it is not a parameter list.
+    """
+    prefix = _strip_trailing_declarator_specifiers(lookahead[:auto_start])
+    prefix = _strip_trailing_attributes(prefix)
+    ident_match = _QUALIFIED_IDENTIFIER_TAIL_PATTERN.search(prefix)
+    if not ident_match:
+        return False
+    before_ident = _strip_leading_decl_noise(prefix[: ident_match.start()].rstrip())
+    last = before_ident[-1:]
+
+    if last == b"(":
+        return not _is_decltype_open_paren(lookahead, len(before_ident) - 1)
+    if last == b",":
+        open_pos = _find_enclosing_open_paren(lookahead, len(before_ident))
+        if open_pos is None:
+            return False
+        return not _is_decltype_open_paren(lookahead, open_pos)
+
+    # Not inside a parameter list at all -- only a genuine statement boundary
+    # makes this a declaration-start return-type position rather than some
+    # other expression context.
+    if before_ident:
+        return last in _REQUIRES_STATEMENT_BOUNDARY_CHARS or (
+            last == b">" and _has_declarator_adjacent_trailing_arrow(before_ident)
+        )
+    prev = _strip_trailing_declarator_specifiers(prev_nonblank_code.rstrip())
+    return not prev or prev[-1:] in _REQUIRES_STATEMENT_BOUNDARY_CHARS
+
+
 def _has_custom_constrained_auto_param(
     lookahead: bytes, prev_nonblank_code: bytes = b""
 ) -> bool:
@@ -462,52 +521,10 @@ def _has_custom_constrained_auto_param(
     MyConcept auto f();``, ``[[nodiscard]] MyConcept auto f();`` — Codex
     review), so they're stripped in the same fixed-point loop, in any
     order, before the statement-boundary check runs."""
-    for m in re.finditer(rb"\bauto\b", lookahead):
-        prefix = _strip_trailing_declarator_specifiers(lookahead[: m.start()])
-        prefix = _strip_trailing_attributes(prefix)
-        ident_match = _QUALIFIED_IDENTIFIER_TAIL_PATTERN.search(prefix)
-        if not ident_match:
-            continue
-        before_ident = prefix[: ident_match.start()].rstrip()
-        while True:
-            stripped = _strip_trailing_declarator_specifiers(before_ident)
-            stripped = _strip_trailing_attributes(stripped)
-            stripped = _strip_trailing_leading_decl_specifier_words(stripped)
-            if stripped == before_ident:
-                break
-            before_ident = stripped
-        last = before_ident[-1:]
-        open_pos: int | None
-        if last == b"(":
-            open_pos = len(before_ident) - 1
-        elif last == b",":
-            open_pos = _find_enclosing_open_paren(lookahead, len(before_ident))
-            if open_pos is None:
-                continue
-        else:
-            open_pos = None
-        if open_pos is not None:
-            if not _is_decltype_open_paren(lookahead, open_pos):
-                return True
-            continue
-        # Not inside a parameter list at all — only a genuine statement
-        # boundary right before the identifier (on this line, or on the
-        # last preceding non-blank code when the identifier opens the
-        # line), or a trailing-return-type arrow directly following a
-        # function declarator's closing ")" (the ``auto f() -> MyConcept
-        # auto;`` shape, Codex review), makes this a declaration-start
-        # return-type position rather than some other expression context.
-        if before_ident:
-            if last not in _REQUIRES_STATEMENT_BOUNDARY_CHARS and not (
-                last == b">" and _has_declarator_adjacent_trailing_arrow(before_ident)
-            ):
-                continue
-        else:
-            prev = _strip_trailing_declarator_specifiers(prev_nonblank_code.rstrip())
-            if prev and prev[-1:] not in _REQUIRES_STATEMENT_BOUNDARY_CHARS:
-                continue
-        return True
-    return False
+    return any(
+        _constrained_auto_at(lookahead, m.start(), prev_nonblank_code)
+        for m in re.finditer(rb"\bauto\b", lookahead)
+    )
 
 
 # "requires" only became a reserved keyword in C++20 — any earlier standard
