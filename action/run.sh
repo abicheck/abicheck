@@ -943,16 +943,35 @@ _coverage_gated() {
 # genuine "cannot tell", and the caller keeps its established verdict rather
 # than guessing.
 #
-# Top-level only, deliberately, unlike the coverage queries above: this is
-# reached from the compare branch alone (a scan's exit code follows its
-# verdict directly, so it has no severity gate to read), and `compare` writes
-# `severity` at the top level. Same for the SEVERITY_ERROR summary's
-# `blocking_categories` lookup, which only runs for a verdict the compare
-# branch alone can set.
+# Falls back to the **text** report when there is no JSON to read. That is not
+# an edge case for `scan`: `format: text` is the Action's documented default
+# and scan writes no JSON sidecar, so `_json_report_src` is empty and the
+# query answered nothing -- publishing ERROR (an operational failure) for a
+# severity-policy result on the most common invocation there is (Codex
+# review). The CLI prints its own gate on that path (`cli_scan_helpers.
+# _severity_gate_lines`), so the fact is present; it just is not JSON.
+#
+# Only a *blocking* gate line is matched, and it is mapped to the same
+# non-zero the JSON branch would yield. A passing gate prints "pass" and is
+# left to answer 0 through the absent-block rule below, exactly as a
+# legacy-scheme run does.
 _severity_gate_exit() {
-  local _src
+  local _src _answer
   _src=$(_json_report_src)
-  _report_query "$_src" severity_exit
+  _answer=$(_report_query "$_src" severity_exit)
+  if [[ -n "$_answer" ]]; then
+    echo "$_answer"
+    return
+  fi
+  # `severity gate: exit N — blocking: <categories>`
+  sed -n 's/.*severity gate: exit \([0-9][0-9]*\).*blocking:.*/\1/p' \
+    <<<"${ABICHECK_OUTPUT:-}" | head -1
+}
+
+# The blocking categories named on the same text line, for the job summary.
+_severity_gate_categories_text() {
+  sed -n 's/.*severity gate: exit [0-9][0-9]* — blocking: \(.*\)$/\1/p' \
+    <<<"${ABICHECK_OUTPUT:-}" | head -1
 }
 
 if [[ "$MODE" == "deps-compare" ]]; then

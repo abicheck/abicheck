@@ -111,6 +111,27 @@ class TestSeverityBlockingCompatibleFindings:
         ]
         assert summary["findings_truncated"] is True
 
+    def test_breaking_findings_are_not_evicted_by_many_blockers(self):
+        # The mirror of the reservation test above, and the failure the
+        # reservation itself caused: 20+ error-level additions alongside an
+        # ABI break exited 4 while itemizing only additions (Codex review).
+        # Both are causes of the exit code; naming only one is wrong either
+        # way round.
+        from abicheck.cli_scan_baseline import _MAX_BASELINE_FINDINGS
+
+        diff, breaks = self._diff(n_adds=25, n_breaks=25)
+        summary = {
+            "findings": [
+                {"bucket": "breaking", "kind": "func_removed", "symbol": c.symbol}
+                for c in breaks[:_MAX_BASELINE_FINDINGS]
+            ]
+        }
+        self._apply(summary, diff)
+        buckets = [f["bucket"] for f in summary["findings"]]
+        assert len(summary["findings"]) <= _MAX_BASELINE_FINDINGS
+        assert buckets.count("breaking") > 0, "the higher-exit cause must survive"
+        assert buckets.count("compatible") > 0, "the blocking additions must too"
+
     def test_only_the_blamed_category_is_pulled_in(self):
         # `--severity-addition error` makes additions block; a quality finding
         # is equally compatible but did not fail the run, so spending report

@@ -234,18 +234,27 @@ def _add_severity_blocking_compatible_findings(
         return
     findings: list[dict[str, Any]] = list(summary.get("findings") or [])
     added = _baseline_finding_dicts(blocking, "compatible")
-    # Reserved, not appended-if-there-is-room. The cap is spent first by the
-    # legacy buckets, and under a demoting preset those are exactly the
-    # findings that did *not* gate -- so a plain append handed all 20 slots to
-    # non-blocking findings and dropped the one that failed the scan, leaving
-    # the report failing with no actionable cause again (Codex review).
-    # Blocking findings go first and keep their slots; the demoted ones fill
-    # whatever is left.
-    keep_blocking = added[:_MAX_BASELINE_FINDINGS]
-    room_left = _MAX_BASELINE_FINDINGS - len(keep_blocking)
-    merged = keep_blocking + findings[:room_left]
-    summary["findings"] = merged
-    if len(added) > len(keep_blocking) or len(findings) > room_left:
+    # Both groups get a share; neither may evict the other outright. Two
+    # opposite failures were found here in successive reviews, and each fix
+    # caused the next:
+    #
+    # - appending only if there was room let the legacy buckets spend all 20
+    #   slots on findings a demoting preset had made non-blocking, dropping
+    #   the compatible finding that actually failed the run; then
+    # - reserving the whole cap for the compatible blockers did the mirror
+    #   image -- 20+ error-level additions alongside an ABI break exited 4
+    #   while itemizing only additions (Codex review).
+    #
+    # So severity decides the *order* (the legacy buckets are already sorted
+    # breaking -> api_break -> risk, and drive the higher exit), while a
+    # reserved floor guarantees the compatible blockers are represented at
+    # all. Both are causes of the exit code; a report that names only one is
+    # wrong whichever one it names.
+    reserved = min(len(added), max(1, _MAX_BASELINE_FINDINGS // 4))
+    head = findings[: _MAX_BASELINE_FINDINGS - reserved]
+    tail = added[: _MAX_BASELINE_FINDINGS - len(head)]
+    summary["findings"] = head + tail
+    if len(findings) > len(head) or len(added) > len(tail):
         summary["findings_truncated"] = True
 
 

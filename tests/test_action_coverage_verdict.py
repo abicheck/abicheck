@@ -426,6 +426,40 @@ class TestCompareTellsTheTwoAxesApart:
         )
         assert outputs["verdict"] == "COVERAGE_INCOMPLETE", outputs
 
+    def test_a_default_text_scan_still_reports_its_severity_gate(
+        self, tmp_path: Path
+    ) -> None:
+        """`format: text` is the Action's *default* and scan writes no JSON
+        sidecar, so `_json_report_src` is empty and the severity query
+        answered nothing -- publishing ERROR for a severity-policy result on
+        the most common invocation there is (Codex review). The CLI prints
+        its own gate line on that path; the mapping now reads it.
+        """
+        bindir = tmp_path / "bin"
+        bindir.mkdir()
+        stub = bindir / "abicheck"
+        stub.write_text(
+            "#!/usr/bin/env bash\nprintf '%s' "
+            + json.dumps(
+                "Baseline comparison\n"
+                "  breaking=0 api_break=0 risk=0 compatible=1\n"
+                "  severity gate: exit 1 \u2014 blocking: addition\n\n"
+                "Verdict: COMPATIBLE\n"
+            )
+            + "\nexit 1\n",
+            encoding="utf-8",
+        )
+        stub.chmod(0o755)
+        outputs = _run_action(
+            tmp_path,
+            {
+                "INPUT_MODE": "scan",
+                "INPUT_NEW_LIBRARY": _lib(tmp_path, "libnew.so"),
+            },  # no INPUT_FORMAT -> the documented text default
+            bindir,
+        )
+        assert outputs["verdict"] == "SEVERITY_ERROR", outputs
+
     def test_a_scan_exit_one_with_neither_signal_stays_an_error(
         self, tmp_path: Path
     ) -> None:

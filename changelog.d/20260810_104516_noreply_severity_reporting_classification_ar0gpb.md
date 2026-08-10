@@ -31,3 +31,9 @@
   explicitly blocking severity policy. `SEVERITY_ERROR` is now declared in
   `action.yml`'s scan output vocabulary (and its generated reference) too.
 
+
+- **The Action reports a scan severity gate on its default text format** —
+  `format: text` is the documented default and `scan` writes no JSON sidecar,
+  so the verdict mapping had nothing to read and published `ERROR` (an
+  operational failure) for a severity-policy result. It now falls back to the
+  gate line the CLI prints on that path.

@@ -999,7 +999,19 @@ Once a root command genuinely clears the bar above, pick the right home:
   `size_bits`. Until then a fabricated `type_base_changed` from a capture gap
   is the accepted cost, because the alternative — suppressing a real
   hierarchy change, which is sometimes the *only* breaking finding a
-  same-size base addition produces — is strictly worse. (2) One accepted
+  same-size base addition produces — is strictly worse. (2) The vtable guard is **narrower than
+  a first reading suggests, and its own docstring used to overclaim it.** The
+  class's virtual functions and its `RecordType.vtable` are two projections of
+  the same DWARF evidence (both trace to `DW_TAG_subprogram`), not independent
+  streams — so a translation unit whose coverage vanishes can take both, the
+  two sides' signature sets then differ, and the guard declines to suppress.
+  The false positive survives in that shape. That is the failure direction to
+  have (it leaves a pre-existing false positive standing rather than hiding a
+  real break), but it means the guard covers the *reported* case — identical
+  headers, no DWARF vtable, no `_ZTV` anywhere, virtuals absent from both
+  sides — and not every capture gap. Closing the rest needs artifact or
+  provenance evidence (`_ZTV` presence, per-finding providers) the type-level
+  detector does not receive today. (3) One accepted
   false negative in the
   fix itself: a class already polymorphic *through a base*, declaring no
   virtuals of its own, that gains one — its vtable grows while its object

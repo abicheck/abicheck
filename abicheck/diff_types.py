@@ -1117,7 +1117,8 @@ def _vtable_transition_is_evidenced(
     have occurred and the differing list is capture noise.
 
     Size alone is **not** sufficient, which is why the class's own virtual
-    functions are consulted first. A sufficiently over-aligned class absorbs
+    functions are consulted first (they are a different projection of the
+    same debug info, not a fully independent one -- see the body). A sufficiently over-aligned class absorbs
     its new vptr into existing padding: verified against g++, both
     ``struct alignas(8) A {}`` and ``struct alignas(8) A { virtual void f(); }``
     are 8 bytes, as are the ``alignas(16)`` pair at 16 -- so a size-only guard
@@ -1151,11 +1152,20 @@ def _vtable_transition_is_evidenced(
     if _owned_virtual_signatures(name, old_funcs) != _owned_virtual_signatures(
         name, new_funcs
     ):
-        # The strongest signal, and independent of layout: the class's own
-        # virtual *functions* are a separate evidence stream from its vtable
-        # list (`snapshot.functions` vs `RecordType.vtable`), so the two
-        # agreeing that a virtual came or went is not a capture gap. This is
-        # also what keeps an over-aligned class honest -- see below.
+        # The class's own virtual *functions* -- a different projection of
+        # the debug info from `RecordType.vtable`, and the signal that keeps
+        # an over-aligned class honest (see below).
+        #
+        # Not fully independent, and the docstring used to overclaim that:
+        # on the DWARF path both ultimately derive from `DW_TAG_subprogram`
+        # evidence, so a TU whose coverage vanishes can take the vtable list
+        # *and* the function with it (Codex review). When that happens the
+        # sets differ, this returns True, and the finding is kept -- i.e. the
+        # guard declines to suppress rather than suppressing wrongly. That is
+        # the failure direction to have: it leaves the pre-existing false
+        # positive standing instead of hiding a real break. Closing it needs
+        # artifact or provenance evidence (`_ZTV` presence, per-finding
+        # providers) the type-level detector does not yet receive.
         return True
     if t_old.size_bits is None or t_new.size_bits is None:
         return True
