@@ -63,7 +63,7 @@ reviewers can route it to the right review lens immediately.
 
 ## P0 — Architecture and first useful release
 
-### P0.1 — `skills-src/` source tree and shared Layer-B fragments — **not started**
+### P0.1 — `skills-src/` source tree and shared Layer-B fragments — **done**
 
 **Problem:** Nothing exists yet. Building four skills' worth of `SKILL.md`
 prose before the shared domain-knowledge fragments they all cite exist
@@ -129,7 +129,7 @@ split apart, but keep this PR free of any `SKILL.md`/generator code.
 
 ---
 
-### P0.2 — Author the four P0 `SKILL.md` files — **not started**
+### P0.2 — Author the four P0 `SKILL.md` files — **done** (including P1.6's CI-wiring content, folded in during authoring)
 
 **Problem:** The actual skill content — the part a user's agent reads.
 
@@ -195,7 +195,7 @@ reviewable for its own decision-tree correctness, and a reviewer for
 
 ---
 
-### P0.3 — Generator: `skills-src/` → `.agents/skills/` — **not started**
+### P0.3 — Generator: `skills-src/` → `.agents/skills/` — **done**
 
 **Problem:** ADR-058 requires generated, self-contained output — no
 symlinks, no hand-maintained copies — and requires each skill's
@@ -932,7 +932,7 @@ Dependencies note.
 
 ---
 
-### P0.6 — AI-readiness gate coverage for the new tree — **not started**
+### P0.6 — AI-readiness gate coverage for the new tree — **done**
 
 **Problem:** Three separate gaps, all closed here rather than left
 unregistered: (1) `skills-src/` is a new major sub-tree that silently falls
@@ -1065,7 +1065,7 @@ marker).
 
 ---
 
-### P0.7 — Structural and tool/API drift tests — **not started**
+### P0.7 — Structural and tool/API drift tests — **done**
 
 **Problem:** ADR-058's Testing architecture commits to more than markdown
 linting — a renamed CLI flag or removed report field referenced by a
@@ -1170,7 +1170,7 @@ either way since both are additive test infrastructure.
 
 ---
 
-### P0.8 — Trigger tests — **not started**
+### P0.8 — Trigger tests — **done** (the deterministic, corpus-driven half; the scripted-agent-session half stays a future opt-in lane per this item's own scope split)
 
 **Problem:** ADR-058's central product bet is that these skills trigger on
 real user language, not abicheck vocabulary, and that they do *not*
@@ -1232,7 +1232,7 @@ from skill content or the generator.
 
 ---
 
-### P0.9 — Documentation: skill catalog and dogfooding — **not started**
+### P0.9 — Documentation: skill catalog and dogfooding — **partially done** (the catalog page, nav entry, and README pointer are done; the dogfooding pass is explicitly deferred until after P0.4/P0.5's follow-up commits and P1.6 land, per this item's own freshness requirement)
 
 **Problem:** ADR-058 commits to a small canonical docs section, not a
 duplicate of existing ABI/API educational material, and to dogfooding
@@ -1569,7 +1569,7 @@ publication purposes even though it is marked complete.
 
 ---
 
-### P1.6 — CI integration flow — **not started**
+### P1.6 — CI integration flow — **done** (landed as part of P0.2's authoring, per that item's Files note)
 
 **Problem:** ADR-058's admission-criteria decision on CI setup was: not a
 fifth public skill, but a documented follow-on action inside

@@ -1,0 +1,86 @@
+# Trigger corpus for the published Agent Skills (ADR-058 / G36 P0.8).
+#
+# The positive prompts are NOT authored here. ADR-058's "Product positioning"
+# section is their one canonical source; `tests/test_agent_skills_triggers.py`
+# extracts the seven verbatim strings from that section and fails if any entry
+# below does not match one of them — so an ADR wording change that is not
+# mirrored here is a failing test, not silent staleness.
+#
+# What this file owns is only what is specific to this item: the
+# expected-target-skill label per prompt, the discriminating keywords each
+# target skill's own `description` must carry, and the negative set.
+#
+# Two of the seven (OS/container upgrade, compiler/client profiles) are P1
+# candidates ADR-058 deliberately did not admit. They are labelled
+# `expected_skill: null`: no P0 skill should exclusively claim them, and
+# forcing one to trigger on out-of-scope phrasing would itself be a false
+# positive. They are recorded so the case is "not yet claimed, not silently
+# mishandled" rather than absent.
+
+schema_version: 1
+
+positive:
+  - prompt: "Review this PR for binary compatibility."
+    expected_skill: native-binary-compatibility-review
+    description_keywords:
+      - pull request
+      - binary
+      - compatibility
+
+  - prompt: "Can I make this public C++ API change without breaking old consumers?"
+    expected_skill: native-api-evolution
+    description_keywords:
+      - api change
+      - without breaking
+      - existing consumers
+
+  - prompt: "Can we release this as a minor version?"
+    expected_skill: native-release-compatibility
+    description_keywords:
+      - release
+      - minor
+      - version
+
+  - prompt: "Will this old application work with the new library?"
+    expected_skill: native-consumer-compatibility
+    description_keywords:
+      - application
+      - still work
+      - library
+
+  - prompt: "Why did this compatibility check suddenly report dozens of breaks?"
+    # ADR-058 folds this into the review skill's root-cause step rather than
+    # admitting a fifth "compatibility debugging" skill.
+    expected_skill: native-binary-compatibility-review
+    description_keywords:
+      - suddenly reported dozens of breaks
+
+  - prompt: "Will this binary still work after moving to a new OS/container?"
+    expected_skill: null
+    unclaimed_reason: >-
+      Runtime / OS / container upgrade compatibility is a P1 candidate
+      (ADR-058, "P1 candidates, evaluated and deliberately deferred"). No P0
+      skill claims it; the runtime contract is a documented non-goal of the
+      compare verdict.
+
+  - prompt: "How do I keep ABI compatibility across compiler/client profiles?"
+    expected_skill: null
+    unclaimed_reason: >-
+      Compiler/client ABI compatibility across profiles is a P1 candidate
+      (ADR-058). The Layer-B fragment `compiler-and-build-profiles.md` covers
+      the domain knowledge, but no P0 skill's decision tree is this question.
+
+# Adjacent-but-out-of-scope requests. No `native-*` skill may claim these:
+# each is a compatibility question about a domain this portfolio deliberately
+# does not cover, and a false trigger there is worse than no trigger.
+negative:
+  - prompt: "Is this a breaking change to our REST API?"
+    forbidden_terms: [rest, http, endpoint]
+  - prompt: "Review this OpenAPI schema change for backwards compatibility."
+    forbidden_terms: [openapi, swagger]
+  - prompt: "Will this database migration break existing queries?"
+    forbidden_terms: [database, migration, sql]
+  - prompt: "Check this Java API for binary compatibility with older clients."
+    forbidden_terms: [java, jvm, bytecode]
+  - prompt: "Are these two JSON schemas compatible?"
+    forbidden_terms: [json schema, jsonschema]

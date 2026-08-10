@@ -1,0 +1,183 @@
+---
+name: native-api-evolution
+description: Design a C/C++ (or other compiled native) library API change so it does not break existing consumers. Use when asked how to make a public API change without breaking compatibility, whether adding a field, a virtual function, or a parameter is safe, how to evolve a struct or class that consumers already depend on, or how to deprecate and replace part of a shipped native API. Provides ABI-safe design patterns — pImpl, reserved slots, versioned interfaces, deprecation lifecycles — and ends by verifying the resulting change.
+license: Apache-2.0
+metadata:
+  abicheck-version-range: ">=0.6.0,<0.7.0"
+  layer: A
+  source: skills-src/native-api-evolution/SKILL.md
+---
+
+# Evolving a native API without breaking consumers
+
+You are here **before** the change exists, or before it is finalized: the
+user wants to make a change and keep already-compiled consumers working.
+This is design work. Diagnosing an already-made change is
+`native-binary-compatibility-review`; deciding whether a release may ship is
+`native-release-compatibility`.
+
+Read [safety invariants](../shared/safety-invariants.md) first. The one that
+shapes this workflow most: you may propose and, with explicit confirmation,
+apply a remediation — but you may only end by **re-running** the
+deterministic check, never by asserting the design is safe.
+
+## Preflight — abicheck availability and version range
+
+Run `abicheck --version` before anything else and check the reported version
+against this skill's declared version range (`metadata.abicheck-version-range`
+in this file's own frontmatter). Outside that range — **below the minimum or
+at/above the maximum** — stop and say so rather than proceeding on an
+unvalidated version: below the minimum the surface this workflow uses may not
+exist yet, and at/above the maximum it may have changed.
+
+If abicheck is not installed, say so and how to install it. Do not install it
+yourself ([safety invariants](../shared/safety-invariants.md) item 8).
+
+## Step 0 — Establish the contract to preserve
+
+Which promise must survive the change: binary (installed consumers, no
+rebuild), source API (their code still compiles), or both? See
+[compatibility contracts](../shared/compatibility-contracts.md). A change
+that is fine for one is routinely fatal for the other — adding a defaulted
+parameter is the canonical example: it keeps *ordinary calls* compiling while
+breaking the ABI outright, and it is not fully source-safe either (see step 1).
+
+Also establish the consumer shape, because it changes which patterns are
+available:
+
+| Shape | Constraint |
+|---|---|
+| Applications linking the library | do not change what they allocate, embed, or call |
+| Plugins / hosts across an ABI boundary | the entrypoint contract is explicit; capability negotiation is available |
+| Vendored SDK, consumers rebuild | source compatibility may be enough |
+| Distro-packaged under a stable SONAME | strictest — binary compatibility is the whole contract |
+
+## Step 1 — Classify the intended change
+
+Name what the user actually wants to do, then look it up in
+[the remediation catalogue](../shared/remediation-catalog.md) and
+[the design pattern catalogue](references/design-patterns.md). The common
+cases and their verdicts before any mitigation:
+
+| Intent | Unmitigated |
+|---|---|
+| add a field to a public struct/class | ABI-breaking |
+| add a virtual function | ABI-breaking for derived/embedding consumers |
+| reorder virtuals or members | ABI-breaking, always |
+| add a parameter (even defaulted) | ABI-breaking — the mangled name changes. Source-compatible **only** for ordinary calls that omit the argument: taking the function's address, storing it in the old function-pointer type, or overriding it as a virtual all stop compiling. Keep the old signature and add a new entry point when source compatibility is in the contract. |
+| change a return type | ABI-breaking |
+| add a new free function (new name) | compatible |
+| add an **overload** of an existing function | ABI-compatible; **not** unconditionally source-compatible |
+| add an enumerator at the end | compatible **only** if the underlying type is fixed (`enum class E : int`, or an explicit `: T`) or the new value fits the old representation — otherwise the compiler may widen the underlying type, changing `sizeof` and every containing layout |
+| renumber an enumerator | ABI-breaking if it reaches a signature or field |
+| remove or rename anything public | breaking |
+| change an inline function or template body | breaking in effect — the old body is baked into consumers |
+
+## Step 2 — Choose a compatible design
+
+Work down this list; the first that fits is usually right.
+
+1. **Additive only.** A new function under a *new name*, or a new type.
+   Nothing existing changes. Always prefer this.
+
+   A new **overload** of an existing name is additive for the ABI — every
+   already-compiled caller keeps binding to the symbol it linked — but it is
+   not automatically source-compatible: an existing call that reached the old
+   function through an implicit conversion can become ambiguous on rebuild,
+   and so can an existing `&f` that names the function. When source
+   compatibility is part of the contract (step 0), give the new function a
+   distinct name instead, or constrain the overload so it cannot participate
+   in an existing call's resolution.
+2. **Spend a reserved slot** if the type was designed with reserved fields.
+   Size and layout are unchanged.
+3. **Hide the state.** pImpl or an opaque handle, so the public type's size
+   never changes again. This is the durable fix; it costs an indirection and
+   is itself an ABI break at the point of introduction — so it lands at a
+   major bump, not mid-stream.
+4. **Version the interface.** `IFoo2` next to `IFoo`, or ELF symbol
+   versioning, so old consumers keep the old contract.
+5. **Negotiate capabilities** at a plugin/host boundary rather than relying
+   on a shared struct layout.
+6. **Accept the break** — a SONAME/major bump with a documented migration.
+   A legitimate outcome, not a failure. See
+   [the design pattern catalogue](references/design-patterns.md) for the
+   deprecation lifecycle that should precede it.
+
+State the cost of the option you recommend. There is no free pattern here:
+pImpl costs an allocation, reserved slots cost foresight, versioned
+interfaces cost duplicated surface.
+
+## Step 3 — Establish the "before" side now, not later
+
+Before the change is made, capture the current surface so the change can be
+verified against it:
+
+```bash
+abicheck dump path/to/libfoo.so \
+  --header include/foo/api.h \
+  --depth headers \
+  -o baseline.abi.json
+```
+
+**`--depth headers` requires the headers.** For a shared library carrying no
+embedded header snapshot, `dump` refuses to write the file at all rather than
+quietly producing a binary-depth baseline — supply the public headers with
+`-H/--header` (a file or a directory, repeatable), and `-I/--include` for any
+directory the parse needs. Without them the command fails with "`--depth
+headers` was requested but the snapshot only reached 'binary' evidence
+depth", and the workflow cannot proceed.
+
+Record the toolchain this was produced under — the verification in step 5
+must reproduce it, or the comparison will be refused
+([compiler and build profiles](../shared/compiler-and-build-profiles.md)).
+
+## Step 4 — Apply the change
+
+Only with explicit confirmation for the specific edit
+([safety invariants](../shared/safety-invariants.md) item 8). Show the diff
+you propose before making it.
+
+## Step 5 — Verify — this is not optional
+
+Hand off to the same deterministic verification
+`native-binary-compatibility-review` performs. The design is not validated
+until this has run:
+
+```bash
+abicheck compare baseline.abi.json path/to/libfoo.so \
+  --header new=include/foo/api.h \
+  --depth headers \
+  --scope-public-headers \
+  --report-mode root-cause \
+  --format json \
+  -o verify.json
+```
+
+Read it in the order
+[report interpretation](../shared/report-interpretation.md) prescribes:
+comparability first (`verdict: null` means the design was not verified at
+all, not that it passed), then evidence tier, then the verdict, then
+`root_causes`.
+
+If findings remain, return to step 2 with what they showed — do not
+rationalize them.
+
+## Step 6 — Report
+
+- The **recommended design**, with its cost and the alternatives rejected.
+- The **verified result** of the change: verdict, evidence tier, and any
+  finding that remains.
+- The **migration story** for consumers, if any surface was deprecated.
+- What the verification **could not** cover — e.g. the wider dependency
+  graph (`abicheck deps compare`) or reachability if the run was
+  not at `--depth source`. A raised symbol-version floor *is* covered:
+  `compare` emits `runtime_floor_raised`, so report it from the findings
+  instead of listing it as uncovered
+  ([evidence and depth](../shared/evidence-and-depth.md)).
+
+## Termination criteria
+
+Done when a concrete design is recommended **and** a real comparison against
+the pre-change baseline has been run and reported. A design recommendation
+with no verification run, or with a refused (`verdict: null`) comparison
+presented as success, is an unfinished job.

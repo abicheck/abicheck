@@ -1,0 +1,118 @@
+# Getting the two sides of a review
+
+A compatibility review needs two **artifacts**, not a diff. This file is the
+mechanical part of the parent skill's step 1: how to obtain an old and a new
+build that are actually comparable. Which baseline is the *right* one is a
+different question, owned by
+[baselines and comparability](../../shared/baseline-and-comparability.md).
+
+## From a pull request or branch
+
+The old side is the merge base, not the target branch's tip — using the tip
+mixes in unrelated changes that landed since the branch was cut.
+
+```bash
+BASE=$(git merge-base origin/main HEAD)
+
+git worktree add ../old-side "$BASE"
+# build ../old-side with the project's own build command
+# build the current checkout the same way, with the same toolchain
+```
+
+Build both sides with **identical** compiler, standard-library, `-std=`,
+target, and ABI-relevant flags. If they differ, the comparison is either
+refused (`verdict: null`, `reason.kind == "profile_mismatch"`) or swamped by
+toolchain churn — see
+[compiler and build profiles](../../shared/compiler-and-build-profiles.md).
+
+Clean up afterwards: `git worktree remove ../old-side`.
+
+## From a released artifact
+
+When the question is "since the last release", the old side is the released
+binary itself — the one users actually have. A distro package, a release
+asset, or a previously published snapshot all work:
+
+```bash
+abicheck compare released/libfoo.so build/libfoo.so --depth headers --format json
+```
+
+## From a stored snapshot
+
+When the old build is not reproducible, a snapshot captured earlier is the
+baseline:
+
+```bash
+# once, on the old side
+abicheck dump build/libfoo.so \
+  --header include/foo/api.h --depth headers -o baseline.abi.json
+
+# later — the baseline carries its own header evidence, so scope the live side
+abicheck compare baseline.abi.json build/libfoo.so \
+  --header new=include/foo/api.h --depth headers --format json
+```
+
+`dump` hard-fails an explicit `--depth headers` that header evidence never
+actually reached, so the `-H/--header` above is required, not decorative — see
+"Headers, not just binaries" below.
+
+Prefer comparing **two persisted snapshots** over mixing a persisted baseline
+with a live binary when the toolchain is in question — the two paths do not
+necessarily scope dependencies identically, and a mismatch there is a real
+difference in the fact universe being compared.
+
+## Headers, not just binaries
+
+`--depth headers` needs the headers to be findable. Supply them when
+auto-discovery cannot:
+
+```bash
+abicheck compare OLD NEW \
+  --header old=../old-side/include/foo/api.h \
+  --header new=include/foo/api.h \
+  --include old=../old-side/include/ \
+  --include new=include/ \
+  --depth headers --format json
+```
+
+**Scope each side to its own headers — and to its own include path.** A bare
+`--header PATH` or `--include PATH` applies to *both* sides; the `old=`/`new=`
+prefixes select one. When the two artifacts come from different revisions,
+parsing both against the current checkout describes the new API twice — a
+changed signature or layout then appears on both sides and cancels out,
+yielding a false compatible. Scoping the headers alone is not enough: an
+unscoped `--include` lets the old header resolve its own `#include`s out of
+the new tree, reintroducing the same masking one level down. Use the bare
+form only when one set of paths genuinely describes both sides.
+
+The same applies when one side is a snapshot: it already carries its own
+header evidence, so scope the live side only — `abicheck compare
+baseline.abi.json build/libfoo.so --header new=include/foo/api.h`.
+
+`--include`/`-I`, `--sysroot`, and `--gcc-option` shape the parse the same way
+they shape the real build. They must match the real build, or the extracted
+surface is not the shipped one.
+
+## Preflight without running the analysis
+
+`--dry-run` reports what a run *would* do — which inputs resolve, which depth
+is reachable — before paying for the extraction:
+
+```bash
+abicheck compare OLD NEW --depth headers --dry-run
+```
+
+Useful when the two sides are expensive to build and you want to confirm the
+inputs resolve first.
+
+## Checklist before running the comparison
+
+- [ ] Both sides built from the intended commits.
+- [ ] Same compiler family, version, `-std=`, target, and ABI-relevant flags.
+- [ ] Same public headers in view on both sides.
+- [ ] Same dependency-scoping choice on both sides (both default, or both
+      `--include-dependencies`).
+- [ ] The old side is the baseline the user's question actually implies.
+
+Failing any of these, fix it before reading findings. Findings produced from
+mismatched sides describe the mismatch, not the change.

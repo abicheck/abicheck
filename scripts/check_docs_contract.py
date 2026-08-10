@@ -68,6 +68,20 @@ if str(Path(__file__).resolve().parent) not in sys.path:
 from findings_report import Findings as _SharedFindings  # noqa: E402
 
 DOCS = ROOT / "docs"
+
+#: Trees outside `docs/` whose Markdown may be registered as a topic's
+#: `task_pages`/`allowed_summaries` entry (ADR-058 / G36 P0.6). Only
+#: `skills-src/shared/` qualifies: those fragments are genuine summary owners
+#: that live outside the published tree by design.
+#:
+#: Deliberately the fragment directory, not `skills-src/` as a whole. Every
+#: other Markdown in that tree would satisfy the registry *vacuously* — a
+#: `native-*/SKILL.md` carries no `summarizes` front matter for the round-trip
+#: to check, and `skills-src/CLAUDE.md` is excluded from front-matter scanning
+#: outright. The same reasoning bars a non-Markdown target: no front matter
+#: means nothing for the ownership check to contradict.
+EXTERNAL_PAGE_ROOTS = ("skills-src/shared",)
+
 TOPICS_FILE = DOCS / "_meta" / "topics.yaml"
 TERMINOLOGY_FILE = DOCS / "_meta" / "terminology.yaml"
 
@@ -314,6 +328,98 @@ def _is_file_under(base: Path, value: str) -> bool:
     return candidate is not None and candidate.is_file()
 
 
+def _is_registered_page(value: str) -> bool:
+    """True if a `task_pages`/`allowed_summaries` entry names a real file.
+
+    Accepts a repo-relative path *outside* `docs/` the same way `fact_sources`
+    already does (ADR-058 / G36 P0.6): `skills-src/shared/*.md` fragments are
+    genuine summary owners of a registered topic, but they live outside the
+    published tree by design -- they are the DRY source the `.agents/skills/`
+    trees are generated from, not doc pages. Everything else about the
+    `summarizes` round-trip below applies to them unchanged.
+
+    The outside-`docs/` half is deliberately narrow: a Markdown file under
+    `EXTERNAL_PAGE_ROOTS`, not any path that happens to exist. Accepting any
+    real file let a registry entry naming, say, `abicheck/foo.py` satisfy
+    both this existence check and the ownership round-trip — `load_front_matter`
+    returns `None` for a `.py` file, so the round-trip had nothing to
+    contradict and passed silently. A source file cannot own or summarize a
+    documentation topic; the exception exists for the fragments, not for the
+    repository at large.
+    """
+    if _is_file_under(DOCS, value):
+        return True
+    if not value.endswith(".md"):
+        return False
+    candidate = _resolves_under(ROOT, value)
+    if candidate is None or not candidate.is_file():
+        return False
+    return any(
+        (ROOT / tree).resolve() in candidate.parents for tree in EXTERNAL_PAGE_ROOTS
+    )
+
+
+def _page_key(value: object) -> str:
+    """Normalized identity for a registry page entry or a scanned page:
+    docs/-relative when it lives under `docs/`, repo-relative otherwise.
+
+    One function for both sides of the `summarizes` round-trip, so a
+    registry entry and the page that claims it compare equal regardless of
+    which tree the page lives in."""
+    text = str(value)
+    docs_candidate = _resolves_under(DOCS, text)
+    if docs_candidate is not None and docs_candidate.is_file():
+        return docs_candidate.relative_to(DOCS.resolve()).as_posix()
+    root_candidate = _resolves_under(ROOT, text)
+    if root_candidate is not None and root_candidate.is_file():
+        return root_candidate.relative_to(ROOT.resolve()).as_posix()
+    return _docs_relative_key(text)
+
+
+def _scanned_page_key(path: Path) -> str:
+    """The identity of a page being scanned, matching `_page_key`'s output for
+    the registry entry that names it: docs/-relative under `docs/`,
+    repo-relative otherwise. Takes a real (absolute) Path, which
+    `_page_key`'s string-and-registry-relative resolution deliberately
+    rejects."""
+    resolved = path.resolve()
+    docs_root = DOCS.resolve()
+    if docs_root == resolved or docs_root in resolved.parents:
+        return resolved.relative_to(docs_root).as_posix()
+    return resolved.relative_to(ROOT.resolve()).as_posix()
+
+
+def _registered_external_pages(topics: dict[str, dict[str, object]]) -> list[Path]:
+    """Every registered `task_pages`/`allowed_summaries` entry that resolves
+    outside `docs/`. `_check_front_matter_schema` scans `DOCS.rglob("*.md")`,
+    so without this these pages' `summarizes` claims would sit in the registry
+    entirely unchecked.
+
+    Registry-derived by design, and deliberately not widened to every file
+    under `EXTERNAL_PAGE_ROOTS`: this feeds a `DOCS`-scoped scan whose callers
+    patch `DOCS` alone, so pulling real repo files in through `ROOT` would
+    make that scan depend on the working tree. The *unregistered* fragment
+    that claims a topic is caught by
+    `_check_external_pages_claim_only_registered_topics` instead.
+    """
+    out: set[Path] = set()
+    for entry in topics.values():
+        if not isinstance(entry, dict):
+            continue
+        for key in ("task_pages", "allowed_summaries"):
+            values = entry.get(key, [])
+            if not isinstance(values, list):
+                continue
+            for value in values:
+                text = str(value)
+                if _is_file_under(DOCS, text) or not _is_registered_page(text):
+                    continue
+                candidate = _resolves_under(ROOT, text)
+                if candidate is not None and candidate.is_file():
+                    out.add(candidate)
+    return sorted(out)
+
+
 def _docs_relative_key(value: object) -> str:
     """Normalize a docs/-relative path value (e.g. a `canonical_page`
     entry) to its resolved, docs-relative POSIX form, so equivalent
@@ -360,12 +466,12 @@ def _check_referenced_paths_exist(
                 f.err("ownership", f"topic {topic_id!r}: {key} must be a list")
                 continue
             for value in values:
-                if not _is_file_under(DOCS, str(value)):
+                if not _is_registered_page(str(value)):
                     f.err(
                         "ownership",
                         f"topic {topic_id!r}: {key} entry {value!r} does not "
-                        "exist as a file under docs/ (or escapes it via "
-                        "'..'/an absolute path)",
+                        "exist as a file under docs/ or the repo root (or "
+                        "escapes it via '..'/an absolute path)",
                     )
         fact_sources = entry.get("fact_sources", [])
         if not isinstance(fact_sources, list):
@@ -414,11 +520,11 @@ def _permitted_summary_pages(entry: dict[str, object]) -> set[str]:
     for key in ("worked_example", "reference_page"):
         value = entry.get(key)
         if value is not None:
-            pages.add(_docs_relative_key(value))
+            pages.add(_page_key(value))
     for key in ("task_pages", "allowed_summaries"):
         values = entry.get(key, [])
         if isinstance(values, list):
-            pages.update(_docs_relative_key(v) for v in values)
+            pages.update(_page_key(v) for v in values)
     return pages
 
 
@@ -434,6 +540,44 @@ _MD_REF_LINK_RE = re.compile(r"(?<!!)\[([^\]]*)\]\[([^\]]*)\]")
 #: review).
 _MD_REF_DEF_RE = re.compile(r"^[ \t]{0,3}\[([^\]]+)\]:\s*(\S+)", re.MULTILINE)
 _HTML_COMMENT_RE = re.compile(r"<!--.*?-->", re.DOTALL)
+
+
+def _strip_top_level_indented_code(text: str) -> str:
+    """Blank out top-level indented (4-space) code blocks, line count intact.
+
+    Deliberately narrower than `gen_agent_skills._indented_code_spans`, which
+    tracks each open list item's content column so it can classify indents
+    *inside* lists. That machinery does not belong in this gate: here the two
+    error directions are asymmetric. Over-stripping would reject a real
+    backlink and fail the build on a correct page; under-stripping only lets a
+    backlink shown inside a list-nested example count, which is the behaviour
+    that already shipped. So a run is treated as code only where the reading
+    is unambiguous — blank-line separated, at top level, with no list open.
+    """
+    lines = text.split("\n")
+    out: list[str] = []
+    list_open = False
+    in_code = False
+    for index, line in enumerate(lines):
+        indented = line.startswith(("    ", "\t"))
+        if not line.strip():
+            out.append(line)  # a blank line neither opens nor closes a block
+            continue
+        if in_code and indented:
+            out.append("")
+            continue
+        in_code = False
+        if re.match(r"^ {0,3}(?:[-*+]|\d{1,9}[.)])\s", line):
+            list_open = True
+        elif not line.startswith((" ", "\t")):
+            list_open = False
+        blank_before = index == 0 or not lines[index - 1].strip()
+        if indented and blank_before and not list_open:
+            in_code = True
+            out.append("")
+        else:
+            out.append(line)
+    return "\n".join(out)
 
 
 def _strip_inline_code(text: str) -> str:
@@ -504,7 +648,8 @@ def _page_links_to(path: Path, target_rel_to_docs: str) -> bool:
     path). The whole point of `summarizes` is "link back to the canonical
     page instead of restating it" — being a permitted summarizer (registered
     in topics.yaml) isn't the same as actually doing that, so this enforces
-    the link exists. Fenced code blocks, inline code spans, and HTML
+    the link exists. Fenced code blocks, top-level indented code blocks,
+    inline code spans, and HTML
     comments are stripped first: a link shown inside a ``` fence or as
     inline code (e.g. `` `[owner](owner.md)` ``, showing the link syntax
     itself rather than a real link) is example text, and a link hidden
@@ -512,6 +657,7 @@ def _page_links_to(path: Path, target_rel_to_docs: str) -> bool:
     navigable backlink, even though the raw regex would otherwise match
     both."""
     text = _strip_fenced_code(_strip_front_matter(path.read_text(encoding="utf-8")))
+    text = _strip_top_level_indented_code(text)
     text = _strip_inline_code(text)
     text = _HTML_COMMENT_RE.sub("", text)
     for m in _MD_LINK_TARGET_RE.finditer(text):
@@ -535,15 +681,150 @@ def _page_links_to(path: Path, target_rel_to_docs: str) -> bool:
     return False
 
 
+def _check_external_pages_claim_only_registered_topics(
+    f: Findings, topics: dict[str, dict[str, object]]
+) -> None:
+    """The page-to-registry direction for out-of-`docs/` fragments.
+
+    `_check_front_matter_schema` performs that round-trip, but only over pages
+    the registry already names — so a fragment declaring `summarizes: topic-x`
+    that was never added to `topic-x` is invisible to it, which is precisely
+    the violation it exists to catch. Scanned by tree here rather than by
+    registry, so an unregistered claim cannot hide by being unregistered.
+    """
+    for tree in EXTERNAL_PAGE_ROOTS:
+        for path in sorted((ROOT / tree).rglob("*.md")):
+            try:
+                fm = load_front_matter(path)
+            except (yaml.YAMLError, ValueError) as exc:
+                f.err("front-matter", f"{_rel(path)}: invalid front matter: {exc}")
+                continue
+            if not isinstance(fm, dict):
+                continue
+            raw_claims = fm.get("summarizes")
+            if raw_claims is None:
+                claims: list[object] = []
+            elif isinstance(raw_claims, list):
+                claims = raw_claims
+            else:
+                # Reported here rather than silently skipped. This tree-wide
+                # scan is the *only* thing that visits an unregistered
+                # fragment — `_check_front_matter_schema` walks pages the
+                # registry names — so coercing a malformed value to an empty
+                # list left both the bad type and the missing round-trip
+                # unreported for exactly the files this scan exists to reach.
+                f.err("front-matter", f"{_rel(path)}: summarizes must be a list")
+                continue
+            for topic_id in [str(c) for c in claims]:
+                entry = topics.get(topic_id)
+                if not isinstance(entry, dict):
+                    f.err(
+                        "front-matter",
+                        f"{_rel(path)}: summarizes unknown topic {topic_id!r}",
+                    )
+                    continue
+                # `isinstance` rather than `or []`, matching every other
+                # iteration of these two keys in this file. A malformed
+                # non-list value (`task_pages: 1`) is already reported as a
+                # schema error by `_check_registry_integrity`; iterating it
+                # here would raise `TypeError` first and take the whole gate
+                # down with a traceback, losing that finding and every other
+                # one alongside it.
+                registered: list[str] = []
+                for key in ("task_pages", "allowed_summaries"):
+                    values = entry.get(key)
+                    if isinstance(values, list):
+                        registered.extend(str(v) for v in values)
+                if not any(_page_key(v) == _scanned_page_key(path) for v in registered):
+                    f.err(
+                        "front-matter",
+                        f"{_rel(path)}: claims to summarize {topic_id!r} but is "
+                        f"not listed in that topic's task_pages/allowed_summaries "
+                        "— a page cannot grant itself permission to restate a "
+                        "topic",
+                    )
+
+
+def _check_external_summary_pages_claim_their_topics(
+    f: Findings, topics: dict[str, dict[str, object]]
+) -> None:
+    """Enforce the registry-to-page direction for non-`docs/` entries.
+
+    `_check_front_matter_schema` runs page-to-registry: a page's `summarizes`
+    ids must round-trip. That check is vacuous for a page with no front matter
+    (it `continue`s) or one whose front matter simply omits the claim — so an
+    approved `skills-src/shared/*.md` file could be registered as a topic's
+    summary, never claim the topic, never link its canonical page, and still
+    pass. Inside `docs/` the front-matter schema is only being rolled out
+    incrementally, so silence there is deliberate; a fragment registered under
+    ADR-058's exception is opting in by construction and must claim what it
+    was registered for.
+    """
+    # Sorted through `str`, not on the raw key: a malformed numeric topic id
+    # alongside the normal string ones makes a bare `sorted` raise `TypeError`
+    # comparing `int` to `str`, which would abort the gate before it could
+    # report the registry errors it has already collected.
+    for topic_id, entry in sorted(topics.items(), key=lambda item: str(item[0])):
+        if not isinstance(entry, dict):
+            continue
+        for key in ("task_pages", "allowed_summaries"):
+            values = entry.get(key, [])
+            if not isinstance(values, list):
+                continue
+            for value in values:
+                text = str(value)
+                if _is_file_under(DOCS, text) or not _is_registered_page(text):
+                    continue
+                path = _resolves_under(ROOT, text)
+                if path is None or not path.is_file():
+                    continue  # existence is _check_referenced_paths_exist's job
+                try:
+                    fm = load_front_matter(path)
+                except (yaml.YAMLError, ValueError):
+                    continue  # reported by the front-matter scan
+                if isinstance(fm, dict) and fm.get("generated") is True:
+                    # `_check_front_matter_schema` skips a generated page
+                    # wholesale, backlink requirement included — so this claim
+                    # would otherwise switch off the very enforcement that
+                    # makes registering an out-of-docs summary safe. It is
+                    # also simply false: every `EXTERNAL_PAGE_ROOTS` tree is
+                    # hand-authored source that generators read, never write.
+                    f.err(
+                        "front-matter",
+                        f"{_rel(path)}: registered as topic {str(topic_id)!r}'s "
+                        f"{key} entry but declares `generated: true` — these "
+                        "trees are hand-authored sources, and the claim skips "
+                        "the schema check that requires a canonical-page "
+                        "backlink",
+                    )
+                    continue
+                claimed = fm.get("summarizes") if isinstance(fm, dict) else None
+                claimed = claimed if isinstance(claimed, list) else []
+                if topic_id not in [str(c) for c in claimed]:
+                    f.err(
+                        "front-matter",
+                        f"{_rel(path)}: registered as topic {topic_id!r}'s "
+                        f"{key} entry but its front matter does not list "
+                        f"{topic_id!r} under `summarizes` — an out-of-docs "
+                        "summary page must claim the topic it is registered "
+                        "for, or the round-trip passes vacuously",
+                    )
+
+
 def _check_front_matter_schema(
     f: Findings, topics: dict[str, dict[str, object]]
 ) -> None:
     """Validate front matter on every manual page that has any, and
-    cross-check `canonical_for`/`summarizes` against the topic registry."""
-    for path in sorted(DOCS.rglob("*.md")):
+    cross-check `canonical_for`/`summarizes` against the topic registry.
+
+    Scans `docs/` plus every registered non-`docs/` summary page (ADR-058's
+    `skills-src/shared/*.md` fragments), so a `summarizes` claim outside the
+    published tree is enforced rather than merely recorded."""
+    scanned = sorted(DOCS.rglob("*.md")) + _registered_external_pages(topics)
+    for path in scanned:
         if path.name in _DUPLICATE_SCAN_EXCLUDE_NAMES:
             continue
-        rel_to_docs = path.relative_to(DOCS).as_posix()
+        rel_to_docs = _scanned_page_key(path)
         try:
             fm = load_front_matter(path)
         except (yaml.YAMLError, ValueError) as exc:
@@ -620,7 +901,7 @@ def _check_front_matter_schema(
                     f"{topic_id!r}, but its entry in {_rel(TOPICS_FILE)} is "
                     "not a mapping",
                 )
-            elif _docs_relative_key(entry.get("canonical_page")) != rel_to_docs:
+            elif _page_key(entry.get("canonical_page")) != rel_to_docs:
                 f.err(
                     "front-matter",
                     f"{_rel(path)}: claims canonical_for {topic_id!r}, but "
@@ -665,7 +946,7 @@ def _check_front_matter_schema(
                 )
             elif entry.get("canonical_page") and not _page_links_to(
                 path, _docs_relative_key(entry["canonical_page"])
-            ):
+            ):  # canonical_page is always docs/-relative (enforced above)
                 f.err(
                     "front-matter",
                     f"{_rel(path)}: claims summarizes {topic_id!r}, but "
@@ -1162,6 +1443,8 @@ def main() -> int:
         _check_referenced_paths_exist(f, topics)
         _check_canonical_page_uniqueness(f, topics)
         _check_front_matter_schema(f, topics)
+        _check_external_summary_pages_claim_their_topics(f, topics)
+        _check_external_pages_claim_only_registered_topics(f, topics)
         _check_canonical_pages_declare_ownership(f, topics)
     terms = _load_terminology(f)
     if terms is not None:
