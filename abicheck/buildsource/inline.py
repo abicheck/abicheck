@@ -1764,7 +1764,8 @@ def _build_inline_graph(
     header-only-graph addendum follow-up). ``fold_archive_graph`` (G29 Phase 5
     item 6) needs no clang and always runs.
     """
-    has_build = bool(merged.compile_units or merged.targets)
+    # link_units too: build_source_graph() folds them regardless, so a link-only input must not return None first (Codex).
+    has_build = bool(merged.compile_units or merged.targets or merged.link_units)
     if not has_build and surface is None:
         return None
     from .source_graph import build_source_graph

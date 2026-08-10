@@ -284,18 +284,41 @@ def _node_file(node: dict[str, Any]) -> str:
     return ""
 
 
+def _specialization_scope_name(node: dict[str, Any], name: str) -> str:
+    """A ``ClassTemplateSpecializationDecl`` node's own scope-disambiguating
+    name: its bare *name* parameterized by its direct ``TemplateArgument``
+    children's raw spellings (``"Wrapper<int>"``), or *name* unchanged for
+    any other decl kind, or when no parseable ``TemplateArgument`` children
+    exist (a pack-expansion-only specialization, or any other unmodeled
+    shape — degrade to the ambiguous-but-harmless bare name, this module's
+    usual "skip rather than guess" discipline)."""
+    if str(node.get("kind", "")) != _CLASS_SPECIALIZATION_KIND:
+        return name
+    spellings = [
+        use.spelling
+        for child in node.get("inner", []) or []
+        if str(child.get("kind", "")) == "TemplateArgument"
+        for use in (_template_arg_use(child),)
+        if use is not None
+    ]
+    return f"{name}<{', '.join(spellings)}>" if spellings else name
+
+
 def _index_type_decls(
     node: Any,
     scope: list[str],
     id_to_qname: dict[str, str],
     id_to_decl_kind: dict[str, str],
-) -> None:
-    """Populate ``id_to_qname``/``id_to_decl_kind``: every record/enum/
-    typedef declaration's clang node ``id`` -> its scope-qualified name and
-    own AST decl kind (``"CXXRecordDecl"``/``"EnumDecl"``/…, for
-    :func:`_type_node_kind` — otherwise every resolved argument mints a
-    ``record_type`` node regardless of whether it's actually an enum or
-    typedef target), anywhere in *node*'s subtree.
+    id_to_file: dict[str, str],
+    cur_file: str = "",
+) -> str:
+    """Populate ``id_to_qname``/``id_to_decl_kind``/``id_to_file``: every
+    declaration's clang node ``id`` -> (for a record/enum/typedef) its
+    scope-qualified name and own AST decl kind (``"CXXRecordDecl"``/
+    ``"EnumDecl"``/…, for :func:`_type_node_kind` — otherwise every resolved
+    argument mints a ``record_type`` node regardless of whether it's
+    actually an enum or typedef target), and (for *every* node with an id,
+    regardless of kind) its declaring file, anywhere in *node*'s subtree.
 
     A small, independent AST walk rather than a reuse/extension of
     ``type_graph._index_declared_entities`` (Codex-review-shaped
@@ -306,21 +329,59 @@ def _index_type_decls(
     for type declarations at all (only for var/enum-constant references),
     so there is nothing to reuse here, only a risk of destabilizing an
     already-hardened function for an unrelated caller's need.
+
+    Returns the last-seen file after visiting *node* and its whole subtree,
+    same sticky-file threading contract as ``type_graph._index_declared_
+    entities``: clang emits ``loc.file`` only on the very *first* node with
+    a location in a TU — verified empirically against real clang output
+    (Codex review, fresh evidence): a two-declaration single-file TU records
+    ``loc.file`` on the *first* top-level declaration only, and every
+    subsequent node -- including every ``ClassTemplateSpecializationDecl``/
+    ``FunctionDecl`` this module cares about -- carries none at all. An
+    earlier revision called the stateless :func:`_node_file` directly at
+    each instantiation site, which is correct only for the file's very
+    first declaration and answers "" for every other one, in practice
+    leaving ``TemplateInstantiation.file`` unset for nearly every real
+    instantiation. Every caller loop below must thread the returned
+    ``cur_file`` from one sibling call into the next, not just pass down the
+    parent's own value independently to each child, or every sibling after
+    the first loses the file.
     """
     if not isinstance(node, dict):
-        return
+        return cur_file
+    f = _node_file(node)
+    if f:
+        cur_file = f
     kind = str(node.get("kind", ""))
     name = str(node.get("name") or "")
     node_id = str(node.get("id") or "")
+    if node_id:
+        id_to_file.setdefault(node_id, cur_file)
 
     if kind in _RECORD_DECL_KINDS and name:
         if node_id:
             id_to_qname.setdefault(node_id, "::".join([*scope, name]))
             id_to_decl_kind.setdefault(node_id, kind)
-        child_scope = [*scope, name]
+        # A ClassTemplateSpecializationDecl's own *nested* declarations (e.g.
+        # `Wrapper<int>::Nested`) must scope under the specialization's own
+        # arguments, not its bare, unparameterized name -- otherwise two
+        # distinct specializations' nested types (`Wrapper<int>::Nested` vs.
+        # `Wrapper<double>::Nested`) both index as the identical bare
+        # "Wrapper::Nested" and collide onto one type node (Codex review,
+        # empirically confirmed against real clang AST output). Builds the
+        # disambiguated scope name directly from this node's own
+        # TemplateArgument children's raw spellings (mirrors
+        # _instantiation_label) -- deliberately not a
+        # _resolve_specialization_qname-style resolved qname: that helper
+        # needs id_to_qname/full_by_id/id_to_template_qname, none of which
+        # exist yet at this point in the "index first, resolve second"
+        # pipeline (this call *is* the pass building id_to_qname).
+        child_scope = [*scope, _specialization_scope_name(node, name)]
         for child in node.get("inner", []) or []:
-            _index_type_decls(child, child_scope, id_to_qname, id_to_decl_kind)
-        return
+            cur_file = _index_type_decls(
+                child, child_scope, id_to_qname, id_to_decl_kind, id_to_file, cur_file
+            )
+        return cur_file
 
     if kind in _OTHER_TYPE_DECL_KINDS and name:
         if node_id:
@@ -329,17 +390,24 @@ def _index_type_decls(
         # No new scope: an enum's own enumerators aren't qualified by its
         # name in clang's spelling (mirrors type_graph's identical choice).
         for child in node.get("inner", []) or []:
-            _index_type_decls(child, scope, id_to_qname, id_to_decl_kind)
-        return
+            cur_file = _index_type_decls(
+                child, scope, id_to_qname, id_to_decl_kind, id_to_file, cur_file
+            )
+        return cur_file
 
     if kind in _SCOPE_DECL_KINDS and name:
         child_scope = [*scope, name]
         for child in node.get("inner", []) or []:
-            _index_type_decls(child, child_scope, id_to_qname, id_to_decl_kind)
-        return
+            cur_file = _index_type_decls(
+                child, child_scope, id_to_qname, id_to_decl_kind, id_to_file, cur_file
+            )
+        return cur_file
 
     for child in node.get("inner", []) or []:
-        _index_type_decls(child, scope, id_to_qname, id_to_decl_kind)
+        cur_file = _index_type_decls(
+            child, scope, id_to_qname, id_to_decl_kind, id_to_file, cur_file
+        )
+    return cur_file
 
 
 def _register_class_template(
@@ -568,6 +636,7 @@ def _walk_function_templates(
     id_to_template_qname: dict[str, str],
     full_by_id: dict[str, dict[str, Any]],
     full_function_by_id: dict[str, dict[str, Any]],
+    id_to_file: dict[str, str],
     out: list[TemplateInstantiation],
 ) -> None:
     if not isinstance(node, dict):
@@ -613,7 +682,7 @@ def _walk_function_templates(
                         label=_instantiation_label(qname, resolved_args),
                         args=resolved_args,
                         emitted_symbols=(mangled,),
-                        file=_node_file(child),
+                        file=id_to_file.get(str(child.get("id") or ""), ""),
                     )
                 )
         # Don't recurse into a FunctionTemplateDecl's own children again --
@@ -649,6 +718,7 @@ def _walk_function_templates(
                 id_to_template_qname,
                 full_by_id,
                 full_function_by_id,
+                id_to_file,
                 out,
             )
         return
@@ -665,6 +735,7 @@ def _walk_function_templates(
                 id_to_template_qname,
                 full_by_id,
                 full_function_by_id,
+                id_to_file,
                 out,
             )
         return
@@ -678,6 +749,7 @@ def _walk_function_templates(
             id_to_template_qname,
             full_by_id,
             full_function_by_id,
+            id_to_file,
             out,
         )
 
@@ -742,7 +814,8 @@ def parse_clang_ast_templates(ast: dict[str, Any]) -> list[TemplateInstantiation
     """
     id_to_qname: dict[str, str] = {}
     id_to_decl_kind: dict[str, str] = {}
-    _index_type_decls(ast, [], id_to_qname, id_to_decl_kind)
+    id_to_file: dict[str, str] = {}
+    _index_type_decls(ast, [], id_to_qname, id_to_decl_kind, id_to_file)
 
     full_by_id: dict[str, dict[str, Any]] = {}
     _collect_full_specializations(ast, full_by_id)
@@ -774,7 +847,7 @@ def parse_clang_ast_templates(ast: dict[str, Any]) -> list[TemplateInstantiation
                 label=_instantiation_label(template_qname, resolved_args),
                 args=resolved_args,
                 emitted_symbols=_member_symbols(full),
-                file=_node_file(full),
+                file=id_to_file.get(spec_id, ""),
             )
         )
 
@@ -788,6 +861,7 @@ def parse_clang_ast_templates(ast: dict[str, Any]) -> list[TemplateInstantiation
         id_to_template_qname,
         full_by_id,
         full_function_by_id,
+        id_to_file,
         out,
     )
     return out

@@ -190,3 +190,29 @@
   `preprocessor_scan.py`/`archive_graph.py`), succeeded. Fixed by
   un-redacting every argv token and the `cwd` the same way, via a new shared
   `call_graph._replay_cwd` helper.
+
+  A seventh round found three more real gaps, each empirically confirmed.
+  A `ClassTemplateSpecializationDecl`'s own *nested* declarations (e.g.
+  `Wrapper<int>::Nested`) scoped under the specialization's bare,
+  unparameterized name — two distinct specializations' nested types
+  (`Wrapper<int>::Nested` vs. `Wrapper<double>::Nested`) both indexed as the
+  identical bare `"Wrapper::Nested"` and collided onto one type node;
+  `_index_type_decls` now builds the scope name from the specialization's own
+  `TemplateArgument` spellings (mirroring `_instantiation_label`) instead.
+  Separately, every `TemplateInstantiation.file` came back empty for nearly
+  every real instantiation: clang emits `loc.file` only on the very *first*
+  node with a location in a TU (confirmed against real clang output — a
+  two-declaration single-file TU records `loc.file` on the first top-level
+  declaration only), and the previous code called the stateless `_node_file`
+  directly at each instantiation site instead of threading the sticky file
+  forward the way `type_graph._index_declared_entities` already does for the
+  identical clang quirk. `_index_type_decls` now threads `cur_file` through
+  its own walk (returning the updated value, same contract as its
+  `type_graph.py` counterpart) and records an `id -> file` index every
+  instantiation site reads instead of calling `_node_file` directly. And
+  `inline._build_inline_graph`'s own `has_build` gate counted only
+  `compile_units`/`targets`, not `link_units` — a link-only
+  input (e.g. a Make transcript linking prebuilt objects against a static
+  archive, no compile actions of its own) made the function return `None`
+  before ever calling `build_source_graph()`, which folds `link_units`
+  unconditionally regardless; `link_units` now counts toward `has_build` too.

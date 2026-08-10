@@ -504,6 +504,127 @@ def test_nested_specialization_argument_disambiguated_by_its_own_args() -> None:
     assert outer_int.args[0].target_qname != outer_double.args[0].target_qname
 
 
+def test_instantiation_file_inherits_sticky_location_from_an_earlier_sibling() -> None:
+    """Clang emits ``loc.file`` only on the very *first* node with a location
+    in a TU -- every later sibling (including a ``ClassTemplateSpecialization
+    Decl``/``FunctionDecl`` this module builds a :class:`TemplateInstantiation`
+    from) carries none at all (Codex review, empirically confirmed against
+    real clang output: a real two-declaration single-file TU records
+    ``loc.file`` on the first top-level declaration only). An earlier
+    revision called the stateless ``_node_file`` directly at each
+    instantiation site, which only ever sees the file on that first
+    declaration -- every other instantiation's ``file``/``defined_in_project``
+    silently stayed unset. The sticky value from an *earlier* top-level
+    sibling (an unrelated ``NamespaceDecl`` opening the file) must carry
+    forward to a later sibling with no ``loc`` of its own."""
+    ast = {
+        "kind": "TranslationUnitDecl",
+        "inner": [
+            {
+                "kind": "NamespaceDecl",
+                "name": "api",
+                "loc": {"file": "t.cpp"},
+                "inner": [],
+            },
+            {
+                "kind": "ClassTemplateDecl",
+                "name": "Box",
+                "inner": [
+                    {"kind": "TemplateTypeParmDecl", "name": "T"},
+                    {"kind": "CXXRecordDecl", "name": "Box"},
+                    {
+                        "id": "0xSPEC",
+                        "kind": "ClassTemplateSpecializationDecl",
+                        "name": "Box",
+                        "completeDefinition": True,
+                        "inner": [
+                            {"kind": "TemplateArgument", "type": {"qualType": "int"}},
+                        ],
+                    },
+                ],
+            },
+        ],
+    }
+    out = parse_clang_ast_templates(ast)
+    assert len(out) == 1
+    assert out[0].file == "t.cpp"
+
+
+def test_nested_type_inside_specialization_disambiguated_by_its_own_args() -> None:
+    """A ``ClassTemplateSpecializationDecl``'s own *nested* declarations
+    (e.g. ``Wrapper<int>::Nested``) must scope under the specialization's
+    own arguments, not its bare, unparameterized name -- otherwise two
+    distinct specializations' nested types (``Wrapper<int>::Nested`` vs.
+    ``Wrapper<double>::Nested``) both index as the identical bare
+    ``"Wrapper::Nested"`` and collide onto one type node (Codex review,
+    empirically confirmed against real clang AST output)."""
+
+    def wrapper_spec(spec_id: str, arg_type: str, nested_id: str) -> dict:
+        return {
+            "id": spec_id,
+            "kind": "ClassTemplateSpecializationDecl",
+            "name": "Wrapper",
+            "completeDefinition": True,
+            "inner": [
+                {"kind": "TemplateArgument", "type": {"qualType": arg_type}},
+                {"id": nested_id, "kind": "CXXRecordDecl", "name": "Nested"},
+            ],
+        }
+
+    def box_spec(spec_id: str, arg_spelling: str, nested_id: str) -> dict:
+        return {
+            "id": spec_id,
+            "kind": "ClassTemplateSpecializationDecl",
+            "name": "Box",
+            "completeDefinition": True,
+            "inner": [
+                {
+                    "kind": "TemplateArgument",
+                    "type": {"qualType": arg_spelling},
+                    "inner": [
+                        {
+                            "kind": "RecordType",
+                            "decl": {
+                                "id": nested_id,
+                                "kind": "CXXRecordDecl",
+                                "name": "Nested",
+                            },
+                        }
+                    ],
+                },
+            ],
+        }
+
+    ast = {
+        "kind": "TranslationUnitDecl",
+        "inner": [
+            {
+                "kind": "ClassTemplateDecl",
+                "name": "Wrapper",
+                "inner": [
+                    wrapper_spec("0xWINT", "int", "0xNESTED_INT"),
+                    wrapper_spec("0xWDOUBLE", "double", "0xNESTED_DOUBLE"),
+                ],
+            },
+            {
+                "kind": "ClassTemplateDecl",
+                "name": "Box",
+                "inner": [
+                    box_spec("0xBINT", "Wrapper<int>::Nested", "0xNESTED_INT"),
+                    box_spec("0xBDOUBLE", "Wrapper<double>::Nested", "0xNESTED_DOUBLE"),
+                ],
+            },
+        ],
+    }
+    out = parse_clang_ast_templates(ast)
+    by_label = {i.label: i for i in out}
+    box_int = by_label["Box<Wrapper<int>::Nested>"]
+    box_double = by_label["Box<Wrapper<double>::Nested>"]
+    assert box_int.args[0].target_qname == "Wrapper<int>::Nested"
+    assert box_double.args[0].target_qname == "Wrapper<double>::Nested"
+    assert box_int.args[0].target_qname != box_double.args[0].target_qname
+
+
 def _overloaded_function_template_ast() -> dict:
     """Two distinct ``FunctionTemplateDecl`` nodes both named ``f`` (real
     overloads, differing by arity), each instantiated with ``T=int`` --

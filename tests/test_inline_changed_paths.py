@@ -1003,6 +1003,36 @@ def test_inline_graph_folds_archive_edges_independent_of_call_graph(
     assert any(r.name == "archive_graph:ar_index" for r in rows)
 
 
+def test_inline_graph_builds_for_link_only_evidence_with_no_compile_units(
+    tmp_path: Path,
+) -> None:
+    """A Make transcript that only links prebuilt objects against a static
+    archive (no compile actions of its own) has no ``compile_units``/
+    ``targets`` -- the ``has_build`` gate must still count ``link_units``, or
+    ``_build_inline_graph`` returns ``None`` before ever calling
+    ``build_source_graph()`` (which folds ``link_units`` via
+    ``_fold_link_provenance`` regardless), silently producing no
+    ``static_library``/archive-member/symbol-definition provenance for this
+    otherwise valid link-only input (Codex review, fresh evidence)."""
+    archive = tmp_path / "libfoo.a"
+    _write_minimal_gnu_archive(archive, {"a.o": ["alpha"]})
+    merged = BuildEvidence(  # no compile_units, no targets -- link-only
+        link_units=[
+            LinkUnit(
+                id="link://libfoo.so",
+                target_id="",
+                output="libfoo.so",
+                kind="shared_library",
+                inputs=[str(archive)],
+            )
+        ]
+    )
+    graph = inline._build_inline_graph(merged, surface=None, with_call_graph=False)
+    assert graph is not None
+    assert any(n.kind == "archive_member" for n in graph.nodes)
+    assert any(e.kind == "ARCHIVE_CONTAINS_OBJECT" for e in graph.edges)
+
+
 def test_inline_graph_archive_symbol_edge_joins_binary_symbol_node(
     tmp_path: Path,
 ) -> None:

@@ -726,11 +726,15 @@ def test_extract_from_build_unredacts_home_placeholder_in_source_and_cwd(
     argv) succeeded. The source positional and ``cwd`` passed to the
     subprocess must always be the real, expanded path."""
     import json as _json
+    import os
 
     import abicheck.buildsource.call_graph as cg
 
-    monkeypatch.setenv("HOME", "/home/realuser")
-    monkeypatch.delenv("USERPROFILE", raising=False)
+    # Assert against the real, current home (like test_unredact_home_expands_tilde
+    # in test_source_extractors.py) rather than a monkeypatched fake one: HOME is
+    # not consulted by os.path.expanduser on Windows (it reads USERPROFILE/
+    # HOMEDRIVE+HOMEPATH instead), so faking HOME alone silently no-ops there.
+    home = os.path.expanduser("~")
     ast = {"kind": "TranslationUnitDecl", "inner": []}
     captured: dict[str, object] = {}
     monkeypatch.setattr(cg.shutil, "which", lambda _b: "/usr/bin/clang++")
@@ -758,9 +762,8 @@ def test_extract_from_build_unredacts_home_placeholder_in_source_and_cwd(
     ClangCallGraphExtractor().extract_from_build(build)
 
     cmd = captured["cmd"]
-    assert cmd[-2:] == ["--", "/home/realuser/AppData/Local/Temp/t.cpp"]
-    assert "~" not in " ".join(cmd)
-    assert captured["cwd"] == "/home/realuser/AppData/Local/Temp"
+    assert cmd[-2:] == ["--", f"{home}/AppData/Local/Temp/t.cpp"]
+    assert captured["cwd"] == f"{home}/AppData/Local/Temp"
 
 
 def test_extract_from_args_empty_stdout(monkeypatch) -> None:
