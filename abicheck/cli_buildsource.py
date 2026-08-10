@@ -402,6 +402,249 @@ def dump_source_only(
     )
 
 
+# ---------------------------------------------------------------------------
+# Snapshot output (dump's write path)
+#
+# Relocated here from ``cli.py`` (which sits within a handful of lines of the
+# AI-readiness 2000-line hard cap) as one cohesive cluster: writing a snapshot
+# *is* the step that folds this module's own ``embed_build_source`` /
+# ``embed_inputs_pack`` payloads in and then enforces the requested evidence
+# depth, and ``embed_build_source``'s caller here already imported
+# ``_write_snapshot_output`` back out of ``cli``. ``cli`` re-exports all three
+# names, so ``abicheck.cli._write_snapshot_output`` -- which several tests and
+# ``dump_cmd`` itself use -- keeps resolving unchanged. This module, not a new
+# one: a *new* module reaching ``service``/``buildsource`` would join the
+# allowlisted CLI import-cycle SCC, which CLAUDE.md "M1-3" forbids extending.
+# ---------------------------------------------------------------------------
+
+
+def _layer_payload_empty(pack: BuildSourcePack, key: str) -> bool:
+    """True when *key*'s embedded payload carries no facts.
+
+    A coverage row can read ``PARTIAL``/``PRESENT`` while the payload is empty —
+    e.g. ``_run_inline_source_abi`` returns an empty ``SourceAbiSurface()`` when
+    clang is unavailable after L3 was found. The status alone then hides the
+    miss, so we inspect the actual payload (Codex review, PR #422).
+    """
+    if key == "L3":
+        be = pack.build_evidence
+        return be is None or (not be.targets and not be.compile_units)
+    if key == "L4":
+        sa = pack.source_abi
+        return sa is None or not any(sa.reachable_buckets().values())
+    if key == "L5":
+        sg = pack.source_graph
+        return sg is None or not sg.nodes
+    return False
+
+
+def _missing_requested_evidence_layers(
+    pack: BuildSourcePack | None, collect_mode: str
+) -> list[str]:
+    """Layers the *collect_mode* asked for but that came back empty.
+
+    Maps the ADR-033 evidence mode to its expected L3/L4/L5 layers and checks the
+    embedded pack. A layer is reported missing when its coverage row is
+    ``NOT_COLLECTED`` (or absent) **or** when its embedded payload carries no
+    facts despite a ``PARTIAL``/``PRESENT`` status — the latter catches a
+    requested extractor that ran but produced nothing (e.g. clang unavailable).
+    Returns [] when nothing was requested or every requested layer has facts.
+    """
+    if pack is None:
+        return []
+    from .buildsource.model import CoverageStatus, DataLayer
+    from .buildsource.source_replay import collection_for_ci_mode
+
+    _layer_for = {
+        "L3": DataLayer.L3_BUILD,
+        "L4": DataLayer.L4_SOURCE_ABI,
+        "L5": DataLayer.L5_SOURCE_GRAPH,
+    }
+    _, layers = collection_for_ci_mode(collect_mode)
+    missing: list[str] = []
+    for key in layers:
+        layer = _layer_for.get(key)
+        if layer is None:
+            continue
+        cov = pack.manifest.coverage_for(layer)
+        if (
+            cov is None
+            or cov.status == CoverageStatus.NOT_COLLECTED
+            or _layer_payload_empty(pack, key)
+        ):
+            missing.append(layer.value)
+    return missing
+
+
+def _classify_missing_layers(
+    pack: BuildSourcePack | None, missing: list[str]
+) -> tuple[list[str], list[str]]:
+    """Split *missing* layer values into (absent, ran_but_empty).
+
+    ``absent`` — the layer never ran (no coverage row, or NOT_COLLECTED): the
+    actionable fix is a compile DB / an installed frontend. ``ran_but_empty`` —
+    a coverage row exists (PARTIAL/PRESENT) but the payload linked no facts: the
+    fix is scoping/roots, not installing tools. Distinguishing the two stops the
+    warning from telling users to install clang/castxml when those already ran.
+    With no pack (or an unknown layer), default to ``absent`` so the legacy
+    "not collected" wording still appears.
+    """
+    if pack is None:
+        return list(missing), []
+    from .buildsource.model import CoverageStatus, DataLayer
+
+    by_value = {layer.value: layer for layer in DataLayer}
+    absent: list[str] = []
+    ran_empty: list[str] = []
+    for value in missing:
+        layer = by_value.get(value)
+        cov = pack.manifest.coverage_for(layer) if layer is not None else None
+        if cov is not None and cov.status != CoverageStatus.NOT_COLLECTED:
+            ran_empty.append(value)
+        else:
+            absent.append(value)
+    return absent, ran_empty
+
+
+def _write_snapshot_output(
+    snap: AbiSnapshot,
+    output: Path | None,
+    build_info: Path | None = None,
+    sources: Path | None = None,
+    build_config: Path | None = None,
+    allow_build_query: bool = False,
+    collect_mode: str = "source-target",
+    build_query: str | None = None,
+    build_compile_db: str | None = None,
+    extractor: str = "auto",
+    inputs_pack: Path | None = None,
+    depth: str | None = None,
+    include_dependencies: bool = False,
+    header_roots: tuple[Path, ...] = (),
+    clang_bin: str = "clang",
+) -> None:
+    """Serialize snapshot and write to file or stdout.
+
+    When *build_info* and/or *sources* are given, their normalized L3/L4/L5 facts
+    are collected (inline from a source tree / build dir, or loaded from a pack
+    directory) and embedded in the snapshot first (single-artifact UX) so a later
+    ``compare old.json new.json`` needs no out-of-band packs. *collect_mode* (the
+    ADR-033 D2 CI evidence mode) selects which layers and replay scope to collect:
+    ``build`` captures L3 build context only, ``off`` collects nothing.
+    *build_query* / *build_compile_db* are the CLI equivalents of the ``.abicheck.yml``
+    ``build.query`` / ``build.compile_db`` keys. *extractor* is the L4 source-ABI
+    frontend — the same ``--ast-frontend`` knob that drives the L2 header AST
+    (ADR-037 D8): one frontend choice across both pipeline stages. *clang_bin* is
+    the caller-resolved L4 replay compiler (forwarded to ``embed_build_source``).
+    *depth* is the raw ``--depth`` CLI value (``None`` when not passed); when given,
+    ``check_requested_depth_satisfied`` raises if the snapshot did not actually reach
+    it. Unless *include_dependencies* is set (``dump --include-dependencies``),
+    toolchain/system-header declarations are excluded from the snapshot right before
+    serialization by default, once every embed step above has had its chance to fill
+    in the snapshot — see ``dumper_scoping.py`` for what "dependency" means here.
+    *header_roots* is the actual ``-H``/``--header`` input the dump was invoked with,
+    forwarded to ``scope_snapshot_excluding_dependencies`` so a header that IS one of
+    those roots (or lives under one) is never treated as a dependency just because it
+    happens to sit under a system prefix (e.g. an installed library dumped via its real
+    ``/usr/include`` path).
+    """
+    from .cli import _safe_write_output
+    from .cli_dump_helpers import (
+        check_requested_depth_satisfied,
+        fold_dump_provenance_into_json,
+    )
+    from .serialization import snapshot_to_json
+
+    if build_info is not None or sources is not None:
+        from .cli_buildsource import embed_build_source
+        embed_build_source(
+            snap, build_info, sources,
+            build_config=build_config, allow_build_query=allow_build_query,
+            collect_mode=collect_mode,
+            build_query=build_query, build_compile_db=build_compile_db,
+            extractor=extractor, clang_bin=clang_bin,
+        )
+        # G21.7: fail loud — if a requested evidence layer came back empty, say so
+        # prominently instead of leaving it buried in the coverage rows. Permissive
+        # by design (a warning, not an error): --collection-mode strict on
+        # `collect` remains the hard-fail path (ADR-028 D3).
+        # Through the ``cli`` module (which re-exports both) so a monkeypatch on
+        # ``abicheck.cli._missing_requested_evidence_layers`` /
+        # ``._classify_missing_layers`` is still honoured after the relocation --
+        # the same resolution the neighbouring ``cli._normalize_binary_input``
+        # calls use, and what several existing tests patch.
+        from . import cli as _cli
+
+        missing = _cli._missing_requested_evidence_layers(
+            snap.build_source, collect_mode
+        )
+        if missing:
+            absent, ran_empty = _cli._classify_missing_layers(
+                snap.build_source, missing
+            )
+            parts: list[str] = []
+            if absent:
+                # Genuinely absent: no extractor / no compile DB / layer never ran.
+                parts.append(
+                    f"not collected: {', '.join(absent)} — supply "
+                    "--build-info/--compile-db (a compile_commands.json, e.g. from "
+                    "`bear -- make`), or install the clang/castxml source frontend"
+                )
+            if ran_empty:
+                # Ran but produced/linked nothing — do NOT tell the user to install
+                # tools they already have; point at the real cause in the coverage
+                # rows (usually a public-header-roots or snapshot/source mismatch).
+                parts.append(
+                    f"collected but linked no facts: {', '.join(ran_empty)} — the "
+                    "extractor ran but matched nothing; see the coverage rows for "
+                    "the reason (commonly a public-header-roots mismatch, an "
+                    "unseeded `--depth source` that selected 0 TUs — use "
+                    "--changed-path/--since to seed a changed scope — or the "
+                    "snapshot binary not matching --sources; a '0/N symbols "
+                    "matched' means source decls did not link to the binary's "
+                    "exports)"
+                )
+            click.echo(
+                "Warning: requested evidence layer(s) " + "; ".join(parts) + ".",
+                err=True,
+            )
+    # A build-emitted Flow-2 pack (--inputs) folds straight into the dump — the
+    # plugin/wrapper flow in one command, no separate `merge` (after any inline
+    # --sources/--build-info embed, so both fact sources combine).
+    if inputs_pack is not None:
+        from .cli_buildsource_merge import embed_inputs_pack
+        embed_inputs_pack(snap, inputs_pack, output)
+    # CLI-audit P1: an *explicitly* requested --depth that was not actually
+    # reached is a hard failure, not a warning — see
+    # check_requested_depth_satisfied's docstring. Checked last, after every
+    # embed step above has had its chance to fill in build_source.
+    check_requested_depth_satisfied(depth, snap)
+    from .dumper_scoping import resolve_dependency_scope
+    snap = resolve_dependency_scope(snap, include_dependencies, header_roots)
+    result = snapshot_to_json(snap)
+    # Audit finding: dump/baseline provenance didn't record requested vs.
+    # effective depth anywhere a later reader could inspect -- fold it into
+    # the written JSON now that the strict gate above has had its say.
+    result, resolved_depth_label = fold_dump_provenance_into_json(result, depth, snap)
+    if output:
+        _safe_write_output(output, result)
+        click.echo(f"Snapshot written to {output}", err=True)
+        # Self-describing output (CLI-audit P2): report the evidence depth
+        # this snapshot actually reached -- computed from what it carries,
+        # not the requested --depth, so an explicit --depth source that
+        # collected nothing usable is never silently reported as if it had
+        # succeeded. Only alongside the file-write notice above (never for
+        # bare stdout output, which callers may pipe/parse as pure JSON).
+        # Reuses fold_dump_provenance_into_json's own returned label (the
+        # strict _gated_source_label, not the plain evidence_depth_label)
+        # so this line can never disagree with the JSON's effective_depth
+        # for the same dump -- they previously could, on the documented
+        # zero-match-source-only case (external review).
+        click.echo(f"Resolved evidence depth: {resolved_depth_label}", err=True)
+    else:
+        click.echo(result)
+
+
 # ── Back-compat re-export shim (lazy, to avoid an import cycle) ───────────────
 # `_load_source_graph` / `_resolve_symbol_from_report` historically lived here
 # (re-exported from `cli_buildsource_helpers`, like the block above). They moved

@@ -514,6 +514,165 @@ class _ScopedFold:
 
     # ── markdown / text / review ───────────────────────────
 
+    def _scoped_verdict_header(self) -> list[str]:
+        """The "scoped verdict disagrees with the headline" note, or ``[]``.
+
+        The exit code is computed from the *scoped* result (ADR-043
+        worst-wins), which can disagree with the full-library verdict this
+        report's own headline already rendered above -- state which one is
+        authoritative for CI instead of leaving the two to silently disagree
+        (Codex review). Under a severity scheme the exit code is NOT a fixed
+        BREAKING->4/API_BREAK->2 mapping of scoped_verdict -- e.g.
+        ``--severity-preset info-only`` can floor it at 0 even for a BREAKING
+        scoped verdict -- so state the actual computed value/scheme instead of
+        asserting the exit code "reflects" the scoped verdict, which would be
+        false in that case (Codex review follow-up).
+        """
+        scoped_verdict_value = self.scoped_verdict_value
+        full_verdict_value = getattr(
+            getattr(self.result, "verdict", None), "value", None
+        )
+        if (
+            scoped_verdict_value is None
+            or full_verdict_value is None
+            or scoped_verdict_value == full_verdict_value
+        ):
+            return []
+        scoped_exit_code = getattr(self.result, "scoped_exit_code", None)
+        scoped_exit_code_scheme = getattr(self.result, "scoped_exit_code_scheme", None)
+        exit_note = (
+            f"the CLI process exits {scoped_exit_code} under the "
+            f"{scoped_exit_code_scheme} exit-code scheme for this run"
+            if scoped_exit_code is not None
+            else "this is what the exit code reflects"
+        )
+        return [
+            f"**Scoped verdict: {scoped_verdict_value}** "
+            f"({exit_note}; the full library verdict above is "
+            f"{full_verdict_value}).",
+            "",
+        ]
+
+    def _used_by_lines(self) -> list[str]:
+        """Per-application ``--used-by`` summaries, naming the missing symbols.
+
+        Names the actual missing symbols/versions, not just their count (Codex
+        review) -- a human reading the default text report otherwise has no way
+        to tell *which* symbol broke this app without re-running with
+        ``--format json``.
+        """
+        if self.used_by is None:
+            return []
+        lines = ["## Scoped to --used-by applications"]
+        for summary in self.used_by:
+            lines.append(
+                f"- {summary['app']}: {summary['verdict']} "
+                f"(missing {len(summary['missing_symbols'])} symbol(s), "
+                f"{len(summary['missing_versions'])} version(s), "
+                f"{summary['relevant_change_count']} relevant change(s))"
+            )
+            lines.extend(
+                f"  - missing symbol: `{sym}`" for sym in summary["missing_symbols"]
+            )
+            lines.extend(
+                f"  - missing version: `{ver}`" for ver in summary["missing_versions"]
+            )
+        return lines
+
+    def _required_symbols_lines(self) -> list[str]:
+        """The ``--required-symbol(s)`` entrypoint-contract summary."""
+        required_symbols = self.required_symbols
+        if required_symbols is None:
+            return []
+        lines = [
+            "## Scoped to --required-symbol(s) contract",
+            f"- verdict: {required_symbols['verdict']} "
+            f"(missing {len(required_symbols['missing_entrypoints'])} of "
+            f"{len(required_symbols['required_entrypoints'])} required "
+            f"entrypoint(s))",
+        ]
+        lines.extend(
+            f"  - missing entrypoint: `{entrypoint}`"
+            for entrypoint in required_symbols["missing_entrypoints"]
+        )
+        return lines
+
+    def _missing_label_line(self, label: str, severity_tag: str) -> str:
+        """One "required but missing" contract-label line.
+
+        ADR-049 Phase 3 (Codex review, fresh evidence): a missing-contract
+        label is a bare string here, not the stamped dict entry the JSON branch
+        builds -- without the contract suffix, the default
+        markdown/text/review report (unlike JSON) silently dropped the contract
+        decision for this exact finding shape.
+        """
+        line = (
+            f"- `{label}` is required but missing from the new library ({severity_tag})"
+        )
+        if not self.contract_evaluation:
+            return line
+        from .contract_scoped_promotion import (
+            stamp_explicit_scope_contract_evaluation,
+        )
+
+        label_decision: dict[str, object] = {}
+        stamp_explicit_scope_contract_evaluation(label_decision)
+        return line + (
+            f" [contract: {label_decision['contract_relevance']} "
+            f"({label_decision['contract_reason_code']}), "
+            f"assurance: {label_decision['contract_assurance']}]"
+        )
+
+    @staticmethod
+    def _scoped_only_line(c: Any) -> str:
+        """One scoped-only ``Change`` line, rendering any contract stamp it has.
+
+        ``scoped_only`` changes are already stamped by
+        ``stamp_scoped_result_findings`` upstream when ``contract_evaluation``
+        was requested -- render what's already there instead of re-deriving it.
+        """
+        line = f"- {c.kind.value}: {c.description}"
+        relevance = getattr(c, "contract_relevance", None)
+        if relevance is None:
+            return line
+        assurance = getattr(c, "contract_assurance", None)
+        line += (
+            f" [contract: {relevance.value} "
+            f"({getattr(c, 'contract_reason_code', None)})"
+        )
+        if assurance is not None:
+            line += f", assurance: {assurance.value}"
+        return line + "]"
+
+    def _scoped_gate_finding_lines(self, fmt: str) -> list[str]:
+        """Scoped-only changes and uncovered missing-contract labels.
+
+        These are relevant to the scoped gate but never land in
+        ``result.changes`` -- name them here too, mirroring the
+        JSON/SARIF/JUnit fold-in, so a text/markdown/review reader sees the
+        same actionable findings a JSON consumer would (Codex review). Skipped
+        for markdown/text root-cause mode: ``_to_markdown_root_cause`` already
+        merged these into its own root-cause groups, so appending them again
+        here would duplicate every scoped finding that correlates with an
+        existing group (Codex review follow-up).
+        """
+        if self.report_mode == "root-cause" and fmt in ("markdown", "text"):
+            return []
+        scoped_only, missing_labels, blocks, _missing_kind = (
+            self._scoped_gate_findings()
+        )
+        if not scoped_only and not missing_labels:
+            return []
+        severity_tag = "breaking" if blocks else "compatible"
+        return [
+            "## Additional scoped-gate findings",
+            *(
+                self._missing_label_line(label, severity_tag)
+                for label in missing_labels
+            ),
+            *(self._scoped_only_line(c) for c in scoped_only),
+        ]
+
     def into_text(self, text: str, fmt: str) -> str:
         """Append the scoped-gate sections to a markdown/text/review report.
 
@@ -521,128 +680,16 @@ class _ScopedFold:
         scoped-verdict header (only when the two verdicts disagree), the
         per-consumer summaries, and the scoped gate's own findings.
         """
-        result = self.result
-        used_by = self.used_by
-        required_symbols = self.required_symbols
-        scoped_verdict_value = self.scoped_verdict_value
-        full_verdict_value = getattr(getattr(result, "verdict", None), "value", None)
-        header: list[str] = []
-        if (
-            scoped_verdict_value is not None
-            and full_verdict_value is not None
-            and scoped_verdict_value != full_verdict_value
-        ):
-            # The exit code is computed from the *scoped* result (ADR-043
-            # worst-wins), which can disagree with the full-library verdict
-            # this report's own headline already rendered above -- state
-            # which one is authoritative for CI instead of leaving the two to
-            # silently disagree (Codex review). Under a severity scheme the
-            # exit code is NOT a fixed BREAKING->4/API_BREAK->2 mapping of
-            # scoped_verdict -- e.g. --severity-preset info-only can floor it
-            # at 0 even for a BREAKING scoped verdict -- so state the actual
-            # computed value/scheme instead of asserting the exit code
-            # "reflects" the scoped verdict, which would be false in that
-            # case (Codex review follow-up).
-            scoped_exit_code = getattr(result, "scoped_exit_code", None)
-            scoped_exit_code_scheme = getattr(result, "scoped_exit_code_scheme", None)
-            exit_note = (
-                f"the CLI process exits {scoped_exit_code} under the "
-                f"{scoped_exit_code_scheme} exit-code scheme for this run"
-                if scoped_exit_code is not None
-                else "this is what the exit code reflects"
-            )
-            header = [
-                f"**Scoped verdict: {scoped_verdict_value}** "
-                f"({exit_note}; the full library verdict above is "
-                f"{full_verdict_value}).",
+        return "\n".join(
+            [
+                *self._scoped_verdict_header(),
+                text,
                 "",
+                *self._used_by_lines(),
+                *self._required_symbols_lines(),
+                *self._scoped_gate_finding_lines(fmt),
             ]
-        lines = [*header, text, ""]
-        if used_by is not None:
-            lines.append("## Scoped to --used-by applications")
-            for summary in used_by:
-                lines.append(
-                    f"- {summary['app']}: {summary['verdict']} "
-                    f"(missing {len(summary['missing_symbols'])} symbol(s), "
-                    f"{len(summary['missing_versions'])} version(s), "
-                    f"{summary['relevant_change_count']} relevant change(s))"
-                )
-                # Name the actual missing symbols/versions, not just their
-                # count (Codex review) -- a human reading the default text
-                # report otherwise has no way to tell *which* symbol broke
-                # this app without re-running with --format json.
-                for sym in summary["missing_symbols"]:
-                    lines.append(f"  - missing symbol: `{sym}`")
-                for ver in summary["missing_versions"]:
-                    lines.append(f"  - missing version: `{ver}`")
-        if required_symbols is not None:
-            lines.append("## Scoped to --required-symbol(s) contract")
-            lines.append(
-                f"- verdict: {required_symbols['verdict']} "
-                f"(missing {len(required_symbols['missing_entrypoints'])} of "
-                f"{len(required_symbols['required_entrypoints'])} required "
-                f"entrypoint(s))"
-            )
-            for entrypoint in required_symbols["missing_entrypoints"]:
-                lines.append(f"  - missing entrypoint: `{entrypoint}`")
-        # Scoped-only changes (e.g. PE_ORDINAL_RETARGETED) and uncovered
-        # missing-contract labels are relevant to the scoped gate but never
-        # land in `result.changes` -- name them here too, mirroring the
-        # JSON/SARIF/JUnit fold-in, so a text/markdown/review reader sees the
-        # same actionable findings a JSON consumer would (Codex review).
-        # Skipped for markdown/text root-cause mode: _to_markdown_root_cause
-        # already merged these into its own root-cause groups, so appending
-        # them again here would duplicate every scoped finding that
-        # correlates with an existing group (Codex review follow-up).
-        if not (self.report_mode == "root-cause" and fmt in ("markdown", "text")):
-            scoped_only, missing_labels, blocks, _missing_kind = (
-                self._scoped_gate_findings()
-            )
-            if scoped_only or missing_labels:
-                lines.append("## Additional scoped-gate findings")
-                severity_tag = "breaking" if blocks else "compatible"
-                for label in missing_labels:
-                    line = (
-                        f"- `{label}` is required but missing from the new "
-                        f"library ({severity_tag})"
-                    )
-                    # ADR-049 Phase 3 (Codex review, fresh evidence): a
-                    # missing-contract label is a bare string here, not the
-                    # stamped dict entry the JSON branch above builds --
-                    # without this, the default markdown/text/review report
-                    # (unlike JSON) silently dropped the contract decision
-                    # for this exact finding shape.
-                    if self.contract_evaluation:
-                        from .contract_scoped_promotion import (
-                            stamp_explicit_scope_contract_evaluation,
-                        )
-
-                        label_decision: dict[str, object] = {}
-                        stamp_explicit_scope_contract_evaluation(label_decision)
-                        line += (
-                            f" [contract: {label_decision['contract_relevance']} "
-                            f"({label_decision['contract_reason_code']}), "
-                            f"assurance: {label_decision['contract_assurance']}]"
-                        )
-                    lines.append(line)
-                for c in scoped_only:
-                    line = f"- {c.kind.value}: {c.description}"
-                    # scoped_only Change objects are already stamped by
-                    # stamp_scoped_result_findings upstream when
-                    # contract_evaluation was requested -- render what's
-                    # already there instead of re-deriving it.
-                    relevance = getattr(c, "contract_relevance", None)
-                    if relevance is not None:
-                        assurance = getattr(c, "contract_assurance", None)
-                        line += (
-                            f" [contract: {relevance.value} "
-                            f"({getattr(c, 'contract_reason_code', None)})"
-                        )
-                        if assurance is not None:
-                            line += f", assurance: {assurance.value}"
-                        line += "]"
-                    lines.append(line)
-        return "\n".join(lines)
+        )
 
 
 def _suppression_rule_label(rule: Any, index: int) -> str:
