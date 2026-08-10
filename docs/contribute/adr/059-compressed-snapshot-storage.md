@@ -1,12 +1,19 @@
 # ADR-059: Compressed Snapshot Storage Envelope
 
 **Date:** 2026-08-10
-**Status:** Accepted — partially implemented (core snapshot I/O, `dump` CLI,
-`compare`/`scan --against`/Python API/service layer, and the internal
-snapshot cache are implemented and tested; baseline-set manifest v2, the
-`actions/baseline`/root composite Action/`resolve-baseline`/publish-workflow
-changes, and the wider documentation sweep described below are deferred —
-see "What this ADR does not (yet) close").
+**Status:** Accepted — implemented for core snapshot I/O, `dump` CLI,
+`compare`/`scan --against`/Python API/service layer, the internal snapshot
+cache, `actions/baseline` (`snapshot-compression` input, stale-file cleanup
+across all three canonical suffixes, `build_manifest.py` reading through
+canonical snapshot I/O), the root composite Action's `dump`-mode
+`snapshot-compression` input, `abi-baseline: latest-release`/`<tag>`
+recognizing compressed release assets, and `publish-baseline.yml`/
+`update-main-baseline.yml`'s `snapshot-compression` input.
+`actions/resolve-baseline` needed no code change at all — it already reads a
+compressed manifest-referenced snapshot transparently via magic-byte
+detection, confirmed by a dedicated end-to-end test. Baseline-set manifest
+v2, a deterministic `.tar.zst` packager, and the wider documentation sweep
+remain deferred — see "What this ADR does not (yet) close".
 **Decision maker:** Nikolay Petrov
 
 ---
@@ -308,27 +315,28 @@ extension of this pass (each is a separately-scoped project of its own):
 
 - **Baseline-set manifest v2** (compressed member paths, a `storage` block
   per artifact recording compression/stored-sha256/stored/decoded size
-  alongside the existing logical `sha256`, v1 backward compatibility).
-- **`actions/baseline`** (a `snapshot-compression` input defaulting to
-  `zstd`, stale-file cleanup across all three suffixes,
-  `build_manifest.py` reading through canonical snapshot I/O instead of a
-  direct `open()`/`json.load()`).
-- **The root composite Action** (`snapshot-compression` input, a
-  `.abicheck.json.zst` default `dump`-mode output path, `snapshot-path`/
-  `snapshot-compression`/size outputs, `abi-baseline: latest-release`
-  recognizing `.gz`/`.zst` variants and rejecting a raw+compressed
-  ambiguity).
-- **`actions/resolve-baseline`** (manifest v2 parsing, compressed-member
-  stored/logical digest validation, no raw-temp-file extraction).
-- **`publish-baseline.yml`/`update-main-baseline.yml`** (a
-  `snapshot-compression` workflow input, a shared deterministic
-  Python/`zstandard` `.tar.zst` packager to replace `tar --zstd`, which
-  does not guarantee deterministic tar metadata across runners).
+  alongside the existing logical `sha256`, v1 backward compatibility). Note
+  `build_manifest.py` already records a per-artifact `compression` field
+  (`none`/`gzip`/`zstd`) informationally as of the follow-up below — that is
+  not the same as a versioned, backward-compatible manifest schema bump,
+  which is what's actually deferred here.
+- **The root composite Action's `dump`-mode default output path/outputs**
+  (a `.abicheck.json.zst` default output path rather than plain
+  `.abicheck.json`, and dedicated `snapshot-path`/`snapshot-compression`/
+  size outputs). The `snapshot-compression` *input* itself, and
+  `abi-baseline: latest-release`/`<tag>` recognizing a compressed release
+  asset, are both implemented — see the Status line above.
+- **A shared deterministic `.tar.zst` packager** for
+  `publish-baseline.yml`/`update-main-baseline.yml`, to replace `tar
+  --zstd`, which does not guarantee deterministic tar metadata across
+  runners. Both workflows' own `snapshot-compression` *input* (forwarded to
+  `actions/baseline`) is implemented — see the Status line above.
 - **The wider documentation sweep** listed in the originating task
-  (`docs/reference/snapshot-format.md`, `docs/use/*baseline*`,
-  `docs/use/github-action*.md`, `docs/reference/*-baseline.md`,
-  `docs/start/*`, the upgrade guide, `README.md`, `mkdocs.yml` nav) beyond
-  this ADR and ADR-015's cross-reference below.
+  (`docs/use/github-action*.md`, `docs/reference/*-baseline.md` beyond
+  `publish-baseline.md`, `docs/start/*`, the upgrade guide, `README.md`,
+  `mkdocs.yml` nav) beyond this ADR, `docs/reference/snapshot-format.md`,
+  `docs/use/baseline-storage.md`, `docs/reference/publish-baseline.md`, and
+  ADR-015's cross-reference below, all of which are done.
 - **`BuildSourcePack` externalization/deduplication** (an `inline |
   referenced | auto` packaging mode, content-addressed dedup of a shared
   pack between `daal`/`oneapi::dal`-shaped sibling libraries) — the

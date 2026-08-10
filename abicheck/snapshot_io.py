@@ -373,6 +373,20 @@ def _decompress_zstd(data: bytes, *, max_decoded_bytes: int, source: str) -> byt
     # truncated frame. Cross-check against that declared size (present on
     # every frame this module writes, via write_content_size=True) rather
     # than trusting a clean decompression loop alone.
+    #
+    # Codex review: ``get_frame_parameters(data)`` only ever inspects the
+    # *first* frame -- a valid zstd stream may legitimately be multiple
+    # concatenated frames (this module's own writer never produces one, but
+    # a foreign/external snapshot may), and ``stream_reader`` correctly
+    # decompresses all of them, so the aggregate output can exceed the
+    # first frame's own declared size without anything being wrong.
+    # Confirmed empirically that truncation and legitimate extra frames are
+    # distinguishable by direction alone: truncating a frame can only ever
+    # *reduce* decoded output below its declared size (a truncated frame
+    # decompresses to fewer bytes than declared, never more), while a
+    # second, legitimate frame can only ever *add* to it. So flag under-
+    # decoding (real truncation) but never over-decoding (more frames,
+    # not corruption).
     try:
         declared_size = zstandard.get_frame_parameters(data).content_size
     except Exception:
@@ -380,7 +394,7 @@ def _decompress_zstd(data: bytes, *, max_decoded_bytes: int, source: str) -> byt
     if (
         declared_size is not None
         and declared_size != zstandard.CONTENTSIZE_UNKNOWN
-        and out.tell() != declared_size
+        and out.tell() < declared_size
     ):
         raise SnapshotError(
             f"{source}: corrupt or truncated zstd stream (decompressed "
@@ -701,12 +715,38 @@ def _atomic_write_bytes(data: bytes, path: Path) -> None:
     FIFO/device either, so a pre-existing non-regular destination is
     written to directly, bypassing the temp-file-and-rename dance
     entirely.
+
+    Hard-linked destinations (Codex review): if *target* has other hard
+    links (``st_nlink > 1``), ``os.replace()`` installs the new content
+    under *this* pathname's directory entry only -- every other link keeps
+    pointing at the old inode's stale content, silently diverging from
+    what this call just wrote. The previous ``open(path, "w")`` behavior
+    wrote into the shared inode directly, keeping every alias in sync.
+    There is no way to have both that in-place-update-every-alias behavior
+    *and* this function's own atomicity/durability guarantees at once for
+    the same call (an in-place write can leave a torn/partial file on a
+    crash, exactly what the atomic design elsewhere in this function exists
+    to prevent) -- silently picking either behavior would surprise a caller
+    expecting the other, so this is a hard error instead: unlink (or
+    otherwise resolve) the extra hard link(s) before writing to *path* if
+    an atomic, single-alias update is what's wanted.
     """
     target = Path(os.path.realpath(path)) if os.path.islink(path) else path
     try:
-        existing_mode_bits = target.stat().st_mode
+        existing_stat_for_type = target.stat()
     except OSError:
         existing_mode_bits = None
+    else:
+        existing_mode_bits = existing_stat_for_type.st_mode
+        if stat.S_ISREG(existing_mode_bits) and existing_stat_for_type.st_nlink > 1:
+            raise SnapshotError(
+                f"{target}: has {existing_stat_for_type.st_nlink} hard links -- "
+                "an atomic rewrite would silently desynchronize the other "
+                "link(s) from this one (they would keep the old content, "
+                "not see the new write). Unlink the extra hard link(s) "
+                "first if you want this path atomically rewritten in "
+                "isolation."
+            )
     if existing_mode_bits is not None and not stat.S_ISREG(existing_mode_bits):
         with open(target, "wb") as f:
             f.write(data)

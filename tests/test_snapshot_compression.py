@@ -309,6 +309,30 @@ def test_truncated_zstd_raises_snapshot_error(tmp_path):
         load_snapshot(p)
 
 
+def test_concatenated_multi_frame_zstd_not_rejected_as_corrupt(tmp_path):
+    """Codex review, PR #699: ``get_frame_parameters(data)`` only inspects
+    the *first* frame of a zstd stream -- this module's own writer never
+    produces more than one, but a valid zstd stream may legitimately be
+    multiple concatenated frames (a foreign/external snapshot), and
+    ``stream_reader`` correctly decompresses all of them. The aggregate
+    decoded output then exceeds the first frame's own declared content
+    size, which must not be flagged as truncation/corruption -- only
+    *under*-decoding relative to that declared size is a real truncation
+    signal."""
+    zstandard = pytest.importorskip("zstandard")
+
+    payload = json.dumps({"library": "x", "version": "1"}).encode()
+    half = len(payload) // 2
+    cctx1 = zstandard.ZstdCompressor(write_content_size=True)
+    frame1 = cctx1.compress(payload[:half])
+    cctx2 = zstandard.ZstdCompressor(write_content_size=True)
+    frame2 = cctx2.compress(payload[half:])
+    p = tmp_path / "multiframe.abicheck.json.zst"
+    p.write_bytes(frame1 + frame2)
+
+    assert read_snapshot_bytes(p) == payload
+
+
 # ── Decompression limits ────────────────────────────────────────────────
 
 
@@ -757,6 +781,35 @@ def test_write_through_fifo_does_not_replace_it(tmp_path):
         assert stat_mod.S_ISFIFO(fifo_path.stat().st_mode)  # still a FIFO
     finally:
         os.close(read_fd)
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX hard links only")
+def test_hard_linked_destination_is_rejected(tmp_path):
+    """Codex review, PR #699: os.replace() installs the new content under
+    *this* pathname's directory entry only -- an existing hard link keeps
+    pointing at the old inode's stale content, silently diverging from
+    what this call just wrote (the previous open(path, "w") behavior wrote
+    into the shared inode directly, keeping every alias in sync). There is
+    no way to have both that every-alias-updated behavior and this
+    function's own atomicity guarantees at once, so a hard-linked
+    destination is a hard error instead of a silent, surprising choice
+    either way -- and the existing content must stay untouched."""
+    p = tmp_path / "original.abicheck.json"
+    p.write_text('{"a": 1}')
+    alias = tmp_path / "alias.abicheck.json"
+    os.link(p, alias)
+    assert p.stat().st_nlink == 2
+    original_bytes = p.read_bytes()
+
+    snap = _sample_snapshot()
+    with pytest.raises(SnapshotError, match="hard link"):
+        write_snapshot(snap, p, compression="none")
+
+    # Neither alias's content changed, and no stray temp file was left.
+    assert p.read_bytes() == original_bytes
+    assert alias.read_bytes() == original_bytes
+    leftovers = [f for f in tmp_path.iterdir() if f not in (p, alias)]
+    assert leftovers == []
 
 
 def test_failed_write_preserves_existing_destination(tmp_path, monkeypatch):
