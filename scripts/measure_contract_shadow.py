@@ -160,12 +160,15 @@ UNRESOLVED_LOSS_BASELINE: dict[str, int] = {
 #:
 #:   nonempty_base_added_stays_breaking         +2
 #:   empty_base_added_stays_breaking            +1
-#:   base_capture_asymmetry_stays_filtered       0
 #:
-#: The pattern repeats exactly: both contributors are FN sentinels (real
-#: breaks with no export table to resolve against), and the FP guard again
-#: contributes nothing because it emits no finding at all -- the same
-#: end-to-end confirmation, now for `_base_transition_is_evidenced`.
+#: Both are FN sentinels -- real breaks with no export table to resolve
+#: against -- so the same reading applies. There is deliberately no base FP
+#: guard alongside them: the guard that would have justified one was written
+#: and reverted (see AGENTS.md), because over-alignment lets even a
+#: storage-contributing base be added without moving the derived class's
+#: size, so `size_bits` cannot separate a capture gap from a real hierarchy
+#: change. These two sentinels stay as the standing proof that base changes
+#: are still reported.
 #:
 #: The +1 third step is `overaligned_first_vptr_stays_breaking`, another FN
 #: sentinel (a real first-vptr addition an over-aligned class absorbs into

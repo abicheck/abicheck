@@ -31,11 +31,3 @@
   explicitly blocking severity policy. `SEVERITY_ERROR` is now declared in
   `action.yml`'s scan output vocabulary (and its generated reference) too.
 
-- **`type_base_changed` no longer fires from absent evidence either** — the
-  base-list twin of the vtable guard, but deliberately not a copy of it: a
-  non-virtual *empty* base is layout-invisible (empty-base optimization), so
-  "size held still" is not evidence of a capture gap for one. The changed
-  bases themselves are inspected instead — a base that contributes storage
-  cannot be added or removed without moving the derived class's size, so a
-  static size alongside one is self-contradictory and marks the gap, while an
-  empty or undescribed base explains it and the finding is kept.

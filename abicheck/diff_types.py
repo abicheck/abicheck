@@ -430,7 +430,7 @@ def _diff_type_pair(
         changes.extend(
             _diff_type_fields(name, t_old, t_new, cv_facts_reliable=cv_facts_reliable)
         )
-    changes.extend(_diff_type_bases(name, t_old, t_new, old_types, new_types))
+    changes.extend(_diff_type_bases(name, t_old, t_new))
     changes.extend(
         _diff_type_vtable(
             name, t_old, t_new, old_funcs, new_funcs, old_types, new_types
@@ -1013,82 +1013,8 @@ def _new_field_change_kind(t_new: RecordType) -> ChangeKind:
     )
 
 
-def _record_contributes_storage(rec: RecordType | None) -> bool | None:
-    """Whether *rec* adds storage when used as a base. ``None`` if unknowable.
-
-    The empty-base optimization is what makes this necessary: an empty base
-    contributes zero bytes to the derived object, so a base-list change that
-    adds or removes one leaves ``size_bits`` completely still. Verified
-    against g++ -- one empty base and two empty bases both leave ``sizeof``
-    at the no-base value, while a non-empty base grows it.
-
-    ``None`` for an absent record: not knowing is not the same as knowing it
-    is empty, and callers must not read the first as the second.
-    """
-    if rec is None:
-        return None
-    return bool(rec.fields or rec.bases or rec.virtual_bases or rec.vtable)
-
-
-def _base_transition_is_evidenced(
-    t_old: RecordType,
-    t_new: RecordType,
-    old_set: set[str],
-    new_set: set[str],
-    old_types: Mapping[str, RecordType],
-    new_types: Mapping[str, RecordType],
-) -> bool:
-    """Whether an *empty↔non-empty* base-list difference rests on real evidence.
-
-    The same ambiguity :func:`_vtable_transition_is_evidenced` answers, and
-    answered the same way -- one side listing no bases means either "has none"
-    or "this side's DWARF did not carry them" -- but it deliberately does
-    **not** reuse that function, because the base case has a failure mode the
-    vtable case does not.
-
-    A non-virtual *empty* base is layout-invisible (empty-base optimization),
-    so "size held still" is not evidence of a capture gap for it: adding one
-    is a real, ABI-relevant change (conversions, RTTI, overload resolution)
-    that a size-only guard would silently swallow. That is why the changed
-    bases themselves are inspected: a base that *does* contribute storage
-    cannot be added or removed without moving ``size_bits``, so a static size
-    alongside one is genuinely self-contradictory and marks the capture gap.
-    An empty base -- or one this snapshot does not describe at all -- explains
-    the static size instead, and the finding is kept.
-
-    Virtual bases need no such carve-out and get the plain size check: a
-    virtual base always costs a pointer, empty or not (verified: 4 -> 16 for
-    `struct D : virtual Empty { int x; }` under g++).
-    """
-    if old_set and new_set:
-        return True
-    if t_old.size_bits is None or t_new.size_bits is None:
-        return True
-    if t_old.size_bits != t_new.size_bits:
-        return True
-    if list(t_old.vtable) != list(t_new.vtable):
-        return True
-    for base in old_set ^ new_set:
-        contributes = _record_contributes_storage(
-            new_types.get(base) or old_types.get(base)
-        )
-        if contributes is not True:
-            # Empty (EBO explains the static size) or undescribed (nothing to
-            # contradict) -- either way this difference is not refuted.
-            return True
-    return False
-
-
-def _diff_type_bases(
-    name: str,
-    t_old: RecordType,
-    t_new: RecordType,
-    old_types: Mapping[str, RecordType] | None = None,
-    new_types: Mapping[str, RecordType] | None = None,
-) -> list[Change]:
+def _diff_type_bases(name: str, t_old: RecordType, t_new: RecordType) -> list[Change]:
     changes: list[Change] = []
-    old_types = old_types if old_types is not None else {}
-    new_types = new_types if new_types is not None else {}
 
     # BASE_CLASS_POSITION_CHANGED: same set of non-virtual bases, different order
     # This shifts this-pointer adjustments for all bases → old binaries call wrong method.
@@ -1104,9 +1030,7 @@ def _diff_type_bases(
                 new_value=str(t_new.bases),
             )
         )
-    elif old_bases_set != new_bases_set and _base_transition_is_evidenced(
-        t_old, t_new, old_bases_set, new_bases_set, old_types, new_types
-    ):
+    elif old_bases_set != new_bases_set:
         # General base class set change (add/remove base) → TYPE_BASE_CHANGED
         changes.append(
             make_change(
@@ -1144,9 +1068,7 @@ def _diff_type_bases(
         # Pure add/remove of a virtual base (not a migration from non-virtual):
         # e.g. class D : virtual A  →  class D : virtual A, virtual B
         # → TYPE_BASE_CHANGED (hierarchy changed, not just virtuality toggled)
-        if not changes and _base_transition_is_evidenced(
-            t_old, t_new, old_virt_set, new_virt_set, old_types, new_types
-        ):
+        if not changes:  # don't duplicate if TYPE_BASE_CHANGED already emitted above
             changes.append(
                 make_change(
                     ChangeKind.TYPE_BASE_CHANGED,

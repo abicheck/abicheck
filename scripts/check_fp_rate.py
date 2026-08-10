@@ -952,20 +952,6 @@ def _derived(bases: list[str], size: int) -> RecordType:
     )
 
 
-def _base_capture_asymmetry_stays_filtered() -> tuple[AbiSnapshot, AbiSnapshot]:
-    # The base-list twin of the vtable capture gap: one side's DWARF did not
-    # carry the class's `DW_TAG_inheritance` children. What makes it provable
-    # rather than merely suspected is the base itself -- `Payload` has a
-    # field, so it *cannot* be added or removed without moving the derived
-    # class's size. A static size alongside it is self-contradictory.
-    return (
-        _snap("1", functions=[_fn("api", ret="Derived *")],
-              types=[_derived([], 64), _SOLID_BASE]),
-        _snap("2", functions=[_fn("api", ret="Derived *")],
-              types=[_derived(["Payload"], 64), _SOLID_BASE]),
-    )
-
-
 def _empty_base_added_stays_breaking() -> tuple[AbiSnapshot, AbiSnapshot]:
     # The FN sentinel that stops the guard being a copy of the vtable one: an
     # *empty* base is layout-invisible (EBO -- verified against g++, one and
@@ -1023,11 +1009,6 @@ CORPUS: list[Case] = [
         "overaligned_first_vptr_stays_breaking",
         False,
         _overaligned_first_vptr_stays_breaking,
-    ),
-    Case(
-        "base_capture_asymmetry_stays_filtered",
-        True,
-        _base_capture_asymmetry_stays_filtered,
     ),
     Case("empty_base_added_stays_breaking", False, _empty_base_added_stays_breaking),
     Case(
@@ -1524,7 +1505,6 @@ CASE_CATEGORY: dict[str, str] = {
     "vtable_became_polymorphic_stays_breaking": "evidence-absence",
     "vtable_reorder_stays_breaking": "evidence-absence",
     "overaligned_first_vptr_stays_breaking": "evidence-absence",
-    "base_capture_asymmetry_stays_filtered": "evidence-absence",
     "empty_base_added_stays_breaking": "evidence-absence",
     "nonempty_base_added_stays_breaking": "evidence-absence",
     # versioned-symbol scheme / multi-.so bundle

@@ -981,12 +981,26 @@ Once a root command genuinely clears the bar above, pick the right home:
   sides) already state in their own docstrings; the type-level detector had
   neither. **Two things remain open.** (1) `_diff_type_bases`
   (`set(t_old.bases) != set(t_new.bases)`, and its virtual-base half) has the
-  same unguarded shape and was deliberately not changed in the same pass — a
-  base-list difference has different corroborating signals than a vtable one
-  (a gained base almost always moves size, but an *empty*-side capture gap
-  does not, and `surface.py`'s reachability closure also reads `bases`), so
-  it needs its own evidence design and its own FP-corpus cases rather than a
-  drive-by copy of the vtable guard. (2) One accepted false negative in the
+  same unguarded shape and **stays that way — an attempted guard was written
+  and reverted before merge, and the reason is worth not rediscovering.**
+  Every layout-based premise for it is false: an *empty* base is invisible by
+  the empty-base optimization, and — the one that killed the attempt — a
+  *storage-contributing* base can be added without moving the derived class's
+  size at all when the class is over-aligned (verified against g++:
+  `struct alignas(8) D {}` and `struct alignas(8) D : B {}` with
+  `struct B { int y; }` are both 8 bytes, as are the `alignas(16)` pair at
+  16). So "size held still" proves nothing about a base list, in either
+  direction. Unlike the vtable case there is no independent evidence stream
+  to fall back on — `snapshot.functions` answers "did this class's virtuals
+  change" but nothing answers "did this class's bases change" except
+  `RecordType.bases` itself. Guarding it therefore needs evidence the model
+  does not currently carry (per-finding provenance, or a captured base-layout
+  fact such as `base_offsets` corroboration), not a cleverer reading of
+  `size_bits`. Until then a fabricated `type_base_changed` from a capture gap
+  is the accepted cost, because the alternative — suppressing a real
+  hierarchy change, which is sometimes the *only* breaking finding a
+  same-size base addition produces — is strictly worse. (2) One accepted
+  false negative in the
   fix itself: a class already polymorphic *through a base*, declaring no
   virtuals of its own, that gains one — its vtable grows while its object
   size does not, making it indistinguishable from capture noise without a
