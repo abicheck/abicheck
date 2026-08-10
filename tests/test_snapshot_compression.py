@@ -505,6 +505,38 @@ def test_existing_file_group_is_preserved_across_rewrite(tmp_path):
 
 
 @pytest.mark.skipif(
+    os.name == "nt", reason="os.chown/getpwall not available on Windows"
+)
+def test_existing_file_owner_is_preserved_across_rewrite(tmp_path):
+    """Codex review, PR #699 (second finding on the same fix): rewriting an
+    existing snapshot also used to silently transfer ownership to the
+    writer -- the fresh temp file is owned by the writer, and only the mode
+    (then, after the first fix, the group) was carried over to the
+    replacement, not the uid. Affects a shared baseline owned by a service
+    account. Requires root/CAP_CHOWN to reassign an arbitrary uid, so this
+    is best-effort like the write path itself."""
+    import pwd
+
+    try:
+        target_uid = pwd.getpwnam("daemon").pw_uid
+    except KeyError:
+        pytest.skip("no 'daemon' user on this system")
+
+    snap = _sample_snapshot()
+    p = tmp_path / "existing.abicheck.json"
+    p.write_text("placeholder")
+    try:
+        os.chown(p, target_uid, -1)
+    except (OSError, AttributeError):
+        pytest.skip("cannot chown to an arbitrary uid in this environment")
+    if p.stat().st_uid != target_uid:
+        pytest.skip("chown did not take effect (insufficient privileges)")
+
+    write_snapshot(snap, p)
+    assert p.stat().st_uid == target_uid
+
+
+@pytest.mark.skipif(
     os.name == "nt", reason="symlinks need elevated privileges on Windows"
 )
 def test_write_through_symlink_preserves_the_link(tmp_path):

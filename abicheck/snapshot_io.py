@@ -602,14 +602,17 @@ def _atomic_write_bytes(data: bytes, path: Path) -> None:
     ``os.chmod`` on our own just-created temp file -- not process-global,
     not racy), so re-dumping a shared, group/world-readable baseline does
     not silently strip its permissions down to whatever the current umask
-    happens to be. Group ownership (Codex review) is preserved the same
-    way: the fresh temp file inherits the writer's own default group, not
-    an existing destination's -- copying only the mode would silently
-    revoke a shared baseline's deliberately-assigned group (e.g. an
-    ``abi-readers`` group with no setgid parent directory to inherit it
-    from). ``os.chown`` is best-effort (a non-privileged writer generally
-    can't change group anyway; the destination simply keeps the writer's
-    own group in that case, the same outcome as before this fix).
+    happens to be. Ownership -- both group (Codex review) and user (Codex
+    review, second finding) -- is preserved the same way: the fresh temp
+    file is owned by the writer, not an existing destination's owner, so
+    copying only the mode would silently revoke a shared baseline's
+    deliberately-assigned owner/group (e.g. a service-account UID or an
+    ``abi-readers`` GID, with no setgid parent directory to inherit either
+    from). ``os.chown`` is best-effort: an unprivileged writer generally
+    can't change a file's uid at all, and can only change gid to a group
+    it belongs to, so the destination simply keeps the writer's own
+    uid/gid where the kernel refuses the change -- the same outcome as
+    before this fix, not a new failure mode.
 
     Symlink destinations (Codex review): if *path* is itself a symlink,
     ``os.replace(tmp_path, path)`` would swap the symlink's own directory
@@ -635,17 +638,25 @@ def _atomic_write_bytes(data: bytes, path: Path) -> None:
         try:
             existing_stat = target.stat()
             existing_mode: int | None = existing_stat.st_mode & 0o777
+            existing_uid: int | None = existing_stat.st_uid
             existing_gid: int | None = existing_stat.st_gid
         except OSError:
             existing_mode = None
+            existing_uid = None
             existing_gid = None
         if existing_mode is not None:
             os.chmod(tmp_path, existing_mode)
-        if existing_gid is not None and hasattr(os, "chown"):
+        if (existing_uid is not None or existing_gid is not None) and hasattr(
+            os, "chown"
+        ):
             try:
-                os.chown(tmp_path, -1, existing_gid)
+                os.chown(
+                    tmp_path,
+                    existing_uid if existing_uid is not None else -1,
+                    existing_gid if existing_gid is not None else -1,
+                )
             except OSError:
-                pass  # best-effort; not group-privileged, or platform has no chown
+                pass  # best-effort; not privileged, or platform has no chown
         os.replace(tmp_path, target)
     except BaseException:
         try:
