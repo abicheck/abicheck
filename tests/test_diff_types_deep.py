@@ -1773,24 +1773,35 @@ class TestFieldDefaultUnreliableLegacyHybridSnapshot:
         assert ChangeKind.FIELD_DEFAULT_INITIALIZER_REMOVED in _kinds(r)
 
 
-class TestFieldDefaultHybridConfirmedRemoval:
-    """Codex review, PR #687, fresh evidence: a REAL hybrid-merge removal
-    where the two matched sides' per-field ``default`` provenance is
-    POSITIVELY known but DIFFERENT -- the exact shape
-    ``fact_same_producer_qualified`` declines outright, but which is safe
-    for a presence/absence comparison (unlike a VALUE comparison) as long as
-    BOTH sides are a genuine hybrid-merge result. See
-    ``diff_types_field_facts._diff_field_default_initializer``'s own
-    docstring/inline comments for the full reasoning."""
+class TestFieldDefaultHybridProducerMismatchDeclines:
+    """Codex review, PR #687, fresh evidence, three rounds: a REAL
+    hybrid-merge removal where the two matched sides' per-field ``default``
+    provenance is POSITIVELY known but DIFFERENT is currently declined by
+    the plain same-producer gate, EVEN when the removal is genuine. Two
+    earlier attempts at relaxing this for a hybrid pair (trusting a hybrid
+    merge's ``"castxml"`` provenance stamp as "both backends confirmed
+    absence") were each reverted after being shown unsound: that stamp is
+    identical whether clang genuinely examined the field and agreed, or
+    never matched the field/type at all (a clang-side parse gap) --
+    ``dumper_hybrid._backfill_fact``'s own docstring already discloses this
+    ("the entity itself IS castxml-sourced", not "both backends agree").
+    See ``diff_types_field_facts._diff_field_default_initializer``'s own
+    docstring for the full reasoning and why a real fix needs a data-model
+    change, not a read-side heuristic. These tests pin the current, honest
+    decline (no false positive, but also no detection of this specific
+    real-removal shape) so a future merge-side fix has a concrete
+    regression to flip."""
 
-    def test_removal_detected_across_hybrid_backfill_producer_mismatch(self):
+    def test_hybrid_backfill_producer_mismatch_declines_even_for_a_real_removal(self):
         """OLD side: castxml found no default, clang backfilled a real value
         (`dumper_hybrid._backfill_fact` stamps this field's provenance
-        "clang"). NEW side: BOTH castxml and clang independently confirm the
-        initializer is gone (`_backfill_fact(None, None)` stamps "castxml"
-        per its own documented convention, even though clang re-confirmed
-        the absence too). Two positively known, DIFFERENT per-field
-        producers for a real removal -- must still fire."""
+        "clang"). NEW side: castxml alone found no default and clang
+        independently agreed (`_backfill_fact(None, None)` stamps "castxml"
+        -- genuinely dual-confirmed here, but that's NOT distinguishable
+        from the "clang never matched this field" case from the resulting
+        snapshot alone). Two positively known, DIFFERENT per-field
+        producers for what IS a real removal -- currently declined, not
+        detected."""
         from abicheck.dumper_hybrid import merge_snapshots
 
         def _type(default):
@@ -1838,15 +1849,50 @@ class TestFieldDefaultHybridConfirmedRemoval:
         assert hybrid_new.fact_provenance["type:Cfg:field:timeout:default"] == "castxml"
 
         r = compare(hybrid_old, hybrid_new)
-        assert ChangeKind.FIELD_DEFAULT_INITIALIZER_REMOVED in _kinds(r)
+        assert ChangeKind.FIELD_DEFAULT_INITIALIZER_REMOVED not in _kinds(r)
+
+    def test_hybrid_new_side_with_no_matching_clang_field_stamps_identically(self):
+        """The exact ambiguity that sank the earlier relaxations: when
+        clang's own dump has NO matching type at all for a field (a
+        clang-side parse gap, not a genuine "no initializer" answer),
+        `_backfill_fact` still stamps "castxml" -- byte-identical to the
+        genuinely dual-confirmed case above. Confirmed empirically that
+        the resulting snapshot cannot distinguish the two from provenance
+        alone."""
+        from abicheck.dumper_hybrid import merge_snapshots
+
+        castxml_new = AbiSnapshot(
+            library="libtest.so.1",
+            version="2.0",
+            types=[
+                RecordType(
+                    name="Cfg",
+                    kind="struct",
+                    size_bits=32,
+                    fields=[TypeField("timeout", "int", 0, default=None)],
+                )
+            ],
+            from_headers=True,
+            ast_producer="castxml",
+        )
+        clang_new = AbiSnapshot(
+            library="libtest.so.1",
+            version="2.0",
+            types=[],  # clang's dump never matched this type at all
+            from_headers=True,
+            ast_producer="clang",
+        )
+        hybrid_new = merge_snapshots(castxml_new, clang_new)
+        assert hybrid_new.fact_provenance["type:Cfg:field:timeout:default"] == "castxml"
 
     def test_pure_castxml_vs_clang_mismatch_still_declines(self):
-        """The control case: the SAME two-known-different-producers shape,
-        but NEITHER side is a hybrid merge -- a pure single-backend
-        snapshot's ``None`` carries no dual-backend-confirmation guarantee
-        (it's one backend's own opinion, which this PR's own documented
-        direct-clang extraction gaps show can under-report a real
-        initializer as absent), so this must still decline -- exactly
+        """The non-hybrid control case: the SAME two-known-different-
+        producers shape, but NEITHER side is a hybrid merge -- a pure
+        single-backend snapshot's ``None`` carries no dual-backend-
+        confirmation guarantee (it's one backend's own opinion, which this
+        PR's own documented direct-clang extraction gaps show can
+        under-report a real initializer as absent), so this must still
+        decline -- exactly
         ``TestProducerMismatchDoesNotFalsePositive.
         test_field_default_initializer_producer_mismatch``'s existing
         scenario, restated here alongside the hybrid case it contrasts

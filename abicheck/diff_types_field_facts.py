@@ -49,12 +49,7 @@ from .diff_types_surface import (
     _directly_referenced,
     _is_abi_surface_type,
 )
-from .fact_provenance import (
-    enum_fact_key,
-    field_fact_key,
-    resolved_fact_producer,
-    type_fact_key,
-)
+from .fact_provenance import enum_fact_key, field_fact_key, type_fact_key
 from .model import (
     AbiSnapshot,
     TypeField,
@@ -278,6 +273,28 @@ def _diff_field_default_initializer(old: AbiSnapshot, new: AbiSnapshot) -> list[
     Unions are NOT excluded (unlike most field-level detectors, which leave
     them to ``_diff_unions``): a union variant may carry a default member
     initializer, and ``_diff_unions`` never checks ``default``.
+
+    KNOWN, deliberately-deferred gap (Codex review, fresh evidence, three
+    rounds): a real ``FIELD_DEFAULT_INITIALIZER_REMOVED`` against a hybrid
+    NEW snapshot where the two matched sides' per-field producers are
+    positively known but DIFFER is currently declined by the same-producer
+    gate above, even when the removal is genuine. The tempting relaxation
+    — trust a hybrid merge's ``"castxml"`` provenance stamp on a ``None``
+    value as "both backends independently confirmed absence" — is UNSOUND:
+    ``dumper_hybrid._backfill_fact``'s own docstring already discloses that
+    this stamp means only "the final value is castxml-sourced," and
+    confirmed empirically that it fires identically whether clang genuinely
+    examined the field and agreed, OR never matched the field/type at all
+    (a clang-side parse gap). No signal in the current
+    ``AbiSnapshot``/``fact_provenance`` data model distinguishes the two
+    cases from outside ``dumper_hybrid.py``'s own merge closure. A real fix
+    needs a new, more precise provenance value recorded AT MERGE TIME (e.g.
+    distinguishing "both backends matched and both said None" from "only
+    castxml matched"), not a read-side heuristic in this detector — three
+    increasingly narrow attempts at the latter were each caught by a
+    fresh Codex review round finding the next counter-example, which is
+    itself the signal that this needs a data-model change, not another
+    heuristic.
     """
     if not _both_header_aware(old, new):
         return []
@@ -323,57 +340,33 @@ def _diff_field_default_initializer(old: AbiSnapshot, new: AbiSnapshot) -> list[
                 field_fact_key(name, fname, "default"),
             )
             if f_new.default is None:
-                # REMOVED carries no representation-mismatch risk the way
-                # CHANGED below does -- None means "confirmed absent"
-                # regardless of which backend confirmed it, and OLD already
-                # has a real (non-None) value, so OLD's own producer plays
-                # no role here at all. What matters is only whether NEW's
-                # `None` is trustworthy: a hybrid merge's own
-                # dumper_hybrid._backfill_fact convention stamps a
-                # matched-but-unset field's provenance "castxml" ONLY when
-                # BOTH backends independently examined the field and BOTH
-                # returned no value (`_backfill_fact`'s own branching: the
-                # "clang" stamp is reachable only when clang's value is
-                # non-None, so a None final value on the matched-field path
-                # is always the dual-confirmed "castxml" stamp) -- unlike a
-                # PURE castxml snapshot's own "castxml" stamp, which means
-                # only that castxml alone examined it (Codex review, fresh
-                # evidence, second round: checking BOTH sides' top-level
-                # `ast_producer == "hybrid"` was still too strict -- a real
-                # removal against a pure-clang OLD side and a hybrid NEW
-                # side was still declined, since OLD's own producer is
-                # irrelevant to whether NEW's absence is trustworthy).
-                # `new.ast_producer == "hybrid"` is required alongside the
-                # producer check itself: a clang-only-appended field (no
-                # castxml opinion at all) is ALSO stamped "clang"
-                # unconditionally by merge_snapshots's own append loop,
-                # regardless of value -- that's single-backend, not dual,
-                # confirmation, and must still decline the same way a pure
-                # single-backend snapshot's `None` does (verified against
-                # TestProducerMismatchDoesNotFalsePositive's own existing
-                # castxml-vs-clang regression, which a plain any-known
-                # relaxation broke).
-                new_confirmed_absent = (
-                    new.ast_producer == "hybrid"
-                    and resolved_fact_producer(
-                        new,
-                        field_fact_key(type_map_key(t_new), fname, "default"),
-                        field_fact_key(name, fname, "default"),
-                        bare_unambiguous=new_map.bare_name_is_unambiguous(name),
-                    )
-                    == "castxml"
-                )
-                # The dual-confirmation check above is an ADDITIONAL way to
-                # accept a removal, not a replacement for the ordinary
-                # same-producer path (e.g. a genuine castxml-vs-castxml or
-                # clang-vs-clang REMOVED, which has nothing to do with a
-                # hybrid merge at all) -- verified by TestFieldDefault
-                # InitializerChanged's own existing same-producer removal
-                # regressions, which an earlier, non-OR version of this fix
-                # broke outright.
-                if not new_confirmed_absent and not fact_same_producer_qualified(
-                    *fact_key_args
-                ):
+                # KNOWN, deliberately-deferred relaxation (Codex review,
+                # fresh evidence, third round): a REMOVED comparison carries
+                # no representation-mismatch risk the way CHANGED below does
+                # -- None means "confirmed absent" regardless of which
+                # backend confirmed it, in principle. Two earlier attempts
+                # at exploiting this tried to trust a hybrid merge's
+                # "castxml" provenance stamp on the NEW side as dual-backend
+                # confirmation (dumper_hybrid._backfill_fact's docstring:
+                # "Provenance is recorded as castxml even when own_value is
+                # None and no clang value was available to backfill from").
+                # That docstring line is exactly the trap: it explicitly
+                # documents that "castxml" here means ONLY "the final value
+                # is castxml-sourced," not "clang also examined and agreed"
+                # -- confirmed empirically that _merge_field's own
+                # `clang_fields_by_name.get(f.name)` can be `None` (clang's
+                # dump never matched this field/type AT ALL, e.g. a
+                # clang-side parse gap) and still produces the identical
+                # "castxml" stamp as a genuine dual-examined absence. No
+                # signal in the current AbiSnapshot/fact_provenance data
+                # model distinguishes the two cases from outside
+                # dumper_hybrid.py's merge closure. A real fix needs a new,
+                # more precise provenance value recorded AT MERGE TIME (not
+                # a narrow read-side heuristic in this detector) -- see the
+                # deferred hybrid-dual-confirmation note in this function's
+                # own docstring. Until then this stays the plain
+                # same-producer gate CHANGED uses below.
+                if not fact_same_producer_qualified(*fact_key_args):
                     continue
                 changes.append(
                     make_change(

@@ -315,28 +315,6 @@ it should read in CHANGELOG.md. Delete the other sections.
   exclusively in a separate `typeArg` key (a different key than
   `sizeof`/`alignof`'s `argType`), verified against real Clang 18 output.
   Now read alongside `argType`.
-- **Fixed a missed `FIELD_DEFAULT_INITIALIZER_REMOVED` on a hybrid pair
-  where the two matched sides' per-field `default` provenance is
-  positively known but DIFFERENT** (Codex review, fresh evidence): a hybrid
-  merge's own `dumper_hybrid._backfill_fact` convention stamps a
-  matched-but-unset field's provenance `"castxml"` even when clang
-  independently re-confirmed the absence, so an OLD side that backfilled
-  its real value from clang (`"clang"`) compared against a NEW side whose
-  dual-confirmed absence recorded `"castxml"` was declined outright by
-  `fact_same_producer_qualified`'s same-producer requirement — even though
-  a presence/absence comparison carries none of the representation-mismatch
-  risk that gate exists to guard (unlike a VALUE comparison, `None` means
-  "confirmed absent" regardless of which backend confirmed it). Fixed by
-  using the any-known-producer gate (`fact_known_qualified`) for the
-  REMOVED branch specifically, but only when BOTH sides are a genuine
-  `"hybrid"`-merge result — a pure single-backend snapshot's `None` carries
-  no such dual-confirmation guarantee (it's one backend's own opinion,
-  which this module's own documented direct-clang extraction gaps show can
-  under-report a real initializer as absent), so a pure castxml-vs-clang
-  mismatch still declines via the same, stricter same-producer gate CHANGED
-  uses — verified against the pre-existing
-  `TestProducerMismatchDoesNotFalsePositive` regression, which a first,
-  unscoped version of this fix broke.
 - **Fixed a missed `FIELD_DEFAULT_INITIALIZER_CHANGED`/
   `PARAM_DEFAULT_VALUE_CHANGED` for a discarded increment/decrement's
   pre/post form** (Codex review, fresh evidence): `(g++, 1)` vs. `(++g, 1)`
@@ -346,27 +324,30 @@ it should read in CHANGELOG.md. Delete the other sections.
   both forms; the only structural distinction is a separate `isPostfix`
   boolean key, verified against real Clang 17 output, which
   `_canonical_expr`'s whitelist didn't read. Now kept verbatim.
-- **Fixed a missed `FIELD_DEFAULT_INITIALIZER_REMOVED` when the OLD side is
-  a pure single-backend snapshot and the NEW side is a hybrid pair with a
-  dual-confirmed absence** (Codex review, fresh evidence, second round):
-  the previous fix only relaxed the producer check when BOTH sides were a
-  `"hybrid"`-merge result, but OLD's own producer plays no role in whether
-  a removal is trustworthy — only whether NEW's `None` is. A hybrid merge's
-  `dumper_hybrid._backfill_fact` convention stamps a matched-but-unset
-  field's provenance `"castxml"` only when BOTH backends independently
-  examined it and both returned no value (verified: the `"clang"` stamp
-  is reachable only when clang's value is non-`None`, so a `None` final
-  value on the matched-field path is always the dual-confirmed `"castxml"`
-  stamp) — a pure-clang OLD side compared against exactly that shape was
-  still declined. The gate is now checked one-sided
-  (`new.ast_producer == "hybrid"` and the field's own resolved producer is
-  `"castxml"`), ORed with the ordinary same-producer path rather than
-  replacing it — restores the original same-producer REMOVED case a first,
-  overly-narrow version of this fix accidentally dropped. A
-  clang-only-appended field (no castxml opinion at all) is still correctly
-  excluded: `merge_snapshots`' append loop stamps it `"clang"`
-  unconditionally regardless of value, which is single-backend
-  confirmation, not dual.
+- **Investigated, attempted, and reverted a relaxation for
+  `FIELD_DEFAULT_INITIALIZER_REMOVED` on a hybrid pair whose two matched
+  sides' per-field `default` provenance is positively known but DIFFERENT**
+  (Codex review, fresh evidence, three rounds — documented rather than
+  fixed): a hybrid merge's own `dumper_hybrid._backfill_fact` convention
+  stamps a matched-but-unset field's provenance `"castxml"` regardless of
+  which backend actually confirmed the absence, so an OLD side that
+  backfilled its real value from clang (`"clang"`) compared against a NEW
+  side with that stamp is declined outright by
+  `fact_same_producer_qualified` even for a genuine removal. Two successive
+  attempts at relaxing this (any-known-producer for a both-hybrid pair;
+  then a one-sided `new`-side-only check) were each reverted after being
+  shown unsound: `_backfill_fact`'s own docstring already discloses that
+  its `"castxml"` stamp means only "the final value is castxml-sourced,"
+  and confirmed empirically that the identical stamp is produced whether
+  clang genuinely examined the field and agreed, OR never matched the
+  field/type at all (a clang-side parse gap) — no signal in the current
+  `AbiSnapshot`/`fact_provenance` data model distinguishes the two cases
+  from outside `dumper_hybrid.py`'s own merge closure. A real fix needs a
+  new, more precise provenance value recorded at merge time, not a
+  read-side heuristic in the detector; the plain same-producer gate is
+  restored for both branches, and the gap is now documented in
+  `_diff_field_default_initializer`'s own docstring with a pinning
+  regression test rather than guessed at again.
 - **Documented a known, deliberately-deferred gap in `override_graph.py`**
   (Codex review, fresh evidence): a local class defined inside a function
   body is scoped only by its enclosing namespace/class chain (mirroring
