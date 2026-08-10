@@ -1779,6 +1779,32 @@ from .compat.cli import (  # noqa: E402,F401
 main.add_command(compat_group)
 
 
+# The snapshot write path moved to `cli_buildsource` (this module sits near the
+# AI-readiness file-size cap; see that module's own "Snapshot output" section).
+# These names are kept resolvable at their historical `abicheck.cli` path for
+# tests and for `cli_dump_helpers`' `cli._layer_payload_empty` /
+# `cli._missing_requested_evidence_layers` lookups. A module-level `__getattr__`
+# (PEP 562) resolves them lazily via `importlib.import_module` -- a runtime
+# call, not a static import edge -- so `cli` never grows a top-level dependency
+# on `cli_buildsource`, which imports back into `cli` (AGENTS.md, "Moving
+# helpers out of a module that re-exports them"). New code should import from
+# `cli_buildsource` directly.
+_SNAPSHOT_OUTPUT_REEXPORTS = frozenset({
+    "_classify_missing_layers",
+    "_layer_payload_empty",
+    "_missing_requested_evidence_layers",
+    "_write_snapshot_output",
+})
+
+
+def __getattr__(name: str) -> Any:
+    if name in _SNAPSHOT_OUTPUT_REEXPORTS:
+        import importlib
+
+        return getattr(importlib.import_module("abicheck.cli_buildsource"), name)
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+
+
 # ---------------------------------------------------------------------------
 # Sub-command modules. Imported for side-effect so their @main.command(...)
 # decorators register the commands on the Click group above. They sit in
@@ -1812,29 +1838,3 @@ from . import (  # noqa: E402  — must run after `main` and helpers are defined
 
 if __name__ == "__main__":
     main()
-
-
-# The snapshot write path moved to `cli_buildsource` (this module sits near the
-# AI-readiness file-size cap; see that module's own "Snapshot output" section).
-# These names are kept resolvable at their historical `abicheck.cli` path for
-# tests and for `cli_dump_helpers`' `cli._layer_payload_empty` /
-# `cli._missing_requested_evidence_layers` lookups. A module-level `__getattr__`
-# (PEP 562) resolves them lazily via `importlib.import_module` -- a runtime
-# call, not a static import edge -- so `cli` never grows a top-level dependency
-# on `cli_buildsource`, which imports back into `cli` (AGENTS.md, "Moving
-# helpers out of a module that re-exports them"). New code should import from
-# `cli_buildsource` directly.
-_SNAPSHOT_OUTPUT_REEXPORTS = frozenset({
-    "_classify_missing_layers",
-    "_layer_payload_empty",
-    "_missing_requested_evidence_layers",
-    "_write_snapshot_output",
-})
-
-
-def __getattr__(name: str) -> Any:
-    if name in _SNAPSHOT_OUTPUT_REEXPORTS:
-        import importlib
-
-        return getattr(importlib.import_module("abicheck.cli_buildsource"), name)
-    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
