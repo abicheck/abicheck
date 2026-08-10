@@ -1325,6 +1325,67 @@ building a second identity-resolution mechanism from scratch.
   through `dump()`/`compare()` against real compiled GCC binaries, plus
   hand-built unit fixtures.
 
+  **An eleventh review round found two more real gaps in the SAME
+  bare-qualname lookup convention, plus one confirmed-safe recurrence of
+  the same accepted limitation reached through a different AST shape.**
+  (1) When TWO DIFFERENT explicit outer specializations each define their
+  OWN same-named nested member template with DIFFERING defaults
+  (`Outer<int>`'s `template<class U=int> struct A` vs. `Outer<double>`'s
+  `template<class U=double> struct A`), both register under the identical
+  bare qualname `"A"` in `_index_template_param_kinds`/`_defaults`/
+  `_names`, since none of those three functions ever extend scope through
+  a `ClassTemplateSpecializationDecl`. First-registration-wins previously
+  trusted whichever was visited first, silently borrowing the WRONG
+  default for the other — confirmed end-to-end this left the base
+  unresolvable and a real virtual-method addition completely undetected
+  (`NO_CHANGE`). Fixed by treating a conflicting second registration as
+  genuinely ambiguous and dropping it entirely (in all three index
+  functions, via a new shared `_register_template_param_metadata()`
+  helper), rather than trusting either candidate — degrading to this
+  module's usual unresolvable-base false negative (safe) instead of
+  fabricating a wrong resolution (unsafe). (2) That fix was immediately
+  too broad: an ordinary, LEGAL C++ redeclaration of the SAME template
+  with renamed parameters (`template<class T, class U=T> struct A;`
+  followed by `template<class X, class Y> struct A {...};`) is one
+  entity, not two — but the two declarations' own parameter NAME lists
+  legitimately differ (`["T","U"]` vs `["X","Y"]`), which finding (1)'s
+  guard treated as a genuine conflict and dropped, breaking dependent-
+  default substitution for this ordinary shape (confirmed end-to-end:
+  masked a real virtual-method addition as `NO_CHANGE` too). Distinguished
+  the two using clang's own `previousDecl` link, confirmed empirically to
+  be present on every legal redeclaration and absent between two
+  genuinely unrelated declarations that coincidentally share a bare
+  qualname. A secondary gap surfaced while implementing this: comparing
+  `None == None` when neither node carries a real `id`/`previousDecl`
+  (reachable for a hand-built test fixture without them) spuriously
+  matched — guarded with an explicit truthiness check.
+
+  **The same round's third finding is real but confirmed to be the
+  IDENTICAL accepted degradation as (1), not a new false positive.** When
+  one member template `Outer<T>::A<U=T>` is IMPLICITLY instantiated for
+  both `Outer<int>` and `Outer<double>` (rather than explicitly
+  specialized), clang emits cloned `ClassTemplateDecl A` nodes with
+  substituted defaults (`int`/`double`) but — confirmed empirically — NO
+  `previousDecl` link between them (they are independent implicit
+  instantiations of the same primary pattern, not redeclarations of each
+  other). This reaches the exact same bare-qualname collision as finding
+  (1), and (1)'s fix correctly treats it as ambiguous and drops it. Traced
+  end-to-end through `dump()`/`compare()` with the reviewer's exact repro:
+  both `Outer<int>::A<>` and `Outer<double>::A<>` stay symmetrically
+  unresolvable (empty vtable on old AND new sides), producing zero
+  findings — not a false positive, the same false negative this whole
+  degradation path already accepts. The reviewer's suggested fix (key
+  metadata by the instantiated outer scope) is exactly what a prior round
+  already declined as its own larger, separate change: it would need
+  `_index_template_param_kinds`/`_defaults`/`_names` to key entries by
+  (bare qualname, enclosing specialization identity) rather than bare
+  qualname alone, threaded consistently through BOTH consumers
+  (`build_specialization_index`'s own base-lookup walk AND
+  `dumper_clang.py`'s `_walk` owner-qualification path) — real,
+  bounded work, but a genuine architectural change to the shared index
+  functions' key shape, not a drive-by extension of the ambiguity guard.
+  Left as a documented, tracked limitation rather than attempted here.
+
 - ~~Single-AST reuse for the direct-clang backend~~ **Done** (see above) —
   via in-process memoization of `_clang_header_dump`'s result, not by
   threading the parser's already-consumed AST object through
