@@ -18,14 +18,15 @@
 Split out of ``inline.py`` (which sits at its 2000-line hard cap) to keep
 adding scoping/coverage fields — ``narrowed_scope``, ``degraded_passes`` —
 from pushing that file over the limit (ADR-041 P0). ``inline.py`` imports
-:func:`fold_call_graph`/:func:`fold_type_graph`/:func:`fold_include_graph` and
-calls them exactly as it called the former same-module
-``_fold_call_graph``/``_fold_type_graph``.
+:func:`fold_call_graph`/:func:`fold_type_graph`/:func:`fold_include_graph`/
+:func:`fold_archive_graph` and calls them exactly as it called the former
+same-module ``_fold_call_graph``/``_fold_type_graph``.
 """
 
 from __future__ import annotations
 
 from dataclasses import replace
+from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from .build_evidence import BuildEvidence
@@ -122,7 +123,8 @@ def _scope_narrowed_target(
     changed_paths: tuple[str, ...],
     scoped_units: list[Any] | None,
 ) -> tuple[BuildEvidence, str, bool, frozenset[str]]:
-    """Shared scoping decision for :func:`fold_call_graph`/``fold_type_graph``.
+    """Shared scoping decision for :func:`fold_call_graph`/``fold_type_graph``/
+    ``fold_template_graph``/``fold_include_graph``.
 
     Returns ``(target, scoped_note, narrowed, scope_key)`` — ``scope_key`` is
     the actual scope a narrowed run examined (``changed_paths``, or the
@@ -343,7 +345,7 @@ def fold_override_graph(
     candidate set a virtual call's ``CALL_KIND_VIRTUAL``/
     ``RESOLUTION_OVERAPPROX`` (``call_graph.py``) can be resolved against.
     Run only when the caller also runs the call/type graph
-    (``with_call_graph``), same as the other two Clang passes.
+    (``with_call_graph``), same as the other Clang passes.
     """
     from .call_graph import extractor_pass_fully_covered, narrowed_pass_confirmed
     from .override_graph import (
@@ -397,6 +399,81 @@ def fold_override_graph(
             detail=(
                 f"{added} override edges from {len(target.compile_units)} compile "
                 f"unit(s){scoped_note}{timing}"
+            ),
+        )
+    )
+
+
+def fold_template_graph(
+    graph: SourceGraphSummary,
+    merged: BuildEvidence,
+    clang_bin: str,
+    extractors: list[ExtractorRecord] | None,
+    changed_paths: tuple[str, ...] = (),
+    scoped_units: list[Any] | None = None,
+) -> None:
+    """Best-effort Clang template-instantiation augmentation of *graph*
+    (G29 Phase 5 item 1).
+
+    Mirrors :func:`fold_type_graph` exactly (same scoping precedence, same
+    graceful degradation on a missing ``clang++``) but folds
+    ``DECL_INSTANTIATES_TEMPLATE``/``TEMPLATE_USES_TYPE``/
+    ``INSTANTIATION_EMITS_SYMBOL`` edges — see
+    ``template_graph.py``'s own module docstring for the empirically-
+    verified AST shapes this closes over. Run only when the caller also
+    runs the call/type graph (``with_call_graph``), sharing the same
+    scoping decision and clang-availability diagnostic story.
+    """
+    from .call_graph import (
+        extractor_pass_fully_covered,
+        narrowed_pass_confirmed,
+        project_source_files,
+    )
+    from .template_graph import (
+        ClangTemplateGraphExtractor,
+        augment_graph_with_templates,
+    )
+
+    rows = extractors if extractors is not None else []
+    extractor = ClangTemplateGraphExtractor(
+        clang_bin=clang_bin if clang_bin != "clang" else "clang++"
+    )
+    if not extractor.available():
+        rows.append(
+            ExtractorRecord(
+                name="template_graph:clang",
+                status="failed",
+                detail=f"{extractor.clang_bin} not found; graph has no template edges",
+            )
+        )
+        return
+    target, scoped_note, narrowed, scope_key = _scope_narrowed_target(
+        merged, changed_paths, scoped_units
+    )
+    instantiations = extractor.extract_from_build(target)
+    project_files = project_source_files(merged)
+    added = augment_graph_with_templates(graph, instantiations, project_files or None)
+    if extractor_pass_fully_covered(target, extractor, narrowed):
+        graph.extractor_passes["template_graph"] = True
+    elif narrowed and narrowed_pass_confirmed(target, extractor):
+        graph.narrowed_passes["template_graph"] = True
+        graph.narrowed_scope["template_graph"] = scope_key
+    elif extractor.diagnostics:
+        graph.degraded_passes["template_graph"] = True
+    for diag in extractor.diagnostics:
+        merged.diagnostics.append(f"template_graph: {diag}")
+    timing = (
+        f", {extractor.last_elapsed_s:.2f}s, jobs={extractor.last_jobs}"
+        if getattr(extractor, "last_jobs", 0)
+        else ""
+    )
+    rows.append(
+        ExtractorRecord(
+            name="template_graph:clang",
+            status="ok" if added else "partial",
+            detail=(
+                f"{len(instantiations)} instantiation(s), {added} edges from "
+                f"{len(target.compile_units)} compile unit(s){scoped_note}{timing}"
             ),
         )
     )
@@ -490,11 +567,12 @@ def fold_semantic_graphs(
 ) -> None:
     """Run every Clang-derived L5 graph pass over *graph* in one call:
     :func:`fold_call_graph`, :func:`fold_type_graph`,
-    :func:`fold_override_graph` (ADR-041 P2 item 1), then
+    :func:`fold_override_graph` (ADR-041 P2 item 1),
+    :func:`fold_template_graph` (G29 Phase 5 item 1), then
     :func:`fold_include_graph` — the exact sequence ``inline._build_inline_graph``
     ran inline before this wrapper existed, kept together here (rather than
-    four separate call sites in ``inline.py``, which sits at its own
-    line-count cap) so a future fifth pass adds one call here instead of
+    five separate call sites in ``inline.py``, which sits at its own
+    line-count cap) so a future sixth pass adds one call here instead of
     growing that file too. Each pass shares the same *changed_paths*/
     *scoped_units* scoping precedence and clang-binary resolution, and each
     degrades independently (a missing ``clang++`` or a per-TU parse failure
@@ -509,6 +587,100 @@ def fold_semantic_graphs(
     fold_override_graph(
         graph, merged, clang_bin, extractors, changed_paths, scoped_units=scoped_units
     )
+    fold_template_graph(
+        graph, merged, clang_bin, extractors, changed_paths, scoped_units=scoped_units
+    )
     fold_include_graph(
         graph, merged, clang_bin, extractors, changed_paths, scoped_units=scoped_units
+    )
+
+
+def _default_archive_search_roots(merged: BuildEvidence) -> tuple[Path, ...]:
+    """Every distinct compile-unit ``directory``, plus every distinct
+    link-unit's own ``directory`` when recorded — the default base a
+    relative archive link-input path is tried against (G29 Phase 5 item 6):
+    for most generators it's the same directory the link step itself ran
+    from. An absolute link-input path ignores this entirely (see
+    :func:`~abicheck.buildsource.archive_graph._resolve_archive_path`).
+
+    The link-unit directories matter for **link-only** evidence (no
+    ``compile_units`` at all, e.g. a Make transcript linking prebuilt
+    objects against a static archive) — without them this function returned
+    no roots whatsoever for exactly that input, so a relative archive input
+    could never be found even though the fixed `has_build` gate now reaches
+    this pass for it (Codex review, fresh evidence). Only ``adapters/
+    make.py`` populates ``LinkUnit.directory`` today (the one build system
+    with no absolute-path-carrying target graph to lean on instead); every
+    other adapter's own ``LinkUnit.inputs``/``output`` are already absolute.
+    """
+    roots: list[Path] = []
+    for cu in merged.compile_units:
+        if cu.directory and Path(cu.directory) not in roots:
+            roots.append(Path(cu.directory))
+    for link in merged.link_units:
+        if link.directory and Path(link.directory) not in roots:
+            roots.append(Path(link.directory))
+    return tuple(roots)
+
+
+def fold_archive_graph(
+    graph: SourceGraphSummary,
+    merged: BuildEvidence,
+    extractors: list[ExtractorRecord] | None,
+    *,
+    search_roots: tuple[Path, ...] = (),
+) -> None:
+    """``ar``-index introspection over *graph*'s ``static_library`` nodes
+    (G29 Phase 5 item 6): populates ``ARCHIVE_CONTAINS_OBJECT``/
+    ``OBJECT_DEFINES_SYMBOL``, closing the last of the five graph families
+    G29.6 named.
+
+    Unlike :func:`fold_call_graph`/:func:`fold_type_graph`/
+    :func:`fold_include_graph`, this pass needs no compiler at all — it reads
+    the archive's own symbol index off disk — so it always runs whenever the
+    graph has at least one ``static_library`` node, independent of
+    ``with_call_graph``/clang availability. *search_roots* are tried, in
+    order, for a link-input path that is not already absolute; when omitted
+    (the ``inline.py`` caller's only use today), they default to
+    :func:`_default_archive_search_roots`.
+
+    Coverage honesty mirrors the clang-backed passes: ``archive_graph`` in
+    ``extractor_passes`` means every ``static_library`` node the graph named
+    was found, opened, and carried a linker-readable symbol index —
+    :attr:`~abicheck.buildsource.archive_graph.ArchiveGraphResult.complete`.
+    Anything less (some archives missing, unreadable, or built without an
+    index) is a ``degraded_passes`` entry with the per-archive reasons on the
+    extractor row's ``detail`` — never silently upgraded to "confirmed", and
+    never downgraded to an error (ADR-028 D3): the nodes/edges this pass did
+    manage to extract stay in the graph either way.
+    """
+    from .archive_graph import augment_graph_with_archives
+
+    if not any(n.kind == "static_library" for n in graph.nodes):
+        return  # no archive link inputs recorded — nothing to introspect
+    rows = extractors if extractors is not None else []
+    result = augment_graph_with_archives(
+        graph, search_roots=search_roots or _default_archive_search_roots(merged)
+    )
+    if result.complete:
+        graph.extractor_passes["archive_graph"] = True
+    elif result.archives_read > 0 or result.diagnostics:
+        graph.degraded_passes["archive_graph"] = True
+    rows.append(
+        ExtractorRecord(
+            name="archive_graph:ar_index",
+            status="ok"
+            if result.complete
+            else ("partial" if result.archives_read else "failed"),
+            detail=(
+                f"{result.archives_read}/{result.archives_seen} archive(s) read, "
+                f"{result.members} member(s), {result.symbol_edges} symbol edge(s)"
+                + (
+                    f", {result.unjoined_symbols} unjoined"
+                    if result.unjoined_symbols
+                    else ""
+                )
+                + ("; " + "; ".join(result.diagnostics) if result.diagnostics else "")
+            ),
+        )
     )

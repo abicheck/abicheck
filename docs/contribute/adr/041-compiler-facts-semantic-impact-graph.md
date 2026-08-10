@@ -1264,11 +1264,24 @@ there is no equivalent "should this be automatic" question for them.
    *same* node instead of a disconnected duplicate, so a change traced to one
    object correlates across both slices. `LINK_UNIT_EXPORTS_SYMBOL` is added
    once `_augment_with_source_abi` resolves which symbols the owning target
-   actually exports. `archive_member`/`linker_script`/`export_map`/
-   `comdat_group` and the `ARCHIVE_CONTAINS_OBJECT`/`OBJECT_DEFINES_SYMBOL`
-   edges stay reserved (schema-only): true archive-member/per-object-symbol
-   enumeration needs a real `ar`/`nm`-equivalent introspection extractor this
-   increment does not add.
+   actually exports. `linker_script`/`export_map`/`comdat_group` stay
+   reserved (schema-only) — no normalized data source for those three yet.
+   **`archive_member` and the `ARCHIVE_CONTAINS_OBJECT`/
+   `OBJECT_DEFINES_SYMBOL` edges: done (G29 Phase 5 item 6)** —
+   `abicheck/buildsource/archive_graph.py`'s `augment_graph_with_archives`
+   is the real archive-introspection pass this item originally deferred: a
+   pure parser over the `ar` container's own linker-written symbol index
+   (GNU `/`/`/SYM64/` and BSD/Mach-O `__.SYMDEF`/`__.SYMDEF_64`, both plain
+   and thin-archive flavors), driven by
+   `inline_graph_fold.fold_archive_graph` over every `static_library` node
+   `_fold_link_provenance` already created. Needs no compiler, so it runs
+   whenever a graph has archive link inputs, independent of clang
+   availability. An `OBJECT_DEFINES_SYMBOL` edge only ever joins onto a
+   `binary_symbol` node the graph already carries (the same "one shared
+   node id is the whole join mechanism" rule ADR-057 D1 states for the
+   consumer graph) — an archive's thousands of internal-only symbols mint
+   no node, keeping the graph compact (ADR-031 D7). See
+   `docs/reference/source-graph-schema.md` for the field-level detail.
 3. ~~**Public-entry impact closure.**~~ — **done, this change.**
    `poi.resolve_changed_paths_public_impact(changed_paths, graph)`
    is the reverse of `resolve_symbol_tus` (export delta → declaring TU): given
@@ -1348,7 +1361,7 @@ there is no equivalent "should this be automatic" question for them.
 ### P2 — advanced / differentiating
 
 1. ~~Virtual-dispatch/class-hierarchy graph with possible-override edges~~ —
-   **done, this change** (`abicheck/buildsource/override_graph.py`): a new
+   **done** (`abicheck/buildsource/override_graph.py`): a new
    `METHOD_POSSIBLE_OVERRIDE` edge kind closes the loop the call graph's
    `CALL_KIND_VIRTUAL`/`RESOLUTION_OVERAPPROX` opened. Built from the class
    hierarchy `type_graph.py`'s own resolved `TYPE_INHERITS` edges already
@@ -1367,11 +1380,26 @@ there is no equivalent "should this be automatic" question for them.
    covariant-return overrides (a documented false negative — a covariant
    override's `type.qualType` genuinely differs from its base's, so this
    matcher correctly declines rather than risk a wrong match). Folded
-   automatically alongside the call/type graph via
+   automatically alongside the call/type/template/include graph via
    `inline_graph_fold.fold_semantic_graphs` — no separate opt-in flag.
-2. Template pattern ↔ instantiation ↔ exported-symbol graph (partially
-   present via `source_link.py`'s `template_instantiation_symbol_to_decl`
-   attribution; not yet a graph edge).
+2. ~~Template pattern ↔ instantiation ↔ exported-symbol graph~~ — **done
+   (G29 Phase 5 item 1)**. `source_link.py`'s `template_instantiation_symbol_to_decl`
+   attribution predates this and stays as-is (a different layer, L4's own
+   linking step); the graph edge this item asked for is
+   `abicheck/buildsource/template_graph.py`: a third, independent
+   `clang -ast-dump=json` pass minting `template_decl`/
+   `template_instantiation` nodes and `DECL_INSTANTIATES_TEMPLATE`/
+   `TEMPLATE_USES_TYPE`/`INSTANTIATION_EMITS_SYMBOL` edges, driven by
+   `inline_graph_fold.fold_semantic_graphs` (via `fold_template_graph`)
+   alongside the call/type/override graph passes. `TEMPLATE_USES_DECL`/
+   `INSTANTIATION_MAPS_TO_EXPORT`/`DECL_USES_DEFAULT_TEMPLATE_ARG`/
+   `CONSTRAINT_DEPENDS_ON_DECL` remain reserved, unpopulated vocabulary —
+   see the module's own docstring for why each is deferred (a non-type/
+   function-pointer argument needing its own AST verification, redundancy
+   with `BINARY_EXPORTS_SYMBOL` on the already-joined symbol node,
+   explicit-vs-defaulted argument detection, and C++20 concepts needing a
+   separate AST subsystem, respectively). See
+   `docs/reference/source-graph-schema.md` for the field-level detail.
 3. Macro expansion/reference graph for public headers (`DECL_USES_MACRO`) —
    `preprocessor_scan.py` (ADR-035 D2) already captures macro facts at the S2
    tier; this would connect them into the same graph instead of a separate

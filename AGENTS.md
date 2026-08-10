@@ -479,6 +479,13 @@ Core pipeline (in order of data flow):
    (collect/merge/source-ABI replay/source graph; ADR-028…033). See
    `abicheck/buildsource/CLAUDE.md` for its module map.
 
+10. **Published Agent Skills (ADR-058)** — `skills-src/` is the one
+   hand-authored source (four `SKILL.md` files in Layer A, one `shared/`
+   tree of Layer-B domain fragments); `scripts/gen_agent_skills.py`
+   publishes it into three committed, self-contained trees
+   (`.agents/skills/`, `.claude/skills/`, `.gemini/skills/`). Never
+   hand-edit the generated trees. See `skills-src/CLAUDE.md`.
+
 Beyond the core package: `.github/AGENTS.md` (CI/workflow architecture),
 `action/AGENTS.md` (the composite GitHub Action's shell-script layer), and
 `contrib/abicheck-clang-plugin/AGENTS.md` (the optional Clang facts plugin)
@@ -539,10 +546,10 @@ CI runs `mypy abicheck/` as a required gate. The baseline is currently **0 error
 | Check | Severity | What it enforces |
 |-------|----------|------------------|
 | `file-size` | ERROR > 2000 lines, WARN > 1500 | Every first-party Python tree (`abicheck/`, `scripts/`, `tests/`, `eval/`, `validation/`, `action/`, the clang plugin's `tests/` — `FIRST_PARTY_PY_ROOTS`) stays legible. `LARGE_FILE_ALLOWLIST` downgrades a specific pre-existing violator to WARN with a reviewed reason — it is not a way to silently exempt a new file |
-| `claude-md-coverage` | ERROR | `CLAUDE.md` exists in each original major sub-tree (`REQUIRED_CLAUDE_MD_DIRS`) |
+| `claude-md-coverage` | ERROR | `CLAUDE.md` exists in each original major sub-tree (`REQUIRED_CLAUDE_MD_DIRS`, which now also covers `skills-src/`) |
 | `agent-instructions-coverage` | ERROR | `AGENTS.md` or `CLAUDE.md` exists in `.github/`, `action/`, `contrib/abicheck-clang-plugin/` (`REQUIRED_AGENT_INSTRUCTION_DIRS`) |
 | `script-inventory` | WARN | Every `scripts/*.py` is named in `scripts/CLAUDE.md`'s inventory table — an unlisted script is invisible to that discovery path |
-| `generated-file-ownership` | ERROR | A known-generated file (`GENERATED_FILE_MARKERS`, plus every `docs/reference/examples/case*.md`) still carries its "this is generated, don't hand-edit" marker comment |
+| `generated-file-ownership` | ERROR | A known-generated file (`GENERATED_FILE_MARKERS`, plus every `docs/reference/examples/case*.md`, plus every `*.md` under the three generated agent-skill trees — `.agents/skills/`, `.claude/skills/`, `.gemini/skills/` — scoped to the skill directories `scripts/gen_agent_skills.py` actually owns, so a hand-authored skill sharing an output root is not flagged) still carries its "this is generated, don't hand-edit" marker comment |
 | `test-ratio` | WARN | At least 20% test-to-source file ratio; test files are discovered recursively under `tests/` (not just top-level) |
 | `future-annotations` | WARN | `from __future__ import annotations` per this file's convention |
 | `changekind-partition` | ERROR | Every `ChangeKind` is in exactly one of `BREAKING_KINDS` / `API_BREAK_KINDS` / `COMPATIBLE_KINDS` / `RISK_KINDS` |

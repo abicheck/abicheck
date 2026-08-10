@@ -59,6 +59,10 @@ from .graph_facts import (
     CONF_UNKNOWN as CONF_UNKNOWN,
     CONSUMER_EDGE_KINDS,  # G29 Phase 4 (ADR-057)
     CONSUMER_NODE_KINDS,
+    LINK_PROVENANCE_EDGE_KINDS,  # ADR-041 P1 #2
+    LINK_PROVENANCE_NODE_KINDS,
+    TEMPLATE_EDGE_KINDS,  # G29 Phase 5 item 1
+    TEMPLATE_NODE_KINDS,
     USE_CASE_EDGE_KINDS,  # G29 Phase 4 slice 2 (ADR-057 amendment)
     USE_CASE_NODE_KINDS,
     FactConflict as FactConflict,
@@ -114,19 +118,11 @@ NODE_KINDS: frozenset[str] = frozenset(
         "toolchain",
         "generated_file",
         "external_dependency",
-        # ADR-041 P1 #2: object/link provenance (a symbol change attributed to "which object/archive member/link step", not only "which target"). object_file/static_library/version_script are populated
-        # from BuildEvidence.compile_units/link_units below; archive_member/linker_script/export_map/comdat_group are reserved for a future archive/linker-artifact introspection extractor (no normalized
-        # data source yet — same "reserved, not yet populated" pattern this ADR's own P0 slice 1 used for the edge kinds it later filled in), so an inputs-pack/hand-built graph naming one is never rejected.
-        "object_file",
-        "archive_member",
-        "static_library",
-        "linker_script",
-        "version_script",
-        "export_map",
-        "comdat_group",
     }
     | CONSUMER_NODE_KINDS
     | USE_CASE_NODE_KINDS
+    | TEMPLATE_NODE_KINDS
+    | LINK_PROVENANCE_NODE_KINDS
 )
 
 #: Edge kinds the graph schema understands (ADR-031 D2).
@@ -154,21 +150,11 @@ EDGE_KINDS: frozenset[str] = frozenset(
         "BUILD_OPTION_AFFECTS_SYMBOL",
         "FINDING_LOCALIZES_TO_DECL",
         "FINDING_CAUSED_BY_OPTION",
-        # ADR-041 P1 #2 (object/link provenance graph).
-        "TARGET_HAS_LINK_UNIT",
-        "COMPILE_UNIT_EMITS_OBJECT",
-        "LINK_UNIT_HAS_INPUT",
-        "LINK_UNIT_USES_VERSION_SCRIPT",
-        "LINK_UNIT_EXPORTS_SYMBOL",
-        # Reserved (no normalized data source yet — see the NODE_KINDS note
-        # above): a future archive/nm-style introspection extractor emits
-        # these against the object_file/static_library nodes this phase
-        # already creates.
-        "ARCHIVE_CONTAINS_OBJECT",
-        "OBJECT_DEFINES_SYMBOL",
     }
     | CONSUMER_EDGE_KINDS
     | USE_CASE_EDGE_KINDS
+    | TEMPLATE_EDGE_KINDS
+    | LINK_PROVENANCE_EDGE_KINDS
 )
 
 #: L5 edge kinds that express a decl/type dependency (ADR-041 P0): a call, a
@@ -703,10 +689,10 @@ def _version_script_node_id(path: str) -> str:
     return f"version_script://{path}"
 
 
-#: Suffixes that identify a static-library archive among a LinkUnit's inputs
-#: (ADR-041 P1 #2) — everything else is treated as an object file. Best-effort
-#: textual classification (no archive introspection), mirroring this module's
-#: existing approximate-by-design conventions elsewhere.
+#: Suffixes identifying a static-library archive among a LinkUnit's inputs
+#: (ADR-041 P1 #2). Lowercase only — compared case-insensitively below
+#: (Codex review): Windows evidence can spell this uppercase (``FOO.LIB``),
+#: hidden from ``archive_graph.py`` otherwise, same as ``adapters/make.py``.
 _STATIC_LIBRARY_SUFFIXES = (".a", ".lib")
 
 
@@ -1243,13 +1229,14 @@ def _fold_link_provenance(graph: SourceGraphSummary, build: BuildEvidence) -> No
       duplicate, so a change traced to one object correlates across both
       slices. A non-empty ``version_script`` gets its own node
       (``LINK_UNIT_USES_VERSION_SCRIPT``).
-    - ``archive_member``/``linker_script``/``export_map``/``comdat_group`` and
-      the ``ARCHIVE_CONTAINS_OBJECT``/``OBJECT_DEFINES_SYMBOL`` edges stay
-      reserved (schema-only): true archive-member/per-object-symbol
-      enumeration needs a real archive/object introspection extractor
-      (``ar``/``nm``-equivalent) this increment does not add, matching the
-      same "reserved, not yet populated" pattern this ADR's own P0 slice 1
-      used for the edge kinds it later filled in.
+    - ``linker_script``/``export_map``/``comdat_group`` stay reserved
+      (schema-only) — no normalized data source for those three yet.
+      ``archive_member``/``ARCHIVE_CONTAINS_OBJECT``/``OBJECT_DEFINES_SYMBOL``
+      are *not* populated here — that needs a real archive introspection
+      pass (:mod:`~abicheck.buildsource.archive_graph`, G29 Phase 5 item 6),
+      run separately over the ``static_library`` nodes this function
+      creates; this function only classifies a link input by filename
+      suffix, it never opens the archive.
 
     ``LINK_UNIT_EXPORTS_SYMBOL`` (a link unit's own exported symbols) is added
     by :func:`_augment_with_source_abi` instead, once ``BINARY_EXPORTS_SYMBOL``
@@ -1311,7 +1298,7 @@ def _fold_link_provenance(graph: SourceGraphSummary, build: BuildEvidence) -> No
         for inp in link.inputs:
             if not inp:
                 continue
-            is_archive = inp.endswith(_STATIC_LIBRARY_SUFFIXES)
+            is_archive = inp.lower().endswith(_STATIC_LIBRARY_SUFFIXES)
             iid = _static_library_node_id(inp) if is_archive else _object_node_id(inp)
             if not graph.has_node(iid):
                 graph.add_node(
@@ -1469,6 +1456,20 @@ def _augment_with_source_abi(
     for symbol in decl_to_sym.values():
         if symbol:
             export_symbol(symbol, CONF_REDUCED)
+    # source_link.py accounts for a real export under several other mappings
+    # too (each keyed *by* the symbol, unlike decl_to_sym): template-
+    # instantiation/synthesized/allocator-interposer/undocumented exports.
+    # Omitting these left no binary_symbol node for a downstream pass's
+    # join-only-onto-an-existing-node rule to find (Codex review).
+    for mapping_name in (
+        "template_instantiation_symbol_to_decl",
+        "synthesized_symbol_to_owner",
+        "allocator_interposer_symbol_to_owner",
+        "non_public_symbol_to_reason",
+    ):
+        for symbol in surface.mappings.get(mapping_name, {}):
+            if symbol:
+                export_symbol(symbol, CONF_REDUCED)
 
     declarations = (
         *surface.reachable_declarations,

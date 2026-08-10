@@ -20,6 +20,7 @@ Adapters for compile_commands.json, CMake File API, Ninja, Bazel, and Make
 stable public schema (ADR-028 D4). Stored as ``build/build_evidence.json``
 inside an evidence pack.
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass, field
@@ -49,9 +50,9 @@ class Confidence(str, Enum):
 class Generator:
     """A build-system generator that produced the tree (ADR-029 D1)."""
 
-    kind: str = "generic"           # cmake | ninja | bazel | make | generic
+    kind: str = "generic"  # cmake | ninja | bazel | make | generic
     version: str = ""
-    generator: str = ""             # e.g. CMake's backend "Ninja"
+    generator: str = ""  # e.g. CMake's backend "Ninja"
 
     def to_dict(self) -> dict[str, Any]:
         return {"kind": self.kind, "version": self.version, "generator": self.generator}
@@ -69,11 +70,11 @@ class Generator:
 class Toolchain:
     """A compiler/toolchain referenced by compile units (ADR-029 D4, D8)."""
 
-    id: str                         # "toolchain://gcc-14-cxx"
+    id: str  # "toolchain://gcc-14-cxx"
     path: str = ""
-    compiler_id: str = ""           # "GNU" | "Clang" | "MSVC"
+    compiler_id: str = ""  # "GNU" | "Clang" | "MSVC"
     version: str = ""
-    language: str = ""              # "C" | "CXX"
+    language: str = ""  # "C" | "CXX"
     implicit_include_dirs: list[str] = field(default_factory=list)
     implicit_link_dirs: list[str] = field(default_factory=list)
     target_triple: str = ""
@@ -108,7 +109,7 @@ class Toolchain:
 class Target:
     """A build target: library/executable mapping (ADR-029 D2)."""
 
-    id: str                         # "target://libfoo"
+    id: str  # "target://libfoo"
     name: str = ""
     kind: TargetKind = TargetKind.UNKNOWN
     build_system: str = "generic"
@@ -117,7 +118,7 @@ class Target:
     private_headers: list[str] = field(default_factory=list)
     outputs: list[str] = field(default_factory=list)
     dependencies: list[str] = field(default_factory=list)
-    visibility: str = "unknown"     # public | private | interface | unknown
+    visibility: str = "unknown"  # public | private | interface | unknown
     confidence: Confidence = Confidence.UNKNOWN
 
     def to_dict(self) -> dict[str, Any]:
@@ -156,15 +157,15 @@ class Target:
 class CompileUnit:
     """One translation-unit compile action (ADR-029 D2, D3)."""
 
-    id: str                         # "cu://src/foo.cpp#cfg:abc123"
+    id: str  # "cu://src/foo.cpp#cfg:abc123"
     source: str = ""
     output: str = ""
     directory: str = ""
     target_id: str = ""
-    compiler: str = ""              # "toolchain://gcc-14-cxx"
+    compiler: str = ""  # "toolchain://gcc-14-cxx"
     argv: list[str] = field(default_factory=list)
-    language: str = ""              # "C" | "CXX"
-    standard: str = ""              # "c++20"
+    language: str = ""  # "C" | "CXX"
+    standard: str = ""  # "c++20"
     defines: dict[str, str] = field(default_factory=dict)
     undefines: list[str] = field(default_factory=list)
     include_paths: list[str] = field(default_factory=list)
@@ -173,7 +174,7 @@ class CompileUnit:
     sysroot: str | None = None
     target_triple: str = ""
     abi_relevant_flags: list[str] = field(default_factory=list)
-    raw_ref: str = ""               # content-addressed path under raw/
+    raw_ref: str = ""  # content-addressed path under raw/
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -225,14 +226,22 @@ class CompileUnit:
 class LinkUnit:
     """One link action producing a shared/static library or executable (D2)."""
 
-    id: str                         # "link://libfoo.so"
+    id: str  # "link://libfoo.so"
     target_id: str = ""
     output: str = ""
     kind: str = "shared_library"
     inputs: list[str] = field(default_factory=list)
     linker_argv: list[str] = field(default_factory=list)
-    version_script: str = ""        # exports.map / .def / version script
+    version_script: str = ""  # exports.map / .def / version script
     soname: str = ""
+    # The link action's own working directory (redacted, mirrors
+    # CompileUnit.directory) -- populated only by adapters/make.py today
+    # (dry-run transcript scraping, the one build system with no absolute-
+    # path-carrying target graph to lean on instead). Empty when unknown
+    # (every other adapter's own inputs/output are already absolute).
+    # Additive field: defensive .get() parsing keeps this forward/backward
+    # compatible without a BUILD_EVIDENCE_VERSION bump (Codex review).
+    directory: str = ""
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -244,6 +253,7 @@ class LinkUnit:
             "linker_argv": list(self.linker_argv),
             "version_script": self.version_script,
             "soname": self.soname,
+            "directory": self.directory,
         }
 
     @classmethod
@@ -257,6 +267,7 @@ class LinkUnit:
             linker_argv=list(d.get("linker_argv", [])),
             version_script=str(d.get("version_script", "")),
             soname=str(d.get("soname", "")),
+            directory=str(d.get("directory", "")),
         )
 
 
@@ -273,8 +284,8 @@ class BuildOption:
     key: str
     value: str = ""
     abi_relevant: bool = False
-    scope: str = "global"           # global | target:<id> | compile-unit:<id>
-    raw: str = ""                   # original flag text, redacted
+    scope: str = "global"  # global | target:<id> | compile-unit:<id>
+    raw: str = ""  # original flag text, redacted
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -301,8 +312,8 @@ class BuildEvidence:
     """Top-level normalized build evidence (ADR-029 D1)."""
 
     schema_version: int = BUILD_EVIDENCE_VERSION
-    source_root: str = ""           # "repo://root" — redacted
-    build_root: str = ""            # "build://root" — redacted
+    source_root: str = ""  # "repo://root" — redacted
+    build_root: str = ""  # "build://root" — redacted
     generators: list[Generator] = field(default_factory=list)
     toolchains: list[Toolchain] = field(default_factory=list)
     targets: list[Target] = field(default_factory=list)
@@ -338,10 +349,14 @@ class BuildEvidence:
             generators=[Generator.from_dict(g) for g in d.get("generators", [])],
             toolchains=[Toolchain.from_dict(t) for t in d.get("toolchains", [])],
             targets=[Target.from_dict(t) for t in d.get("targets", [])],
-            compile_units=[CompileUnit.from_dict(c) for c in d.get("compile_units", [])],
+            compile_units=[
+                CompileUnit.from_dict(c) for c in d.get("compile_units", [])
+            ],
             link_units=[LinkUnit.from_dict(link) for link in d.get("link_units", [])],
             generated_files=list(d.get("generated_files", [])),
-            build_options=[BuildOption.from_dict(o) for o in d.get("build_options", [])],
+            build_options=[
+                BuildOption.from_dict(o) for o in d.get("build_options", [])
+            ],
             diagnostics=list(d.get("diagnostics", [])),
             raw_artifacts=list(d.get("raw_artifacts", [])),
         )
@@ -359,7 +374,9 @@ class BuildEvidence:
         _merge_by_id(self.targets, other.targets)
         _merge_by_id(self.compile_units, other.compile_units)
         _merge_by_id(self.link_units, other.link_units)
-        self.generated_files = sorted(set(self.generated_files) | set(other.generated_files))
+        self.generated_files = sorted(
+            set(self.generated_files) | set(other.generated_files)
+        )
         # De-duplicate build options by (key, value) so running two adapters on
         # one tree (e.g. compile DB + Ninja) doesn't store the same option twice.
         seen_opts = {(o.key, o.value) for o in self.build_options}

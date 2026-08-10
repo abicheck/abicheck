@@ -47,6 +47,8 @@ checks and is left as a follow-up.
 from __future__ import annotations
 
 import re
+from collections.abc import Callable
+from typing import ClassVar
 
 __all__ = [
     "ITANIUM_RTTI_PREFIXES",
@@ -649,6 +651,192 @@ def _find_matching_close(name: str, open_idx: int) -> int:
     return len(name) - 1
 
 
+def _skip_spaces(name: str, i: int, end: int) -> int:
+    """First non-space index at or after *i*, bounded by *end*."""
+    while i < end and name[i].isspace():
+        i += 1
+    return i
+
+
+def _skip_trailing_cv_tokens(name: str, i: int, end: int) -> int:
+    """Skip past every cv token (and surrounding space) starting at *i*.
+
+    A cv qualifier immediately following a REAL parameter list's closing paren
+    is a member-function-POINTER's own cv-qualification (e.g.
+    ``"void (C::*)(int) const"`` -- the pointer points to a const member
+    function) -- a genuinely different, non-interchangeable type (confirmed
+    against real g++ mangling: two same-named overloads differing only in this
+    trailing const compile as distinct symbols, matching the existing
+    FUNC_CV_CHANGED precedent for a member function's own const/volatile).
+    Never neutral, regardless of strict/non-strict context or position relative
+    to any pointer sigil -- skipping past it leaves it completely untouched
+    rather than stripping it (permissive/non-strict mode) or treating it as a
+    stripping candidate (strict mode) (CodeRabbit review, PR #589).
+    """
+    i = _skip_spaces(name, i, end)
+    m = _CV_TOKEN_RE.match(name, i)
+    while m and m.end() <= end:
+        i = _skip_spaces(name, m.end(), end)
+        m = _CV_TOKEN_RE.match(name, i)
+    return i
+
+
+def _is_declarator_grouping_paren(name: str, close_idx: int, end: int) -> bool:
+    """Whether the paren closing at *close_idx* groups a declarator rather than
+    opening a parameter list.
+
+    A pointer/pointer-to-member DECLARATOR-GROUPING paren -- e.g. the
+    ``"(*)"``/``"(*const)"``/``"(C::*)"`` in ``"RetType (*)(Params)"``/
+    ``"RetType (C::*)(Params)"`` -- is recognized structurally by being
+    immediately followed by ANOTHER top-level paren/bracket (the real parameter
+    list or array dimensions), regardless of what's inside it (a bare sigil, or
+    a qualified pointer-to-member ``"Class::*"`` -- deliberately NOT restricted
+    to "only sigils/cv tokens inside", since that missed the class-qualified
+    case: Codex review, PR #589, round 2).
+    """
+    k = _skip_spaces(name, close_idx + 1, end)
+    return k < end and name[k] in "(["
+
+
+class _CvSegmentScan:
+    """One scan of ``name[start:end]``, blanking strippable cv tokens in
+    *chars*.
+
+    Split out of :func:`_strip_cv_in_segment` so each syntactic case is its own
+    named method rather than a branch in one long loop; the per-case rules
+    below are exactly the ones that function's docstring states, and each
+    method carries the evidence for its own rule.
+    """
+
+    #: Which method handles a given leading character (bound below, once the
+    #: methods exist). Every other character falls through to
+    #: :meth:`_at_other`, which is where a cv token is actually recognized.
+    _HANDLERS: ClassVar[dict[str, Callable[[_CvSegmentScan, int], int]]]
+
+    def __init__(self, name: str, chars: list[str], end: int, *, strict: bool):
+        self.name = name
+        self.chars = chars
+        self.end = end
+        self.strict = strict
+        self.last_ptr_pos: int | None = None
+        self.candidates: list[tuple[int, int]] = []
+
+    def run(self, start: int) -> None:
+        i = start
+        while i < self.end:
+            handler = self._HANDLERS.get(self.name[i], _CvSegmentScan._at_other)
+            i = handler(self, i)
+        self._flush()
+
+    def _flush(self) -> None:
+        """Blank every candidate not shadowed by a pointer sigil to its left.
+
+        In strict mode the pointee-vs-pointer-own position is resolved
+        independently PER comma-separated parameter within this paren (a
+        callback can itself take multiple parameters, e.g.
+        ``void (*)(int*, const int)`` -- the second parameter's own by-value cv
+        must not be judged against the FIRST parameter's unrelated pointer
+        sigil), which is why this runs at each comma as well as at the end.
+        """
+        for tok_start, tok_end in self.candidates:
+            if self.last_ptr_pos is None or tok_start > self.last_ptr_pos:
+                for k in range(tok_start, tok_end):
+                    self.chars[k] = " "
+        self.candidates.clear()
+
+    def _at_angle(self, i: int) -> int:
+        """``<...>`` is skipped whole: a cv qualifier inside a
+        template-argument list names a genuinely different type
+        (``Box<const int>`` vs. ``Box<int>``; Codex/CodeRabbit review, PR
+        #582)."""
+        return min(_find_matching_close(self.name, i), self.end - 1) + 1
+
+    def _at_bracket(self, i: int) -> int:
+        """``[...]`` is skipped whole, and may move the pointer boundary."""
+        j = min(_find_matching_close(self.name, i), self.end - 1)
+        if self.last_ptr_pos is None:
+            # An array-typed function PARAMETER (no preceding pointer sigil in
+            # this segment yet) decays to a pointer, so a cv qualifier before
+            # it is pointee-position, not by-value -- same non-strippable
+            # treatment as a real pointer sigil (confirmed against real
+            # clang/gcc mangling: void(*)(int[3]) and void(*)(const int[3])
+            # are different, non-interchangeable function pointer types, same
+            # as the int*/const int* case). Only matters in strict mode;
+            # harmless otherwise since non-strict stripping ignores
+            # last_ptr_pos entirely (Codex review, PR #589).
+            self.last_ptr_pos = i
+        # else: a "[...]" AFTER an already-seen pointer sigil is the POINTEE's
+        # array bound (e.g. "int (*)[3]" -- a pointer to an array, not a
+        # decaying array parameter), analogous to a callback's own parameter
+        # list: it doesn't move last_ptr_pos, so the declarator's own preceding
+        # qualifier (e.g. "int (* const)[3]") stays recognized as its own
+        # trailing cv, dropped for mangling (confirmed identical types by real
+        # g++: two same-named overloads differing only in that const are a hard
+        # redefinition error, not distinct overloads) -- treating this "[" the
+        # same as the decay case above wrongly moved the boundary past the
+        # declarator's own const, leaving it unstrippable (Codex review, PR
+        # #589, round 3).
+        return j + 1
+
+    def _at_paren(self, i: int) -> int:
+        """``(...)`` is either a declarator grouping (stepped into in place) or
+        a real parameter list (recursed into with ``strict=True``)."""
+        j = min(_find_matching_close(self.name, i), self.end - 1)
+        if _is_declarator_grouping_paren(self.name, j, self.end):
+            # NOT itself a nested parameter list, so don't open a fresh strict
+            # scope for it: its "*" is the CURRENT (possibly
+            # nested-callback-parameter's own) declarator's top-level sigil and
+            # must stay visible to it. Recursing here would hide that "*"
+            # inside an isolated scan whose own last_ptr_pos never reaches this
+            # scope's tracking, so a callback parameter that is itself a
+            # function pointer with a cv-qualified return type
+            # (``void(*)(int (*)())`` vs. ``void(*)(const int (*)())`` --
+            # confirmed distinct, non-interchangeable types by real g++
+            # mangling) had its return-type cv wrongly treated as the callback
+            # parameter's own neutral by-value qualifier instead. Just step
+            # past the "(" and let this same scan process the interior in
+            # place.
+            return i + 1
+        _strip_cv_in_segment(self.name, self.chars, i + 1, j, strict=True)
+        return _skip_trailing_cv_tokens(self.name, j + 1, self.end)
+
+    def _at_comma(self, i: int) -> int:
+        """A strict-mode comma closes one callback parameter's own scope."""
+        if not self.strict:
+            return self._at_other(i)
+        self._flush()
+        self.last_ptr_pos = None
+        return i + 1
+
+    def _at_sigil(self, i: int) -> int:
+        """``*``/``&`` moves the pointee/pointer-own boundary."""
+        self.last_ptr_pos = i
+        return i + 1
+
+    def _at_other(self, i: int) -> int:
+        """Anything else: a cv token here is recorded (strict) or blanked
+        outright (non-strict); any other character is just stepped over."""
+        m = _CV_TOKEN_RE.match(self.name, i)
+        if not (m and m.end() <= self.end):
+            return i + 1
+        if self.strict:
+            self.candidates.append((m.start(), m.end()))
+        else:
+            for k in range(m.start(), m.end()):
+                self.chars[k] = " "
+        return m.end()
+
+
+_CvSegmentScan._HANDLERS = {
+    "<": _CvSegmentScan._at_angle,
+    "[": _CvSegmentScan._at_bracket,
+    "(": _CvSegmentScan._at_paren,
+    ",": _CvSegmentScan._at_comma,
+    "*": _CvSegmentScan._at_sigil,
+    "&": _CvSegmentScan._at_sigil,
+}
+
+
 def _strip_cv_in_segment(
     name: str, chars: list[str], start: int, end: int, *, strict: bool
 ) -> None:
@@ -685,130 +873,7 @@ def _strip_cv_in_segment(
     (*)(int*, const int)`` — the second parameter's own by-value cv must
     not be judged against the FIRST parameter's unrelated pointer sigil).
     """
-    last_ptr_pos: int | None = None
-    candidates: list[tuple[int, int]] = []
-
-    def _flush() -> None:
-        for tok_start, tok_end in candidates:
-            if last_ptr_pos is None or tok_start > last_ptr_pos:
-                for k in range(tok_start, tok_end):
-                    chars[k] = " "
-        candidates.clear()
-
-    i = start
-    while i < end:
-        ch = name[i]
-        if ch == "<":
-            j = min(_find_matching_close(name, i), end - 1)
-            i = j + 1
-            continue
-        if ch == "[":
-            j = min(_find_matching_close(name, i), end - 1)
-            if last_ptr_pos is None:
-                # An array-typed function PARAMETER (no preceding pointer
-                # sigil in this segment yet) decays to a pointer, so a cv
-                # qualifier before it is pointee-position, not by-value —
-                # same non-strippable treatment as a real pointer sigil
-                # (confirmed against real clang/gcc mangling: void(*)(int[3])
-                # and void(*)(const int[3]) are different, non-
-                # interchangeable function pointer types, same as the
-                # int*/const int* case above). Only matters in strict mode;
-                # harmless otherwise since non-strict stripping ignores
-                # last_ptr_pos entirely (Codex review, PR #589).
-                last_ptr_pos = i
-            # else: a "[...]" AFTER an already-seen pointer sigil is the
-            # POINTEE's array bound (e.g. "int (*)[3]" — a pointer to an
-            # array, not a decaying array parameter), analogous to a
-            # callback's own parameter list: it doesn't move last_ptr_pos,
-            # so the declarator's own preceding qualifier (e.g. "int (*
-            # const)[3]") stays recognized as its own trailing cv, dropped
-            # for mangling (confirmed identical types by real g++: two
-            # same-named overloads differing only in that const are a
-            # hard redefinition error, not distinct overloads) — treating
-            # this "[" the same as the decay case above wrongly moved the
-            # boundary past the declarator's own const, leaving it
-            # unstrippable (Codex review, PR #589, round 3).
-            i = j + 1
-            continue
-        if ch == "(":
-            j = min(_find_matching_close(name, i), end - 1)
-            k = j + 1
-            while k < end and name[k].isspace():
-                k += 1
-            if k < end and name[k] in "([":
-                # A pointer/pointer-to-member DECLARATOR-GROUPING paren --
-                # e.g. the "(*)"/"(*const)"/"(C::*)" in "RetType
-                # (*)(Params)"/"RetType (C::*)(Params)" -- recognized
-                # structurally by being immediately followed by ANOTHER
-                # top-level paren/bracket (the real parameter list or array
-                # dimensions), regardless of what's inside it (a bare
-                # sigil, or a qualified pointer-to-member "Class::*" —
-                # deliberately NOT restricted to "only sigils/cv tokens
-                # inside", since that missed the class-qualified case:
-                # Codex review, PR #589, round 2). It is NOT itself a
-                # nested parameter list, so don't open a fresh strict scope
-                # for it: its "*" is the CURRENT (possibly
-                # nested-callback-parameter's own) declarator's top-level
-                # sigil and must stay visible to it. Recursing here would
-                # hide that "*" inside an isolated call whose own
-                # last_ptr_pos never reaches this scope's tracking, so a
-                # callback parameter that is itself a function pointer with
-                # a cv-qualified return type (``void(*)(int (*)())`` vs.
-                # ``void(*)(const int (*)())`` — confirmed distinct,
-                # non-interchangeable types by real g++ mangling) had its
-                # return-type cv wrongly treated as the callback
-                # parameter's own neutral by-value qualifier instead. Just
-                # step past the "(" and let this same scan process the
-                # interior in place.
-                i += 1
-                continue
-            _strip_cv_in_segment(name, chars, i + 1, j, strict=True)
-            i = j + 1
-            # A cv qualifier immediately following a REAL parameter list's
-            # closing paren is a member-function-POINTER's own
-            # cv-qualification (e.g. "void (C::*)(int) const" — the pointer
-            # points to a const member function) — a genuinely different,
-            # non-interchangeable type (confirmed against real g++
-            # mangling: two same-named overloads differing only in this
-            # trailing const compile as distinct symbols, matching the
-            # existing FUNC_CV_CHANGED precedent for a member function's
-            # own const/volatile). Never neutral, regardless of strict/
-            # non-strict context or position relative to any pointer
-            # sigil — leave it completely untouched rather than stripping
-            # it (permissive/non-strict mode) or treating it as a
-            # stripping candidate (strict mode) (CodeRabbit review, PR
-            # #589).
-            k = i
-            while k < end and name[k].isspace():
-                k += 1
-            m = _CV_TOKEN_RE.match(name, k)
-            while m and m.end() <= end:
-                k = m.end()
-                while k < end and name[k].isspace():
-                    k += 1
-                m = _CV_TOKEN_RE.match(name, k)
-            i = k
-            continue
-        if strict and ch == ",":
-            _flush()
-            last_ptr_pos = None
-            i += 1
-            continue
-        if ch in "*&":
-            last_ptr_pos = i
-            i += 1
-            continue
-        m = _CV_TOKEN_RE.match(name, i)
-        if m and m.end() <= end:
-            if strict:
-                candidates.append((m.start(), m.end()))
-            else:
-                for k in range(m.start(), m.end()):
-                    chars[k] = " "
-            i = m.end()
-            continue
-        i += 1
-    _flush()
+    _CvSegmentScan(name, chars, end, strict=strict).run(start)
 
 
 def _strip_cv_qualifiers(name: str) -> str:

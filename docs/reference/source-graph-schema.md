@@ -194,6 +194,90 @@ The vocabulary constants live in `abicheck/buildsource/graph_facts.py` and are
 unioned into `source_graph.NODE_KINDS`/`EDGE_KINDS`; the producer is
 `abicheck/impact/consumer_graph.py`.
 
+## The archive/object half of the graph (G29 Phase 5 item 6)
+
+`source_graph._fold_link_provenance` (ADR-041 P1 #2) already creates an
+`object_file`/`static_library` node for each `BuildEvidence` link input, by
+filename suffix alone. `abicheck/buildsource/archive_graph.py` is the real
+`ar`-index introspection that fills in the rest, driven by
+`inline_graph_fold.fold_archive_graph` whenever a graph carries at least one
+`static_library` node — no compiler required.
+
+| Kind | Status | Meaning |
+|---|---|---|
+| `archive_member` *(node)* | populated | One member (object file) of a `static_library`, scoped by its owning archive's label (`archive_member://<archive>::<member>`) — two archives may share a member name without colliding. |
+| `ARCHIVE_CONTAINS_OBJECT` *(edge)* | populated | `static_library` → `archive_member`, one per member the archive's headers name. |
+| `OBJECT_DEFINES_SYMBOL` *(edge)* | populated | `archive_member` → `binary_symbol`, one per symbol the archive's own linker-written index attributes to that member. |
+| `linker_script` / `export_map` / `comdat_group` *(nodes)* | reserved | No normalized data source yet. |
+
+Evidence source is deliberately the archive's **own symbol index** (GNU
+`/`/`/SYM64/`, or BSD/Mach-O `__.SYMDEF`/`__.SYMDEF_64`; both plain and
+*thin* (`ar rcT`) archives) — the same table the linker itself reads to
+decide which member to pull in — not a per-member ELF/COFF/Mach-O symbol
+table walk: the index is format-agnostic (one parser covers all three
+object formats) and encodes exactly "this member defines this symbol",
+which is what `OBJECT_DEFINES_SYMBOL` means. An archive built without an
+index (`ar rc` with no `s`, or a stripped `ranlib`-less one) still yields
+`archive_member` nodes from its header chain, just no `OBJECT_DEFINES_SYMBOL`
+edges — recorded as a diagnostic, not inferred around.
+
+Like the consumer join, **`OBJECT_DEFINES_SYMBOL` only ever joins onto a
+`binary_symbol` node the graph already carries** — an archive's internal-only
+indexed symbols (never exported by any side) mint no node, keeping the graph
+compact (ADR-031 D7). `archive_graph.defining_members(graph, symbol)` is the
+localization read view: every `(archive label, member name)` pair the graph
+records as defining a symbol, for a "`cache_dispatch.o` in
+`libinternal_dispatch.a`" finding detail.
+
+Coverage is tracked at `extractor_passes["archive_graph"]` (every
+`static_library` node the graph named was found, read, and index-backed) /
+`degraded_passes["archive_graph"]` (some archive was missing, unreadable, not
+an archive, or lacked an index) — the same family-level coverage-honesty
+contract the call/type/include-graph passes use (see "Coverage matrix"
+below), just gated on disk access rather than clang availability.
+
+## The template-instantiation half of the graph (G29 Phase 5 item 1)
+
+A template's own declaration is often internal-type-free
+(`template <typename T> struct Wrapper { T value; };`), but a specific
+**instantiation** (`Wrapper<internal::Detail>`) can both depend on an
+internal type through its arguments and emit a real, linkable symbol for
+its instantiated members — neither of which the pre-existing
+`type_graph`/`call_graph` passes capture, since they only ever see the
+template *pattern*. `abicheck/buildsource/template_graph.py` is a third,
+independent `clang -ast-dump=json` pass (alongside the call and type graph
+passes) closing that gap, driven by `inline_graph_fold.fold_template_graph`
+whenever the call/type graph passes run (`with_call_graph`).
+
+| Kind | Status | Meaning |
+|---|---|---|
+| `template_decl` *(node)* | populated | The abstract template pattern (`template_decl://<qualified name>`), e.g. `template_decl://Wrapper`. |
+| `template_instantiation` *(node)* | populated | One concrete instantiation, keyed by its own human label (`template_instantiation://Wrapper<internal::Detail>`). |
+| `DECL_INSTANTIATES_TEMPLATE` *(edge)* | populated | `template_instantiation` → `template_decl`. |
+| `TEMPLATE_USES_TYPE` *(edge)* | populated | `template_instantiation` → the `record_type`/`enum_type`/`typedef` node a resolved template argument names — clang's own `decl` cross-reference on the `TemplateArgument` node, not a textual heuristic. |
+| `INSTANTIATION_EMITS_SYMBOL` *(edge)* | populated | `template_instantiation` → `binary_symbol`, for a function instantiation's own mangled name or a class instantiation's instantiated member functions. |
+| `TEMPLATE_USES_DECL` / `INSTANTIATION_MAPS_TO_EXPORT` / `DECL_USES_DEFAULT_TEMPLATE_ARG` / `CONSTRAINT_DEPENDS_ON_DECL` *(edges)* | reserved | See the module's own docstring for why each is deferred (a non-type/function-pointer argument, redundancy with `BINARY_EXPORTS_SYMBOL` on the already-joined symbol node, explicit-vs-defaulted argument detection, and C++20 concepts respectively). |
+
+Like the archive/object join, **`TEMPLATE_USES_TYPE`/`INSTANTIATION_EMITS_SYMBOL`
+only ever join onto a node the graph already carries** — an unresolved
+template argument (a builtin type, a non-type literal) contributes no edge,
+and an instantiated member the linker discarded (never ODR-used, or inlined
+away) mints no symbol node, keeping the graph compact (ADR-031 D7).
+
+Two AST shapes were the load-bearing empirical findings while building the
+parser (see the module's own docstring for the full detail): an *explicit*
+instantiation (`template struct Wrapper<int>;`) produces a **detached**
+full-content copy of its specialization, sharing its clang node id with an
+empty stub nested under the real `ClassTemplateDecl` — resolved by a
+two-pass, id-keyed join rather than assuming physical nesting; and a
+`using`/typedef-aliased template argument (`Box<internal::DetailAlias>`)
+resolves, via clang's own printer, straight to the real record's `decl`
+reference — no typedef-chain-following logic needed here.
+
+Coverage is tracked at `extractor_passes["template_graph"]` /
+`degraded_passes["template_graph"]`, the same family-level contract the
+call/type/include-graph passes use.
+
 ## `primary_path` / `alternative_paths` / `discarded_path_count`
 
 `select_preferred_graph_path`'s caller (`buildsource.graph_impact.attach_impact_metadata`)

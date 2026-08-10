@@ -508,6 +508,18 @@ def _normalize_mangled(mangled: str) -> str:
     starting with two underscores is reserved and never emitted here), so
     this is a no-op on Linux/Windows, where clang's ``mangledName`` is
     already the bare ``_Z...`` form.
+
+    **Known gap, not fixed here** (self-review round, fresh evidence): the
+    "no-op on Linux/Windows" claim above does not hold for an explicit GNU
+    ``asm("__Zfake")`` label -- clang reports that literal spelling
+    verbatim on *any* platform, confirmed empirically. Called
+    unconditionally (unlike :mod:`template_graph`'s own
+    ``_normalize_mangled``, whose join now tries the exact spelling first
+    and only falls back to this strip), this corrupts such a decl's
+    identity here too. Porting the same guarded-fallback fix to this
+    module's own join needs its own scoped change, not a drive-by
+    extension of this docstring; see ``call_graph._normalize_mangled``'s
+    identical note.
     """
     return mangled[1:] if mangled.startswith("__Z") else mangled
 
@@ -1509,10 +1521,10 @@ class ClangTypeGraphExtractor:
     def _extract_from_compile_unit(
         self, cu: BuildEvidenceCompileUnit
     ) -> list[TypeEdge]:
-        from .call_graph import _safe_clang_args_from_compile_unit
+        from .call_graph import _replay_cwd, _safe_clang_args_from_compile_unit
 
         argv = _safe_clang_args_from_compile_unit(cu)
-        return self._extract_from_safe_args(argv, cwd=cu.directory or None)
+        return self._extract_from_safe_args(argv, cwd=_replay_cwd(cu))
 
     def extract_from_build(self, build: BuildEvidence) -> list[TypeEdge]:
         """Extract type edges across every compile unit in *build* (best effort)."""

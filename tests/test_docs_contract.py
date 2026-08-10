@@ -1621,3 +1621,330 @@ def test_stale_process_language_reports_real_line_number(
     dc._check_stale_process_language(f)
     assert len(f.warnings) == 1
     assert "page.md:13:" in f.warnings[0][1]
+
+
+# --- ADR-058 / G36 P0.6: registered summary pages outside docs/ -----------
+
+
+def _external_registry(tmp_path: Path) -> tuple[dict, Path]:
+    """A docs/ tree with one canonical page, plus an out-of-tree fragment
+    registered as that topic's allowed summary — the real
+    `skills-src/shared/*.md` shape, in miniature."""
+    docs = tmp_path / "docs"
+    (docs / "learn").mkdir(parents=True)
+    (docs / "learn" / "owner.md").write_text(
+        "---\ndoc_type: explanation\ncanonical_for:\n  - a-topic\n---\n\n# Owner\n",
+        encoding="utf-8",
+    )
+    fragment = tmp_path / "skills-src" / "shared" / "frag.md"
+    fragment.parent.mkdir(parents=True)
+    fragment.write_text(
+        "---\ndoc_type: reference\nsummarizes:\n  - a-topic\n---\n\n"
+        "See [owner](../../docs/learn/owner.md).\n",
+        encoding="utf-8",
+    )
+    topics = {
+        "a-topic": {
+            "canonical_page": "learn/owner.md",
+            "allowed_summaries": ["skills-src/shared/frag.md"],
+        }
+    }
+    return topics, fragment
+
+
+@pytest.mark.parametrize(
+    "entry",
+    ["abicheck/foo.py", "skills-src/shared/notes.txt", "repo_facts.json"],
+    ids=["source-file", "non-markdown", "data-file"],
+)
+def test_registered_summary_entry_outside_the_approved_tree_is_rejected(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, entry: str
+) -> None:
+    """The out-of-docs exception is for `skills-src/**.md`, not for any file
+    that happens to exist.
+
+    A non-Markdown target carries no front matter, so `load_front_matter`
+    returns `None` and the ownership round-trip has nothing to contradict —
+    the entry would satisfy the registry vacuously. A source or data file
+    cannot own or summarize a documentation topic.
+    """
+    topics, _ = _external_registry(tmp_path)
+    target = tmp_path / entry
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text("whatever\n", encoding="utf-8")
+    topics["a-topic"]["allowed_summaries"] = [entry]
+    monkeypatch.setattr(dc, "ROOT", tmp_path)
+    monkeypatch.setattr(dc, "DOCS", tmp_path / "docs")
+    f = dc.Findings()
+    dc._check_referenced_paths_exist(f, topics)
+    assert f.errors, f"{entry} must not satisfy a documentation-page entry"
+
+
+@pytest.mark.parametrize(
+    "claim,expect_error",
+    [
+        ("a-topic", False),
+        ("some-other-topic", True),
+        ("no-such-topic", True),
+    ],
+    ids=["registered", "registered-topic-but-unlisted-page", "unknown-topic"],
+)
+def test_external_page_may_not_claim_a_topic_it_is_not_registered_for(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, claim: str, expect_error: bool
+) -> None:
+    """Page-to-registry, scanned by tree rather than by registry.
+
+    `_check_front_matter_schema` only visits pages the registry already names,
+    so a fragment claiming a topic it was never added to is invisible to it —
+    exactly the violation that round-trip exists to catch.
+    """
+    topics, fragment = _external_registry(tmp_path)
+    topics["some-other-topic"] = {"canonical_page": "learn/owner.md"}
+    fragment.write_text(
+        f"---\ndoc_type: reference\nsummarizes:\n  - {claim}\n---\n\n# F\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(dc, "ROOT", tmp_path)
+    monkeypatch.setattr(dc, "DOCS", tmp_path / "docs")
+    f = dc.Findings()
+    dc._check_external_pages_claim_only_registered_topics(f, topics)
+    assert bool(f.errors) is expect_error
+
+
+@pytest.mark.parametrize(
+    "malformed", [1, "learn/owner.md", {"a": 1}], ids=["int", "str", "mapping"]
+)
+def test_a_malformed_page_list_is_reported_not_raised(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, malformed: object
+) -> None:
+    """A non-list `task_pages`/`allowed_summaries` is a schema error the
+    registry check already reports. Iterating it here would raise `TypeError`
+    first and take the whole gate down with a traceback — losing that finding
+    and every other one alongside it, so the run reports nothing actionable at
+    all rather than one bad topic."""
+    topics, fragment = _external_registry(tmp_path)
+    topics["a-topic"]["task_pages"] = malformed
+    fragment.write_text(
+        "---\ndoc_type: reference\nsummarizes:\n  - a-topic\n---\n\n# F\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(dc, "ROOT", tmp_path)
+    monkeypatch.setattr(dc, "DOCS", tmp_path / "docs")
+    f = dc.Findings()
+    dc._check_external_pages_claim_only_registered_topics(f, topics)  # must not raise
+    assert f is not None
+
+
+def test_an_external_fragment_may_not_declare_itself_generated(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """`_check_front_matter_schema` skips a `generated: true` page wholesale —
+    backlink requirement included — so the claim would switch off the very
+    enforcement that makes registering an out-of-docs summary safe. It is also
+    false: these trees are hand-authored sources generators read, never write.
+    """
+    topics, fragment = _external_registry(tmp_path)
+    fragment.write_text(
+        "---\ndoc_type: reference\ngenerated: true\nsummarizes:\n  - a-topic\n---\n\n"
+        "# F\n",  # no backlink — the schema check would have caught this
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(dc, "ROOT", tmp_path)
+    monkeypatch.setattr(dc, "DOCS", tmp_path / "docs")
+    f = dc.Findings()
+    dc._check_external_summary_pages_claim_their_topics(f, topics)
+    assert any("generated: true" in str(e) for e in f.errors)
+
+
+def test_a_malformed_topic_id_is_reported_not_raised(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """A numeric topic id alongside the normal string ones makes a bare
+    `sorted(topics.items())` raise `TypeError` comparing `int` to `str`,
+    aborting the gate before it can report the registry errors it already
+    collected."""
+    topics, _ = _external_registry(tmp_path)
+    topics[123] = {"canonical_page": "learn/owner.md"}  # type: ignore[index]
+    monkeypatch.setattr(dc, "ROOT", tmp_path)
+    monkeypatch.setattr(dc, "DOCS", tmp_path / "docs")
+    f = dc.Findings()
+    dc._check_external_summary_pages_claim_their_topics(f, topics)  # must not raise
+    assert f is not None
+
+
+@pytest.mark.parametrize(
+    "front_matter",
+    ["", "---\ndoc_type: reference\n---\n", "---\nsummarizes:\n  - other\n---\n"],
+    ids=["no-front-matter", "no-summarizes", "wrong-topic"],
+)
+def test_external_summary_entry_must_claim_its_topic(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, front_matter: str
+) -> None:
+    """Registry-to-page direction. The page-to-registry check is vacuous when
+    a page has no front matter (it skips) or simply omits the claim, so an
+    approved fragment could be registered as a topic's summary, never claim
+    the topic, and still pass."""
+    topics, fragment = _external_registry(tmp_path)
+    fragment.write_text(front_matter + "\n# Fragment\n", encoding="utf-8")
+    monkeypatch.setattr(dc, "ROOT", tmp_path)
+    monkeypatch.setattr(dc, "DOCS", tmp_path / "docs")
+    f = dc.Findings()
+    dc._check_external_summary_pages_claim_their_topics(f, topics)
+    assert f.errors, "an unclaimed external summary entry must fail"
+
+
+def test_external_summary_entry_that_claims_its_topic_passes(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """The complement: the well-formed fragment the exception exists for."""
+    topics, _ = _external_registry(tmp_path)
+    monkeypatch.setattr(dc, "ROOT", tmp_path)
+    monkeypatch.setattr(dc, "DOCS", tmp_path / "docs")
+    f = dc.Findings()
+    dc._check_external_summary_pages_claim_their_topics(f, topics)
+    assert f.errors == []
+
+
+def test_registered_summary_page_outside_docs_is_accepted(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """`task_pages`/`allowed_summaries` must tolerate a repo-relative path
+    outside docs/ the way `fact_sources` already does — otherwise registering
+    a `skills-src/shared/*.md` fragment fails the registry's own existence
+    check instead of passing it."""
+    topics, _ = _external_registry(tmp_path)
+    monkeypatch.setattr(dc, "ROOT", tmp_path)
+    monkeypatch.setattr(dc, "DOCS", tmp_path / "docs")
+    f = dc.Findings()
+    dc._check_referenced_paths_exist(f, topics)
+    assert f.errors == []
+
+
+def test_registered_summary_page_outside_docs_is_actually_scanned(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """The enforcement half, not just the plumbing: the fragment's own
+    `summarizes` front matter must be round-tripped against the registry.
+    Well-formed passes; an unknown topic id fails."""
+    topics, fragment = _external_registry(tmp_path)
+    monkeypatch.setattr(dc, "ROOT", tmp_path)
+    monkeypatch.setattr(dc, "DOCS", tmp_path / "docs")
+
+    f = dc.Findings()
+    dc._check_front_matter_schema(f, topics)
+    assert f.errors == []
+
+    fragment.write_text(
+        fragment.read_text(encoding="utf-8").replace("a-topic", "no-such-topic", 1),
+        encoding="utf-8",
+    )
+    f = dc.Findings()
+    dc._check_front_matter_schema(f, topics)
+    assert any("no-such-topic" in msg for _, msg in f.errors), (
+        "a registered out-of-docs fragment's summarizes claim went unchecked"
+    )
+
+
+def test_unregistered_summary_page_outside_docs_is_rejected(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """A fragment cannot grant itself permission to summarize a topic just by
+    adding the front-matter claim — the same round-trip docs/ pages are under."""
+    topics, fragment = _external_registry(tmp_path)
+    topics["a-topic"].pop("allowed_summaries")
+    monkeypatch.setattr(dc, "ROOT", tmp_path)
+    monkeypatch.setattr(dc, "DOCS", tmp_path / "docs")
+    f = dc.Findings()
+    dc._check_front_matter_schema(f, topics)
+    # Unregistered pages outside docs/ aren't scanned at all, so the claim
+    # must not be silently accepted from the registry side either.
+    dc._check_referenced_paths_exist(f, topics)
+    assert fragment.is_file()
+    assert not any(
+        "claims summarizes" in msg and "is registered" in msg for _, msg in f.errors
+    )
+
+
+def test_missing_registered_summary_page_outside_docs_is_flagged(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    topics, fragment = _external_registry(tmp_path)
+    fragment.unlink()
+    monkeypatch.setattr(dc, "ROOT", tmp_path)
+    monkeypatch.setattr(dc, "DOCS", tmp_path / "docs")
+    f = dc.Findings()
+    dc._check_referenced_paths_exist(f, topics)
+    assert any("frag.md" in msg for _, msg in f.errors)
+
+
+def test_every_shared_skill_fragment_is_registered_in_topics_yaml() -> None:
+    """The real tree: every `skills-src/shared/*.md` fragment that claims a
+    `summarizes` topic must be registered against it, and the whole gate must
+    stay error-free with those entries present."""
+    import yaml
+
+    root = Path(__file__).resolve().parent.parent
+    topics = yaml.safe_load(
+        (root / "docs" / "_meta" / "topics.yaml").read_text(encoding="utf-8")
+    )["topics"]
+    registered = {
+        value
+        for entry in topics.values()
+        if isinstance(entry, dict)
+        for key in ("task_pages", "allowed_summaries")
+        for value in (entry.get(key) or [])
+    }
+    for fragment in sorted((root / "skills-src" / "shared").glob("*.md")):
+        fm = dc.load_front_matter(fragment)
+        if not (fm or {}).get("summarizes"):
+            continue
+        rel = fragment.relative_to(root).as_posix()
+        assert rel in registered, f"{rel} claims summarizes but is unregistered"
+
+
+@pytest.mark.parametrize(
+    "value", ["output-formats", "1", "{a: 1}"], ids=["str", "int-ish", "mapping"]
+)
+def test_a_malformed_summarizes_in_an_unregistered_fragment_is_reported(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, value: str
+) -> None:
+    """This tree-wide scan is the only thing that visits an *unregistered*
+    fragment — `_check_front_matter_schema` walks pages the registry names —
+    so coercing a malformed `summarizes` to an empty list left both the bad
+    type and the missing round-trip unreported for exactly the files this
+    scan exists to reach."""
+    topics, fragment = _external_registry(tmp_path)
+    stray = fragment.parent / "stray.md"
+    stray.write_text(
+        f"---\ndoc_type: reference\nsummarizes: {value}\n---\n\n# S\n", encoding="utf-8"
+    )
+    monkeypatch.setattr(dc, "ROOT", tmp_path)
+    monkeypatch.setattr(dc, "DOCS", tmp_path / "docs")
+    f = dc.Findings()
+    dc._check_external_pages_claim_only_registered_topics(f, topics)
+    assert any("summarizes must be a list" in str(e) for e in f.errors)
+
+
+@pytest.mark.parametrize(
+    ("body", "counts"),
+    [
+        ("See [o](docs/learn/owner.md).\n", True),
+        ("Prose:\n\n    [o](docs/learn/owner.md)\n\nmore\n", False),
+        ("- step\n\n    [o](docs/learn/owner.md)\n", True),
+        ("p:\n\n    code\n\nSee [o](docs/learn/owner.md).\n", True),
+    ],
+    ids=["prose", "indented-example", "list-continuation", "after-example"],
+)
+def test_a_backlink_inside_an_indented_example_is_not_navigable(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, body: str, counts: bool
+) -> None:
+    """A link shown as an indented code example is example text, exactly like
+    one inside a fence. The stripping is deliberately top-level-only: over-
+    stripping would fail the build on a correct page, so a backlink in a list
+    continuation must keep counting."""
+    docs = tmp_path / "docs"
+    (docs / "learn").mkdir(parents=True)
+    monkeypatch.setattr(dc, "DOCS", docs)
+    page = tmp_path / "frag.md"
+    page.write_text(body, encoding="utf-8")
+    assert dc._page_links_to(page, "learn/owner.md") is counts

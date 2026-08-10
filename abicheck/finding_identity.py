@@ -254,6 +254,227 @@ def _operand_looks_valid(operand: str) -> bool:
     return _source_name_end(operand) is not None
 
 
+def _consume_nested_prefix_components(rest: str) -> tuple[int, bool, bool] | None:
+    """Walk the ``<prefix>`` components of an ``N``/``Z`` production, starting
+    just past the leading ``N``/``Z`` byte.
+
+    Returns ``(pos, consumed_any_component, pending_prefix_only)`` -- *pos*
+    being the index of the first byte this walk could not consume -- or
+    ``None`` when a digit-prefixed component is itself malformed (declared
+    length 0, or claiming more bytes than exist), which invalidates the whole
+    production, matching the single-component "_ZN0E"/"_ZN9abcE" fix (round 3).
+
+    Consuming components at all exists to keep an ``E`` byte that belongs to a
+    component's OWN spelling from being mistaken for the production's
+    terminator -- e.g. "_ZN1E" is incomplete (the "1E" is a length-1
+    <source-name> whose one-byte identifier IS "E", leaving no separate
+    terminator), but a naive ``rest.find("E", 1)`` found that embedded byte and
+    wrongly accepted it (Codex review, fresh evidence). A <nested-name>'s
+    <prefix> can chain MULTIPLE consecutive source-name components (e.g.
+    "N1A1BE" = namespace A, class B), so a single-component skip left a later
+    component's own trailing 'E' exposed to the identical confusion: "_ZN1A1E"
+    is incomplete (after consuming "1A", "1E" is a second length-1
+    <source-name> whose identifier IS "E" -- the complete form is "_ZN1A1EE"),
+    but a single skip still found that embedded byte (Codex review, fresh
+    evidence, round 4). No other <nested-name>/<local-name> first-component
+    production starts with a bare digit -- a digit-prefixed component can only
+    be a <source-name>, the same reasoning as :func:`_operand_looks_valid`.
+    """
+    pos = 1
+    consumed_any_component = False
+    pending_prefix_only = False
+    while pos < len(rest):
+        if rest[pos] == "S" and pos + 1 < len(rest) and rest[pos + 1] in "tabdios":
+            # A standard substitution ("St" = std:: prefix; "Sa" / "Sb" /
+            # "Sd" / "Si" / "So" / "Ss" = the complete named substitutions,
+            # e.g. std::allocator/std::string) is itself a <prefix>
+            # component -- consuming just its two bytes without continuing
+            # the loop left a trailing digit-prefixed <source-name> exposed
+            # to the same embedded-terminator confusion the earlier fixes
+            # addressed: "_ZNSt1E" and "_ZNSa1E" are both incomplete ("1E"
+            # is a length-1 <source-name> whose identifier IS "E", leaving
+            # no separate terminator) but a loop that only recognized "St"
+            # literally -- or only digits -- never started skipping here for
+            # the other five letters (Codex review, fresh evidence, round 7).
+            #
+            # Whichever letter follows "S", the production is still
+            # <nested-name> ::= N <prefix> <unqualified-name> E, and
+            # <substitution> (what ANY of these six letters spells) is never
+            # itself a valid <unqualified-name> -- so even though
+            # "Sa"/"Sb"/"Sd"/"Si"/"So"/"Ss" are complete, context-free
+            # substitutions in their OWN right (see _substitution_looks_valid),
+            # a <nested-name> still needs a real <unqualified-name> after
+            # them, same as "St". "_ZNSaE" leaves `pos` pointing straight at
+            # the 'E' right after "Sa", which the terminator search previously
+            # accepted as though "Sa" alone had completed the required
+            # trailing unqualified-name (Codex review, fresh evidence,
+            # round 9; round 6 fixed only the "St" spelling of this same
+            # gap). `pending_prefix_only` tracks that the most recent thing
+            # consumed was a bare substitution with nothing completing it
+            # yet, and is cleared as soon as a real component (a
+            # <source-name>) follows it.
+            pos += 2
+            consumed_any_component = True
+            pending_prefix_only = True
+            continue
+        if not rest[pos].isdigit():
+            break
+        component_end = _source_name_end(rest[pos:])
+        if component_end is None:
+            return None
+        pos += component_end
+        consumed_any_component = True
+        pending_prefix_only = False
+    return pos, consumed_any_component, pending_prefix_only
+
+
+def _nested_or_local_name_looks_valid(rest: str) -> bool:
+    """The ``N``/``Z`` branch of :func:`_looks_like_itanium_encoding`:
+    ``<nested-name>`` (``N...E``) and ``<local-name>``
+    (``Z<encoding>E<entity>``).
+
+    Both productions terminate with a literal 'E' after at least one non-empty
+    component -- a bare "N" or content with no terminator at all (e.g.
+    "_ZNonsense", "_ZN") was previously accepted outright regardless of
+    structure (Codex review). Does not validate that everything between N/Z and
+    E is itself well-formed -- that is the unbounded full-grammar case this
+    heuristic deliberately doesn't attempt (see
+    :func:`_looks_like_itanium_encoding`'s docstring on its accepted boundary);
+    a component shape this walk doesn't recognize (constructor/destructor
+    names, template-args, ...) falls back to the original naive terminator
+    scan.
+    """
+    walked = _consume_nested_prefix_components(rest)
+    if walked is None:
+        return False
+    pos, consumed_any_component, pending_prefix_only = walked
+    if pending_prefix_only:
+        return False
+    if consumed_any_component:
+        e_index = rest.find("E", pos)
+        terminator_ok = e_index >= pos
+    else:
+        e_index = rest.find("E", 1)
+        terminator_ok = e_index > 1
+    if not terminator_ok:
+        return False
+    if rest[0] == "Z":
+        # Unlike <nested-name> (complete once its own terminator E is
+        # found), a <local-name> is "Z <function encoding> E <entity
+        # name> [<discriminator>]" -- the terminator MUST be followed
+        # by a non-empty entity name. "_ZZ1fvE" has a terminator (the
+        # trailing E) but nothing after it, so it previously passed
+        # the shared N/Z check above despite being incomplete (Codex
+        # review, fresh evidence). A merely non-empty suffix isn't
+        # enough either: "_ZZ1fvE0" has one trailing byte, but "0" is
+        # a zero-length <source-name> and not a valid entity name --
+        # reuse _operand_looks_valid's same digit-prefixed check
+        # (Codex review, fresh evidence, round 2).
+        suffix = rest[e_index + 1 :]
+        return bool(suffix) and _operand_looks_valid(suffix)
+    return True
+
+
+def _internal_linkage_name_looks_valid(rest: str) -> bool:
+    """The ``L`` branch: GCC internal-linkage prefix (_ZL7g_count) +
+    ``<source-name>``."""
+    return len(rest) > 1 and rest[1].isdigit() and _valid_source_name(rest[1:])
+
+
+def _special_name_looks_valid(rest: str) -> bool:
+    """The ``T`` branch -- ``<special-name>``: vtable(V)/VTT(T)/typeinfo(I)/
+    typeinfo-name(S)/thread-local-init(H)/thread-local-wrapper(W).
+
+    Previously included unverified "F"/"J" (CodeRabbit review: no corresponding
+    Itanium production found for either) -- dropped rather than guessed at,
+    matching this module's ambiguity-safe bias (a real production this set is
+    missing only degrades to NORMALIZED, never a wrong promotion the other
+    way). ``len(rest) > 2``, not ``> 1``: every one of these productions
+    requires an operand (a type or source-name) after the two-letter prefix --
+    a bare "_ZTV" has no such operand and is not a complete encoding (Codex
+    review). The operand itself is then checked by :func:`_operand_looks_valid`
+    for the narrower digit-prefixed case (Codex review, fresh evidence:
+    "_ZTV0").
+    """
+    return len(rest) > 2 and rest[1] in "VITSHW" and _operand_looks_valid(rest[2:])
+
+
+def _guard_variable_looks_valid(rest: str) -> bool:
+    """The ``G`` branch -- guard variable / reference temporary. Same "requires
+    an operand after the two-letter prefix" reasoning as
+    :func:`_special_name_looks_valid`; a bare "_ZGV" is not a complete encoding
+    either."""
+    return len(rest) > 2 and rest[1] in "VR" and _operand_looks_valid(rest[2:])
+
+
+def _substitution_looks_valid(rest: str) -> bool:
+    """The ``S`` branch -- substitution-abbreviated std:: name.
+
+    "St" specifically abbreviates the std:: NAMESPACE PREFIX only, not a
+    complete substitution by itself -- it must be followed by an
+    unqualified-name (e.g. "St9terminate" for std::terminate), unlike the other
+    single-letter abbreviations (Sa/Sb/Sd/Si/So/Ss, each a complete named
+    substitution on its own) or numbered back-references (S_, S0_, ...). A bare
+    "_ZSt" previously passed this check with nothing after it (Codex review,
+    fresh evidence).
+    """
+    if len(rest) < 2 or not (rest[1].isalnum() or rest[1] == "_"):
+        return False
+    if rest[1] == "t":
+        # A length-only check let "_ZSt0"/"_ZSt9abc" through: "0" is a
+        # zero-length <source-name> and "9abc" is truncated (claims 9
+        # bytes, has 3) -- neither is a valid unqualified-name after
+        # the namespace prefix. Reuse _operand_looks_valid's same
+        # digit-prefixed <source-name> check (Codex review, fresh
+        # evidence, round 3).
+        return len(rest) > 2 and _operand_looks_valid(rest[2:])
+    if rest[1].isdigit() or (rest[1].isalpha() and rest[1].isupper()):
+        # A numbered substitution (<seq-id> ::= [0-9A-Z]+, ALWAYS
+        # followed by a literal terminating "_", e.g. "S0_", "SA_")
+        # references an EARLIER substitution-table entry -- one only
+        # populated by <name>/<type> productions already emitted
+        # earlier in the SAME encoding. This function validates only
+        # the FIRST production of a top-level <encoding>, where no
+        # such entry can exist yet: a well-formed "S0_"/"SA_" here is
+        # a context-free reference to nothing, never a valid first
+        # production, regardless of whether its own terminator is
+        # present (Codex review, fresh evidence, round 8; previously
+        # only the missing-terminator shape "_ZS0"/"_ZSA" was
+        # rejected, while the well-formed-but-context-free "_ZS0_"
+        # still passed).
+        return False
+    # Only Sa/Sb/Sd/Si/So/Ss are real complete single-letter
+    # abbreviations (allocator/basic_string/basic_iostream/
+    # basic_istream/basic_ostream/string) that don't need any prior
+    # context -- they denote fixed, well-known components, unlike a
+    # numbered back-reference. Bare "S_" (back-reference-0) has the
+    # exact same "no earlier entry can exist yet" problem as the
+    # numbered case above and is rejected for the same reason (Codex
+    # review, fresh evidence, round 8). Any other lowercase letter
+    # (e.g. "_ZSx") is not a real Itanium substitution at all, but
+    # previously matched this fallback outright regardless of which
+    # letter followed "S" (Codex review, fresh evidence, round 2).
+    return rest[1] in "abdios"
+
+
+#: Leading-byte dispatch for the non-``<source-name>`` ``<encoding>``
+#: productions :func:`_looks_like_itanium_encoding` recognizes. A handler owns
+#: its production's *whole* condition, including the guard that used to sit in
+#: the ``if`` -- returning ``False`` where the pre-table code fell through to
+#: the ``<operator-name>`` tail is equivalent, since no Itanium operator code
+#: begins with any of these six bytes (verified against
+#: :data:`_ITANIUM_OPERATOR_CODES`: every code's first byte is lowercase, and
+#: none of ``N``/``Z``/``L``/``T``/``G``/``S`` appears there).
+_ENCODING_PRODUCTION_HANDLERS: dict[str, Callable[[str], bool]] = {
+    "N": _nested_or_local_name_looks_valid,
+    "Z": _nested_or_local_name_looks_valid,
+    "L": _internal_linkage_name_looks_valid,
+    "T": _special_name_looks_valid,
+    "G": _guard_variable_looks_valid,
+    "S": _substitution_looks_valid,
+}
+
+
 def _looks_like_itanium_encoding(rest: str) -> bool:
     """Whether *rest* (``mangled_name`` with the ``_Z`` prefix and any
     clone suffix already stripped) plausibly starts a real Itanium
@@ -282,184 +503,9 @@ def _looks_like_itanium_encoding(rest: str) -> bool:
         return False
     if rest[0].isdigit():  # <source-name>: digit-prefixed length
         return _valid_source_name(rest)
-    if rest[0] in "NZ":  # <nested-name> / <local-name>
-        # Both productions (`N...E`, `Z<encoding>E...`) terminate with a
-        # literal 'E' after at least one non-empty component -- a bare "N"
-        # or content with no terminator at all (e.g. "_ZNonsense", "_ZN")
-        # was previously accepted outright regardless of structure (Codex
-        # review). Does not validate that everything between N/Z and E is
-        # itself well-formed -- that is the unbounded full-grammar case
-        # this heuristic deliberately doesn't attempt (see this function's
-        # docstring on its accepted boundary).
-        #
-        # A naive `rest.find("E", 1)` can mistake an 'E' byte that is part
-        # of the first component's OWN spelling for the production's
-        # terminator -- e.g. "_ZN1E" is incomplete (the "1E" is a
-        # length-1 <source-name> whose one-byte identifier IS "E", leaving
-        # no separate terminator), but the naive scan found that embedded
-        # byte and wrongly accepted it (Codex review, fresh evidence).
-        # When the component right after N/Z is itself a <source-name>
-        # (the common shape: a namespace/class/function name), skip past
-        # it before searching for the real terminator; any other
-        # component shape (constructor/destructor names, template-args,
-        # ...) falls back to the original naive scan -- still this
-        # heuristic's documented accepted boundary, just narrowed to the
-        # one concrete counterexample found so far.
-        # No other <nested-name>/<local-name> first-component production
-        # starts with a bare digit -- a digit-prefixed component can only
-        # be a <source-name> (same reasoning as _operand_looks_valid), and
-        # a <nested-name>'s <prefix> can chain MULTIPLE consecutive
-        # source-name components (e.g. "N1A1BE" = namespace A, class B) --
-        # a single-component skip left a later component's own trailing
-        # 'E' byte exposed to the same embedded-terminator confusion the
-        # first-component fix addressed: "_ZN1A1E" is incomplete (after
-        # consuming "1A", "1E" is a second length-1 <source-name> whose
-        # identifier IS "E", leaving no separate terminator -- the
-        # complete form is "_ZN1A1EE"), but a single skip still found that
-        # embedded byte (Codex review, fresh evidence, round 4). If a
-        # digit-prefixed component fails to parse (declared length 0, or
-        # claims more bytes than exist), the whole production is invalid,
-        # matching the single-component "_ZN0E"/"_ZN9abcE" fix (round 3).
-        pos = 1
-        consumed_any_component = False
-        pending_prefix_only = False
-        while pos < len(rest):
-            if rest[pos] == "S" and pos + 1 < len(rest) and rest[pos + 1] in "tabdios":
-                # A standard substitution ("St" = std:: prefix; "Sa" /
-                # "Sb" / "Sd" / "Si" / "So" / "Ss" = the complete named
-                # substitutions, e.g. std::allocator/std::string) is
-                # itself a <prefix> component -- consuming just its two
-                # bytes without continuing the loop left a trailing
-                # digit-prefixed <source-name> exposed to the same
-                # embedded-terminator confusion the earlier fixes
-                # addressed: "_ZNSt1E" and "_ZNSa1E" are both incomplete
-                # ("1E" is a length-1 <source-name> whose identifier IS
-                # "E", leaving no separate terminator) but a loop that
-                # only recognized "St" literally -- or only digits --
-                # never started skipping here for the other five letters
-                # (Codex review, fresh evidence, round 7).
-                #
-                # Whichever letter follows "S", the production is still
-                # <nested-name> ::= N <prefix> <unqualified-name> E, and
-                # <substitution> (what ANY of these six letters spells)
-                # is never itself a valid <unqualified-name> -- so even
-                # though "Sa"/"Sb"/"Sd"/"Si"/"So"/"Ss" are complete,
-                # context-free substitutions in their OWN right (see the
-                # non-nested "S"-prefix branch below), a <nested-name>
-                # still needs a real <unqualified-name> after them, same
-                # as "St". "_ZNSaE" leaves `pos` pointing straight at the
-                # 'E' right after "Sa", which the terminator search
-                # previously accepted as though "Sa" alone had completed
-                # the required trailing unqualified-name (Codex review,
-                # fresh evidence, round 9; round 6 fixed only the "St"
-                # spelling of this same gap). `pending_prefix_only`
-                # tracks that the most recent thing consumed was a bare
-                # substitution with nothing completing it yet, and is
-                # cleared as soon as a real component (a <source-name>)
-                # follows it.
-                pos += 2
-                consumed_any_component = True
-                pending_prefix_only = True
-                continue
-            if not rest[pos].isdigit():
-                break
-            component_end = _source_name_end(rest[pos:])
-            if component_end is None:
-                return False
-            pos += component_end
-            consumed_any_component = True
-            pending_prefix_only = False
-        if pending_prefix_only:
-            return False
-        if consumed_any_component:
-            e_index = rest.find("E", pos)
-            terminator_ok = e_index >= pos
-        else:
-            e_index = rest.find("E", 1)
-            terminator_ok = e_index > 1
-        if not terminator_ok:
-            return False
-        if rest[0] == "Z":
-            # Unlike <nested-name> (complete once its own terminator E is
-            # found), a <local-name> is "Z <function encoding> E <entity
-            # name> [<discriminator>]" -- the terminator MUST be followed
-            # by a non-empty entity name. "_ZZ1fvE" has a terminator (the
-            # trailing E) but nothing after it, so it previously passed
-            # the shared N/Z check above despite being incomplete (Codex
-            # review, fresh evidence). A merely non-empty suffix isn't
-            # enough either: "_ZZ1fvE0" has one trailing byte, but "0" is
-            # a zero-length <source-name> and not a valid entity name --
-            # reuse _operand_looks_valid's same digit-prefixed check
-            # (Codex review, fresh evidence, round 2).
-            suffix = rest[e_index + 1 :]
-            return bool(suffix) and _operand_looks_valid(suffix)
-        return True
-    if rest[0] == "L" and len(rest) > 1 and rest[1].isdigit():
-        # GCC internal-linkage prefix (_ZL7g_count) + <source-name>
-        return _valid_source_name(rest[1:])
-    if rest[0] == "T" and len(rest) > 2 and rest[1] in "VITSHW":
-        # <special-name>: vtable(V)/VTT(T)/typeinfo(I)/typeinfo-name(S)/
-        # thread-local-init(H)/thread-local-wrapper(W). Previously included
-        # unverified "F"/"J" (CodeRabbit review: no corresponding Itanium
-        # production found for either) -- dropped rather than guessed at,
-        # matching this module's ambiguity-safe bias (a real production
-        # this set is missing only degrades to NORMALIZED, never a wrong
-        # promotion the other way). `len(rest) > 2`, not `> 1`: every one of
-        # these productions requires an operand (a type or source-name)
-        # after the two-letter prefix -- a bare "_ZTV" has no such operand
-        # and is not a complete encoding (Codex review). The operand
-        # itself is then checked by _operand_looks_valid for the narrower
-        # digit-prefixed case (Codex review, fresh evidence: "_ZTV0").
-        return _operand_looks_valid(rest[2:])
-    if rest[0] == "G" and len(rest) > 2 and rest[1] in "VR":
-        # guard variable / reference temporary -- same "requires an operand
-        # after the two-letter prefix" reasoning as <special-name> above; a
-        # bare "_ZGV" is not a complete encoding either.
-        return _operand_looks_valid(rest[2:])
-    if rest[0] == "S" and len(rest) > 1 and (rest[1].isalnum() or rest[1] == "_"):
-        # substitution-abbreviated std:: name. "St" specifically
-        # abbreviates the std:: NAMESPACE PREFIX only, not a complete
-        # substitution by itself -- it must be followed by an
-        # unqualified-name (e.g. "St9terminate" for std::terminate),
-        # unlike the other single-letter abbreviations (Sa/Sb/Sd/Si/So/Ss,
-        # each a complete named substitution on its own) or numbered
-        # back-references (S_, S0_, ...). A bare "_ZSt" previously passed
-        # this check with nothing after it (Codex review, fresh evidence).
-        if rest[1] == "t":
-            # A length-only check let "_ZSt0"/"_ZSt9abc" through: "0" is a
-            # zero-length <source-name> and "9abc" is truncated (claims 9
-            # bytes, has 3) -- neither is a valid unqualified-name after
-            # the namespace prefix. Reuse _operand_looks_valid's same
-            # digit-prefixed <source-name> check (Codex review, fresh
-            # evidence, round 3).
-            return len(rest) > 2 and _operand_looks_valid(rest[2:])
-        if rest[1].isdigit() or (rest[1].isalpha() and rest[1].isupper()):
-            # A numbered substitution (<seq-id> ::= [0-9A-Z]+, ALWAYS
-            # followed by a literal terminating "_", e.g. "S0_", "SA_")
-            # references an EARLIER substitution-table entry -- one only
-            # populated by <name>/<type> productions already emitted
-            # earlier in the SAME encoding. This function validates only
-            # the FIRST production of a top-level <encoding>, where no
-            # such entry can exist yet: a well-formed "S0_"/"SA_" here is
-            # a context-free reference to nothing, never a valid first
-            # production, regardless of whether its own terminator is
-            # present (Codex review, fresh evidence, round 8; previously
-            # only the missing-terminator shape "_ZS0"/"_ZSA" was
-            # rejected, while the well-formed-but-context-free "_ZS0_"
-            # still passed).
-            return False
-        # Only Sa/Sb/Sd/Si/So/Ss are real complete single-letter
-        # abbreviations (allocator/basic_string/basic_iostream/
-        # basic_istream/basic_ostream/string) that don't need any prior
-        # context -- they denote fixed, well-known components, unlike a
-        # numbered back-reference. Bare "S_" (back-reference-0) has the
-        # exact same "no earlier entry can exist yet" problem as the
-        # numbered case above and is rejected for the same reason (Codex
-        # review, fresh evidence, round 8). Any other lowercase letter
-        # (e.g. "_ZSx") is not a real Itanium substitution at all, but
-        # previously matched this fallback outright regardless of which
-        # letter followed "S" (Codex review, fresh evidence, round 2).
-        return rest[1] in "abdios"
+    handler = _ENCODING_PRODUCTION_HANDLERS.get(rest[0])
+    if handler is not None:
+        return handler(rest)
     # Two <operator-name> codes are not complete by themselves the way the
     # other 47 are: "cv" (conversion operator) requires a following
     # <type>, and "li" (C++11 literal operator) requires a following

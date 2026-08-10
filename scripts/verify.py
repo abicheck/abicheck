@@ -275,6 +275,18 @@ STEPS: tuple[Step, ...] = (
         description="docs/AGENTS.md ownership contract: topics.yaml integrity, front-matter schema, duplicate-block scan",
     ),
     Step(
+        # The generated-doc drift contract (docs/AGENTS.md, "regenerating
+        # generated docs") applied to ADR-058's new artifact family: the three
+        # committed publication trees must reproduce from skills-src/. Checks
+        # all three, not just the authoritative .agents/skills/ one — a
+        # rewrite bug reachable only on one emission path would otherwise pass
+        # indefinitely.
+        "agent-skills-generated",
+        _pyscript("scripts/gen_agent_skills.py", "--check"),
+        frozenset({PR, FULL}),
+        description="Generated agent-skill trees match skills-src/ (ADR-058)",
+    ),
+    Step(
         "repo-facts",
         _pyscript("scripts/gen_repo_facts.py", "--check"),
         frozenset({PR, FULL}),
