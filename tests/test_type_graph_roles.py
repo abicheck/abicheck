@@ -276,6 +276,115 @@ def test_anonymous_enum_typedef_that_does_not_own_the_preceding_tag_is_not_match
     assert _find(ast, "enum_underlying") == []
 
 
+def _anonymous_enum(tag_id: str = "0xenum") -> dict:
+    return {
+        "id": tag_id,
+        "kind": "EnumDecl",
+        "name": "",
+        "fixedUnderlyingType": {
+            "qualType": "detail::Handle",
+            "desugaredQualType": "long",
+        },
+        "inner": [
+            {"kind": "EnumConstantDecl", "name": "A", "type": {"qualType": "int"}}
+        ],
+    }
+
+
+def test_anonymous_enum_field_declarator_emits_underlying_edge_on_the_owner() -> None:
+    """G29 Phase 5 item 5 gap, second shape (Codex review, fresh evidence):
+    ``struct Public { enum : U { A } value; };`` -- clang gives this shape no
+    id linkage at all (unlike the typedef case), only a location-encoded
+    type spelling on the FieldDecl itself, so the fix attributes the
+    dependency to the *owning record*, mirroring the record's own ordinary
+    field-type edges."""
+    record = {
+        "kind": "CXXRecordDecl",
+        "name": "Public",
+        "tagUsed": "struct",
+        "inner": [
+            _anonymous_enum(),
+            {
+                "kind": "FieldDecl",
+                "name": "value",
+                "type": {
+                    "qualType": "enum (unnamed enum at t.hpp:4:5)",
+                    "desugaredQualType": "api::Public::(unnamed enum at t.hpp:4:5)",
+                },
+            },
+        ],
+    }
+    ast = _tu(_detail_ns(), _namespace("api", record))
+    assert _find(ast, "enum_underlying") == [
+        (EDGE_TYPE_HAS_FIELD_TYPE, "api::Public", "detail::Handle", CONF_HIGH)
+    ]
+
+
+def test_anonymous_enum_var_declarator_emits_underlying_edge_on_the_variable() -> None:
+    """The namespace-scope-variable spelling of the same idiom --
+    ``enum : U { A } global_value;`` -- attributes to the variable's own
+    decl identity (`DECL_HAS_TYPE`), not a record, since there is none."""
+    var = {
+        "kind": "VarDecl",
+        "name": "global_value",
+        "mangledName": "_ZN3api12global_valueE",
+        "type": {
+            "qualType": "enum (unnamed enum at t.hpp:3:1)",
+            "desugaredQualType": "api::(unnamed enum at t.hpp:3:1)",
+        },
+    }
+    ast = _tu(_detail_ns(), _namespace("api", _anonymous_enum(), var))
+    assert _find(ast, "enum_underlying") == [
+        (EDGE_DECL_HAS_TYPE, "_ZN3api12global_valueE", "detail::Handle", CONF_HIGH)
+    ]
+
+
+def test_anonymous_enum_local_var_declarator_emits_nothing() -> None:
+    """A block-scope local (inside a function body) is out of scope for
+    every existing VarDecl-type edge in this module -- the anonymous-enum
+    path must not carve out an exception."""
+    func = {
+        "kind": "FunctionDecl",
+        "name": "f",
+        "mangledName": "_ZN3api1fEv",
+        "inner": [
+            {
+                "kind": "CompoundStmt",
+                "inner": [
+                    _anonymous_enum(),
+                    {
+                        "kind": "VarDecl",
+                        "name": "local_value",
+                        "type": {
+                            "qualType": "enum (unnamed enum at t.hpp:5:5)",
+                            "desugaredQualType": "api::f()::(unnamed enum at t.hpp:5:5)",
+                        },
+                    },
+                ],
+            }
+        ],
+    }
+    ast = _tu(_detail_ns(), _namespace("api", func))
+    assert _find(ast, "enum_underlying") == []
+
+
+def test_anonymous_enum_unrelated_following_field_emits_nothing() -> None:
+    """An anonymous enum with no declarator of its own at all (unusual, but
+    legal -- only its enumerators are used) must not attribute its
+    underlying-type edge to an unrelated later field."""
+    record = {
+        "kind": "CXXRecordDecl",
+        "name": "Public",
+        "tagUsed": "struct",
+        "inner": [
+            _anonymous_enum(),
+            {"kind": "FieldDecl", "name": "other", "type": {"qualType": "int"}},
+        ],
+    }
+    ast = _tu(_detail_ns(), _namespace("api", record))
+    assert _find(ast, "enum_underlying") == []
+
+
 # ── template_param (non-type template parameter type) ──────────────────────
 
 
@@ -877,6 +986,8 @@ template <template <detail::Handle H> class C> struct Outer { C<0> c; };
 template <void (*Fn)()> struct Holder {};
 using Public = Holder<&detail::f>;
 typedef enum : detail::Handle { AnonA } AnonPublic;
+struct AnonField { enum : detail::Handle { AnonFieldA } anon_field; };
+enum : detail::Handle { AnonVarA } anon_global_var;
 }
 """
 
@@ -928,6 +1039,19 @@ def test_real_clang_emits_every_new_role_end_to_end(tmp_path) -> None:
         "the C-style `typedef enum : U {...} Name;` idiom gives the enum no "
         "name of its own -- the underlying-type edge must still land on the "
         "typedef's own public name"
+    )
+    assert ("enum_underlying", "api::AnonField", "detail::Handle") in edges, (
+        "a field-declared anonymous enum has no id linkage at all -- the "
+        "underlying-type edge must land on the owning record instead"
+    )
+    assert any(
+        role == "enum_underlying"
+        and dst == "detail::Handle"
+        and "anon_global_var" in src
+        for role, src, dst in edges
+    ), (
+        "a namespace-scope-variable-declared anonymous enum attributes to "
+        "the variable's own decl identity"
     )
 
 

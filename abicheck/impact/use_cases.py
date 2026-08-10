@@ -800,26 +800,37 @@ def explain_use_case_impact(
     # one seen, so a change to foo@V2 could be mis-attributed through
     # decl://foo to a use case that named foo@V1 specifically, or a genuine
     # foo@V1 change could vanish if foo@V2's edge happened to be visited
-    # later), and the reverse symbol id -> decl id -- the latter to resolve
-    # a coalesced ``binary_symbol://`` entry (`_public_entry_index` prefers
-    # the mapped symbol id over the declaring decl id, see its own
-    # docstring) back to the decl node the call-graph's own edges are keyed
-    # on: a ``DECL_CALLS_DECL``/``DECL_REFERENCES_DECL`` edge's src/dst is
-    # always a decl (or type) node id, never a bare exported-symbol one, so
-    # walking from the coalesced binary_symbol id directly would find no
-    # outgoing edges at all and silently explain nothing.
+    # later), and the reverse symbol id -> decl id(s) -- the latter to
+    # resolve a coalesced ``binary_symbol://`` entry (`_public_entry_index`
+    # prefers the mapped symbol id over the declaring decl id, see its own
+    # docstring) back to the decl node(s) the call-graph's own edges are
+    # keyed on: a ``DECL_CALLS_DECL``/``DECL_REFERENCES_DECL`` edge's
+    # src/dst is always a decl (or type) node id, never a bare
+    # exported-symbol one, so walking from the coalesced binary_symbol id
+    # directly would find no outgoing edges at all and silently explain
+    # nothing.
     decl_to_symbols: dict[str, set[str]] = {}
-    symbol_to_decl: dict[str, str] = {}
+    # Every decl that maps onto a given symbol, not just one (Codex review,
+    # fresh evidence): the same export can legitimately be reached by more
+    # than one SOURCE_DECL_MAPS_TO_SYMBOL edge -- e.g. an inline/weak
+    # definition captured once per TU, all mangling to the identical symbol
+    # name. A plain dict[str, str] here kept only the first decl seen
+    # (edge-iteration-order dependent), and a manifest entry naming that
+    # exact binary_symbol could then walk from a declaration with no
+    # captured call edges (a forward declaration, an extern with no body in
+    # *this* TU's evidence) while the sibling decl carrying the real body --
+    # and its transitive calls -- was silently never walked at all.
+    symbol_to_decls: dict[str, set[str]] = {}
     for edge in library_graph.edges:
         if edge.kind != "SOURCE_DECL_MAPS_TO_SYMBOL":
             continue
-        symbol_to_decl.setdefault(edge.dst, edge.src)
+        symbol_to_decls.setdefault(edge.dst, set()).add(edge.src)
         name = edge.dst.removeprefix("binary_symbol://")
         if name in wanted:
             decl_to_symbols.setdefault(edge.src, set()).add(name)
 
-    def walk_root(entry: str) -> str:
-        return symbol_to_decl.get(entry, entry)
+    def walk_roots_for(entry: str) -> set[str]:
+        return symbol_to_decls.get(entry, {entry})
 
     node_by_id = {n.id: n for n in library_graph.nodes}
     exported_decls = {
@@ -830,7 +841,7 @@ def explain_use_case_impact(
         {
             root
             for eid in all_entries
-            for root in (walk_root(eid),)
+            for root in walk_roots_for(eid)
             if is_consumer_compiled_public_entry(root, node_by_id, exported_decls)
         }
     )
@@ -864,11 +875,12 @@ def explain_use_case_impact(
                 # wanted symbol that decl maps to counts.
                 for direct_symbol in decl_to_symbols.get(entry, ()):
                     result.setdefault(direct_symbol, set()).add(use_case)
-            seen, _came_from, _degraded = reachability.get(
-                walk_root(entry), (frozenset(), {}, frozenset())
-            )
-            for decl in seen:
-                for sym in decl_to_symbols.get(decl, ()):
-                    result.setdefault(sym, set()).add(use_case)
+            for root in walk_roots_for(entry):
+                seen, _came_from, _degraded = reachability.get(
+                    root, (frozenset(), {}, frozenset())
+                )
+                for decl in seen:
+                    for sym in decl_to_symbols.get(decl, ()):
+                        result.setdefault(sym, set()).add(use_case)
 
     return {symbol: tuple(sorted(names)) for symbol, names in result.items()}

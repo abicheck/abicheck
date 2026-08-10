@@ -863,6 +863,95 @@ def test_explain_use_case_impact_two_use_cases_pin_different_versions() -> None:
     }
 
 
+def _multi_decl_one_symbol_library_graph() -> SourceGraphSummary:
+    """Two *distinct* declarations both mapping onto the **same** exported
+    symbol (`binary_symbol://foo`) -- the shape an inline/weak definition
+    captured once per TU produces, all mangling to the identical symbol
+    name. `decl://foo_declaration_only` has no outgoing call edges (a
+    forward declaration / extern with no captured body in this TU's
+    evidence); `decl://foo_with_body` is the sibling declaration that
+    actually carries the definition, calling `detail::helper`."""
+    g = SourceGraphSummary()
+    g.add_node(GraphNode(id="binary_symbol://foo", kind="binary_symbol", label="foo"))
+    g.add_node(
+        GraphNode(
+            id="decl://foo_declaration_only",
+            kind="source_decl",
+            label="foo",
+            attrs={"visibility": "public_header"},
+        )
+    )
+    g.add_edge(
+        GraphEdge(
+            src="decl://foo_declaration_only",
+            dst="binary_symbol://foo",
+            kind="SOURCE_DECL_MAPS_TO_SYMBOL",
+        )
+    )
+    g.add_node(
+        GraphNode(
+            id="decl://foo_with_body",
+            kind="source_decl",
+            label="foo",
+            attrs={"visibility": "public_header"},
+        )
+    )
+    g.add_edge(
+        GraphEdge(
+            src="decl://foo_with_body",
+            dst="binary_symbol://foo",
+            kind="SOURCE_DECL_MAPS_TO_SYMBOL",
+        )
+    )
+    g.add_node(
+        GraphNode(
+            id="decl://_ZN6detail6helperEv",
+            kind="source_decl",
+            label="detail::helper",
+            attrs={"visibility": "source"},
+        )
+    )
+    g.add_node(
+        GraphNode(
+            id="binary_symbol://_ZN6detail6helperEv",
+            kind="binary_symbol",
+            label="_ZN6detail6helperEv",
+        )
+    )
+    g.add_edge(
+        GraphEdge(
+            src="decl://_ZN6detail6helperEv",
+            dst="binary_symbol://_ZN6detail6helperEv",
+            kind="SOURCE_DECL_MAPS_TO_SYMBOL",
+        )
+    )
+    g.add_edge(
+        GraphEdge(
+            src="decl://foo_with_body",
+            dst="decl://_ZN6detail6helperEv",
+            kind="DECL_CALLS_DECL",
+        )
+    )
+    return g
+
+
+def test_explain_use_case_impact_walks_every_decl_mapped_to_the_same_symbol() -> None:
+    # Codex review, fresh evidence: when more than one declaration maps to
+    # the same exported symbol, a manifest entry naming that symbol must
+    # walk from EVERY mapped declaration, not just whichever one an
+    # arbitrary edge-iteration order retained -- otherwise transitive
+    # attribution silently depends on which sibling decl "won".
+    library = _multi_decl_one_symbol_library_graph()
+    definitions = [UseCaseDefinition(use_case="caller", entrypoints=("foo",))]
+    result = explain_use_case_impact(
+        definitions, library, symbols=["foo", "_ZN6detail6helperEv"]
+    )
+    assert result == {
+        "foo": ("caller",),
+        "_ZN6detail6helperEv": ("caller",),
+    }
+
+
 def test_explain_use_case_impact_merges_repeated_use_case_entries() -> None:
     # Codex review, fresh evidence: a manifest may repeat the same
     # `use_case` name across separate list entries -- `parse_use_case_manifest`

@@ -1016,6 +1016,24 @@ def _anonymous_tag_id_referenced(node: Any, tag_id: str) -> bool:
     )
 
 
+_ANONYMOUS_ENUM_MARKER = "(unnamed enum"
+
+
+def _declares_anonymous_enum_type(node: Any) -> bool:
+    """Whether *node* (a ``FieldDecl``/``VarDecl``) is declared with the type
+    of an anonymous enum -- clang spells this ``"enum (unnamed enum at
+    <file>:<line>:<col>)"`` in both ``type.qualType`` and
+    ``desugaredQualType`` (verified against real Clang 18), with **no** id
+    linkage back to the ``EnumDecl`` at all (unlike the typedef/alias case
+    :func:`_anonymous_tag_id_referenced` handles) -- so a substring check is
+    the only join signal clang's JSON AST actually provides for this shape.
+    """
+    node_type = node.get("type")
+    if not isinstance(node_type, dict):
+        return False
+    return _ANONYMOUS_ENUM_MARKER in str(node_type.get("qualType", ""))
+
+
 def _walk_children(
     node: Any,
     scope: list[str],
@@ -1042,24 +1060,68 @@ def _walk_children(
     (via :func:`_anonymous_tag_id_referenced`, an ``id`` match, not a name
     heuristic), emitting the ``enum_underlying`` edge under the typedef's own
     name -- the only public identity this anonymous enum ever gets.
+
+    A second, differently-shaped instance of the identical gap (Codex
+    review, fresh evidence): ``struct Public { enum : U { A } value; };`` --
+    an anonymous enum introduced through a field or (namespace/class-scope)
+    variable declarator rather than a typedef/alias. clang gives this shape
+    **no** id-based linkage whatsoever (confirmed empirically: the
+    ``FieldDecl``/``VarDecl``'s own ``type`` carries only the location-
+    encoded spelling, no ``ownedTagDecl``/``decl`` id at all), so sibling
+    adjacency plus :func:`_declares_anonymous_enum_type`'s marker-string
+    check is the only join signal available -- safe because C++ requires an
+    anonymous tag's own declarator(s) to be the *same* declaration, always
+    the immediately following sibling, never separated by an unrelated one.
+    Attributed to the *owning* identity a field/variable's own type edge
+    would already use (the record's own qualified name for a field,
+    :func:`_var_decl_ident` for a variable) rather than inventing a name for
+    the enum itself, since it has no public identity of its own to name.
     """
     pending_anon_enum: dict[str, Any] | None = None
     for child in node.get("inner", []) or []:
         if isinstance(child, dict):
             tag_id = str((pending_anon_enum or {}).get("id") or "")
             name = str(child.get("name") or "")
+            kind = child.get("kind")
             if (
                 tag_id
                 and name
-                and child.get("kind") in ("TypedefDecl", "TypeAliasDecl")
+                and kind in ("TypedefDecl", "TypeAliasDecl")
                 and _anonymous_tag_id_referenced(child, tag_id)
             ):
                 assert pending_anon_enum is not None
                 _emit_enum_underlying_edge(pending_anon_enum, scope, name, edges, idx)
+            elif (
+                pending_anon_enum is not None
+                and kind == "FieldDecl"
+                and name
+                and _declares_anonymous_enum_type(child)
+            ):
+                _emit_enum_underlying_edge_from(
+                    "::".join(scope),
+                    pending_anon_enum,
+                    EDGE_TYPE_HAS_FIELD_TYPE,
+                    scope,
+                    edges,
+                    idx,
+                )
+            elif (
+                pending_anon_enum is not None
+                and kind == "VarDecl"
+                and name
+                and not enclosing_func
+                and _declares_anonymous_enum_type(child)
+            ):
+                _emit_enum_underlying_edge_from(
+                    _var_decl_ident(child, scope, name),
+                    pending_anon_enum,
+                    EDGE_DECL_HAS_TYPE,
+                    scope,
+                    edges,
+                    idx,
+                )
             pending_anon_enum = (
-                child
-                if child.get("kind") == "EnumDecl" and not child.get("name")
-                else None
+                child if kind == "EnumDecl" and not child.get("name") else None
             )
         _walk_types(child, scope, enclosing_func, edges, idx)
 
@@ -1146,11 +1208,23 @@ def _emit_alias_edge(
     )
 
 
-def _emit_enum_underlying_edge(
-    node: Any, scope: list[str], name: str, edges: list[TypeEdge], idx: _AstIndexes
+def _emit_enum_underlying_edge_from(
+    src: str,
+    node: Any,
+    edge_kind: str,
+    scope: list[str],
+    edges: list[TypeEdge],
+    idx: _AstIndexes,
 ) -> None:
-    """Emit the edge from an enum to its *fixed underlying type* (G29 Phase 5
-    item 5's ``enum_underlying`` role).
+    """Core of the ``enum_underlying`` role: emit *node* (an ``EnumDecl``)'s
+    ``fixedUnderlyingType`` dependency from an already-computed *src*
+    identity, under *edge_kind* (``TYPE_HAS_FIELD_TYPE`` for a type-shaped
+    src -- a named enum, or a typedef/alias/record standing in for an
+    anonymous one; ``DECL_HAS_TYPE`` for a decl-shaped src -- a variable).
+    Split out so every caller that can name *some* public identity for an
+    otherwise-anonymous enum (see :func:`_emit_enum_underlying_edge` and
+    :func:`_walk_children`'s field/variable declarator handling) shares one
+    implementation rather than re-deriving the ``fixedUnderlyingType`` read.
 
     An ``EnumDecl`` carries **no** ``type`` key at all — the underlying type
     lives in its own ``fixedUnderlyingType`` object (verified against real
@@ -1177,13 +1251,25 @@ def _emit_enum_underlying_edge(
         return
     _emit_type_edges(
         edges,
-        "::".join([*scope, name]),
+        src,
         raw,
-        EDGE_TYPE_HAS_FIELD_TYPE,
+        edge_kind,
         "enum_underlying",
         scope,
         idx.name_index,
         idx.decl_file,
+    )
+
+
+def _emit_enum_underlying_edge(
+    node: Any, scope: list[str], name: str, edges: list[TypeEdge], idx: _AstIndexes
+) -> None:
+    """Emit the edge from a *named* enum to its fixed underlying type (G29
+    Phase 5 item 5's ``enum_underlying`` role) -- see
+    :func:`_emit_enum_underlying_edge_from` for the shared implementation.
+    """
+    _emit_enum_underlying_edge_from(
+        "::".join([*scope, name]), node, EDGE_TYPE_HAS_FIELD_TYPE, scope, edges, idx
     )
 
 
