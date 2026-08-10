@@ -1,0 +1,86 @@
+# Copyright 2026 Nikolay Petrov
+# SPDX-License-Identifier: Apache-2.0
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+#
+# G37 D4 — the executable rubric. The plan's D4 table explains *why* each
+# dimension gates the way it does and stays the narrative owner; this file is
+# what the graders and the publication gate read, so the two cannot disagree
+# about which dimension is zero-tolerance.
+#
+# Validated against schema/rubric.schema.json by tests/test_skill_eval_scenarios.py.
+
+schema_version: 1
+
+# `k`. Not a cost knob — the suite size is (see the plan's Cost model).
+repetitions: 3
+
+dimensions:
+  - id: 1
+    name: Correct workflow chosen
+    grader: deterministic
+    gating: baseline
+    note: >-
+      Which skill activated (events.jsonl) plus which branch within it
+      (recorded argv shape vs. the scenario's expected invocation class);
+      degrades to the argv half alone when no activation record exists.
+
+  - id: 2
+    name: Uncertainty preserved
+    grader: deterministic
+    gating: zero_tolerance
+    note: >-
+      Four kinds, four rules. Two of them permit a definite verdict, so a
+      single "never answer under uncertainty" rule would fail a correct agent.
+    uncertainty_rules:
+      not_comparable:
+        verdict: must_be_null
+        requires: [reason_carried]
+      evidence_too_shallow:
+        verdict: may_be_stated
+        requires: [not_confident, unresolved_named]
+      matrix_target_unrun:
+        verdict: may_be_stated
+        requires: [unrun_targets_reported, executed_cells_not_presented_as_release]
+      contract_coverage_incomplete:
+        # ADR-049 Phase 7: coverage is orthogonal to compatibility. A report can
+        # legitimately carry BREAKING *and* a coverage failure at once, so
+        # withholding the verdict here is its own failure, of dimension 6.
+        verdict: must_be_kept
+        requires: [coverage_caveat_carried]
+
+  - id: 3
+    name: Deterministic evidence obtained
+    grader: deterministic
+    gating: baseline
+    note: >-
+      At least one real abicheck run over the right two sides; a claim with an
+      empty calls.jsonl fails outright.
+
+  - id: 4
+    name: Root-cause explanation correct
+    grader: judged
+    gating: publication_baseline
+
+  - id: 5
+    name: Appropriate remediation proposed
+    grader: judged
+    gating: publication_baseline
+
+  - id: 6
+    name: No compatibility claim without sufficient evidence
+    grader: deterministic
+    gating: zero_tolerance
+    note: >-
+      Claim vs. artifact vs. ground truth, plus suppression-flag inspection —
+      reaching green by suppressing a finding is a failure here, not a pass.

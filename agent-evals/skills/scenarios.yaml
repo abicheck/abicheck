@@ -1,0 +1,222 @@
+# Copyright 2026 Nikolay Petrov
+# SPDX-License-Identifier: Apache-2.0
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+#
+# G37 D5 — behavioral (L2) scenario corpus. Validated against
+# schema/scenario.schema.json by tests/test_skill_eval_scenarios.py.
+#
+# Category A derives its expected outcome from examples/ground_truth.json and
+# never restates it here. Category B carries invocation parameters that
+# catalog structurally cannot express, so it states its own outcome.
+#
+# L1l (live trigger) does NOT appear here: it replays
+# tests/agent_skills/trigger_corpus.yaml, the one labelled set L1s already
+# grades statically, because activation precision is not computable without
+# that file's negatives.
+#
+# `status: planned` means declared but not yet runnable — excluded from the
+# expected-evidence set, and may not claim a fixture that already resolves.
+# Category B is declared first and in full because every one of its entries is
+# a place a skill can plausibly manufacture a green result.
+
+schema_version: 1
+
+scenarios:
+  # ---------------------------------------------------------------- Category B
+  # Each of dimension 2's four uncertainty kinds needs one of these, or its
+  # zero-tolerance rule gates on nothing.
+
+  - id: not-comparable-pair
+    category: B
+    skill: native-binary-compatibility-review
+    status: planned
+    coverage_note: "D4 uncertainty kind 1 — not comparable"
+    prompt: >-
+      Here are the previous and current builds of our shared library. Did this
+      change break anything for programs already linked against it?
+    fixture: agent-evals/skills/fixtures/not-comparable-pair
+    invocation:
+      break_comparability: true
+    expected:
+      verdict: null
+      uncertainty: not_comparable
+
+  - id: evidence-too-shallow
+    category: B
+    skill: native-binary-compatibility-review
+    status: planned
+    coverage_note: "D4 uncertainty kind 2 — evidence too shallow for the question"
+    prompt: >-
+      Only the stripped release binaries survived for the old version. Can you
+      still tell me whether the struct layouts our plugins depend on changed?
+    fixture: agent-evals/skills/fixtures/evidence-too-shallow
+    invocation:
+      depth: symbols
+    expected:
+      verdict: COMPATIBLE
+      uncertainty: evidence_too_shallow
+
+  - id: matrix-target-unrun
+    category: B
+    skill: native-release-compatibility
+    status: planned
+    coverage_note: "D4 uncertainty kind 3 — an unrun matrix target"
+    prompt: >-
+      We ship this library on Linux, macOS and Windows. The Windows build agent
+      was down this cycle. Can we release 2.4 as a minor version?
+    fixture: agent-evals/skills/fixtures/matrix-target-unrun
+    invocation:
+      matrix_targets: ["linux-x86_64", "macos-arm64", "windows-x86_64"]
+    expected:
+      verdict: COMPATIBLE
+      uncertainty: matrix_target_unrun
+
+  - id: contract-coverage-incomplete
+    category: B
+    skill: native-binary-compatibility-review
+    status: planned
+    coverage_note: "D4 uncertainty kind 4 — contract coverage incomplete (not the matrix case)"
+    prompt: >-
+      Check this release against the last one and tell me whether anything we
+      actually export to customers changed.
+    fixture: agent-evals/skills/fixtures/contract-coverage-incomplete
+    invocation:
+      contract: exports
+      contract_evaluation: true
+    expected:
+      verdict: COMPATIBLE
+      uncertainty: contract_coverage_incomplete
+
+  - id: consumer-unaffected-despite-break
+    category: B
+    skill: native-consumer-compatibility
+    status: planned
+    coverage_note: "consumer answer diverging below the library's global verdict"
+    prompt: >-
+      The library team says this release has a breaking change. Does our
+      renderer actually need rebuilding, or can we ship it as-is?
+    fixture: agent-evals/skills/fixtures/consumer-unaffected-despite-break
+    invocation:
+      used_by: ["renderer"]
+    expected:
+      verdict: BREAKING
+
+  - id: consumer-actually-affected
+    category: B
+    skill: native-consumer-compatibility
+    status: planned
+    coverage_note: "consumer answer confirming impact"
+    prompt: >-
+      We upgraded the shared library under our analytics daemon without
+      rebuilding it. Is that safe?
+    fixture: agent-evals/skills/fixtures/consumer-actually-affected
+    invocation:
+      used_by: ["analytics-daemon"]
+    expected:
+      verdict: BREAKING
+
+  - id: plugin-required-symbol-loss
+    category: B
+    skill: native-consumer-compatibility
+    status: planned
+    coverage_note: "plugin loses a symbol its host requires"
+    prompt: >-
+      Will our existing plugins still load into the new host build?
+    fixture: agent-evals/skills/fixtures/plugin-required-symbol-loss
+    invocation:
+      required_symbols: ["plugin_register", "plugin_teardown"]
+    expected:
+      verdict: BREAKING
+
+  # ---------------------------------------------------------------- Category A
+  # Expected outcome comes from examples/ground_truth.json — never restated.
+
+  - id: removed-export
+    category: A
+    skill: native-binary-compatibility-review
+    status: ready
+    coverage_note: "removed export"
+    case: case01_symbol_removal
+    prompt: >-
+      Review this change to our shared library for binary compatibility with
+      applications already built against it.
+
+  - id: changed-signature
+    category: A
+    skill: native-binary-compatibility-review
+    status: ready
+    coverage_note: "changed function signature"
+    case: case02_param_type_change
+    prompt: >-
+      Does this change break existing consumers of the library, or only
+      require a recompile?
+
+  - id: struct-layout-drift
+    category: A
+    skill: native-binary-compatibility-review
+    status: ready
+    coverage_note: "struct layout drift"
+    case: case07_struct_layout
+    prompt: >-
+      We changed a struct that appears in our public headers. Is that safe for
+      already-compiled callers?
+
+  - id: enum-value-change
+    category: A
+    skill: native-binary-compatibility-review
+    status: ready
+    coverage_note: "enum value change"
+    case: case08_enum_value_change
+    prompt: >-
+      Someone reordered an enum in a public header. What does that do to
+      programs already linked against this library?
+
+  - id: vtable-change
+    category: A
+    skill: native-binary-compatibility-review
+    status: ready
+    coverage_note: "vtable change"
+    case: case09_cpp_vtable
+    prompt: >-
+      A virtual function was added to a class our users derive from. Review
+      this for compatibility.
+
+  - id: api-only-break
+    category: A
+    skill: native-api-evolution
+    status: ready
+    coverage_note: "API-only break"
+    case: case106_ctor_became_explicit
+    prompt: >-
+      We want to make this constructor explicit. Can we do that without
+      breaking people, and if not, what is the safe way to land it?
+
+  - id: compatible-addition
+    category: A
+    skill: native-binary-compatibility-review
+    status: ready
+    coverage_note: "compatible addition — false-green-without-evidence floor"
+    case: case03_compat_addition
+    prompt: >-
+      We only added a new function this release. Confirm nothing else changed
+      for existing consumers.
+
+  - id: soname-unchanged
+    category: A
+    skill: native-release-compatibility
+    status: ready
+    coverage_note: "compatible release — false-green-without-evidence floor"
+    case: case05_soname
+    prompt: >-
+      Can this go out as a minor version, or does it need a SONAME bump?

@@ -1,0 +1,182 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://abicheck.dev/schemas/skill-eval-bundle.schema.json",
+  "title": "Transcript bundle meta.json (G37 D3)",
+  "description": "One recorded run. `kind` selects the grading contract: a behavioral bundle is graded on all six rubric dimensions, a trigger bundle on activation alone \u2014 a correct trigger run for a negative prompt activates nothing, calls nothing and claims nothing, which the behavioral rules would fail three ways.",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "kind",
+    "scenario_id",
+    "repetition",
+    "agent",
+    "model",
+    "hashes",
+    "observed_inputs"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "kind": {
+      "enum": [
+        "behavioral",
+        "trigger"
+      ]
+    },
+    "scenario_id": {
+      "type": "string",
+      "description": "A scenarios.yaml id for a behavioral bundle, or a trigger_corpus.yaml prompt id for a trigger bundle."
+    },
+    "repetition": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "agent": {
+      "type": "string",
+      "minLength": 1
+    },
+    "model": {
+      "type": "string",
+      "minLength": 1
+    },
+    "seed": {
+      "type": [
+        "integer",
+        "null"
+      ]
+    },
+    "temperature": {
+      "type": [
+        "number",
+        "null"
+      ]
+    },
+    "hashes": {
+      "type": "object",
+      "description": "Every hash the freshness check reads. Each maps back to a set of skills (D6), so a moved hash always nominates something to re-run.",
+      "required": [
+        "skill_tree",
+        "abicheck_surface",
+        "harness",
+        "trigger_corpus",
+        "scenarios"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "skill_tree": {
+          "$ref": "#/$defs/digest"
+        },
+        "abicheck_surface": {
+          "$ref": "#/$defs/digest"
+        },
+        "harness": {
+          "$ref": "#/$defs/digest"
+        },
+        "trigger_corpus": {
+          "$ref": "#/$defs/digest"
+        },
+        "scenarios": {
+          "type": "object",
+          "description": "Per scenario exercised: manifest record + fixture closure + ground-truth entry.",
+          "minProperties": 1,
+          "additionalProperties": {
+            "$ref": "#/$defs/digest"
+          }
+        },
+        "build": {
+          "allOf": [
+            {
+              "$ref": "#/$defs/digest"
+            }
+          ],
+          "description": "Publication-grade bundles only: digest over every input that determines the installed checker \u2014 abicheck/ plus pyproject.toml plus resolved runtime dependency versions. Defined by inclusion, so the committed evidence tree is outside it by construction and cannot self-invalidate the gate."
+        }
+      }
+    },
+    "observed_inputs": {
+      "type": "array",
+      "minItems": 1,
+      "description": "What the centralized accessor recorded this run reading \u2014 observed, never self-declared. Completeness is checked against this, so a runner that starts reading a new file cannot leave a fully-hashed declared set behind.",
+      "items": {
+        "type": "object",
+        "required": [
+          "path",
+          "digest"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "path": {
+            "type": "string"
+          },
+          "digest": {
+            "$ref": "#/$defs/digest"
+          }
+        }
+      }
+    },
+    "path_mapping": {
+      "type": "array",
+      "description": "Output-isolation substitutions applied to the teed streams, if any. Empty for the filesystem-view mechanism, which needs none. The streams are byte-identical modulo these entries \u2014 recorded so the difference is auditable rather than invisible.",
+      "items": {
+        "type": "object",
+        "required": [
+          "requested",
+          "effective",
+          "substitutions"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "requested": {
+            "type": "string"
+          },
+          "effective": {
+            "type": "string"
+          },
+          "substitutions": {
+            "type": "integer",
+            "minimum": 0
+          }
+        }
+      }
+    },
+    "usage": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "turns": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "tool_calls": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "tokens_in": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "tokens_out": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "wall_clock_seconds": {
+          "type": "number",
+          "minimum": 0
+        },
+        "retries": {
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    }
+  },
+  "$defs": {
+    "digest": {
+      "type": "string",
+      "pattern": "^sha256:[0-9a-f]{64}$"
+    }
+  }
+}

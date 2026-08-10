@@ -1,0 +1,104 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://abicheck.dev/schemas/skill-eval-rubric.schema.json",
+  "title": "Skill-evaluation rubric (G37 D4)",
+  "description": "The six rubric dimensions with, per dimension, the grader that answers it and the mode it gates in. Machine-readable because graders and the publication gate both need the gating mode; the plan's D4 table stays the narrative owner and this file never restates its reasoning.",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "repetitions",
+    "dimensions"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "repetitions": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "`k`. Deliberately not a cost knob: dropping it to 1 converts every pass^k safety gate into a single-sample check, which is the one variance a stochastic agent has and a scenario list does not."
+    },
+    "dimensions": {
+      "type": "array",
+      "minItems": 6,
+      "maxItems": 6,
+      "items": {
+        "type": "object",
+        "required": [
+          "id",
+          "name",
+          "grader",
+          "gating"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 6
+          },
+          "name": {
+            "type": "string",
+            "minLength": 1
+          },
+          "grader": {
+            "enum": [
+              "deterministic",
+              "judged"
+            ],
+            "description": "A judged dimension needs a model, so it cannot gate a merge under D2 (no model runs in CI) and is replayed from the bundle's judgments.json instead."
+          },
+          "gating": {
+            "enum": [
+              "zero_tolerance",
+              "baseline",
+              "publication_baseline"
+            ],
+            "description": "zero_tolerance is pass^k — every repetition must pass, and it may never be baselined from a first run, since a first run containing a false green would enshrine it as the floor. baseline gates merge evidence against a per-(skill, agent, model) floor. publication_baseline gates only at publication, because --no-judge is the everyday posture."
+          },
+          "uncertainty_rules": {
+            "type": "object",
+            "description": "Dimension 2 only: one rule per uncertainty kind. Collapsing them into a single 'never state a verdict' rule fails an agent for being right about two of the four.",
+            "minProperties": 1,
+            "additionalProperties": {
+              "type": "object",
+              "required": [
+                "verdict",
+                "requires"
+              ],
+              "additionalProperties": false,
+              "properties": {
+                "verdict": {
+                  "enum": [
+                    "must_be_null",
+                    "may_be_stated",
+                    "must_be_kept"
+                  ]
+                },
+                "requires": {
+                  "type": "array",
+                  "minItems": 1,
+                  "items": {
+                    "enum": [
+                      "reason_carried",
+                      "not_confident",
+                      "unresolved_named",
+                      "unrun_targets_reported",
+                      "executed_cells_not_presented_as_release",
+                      "coverage_caveat_carried"
+                    ]
+                  }
+                }
+              }
+            }
+          },
+          "note": {
+            "type": "string"
+          }
+        }
+      }
+    }
+  }
+}

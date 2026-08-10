@@ -293,6 +293,27 @@ STEPS: tuple[Step, ...] = (
         description="repo_facts.json freshness (test/example counts, version) — CLAUDE.md M1-4",
     ),
     Step(
+        # G37 Phase 0. Two steps rather than one, because they fail for
+        # different reasons and want different fixes: this one means "the pack
+        # no longer describes the repository" (re-run the generator), while
+        # skill-eval-freshness below means "the committed evidence no longer
+        # describes the pack" (re-run the evaluation). Collapsing them would
+        # report the cheap fix and the expensive one under one name.
+        "skill-eval-pack",
+        _pyscript("scripts/gen_skill_eval_pack.py", "--check"),
+        frozenset({PR, FULL}),
+        description="skill-eval-pack.json matches its generator (G37 D6)",
+    ),
+    Step(
+        # No model runs here (G37 D2) — this reads committed hashes and
+        # committed bundles, so it is bit-for-bit reproducible and costs
+        # nothing. That is the whole reason it can be a required check.
+        "skill-eval-freshness",
+        _pyscript("scripts/check_skill_eval_freshness.py"),
+        frozenset({PR, FULL}),
+        description="Skill-eval evidence is fresh, every hash maps to a skill, every observed input is hashed (G37 D6)",
+    ),
+    Step(
         # FULL only, NOT PR: this step's precondition depends on origin/main
         # being locally resolvable, which is a checkout-topology fact (shallow
         # clone, detached HEAD, a fresh CI checkout without an explicit

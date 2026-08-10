@@ -68,6 +68,12 @@ jobs:
       # silently diverge from the local PR-profile definition of done.
       - name: Scoping / tier-accuracy / doc-sync / docs-contract / agent-skills / repo-facts gates
         run: python scripts/verify.py --profile pr --only fp-rate,tier-accuracy,usecase-docs-sync,docs-contract,agent-skills-generated,repo-facts
+      # G37 Phase 0. Deliberately in this job and not a new one: both steps are
+      # deterministic re-derivations over committed content, no model is
+      # involved (G37 D2), so they belong beside the other structural gates
+      # rather than in a lane of their own.
+      - name: Skill-eval pack + evidence freshness gates (G37 D6)
+        run: python scripts/verify.py --profile pr --only skill-eval-pack,skill-eval-freshness
       - name: Per-tier accuracy matrix (step-summary artifact)
         if: always()
         run: python scripts/check_tier_accuracy.py --markdown >> "$GITHUB_STEP_SUMMARY"
