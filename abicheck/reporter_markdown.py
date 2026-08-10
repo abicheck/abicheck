@@ -1528,6 +1528,77 @@ def _build_internal_rtti_note(breaking: list[Change]) -> list[str]:
     ]
 
 
+def _markdown_alternate_rendering(
+    result: DiffResult,
+    *,
+    stat: bool,
+    report_mode: str,
+    show_impact: bool,
+    show_only: str | None,
+    show_recommendation: bool,
+    severity_config: Any,
+    contract_evaluation: bool,
+) -> str | None:
+    """Render one of the non-default markdown views, or ``None`` for the default.
+
+    ``--stat`` and the ``leaf`` / ``root-cause`` report modes each produce a
+    complete document of their own; the caller returns it as-is (after its own
+    demangling pass) rather than continuing into the full report.
+    """
+    if stat:
+        return to_stat(result, severity_config=severity_config)
+    if report_mode == "leaf":
+        return _to_markdown_leaf(
+            result,
+            show_impact=show_impact,
+            show_only=show_only,
+            show_recommendation=show_recommendation,
+            severity_config=severity_config,
+        )
+    if report_mode == "root-cause":
+        return _to_markdown_root_cause(
+            result,
+            show_only=show_only,
+            show_recommendation=show_recommendation,
+            show_impact=show_impact,
+            severity_config=severity_config,
+            contract_evaluation=contract_evaluation,
+        )
+    return None
+
+
+def _markdown_headline_table(
+    result: DiffResult, emoji: str, label: str
+) -> list[str]:
+    """The report's headline summary table.
+
+    ADR-049 D1/D11: when contract evaluation excluded findings from the
+    compatibility axis, say so in the headline table. The four counts above
+    are now over the *evaluated* findings only, so a reader who sees a
+    `NO_CHANGE` verdict beside a populated "Not Evaluated" section has the
+    count that reconciles them rather than an apparent contradiction. The
+    row is absent for every run that did not opt in, where it is always 0.
+    """
+    lines: list[str] = [
+        f"# ABI Report: {result.library}",
+        "",
+        "| | |",
+        "|---|---|",
+        f"| **Old version** | `{result.old_version}` |",
+        f"| **New version** | `{result.new_version}` |",
+        f"| **Verdict** | {emoji} `{label}` |",
+        f"| Breaking changes | {len(result.breaking)} |",
+        f"| Source-level breaks | {len(result.source_breaks)} |",
+        f"| Deployment risk changes | {len(result.risk)} |",
+        f"| Compatible changes | {len(result.compatible)} |",
+    ]
+    not_evaluated_total = len(result.not_evaluated)
+    if not_evaluated_total:
+        lines.append(f"| Not evaluated (contract) | {not_evaluated_total} |")
+    lines.append("")
+    return lines
+
+
 def to_markdown(
     result: DiffResult,
     *,
@@ -1549,31 +1620,18 @@ def to_markdown(
 
         return demangle_text(text)
 
-    if stat:
-        return _out(to_stat(result, severity_config=severity_config))
-
-    if report_mode == "leaf":
-        return _out(
-            _to_markdown_leaf(
-                result,
-                show_impact=show_impact,
-                show_only=show_only,
-                show_recommendation=show_recommendation,
-                severity_config=severity_config,
-            )
-        )
-
-    if report_mode == "root-cause":
-        return _out(
-            _to_markdown_root_cause(
-                result,
-                show_only=show_only,
-                show_recommendation=show_recommendation,
-                show_impact=show_impact,
-                severity_config=severity_config,
-                contract_evaluation=contract_evaluation,
-            )
-        )
+    alternate = _markdown_alternate_rendering(
+        result,
+        stat=stat,
+        report_mode=report_mode,
+        show_impact=show_impact,
+        show_only=show_only,
+        show_recommendation=show_recommendation,
+        severity_config=severity_config,
+        contract_evaluation=contract_evaluation,
+    )
+    if alternate is not None:
+        return _out(alternate)
 
     v = result.verdict
     emoji = _VERDICT_EMOJI[v]
@@ -1605,30 +1663,7 @@ def to_markdown(
         model.compatible,
     )
 
-    lines: list[str] = [
-        f"# ABI Report: {result.library}",
-        "",
-        "| | |",
-        "|---|---|",
-        f"| **Old version** | `{result.old_version}` |",
-        f"| **New version** | `{result.new_version}` |",
-        f"| **Verdict** | {emoji} `{label}` |",
-        f"| Breaking changes | {len(result.breaking)} |",
-        f"| Source-level breaks | {len(result.source_breaks)} |",
-        f"| Deployment risk changes | {len(result.risk)} |",
-        f"| Compatible changes | {len(result.compatible)} |",
-    ]
-    # ADR-049 D1/D11: when contract evaluation excluded findings from the
-    # compatibility axis, say so in the headline table. The four counts above
-    # are now over the *evaluated* findings only, so a reader who sees a
-    # `NO_CHANGE` verdict beside a populated "Not Evaluated" section has the
-    # count that reconciles them rather than an apparent contradiction. The
-    # row is absent for every run that did not opt in, where it is always 0.
-    not_evaluated_total = len(result.not_evaluated)
-    if not_evaluated_total:
-        lines.append(f"| Not evaluated (contract) | {not_evaluated_total} |")
-    lines.append("")
-
+    lines = _markdown_headline_table(result, emoji, label)
     # When most of the breaking count is RTTI / internal-namespace churn, say so
     # up front — otherwise a huge count from a library lacking -fvisibility=hidden
     # buries the handful of genuine public-API breaks.
