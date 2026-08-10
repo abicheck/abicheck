@@ -306,6 +306,54 @@ def test_lines_starting_inside_block_comment_single_line_comment_unaffected() ->
     assert regions == [ConditionalRegion("FEATURE_X", False, 3, 3)]
 
 
+def test_lines_starting_inside_block_comment_ignores_delimiter_in_string_literal() -> (
+    None
+):
+    # Codex review, fresh evidence: a "/*" inside an ordinary string literal
+    # must not open block-comment state -- previously this silently swallowed
+    # every following line, including a real #ifdef/#endif pair, with no
+    # diagnostic to signal the desync.
+    from abicheck.buildsource.macro_graph import _lines_starting_inside_block_comment
+
+    text = 'const char *token = "/*";\n#ifdef FEATURE_X\nvoid f();\n#endif\n'
+    starts = _lines_starting_inside_block_comment(text)
+    assert starts == [False, False, False, False]
+    regions = scan_conditional_regions(text)
+    assert regions == [ConditionalRegion("FEATURE_X", False, 3, 3)]
+
+
+def test_lines_starting_inside_block_comment_ignores_delimiter_in_char_literal() -> (
+    None
+):
+    from abicheck.buildsource.macro_graph import _lines_starting_inside_block_comment
+
+    text = "char c = '/';\n#ifdef FEATURE_X\nvoid f();\n#endif\n"
+    starts = _lines_starting_inside_block_comment(text)
+    assert starts == [False, False, False, False]
+
+
+def test_lines_starting_inside_block_comment_handles_escaped_quote_in_string() -> None:
+    from abicheck.buildsource.macro_graph import _lines_starting_inside_block_comment
+
+    # An escaped quote inside the string must not close the literal early --
+    # if it did, the real "/*" right after would incorrectly open a comment.
+    text = 'const char *s = "\\"/*";\n#ifdef FEATURE_X\n#endif\n'
+    starts = _lines_starting_inside_block_comment(text)
+    assert starts == [False, False, False]
+
+
+def test_lines_starting_inside_block_comment_still_tracks_a_real_block_comment() -> (
+    None
+):
+    # A string-literal-state fix must not regress the original, already-shipped
+    # cross-line block-comment tracking this function exists for.
+    from abicheck.buildsource.macro_graph import _lines_starting_inside_block_comment
+
+    text = "/*\n#ifdef FEATURE_X\nvoid a();\n#endif\n*/\nvoid real_decl();\n"
+    starts = _lines_starting_inside_block_comment(text)
+    assert starts == [False, True, True, True, True, False]
+
+
 def test_macro_definition_lines_ignores_define_inside_block_comment() -> None:
     text = "/* #define FEATURE_X 1 */\nvoid f() { return FEATURE_X; }\n"
     assert _macro_definition_lines(text) == {}

@@ -418,17 +418,32 @@ def _lines_starting_inside_block_comment(text: str) -> list[bool]:
     directive matching had no notion of comment state at all — a false
     ``CONF_HIGH`` ``MACRO_CONTROLS_DECL`` edge from documentation, not code).
 
-    A simple, single-pass toggle scan — this deliberately does not attempt
-    string/char-literal awareness (a ``"/*"`` inside a string literal would
-    be mis-tracked) or a same-line-closed comment before a real trailing
-    directive (``/* note */ #ifdef X`` already can't match the ``^\\s*#``-
+    A simple, single-pass toggle scan that also tracks ordinary ``"..."``/
+    ``'...'`` string/char-literal state (Codex review, fresh evidence,
+    second round): a comment delimiter appearing inside a string literal
+    (``const char *token = "/*";``) was previously mis-tracked as a real
+    block-comment open, silently hiding every following line — including a
+    real ``#ifdef``/``#endif`` pair — until some later, unrelated ``*/``
+    happened to close it, with no diagnostic to signal the desync
+    (reproduced empirically: exactly this shape swallowed a live ``#ifdef``
+    entirely). String/char state resets at the start of every line — a
+    literal is assumed not to span multiple lines (true for an ordinary
+    literal; a backslash-newline line-spliced continuation is a documented,
+    accepted residual gap, same discipline as the rest of this heuristic
+    scanner) — and an escape character (``\\``) inside either always skips
+    its following character so an escaped quote (``'\\''``, ``"\\""``)
+    never closes the literal early. Deliberately NOT attempted: a raw
+    string literal (``R"(...)"``) — its arbitrary, un-lookahead-able
+    delimiter is a materially different parsing problem, and a raw string
+    containing a literal ``/*``/``//`` inside a header controlling
+    conditional compilation is not a shape this module has empirical
+    evidence for. A same-line-closed comment before a real trailing
+    directive (``/* note */ #ifdef X``) already can't match the ``^\\s*#``-
     anchored directive patterns regardless, so that shape needs no special
-    handling here) — the same "textual heuristic, not real preprocessing"
-    discipline the rest of this module already documents. ``//`` line
-    comments need no tracking here: they only ever affect the one line they
-    start on, and a directive-family regex already requires the line to
-    *start* with (optional whitespace then) ``#``, which a ``// #ifdef X``
-    line can never satisfy.
+    handling here. ``//`` line comments need no cross-line tracking: they
+    only ever affect the one line they start on, and a directive-family
+    regex already requires the line to *start* with (optional whitespace
+    then) ``#``, which a ``// #ifdef X`` line can never satisfy.
     """
     starts_in_comment: list[bool] = []
     in_block = False
@@ -442,19 +457,39 @@ def _lines_starting_inside_block_comment(text: str) -> list[bool]:
         starts_in_comment.append(in_block)
         i = 0
         n = len(raw_line)
+        in_string = False
+        in_char = False
         while i < n:
+            ch = raw_line[i]
             if in_block:
-                if raw_line[i] == "*" and i + 1 < n and raw_line[i + 1] == "/":
+                if ch == "*" and i + 1 < n and raw_line[i + 1] == "/":
                     in_block = False
                     i += 2
                     continue
                 i += 1
                 continue
-            if raw_line[i] == "/" and i + 1 < n and raw_line[i + 1] == "*":
+            if in_string or in_char:
+                if ch == "\\" and i + 1 < n:
+                    i += 2
+                    continue
+                if (in_string and ch == '"') or (in_char and ch == "'"):
+                    in_string = False
+                    in_char = False
+                i += 1
+                continue
+            if ch == '"':
+                in_string = True
+                i += 1
+                continue
+            if ch == "'":
+                in_char = True
+                i += 1
+                continue
+            if ch == "/" and i + 1 < n and raw_line[i + 1] == "*":
                 in_block = True
                 i += 2
                 continue
-            if raw_line[i] == "/" and i + 1 < n and raw_line[i + 1] == "/":
+            if ch == "/" and i + 1 < n and raw_line[i + 1] == "/":
                 break  # rest of the line is a line comment
             i += 1
     return starts_in_comment
