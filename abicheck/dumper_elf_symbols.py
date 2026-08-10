@@ -25,9 +25,11 @@ existing bare-name calls and test patches (``patch.object(dumper,
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from pathlib import Path
+from typing import TYPE_CHECKING, Any
 
 from .elf_symbol_filter import is_abi_relevant_elf_symbol
+from .errors import SnapshotError
 from .model import AbiSnapshot, ElfVisibility, is_cxx_runtime_library
 
 if TYPE_CHECKING:
@@ -118,3 +120,63 @@ def _elf_classify_symbols(
         exported_dynamic_objects,
         exported_dynamic_tls,
     )
+
+
+_HIDDEN_VIS = frozenset({"STV_HIDDEN", "STV_INTERNAL"})
+
+
+def _is_abi_relevant_symbol(name: str) -> bool:
+    """Return False for symbols that are NOT part of the library's public ABI.
+
+    Filters out (in ELF-only mode):
+    1. GCC/compiler internal symbols (``ix86_*``, ``_ZGV*``, ``__svml_*`` …)
+       that leak into ``.dynsym`` through a statically-linked runtime.
+    2. Transitive C++ stdlib symbols (``_ZNSt*``, ``_ZTI*`` …) that appear
+       in ``.dynsym`` via weak linkage from libstdc++ / libc++.
+    3. Private C symbols that use ``__`` as a namespace separator
+       (e.g. ``H5C__flush``, ``MPI__send``).  These follow an internal
+       naming convention and are *not* part of the public API, even though
+       they may have global ELF visibility.
+    """
+    return is_abi_relevant_elf_symbol(name)
+
+
+def _pyelftools_exported_symbols(so_path: Path) -> tuple[set[str], set[str]]:
+    """Return (exported_dynamic, exported_static) sets of mangled symbol names.
+
+    Uses pyelftools (pure Python) instead of shelling out to readelf.
+    - exported_dynamic: symbols from .dynsym, truly exported via ELF
+    - exported_static: symbols from .symtab (all symbols including static)
+    """
+    from elftools.common.exceptions import ELFError
+    from elftools.elf.elffile import ELFFile
+    from elftools.elf.sections import SymbolTableSection
+
+    def _extract_symbols(elf: Any, section_name: str) -> set[str]:
+        syms: set[str] = set()
+        section = elf.get_section_by_name(section_name)
+        if section is None or not isinstance(section, SymbolTableSection):
+            return syms
+        for sym in section.iter_symbols():
+            shndx = sym.entry.st_shndx
+            if shndx in ("SHN_UNDEF", "SHN_ABS"):
+                continue
+            bind = sym.entry.st_info.bind
+            vis = sym.entry.st_other.visibility
+            if bind in ("STB_GLOBAL", "STB_WEAK") and vis not in _HIDDEN_VIS:
+                name = sym.name
+                if name and _is_abi_relevant_symbol(name):
+                    syms.add(name)
+        return syms
+
+    try:
+        with open(so_path, "rb") as f:
+            elf: Any = ELFFile(f)  # type: ignore[no-untyped-call]
+            exported_dynamic = _extract_symbols(elf, ".dynsym")
+            try:
+                exported_static = _extract_symbols(elf, ".symtab")
+            except (ELFError, OSError):
+                exported_static = set(exported_dynamic)
+            return exported_dynamic, exported_static
+    except (ELFError, OSError) as exc:
+        raise SnapshotError(f"Failed to parse ELF file {so_path}: {exc}") from exc
