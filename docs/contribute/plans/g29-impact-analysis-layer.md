@@ -1326,6 +1326,34 @@ which all depend on a Clang AST pass.
      parameter can never be referenced by name from within its own function
      body (or anywhere else), so the fallback only needs to be stably unique
      per callee, never to match some other module's own identity scheme.
+   - **A nineteenth finding, confirmed real and fixed: a multi-line-opened
+     comment closing mid-line before a real directive was skipped
+     wholesale.** `/* opening\n*/ #ifdef X` — the second line "starts inside"
+     the carried-over block comment per `_lines_starting_inside_block_
+     comment`, so the previous per-line gate (skip the whole line or don't)
+     never resumed scanning after that specific comment actually closed,
+     omitting the guard and, nested, letting its `#endif` pop the enclosing
+     guard's frame instead (reproduced empirically, same desync shape as
+     the eighteenth finding's sibling). Fixed with `_line_after_carryover_
+     comment_closes()`: finding the first `"*/"` on a line already known to
+     start inside a comment is unambiguously that comment's own close (an
+     open block comment has no internal string/quote semantics to worry
+     about), and the live remainder is fed through the same
+     `_strip_leading_inline_comment()` path the seventeenth finding's fix
+     already established — applied identically in `scan_conditional_
+     regions` and `_macro_definition_lines`.
+   - **A twentieth finding, confirmed real and fixed: C++ list-
+     initialization of a callback slot was never recognized.** `handler_t
+     slot{my_handler};` wraps the identical `ImplicitCastExpr`/
+     `FunctionToPointerDecay` `_address_taken_function` already recognizes
+     inside an `InitListExpr` — verified against real Clang 18 output — so
+     passing it straight through returned `None`, silently omitting the
+     `DECL_TAKES_ADDRESS_OF` edge (and everything Part A's join could have
+     built on it). Fixed by also unwrapping a single-element `InitListExpr`,
+     the same way `ParenExpr`/an explicit cast are already unwrapped; scoped
+     to exactly one element since a scalar (function-pointer) type
+     type-checks to exactly one initializer in valid C++, so a real
+     aggregate/multi-element list can never be accidentally swallowed.
 5. **Full type-role coverage** to parity: variable type, typedef target,
    alias-template target, enum underlying type, non-type template argument,
    default template argument, concept/constraint dependency, function-pointer

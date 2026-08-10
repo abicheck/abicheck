@@ -37,6 +37,7 @@ from abicheck.buildsource.callback_graph import (
     CallbackDispatchResult,
     CallbackEdge,
     ClangCallbackGraphExtractor,
+    _address_taken_function,
     augment_graph_with_callback_invocations,
     augment_graph_with_callback_registrations,
     parse_clang_ast_callbacks,
@@ -464,6 +465,57 @@ class TestParseCallbacksTakesAddressOf:
                 "void (*)(int)",
             )
         ]
+
+    def test_var_decl_list_initializer_records_takes_address_of(self) -> None:
+        """Codex review, fresh evidence: C++ list-initialization
+        (``handler_t slot{my_handler};``) wraps the identical
+        ``ImplicitCastExpr``/``FunctionToPointerDecay`` inside an
+        ``InitListExpr`` -- verified against real Clang 18 output. Only a
+        single-element list is unwrapped."""
+        other_handler = _func_decl("other_handler", "F1", mangled="_Z13other_handleri")
+        slot = {
+            "kind": "VarDecl",
+            "name": "slot",
+            "type": {"qualType": "handler_t", "desugaredQualType": "void (*)(int)"},
+            "inner": [
+                {
+                    "kind": "InitListExpr",
+                    "type": {"qualType": "handler_t"},
+                    "inner": [_decay(other_handler)],
+                }
+            ],
+        }
+        ast = _tu(other_handler, slot)
+
+        edges = parse_clang_ast_callbacks(ast)
+
+        assert edges == [
+            CallbackEdge(
+                "_Z13other_handleri",
+                "slot",
+                EDGE_DECL_TAKES_ADDRESS_OF,
+                CONF_REDUCED,
+                "void (*)(int)",
+            )
+        ]
+
+    def test_multi_element_init_list_is_not_unwrapped(self) -> None:
+        """A multi-element InitListExpr is never a scalar function-pointer
+        initializer (would fail to type-check in real C++) -- must not be
+        unwrapped, guarding against ever mis-attributing an aggregate's
+        first element as the whole target's callback. Exercises
+        ``_address_taken_function`` directly, since a realistic full AST
+        for this shape would need an aggregate-typed VarDecl that never
+        reaches this function's own type-shape gate in the first place."""
+        other_handler = _func_decl("other_handler", "F1", mangled="_Z13other_handleri")
+        second_handler = _func_decl(
+            "second_handler", "F2", mangled="_Z14second_handleri"
+        )
+        node = {
+            "kind": "InitListExpr",
+            "inner": [_decay(other_handler), _decay(second_handler)],
+        }
+        assert _address_taken_function(node, {}) is None
 
     def test_assignment_to_non_function_pointer_target_not_recorded(self) -> None:
         """An address-of assigned into an ordinary (non-function-pointer)

@@ -442,6 +442,35 @@ def _strip_leading_inline_comment(line: str) -> str:
         stripped = new
 
 
+def _line_after_carryover_comment_closes(raw_line: str) -> str | None:
+    """For *raw_line*, already known (per :func:`_lines_starting_inside_
+    block_comment`) to START inside a block comment carried over from an
+    earlier line -- the live remainder of *raw_line* after that SAME
+    comment closes, or ``None`` if it doesn't close on this line at all
+    (the whole line stays commented, the caller's existing skip-the-line
+    behavior).
+
+    Codex review, fresh evidence: a valid multi-line-opened comment that
+    closes mid-line before a real directive (``/* opening\\n*/ #ifdef
+    FEATURE_X``) was previously skipped wholesale -- every directive-family
+    regex only ever saw the ORIGINAL line, never the text that survives
+    after the carried-over comment ends -- omitting the guard, and, nested,
+    letting its ``#endif`` pop the *enclosing* guard's frame instead (the
+    same desync shape the leading-inline-comment fix closed for a
+    same-line-only comment). Finding the first ``"*/"`` from the very start
+    of the line is unambiguously this comment's own close: nothing inside
+    an already-open block comment carries special meaning, so no
+    string/char-literal tracking is needed for this narrower question (the
+    normal per-character scan's own quote-awareness starts fresh only once
+    we're back to live code, which is exactly the remainder this function
+    returns).
+    """
+    idx = raw_line.find("*/")
+    if idx == -1:
+        return None
+    return raw_line[idx + 2 :]
+
+
 def _lines_starting_inside_block_comment(text: str) -> list[bool]:
     """For each line of *text* (1-indexed, matching
     ``enumerate(text.splitlines(), start=1)``), whether that line's very
@@ -573,7 +602,10 @@ def scan_conditional_regions(text: str) -> list[ConditionalRegion]:
     in_comment = _lines_starting_inside_block_comment(text)
     for lineno, line in enumerate(text.splitlines(), start=1):
         if in_comment[lineno - 1]:
-            continue
+            remainder = _line_after_carryover_comment_closes(line)
+            if remainder is None:
+                continue
+            line = remainder
         line = _strip_leading_inline_comment(line)
         m = _IFDEF_RE.match(line)
         if m:
@@ -674,7 +706,10 @@ def _macro_definition_lines(text: str) -> dict[str, int]:
     in_comment = _lines_starting_inside_block_comment(text)
     for lineno, line in enumerate(text.splitlines(), start=1):
         if in_comment[lineno - 1]:
-            continue
+            remainder = _line_after_carryover_comment_closes(line)
+            if remainder is None:
+                continue
+            line = remainder
         line = _strip_leading_inline_comment(line)
         m = _DEFINE_RE.match(line)
         if m is None:

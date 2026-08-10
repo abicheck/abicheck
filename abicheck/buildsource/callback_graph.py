@@ -573,6 +573,15 @@ def _address_taken_function(node: Any, id_index: dict[str, str]) -> str | None:
     (:data:`_EXPLICIT_CAST_KINDS`), which an earlier version of this function
     did not unwrap (only ``ParenExpr``), silently omitting the registration
     for any API that requires or commonly receives a cast callback argument.
+
+    Also unwraps a single-element ``InitListExpr`` (Codex review, fresh
+    evidence): C++ list-initialization of a function-pointer-typed variable
+    (``handler_t slot{my_handler};``) wraps the identical
+    ``ImplicitCastExpr``/``FunctionToPointerDecay`` inside an
+    ``InitListExpr`` — verified against real Clang 18 output. Only a
+    single-element list is ever unwrapped: a scalar (function-pointer)
+    type-checks to exactly one initializer in valid C++, so this can never
+    accidentally swallow a real aggregate/multi-element list.
     """
     if not isinstance(node, dict):
         return None
@@ -584,6 +593,10 @@ def _address_taken_function(node: Any, id_index: dict[str, str]) -> str | None:
     if kind == "ParenExpr" or kind in _EXPLICIT_CAST_KINDS:
         inner = node.get("inner") or []
         if inner and isinstance(inner[0], dict):
+            return _address_taken_function(inner[0], id_index)
+    if kind == "InitListExpr":
+        inner = node.get("inner") or []
+        if len(inner) == 1 and isinstance(inner[0], dict):
             return _address_taken_function(inner[0], id_index)
     return None
 
