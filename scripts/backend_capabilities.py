@@ -117,6 +117,7 @@ class FactRow:
     note: str = ""
 
     def __post_init__(self) -> None:
+        """Reject a row that contradicts itself before it can be published."""
         if self.owner not in COVERED_MODEL_CLASSES:
             raise ValueError(f"unknown owner {self.owner!r}")
         other = Capability.OTHER_LAYER
@@ -138,6 +139,13 @@ class FactRow:
 
     @property
     def populated_by_any_backend(self) -> bool:
+        """Whether a header parse carries this fact at all.
+
+        False means another layer owns it (DWARF, the symbol table, the
+        provenance pass) or nothing does — such a row is a real field of the
+        dataclass, but not a *header-backend* capability, so the summary
+        counts exclude it.
+        """
         return Capability.OTHER_LAYER not in (self.castxml, self.clang)
 
 
@@ -623,6 +631,13 @@ class Evidence(str, Enum):
 
 
 def _is_placeholder_literal(node: ast.expr) -> bool:
+    """Whether a keyword's value is a hardcoded default rather than a parse.
+
+    ``Param(is_restrict=False)`` names the field but extracts nothing, and is
+    exactly what a claim of "this backend populates it" must not be built on.
+    A constant, or an empty container, is that shape; anything else (a name, a
+    call, a comprehension, a conditional) reads a real value off the AST.
+    """
     if isinstance(node, ast.Constant):
         return True
     if isinstance(node, (ast.List, ast.Tuple, ast.Set)):
@@ -661,6 +676,8 @@ def scan_backend_evidence(module_path: Path) -> dict[str, dict[str, Evidence]]:
     out: dict[str, dict[str, Evidence]] = {c: {} for c in COVERED_MODEL_CLASSES}
 
     def record(cls: str, field: str, evidence: Evidence) -> None:
+        """Keep the strongest evidence seen, so one placeholder among several
+        construction sites cannot mask a real extraction elsewhere."""
         if out[cls].get(field) is not Evidence.EXTRACTED:
             out[cls][field] = evidence
 
@@ -684,12 +701,15 @@ def scan_backend_evidence(module_path: Path) -> dict[str, dict[str, Evidence]]:
 
 
 def castxml_evidence() -> dict[str, dict[str, Evidence]]:
+    """What ``dumper_castxml.py``'s own source shows it populating."""
     return scan_backend_evidence(PKG_DIR / "dumper_castxml.py")
 
 
 def clang_evidence() -> dict[str, dict[str, Evidence]]:
+    """What ``dumper_clang.py``'s own source shows it populating."""
     return scan_backend_evidence(PKG_DIR / "dumper_clang.py")
 
 
 def rows_for(owner: str) -> tuple[FactRow, ...]:
+    """Every row describing one declaration dataclass, in declaration order."""
     return tuple(r for r in FACT_ROWS if r.owner == owner)

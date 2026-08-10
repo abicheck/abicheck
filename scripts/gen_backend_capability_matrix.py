@@ -93,6 +93,7 @@ def _hybrid_note(row: FactRow) -> str:
 
 
 def _render_owner(owner: str) -> str:
+    """One declaration dataclass's fact table."""
     lines = [
         f"### `{owner}`",
         "",
@@ -109,6 +110,7 @@ def _render_owner(owner: str) -> str:
 
 
 def _render_summary() -> str:
+    """The headline counts and the cell legend, above the per-owner tables."""
     header_facts = [r for r in FACT_ROWS if r.populated_by_any_backend]
     divergent = [r for r in header_facts if r.castxml is not r.clang]
     # "Only X populates it" means X's OWN PARSE does. A companion-tool row is
@@ -141,6 +143,7 @@ def _render_summary() -> str:
 
 
 def render() -> str:
+    """The whole spliced-in section: summary, legend, then one table per owner."""
     sections = [_render_summary()] + [
         _render_owner(owner) for owner in COVERED_MODEL_CLASSES
     ]
@@ -148,6 +151,7 @@ def render() -> str:
 
 
 def _splice(text: str, inner: str) -> str:
+    """Replace the sentinel-delimited region, leaving the narrative untouched."""
     begin = re.search(rf"<!-- BEGIN GENERATED: {_MARKER} -->\n", text)
     end = re.search(rf"\n<!-- END GENERATED: {_MARKER} -->", text)
     if not begin or not end or begin.end() > end.start():
@@ -159,6 +163,7 @@ def _splice(text: str, inner: str) -> str:
 
 
 def main(argv: list[str] | None = None) -> int:
+    """Write the generated section, or (``--check``) fail if it has drifted."""
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
         "--check",
