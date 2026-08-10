@@ -697,6 +697,24 @@ def _register_template_param_metadata(
     ``Outer<double>``'s own nested ``struct A``) via ``previousDecl``:
     confirmed empirically that clang stamps it on every legal
     redeclaration and NEVER on two genuinely unrelated declarations.
+
+    The tracked ``node_ids[qualname]`` -- the id ``previousDecl`` is
+    matched against for the NEXT registration -- is only ever advanced on
+    a CONFIRMED same-entity link (the first registration, or a
+    ``previousDecl`` match), never merely because a later registration's
+    *value* happens to equal the stored one (Codex review, fresh evidence,
+    fifth round). Two genuinely unrelated declarations sharing a bare
+    qualname (the ``Outer<int>``/``Outer<double>`` case above) can easily
+    have byte-identical kinds/defaults/names by coincidence -- e.g. both
+    nested ``template<class T, class U=T> struct A`` before either is ever
+    redeclared -- and advancing ``node_ids`` to the second, unrelated
+    node's id there would corrupt the chain for the FIRST entity's own
+    later, legal redeclaration: its real ``previousDecl`` (pointing at the
+    first node) would then mismatch the corrupted tracked id and get
+    wrongly deleted as ambiguous, confirmed with a real end-to-end repro.
+    A value-equal-but-unconfirmed registration is still safely absorbed
+    (the stored value doesn't change either way), it just doesn't get to
+    reassign whose id is being tracked.
     """
     existing = idx.get(qualname)
     node_id = node.get("id")
@@ -706,9 +724,11 @@ def _register_template_param_metadata(
             node_ids[qualname] = node_id
         return
     previous_decl = node.get("previousDecl")
-    if existing == value or (previous_decl and previous_decl == node_ids.get(qualname)):
+    if previous_decl and previous_decl == node_ids.get(qualname):
         if node_id:
             node_ids[qualname] = node_id
+        return
+    if existing == value:
         return
     ambiguous.add(qualname)
     del idx[qualname]

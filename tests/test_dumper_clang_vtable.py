@@ -1681,3 +1681,144 @@ def test_legal_redeclaration_with_renamed_params_still_resolves_dependent_defaul
     types = _types(root)
     assert types["D"].vtable == ["_ZN1AIddE1fEv"]
     assert types["D"].vptr_offset_bits == 0
+
+
+def test_unrelated_coincidentally_equal_registration_does_not_corrupt_redecl_identity() -> (
+    None
+):
+    """Codex review, fresh evidence (fifth round): the fourth round's
+    ``previousDecl``-based redeclaration check was itself incomplete.
+    ``_register_template_param_metadata`` also treated a bare *value*
+    match (``existing == value``) as license to advance the tracked
+    ``node_ids[qualname]`` -- but two genuinely UNRELATED nested member
+    templates (``Outer<int>``'s and ``Outer<double>``'s own, neither ever
+    redeclared) can trivially have byte-identical kinds/defaults/names by
+    coincidence before either is redeclared: both are plain ``template
+    <class T, class U=T> struct A;``. Advancing ``node_ids["A"]`` to the
+    SECOND (unrelated) node's id there corrupted the chain for the FIRST
+    entity's own later, legal out-of-class redeclaration with renamed
+    parameters: its real ``previousDecl`` (pointing at the first node)
+    then mismatched the corrupted tracked id and was wrongly dropped as
+    ambiguous, losing the DEFAULTS metadata for "A" entirely and leaving
+    ``Outer<int>::A<double>``'s dependent default unsubstituted -- the
+    specialization was indexed as ``Outer<int>::A<double, double>``
+    instead of the base's actual ``Outer<int>::A<double>``, leaving the
+    inherited vtable unresolvable and a real added virtual method
+    undetected. Fixed by only ever advancing ``node_ids`` on a CONFIRMED
+    same-entity link (the first registration, or a ``previousDecl``
+    match) -- a coincidental value match no longer reassigns whose id is
+    being tracked.
+    """
+    outer_int_spec = {
+        "kind": "ClassTemplateSpecializationDecl",
+        "name": "Outer",
+        "completeDefinition": True,
+        "inner": [
+            {"kind": "TemplateArgument", "type": {"qualType": "int"}},
+            {
+                "kind": "ClassTemplateDecl",
+                "name": "A",
+                "id": "0x1",
+                "inner": [
+                    {"kind": "TemplateTypeParmDecl", "name": "T"},
+                    {
+                        "kind": "TemplateTypeParmDecl",
+                        "name": "U",
+                        "defaultArg": {
+                            "kind": "TemplateArgument",
+                            "type": {"qualType": "T"},
+                        },
+                    },
+                ],
+            },
+        ],
+    }
+    outer_double_spec = {
+        "kind": "ClassTemplateSpecializationDecl",
+        "name": "Outer",
+        "completeDefinition": True,
+        "inner": [
+            {"kind": "TemplateArgument", "type": {"qualType": "double"}},
+            {
+                "kind": "ClassTemplateDecl",
+                "name": "A",
+                "id": "0x2",
+                "inner": [
+                    {"kind": "TemplateTypeParmDecl", "name": "T"},
+                    {
+                        "kind": "TemplateTypeParmDecl",
+                        "name": "U",
+                        "defaultArg": {
+                            "kind": "TemplateArgument",
+                            "type": {"qualType": "T"},
+                        },
+                    },
+                ],
+            },
+        ],
+    }
+    # Out-of-class definition of Outer<int>::A, using RENAMED parameters --
+    # a legal redeclaration of the FIRST entity (id "0x1"), never the
+    # second (unrelated) one.
+    outer_int_spec_redef = {
+        "kind": "ClassTemplateSpecializationDecl",
+        "name": "Outer",
+        "completeDefinition": True,
+        "inner": [
+            {"kind": "TemplateArgument", "type": {"qualType": "int"}},
+            {
+                "kind": "ClassTemplateDecl",
+                "name": "A",
+                "id": "0x3",
+                "previousDecl": "0x1",
+                "inner": [
+                    {"kind": "TemplateTypeParmDecl", "name": "X"},
+                    {
+                        "kind": "TemplateTypeParmDecl",
+                        "name": "Y",
+                        "defaultArg": {
+                            "kind": "TemplateArgument",
+                            "type": {"qualType": "X"},
+                        },
+                    },
+                    _record("A"),
+                    _specialization(
+                        "A",
+                        {
+                            "kind": "CXXMethodDecl",
+                            "name": "f",
+                            "mangledName": "_ZN5OuterIiE1AIddE1fEv",
+                            "type": {"qualType": "void ()"},
+                            "virtual": True,
+                        },
+                        type_args=["double", "double"],
+                    ),
+                ],
+            },
+        ],
+    }
+    root = _tu(
+        {
+            "kind": "ClassTemplateDecl",
+            "name": "Outer",
+            "inner": [
+                {"kind": "TemplateTypeParmDecl", "name": "T"},
+                _record("Outer"),
+            ],
+        },
+        outer_int_spec,
+        outer_double_spec,
+        outer_int_spec_redef,
+        _record("D", bases=[_base("Outer<int>::A<double>")]),
+    )
+    from abicheck.dumper_clang_vtable import _index_template_param_defaults
+
+    # The redeclaration's own previousDecl link must still resolve
+    # correctly despite the unrelated, coincidentally-equal middle
+    # registration -- "A" stays in the index (not dropped as ambiguous),
+    # keeping the FIRST declaration's defaults (dependent default spelled
+    # with the ORIGINAL parameter name "T", not the redeclaration's "X").
+    assert _index_template_param_defaults(root).get("A") == [None, "T"]
+    types = _types(root)
+    assert types["D"].vtable == ["_ZN5OuterIiE1AIddE1fEv"]
+    assert types["D"].vptr_offset_bits == 0
