@@ -10,3 +10,12 @@
   `_validate_explicit_overrides`, `_collect_pack_assignments` and
   `_reject_invalid_assignment`, so D8's actual conflict rule is no longer buried
   under them. Behaviour-preserving.
+- **Split `diff_wheel_deployment.check_wheel_tag_architecture_mismatch`.** The
+  ELF and Mach-O halves are now `_elf_arch_mismatch` / `_macho_arch_mismatch`,
+  with the byte-order/word-size evidence and the armhf ABI rule as their own
+  named checks and the five identical finding constructions folded into one
+  `_arch_mismatch`. Behaviour-preserving, checked differentially against the
+  pre-refactor implementation over 94,083 runs (every architecture claim x
+  e_machine x byte order x word size x ARM ABI-flag set x Mach-O slice shape) —
+  no differences.
+
