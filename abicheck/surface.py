@@ -371,10 +371,12 @@ class PublicSurface:
     # both kinds share (Codex review, thirteenth round).
     ambiguous_type_names: set[str] = field(default_factory=set)
     # Qualified (or, when a type carries no ``qualified_name``, bare) identity
-    # of every record/enum ``_walk_type_closure`` reached via a queued
-    # spelling that resolved to *exactly one* record/enum (across both maps
-    # combined — see ``_index_surface_types``'s cross-kind ``combined_counts``
-    # rationale). Distinguishes "this qualified identity was itself directly,
+    # of every record/enum reached by :func:`_walk_exact_type_closure` -- a
+    # chain from a seed where *every* step resolved to exactly one candidate,
+    # never through an ambiguous ``::``-tail fork (see that function's own
+    # docstring for why this needs its own, separate, ambiguity-vetoing walk
+    # rather than a flag computed inside :func:`_walk_type_closure`).
+    # Distinguishes "this qualified identity was itself directly,
     # unambiguously referenced" from "this qualified identity was only swept
     # in because an unrelated sibling shares its bare tail" — the anti-hiding
     # rule means both routes leave an *identical* footprint in ``public_types``/
@@ -383,7 +385,8 @@ class PublicSurface:
     # needed for a real fix (Codex review, fifteenth round's known gap; ADR-049).
     # Monotonic: once a spelling resolves an identity exactly, it stays here
     # even if that same identity is *also* later swept in ambiguously via a
-    # different, colliding spelling.
+    # different, colliding spelling (during the *other*, ambiguity-tolerant
+    # walk -- this set itself never records an ambiguous route at all).
     exact_type_identities: set[str] = field(default_factory=set)
     # True when *any* declaration carried a non-UNKNOWN origin — i.e. the
     # snapshot was dumped with a public-header set so provenance is available.
@@ -568,10 +571,11 @@ def _walk_type_closure(
     Follows typedef targets, record fields, and base classes from each seed
     type, marking every reachable known type as part of the public surface.
     A name may resolve to *several* types (an ambiguous ``::`` tail shared by
-    two namespaces); every match is marked public and walked -- but also
-    fills ``exact_type_identities`` with the identity of any record/enum
-    resolved via a queued spelling that matched *exactly one* candidate, so a
-    caller can tell that route apart from the ambiguous one.
+    two namespaces); every match is marked public and walked -- the anti-
+    hiding, never-lose-a-real-dependency direction. ``exact_type_identities``
+    is deliberately NOT filled here: see :func:`_walk_exact_type_closure`'s
+    docstring for why an ambiguity-tolerant walk cannot also answer "was this
+    reached without ever passing through an ambiguous fork".
     """
     queue = list(seed_types)
     seen: set[str] = set()
@@ -596,28 +600,15 @@ def _walk_type_closure(
         # An ambiguous tail may match enums in several namespaces — mark them all.
         en_nodes = enum_by_name.get(name, ())
         rec_nodes = record_by_name.get(name, [])
-        # Exact iff *this queued spelling* resolves to precisely one
-        # record/enum across both maps combined — the same combined-count
-        # rationale ``_index_surface_types`` uses for ``ambiguous_type_names``
-        # (a record and an enum can each look unique within their own map
-        # while still colliding once combined).
-        is_exact = (len(en_nodes) + len(rec_nodes)) == 1
         for en_node in en_nodes:
             surface.public_types.add(en_node.name)
             # Also record the qualified spelling itself (castxml/clang
             # convention: `.name` is deliberately bare, so a qualified
             # candidate would otherwise never appear in `public_types` at
-            # all, regardless of `exact_type_identities` -- unconditional,
-            # matching the existing anti-hiding "mark every match public"
-            # rule for `.name` above; ambiguity-safety is still enforced
-            # separately via `ambiguous_type_names`/`exact_type_identities`,
-            # not by omission from this set (Codex review).
+            # all -- unconditional, matching the existing anti-hiding "mark
+            # every match public" rule for the bare `.name` (Codex review).
             if en_node.qualified_name:
                 surface.public_types.add(en_node.qualified_name)
-            if is_exact:
-                surface.exact_type_identities.add(
-                    en_node.qualified_name or en_node.name
-                )
         if not rec_nodes:
             continue
         # A short alias (``A``) reached inside its namespace resolves here to the
@@ -631,10 +622,6 @@ def _walk_type_closure(
             # See the equivalent enum comment above.
             if rec_node.qualified_name:
                 surface.public_types.add(rec_node.qualified_name)
-            if is_exact:
-                surface.exact_type_identities.add(
-                    rec_node.qualified_name or rec_node.name
-                )
             for f in rec_node.fields:
                 for ident in _type_identifiers(f.type):
                     if ident not in seen:
@@ -646,6 +633,87 @@ def _walk_type_closure(
                 for ident in _type_identifiers(base):
                     if ident not in seen:
                         queue.append(ident)
+
+
+def _walk_exact_type_closure(
+    snap: AbiSnapshot,
+    surface: PublicSurface,
+    record_by_name: dict[str, list[RecordType]],
+    enum_by_name: dict[str, list[EnumType]],
+    seed_types: set[str],
+) -> None:
+    """Fills ``surface.exact_type_identities``: every record/enum reachable
+    from a seed via a chain where *every* step resolved to precisely one
+    candidate -- never through an ambiguous ``::``-tail fork.
+
+    A separate walk from :func:`_walk_type_closure`, not a flag threaded
+    through it, because the two questions need opposite behavior at an
+    ambiguous fork. ``_walk_type_closure`` must *keep walking* every
+    colliding candidate (anti-hiding: a real dependency of either sibling
+    must not be lost just because the reference couldn't disambiguate them).
+    This walk must *stop* at that exact point: once a queued spelling
+    resolves to more than one record/enum, nothing reachable only through
+    one of those candidates can be trusted "exact" -- the public API might
+    just as well have meant the *other* one, which may not even declare the
+    field/base being asked about.
+
+    **The bug this replaced** (Codex review): an earlier version computed
+    "exact" per queued spelling in the *same* ambiguity-tolerant walk --
+    correct for a spelling that is itself an original seed (a signature
+    naming a type directly), but wrong once a field/base type discovered
+    *while walking one of several ambiguous candidates* happened to be
+    locally unique on its own. A ``Container`` that collides between two
+    namespaces, where only one sibling happens to declare a field of a
+    genuinely unique type ``one::Point``, is the reproducer: that field's
+    own spelling resolves to exactly one record, so the old per-spelling
+    check marked it exact even though the path to it runs through an
+    *unconfirmed* branch (the public reference never said which
+    ``Container`` it meant). This walk never even enters either
+    ``Container`` candidate's fields, since the moment it pops the
+    ambiguous spelling ``"Container"`` it sees more than one match and
+    stops right there -- so ``one::Point`` is correctly never marked exact,
+    while still being conservatively kept in ``public_types`` by the other
+    walk.
+
+    Safe to dedupe visited spellings permanently (unlike a general fixpoint
+    over a monotonically-increasing confidence lattice): a name is only ever
+    enqueued here *after* its parent already resolved exactly, so by
+    construction nothing reachable through an ambiguous fork is ever queued
+    in the first place -- a later, independent exact route to the same name
+    would confirm the same (or a redundant) fact, never a new one.
+    """
+    queue = list(seed_types)
+    seen: set[str] = set()
+    while queue:
+        name = queue.pop()
+        if name in seen:
+            continue
+        seen.add(name)
+        target = snap.typedefs.get(name)
+        if target:
+            for ident in _type_identifiers(target):
+                if ident not in seen:
+                    queue.append(ident)
+        en_nodes = enum_by_name.get(name, ())
+        rec_nodes = record_by_name.get(name, [])
+        if len(en_nodes) + len(rec_nodes) != 1:
+            # Absent, or ambiguous: stop here either way -- do not expand,
+            # do not mark exact.
+            continue
+        if en_nodes:
+            en_node = en_nodes[0]
+            surface.exact_type_identities.add(en_node.qualified_name or en_node.name)
+            continue  # enums have no fields/bases to expand.
+        rec_node = rec_nodes[0]
+        surface.exact_type_identities.add(rec_node.qualified_name or rec_node.name)
+        for f in rec_node.fields:
+            for ident in _type_identifiers(f.type):
+                if ident not in seen:
+                    queue.append(ident)
+        for base in (*rec_node.bases, *rec_node.virtual_bases):
+            for ident in _type_identifiers(base):
+                if ident not in seen:
+                    queue.append(ident)
 
 
 def compute_public_surface(snap: AbiSnapshot) -> PublicSurface:
@@ -705,6 +773,9 @@ def compute_public_surface(snap: AbiSnapshot) -> PublicSurface:
 
     # Transitive closure over the record/typedef graph.
     _walk_type_closure(snap, surface, record_by_name, enum_by_name, seed_types)
+    # Separate, ambiguity-vetoing closure -- see its own docstring for why
+    # this can't be folded into the walk above.
+    _walk_exact_type_closure(snap, surface, record_by_name, enum_by_name, seed_types)
     return surface
 
 

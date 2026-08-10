@@ -58,7 +58,6 @@ its :doc:`implementation plan </contribute/plans/public-contract-default>`.
 
 from __future__ import annotations
 
-from collections.abc import Set as AbstractSet
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
@@ -731,42 +730,37 @@ def _in_surface_result_is_confirmed(
       are silently upgraded to ``IN_CONTRACT`` without this check
       (Codex review, eighth round).
 
-    Candidate derivation (:func:`_type_candidates`) and the
-    ambiguous-candidate rejection (:func:`_confirmed_type_matches`, Codex
-    review, twelfth round) both live in shared helpers -- see their
-    docstrings; the ``exports`` domain asks the identical questions against
-    its own root/closure sets.
+    Candidate derivation (:func:`_type_candidates`) is a shared helper -- see
+    its own docstring; the ``exports`` domain asks the identical question
+    against its own root/closure sets, but (see below) no longer through the
+    same confirmation predicate this domain uses.
 
-    **Formerly-known over-rejection, now fixed (originally Codex review,
-    fifteenth round; closed by adding ``PublicSurface.exact_type_identities``):**
-    when a public signature names ``ns1::Point`` *explicitly* (fully
-    qualified) and the snapshot separately contains an unrelated
-    ``ns2::Point``, ``_type_identifiers`` still derives the bare tail
-    ``"Point"`` from that qualified reference (by design, so a short alias
-    referenced from inside its own namespace still resolves) -- which is
-    *also* how the ambiguous-bare-tail path itself reaches both siblings.
-    That used to make ``ns1::Point``'s membership in ``public_types`` and
-    ``ns2::Point``'s membership structurally indistinguishable from this
-    function's inputs, because ``_walk_type_closure`` queued the bare tail
-    unconditionally alongside the qualified form for every ``"::"``-bearing
-    token, and only recorded the *merged* final ``public_types``/
-    ``ambiguous_type_names`` state -- not which route got there.
-    ``_walk_type_closure`` now also records, in ``exact_type_identities``,
-    the identity of any record/enum resolved via a queued spelling that
-    matched *precisely one* candidate -- so a public signature spelling the
-    qualified form directly resolves ``ns1::Point`` via its own,
-    independently-unambiguous queue entry, distinct from the separately-
-    queued, genuinely-ambiguous bare tail ``"Point"`` that also (correctly)
-    sweeps in the unrelated ``ns2::Point``. See
-    :func:`_confirmed_type_matches`'s docstring for the mechanism and why it
-    is not a re-derivation of the reverted "indecisive ambiguity" shortcut.
-    A signature that *only* ever spells the bare tail (never the qualified
-    form) still leaves both siblings equally, ambiguously reached -- that
-    scenario correctly remains ``UNKNOWN_UNRESOLVED``
+    **Type-level confirmation goes through ``exact_type_identities``, not
+    :func:`_confirmed_type_matches`, as of Codex review's sixteenth round.**
+    That function's own name-level ambiguity check (rejecting a candidate
+    only when *its own* spelling, or its bare tail, collides with something
+    else) is unsound on its own: a candidate whose spelling never collides
+    with anything can still have been discovered only by walking a
+    *different*, ambiguously-resolved ancestor's fields/bases -- two
+    same-bare-tail ``Container`` siblings, where only one happens to declare
+    a field of an otherwise-unique type, reproduces it (confirmed
+    empirically; see :func:`_confirmed_type_matches`'s own docstring). This
+    domain now checks ``auth.exact_type_identities`` directly instead --
+    :func:`~abicheck.surface._walk_exact_type_closure`'s own answer to "was
+    this candidate reached via a chain where *every* step resolved
+    unambiguously", computed by a walk that stops the instant it hits an
+    ambiguous fork rather than (like the ordinary closure walk) walking
+    every colliding candidate anyway. A signature that *only* ever spells a
+    bare, colliding tail (never the qualified form) never gives that walk an
+    unambiguous entry point, so it correctly remains ``UNKNOWN_UNRESOLVED``
     (``test_a_public_header_sibling_no_public_api_reaches_is_not_confirmed``,
     and the ``ambiguous_namespaced_leaf`` fp-rate-corpus case, whose public
     function only ever names the bare, colliding spelling and so has no
-    exact route to disambiguate from either).
+    exact route to disambiguate from either). The ``exports`` domain has no
+    equivalent walk yet, so it still goes through
+    :func:`_confirmed_type_matches`'s original (narrower, and for the
+    ancestor-ambiguity hazard above, not-yet-fixed) logic -- its own
+    docstring explains why extending it is a separately-scoped follow-up.
 
     **Checks only the authoritative side (ADR-049 D4), not the old-union-new
     universe:** "Removal and modification of an existing obligation use
@@ -836,12 +830,14 @@ def _in_surface_result_is_confirmed(
     auth = _authoritative_surface(change, surf_old, surf_new)
     if _symbol_matches(change, auth.public_symbols):
         return True
-    if _confirmed_type_matches(
-        _type_candidates(change),
-        auth.public_types,
-        auth.ambiguous_type_names,
-        auth.exact_type_identities,
-    ):
+    # Deliberately NOT `_confirmed_type_matches` (that function's own
+    # docstring explains why its name-level ambiguity check is unsound for
+    # this domain) -- `exact_type_identities` is `surface.py`'s own,
+    # separately-verified answer to "was this candidate reached via a chain
+    # where every step resolved unambiguously", computed by a walk that
+    # never even enters an ambiguous fork in the first place. No further
+    # ambiguity check is needed on top of it.
+    if _type_candidates(change) & auth.exact_type_identities:
         return True
     directly_referenced_stdlib = (
         directly_referenced_stdlib_new
@@ -1019,7 +1015,6 @@ def _confirmed_type_matches(
     candidates: set[str],
     types: set[str],
     ambiguous: set[str],
-    exact: AbstractSet[str] = frozenset(),
 ) -> set[str]:
     """*candidates* present in *types* whose identity is not ambiguous.
 
@@ -1035,8 +1030,7 @@ def _confirmed_type_matches(
     so a qualified candidate's presence does not by itself prove *that*
     candidate, rather than its ambiguous sibling, is what the signature
     actually reaches. Neither case establishes which record -- or whether
-    either -- this finding's root actually resolves to *unless* ``exact``
-    (``PublicSurface.exact_type_identities``) says otherwise -- see below.
+    either -- this finding's root actually resolves to.
 
     **An "indecisive ambiguity" shortcut was tried here and reverted; do not
     re-derive it.** The idea was that when every colliding entry is
@@ -1056,34 +1050,33 @@ def _confirmed_type_matches(
     unreachable ``two::Point`` also declared in a public header, the origin
     count equals the arity, so a layout finding on ``two::Point`` was
     confirmed ``IN_CONTRACT`` and gated the run -- turning a withheld
-    finding into a false positive. **``exact`` is not a resurrection of that
-    shortcut** -- origin is never consulted here, and a candidate reached
-    only via the shared ambiguous bare key (``one::api(Point *)`` alone,
-    with no other reference) is *not* added to ``exact_type_identities`` for
-    either sibling, so this rejected scenario stays rejected (see
-    ``test_a_public_header_sibling_no_public_api_reaches_is_not_confirmed``).
+    finding into a false positive.
 
-    ``exact`` closes a narrower, later-found gap instead (Codex review,
-    fifteenth round): a public signature that names ``ns1::Point``
-    *explicitly* (fully qualified) is a genuinely exact, unambiguous
-    reference, even though an unrelated ``ns2::Point`` also exists and
-    shares the bare tail ``Point`` -- ``_walk_type_closure`` now records
-    that ``ns1::Point`` was reached via a queued spelling
-    (``"ns1::Point"`` itself) that resolved to precisely one record,
-    independent of whatever the *separately*-derived, genuinely ambiguous
-    bare-tail spelling (``"Point"``) also swept in. A candidate present in
-    ``exact`` is confirmed even when its bare tail is ambiguous elsewhere;
-    a candidate reached *only* through the ambiguous bare key (never
-    through its own exact spelling) never enters ``exact`` in the first
-    place, so the rejection above still applies to it.
+    **Only ever called for the ``exports`` domain now** (Codex review,
+    sixteenth round): the ``public`` domain has since gained
+    ``PublicSurface.exact_type_identities`` -- a genuinely path-aware
+    exactness signal computed by a *separate*, ambiguity-vetoing walk
+    (:func:`~abicheck.surface._walk_exact_type_closure`) -- which
+    :func:`_in_surface_result_is_confirmed` now checks directly instead of
+    going through this function. This function's own *name*-level ambiguity
+    check (the ``ambiguous``/tail-ambiguous clauses above) is unsound on its
+    own for exactly the reason the "indecisive ambiguity" shortcut was: a
+    candidate whose *own* spelling never collides with anything can still
+    have been discovered only by walking a *different*, ambiguously-resolved
+    ancestor's fields/bases -- ``one::Container``/``two::Container`` sharing
+    the bare tail ``Container``, where only ``one::Container`` happens to
+    declare a field of the otherwise-unique type ``one::Point``, reproduces
+    it (confirmed empirically). The ``exports`` domain does not yet have an
+    equivalent path-aware closure (``export_surface.py``'s own, separate
+    implementation), so it keeps this function's original, narrower (and
+    for this one hazard, still theoretically unsound) behavior rather than
+    silently losing its only ambiguity check -- fixing that is its own,
+    separately-scoped follow-up, not a drive-by extension here.
     """
     return {
         m
         for m in candidates & types
-        if (
-            m not in ambiguous and not ("::" in m and m.rsplit("::", 1)[1] in ambiguous)
-        )
-        or m in exact
+        if m not in ambiguous and not ("::" in m and m.rsplit("::", 1)[1] in ambiguous)
     }
 
 

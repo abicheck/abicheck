@@ -18,4 +18,10 @@ A new changelog fragment. See changelog.d/README.md for the workflow.
   `EnumType.qualified_name`, not just the bare `.name` and its trailing
   `::` segment, so this fix applies under the bare-name-plus-separate-
   qualified-name convention (castxml/clang) as well as DWARF's
-  qualifier-baked-into-`.name` convention.
+  qualifier-baked-into-`.name` convention. `exact_type_identities` is
+  computed by a dedicated, ambiguity-vetoing closure walk that stops the
+  instant it hits a colliding `::`-tail, rather than a per-spelling check
+  inside the ordinary (deliberately over-keeping) closure walk — a type
+  reached only by speculatively following one of several same-tail
+  candidates' fields/bases is never marked exact, even if its own spelling
+  happens to be otherwise unique.

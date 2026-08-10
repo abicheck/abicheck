@@ -32,6 +32,7 @@ from abicheck.model import (
     Param,
     RecordType,
     ScopeOrigin,
+    TypeField,
     Visibility,
 )
 from abicheck.surface import compute_public_surface
@@ -446,6 +447,76 @@ class TestPublicModeAmbiguousTypeRoot:
         # still be rejected exactly like
         # `test_a_public_header_sibling_no_public_api_reaches_is_not_confirmed`.
         s = compute_public_surface(self._two_siblings(ScopeOrigin.PUBLIC_HEADER))
+        assert s.exact_type_identities == set()
+        c = Change(
+            kind=ChangeKind.TYPE_SIZE_CHANGED, symbol="one::Point", description=""
+        )
+        decision = evaluate_change_contract_relevance(c, s, s, mode=ContractMode.PUBLIC)
+        assert decision.relevance is ContractRelevance.UNKNOWN_UNRESOLVED
+
+    def test_field_of_a_speculatively_reached_ambiguous_root_is_not_exact(
+        self,
+    ) -> None:
+        """Real hazard the exactness check must not fall into (Codex
+        review): a public signature names only the ambiguous bare root
+        ``Container``, so the *ordinary* (anti-hiding) closure walk visits
+        *both* colliding siblings -- including ``one::Container``, purely
+        speculatively, since the signature never disambiguated which one it
+        meant. ``one::Container`` happens to have a field typed
+        ``one::Point``, a record that (taken on its own) resolves to exactly
+        one candidate in ``record_by_name``. An earlier version of the
+        exactness check computed exactness per *queued spelling*, in the
+        *same* walk that tolerates ambiguity, with no memory of *how* that
+        spelling was reached -- so this locally-unique field type was
+        wrongly marked exact even though the path to it runs through an
+        unconfirmed, speculative branch, letting a ``TYPE_SIZE_CHANGED``
+        finding on ``one::Point`` wrongly confirm ``IN_CONTRACT`` (both via
+        that flawed per-spelling exactness check, and independently via
+        ``_confirmed_type_matches``'s own, separately-unsound name-collision
+        check -- see that function's docstring), when the real public root
+        might just as well have been ``two::Container`` (which has no such
+        field at all). ``exact_type_identities`` is now computed by
+        ``_walk_exact_type_closure``, a *separate* walk that stops the
+        instant it hits an ambiguous fork rather than walking into it at
+        all -- so it never even reaches ``one::Point`` through this
+        speculative branch, regardless of how many other, ordinary
+        candidates it discovers via genuinely unambiguous chains.
+        """
+        snap = AbiSnapshot(
+            library="l",
+            version="1",
+            functions=[_fn("api", ret="void", params=["Container *"])],
+            types=[
+                RecordType(
+                    name="Container",
+                    kind="struct",
+                    size_bits=64,
+                    origin=ScopeOrigin.PUBLIC_HEADER,
+                    qualified_name="one::Container",
+                    fields=[TypeField(name="p", type="one::Point")],
+                ),
+                RecordType(
+                    name="Container",
+                    kind="struct",
+                    size_bits=32,
+                    origin=ScopeOrigin.PUBLIC_HEADER,
+                    qualified_name="two::Container",
+                ),
+                RecordType(
+                    name="Point",
+                    kind="struct",
+                    size_bits=64,
+                    origin=ScopeOrigin.PUBLIC_HEADER,
+                    qualified_name="one::Point",
+                ),
+            ],
+        )
+        s = compute_public_surface(snap)
+        assert "Container" in s.ambiguous_type_names
+        # one::Point is still conservatively kept (anti-hiding: never hide a
+        # real dependency behind snapshot order) -- it just must not be
+        # *exact*.
+        assert "one::Point" in s.public_types
         assert s.exact_type_identities == set()
         c = Change(
             kind=ChangeKind.TYPE_SIZE_CHANGED, symbol="one::Point", description=""
