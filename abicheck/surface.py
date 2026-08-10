@@ -635,6 +635,58 @@ def _walk_type_closure(
                         queue.append(ident)
 
 
+def _mark_identity_forms_if_unambiguous(
+    surface: PublicSurface,
+    node: RecordType | EnumType,
+    record_by_name: dict[str, list[RecordType]],
+    enum_by_name: dict[str, list[EnumType]],
+) -> None:
+    """Adds *node*'s bare ``.name`` and (if present) its ``.qualified_name``
+    to ``exact_type_identities`` -- but only each form that is *itself*
+    independently unambiguous.
+
+    The queued spelling that led here was already confirmed to resolve to
+    exactly *node* -- but that spelling might not be either of ``node``'s own
+    two identity forms: castxml/clang's convention means the queued spelling
+    is very often the bare ``.name`` (that's the only form a real
+    castxml/clang-produced signature can ever spell -- confirmed against
+    ``dumper_castxml.py``'s ``_type_name``, which never prints a
+    namespace-qualified record reference), while ``diff_types.py`` also
+    always emits a type-level finding's own candidate as the bare ``.name``
+    (Codex review) -- so a caller that only ever recorded the *qualified*
+    form here would leave the overwhelmingly common castxml/clang bare-name
+    finding unconfirmable. Trusting ``node.name`` just because *some* route
+    to ``node`` was exact would be unsound on its own, though: a namespaced
+    sibling sharing the *same* bare tail elsewhere in the snapshot (the
+    ``ambiguous_namespaced_leaf`` shape) makes that bare spelling genuinely
+    ambiguous regardless of how *this* node was reached -- so each form is
+    independently re-resolved and checked for its own uniqueness before
+    being trusted, rather than inherited from whichever spelling arrived
+    here. ``node.qualified_name``, by construction, names exactly one
+    record/enum (two distinct declarations sharing one fully-qualified name
+    would be a real ODR violation, not a modeled ambiguity), but is checked
+    the same way for consistency and defense-in-depth.
+    """
+    if _combined_match_count(node.name, record_by_name, enum_by_name) == 1:
+        surface.exact_type_identities.add(node.name)
+    if node.qualified_name and (
+        _combined_match_count(node.qualified_name, record_by_name, enum_by_name) == 1
+    ):
+        surface.exact_type_identities.add(node.qualified_name)
+
+
+def _combined_match_count(
+    key: str,
+    record_by_name: dict[str, list[RecordType]],
+    enum_by_name: dict[str, list[EnumType]],
+) -> int:
+    """Records plus enums matching *key* -- the same cross-kind combination
+    ``_index_surface_types`` uses to compute ``ambiguous_type_names`` (a
+    record and an enum can each look unique within their own map while
+    still colliding once combined)."""
+    return len(record_by_name.get(key, ())) + len(enum_by_name.get(key, ()))
+
+
 def _walk_exact_type_closure(
     snap: AbiSnapshot,
     surface: PublicSurface,
@@ -715,10 +767,14 @@ def _walk_exact_type_closure(
             continue
         if en_nodes:
             en_node = en_nodes[0]
-            surface.exact_type_identities.add(en_node.qualified_name or en_node.name)
+            _mark_identity_forms_if_unambiguous(
+                surface, en_node, record_by_name, enum_by_name
+            )
             continue  # enums have no fields/bases to expand.
         rec_node = rec_nodes[0]
-        surface.exact_type_identities.add(rec_node.qualified_name or rec_node.name)
+        _mark_identity_forms_if_unambiguous(
+            surface, rec_node, record_by_name, enum_by_name
+        )
         for f in rec_node.fields:
             for ident in _type_identifiers(f.type):
                 if ident not in seen:

@@ -561,3 +561,106 @@ class TestPublicModeAmbiguousTypeRoot:
         decision = evaluate_change_contract_relevance(c, s, s, mode=ContractMode.PUBLIC)
         assert decision.relevance is ContractRelevance.IN_CONTRACT
         assert decision.reason_code == "public_root_membership"
+
+    def test_ordinary_castxml_namespaced_type_confirms_via_its_bare_symbol(
+        self,
+    ) -> None:
+        """Regression (Codex review): the overwhelmingly common case, not an
+        edge case -- a single, globally-unique namespaced record under the
+        castxml/clang convention (bare ``.name`` + separate
+        ``.qualified_name``), with no collision anywhere in the snapshot.
+        castxml/clang can never spell a record reference qualified in a
+        signature (confirmed against ``dumper_castxml.py``'s ``_type_name``),
+        so the public function's return type -- and therefore the seed
+        queued into the closure -- is bare ``"Point"``, not ``"ns::Point"``.
+        ``diff_types.py`` *also* always emits a type-level finding's own
+        ``symbol`` as the bare ``t_old.name`` (its own documented
+        convention), so a real ``TYPE_SIZE_CHANGED`` finding's candidate is
+        bare ``"Point"`` too. Recording only the *qualified* form in
+        ``exact_type_identities`` (as an earlier revision of this walk did)
+        would leave this ordinary, entirely unambiguous finding
+        ``UNKNOWN_UNRESOLVED`` -- excluding a real break from policy and the
+        exit code for what should be the single most common shape of
+        namespaced-type confirmation there is.
+        """
+        snap = AbiSnapshot(
+            library="l",
+            version="1",
+            functions=[_fn("api", ret="void", params=["Point *"])],
+            types=[
+                RecordType(
+                    name="Point",
+                    kind="struct",
+                    size_bits=64,
+                    origin=ScopeOrigin.PUBLIC_HEADER,
+                    qualified_name="ns::Point",
+                ),
+            ],
+        )
+        s = compute_public_surface(snap)
+        assert "Point" not in s.ambiguous_type_names
+        assert s.exact_type_identities == {"Point", "ns::Point"}
+        # The real-world shape: diff_types.py emits the bare .name.
+        c = Change(kind=ChangeKind.TYPE_SIZE_CHANGED, symbol="Point", description="")
+        decision = evaluate_change_contract_relevance(c, s, s, mode=ContractMode.PUBLIC)
+        assert decision.relevance is ContractRelevance.IN_CONTRACT
+        assert decision.reason_code == "public_root_membership"
+
+    def test_bare_name_form_is_withheld_when_it_independently_collides(
+        self,
+    ) -> None:
+        """Counterpart to the previous test: a node reached via its
+        (unique) *qualified* spelling must not also grant its *bare* form
+        exactness for free when that bare form independently collides with
+        an unrelated sibling elsewhere -- the two forms are re-checked for
+        their own uniqueness separately, not inherited from whichever
+        spelling arrived at this node. ``ns1::Cache``/``ns2::Cache`` -- the
+        fp-rate corpus's own ``ambiguous_namespaced_leaf`` shape -- share
+        the bare tail ``Cache``; if a *different*, unrelated seed happened
+        to name ``ns1::Cache`` exactly, that must confirm ``ns1::Cache``
+        itself without ever wrongly promoting the still-genuinely-ambiguous
+        bare ``Cache`` alongside it.
+        """
+        snap = AbiSnapshot(
+            library="l",
+            version="1",
+            functions=[
+                _fn("api", ret="void", params=["ns1::Cache *"]),
+            ],
+            types=[
+                RecordType(
+                    name="Cache",
+                    kind="struct",
+                    size_bits=64,
+                    origin=ScopeOrigin.PUBLIC_HEADER,
+                    qualified_name="ns1::Cache",
+                ),
+                RecordType(
+                    name="Cache",
+                    kind="struct",
+                    size_bits=32,
+                    origin=ScopeOrigin.PUBLIC_HEADER,
+                    qualified_name="ns2::Cache",
+                ),
+            ],
+        )
+        s = compute_public_surface(snap)
+        assert "Cache" in s.ambiguous_type_names
+        assert s.exact_type_identities == {"ns1::Cache"}
+        # The qualified candidate confirms.
+        c_exact = Change(
+            kind=ChangeKind.TYPE_SIZE_CHANGED, symbol="ns1::Cache", description=""
+        )
+        decision = evaluate_change_contract_relevance(
+            c_exact, s, s, mode=ContractMode.PUBLIC
+        )
+        assert decision.relevance is ContractRelevance.IN_CONTRACT
+        # The bare candidate -- what a real diff_types.py finding on either
+        # sibling would actually carry -- must NOT be wrongly promoted.
+        c_bare = Change(
+            kind=ChangeKind.TYPE_SIZE_CHANGED, symbol="Cache", description=""
+        )
+        decision = evaluate_change_contract_relevance(
+            c_bare, s, s, mode=ContractMode.PUBLIC
+        )
+        assert decision.relevance is ContractRelevance.UNKNOWN_UNRESOLVED

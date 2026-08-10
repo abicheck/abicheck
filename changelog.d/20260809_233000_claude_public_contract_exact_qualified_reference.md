@@ -27,4 +27,11 @@ A new changelog fragment. See changelog.d/README.md for the workflow.
   happens to be otherwise unique. A publicly-reachable typedef alias's own
   name (not just the record/enum its target resolves to) is also recorded
   exact, so a `TYPEDEF_REMOVED`/`TYPEDEF_BASE_CHANGED` finding on a directly-
-  exposed alias confirms correctly too.
+  exposed alias confirms correctly too. Every record/enum's *bare* `.name`
+  is now recorded alongside its `.qualified_name` (each independently
+  re-checked for its own uniqueness, since a node reached via one exact
+  form must not grant the other form exactness for free if that other
+  form happens to independently collide elsewhere) — `diff_types.py`
+  always emits a type-level finding's own candidate as the bare `.name`,
+  so this was previously the single most common castxml/clang
+  confirmation shape left unfixed.
