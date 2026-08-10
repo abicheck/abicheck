@@ -28,7 +28,9 @@
   contract-coverage axes separable now that a scan can natively exit `1`;
   a `gate-mode: advisory` check report has that nested gate neutralized
   alongside its top-level exit code, so an advisory check still gates
-  nothing.
+  nothing. `scan --dry-run` previews the resolved scheme, the per-category
+  severity levels, and that scheme's exit codes, instead of always showing
+  the legacy contract.
   `--pack` gate-severity folding is not yet extended to `scan`; pass
   severity settings directly. See `docs/reference/exit-codes.md`'s new
   "`scan --against` and severity" section.

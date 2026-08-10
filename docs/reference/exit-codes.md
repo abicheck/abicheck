@@ -303,6 +303,10 @@ contribution — but a severity-scheme scan *does* (an error-level addition),
 and folding both to `1` would otherwise be indistinguishable. See
 [`abicheck aggregate`](#abicheck-aggregate).
 
+`scan --dry-run` previews whichever scheme the invocation resolves —
+the scheme label, the per-category severity levels, and that scheme's exit
+codes — so the preview matches the run it is predicting.
+
 This is CLI/config-level parity only — a gate pack (`--pack`)
 does not yet fold a `gate.*` assignment into a scan's severity the way it
 does for `compare`; pass `--severity-*`/`--exit-code-scheme` directly

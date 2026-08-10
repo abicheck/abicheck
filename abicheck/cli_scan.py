@@ -377,6 +377,54 @@ def _scan_explicit_flags(
     return level_explicit, pinned_explicit
 
 
+def _dry_run_exit_code_lines(
+    scheme_label: str, sev_config: Any, against: Path | None
+) -> list[str]:
+    """The dry-run's exit-code preview, for the scheme this run actually resolved.
+
+    Split out of :func:`render_scan_dry_run` so the two schemes' wording sits
+    side by side rather than inside an already-long renderer.
+
+    *scheme_label* is the caller's already-resolved label (from
+    ``cli_compare_receipt.dry_run_scheme_label``, the same one ``compare
+    --dry-run`` prints); the severity branch keys off *sev_config* being
+    present, which is exactly when the caller resolved that scheme.
+
+    That branch is reachable only with ``--against``: every severity flag is a
+    comparison-only flag, and without a baseline there is no comparison to
+    gate, so an audit-only run always previews the legacy codes.
+    """
+    tail = "5 budget overflow, 6 not_comparable"
+    lines = [
+        "dry-run exit codes: 0 valid, 1 requested depth not satisfiable, "
+        "64 usage error",
+        f"exit-code scheme: {scheme_label}",
+    ]
+    if sev_config is not None and against is not None:
+        levels = ", ".join(
+            f"{attr}={getattr(getattr(sev_config, attr, None), 'value', '?')}"
+            for attr in (
+                "abi_breaking", "potential_breaking", "quality_issues", "addition",
+            )
+        )
+        lines.append(f"resolved severity: {levels}")
+        lines.append(
+            "a real scan run's exit codes are 0 no error-level findings, "
+            "1 error-level addition/quality findings (or incomplete contract "
+            "coverage under --contract-evaluation), 2 error-level "
+            "potential_breaking, 4 error-level abi_breaking, "
+            f"{tail} -- a category set to warning/info never gates, so a "
+            "breaking comparison can exit 0"
+        )
+        return lines
+    lines.append(
+        "a real scan run's exit codes are 0 compatible, "
+        "1 incomplete contract coverage (--contract-evaluation only), "
+        f"2 API break, 4 ABI break, {tail}"
+    )
+    return lines
+
+
 def render_scan_dry_run(
     *,
     artifact: Path,
@@ -396,12 +444,24 @@ def render_scan_dry_run(
     lang: str,
     header_backend: str,
     fmt: str,
+    scheme_label: str = "legacy (0/2/4)",
+    sev_config: Any = None,
 ) -> Any:
     """Build the ``scan --dry-run`` report (ADR-043 D4): resolve, never scan.
 
     Reuses :func:`service.estimate_scan`'s per-layer cost/TU-count probe (the
     same read-only projection ``--estimate`` used to provide) so the report
     also states how many translation units the resolved level would touch.
+
+    *scheme_label*/*sev_config* describe this invocation's **already-resolved**
+    gate (the caller resolves them before emitting), so the preview states the
+    contract the real run would actually use. Stating the legacy codes
+    unconditionally was wrong once `scan --against` gained a severity gate --
+    `--severity-preset info-only` previewed "0 compatible / 4 ABI break" for a
+    run that exits 0 on a breaking comparison (Codex review). Same defect
+    `compare --dry-run` already had and fixed, which is why the scheme label
+    comes from its :func:`~abicheck.cli_compare_receipt.dry_run_scheme_label`
+    rather than a second spelling of the same idea.
     """
     from .dry_run import DryRunResult, tool_status
     from .service import Budget, ScanRequest, estimate_scan
@@ -437,11 +497,7 @@ def render_scan_dry_run(
     result.add(
         "Output and exit-code behavior",
         f"format: {fmt}",
-        "dry-run exit codes: 0 valid, 1 requested depth not satisfiable, "
-        "64 usage error (a real scan run's exit codes are 0 compatible, "
-        "1 incomplete contract coverage (--contract-evaluation only), "
-        "2 API break, 4 ABI break, 5 budget overflow, "
-        "6 not_comparable)",
+        *_dry_run_exit_code_lines(scheme_label, sev_config, against),
     )
     try:
         req = ScanRequest(
@@ -1565,6 +1621,10 @@ def scan_cmd(
     require_justification = False
     sev_config = None
     resolved_exit_scheme = "legacy"
+    # What `--dry-run` previews as the exit-code contract. Defaults match an
+    # audit-only run, which has no baseline comparison and therefore no gate.
+    scheme_label = "legacy (0/2/4)"
+    sev_config_for_preview = None
     if against is not None:
         from .cli_helpers_compare import resolve_compare_config
 
@@ -1601,6 +1661,21 @@ def scan_cmd(
         # alone, never consulting severity).
         sev_config = resolved_cfg.severity
         resolved_exit_scheme = resolved_cfg.exit_code_scheme
+        # The same label `compare --dry-run` prints, from the same function
+        # and the same *resolved* config -- so a `.abicheck.yml`-only severity
+        # setup previews correctly, which is the case that function was
+        # itself fixed for. `pack_paths=()` deliberately: a `kind: gate` pack
+        # is rejected outright on `scan`, so nothing can move this scheme
+        # after resolution and the "a pack may adjust it" caveat would be
+        # false here.
+        from .cli_compare_receipt import dry_run_scheme_label
+
+        scheme_label = dry_run_scheme_label(resolved_cfg, ())
+        # Only a severity-scheme run has a gate to describe; under `legacy`
+        # the severity values still resolve but never score anything, so
+        # previewing them would imply a gate the run will not run.
+        if resolved_exit_scheme == "severity":
+            sev_config_for_preview = sev_config
 
     # ADR-049 Phase 5: --against reuses `compare`'s own suppression/policy
     # loader (`_load_suppression_and_policy`) so a scan baseline comparison
@@ -1743,6 +1818,8 @@ def scan_cmd(
                 lang=lang,
                 header_backend=header_backend,
                 fmt=fmt,
+                scheme_label=scheme_label,
+                sev_config=sev_config_for_preview,
             )
         )
 

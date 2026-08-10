@@ -348,6 +348,70 @@ class TestScanPreCoverageBaseExit:
         ) == 4
 
 
+class TestScanDryRunExitCodePreview:
+    """`--dry-run` must preview the exit-code contract the real run would use.
+
+    Codex review: it stated the legacy codes unconditionally, so
+    `--severity-preset info-only` previewed "0 compatible / 4 ABI break" for a
+    run that exits 0 on a breaking comparison.
+    """
+
+    def test_legacy_scheme_previews_the_verdict_codes(
+        self, runner, baseline_snap, new_snap_compatible
+    ):
+        res = runner.invoke(
+            main,
+            ["scan", str(new_snap_compatible), "--against", str(baseline_snap),
+             "--dry-run"],
+        )
+        assert res.exit_code == 0, res.output
+        assert "exit-code scheme: legacy (0/2/4)" in res.output
+        assert "0 compatible" in res.output
+        assert "resolved severity:" not in res.output
+
+    def test_severity_scheme_previews_the_category_codes_and_levels(
+        self, runner, baseline_snap, new_snap_compatible
+    ):
+        res = runner.invoke(
+            main,
+            ["scan", str(new_snap_compatible), "--against", str(baseline_snap),
+             "--dry-run", "--severity-preset", "info-only"],
+        )
+        assert res.exit_code == 0, res.output
+        assert "exit-code scheme: severity" in res.output
+        assert "abi_breaking=info" in res.output
+        # The consequence a user needs to see, stated outright.
+        assert "breaking comparison can exit 0" in res.output
+
+    def test_config_only_severity_is_not_previewed_as_legacy(
+        self, runner, tmp_path, baseline_snap, new_snap_compatible, monkeypatch
+    ):
+        # The case `dry_run_scheme_label` was itself fixed for: severity comes
+        # from .abicheck.yml with no CLI flag, so a raw-flag check would say
+        # "legacy" while the real run gates on severity.
+        (tmp_path / ".abicheck.yml").write_text(
+            "severity:\n  preset: info-only\n", encoding="utf-8"
+        )
+        monkeypatch.chdir(tmp_path)
+        res = runner.invoke(
+            main,
+            ["scan", str(new_snap_compatible), "--against", str(baseline_snap),
+             "--dry-run"],
+        )
+        assert res.exit_code == 0, res.output
+        assert "exit-code scheme: severity" in res.output
+
+    def test_audit_only_run_previews_legacy(self, runner, new_snap_compatible):
+        # No --against means no comparison to gate, so there is no severity
+        # scheme to preview regardless of config.
+        res = runner.invoke(
+            main, ["scan", str(new_snap_compatible), "--dry-run"]
+        )
+        assert res.exit_code == 0, res.output
+        assert "exit-code scheme: legacy (0/2/4)" in res.output
+        assert "resolved severity:" not in res.output
+
+
 def test_scan_severity_preset_without_against_is_usage_error(tmp_path: Path):
     # --severity-preset only configures the --against baseline comparison,
     # like the rest of _COMPARISON_ONLY_FLAGS (test_scan_rejects_comparison_
