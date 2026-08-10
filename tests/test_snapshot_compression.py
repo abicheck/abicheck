@@ -429,6 +429,31 @@ def test_stored_size_cap_is_independent_of_max_decoded_bytes():
     assert DEFAULT_MAX_STORED_BYTES > 100
 
 
+def test_raised_decoded_limit_does_not_expand_stored_size_ceiling(
+    tmp_path, monkeypatch
+):
+    """Codex review, PR #699 (fourth round on this precheck): an earlier fix
+    used ``max(limit, _max_stored_bytes())`` for the compressed-file cap --
+    a caller raising ``max_decoded_bytes`` (tolerance for large *decoded*
+    content) silently raised the *stored*-size ceiling too, letting an
+    untrusted compressed file past a deliberately lower/default
+    ``_max_stored_bytes()``. The two are orthogonal knobs; a raised decoded
+    limit must not widen the independent stored-size safety ceiling."""
+    import abicheck.snapshot_io as snapshot_io_mod
+
+    snap = _sample_snapshot()
+    p = tmp_path / "big.abicheck.json.gz"
+    write_snapshot(snap, p)
+    stored_size = p.stat().st_size
+
+    # Lower the stored-bytes ceiling below the real file's own stored size,
+    # then raise max_decoded_bytes far past it -- the file must still be
+    # rejected on the (unrelated, still-lower) stored-size ceiling.
+    monkeypatch.setenv(snapshot_io_mod._MAX_STORED_BYTES_ENV, str(stored_size - 1))
+    with pytest.raises(SnapshotError, match="exceeds"):
+        read_snapshot_bytes(p, max_decoded_bytes=10 * 1024 * 1024 * 1024)
+
+
 def test_concatenated_multi_member_gzip_not_rejected_by_stored_size_precheck(
     tmp_path,
 ):

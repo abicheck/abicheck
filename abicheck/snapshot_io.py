@@ -438,10 +438,20 @@ def read_snapshot_bytes(
         stored_size = os.fstat(f.fileno()).st_size
         prefix = f.read(4)
         compression_hint = detect_compression_from_bytes(prefix)
+        # Codex review: `max(limit, _max_stored_bytes())` let a raised
+        # `max_decoded_bytes` (a caller's tolerance for large *decoded*
+        # content) silently expand the *stored*-size ceiling too -- an
+        # untrusted compressed file could then be buffered wholly into
+        # memory well past `_max_stored_bytes()`'s own, separately
+        # configured safety intent. The two are orthogonal knobs; use
+        # `_max_stored_bytes()` alone for a compressed file, exactly as
+        # documented above -- a caller who genuinely needs a larger stored-
+        # size ceiling raises that knob directly (its own env var), not as
+        # a side effect of raising the unrelated decoded-size one.
         cap = (
             limit
             if compression_hint is SnapshotCompression.NONE
-            else max(limit, _max_stored_bytes())
+            else _max_stored_bytes()
         )
         if stored_size > cap:
             raise SnapshotError(
