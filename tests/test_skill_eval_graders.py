@@ -673,9 +673,23 @@ class TestGradeRunEndToEnd:
 
 
 class TestShim:
-    def test_declared_outputs_cover_both_spellings(self):
+    def test_declared_outputs_cover_every_spelling(self):
         argv = ["compare", "a", "b", "-o", "r.json", "--output-dir=out"]
         assert shim._declared_outputs(argv) == ["r.json", "out"]
+
+    def test_an_attached_short_option_value_is_recognized(self):
+        """Verified against the real CLI: `compare ... -oreport.json` writes it.
+
+        An unrecognized output is never snapshotted, so a later call reusing the
+        path overwrites the evidence a claim cites."""
+        assert shim._declared_outputs(["compare", "a", "b", "-oreport.json"]) == [
+            "report.json"
+        ]
+        assert shim._declared_outputs(["compare", "-o=r.json"]) == ["r.json"]
+
+    def test_a_long_option_is_not_split_as_an_attached_value(self):
+        """`--output-dir` must not be read as `-o` plus `utput-dir`."""
+        assert shim._declared_outputs(["compare", "--output-dir", "out"]) == ["out"]
 
     def test_same_named_outputs_do_not_overwrite_each_other(self, tmp_path):
         """`-o human/report.json --secondary-output machine/report.json`."""

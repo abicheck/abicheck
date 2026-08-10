@@ -97,16 +97,35 @@ def _digest(data: bytes) -> str:
     return "sha256:" + hashlib.sha256(data).hexdigest()
 
 
+def _is_short(option: str) -> bool:
+    return len(option) == 2 and not option.startswith("--")
+
+
 def _declared_outputs(argv: list[str]) -> list[str]:
-    """Paths this invocation asked abicheck to write."""
+    """Paths this invocation asked abicheck to write.
+
+    Three spellings, because Click accepts three and the shim has to recognize
+    every one the real command does: `-o path`, `-o=path`, and the attached
+    short form `-opath`. The attached form was missed, and the consequence was
+    not a cosmetic gap — an unrecognized output is never snapshotted, so a
+    later call reusing the same path silently overwrites the evidence a claim
+    cites, which is the exact failure per-call snapshotting exists to prevent.
+    Verified against the real CLI: `compare ... -oreport.json` writes
+    `report.json`.
+    """
     found: list[str] = []
     for i, token in enumerate(argv):
-        if token in OUTPUT_OPTIONS and i + 1 < len(argv):
-            found.append(argv[i + 1])
-        else:
-            for opt in OUTPUT_OPTIONS:
-                if token.startswith(f"{opt}="):
-                    found.append(token.split("=", 1)[1])
+        if token in OUTPUT_OPTIONS:
+            if i + 1 < len(argv):
+                found.append(argv[i + 1])
+            continue
+        for opt in OUTPUT_OPTIONS:
+            if token.startswith(f"{opt}="):
+                found.append(token.split("=", 1)[1])
+                break
+            if _is_short(opt) and token.startswith(opt) and len(token) > len(opt):
+                found.append(token[len(opt) :])
+                break
     return found
 
 

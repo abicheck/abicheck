@@ -32,6 +32,7 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+import yaml
 
 REPO = Path(__file__).resolve().parent.parent
 SCRIPTS = REPO / "scripts"
@@ -592,6 +593,34 @@ def test_a_trigger_bundle_is_not_held_to_the_scenario_rules(
     bundle["kind"] = "trigger"
     bundle["scenario_id"] = "positive-0"
     assert _check_bundle(monkeypatch, tmp_path, bundle) == 0
+
+
+def test_a_trigger_bundle_naming_no_real_prompt_is_rejected(
+    pack: dict[str, Any], monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """The behavioral rule's counterpart for the other kind. Without it an
+    invented id produced activation evidence that passed every check and could
+    never be aggregated against the trigger it was supposed to exercise."""
+    bundle = _bundle(pack)
+    bundle["kind"] = "trigger"
+    bundle["scenario_id"] = "positive-99"
+    del bundle["hashes"]["scenarios"]
+    assert _check_bundle(monkeypatch, tmp_path, bundle) == 1
+
+
+def test_every_corpus_prompt_has_an_id_in_the_pack(pack: dict[str, Any]) -> None:
+    """The ids are positional, which is only safe because the corpus digest is
+    itself a pack entry: reordering renames ids *and* invalidates every trigger
+    bundle in the same edit, so an id cannot come to mean a different prompt."""
+    corpus = yaml.safe_load(
+        (REPO / "tests" / "agent_skills" / "trigger_corpus.yaml").read_text(
+            encoding="utf-8"
+        )
+    )
+    ids = pack["shared"]["trigger_corpus"]["prompt_ids"]
+    assert len(ids) == len(corpus["positive"]) + len(corpus["negative"])
+    assert ids[0] == "positive-0"
+    assert len(set(ids)) == len(ids)
 
 
 @pytest.mark.parametrize(

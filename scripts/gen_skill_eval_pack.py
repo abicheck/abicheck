@@ -330,6 +330,30 @@ def _roots(sources: tuple[Path, ...]) -> list[str]:
     return sorted(p.as_posix() for p in sources)
 
 
+def _trigger_prompt_ids() -> list[str]:
+    """The id of every prompt in the trigger corpus, `<set>-<index>`.
+
+    The corpus names its prompts positionally rather than carrying an `id`
+    field, so this is where that convention is defined — the freshness check
+    cannot read the YAML itself (stdlib only) and needs somewhere to resolve a
+    trigger bundle's `scenario_id` against, exactly as a behavioral bundle
+    resolves against `scenarios`. Without it an invented id such as
+    `positive-99` produced activation evidence that passed every check and
+    could never be aggregated against an expected trigger.
+
+    Positional ids are safe here precisely because the corpus digest is already
+    a pack entry affecting every skill: reordering the corpus renames ids *and*
+    invalidates every trigger bundle in the same edit, so an id can never
+    quietly come to mean a different prompt.
+    """
+    corpus = yaml.safe_load(TRIGGER_CORPUS.read_text(encoding="utf-8"))
+    return [
+        f"{group}-{index}"
+        for group in ("positive", "negative")
+        for index, _ in enumerate(corpus.get(group) or [])
+    ]
+
+
 def build_pack() -> dict[str, Any]:
     manifest = _load_scenarios()
     ground_truth = json.loads(GROUND_TRUTH.read_text(encoding="utf-8"))
@@ -415,6 +439,7 @@ def build_pack() -> dict[str, Any]:
                 "digest": _digest(TRIGGER_CORPUS.read_bytes()),
                 "roots": [TRIGGER_CORPUS.relative_to(ROOT).as_posix()],
                 "affects": skills,
+                "prompt_ids": _trigger_prompt_ids(),
             },
             "harness": {
                 "digest": _digest_paths(_expand(HARNESS_SOURCES)),

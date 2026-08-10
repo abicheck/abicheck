@@ -313,6 +313,7 @@ def check_bundle(
     path: Path,
     entries: dict[str, dict[str, Any]],
     out: Findings,
+    pack: dict[str, Any] | None = None,
 ) -> set[str]:
     """Check one bundle; return the skills its stale hashes nominate."""
     rel = _rel(path)
@@ -366,6 +367,21 @@ def check_bundle(
                     f"{rel}: is filed under {skill!r} but scenario {scenario_id!r} "
                     f"belongs to {scenario.get('skill')!r}",
                 )
+    elif bundle.get("kind") == "trigger":
+        # The same rule, for the other bundle kind. `scenario_id` on a trigger
+        # bundle names a trigger-corpus prompt, and nothing resolved it — so an
+        # invented or mistyped id (`positive-99`) produced activation evidence
+        # that passed every check and could never be aggregated against the
+        # trigger it was supposed to exercise.
+        prompt_id = bundle.get("scenario_id", "")
+        known = ((pack or {}).get("shared", {}).get("trigger_corpus", {}) or {}).get(
+            "prompt_ids"
+        )
+        if known is not None and prompt_id not in known:
+            out.err(
+                "bundle",
+                f"{rel}: names trigger prompt {prompt_id!r}, which the corpus has no",
+            )
 
     nominated: set[str] = set()
     recorded_ids: set[str] = set()
@@ -488,7 +504,7 @@ def main(argv: list[str] | None = None) -> int:
     nominated: set[str] = set()
     bundles = sorted(EVIDENCE.rglob("meta.json")) if EVIDENCE.is_dir() else []
     for bundle_path in bundles:
-        nominated |= check_bundle(bundle_path, entries, out)
+        nominated |= check_bundle(bundle_path, entries, out, pack)
 
     if nominated:
         out.err(

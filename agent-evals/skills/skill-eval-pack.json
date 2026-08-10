@@ -490,7 +490,7 @@
         "native-consumer-compatibility",
         "native-release-compatibility"
       ],
-      "digest": "sha256:8b5e432506fef626df0f3db3ce8e79e284e122b6329b098d8a04a1f5fdebdf61",
+      "digest": "sha256:abc6c1d56aed1d960f7afd827962a34816191f94c76e03c84b720590e798bf23",
       "roots": [
         "agent-evals/skills/grade_bundle.py",
         "agent-evals/skills/graders",
@@ -507,6 +507,20 @@
         "native-release-compatibility"
       ],
       "digest": "sha256:8470329beed40dc34cea75fff2b6c3c209b575db5ec9b73167a8810fe284eabf",
+      "prompt_ids": [
+        "positive-0",
+        "positive-1",
+        "positive-2",
+        "positive-3",
+        "positive-4",
+        "positive-5",
+        "positive-6",
+        "negative-0",
+        "negative-1",
+        "negative-2",
+        "negative-3",
+        "negative-4"
+      ],
       "roots": [
         "tests/agent_skills/trigger_corpus.yaml"
       ]
