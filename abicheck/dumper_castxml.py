@@ -1272,6 +1272,19 @@ class _CastxmlParser:
                     type=type_name,
                     visibility=vis,
                     is_const=is_const,
+                    # G31 Phase C continued: `_access_level`, already used
+                    # for a `Field`, reads the identical structured `access`
+                    # attribute on a static class member's `<Variable>`
+                    # element (verified against real castxml output).
+                    access=self._access_level(el),
+                    # G31 Phase C continued: `init` is a verbatim
+                    # (unevaluated) expression, like `TypeField.default`/
+                    # `Param.default`. Restricted to `is_const` (mirroring
+                    # `_iter_public_constants`'s own filter below): a
+                    # non-const initializer can be an arbitrary runtime
+                    # expression (`init="f()"`, verified empirically), not
+                    # the "compile-time constant" `Variable.value` promises.
+                    value=el.get("init") if is_const else None,
                     source_location=self._source_location(el),
                     # Explicit alignas/aligned override when castxml emits an
                     # ``align`` attribute on the Variable itself; falls back to

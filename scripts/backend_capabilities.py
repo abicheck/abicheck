@@ -283,23 +283,38 @@ FACT_ROWS: tuple[FactRow, ...] = (
     FactRow(
         "Variable",
         "value",
-        _OTHER,
-        _OTHER,
+        _PARTIAL,
+        _NONE,
         note=(
-            "**No producer on any layer today** — only the JSON round-trip "
-            "reads it back. A public constant's value reaches a snapshot "
-            "through `AbiSnapshot.constants`, not through this field."
+            "castxml side wired in G31 Phase C continued (schema v24), "
+            "restricted to `is_const` (mirroring `_iter_public_constants`'s "
+            "own filter a few methods below — an unevaluated, non-const "
+            "initializer can be an arbitrary runtime expression like "
+            '`init="f()"`, verified empirically, which is not the '
+            '"compile-time constant" this field\'s own docstring promises). '
+            "No reliability flag needed: `diff_types_abicc_parity."
+            "_diff_var_values` already declines per-pair unless BOTH sides "
+            "are non-`None`, so a legacy blanket-`None` side is silently "
+            "skipped rather than misread. A public constant's value ALSO "
+            "reaches a snapshot through `AbiSnapshot.constants` — the two "
+            "are independent paths, not a duplication of one another."
         ),
     ),
     FactRow(
         "Variable",
         "access",
-        _OTHER,
-        _OTHER,
+        _FULL,
+        _NONE,
         note=(
-            "**No producer on any layer today**; every variable keeps the "
-            "`public` default. (`Function.access`/`TypeField.access` *are* "
-            "populated — this is the one access field nothing sets.)"
+            "castxml side wired in G31 Phase C continued (schema v24), "
+            "reusing the same structured `access` attribute already read "
+            "for `Function`/`TypeField` — verified against real castxml "
+            "output that a static class member's `<Variable>` element "
+            "carries it too. `diff_symbols._diff_var_access` requires "
+            '`ast_producer == "castxml"` specifically (not "hybrid" — '
+            "see `AbiSnapshot.castxml_var_access_facts_reliable`'s own "
+            "docstring) and gates on that reliability flag for the "
+            "pre-v24-legacy-baseline case."
         ),
     ),
     FactRow("Variable", "elf_visibility", _OTHER, _OTHER, note=_DYNSYM),
@@ -609,9 +624,12 @@ FACT_ROWS: tuple[FactRow, ...] = (
             "x86-64 System V spelling only — the one ABI verified there; "
             "an unrecognized target's real `va_list` still reads `False`. "
             "castxml has never populated this fact, so "
-            "`diff_symbols._diff_param_va_list` only trusts a clang/hybrid "
-            "pair (see its own docstring), unlike the now-symmetric "
-            "`is_restrict` above."
+            '`diff_symbols._diff_param_va_list` only trusts a `"clang"`-'
+            'producer pair — NOT `"hybrid"` either, unlike the now-'
+            "symmetric `is_restrict` above, since a hybrid merge keeps "
+            "castxml's own params verbatim for every matched function and "
+            "castxml never populates this fact at all (see its own "
+            "docstring)."
         ),
     ),
 )

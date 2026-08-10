@@ -814,12 +814,23 @@ class TestPreprocessorConstants:
 
 
 class TestVarAccessChanged:
-    """Detect variable access level narrowing."""
+    """Detect variable access level narrowing.
+
+    ``Variable.access`` is populated only by the castxml header-AST backend
+    (G31 Phase C continued, schema v24) — see
+    ``diff_symbols._diff_var_access``'s own docstring — so both sides here
+    need ``ast_producer="castxml"``, unlike this module's other ``_snap()``
+    calls.
+    """
 
     def test_var_became_private(self) -> None:
-        old = _snap(variables=[_var("data", "_data", "int", access=AccessLevel.PUBLIC)])
+        old = _snap(
+            ast_producer="castxml",
+            variables=[_var("data", "_data", "int", access=AccessLevel.PUBLIC)],
+        )
         new = _snap(
-            variables=[_var("data", "_data", "int", access=AccessLevel.PRIVATE)]
+            ast_producer="castxml",
+            variables=[_var("data", "_data", "int", access=AccessLevel.PRIVATE)],
         )
         result = compare(old, new)
         assert ChangeKind.VAR_ACCESS_CHANGED in _kinds(result)
@@ -830,9 +841,13 @@ class TestVarAccessChanged:
         assert change.new_value == "private"
 
     def test_var_became_protected(self) -> None:
-        old = _snap(variables=[_var("data", "_data", "int", access=AccessLevel.PUBLIC)])
+        old = _snap(
+            ast_producer="castxml",
+            variables=[_var("data", "_data", "int", access=AccessLevel.PUBLIC)],
+        )
         new = _snap(
-            variables=[_var("data", "_data", "int", access=AccessLevel.PROTECTED)]
+            ast_producer="castxml",
+            variables=[_var("data", "_data", "int", access=AccessLevel.PROTECTED)],
         )
         result = compare(old, new)
         assert ChangeKind.VAR_ACCESS_CHANGED in _kinds(result)
@@ -840,23 +855,37 @@ class TestVarAccessChanged:
     def test_var_widened_no_change(self) -> None:
         """private→public is widening, should NOT be flagged."""
         old = _snap(
-            variables=[_var("data", "_data", "int", access=AccessLevel.PRIVATE)]
+            ast_producer="castxml",
+            variables=[_var("data", "_data", "int", access=AccessLevel.PRIVATE)],
         )
-        new = _snap(variables=[_var("data", "_data", "int", access=AccessLevel.PUBLIC)])
+        new = _snap(
+            ast_producer="castxml",
+            variables=[_var("data", "_data", "int", access=AccessLevel.PUBLIC)],
+        )
         result = compare(old, new)
         assert ChangeKind.VAR_ACCESS_CHANGED not in _kinds(result)
 
     def test_var_access_unchanged(self) -> None:
-        old = _snap(variables=[_var("data", "_data", "int", access=AccessLevel.PUBLIC)])
-        new = _snap(variables=[_var("data", "_data", "int", access=AccessLevel.PUBLIC)])
+        old = _snap(
+            ast_producer="castxml",
+            variables=[_var("data", "_data", "int", access=AccessLevel.PUBLIC)],
+        )
+        new = _snap(
+            ast_producer="castxml",
+            variables=[_var("data", "_data", "int", access=AccessLevel.PUBLIC)],
+        )
         result = compare(old, new)
         assert ChangeKind.VAR_ACCESS_CHANGED not in _kinds(result)
 
     def test_var_access_narrowed_is_source_break(self) -> None:
         """Narrowing access is a source-level break."""
-        old = _snap(variables=[_var("data", "_data", "int", access=AccessLevel.PUBLIC)])
+        old = _snap(
+            ast_producer="castxml",
+            variables=[_var("data", "_data", "int", access=AccessLevel.PUBLIC)],
+        )
         new = _snap(
-            variables=[_var("data", "_data", "int", access=AccessLevel.PRIVATE)]
+            ast_producer="castxml",
+            variables=[_var("data", "_data", "int", access=AccessLevel.PRIVATE)],
         )
         result = compare(old, new)
         assert result.verdict == Verdict.API_BREAK

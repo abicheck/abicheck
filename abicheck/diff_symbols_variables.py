@@ -23,12 +23,63 @@ cycle). ``diff_symbols._check_variable`` is the sole caller.
 from __future__ import annotations
 
 import re
+from typing import Any
 
 from .checker_policy import ChangeKind
 from .checker_types import Change
 from .diff_helpers import make_change
-from .model import Variable
+from .model import AccessLevel, Variable
 from .name_classification import _find_matching_close
+
+
+def _is_access_narrowing(old_access: Any, new_access: Any) -> bool:
+    """Return True if the access level transition is narrowing (breaking).
+
+    Narrowing = less accessible: public→protected, public→private, protected→private.
+    Widening (e.g., private→public) is backward-compatible and should NOT be flagged.
+
+    Shared by ``diff_symbols.py``'s method/field access-narrowing checks and
+    :func:`var_access_changes` below — moved here (rather than staying in
+    ``diff_symbols.py``) purely to make room under that file's 2000-line hard
+    cap; not otherwise Variable-specific.
+    """
+    _RANK = {AccessLevel.PUBLIC: 0, AccessLevel.PROTECTED: 1, AccessLevel.PRIVATE: 2}  # pylint: disable=invalid-name
+    return _RANK.get(new_access, 0) > _RANK.get(old_access, 0)
+
+
+def var_access_changes(
+    old_map: dict[str, Variable], new_map: dict[str, Variable]
+) -> list[Change]:
+    """``VAR_ACCESS_CHANGED``/``VAR_ACCESS_WIDENED`` for flipped variables.
+
+    The evidence gates (header-tier, "castxml"-producer-only,
+    reliability-gated) live with the registration in ``diff_symbols.py``'s
+    ``_diff_var_access`` (G31 Phase C continued — see
+    ``AbiSnapshot.castxml_var_access_facts_reliable``'s own docstring for
+    the full reasoning); by the time this runs both sides are known-safe.
+    """
+    changes: list[Change] = []
+    for mangled, v_old in old_map.items():
+        v_new = new_map.get(mangled)
+        if v_new is None:
+            continue
+        if v_old.access == v_new.access:
+            continue
+        kind = (
+            ChangeKind.VAR_ACCESS_CHANGED
+            if _is_access_narrowing(v_old.access, v_new.access)
+            else ChangeKind.VAR_ACCESS_WIDENED
+        )
+        changes.append(
+            make_change(
+                kind,
+                symbol=mangled,
+                name=v_old.name,
+                old=v_old.access.value,
+                new=v_new.access.value,
+            )
+        )
+    return changes
 
 
 def _check_variable_alignment(

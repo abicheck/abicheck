@@ -27,10 +27,13 @@ Three layers are covered here, mirroring ``test_clang_param_restrict.py``:
 
 1. The extraction predicate itself, over spellings real clang emits.
 2. The same predicate against a LIVE ``clang -ast-dump=json`` tree.
-3. The gates the new fact needs at the detector: header-tier, clang/hybrid-
-   producer-only (this fact is NOT symmetric across backends the way
-   ``is_restrict`` is — castxml never populates it), and the pre-v23
-   legacy-baseline flag.
+3. The gates the new fact needs at the detector: header-tier, "clang"-
+   producer-ONLY (this fact is NOT symmetric across backends the way
+   ``is_restrict`` is — castxml never populates it, and "hybrid" is
+   excluded entirely, not merely reliability-gated, since a hybrid merge
+   keeps castxml's verbatim params for every matched function — see
+   ``diff_param_qualifiers.param_va_list_changes``'s docstring), and the
+   pre-v23 legacy-baseline flag.
 """
 
 from __future__ import annotations
@@ -243,9 +246,9 @@ def _kinds(result: object) -> set[ChangeKind]:
 class TestParamVaListProducerGate:
     """Unlike ``is_restrict``, this fact is NOT symmetric across backends:
     castxml has never populated it, so pairing a castxml side (always
-    ``False``) with a clang/hybrid side (real values) must not fire — the
-    detector requires ``ast_producer in ("clang", "hybrid")`` on both sides,
-    not merely "both header-parsed"."""
+    ``False``) with a clang side (real values) must not fire — the
+    detector requires ``ast_producer == "clang"`` on both sides, not merely
+    "both header-parsed", and NOT "hybrid" either (see the class below)."""
 
     def test_castxml_vs_clang_does_not_manufacture_a_finding(self) -> None:
         """The dangerous asymmetric pairing: castxml's blanket False against
@@ -268,6 +271,53 @@ class TestParamVaListProducerGate:
         assert ChangeKind.PARAM_BECAME_VA_LIST not in _kinds(compare(old, new))
 
 
+class TestParamVaListHybridExcluded:
+    """``"hybrid"`` is excluded from the producer gate entirely, unlike
+    ``param_restrict``'s (Codex review, fresh evidence). A hybrid merge
+    keeps castxml's own ``params`` verbatim for every MATCHED function
+    (``dumper_hybrid._merge_functions``), and castxml has never populated
+    ``is_va_list`` at all — so a matched function's param reads a
+    permanent, version-independent ``False``, unlike ``is_restrict`` where
+    castxml IS a real producer and a matched function's castxml-verbatim
+    param still carries a genuine answer.
+
+    The concrete failure mode: the SAME function's parser coverage differs
+    between the old and new snapshot — clang-only-appended (real value) in
+    one, matched-by-both-and-therefore-blind (always False) in the other —
+    which would read a real, unchanged ``va_list`` parameter as
+    added/removed purely from that coverage shift."""
+
+    def test_two_hybrid_sides_never_fire_even_when_reliable(self) -> None:
+        """Positive control that this is a producer exclusion, not merely
+        the reliability flag happening to be unset."""
+        old = _snap(
+            ast_producer="hybrid",
+            clang_va_list_facts_reliable=True,
+            functions=[_func(False)],
+        )
+        new = _snap(
+            ast_producer="hybrid",
+            clang_va_list_facts_reliable=True,
+            functions=[_func(True)],
+        )
+        assert ChangeKind.PARAM_BECAME_VA_LIST not in _kinds(compare(old, new))
+
+    def test_hybrid_vs_clang_never_fires(self) -> None:
+        old = _snap(ast_producer="hybrid", functions=[_func(False)])
+        new = _snap(ast_producer="clang", functions=[_func(True)])
+        assert ChangeKind.PARAM_BECAME_VA_LIST not in _kinds(compare(old, new))
+
+    def test_coverage_shift_across_hybrid_snapshots_does_not_fire(self) -> None:
+        """The scenario Codex's review named directly: a function that was
+        clang-only-appended (real True) in the old hybrid snapshot becomes
+        castxml-matched-and-therefore-blind (False) in the new one — a
+        parser-coverage artifact, not a real qualifier change. Without the
+        producer exclusion this reads as PARAM_LOST_VA_LIST."""
+        old = _snap(ast_producer="hybrid", functions=[_func(True)])
+        new = _snap(ast_producer="hybrid", functions=[_func(False)])
+        assert ChangeKind.PARAM_LOST_VA_LIST not in _kinds(compare(old, new))
+
+
 class TestParamVaListHeaderTierGate:
     """``Param.is_va_list`` is populated by the direct-clang backend alone —
     DWARF, PDB, and the symbol-table paths never set it."""
@@ -285,7 +335,7 @@ class TestParamVaListHeaderTierGate:
 
 
 class TestLegacyClangBaselineSuppression:
-    """A persisted pre-v23 clang/hybrid baseline reads ``is_va_list=False``
+    """A persisted pre-v23 clang baseline reads ``is_va_list=False``
     for EVERY parameter, so comparing it against a fresh dump of unchanged
     headers would report every ``va_list`` parameter as newly added."""
 

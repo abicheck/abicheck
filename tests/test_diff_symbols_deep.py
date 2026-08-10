@@ -978,18 +978,34 @@ class TestVarValueChanged:
 
 
 class TestVarAccessChanged:
-    """Variable access level changes."""
+    """Variable access level changes.
+
+    ``Variable.access`` is populated only by the castxml header-AST backend
+    (G31 Phase C continued, schema v24) — see
+    ``diff_symbols._diff_var_access``'s own docstring — so both sides here
+    must be tagged ``ast_producer="castxml"``, not the plain ``_snap()``
+    helper's producer-less default.
+    """
+
+    def _castxml_snap(self, variables):
+        return AbiSnapshot(
+            library="libtest.so.1",
+            version="1.0",
+            variables=variables,
+            from_headers=True,
+            ast_producer="castxml",
+        )
 
     def test_var_access_narrowed(self):
         v_v1 = _pub_var("data", "_Z4datav", "int", access=AccessLevel.PUBLIC)
         v_v2 = _pub_var("data", "_Z4datav", "int", access=AccessLevel.PRIVATE)
-        r = compare(_snap(variables=[v_v1]), _snap(variables=[v_v2]))
+        r = compare(self._castxml_snap([v_v1]), self._castxml_snap([v_v2]))
         assert ChangeKind.VAR_ACCESS_CHANGED in _kinds(r)
 
     def test_var_access_widened(self):
         v_v1 = _pub_var("data", "_Z4datav", "int", access=AccessLevel.PRIVATE)
         v_v2 = _pub_var("data", "_Z4datav", "int", access=AccessLevel.PUBLIC)
-        r = compare(_snap(variables=[v_v1]), _snap(variables=[v_v2]))
+        r = compare(self._castxml_snap([v_v1]), self._castxml_snap([v_v2]))
         assert ChangeKind.VAR_ACCESS_WIDENED in _kinds(r)
 
 

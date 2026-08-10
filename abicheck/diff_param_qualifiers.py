@@ -89,12 +89,35 @@ def param_va_list_changes(
 
     The evidence gates live with the registration in ``diff_symbols.py``, not
     here (same split as ``param_restrict_changes`` above): by the time this
-    runs both sides are known to be header-derived, clang/hybrid-produced,
-    and carry reliable va_list facts (G31 Phase C continued —
-    ``dumper_clang_qualifiers._clang_param_is_va_list``, x86-64 System V
-    spelling only; castxml never populates this fact). See
-    ``diff_symbols._diff_param_va_list``'s own docstring for why this one is
-    NOT symmetric across producers the way ``param_restrict`` is.
+    runs both sides are known to be header-derived, **"clang"-produced
+    specifically** (not "hybrid" — see below), and carry reliable va_list
+    facts (G31 Phase C continued — ``dumper_clang_qualifiers.
+    _clang_param_is_va_list``, x86-64 System V spelling only; castxml never
+    populates this fact at all).
+
+    **Unlike ``param_restrict_changes``, "hybrid" is excluded from the
+    producer gate entirely, not merely reliability-gated** (Codex review,
+    fresh evidence). ``dumper_hybrid._merge_functions`` keeps castxml's own
+    ``params`` verbatim for every MATCHED function (parameters are never
+    merged field-by-field — see ``Param.default``'s identical note in
+    ``scripts/backend_capabilities.py``). For ``is_restrict``, that's safe:
+    castxml IS a real producer of that fact, so a matched function's
+    castxml-verbatim param still carries a genuine answer either way. For
+    ``is_va_list``, castxml has NEVER populated it, so a matched function's
+    param reads a permanent, version-independent ``False`` — not a legacy-
+    baseline artifact ``clang_va_list_facts_reliable`` could catch, since
+    it's just as false on a snapshot built with the current parser as an
+    old one. The dangerous case: comparing two hybrid snapshots (or a
+    hybrid against a clang one) where the SAME function's parser coverage
+    differs between old and new — clang-only-appended in one snapshot,
+    matched-by-both-and-therefore-blind in the other — would read a real,
+    unchanged ``va_list`` parameter as added/removed purely from that
+    coverage shift, not a real qualifier change. No per-function provenance
+    exists today to distinguish a matched (blind) function's param from a
+    clang-only (real) one, so the whole producer is excluded rather than
+    guessed at; revisit once ``dumper_hybrid.py`` backfills ``is_va_list``
+    per parameter the way it does for a handful of scalar record-layout
+    attributes today.
     """
     changes: list[Change] = []
     for mangled, f_old in old_map.items():

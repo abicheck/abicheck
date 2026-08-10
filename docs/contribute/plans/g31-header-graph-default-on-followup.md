@@ -1689,14 +1689,53 @@ phase held to):
   negative, not a guessed spelling, matching this whole phase's "verify
   before claiming" discipline). Unlike `is_restrict`, this fact is **not**
   symmetric across producers: castxml has never populated it and always
-  reports `False`, so `diff_symbols._diff_param_va_list` requires both sides
-  to be `ast_producer in ("clang", "hybrid")` specifically, not merely
-  header-aware — pairing a castxml side with a clang/hybrid side would read
-  every genuine `va_list` parameter as added/removed purely from which
-  backend parsed which side. `AbiSnapshot.clang_va_list_facts_reliable`
-  covers the separate pre-v23-baseline case the same way
-  `clang_restrict_facts_reliable` does. `Variable.value`/`Variable.access`
-  remain genuinely unstarted.
+  reports `False`, so `diff_symbols._diff_param_va_list` requires both
+  sides' `ast_producer` to be reliable clang facts.
+
+  **A Codex review round found the first version of this fix over-included
+  `"hybrid"`, mirroring `param_restrict`'s own gate without checking
+  whether the analogy actually held.** It doesn't: `param_restrict`'s
+  hybrid inclusion is safe because castxml genuinely IS a real `is_restrict`
+  producer, so a hybrid merge's castxml-verbatim params for a MATCHED
+  function still carry a real answer either way. `is_va_list` has no such
+  fallback — castxml has never populated it — so a matched function's
+  param in a hybrid snapshot reads a permanent, version-independent
+  `False`, not a legacy-baseline artifact any reliability flag could
+  describe. The dangerous case: the SAME function's parser coverage
+  differing between the old and new snapshot (clang-only-appended, real
+  value, in one; matched-by-both-and-blind in the other) would read a
+  real, unchanged `va_list` parameter as added/removed purely from that
+  coverage shift. Fixed by excluding `"hybrid"` from the producer gate
+  entirely — `diff_symbols._diff_param_va_list` now requires
+  `ast_producer == "clang"` on both sides, full stop. See
+  `diff_param_qualifiers.param_va_list_changes`'s own docstring for the
+  complete reasoning and `tests/test_clang_param_va_list.py`'s
+  `TestParamVaListHybridExcluded` for the regression coverage, including
+  the exact coverage-shift repro.
+
+  **Closed for `Variable.value`/`Variable.access` in a still-later pass**
+  (schema v24), once a real pinned castxml build became available to
+  verify against in this environment (`action/install-castxml.sh`).
+  castxml already emits the identical structured `access` attribute on a
+  static class member's `<Variable>` element that `_access_level` already
+  reads for `Function`/`TypeField` (confirmed against real castxml 0.6
+  output), and the identical verbatim, unevaluated `init` attribute
+  `TypeField.default`/`Param.default` already read (also confirmed a
+  non-const global's initializer can be an arbitrary runtime expression —
+  `init="f()"` — which is why `value` extraction is restricted to
+  `is_const`, mirroring `_iter_public_constants`'s own filter one method
+  below). `Variable.value` needed no reliability flag at all:
+  `diff_types_abicc_parity._diff_var_values` already declines per-pair
+  unless BOTH sides are non-`None`, so a legacy blanket-`None` side is
+  silently skipped rather than misread — the same protection that made
+  `TypeField.default`'s *value representation* safe without a whole-
+  snapshot gate. `Variable.access` has no such "unknown" state (a plain
+  enum, `PUBLIC` by construction), so it needed the identical
+  real-but-WRONG-data treatment as `is_restrict`/`is_va_list`:
+  `AbiSnapshot.castxml_var_access_facts_reliable`, and — learning directly
+  from the Codex finding immediately above — `"hybrid"` excluded from
+  `diff_symbols._diff_var_access`'s producer gate from the start, not
+  added as a second review round's correction.
 
 **Performance benchmarks + regression gate — done.** Now that the
 header-only graph is always-on rather than opt-in, its per-dump cost is paid
