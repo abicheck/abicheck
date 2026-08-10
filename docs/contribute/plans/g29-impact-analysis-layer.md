@@ -118,15 +118,23 @@ model:
     tagged. See the Phase 3 section below ("Slice 10") for the exact
     per-function site count and breakdown.
 
-  A third entry D2's original decision text named, `suppression.py`, still
+  A third entry D2's original decision text named, `suppression.py`,
   contains **no** `Change(...)` construction at all (confirmed by direct
   search, unchanged from Slice 8/9's finding) — the diagnostic construction
   near it (`SUPPRESSION_WOULD_HIDE_PUBLIC_BREAK`) actually lives in
-  `post_processing.py` and carries no reachability evidence to cache. This
-  is the one item from D2's original scope still genuinely open after
-  Slice 10 — a separate, unresolved documentation question (what
-  `suppression.py`'s named D2 role was actually meant to be), not a
-  producer to migrate.
+  `post_processing.py` and carries no reachability evidence to cache. **G29
+  Phase 3 Slice 11 resolved this**, the one item from D2's original scope
+  still open after Slice 10: `suppression.py` mutates no `Change` field
+  anywhere in the module (confirmed by grepping every assignment target),
+  so it was never a producer to migrate — the mutation D2's text was
+  naming is `checker._filter_suppressed_changes`/
+  `post_processing.ApplySuppression`, already migrated in Slice 2, and
+  already covered by Slice 10's `MarkReachability` caching (which runs
+  earlier in `DEFAULT_PIPELINE`, ADR-044 D1's ordering, so every `Change`
+  those callers see already carries a cached `impact_assessment`). D2's
+  text conflated "the suppression subsystem" (the caller sites) with "the
+  `suppression.py` module" (a pure predicate engine with nothing to
+  migrate, by design — see ADR-052 Slice 11 for the full resolution).
 - **G29.3** (Phase 2, **D1-D6 all done, ADR-046**) — Graph core v2:
   relation/occurrence identity split (**done**), an evidence-preserving
   (order-independent) node/edge merge (**done**), a per-kind/per-role
@@ -308,11 +316,21 @@ generation itself across every graph producer plus a v1/v2
 *identity-level* compatibility matrix (not just the pack-loading
 compatibility this implementation already provides) — categorically larger
 and riskier than any slice landed in this phase, still deserving its own
-scoped design pass if ever attempted. Two narrower items D5/D6 explicitly
-still leave open too (adopting `TraversalPolicy` on the layout walk's
-non-graph data model; a "consumer-proven" tier and a genuinely finer
-"reduced-confidence name resolution" axis, both needing evidence that
-doesn't exist yet) — open follow-up work under the same accepted ADR.
+scoped design pass if ever attempted. Two narrower items D5/D6 named as
+open have since resolved differently: D6's "consumer-proven" tier is
+**done** for `select_preferred_graph_path` (G29 Phase 4, ADR-057, reads the
+consumer graph straight off the structured-path selector's own `graph`
+argument) — it remains out of scope only for `select_preferred_path`'s
+plain `list[str]` layout-walk paths, for a structural reason (no per-hop
+node identity to test), not an evidence gap. D5's `TraversalPolicy`
+adoption on the layout walk and D6's genuinely finer
+"reduced-confidence name resolution" axis (tier 5, beyond the residual
+case) were both re-investigated (2026-08) and confirmed to need more than
+evidence to close: the layout walk has no `allowed_edges`/`stop_conditions`
+analogue at all (it walks every base/field/typedef target unconditionally,
+by design), and the six-tier order is fixed by this accepted ADR with no
+slot to insert a finer axis into without an amendment — see ADR-046's D5/D6
+implementation sections for the full evidence.
 See [Source Graph Schema Reference](../../reference/source-graph-schema.md)
 for the exhaustive schema this phase produced.
 
@@ -377,15 +395,21 @@ for the exhaustive schema this phase produced.
   layout walk's plain `list[str]` paths) covers 2 tiers (exact,
   virtual/indirect); `buildsource.graph_impact.select_preferred_graph_path`
   (a structured `list[GraphEdge]` path — real per-edge confidence, fact-
-  producer count, node visibility) covers 4 tiers (exact, public-header
-  structural, multi-producer-confirmed, and a reduced-confidence residual),
-  wired into `source_graph_findings.py`'s `PUBLIC_API_INTERNAL_DEPENDENCY_ADDED`
+  producer count, node visibility) covered 4 tiers at the time this was
+  written (exact, public-header structural, multi-producer-confirmed, and a
+  reduced-confidence residual); **now covers 5** — G29 Phase 4 (ADR-057)
+  wired the consumer-proven tier into the same selector once the consumer
+  graph existed to read (see G29.5 below), reading the required-node set
+  straight off its own `graph` argument, inert for every run without
+  `--used-by`. Wired into
+  `source_graph_findings.py`'s `PUBLIC_API_INTERNAL_DEPENDENCY_ADDED`
   producer in place of its own `min(..., key=len)`. The
   `primary_path`/`alternative_paths`/`discarded_path_count` finding shape is
   on `impact.model.GraphProofPath`, populated by
-  `graph_impact.attach_impact_metadata`. Still open: the consumer-proven
-  tier (needs Phase 4's consumer graph) and a genuinely finer
-  reduced-confidence-name-resolution axis beyond the residual case.
+  `graph_impact.attach_impact_metadata`. Still open: only a genuinely finer
+  reduced-confidence-name-resolution axis beyond the residual case
+  (investigated, needs an ADR amendment to insert a new tier — see
+  ADR-046's D6 implementation section).
 
 **ADR-046 accepted and implemented** — see the Phase 2 heading above for the
 current per-decision status (D1-D6 all implemented, D4 as a deliberately
@@ -496,14 +520,22 @@ sites, each resolved by a real audit rather than an assumption:
   instead of a construction-time cache write; `MarkReachability`'s own new
   caching reaches every one of these findings anyway, once tagged.
 
-A third entry the original decision text named, `suppression.py`, is still a
-separate, unresolved documentation question rather than a producer site:
-direct search found no `Change(...)` construction in this module at all; the
-nearby diagnostic (`SUPPRESSION_WOULD_HIDE_PUBLIC_BREAK`) actually lives in
-`post_processing.py` and carries no reachability evidence. What D2's
-original text meant by naming `suppression.py` needs a documentation-only
-clarification pass before any code work is scheduled against it — this is
-the one item from D2's original scope still genuinely open after Slice 10.
+A third entry the original decision text named, `suppression.py`, is
+**resolved (G29 Phase 3 Slice 11)** rather than a producer site: direct
+search found no `Change(...)` construction *or mutation* anywhere in this
+module — it only reads `Change` fields for rule matching, returning a
+`SuppressionOutcome` the caller acts on. The nearby diagnostic
+(`SUPPRESSION_WOULD_HIDE_PUBLIC_BREAK`) actually lives in
+`post_processing.py`. The mutation D2's original text was naming happens at
+the caller — `checker._filter_suppressed_changes`/
+`post_processing.ApplySuppression` — already migrated in Slice 2, and
+already covered by Slice 10's `MarkReachability` caching (which runs
+earlier in the pipeline, so every `Change` those callers see already
+carries a cached `impact_assessment`). D2's text conflated the suppression
+*subsystem* (the callers) with the `suppression.py` *module* (a pure
+predicate engine, correctly untouched) — see ADR-052 Slice 11 for the full
+resolution. This closes the last item from D2's original five-producer
+scope.
 
 Also still open: the full `RootCauseCorrelator`-based correlation across
 consumer-overlay findings with no `caused_by_type` link (Phase 6) — which is
@@ -541,9 +573,10 @@ section describes, most of it still open:
   see above). The flat fields stay as real fields (not converted to derived
   properties) rather than the originally-described full flip, since that
   conversion touches every existing `Change(...)` construction site
-  repo-wide and was judged out of scope for a verifiably-safe slice. **Still
-  open**: `suppression.py` (its D2 role needs a documentation clarification
-  pass — see above) — the one remaining item from D2's original scope.
+  repo-wide and was judged out of scope for a verifiably-safe slice.
+  `suppression.py`'s D2 role — the one remaining item from D2's original
+  scope — **is resolved (Slice 11, above)**: the module has no `Change`
+  construction/mutation site to migrate.
 - `reporter.py`/`sarif.py`: structured `impact` object in JSON (**done**,
   `impact_assessment`), `codeFlows`/`threadFlows` in SARIF (**not done** —
   SARIF's root-cause mode is additive `properties.rootCauseId`/`rootCause`

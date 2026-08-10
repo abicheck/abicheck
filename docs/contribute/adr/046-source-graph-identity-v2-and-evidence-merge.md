@@ -23,14 +23,15 @@ what's still deferred to the layout walk), and a proof-path preference order
 across two selectors split by how much per-hop structure their walk's path
 representation carries (`internal_leak.select_preferred_path` — 2 of 6
 tiers, the layout walk's plain `list[str]` paths;
-`buildsource.graph_impact.select_preferred_graph_path` — 4 of 6 tiers, a
-structured `list[GraphEdge]` path — plus the `primary_path`/
+`buildsource.graph_impact.select_preferred_graph_path` — 5 of 6 tiers as of
+G29 Phase 4/ADR-057's consumer-proven wiring (4 of 6 at this ADR's original
+acceptance), a structured `list[GraphEdge]` path — plus the `primary_path`/
 `alternative_paths`/`discarded_path_count` finding shape on
 `impact.model.GraphProofPath`; see "D6 implementation" for the exact tier
 mapping and what's still deferred). See "D1 implementation"/"D2
 implementation"/"D3 implementation"/"D4 implementation"/"D5
 implementation"/"D6 implementation" below.
-**Verified:** main@2e43d53 on 2026-08-04
+**Verified:** main@7c59880 on 2026-08-10
 **Decision maker:** (pending — recorded per repository convention, the same
 caveat ADR-048's header carries; a single-maintainer repo where merging the
 implementing PR is the acceptance mechanism.)
@@ -781,7 +782,24 @@ single change.
   `GraphEdge` graph this policy shape describes, so it would need its own
   data-model change first, which stays out of scope (matches the
   same-shaped scoping decision D3 made for `inline_graph_fold` vs.
-  `header_graph.py`/the clang-plugin producer).
+  `header_graph.py`/the clang-plugin producer). **Re-investigated (2026-08,
+  G29 Phase 2/3 tail-closing pass): the mismatch is deeper than the data
+  model alone, confirmed by reading the walk's own enqueue logic
+  (`_enqueue_record_children`/`_enqueue_typedef_targets`).** This walk has
+  no analogue for either of `TraversalPolicy`'s two defining fields:
+  `allowed_edges` filters nothing here — bases, virtual bases, fields, and
+  typedef targets are *all* unconditionally enqueued, by design (the walk's
+  own docstring: "Fields are included regardless of whether they are
+  pointers/references — identity/vtable changes propagate via those too");
+  and `stop_conditions` has no counterpart either, since this walk's whole
+  purpose is exhaustive reachability from the public surface, unlike the
+  call-graph walk's deliberate stop at a non-consumer-compiled boundary.
+  Forcing a `TraversalPolicy`-shaped object onto a walk with no filtering
+  or stopping semantics to configure would be ceremony with no behavior or
+  clarity gain — this stays out of scope on its own terms, not only
+  because of the data-model change; adopting `TraversalPolicy` here needs a
+  genuinely different walk semantics first, which no current caller asks
+  for.
 - `tests/test_internal_leak.py` (`TestTraversalPolicy`): the shared policy's
   `allowed_edges`; a custom policy's `minimum_confidence` actually excludes
   a lower-confidence edge from reachability (not merely accepted and
@@ -824,9 +842,17 @@ single change.
   "reduced-confidence" catch-all; over-approximation (crossing an
   `effect_transitions`-tagged edge, D5) is checked first and forces the
   weakest tier regardless of the other signals, since an over-approximated
-  proof is never "exact" no matter how confident its other edges look. Tier
-  1 (consumer-proven) stays out of scope for both selectors — it needs the
-  Phase 4 consumer graph. Wired into
+  proof is never "exact" no matter how confident its other edges look.
+  **Tier 1 (consumer-proven) closed later, for this selector only** (G29
+  Phase 4, [ADR-057](057-consumer-graph-and-impact-join.md)): once
+  `impact.consumer_graph.join_consumer_graph` folds a real `--used-by`
+  consumer's requirements onto the graph, `select_preferred_graph_path`
+  reads the required-node set straight off *graph* — no new parameter, and
+  inert (an empty set) for every run without `--used-by`. It remains out
+  of scope for `select_preferred_path` (the plain `list[str]` layout-walk
+  selector, unchanged above) for a structural reason, not an evidence gap:
+  that selector's path representation carries no per-hop node identity to
+  test against a required-symbol set. Wired into
   `source_graph_findings.py`'s `PUBLIC_API_INTERNAL_DEPENDENCY_ADDED`
   producer, replacing its own `min(target_paths, key=lambda tp: len(tp[1]))`
   — the same plain-shortest anti-pattern this ADR's Decision text
@@ -843,12 +869,29 @@ single change.
   Both are empty/zero for the still-common single-candidate case. See
   [Unified Impact Assessment](../../learn/impact-analysis.md) and
   [Source Graph Schema Reference](../../reference/source-graph-schema.md#primary_path-alternative_paths-discarded_path_count).
-- **Still not implemented**: the two evidence-requiring tiers neither
-  selector covers (consumer-proven, and a genuinely finer
-  "reduced-confidence name resolution" axis beyond the residual case
-  `select_preferred_graph_path` folds it into) — both need evidence
-  (a consumer graph; a producer-name-resolution confidence signal) that
-  doesn't exist yet.
+- **Still not implemented**: consumer-proven for `select_preferred_path`
+  (the layout walk's plain `list[str]` selector — structurally blocked, not
+  an evidence gap, since ADR-057 already supplies the consumer graph
+  `select_preferred_graph_path` reads; adopting it here would need the same
+  data-model change D5 already declined for this walk, see below), and a
+  genuinely finer "reduced-confidence name resolution" axis for
+  `select_preferred_graph_path` (tier 5), beyond the residual case it
+  currently folds every non-tier-1-4 path into. **Investigated (2026-08),
+  not implemented**: `type_graph.py` producers do stamp a `resolution` attr
+  distinguishing an exact/scope match from a genuinely ambiguous
+  bare-name/suffix one (`RESOLUTION_UNIQUE_CANDIDATE`/
+  `RESOLUTION_REF_UNIQUE_CANDIDATE`) — the literal signal D6's tier-5
+  wording names — but `call_graph.py`'s own `DECL_CALLS_DECL` edges (the
+  majority of paths reaching this selector) carry no equivalent signal at
+  all, and there is no tier between 4 and 5 in this ADR's fixed six-tier
+  order to insert a "confirmed ambiguous" sub-tier into without an ADR
+  amendment: every path that fails tiers 1-4 already lands in tier 5
+  today, so checking `resolution` explicitly would change no path's tier
+  assignment — only make the code's intent match the wording more
+  visibly. Not attempted as a drive-by, since a real split needs its own
+  priority decision this ADR doesn't make (e.g. is a
+  low-confidence-but-unambiguous edge stronger or weaker than a
+  high-confidence-but-name-ambiguous one? — no established answer).
 - `tests/test_internal_leak.py` (`TestSelectPreferredPath`): value-propagating
   preferred over a shorter indirect path; shortest wins within the same tier;
   a pointer/signature-only path beats a pure-indirect one; a single path
