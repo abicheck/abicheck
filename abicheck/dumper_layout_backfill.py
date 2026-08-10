@@ -30,7 +30,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field, replace
 from typing import TYPE_CHECKING
 
-from .model import RecordType
+from .model import RecordType, TypeField
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -172,6 +172,181 @@ def _coherence_status(
     if unavailable_types or ambiguous:
         return "partial"
     return "matched"
+
+
+def _unique_dwarf_match(
+    dwarf_candidates: dict[str, list[RecordType]], name: str
+) -> RecordType | None:
+    """The single DWARF candidate for *name*, or ``None`` when ambiguous/absent."""
+    candidates = dwarf_candidates.get(name, [])
+    return candidates[0] if len(candidates) == 1 else None
+
+def _fields_corroborate(header: RecordType, dwarf: RecordType) -> bool:
+    if header.fields and dwarf.fields:
+        return bool(
+            {f.name for f in header.fields} & {f.name for f in dwarf.fields}
+        )
+    if not header.fields and dwarf.fields:
+        # An empty header type (tag type) can't corroborate against a
+        # DWARF candidate that DOES have fields — that's exactly the
+        # unrelated-internal-type risk this check exists to catch, not
+        # the anonymous-aggregate asymmetry handled below.
+        return False
+    # dwarf.fields is empty here — either both sides are genuinely
+    # fieldless, or the header side has real fields that DWARF's
+    # anonymous-aggregate asymmetry flattened away. Field names alone
+    # can't tell those apart from a coincidentally-fieldless unrelated
+    # type in either case, so fall back to base-class-name overlap as a
+    # second corroborating signal before trusting the match. Virtual
+    # bases are stored separately from ordinary bases on both the clang
+    # header parser and the DWARF builder (RecordType.virtual_bases,
+    # not .bases) — a virtual-inheritance-only class would otherwise
+    # leave both .bases sets empty and fall through unchallenged. Base
+    # names also need the same scope-suffix normalization record names
+    # get: the clang header parser stores each base's full `qualType`
+    # (e.g. "api::Base"), while the DWARF builder's base resolution
+    # only ever reads DW_AT_name (always bare, e.g. "Base", never
+    # scope-qualified) — comparing the raw strings would reject a
+    # namespaced base's own correct match (Codex review).
+    header_bases = {
+        _topmost_scope_suffix(b) for b in header.bases + header.virtual_bases
+    }
+    dwarf_bases = {
+        _topmost_scope_suffix(b) for b in dwarf.bases + dwarf.virtual_bases
+    }
+    if header_bases or dwarf_bases:
+        return bool(header_bases & dwarf_bases)
+    if header.name == dwarf.name:
+        # Exact match still needs the header's own fields to be real
+        # corroborating evidence, not just the match key itself (Codex
+        # review, fresh evidence): the clang header parser never
+        # namespace-qualifies RecordType.name at all (see above), so an
+        # exact match only shows this DWARF candidate has no scope of
+        # its own — not that it is the header's (possibly actually-
+        # namespaced) type. A *populated* header record (real,
+        # non-anonymous-aggregate fields) with an empty DWARF candidate
+        # reached only by that coincidence is exactly the unrelated-
+        # type risk the field-overlap check above exists to catch. A
+        # trivial fieldless match still needs ``not dwarf.vtable`` too
+        # (Codex review, fresh evidence): a genuinely empty header
+        # record can exact-match a unique, unrelated, fieldless-but-
+        # *polymorphic* DWARF candidate just as easily as the
+        # anonymous-aggregate case below can — "nothing to disagree
+        # with" isn't true once the DWARF side has a vtable the header
+        # side structurally can't (the clang header parser never
+        # populates ``RecordType.vtable`` itself).
+        return not dwarf.vtable and (
+            not header.fields or header.has_anonymous_aggregate_fields
+        )
+    # Suffix-only match with no field/base overlap left to corroborate.
+    # Trusting this on "header merely has some fields" would reopen the
+    # exact risk just closed above: an ordinary struct with real fields,
+    # whose actual DWARF counterpart is simply absent, matched instead
+    # to an unrelated, coincidentally-fieldless internal type via bare
+    # suffix (CodeRabbit review). Only trust it when the header's
+    # fields are *known* to come from an anonymous-aggregate flatten —
+    # a structural signal the clang parser sets itself, not a guess —
+    # since DWARF's own builder doesn't flatten the same way and a
+    # *namespaced* anonymous-aggregate record (clang emits the bare
+    # "Foo", DWARF emits "api::Foo") would otherwise be permanently
+    # layout-blind, defeating the point of that exception for exactly
+    # the common namespaced case it exists for (Codex review).
+    #
+    # That flag alone still doesn't vouch for *this particular* unique
+    # candidate, though (Codex review, fresh evidence): an unrelated
+    # ``impl::Foo`` that is fieldless and baseless but *polymorphic*
+    # (virtual methods only, no data) would pass every check so far and
+    # hand over its real vtable/size onto the public anonymous-aggregate
+    # type. Unlike the header side, DWARF's own builder does populate
+    # ``vtable`` for a genuinely polymorphic type, so requiring it to be
+    # empty here closes that specific over-trust: the only match this
+    # still can't rule out is a *fully* trivial unrelated type (no
+    # fields, no bases, no vtable), whose own layout is necessarily
+    # near-fixed and small regardless of identity — the same bounded,
+    # low-consequence residual risk already accepted for the plain
+    # fieldless-tag-type case above.
+    #
+    # A namespaced class with *only* virtual methods (no fields, no
+    # bases, no anonymous-aggregate flatten) is a deliberately accepted
+    # gap in this same vein, not an oversight (Codex review): it too is
+    # fieldless/baseless with a real, non-empty ``dwarf.vtable``, so by
+    # the reasoning just above it would need a structural signal on the
+    # *header* side analogous to ``has_anonymous_aggregate_fields`` —
+    # but "the class declares a virtual method" only demonstrates that
+    # *some* class does, not that this unique suffix-matched candidate
+    # is that same one; unlike anonymous-aggregate flattening (a fact
+    # about field provenance) or field/base-name overlap (specific
+    # identifiers), "has a vtable" is a coarse category shared by
+    # every polymorphic class in the binary. Trusting it here would
+    # reintroduce exactly the over-trust the ``not dwarf.vtable``
+    # guard above exists to prevent, just from the opposite class
+    # shape. Closing this safely would need to cross-reference actual
+    # member-function names/mangled symbols between the header and
+    # DWARF views — data this function doesn't have (only
+    # ``RecordType``s, not the snapshot's ``functions`` list) — so it's
+    # left unbackfilled (stays ``None``) rather than guessed.
+    return header.has_anonymous_aggregate_fields and not dwarf.vtable
+
+
+def _merged_fields(header: RecordType, dwarf: RecordType) -> list[TypeField]:
+    """*header*'s fields with offset/bitfield data filled in from *dwarf*.
+
+    A field that already carries an ``offset_bits``, or has no DWARF
+    counterpart by name, is kept exactly as the header parser produced it.
+    """
+    dwarf_fields_by_name = {f.name: f for f in dwarf.fields}
+    merged: list[TypeField] = []
+    for f in header.fields:
+        df = dwarf_fields_by_name.get(f.name)
+        if f.offset_bits is not None or df is None:
+            merged.append(f)
+            continue
+        merged.append(
+            replace(
+                f,
+                offset_bits=df.offset_bits,
+                is_bitfield=df.is_bitfield,
+                bitfield_bits=df.bitfield_bits,
+            )
+        )
+    return merged
+
+
+def _backfilled_record(header: RecordType, dwarf: RecordType) -> RecordType:
+    """*header* with every layout attribute it lacks taken from *dwarf*.
+
+    Purely additive: an attribute the header backend already computed always
+    wins, so this is a no-op for a layout-aware backend (castxml) and a fill-in
+    for a layout-blind one (clang).
+    """
+    return replace(
+        header,
+        size_bits=dwarf.size_bits,
+        alignment_bits=dwarf.alignment_bits,
+        fields=_merged_fields(header, dwarf),
+        vtable=header.vtable or dwarf.vtable,
+        vptr_offset_bits=(
+            header.vptr_offset_bits
+            if header.vptr_offset_bits is not None
+            else dwarf.vptr_offset_bits
+        ),
+        base_offsets=header.base_offsets or dwarf.base_offsets,
+        data_size_bits=(
+            header.data_size_bits
+            if header.data_size_bits is not None
+            else dwarf.data_size_bits
+        ),
+        is_standard_layout=(
+            header.is_standard_layout
+            if header.is_standard_layout is not None
+            else dwarf.is_standard_layout
+        ),
+        is_trivially_copyable=(
+            header.is_trivially_copyable
+            if header.is_trivially_copyable is not None
+            else dwarf.is_trivially_copyable
+        ),
+    )
 
 
 def backfill_dwarf_layout(
@@ -391,116 +566,6 @@ def backfill_dwarf_layout(
         for key in {t.name, _topmost_scope_suffix(t.name)}:  # pylint: disable=use-sequence-for-iteration
             dwarf_candidates.setdefault(key, []).append(t)
 
-    def _dwarf_match(name: str) -> RecordType | None:
-        candidates = dwarf_candidates.get(name, [])
-        return candidates[0] if len(candidates) == 1 else None
-
-    def _fields_corroborate(header: RecordType, dwarf: RecordType) -> bool:
-        if header.fields and dwarf.fields:
-            return bool(
-                {f.name for f in header.fields} & {f.name for f in dwarf.fields}
-            )
-        if not header.fields and dwarf.fields:
-            # An empty header type (tag type) can't corroborate against a
-            # DWARF candidate that DOES have fields — that's exactly the
-            # unrelated-internal-type risk this check exists to catch, not
-            # the anonymous-aggregate asymmetry handled below.
-            return False
-        # dwarf.fields is empty here — either both sides are genuinely
-        # fieldless, or the header side has real fields that DWARF's
-        # anonymous-aggregate asymmetry flattened away. Field names alone
-        # can't tell those apart from a coincidentally-fieldless unrelated
-        # type in either case, so fall back to base-class-name overlap as a
-        # second corroborating signal before trusting the match. Virtual
-        # bases are stored separately from ordinary bases on both the clang
-        # header parser and the DWARF builder (RecordType.virtual_bases,
-        # not .bases) — a virtual-inheritance-only class would otherwise
-        # leave both .bases sets empty and fall through unchallenged. Base
-        # names also need the same scope-suffix normalization record names
-        # get: the clang header parser stores each base's full `qualType`
-        # (e.g. "api::Base"), while the DWARF builder's base resolution
-        # only ever reads DW_AT_name (always bare, e.g. "Base", never
-        # scope-qualified) — comparing the raw strings would reject a
-        # namespaced base's own correct match (Codex review).
-        header_bases = {
-            _topmost_scope_suffix(b) for b in header.bases + header.virtual_bases
-        }
-        dwarf_bases = {
-            _topmost_scope_suffix(b) for b in dwarf.bases + dwarf.virtual_bases
-        }
-        if header_bases or dwarf_bases:
-            return bool(header_bases & dwarf_bases)
-        if header.name == dwarf.name:
-            # Exact match still needs the header's own fields to be real
-            # corroborating evidence, not just the match key itself (Codex
-            # review, fresh evidence): the clang header parser never
-            # namespace-qualifies RecordType.name at all (see above), so an
-            # exact match only shows this DWARF candidate has no scope of
-            # its own — not that it is the header's (possibly actually-
-            # namespaced) type. A *populated* header record (real,
-            # non-anonymous-aggregate fields) with an empty DWARF candidate
-            # reached only by that coincidence is exactly the unrelated-
-            # type risk the field-overlap check above exists to catch. A
-            # trivial fieldless match still needs ``not dwarf.vtable`` too
-            # (Codex review, fresh evidence): a genuinely empty header
-            # record can exact-match a unique, unrelated, fieldless-but-
-            # *polymorphic* DWARF candidate just as easily as the
-            # anonymous-aggregate case below can — "nothing to disagree
-            # with" isn't true once the DWARF side has a vtable the header
-            # side structurally can't (the clang header parser never
-            # populates ``RecordType.vtable`` itself).
-            return not dwarf.vtable and (
-                not header.fields or header.has_anonymous_aggregate_fields
-            )
-        # Suffix-only match with no field/base overlap left to corroborate.
-        # Trusting this on "header merely has some fields" would reopen the
-        # exact risk just closed above: an ordinary struct with real fields,
-        # whose actual DWARF counterpart is simply absent, matched instead
-        # to an unrelated, coincidentally-fieldless internal type via bare
-        # suffix (CodeRabbit review). Only trust it when the header's
-        # fields are *known* to come from an anonymous-aggregate flatten —
-        # a structural signal the clang parser sets itself, not a guess —
-        # since DWARF's own builder doesn't flatten the same way and a
-        # *namespaced* anonymous-aggregate record (clang emits the bare
-        # "Foo", DWARF emits "api::Foo") would otherwise be permanently
-        # layout-blind, defeating the point of that exception for exactly
-        # the common namespaced case it exists for (Codex review).
-        #
-        # That flag alone still doesn't vouch for *this particular* unique
-        # candidate, though (Codex review, fresh evidence): an unrelated
-        # ``impl::Foo`` that is fieldless and baseless but *polymorphic*
-        # (virtual methods only, no data) would pass every check so far and
-        # hand over its real vtable/size onto the public anonymous-aggregate
-        # type. Unlike the header side, DWARF's own builder does populate
-        # ``vtable`` for a genuinely polymorphic type, so requiring it to be
-        # empty here closes that specific over-trust: the only match this
-        # still can't rule out is a *fully* trivial unrelated type (no
-        # fields, no bases, no vtable), whose own layout is necessarily
-        # near-fixed and small regardless of identity — the same bounded,
-        # low-consequence residual risk already accepted for the plain
-        # fieldless-tag-type case above.
-        #
-        # A namespaced class with *only* virtual methods (no fields, no
-        # bases, no anonymous-aggregate flatten) is a deliberately accepted
-        # gap in this same vein, not an oversight (Codex review): it too is
-        # fieldless/baseless with a real, non-empty ``dwarf.vtable``, so by
-        # the reasoning just above it would need a structural signal on the
-        # *header* side analogous to ``has_anonymous_aggregate_fields`` —
-        # but "the class declares a virtual method" only demonstrates that
-        # *some* class does, not that this unique suffix-matched candidate
-        # is that same one; unlike anonymous-aggregate flattening (a fact
-        # about field provenance) or field/base-name overlap (specific
-        # identifiers), "has a vtable" is a coarse category shared by
-        # every polymorphic class in the binary. Trusting it here would
-        # reintroduce exactly the over-trust the ``not dwarf.vtable``
-        # guard above exists to prevent, just from the opposite class
-        # shape. Closing this safely would need to cross-reference actual
-        # member-function names/mangled symbols between the header and
-        # DWARF views — data this function doesn't have (only
-        # ``RecordType``s, not the snapshot's ``functions`` list) — so it's
-        # left unbackfilled (stays ``None``) rather than guessed.
-        return header.has_anonymous_aggregate_fields and not dwarf.vtable
-
     header_name_counts: dict[str, int] = {}
     for t in header_types:
         header_name_counts[t.name] = header_name_counts.get(t.name, 0) + 1
@@ -533,7 +598,7 @@ def backfill_dwarf_layout(
             out.append(t)
             ambiguous.append(t.name)
             continue
-        dwarf_t = _dwarf_match(t.name)
+        dwarf_t = _unique_dwarf_match(dwarf_candidates, t.name)
         if dwarf_t is None:
             out.append(t)
             unavailable_types.append(t.name)
@@ -543,49 +608,7 @@ def backfill_dwarf_layout(
             mismatched.append(t.name)
             continue
         matched.append(t.name)
-        dwarf_fields_by_name = {f.name: f for f in dwarf_t.fields}
-        new_fields = []
-        for f in t.fields:
-            df = dwarf_fields_by_name.get(f.name)
-            if f.offset_bits is not None or df is None:
-                new_fields.append(f)
-                continue
-            new_fields.append(
-                replace(
-                    f,
-                    offset_bits=df.offset_bits,
-                    is_bitfield=df.is_bitfield,
-                    bitfield_bits=df.bitfield_bits,
-                )
-            )
-        out.append(
-            replace(
-                t,
-                size_bits=dwarf_t.size_bits,
-                alignment_bits=dwarf_t.alignment_bits,
-                fields=new_fields,
-                vtable=t.vtable or dwarf_t.vtable,
-                vptr_offset_bits=(
-                    t.vptr_offset_bits
-                    if t.vptr_offset_bits is not None
-                    else dwarf_t.vptr_offset_bits
-                ),
-                base_offsets=t.base_offsets or dwarf_t.base_offsets,
-                data_size_bits=t.data_size_bits
-                if t.data_size_bits is not None
-                else dwarf_t.data_size_bits,
-                is_standard_layout=(
-                    t.is_standard_layout
-                    if t.is_standard_layout is not None
-                    else dwarf_t.is_standard_layout
-                ),
-                is_trivially_copyable=(
-                    t.is_trivially_copyable
-                    if t.is_trivially_copyable is not None
-                    else dwarf_t.is_trivially_copyable
-                ),
-            )
-        )
+        out.append(_backfilled_record(t, dwarf_t))
     coherence = DwarfLayoutCoherence(
         status=_coherence_status(
             mismatched=mismatched,

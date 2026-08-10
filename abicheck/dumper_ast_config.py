@@ -1,7 +1,17 @@
 # Copyright 2026 Nikolay Petrov
 # SPDX-License-Identifier: Apache-2.0
 
-"""AST cache-key, language detection, and CastXML command helpers."""
+"""AST cache-key, language detection, and CastXML/Clang command helpers.
+
+``_build_castxml_command`` and ``_build_clang_header_command`` are deliberate
+neighbours: the two backends must parse the same TU under the same context, so
+their flag handling (includes, sysroot, ``-nostdinc``, pass-through options,
+C-vs-C++ mode, the C++20 bump) is meant to be read side by side. The clang
+builder previously lived in ``dumper.py``, which sits at the AI-readiness
+2000-line hard cap; it is pure argv construction with no dependency on the
+dumper pipeline, so it lives here and ``dumper`` re-exports it (several callers
+and tests import ``abicheck.dumper._build_clang_header_command``).
+"""
 
 from __future__ import annotations
 
@@ -13,6 +23,7 @@ from collections.abc import Sequence
 from pathlib import Path
 
 from ._compiler_options import has_explicit_std
+from .dumper_clang import _needs_sycl_host_only
 from .header_utils import iter_cache_header_files
 
 
@@ -267,4 +278,86 @@ def _build_castxml_command(
             cmd += ["-x", "c++", "-std=gnu++20"]
 
     cmd += ["-o", str(out_xml), str(agg_path)]
+    return cmd
+
+
+def _build_clang_header_command(
+    cc_bin: str,
+    cc_id: str,
+    extra_includes: list[Path],
+    agg_path: Path,
+    *,
+    sysroot: Path | None = None,
+    nostdinc: bool = False,
+    gcc_options: str | None = None,
+    gcc_option_tokens: tuple[str, ...] = (),
+    force_cpp: bool = False,
+    force_cpp20: bool = False,
+    system_includes: tuple[str, ...] = (),
+    dpcpp_multi_context: bool = False,
+) -> list[str]:
+    """Build the ``clang -ast-dump=json`` command for the aggregate header.
+
+    Mirrors :func:`_build_castxml_command`'s flag handling (includes, sysroot,
+    ``-nostdinc``, pass-through options, C-vs-C++ language mode and the C++20
+    bump) so the clang backend parses the same TU under the same context.
+    ``-fsyntax-only``/``-ferror-limit=0`` keeps parsing past recoverable
+    errors so a single bad decl does not blank the whole dump.
+
+    ``system_includes`` are host-compiler-probed system dirs (see
+    :func:`_probe_gnu_system_includes`) injected as ``-isystem`` so clang
+    finds the same libstdc++/libc headers castxml gets via
+    ``--castxml-cc-gnu``. Emitted **last** (after the user's ``-I`` and
+    pass-through ``--gcc-options``/``--gcc-option``) so a user-supplied
+    ``-isystem`` for a cross/hermetic SDK wins. Skipped under ``-nostdinc``.
+
+    On an Intel oneAPI driver, ``-fsycl-host-only`` is appended per
+    :func:`_needs_sycl_host_only` (PR #643) -- skipped when
+    ``dpcpp_multi_context`` is set, since that request wants both passes.
+
+    ``dpcpp_multi_context`` (ADR-050 D5, G32 Phase D) adds ``-fsycl -v``
+    when *cc_bin* is DPC++-capable (:func:`_is_dpcpp_family_binary`) --
+    ``-fsycl`` splits the driver into a host + one-or-more-device
+    compilation passes, and ``-v`` emits the ``-cc1 ... -triple <T> ...
+    -fsycl-is-(host|device)`` stderr lines :mod:`abicheck.sycl_context`
+    needs to correlate each stdout document back to a host/device ``kind``.
+    """
+    cmd = [cc_bin]
+    for inc in extra_includes:
+        cmd += ["-I", str(inc)]
+    if sysroot:
+        cmd += [f"--sysroot={sysroot.as_posix()}"]
+    if nostdinc:
+        cmd += ["-nostdinc"]
+    if gcc_options:
+        cmd += shlex.split(gcc_options, posix=os.name != "nt")
+    # Repeatable --gcc-option: one literal argument each (no shlex split).
+    cmd += list(gcc_option_tokens)
+    if not dpcpp_multi_context and _needs_sycl_host_only(cc_bin, cmd):
+        cmd.append("-fsycl-host-only")
+    # Auto-probed host system dirs go *after* the user's pass-through flags, so a
+    # user-supplied -isystem (cross/hermetic SDK) keeps higher priority (Codex review).
+    for sysinc in system_includes:
+        cmd += ["-isystem", sysinc]
+    explicit_std = has_explicit_std(gcc_options, gcc_option_tokens)
+    if not force_cpp:
+        if not explicit_std:
+            cmd += ["-x", "c", "-std=gnu11"]
+    elif not explicit_std:
+        # Select the C++ language explicitly (``-x c++``) rather than relying on
+        # the aggregate file's extension: the C→C++ retry reuses a ``.h`` aggregate
+        # that clang would otherwise parse as C. Only bump the standard to gnu++20
+        # when C++20 syntax was detected; otherwise leave clang's default dialect.
+        cmd += ["-x", "c++"]
+        if force_cpp20:
+            cmd += ["-std=gnu++20"]
+    if dpcpp_multi_context:
+        cmd += ["-fsycl", "-v"]
+    cmd += [
+        "-fsyntax-only",
+        "-ferror-limit=0",
+        "-Xclang",
+        "-ast-dump=json",
+        str(agg_path),
+    ]
     return cmd
