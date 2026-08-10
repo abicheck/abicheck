@@ -247,20 +247,57 @@ def _function_identity(node: dict[str, Any], scope: list[str]) -> str:
     )
 
 
-def _find_referenced_decl(node: dict[str, Any]) -> dict[str, Any] | None:
-    """Depth-first search for the first ``referencedDecl`` under *node*.
+def _find_referenced_decl(
+    node: dict[str, Any], member_index: Mapping[str, dict[str, Any]]
+) -> dict[str, Any] | None:
+    """Depth-first search for the first ``referencedDecl``/``referencedMemberDecl``
+    under *node*.
 
     clang stores the callee target on a ``DeclRefExpr`` (``referencedDecl``) or,
     for member calls, on a ``MemberExpr`` (``referencedMemberDecl``). The call
     expression's callee subtree is the first inner child, so a DFS finds it
     without needing to model every wrapping cast/paren node.
+
+    ``referencedMemberDecl`` is **not** a nested compact-declaration dict the
+    way ``referencedDecl`` is — real clang emits it as a bare node-id string
+    (Codex review, fresh evidence, verified against real Clang 17/18 output
+    for ``p->f()``: ``MemberExpr`` carries ``"referencedMemberDecl":
+    "0x...")``, never a dict). An earlier version of this function only
+    checked ``isinstance(ref, dict)``, so a string ``referencedMemberDecl``
+    was silently ignored and the DFS fell through into the ``MemberExpr``'s
+    own children — finding the *receiver* expression's ``DeclRefExpr``
+    instead (e.g. the parameter ``p``) and misclassifying every virtual/
+    member method call as a ``CALL_KIND_FUNCTION_POINTER`` call through the
+    receiver, making ``VIRTUAL_CALL_MAY_DISPATCH_TO``
+    (``virtual_dispatch_graph.py``) effectively inert for this — the most
+    common — call shape. *member_index* (``id -> full decl node``, built
+    from every ``_FUNCTION_DECL_KINDS`` node seen so far during the same
+    walk, mirroring *id_index*'s identical id-keyed pattern) resolves the
+    string back to the real ``CXXMethodDecl``/... node, carrying its own
+    ``virtual``/``type.qualType``/``id`` fields ``_classify_call``/
+    ``_resolve_ref_callee_identity`` need. A member id not (yet) indexed —
+    a forward reference, or a genuinely non-function member (a plain data
+    field, e.g. a struct's own function-pointer-typed field invoked via
+    ``w->cb(x)`` — ``FieldDecl`` is never in ``_FUNCTION_DECL_KINDS``, so
+    never indexed here at all) resolves to ``None`` rather than falling
+    through to the receiver: an unresolved call is a real, honest gap (no
+    edge at all), never a *wrong* one (ADR-028 D3's "degrade to no fact,
+    never a wrong fact" authority rule) — extending this resolution to
+    data-member callback slots too is real, separately-scoped follow-up
+    work (see ``callback_graph.py``'s own docstring, which already
+    documents this exact gap from the consuming side).
     """
-    ref = node.get("referencedDecl") or node.get("referencedMemberDecl")
+    ref = node.get("referencedDecl")
     if isinstance(ref, dict):
         return ref
+    member_ref = node.get("referencedMemberDecl")
+    if isinstance(member_ref, dict):
+        return member_ref
+    if isinstance(member_ref, str):
+        return member_index.get(member_ref)
     for child in node.get("inner", []) or []:
         if isinstance(child, dict):
-            found = _find_referenced_decl(child)
+            found = _find_referenced_decl(child, member_index)
             if found is not None:
                 return found
     return None
@@ -351,6 +388,7 @@ def _enter_function_scope(
     scope: list[str],
     decl_files: dict[str, str],
     id_index: dict[str, str],
+    member_index: dict[str, dict[str, Any]],
 ) -> tuple[str, str]:
     """Return the ``(caller, caller_file)`` scope after a function-decl node, recording its definition file."""
     ident = _function_identity(node, scope) or caller
@@ -381,6 +419,14 @@ def _enter_function_scope(
     real_ident = _function_identity(node, scope)
     if node_id and real_ident:
         id_index.setdefault(node_id, real_ident)
+    # Index the full node too (not just its identity string), keyed the same
+    # way, so a MemberExpr's bare-string `referencedMemberDecl` id can
+    # resolve back to the real CXXMethodDecl node itself -- carrying its own
+    # `virtual`/`type.qualType` fields `_classify_call` needs, which the
+    # id_index's flat identity string alone can't provide (Codex review,
+    # fresh evidence -- see `_find_referenced_decl`'s own docstring).
+    if node_id:
+        member_index.setdefault(node_id, node)
     return caller, caller_file
 
 
@@ -390,9 +436,10 @@ def _append_call_edge(
     caller_file: str,
     edges: list[CallEdge],
     id_index: dict[str, str],
+    member_index: dict[str, dict[str, Any]],
 ) -> None:
     """Resolve one call expression's callee and append the edge (unresolved/self calls dropped)."""
-    ref = _find_referenced_decl(node)
+    ref = _find_referenced_decl(node, member_index)
     callee, call_kind, resolution = _classify_call(node, ref, id_index)
     if callee and callee != caller:
         edges.append(CallEdge(caller, callee, call_kind, resolution, caller_file))
@@ -407,6 +454,7 @@ def _walk_calls(
     edges: list[CallEdge],
     decl_files: dict[str, str],
     id_index: dict[str, str],
+    member_index: dict[str, dict[str, Any]],
 ) -> str:
     """Recursive AST walk tracking the nearest enclosing function as the *caller*
     and the qualified-name scope (ADR-041 P1 #5), mirroring
@@ -428,10 +476,17 @@ def _walk_calls(
     name = str(node.get("name") or "")
     if kind in _FUNCTION_DECL_KINDS:
         caller, caller_file = _enter_function_scope(
-            node, caller, caller_file, cur_file, scope, decl_files, id_index
+            node,
+            caller,
+            caller_file,
+            cur_file,
+            scope,
+            decl_files,
+            id_index,
+            member_index,
         )
     if kind in _CALL_EXPR_KINDS and caller:
-        _append_call_edge(node, caller, caller_file, edges, id_index)
+        _append_call_edge(node, caller, caller_file, edges, id_index, member_index)
     child_scope = [*scope, name] if kind in _SCOPE_DECL_KINDS and name else scope
     for child in node.get("inner", []) or []:
         cur_file = _walk_calls(
@@ -443,6 +498,7 @@ def _walk_calls(
             edges,
             decl_files,
             id_index,
+            member_index,
         )
     return cur_file
 
@@ -494,7 +550,13 @@ def parse_clang_ast_calls(ast: dict[str, Any]) -> list[CallEdge]:
     # referencedDecl stub can resolve its real (mangled, overload-distinct)
     # identity instead of the stub's own name-only fallback (PR1b).
     id_index: dict[str, str] = {}
-    _walk_calls(ast, "", "", "", [], edges, decl_files, id_index)
+    # clang AST node id -> the full FunctionDecl/CXXMethodDecl/... node
+    # itself (Codex review, fresh evidence), so a MemberExpr's bare-string
+    # `referencedMemberDecl` id can resolve back to a real node carrying its
+    # own `virtual`/`type.qualType` fields -- see `_find_referenced_decl`'s
+    # own docstring for the full empirical finding this closes.
+    member_index: dict[str, dict[str, Any]] = {}
+    _walk_calls(ast, "", "", "", [], edges, decl_files, id_index, member_index)
     return _dedupe_edges(_fill_callee_files(edges, decl_files))
 
 

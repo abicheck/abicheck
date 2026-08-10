@@ -22,6 +22,7 @@ integration-only (guarded by ``shutil.which("clang++")``, mirroring
 
 from __future__ import annotations
 
+import os
 import shutil
 
 import pytest
@@ -784,60 +785,73 @@ def test_augment_result_complete_when_clean() -> None:
 
 
 def test_extract_from_compile_unit_resolves_relative_file_against_own_cwd(
-    monkeypatch,
+    monkeypatch, tmp_path
 ) -> None:
     """Codex review, PR #708: clang echoes a relative source path (an
     out-of-source build's ``directory`` + relative ``source``) back into the
     AST dump's ``file`` fields exactly as given on the command line -- it
     never resolves that against the compile unit's own ``directory`` itself.
     ``_extract_from_compile_unit`` must resolve a relative ``DeclRange.file``
-    against the compile unit's *own* replayed cwd, not the process cwd."""
+    against the compile unit's *own* replayed cwd, not the process cwd.
+
+    Uses a real, OS-native ``tmp_path`` (rather than a hand-rolled POSIX-style
+    literal) so the expected joined path is computed the same way on every
+    platform -- a hardcoded ``"/build/src/a.h"``-shaped literal fails on
+    Windows, where ``os.path.join``/``normpath`` (which the implementation
+    itself correctly uses, since a real join must produce a path the host OS
+    can actually open) produce backslash separators instead."""
     import abicheck.buildsource.call_graph as call_graph_mod
     from abicheck.buildsource.build_evidence import CompileUnit
 
+    out_dir = tmp_path / "build" / "out"
     extractor = ClangMacroGraphExtractor(clang_bin="clang++")
     monkeypatch.setattr(
         call_graph_mod,
         "_safe_clang_args_from_compile_unit",
         lambda cu: ["--", cu.source],
     )
-    monkeypatch.setattr(call_graph_mod, "_replay_cwd", lambda cu: "/build/out")
+    monkeypatch.setattr(call_graph_mod, "_replay_cwd", lambda cu: str(out_dir))
     monkeypatch.setattr(
         extractor,
         "_extract_from_safe_args",
-        lambda argv, cwd=None: [DeclRange("f", "../src/a.h", 3, 3)],
+        lambda argv, cwd=None: [DeclRange("f", os.path.join("..", "src", "a.h"), 3, 3)],
     )
     cu = CompileUnit(
         id="cu://a",
-        source="../src/a.cpp",
-        input_files=["../src/a.cpp"],
-        directory="/build/out",
+        source=os.path.join("..", "src", "a.cpp"),
+        input_files=[os.path.join("..", "src", "a.cpp")],
+        directory=str(out_dir),
     )
     ranges = extractor._extract_from_compile_unit(cu)
-    assert ranges == [DeclRange("f", "/build/src/a.h", 3, 3)]
+    expected_file = os.path.normpath(str(tmp_path / "build" / "src" / "a.h"))
+    assert ranges == [DeclRange("f", expected_file, 3, 3)]
 
 
-def test_extract_from_compile_unit_leaves_absolute_file_untouched(monkeypatch) -> None:
+def test_extract_from_compile_unit_leaves_absolute_file_untouched(
+    monkeypatch, tmp_path
+) -> None:
     import abicheck.buildsource.call_graph as call_graph_mod
     from abicheck.buildsource.build_evidence import CompileUnit
 
+    out_dir = tmp_path / "build" / "out"
+    abs_file = str(tmp_path / "abs" / "a.h")
     extractor = ClangMacroGraphExtractor(clang_bin="clang++")
     monkeypatch.setattr(
         call_graph_mod,
         "_safe_clang_args_from_compile_unit",
         lambda cu: ["--", cu.source],
     )
-    monkeypatch.setattr(call_graph_mod, "_replay_cwd", lambda cu: "/build/out")
+    monkeypatch.setattr(call_graph_mod, "_replay_cwd", lambda cu: str(out_dir))
     monkeypatch.setattr(
         extractor,
         "_extract_from_safe_args",
-        lambda argv, cwd=None: [DeclRange("f", "/abs/a.h", 3, 3)],
+        lambda argv, cwd=None: [DeclRange("f", abs_file, 3, 3)],
     )
     cu = CompileUnit(
-        id="cu://a", source="a.cpp", input_files=["a.cpp"], directory="/build/out"
+        id="cu://a", source="a.cpp", input_files=["a.cpp"], directory=str(out_dir)
     )
     ranges = extractor._extract_from_compile_unit(cu)
-    assert ranges == [DeclRange("f", "/abs/a.h", 3, 3)]
+    assert ranges == [DeclRange("f", abs_file, 3, 3)]
 
 
 def test_extract_from_build_keeps_distinct_spans_for_same_identity(monkeypatch) -> None:

@@ -770,6 +770,29 @@ which all depend on a Clang AST pass.
      an `is_virtual: True` fact onto each identity's *already-existing*
      `source_decl` node (never minting one, same join-only discipline) —
      which `augment_graph_with_vtable_presence`'s seed loop now also reads.
+   - A third Codex-review round found a deeper root cause than either fix
+     above touched: `VIRTUAL_CALL_MAY_DISPATCH_TO` was effectively **inert**
+     for the single most common call shape, `p->f()`, because the upstream
+     `call_graph.py` (ADR-031 D4, predates this item) never even classified
+     it as `call_kind="virtual"` in the first place. Verified against real
+     Clang 17/18 output: `MemberExpr.referencedMemberDecl` is a bare node-id
+     *string*, not the nested dict `call_graph._find_referenced_decl` only
+     recognized — so the DFS fell through to the *receiver*'s own
+     `DeclRefExpr` (`p`, a `ParmVarDecl`) and misclassified the whole call as
+     `CALL_KIND_FUNCTION_POINTER` through `p`. Fixed in `call_graph.py`
+     itself (foundational, shared by every consumer of `DECL_CALLS_DECL`,
+     not scoped to this item): a new `member_index` (clang node id -> full
+     decl node, built the same way the existing `id_index` already is)
+     resolves a string `referencedMemberDecl` back to the real
+     `CXXMethodDecl`, carrying its own `virtual`/`type.qualType` fields.
+     An id not found in `member_index` (a forward reference, or — see
+     G29 Phase 5 item 4's own callback-graph section — a `FieldDecl`, never
+     indexed at all since only `_FUNCTION_DECL_KINDS` populate it) resolves
+     to no edge at all rather than falling through to the receiver: ADR-028
+     D3's "degrade to no fact, never a wrong one" rule, applied to a call
+     classification for the first time. `p->f()` now correctly classifies
+     as `call_kind="virtual"`, which is what makes `VIRTUAL_CALL_MAY_DISPATCH_TO`
+     actually reachable in the common case this feature exists for.
    - **`DECL_OVERRIDES_DECL` needed no new producer at all — a closed gap,
      not a deferred one.** `override_graph.py` (ADR-041 P2 item 1, which
      predates this item) already emits `METHOD_POSSIBLE_OVERRIDE` edges whose
@@ -840,14 +863,27 @@ which all depend on a Clang AST pass.
      identity the same (weak) way, rather than a stronger one that would
      simply never match anything `call_graph.py` produces — mirroring an
      existing, already-shipped limitation of the graph it joins onto.
-   - **A load-bearing negative empirical finding, not a defect introduced
-     here:** a struct-field-typed callback slot invoked through member-call
-     syntax (`w->cb(x)`) never actually joins in Part A today, because
-     `call_graph._find_referenced_decl` cannot recognize a `MemberExpr`'s
-     own `referencedMemberDecl` (a bare node-id *string* in real clang
-     output, not a nested dict) and falls through to the base object's own
-     reference instead — a documented, inherited limitation of the upstream
-     pass this module builds on.
+   - **A load-bearing negative empirical finding, partially closed by a
+     later same-PR fix, not fully.** Originally found that a struct-field-
+     typed callback slot invoked through member-call syntax (`w->cb(x)`)
+     never joined in Part A, because `call_graph._find_referenced_decl`
+     could not recognize a `MemberExpr`'s own `referencedMemberDecl` (a bare
+     node-id *string* in real clang output, not a nested dict) and fell
+     through to the base object's own reference instead — a **wrong** edge
+     (attributed to the receiver `w`), not merely a missing one. A separate
+     Codex-review finding (fresh evidence, same PR) on `virtual_dispatch_graph.py`'s
+     own `VIRTUAL_CALL_MAY_DISPATCH_TO` producer hit the identical root
+     cause for a virtual **method** call (`p->f()`) and fixed it in
+     `call_graph.py` directly: a new `member_index` (id -> full decl node,
+     built alongside the existing `id_index`) resolves a string
+     `referencedMemberDecl`, but only for `_FUNCTION_DECL_KINDS` nodes — a
+     `FieldDecl` (what a callback slot always is) is never one of those, so
+     it is never indexed. Re-verified against the identical field-callback
+     repro after that fix landed: the call now resolves to **no edge at
+     all**, not the wrong `decl://w` edge originally found — an improvement
+     (ADR-028 D3: no fact beats a wrong one), but the field case still
+     doesn't join. Extending `member_index` to also cover `FieldDecl` stays
+     its own scoped follow-up, not attempted here.
    - **`FUNCTION_POINTER_HAS_SIGNATURE` — investigated, found genuinely
      unmet, implemented as a node-level fact instead of an edge.** Checked
      (not assumed) whether `type_graph.py`'s existing `DECL_HAS_TYPE`/
@@ -865,7 +901,8 @@ which all depend on a Clang AST pass.
      registration case (not `CXXMemberCallExpr`/`CXXOperatorCallExpr`),
      mirroring `override_graph.py`'s own first-slice AST-node-kind
      narrowing. Deferred, each needing its own scoped follow-up: extending
-     `call_graph.py`'s own `id_index`/`_find_referenced_decl` (would
+     `call_graph.py`'s own `member_index` to also cover `FieldDecl` nodes
+     (would close the remaining field-callback join gap above and
      strengthen every function-pointer `DECL_CALLS_DECL` edge, not just this
      module's own — shared infrastructure, not a same-slice fix);
      `CXXMemberCallExpr`/`CXXOperatorCallExpr` registration detection.

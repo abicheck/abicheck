@@ -419,20 +419,28 @@ that would simply never match anything `call_graph.py` produces — mirroring
 an existing, already-shipped limitation of the graph it joins onto, not
 inventing a new one.
 
-**A load-bearing negative empirical finding: a struct-field-typed callback
-slot invoked through member-call syntax (`w->cb(x)`) never actually joins in
-Part A today.** Confirmed by compiling real code through
-`call_graph.parse_clang_ast_calls`: clang emits a `MemberExpr`'s own callee
-reference as `"referencedMemberDecl": "<node-id-string>"` — a bare string,
-not a nested dict — which `call_graph._find_referenced_decl`'s
-`isinstance(..., dict)` check does not recognize, so the DFS falls through
-to the *base object's* own reference instead (`w`, not `cb`). Part B still
-records a real, individually correct `DECL_REGISTERS_CALLBACK`/
+**A load-bearing negative empirical finding, partially closed by a later fix,
+not fully: a struct-field-typed callback slot invoked through member-call
+syntax (`w->cb(x)`) still never joins in Part A.** Originally confirmed by
+compiling real code through `call_graph.parse_clang_ast_calls`: clang emits a
+`MemberExpr`'s own callee reference as
+`"referencedMemberDecl": "<node-id-string>"` — a bare string, not a nested
+dict — which `call_graph._find_referenced_decl` did not recognize, so the
+DFS fell through to the *base object's* own reference instead (`w`, not
+`cb`) — a **wrong** edge. A later Codex-review fix (fresh evidence, same PR)
+found the identical root cause independently, for a virtual method call
+(`p->f()`) `virtual_dispatch_graph.py` depends on, and fixed it in
+`call_graph.py` itself: a new `member_index` resolves a string
+`referencedMemberDecl`, but only for `_FUNCTION_DECL_KINDS` nodes — a
+`FieldDecl` (what a callback slot's own declaration always is) is never one
+of those, so it's still never indexed. Re-verified against the identical
+repro after that fix landed: the call now resolves to no edge at all rather
+than the wrong `w`-attributed one — an improvement, not a close. Part B
+still records a real, individually correct `DECL_REGISTERS_CALLBACK`/
 `DECL_TAKES_ADDRESS_OF` edge naming the field itself, but Part A's join
-against it only fires when some other code path calls through the field in a
-form `call_graph.py` resolves to the field directly — an inherited
-limitation of the upstream pass this module builds on, not a bug introduced
-here.
+against it still only fires when some other code path calls through the
+field in a form `call_graph.py` resolves to the field directly — extending
+`member_index` to also cover `FieldDecl` stays its own scoped follow-up.
 
 Scoped to a **plain, free-function** `CallExpr` for the registration case —
 not `CXXMemberCallExpr`/`CXXOperatorCallExpr` — mirroring

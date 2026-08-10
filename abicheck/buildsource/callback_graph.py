@@ -121,29 +121,37 @@ weak identity is out of scope for this slice — see "Deferred" below.
 
 **A load-bearing negative empirical finding, not a design choice of this
 module's own: a struct-field-typed callback slot invoked through
-member-call syntax (``w->cb(x)``) never actually joins in Part A today.**
-Verified by compiling real code and running it through
-``call_graph.parse_clang_ast_calls``: clang emits a ``MemberExpr``'s own
-callee reference as ``"referencedMemberDecl": "<node-id-string>"`` — a bare
-**string**, not a nested dict node, for a field access used as a call target.
-``call_graph._find_referenced_decl`` only recognizes
-``referencedMemberDecl``/``referencedDecl`` when it ``isinstance(..., dict)``
-— a string fails that check, so the DFS falls through into the
-``MemberExpr``'s own children and returns the *base object's* own
-``DeclRefExpr`` instead (e.g. ``w``, not ``cb``). Confirmed empirically:
-``struct Widget { handler_t cb; }; void f(Widget *w) { w->cb(1); }`` produces
-a ``DECL_CALLS_DECL(call_kind="function_pointer")`` edge whose ``dst`` is
-``decl://w`` — the parameter, not the field. This module's own Part B still
-correctly records a ``DECL_REGISTERS_CALLBACK``/``DECL_TAKES_ADDRESS_OF``
-edge with ``dst`` = the field's own identity (``decl://cb``) when a function
-address is written into that field — a real, individually correct fact — but
-Part A's join against it will only ever fire when some *other* code path
-calls through the field in a form ``call_graph.py`` resolves to the field
-itself (rare) rather than through ``->``/``.`` member-call syntax (the common
-one). This is an inherited limitation of the upstream ``call_graph.py`` pass
-this module builds on top of, not a bug introduced here — fixing
-``_find_referenced_decl`` itself is out of scope for this slice (see
-"Deferred" below); documented rather than silently accepted, per this
+member-call syntax (``w->cb(x)``) still never joins in Part A.** Originally
+found (and, at the time, verified against real compiled repros) that clang
+emits a ``MemberExpr``'s own callee reference as
+``"referencedMemberDecl": "<node-id-string>"`` — a bare **string**, not a
+nested dict node — and that ``call_graph._find_referenced_decl`` only
+recognized the dict shape, falling through to resolve the *receiver*'s own
+``DeclRefExpr`` instead (e.g. ``w``, not ``cb``): a **wrong** edge, not
+merely a missing one. A later, separate fix (Codex review, fresh evidence,
+same PR) taught ``_find_referenced_decl`` to resolve a string
+``referencedMemberDecl`` id through a new ``member_index`` — but that index
+is only ever populated for ``_FUNCTION_DECL_KINDS`` nodes
+(``FunctionDecl``/``CXXMethodDecl``/...), the exact set that fix's own
+motivating case (a virtual **method** call, ``p->f()``) needed; a
+``FieldDecl`` (a plain data member, which is what a callback slot's own
+declaration always is) is never one of those kinds, so it is never
+indexed. The practical effect on this module's own case changed, but did
+not close: re-verified against the identical repro
+(``struct Widget { handler_t cb; }; void f(Widget *w) { w->cb(1); }``) after
+that fix landed — the call now resolves to **no edge at all**, not the
+wrong ``decl://w`` edge the earlier finding recorded. Silently dropping the
+call is the objectively safer outcome (ADR-028 D3: degrade to no fact,
+never a wrong one), but Part A's join against this module's own
+``DECL_REGISTERS_CALLBACK``/``DECL_TAKES_ADDRESS_OF`` edges (``dst`` =
+the field's own identity, ``decl://cb`` — those two remain individually
+correct) still only ever fires when some *other* code path calls through
+the field in a form ``call_graph.py`` resolves to the field itself (rare)
+rather than through ``->``/``.`` member-call syntax (the common one).
+Extending ``member_index`` to also cover data-member declarations (a
+distinct, separately-scoped change to the shared upstream module, not a
+drive-by extension of either fix) remains out of scope for this slice — see
+"Deferred" below; documented rather than silently accepted, per this
 family's own evidence-honesty discipline.
 
 **Empirical AST-dump findings** (Ubuntu Clang 18, verified with real compiled
@@ -223,9 +231,11 @@ not a drive-by extension here):
   ``DECL_CALLS_DECL`` edge this module's Part A already depends on, not just
   this module's own edges; a change to shared, heavily-reviewed
   infrastructure four other passes also read, not a same-slice extension.
-- Fixing ``call_graph._find_referenced_decl``'s ``referencedMemberDecl``
-  string-vs-dict handling (the field-callback join gap documented above) —
-  same reasoning: shared infrastructure, its own scoped fix.
+- Extending ``call_graph.py``'s ``member_index`` (the fix that closed the
+  string-vs-dict ``referencedMemberDecl`` handling for method calls, see
+  above) to also index ``FieldDecl`` nodes, closing the remaining
+  field-callback join gap documented above — same reasoning: shared
+  infrastructure, its own scoped fix.
 - ``CXXMemberCallExpr``/``CXXOperatorCallExpr`` registration detection (a
   callback registered through a method call rather than a free function) —
   deliberately out of scope for this slice, mirroring ``override_graph.py``'s

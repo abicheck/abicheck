@@ -249,6 +249,119 @@ def test_parse_virtual_call_is_overapprox() -> None:
     assert e.confidence() == "reduced"
 
 
+def test_parse_virtual_member_call_resolves_realistic_string_id() -> None:
+    """Codex review, fresh evidence, verified against real Clang 17/18
+    ``-ast-dump=json`` output for ``p->f()``: ``MemberExpr.
+    referencedMemberDecl`` is a bare node-id **string**, not the nested
+    compact-dict shape ``_member_call``'s hand-built fixture (and the test
+    above) use. An earlier version of ``_find_referenced_decl`` only
+    recognized the dict shape, silently fell through into ``MemberExpr``'s
+    own children, and resolved the *receiver* parameter's ``DeclRefExpr``
+    instead -- misclassifying every real virtual/member call as
+    ``CALL_KIND_FUNCTION_POINTER`` through the receiver. This reproduces
+    the real shape end to end: a ``CXXMethodDecl`` with an ``id``, a
+    ``CXXMemberCallExpr`` whose ``MemberExpr`` names that same id as a bare
+    string, and (mirroring the real receiver ``DeclRefExpr`` clang also
+    emits, to prove it is NOT what gets resolved) a receiver reference to
+    an unrelated ``ParmVarDecl``.
+    """
+    ast = {
+        "kind": "TranslationUnitDecl",
+        "inner": [
+            {
+                "kind": "CXXRecordDecl",
+                "name": "Base",
+                "inner": [
+                    {
+                        "kind": "CXXMethodDecl",
+                        "id": "0x1",
+                        "name": "f",
+                        "mangledName": "_ZN4Base1fEv",
+                        "type": {"qualType": "void ()"},
+                        "virtual": True,
+                    }
+                ],
+            },
+            _func(
+                "call_it",
+                "_Z7call_itP4Base",
+                [
+                    {
+                        "kind": "CXXMemberCallExpr",
+                        "inner": [
+                            {
+                                "kind": "MemberExpr",
+                                "referencedMemberDecl": "0x1",
+                                "inner": [
+                                    {
+                                        "kind": "ImplicitCastExpr",
+                                        "inner": [
+                                            {
+                                                "kind": "DeclRefExpr",
+                                                "referencedDecl": {
+                                                    "kind": "ParmVarDecl",
+                                                    "name": "p",
+                                                },
+                                            }
+                                        ],
+                                    }
+                                ],
+                            }
+                        ],
+                    }
+                ],
+            ),
+        ],
+    }
+    edges = parse_clang_ast_calls(ast)
+    assert edges == [
+        CallEdge(
+            "_Z7call_itP4Base",
+            "_ZN4Base1fEv",
+            CALL_KIND_VIRTUAL,
+            RESOLUTION_OVERAPPROX,
+        )
+    ]
+
+
+def test_parse_member_call_unresolved_id_is_dropped_not_misattributed() -> None:
+    """A ``referencedMemberDecl`` string id that was never indexed (a
+    forward reference, or a genuinely non-function member -- a data field,
+    never in ``_FUNCTION_DECL_KINDS``) must resolve to no edge at all,
+    never fall through to the receiver's own reference (the exact bug this
+    fix closes)."""
+    ast = {
+        "kind": "TranslationUnitDecl",
+        "inner": [
+            _func(
+                "call_it",
+                "_Zcall_it",
+                [
+                    {
+                        "kind": "CXXMemberCallExpr",
+                        "inner": [
+                            {
+                                "kind": "MemberExpr",
+                                "referencedMemberDecl": "0xnotindexed",
+                                "inner": [
+                                    {
+                                        "kind": "DeclRefExpr",
+                                        "referencedDecl": {
+                                            "kind": "ParmVarDecl",
+                                            "name": "w",
+                                        },
+                                    }
+                                ],
+                            }
+                        ],
+                    }
+                ],
+            ),
+        ],
+    }
+    assert parse_clang_ast_calls(ast) == []
+
+
 def test_parse_function_pointer_call_is_unknown() -> None:
     ast = {
         "kind": "TranslationUnitDecl",
