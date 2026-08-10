@@ -797,8 +797,11 @@ def _collect_source_graph(
         from .buildsource.inline_graph_fold import (
             fold_call_graph,
             fold_include_graph,
+            fold_macro_graph,
+            fold_override_graph,
             fold_template_graph,
             fold_type_graph,
+            fold_virtual_dispatch_graph,
         )
 
         fold_call_graph(graph, merged, clang_bin, extractors, changed_paths)
@@ -811,6 +814,22 @@ def _collect_source_graph(
         # an otherwise-equivalent collected pack silently carried no template
         # nodes/edges/coverage stamp at all.
         fold_template_graph(graph, merged, clang_bin, extractors, changed_paths)
+        # ADR-041 P2 item 1 / G29 Phase 5 items 2/3 (Codex review, fresh
+        # evidence): this collect path had fallen behind
+        # `inline_graph_fold.fold_semantic_graphs`'s own list a third time --
+        # override/virtual-dispatch/macro folding were still missing here,
+        # so an otherwise-equivalent collected pack silently carried no
+        # METHOD_POSSIBLE_OVERRIDE/VIRTUAL_CALL_MAY_DISPATCH_TO/
+        # TYPE_HAS_VTABLE/MACRO_CONTROLS_DECL/DECL_USES_MACRO edges (or
+        # their coverage stamps) at all, regardless of what `--source-abi`
+        # collected. `fold_override_graph` must run before
+        # `fold_virtual_dispatch_graph` (the latter reads the former's
+        # already-folded edges, per `fold_semantic_graphs`' own ordering
+        # contract), and `fold_virtual_dispatch_graph` takes no
+        # clang/scoping arguments of its own (see its docstring).
+        fold_override_graph(graph, merged, clang_bin, extractors, changed_paths)
+        fold_virtual_dispatch_graph(graph)
+        fold_macro_graph(graph, merged, clang_bin, extractors, changed_paths)
     # fold_archive_graph needs no clang/L4 surface (unlike the three passes
     # above) -- it runs unconditionally whenever the graph carries a
     # static_library node, mirroring inline._build_inline_graph's identical
