@@ -316,6 +316,48 @@ def test_a_pseudo_closer_inside_a_fence_does_not_end_the_mask(synthetic):
     assert "[example](../../docs/use/cli-usage.md)" in rendered
 
 
+@pytest.mark.parametrize(
+    "opener,closer",
+    [("```", "```"), ("```", "`````"), ("~~~", "~~~"), ("~~~", "~~~~~")],
+    ids=["tick-equal", "tick-longer", "tilde-equal", "tilde-longer"],
+)
+def test_a_closing_fence_may_be_longer_than_its_opener(synthetic, opener, closer):
+    """CommonMark: the closer uses the same character and runs *at least* as
+    long. Requiring an exact match left a longer-closed block unmasked, so its
+    example links were rewritten as prose."""
+    synthetic(
+        skills={
+            "demo": {
+                "SKILL.md": (
+                    "---\nname: demo\n---\n\n[a](../shared/a.md)\n\n"
+                    f"{opener}\n[example](../../docs/use/cli-usage.md)\n{closer}\n"
+                )
+            }
+        },
+        shared={"a.md": "# A\n"},
+    )
+    rendered = gen.render_all(gen.SRC_DIR)["demo/SKILL.md"]
+    assert "[example](../../docs/use/cli-usage.md)" in rendered
+
+
+def test_a_tilde_run_does_not_close_a_backtick_fence(synthetic):
+    """The delimiter character must be consistent: `~~~` cannot close a
+    backtick fence, so the block runs on and its content stays masked."""
+    synthetic(
+        skills={
+            "demo": {
+                "SKILL.md": (
+                    "---\nname: demo\n---\n\n[a](../shared/a.md)\n\n"
+                    "```\n~~~\n[example](../../docs/use/cli-usage.md)\n```\n"
+                )
+            }
+        },
+        shared={"a.md": "# A\n"},
+    )
+    rendered = gen.render_all(gen.SRC_DIR)["demo/SKILL.md"]
+    assert "[example](../../docs/use/cli-usage.md)" in rendered
+
+
 def test_a_fragment_cited_only_inside_a_code_example_is_not_a_citation(synthetic):
     """Masking must apply to citation scanning too, or a fragment merely
     *shown* in an example would be copied into the skill — and, if that were

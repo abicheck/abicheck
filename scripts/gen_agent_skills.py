@@ -137,11 +137,23 @@ _FRONT_MATTER_RE = re.compile(r"\A---\r?\n.*?\r?\n---\r?\n", re.DOTALL)
 
 #: Fenced code blocks, then inline code spans. Applied in that order so a
 #: backtick *inside* a fence is never mistaken for an inline span.
-#: The closing delimiter permits only trailing whitespace after it — a line
-#: like ```` ```oops ```` inside a block is an *info-string* line, not a
-#: closer. Accepting arbitrary text there ended the mask early, so the rest of
-#: the block was treated as prose: its link syntax rewritten or rejected.
-_FENCE_RE = re.compile(r"^ {0,3}(`{3,}|~{3,})[^\n]*\n.*?\n {0,3}\1[ \t]*$", re.M | re.S)
+#:
+#: A closing fence uses the same character as its opener, runs *at least* as
+#: long, and carries nothing but trailing whitespace. Both halves of that were
+#: wrong in turn: accepting arbitrary text after the delimiter let a line like
+#: ```` ```oops ```` inside a block read as a closer, and a plain backreference
+#: demanded an exactly-equal run so a block closed with a longer delimiter
+#: never matched at all. Either way the mask ended early or never formed, and
+#: the example's link syntax was rewritten or rejected as prose.
+#:
+#: Two alternatives rather than one, because the delimiter character must be
+#: consistent — `~~~` may not close ```` ``` ````. The backtick variant also
+#: bars backticks from its info string, as CommonMark does.
+_FENCE_RE = re.compile(
+    r"^ {0,3}(?P<tick>`{3,})[^\n`]*\n.*?\n {0,3}(?P=tick)`*[ \t]*$"
+    r"|^ {0,3}(?P<tilde>~{3,})[^\n]*\n.*?\n {0,3}(?P=tilde)~*[ \t]*$",
+    re.M | re.S,
+)
 _INLINE_CODE_RE = re.compile(r"(?<!`)(`+)(?!`)(.+?)(?<!`)\1(?!`)", re.DOTALL)
 
 #: Placeholder body — `\x00` cannot occur in a Markdown source, so a masked
