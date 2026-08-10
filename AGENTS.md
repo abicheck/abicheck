@@ -21,7 +21,7 @@ they are.
 ## What is abicheck?
 
 ABI compatibility checker for C/C++ shared libraries. Pure Python (3.10+).
-Detects 396 ABI/API change types across ELF, PE/COFF, and Mach-O binaries,
+Detects 397 ABI/API change types across ELF, PE/COFF, and Mach-O binaries,
 categorized into `BREAKING_KINDS`, `API_BREAK_KINDS`, `COMPATIBLE_KINDS`, and `RISK_KINDS` (see `ChangeKind`).
 Drop-in replacement for abi-compliance-checker (ABICC).
 
@@ -490,7 +490,7 @@ cover the surrounding first-party trees this file doesn't detail.
 
 - `AbiSnapshot` (`model.py`) — serializable snapshot of a library's ABI surface
 - `DiffResult` (`checker_types.py`) — single detected change with kind, severity, details
-- `ChangeKind` (`checker_policy.py`) — enum of 396 change types; categorized into `BREAKING_KINDS`, `API_BREAK_KINDS`, `RISK_KINDS`, and `COMPATIBLE_KINDS` (further split into `ADDITION_KINDS` and `QUALITY_KINDS`)
+- `ChangeKind` (`checker_policy.py`) — enum of 397 change types; categorized into `BREAKING_KINDS`, `API_BREAK_KINDS`, `RISK_KINDS`, and `COMPATIBLE_KINDS` (further split into `ADDITION_KINDS` and `QUALITY_KINDS`)
 - `Verdict` (`checker.py`) — overall comparison result (compatible/source_break/breaking)
 - `LibraryMetadata` (`checker.py`) — parsed library info
 
@@ -730,8 +730,35 @@ Once a root command genuinely clears the bar above, pick the right home:
 
 ## Known gaps — acknowledged remaining work
 
-- **Linkage-blind removal — attempted, reverted before merge; blocked on a
-  definition-availability fact the model does not carry.** A symbol vanishing
+- **Linkage-blind removal — evidence source built and wired; blocked on the
+  L3 collection path not carrying object paths.** `func_vague_export_dropped`
+  (`COMPATIBLE_WITH_RISK`) demotes a dropped export that the *old* build proved
+  was vague-linkage, while the new headers still declare the entity. The proof
+  is COMDAT-group membership read from L3 object files
+  (`buildsource/comdat_groups.py`): a vague-linkage definition is emitted into
+  a COMDAT group precisely because the language requires every using
+  translation unit to define it, so an already-linked consumer carries its own
+  copy. Verified end to end — a `__attribute__((weak))` out-of-line function
+  (also `WEAK` in `.dynsym`, and the case that made the earlier `is_inline`
+  attempt wrong) stays `BREAKING`, and so does a vague symbol when no L3
+  evidence exists.
+
+  **What still blocks it from firing in practice** (Codex review, both
+  confirmed against the code): `CompileDbAdapter` never assigns
+  `CompileUnit.output`, discarding both the compile database's own `output`
+  field and the `-o` argument — so on the primary auto-discovered
+  `compile_commands.json` path the scan sees no objects and the evidence is
+  never collected. And `CompileUnit.output`, where an adapter does set it, is
+  normalized for *persistence* rather than guaranteed usable: home-rooted
+  paths are redacted to `~/...`, and Ninja/Make/Bazel outputs are relative to
+  `CompileUnit.directory`. Closing this needs the scan to run against raw,
+  resolved paths before redaction — inside the adapters or on a raw-path
+  channel — which is its own change rather than a patch to the scan call.
+  Until then the demotion is correct but inert on the common path, which is
+  the safe direction (no demotion without proof).
+
+  The earlier attempt and why it was reverted, kept because the reasoning
+  still governs what is allowed here: A symbol vanishing
   from the export table is reported as `func_removed` (and, on the same
   symbol, `func_deleted_elf_fallback`) regardless of its *linkage*, so a weak
   vague-linkage/COMDAT export — an inline function, a template instantiation,

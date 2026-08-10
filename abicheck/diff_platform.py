@@ -71,6 +71,7 @@ from .model import (
     stdlib_namespaces_excluded,
 )
 from .name_classification import RTTI_DATA_PREFIXES
+from .symbol_linkage import vague_linkage_export_dropped, vague_linkage_symbols
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
     from collections.abc import Set as AbstractSet
@@ -1875,6 +1876,7 @@ def _diff_elf_deleted_fallback(old: AbiSnapshot, new: AbiSnapshot) -> list[Chang
     new_func_map = new.function_map
 
     old_pub = _public_functions(old)
+    _vague = vague_linkage_symbols(old)
 
     for mangled, f_old in old_pub.items():
         # Must be present in old ELF (this was a real exported symbol)
@@ -1892,6 +1894,15 @@ def _diff_elf_deleted_fallback(old: AbiSnapshot, new: AbiSnapshot) -> list[Chang
 
         # Skip if already explicitly marked deleted (FUNC_DELETED handles it)
         if f_new.is_deleted:
+            continue
+
+        # The one exception: an export the old build *proved* to be
+        # vague-linkage. A consumer of such an entity emitted its own COMDAT
+        # copy -- the language required it to -- so the disappearing export
+        # does not break it, and `check_removed_function` already reports that
+        # event once at risk severity. Emitting BREAKING here for the same
+        # symbol would both double-report it and dominate the verdict.
+        if vague_linkage_export_dropped(f_old, f_new, _vague):
             continue
 
         # NOTE: We intentionally do NOT skip inline transitions here.

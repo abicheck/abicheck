@@ -1,6 +1,6 @@
 {
   "description": "Formal detector specification matrix (generated).",
-  "count": 396,
+  "count": 397,
   "detectors": [
     {
       "kind": "abi_relevant_build_flag_changed",
