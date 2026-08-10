@@ -20,6 +20,7 @@ BUILD_INFO="${INPUT_BUILD_INFO:-}"
 DEPTH="${INPUT_DEPTH:-}"
 PREVIOUS_MANIFEST="${INPUT_PREVIOUS_MANIFEST:-}"
 VALIDATION="${INPUT_VALIDATION:-strict}"
+SNAPSHOT_COMPRESSION="${INPUT_SNAPSHOT_COMPRESSION:-none}"
 ACTION_PATH="${ACTION_PATH:-$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)}"
 
 _fail() {
@@ -30,6 +31,20 @@ _fail() {
 case "$VALIDATION" in
   strict | none) ;;
   *) _fail "validation '$VALIDATION' is not recognized. Use 'strict' or 'none'." ;;
+esac
+
+# ADR-059: the canonical storage suffix implied by snapshot-compression --
+# every library in one run uses the same encoding (action.yml's own
+# contract), so this is computed once. `dump`'s own --compression flag
+# would also accept a mismatched explicit value against a *different*
+# canonical suffix as a hard error (resolve_write_compression) -- keeping
+# the -o path's suffix and --compression in agreement here is what avoids
+# ever hitting that path.
+case "$SNAPSHOT_COMPRESSION" in
+  none) SNAPSHOT_SUFFIX=".abicheck.json" ;;
+  gzip) SNAPSHOT_SUFFIX=".abicheck.json.gz" ;;
+  zstd) SNAPSHOT_SUFFIX=".abicheck.json.zst" ;;
+  *) _fail "snapshot-compression '$SNAPSHOT_COMPRESSION' is not recognized. Use 'none', 'gzip', or 'zstd'." ;;
 esac
 
 # Validate the libraries JSON up front (name/artifact required per entry) --
@@ -88,7 +103,7 @@ if [[ -d "$OUTPUT_DIR" ]]; then
   # files this script itself writes, never the whole directory, so an
   # output-dir that happens to already exist for an unrelated reason isn't
   # blown away.
-  find "$OUTPUT_DIR" -maxdepth 1 -name '*.abicheck.json' -delete
+  find "$OUTPUT_DIR" -maxdepth 1 \( -name '*.abicheck.json' -o -name '*.abicheck.json.gz' -o -name '*.abicheck.json.zst' \) -delete
   # Same reasoning, for staged bundle-member binaries (G30 P1.6): a member
   # dropped from stage_binary since an earlier run at this same output-dir
   # would otherwise leave its old binary sitting under binaries/, invisible
@@ -132,7 +147,8 @@ while IFS=$'\x1f' read -r name artifact header include stage_binary; do
   [[ -n "$BUILD_INFO" ]] && CMD+=(--build-info "$BUILD_INFO")
   [[ -n "$DEPTH" ]] && CMD+=(--depth "$DEPTH")
   [[ -n "$PROJECT_REF" ]] && CMD+=(--version "$PROJECT_REF")
-  CMD+=(-o "$OUTPUT_DIR/$name.abicheck.json")
+  [[ "$SNAPSHOT_COMPRESSION" != "none" ]] && CMD+=(--compression "$SNAPSHOT_COMPRESSION")
+  CMD+=(-o "$OUTPUT_DIR/$name$SNAPSHOT_SUFFIX")
   if ! "${CMD[@]}"; then
     _fail "dump failed for library '$name' ($artifact) -- see the command output above."
   fi
@@ -175,7 +191,7 @@ if [[ "$VALIDATION" == "strict" ]]; then
   echo "::group::Self-compare validation (each snapshot against itself)"
   while IFS=$'\x1f' read -r name _artifact _header _include; do
     [[ -z "$name" ]] && continue
-    snap="$OUTPUT_DIR/$name.abicheck.json"
+    snap="$OUTPUT_DIR/$name$SNAPSHOT_SUFFIX"
     if ! abicheck compare "$snap" "$snap" --format json > /dev/null; then
       _fail "self-compare failed for '$snap' -- the snapshot this run just wrote is not loadable/self-consistent. This should never happen; please report it."
     fi

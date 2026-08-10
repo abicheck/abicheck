@@ -59,12 +59,33 @@ _SNAPSHOT_SUFFIXES = (".abicheck.json.zst", ".abicheck.json.gz", ".abicheck.json
 
 def _find_snapshot_path(output_dir: Path, name: str) -> Path | None:
     """Locate library *name*'s dumped snapshot regardless of which storage
-    encoding (ADR-059's ``--compression``) produced it."""
-    for suffix in _SNAPSHOT_SUFFIXES:
-        candidate = output_dir / f"{name}{suffix}"
-        if candidate.is_file():
-            return candidate
-    return None
+    encoding (ADR-059's ``--compression``) produced it.
+
+    Codex review: a leftover sibling from an earlier run using a different
+    ``--compression`` setting (e.g. an incomplete cleanup, or a caller that
+    invokes this script directly rather than through ``run.sh``, which is
+    the one place that actually clears every canonical suffix before a
+    fresh dump) must not be silently preferred over -- or silently
+    shadowed by -- the snapshot this run actually just produced. More than
+    one candidate present is ambiguous stale state, not a priority order to
+    pick from; this raises rather than guessing which one is current.
+    """
+    candidates = [
+        output_dir / f"{name}{suffix}"
+        for suffix in _SNAPSHOT_SUFFIXES
+        if (output_dir / f"{name}{suffix}").is_file()
+    ]
+    if len(candidates) > 1:
+        found = ", ".join(c.name for c in candidates)
+        raise SystemExit(
+            f"library {name!r} has more than one dumped snapshot present "
+            f"({found}) -- this is stale state from a previous run using a "
+            "different --compression setting, not a legitimate ambiguity "
+            "to guess through. Clear the output directory before dumping "
+            "(run.sh's own cleanup does this; a caller invoking this "
+            "script directly must do the same)."
+        )
+    return candidates[0] if candidates else None
 
 
 def _read_snapshot_meta(path: Path) -> dict[str, Any]:

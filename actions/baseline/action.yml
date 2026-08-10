@@ -71,6 +71,20 @@ inputs:
       'none' skips it.
     required: false
     default: 'strict'
+  snapshot-compression:
+    description: >
+      Storage encoding (ADR-059) for each library's dumped snapshot: 'none'
+      (default, plain .abicheck.json -- unchanged behavior), 'gzip', or
+      'zstd'. A large multi-library baseline-set's combined snapshot size
+      can dominate CI artifact storage/transfer time; compression is a
+      pure storage envelope around identical JSON content, transparently
+      read back by `compare`/`scan --against`/resolve-baseline regardless
+      of this setting. Every library in one baseline-set run uses the same
+      encoding -- manifest.json records each artifact's actual encoding
+      individually (informational; resolution never trusts it, only the
+      snapshot's own magic bytes).
+    required: false
+    default: 'none'
   python-version:
     description: 'Python version for setup-python.'
     required: false
@@ -134,5 +148,6 @@ runs:
         INPUT_DEPTH: ${{ inputs.depth }}
         INPUT_PREVIOUS_MANIFEST: ${{ inputs.previous-manifest }}
         INPUT_VALIDATION: ${{ inputs.validation }}
+        INPUT_SNAPSHOT_COMPRESSION: ${{ inputs.snapshot-compression }}
         ACTION_PATH: ${{ github.action_path }}
       run: bash "${{ github.action_path }}/run.sh"

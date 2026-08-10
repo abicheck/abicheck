@@ -125,6 +125,17 @@ class TestValidationInputRejected:
         result, _ = _run_action({}, tmp_path)
         assert result.returncode != 0
 
+    def test_unknown_snapshot_compression_value_fails(self, tmp_path: Path) -> None:
+        result, _ = _run_action(
+            {
+                "INPUT_LIBRARIES": json.dumps([{"name": "foo", "artifact": "a.so"}]),
+                "INPUT_SNAPSHOT_COMPRESSION": "bogus",
+            },
+            tmp_path,
+        )
+        assert result.returncode == 1
+        assert "not recognized" in result.stdout
+
 
 @pytest.mark.skipif(not RUN_SH.is_file(), reason="actions/baseline/run.sh not found")
 class TestLibrariesJsonValidation:
@@ -504,6 +515,51 @@ class TestEndToEndBaselineSet:
         assert by_library["libfoo"]["binary"] == "binaries/libfoo"
         assert by_library["libfoo"]["binary_sha256"]
         assert "binary" not in by_library["libbar"]
+
+    @pytest.mark.parametrize(
+        ("compression", "suffix", "magic"),
+        [
+            ("gzip", ".abicheck.json.gz", b"\x1f\x8b"),
+            ("zstd", ".abicheck.json.zst", b"\x28\xb5\x2f\xfd"),
+        ],
+    )
+    def test_snapshot_compression_writes_and_self_compares_real_snapshot(
+        self, tmp_path: Path, compression: str, suffix: str, magic: bytes
+    ) -> None:
+        """ADR-059: snapshot-compression threads through to a real `dump
+        --compression` call, the self-compare validation pass reads the
+        compressed file back transparently, and manifest.json records the
+        actual suffix/compression -- end to end, with a real compiled
+        library, no mocking."""
+        libfoo = tmp_path / "libfoo.so"
+        _compile_shared_lib(
+            "int abicheck_foo_add(int a, int b) { return a + b; }\n", libfoo
+        )
+        output_dir = tmp_path / "baseline-out"
+
+        result, _ = _run_action(
+            {
+                "INPUT_LIBRARIES": json.dumps(
+                    [{"name": "libfoo", "artifact": str(libfoo)}]
+                ),
+                "INPUT_OUTPUT_DIR": str(output_dir),
+                "INPUT_SNAPSHOT_COMPRESSION": compression,
+            },
+            tmp_path,
+        )
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert "all snapshots round-tripped cleanly" in result.stdout
+
+        snap_path = output_dir / f"libfoo{suffix}"
+        assert snap_path.is_file()
+        assert snap_path.read_bytes()[: len(magic)] == magic
+        # No stray plain-JSON sibling from a previous default-compression run.
+        assert not (output_dir / "libfoo.abicheck.json").exists()
+
+        manifest = json.loads((output_dir / "manifest.json").read_text())
+        artifact = manifest["artifacts"][0]
+        assert artifact["snapshot"] == f"libfoo{suffix}"
+        assert artifact["compression"] == compression
 
 
 _DUMP_LOOP_START = 'echo "::group::Dump baseline-set into $OUTPUT_DIR"'

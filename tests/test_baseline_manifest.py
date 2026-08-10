@@ -405,17 +405,23 @@ class TestBuildManifestCompressedSnapshots:
             == gz_manifest["artifacts"][0]["sha256"]
         )
 
-    def test_prefers_zstd_over_plain_when_both_present(self, tmp_path: Path) -> None:
-        """If a stray plain snapshot and a real compressed one coexist
-        (e.g. a partial local rerun), discovery must not silently pick the
-        wrong one -- compressed suffixes are tried first, longest-first."""
+    def test_multiple_encodings_present_is_rejected_as_ambiguous(
+        self, tmp_path: Path
+    ) -> None:
+        """Codex review: if a stray plain snapshot and a real compressed one
+        coexist (e.g. an incomplete cleanup from a previous run using a
+        different --compression setting, or a caller invoking this script
+        directly without run.sh's own cleanup), discovery must not silently
+        prefer one over the other -- that risks recording a stale snapshot
+        in the manifest without it being regenerated/validated this run.
+        This is stale state to fail loudly on, not a priority order."""
         _write_snapshot(tmp_path / "libfoo.abicheck.json", library="libfoo")
         _write_compressed_snapshot(
             tmp_path / "libfoo.abicheck.json.zst", library="libfoo", compression="zstd"
         )
         entries = [{"name": "libfoo", "artifact": "build/libfoo.so"}]
-        manifest = build_manifest_module.build_manifest(tmp_path, "", "", entries, None)
-        assert manifest["artifacts"][0]["snapshot"] == "libfoo.abicheck.json.zst"
+        with pytest.raises(SystemExit, match="more than one dumped snapshot"):
+            build_manifest_module.build_manifest(tmp_path, "", "", entries, None)
 
 
 class TestFreshness:
