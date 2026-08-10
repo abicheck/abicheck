@@ -31,6 +31,7 @@ These tests extract the relevant fragment verbatim from run.sh (the same
 logic, and stub out ``gh`` (not available/authenticated in the test
 environment) with a shell function.
 """
+
 from __future__ import annotations
 
 import os
@@ -69,12 +70,15 @@ def _bash_executable() -> str:
     return "bash"
 
 
-_FAILING_GH_STUB = 'gh() { return 1; }\n'
+_FAILING_GH_STUB = "gh() { return 1; }\n"
 
 
 class TestDryRunToleratesUnavailableBaseline:
     def _run(
-        self, env_extra: dict[str, str], *, gh_stub: str = _FAILING_GH_STUB,
+        self,
+        env_extra: dict[str, str],
+        *,
+        gh_stub: str = _FAILING_GH_STUB,
     ) -> subprocess.CompletedProcess[str]:
         # MODE/FORCE_AUDIT_ONLY are set earlier in run.sh (outside the
         # extracted region); the baseline block reads both, so the harness
@@ -90,7 +94,10 @@ class TestDryRunToleratesUnavailableBaseline:
         env = {**os.environ, **env_extra}
         return subprocess.run(
             [_bash_executable(), "-c", script],
-            capture_output=True, text=True, env=env, check=False,
+            capture_output=True,
+            text=True,
+            env=env,
+            check=False,
         )
 
     def test_non_dry_run_still_fails_hard_on_unavailable_baseline(self) -> None:
@@ -106,11 +113,13 @@ class TestDryRunToleratesUnavailableBaseline:
         -- action.yml documents this as the one deliberate exception to
         dry-run's own contract (a malformed invocation or an unsatisfiable
         requested depth still exits nonzero)."""
-        result = self._run({
-            "INPUT_MODE": "compare",
-            "INPUT_ABI_BASELINE": "latest-release",
-            "INPUT_DRY_RUN": "true",
-        })
+        result = self._run(
+            {
+                "INPUT_MODE": "compare",
+                "INPUT_ABI_BASELINE": "latest-release",
+                "INPUT_DRY_RUN": "true",
+            }
+        )
         assert result.returncode == 0, result.stderr
         assert "::warning::" in result.stdout
         # Nothing else to preview (no other old-library given) -- the block
@@ -120,19 +129,24 @@ class TestDryRunToleratesUnavailableBaseline:
     def test_dry_run_with_explicit_old_library_still_proceeds(self) -> None:
         """An explicitly-given old-library must not be discarded just because
         the (redundant) baseline fetch also failed under --dry-run."""
-        result = self._run({
-            "INPUT_MODE": "compare",
-            "INPUT_ABI_BASELINE": "latest-release",
-            "INPUT_DRY_RUN": "true",
-            "INPUT_OLD_LIBRARY": "libfoo.so.1",
-        })
+        result = self._run(
+            {
+                "INPUT_MODE": "compare",
+                "INPUT_ABI_BASELINE": "latest-release",
+                "INPUT_DRY_RUN": "true",
+                "INPUT_OLD_LIBRARY": "libfoo.so.1",
+            }
+        )
         assert result.returncode == 0, result.stderr
         assert "REACHED_END OLD_LIBRARY=libfoo.so.1" in result.stdout
 
     def test_scan_mode_dry_run_exits_0_instead_of_failing(self) -> None:
         result = self._run(
-            {"INPUT_MODE": "scan", "INPUT_ABI_BASELINE": "latest-release",
-             "INPUT_DRY_RUN": "true"}
+            {
+                "INPUT_MODE": "scan",
+                "INPUT_ABI_BASELINE": "latest-release",
+                "INPUT_DRY_RUN": "true",
+            }
         )
         assert result.returncode == 0, result.stderr
         assert "REACHED_END" not in result.stdout
@@ -157,7 +171,9 @@ _MARKER_GH_STUB = 'gh() { touch "$GH_CALLED_MARKER"; return 1; }\n'
 
 class TestAuditSkipsBaselineFetch:
     def _run(
-        self, env_extra: dict[str, str], marker: Path,
+        self,
+        env_extra: dict[str, str],
+        marker: Path,
     ) -> subprocess.CompletedProcess[str]:
         script = (
             'MODE="${INPUT_MODE:-compare}"\n'
@@ -169,7 +185,10 @@ class TestAuditSkipsBaselineFetch:
         env = {**os.environ, **env_extra, "GH_CALLED_MARKER": str(marker)}
         return subprocess.run(
             [_bash_executable(), "-c", script],
-            capture_output=True, text=True, env=env, check=False,
+            capture_output=True,
+            text=True,
+            env=env,
+            check=False,
         )
 
     def test_audit_true_skips_baseline_fetch_entirely(self, tmp_path: Path) -> None:
@@ -180,8 +199,11 @@ class TestAuditSkipsBaselineFetch:
         baseline at all."""
         marker = tmp_path / "gh_called"
         result = self._run(
-            {"INPUT_MODE": "scan", "INPUT_ABI_BASELINE": "latest-release",
-             "INPUT_AUDIT": "true"},
+            {
+                "INPUT_MODE": "scan",
+                "INPUT_ABI_BASELINE": "latest-release",
+                "INPUT_AUDIT": "true",
+            },
             marker,
         )
         assert result.returncode == 0, result.stderr
@@ -216,19 +238,20 @@ class TestGhReleaseDownloadRepoFlag:
         script = (
             'MODE="${INPUT_MODE:-compare}"\n'
             'FORCE_AUDIT_ONLY="${INPUT_AUDIT:-false}"\n'
-            'gh() {\n'
+            "gh() {\n"
             '  printf "%s\\n" "$@" > "$GH_ARGV_FILE"\n'
             '  local dir=""; while [[ $# -gt 0 ]]; do '
             '[[ "$1" == "-D" ]] && dir="$2"; shift; done\n'
             '  touch "$dir/lib.abicheck.json"\n'
-            '}\n'
-            + _baseline_region()
-            + '\necho "REACHED_END"\n'
+            "}\n" + _baseline_region() + '\necho "REACHED_END"\n'
         )
         env = {**os.environ, **env_extra, "GH_ARGV_FILE": str(argv_file)}
         return subprocess.run(
             [_bash_executable(), "-c", script],
-            capture_output=True, text=True, env=env, check=False,
+            capture_output=True,
+            text=True,
+            env=env,
+            check=False,
         )
 
     def test_latest_release_passes_repo_flag(self, tmp_path: Path) -> None:
@@ -270,14 +293,12 @@ class TestGhReleaseDownloadRepoFlag:
         script = (
             'MODE="${INPUT_MODE:-compare}"\n'
             'FORCE_AUDIT_ONLY="${INPUT_AUDIT:-false}"\n'
-            'gh() {\n'
+            "gh() {\n"
             '  printf "%s\\n" "$@" > "$GH_ARGV_FILE"\n'
             '  local dir=""; while [[ $# -gt 0 ]]; do '
             '[[ "$1" == "-D" ]] && dir="$2"; shift; done\n'
             '  touch "$dir/lib.abicheck.json"\n'
-            '}\n'
-            + _baseline_region()
-            + '\necho "REACHED_END"\n'
+            "}\n" + _baseline_region() + '\necho "REACHED_END"\n'
         )
         env.update(
             {
@@ -288,7 +309,10 @@ class TestGhReleaseDownloadRepoFlag:
         )
         result = subprocess.run(
             [_bash_executable(), "-c", script],
-            capture_output=True, text=True, env=env, check=False,
+            capture_output=True,
+            text=True,
+            env=env,
+            check=False,
         )
         assert result.returncode == 0, result.stderr
         argv = argv_file.read_text(encoding="utf-8").splitlines()
@@ -304,11 +328,17 @@ class TestAmbiguousBaselineAssets:
             + _baseline_region()
             + '\necho "REACHED_END OLD_LIBRARY=${INPUT_OLD_LIBRARY:-}"\n'
         )
-        env = {**os.environ, "INPUT_MODE": "compare",
-               "INPUT_ABI_BASELINE": "latest-release"}
+        env = {
+            **os.environ,
+            "INPUT_MODE": "compare",
+            "INPUT_ABI_BASELINE": "latest-release",
+        }
         return subprocess.run(
             [_bash_executable(), "-c", script],
-            capture_output=True, text=True, env=env, check=False,
+            capture_output=True,
+            text=True,
+            env=env,
+            check=False,
         )
 
     def test_single_asset_still_resolves(self) -> None:
@@ -331,6 +361,96 @@ class TestAmbiguousBaselineAssets:
             'local dir=""; while [[ $# -gt 0 ]]; do '
             '[[ "$1" == "-D" ]] && dir="$2"; shift; done; '
             'touch "$dir/a.abicheck.json" "$dir/b.abicheck.json"'
+        )
+        assert result.returncode == 1
+        assert "Multiple *.abicheck.json assets found" in result.stdout
+        assert "REACHED_END" not in result.stdout
+
+
+class TestCompressedBaselineAssets:
+    """ADR-059 (Codex review): a release baseline may be published under any
+    of the three canonical snapshot suffixes (dump --compression writes
+    .abicheck.json.gz/.abicheck.json.zst too, not just plain
+    .abicheck.json) -- `gh release download --pattern '*.abicheck.json'`
+    alone silently missed the compressed forms, reporting "no baseline
+    found" for a perfectly valid published asset."""
+
+    def _run(self, gh_body: str, argv_file: Path) -> subprocess.CompletedProcess[str]:
+        script = (
+            'MODE="${INPUT_MODE:-compare}"\n'
+            'FORCE_AUDIT_ONLY="${INPUT_AUDIT:-false}"\n'
+            f'gh() {{ printf "%s\\n" "$@" >> "$GH_ARGV_FILE"; {gh_body}; }}\n'
+            + _baseline_region()
+            + '\necho "REACHED_END OLD_LIBRARY=${INPUT_OLD_LIBRARY:-}"\n'
+        )
+        env = {
+            **os.environ,
+            "INPUT_MODE": "compare",
+            "INPUT_ABI_BASELINE": "latest-release",
+            "GH_ARGV_FILE": str(argv_file),
+        }
+        return subprocess.run(
+            [_bash_executable(), "-c", script],
+            capture_output=True,
+            text=True,
+            env=env,
+            check=False,
+        )
+
+    def test_all_three_pattern_flags_passed(self, tmp_path: Path) -> None:
+        argv_file = tmp_path / "gh_argv"
+        result = self._run(
+            'local dir=""; while [[ $# -gt 0 ]]; do '
+            '[[ "$1" == "-D" ]] && dir="$2"; shift; done; '
+            'touch "$dir/lib.abicheck.json"',
+            argv_file,
+        )
+        assert result.returncode == 0, result.stderr
+        argv = argv_file.read_text(encoding="utf-8").splitlines()
+        assert argv.count("--pattern") == 3, argv
+        patterns = [argv[i + 1] for i, tok in enumerate(argv) if tok == "--pattern"]
+        assert patterns == [
+            "*.abicheck.json",
+            "*.abicheck.json.gz",
+            "*.abicheck.json.zst",
+        ]
+
+    def test_gzip_asset_discovered(self, tmp_path: Path) -> None:
+        argv_file = tmp_path / "gh_argv"
+        result = self._run(
+            'local dir=""; while [[ $# -gt 0 ]]; do '
+            '[[ "$1" == "-D" ]] && dir="$2"; shift; done; '
+            'touch "$dir/lib.abicheck.json.gz"',
+            argv_file,
+        )
+        assert result.returncode == 0, result.stderr
+        assert "lib.abicheck.json.gz" in result.stdout
+        assert "REACHED_END" in result.stdout
+
+    def test_zstd_asset_discovered(self, tmp_path: Path) -> None:
+        argv_file = tmp_path / "gh_argv"
+        result = self._run(
+            'local dir=""; while [[ $# -gt 0 ]]; do '
+            '[[ "$1" == "-D" ]] && dir="$2"; shift; done; '
+            'touch "$dir/lib.abicheck.json.zst"',
+            argv_file,
+        )
+        assert result.returncode == 0, result.stderr
+        assert "lib.abicheck.json.zst" in result.stdout
+        assert "REACHED_END" in result.stdout
+
+    def test_mixed_suffix_assets_still_rejected_as_ambiguous(
+        self, tmp_path: Path
+    ) -> None:
+        """A plain and a compressed asset together are still two candidate
+        baselines, not one -- the ambiguity check must count across all
+        three suffixes combined, not per-suffix."""
+        argv_file = tmp_path / "gh_argv"
+        result = self._run(
+            'local dir=""; while [[ $# -gt 0 ]]; do '
+            '[[ "$1" == "-D" ]] && dir="$2"; shift; done; '
+            'touch "$dir/a.abicheck.json" "$dir/b.abicheck.json.zst"',
+            argv_file,
         )
         assert result.returncode == 1
         assert "Multiple *.abicheck.json assets found" in result.stdout
