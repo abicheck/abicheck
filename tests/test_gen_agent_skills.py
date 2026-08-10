@@ -245,6 +245,24 @@ def test_raw_html_link_is_a_hard_error(synthetic, markup):
         gen.render_all(gen.SRC_DIR)
 
 
+def test_shared_output_path_collision_is_a_hard_error(synthetic):
+    """A skill-specific `references/shared/<name>.md` colliding with a cited
+    global fragment of the same name used to be silently overwritten by the
+    global one — generation and `--check` both passed while every published
+    tree served content the skill's own links did not mean."""
+    synthetic(
+        skills={
+            "demo": {
+                "SKILL.md": "---\nname: demo\n---\n\n[a](../shared/a.md)\n",
+                "references/shared/a.md": "# Skill-specific A\n",
+            }
+        },
+        shared={"a.md": "# Global A\n"},
+    )
+    with pytest.raises(gen.SkillGenerationError, match="produced twice"):
+        gen.render_all(gen.SRC_DIR)
+
+
 def test_markdown_image_is_a_hard_error(synthetic):
     """Same class as the reference-definition case: `_MD_LINK_RE`'s negative
     lookbehind skips images, and the generator copies only Markdown — so an

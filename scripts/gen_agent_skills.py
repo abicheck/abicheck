@@ -551,6 +551,20 @@ def render_skill(skill_dir: Path, shared_dir: Path | None = None) -> dict[str, s
 
     for name in fragments:
         rel = f"{SHARED_SUBDIR}/{name}"
+        if rel in out:
+            # A skill-specific `references/shared/<name>.md` was rendered
+            # above and the skill also cites the global fragment of that
+            # name. Assigning here would silently replace the skill's own
+            # file with the global one — generation and `--check` would both
+            # pass while every published tree served content the skill's own
+            # links did not mean.
+            raise SkillGenerationError(
+                f"{skill_dir.name}: {rel!r} is produced twice — once from "
+                f"this skill's own `references/shared/{name}` and once from "
+                f"the global `shared/{name}` it cites. Rename the "
+                "skill-specific file; `references/shared/` is reserved for "
+                "copied global fragments."
+            )
         out[rel] = _render(
             shared_dir / name,
             rel,

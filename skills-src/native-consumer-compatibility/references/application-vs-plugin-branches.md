@@ -30,14 +30,25 @@ a different user job.
 ## Application branch, in practice
 
 ```bash
+# one run per consumer, into its own report
 abicheck compare OLD NEW \
   --used-by build/bin/myapp \
+  --depth headers --report-mode root-cause --format json \
+  -o myapp.json
+
+abicheck compare OLD NEW \
   --used-by build/lib/libplugin_host.so \
-  --depth headers --report-mode root-cause --format json
+  --depth headers --report-mode root-cause --format json \
+  -o plugin-host.json
 ```
 
-- Pass every consumer asked about; answer **per consumer**. A merged verdict
-  hides the divergence this workflow exists to surface.
+- **One run per consumer.** `--used-by` is repeatable and a single run does
+  answer every consumer, but only the *per-app summary* is per app; the
+  findings are one deduplicated union with no app-to-finding association.
+  Reading that merged list as one app's would misattribute another's break —
+  see the parent skill's step 2A, which owns this rule.
+- Answer **per consumer**. A merged verdict hides the divergence this
+  workflow exists to surface.
 - Deepen to `--depth source` when reachability, not just import presence, is
   the question.
 - A consumer built against a *different* old version than the project's last
