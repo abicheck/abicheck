@@ -1204,6 +1204,57 @@ which all depend on a Clang AST pass.
      `call_graph.py`'s own edge identity. Pinned by a dedicated regression
      test documenting the current, known-bad behavior rather than silently
      accepted.
+   - **A fourteenth finding: `fold_callback_graph`'s own coverage stamp
+     ignored `call_graph`'s coverage state entirely.** Part A's
+     `CALLBACK_MAY_INVOKE` join reads `call_graph`'s own already-folded
+     function-pointer-kind `DECL_CALLS_DECL` edges, so a degraded or
+     never-run `call_graph` pass means a real dispatch target can be
+     silently absent even when this pass's own clang run (Part B) examined
+     the whole compile DB cleanly — the identical class of bug the
+     `fold_virtual_dispatch_graph` propagation fix (findings eleven through
+     thirteen above) already closed for its own three prerequisites, just
+     not yet applied here. Fixed the same way: this pass's own extractor-run
+     state and `call_graph`'s recorded state are combined worst-wins
+     (`degraded`/missing > `narrowed` > `full`) before stamping
+     `extractor_passes`/`narrowed_passes`/`degraded_passes` for
+     `callback_graph`, with a dedicated regression test class
+     (`TestFoldCallbackGraphPropagatesCallGraphCoverage`) covering all four
+     combinations. A companion, much narrower finding in the same round:
+     `docs/_meta/topics.yaml`'s `impact-analysis` topic listed
+     `graph_impact.py` as a fact source but not `graph_facts.py` — the
+     shared node/edge kind and confidence-tier vocabulary every graph module
+     in this family (`macro_graph.py`/`virtual_dispatch_graph.py`/
+     `callback_graph.py`/...) actually builds on. Added.
+   - **A fifteenth finding, investigated and confirmed real, deliberately
+     not implemented: a callback propagated through an intermediate
+     parameter-to-slot assignment is never joined at all.** A registration
+     API that stashes its own *parameter* (not a function) into a stored
+     slot — `void reg(handler_t h) { stored = h; }`, with the eventual
+     indirect call made through `stored`, not `h` — breaks Part A's join.
+     Reproduced empirically end to end against real Clang 18: `call_graph.py`
+     correctly emits `DECL_CALLS_DECL(invoke -> stored, function_pointer)`,
+     and this module correctly emits `DECL_REGISTERS_CALLBACK(my_handler ->
+     h)` for the outer `reg(my_handler)` registration call — but
+     `stored = h;` inside `reg` is never captured as any edge at all, since
+     the RHS-resolution helper `_address_taken_function` only recognizes a
+     real function address/decay, not a parameter/variable/field alias. The
+     whole chain — a real, runtime-reachable `invoke -> my_handler`
+     relationship — therefore produces no `CALLBACK_MAY_INVOKE` edge, a
+     false negative distinct from every other gap documented above (those
+     under-report a slot that itself IS named; here the actually-invoked
+     slot never gets linked to the originally-registered function at all).
+     A sound fix needs two new pieces, not one: a new intra-procedural
+     "slot aliases slot" edge for a function-pointer-to-function-pointer
+     assignment, and a transitive closure in Part A's join with its own
+     cycle guard (an alias chain can be arbitrarily long and could
+     self-reference). Both are a scoped follow-up of their own — attempting
+     the transitive-closure half without careful cycle protection risks
+     turning a currently-safe "degrade to no fact" gap into a
+     non-terminating or spuriously overapproximating one, worse than the
+     status quo. Pinned by a dedicated regression test
+     (`test_callback_propagated_through_stored_parameter_slot_is_not_joined`)
+     documenting the current, known-incomplete behavior rather than
+     silently accepted.
 5. **Full type-role coverage** to parity: variable type, typedef target,
    alias-template target, enum underlying type, non-type template argument,
    default template argument, concept/constraint dependency, function-pointer

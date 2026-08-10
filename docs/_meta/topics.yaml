@@ -160,6 +160,7 @@ topics:
       - abicheck/impact/engine.py
       - abicheck/impact/use_cases.py
       - abicheck/buildsource/graph_impact.py
+      - abicheck/buildsource/graph_facts.py
       - abicheck/buildsource/macro_graph.py
       - abicheck/buildsource/virtual_dispatch_graph.py
       - abicheck/buildsource/callback_graph.py

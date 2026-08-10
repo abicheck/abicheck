@@ -269,6 +269,46 @@ not a drive-by extension here):
   function pointer, but this module makes no attempt to additionally verify
   the *owning class* of a pointer-to-member-function assignment — a narrower,
   separately-verified extension, not attempted here.
+- **Propagating a callback through an intermediate parameter-to-slot
+  assignment — investigated, confirmed real, deliberately not implemented.**
+  Codex review flagged a registration API that stashes its own *parameter*
+  (not a function) into a stored slot: ``void reg(handler_t h) { stored =
+  h; }``, with the eventual indirect call made through ``stored``, not
+  ``h``. Reproduced empirically end to end against real Clang 18
+  (``reg(my_handler)`` as the registration call, ``stored = h;`` inside
+  ``reg``, ``stored(1);`` inside a separate ``invoke``): ``call_graph.py``
+  correctly emits ``DECL_CALLS_DECL(invoke -> stored, function_pointer)``,
+  and this module correctly emits ``DECL_REGISTERS_CALLBACK(my_handler ->
+  h)`` for the outer ``reg(my_handler)`` call — but ``stored = h;`` inside
+  ``reg`` is never captured as any edge at all, since ``_address_taken_
+  function`` (what :func:`_emit_assignment_address_of`'s RHS resolution
+  requires) only recognizes a real function address/decay, not a
+  parameter/variable/field alias. Part A's join in
+  :func:`augment_graph_with_callback_invocations` therefore has no way to
+  connect ``stored`` back to ``h``, so the whole chain — a real,
+  runtime-reachable ``invoke -> my_handler`` relationship — produces no
+  ``CALLBACK_MAY_INVOKE`` edge at all, a false negative distinct from every
+  other gap documented above (those under-report a slot that itself IS
+  named; here the actually-invoked slot never gets linked to the
+  originally-registered function at all). A sound fix needs two new
+  pieces, not one: (1) a new intra-procedural "slot aliases slot" edge for
+  an assignment whose RHS is itself a function-pointer-typed
+  variable/parameter/field (broadening :func:`_resolve_assignment_slot`'s
+  existing LHS-only slot recognition to the RHS too), and (2) a transitive
+  closure in Part A's join — propagating a registration through zero or
+  more alias hops before matching against ``call_graph.py``'s
+  ``DECL_CALLS_DECL`` callee identity, with its own termination/cycle
+  guard (an alias chain can be arbitrarily long, and — unlike every other
+  edge kind this module emits — could self-reference through a pointer
+  assigned back to itself). Both pieces are a real, scoped follow-up of
+  their own, not a drive-by extension of the existing single-hop join;
+  attempting the transitive-closure half without careful cycle protection
+  risks turning a currently-safe "degrade to no fact" gap into a
+  non-terminating or a spuriously overapproximating one, which is worse
+  than the status quo. Pinned by a dedicated regression test documenting
+  the current, known-incomplete behavior (``test_callback_graph.py``'s
+  ``test_callback_propagated_through_stored_parameter_slot_is_not_joined``)
+  rather than silently accepted.
 """
 
 from __future__ import annotations

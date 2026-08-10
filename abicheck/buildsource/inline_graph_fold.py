@@ -755,12 +755,48 @@ def fold_callback_graph(
     )
     dispatch_result = augment_graph_with_callback_invocations(graph)
     added = registration_result.edges_joined + dispatch_result.dispatch_edges_added
+    # This pass's own extractor run (Part B, DECL_REGISTERS_CALLBACK/
+    # DECL_TAKES_ADDRESS_OF) gives the *ceiling* on the coverage claim below;
+    # Part A's CALLBACK_MAY_INVOKE join separately depends on `call_graph`'s
+    # already-folded function-pointer-kind DECL_CALLS_DECL edges (Codex
+    # review, fresh evidence) -- a degraded or missing call_graph pass means
+    # a real CALLBACK_MAY_INVOKE dispatch target can be silently absent even
+    # when this pass's own clang run examined the whole compile DB cleanly,
+    # mirroring the same prerequisite-propagation `fold_virtual_dispatch_graph`
+    # already applies for its own three prerequisites.
     if extractor_pass_fully_covered(target, extractor, narrowed):
-        graph.extractor_passes["callback_graph"] = True
+        own_state = "full"
     elif narrowed and narrowed_pass_confirmed(target, extractor):
-        graph.narrowed_passes["callback_graph"] = True
-        graph.narrowed_scope["callback_graph"] = scope_key
+        own_state = "narrowed"
     elif extractor.diagnostics:
+        own_state = "degraded"
+    else:
+        own_state = "none"
+    if graph.degraded_passes.get("call_graph"):
+        call_graph_state = "degraded"
+    elif graph.narrowed_passes.get("call_graph"):
+        call_graph_state = "narrowed"
+    elif graph.extractor_passes.get("call_graph"):
+        call_graph_state = "full"
+    else:
+        # Never ran at all (e.g. clang unavailable) -- as untrustworthy as a
+        # real per-TU diagnostic.
+        call_graph_state = "degraded"
+    # "degraded" and "none" share the worst rank on purpose: both land in the
+    # same `degraded_passes` branch below, so which of the two `max()` picks
+    # on a tie (Python keeps the first-seen argument, i.e. `own_state`) never
+    # changes the outcome -- the branch below re-checks both states directly
+    # rather than trusting `worst_state`'s exact spelling in that case.
+    _STATE_RANK = {"full": 0, "narrowed": 1, "degraded": 2, "none": 2}
+    worst_state = max(own_state, call_graph_state, key=_STATE_RANK.__getitem__)
+    if worst_state == "full":
+        graph.extractor_passes["callback_graph"] = True
+    elif worst_state == "narrowed":
+        graph.narrowed_passes["callback_graph"] = True
+        graph.narrowed_scope["callback_graph"] = (
+            scope_key if own_state == "narrowed" else graph.narrowed_scope["call_graph"]
+        )
+    elif own_state != "none" or call_graph_state != "none":
         graph.degraded_passes["callback_graph"] = True
     for diag in extractor.diagnostics:
         merged.diagnostics.append(f"callback_graph: {diag}")

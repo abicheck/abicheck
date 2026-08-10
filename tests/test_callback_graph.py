@@ -741,6 +741,121 @@ class TestFoldCallbackGraphGracefulDegradation:
         assert not graph.extractor_passes.get("callback_graph")
 
 
+class _FakeCleanCallbackExtractor:
+    """A callback extractor whose own clang run always succeeds cleanly (no
+    diagnostics, zero edges) -- used to isolate the ``call_graph`` coverage
+    propagation below from this pass's own extraction result."""
+
+    def __init__(self, *a, **k) -> None:
+        self.clang_bin = "clang++"
+        self.diagnostics: list[str] = []
+        self.last_jobs = 0
+        self.last_elapsed_s = 0.0
+
+    def available(self) -> bool:
+        return True
+
+    def extract_from_build(self, build):
+        return []
+
+
+def _merged_one_unit():
+    from abicheck.buildsource.build_evidence import BuildEvidence, CompileUnit
+
+    return BuildEvidence(
+        compile_units=[
+            CompileUnit(id="cu://t", source="t.c", directory=".", language="C")
+        ]
+    )
+
+
+class TestFoldCallbackGraphPropagatesCallGraphCoverage:
+    """Codex review, fresh evidence: Part A's ``CALLBACK_MAY_INVOKE`` join
+    depends on ``call_graph``'s own already-folded function-pointer-kind
+    ``DECL_CALLS_DECL`` edges, so a degraded/missing/narrowed ``call_graph``
+    pass must degrade (or narrow) this pass's own coverage claim too, even
+    when this pass's own clang run (Part B) examined the whole compile DB
+    cleanly -- mirroring ``fold_virtual_dispatch_graph``'s prerequisite
+    propagation (see that function's own test class,
+    ``TestFoldVirtualDispatchGraph``, in ``test_virtual_dispatch_graph.py``).
+    """
+
+    def test_degraded_call_graph_degrades_callback_graph_despite_clean_own_run(
+        self, monkeypatch
+    ) -> None:
+        from abicheck.buildsource import callback_graph
+
+        monkeypatch.setattr(
+            callback_graph, "ClangCallbackGraphExtractor", _FakeCleanCallbackExtractor
+        )
+        graph = SourceGraphSummary()
+        graph.degraded_passes["call_graph"] = True
+        rows: list = []
+
+        fold_callback_graph(graph, _merged_one_unit(), "clang", rows)
+
+        assert graph.degraded_passes.get("callback_graph") is True
+        assert "callback_graph" not in graph.extractor_passes
+        assert "callback_graph" not in graph.narrowed_passes
+
+    def test_missing_call_graph_coverage_degrades_callback_graph(
+        self, monkeypatch
+    ) -> None:
+        # call_graph never ran at all (e.g. clang unavailable for that pass)
+        # -- as untrustworthy as a real per-TU diagnostic, same as
+        # fold_virtual_dispatch_graph's "missing" case.
+        from abicheck.buildsource import callback_graph
+
+        monkeypatch.setattr(
+            callback_graph, "ClangCallbackGraphExtractor", _FakeCleanCallbackExtractor
+        )
+        graph = SourceGraphSummary()
+        rows: list = []
+
+        fold_callback_graph(graph, _merged_one_unit(), "clang", rows)
+
+        assert graph.degraded_passes.get("callback_graph") is True
+        assert "callback_graph" not in graph.extractor_passes
+
+    def test_narrowed_call_graph_propagates_to_callback_graph(
+        self, monkeypatch
+    ) -> None:
+        from abicheck.buildsource import callback_graph
+
+        monkeypatch.setattr(
+            callback_graph, "ClangCallbackGraphExtractor", _FakeCleanCallbackExtractor
+        )
+        graph = SourceGraphSummary()
+        graph.narrowed_passes["call_graph"] = True
+        graph.narrowed_scope["call_graph"] = frozenset({"a.cpp"})
+        rows: list = []
+
+        fold_callback_graph(graph, _merged_one_unit(), "clang", rows)
+
+        assert graph.narrowed_passes.get("callback_graph") is True
+        assert graph.narrowed_scope.get("callback_graph") == frozenset({"a.cpp"})
+        assert not graph.degraded_passes.get("callback_graph")
+        assert "callback_graph" not in graph.extractor_passes
+
+    def test_fully_covered_call_graph_leaves_callback_graph_fully_covered(
+        self, monkeypatch
+    ) -> None:
+        from abicheck.buildsource import callback_graph
+
+        monkeypatch.setattr(
+            callback_graph, "ClangCallbackGraphExtractor", _FakeCleanCallbackExtractor
+        )
+        graph = SourceGraphSummary()
+        graph.extractor_passes["call_graph"] = True
+        rows: list = []
+
+        fold_callback_graph(graph, _merged_one_unit(), "clang", rows)
+
+        assert graph.extractor_passes.get("callback_graph") is True
+        assert "callback_graph" not in graph.narrowed_passes
+        assert "callback_graph" not in graph.degraded_passes
+
+
 @pytest.mark.integration
 @pytest.mark.skipif(shutil.which("clang") is None, reason="clang not installed")
 class TestFoldCallbackGraphEndToEnd:
@@ -789,6 +904,64 @@ class TestFoldCallbackGraphEndToEnd:
         may_invoke = [e for e in graph.edges if e.kind == EDGE_CALLBACK_MAY_INVOKE]
         assert may_invoke, "expected at least one CALLBACK_MAY_INVOKE edge"
         assert any(e.resolved.get("resolution") == "overapprox" for e in may_invoke)
+
+    def test_callback_propagated_through_stored_parameter_slot_is_not_joined(
+        self, tmp_path
+    ) -> None:
+        """Documents a known, deliberately-unfixed false negative (Codex
+        review, fresh evidence; see this module's own docstring, "Deferred").
+        ``reg(h)`` stashes its own parameter ``h`` -- not a function -- into
+        the module-scope slot ``stored``; ``invoke`` later calls through
+        ``stored``. The real runtime relationship is ``invoke ->
+        my_handler``, but ``stored = h;`` is never captured as any edge
+        (``_address_taken_function`` only recognizes a real function
+        address/decay, not a parameter alias), so Part A's join has no path
+        from ``stored`` back to ``h`` and produces no ``CALLBACK_MAY_INVOKE``
+        edge for this chain at all -- pinned here rather than silently
+        regressed if a future change makes this join partially work without
+        the full transitive-closure fix the docstring describes.
+        """
+        from abicheck.buildsource.build_evidence import BuildEvidence, CompileUnit
+
+        src = tmp_path / "t.c"
+        src.write_text(
+            "typedef void (*handler_t)(int);\n"
+            "void my_handler(int x) {}\n"
+            "handler_t stored;\n"
+            "void reg(handler_t h) { stored = h; }\n"
+            "void invoke(void) { stored(1); }\n"
+            "void use(void) { reg(my_handler); }\n"
+        )
+        merged = BuildEvidence(
+            compile_units=[
+                CompileUnit(
+                    id="cu://t",
+                    source=str(src),
+                    directory=str(tmp_path),
+                    language="C",
+                )
+            ]
+        )
+        graph = SourceGraphSummary()
+        extractors: list = []
+        fold_call_graph(graph, merged, "clang", extractors)
+        fold_callback_graph(graph, merged, "clang", extractors)
+
+        assert graph.extractor_passes.get("callback_graph") is True
+        # The outer registration call is still captured correctly...
+        assert any(
+            e.kind == EDGE_DECL_REGISTERS_CALLBACK and e.dst == "decl://h"
+            for e in graph.edges
+        )
+        # ...and call_graph.py still sees the real indirect call through
+        # `stored`...
+        assert any(
+            e.kind == "DECL_CALLS_DECL" and e.dst == "decl://stored"
+            for e in graph.edges
+        )
+        # ...but the two never join, since `stored = h;` mints no alias edge
+        # connecting them: this is the documented gap, not a regression.
+        assert not any(e.kind == EDGE_CALLBACK_MAY_INVOKE for e in graph.edges)
 
 
 @pytest.mark.integration
