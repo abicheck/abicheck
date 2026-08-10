@@ -755,14 +755,22 @@ Once a root command genuinely clears the bar above, pick the right home:
   demotion stays inert wherever the evidence is absent; `STB_GNU_UNIQUE` is
   kept distinct from `WEAK` rather than folded in, since it is a strong,
   process-wide-unique definition whose whole purpose is to stop each consumer
-  using its own copy. (3) The predicate lives in a leaf module rather than in
+  using its own copy. (3) The demotion replaces the *removal*
+  finding only, never the signature comparison. The declaration is still
+  present on the new side — that is the whole basis for demoting — so it can
+  also have changed, and a first revision returned the risk finding early and
+  swallowed every such break (dropping a weak export while changing the return
+  type reported only the risk and came out `COMPATIBLE_WITH_RISK`). This is
+  the one path where a symbol leaves `_public_functions` yet still has a
+  new-side declaration worth comparing, so `_check_function_signature` had
+  never run on it. (4) The predicate lives in a leaf module rather than in
   `diff_symbols`, because **two** detectors in two files observe this same
   event and must agree: `diff_platform`'s ELF-fallback detector independently
   re-reported the same symbol at `BREAKING` and dominated the verdict, so a
   first attempt that fixed only `diff_symbols` changed the finding list and
   left the verdict wrong. A predicate-level unit test could not see that; the
-  regression coverage is a `compare()`-level test plus three FP-corpus cases
-  (one FP guard, two FN sentinels) under the `evidence-absence` axis.
+  regression coverage is a `compare()`-level test plus four FP-corpus cases
+  (one FP guard, three FN sentinels) under the `evidence-absence` axis.
   **Still open, deliberately not attempted in the same change:** the same
   demotion for *variables* (`Variable.elf_binding` is captured, but no
   variable-removal detector consults it — a weak exported variable is a

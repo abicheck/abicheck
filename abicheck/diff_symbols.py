@@ -788,7 +788,37 @@ def _match_old_function(
         matched_by_name.add(f_old.name)
         return result
 
-    return [check_removed_function(mangled, f_old, new_all, elf_only_mode)]
+    removal = check_removed_function(mangled, f_old, new_all, elf_only_mode)
+    if removal.kind is not ChangeKind.FUNC_EXPORT_DROPPED_INLINE_AVAILABLE:
+        return [removal]
+    # The demotion replaces the *removal* finding, not the signature
+    # comparison. The declaration is still there on the new side -- that is
+    # the whole basis for demoting -- so it can also have changed, and the
+    # early return swallowed every such break: dropping a weak export while
+    # changing the return type reported only the risk and came out
+    # COMPATIBLE_WITH_RISK (Codex review). This is the one path where a
+    # symbol leaves `_public_functions` yet still has a new-side declaration
+    # worth comparing, so `_check_function_signature` never ran on it.
+    #
+    # `check_removed_function`'s other early return -- FUNC_VISIBILITY_CHANGED
+    # -- also holds a new-side declaration but deliberately keeps swallowing
+    # the signature check: a function that went hidden is no longer callable
+    # by anyone, so how its signature changed is moot. The difference is that
+    # a demoted export is still *available* to a consumer through the header,
+    # which is exactly why a change to it still matters.
+    f_new_decl = new_all.get(mangled)
+    if f_new_decl is None:  # pragma: no cover - the predicate requires one
+        return [removal]
+    return [
+        removal,
+        *_check_function_signature(
+            mangled,
+            f_old,
+            f_new_decl,
+            params_unconfirmed=params_unconfirmed,
+            is_llp64=is_llp64,
+        ),
+    ]
 
 
 def _detect_newly_deleted_functions(

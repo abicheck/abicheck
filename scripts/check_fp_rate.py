@@ -916,6 +916,26 @@ def _out_of_line_weak_export_dropped_stays_breaking() -> tuple[AbiSnapshot, AbiS
     )
 
 
+def _demoted_export_with_signature_break_stays_breaking() -> tuple[AbiSnapshot, AbiSnapshot]:
+    # The demotion replaces the *removal* finding, not the signature check.
+    # The declaration is still there on the new side -- that is the basis for
+    # demoting -- so it can have changed too, and returning the risk finding
+    # early swallowed every such break (Codex review). This is the one path
+    # where a symbol leaves the public map yet still has a new-side
+    # declaration worth comparing.
+    mangled = _linkage_fn().mangled
+
+    def fn(ret, *, binding=None):
+        f = _linkage_fn(binding=binding, inline=True)
+        f.return_type = ret
+        return f
+
+    return (
+        _linkage_snap("1", [fn("int", binding=ElfBinding.WEAK)], [mangled]),
+        _linkage_snap("2", [fn("long")], ["_Z5otherv"]),
+    )
+
+
 def _strong_export_dropped_stays_breaking() -> tuple[AbiSnapshot, AbiSnapshot]:
     # The FN sentinel for the demotion above, and the whole reason it keys on
     # the binding: an identical-looking event on a *strong* definition really
@@ -1122,6 +1142,11 @@ CORPUS: list[Case] = [
     Case("internal_struct_size", True, _internal_struct_size),
     Case("weak_export_dropped_stays_nonbreaking", True, _weak_export_dropped_stays_nonbreaking),
     Case("strong_export_dropped_stays_breaking", False, _strong_export_dropped_stays_breaking),
+    Case(
+        "demoted_export_with_signature_break_stays_breaking",
+        False,
+        _demoted_export_with_signature_break_stays_breaking,
+    ),
     Case(
         "out_of_line_weak_export_dropped_stays_breaking",
         False,
@@ -1658,6 +1683,7 @@ CASE_CATEGORY: dict[str, str] = {
     # evidence-absence vs. real change (a finding must rest on evidence)
     "weak_export_dropped_stays_nonbreaking": "evidence-absence",
     "strong_export_dropped_stays_breaking": "evidence-absence",
+    "demoted_export_with_signature_break_stays_breaking": "evidence-absence",
     "out_of_line_weak_export_dropped_stays_breaking": "evidence-absence",
     "uncaptured_binding_export_dropped_stays_breaking": "evidence-absence",
     "vtable_capture_asymmetry_stays_filtered": "evidence-absence",

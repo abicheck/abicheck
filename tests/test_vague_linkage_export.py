@@ -156,6 +156,54 @@ class TestThroughCompare:
         assert result.verdict is Verdict.BREAKING
 
 
+class TestTheDemotionReplacesOnlyTheRemoval:
+    """A demoted export can *also* have changed, and both must be reported.
+
+    The demotion rests on the declaration still being there on the new side,
+    which is exactly why it can have changed too. Returning the risk finding
+    early swallowed every such break: dropping a weak export while changing
+    the return type reported only the risk and came out
+    COMPATIBLE_WITH_RISK (Codex review). This is the one path where a symbol
+    leaves ``_public_functions`` yet still has a new-side declaration worth
+    comparing, so the ordinary signature check never ran on it.
+    """
+
+    @staticmethod
+    def _pair(old_ret: str, new_ret: str) -> tuple[AbiSnapshot, AbiSnapshot]:
+        old = Function(
+            name="ns::f",
+            mangled=MANGLED,
+            return_type=old_ret,
+            visibility=Visibility.PUBLIC,
+            is_inline=True,
+            elf_binding=ElfBinding.WEAK,
+        )
+        new = Function(
+            name="ns::f",
+            mangled=MANGLED,
+            return_type=new_ret,
+            visibility=Visibility.PUBLIC,
+            is_inline=True,
+        )
+        return _snap([old], [MANGLED]), _snap([new], ["_Z5otherv"])
+
+    def test_a_coincident_signature_break_is_still_reported(self) -> None:
+        result = compare(*self._pair("int", "long"))
+        kinds = {c.kind.value for c in result.changes}
+        assert "func_export_dropped_inline_available" in kinds, kinds
+        assert "func_return_changed" in kinds, kinds
+        assert result.verdict is Verdict.BREAKING
+
+    def test_an_unchanged_declaration_stays_a_lone_risk(self) -> None:
+        """The mirror: emitting the signature findings must not manufacture
+        one where the declaration really did hold still."""
+        result = compare(*self._pair("int", "int"))
+        assert [c.kind.value for c in result.changes] == [
+            "func_export_dropped_inline_available"
+        ]
+        assert result.verdict is Verdict.COMPATIBLE_WITH_RISK
+
+
 class TestTheEvidenceRoundTrips:
     def test_the_binding_survives_serialization(self) -> None:
         from abicheck.serialization import snapshot_from_dict, snapshot_to_dict
