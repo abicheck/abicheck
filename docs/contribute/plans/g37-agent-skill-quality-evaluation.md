@@ -307,7 +307,8 @@ Every live run persists a **transcript bundle**:
 agent-evals/skills/runs/<run-id>/<scenario>/<k>/
   meta.json          agent, model, seed/temperature, and every hash D6's freshness
                      check reads: this skill's tree hash, the abicheck build hash, and
-                     one entry per scenario exercised (scenario record + fixture closure)
+                     one entry per scenario exercised (scenario record + fixture
+                     closure), and the live-trigger corpus hash for L1l evidence
   prompt.txt         the verbatim user request
   events.jsonl       normalized agent events: which skill activated, which skill files
                      were read, tool calls in order — the L1l evidence (see below)
@@ -901,16 +902,35 @@ skills, and the suite is the union over all moved hashes.** Concretely —
 |---|---|
 | A skill's own tree hash | that skill (a `skills-src/shared/` edit resolves through the generator's citation graph, below) |
 | A scenario hash (manifest record, fixture closure, or ground-truth entry) | every skill whose scenarios reference that scenario |
+| The live-trigger corpus hash (`tests/agent_skills/trigger_corpus.yaml`) | all of them — L1l precision is computed per skill across the whole corpus, so any prompt or label change invalidates every skill's activation evidence |
 | The abicheck build-surface hash | all of them |
 
 The last row's practical effect is that a CLI/report-schema change costs a
 full re-evaluation, which is the correct price for the one change class that
 can silently alter what every skill's workflow produces; the hash is
 deliberately scoped to consumed surface (D6) so ordinary detector-internals
-commits do not trigger it. Phase 0's checker builds the mapping from the same
-data D6 hashes, so a hash added later cannot be forgotten by the selector
-without failing its own round-trip test — which is what stops this from
-happening a third time.
+commits do not trigger it. **The invariant has a dual, and it failed too, which is why both are stated
+as checks rather than as prose.** The mapping rule above assumes the hash set
+is complete. The complementary failure is an input the evaluation *reads*
+with no hash at all: the trigger corpus was exactly that for one commit —
+wired into L1l as Phase 2's input, hashed nowhere, so editing a prompt or
+relabelling one would have left every bundle "fresh" and reported activation
+precision against the previous corpus indefinitely. Note the two failures
+point opposite ways: a hash with no mapping rejects evidence with nothing to
+regenerate it; an input with no hash accepts evidence that no longer
+corresponds to anything.
+
+So Phase 0 carries **two** round-trip checks over one list of inputs:
+
+1. **Completeness** — every input a run reads (skill trees, scenario
+   manifest, fixtures, ground-truth entries, trigger corpus, the abicheck
+   surface) contributes to some hash the freshness check reads.
+2. **Mapping** — every such hash resolves to a set of skills, so a moved hash
+   always nominates something to re-run.
+
+Both derive from the same declared input list, so an input added later fails
+one check or the other rather than silently escaping both — which is what
+stops this class recurring, having now recurred twice in each direction.
 
 Deterministic rotation was considered and rejected for the wide cases: a
 rotating subset would make the gate's strength depend on when a PR happened to
