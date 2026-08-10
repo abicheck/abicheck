@@ -1017,6 +1017,39 @@ def test_augment_graph_macho_symbol_joins_via_fallback_on_gnu_indexed_archive(
     assert defining_members(g, "foo") == [("libtest.a", "a.o")]
 
 
+def test_augment_graph_macho_fallback_is_gated_per_member_not_archive_wide(
+    tmp_path,
+) -> None:
+    """A mixed-format archive (an ELF object and a Mach-O object archived
+    together, e.g. a cross-toolchain build) has members whose own object
+    format genuinely differs member-to-member -- the underscore-stripping
+    join fallback must gate on *each ref's own defining member's* magic,
+    not the archive-wide first-member magic (Codex review, fifth round,
+    fresh evidence): applying the first (Mach-O) member's format to every
+    symbol in the archive would incorrectly strip the second (ELF)
+    member's already-correctly-spelled ``_baz`` and false-join it onto an
+    unrelated exported ``baz``, while the first member's real Mach-O
+    ``_foo`` join must still succeed."""
+    data = build_gnu_archive(
+        [
+            ("a.o", b"\xfe\xed\xfa\xcf\nSYM:_foo\n"),  # Mach-O magic
+            ("b.o", b"\x7fELF\nSYM:_baz\n"),  # ELF magic
+        ]
+    )
+    (tmp_path / "libtest.a").write_bytes(data)
+    # Both "foo" and "baz" exist as unrelated exported symbol nodes with no
+    # leading underscore -- "baz" must NOT be joined to, since "_baz" is a
+    # real ELF symbol's own correct spelling, not a Mach-O-stripped one.
+    g = _graph_with_archive("libtest.a", ["foo", "baz"])
+
+    result = augment_graph_with_archives(g, search_roots=(tmp_path,))
+
+    assert result.symbol_edges == 1
+    assert result.unjoined_symbols == 1
+    assert defining_members(g, "foo") == [("libtest.a", "a.o")]
+    assert defining_members(g, "baz") == []
+
+
 def test_thin_archive_regular_member_object_magic_is_empty_not_fabricated() -> None:
     """A thin archive's regular members are bodiless (their real data lives
     in an external file this parser has no path to open) -- reading

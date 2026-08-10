@@ -275,12 +275,30 @@ class ArMember:
     ``#1/<len>`` inline name). ``header_offset`` is what a symbol index
     entry points at, which is why it — not ``data_offset`` — is the join key
     between the two parsing passes.
-    """
+
+    ``object_magic`` is *this specific member's own* leading 4 bytes — real,
+    per-member object-format evidence, not the whole archive's (Codex
+    review, fresh evidence): a mixed-format archive (an ELF object and a
+    Mach-O object archived together, e.g. via a cross-toolchain build) has
+    members whose own object format genuinely differs member-to-member,
+    and `augment_graph_with_archives`'s Mach-O leading-underscore join
+    fallback previously gated on `ArchiveContents.object_magic` — the
+    *first* regular member's magic alone — applied uniformly to every
+    symbol in the archive regardless of which member actually defines it.
+    That misclassifies a later member of the *other* format: if the first
+    member is Mach-O but a later one is ELF, the later member's own
+    already-correctly-spelled `_foo` symbol gets the stripped-underscore
+    treatment applied anyway and can false-join onto an unrelated exported
+    `foo`; the reverse ordering just as wrongly skips a real Mach-O join.
+    Same limitation as the archive-wide field for a *thin* archive's
+    bodiless regular members (empty, not fabricated — see
+    :func:`parse_ar_archive`'s own docstring)."""
 
     name: str
     header_offset: int
     data_offset: int
     size: int
+    object_magic: bytes = b""
 
 
 @dataclass(frozen=True)
@@ -690,12 +708,14 @@ def parse_ar_archive(reader: ByteReader) -> ArchiveContents:
                 stored = size  # a BSD index member's data is always inline
             else:
                 if name:
+                    member_data_offset = data_offset + name_bytes
                     members.append(
                         ArMember(
                             name=name,
                             header_offset=header_offset,
-                            data_offset=data_offset + name_bytes,
+                            data_offset=member_data_offset,
                             size=size - name_bytes,
+                            object_magic=reader.read(member_data_offset, 4),
                         )
                     )
                 stored = size if not thin else 0
@@ -724,6 +744,7 @@ def parse_ar_archive(reader: ByteReader) -> ArchiveContents:
                     header_offset=m.header_offset,
                     data_offset=m.data_offset,
                     size=m.size,
+                    object_magic=m.object_magic,
                 )
             )
             for m in members
@@ -778,7 +799,10 @@ def parse_ar_archive(reader: ByteReader) -> ArchiveContents:
     # this read. Deferred the same way this file already defers its other
     # documented thin-archive gaps (see `_resolve_archive_path`'s own
     # docstring).
-    object_magic = reader.read(members[0].data_offset, 4) if members else b""
+    # Reuses the first member's own already-read object_magic (populated at
+    # construction time above) rather than re-reading -- same value, one
+    # less I/O call.
+    object_magic = members[0].object_magic if members else b""
 
     return ArchiveContents(
         flavor=flavor,
@@ -1082,12 +1106,21 @@ def augment_graph_with_archives(
         # unrelated, byte-identical member as removed-and-re-added on a
         # structural graph diff (Codex review, second round).
         member_ids: dict[int, str] = {}
+        # Per-member object-format evidence, keyed the same way as
+        # member_ids -- a mixed-format archive (Codex review, fresh
+        # evidence: an ELF object and a Mach-O object archived together)
+        # has members whose own format genuinely differs, so the Mach-O
+        # underscore-stripping join fallback below must gate on *this*
+        # symbol's own defining member, not the archive-wide first-member
+        # magic (see ArMember.object_magic's own docstring).
+        member_magic: dict[int, bytes] = {}
         name_occurrences: dict[str, int] = {}
         for member in contents.members:
             occurrence = name_occurrences.get(member.name, 0)
             name_occurrences[member.name] = occurrence + 1
             mid = archive_member_node_id(label, member.name, occurrence)
             member_ids[member.header_offset] = mid
+            member_magic[member.header_offset] = member.object_magic
             graph.add_node(
                 GraphNode(
                     id=mid,
@@ -1116,7 +1149,7 @@ def augment_graph_with_archives(
             if (
                 sid not in known_symbols
                 and ref.symbol.startswith("_")
-                and contents.object_magic in _MACHO_MAGICS
+                and member_magic.get(ref.member_offset, b"") in _MACHO_MAGICS
             ):
                 # A Mach-O/BSD ranlib index keeps the platform's C-symbol
                 # leading underscore (`_foo`), but `macho_metadata.py`'s own
@@ -1154,6 +1187,18 @@ def augment_graph_with_archives(
                 # stronger signal (direct evidence of the member's own
                 # bytes, not an inference from how the *index* happened to
                 # be written), so it is sufficient on its own.
+                #
+                # Gated on *this ref's own defining member's* magic
+                # (`member_magic`), not the archive-wide first-member magic
+                # (Codex review, fifth round, fresh evidence): a mixed-
+                # format archive genuinely exists (an ELF object and a
+                # Mach-O object archived together, e.g. a cross-toolchain
+                # build combining both) — applying one member's format to
+                # every symbol in the archive either strips a real ELF
+                # symbol's already-correct spelling (risking a false join
+                # onto an unrelated export merely sharing the stripped
+                # name) or skips a real Mach-O join, depending on which
+                # member happened to come first.
                 stripped_sid = _symbol_node_id(ref.symbol[1:])
                 if stripped_sid in known_symbols:
                     sid = stripped_sid

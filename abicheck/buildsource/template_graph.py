@@ -485,10 +485,12 @@ def _node_loc_offset(node: dict[str, Any]) -> int | None:
     return offset if isinstance(offset, int) else None
 
 
-def _primary_pattern_member_locs(class_template_node: dict[str, Any]) -> dict[str, int]:
-    """``member name -> loc.offset`` for each direct ``FunctionTemplateDecl``
-    child of a ``ClassTemplateDecl``'s own primary pattern (its un-
-    specialized ``CXXRecordDecl`` child) -- the signal
+def _primary_pattern_member_locs(
+    class_template_node: dict[str, Any],
+) -> dict[tuple[str, str], int]:
+    """``(member name, pattern signature) -> loc.offset`` for each direct
+    ``FunctionTemplateDecl`` child of a ``ClassTemplateDecl``'s own primary
+    pattern (its un-specialized ``CXXRecordDecl`` child) -- the signal
     :func:`_walk_function_templates` needs to tell a genuinely *shared*
     member (an implicit instantiation, or an explicit-instantiation
     *definition* that forces the primary pattern's own body without writing
@@ -506,7 +508,25 @@ def _primary_pattern_member_locs(class_template_node: dict[str, Any]) -> dict[st
     cannot distinguish these two cases -- both detach identically -- so this
     compares source identity instead. Returns ``{}`` when the primary
     pattern's own record isn't found (an unmodeled shape; degrades to no
-    shared members recognized, this module's usual conservative default)."""
+    shared members recognized, this module's usual conservative default).
+
+    Keyed by ``(name, signature)``, not name alone (Codex review, third
+    round, fresh evidence, confirmed against real clang AST output): when
+    the primary pattern itself *overloads* a member-template name (``template
+    <typename U> U f(U);`` alongside ``template <typename U> U f(U, U);``,
+    both named ``f``), a name-only dict keeps only the last-registered
+    overload's offset, so every earlier overload's own instantiated member
+    then fails the shared-member check and gets wrongly disambiguated --
+    confirmed empirically: two overloads of ``f`` on ``Holder``'s primary
+    pattern, each instantiated through both ``Holder<int>`` and
+    ``Holder<double>``, split the *first* overload into separate
+    ``Holder<int>::f``/``Holder<double>::f`` template-declaration nodes for
+    what both AST dumps show is the identical syntactic overload, while the
+    second overload (whose offset survived the overwrite) stayed correctly
+    merged. :func:`_function_template_pattern_signature` (clang's printed,
+    unspecialized function type, e.g. ``"T (T)"`` vs. ``"T (T, T)"``) is the
+    same discriminator :func:`template_decl_node_id` already uses to keep
+    two such overloads' own declaration nodes distinct."""
     pattern: dict[str, Any] | None = None
     for child in class_template_node.get("inner", []) or []:
         if str(child.get("kind", "")) in ("CXXRecordDecl", "RecordDecl"):
@@ -514,13 +534,14 @@ def _primary_pattern_member_locs(class_template_node: dict[str, Any]) -> dict[st
             break
     if pattern is None:
         return {}
-    locs: dict[str, int] = {}
+    locs: dict[tuple[str, str], int] = {}
     for child in pattern.get("inner", []) or []:
         if str(child.get("kind", "")) == _FUNCTION_TEMPLATE_KIND:
             name = str(child.get("name") or "")
             offset = _node_loc_offset(child)
             if name and offset is not None:
-                locs[name] = offset
+                signature = _function_template_pattern_signature(child)
+                locs[(name, signature)] = offset
     return locs
 
 
@@ -952,7 +973,7 @@ def _walk_function_templates(
     full_function_by_id: dict[str, dict[str, Any]],
     id_to_file: dict[str, str],
     out: list[TemplateInstantiation],
-    qname_to_member_locs: dict[str, dict[str, int]],
+    qname_to_member_locs: dict[str, dict[tuple[str, str], int]],
 ) -> None:
     if not isinstance(node, dict):
         return
@@ -1060,10 +1081,17 @@ def _walk_function_templates(
         for child in node.get("inner", []) or []:
             if str(child.get("kind", "")) == _FUNCTION_TEMPLATE_KIND:
                 member_name = str(child.get("name") or "")
+                # Keyed by (name, signature), not name alone -- a
+                # same-named overload on the primary pattern (`f<U>(U)`
+                # vs. `f<U>(U, U)`) needs its own discriminator or the
+                # dict-overwrite-by-name loses every overload but the last
+                # (Codex review, third round, fresh evidence; see
+                # _primary_pattern_member_locs's own docstring).
+                member_key = (member_name, _function_template_pattern_signature(child))
                 shared = (
                     member_name
-                    and member_name in member_locs
-                    and _node_loc_offset(child) == member_locs[member_name]
+                    and member_key in member_locs
+                    and _node_loc_offset(child) == member_locs[member_key]
                 )
                 if shared:
                     name = bare_name
@@ -1126,7 +1154,7 @@ def _walk_class_templates(
     scope: list[str],
     id_to_qname: dict[str, str],
     id_to_template_qname: dict[str, str],
-    qname_to_member_locs: dict[str, dict[str, int]],
+    qname_to_member_locs: dict[str, dict[tuple[str, str], int]],
 ) -> None:
     if not isinstance(node, dict):
         return
@@ -1204,7 +1232,7 @@ def parse_clang_ast_templates(ast: dict[str, Any]) -> list[TemplateInstantiation
     full_by_id: dict[str, dict[str, Any]] = {}
     _collect_full_specializations(ast, full_by_id)
     id_to_template_qname: dict[str, str] = {}
-    qname_to_member_locs: dict[str, dict[str, int]] = {}
+    qname_to_member_locs: dict[str, dict[tuple[str, str], int]] = {}
     _walk_class_templates(
         ast, [], id_to_qname, id_to_template_qname, qname_to_member_locs
     )

@@ -552,3 +552,36 @@
   module nor `diff_cxx_rules.py` currently exposes — each its own scoped
   follow-up, documented in the module's own docstring rather than
   attempted as a drive-by extension here.
+
+  A twentieth round found and fixed two more real gaps, both confirmed
+  empirically against real compiled/hand-assembled fixtures. First,
+  `_primary_pattern_member_locs` keyed its `member name -> loc.offset`
+  dict by name alone -- when a class template's primary pattern itself
+  *overloads* a member-template name (`template <typename U> U f(U);`
+  alongside `template <typename U> U f(U, U);`, both named `f`), the
+  name-only dict kept only the last-registered overload's offset, so
+  every earlier overload's own instantiated member failed the
+  shared-member check and was wrongly disambiguated. Confirmed against a
+  real `clang -ast-dump=json` dump: two overloads of `f` on `Holder`'s
+  primary pattern, each instantiated through both `Holder<int>` and
+  `Holder<double>`, split the first overload into separate
+  `Holder<int>::f`/`Holder<double>::f` nodes for what both dumps show is
+  the identical syntactic overload. Fixed by keying on `(name, pattern
+  signature)` instead, reusing the same `_function_template_pattern_
+  signature` discriminator `template_decl_node_id` already uses to keep
+  two such overloads' own declaration nodes distinct (Codex review, fresh
+  evidence). Second, `augment_graph_with_archives`'s Mach-O leading-
+  underscore join fallback gated on `ArchiveContents.object_magic` --
+  the *first* regular member's own magic bytes -- applied uniformly to
+  every symbol in the archive regardless of which member actually defines
+  it. A mixed-format archive (an ELF object and a Mach-O object archived
+  together, e.g. a cross-toolchain build) has members whose own format
+  genuinely differs member-to-member: if the first member is Mach-O but a
+  later one is ELF, the later member's own already-correctly-spelled
+  `_foo` symbol gets the stripped-underscore treatment applied anyway and
+  can false-join onto an unrelated exported `foo` (confirmed with a
+  hand-assembled two-member archive reproducing exactly this). `ArMember`
+  now carries its own `object_magic` (populated once at construction,
+  first four bytes of that specific member's own data), and the fallback
+  gates on the *referenced symbol's own defining member's* magic instead
+  of the archive-wide value.
