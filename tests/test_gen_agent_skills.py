@@ -27,6 +27,7 @@ import importlib.util
 import re
 import shutil
 import sys
+import time
 from pathlib import Path
 
 import pytest
@@ -362,8 +363,19 @@ def test_a_fence_running_to_end_of_file_is_still_masked(synthetic, opener):
 @pytest.mark.parametrize("fence", ["```md", "~~~md"], ids=["tick", "tilde"])
 @pytest.mark.parametrize(
     "prefix",
-    ["> ", "    ", "    > ", ">> ", "\t"],
-    ids=["quote", "list-indent", "quote-in-list", "nested-quote", "tab"],
+    ["> ", "    ", "    > ", ">> ", "\t", "- ", "1. ", "* ", "2) ", "> - "],
+    ids=[
+        "quote",
+        "list-indent",
+        "quote-in-list",
+        "nested-quote",
+        "tab",
+        "on-dash-marker",
+        "on-ordered-marker",
+        "on-star-marker",
+        "on-paren-ordered-marker",
+        "quote-then-list-marker",
+    ],
 )
 def test_a_fence_behind_a_container_prefix_is_a_hard_error(synthetic, fence, prefix):
     """The mask anchors on the line start and reads at most three spaces, so a
@@ -423,6 +435,51 @@ def test_a_fence_indented_three_spaces_is_not_a_container():
     """`_FENCE_RE` accepts up to three leading spaces, so that prefix is one
     the mask *can* read — the guard must not reject what already works."""
     assert gen._contained_fence_line("   ```bash\nrun\n   ```\n") is None
+
+
+@pytest.mark.parametrize(
+    "prefix",
+    ["", "> ", "- ", "  > - "],
+    ids=["top-level", "quote", "list-item", "quote-in-list"],
+)
+def test_a_reference_definition_is_rejected_inside_any_container(synthetic, prefix):
+    """A quoted `> [guide]: ../…` still binds a later `> [guide]`, and carries
+    no `](` for the inline-link guard to see — so a container-blind check
+    shipped a repo-relative destination into all three trees silently."""
+    synthetic(
+        skills={
+            "demo": {
+                "SKILL.md": (
+                    "---\nname: demo\n---\n\n[a](../shared/a.md)\n\n"
+                    f"{prefix}[guide]: ../../docs/use/output-formats.md\n"
+                )
+            }
+        },
+        shared={"a.md": "# A\n"},
+    )
+    with pytest.raises(gen.SkillGenerationError, match="reference-style link"):
+        gen.render_all(gen.SRC_DIR)
+
+
+@pytest.mark.parametrize(
+    "line",
+    ["[^fn]: a footnote", "> [!IMPORTANT]", "- [ ] a task item", "see [guide]: inline"],
+    ids=["footnote", "callout", "task-item", "mid-sentence"],
+)
+def test_a_definition_lookalike_is_not_a_reference_definition(line):
+    """Widening the guard across containers must not start rejecting ordinary
+    prose that merely contains a bracket and a colon."""
+    assert gen._reference_definition_labels(line) == []
+
+
+def test_a_long_container_prefix_does_not_blow_up(synthetic):
+    """The prefix is scanned, not pattern-matched. Expressing it as a regex
+    needs `[ \\t]*` both inside and after the repetition; those compete for the
+    same characters, and the first attempt here hung on a line like this one.
+    """
+    start = time.monotonic()
+    assert gen._contained_fence_line("> " * 4000 + "x\n") is None
+    assert time.monotonic() - start < 5.0
 
 
 def test_a_tilde_run_does_not_close_a_backtick_fence(synthetic):
