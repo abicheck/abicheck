@@ -671,6 +671,90 @@ def test_fsync_unsupported_error_is_still_best_effort(tmp_path, monkeypatch):
     assert p.is_file()
 
 
+@pytest.mark.skipif(os.name == "nt", reason="no O_DIRECTORY on Windows")
+def test_replace_fsyncs_the_parent_directory(tmp_path, monkeypatch):
+    """CodeRabbit review, PR #699: os.replace()'s directory-entry update is
+    not itself durable across a crash until the parent directory is
+    fsync'd -- the file-content fsync alone only guarantees the new data
+    reaches storage, not that the rename pointing at it survives a power
+    loss. Verify the parent directory is actually opened and fsync'd, and
+    that it happens strictly after the file's own content fsync (fsync'ing
+    the directory before the data it points at is durable would defeat the
+    point)."""
+    import abicheck.snapshot_io as snapshot_io_mod
+
+    snap = _sample_snapshot()
+    p = tmp_path / "existing.abicheck.json"
+    write_snapshot(snap, p)  # pre-existing destination, so this is a rewrite
+
+    calls: list[tuple[str, int]] = []
+    real_fsync = os.fsync
+    real_open = os.open
+
+    def _tracking_fsync(fd):
+        calls.append(("fsync", fd))
+        return real_fsync(fd)
+
+    dir_fds: list[int] = []
+
+    def _tracking_open(path, flags, *a, **kw):
+        fd = real_open(path, flags, *a, **kw)
+        if flags & os.O_DIRECTORY:
+            dir_fds.append(fd)
+        return fd
+
+    monkeypatch.setattr(snapshot_io_mod.os, "fsync", _tracking_fsync)
+    monkeypatch.setattr(snapshot_io_mod.os, "open", _tracking_open)
+    write_snapshot(snap, p)
+
+    assert len(calls) == 2, calls  # file content fsync, then directory fsync
+    assert len(dir_fds) == 1
+    # fd numbers can be reused once closed, so identify the directory fsync
+    # by *position* (it must be the second, later call) rather than by a
+    # fd-number inequality against the first.
+    assert calls[1] == ("fsync", dir_fds[0])  # directory fd, strictly after
+
+
+def test_directory_fsync_real_failure_propagates_but_content_is_already_live(
+    tmp_path, monkeypatch
+):
+    """A real error (not the fsync-unsupported case) fsync'ing the parent
+    directory still surfaces to the caller -- but by that point os.replace()
+    has already succeeded, so unlike the pre-replace file-fsync failure
+    case, the new content is genuinely on disk at the destination; only its
+    directory-entry durability across a crash is unconfirmed."""
+    import errno
+
+    import abicheck.snapshot_io as snapshot_io_mod
+
+    snap = _sample_snapshot()
+    p = tmp_path / "existing.abicheck.json"
+    write_snapshot(snap, p)
+
+    new_snap = AbiSnapshot(library="libbar.so.2", version="2.0")
+    real_fsync = os.fsync
+    real_open = os.open
+    call_count = 0
+
+    def _fail_second_fsync(fd):
+        nonlocal call_count
+        call_count += 1
+        if call_count == 2:  # the directory fsync
+            raise OSError(errno.EIO, "I/O error")
+        return real_fsync(fd)
+
+    def _passthrough_open(path, flags, *a, **kw):
+        return real_open(path, flags, *a, **kw)
+
+    monkeypatch.setattr(snapshot_io_mod.os, "fsync", _fail_second_fsync)
+    monkeypatch.setattr(snapshot_io_mod.os, "open", _passthrough_open)
+    with pytest.raises(OSError):
+        write_snapshot(new_snap, p)
+    # The rename already completed -- content reflects the new write, not
+    # the old one, despite the raised exception.
+    assert load_snapshot(p).library == "libbar.so.2"
+
+
 # ── Content ──────────────────────────────────────────────────────────────
 
 

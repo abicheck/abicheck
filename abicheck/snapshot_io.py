@@ -603,8 +603,21 @@ def _open_unique_temp(parent: Path, prefix: str, suffix: str) -> tuple[int, Path
 
 def _atomic_write_bytes(data: bytes, path: Path) -> None:
     """Write *data* to *path* atomically: temp file in the same directory,
-    flush, best-effort fsync, then os.replace(). Never leaves a partial file
-    at *path* on failure, and cleans up its own temp file either way.
+    flush, best-effort fsync, then os.replace(), then best-effort fsync the
+    parent directory. Never leaves a partial file at *path* on failure, and
+    cleans up its own temp file either way.
+
+    Note the parent-directory fsync's failure semantics differ from the
+    pre-replace file fsync above (CodeRabbit review): by the time it runs,
+    ``os.replace()`` has already completed and *target* already holds the
+    new content -- a real error there (propagated the same narrow way as
+    the file fsync, distinguishing genuine storage failures from an
+    fsync-unsupported filesystem/platform) means the directory-entry
+    update pointing at that content is not confirmed durable across a
+    crash, not that the write itself failed or that *target*'s content is
+    wrong on a running system. A caller catching it may still choose to
+    retry the whole write; doing so is safe (idempotent) but unnecessary
+    for correctness on a system that stays up.
 
     File mode (Codex/CodeRabbit review, two rounds): the temp file is
     created via :func:`_open_unique_temp`, so a genuinely *new* destination
@@ -690,6 +703,35 @@ def _atomic_write_bytes(data: bytes, path: Path) -> None:
             except OSError:
                 pass  # best-effort; not privileged, or platform has no chown
         os.replace(tmp_path, target)
+        # CodeRabbit review: os.replace()'s directory-entry update is not
+        # itself durable across a crash until the *parent* directory is
+        # fsync'd too -- the file-content fsync above only guarantees the
+        # new data reaches storage, not that the rename pointing at it
+        # survives a power loss. Best-effort in the same narrow sense as
+        # the file fsync above: some platforms/filesystems don't support
+        # fsync on a directory fd at all (Windows has no directory fd
+        # concept here), which is not a storage failure to propagate --
+        # but a real one (EIO/ENOSPC/EROFS) means the rename may not
+        # actually be durable, which this function should surface rather
+        # than silently claim success for. Never blocks on a missing
+        # `target.parent` (`hasattr(os, "O_DIRECTORY")` gates POSIX-only).
+        if hasattr(os, "O_DIRECTORY"):
+            try:
+                dir_fd = os.open(parent, os.O_RDONLY | os.O_DIRECTORY)
+            except OSError:
+                dir_fd = None
+            if dir_fd is not None:
+                try:
+                    os.fsync(dir_fd)
+                except OSError as exc:
+                    if exc.errno not in (
+                        errno.EINVAL,
+                        errno.ENOTSUP,
+                        errno.EOPNOTSUPP,
+                    ):
+                        raise
+                finally:
+                    os.close(dir_fd)
     except BaseException:
         try:
             tmp_path.unlink(missing_ok=True)
