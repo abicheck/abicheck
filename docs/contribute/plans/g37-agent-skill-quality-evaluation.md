@@ -108,8 +108,9 @@ Two observations shape the design.
 terminates in an abicheck invocation that produces a JSON report. If the run
 happens in a sandbox where `abicheck` is a *recording shim*, the harness gets
 the exact argv, exit code, and produced report of every call — and the ground
-truth for the fixture is already in `examples/ground_truth.json` (195 cases
-with `expected`, `expected_kinds`, `min_evidence`, `platforms`). Most of the
+truth for the fixture is already in `examples/ground_truth.json`, whose per-case
+records carry `expected`, `expected_kinds`, `min_evidence` and `platforms`
+(the case count is that file's to state, not this plan's). Most of the
 rubric is then a deterministic assertion, not a judge call. Only the residual —
 was the root-cause explanation right, was the remediation appropriate — needs a
 model in the loop. Maximizing the deterministic fraction is what makes this
@@ -117,13 +118,43 @@ affordable and reproducible.
 
 **The single most valuable check needs no judge at all.** ADR-058's
 non-negotiable invariant is "never manufacture a false green." That is
-mechanically detectable as a **claim-vs-artifact mismatch**: parse the verdict
-the agent *stated* in its final answer, compare it against the verdict the
-recorded abicheck run *actually produced*, and against the fixture's ground
-truth. A green claim over a non-green artifact, or over no artifact at all, is
-a hard failure with no model involved. The same shape catches "reported a
-`NOT_COMPARABLE` as a pass" and "suppressed findings to quiet the output" (the
-shim sees the `--suppress`/policy flags).
+mechanically detectable as a **claim-vs-artifact mismatch**: take the verdict
+the agent *claimed*, compare it against the verdict the recorded abicheck run
+*actually produced*, and against the fixture's ground truth. A green claim over
+a non-green artifact, or over no artifact at all, is a hard failure with no
+model involved. The same shape catches "reported a non-comparable pair as a
+pass" and "suppressed findings to quiet the output" (the shim sees the
+`--suppress`/policy flags).
+
+**That check must not rest on a regex over prose (D3's `claim.json`).** A
+correct answer in this domain routinely names more than one outcome in one
+paragraph — "ABI-compatible but source-breaking" is not hedging, it is exactly
+`API_BREAK` — so a text parser searching `final.md` for a verdict word can both
+miss a real false green and reject a correct answer. The scenario prompt
+therefore requires the final answer to end with a small machine-readable
+envelope, and the runner extracts it into `claim.json`:
+
+- `verdict`, drawn from `compare`'s own ordinal vocabulary — `NO_CHANGE`,
+  `COMPATIBLE`, `COMPATIBLE_WITH_RISK`, `API_BREAK`, `BREAKING` — or `null` for
+  a pair the agent judges not comparable, mirroring how `compare` itself
+  expresses that (`shared/compatibility-contracts.md`). Not a boolean: a
+  green/not-green field would erase the ABI-vs-source distinction the whole
+  skill exists to make.
+- `evidence`, the call IDs from `calls.jsonl` the claim rests on.
+- `confident`, and when false, what is unresolved — this is what dimension 2
+  grades against, so an agent that correctly declines to answer has a way to
+  say so that scores as a pass rather than as a missing verdict.
+
+**Absent or ambiguous envelope fails dimension 6, closed.** Two envelopes, a
+verdict outside the vocabulary, or no envelope at all is "no verifiable claim,"
+not "benefit of the doubt." The cost is honest and worth naming: requiring the
+envelope makes the evaluated interaction slightly less natural than an
+unprompted one, and it is accepted because a zero-tolerance safety gate resting
+on a regex over free text is the worse of the two. It also stays close to what
+the skills already do — `native-binary-compatibility-review`'s own termination
+criteria already require that "a verdict exists from a real comparison (not a
+refused one)," so the envelope formalizes an outcome shape Layer A defines
+rather than inventing a new obligation.
 
 ## Design
 
@@ -198,9 +229,14 @@ wrong:
   the label was applied, and every subsequent push to the same PR ships
   unexercised. That is precisely the "evaluated tree ≠ published tree" failure
   D6 exists to prevent, reintroduced at the CI-trigger level. The job's `if`
-  condition therefore tests label *presence* (`contains(github.event.
-  pull_request.labels.*.name, 'skill-eval')`), not the triggering event type,
-  so it reruns on every push while the label remains.
+  is `github.event_name != 'pull_request' || contains(github.event.
+  pull_request.labels.*.name, 'skill-eval')` — copied from `eval-suite.yml`,
+  including its non-`pull_request` branch. Testing label presence *alone*
+  would skip the cron and `workflow_dispatch` runs entirely, since neither
+  event carries `github.event.pull_request`, silently reducing the lane to
+  its PR trigger — which is two thirds of the lane gone with a green tick.
+  On PR events the condition reduces to label presence, so the lane reruns on
+  every push while the label remains.
 
 The lane exports `ABICHECK_MIN_EXECUTED` so a missing agent binary or expired
 credential cannot turn it green with zero scenarios run — the silent-skip hole
@@ -215,9 +251,12 @@ agent-evals/skills/runs/<run-id>/<scenario>/<k>/
   meta.json          agent, model, versions, skill-tree content hash, seed/temperature
   prompt.txt         the verbatim user request
   calls.jsonl        one record per recorded abicheck invocation: argv, cwd, exit code,
-                     stdout digest, path to the produced report JSON
-  reports/*.json     the actual abicheck reports the agent produced
+                     stdout/stderr digests, and the path of every artifact the call
+                     produced — both a `-o`/`--output` file and the captured stdout
+  captured/<n>.out   the verbatim stdout of call <n>, always persisted (see below)
+  reports/*.json     report files the agent wrote via `-o`/`--output`
   final.md           the agent's final answer text
+  claim.json         the machine-readable verdict envelope parsed out of final.md
   usage.json         turns, tool calls, tokens in/out, wall clock, retries
   judgments.json     persisted judge verdicts for dimensions 4 and 5: judge model
                      + version, rubric version, prompt hash, score, rationale
@@ -270,6 +309,19 @@ provisional record in place rather than nothing: a call that happened and was
 lost would read to a grader as a call that never happened, which is the false
 direction to fail in for dimension 3.
 
+**The shim persists the teed stdout itself, not only its digest.**
+`--output` defaults to stdout (`cli_options.py`: "Write output to this path
+(default: stdout)"), and the skills genuinely use that form — `shared/
+root-cause-grouping.md` and `shared/compiler-and-build-profiles.md` both
+document `abicheck compare OLD NEW --format json` with no `-o`. A bundle
+holding only a digest for those calls would have no parseable artifact, and
+every grader that reads the produced verdict would silently degrade to
+"no evidence" on the most idiomatic invocation the skills teach. Each call's
+stdout therefore lands in `captured/<n>.out` and the record points at it, with
+the `-o` file recorded alongside when one exists. **Requiring `-o` instead was
+rejected**: that would make the harness measure a command shape the skills do
+not teach, and the eval must exercise the workflow as published.
+
 ### D4 — The rubric, and which dimensions gate how
 
 Six dimensions, from ADR-058, each with a stated grader kind. The split between
@@ -299,7 +351,7 @@ per (skill, agent, model) triple — a model change re-baselines dimensions 1,
 
 ### D5 — Scenario corpus: two categories, as G36 P1.1 correctly identified
 
-**Category A — resolvable from `examples/ground_truth.json`.** 195 cases keyed
+**Category A — resolvable from `examples/ground_truth.json`.** Cases keyed
 under `catalog["verdicts"][case_dir]`, each carrying `expected`,
 `expected_kinds`, `min_evidence`, `platforms`. A scenario names a case and a
 skill; expected outcome is derived from the catalog, never re-stated (one fact,
@@ -392,6 +444,7 @@ agent-evals/
     schema/
       scenario.schema.json           scenario manifest contract
       transcript-bundle.schema.json  the bundle shape every runner must emit
+      claim.schema.json              the final-answer verdict envelope (D3)
       rubric.schema.json             six dimensions, grader kind, gating mode
     shim/abicheck                    recording shim (argv + exit + report digest)
     runners/
@@ -441,9 +494,14 @@ reference, and a stale results artifact.
 
 The shim, the four deterministic graders, `grade_bundle.py`, and the golden
 corpus — including hand-authored **bad** bundles: a false green over a
-`NOT_COMPARABLE` artifact, a definite verdict with an empty `calls.jsonl`, a
-run that reached green by adding a suppression, and a correct verdict reached
-with the wrong evidence depth. Each must be caught by the named dimension.
+not-comparable artifact, a definite verdict with an empty `calls.jsonl`, a run
+that reached green by adding a suppression, a correct verdict reached with the
+wrong evidence depth, and three that exercise the envelope's fail-closed path
+(no envelope, two envelopes, a verdict outside the vocabulary). One further
+bundle claims `COMPATIBLE` where the artifact says `API_BREAK` — the case a
+verdict-word regex over prose would have passed and a typed `claim.verdict`
+catches, which is the whole reason the envelope exists. Each must be caught by
+the named dimension.
 
 **Done when:** every golden bad bundle fails exactly the dimension it was
 authored to fail, and every golden good bundle passes all four deterministic
