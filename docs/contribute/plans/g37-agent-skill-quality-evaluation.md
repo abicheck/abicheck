@@ -230,8 +230,16 @@ changes":
 1. The author (or a maintainer) runs `run_skill_eval.py` locally for the
    risk-selected scenario set (Cost model) and commits the resulting bundles.
 2. CI re-grades those committed bundles deterministically — the four
-   deterministic dimensions, including both zero-tolerance ones — and runs the
-   D6 freshness check.
+   deterministic dimensions, including both zero-tolerance ones — runs the D6
+   freshness check, and **verifies the evidence set is complete**:
+   `check_skill_eval_evidence.py` derives the expected (scenario, repetition)
+   pairs from the same risk-selection rule the runner used and rejects any
+   missing scenario id or repetition index. Without that step the gate reads
+   only what was committed, so omitting one failing scenario — or one failing
+   run out of `k` — would turn `pass^k` into pass-on-whatever-was-uploaded,
+   and the two zero-tolerance dimensions would be satisfiable by selective
+   upload. Deriving the expected set rather than trusting the uploaded one is
+   what makes the repetition count mean anything.
 3. A PR that changes skill content without refreshed bundles fails on
    freshness: the committed evidence records a per-skill hash (D6) that no
    longer matches that skill's generated tree. Missing evidence and stale evidence fail identically,
@@ -481,18 +489,29 @@ retains reports from earlier calls: `cli_compare_release.py` creates it with
 current comparison, clearing nothing. Capturing everything present would
 attribute an earlier call's per-library report to this one, and replay would
 accept it as this call's evidence — the same misattribution the per-call
-snapshot exists to prevent, reintroduced one level up. So the shim records the
-directory's entries and their content digests *before* spawning and captures
-what is new or whose digest changed when the child exits. **Digests, not
-mtimes**: a report overwritten within the filesystem's timestamp granularity —
-plausible for exactly the rapid iterative calls this addresses, and more so on
-coarse-resolution or network filesystems — keeps its mtime while its contents
-differ, so an mtime comparison would silently omit that call's own report from
-the snapshot and leave replay short of the evidence it is meant to preserve. Redirecting each call to a private directory
-was rejected: the agent reads that path back in later steps, so relocating it
-would change the workflow being measured. **Requiring `-o` instead was
-rejected**: that would make the harness measure a command shape the skills do
-not teach, and the eval must exercise the workflow as published.
+snapshot exists to prevent, reintroduced one level up. So the shim gives the child a **private
+output directory** and copies its contents into the requested path when the
+child exits, keeping the private directory as the call's snapshot. Content
+comparison alone cannot do this job: it misses a rewrite that produces
+byte-identical output (an agent repeating the same comparison writes the same
+report, so no digest moves and the call's own evidence would be dropped), and
+mtime comparison misses a rewrite inside the filesystem's timestamp
+granularity. Both failures are silent, and no refinement of "diff the
+directory" separates a file this call wrote from one an earlier call left —
+that information does not exist in the directory's state. Redirecting supplies
+it directly: whatever lands in the private directory is exactly what this call
+produced.
+
+An earlier draft rejected redirection because the agent reads the requested
+path back in later steps. Copying back on exit removes that objection — the
+agent sees the requested path populated exactly as a real run leaves it
+(pre-existing files retained, since `cli_compare_release.py` clears nothing,
+plus this call's own outputs written over them). The cost is honest and worth
+naming: the real abicheck receives a rewritten `--output-dir` argument, so the
+recorded argv shows the private path. The record therefore keeps both — what
+the agent asked for and where it was redirected — so dimension 1's
+invocation-shape check reads the agent's own argument, not the harness's
+substitution.
 
 ### D4 — The rubric, and which dimensions gate how
 
@@ -910,7 +929,9 @@ comparisons — the gating `skill-agent:` vs `baseline` and the reported
 ### Phase 6 — Publication gate *(S)*
 
 G36 P1.4's publication precondition becomes a check: publication requires a
-fresh per-skill hashes across every published skill, zero failures on
+fresh per-skill hashes across every published skill, a **source digest matching
+the commit being published** (D6 — the narrow surface hash is not sufficient
+here), a complete evidence set for the full suite, zero failures on
 dimensions 2 and 6, dimensions 1/3/4/5 at or
 above baseline, and a Phase 5 scorecard showing non-negative lift on
 **`skill-agent:` vs `baseline`** — D7's declared deployment comparator. The
