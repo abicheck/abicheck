@@ -515,10 +515,76 @@ def parse_clang_ast_virtual_methods(ast: dict[str, Any]) -> frozenset[str]:
     return frozenset(virtual_identities)
 
 
+def parse_clang_ast_virtual_destructor_owners(ast: dict[str, Any]) -> frozenset[str]:
+    """Pure function: a ``clang -ast-dump=json`` tree -> the scope-qualified
+    identity of every class that directly declares its own virtual
+    destructor.
+
+    A separate, narrower pass from :func:`parse_clang_ast_virtual_methods`
+    for a real reason (Codex review, fresh evidence): a destructor
+    (``CXXDestructorDecl``) is deliberately excluded from
+    ``_OVERRIDE_CANDIDATE_KINDS`` — override-EDGE matching for a destructor
+    needs its own verified rule for the Itanium ABI's dual ``D1``/``D2``
+    mangling (this module's own docstring, "Deliberately scoped OUT"), which
+    this function does not attempt. But a class's own vtable *presence* only
+    needs the much narrower fact "this destructor's slot is virtual" — clang
+    stamps ``"virtual": true`` directly on a ``CXXDestructorDecl`` node the
+    identical way it does for any other virtual method, own or inherited, no
+    override-pair matching required (verified against real Clang 18 output:
+    ``struct Base { virtual ~Base(); };`` alone, no override anywhere in
+    scope, still carries ``"virtual": true`` on its own ``CXXDestructorDecl``
+    child). Without this, a class whose *only* virtual member is its
+    destructor — a common, real shape, e.g. a plugin/interface base class —
+    was invisible to ``virtual_dispatch_graph.augment_graph_with_vtable_
+    presence``'s existing two seeds (the override-edge seed can't see a
+    destructor at all; the leaf-virtual-method seed reads
+    ``parse_clang_ast_virtual_methods``'s output, which never contains one
+    either). The returned identities feed a third, independent vtable-
+    presence seed stamped directly onto the owning class's own
+    ``record_type`` node — not routed through a ``decl://`` node the way the
+    other two seeds are, since a bare, uncalled destructor declaration often
+    has no ``decl://`` node in the graph at all (unlike a class's other
+    members, which ``type_graph.py`` mints a node for via
+    ``DECL_HAS_TYPE``), and this module's "join-only-onto-an-existing-node"
+    discipline correctly declines to mint one just for this purpose — the
+    owning class's own ``record_type`` node, by contrast, always exists once
+    ``type_graph.py`` has walked the class at all.
+    """
+    owners: set[str] = set()
+
+    def walk(node: Any, scope: list[str]) -> None:
+        if not isinstance(node, dict):
+            return
+        kind = node.get("kind")
+        name = str(node.get("name") or "")
+        if kind in _RECORD_DECL_KINDS and name:
+            qname = "::".join([*scope, name])
+            if any(
+                isinstance(child, dict)
+                and child.get("kind") == "CXXDestructorDecl"
+                and child.get("virtual")
+                for child in node.get("inner", []) or []
+            ):
+                owners.add(qname)
+            child_scope = [*scope, name]
+            for child in node.get("inner", []) or []:
+                walk(child, child_scope)
+            return
+        child_scope = (
+            [*scope, name] if kind in _NAMESPACE_SCOPE_KINDS and name else scope
+        )
+        for child in node.get("inner", []) or []:
+            walk(child, child_scope)
+
+    walk(ast, [])
+    return frozenset(owners)
+
+
 def augment_graph_with_overrides(
     graph: SourceGraphSummary,
     edges: list[OverrideEdge],
     virtual_methods: frozenset[str] = frozenset(),
+    virtual_destructor_owners: frozenset[str] = frozenset(),
 ) -> int:
     """Fold possible-override edges into *graph*. Both endpoints are
     ``decl://`` (``source_decl``) nodes — the same id scheme
@@ -591,6 +657,26 @@ def augment_graph_with_overrides(
                     attrs={"is_virtual": True},
                 )
             )
+    # A class's own virtual destructor is a third, independent vtable-
+    # presence seed (see parse_clang_ast_virtual_destructor_owners's own
+    # docstring for why it can't reuse the decl://-node-based seed above) --
+    # stamped directly on the owning class's own record_type node, which
+    # (unlike a bare, uncalled destructor's own decl:// node) always exists
+    # once type_graph.py has walked the class at all.
+    from .source_graph import _type_node_id
+
+    for owner in virtual_destructor_owners:
+        type_id = _type_node_id(owner)
+        if graph.has_node(type_id):
+            graph.add_node(
+                GraphNode(
+                    id=type_id,
+                    kind="record_type",
+                    provenance="override_graph",
+                    confidence=CONF_HIGH,
+                    attrs={"has_virtual_destructor": True},
+                )
+            )
     return added
 
 
@@ -623,6 +709,14 @@ class ClangOverrideGraphExtractor:
     #: ``set.update`` from multiple threads is the same accepted CPython/GIL
     #: pattern this class already relies on for ``diagnostics``.
     last_virtual_methods: set[str] = field(default_factory=set)
+    #: Every class identity found to directly declare its own virtual
+    #: destructor across the most recent :meth:`extract_from_build` call
+    #: (:func:`parse_clang_ast_virtual_destructor_owners`, unioned across
+    #: every TU) — same side-effecting-sibling pattern as
+    #: ``last_virtual_methods``, closing the sibling gap that field's own
+    #: docstring cross-references (a class whose only virtual member is its
+    #: destructor was invisible to every existing vtable-presence seed).
+    last_virtual_destructor_owners: set[str] = field(default_factory=set)
 
     def available(self) -> bool:
         return shutil.which(self.clang_bin) is not None
@@ -641,6 +735,9 @@ class ClangOverrideGraphExtractor:
         try:
             edges = parse_clang_ast_overrides(ast)
             self.last_virtual_methods.update(parse_clang_ast_virtual_methods(ast))
+            self.last_virtual_destructor_owners.update(
+                parse_clang_ast_virtual_destructor_owners(ast)
+            )
             return edges
         except (ValueError, RecursionError) as exc:
             self.diagnostics.append(f"could not parse clang AST JSON: {exc}")
@@ -661,6 +758,7 @@ class ClangOverrideGraphExtractor:
         from .call_graph import _call_graph_jobs, _deadline_bound_worker
 
         self.last_virtual_methods = set()
+        self.last_virtual_destructor_owners = set()
         start = time.monotonic()
         units = [cu for cu in build.compile_units if cu.source]
         self.last_jobs = _call_graph_jobs(len(units))

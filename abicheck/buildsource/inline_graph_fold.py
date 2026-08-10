@@ -379,7 +379,10 @@ def fold_override_graph(
     # `is_virtual` fact for `virtual_dispatch_graph.py`'s vtable-presence
     # seeding to read (see that function's own docstring).
     added = augment_graph_with_overrides(
-        graph, edges, virtual_methods=frozenset(extractor.last_virtual_methods)
+        graph,
+        edges,
+        virtual_methods=frozenset(extractor.last_virtual_methods),
+        virtual_destructor_owners=frozenset(extractor.last_virtual_destructor_owners),
     )
     # Recorded regardless of `added` — mirrors fold_call_graph/fold_type_graph's
     # coverage gate. project_source_files() isn't consulted here: unlike a call

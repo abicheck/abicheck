@@ -796,9 +796,10 @@ def test_inline_graph_folds_macro_edges_when_clang_available(monkeypatch, tmp_pa
             self.diagnostics: list[str] = []
             self.last_jobs = 0
             self.last_elapsed_s = 0.0
-            # ClangOverrideGraphExtractor's own extra field
-            # (fold_override_graph reads it after extract_from_build).
+            # ClangOverrideGraphExtractor's own extra fields
+            # (fold_override_graph reads them after extract_from_build).
             self.last_virtual_methods: set[str] = set()
+            self.last_virtual_destructor_owners: set[str] = set()
 
         def available(self) -> bool:
             return True

@@ -1255,6 +1255,45 @@ which all depend on a Clang AST pass.
      (`test_callback_propagated_through_stored_parameter_slot_is_not_joined`)
      documenting the current, known-incomplete behavior rather than
      silently accepted.
+   - **A sixteenth finding, confirmed real and fixed: a class whose only
+     virtual member is its destructor was invisible to every existing
+     vtable-presence seed.** `override_graph._OVERRIDE_CANDIDATE_KINDS`
+     deliberately excludes `CXXDestructorDecl` from override-EDGE matching
+     (the module's own documented Itanium D1/D2 dual-mangling concern), so
+     `virtual_dispatch_graph.augment_graph_with_vtable_presence`'s
+     override-edge seed can never see a destructor at all — and its
+     leaf-virtual-method seed reads `is_virtual`-tagged `decl://` nodes,
+     which a bare, uncalled destructor typically has none of (unlike an
+     ordinary member, `type_graph.py` doesn't mint a `decl://` node for a
+     destructor purely from its own declaration). Reproduced empirically
+     end to end against real Clang 18: `struct Base { virtual ~Base(); };`
+     with a real derived class produced no `TYPE_HAS_VTABLE` edge for
+     either side at all before the fix. Closed with a new, narrower pure
+     function, `override_graph.parse_clang_ast_virtual_destructor_owners`
+     — deliberately *not* extending `_OVERRIDE_CANDIDATE_KINDS` (that would
+     reopen the D1/D2 concern this module's docstring already explains) —
+     which only asks "does this destructor's own AST node carry
+     `virtual: true`", the identical direct signal every other virtual
+     method already carries, no override-pair matching required. Its
+     output feeds a third, independent vtable-presence seed stamped
+     directly onto the owning class's own `record_type` node (not routed
+     through a `decl://` node the way the other two seeds are), since a
+     bare destructor declaration often has no `decl://` node to join onto
+     at all — matching the identical join-only-onto-an-existing-node
+     discipline the rest of this module family uses. **One residual gap,
+     shared with the two pre-existing seeds, not new to this fix:** a
+     class isolated enough that nothing else in the graph (no
+     `TYPE_INHERITS` edge, no override edge) already minted its bare
+     `record_type` node still seeds nothing — verified empirically that
+     `type_graph.py`'s own `CXXRecordDecl` walk, for a fully isolated
+     class, mints only the class's own injected-class-name identity (e.g.
+     `record::Base::Base`), never the bare `Base` identity every seed's
+     owner-recovery logic produces, unless something else (inheritance, an
+     override) independently triggers the bare node's creation. Confirmed
+     this is not a fix-specific regression: the exact same isolated-class
+     shape already failed to seed a plain `virtual void run()` with no
+     override or inheritance anywhere in scope, via the pre-existing
+     leaf-virtual-method seed, before this fix touched anything.
 5. **Full type-role coverage** to parity: variable type, typedef target,
    alias-template target, enum underlying type, non-type template argument,
    default template argument, concept/constraint dependency, function-pointer

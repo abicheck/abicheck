@@ -128,6 +128,20 @@ def _inherits_edge(derived: str, base: str) -> GraphEdge:
     )
 
 
+def _record_node_with_virtual_dtor(name: str) -> GraphNode:
+    """A ``record_type`` node carrying the ``has_virtual_destructor`` fact
+    ``override_graph.augment_graph_with_overrides``' ``virtual_destructor_
+    owners`` parameter stamps (mirrors ``_virtual_decl_node``'s own
+    construction for the sibling ``is_virtual`` fact)."""
+    return GraphNode(
+        id=f"type://{name}",
+        kind="record_type",
+        provenance="override_graph",
+        confidence=CONF_HIGH,
+        attrs={"has_virtual_destructor": True},
+    )
+
+
 def _multi_override_graph() -> SourceGraphSummary:
     """Base::run declared virtual, two derived overrides, one confirmed by
     the ``override`` keyword and one only a signature match; a caller
@@ -339,6 +353,55 @@ class TestTypeHasVtable:
         already follows."""
         g = SourceGraphSummary()
         g.add_node(_virtual_decl_node(BASE_RUN))
+
+        augment_graph_with_vtable_presence(g)
+
+        assert not [n for n in g.nodes if n.kind == NODE_VTABLE]
+        assert not [e for e in g.edges if e.kind == EDGE_TYPE_HAS_VTABLE]
+
+    def test_virtual_destructor_owner_alone_still_gets_vtable(self) -> None:
+        """Codex review, fresh evidence: a class whose only virtual member is
+        its destructor (a common, real shape, e.g. a plugin/interface base
+        class) is invisible to both the override-edge seed (destructors are
+        deliberately excluded from override-EDGE matching) and the leaf-
+        virtual-method seed (a bare, uncalled destructor typically has no
+        decl:// node at all). Seeded instead from the `has_virtual_destructor`
+        fact `override_graph.augment_graph_with_overrides` stamps directly on
+        the owning class's own record_type node."""
+        g = SourceGraphSummary()
+        g.add_node(_record_node_with_virtual_dtor("Base"))
+
+        result = augment_graph_with_vtable_presence(g)
+
+        assert result.polymorphic_types == 1
+        vtable_edges = [e for e in g.edges if e.kind == EDGE_TYPE_HAS_VTABLE]
+        assert len(vtable_edges) == 1
+        assert vtable_edges[0].src == "type://Base"
+        assert vtable_edges[0].dst == "vtable://Base"
+
+    def test_virtual_destructor_owner_seeds_transitively_inheriting_classes_too(
+        self,
+    ) -> None:
+        g = SourceGraphSummary()
+        g.add_node(_record_node_with_virtual_dtor("Base"))
+        g.add_node(_record_node("Derived"))
+        g.add_edge(_inherits_edge("Derived", "Base"))
+
+        result = augment_graph_with_vtable_presence(g)
+
+        assert result.polymorphic_types == 2
+        vtable_edges = {e.src for e in g.edges if e.kind == EDGE_TYPE_HAS_VTABLE}
+        assert vtable_edges == {"type://Base", "type://Derived"}
+
+    def test_has_virtual_destructor_fact_without_a_record_node_mints_nothing(
+        self,
+    ) -> None:
+        """The same join-only-onto-an-existing-node discipline as the other
+        two seeds (and as override_graph.py's own stamping, which never
+        mints a record_type node just to carry this fact) — a graph with no
+        `type://Base` node at all has nothing to stamp regardless of what
+        `augment_graph_with_overrides` observed."""
+        g = SourceGraphSummary()
 
         augment_graph_with_vtable_presence(g)
 

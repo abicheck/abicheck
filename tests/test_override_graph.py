@@ -31,6 +31,7 @@ from abicheck.buildsource.override_graph import (
     _strip_exception_spec,
     augment_graph_with_overrides,
     parse_clang_ast_overrides,
+    parse_clang_ast_virtual_destructor_owners,
 )
 from abicheck.buildsource.source_graph import (
     CONF_HIGH,
@@ -71,6 +72,13 @@ def _record(name: str, *, bases: list[str] | None = None, inner: list[dict]) -> 
 
 def _tu(*decls: dict) -> dict:
     return {"kind": "TranslationUnitDecl", "inner": list(decls)}
+
+
+def _dtor(name: str, *, is_virtual: bool = False) -> dict:
+    d: dict = {"kind": "CXXDestructorDecl", "name": name, "inner": []}
+    if is_virtual:
+        d["virtual"] = True
+    return d
 
 
 # ── _strip_exception_spec ────────────────────────────────────────────────
@@ -729,6 +737,71 @@ def test_namespaced_hierarchy_qualifies_class_identities() -> None:
     ]
 
 
+# ── parse_clang_ast_virtual_destructor_owners ────────────────────────────
+
+
+def test_virtual_destructor_owner_detected() -> None:
+    ast = _tu(_record("Base", inner=[_dtor("~Base", is_virtual=True)]))
+    assert parse_clang_ast_virtual_destructor_owners(ast) == frozenset({"Base"})
+
+
+def test_non_virtual_destructor_not_detected() -> None:
+    ast = _tu(_record("Base", inner=[_dtor("~Base", is_virtual=False)]))
+    assert parse_clang_ast_virtual_destructor_owners(ast) == frozenset()
+
+
+def test_class_with_no_destructor_at_all_not_detected() -> None:
+    ast = _tu(
+        _record(
+            "Base",
+            inner=[_method("run", "_ZN4Base3runEv", "void ()", is_virtual=True)],
+        )
+    )
+    assert parse_clang_ast_virtual_destructor_owners(ast) == frozenset()
+
+
+def test_virtual_destructor_owner_is_scope_qualified() -> None:
+    ast = _tu(
+        {
+            "kind": "NamespaceDecl",
+            "name": "ns",
+            "inner": [_record("Base", inner=[_dtor("~Base", is_virtual=True)])],
+        }
+    )
+    assert parse_clang_ast_virtual_destructor_owners(ast) == frozenset({"ns::Base"})
+
+
+def test_multiple_classes_only_virtual_destructor_owner_returned() -> None:
+    ast = _tu(
+        _record("HasVirtualDtor", inner=[_dtor("~HasVirtualDtor", is_virtual=True)]),
+        _record(
+            "PlainOldData",
+            inner=[_method("run", "_ZN12PlainOldData3runEv", "void ()")],
+        ),
+    )
+    assert parse_clang_ast_virtual_destructor_owners(ast) == frozenset(
+        {"HasVirtualDtor"}
+    )
+
+
+def test_ordinary_virtual_method_alongside_a_non_virtual_destructor() -> None:
+    # A class can be polymorphic (own virtual method) without its destructor
+    # itself being virtual -- this function answers the narrower, distinct
+    # "does THIS class's own destructor carry the virtual slot" question,
+    # not "is this class polymorphic at all" (that's the caller's job, via
+    # augment_graph_with_vtable_presence's other two seeds).
+    ast = _tu(
+        _record(
+            "Base",
+            inner=[
+                _method("run", "_ZN4Base3runEv", "void ()", is_virtual=True),
+                _dtor("~Base", is_virtual=False),
+            ],
+        )
+    )
+    assert parse_clang_ast_virtual_destructor_owners(ast) == frozenset()
+
+
 # ── augment_graph_with_overrides ─────────────────────────────────────────
 
 
@@ -790,6 +863,27 @@ def test_augment_graph_is_idempotent_on_reregistration() -> None:
     assert first == 1
     assert second == 0
     assert len(graph.edges) == 1
+
+
+def test_virtual_destructor_owners_stamps_existing_record_type_node() -> None:
+    graph = SourceGraphSummary()
+    graph.add_node(GraphNode(id="type://Base", kind="record_type"))
+    augment_graph_with_overrides(
+        graph, [], virtual_destructor_owners=frozenset({"Base"})
+    )
+    (node,) = [n for n in graph.nodes if n.id == "type://Base"]
+    assert node.resolved.get("has_virtual_destructor") is True
+
+
+def test_virtual_destructor_owners_mints_no_node_for_an_unknown_class() -> None:
+    # The same join-only-onto-an-existing-node discipline `virtual_methods`
+    # already follows -- a class with no record_type node in the graph has
+    # nothing to stamp the fact onto.
+    graph = SourceGraphSummary()
+    augment_graph_with_overrides(
+        graph, [], virtual_destructor_owners=frozenset({"Base"})
+    )
+    assert graph.nodes == []
 
 
 # ── ClangOverrideGraphExtractor: graceful degrade ────────────────────────

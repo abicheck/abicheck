@@ -354,6 +354,37 @@ def augment_graph_with_vtable_presence(
         if owner is not None and owner in record_identities:
             polymorphic.add(owner)
 
+    # Third seed: a class's own virtual destructor (Codex review, fresh
+    # evidence) -- a class whose *only* virtual member is its destructor
+    # (a common, real shape, e.g. a plugin/interface base class) is invisible
+    # to both seeds above: the override-edge seed can't see a destructor at
+    # all (override_graph.py deliberately excludes CXXDestructorDecl from
+    # override-EDGE matching, its own Itanium D1/D2 dual-mangling concern —
+    # see that module's docstring), and the leaf-virtual-method seed reads
+    # `is_virtual`-tagged decl:// nodes, which a bare, uncalled destructor
+    # declaration typically has none of. override_graph.py's own
+    # parse_clang_ast_virtual_destructor_owners stamps this fact directly
+    # onto the owning class's own record_type node instead (see that
+    # function's docstring), which is what this seed reads. Same
+    # join-only-onto-an-existing-node discipline as the other two seeds:
+    # a class isolated enough that NOTHING else in the graph (no
+    # TYPE_INHERITS edge, no override edge) already minted its bare
+    # record_type node has nothing here to stamp the fact onto either
+    # (verified empirically: type_graph.py's own CXXRecordDecl walk mints
+    # only the class's own injected-class-name identity, e.g.
+    # `record::Base::Base`, not the bare `Base` this seed's owner
+    # identities use, unless something else independently triggers the
+    # bare node's creation) -- an accepted, pre-existing limitation shared
+    # by the other two seeds, not new to this one.
+    for n in graph.nodes:
+        if n.kind != "record_type" or n.id not in record_ids:
+            continue
+        if not n.resolved.get("has_virtual_destructor"):
+            continue
+        ident = _record_identity(n.id)
+        if ident is not None:
+            polymorphic.add(ident)
+
     # Transitive closure over TYPE_INHERITS: inheriting from a polymorphic
     # base makes the derived class polymorphic too, per the Itanium ABI rule
     # -- fixed-point iteration since bases_of may chain several levels deep.
