@@ -708,18 +708,28 @@ def _env_matrix_contract_changes(
     # answer "does this binary's own declared requirement violate the floor",
     # which an absent ELF answers "no"); the wheel checks take the raw value,
     # since a non-ELF input has no wheel-portability claim to check at all.
-    return _filter_suppressed_changes(
-        [
-            *check_platform_baseline_floor(new_elf or ElfMetadata(), floors),
-            *check_musllinux_glibc_dependency(new_elf or ElfMetadata(), floors),
-            *check_macos_deployment_target_floor(new_macho, floors),
-            *check_wheel_tag_architecture_mismatch(new_elf, new_macho, floors),
-            *check_wheel_rpath_not_portable(new_elf, floors),
-            *check_wheel_closure_dependency_violation(new_elf, floors),
-        ],
-        suppression,
-        suppressed,
-    )
+    # Filtered per check, not once over the concatenation (Codex review):
+    # _filter_suppressed_changes appends the SUPPRESSION_WOULD_HIDE_PUBLIC_BREAK
+    # / unknown-reachability diagnostics it raises to the END of its own return
+    # value, so one combined call would move every check's diagnostics past
+    # every other check's findings -- turning the report's
+    # [floor, floor-diagnostic, musl, musl-diagnostic, ...] into
+    # [floor, musl, ..., floor-diagnostic, musl-diagnostic, ...]. DiffResult
+    # .changes preserves list order and the reporters render it, so that is an
+    # observable output change, not an internal detail.
+    produced: list[Change] = []
+    for check_changes in (
+        check_platform_baseline_floor(new_elf or ElfMetadata(), floors),
+        check_musllinux_glibc_dependency(new_elf or ElfMetadata(), floors),
+        check_macos_deployment_target_floor(new_macho, floors),
+        check_wheel_tag_architecture_mismatch(new_elf, new_macho, floors),
+        check_wheel_rpath_not_portable(new_elf, floors),
+        check_wheel_closure_dependency_violation(new_elf, floors),
+    ):
+        produced.extend(
+            _filter_suppressed_changes(check_changes, suppression, suppressed)
+        )
+    return produced
 
 
 def compare(
