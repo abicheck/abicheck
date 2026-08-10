@@ -10,11 +10,15 @@
   `--severity-preset info-only` can leave a `BREAKING` verdict at exit `0`.
   Previously `scan --against` always used the legacy verdict→`{0,2,4}`
   mapping and silently ignored any severity setting. Under the `severity`
-  scheme the JSON report's `diff` block also gains a `severity` gate object
-  (`config`/`categories`/`exit_code`/`blocking`/`blocking_categories` —
-  the same shape and the same builder `compare`'s report uses, so a
-  non-zero exit on an otherwise compatible diff names its own cause;
-  `scan_schema_version` 1.9, absent under the default legacy scheme).
+  scheme the report also states the gate that produced the exit code —
+  a `severity` object in the JSON `diff` block
+  (`config`/`categories`/`exit_code`/`blocking`/`blocking_categories`, the
+  same shape and the same builder `compare`'s report uses;
+  `scan_schema_version` 1.9) and a matching `severity gate: exit N —
+  blocking: <categories>` line in the default text output — so a non-zero
+  exit on an otherwise compatible diff names its own cause instead of being
+  indistinguishable from the orthogonal contract-coverage exit `1`. Both
+  are absent under the default legacy scheme, which runs no severity gate.
   `--pack` gate-severity folding is not yet extended to `scan`; pass
   severity settings directly. See `docs/reference/exit-codes.md`'s new
   "`scan --against` and severity" section.

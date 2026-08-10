@@ -473,6 +473,29 @@ def render_scan_dry_run(
     return result
 
 
+def _scan_pre_coverage_base_exit(outcome: ScanOutcome) -> int:
+    """This run's compatibility exit code *before* the coverage floor was folded.
+
+    The number ADR-049 §7's coverage diagnostic must explain itself against.
+    Under a resolved ``severity`` scheme that base is the severity gate's own
+    exit code -- which ``_run_baseline_compare`` publishes as
+    ``diff_summary["severity"]["exit_code"]``, taken from the very
+    ``compute_gate_decision`` result it also gated on -- and only otherwise the
+    verdict's legacy ``{0,2,4}`` mapping. Read back rather than recomputed so
+    the published explanation cannot disagree with the exit code the process
+    actually returned (Codex review).
+    """
+    from .cli_compare_helpers import _verdict_exit_code
+
+    summary = outcome.diff_summary or {}
+    gate = summary.get("severity")
+    if isinstance(gate, dict):
+        code = gate.get("exit_code")
+        if isinstance(code, int):
+            return code
+    return _verdict_exit_code(outcome.verdict)
+
+
 def _emit_scan_report(outcome: ScanOutcome, fmt: str, output: Path | None) -> None:
     """Render the scan outcome, write/echo it, and exit non-zero on a verdict."""
     text = (
@@ -491,18 +514,26 @@ def _emit_scan_report(outcome: ScanOutcome, fmt: str, output: Path | None) -> No
     # those keys, so without this the command prints "Verdict: NO_CHANGE"
     # and then fails with no explanation (Codex review).
     if fmt != "json":
-        from .cli_compare_helpers import _verdict_exit_code
         from .contract_coverage_exit import coverage_diagnostic_from_summary
 
         # `outcome.exit_code` has ALREADY had the coverage floor folded in
         # by `_run_baseline_compare`, so passing it would make the notice
         # say "contributes 1 to an exit that was already 1" for a run where
-        # coverage is exactly what raised 0 to 1 (Codex review). The
-        # pre-coverage value is the verdict's own code, which is what that
-        # fold took as its base.
+        # coverage is exactly what raised 0 to 1 (Codex review).
+        #
+        # The pre-coverage base is the *severity* gate's exit code when this
+        # run resolved the severity scheme, and only otherwise the verdict's
+        # own code. Re-deriving `_verdict_exit_code(verdict)` unconditionally
+        # misreported the severity case: a COMPATIBLE_WITH_RISK diff promoted
+        # to 2 by `--severity-potential-breaking error` alongside a coverage
+        # failure exits 2, but the notice claimed coverage floored it to 1
+        # (Codex review). `_run_baseline_compare` emits the gate block from
+        # the same `compute_gate_decision` result it took its own base from,
+        # so this reads back the number that actually gated, rather than a
+        # second guess at it.
         notice = coverage_diagnostic_from_summary(
             outcome.diff_summary,
-            base_exit=_verdict_exit_code(outcome.verdict),
+            base_exit=_scan_pre_coverage_base_exit(outcome),
         )
         if notice is not None:
             click.echo(notice, err=True)

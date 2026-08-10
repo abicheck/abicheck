@@ -355,7 +355,33 @@ def render_baseline_lines(out: Any) -> list[str]:
         lines.append(
             "    … additional findings omitted; rerun `compare` for the full list"
         )
+    lines.extend(_severity_gate_lines(out.diff_summary))
     return lines
+
+
+def _severity_gate_lines(diff_summary: dict[str, Any]) -> list[str]:
+    """The severity-gate explanation, when this scan resolved that scheme.
+
+    Text is the *default* format, so the JSON ``severity`` block alone left
+    the common case unexplained: an additions-only scan under
+    ``--severity-addition error`` printed ``Verdict: COMPATIBLE`` and exited
+    1 with nothing naming the cause -- indistinguishable in a CI log from
+    ADR-049 §7's orthogonal contract-coverage 1 (Codex review). Empty for a
+    legacy-scheme scan, which runs no severity gate and whose text output is
+    therefore unchanged.
+    """
+    gate = diff_summary.get("severity")
+    if not isinstance(gate, dict):
+        return []
+    exit_code = gate.get("exit_code")
+    blocking_categories = gate.get("blocking_categories") or []
+    if not gate.get("blocking"):
+        # Stated rather than omitted: "the gate ran and cleared it" is a
+        # different fact from "no gate ran", and only the former explains an
+        # exit 0 on a diff whose verdict alone would have been 2 or 4.
+        return ["  severity gate: pass (no error-level findings)"]
+    blamed = ", ".join(str(c) for c in blocking_categories) or "unspecified"
+    return [f"  severity gate: exit {exit_code} — blocking: {blamed}"]
 
 
 def render_verdict_lines(out: Any) -> list[str]:

@@ -239,6 +239,115 @@ def test_scan_legacy_scheme_emits_no_severity_gate_block(
     assert "severity" not in _payload(res)["diff"]
 
 
+def test_scan_severity_gate_is_rendered_in_default_text_output(
+    runner, baseline_snap, new_snap_compatible
+):
+    # Codex review: text is the *default* format, so the JSON gate block
+    # alone left the common case unexplained -- `Verdict: COMPATIBLE` and
+    # exit 1 with nothing naming the cause, indistinguishable in a CI log
+    # from ADR-049 §7's orthogonal contract-coverage 1.
+    res = runner.invoke(
+        main,
+        [
+            "scan",
+            str(new_snap_compatible),
+            "--against",
+            str(baseline_snap),
+            "--severity-addition",
+            "error",
+        ],
+    )
+    assert res.exit_code == 1, res.output
+    assert "Verdict: COMPATIBLE" in res.output
+    assert "severity gate: exit 1 — blocking: addition" in res.output
+
+
+def test_scan_legacy_scheme_text_has_no_severity_gate_line(
+    runner, baseline_snap, new_snap_breaking
+):
+    # A legacy-scheme scan runs no severity gate, so its text output must be
+    # unchanged -- reporting a gate would claim one the run never used.
+    res = runner.invoke(
+        main,
+        ["scan", str(new_snap_breaking), "--against", str(baseline_snap)],
+    )
+    assert res.exit_code == 4, res.output
+    assert "severity gate" not in res.output
+
+
+class TestScanPreCoverageBaseExit:
+    """`_scan_pre_coverage_base_exit` — what ADR-049 §7's notice explains itself against.
+
+    Codex review: `_emit_scan_report` re-derived `_verdict_exit_code(verdict)`
+    unconditionally, which is wrong under the severity scheme -- a verdict
+    promoted (or demoted) by severity has a different pre-coverage base, so
+    the published coverage notice could contradict the real exit code.
+    """
+
+    @staticmethod
+    def _outcome(verdict: str, diff_summary):
+        from abicheck.buildsource.risk import RiskScore
+        from abicheck.scan_engine import ScanOutcome
+
+        return ScanOutcome(
+            mode="pr", resolved_method="s5", depth="source",
+            collect_mode="off", risk=RiskScore(total=0), auto=True,
+            changed_path_count=0, changed_path_source="none",
+            diff_summary=diff_summary, verdict=verdict,
+        )
+
+    def test_severity_scheme_reads_the_gate_that_actually_ran(self):
+        from abicheck.cli_scan import _scan_pre_coverage_base_exit
+
+        # The exact shape Codex named: a COMPATIBLE_WITH_RISK verdict whose
+        # legacy code is 0, promoted to 2 by --severity-potential-breaking
+        # error. The notice must explain itself against 2, not 0.
+        out = self._outcome(
+            "COMPATIBLE_WITH_RISK",
+            {"severity": {"exit_code": 2, "blocking": True,
+                          "blocking_categories": ["potential_breaking"]}},
+        )
+        assert _scan_pre_coverage_base_exit(out) == 2
+
+    def test_severity_scheme_reads_a_demoted_base_too(self):
+        from abicheck.cli_scan import _scan_pre_coverage_base_exit
+
+        # The inverse: BREAKING (legacy 4) demoted to 0 by info-only.
+        out = self._outcome(
+            "BREAKING",
+            {"severity": {"exit_code": 0, "blocking": False,
+                          "blocking_categories": []}},
+        )
+        assert _scan_pre_coverage_base_exit(out) == 0
+
+    def test_legacy_scheme_falls_back_to_the_verdict_mapping(self):
+        from abicheck.cli_scan import _scan_pre_coverage_base_exit
+
+        assert _scan_pre_coverage_base_exit(self._outcome("BREAKING", {})) == 4
+        assert _scan_pre_coverage_base_exit(self._outcome("API_BREAK", {})) == 2
+        assert _scan_pre_coverage_base_exit(self._outcome("COMPATIBLE", {})) == 0
+
+    def test_absent_diff_summary_falls_back(self):
+        from abicheck.cli_scan import _scan_pre_coverage_base_exit
+
+        assert _scan_pre_coverage_base_exit(self._outcome("BREAKING", None)) == 4
+
+    def test_malformed_gate_block_falls_back_rather_than_crashing(self):
+        from abicheck.cli_scan import _scan_pre_coverage_base_exit
+
+        # A NOT_COMPARABLE summary is {"reason": ...}, and a corrupt/foreign
+        # `severity` value must not take down the notice path.
+        assert _scan_pre_coverage_base_exit(
+            self._outcome("BREAKING", {"reason": "scope drift"})
+        ) == 4
+        assert _scan_pre_coverage_base_exit(
+            self._outcome("BREAKING", {"severity": "nonsense"})
+        ) == 4
+        assert _scan_pre_coverage_base_exit(
+            self._outcome("BREAKING", {"severity": {"exit_code": "2"}})
+        ) == 4
+
+
 def test_scan_severity_preset_without_against_is_usage_error(tmp_path: Path):
     # --severity-preset only configures the --against baseline comparison,
     # like the rest of _COMPARISON_ONLY_FLAGS (test_scan_rejects_comparison_

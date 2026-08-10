@@ -273,8 +273,19 @@ shared builder, so the two are comparable field by field), added in
 *compatible* diff self-explanatory: `--severity-addition error` on an
 additions-only diff exits `1`, and `blocking_categories: ["addition"]` names
 the cause, distinguishing it from the orthogonal contract-coverage `1`
-above. The block is absent under the default legacy scheme, which runs no
-severity gate.
+above. The default **text** output states the same fact in its
+`Baseline comparison` block:
+
+```
+Baseline comparison
+  breaking=0 api_break=0 risk=0 compatible=1
+  severity gate: exit 1 — blocking: addition
+
+Verdict: COMPATIBLE
+```
+
+Both are absent under the default legacy scheme, which runs no severity
+gate.
 
 This is CLI/config-level parity only — a gate pack (`--pack`)
 does not yet fold a `gate.*` assignment into a scan's severity the way it

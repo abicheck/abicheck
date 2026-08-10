@@ -688,15 +688,7 @@ def _run_baseline_compare(
     # unconditional verdict->exit mapping, unchanged.
     if exit_code_scheme == "severity" and sev_config is not None:
         from .reporter import _build_severity_json
-        from .severity import compute_exit_code
 
-        base_exit = compute_exit_code(
-            diff.changes,
-            sev_config,
-            policy=diff.policy,
-            kind_sets=diff._effective_kind_sets(),
-            policy_file=diff.policy_file,
-        )
         # §6.4 cross-command parity, and the reason this block is not
         # optional: under the severity scheme a *compatible* diff can exit
         # non-zero (`--severity-addition error` on an additions-only diff
@@ -709,13 +701,27 @@ def _run_baseline_compare(
         # present. Emitted only under the severity scheme: a legacy-scheme
         # scan has no gate to report, so its summary stays byte-identical
         # to before.
-        summary["severity"] = _build_severity_json(
+        gate = _build_severity_json(
             list(diff.changes),
             sev_config,
             policy=diff.policy,
             kind_sets=diff._effective_kind_sets(),
             policy_file=diff.policy_file,
         )
+        summary["severity"] = gate
+        # Taken *off the emitted block* rather than computed alongside it:
+        # `_build_severity_json` routes through `severity.compute_gate_decision`,
+        # whose whole purpose is that an exit code and the categories blamed
+        # for it cannot disagree (see its docstring -- it exists because two
+        # independently-computed values did drift, twice). Calling
+        # `compute_exit_code` separately here would reintroduce exactly that
+        # second computation. It is also what lets `_emit_scan_report` and
+        # `render_baseline_lines` recover this run's *pre-coverage* base from
+        # the summary alone, instead of re-deriving a verdict-based one that
+        # is wrong under this scheme (Codex review).
+        gate_exit = gate["exit_code"]
+        assert isinstance(gate_exit, int)  # compute_gate_decision.exit_code
+        base_exit = gate_exit
     else:
         base_exit = _verdict_exit_code(diff.verdict)
     # ADR-049 §7/§6.4: the coverage axis is orthogonal to the verdict/severity
