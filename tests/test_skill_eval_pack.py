@@ -319,6 +319,18 @@ def test_an_unrouted_input_is_reported(pack: dict[str, Any]) -> None:
     assert not freshness.route("some/unrelated/thing.txt", freshness.hash_entries(pack))
 
 
+#: One file every synthetic bundle claims to have read.
+SKILL_READ = ".agents/skills/native-binary-compatibility-review/SKILL.md"
+
+
+def _observed(rel_path: str) -> dict[str, str]:
+    """An observed-input record carrying the file's real current digest."""
+    import hashlib
+
+    data = (REPO / rel_path).read_bytes()
+    return {"path": rel_path, "digest": "sha256:" + hashlib.sha256(data).hexdigest()}
+
+
 def _bundle(pack: dict[str, Any], **overrides: Any) -> dict[str, Any]:
     skill = "native-binary-compatibility-review"
     scenario = "removed-export"
@@ -338,12 +350,10 @@ def _bundle(pack: dict[str, Any], **overrides: Any) -> dict[str, Any]:
         "agent": "claude-code",
         "model": "test-model",
         "hashes": hashes,
-        "observed_inputs": [
-            {
-                "path": ".agents/skills/native-binary-compatibility-review/SKILL.md",
-                "digest": "sha256:" + "0" * 64,
-            },
-        ],
+        # A real content digest, not a placeholder: the checker compares each
+        # observed digest against the file's current content, which is what
+        # catches an input whose routed hash is coarser than the file itself.
+        "observed_inputs": [_observed(SKILL_READ)],
         **overrides,
     }
 
@@ -541,11 +551,11 @@ def test_an_input_routing_only_to_a_hash_this_bundle_lacks_fails(
     edit to the skill it actually read leaves it 'fresh' — completeness is a
     property of this bundle's own recorded hashes, not of the pack."""
     bundle = _bundle(pack)
+    # Real digest: the input is current, so the only thing wrong with it is
+    # that no hash this bundle recorded covers it. A placeholder would fail
+    # the content comparison instead and pass this test for the wrong reason.
     bundle["observed_inputs"].append(
-        {
-            "path": ".agents/skills/native-api-evolution/SKILL.md",
-            "digest": "sha256:" + "9" * 64,
-        }
+        _observed(".agents/skills/native-api-evolution/SKILL.md")
     )
     assert _check_bundle(monkeypatch, tmp_path, bundle) == 1
 
@@ -590,6 +600,46 @@ def test_a_publication_build_hash_is_not_compared_against_the_pack(
     Phase 6 bundle. Phase 6's own step is what verifies it."""
     bundle = _bundle(pack, hashes={"build": "sha256:" + "7" * 64})
     assert _check_bundle(monkeypatch, tmp_path, bundle) == 0
+
+
+def test_an_observed_input_that_changed_since_the_run_fails(
+    pack: dict[str, Any], monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Routing is not freshness. Roots are coarser than the digests they route
+    to — `scenarios.yaml` routes to every scenario, while each scenario's hash
+    covers only its own record — so editing scenario B leaves A's hash
+    untouched while the manifest A actually read changed underneath it."""
+    bundle = _bundle(pack)
+    bundle["observed_inputs"].append(
+        {"path": "agent-evals/skills/scenarios.yaml", "digest": "sha256:" + "1" * 64}
+    )
+    assert _check_bundle(monkeypatch, tmp_path, bundle) == 1
+
+
+def test_an_observed_input_that_no_longer_exists_fails(
+    pack: dict[str, Any], monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    bundle = _bundle(pack)
+    bundle["observed_inputs"] = [
+        {
+            "path": ".agents/skills/deleted-skill/SKILL.md",
+            "digest": "sha256:" + "2" * 64,
+        }
+    ]
+    assert _check_bundle(monkeypatch, tmp_path, bundle) == 1
+
+
+@pytest.mark.parametrize("kind", ["behavioural", "Behavioral", "", "scenario"])
+def test_an_unknown_bundle_kind_fails(
+    pack: dict[str, Any], monkeypatch: pytest.MonkeyPatch, tmp_path: Path, kind: str
+) -> None:
+    """Validating only presence let any non-empty typo read as not-behavioral:
+    it needed no scenario hash and skipped every behavioral check, so a
+    malformed bundle passed while being ungradeable by either contract."""
+    bundle = _bundle(pack)
+    bundle["kind"] = kind
+    del bundle["hashes"]["scenarios"]
+    assert _check_bundle(monkeypatch, tmp_path, bundle) == 1
 
 
 def test_a_near_empty_bundle_fails(

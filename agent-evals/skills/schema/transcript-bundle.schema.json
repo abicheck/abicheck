@@ -111,7 +111,12 @@
             "type": "string"
           },
           "digest": {
-            "$ref": "#/$defs/digest"
+            "allOf": [
+              {
+                "$ref": "#/$defs/digest"
+              }
+            ],
+            "description": "sha256 of that one file's bytes as the run read it. The freshness check compares it against the file's current content, which is what catches an input whose routed hash is coarser than the file itself — `scenarios.yaml` routes to every scenario, but each scenario's hash covers only its own record."
           }
         }
       }

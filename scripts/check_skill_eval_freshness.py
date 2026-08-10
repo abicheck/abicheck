@@ -61,6 +61,7 @@ Run:
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import sys
 from pathlib import Path
@@ -94,6 +95,19 @@ def _rel(path: Path) -> str:
         return path.relative_to(ROOT).as_posix()
     except ValueError:
         return path.as_posix()
+
+
+def _content_digest(path: Path) -> str | None:
+    """`sha256:` of one file's bytes, or None when it is gone.
+
+    Deliberately the plain content digest, not the pack's `_digest_paths`
+    (which folds the path name in): an observed input is one file the run read,
+    and the shim records exactly this.
+    """
+    try:
+        return "sha256:" + hashlib.sha256(path.read_bytes()).hexdigest()
+    except OSError:
+        return None
 
 
 def _load_pack() -> dict[str, Any]:
@@ -200,6 +214,13 @@ BEHAVIORAL_ONLY_HASHES = ("scenarios",)
 #: Phase 6's publication step is what verifies it.
 PUBLICATION_ONLY_HASHES = frozenset({"build"})
 
+#: The two bundle kinds, checked as a closed set. Validating only *presence*
+#: let any non-empty typo — `"behavioural"` — read as not-behavioral: it needed
+#: no scenario hash and skipped every behavioral check below, so a malformed
+#: bundle carrying the four shared hashes passed while being ungradeable
+#: (Codex review). An unknown kind is an error, not a default.
+KNOWN_BUNDLE_KINDS = frozenset({"behavioral", "trigger"})
+
 
 def check_bundle_completeness(rel: str, bundle: dict[str, Any], out: Findings) -> None:
     for field in REQUIRED_BUNDLE_FIELDS:
@@ -207,9 +228,17 @@ def check_bundle_completeness(rel: str, bundle: dict[str, Any], out: Findings) -
             out.err(
                 "completeness", f"{rel}: no {field!r} — this is not a gradeable bundle"
             )
+    kind = bundle.get("kind")
+    if kind is not None and kind not in KNOWN_BUNDLE_KINDS:
+        out.err(
+            "bundle",
+            f"{rel}: unknown kind {kind!r} — expected one of "
+            f"{', '.join(sorted(KNOWN_BUNDLE_KINDS))}; a bundle whose kind does not "
+            f"resolve cannot be graded by either contract",
+        )
     hashes = bundle.get("hashes") or {}
     required = REQUIRED_BUNDLE_HASHES
-    if bundle.get("kind") == "behavioral":
+    if kind == "behavioral":
         required = (*required, *BEHAVIORAL_ONLY_HASHES)
     for name in required:
         if not hashes.get(name):
@@ -325,6 +354,29 @@ def check_bundle(
     # question is whether *this* evidence can be invalidated by *this* input.
     for observed in bundle.get("observed_inputs", []):
         observed_path = observed.get("path", "")
+
+        # Routing alone is not freshness. Roots are deliberately coarser than
+        # the digests they route to — `scenarios.yaml` routes to every
+        # scenario, while each scenario's digest covers only its own record —
+        # so editing scenario B leaves scenario A's hash untouched and A's
+        # bundle passes while the manifest it actually read has changed
+        # underneath it (Codex review). The recorded digest is the direct
+        # answer: it is what the file held when the run read it.
+        recorded_digest = observed.get("digest")
+        current = _content_digest(ROOT / observed_path)
+        if current is None:
+            out.err(
+                "staleness",
+                f"{rel}: read {observed_path!r}, which no longer exists — the evidence "
+                f"rests on an input that is gone",
+            )
+        elif recorded_digest != current:
+            out.err(
+                "staleness",
+                f"{rel}: {observed_path} changed since the run read it "
+                f"(bundle {recorded_digest}, current {current})",
+            )
+
         routed = route(observed_path, entries)
         if not routed:
             out.err(
