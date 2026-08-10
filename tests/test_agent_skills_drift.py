@@ -645,3 +645,42 @@ def test_cited_aggregate_invocations_satisfy_its_required_option_group(tmp_path)
                     f"`aggregate`'s own usage check: {output.strip().splitlines()[-1]}"
                 )
     assert offenders == []
+
+
+#: Options whose value `compare --help` documents as applying to *both* sides
+#: unless an `old=`/`new=` prefix scopes it.
+_TWO_SIDED_OPTIONS = ("--header", "-H", "--include", "-I")
+
+
+def test_no_runnable_compare_example_leaves_a_two_sided_option_unscoped():
+    """A bare `--header`/`--include` in a `compare` example is a false-green
+    mechanism, not a style nit.
+
+    Both options apply to *both* sides unless prefixed. When the two operands
+    come from different revisions, an unscoped value parses both artifacts
+    against one revision's headers — so a changed signature or layout appears
+    identically on each side and cancels out, and the run reports compatible.
+    An unscoped `--include` reintroduces the same masking one level down, by
+    letting the old header resolve its own `#include`s out of the new tree.
+
+    Enforced mechanically because this class of defect kept reappearing in a
+    sibling file after each hand-correction: the same wrong command was
+    written several ways across four files, and grepping the phrasing of one
+    did not find the others.
+    """
+    offenders: list[str] = []
+    for path in SKILL_FILES:
+        for line, invocation in _runnable_invocations(path):
+            words = invocation.split()
+            if len(words) < 2 or words[1] != "compare":
+                continue
+            for index, word in enumerate(words):
+                if word not in _TWO_SIDED_OPTIONS:
+                    continue
+                value = words[index + 1] if index + 1 < len(words) else ""
+                if not value.startswith(("old=", "new=", "old:", "new:")):
+                    offenders.append(
+                        f"{path.relative_to(REPO)}:{line}: `{word} {value}` "
+                        "applies to both sides — scope it with 'old='/'new='"
+                    )
+    assert offenders == []

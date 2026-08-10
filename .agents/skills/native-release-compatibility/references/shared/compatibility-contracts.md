@@ -56,9 +56,10 @@ exit-code matrix is in
   `verdict` reaching `BREAKING`.
 - "Will my users' code still compile?" → source API. `API_BREAK` matters as
   much as `BREAKING`.
-- "Will this binary still run on the new base image?" → runtime. `compare`
-  is the wrong tool on its own; reach for `deps compare` and state the
-  limitation.
+- "Will this binary still run on the new base image?" → runtime. Start with
+  `compare`'s own `runtime_floor_raised` finding, which answers the
+  symbol-version half; `compare` cannot answer the rest on its own, so reach
+  for `deps compare` for the dependency graph and state the limitation.
 
 If the user has not said which one they mean, and the answers would differ,
 say so and answer both — do not silently pick the one that reads better.

@@ -63,9 +63,14 @@ shape is [plugin systems](https://abicheck.github.io/abicheck/use/plugin-systems
 
 ## Failure modes to state, not paper over
 
-- **The consumer binary is stripped or its imports are unresolvable.** You
-  cannot scope; the honest answer is the global verdict plus a statement
-  that consumer scoping was unavailable.
+- **The consumer's imports are unresolvable.** Then you cannot scope, and the
+  honest answer is the global verdict plus a statement that consumer scoping
+  was unavailable. Stripping alone does **not** put a binary here: scoping
+  reads loader-visible imports (ELF `.dynsym`, the PE import directory,
+  Mach-O undefined symbols), which survive `strip` — it removes `.symtab`.
+  Reserve this for an undetectable format or genuinely absent loader
+  metadata; treating every stripped consumer as unscopable throws away an
+  answer the tool can give.
 - **A required symbol is missing from the *old* side too.** The contract was
   already unsatisfied; that is a pre-existing defect, not a regression this
   change introduced. Report it as such.

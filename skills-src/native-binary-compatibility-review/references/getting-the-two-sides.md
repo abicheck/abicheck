@@ -70,16 +70,20 @@ auto-discovery cannot:
 abicheck compare OLD NEW \
   --header old=../old-side/include/foo/api.h \
   --header new=include/foo/api.h \
-  --include include/ \
+  --include old=../old-side/include/ \
+  --include new=include/ \
   --depth headers --format json
 ```
 
-**Scope each side to its own headers.** A bare `--header PATH` applies to
-*both* sides; the `old=`/`new=` prefixes select one. When the two artifacts
-come from different revisions, parsing both against the current checkout's
-headers describes the new API twice — a changed signature or layout then
-appears on both sides and cancels out, yielding a false compatible. Use the
-bare form only when one set of headers genuinely describes both sides.
+**Scope each side to its own headers — and to its own include path.** A bare
+`--header PATH` or `--include PATH` applies to *both* sides; the `old=`/`new=`
+prefixes select one. When the two artifacts come from different revisions,
+parsing both against the current checkout describes the new API twice — a
+changed signature or layout then appears on both sides and cancels out,
+yielding a false compatible. Scoping the headers alone is not enough: an
+unscoped `--include` lets the old header resolve its own `#include`s out of
+the new tree, reintroducing the same masking one level down. Use the bare
+form only when one set of paths genuinely describes both sides.
 
 The same applies when one side is a snapshot: it already carries its own
 header evidence, so scope the live side only — `abicheck compare

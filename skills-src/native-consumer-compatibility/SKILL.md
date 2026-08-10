@@ -150,14 +150,23 @@ inherently incomplete:
 - **Dynamic resolution.** `dlopen`/`dlsym`, `GetProcAddress`, plugin
   registries, and scripting bridges are invisible to import scanning. If the
   consumer does any of this, the scope is incomplete — say so.
-- **Stripped or unresolvable consumer.** No scoping is possible; fall back
-  to the global verdict and state that consumer scoping was unavailable.
+- **Unresolvable consumer.** Note that an ordinarily *stripped* binary is
+  **not** in this category: scoping reads the loader-visible imports — ELF
+  `.dynsym`, the PE import directory, Mach-O undefined symbols — which
+  `strip` leaves in place (it removes `.symtab`). Fall back to the global
+  verdict only on a real failure: an undetectable binary format, or missing
+  loader metadata. Falling back merely because a consumer is stripped
+  discards a valid consumer-specific answer.
 - **Indirect consumers.** Something the consumer links may itself use the
   library. Scope those separately or state that you did not.
 - **Behaviour.** ABI compatibility is not behavioural compatibility. A
   consumer can keep loading and still misbehave.
 - **Runtime floors.** Even an unaffected consumer fails if the new build
-  raised its glibc floor — `abicheck deps compare`, reported separately
+  raised its glibc floor. Read this one out of the comparison you already
+  ran: `compare` emits `runtime_floor_raised` in the full result, and an
+  environment matrix can promote it to a break — report that first. Use
+  `abicheck deps compare` for the wider dependency graph beyond the
+  symbol-version floor, reported separately
   ([compatibility contracts](../shared/compatibility-contracts.md)).
 
 ## Step 5 — Report
