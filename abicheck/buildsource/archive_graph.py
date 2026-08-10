@@ -744,6 +744,29 @@ def parse_ar_archive(reader: ByteReader) -> ArchiveContents:
     # regular member's own leading 4 bytes -- real object-format evidence
     # `augment_graph_with_archives` needs alongside ``index_kind`` before
     # trusting the Mach-O leading-underscore join fallback.
+    #
+    # Empty (not a wrong guess) for a *thin* archive's first regular member
+    # (Codex review, fresh evidence, empirically confirmed: `llvm-ar
+    # --format=gnu rcT lib.a a.o` over a real Mach-O `a.o`, then re-parsed,
+    # yields `object_magic == b""`): a thin archive's regular members are
+    # bodiless (`stored = 0` above) -- their real bytes live in an external
+    # file this parser has no path to open, so `member.data_offset` for a
+    # thin member points at whatever immediately follows its header (the
+    # next member's header, or EOF), never real object content. Reading
+    # that offset is therefore never a false Mach-O match (it is ASCII
+    # header text, not a 4-byte binary magic sequence), only ever the
+    # correct empty/non-matching answer -- so the Mach-O join fallback
+    # below silently misses a real Mach-O thin archive's underscore-
+    # prefixed symbols (a missed edge, never a wrong one) rather than
+    # trusting fabricated evidence. A real fix means resolving each thin
+    # member's own external file path (relative to the archive's own
+    # directory, ADR-032 D7-redaction-aware, with the same path-escape
+    # care `_resolve_archive_path`'s own docstring already gives adjacent
+    # inputs) and reading its magic from there instead -- new, non-trivial
+    # plumbing this parser doesn't have today, not a one-line extension of
+    # this read. Deferred the same way this file already defers its other
+    # documented thin-archive gaps (see `_resolve_archive_path`'s own
+    # docstring).
     object_magic = reader.read(members[0].data_offset, 4) if members else b""
 
     return ArchiveContents(

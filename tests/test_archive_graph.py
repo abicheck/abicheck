@@ -977,6 +977,23 @@ def test_augment_graph_macho_symbol_joins_via_fallback_on_gnu_indexed_archive(
     assert defining_members(g, "foo") == [("libtest.a", "a.o")]
 
 
+def test_thin_archive_regular_member_object_magic_is_empty_not_fabricated() -> None:
+    """A thin archive's regular members are bodiless (their real data lives
+    in an external file this parser has no path to open) -- reading
+    ``object_magic`` from a thin member's ``data_offset`` must land on
+    whatever immediately follows the header (the next header, or EOF) and
+    never fabricate a Mach-O match, confirmed empirically against a real
+    ``llvm-ar --format=gnu rcT`` thin archive over a real Mach-O object
+    (Codex review, fresh evidence): the real member content is never
+    inline, so this always resolves to an empty/non-matching read rather
+    than a wrong one."""
+    data = build_gnu_archive([("a.o", b"SYM:_foo\n")], thin=True)
+    contents = parse_ar_archive(BytesReader(data))
+    assert contents.flavor == "thin"
+    assert [m.name for m in contents.members] == ["a.o"]
+    assert contents.object_magic == b""
+
+
 def test_augment_graph_bsd_index_without_macho_magic_not_stripped(tmp_path) -> None:
     """A BSD/``__.SYMDEF``-indexed archive around ordinary ELF (or other
     non-Mach-O) object members must not trigger the underscore-stripping

@@ -175,6 +175,106 @@ def test_parses_explicit_instantiation_detached_from_its_template_decl() -> None
     assert int_inst.emitted_symbols == ("_ZNK7WrapperIiE3getEv",)
 
 
+def test_class_template_instantiation_includes_static_data_member_symbol() -> None:
+    """An instantiated *static data member* carries its mangled name on a
+    ``VarDecl`` child, not one of the member-function kinds -- Codex review,
+    verified empirically against real clang AST output (``template
+    <typename T> struct Box { static T value; };`` explicitly instantiated
+    as ``Box<int>`` puts ``_ZN3BoxIiE5valueE`` on a direct ``VarDecl``
+    child). An earlier revision only scanned member-function kinds, so this
+    symbol was silently dropped from ``emitted_symbols`` even though the
+    instantiation genuinely emits it."""
+    ast = {
+        "kind": "TranslationUnitDecl",
+        "inner": [
+            {
+                "kind": "ClassTemplateDecl",
+                "name": "Box",
+                "inner": [
+                    {"kind": "TemplateTypeParmDecl", "name": "T"},
+                    {
+                        "kind": "CXXRecordDecl",
+                        "name": "Box",
+                        "completeDefinition": True,
+                        "inner": [],
+                    },
+                    {
+                        "id": "0xSPEC_BOX_INT",
+                        "kind": "ClassTemplateSpecializationDecl",
+                        "name": "Box",
+                    },
+                ],
+            },
+            {
+                "id": "0xSPEC_BOX_INT",
+                "kind": "ClassTemplateSpecializationDecl",
+                "name": "Box",
+                "completeDefinition": True,
+                "inner": [
+                    {
+                        "kind": "TemplateArgument",
+                        "type": {"qualType": "int"},
+                        "inner": [],
+                    },
+                    {
+                        "kind": "VarDecl",
+                        "name": "value",
+                        "mangledName": "_ZN3BoxIiE5valueE",
+                    },
+                ],
+            },
+        ],
+    }
+    out = parse_clang_ast_templates(ast)
+    assert len(out) == 1
+    assert out[0].label == "Box<int>"
+    assert out[0].emitted_symbols == ("_ZN3BoxIiE5valueE",)
+
+
+def test_class_template_instantiation_ignores_non_static_field() -> None:
+    """A direct-child ``VarDecl`` scan must not pick up an ordinary field:
+    a non-static field has no linkage, so clang never gives it a
+    ``mangledName`` -- the existing truthiness guard on ``mangledName``
+    already excludes it without needing kind-specific filtering, verified
+    here so the static-data-member fix above can't regress into treating
+    every field as an emitted symbol."""
+    ast = {
+        "kind": "TranslationUnitDecl",
+        "inner": [
+            {
+                "kind": "ClassTemplateDecl",
+                "name": "Box",
+                "inner": [
+                    {"kind": "TemplateTypeParmDecl", "name": "T"},
+                    {
+                        "kind": "CXXRecordDecl",
+                        "name": "Box",
+                        "completeDefinition": True,
+                        "inner": [],
+                    },
+                    {
+                        "id": "0xSPEC_BOX_INT2",
+                        "kind": "ClassTemplateSpecializationDecl",
+                        "name": "Box",
+                        "completeDefinition": True,
+                        "inner": [
+                            {
+                                "kind": "TemplateArgument",
+                                "type": {"qualType": "int"},
+                                "inner": [],
+                            },
+                            {"kind": "FieldDecl", "name": "member"},
+                        ],
+                    },
+                ],
+            },
+        ],
+    }
+    out = parse_clang_ast_templates(ast)
+    assert len(out) == 1
+    assert out[0].emitted_symbols == ()
+
+
 def test_class_template_stub_with_no_full_definition_is_skipped() -> None:
     """A specialization id that is only ever seen as an empty stub (no
     matching ``completeDefinition: true`` occurrence anywhere) contributes

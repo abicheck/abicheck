@@ -709,9 +709,24 @@ def _instantiation_label(template_qname: str, args: Iterable[TemplateArgUse]) ->
 
 
 def _member_symbols(node: dict[str, Any]) -> tuple[str, ...]:
+    """A class-template instantiation's own emitted member symbols --
+    ``node`` is the full-content ``ClassTemplateSpecializationDecl``, and
+    every direct child with a ``mangledName`` is a member that has real
+    linkage. Includes ``VarDecl`` alongside the member-function kinds
+    (Codex review, fresh evidence, verified empirically against real clang
+    AST output): an instantiated *static data member* --
+    ``template <typename T> struct Box { static T value; };`` explicitly
+    instantiated as ``Box<int>`` -- carries its mangled name
+    (``_ZN3BoxIiE5valueE``) directly on a ``VarDecl`` child, not one of the
+    member-function kinds, so it was previously silently dropped from
+    ``emitted_symbols`` entirely. An *ordinary* (non-static) field is also a
+    direct child here but is never mistaken for one: a non-static field has
+    no linkage and clang never gives it a ``mangledName``, so the existing
+    ``isinstance(mangled, str) and mangled`` guard already excludes it
+    without kind-specific filtering."""
     symbols: list[str] = []
     for child in node.get("inner", []) or []:
-        if str(child.get("kind", "")) in _MEMBER_FUNCTION_KINDS:
+        if str(child.get("kind", "")) in _MEMBER_FUNCTION_KINDS | {"VarDecl"}:
             mangled = child.get("mangledName")
             if isinstance(mangled, str) and mangled:
                 symbols.append(_normalize_mangled(mangled))

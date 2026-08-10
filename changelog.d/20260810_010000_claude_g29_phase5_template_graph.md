@@ -339,3 +339,31 @@
   observed or reproduced; the function now explicitly skips a
   `mangledName`-carrying child anyway, removing the implicit ordering
   dependency rather than merely relying on it.
+
+  A thirteenth review round found one more real gap, fixed, plus one
+  empirically-confirmed limitation, deferred and documented in place. An
+  instantiated class template's *static data member* carries its mangled
+  name on a direct `VarDecl` child (e.g. `template <typename T> struct Box
+  { static T value; };` explicitly instantiated as `Box<int>` puts
+  `_ZN3BoxIiE5valueE` on a `VarDecl`), not one of the member-function
+  kinds `_member_symbols` scanned — so this genuinely emitted symbol was
+  silently dropped from `emitted_symbols` entirely, verified against real
+  clang AST output; `_member_symbols` now also scans `VarDecl` children (a
+  non-static field is never mistaken for one, since it has no linkage and
+  clang never gives it a `mangledName`, so the existing truthiness guard
+  already excludes it). Separately, `archive_graph.py`'s `object_magic`
+  field — read from `members[0].data_offset` — is empty, not wrong, for a
+  *thin* archive's first regular member: a thin archive's regular members
+  are bodiless (their real data lives in an external file this parser has
+  no path to open), so that offset lands on whatever immediately follows
+  the header rather than real object content, confirmed empirically with a
+  real `llvm-ar --format=gnu rcT` thin archive over a real Mach-O object
+  (`object_magic` comes back `b""`). The Mach-O underscore-stripping join
+  fallback therefore silently misses a real Mach-O thin archive's
+  underscore-prefixed symbols — a missed edge, never a wrong one, since an
+  ASCII archive header can never accidentally match a 4-byte binary Mach-O
+  magic sequence. A real fix needs resolving each thin member's own
+  external file path and reading its magic from there — new, non-trivial
+  plumbing this parser doesn't have today — so it is deferred the same way
+  this module already defers its other documented thin-archive gaps,
+  rather than attempted as a drive-by extension of this read.
