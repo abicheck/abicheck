@@ -120,16 +120,43 @@ def _clang_param_is_restrict(node: dict[str, Any]) -> bool:
       same mechanism ``_desugared_qualtype``'s own docstring documents for
       const/volatile). castxml's walk follows its ``Typedef`` chain for
       the identical reason.
-    - **Top-level only** is why it reuses :func:`_field_own_cv_source`:
-      ``int *restrict *`` qualifies the INNER pointer, leaving the
-      parameter itself unqualified, while ``int **restrict`` qualifies the
-      parameter (both spellings confirmed empirically). Scanning the whole
-      spelling would conflate the two.
+    - **Top-level only** is why only the span after the last depth-0 ``*``
+      is searched: ``int *restrict *`` qualifies the INNER pointer, leaving
+      the parameter itself unqualified, while ``int **restrict`` qualifies
+      the parameter (both spellings confirmed empirically). Scanning the
+      whole spelling would conflate the two.
+    - **A missing depth-0 pointer means "no", never "search everything".**
+      This is deliberately NOT :func:`_field_own_cv_source`, whose
+      no-pointer fallback (return the whole spelling) is right for a
+      const/volatile *field* but wrong here. A callback parameter spells as
+      ``void (*)(int *restrict)`` — its own ``*`` sits inside parentheses,
+      so there is no depth-0 pointer, and the fallback would hand the whole
+      spelling to the regex and match the CALLBACK ARGUMENT's ``restrict``
+      as though it qualified the parameter (Codex review, confirmed against
+      real clang 18 output: castxml's type-chain walk stops at the outer
+      ``PointerType`` and correctly answers False, so this would have been
+      a fresh cross-backend false positive of exactly the kind this
+      extraction exists to remove). Requiring the depth-0 pointer is also
+      semantically exact rather than merely defensive — ``restrict`` is
+      only valid on a pointer, so a spelling with no top-level pointer can
+      never be restrict-qualified.
+
+    Answering False for a function-pointer parameter costs nothing, which is
+    worth stating because it is easy to assume otherwise: a pointer to a
+    *function* may not be ``restrict``-qualified at all (C11 6.7.3p2 —
+    ``restrict`` qualifies a pointer to an object type), so there is no
+    legal declaration this loses. Verified rather than reasoned about:
+    ``void (*restrict cb)(int)`` is rejected outright by clang in C and C++
+    alike ("pointer to function type 'void (int)' may not be 'restrict'
+    qualified"), so the shape cannot appear in a header abicheck parses.
 
     Both the C spelling (``restrict``) and the C++ ones (``__restrict`` /
     ``__restrict__``, which clang normalizes to ``__restrict``) are
     recognized; the word-boundary anchors keep a type merely *named*
     ``restrict_like`` from matching.
     """
-    own = _field_own_cv_source(_desugared_qualtype(node))
-    return bool(re.search(r"\b(?:__)?restrict(?:__)?\b", own))
+    desugared = _desugared_qualtype(node)
+    end = _last_top_level_ptr_end(desugared)
+    if end < 0:
+        return False
+    return bool(re.search(r"\b(?:__)?restrict(?:__)?\b", desugared[end:]))

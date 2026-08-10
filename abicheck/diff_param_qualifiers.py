@@ -22,11 +22,21 @@ means both "not qualified" and "this producer never collected the fact", so
 each needs an evidence gate rather than a bare value comparison — the same
 distinction ``diff_default_value_reliability.py`` draws for ``Param.default``.
 
-Import direction: this module imports from ``diff_symbols`` (for the shared
+Import direction: this module depends on ``diff_symbols`` (for the shared
 ``_public_functions``/``_both_header_aware`` helpers), never the reverse —
 the same direction ``diff_filtering.py``/``diff_types.py`` already take.
 Registration happens through ``checker.py``'s detector-import block, not
 through a back-import from ``diff_symbols``, so no cycle is introduced.
+
+Those two helpers are imported **inside** the detectors rather than at
+module scope, and that is load-bearing rather than stylistic: this module is
+imported near the top of ``checker.py``, while ``diff_symbols`` is imported
+much further down, so a module-scope import would pull ``diff_symbols`` (and
+its ``diff_symbols_renames`` sibling) forward and register their detectors
+ahead of ``diff_elf_layout``'s. Detector registration order is user-visible
+— it orders the coverage-gap rows in a report — and the golden output tests
+caught exactly that reordering. A function-local import is also the remedy
+the root ``AGENTS.md`` names for this class of coupling.
 """
 
 from __future__ import annotations
@@ -35,7 +45,6 @@ from .checker_policy import ChangeKind
 from .checker_types import Change
 from .detector_registry import registry
 from .diff_helpers import make_change
-from .diff_symbols import _both_header_aware, _public_functions
 from .model import AbiSnapshot
 
 
@@ -66,6 +75,8 @@ def _diff_param_restrict(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
     the same reasoning ``fact_provenance.both_known_backed_fact`` encodes
     for ``deprecated``/``is_scoped``.
     """
+    from .diff_symbols import _both_header_aware, _public_functions
+
     if not _both_header_aware(old, new):
         return []
     if not (old.clang_restrict_facts_reliable and new.clang_restrict_facts_reliable):
@@ -108,6 +119,8 @@ def _diff_param_va_list(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
     problem exactly — a cross-producer or legacy-baseline comparison reading
     a blanket ``False`` as "not a va_list" — and will need the same gate.
     """
+    from .diff_symbols import _public_functions
+
     changes: list[Change] = []
     old_map = _public_functions(old)
     new_map = _public_functions(new)

@@ -29,7 +29,8 @@ Three layers are covered here:
    emits (pure; runs everywhere).
 2. The same predicate against a LIVE ``clang -ast-dump=json`` tree, so the
    spellings asserted in (1) are the ones clang actually produces rather
-   than ones this test made up (``integration``).
+   than ones this test made up (self-skipping, not ``integration`` — see
+   that class's own docstring for why).
 3. The two gates the new fact needs at the detector: a header-tier gate
    (DWARF/PDB/symbol paths never populate it at all) and the pre-v22
    legacy-baseline flag, each with a positive control confirming the
@@ -88,10 +89,28 @@ class TestClangParamIsRestrict:
             # A type merely NAMED like the keyword must not match.
             ("restrict_like *", False),
             ("struct restrict_like *", False),
+            # A CALLBACK parameter: the parameter's own `*` is inside
+            # parentheses, so there is no depth-0 pointer at all. The
+            # `restrict` belongs to the callback's ARGUMENT, not to the
+            # parameter — answering True here would be a fresh cross-backend
+            # false positive, since castxml's type-chain walk stops at the
+            # outer PointerType and says False (Codex review).
+            ("void (*)(int *restrict)", False),
+            ("void (*)(int *)", False),
+            ("void (*)(int)", False),
         ],
     )
     def test_spellings(self, qual_type: str, expected: bool) -> None:
         assert _clang_param_is_restrict(_param_node(qual_type)) is expected
+
+    def test_a_non_pointer_spelling_is_never_restrict(self) -> None:
+        """`restrict` is only valid on a pointer, so "no depth-0 `*`" is an
+        exact answer rather than a defensive default — and specifically NOT
+        the "search the whole spelling" fallback `_field_own_cv_source` uses
+        for a const/volatile field, which is what let a callback argument's
+        qualifier leak in."""
+        assert _clang_param_is_restrict(_param_node("struct S")) is False
+        assert _clang_param_is_restrict(_param_node("int &")) is False
 
     def test_typedef_indirection_is_followed(self) -> None:
         """A parameter declared through ``typedef int *restrict rptr;``
@@ -182,6 +201,53 @@ class TestClangParamIsRestrictAgainstRealClang:
         for fn, want in expected.items():
             assert fn in params, f"clang emitted no ParmVarDecl for {fn}"
             assert _clang_param_is_restrict(params[fn][0]) is want, fn
+
+    def test_callback_parameters(self, tmp_path: Path) -> None:
+        """The Codex-review case, against real output rather than a fixture.
+
+        A callback parameter's own ``*`` sits inside parentheses, so there is
+        no depth-0 pointer and the qualifier found in the spelling belongs to
+        the callback's ARGUMENT. Reading the whole spelling (the fallback
+        `_field_own_cv_source` uses for a const/volatile field) answered True
+        here, against castxml's False.
+        """
+        root = self._parse(
+            tmp_path,
+            """
+            void takes_cb(void (*cb)(int *restrict));
+            void takes_cb_plain(void (*cb)(int *));
+            """,
+            cpp=False,
+        )
+        params = self._params_by_function(root)
+        for fn in ("takes_cb", "takes_cb_plain"):
+            assert fn in params, f"clang emitted no ParmVarDecl for {fn}"
+            assert _clang_param_is_restrict(params[fn][0]) is False, fn
+
+        # The spelling the first answer depends on.
+        assert (params["takes_cb"][0].get("type") or {}).get(
+            "qualType"
+        ) == "void (*)(int *restrict)"
+
+    def test_a_restrict_function_pointer_is_not_legal_c(self, tmp_path: Path) -> None:
+        """Why answering False for a function-pointer parameter loses nothing.
+
+        C11 6.7.3p2 allows `restrict` only on a pointer to an OBJECT type, so
+        there is no legal declaration the depth-0-pointer requirement misses.
+        Pinned against the real compiler rather than cited, since the whole
+        no-false-negative claim rests on it.
+        """
+        if shutil.which("clang") is None:
+            pytest.skip("clang not installed")
+        src = tmp_path / "fnptr.c"
+        src.write_text("void f(void (*restrict cb)(int));\n")
+        proc = subprocess.run(
+            ["clang", "-fsyntax-only", "-x", "c", str(src)],
+            capture_output=True,
+            text=True,
+        )
+        assert proc.returncode != 0
+        assert "may not be 'restrict' qualified" in proc.stderr
 
     def test_cpp_spellings(self, tmp_path: Path) -> None:
         root = self._parse(

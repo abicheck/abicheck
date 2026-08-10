@@ -1430,6 +1430,35 @@ building a second identity-resolution mechanism from scratch.
   detectors, registered through `checker.py`'s import block so no cycle is
   introduced).
 
+  **Two review findings on that change, both worth not rediscovering.**
+  (1) *A callback parameter's argument qualifier is not the parameter's.*
+  The first cut reused `_field_own_cv_source`, whose no-pointer fallback
+  returns the whole type spelling — right for a const/volatile field, wrong
+  here. clang spells a callback parameter as `void (*)(int *restrict)`, its
+  own `*` inside parentheses, so there is no depth-0 pointer and the
+  fallback handed the whole spelling to the regex, matching the
+  *callback argument's* `restrict` as though it qualified the parameter.
+  castxml's type-chain walk stops at the outer `PointerType` and correctly
+  answers False — so this would have introduced a fresh cross-backend false
+  positive of exactly the kind the change exists to remove (Codex review,
+  reproduced against real clang 18 output). Fixed by requiring a depth-0
+  pointer before searching at all, which is semantically exact rather than
+  merely defensive: C11 6.7.3p2 allows `restrict` only on a pointer to an
+  *object* type, so nothing legal is lost. That last point was verified
+  rather than assumed — `void (*restrict cb)(int)` is rejected outright by
+  clang in C and C++ alike, which retired an "accepted false negative" note
+  an earlier draft of this fix had written for it.
+  (2) *Detector registration order is user-visible.* Registering the new
+  module from `checker.py`'s top import block pulled `diff_symbols` (and its
+  `diff_symbols_renames` sibling, which owns `fingerprint_renames`) forward
+  from its own import much further down the file, moving those detectors
+  ahead of `diff_elf_layout`'s and reordering the coverage-gap rows in every
+  report. Five golden-output tests caught it — a marker the everyday fast
+  command excludes, which is the case for running `verify.py --profile pr`
+  before opening a PR rather than the four-command inner loop. Fixed by
+  importing the two shared helpers *inside* the detectors, the remedy the
+  root `AGENTS.md` already names for this class of coupling.
+
 - ~~Single-AST reuse for the direct-clang backend~~ **Done** (see above) —
   via in-process memoization of `_clang_header_dump`'s result, not by
   threading the parser's already-consumed AST object through
