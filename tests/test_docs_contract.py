@@ -1900,3 +1900,26 @@ def test_every_shared_skill_fragment_is_registered_in_topics_yaml() -> None:
             continue
         rel = fragment.relative_to(root).as_posix()
         assert rel in registered, f"{rel} claims summarizes but is unregistered"
+
+
+@pytest.mark.parametrize(
+    "value", ["output-formats", "1", "{a: 1}"], ids=["str", "int-ish", "mapping"]
+)
+def test_a_malformed_summarizes_in_an_unregistered_fragment_is_reported(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, value: str
+) -> None:
+    """This tree-wide scan is the only thing that visits an *unregistered*
+    fragment — `_check_front_matter_schema` walks pages the registry names —
+    so coercing a malformed `summarizes` to an empty list left both the bad
+    type and the missing round-trip unreported for exactly the files this
+    scan exists to reach."""
+    topics, fragment = _external_registry(tmp_path)
+    stray = fragment.parent / "stray.md"
+    stray.write_text(
+        f"---\ndoc_type: reference\nsummarizes: {value}\n---\n\n# S\n", encoding="utf-8"
+    )
+    monkeypatch.setattr(dc, "ROOT", tmp_path)
+    monkeypatch.setattr(dc, "DOCS", tmp_path / "docs")
+    f = dc.Findings()
+    dc._check_external_pages_claim_only_registered_topics(f, topics)
+    assert any("summarizes must be a list" in str(e) for e in f.errors)

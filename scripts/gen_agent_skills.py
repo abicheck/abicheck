@@ -320,8 +320,18 @@ def _indented_code_spans(text: str) -> list[tuple[int, int]]:
 
 
 def _column_width(text: str) -> int:
-    """Columns `text` occupies, counting a tab as CommonMark's four."""
-    return sum(4 if char == "\t" else 1 for char in text)
+    """Columns `text` occupies, with CommonMark's four-column tab stops.
+
+    A tab advances to the *next multiple of four*, which is not the same as
+    adding four: `"  \\t"` reaches column 4, not 6. Adding four flat made a
+    two-space-then-tab continuation under `- ` measure 6 — exactly the
+    `column + 4` code floor — so a real link on that line was masked as code
+    and shipped unrewritten.
+    """
+    width = 0
+    for char in text:
+        width = (width // 4 + 1) * 4 if char == "\t" else width + 1
+    return width
 
 
 def _indent_width(line: str) -> int:

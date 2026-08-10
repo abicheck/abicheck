@@ -661,10 +661,21 @@ def _check_external_pages_claim_only_registered_topics(
                 continue
             if not isinstance(fm, dict):
                 continue
-            claims = fm.get("summarizes")
-            for topic_id in (
-                [str(c) for c in claims] if isinstance(claims, list) else []
-            ):
+            raw_claims = fm.get("summarizes")
+            if raw_claims is None:
+                claims: list[object] = []
+            elif isinstance(raw_claims, list):
+                claims = raw_claims
+            else:
+                # Reported here rather than silently skipped. This tree-wide
+                # scan is the *only* thing that visits an unregistered
+                # fragment — `_check_front_matter_schema` walks pages the
+                # registry names — so coercing a malformed value to an empty
+                # list left both the bad type and the missing round-trip
+                # unreported for exactly the files this scan exists to reach.
+                f.err("front-matter", f"{_rel(path)}: summarizes must be a list")
+                continue
+            for topic_id in [str(c) for c in claims]:
                 entry = topics.get(topic_id)
                 if not isinstance(entry, dict):
                     f.err(
@@ -679,13 +690,11 @@ def _check_external_pages_claim_only_registered_topics(
                 # here would raise `TypeError` first and take the whole gate
                 # down with a traceback, losing that finding and every other
                 # one alongside it.
-                registered = [
-                    str(v)
-                    for key in ("task_pages", "allowed_summaries")
-                    for v in (
-                        entry.get(key) if isinstance(entry.get(key), list) else []
-                    )
-                ]
+                registered: list[str] = []
+                for key in ("task_pages", "allowed_summaries"):
+                    values = entry.get(key)
+                    if isinstance(values, list):
+                        registered.extend(str(v) for v in values)
                 if not any(_page_key(v) == _scanned_page_key(path) for v in registered):
                     f.err(
                         "front-matter",

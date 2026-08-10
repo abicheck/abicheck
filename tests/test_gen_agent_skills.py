@@ -1066,3 +1066,37 @@ def test_a_structural_escape_inside_a_fenced_example_is_allowed(synthetic):
         shared={"a.md": "# A\n"},
     )
     assert r'r"\[a\]"' in gen.render_all(gen.SRC_DIR)["demo/SKILL.md"]
+
+
+@pytest.mark.parametrize(
+    ("text", "width"),
+    [("  \t", 4), ("\t", 4), ("   \t", 4), ("    \t", 8), ("\t\t", 8), ("- ", 2)],
+    ids=[
+        "two-then-tab",
+        "bare-tab",
+        "three-then-tab",
+        "four-then-tab",
+        "two-tabs",
+        "marker",
+    ],
+)
+def test_a_tab_advances_to_the_next_stop_not_by_four(text, width):
+    """CommonMark tab stops are every four columns, so a tab *advances to* the
+    next multiple of four rather than adding four. Adding four flat made
+    `"  \\t"` measure 6 — exactly the `column + 4` floor under `- ` — so a real
+    link on a continuation line was masked as code and shipped unrewritten."""
+    assert gen._column_width(text) == width
+
+
+@pytest.mark.parametrize(
+    ("body", "masked"),
+    [
+        ("- s:\n\n  \t x\n", False),
+        ("- s:\n\n\t x\n", False),
+        ("- s:\n\n    \t x\n\nq\n", True),
+        ("p:\n\n\t x\n\nq\n", True),
+    ],
+    ids=["two-then-tab-cont", "tab-cont", "four-then-tab-code", "top-level-tab-code"],
+)
+def test_tab_indented_runs_classify_against_the_real_column(body, masked):
+    assert bool(gen._indented_code_spans(body)) is masked
