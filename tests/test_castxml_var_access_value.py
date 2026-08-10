@@ -306,6 +306,51 @@ class TestCastxmlVariableAccessAndValue:
         (v,) = parser.parse_variables()
         assert v.value == "&a"
 
+    def test_private_static_const_member_has_no_value(self) -> None:
+        """A private (or protected) `static const` member is implementation
+        detail no CONSUMER can name or inline, even when castxml still
+        assigns it a mangled export symbol -- the identical reasoning
+        `_iter_public_constants` already applies for `AbiSnapshot.constants`
+        (Codex review, second round: the first fix gated on top-level
+        constness alone and missed this)."""
+        root = Element("CastXML", attrib={"format": "1.4.0"})
+        f1 = SubElement(root, "File")
+        f1.set("id", "f1")
+        f1.set("name", "lib.h")
+        SubElement(root, "Namespace", attrib={"id": "_1", "name": "::"})
+        SubElement(root, "FundamentalType", attrib={"id": "_23", "name": "int"})
+        SubElement(
+            root, "CvQualifiedType", attrib={"id": "_23c", "type": "_23", "const": "1"}
+        )
+        cls = SubElement(root, "Class")
+        cls.set("id", "_7")
+        cls.set("name", "S")
+        cls.set("context", "_1")
+        cls.set("file", "f1")
+        cls.set("location", "f1:1")
+        cls.set("size", "0")
+        cls.set("align", "8")
+        SubElement(
+            root,
+            "Variable",
+            attrib={
+                "id": "_13",
+                "name": "kSecret",
+                "type": "_23c",
+                "context": "_7",
+                "access": "private",
+                "static": "1",
+                "init": "42",
+                "mangled": "_ZN1S7kSecretE",
+                "file": "f1",
+                "location": "f1:2",
+            },
+        )
+        parser = _CastxmlParser(root, exported_dynamic=set(), exported_static=set())
+        (v,) = parser.parse_variables()
+        assert v.access == AccessLevel.PRIVATE
+        assert v.value is None
+
 
 @pytest.mark.integration
 class TestCastxmlVariableAccessAndValueAgainstRealCastxml:
@@ -398,6 +443,26 @@ class TestCastxmlVariableAccessAndValueAgainstRealCastxml:
         by_name = {v.name: v for v in variables}
         assert by_name["p"].value is None
         assert by_name["q"].value == "&a"
+
+    def test_private_static_const_member_has_no_value(self, tmp_path: Path) -> None:
+        """The synthetic-XML regression above, confirmed against real
+        castxml: a private `static const` member's value is not surfaced
+        even though it still has real top-level constness (Codex review,
+        second round)."""
+        variables = self._dump_variables(
+            tmp_path,
+            """
+            struct S {
+            public:
+                static const int kPub = 1;
+            private:
+                static const int kPriv = 2;
+            };
+            """,
+        )
+        by_name = {v.name: v for v in variables}
+        assert by_name["kPub"].value == "1"
+        assert by_name["kPriv"].value is None
 
 
 def _snap(**kwargs: object) -> AbiSnapshot:

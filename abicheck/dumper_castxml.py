@@ -1272,22 +1272,23 @@ class _CastxmlParser:
                     type=type_name,
                     visibility=vis,
                     is_const=is_const,
-                    # G31 Phase C continued: `_access_level`, already used
-                    # for a `Field`, reads the identical `access` attribute
-                    # a static class member's `<Variable>` also carries.
+                    # G31 Phase C continued: reuses `_access_level`, already
+                    # used for `Field`, for the identical attribute a static
+                    # class member's `<Variable>` also carries.
                     access=self._access_level(el),
                     # G31 Phase C continued: `init` is verbatim/unevaluated,
                     # like `TypeField.default`. Gated on TOP-LEVEL constness
-                    # via `_resolve_cv_restrict` (stops at `PointerType`) --
-                    # NOT the loose `is_const` above, which reads "const"
-                    # anywhere in the spelling: `const int *p` is a MUTABLE
-                    # pointer whose "value" (an address) is not a
-                    # compile-time contract (Codex review; confirmed `p`'s
-                    # type resolves to a plain `PointerType`, never a
-                    # `CvQualifiedType`, unlike a real `int *const`).
+                    # (stops at `PointerType`, unlike the loose `is_const`
+                    # above -- a mutable `const int *p`'s address-of
+                    # initializer is not a contract) AND public access,
+                    # mirroring `_iter_public_constants` below (both gates
+                    # from Codex review).
                     value=(
                         el.get("init")
-                        if self._resolve_cv_restrict(el.get("type", ""))[0]
+                        if (
+                            el.get("access") not in ("private", "protected")
+                            and self._resolve_cv_restrict(el.get("type", ""))[0]
+                        )
                         else None
                     ),
                     source_location=self._source_location(el),
