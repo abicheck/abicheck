@@ -880,11 +880,13 @@ def test_augment_graph_macho_underscore_prefixed_symbol_joins_via_fallback(
     (``_foo``), while ``macho_metadata.py`` strips exactly one before a
     ``binary_symbol`` node is minted from it — the exact-name join alone
     (an earlier revision) missed every Mach-O archive symbol (Codex review,
-    fresh evidence). Uses a genuinely BSD-indexed archive: the fallback is
-    gated on ``index_kind == "bsd"`` (a later Codex round, fresh evidence),
-    since an ordinary GNU/ELF archive's own symbol table can legitimately
-    contain a name that already starts with ``_``."""
-    data = build_bsd_archive([("a.o", b"SYM:_foo\n")])
+    fresh evidence). Uses a genuinely BSD-indexed archive whose first member
+    also carries real Mach-O magic bytes: the fallback needs *both* (a later
+    Codex round, fresh evidence) since a BSD index alone doesn't prove
+    Mach-O (``llvm-ar --format=bsd`` can wrap ordinary ELF objects too), and
+    an ordinary GNU/ELF archive's own symbol table can legitimately contain
+    a name that already starts with ``_``."""
+    data = build_bsd_archive([("a.o", b"\xfe\xed\xfa\xcf\nSYM:_foo\n")])
     (tmp_path / "libtest.a").write_bytes(data)
     g = _graph_with_archive("libtest.a", ["foo"])  # node has no leading underscore
 
@@ -893,6 +895,25 @@ def test_augment_graph_macho_underscore_prefixed_symbol_joins_via_fallback(
     assert result.symbol_edges == 1
     assert result.unjoined_symbols == 0
     assert defining_members(g, "foo") == [("libtest.a", "a.o")]
+
+
+def test_augment_graph_bsd_index_without_macho_magic_not_stripped(tmp_path) -> None:
+    """A BSD/``__.SYMDEF``-indexed archive around ordinary ELF (or other
+    non-Mach-O) object members must not trigger the underscore-stripping
+    fallback either -- confirmed reproducible with a real toolchain: a real
+    ``llvm-ar --format=bsd rcs lib.a a.o`` over a genuine ELF ``a.o``
+    produces exactly this shape (Codex review, fresh evidence). Only when
+    the first member's own magic bytes also confirm genuine Mach-O content
+    does the fallback apply."""
+    data = build_bsd_archive([("a.o", b"\x7fELF\nSYM:_foo\n")])  # ELF magic, not Mach-O
+    (tmp_path / "libtest.a").write_bytes(data)
+    g = _graph_with_archive("libtest.a", ["foo"])
+
+    result = augment_graph_with_archives(g, search_roots=(tmp_path,))
+
+    assert result.symbol_edges == 0
+    assert result.unjoined_symbols == 1
+    assert defining_members(g, "foo") == []
 
 
 def test_augment_graph_underscore_symbol_not_stripped_on_gnu_archive(

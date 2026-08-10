@@ -84,6 +84,25 @@ _HEADER_MAGIC = b"`\n"
 _GNU_INDEX_NAMES = frozenset({"/", "/SYM64/"})
 _GNU_LONG_NAME_TABLE = "//"
 
+#: Mach-O magic numbers (both byte orders + fat/universal binaries) — an
+#: independent copy of ``macho_metadata._MACHO_MAGICS`` (same reasoning as
+#: this module's other independent-copy constants: this module and
+#: ``macho_metadata.py`` are unrelated packages with no import dependency
+#: between them, and duplicating one small frozenset is cheaper than a
+#: cross-package coupling for it).
+_MACHO_MAGICS = frozenset(
+    {
+        b"\xfe\xed\xfa\xce",  # MH_MAGIC (32-bit)
+        b"\xce\xfa\xed\xfe",  # MH_CIGAM (32-bit, swapped)
+        b"\xfe\xed\xfa\xcf",  # MH_MAGIC_64 (64-bit)
+        b"\xcf\xfa\xed\xfe",  # MH_CIGAM_64 (64-bit, swapped)
+        b"\xca\xfe\xba\xbe",  # FAT_MAGIC (universal binary)
+        b"\xbe\xba\xfe\xca",  # FAT_CIGAM (universal, swapped)
+        b"\xca\xfe\xba\xbf",  # FAT_MAGIC_64 (fat64 universal binary)
+        b"\xbf\xba\xfe\xca",  # FAT_CIGAM_64 (fat64, swapped)
+    }
+)
+
 #: The BSD/Mach-O symbol index is matched **by prefix**, not an exact-name
 #: set (real macOS CI evidence, Codex/CI review): Apple's ``libtool``/
 #: ``ranlib`` writes ``__.SYMDEF`` (unsorted) or ``__.SYMDEF SORTED``
@@ -289,15 +308,24 @@ class ArchiveContents:
     ``index_kind`` (``"gnu"``/``"bsd"``/``""``) records which symbol-index
     *format* was actually decoded — independent of ``flavor``, which is
     about the archive *container*'s own magic (GNU vs. thin), not which
-    ranlib wrote the index inside it. A BSD/Mach-O ``__.SYMDEF`` index is
-    the one reliable signal that the archive's own symbol names may carry a
-    leading-underscore C-symbol convention worth normalizing against; a
-    GNU/ELF archive's ``/``/``/SYM64/`` index never does (Codex review,
-    fresh evidence: a real GNU/ELF archive's own symbol table can
-    legitimately contain a name that already starts with ``_``, e.g.
-    ``_foo``, so blindly trying the underscore-stripped spelling risked a
-    false join onto an unrelated binary export sharing the stripped name).
-    ``""`` when the archive carries no index at all.
+    ranlib wrote the index inside it. A GNU/``/``/``/SYM64/`` index never
+    carries the Mach-O leading-underscore convention (Codex review, fresh
+    evidence: a real GNU/ELF archive's own symbol table can legitimately
+    contain a name that already starts with ``_``, e.g. ``_foo``, so
+    blindly trying the underscore-stripped spelling risked a false join
+    onto an unrelated binary export sharing the stripped name). ``""`` when
+    the archive carries no index at all.
+
+    ``index_kind == "bsd"`` alone is **not** proof of Mach-O either, though
+    (Codex review, second round, fresh evidence): a real ``llvm-ar
+    --format=bsd`` produces a valid ``__.SYMDEF``-indexed archive around
+    ordinary ELF objects too (empirically confirmed: `llvm-ar --format=bsd
+    rcs lib.a a.o` over a real ELF `a.o`). ``object_magic`` is the first
+    regular member's own leading 4 bytes — real object-format evidence, so
+    the join fallback can require *both* a BSD index *and* genuine Mach-O
+    member magic before trusting the underscore convention. ``b""`` when
+    the archive has no regular members (index-only) or a truncated first
+    member.
     """
 
     flavor: str
@@ -305,6 +333,7 @@ class ArchiveContents:
     symbols: tuple[ArSymbolRef, ...] = ()
     has_symbol_index: bool = False
     index_kind: str = ""
+    object_magic: bytes = b""
 
 
 # ── pure ar-format parsing ───────────────────────────────────────────────────
@@ -668,12 +697,24 @@ def parse_ar_archive(reader: ByteReader) -> ArchiveContents:
                 )
             )
             index_kind = index_kind or "bsd"
+
+    # A BSD/`__.SYMDEF` index format does not by itself prove Mach-O: real
+    # `llvm-ar --format=bsd` produces a valid `__.SYMDEF`-indexed archive
+    # around ordinary ELF objects too (empirically confirmed -- Codex review,
+    # fresh evidence: `llvm-ar --format=bsd rcs lib.a a.o` over a real
+    # ELF `a.o` produces exactly this). ``object_magic`` is the first
+    # regular member's own leading 4 bytes -- real object-format evidence
+    # `augment_graph_with_archives` needs alongside ``index_kind`` before
+    # trusting the Mach-O leading-underscore join fallback.
+    object_magic = reader.read(members[0].data_offset, 4) if members else b""
+
     return ArchiveContents(
         flavor=flavor,
         members=tuple(members),
         symbols=tuple(symbols),
         has_symbol_index=bool(pending_index),
         index_kind=index_kind,
+        object_magic=object_magic,
     )
 
 
@@ -1004,6 +1045,7 @@ def augment_graph_with_archives(
                 sid not in known_symbols
                 and ref.symbol.startswith("_")
                 and contents.index_kind == "bsd"
+                and contents.object_magic in _MACHO_MAGICS
             ):
                 # A Mach-O/BSD ranlib index keeps the platform's C-symbol
                 # leading underscore (`_foo`), but `macho_metadata.py`'s own
@@ -1020,7 +1062,13 @@ def augment_graph_with_archives(
                 # that already starts with `_` (reproduced with a real `cc`+
                 # `ar` build), and trying the stripped spelling there risked a
                 # false join onto an unrelated binary export merely sharing
-                # the stripped name.
+                # the stripped name. ``index_kind == "bsd"`` alone still isn't
+                # sufficient (Codex review, third round, fresh evidence): a
+                # real `llvm-ar --format=bsd` writes a valid `__.SYMDEF` index
+                # around ordinary ELF objects too (empirically reproduced),
+                # so the first regular member's own magic bytes must also
+                # confirm genuine Mach-O object content before trusting the
+                # underscore convention.
                 stripped_sid = _symbol_node_id(ref.symbol[1:])
                 if stripped_sid in known_symbols:
                     sid = stripped_sid

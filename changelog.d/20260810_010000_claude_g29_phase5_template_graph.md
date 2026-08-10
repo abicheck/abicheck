@@ -254,3 +254,35 @@
   `adapters/make.py` — the one build system with no absolute-path-carrying
   target graph to lean on instead — and `_default_archive_search_roots` now
   also tries each link unit's own directory.
+
+  A tenth round found two more real gaps and confirmed one deliberate,
+  pre-existing tradeoff needed no change. `template_decl_node_id()` keyed
+  a function template's own abstract declaration node by qname alone
+  (`template_decl://f`) — so two overloaded function templates sharing one
+  name (`f<T>(T)` vs. `f<T>(T,T)`) still collapsed their `DECL_INSTANTIATES_
+  TEMPLATE` edges onto one shared node even after the earlier instantiation-
+  id fix separated their own instantiation nodes. Verified against real
+  clang output: each overload's own pattern `FunctionDecl` carries a
+  distinct printed signature (`"T (T)"` vs. `"T (T, T)"`) — a new
+  `TemplateInstantiation.template_signature` field (function-kind only)
+  threads it through as a discriminator. Separately, `archive_graph.py`'s
+  Mach-O leading-underscore join fallback was gated on `index_kind ==
+  "bsd"` alone (the previous round's fix) — but a BSD symbol-index format
+  doesn't prove Mach-O either: a real `llvm-ar --format=bsd` produces a
+  valid `__.SYMDEF`-indexed archive around ordinary ELF objects too
+  (empirically reproduced: `llvm-ar --format=bsd rcs lib.a a.o` over a real
+  ELF `a.o`). `ArchiveContents` gains an `object_magic` field (the first
+  regular member's own leading 4 bytes, read for free during the existing
+  parse); the fallback now requires *both* a BSD index and genuine Mach-O
+  member magic (`_MACHO_MAGICS`, an independent copy of `macho_metadata`'s
+  own constant). And a review comment on `call_graph.py`'s redaction fix
+  (two rounds back) — that blanket-expanding every reconstructed argv token
+  including `-D`/`-U` macro values could corrupt a rare user-authored
+  literal macro value that itself starts with `~` — was investigated and
+  found to be an already-accepted, already-documented tradeoff: `source_
+  extractors/castxml.py`'s own `extract()` has blanket-expanded its entire
+  command line the identical way since an earlier Codex review (#335),
+  accepting exactly this narrow risk as the cost of correctly replaying the
+  far more common case (a genuinely redacted home-path macro that must
+  expand or replay fails to find the right header). Documented in place
+  rather than narrowed, for consistency with that established precedent.

@@ -709,7 +709,23 @@ def _safe_clang_args_from_compile_unit(cu: BuildEvidenceCompileUnit) -> list[str
     ``include_graph.ClangIncludeExtractor.extract_from_build``) succeeded.
     Un-redact every token here, the same pattern already used by
     ``include_graph.py``/``preprocessor_scan.py``/``archive_graph.py``, so
-    every clang-backed L5 pass replays a real, resolvable path."""
+    every clang-backed L5 pass replays a real, resolvable path.
+
+    This blanket-expands every token, ``-D``/``-U`` macro values included,
+    not just path-shaped operands (Codex review) — a rare user-authored
+    literal macro value that itself starts with ``~`` (e.g. ``-DROOT=~/x``
+    meaning the literal two-character string, never a path the compiler
+    should expand) would be corrupted the same way. This is not a new
+    tradeoff introduced here: ``source_extractors/castxml.py``'s own
+    ``extract()`` already blanket-expands its *entire* built command line
+    the identical way, with this exact scenario already investigated and
+    accepted there (see its docstring, from an earlier Codex review #335)
+    as the necessary cost of correctly replaying the far more common case —
+    a genuinely redacted home-path macro (e.g. ``-DCFG=~/build/cfg.h``
+    consumed by ``#include CFG``) that must expand or replay parses a
+    different TU / fails to find the header entirely. This call site keeps
+    the same accepted tradeoff for consistency rather than inventing a
+    narrower, path-only expansion this module alone would apply."""
     from .source_extractors._argv import unredact_home
 
     flags = _safe_replay_flags_from_context(
