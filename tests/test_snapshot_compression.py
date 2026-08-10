@@ -630,6 +630,55 @@ def test_existing_file_owner_is_preserved_across_rewrite(tmp_path):
     assert p.stat().st_uid == target_uid
 
 
+@pytest.mark.skipif(os.name == "nt", reason="POSIX chown/uid semantics only")
+def test_owner_restoration_failure_aborts_the_replacement(tmp_path, monkeypatch):
+    """Codex review, PR #699 (third finding on the same fix): the previous
+    fix made ownership restoration best-effort (silently swallowing any
+    chown() failure) -- but chown(uid, gid) is all-or-nothing, so when an
+    unprivileged writer genuinely can't restore a *different* existing
+    owner (the exact case ownership preservation exists for -- a shared
+    baseline owned by a service account, refreshed by a non-privileged
+    writer), silently proceeding to os.replace() transfers ownership to
+    the writer instead. That's exactly the class of silent attribute loss
+    the unguarded os.chmod() call already refuses to tolerate. The write
+    must abort instead, leaving the existing destination untouched."""
+    import errno
+    import pwd
+
+    import abicheck.snapshot_io as snapshot_io_mod
+
+    try:
+        target_uid = pwd.getpwnam("daemon").pw_uid
+    except KeyError:
+        pytest.skip("no 'daemon' user on this system")
+    if target_uid == os.getuid():
+        pytest.skip("test process already runs as the target uid")
+
+    snap = _sample_snapshot()
+    p = tmp_path / "existing.abicheck.json"
+    p.write_text("placeholder")
+    try:
+        os.chown(p, target_uid, -1)
+    except (OSError, AttributeError):
+        pytest.skip("cannot chown to an arbitrary uid in this environment")
+    if p.stat().st_uid != target_uid:
+        pytest.skip("chown did not take effect (insufficient privileges)")
+    original_bytes = p.read_bytes()
+
+    def _eperm_chown(path, uid, gid):
+        raise OSError(errno.EPERM, "Operation not permitted")
+
+    monkeypatch.setattr(snapshot_io_mod.os, "chown", _eperm_chown)
+    with pytest.raises(OSError):
+        write_snapshot(snap, p)
+    # Destination and its ownership must be untouched -- os.replace() must
+    # never have run -- and no stray temp file left behind.
+    assert p.read_bytes() == original_bytes
+    assert p.stat().st_uid == target_uid
+    leftovers = [f for f in tmp_path.iterdir() if f != p]
+    assert leftovers == []
+
+
 @pytest.mark.skipif(
     os.name == "nt", reason="symlinks need elevated privileges on Windows"
 )

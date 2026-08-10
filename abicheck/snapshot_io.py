@@ -742,7 +742,28 @@ def _atomic_write_bytes(data: bytes, path: Path) -> None:
                     existing_gid if existing_gid is not None else -1,
                 )
             except OSError:
-                pass  # best-effort; not privileged, or platform has no chown
+                # Codex review: a failure here must not always be silently
+                # swallowed the way it was. chown(uid, gid) is all-or-
+                # nothing -- if the *owner* genuinely needed to change (an
+                # unprivileged writer that isn't the destination's current
+                # owner can never restore a different uid without
+                # CAP_CHOWN/root), the combined call fails entirely, so a
+                # legitimate gid restoration silently fails right along
+                # with it too. Proceeding to os.replace() in that case
+                # would silently transfer ownership of a shared baseline
+                # to whoever last wrote it -- exactly the class of silent
+                # attribute loss the unguarded os.chmod() call just above
+                # already refuses to tolerate (a real chmod failure is
+                # never caught here either). Abort the replacement instead
+                # of publishing it under a changed owner; the *existing*
+                # destination is untouched either way (this runs before
+                # os.replace()). Only a gid-only restoration failure
+                # (the writer already owns the file, or there was no uid
+                # to preserve at all) stays best-effort -- matching this
+                # docstring's own "can only change gid to a group it
+                # belongs to" rationale above.
+                if existing_uid is not None and existing_uid != os.getuid():
+                    raise
         os.replace(tmp_path, target)
         # CodeRabbit review: os.replace()'s directory-entry update is not
         # itself durable across a crash until the *parent* directory is
