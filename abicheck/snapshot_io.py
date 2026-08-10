@@ -340,6 +340,22 @@ def read_snapshot_bytes(
     """
     p = Path(path)
     limit = max_decoded_bytes if max_decoded_bytes is not None else _max_decoded_bytes()
+    # CodeRabbit review: check the *stored* file size against the same
+    # safety limit before reading it fully into memory -- a stored file
+    # larger than the decoded-size ceiling can only ever fail that ceiling
+    # anyway (compression never expands a snapshot's own JSON payload by
+    # orders of magnitude), so there's no legitimate case this rejects that
+    # the post-read checks below wouldn't have rejected regardless; it just
+    # avoids buffering the whole oversized file first. Best-effort: a stat()
+    # failure here falls through to read_bytes() below, which raises the
+    # same OSError either way.
+    try:
+        if p.stat().st_size > limit:
+            raise SnapshotError(
+                f"{p}: stored file exceeds the {limit} byte safety limit."
+            )
+    except OSError:
+        pass
     # Deliberately not wrapped in SnapshotError: a missing/unreadable file is
     # a plain OSError (FileNotFoundError, PermissionError, ...) and
     # load_snapshot() historically let that propagate as-is -- only actual
@@ -390,23 +406,17 @@ def read_snapshot_text(
         ) from exc
 
 
-def bounded_decoded_prefix(path: str | Path, n: int = _SNIFF_BYTES) -> bytes | None:
-    """Return up to *n* decoded bytes of *path*, or ``None`` if it cannot be
-    decoded as a snapshot storage envelope at all (corrupt, or a format this
-    module doesn't recognize as plain/gzip/zstd, e.g. a `.tar.zst` archive).
+#: Hard ceiling for bounded_decoded_prefix's escalating raw-prefix reads
+#: (see its docstring) -- bounds the retry loop's worst case without
+#: approaching a full decompression of a large file.
+_BOUNDED_PREFIX_MAX_RAW_BYTES = 1024 * 1024  # 1 MiB
 
-    Used for input classification: distinguishing a compressed *snapshot*
-    from an unrelated compressed *archive* without a full decompression.
-    """
-    p = Path(path)
-    try:
-        with open(p, "rb") as f:
-            head = f.read(max(n, 4))
-    except OSError:
-        return None
-    compression = detect_compression_from_bytes(head[:4])
-    if compression is SnapshotCompression.NONE:
-        return head[:n]
+
+def _try_decode_prefix(
+    head: bytes, compression: SnapshotCompression, n: int
+) -> bytes | None:
+    """One decode attempt of a raw prefix; ``None`` means "try a larger raw
+    prefix" (truncated mid-frame) rather than "this is not a snapshot"."""
     try:
         if compression is SnapshotCompression.GZIP:
             with gzip.GzipFile(fileobj=io.BytesIO(head), mode="rb") as gz:
@@ -416,10 +426,49 @@ def bounded_decoded_prefix(path: str | Path, n: int = _SNIFF_BYTES) -> bytes | N
         with dctx.stream_reader(io.BytesIO(head)) as reader:
             return bytes(reader.read(n))
     except Exception:
-        # A truncated bounded prefix legitimately fails to decompress on its
-        # own (mid-frame) — that's expected for a large real file; treat it
-        # as "cannot bounded-sniff this way", not a hard error, and let the
-        # caller fall back to reading the whole thing if it wants to.
+        return None
+
+
+def bounded_decoded_prefix(path: str | Path, n: int = _SNIFF_BYTES) -> bytes | None:
+    """Return up to *n* decoded bytes of *path*, or ``None`` if it cannot be
+    decoded as a snapshot storage envelope at all (corrupt, or a format this
+    module doesn't recognize as plain/gzip/zstd, e.g. a `.tar.zst` archive).
+
+    Used for input classification: distinguishing a compressed *snapshot*
+    from an unrelated compressed *archive* without a full decompression.
+
+    Reading exactly *n* raw (stored) bytes is not always enough to produce
+    *n* *decoded* bytes -- for low-compression-ratio content (already-dense
+    data, or a very small file whose compressor overhead dominates), a
+    frame truncated at the raw-byte boundary can legitimately fail to
+    decode at all (CodeRabbit review, fresh evidence). Escalating the raw
+    read (doubling up to `_BOUNDED_PREFIX_MAX_RAW_BYTES`) before giving up
+    still keeps this bounded and cheap for the common case (typically
+    succeeds on the first, smallest attempt for real ABI snapshot JSON,
+    which compresses well) while no longer misclassifying a valid but
+    less-compressible compressed snapshot as unreadable.
+    """
+    p = Path(path)
+    try:
+        with open(p, "rb") as f:
+            probe = f.read(4)
+            compression = detect_compression_from_bytes(probe)
+            if compression is SnapshotCompression.NONE:
+                return (probe + f.read(max(n, 4) - len(probe)))[:n]
+            raw_size = max(n, 4)
+            while True:
+                f.seek(0)
+                head = f.read(raw_size)
+                result = _try_decode_prefix(head, compression, n)
+                if result is not None:
+                    return result
+                if len(head) < raw_size or raw_size >= _BOUNDED_PREFIX_MAX_RAW_BYTES:
+                    # Either the whole file was already read (genuinely
+                    # corrupt/incompatible, not just truncated-at-the-
+                    # boundary) or the escalation cap was reached.
+                    return None
+                raw_size = min(raw_size * 4, _BOUNDED_PREFIX_MAX_RAW_BYTES)
+    except OSError:
         return None
 
 
@@ -478,10 +527,19 @@ def _atomic_write_bytes(data: bytes, path: Path) -> None:
     over onto *path* verbatim — silently turning every snapshot write into
     an owner-only file, including rewriting an existing world/group-readable
     one, breaking a shared baseline directory or a consumer running under a
-    different account (Codex review, fresh evidence). Restored below: a
-    *new* destination gets the normal umask-derived default (``0666`` minus
-    umask, matching what ``open(path, "w")``/``Path.write_text()`` would
-    have produced); an *existing* destination keeps its own current mode.
+    different account (Codex review, fresh evidence). Restored below: an
+    *existing* destination keeps its own current mode; a genuinely *new*
+    destination gets a fixed, world-readable ``0o644`` rather than a plain
+    ``open(path, "w")``'s umask-derived default -- reading the process
+    umask needs the read-zero-restore ``os.umask()`` dance, which is
+    process-wide and not thread-safe (CodeRabbit review, citing CPython's
+    own documented caveat): a concurrent thread creating a file during that
+    window could see the temporarily-zeroed umask and get an
+    unintentionally permissive file. A fixed mode for the new-file case
+    sidesteps that hazard entirely, at the cost of not honoring an
+    unusually restrictive umask (e.g. 0077) for a snapshot's first write --
+    an accepted trade-off given every other consumer of a *shared* baseline
+    file needs it group/world-readable anyway.
     """
     parent = path.parent
     parent.mkdir(parents=True, exist_ok=True)
@@ -499,12 +557,7 @@ def _atomic_write_bytes(data: bytes, path: Path) -> None:
             existing_mode = path.stat().st_mode & 0o777
         except OSError:
             existing_mode = None
-        if existing_mode is not None:
-            os.chmod(tmp_path, existing_mode)
-        else:
-            umask = os.umask(0)
-            os.umask(umask)
-            os.chmod(tmp_path, 0o666 & ~umask)
+        os.chmod(tmp_path, existing_mode if existing_mode is not None else 0o644)
         os.replace(tmp_path, path)
     except BaseException:
         try:

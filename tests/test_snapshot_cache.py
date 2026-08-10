@@ -409,8 +409,10 @@ class TestEviction:
             binary.write_bytes(f"content {i}".encode())
             store(snap, binary, [], [], "1.0", "c++")
 
-        # Should have at most MAX_ENTRIES files
-        entries = list(cache_dir.glob("*.json"))
+        # Should have at most MAX_ENTRIES files (ADR-059: new entries are
+        # *.json.zst, not plain *.json).
+        entries = list(cache_dir.glob("*.json.zst"))
+        assert entries, "eviction test produced zero entries -- glob is stale"
         assert len(entries) <= 3
 
 
@@ -483,7 +485,9 @@ class TestStoreErrorPaths:
         snap = _sample_snap()
         store(snap, binary, [], [], "1.0", "c++")  # should not raise
         # Serialization failed before the temp file could be renamed into
-        # place, so no (partial/corrupt) cache entry should be left behind.
+        # place, so no (partial/corrupt) cache entry should be left behind
+        # -- neither the current *.json.zst shape nor a legacy plain *.json.
+        assert list(cache_dir.glob("*.json.zst")) == []
         assert list(cache_dir.glob("*.json")) == []
 
 

@@ -89,7 +89,7 @@ container; the two are architecturally distinct and must not be conflated.
 
 One project-wide enum, `abicheck.snapshot_io.SnapshotCompression`:
 
-```
+```text
 auto | none | gzip | zstd
 ```
 
@@ -98,8 +98,10 @@ auto | none | gzip | zstd
 - **gzip** — `*.abicheck.json.gz` / `*.abi.json.gz`. Universally available,
   good for interoperability with tooling that only speaks gzip.
 - **zstd** — `*.abicheck.json.zst` / `*.abi.json.zst`. **Preferred** for
-  baseline/release/cache storage: better ratio and speed than gzip at the
-  levels this project uses (see "Compression levels" below).
+  baseline/release/cache storage: a better compression ratio than gzip at
+  every level measured (see "Deterministic compression" below) — the
+  baseline/release level (19) trades write speed for that ratio, while the
+  separate, faster cache level (3) is chosen for write speed instead.
 
 `bz2`/`xz`/`lz4` are explicitly out of scope for this pass (P0) — not
 because they're bad, but because supporting a fourth codec doubles the
@@ -237,7 +239,7 @@ corrupt, not accepted as a short read.
 
 `dump`'s write path used to be:
 
-```
+```text
 AbiSnapshot -> snapshot_to_json() [full JSON string]
             -> fold_dump_provenance_into_json() [json.loads + mutate + json.dumps -- a SECOND full parse/encode]
             -> Path.write_text()
@@ -245,7 +247,7 @@ AbiSnapshot -> snapshot_to_json() [full JSON string]
 
 Now:
 
-```
+```text
 AbiSnapshot -> snapshot_to_dict() [one payload dict]
             -> fold_dump_provenance_into_dict() [mutate the dict in place]
             -> json.dumps() [one encode]
@@ -260,7 +262,7 @@ thin backward-compatible wrapper over it for existing callers/tests. `dump`
 prints a compact storage summary to stderr (never stdout, which stays pure
 JSON when no `-o/--output` is given):
 
-```
+```text
 Snapshot written to foo.abicheck.json.zst
 Storage: zstd, 19,169 -> 3,191 bytes (16.6%)
 Resolved evidence depth: headers

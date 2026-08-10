@@ -1,12 +1,14 @@
 ### Added
 
-- **Compressed snapshot storage (ADR-059)** — `abicheck dump`, `compare`,
-  `scan --against`, and the Python API now transparently read and write
+- **Compressed snapshot storage (ADR-059)** — `compare`, `scan --against`,
+  and the Python API (`load_snapshot`) now transparently *read*
   gzip- and zstd-compressed snapshots (`*.abicheck.json.gz`/`.zst`,
-  detected by magic bytes, not just filename), alongside plain JSON.
-  `dump` gained a `--compression [auto|none|gzip|zstd]` option (default
-  `auto`, inferred from `-o/--output`'s suffix) and prints a storage
-  summary (`Storage: zstd, 19,169 -> 3,191 bytes (16.6%)`) after writing.
+  detected by magic bytes, not just filename) alongside plain JSON.
+  `abicheck dump` (and the Python API's `write_snapshot`) can now
+  *produce* one: `dump` gained a `--compression [auto|none|gzip|zstd]`
+  option (default `auto`, inferred from `-o/--output`'s suffix) and prints
+  a storage summary (`Storage: zstd, 19,169 -> 3,191 bytes (16.6%)`) after
+  writing.
   `zstandard` is now a core dependency (previously scoped to the
   `validation` extra). The internal snapshot cache
   (`abicheck/snapshot_cache.py`) now stores new entries zstd-compressed,

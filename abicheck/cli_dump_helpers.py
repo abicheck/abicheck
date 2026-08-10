@@ -544,6 +544,29 @@ def write_snapshot_payload(
     return write_snapshot_text(text, path, compression=compression)
 
 
+def reject_snapshot_compression_conflict(
+    output: Path | None, snapshot_compression: str
+) -> None:
+    """Validate ``--compression``/``-o`` suffix agreement up front (Codex
+    review): :func:`~abicheck.snapshot_io.resolve_write_compression` used to
+    run only at the very end of the write path, after a potentially
+    expensive extraction had already completed -- so ``--compression zstd
+    -o snapshot.json.gz`` wasted a full dump before failing. Calling it here
+    too, before any extraction work starts, makes the same conflict a fast
+    usage error (exit 64) like every other invalid-argument case, and keeps
+    ``--dry-run``'s own reporting of the same conflict consistent with the
+    real run's exit code (both go through this same resolver now)."""
+    if output is None:
+        return
+    from .errors import SnapshotError
+    from .snapshot_io import SnapshotCompression, resolve_write_compression
+
+    try:
+        resolve_write_compression(output, SnapshotCompression(snapshot_compression))
+    except SnapshotError as exc:
+        raise click.UsageError(str(exc)) from exc
+
+
 def write_snapshot_and_report(
     payload: dict[str, Any],
     output: Path,
@@ -565,6 +588,14 @@ def write_snapshot_and_report(
         )
     except SnapshotError as exc:
         raise click.ClickException(str(exc)) from exc
+    except OSError as exc:
+        # Codex review: the canonical atomic writer can raise a plain OSError
+        # (unwritable destination, disk full, a chmod/os.replace failure --
+        # see snapshot_io._atomic_write_bytes) that isn't a SnapshotError.
+        # The old _safe_write_output() path translated exactly this class of
+        # failure into a ClickException instead of a raw traceback; match
+        # that here too.
+        raise click.ClickException(f"Cannot write to {output}: {exc}") from exc
     click.echo(f"Snapshot written to {output}", err=True)
     click.echo(
         "Storage: "
@@ -897,7 +928,9 @@ def render_dump_dry_run(
             )
         except SnapshotError as exc:
             raise click.UsageError(str(exc)) from exc
-        compression_line = f"compression: {resolved_compression.value} (file will not be created)"
+        compression_line = (
+            f"compression: {resolved_compression.value} (file will not be created)"
+        )
     else:
         compression_line = "compression: (n/a -- stdout is always plain JSON)"
     result.add(

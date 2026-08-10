@@ -174,6 +174,31 @@ def test_magic_byte_detection_without_suffix(tmp_path):
     assert load_snapshot(neutral_zst).library == snap.library
 
 
+def test_bounded_decoded_prefix_escalates_for_low_compression_content(tmp_path):
+    """CodeRabbit review: reading only the first ``n`` *raw* bytes of a
+    low-compression-ratio stream can produce fewer than ``n`` *decoded*
+    bytes (or fail outright, mid-frame) -- bounded_decoded_prefix must
+    escalate its raw read rather than giving up on the first attempt."""
+    import random
+
+    from abicheck.snapshot_io import bounded_decoded_prefix
+
+    random.seed(99)
+    # Low-entropy/incompressible payload wrapped in valid JSON so a
+    # successful decode is still verifiable; large enough that its
+    # compressed form exceeds a small requested prefix `n`.
+    blob = "".join(chr(random.randrange(0x21, 0x7E)) for _ in range(20000))
+    text = json.dumps({"library": "x", "version": "1", "blob": blob})
+
+    gz_path = tmp_path / "incompressible.abicheck.json.gz"
+    gz_path.write_bytes(gzip.compress(text.encode(), compresslevel=9))
+    assert gz_path.stat().st_size > 4096  # compressed stream spans multiple reads
+
+    prefix = bounded_decoded_prefix(gz_path, n=100)
+    assert prefix is not None
+    assert prefix.startswith(b'{"library"')
+
+
 def test_detect_compression_from_bytes_plain():
     assert detect_compression_from_bytes(b"{not compressed") == SnapshotCompression.NONE
     assert (
@@ -285,6 +310,23 @@ def test_plain_snapshot_overflow(tmp_path):
         read_snapshot_bytes(p, max_decoded_bytes=100)
 
 
+def test_oversized_stored_file_rejected_before_full_read(tmp_path):
+    """CodeRabbit review: the stored-file-size check (via stat(), before
+    read_bytes()) must reject a file whose *stored* size alone already
+    exceeds the limit -- using low-entropy content so the compressed size
+    stays large rather than shrinking under the limit itself."""
+    import os as _os
+    import random
+
+    random.seed(1234)
+    incompressible = bytes(random.randrange(256) for _ in range(4096))
+    p = tmp_path / "big.abicheck.json.gz"
+    p.write_bytes(gzip.compress(incompressible, compresslevel=9))
+    assert _os.path.getsize(p) > 100
+    with pytest.raises(SnapshotError, match="exceeds"):
+        read_snapshot_bytes(p, max_decoded_bytes=100)
+
+
 # ── Determinism ──────────────────────────────────────────────────────────
 
 
@@ -336,18 +378,16 @@ def test_atomic_write_leaves_no_temp_file(tmp_path):
 
 
 @pytest.mark.skipif(os.name == "nt", reason="POSIX file mode semantics only")
-def test_new_file_gets_umask_derived_mode_not_owner_only(tmp_path):
+def test_new_file_gets_fixed_world_readable_mode_not_owner_only(tmp_path):
     """tempfile.mkstemp() always creates 0600; a snapshot write must not
-    silently make every new file owner-only -- it should land at the normal
-    umask-derived default, like open(path, "w") would (Codex review)."""
-    old_umask = os.umask(0o022)
-    try:
-        snap = _sample_snapshot()
-        p = tmp_path / "new.abicheck.json"
-        write_snapshot(snap, p)
-        assert oct(p.stat().st_mode & 0o777) == oct(0o644)
-    finally:
-        os.umask(old_umask)
+    silently make every new file owner-only -- it should land at a fixed,
+    world-readable 0o644 (Codex/CodeRabbit review: reading/restoring the
+    process umask to derive this would be a process-wide, non-thread-safe
+    operation, so a fixed mode is used instead of introspecting umask)."""
+    snap = _sample_snapshot()
+    p = tmp_path / "new.abicheck.json"
+    write_snapshot(snap, p)
+    assert oct(p.stat().st_mode & 0o777) == oct(0o644)
 
 
 @pytest.mark.skipif(os.name == "nt", reason="POSIX file mode semantics only")

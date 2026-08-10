@@ -76,7 +76,6 @@ if TYPE_CHECKING:
     from .model import AbiSnapshot
 
 
-
 # ── Attach / compare integration (ADR-028 D6, D7; ADR-029 D9) ─────────────────
 
 
@@ -215,7 +214,8 @@ def embed_build_source(
             # not fall through to inference) when it came from the CLI
             # --build-compile-db or an operator --config — never from an
             # auto-discovered .abicheck.yml (review).
-            compile_db_explicit=build_compile_db is not None or build_config is not None,
+            compile_db_explicit=build_compile_db is not None
+            or build_config is not None,
             base_build=bi_pack.build_evidence if bi_pack else None,
             clang_bin=clang_bin,
             extractor=extractor,
@@ -292,12 +292,20 @@ def embed_build_source(
     # combine would silently keep reporting L5 as not collected despite the
     # backfilled facts now being present.
     existing = snap.build_source
-    if merged.source_graph is None and existing is not None and existing.source_graph is not None:
+    if (
+        merged.source_graph is None
+        and existing is not None
+        and existing.source_graph is not None
+    ):
         import dataclasses
 
         graph_layer = DataLayer.L5_SOURCE_GRAPH.value
         graph_row = next(
-            (c for c in existing.manifest.coverage if _layer_value(c.layer) == graph_layer),
+            (
+                c
+                for c in existing.manifest.coverage
+                if _layer_value(c.layer) == graph_layer
+            ),
             None,
         )
         coverage = [
@@ -347,6 +355,7 @@ def dump_source_only(
     include_dependencies: bool = False,
     gcc_path: str | None = None,
     gcc_prefix: str | None = None,
+    snapshot_compression: str = "auto",
 ) -> None:
     """Write a binary-less snapshot carrying only the embedded build/source facts.
 
@@ -399,6 +408,7 @@ def dump_source_only(
         clang_bin=resolve_source_frontend_clang_bin(
             gcc_path, gcc_prefix, exclude_cl_style=False
         ),
+        snapshot_compression=snapshot_compression,
     )
 
 

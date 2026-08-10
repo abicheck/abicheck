@@ -46,6 +46,7 @@ from .cli_dump_helpers import (
     handle_non_elf_dump,
     has_other_l3_source,
     perform_elf_dump,
+    reject_snapshot_compression_conflict,
     resolve_compile_db_l3_reuse,
     resolve_dump_collect_context,
     resolve_dump_compile_context,
@@ -652,6 +653,7 @@ def dump_cmd(so_path: Path | None, headers: tuple[Path, ...], includes: tuple[Pa
             "-o/--output; pass an explicit output file to write compressed "
             "output)."
         )
+    reject_snapshot_compression_conflict(output, snapshot_compression)
     _setup_verbosity(verbose)
 
     # ADR-050 D3: parsed before the collect/compile-context resolution below so
@@ -847,7 +849,7 @@ def dump_cmd(so_path: Path | None, headers: tuple[Path, ...], includes: tuple[Pa
     # Source-only dump (no binary) for the parallel-baseline flow.
     if so_path is None:
         from .cli_buildsource import dump_source_only
-        dump_source_only(sources, build_info, version, output, build_config, allow_build_query, git_tag, build_id, no_git, collect_mode, build_query=build_query, build_compile_db=build_compile_db, extractor=header_backend, depth=depth, include_dependencies=include_dependencies, gcc_path=gcc_path, gcc_prefix=gcc_prefix)
+        dump_source_only(sources, build_info, version, output, build_config, allow_build_query, git_tag, build_id, no_git, collect_mode, build_query=build_query, build_compile_db=build_compile_db, extractor=header_backend, depth=depth, include_dependencies=include_dependencies, gcc_path=gcc_path, gcc_prefix=gcc_prefix, snapshot_compression=snapshot_compression)
         return
 
     effective_compile_db = resolve_dump_compile_db(compile_db_path, compile_db_path_alt, headers)

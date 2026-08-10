@@ -1,3 +1,15 @@
+---
+doc_type: reference
+audience:
+  - library-maintainer
+  - ci-owner
+level: intermediate
+canonical_for:
+  - snapshot-storage-compression
+lifecycle: active
+generated: false
+---
+
 # Snapshot Format (`.abi.json`)
 
 `abicheck dump` writes a **snapshot** — a serializable, JSON representation of a
@@ -109,12 +121,13 @@ snapshots produce when compared.
 | gzip | `.abicheck.json.gz` / `.abi.json.gz` | universal interoperability |
 | zstd | `.abicheck.json.zst` / `.abi.json.zst` | **preferred** for baseline/release/cache storage |
 
-`abicheck dump`, `compare`, `scan --against`, and the Python API
-(`abicheck.serialization.load_snapshot`/`write_snapshot`) all read every
-encoding transparently — detected from magic bytes, not just the filename
-suffix. `dump` infers the encoding from `-o/--output`'s suffix by default
-(`--compression auto`), or accepts an explicit `--compression
-{none,gzip,zstd}`. See [ADR-059](../contribute/adr/059-compressed-snapshot-storage.md)
+`compare`, `scan --against`, and the Python API
+(`abicheck.serialization.load_snapshot`) all *read* every encoding
+transparently — detected from magic bytes, not just the filename suffix.
+`abicheck dump` *produces* one: it infers the encoding from `-o/--output`'s
+suffix by default (`--compression auto`), or accepts an explicit
+`--compression {none,gzip,zstd}`; `write_snapshot` is the Python API
+equivalent for writing. See [ADR-059](../contribute/adr/059-compressed-snapshot-storage.md)
 for the full storage-envelope model (determinism, atomic writes,
 decompression limits, and what's still deferred).
 

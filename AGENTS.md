@@ -432,7 +432,7 @@ Core pipeline (in order of data flow):
    - `snapshot_io.py` — ADR-059's canonical snapshot *storage envelope* I/O:
      plain/gzip/zstd detection (magic bytes), atomic + deterministic
      compressed writes, decompression-bomb limits. A dependency-free leaf
-     module `serialization.py`/`snapshot_cache.py`/CLI code build on
+     module `serialization.py`/`snapshot_cache.py`/CLI code build on it
    - `package.py` — package/archive handling
    - `debian_symbols.py` — Debian symbols file adapter
    - `environment_matrix.py` — multi-env comparison
