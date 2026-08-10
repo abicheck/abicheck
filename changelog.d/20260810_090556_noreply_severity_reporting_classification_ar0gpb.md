@@ -25,7 +25,10 @@
   gate). `aggregate` reads that nested block as the target's compatibility
   gate when present (through the same fail-closed validator a `compare`
   gate goes through), which is what keeps the compatibility and
-  contract-coverage axes separable now that a scan can natively exit `1`.
+  contract-coverage axes separable now that a scan can natively exit `1`;
+  a `gate-mode: advisory` check report has that nested gate neutralized
+  alongside its top-level exit code, so an advisory check still gates
+  nothing.
   `--pack` gate-severity folding is not yet extended to `scan`; pass
   severity settings directly. See `docs/reference/exit-codes.md`'s new
   "`scan --against` and severity" section.
