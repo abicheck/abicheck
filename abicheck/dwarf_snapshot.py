@@ -1253,6 +1253,39 @@ class _DwarfSnapshotBuilder:
             if rec.vptr_offset_bits is None and rec.vtable:
                 rec.vptr_offset_bits = 0
 
+        # Second final-fallback tier: a class that is polymorphic ONLY
+        # through a "nearly empty" virtual base, adding or overriding no
+        # virtual method of its own at all, has neither a local vptr member
+        # nor any entry in its own `vtable` list -- confirmed with
+        # `struct A { virtual void a(); }; struct E : virtual A {};`: GCC
+        # emits no local `_vptr.E` and `E.vtable` is empty, so the tier
+        # above (gated on `rec.vtable`) never applies (Codex review, fresh
+        # evidence). Unlike the first fallback tier, this one is a genuine
+        # accuracy improvement, not a regression fix: the pre-fix heuristic
+        # (`0 if vtable else None`) ALSO returned `None` for this exact
+        # shape, since `vtable` was always empty here -- there was no prior
+        # "0" answer for this case to preserve. Resolved by checking whether
+        # any of this class's OWN virtual bases is itself already known to
+        # be polymorphic (`by_name` bare lookup, matching this tier's own
+        # best-effort character -- virtual bases were never given DIE-key
+        # tracking the way non-virtual `base_edges` are, since a virtual
+        # base's real offset is inherently dynamic in the general case; this
+        # tier only ever answers "0 or unknown," never a real non-zero
+        # offset, for exactly that reason). A polymorphic virtual base is
+        # positive evidence *this* class shares that vtable pointer under
+        # the same virtual-primary-base rule the first tier's own comment
+        # documents, so 0 is used unconditionally here too -- not the base's
+        # own (possibly different, if it isn't nearly-empty) offset.
+        for rec in self.types:
+            if rec.vptr_offset_bits is not None or not rec.virtual_bases:
+                continue
+            if any(
+                (vbase := by_name.get(vbase_name)) is not None
+                and vbase.vptr_offset_bits is not None
+                for vbase_name in rec.virtual_bases
+            ):
+                rec.vptr_offset_bits = 0
+
     def _resolve_decl_file(self, die: Any, CU: Any) -> str | None:
         """Resolve DW_AT_decl_file to a source file path.
 

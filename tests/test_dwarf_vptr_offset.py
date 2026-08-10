@@ -357,3 +357,43 @@ extern "C" E* get_e() { return &g_e; }
         types = self._types_by_name(nearly_empty_virtual_base_lib)
         assert types["E"].vtable  # confirms this exercises the no-local-member path
         assert types["E"].vptr_offset_bits == 0
+
+    @pytest.fixture()
+    def inherited_only_virtual_base_lib(self, tmp_path: Path) -> Path:
+        """A class polymorphic ONLY through a "nearly empty" virtual base,
+        adding or overriding no virtual method of its own at all -- unlike
+        the fixture above (E has its own e()), this E has neither a local
+        vptr member NOR any entry in its own vtable list. Reproduces the
+        gap Codex review found: the first fallback tier (gated on
+        rec.vtable) never applies here since vtable is empty, and this is
+        not covered by the pre-fix heuristic either (0 if vtable else None
+        also gave None for this exact shape -- a genuine accuracy
+        improvement, not a regression fix)."""
+        cpp_src = tmp_path / "inherited_only_virtual.cpp"
+        cpp_src.write_text("""\
+struct A { virtual void a(); };
+struct E : virtual A {};
+
+void A::a() {}
+static E g_e;
+extern "C" E* get_e() { return &g_e; }
+""")
+        so_path = tmp_path / "libinheritedonlyvirtual.so"
+        result = subprocess.run(
+            [_GPP, "-shared", "-fPIC", "-g", "-O0", "-o", str(so_path), str(cpp_src)],
+            capture_output=True, text=True, timeout=30,
+        )
+        assert result.returncode == 0, f"Compilation failed: {result.stderr}"
+        return so_path
+
+    def test_inherited_only_virtual_primary_base_resolves(
+        self, inherited_only_virtual_base_lib: Path
+    ) -> None:
+        """E has no own vtable entries and no local vptr member -- resolved
+        only by recognizing that its virtual base A is itself known to be
+        polymorphic, sharing A's vptr at offset 0."""
+        types = self._types_by_name(inherited_only_virtual_base_lib)
+        assert not types["E"].vtable  # confirms the no-own-vtable-entries path
+        assert not types["E"].bases  # only a virtual base, no non-virtual one
+        assert types["E"].virtual_bases == ["A"]
+        assert types["E"].vptr_offset_bits == 0

@@ -448,6 +448,29 @@ building a second identity-resolution mechanism from scratch.
   (matching this repo's existing test-file-splitting convention for a
   large module — see `AGENTS.md`'s "Files that are large" section).
 
+  **A fifth review round on the same fix found the immediately-adjacent
+  case the fourth's fallback tier didn't cover.** `struct A { virtual void
+  a(); }; struct E : virtual A {};` — `E` is polymorphic ONLY through the
+  virtual base `A`, adding or overriding no virtual method of its own at
+  all — has neither a local vptr member NOR any entry in its own `vtable`
+  list (confirmed: `E.vtable == []`), so the fourth finding's fallback
+  (gated on `rec.vtable` being non-empty) never applies here, leaving `E`
+  unresolved as `None`. Unlike that finding, this one is a genuine accuracy
+  improvement, not a regression fix: the pre-fix heuristic (`0 if vtable
+  else None`) ALSO returned `None` for this exact shape (its `vtable` was
+  always empty), so there was no prior "0" answer here to lose. Fixed with
+  a second final-fallback tier: a class with `virtual_bases` and no
+  resolved `vptr_offset_bits` gets `0` when at least one of its own virtual
+  bases is itself already known to be polymorphic (a bare-name `by_name`
+  lookup — virtual bases were never given DIE-key tracking the way
+  non-virtual `base_edges` are, since a virtual base's real offset is
+  inherently dynamic in the general case; this tier only ever answers "0
+  or unknown," matching the same virtual-primary-base-sharing rule the
+  fourth finding's own tier already documents, never a real non-zero
+  offset it has no way to derive). New regression test with this exact
+  `A`/`E` shape, confirming both `E.vtable` and `E.bases` are empty (only
+  `virtual_bases == ["A"]`) before asserting the resolved offset.
+
   **A later pass closed the last of this phase's four originally-listed
   facts** (`deprecated`/`is_scoped`/bitfields/default-argument facts were
   the other three, already covered above): direct-clang now populates
