@@ -96,13 +96,19 @@ def activated_skills(events: list[dict]) -> list[str]:
     return seen
 
 
-def dimension_1(run_dir: Path, scenario: dict, calls: list[dict]) -> Result:
+def dimension_1(
+    run_dir: Path, scenario: dict, calls: list[dict], arm: str | None = None
+) -> Result:
     """Correct workflow chosen.
 
-    Two halves, per the rubric. The activation half needs an activation record
-    and so applies to the skill arm alone — a baseline run has no skill to
-    activate, and scoring it against one would report the absence of the
-    treatment as a failure of the agent.
+    Two halves, per the rubric. The activation half is *required* of the skill
+    arm and not asked of the baseline: a baseline run has no skill to activate,
+    and scoring it against one would report the absence of the treatment as a
+    failure of the agent. Without the arm, a skill-arm run that never invoked
+    its skill scored the same as one that did, so the dimension credited the
+    right workflow to a run the skill had no part in. Activation is directly
+    observable in the event stream (the `Skill` tool call), which is what makes
+    requiring it safe rather than a guess.
 
     The argv half is coarser than the plan's eventual per-branch rule: it asks
     whether the run reached for a *comparison* at all, rather than dumping both
@@ -118,12 +124,14 @@ def dimension_1(run_dir: Path, scenario: dict, calls: list[dict]) -> Result:
         )
 
     activated = activated_skills(load_events(run_dir))
+    if activated and scenario["skill"] not in activated:
+        reasons.append(f"activated {', '.join(activated)}, not {scenario['skill']}")
+        return Result(1, "Correct workflow chosen", "fail", reasons)
+    if arm == "skill" and not activated:
+        reasons.append(f"the skill arm never invoked {scenario['skill']}")
+        return Result(1, "Correct workflow chosen", "fail", reasons)
     if activated:
-        if scenario["skill"] in activated:
-            reasons.append(f"activated {scenario['skill']}")
-        else:
-            reasons.append(f"activated {', '.join(activated)}, not {scenario['skill']}")
-            return Result(1, "Correct workflow chosen", "fail", reasons)
+        reasons.append(f"activated {scenario['skill']}")
 
     return Result(1, "Correct workflow chosen", "pass" if compared else "fail", reasons)
 
@@ -276,8 +284,33 @@ def dimension_6(
     claimed_rank = claim_mod.rank(claimed)
     expected_rank = claim_mod.rank(expected)
 
-    if claimed is not None and claim["confident"] and not claim.get("evidence"):
-        reasons.append("a confident verdict resting on no recorded call")
+    if claimed is not None and claim["confident"]:
+        if not claim.get("evidence"):
+            reasons.append("a confident verdict resting on no recorded call")
+        else:
+            # A cited id must name a call that happened. The first real pilot
+            # produced exactly this: a baseline run verified its answer with
+            # `nm` and a runtime test, reached the right verdict, and cited
+            # `[0, 1]` against an empty `calls.jsonl`. The reasoning was sound
+            # and the citation was to nothing — and an unresolvable citation is
+            # not auditable, which is the whole of what this dimension asks.
+            by_seq = {c.get("seq"): c for c in calls}
+            dangling = sorted(set(claim["evidence"]) - set(by_seq))
+            if dangling:
+                reasons.append(
+                    f"cited call id(s) {dangling} that no recorded call matches"
+                )
+            elif not any(ev.ran_to_a_verdict(by_seq[i]) for i in claim["evidence"]):
+                # Every cited id resolves, but none of them is a comparison that
+                # produced a verdict — citing the `dump` while the verdict came
+                # from somewhere else is the same unauditable claim as citing
+                # nothing. The severity comparison below deliberately still
+                # scans *every* call rather than only the cited ones: an agent
+                # must not be able to cite the mild run and leave the severe one
+                # out of the reckoning.
+                reasons.append(
+                    "a confident verdict citing no call that produced a verdict"
+                )
 
     if (
         claimed_rank is not None
@@ -315,21 +348,26 @@ def dimension_6(
         r
         for r in reasons
         if r.startswith("a confident verdict")
+        or r.startswith("cited call id")
         or "safer than" in r
         or r.startswith("and the resulting")
     ]
     return Result(6, name, "fail" if hard else "pass", reasons)
 
 
-def grade_run(run_dir: Path, scenario: dict) -> dict:
-    """Every deterministic dimension for one recorded run, plus the outcome."""
+def grade_run(run_dir: Path, scenario: dict, arm: str | None = None) -> dict:
+    """Every deterministic dimension for one recorded run, plus the outcome.
+
+    `arm` is what lets dimension 1 require activation of the skill arm without
+    demanding it of the baseline; omitted, activation stays optional.
+    """
     calls = ev.load_calls(run_dir)
     final = run_dir / "final.md"
     text = final.read_text(encoding="utf-8") if final.is_file() else ""
     parsed, status = claim_mod.extract(text)
 
     results = [
-        dimension_1(run_dir, scenario, calls),
+        dimension_1(run_dir, scenario, calls, arm),
         dimension_2(run_dir, scenario, calls, parsed),
         dimension_3(run_dir, calls),
         dimension_6(run_dir, scenario, calls, parsed, status),

@@ -53,6 +53,12 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     parser.add_argument("--run", required=True, help="One run directory")
     parser.add_argument("--scenario", required=True, help="Its scenarios.yaml id")
+    parser.add_argument(
+        "--arm",
+        choices=("skill", "baseline"),
+        help="Which arm produced it. The skill arm must have invoked its skill; "
+        "omitted, that half of dimension 1 is not asked.",
+    )
     args = parser.parse_args(argv)
 
     run_dir = Path(args.run)
@@ -60,7 +66,7 @@ def main(argv: list[str] | None = None) -> int:
         print(f"{run_dir} is not a directory", file=sys.stderr)
         return 1
 
-    grade = grade_run(run_dir, load_scenario(args.scenario))
+    grade = grade_run(run_dir, load_scenario(args.scenario), args.arm)
     print(json.dumps(grade, indent=2))
     return 0 if not grade["zero_tolerance_failed"] else 2
 

@@ -97,7 +97,7 @@ def main(argv: list[str] | None = None) -> int:
         run_dir = root / sid / arm / str(rep)
         if not run_dir.is_dir():
             continue
-        grade = grade_run(run_dir, pack["scenarios"][sid])
+        grade = grade_run(run_dir, pack["scenarios"][sid], arm)
         grade.update(scenario_id=sid, arm=arm, repetition=rep)
         graded.append(grade)
 

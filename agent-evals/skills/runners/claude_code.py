@@ -285,19 +285,27 @@ def _run_once(
     }
 
 
-def _recovered_record(out_dir: Path, sid: str, arm: str, rep: int, skill: str) -> dict:
+def _recovered_record(
+    out_dir: Path, sid: str, arm: str, rep: int, scenario: dict
+) -> dict:
     """An index row for a run whose directory exists but whose row does not.
 
     A crash between writing `final.md` and rewriting `index.json` used to make
     that repetition permanently invisible: every later resume skipped the
     directory as done and never added the row, so the aggregate silently
     counted one run fewer than was actually paid for.
+
+    The treatment check runs again here, and that is not belt-and-braces. A run
+    rejected by `_run_once` has *already written* `final.md` — the check happens
+    after — so recovering on the strength of that file alone would launder a
+    contaminated baseline into accepted evidence on the next resume, which is
+    the one failure the check exists to prevent.
     """
     record = {
         "scenario_id": sid,
         "arm": arm,
         "repetition": rep,
-        "skill": skill,
+        "skill": scenario["skill"],
         "recovered": True,
     }
     usage_path = out_dir / "usage.json"
@@ -309,13 +317,23 @@ def _recovered_record(out_dir: Path, sid: str, arm: str, rep: int, skill: str) -
         except json.JSONDecodeError:
             pass
     events_path = out_dir / "events.jsonl"
+    events: list[dict] = []
     if events_path.is_file():
-        events = [
-            json.loads(line)
-            for line in events_path.read_text(encoding="utf-8").splitlines()
-            if line.strip()
-        ]
-        record["visible_skills"] = visible_native_skills(events)
+        for line in events_path.read_text(encoding="utf-8").splitlines():
+            if line.strip():
+                try:
+                    events.append(json.loads(line))
+                except json.JSONDecodeError:
+                    continue
+    visible = visible_native_skills(events)
+    record["visible_skills"] = visible
+    problem = check_treatment(arm, scenario, visible)
+    if problem is not None:
+        raise RuntimeError(
+            f"{sid}/{arm}/{rep}: {problem}. This run was left on disk without an "
+            f"index row, which is what a rejected run looks like — delete its "
+            f"directory to re-run it rather than recovering it as evidence."
+        )
     return record
 
 
@@ -404,9 +422,7 @@ def main(argv: list[str] | None = None) -> int:
                     continue
                 if (out_dir / "final.md").exists():
                     print(f"recover {sid}/{arm}/{rep} (ran, was not indexed)")
-                    index.append(
-                        _recovered_record(out_dir, sid, arm, rep, scenario["skill"])
-                    )
+                    index.append(_recovered_record(out_dir, sid, arm, rep, scenario))
                     flush()
                     continue
                 out_dir.mkdir(parents=True, exist_ok=True)

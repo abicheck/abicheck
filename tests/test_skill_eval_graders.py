@@ -285,9 +285,16 @@ class TestDimensionOne:
 
     def test_a_baseline_run_with_no_activation_is_graded_on_argv_alone(self, tmp_path):
         run = build_run(tmp_path, final="", calls=[a_breaking_call()], events=[])
-        assert (
-            dim.dimension_1(run, SCENARIO_BREAKING, ev.load_calls(run)).status == "pass"
-        )
+        result = dim.dimension_1(run, SCENARIO_BREAKING, ev.load_calls(run), "baseline")
+        assert result.status == "pass"
+
+    def test_a_skill_arm_that_never_invoked_its_skill_fails(self, tmp_path):
+        """Otherwise the dimension credits the right workflow to a run the skill
+        had no part in — it graded the same as one that did invoke it."""
+        run = build_run(tmp_path, final="", calls=[a_breaking_call()], events=[])
+        result = dim.dimension_1(run, SCENARIO_BREAKING, ev.load_calls(run), "skill")
+        assert result.status == "fail"
+        assert "never invoked" in result.reasons[-1]
 
 
 class TestDimensionTwo:
@@ -481,6 +488,48 @@ class TestDimensionSix:
         )
         assert result.status == "fail"
         assert any("own report" in r for r in result.reasons)
+
+    def test_citing_call_ids_that_never_happened_fails(self, tmp_path):
+        """The shape the first real pilot produced: a baseline run verified its
+        answer with `nm` and a runtime test, reached the right verdict, and
+        cited `[0, 1]` against an empty call log. Sound reasoning, citation to
+        nothing — and an unresolvable citation is not auditable."""
+        result = self._grade(
+            tmp_path,
+            envelope(verdict="BREAKING", evidence=[0, 1], confident=True),
+            SCENARIO_BREAKING,
+            calls=[],
+        )
+        assert result.status == "fail"
+        assert any("no recorded call matches" in r for r in result.reasons)
+
+    def test_citing_only_a_dump_is_not_citing_a_verdict(self, tmp_path):
+        result = self._grade(
+            tmp_path,
+            envelope(verdict="BREAKING", evidence=[0], confident=True),
+            SCENARIO_BREAKING,
+            calls=[{"seq": 0, "argv": ["dump", "old.so"], "exit_code": 0}],
+        )
+        assert result.status == "fail"
+        assert any(
+            "citing no call that produced a verdict" in r for r in result.reasons
+        )
+
+    def test_the_severity_check_still_scans_every_call_not_just_cited_ones(
+        self, tmp_path
+    ):
+        """Otherwise an agent cites the mild run and leaves the severe one out."""
+        result = self._grade(
+            tmp_path,
+            envelope(verdict="COMPATIBLE", evidence=[0], confident=True),
+            SCENARIO_COMPATIBLE,
+            calls=[a_breaking_call(0), a_breaking_call(1)],
+            artifacts={
+                "captured/0.out": json.dumps({"verdict": "COMPATIBLE"}),
+                "captured/1.out": json.dumps({"verdict": "BREAKING"}),
+            },
+        )
+        assert result.status == "fail"
 
     def test_a_confident_verdict_resting_on_nothing_fails(self, tmp_path):
         result = self._grade(
@@ -702,13 +751,28 @@ class TestRunnerTreatment:
         assert "```json" in runner.ANSWER_CONTRACT
         assert "abicheck" not in runner.ANSWER_CONTRACT.lower()
 
-    def test_a_run_that_completed_but_was_never_indexed_is_recovered(self, tmp_path):
+    def _unindexed_run(self, tmp_path, visible):
         out_dir = tmp_path / "sid" / "skill" / "0"
         out_dir.mkdir(parents=True)
         (out_dir / "final.md").write_text("done", encoding="utf-8")
         (out_dir / "usage.json").write_text(
             json.dumps({"wall_clock_seconds": 9.0}), encoding="utf-8"
         )
-        record = runner._recovered_record(out_dir, "sid", "skill", 0, "native-x")
+        (out_dir / "events.jsonl").write_text(
+            json.dumps({"type": "system", "subtype": "init", "skills": visible}),
+            encoding="utf-8",
+        )
+        return out_dir
+
+    def test_a_run_that_completed_but_was_never_indexed_is_recovered(self, tmp_path):
+        out_dir = self._unindexed_run(tmp_path, [SCENARIO_BREAKING["skill"]])
+        record = runner._recovered_record(out_dir, "sid", "skill", 0, SCENARIO_BREAKING)
         assert record["recovered"] is True
         assert record["wall_clock_seconds"] == 9.0
+
+    def test_recovery_will_not_launder_a_rejected_run_into_evidence(self, tmp_path):
+        """`_run_once` writes final.md *before* checking the treatment, so a
+        rejected run looks exactly like a crashed one on the next resume."""
+        out_dir = self._unindexed_run(tmp_path, ["native-api-evolution"])
+        with pytest.raises(RuntimeError, match="should see exactly"):
+            runner._recovered_record(out_dir, "sid", "skill", 0, SCENARIO_BREAKING)
