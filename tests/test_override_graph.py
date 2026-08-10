@@ -254,6 +254,51 @@ def test_multiple_inheritance_emits_edge_to_each_matching_base() -> None:
     }
 
 
+def test_virtual_conversion_operator_override_emits_an_edge() -> None:
+    # Codex review, fresh evidence, verified against real Clang 18 output:
+    # a conversion operator (`operator int() const`) is its own node kind,
+    # CXXConversionDecl -- NOT CXXMethodDecl -- so a CXXMethodDecl-only
+    # collection filter silently dropped every conversion-operator override,
+    # including a real, OverrideAttr-confirmed one.
+    ast = _tu(
+        _record(
+            "Base",
+            inner=[
+                {
+                    "kind": "CXXConversionDecl",
+                    "name": "operator int",
+                    "mangledName": "_ZNK4BasecviEv",
+                    "type": {"qualType": "int () const"},
+                    "virtual": True,
+                    "inner": [],
+                }
+            ],
+        ),
+        _record(
+            "Derived",
+            bases=["Base"],
+            inner=[
+                {
+                    "kind": "CXXConversionDecl",
+                    "name": "operator int",
+                    "mangledName": "_ZNK7DerivedcviEv",
+                    "type": {"qualType": "int () const"},
+                    "inner": [{"kind": "OverrideAttr"}],
+                }
+            ],
+        ),
+    )
+    edges = parse_clang_ast_overrides(ast)
+    assert edges == [
+        OverrideEdge(
+            "_ZNK7DerivedcviEv",
+            "_ZNK4BasecviEv",
+            CONF_HIGH,
+            RESOLUTION_OVERRIDE_CONFIRMED,
+        )
+    ]
+
+
 def test_non_virtual_base_method_is_not_an_override_target() -> None:
     # Same (name, type.qualType) but the base method is never marked virtual
     # -- an unrelated ordinary member hiding, not an override.

@@ -1619,6 +1619,62 @@ def test_new_expr_allocation_semantics_distinguish_fingerprints() -> None:
     assert value_member != value_global
 
 
+def test_new_expr_init_style_distinguishes_fingerprints() -> None:
+    """Codex review, PR #687, fresh evidence: ``S* p = new S;`` (default-
+    initialization) vs. ``S* p = new S();`` (value-initialization, which
+    zero-initializes ``S``'s scalar members) previously fingerprinted
+    identically -- ``CXXNewExpr.initStyle`` (absent vs. ``"call"``) and the
+    nested ``CXXConstructExpr``'s ``zeroing`` (absent vs. ``true``) were both
+    dropped by ``_canonical_expr``'s whitelist. Node shapes below are
+    trimmed verbatim from real ``clang++ --std=c++17 -Xclang
+    -ast-dump=json`` output (Clang 18) for exactly this pair."""
+    from abicheck.dumper_clang_expr import _field_initializer_value
+
+    def _new_field(*, value_init: bool) -> dict:
+        construct_expr: dict = {
+            "kind": "CXXConstructExpr",
+            "type": {"qualType": "S"},
+            "valueCategory": "prvalue",
+            "ctorType": {"qualType": "void () noexcept"},
+        }
+        new_expr: dict = {
+            "kind": "CXXNewExpr",
+            "type": {"qualType": "S *"},
+            "valueCategory": "prvalue",
+            "operatorNewDecl": {
+                "kind": "FunctionDecl",
+                "name": "operator new",
+                "type": {"qualType": "void *(unsigned long)"},
+            },
+            "operatorDeleteDecl": {
+                "kind": "FunctionDecl",
+                "name": "operator delete",
+                "type": {"qualType": "void (void *) noexcept"},
+            },
+        }
+        if value_init:
+            new_expr["initStyle"] = "call"
+            construct_expr["zeroing"] = True
+        new_expr["inner"] = [construct_expr]
+        return {
+            "kind": "FieldDecl",
+            "name": "p",
+            "type": {"qualType": "S *"},
+            "hasInClassInitializer": True,
+            "inner": [new_expr],
+        }
+
+    field_default_init = _new_field(value_init=False)
+    field_value_init = _new_field(value_init=True)
+
+    value_default = _field_initializer_value(field_default_init)
+    value_value = _field_initializer_value(field_value_init)
+
+    assert value_default is not None
+    assert value_value is not None
+    assert value_default != value_value
+
+
 def test_parse_enums_is_scoped_false_for_plain_enum() -> None:
     root = _tu(
         {

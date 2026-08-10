@@ -281,3 +281,11 @@ it should read in CHANGELOG.md. Delete the other sections.
   stable `kind`/`name`/`type`(/`qualified_name`-via-id-index) stub
   `referencedDecl` already used, factored into a shared `_decl_stub()`
   helper.
+- **Fixed a missed `FIELD_DEFAULT_INITIALIZER_CHANGED`/
+  `PARAM_DEFAULT_VALUE_CHANGED` for a value- vs. default-initialization
+  change** (Codex review, fresh evidence): `new S` vs. `new S()` previously
+  fingerprinted identically too — `CXXNewExpr.initStyle` (absent vs.
+  `"call"`) and the nested `CXXConstructExpr`'s `zeroing` (absent vs.
+  `true`, since value-initialization zero-initializes `S`'s scalar members
+  first) were both dropped by `_canonical_expr`'s whitelist, verified
+  against real Clang 18 output before fixing. Both are now kept verbatim.

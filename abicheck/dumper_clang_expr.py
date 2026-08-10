@@ -437,11 +437,29 @@ def _canonical_expr(node: Any, id_index: _IdIndexProvider | None = None) -> Any:
     Fixed by keeping ``isGlobal`` verbatim and reusing the same decl-stub
     reduction ``referencedDecl`` already gets (below) for both operator
     fields.
+
+    A fourth gap, also found and fixed (Codex review, fresh evidence): ``new
+    S`` (default-initialization) vs. ``new S()`` (value-initialization, which
+    zero-initializes ``S``'s scalar members first) previously fingerprinted
+    identically too — confirmed against real Clang 18 output that
+    ``CXXNewExpr.initStyle`` is absent for the bare form and ``"call"`` for
+    the parenthesized form, with the nested ``CXXConstructExpr`` additionally
+    carrying ``zeroing: true`` only for the latter; neither key was in this
+    function's whitelist. Both are now kept verbatim alongside ``isGlobal``.
     """
     if not isinstance(node, dict):
         return node
     out: dict[str, Any] = {}
-    for key in ("kind", "value", "opcode", "name", "castKind", "isGlobal"):
+    for key in (
+        "kind",
+        "value",
+        "opcode",
+        "name",
+        "castKind",
+        "isGlobal",
+        "initStyle",
+        "zeroing",
+    ):
         if key in node:
             out[key] = node[key]
     type_obj = node.get("type")

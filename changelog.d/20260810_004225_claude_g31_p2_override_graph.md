@@ -45,3 +45,11 @@
   (`inline_graph_fold.fold_semantic_graphs`) — best-effort, degrading
   gracefully (no edges, an extractor row recorded) when `clang++` is
   unavailable, never aborting collection.
+- **Fixed a missed `METHOD_POSSIBLE_OVERRIDE` edge for a virtual conversion
+  operator** (Codex review, fresh evidence): `operator int() const` is its
+  own clang AST node kind, `CXXConversionDecl` — NOT `CXXMethodDecl` —
+  verified against real Clang 18 output, so the method-collection pass's
+  `CXXMethodDecl`-only filter silently dropped every conversion-operator
+  override, including a real, `OverrideAttr`-confirmed one.
+  `CXXConversionDecl` is now collected alongside `CXXMethodDecl`, matching
+  `call_graph.py`/`type_graph.py`'s own existing callable-kind sets.

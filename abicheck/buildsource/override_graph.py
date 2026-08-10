@@ -57,7 +57,8 @@ Architecture mirrors ``call_graph.py``/``type_graph.py`` deliberately:
 Deliberately scoped OUT of this first slice (documented gaps, not silent
 omissions):
 
-- Only ``CXXMethodDecl`` participates — constructors/destructors
+- Only ``CXXMethodDecl``/``CXXConversionDecl`` participate (see
+  ``_OVERRIDE_CANDIDATE_KINDS``) — constructors/destructors
   (``CXXConstructorDecl``/``CXXDestructorDecl``) are excluded. A virtual
   destructor is a common, real override case, but the Itanium ABI mangles
   one C++ destructor into TWO symbols (complete- and base-object, ``D1``/
@@ -134,6 +135,18 @@ RESOLUTION_OVERRIDE_SIGNATURE_MATCH = "override_signature_match"
 
 _RECORD_DECL_KINDS = frozenset({"CXXRecordDecl", "RecordDecl"})
 _NAMESPACE_SCOPE_KINDS = frozenset({"NamespaceDecl"})
+#: clang AST node kinds this module collects as override candidates. A
+#: virtual conversion operator (``operator int() const``) is its own kind,
+#: ``CXXConversionDecl`` -- NOT ``CXXMethodDecl`` -- verified against real
+#: Clang 18 output (Codex review, fresh evidence): an ordinary override of
+#: `virtual operator int() const` by `operator int() const override` was
+#: silently dropped by a ``CXXMethodDecl``-only filter, producing no
+#: ``METHOD_POSSIBLE_OVERRIDE`` edge for a valid, ``OverrideAttr``-confirmed
+#: override. ``call_graph.py``/``type_graph.py`` already include
+#: ``CXXConversionDecl`` in their own callable-kind sets for the identical
+#: reason. Constructors/destructors stay excluded per this module's own
+#: docstring (a deliberate scoping decision, unlike this omission).
+_OVERRIDE_CANDIDATE_KINDS = frozenset({"CXXMethodDecl", "CXXConversionDecl"})
 
 
 @dataclass(frozen=True)
@@ -230,10 +243,11 @@ def _method_info(node: dict[str, Any], scope: list[str]) -> _MethodInfo | None:
 
 
 def _collect_class_methods(ast: dict[str, Any]) -> dict[str, list[_MethodInfo]]:
-    """Every ``CXXRecordDecl``'s own direct ``CXXMethodDecl`` children,
-    keyed by scope-qualified class name (the same ``"::".join(scope)``
-    convention ``type_graph.py``'s own resolution produces, so the two data
-    sources' class identities line up without a second resolution pass)."""
+    """Every ``CXXRecordDecl``'s own direct ``CXXMethodDecl``/
+    ``CXXConversionDecl`` children, keyed by scope-qualified class name (the
+    same ``"::".join(scope)`` convention ``type_graph.py``'s own resolution
+    produces, so the two data sources' class identities line up without a
+    second resolution pass)."""
     result: dict[str, list[_MethodInfo]] = {}
 
     def walk(node: Any, scope: list[str]) -> None:
@@ -246,7 +260,8 @@ def _collect_class_methods(ast: dict[str, Any]) -> dict[str, list[_MethodInfo]]:
             methods = [
                 info
                 for child in node.get("inner", []) or []
-                if isinstance(child, dict) and child.get("kind") == "CXXMethodDecl"
+                if isinstance(child, dict)
+                and child.get("kind") in _OVERRIDE_CANDIDATE_KINDS
                 for info in [_method_info(child, [*scope, name])]
                 if info is not None
             ]
