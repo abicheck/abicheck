@@ -89,6 +89,7 @@ default, never a false positive.
 
 from __future__ import annotations
 
+from collections.abc import Iterable, Mapping
 from typing import TYPE_CHECKING
 
 from .diff_cxx_rules import owner_class_of
@@ -1105,6 +1106,156 @@ def directly_referenced_stdlib_types(
     return scan.referenced() if scan is not None else frozenset()
 
 
+def _alias_confirmed_identities(
+    base: Iterable[str],
+    alias_map: Mapping[str, frozenset[str]],
+    non_stdlib_spellings: frozenset[str],
+) -> frozenset[str]:
+    """*base*, plus every identity reached only through a typedef alias where
+    at least one producing alias is itself free of a collision against
+    *non_stdlib_spellings*.
+
+    A match found via a real declaration's own literal text is always
+    trustworthy. A match found only while recursively scanning a typedef's
+    *target* string is trustworthy too, but only under that condition -- the
+    scan itself cannot judge it, since only the caller computes that
+    vocabulary. One genuinely unambiguous route is real proof regardless of
+    how many other, separately ambiguous routes reached the same identity.
+
+    Shared by both the exact and the trusted set: the two differ only in
+    which scan collections they start from, never in this rule.
+    """
+    confirmed = set(base)
+    for identity, aliases in alias_map.items():
+        if aliases - non_stdlib_spellings:
+            confirmed.add(identity)
+    return frozenset(confirmed)
+
+
+def _stripped_spelling_index(
+    all_stdlib_identities: Iterable[str],
+    non_stdlib_spellings: frozenset[str],
+    non_stdlib_identities: frozenset[str],
+    typedef_candidate_spellings: frozenset[str],
+    typedef_spelling_targets: Mapping[str, str],
+) -> tuple[dict[str, str], dict[str, int]]:
+    """Each stdlib identity's own stripped spelling, and how many identities
+    share each such spelling.
+
+    Counts span EVERY stdlib identity the snapshot carries, not just the
+    referenced subset -- an unreferenced sibling sharing a referenced
+    identity's bare spelling still makes that spelling ambiguous for any
+    other finding's bare ``Change.symbol`` to match against.
+    """
+    stripped_by_identity: dict[str, str] = {}
+    stripped_counts: dict[str, int] = {}
+    for identity in set(all_stdlib_identities):
+        stripped = _stripped_signature_spelling(identity)
+        if not stripped or stripped in non_stdlib_spellings:
+            continue
+        if stripped in typedef_candidate_spellings:
+            typedef_target = typedef_spelling_targets.get(stripped)
+            # A typedef target naming this exact identity -- spelled fully
+            # qualified, or as one of its own *structural* namespace-suffix
+            # spellings (`_namespace_suffix_spellings`, which only ever
+            # drops a namespace/class-scope prefix `identity` itself
+            # already carries) -- genuinely refers to the same entity and
+            # is not a collision. An earlier revision instead compared via
+            # `_stripped_signature_spelling(typedef_target)` -- rejected
+            # (Codex review, fresh evidence): that normalization also
+            # strips inline ABI-tag namespaces (`__cxx11::`, `__1::`,
+            # `__ndk1::`), so a target naming a *different*, differently
+            # ABI-tagged stdlib sibling this snapshot never captured (e.g.
+            # a typedef targeting `std::__cxx11::basic_string<char>`
+            # against a captured pre-C++11-ABI `std::basic_string<char>`)
+            # stripped-collapses to the identical bare form as `identity`
+            # purely by coincidence, and was waved through here as "the
+            # same identity" when it actually names something else
+            # entirely -- confirmed empirically. `_namespace_suffix_
+            # spellings` cannot manufacture that coincidence, since it
+            # only derives suffixes from `identity`'s own scope chain.
+            # A suffix match is itself not safe unqualified: the target
+            # string can equal one of `identity`'s own structural suffixes
+            # while *also* being the real, distinct identity of an
+            # unrelated non-stdlib record/enum captured in this same
+            # snapshot (Codex review, fresh evidence -- e.g. a DWARF
+            # `std::chrono::duration` alongside an unrelated global
+            # `duration` record, with a typedef `chrono::duration ->
+            # duration`: the target textually matches `identity`'s own bare
+            # suffix, but a real, captured `duration` record is exactly
+            # what it actually names). Rejecting whenever the target is
+            # itself a captured non-stdlib identity closes this without
+            # reopening the ABI-tag coincidence above, since an *exact*
+            # match against `identity` is still accepted unconditionally.
+            suffix_match = (
+                typedef_target in _namespace_suffix_spellings(identity)
+                and typedef_target not in non_stdlib_identities
+            )
+            if typedef_target != identity and not suffix_match:
+                # A real, unrelated typedef alias whose key -- or one of
+                # its own derived namespace-suffix spellings -- happens to
+                # equal this identity's stripped spelling (bare key,
+                # namespace-qualified key, or an ambiguous one where
+                # `typedef_spelling_targets` itself drops the spelling
+                # rather than resolving it, leaving `typedef_target` as
+                # `None`, still correctly rejected here) -- the stripped
+                # spelling isn't this stdlib identity's own bare backend
+                # form at all, it's someone else's (possibly ambiguous)
+                # alias, so it can never safely stand in for the identity
+                # in a bare Change.symbol match.
+                continue
+        stripped_by_identity[identity] = stripped
+        stripped_counts[stripped] = stripped_counts.get(stripped, 0) + 1
+    return stripped_by_identity, stripped_counts
+
+
+def _assemble_spellings(
+    identities: Iterable[str],
+    stripped_by_identity: Mapping[str, str],
+    stripped_counts: Mapping[str, int],
+    exact: frozenset[str],
+    trusted: frozenset[str],
+) -> frozenset[str]:
+    """Which spellings each referenced identity may safely be matched by."""
+    spellings: set[str] = set()
+    for identity in identities:
+        stripped = stripped_by_identity.get(identity)
+        if stripped is None or stripped_counts[stripped] > 1:
+            # The derived spelling either collides with an unrelated
+            # non-stdlib record/enum (`stripped is None`, filtered out
+            # above) or with another stdlib identity in the snapshot --
+            # referenced or not (`stripped_counts[stripped] > 1`) -- either
+            # way, only an identity independently proven via its own
+            # literal spelling survives; the derived form itself is never
+            # added here.
+            if identity in exact:
+                spellings.add(identity)
+            continue
+        if identity not in trusted:
+            # The stripped form is unambiguous against everything else in
+            # the snapshot -- but that alone only says "nothing else could
+            # this spelling mean," not "the signature legitimately reaches
+            # this spelling at all." An identity whose own reachability was
+            # never proven trustworthy (e.g. found only inside a record
+            # that was itself reached solely through an ambiguous typedef
+            # alias) cannot be rescued by bare-spelling uniqueness alone.
+            # No fallback to `exact` here (unlike the ambiguous-stripped-
+            # form branch above): `exact` is always a subset of `trusted`
+            # by construction (every site that adds to `_referenced_exact`/
+            # `_exact_typedef_aliases` adds the identical identity/origin to
+            # `_referenced_trusted`/`_trusted_via_alias` first), so
+            # `identity not in trusted` already implies `identity not in
+            # exact` -- nothing would ever survive here.
+            continue
+        # Unambiguous against every stdlib identity in the snapshot *and*
+        # against every non-stdlib spelling in it, *and* independently
+        # proven trustworthy: keep both the identity and its derived bare
+        # form.
+        spellings.add(identity)
+        spellings.add(stripped)
+    return frozenset(spellings)
+
+
 def directly_referenced_stdlib_type_spellings(
     snapshot: AbiSnapshot,
     *,
@@ -1268,11 +1419,11 @@ def directly_referenced_stdlib_type_spellings(
     # that produced it is itself absent from this function's own
     # enum-aware `non_stdlib_spellings` collision set -- the scan itself
     # cannot judge that, since only this function computes that vocabulary.
-    exact_mut = set(scan.referenced_exact())
-    for identity, aliases in scan.referenced_exact_typedef_aliases().items():
-        if aliases - non_stdlib_spellings:
-            exact_mut.add(identity)
-    exact = frozenset(exact_mut)
+    exact = _alias_confirmed_identities(
+        scan.referenced_exact(),
+        scan.referenced_exact_typedef_aliases(),
+        non_stdlib_spellings,
+    )
     # Broader sibling of `exact` above, mirroring the same alias-ambiguity
     # check but for *any* spelling (self-key or derived) rather than only
     # the self-key one -- needed below for the "stripped form collides with
@@ -1283,11 +1434,11 @@ def directly_referenced_stdlib_type_spellings(
     # where the record itself was reached only through an ambiguous
     # typedef alias, was previously confirmed unconditionally through this
     # shortcut regardless of that ambiguity -- confirmed empirically).
-    trusted_mut = set(scan.referenced_trusted())
-    for identity, aliases in scan.trusted_via_alias().items():
-        if aliases - non_stdlib_spellings:
-            trusted_mut.add(identity)
-    trusted = frozenset(trusted_mut)
+    trusted = _alias_confirmed_identities(
+        scan.referenced_trusted(),
+        scan.trusted_via_alias(),
+        non_stdlib_spellings,
+    )
     # Every spelling a typedef could be reached by -- not just its literal
     # dict key -- via the same suffix-expansion _StdlibReferenceScan itself
     # already uses to resolve a typedef alias to its target: a raw
@@ -1313,99 +1464,13 @@ def directly_referenced_stdlib_type_spellings(
     # one identity (an ODR-duplicate/incomplete-declaration pair,
     # `_partition_snapshot_types`'s own list-per-identity reason) so a
     # duplicate doesn't inflate a count against itself.
-    stripped_by_identity: dict[str, str] = {}
-    stripped_counts: dict[str, int] = {}
-    for identity in set(all_stdlib_identities):
-        stripped = _stripped_signature_spelling(identity)
-        if not stripped or stripped in non_stdlib_spellings:
-            continue
-        if stripped in typedef_candidate_spellings:
-            typedef_target = typedef_spelling_targets.get(stripped)
-            # A typedef target naming this exact identity -- spelled fully
-            # qualified, or as one of its own *structural* namespace-suffix
-            # spellings (`_namespace_suffix_spellings`, which only ever
-            # drops a namespace/class-scope prefix `identity` itself
-            # already carries) -- genuinely refers to the same entity and
-            # is not a collision. An earlier revision instead compared via
-            # `_stripped_signature_spelling(typedef_target)` -- rejected
-            # (Codex review, fresh evidence): that normalization also
-            # strips inline ABI-tag namespaces (`__cxx11::`, `__1::`,
-            # `__ndk1::`), so a target naming a *different*, differently
-            # ABI-tagged stdlib sibling this snapshot never captured (e.g.
-            # a typedef targeting `std::__cxx11::basic_string<char>`
-            # against a captured pre-C++11-ABI `std::basic_string<char>`)
-            # stripped-collapses to the identical bare form as `identity`
-            # purely by coincidence, and was waved through here as "the
-            # same identity" when it actually names something else
-            # entirely -- confirmed empirically. `_namespace_suffix_
-            # spellings` cannot manufacture that coincidence, since it
-            # only derives suffixes from `identity`'s own scope chain.
-            # A suffix match is itself not safe unqualified: the target
-            # string can equal one of `identity`'s own structural suffixes
-            # while *also* being the real, distinct identity of an
-            # unrelated non-stdlib record/enum captured in this same
-            # snapshot (Codex review, fresh evidence -- e.g. a DWARF
-            # `std::chrono::duration` alongside an unrelated global
-            # `duration` record, with a typedef `chrono::duration ->
-            # duration`: the target textually matches `identity`'s own bare
-            # suffix, but a real, captured `duration` record is exactly
-            # what it actually names). Rejecting whenever the target is
-            # itself a captured non-stdlib identity closes this without
-            # reopening the ABI-tag coincidence above, since an *exact*
-            # match against `identity` is still accepted unconditionally.
-            suffix_match = (
-                typedef_target in _namespace_suffix_spellings(identity)
-                and typedef_target not in non_stdlib_identities
-            )
-            if typedef_target != identity and not suffix_match:
-                # A real, unrelated typedef alias whose key -- or one of
-                # its own derived namespace-suffix spellings -- happens to
-                # equal this identity's stripped spelling (bare key,
-                # namespace-qualified key, or an ambiguous one where
-                # `typedef_spelling_targets` itself drops the spelling
-                # rather than resolving it, leaving `typedef_target` as
-                # `None`, still correctly rejected here) -- the stripped
-                # spelling isn't this stdlib identity's own bare backend
-                # form at all, it's someone else's (possibly ambiguous)
-                # alias, so it can never safely stand in for the identity
-                # in a bare Change.symbol match.
-                continue
-        stripped_by_identity[identity] = stripped
-        stripped_counts[stripped] = stripped_counts.get(stripped, 0) + 1
-    spellings: set[str] = set()
-    for identity in identities:
-        stripped = stripped_by_identity.get(identity)
-        if stripped is None or stripped_counts[stripped] > 1:
-            # The derived spelling either collides with an unrelated
-            # non-stdlib record/enum (`stripped is None`, filtered out
-            # above) or with another stdlib identity in the snapshot --
-            # referenced or not (`stripped_counts[stripped] > 1`) -- either
-            # way, only an identity independently proven via its own
-            # literal spelling survives; the derived form itself is never
-            # added here.
-            if identity in exact:
-                spellings.add(identity)
-            continue
-        if identity not in trusted:
-            # The stripped form is unambiguous against everything else in
-            # the snapshot -- but that alone only says "nothing else could
-            # this spelling mean," not "the signature legitimately reaches
-            # this spelling at all." An identity whose own reachability was
-            # never proven trustworthy (e.g. found only inside a record
-            # that was itself reached solely through an ambiguous typedef
-            # alias) cannot be rescued by bare-spelling uniqueness alone.
-            # No fallback to `exact` here (unlike the ambiguous-stripped-
-            # form branch above): `exact` is always a subset of `trusted`
-            # by construction (every site that adds to `_referenced_exact`/
-            # `_exact_typedef_aliases` adds the identical identity/origin to
-            # `_referenced_trusted`/`_trusted_via_alias` first), so
-            # `identity not in trusted` already implies `identity not in
-            # exact` -- nothing would ever survive here.
-            continue
-        # Unambiguous against every stdlib identity in the snapshot *and*
-        # against every non-stdlib spelling in it, *and* independently
-        # proven trustworthy: keep both the identity and its derived bare
-        # form.
-        spellings.add(identity)
-        spellings.add(stripped)
-    return frozenset(spellings)
+    stripped_by_identity, stripped_counts = _stripped_spelling_index(
+        all_stdlib_identities,
+        non_stdlib_spellings,
+        non_stdlib_identities,
+        typedef_candidate_spellings,
+        typedef_spelling_targets,
+    )
+    return _assemble_spellings(
+        identities, stripped_by_identity, stripped_counts, exact, trusted
+    )
