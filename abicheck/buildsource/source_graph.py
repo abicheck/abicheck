@@ -29,13 +29,8 @@ This module implements the MVP scope of the ADR:
 - A structural :func:`diff_source_graph` (Phase 5 seed) that powers the
   ``graph compare`` command for explanation and triage.
 
-Every edge carries provenance and a confidence label (ADR-031 D2, D9): a graph
-fact must always say *how* it was derived so a reader never mistakes graph
-absence for safety. Deeper layers — public-reachability / type / include /
-call graphs (Phases 3-4, 6) and external backends like Kythe/CodeQL (Phase 7) —
-extend this same schema; per ADR-031 D6 graph diffs *explain and prioritize* and
-must never, on their own, silently decide or suppress an artifact-proven ABI
-break (ADR-028 D3).
+Every edge carries provenance and a confidence label (ADR-031 D2, D9): a graph fact must always say *how* it was derived so a reader never mistakes graph absence for safety.
+Deeper layers — public-reachability / type / include / call graphs (Phases 3-4, 6) and external backends like Kythe/CodeQL (Phase 7) — extend this same schema; per ADR-031 D6 graph diffs *explain and prioritize* and must never, on their own, silently decide or suppress an artifact-proven ABI break (ADR-028 D3).
 """
 
 from __future__ import annotations
@@ -61,6 +56,7 @@ from .graph_facts import (
     CONSUMER_NODE_KINDS,
     LINK_PROVENANCE_EDGE_KINDS,  # ADR-041 P1 #2
     LINK_PROVENANCE_NODE_KINDS,
+    MACRO_DEP_EDGE_KINDS,  # G29 Phase 5 item 2
     TEMPLATE_EDGE_KINDS,  # G29 Phase 5 item 1
     TEMPLATE_NODE_KINDS,
     USE_CASE_EDGE_KINDS,  # G29 Phase 4 slice 2 (ADR-057 amendment)
@@ -155,6 +151,7 @@ EDGE_KINDS: frozenset[str] = frozenset(
     | USE_CASE_EDGE_KINDS
     | TEMPLATE_EDGE_KINDS
     | LINK_PROVENANCE_EDGE_KINDS
+    | MACRO_DEP_EDGE_KINDS
 )
 
 #: L5 edge kinds that express a decl/type dependency (ADR-041 P0): a call, a

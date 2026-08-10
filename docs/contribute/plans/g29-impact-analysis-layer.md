@@ -195,9 +195,13 @@ model:
   (`template_graph.py`, `extractor_passes["template_graph"]`/
   `degraded_passes["template_graph"]` — see Phase 5 item 1 above), for the
   three populated edge kinds; the four reserved ones (`TEMPLATE_USES_DECL`
-  etc.) remain open, each its own follow-up. Virtual dispatch, macro/config,
-  and callback/function-pointer remain fully open — each needs its own
-  Clang AST pass this phase has not added.
+  etc.) remain open, each its own follow-up. **Macro/config dependency is
+  done** (`macro_graph.py`, `extractor_passes["macro_graph"]`/
+  `degraded_passes["macro_graph"]` — see Phase 5 item 2 above), for the two
+  populated edge kinds (`MACRO_CONTROLS_DECL`/`DECL_USES_MACRO`); the three
+  reserved ones (`MACRO_EXPANDS_TO_VALUE` etc.) remain open, each its own
+  follow-up. Virtual dispatch and callback/function-pointer remain fully
+  open — each needs its own Clang AST pass this phase has not added.
 - **G29.7** — The minimal new user-facing detector set from the review
   (8 detector surfaces: 6 `ChangeKind`s and 2 report-level overlays — see
   Phase 6) plus `case194`-`case205` positive/negative example pairs and the
@@ -641,9 +645,34 @@ which all depend on a Clang AST pass.
    `docs/reference/source-graph-schema.md` for the field-level detail,
    including the two load-bearing empirical AST findings (the explicit-
    instantiation detachment quirk, and typedef-alias argument resolution).
-2. **Macro/config dependency**: `DECL_USES_MACRO`, `MACRO_EXPANDS_TO_VALUE`/
-   `MACRO_EXPANDS_TO_TYPE`, `MACRO_CONTROLS_DECL`/`MACRO_CONTROLS_EDGE`, each
-   edge carrying a configuration condition (`_WIN32`, feature flags).
+2. **Macro/config dependency — done.** `abicheck/buildsource/macro_graph.py`
+   is a two-pass extractor (a Clang AST pass indexing every declaration's
+   own `(file, begin_line, end_line)` span, plus a pure raw-text scan for
+   conditional regions and macro definitions — clang's own AST carries no
+   representation of preprocessor conditionals at all, confirmed
+   empirically), driven by `inline_graph_fold.fold_macro_graph` alongside
+   the other Clang-backed passes. Populates `MACRO_CONTROLS_DECL` (macro →
+   source_decl, `CONF_HIGH` — a declaration compiled only under a simple
+   `#ifdef`/`#ifndef`/`#if defined`/`#if !defined` guard) and
+   `DECL_USES_MACRO` (source_decl → macro, `CONF_REDUCED` — a declaration's
+   own text references a macro defined earlier in the same file, a textual
+   heuristic). `MACRO_EXPANDS_TO_VALUE`/`MACRO_EXPANDS_TO_TYPE`/
+   `MACRO_CONTROLS_EDGE` remain reserved, unpopulated — see the module's own
+   docstring (real macro-*expansion* tracing for the first two; per-edge
+   rather than per-declaration conditional attribution for the third; none
+   attempted this slice). A compound condition (`#if defined(X) &&
+   defined(Y)`) or an `#elif` chain is deliberately unmodeled but still
+   correctly maintains nesting depth across it, so a sibling/enclosing
+   simple guard is never desynchronized. No new node kind — both edges join
+   onto the existing `macro`/`source_decl` nodes only (ADR-057 D1's
+   join-only-onto-an-existing-node rule, reapplied). See
+   `docs/reference/source-graph-schema.md` for the field-level detail,
+   including the load-bearing empirical AST-dump finding this slice
+   depends on: a declaration's `range.begin`/`range.end` share one sticky,
+   whole-document `(file, line)` cursor with every other AST node's `loc`
+   (not just file-only sibling tracking, the way the pre-existing
+   `type_graph.py` pass already threads) — printed only when it changes
+   from the immediately preceding node's, in document-traversal order.
 3. **Virtual dispatch**: `DECL_OVERRIDES_DECL`, `VIRTUAL_CALL_MAY_DISPATCH_TO`
    (explicitly `overapprox`, never `exact`), `VTABLE_SLOT_MAPS_TO_DECL`,
    `TYPE_HAS_VTABLE` — distinguishes "the vtable slot provably changed" from
@@ -733,6 +762,7 @@ abicheck/buildsource/graph_impact.py  # select_preferred_graph_path, attach_impa
 abicheck/buildsource/entity_resolver.py  # EntityResolver/EntityConflict (Phase 2 D4, DONE — scoped implementation)
 abicheck/buildsource/archive_graph.py  # ar-index introspection (Phase 5 item 6, DONE — archive_member/ARCHIVE_CONTAINS_OBJECT/OBJECT_DEFINES_SYMBOL)
 abicheck/buildsource/template_graph.py  # Clang template-instantiation pass (Phase 5 item 1, DONE — template_decl/template_instantiation, DECL_INSTANTIATES_TEMPLATE/TEMPLATE_USES_TYPE/INSTANTIATION_EMITS_SYMBOL)
+abicheck/buildsource/macro_graph.py  # Clang + raw-text macro/config-dependency pass (Phase 5 item 2, DONE — MACRO_CONTROLS_DECL/DECL_USES_MACRO)
 abicheck/internal_leak.py   # TraversalPolicy + effect_transitions (Phase 2 D5, DONE — landed here, not a separate impact/traversal.py)
 abicheck/impact/
     model.py           # ImpactAssessment, GraphProofPath, FindingDecision (Phase 3 slices 1/7, DONE — ADR-052)

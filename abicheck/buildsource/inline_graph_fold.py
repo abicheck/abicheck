@@ -19,8 +19,8 @@ Split out of ``inline.py`` (which sits at its 2000-line hard cap) to keep
 adding scoping/coverage fields — ``narrowed_scope``, ``degraded_passes`` —
 from pushing that file over the limit (ADR-041 P0). ``inline.py`` imports
 :func:`fold_call_graph`/:func:`fold_type_graph`/:func:`fold_include_graph`/
-:func:`fold_archive_graph` and calls them exactly as it called the former
-same-module ``_fold_call_graph``/``_fold_type_graph``.
+:func:`fold_archive_graph`/:func:`fold_macro_graph` and calls them exactly as
+it called the former same-module ``_fold_call_graph``/``_fold_type_graph``.
 """
 
 from __future__ import annotations
@@ -479,6 +479,99 @@ def fold_template_graph(
     )
 
 
+def fold_macro_graph(
+    graph: SourceGraphSummary,
+    merged: BuildEvidence,
+    clang_bin: str,
+    extractors: list[ExtractorRecord] | None,
+    changed_paths: tuple[str, ...] = (),
+    scoped_units: list[Any] | None = None,
+) -> None:
+    """Best-effort Clang macro/config-dependency augmentation of *graph*
+    (G29 Phase 5 item 2).
+
+    Mirrors :func:`fold_template_graph` exactly (same scoping precedence,
+    same graceful degradation on a missing ``clang++``) but folds
+    ``MACRO_CONTROLS_DECL``/``DECL_USES_MACRO`` edges — see
+    ``macro_graph.py``'s own module docstring for the full reasoning,
+    including a load-bearing empirical clang AST-dump finding. Run only when
+    the caller also runs the call/type graph (``with_call_graph``), sharing
+    the same scoping decision and clang-availability diagnostic story.
+
+    Unlike the AST-only passes above, this one also needs each named file's
+    *raw source text* (``macro_graph.py``'s Pass B is a text scan, not an
+    AST walk) — supplied here as a plain ``Path.read_text`` callable, whose
+    own read failures are turned into per-file diagnostics by
+    :func:`~abicheck.buildsource.macro_graph.augment_graph_with_macro_dependencies`
+    itself (never raised here).
+    """
+    from .call_graph import (
+        extractor_pass_fully_covered,
+        narrowed_pass_confirmed,
+    )
+    from .macro_graph import (
+        ClangMacroGraphExtractor,
+        augment_graph_with_macro_dependencies,
+    )
+
+    rows = extractors if extractors is not None else []
+    extractor = ClangMacroGraphExtractor(
+        clang_bin=clang_bin if clang_bin != "clang" else "clang++"
+    )
+    if not extractor.available():
+        rows.append(
+            ExtractorRecord(
+                name="macro_graph:clang",
+                status="failed",
+                detail=f"{extractor.clang_bin} not found; graph has no macro edges",
+            )
+        )
+        return
+    target, scoped_note, narrowed, scope_key = _scope_narrowed_target(
+        merged, changed_paths, scoped_units
+    )
+    decl_ranges = extractor.extract_from_build(target)
+
+    def _read_source(path: str) -> str | None:
+        return Path(path).read_text(encoding="utf-8")
+
+    result = augment_graph_with_macro_dependencies(
+        graph, decl_ranges, source_lookup=_read_source
+    )
+    added = result.controls_edges + result.uses_edges
+    # Coverage honesty mirrors fold_template_graph's clang-extractor gate,
+    # additionally requiring Pass B's own text-read diagnostics to be clean
+    # (result.complete) — a confirmed clang pass whose source-text scan hit
+    # a read failure on some file must not read as fully covered either.
+    if extractor_pass_fully_covered(target, extractor, narrowed) and result.complete:
+        graph.extractor_passes["macro_graph"] = True
+    elif narrowed and narrowed_pass_confirmed(target, extractor) and result.complete:
+        graph.narrowed_passes["macro_graph"] = True
+        graph.narrowed_scope["macro_graph"] = scope_key
+    elif extractor.diagnostics or result.diagnostics:
+        graph.degraded_passes["macro_graph"] = True
+    for diag in extractor.diagnostics:
+        merged.diagnostics.append(f"macro_graph: {diag}")
+    for diag in result.diagnostics:
+        merged.diagnostics.append(f"macro_graph: {diag}")
+    timing = (
+        f", {extractor.last_elapsed_s:.2f}s, jobs={extractor.last_jobs}"
+        if getattr(extractor, "last_jobs", 0)
+        else ""
+    )
+    rows.append(
+        ExtractorRecord(
+            name="macro_graph:clang",
+            status="ok" if added else "partial",
+            detail=(
+                f"{result.controls_edges} MACRO_CONTROLS_DECL, "
+                f"{result.uses_edges} DECL_USES_MACRO edge(s) from "
+                f"{len(target.compile_units)} compile unit(s){scoped_note}{timing}"
+            ),
+        )
+    )
+
+
 def fold_include_graph(
     graph: SourceGraphSummary,
     merged: BuildEvidence,
@@ -568,12 +661,16 @@ def fold_semantic_graphs(
     """Run every Clang-derived L5 graph pass over *graph* in one call:
     :func:`fold_call_graph`, :func:`fold_type_graph`,
     :func:`fold_override_graph` (ADR-041 P2 item 1),
-    :func:`fold_template_graph` (G29 Phase 5 item 1), then
+    :func:`fold_template_graph` (G29 Phase 5 item 1),
+    :func:`fold_macro_graph` (G29 Phase 5 item 2), then
     :func:`fold_include_graph` — the exact sequence ``inline._build_inline_graph``
     ran inline before this wrapper existed, kept together here (rather than
-    five separate call sites in ``inline.py``, which sits at its own
-    line-count cap) so a future sixth pass adds one call here instead of
-    growing that file too. Each pass shares the same *changed_paths*/
+    six separate call sites in ``inline.py``, which sits at its own
+    line-count cap) so a future seventh pass adds one call here instead of
+    growing that file too. ``fold_macro_graph`` sits right after
+    ``fold_template_graph`` — both are Clang-backed passes needing the same
+    scoping decision, and both close over one of G29 Phase 5's originally
+    open graph families. Each pass shares the same *changed_paths*/
     *scoped_units* scoping precedence and clang-binary resolution, and each
     degrades independently (a missing ``clang++`` or a per-TU parse failure
     never aborts a later pass — ADR-028 D3).
@@ -588,6 +685,9 @@ def fold_semantic_graphs(
         graph, merged, clang_bin, extractors, changed_paths, scoped_units=scoped_units
     )
     fold_template_graph(
+        graph, merged, clang_bin, extractors, changed_paths, scoped_units=scoped_units
+    )
+    fold_macro_graph(
         graph, merged, clang_bin, extractors, changed_paths, scoped_units=scoped_units
     )
     fold_include_graph(

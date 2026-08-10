@@ -278,6 +278,62 @@ Coverage is tracked at `extractor_passes["template_graph"]` /
 `degraded_passes["template_graph"]`, the same family-level contract the
 call/type/include-graph passes use.
 
+## The macro/config-dependency half of the graph (G29 Phase 5 item 2)
+
+Clang's own AST carries **no** representation of preprocessor conditionals
+at all — a `#ifdef`/`#define` leaves no trace in a `clang -ast-dump=json`
+tree; the declarations it admits or excludes simply appear or don't, with no
+marker of which guard let them through. `abicheck/buildsource/macro_graph.py`
+closes that gap with two independent passes: a Clang AST pass indexing every
+declaration's own `(file, begin_line, end_line)` span, and a pure raw-text
+scan of the same files for conditional regions and macro definitions —
+joined by line-range containment. Driven by
+`inline_graph_fold.fold_macro_graph` alongside the other Clang-backed passes
+(`with_call_graph`).
+
+| Kind | Status | Meaning |
+|---|---|---|
+| `MACRO_CONTROLS_DECL` *(edge)* | populated | `macro` → `source_decl`. A declaration is compiled only under a simple `#ifdef X` / `#ifndef X` / `#if defined(X)` / `#if !defined(X)` conditional region; `attrs.negated` is `true` for the `#else` branch of a simple guard. `CONF_HIGH` — an exact structural fact about the raw text, not a guess. |
+| `DECL_USES_MACRO` *(edge)* | populated | `source_decl` → `macro`. A declaration's own signature/body span contains a word-boundary reference to a macro name `#define`d earlier in the same file. `CONF_REDUCED` — a textual heuristic, not semantic preprocessing (see below). |
+| `MACRO_EXPANDS_TO_VALUE` / `MACRO_EXPANDS_TO_TYPE` / `MACRO_CONTROLS_EDGE` *(edges)* | reserved | See the module's own docstring for why each is deferred (real macro-*expansion* tracing for the first two; per-edge rather than per-declaration conditional attribution for the third). |
+
+No new **node** kind — both edges join onto the existing `macro`/
+`source_decl` node kinds only (join-only-onto-an-existing-node, the same
+ADR-057 D1 rule `archive_graph.py`'s `OBJECT_DEFINES_SYMBOL` reapplies): a
+macro or declaration this pass discovers in the AST/text scan but the graph
+doesn't already carry a node for mints nothing.
+
+**A compound condition (`#if defined(X) && defined(Y)`) or an `#elif` chain
+is deliberately unmodeled** — neither its own branch nor (for a compound
+condition) its `#else` branch contributes a `MACRO_CONTROLS_DECL` edge,
+though nesting depth is still tracked correctly across it (its own `#endif`
+still pops the scan's nesting stack, so a sibling or enclosing simple guard
+elsewhere in the file is never desynchronized). `DECL_USES_MACRO` is a
+textual, not semantic, scan and accepts two documented tradeoffs: it cannot
+tell an identifier that merely shares a defined macro's name from a genuine
+macro reference (a known, accepted over-match), and it is strictly
+same-file — a macro `#define`d in one header and referenced from a
+declaration in a different file/TU is not modeled.
+
+One load-bearing empirical AST-dump finding underlies the declaration-range
+pass: a declaration's `range.begin`/`range.end` objects do not reliably
+carry a `"line"` key — clang's JSON node dumper prints a single,
+whole-AST-wide sticky `(file, line)` cursor shared across *every* node's
+`loc`, then `range.begin`, then `range.end` (in that field order), printing
+a field only when it changes from the immediately preceding one. This is a
+stricter version of `type_graph._node_file`'s own file-only sticky tracking
+between siblings — the cursor here is one value threaded through the
+*entire* document-order traversal (every node, including every statement/
+expression inside a function body, not just the declarations this module
+indexes), and it tracks `line` as well as `file`. See `macro_graph.py`'s own
+module docstring for the full reasoning and verification detail.
+
+Coverage is tracked at `extractor_passes["macro_graph"]` /
+`degraded_passes["macro_graph"]`, the same family-level coverage-honesty
+contract the call/type/template/include-graph passes use — requiring both a
+clean, fully-covered Clang pass *and* a clean raw-text scan (no per-file
+read/parse diagnostic) before claiming confirmed coverage.
+
 ## `primary_path` / `alternative_paths` / `discarded_path_count`
 
 `select_preferred_graph_path`'s caller (`buildsource.graph_impact.attach_impact_metadata`)

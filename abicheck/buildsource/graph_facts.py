@@ -163,6 +163,44 @@ TEMPLATE_EDGE_KINDS: frozenset[str] = frozenset(
     }
 )
 
+#: The macro/config-dependency half of the graph vocabulary (G29 Phase 5 item
+#: 2, G29.6's second open graph family) — ``source_graph.EDGE_KINDS`` unions
+#: this in the same way ``TEMPLATE_EDGE_KINDS``/``LINK_PROVENANCE_EDGE_KINDS``
+#: above are, and ``abicheck.buildsource.macro_graph`` (which populates it)
+#: re-exports it. Same two reasons for living in this leaf module:
+#: ``source_graph.py`` is at its 2000-line hard cap, and the producer would
+#: need to import ``source_graph`` back. **No new node kind** — every edge
+#: below joins onto the existing ``macro``/``source_decl`` node kinds
+#: ``source_graph.NODE_KINDS`` already declares (same "no new node kind
+#: needed" shape as ``CONSUMER_EDGE_KINDS``'s deliberate absence of a
+#: ``consumer_required_symbol`` node kind above).
+#:
+#: Only ``MACRO_CONTROLS_DECL`` (a declaration compiled only under a simple
+#: ``#ifdef``/``#ifndef``/``#if defined``/``#if !defined`` guard) and
+#: ``DECL_USES_MACRO`` (a declaration's own text references a macro name
+#: defined earlier in the same file — a textual heuristic, not semantic
+#: preprocessing) are populated this slice — see ``macro_graph.py``'s own
+#: module docstring for the full reasoning, including a load-bearing
+#: empirical clang AST-dump finding. The rest are **reserved**, same
+#: "registered so a hand-built or newer graph naming one is never rejected,
+#: but no normalized data source yet" pattern as ``TEMPLATE_USES_DECL``/
+#: ``CONSTRAINT_DEPENDS_ON_DECL`` above: ``MACRO_EXPANDS_TO_VALUE``/
+#: ``MACRO_EXPANDS_TO_TYPE`` need real macro-expansion tracing (a full
+#: preprocessor substitution model), and ``MACRO_CONTROLS_EDGE`` needs
+#: per-edge (not per-declaration) conditional attribution — knowing that one
+#: specific call/reference *inside* a declaration's body is itself nested
+#: under a *different* macro guard than the declaration's own, a finer-
+#: grained walk than this slice's whole-declaration region join.
+MACRO_DEP_EDGE_KINDS: frozenset[str] = frozenset(
+    {
+        "MACRO_CONTROLS_DECL",
+        "DECL_USES_MACRO",
+        "MACRO_EXPANDS_TO_VALUE",
+        "MACRO_EXPANDS_TO_TYPE",
+        "MACRO_CONTROLS_EDGE",
+    }
+)
+
 #: Object/link provenance (ADR-041 P1 #2) — ``source_graph.NODE_KINDS``/
 #: ``EDGE_KINDS`` union these in the same way the vocabulary above is;
 #: relocated here from inline additions in ``source_graph.py`` itself once
