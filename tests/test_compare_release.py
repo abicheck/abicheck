@@ -1,10 +1,12 @@
 """Tests for the compare-release command (multi-binary directory comparison)."""
+
 from __future__ import annotations
 
 import json
 from pathlib import Path
 from unittest.mock import MagicMock
 
+import pytest
 from click.testing import CliRunner
 
 from abicheck.cli import (
@@ -34,15 +36,24 @@ from abicheck.serialization import snapshot_to_json
 
 # ── helpers ──────────────────────────────────────────────────────────────────
 
+
 def _snap(
     version: str = "1.0",
     funcs: list[Function] | None = None,
     library: str = "libfoo.so",
 ) -> AbiSnapshot:
     if funcs is None:
-        funcs = [Function(name="foo", mangled="_Z3foov", return_type="int",
-                          visibility=Visibility.PUBLIC)]
-    return AbiSnapshot(library=library, version=version, functions=funcs, from_headers=True)
+        funcs = [
+            Function(
+                name="foo",
+                mangled="_Z3foov",
+                return_type="int",
+                visibility=Visibility.PUBLIC,
+            )
+        ]
+    return AbiSnapshot(
+        library=library, version=version, functions=funcs, from_headers=True
+    )
 
 
 def _write_snap(path: Path, snap: AbiSnapshot) -> Path:
@@ -52,36 +63,67 @@ def _write_snap(path: Path, snap: AbiSnapshot) -> Path:
 
 def _breaking_pair(lib: str = "libfoo.so") -> tuple[AbiSnapshot, AbiSnapshot]:
     """Remove a function — always produces BREAKING verdict."""
-    old = _snap("1.0", [
-        Function(name="foo", mangled="_Z3foov", return_type="int", visibility=Visibility.PUBLIC),
-        Function(name="bar", mangled="_Z3barv", return_type="void", visibility=Visibility.PUBLIC),
-    ], library=lib)
-    new = _snap("2.0", [
-        Function(name="foo", mangled="_Z3foov", return_type="int", visibility=Visibility.PUBLIC),
-    ], library=lib)
+    old = _snap(
+        "1.0",
+        [
+            Function(
+                name="foo",
+                mangled="_Z3foov",
+                return_type="int",
+                visibility=Visibility.PUBLIC,
+            ),
+            Function(
+                name="bar",
+                mangled="_Z3barv",
+                return_type="void",
+                visibility=Visibility.PUBLIC,
+            ),
+        ],
+        library=lib,
+    )
+    new = _snap(
+        "2.0",
+        [
+            Function(
+                name="foo",
+                mangled="_Z3foov",
+                return_type="int",
+                visibility=Visibility.PUBLIC,
+            ),
+        ],
+        library=lib,
+    )
     return old, new
 
 
 def _api_break_pair(lib: str = "libfoo.so") -> tuple[AbiSnapshot, AbiSnapshot]:
     """Signature change that requires recompilation but is not a binary break."""
-    old = _snap("1.0", [
-        Function(
-            name="foo",
-            mangled="_Z3foov",
-            return_type="int",
-            params=[Param(name="x", type="int", default="0")],
-            visibility=Visibility.PUBLIC,
-        ),
-    ], library=lib)
-    new = _snap("2.0", [
-        Function(
-            name="foo",
-            mangled="_Z3foov",
-            return_type="int",
-            params=[Param(name="x", type="int")],
-            visibility=Visibility.PUBLIC,
-        ),
-    ], library=lib)
+    old = _snap(
+        "1.0",
+        [
+            Function(
+                name="foo",
+                mangled="_Z3foov",
+                return_type="int",
+                params=[Param(name="x", type="int", default="0")],
+                visibility=Visibility.PUBLIC,
+            ),
+        ],
+        library=lib,
+    )
+    new = _snap(
+        "2.0",
+        [
+            Function(
+                name="foo",
+                mangled="_Z3foov",
+                return_type="int",
+                params=[Param(name="x", type="int")],
+                visibility=Visibility.PUBLIC,
+            ),
+        ],
+        library=lib,
+    )
     return old, new
 
 
@@ -91,6 +133,7 @@ def _invoke(*args: str) -> tuple[int, str]:
 
 
 # ── canonical key helpers ─────────────────────────────────────────────────────
+
 
 class TestCanonicalLibraryKey:
     def test_so_versioned(self, tmp_path: Path) -> None:
@@ -114,6 +157,23 @@ class TestCanonicalLibraryKey:
     def test_dll(self, tmp_path: Path) -> None:
         assert _canonical_library_key(Path("libfoo.dll")) == "libfoo.dll"
 
+    def test_compressed_snapshot_matches_plain(self, tmp_path: Path) -> None:
+        # Codex review, PR #699: a compressed snapshot (ADR-059) must key-match
+        # the same release's plain JSON -- the storage envelope is not part of
+        # the release identity, so switching only the compression must not
+        # turn a matched pair into an unrelated removal+addition.
+        plain = _canonical_library_key(Path("libfoo.abicheck.json"))
+        gz = _canonical_library_key(Path("libfoo.abicheck.json.gz"))
+        zst = _canonical_library_key(Path("libfoo.abicheck.json.zst"))
+        assert plain == gz == zst == "libfoo.abicheck.json"
+
+    def test_compressed_snapshot_with_so_version(self, tmp_path: Path) -> None:
+        assert (
+            _canonical_library_key(Path("libfoo.so.1.2.zst"))
+            == _canonical_library_key(Path("libfoo.so.1.2"))
+            == "libfoo.so"
+        )
+
 
 class TestStripVendorHash:
     """G9: auditwheel/delocate rewrite vendored libs to lib<name>-<hash>.so.<ver>,
@@ -122,7 +182,9 @@ class TestStripVendorHash:
     releases instead of reporting every one as removed+added noise."""
 
     def test_auditwheel_hex_before_so_stripped(self) -> None:
-        assert strip_vendor_hash("libpng16-a746ad4a.so.16.43.0") == "libpng16.so.16.43.0"
+        assert (
+            strip_vendor_hash("libpng16-a746ad4a.so.16.43.0") == "libpng16.so.16.43.0"
+        )
 
     def test_different_hash_same_stem(self) -> None:
         # The whole point: two different rebuild hashes must normalize identically.
@@ -132,7 +194,10 @@ class TestStripVendorHash:
         assert b == "libpng16.so.16.56.0"
 
     def test_16char_hash_stripped(self) -> None:
-        assert strip_vendor_hash("libsodium-1234567890abcdef.so.23.3.0") == "libsodium.so.23.3.0"
+        assert (
+            strip_vendor_hash("libsodium-1234567890abcdef.so.23.3.0")
+            == "libsodium.so.23.3.0"
+        )
 
     def test_purely_decimal_suffix_untouched(self) -> None:
         # A purely-decimal 6-16-digit hyphenated suffix is a plausible real
@@ -194,6 +259,42 @@ class TestVersionSortKey:
         newer = _version_sort_key(Path("libfoo-ffffff.so.2"), "libfoo.so")
         assert older < newer, "hash content must not outrank the .so version"
 
+    def test_compression_suffix_does_not_perturb_version_order(self) -> None:
+        """Codex review, PR #699: an unstripped ".gz"/".zst" storage suffix
+        (ADR-059) becomes an extra alphabetic sort token that always
+        outranks a plain ".json" and always outranks each other
+        alphabetically (".zst" > ".gz") -- regardless of which snapshot is
+        actually the newer version. A real version difference (v1 vs v2)
+        must still order correctly no matter which side happens to carry
+        which compression suffix, including the "wrong direction" case
+        where the naive bug would have picked the numerically older file
+        just because it's the more-compressed one."""
+        older_plain = _version_sort_key(Path("libfoo.so.1.abicheck.json"), "libfoo.so")
+        newer_zst = _version_sort_key(
+            Path("libfoo.so.2.abicheck.json.zst"), "libfoo.so"
+        )
+        assert older_plain < newer_zst
+
+        # The bug's exact failure direction: a numerically *older* file
+        # compressed with zstd must not outrank a numerically *newer* file
+        # left plain, just because ".zst" sorts alphabetically last.
+        older_zst = _version_sort_key(
+            Path("libfoo.so.1.abicheck.json.zst"), "libfoo.so"
+        )
+        newer_plain = _version_sort_key(Path("libfoo.so.2.abicheck.json"), "libfoo.so")
+        assert older_zst < newer_plain
+
+    def test_encoding_only_duplicates_reduce_to_the_same_sort_key(self) -> None:
+        """Two snapshots differing *only* by storage encoding (same
+        version) carry no information in the filename to break the tie by
+        -- confirm they now reduce to an identical sort key (surfaced as
+        an honest ambiguous-match warning by _build_match_map, rather than
+        silently, deterministically always preferring zstd)."""
+        plain = _version_sort_key(Path("libfoo.so.1.abicheck.json"), "libfoo.so")
+        gz = _version_sort_key(Path("libfoo.so.1.abicheck.json.gz"), "libfoo.so")
+        zst = _version_sort_key(Path("libfoo.so.1.abicheck.json.zst"), "libfoo.so")
+        assert plain == gz == zst
+
 
 class TestBuildMatchMapVendorHash:
     def test_picks_higher_soname_version_despite_hash(self, tmp_path: Path) -> None:
@@ -209,7 +310,53 @@ class TestBuildMatchMapVendorHash:
         assert warnings
 
 
+class TestBuildMatchMapEncodingOnlyDuplicates:
+    """Codex review, PR #699 (second round on the same fix): stripping a
+    compressed snapshot's storage suffix from the sort key makes two
+    candidates differing *only* by encoding reduce to an identical sort
+    key -- sorted()'s stability then means the winner is decided by
+    original list order, itself alphabetically biased toward whichever
+    compression suffix sorts last, so silently picking one and only
+    warning would deterministically prefer a stale compressed sibling
+    over a fresh plain one every time. Confirm this is now a hard error
+    instead."""
+
+    def test_plain_and_zstd_duplicate_is_rejected(self, tmp_path: Path) -> None:
+        plain = tmp_path / "libfoo.so.1.abicheck.json"
+        zst = tmp_path / "libfoo.so.1.abicheck.json.zst"
+        plain.write_text("{}")
+        zst.write_bytes(b"\x28\xb5\x2f\xfd")
+        import click.exceptions
+
+        with pytest.raises(click.exceptions.ClickException, match="indistinguishable"):
+            _build_match_map([plain, zst])
+
+    def test_all_three_encodings_duplicate_is_rejected(self, tmp_path: Path) -> None:
+        plain = tmp_path / "libfoo.so.1.abicheck.json"
+        gz = tmp_path / "libfoo.so.1.abicheck.json.gz"
+        zst = tmp_path / "libfoo.so.1.abicheck.json.zst"
+        for p in (plain, gz, zst):
+            p.write_bytes(b"{}")
+        import click.exceptions
+
+        with pytest.raises(click.exceptions.ClickException, match="indistinguishable"):
+            _build_match_map([plain, gz, zst])
+
+    def test_genuinely_different_versions_still_only_warn(self, tmp_path: Path) -> None:
+        """Sanity: a real multi-version bucket (distinct sort keys) must
+        not be caught by the new tie check -- only an exact tie is a hard
+        error."""
+        v1 = tmp_path / "libfoo.so.1.abicheck.json"
+        v2 = tmp_path / "libfoo.so.2.abicheck.json.zst"
+        v1.write_text("{}")
+        v2.write_bytes(b"\x28\xb5\x2f\xfd")
+        mapping, warnings = _build_match_map([v1, v2])
+        assert mapping["libfoo.so"] == v2
+        assert warnings
+
+
 # ── file vs file ─────────────────────────────────────────────────────────────
+
 
 class TestFileVsFile:
     def test_no_change(self, tmp_path: Path) -> None:
@@ -251,6 +398,7 @@ class TestFileVsFile:
 
 
 # ── dir vs dir ───────────────────────────────────────────────────────────────
+
 
 class TestDirVsDir:
     def test_matching_by_name_no_change(self, tmp_path: Path) -> None:
@@ -305,7 +453,9 @@ class TestDirVsDir:
         code, out = _invoke("compare", str(old_dir), str(new_dir))
         assert code == 2
 
-    def test_usage_error_from_release_engine_has_usage_header(self, tmp_path: Path) -> None:
+    def test_usage_error_from_release_engine_has_usage_header(
+        self, tmp_path: Path
+    ) -> None:
         """CLI-audit P2: `_dispatch_release_compare` now calls
         `compare_release_cmd.callback` directly instead of
         `ctx.invoke(compare_release_cmd, ...)` (no more Click-to-Click
@@ -324,7 +474,10 @@ class TestDirVsDir:
         _write_snap(old_dir / "libfoo.json", snap)
         _write_snap(new_dir / "libfoo.json", snap)
         code, out = _invoke(
-            "compare", str(old_dir), str(new_dir), "--annotate-additions",
+            "compare",
+            str(old_dir),
+            str(new_dir),
+            "--annotate-additions",
         )
         assert code == 64
         assert "Usage:" in out
@@ -369,14 +522,20 @@ class TestDirVsDir:
         assert "findings_truncated" not in lib
         assert "_diff_result" not in lib
 
-    def test_json_output_findings_capped_and_flagged_truncated(self, tmp_path: Path) -> None:
+    def test_json_output_findings_capped_and_flagged_truncated(
+        self, tmp_path: Path
+    ) -> None:
         old_dir = tmp_path / "old"
         old_dir.mkdir()
         new_dir = tmp_path / "new"
         new_dir.mkdir()
         old_funcs = [
-            Function(name=f"foo{i}", mangled=f"_Z4foo{i}v", return_type="int",
-                      visibility=Visibility.PUBLIC)
+            Function(
+                name=f"foo{i}",
+                mangled=f"_Z4foo{i}v",
+                return_type="int",
+                visibility=Visibility.PUBLIC,
+            )
             for i in range(15)
         ]
         old = _snap("1.0", old_funcs, library="libfoo.so")
@@ -390,7 +549,9 @@ class TestDirVsDir:
         assert len(lib["findings"]) == 10
         assert lib["findings_truncated"] is True
 
-    def test_json_findings_include_severity_gated_addition(self, tmp_path: Path) -> None:
+    def test_json_findings_include_severity_gated_addition(
+        self, tmp_path: Path
+    ) -> None:
         """Codex review on #557: when --severity-addition error promotes a
         compatible-additions-only library to a nonzero severity exit code,
         the per-library findings list — which only walked the legacy
@@ -402,14 +563,25 @@ class TestDirVsDir:
         new_dir = tmp_path / "new"
         new_dir.mkdir()
         old = _snap("1.0", [], library="libfoo.so")
-        new_funcs = [Function(name="new_api", mangled="_Z6new_apiv", return_type="int",
-                              visibility=Visibility.PUBLIC)]
+        new_funcs = [
+            Function(
+                name="new_api",
+                mangled="_Z6new_apiv",
+                return_type="int",
+                visibility=Visibility.PUBLIC,
+            )
+        ]
         new = _snap("2.0", new_funcs, library="libfoo.so")
         _write_snap(old_dir / "libfoo.json", old)
         _write_snap(new_dir / "libfoo.json", new)
         code, out = _invoke(
-            "compare", str(old_dir), str(new_dir),
-            "--format", "json", "--severity-addition", "error",
+            "compare",
+            str(old_dir),
+            str(new_dir),
+            "--format",
+            "json",
+            "--severity-addition",
+            "error",
         )
         assert code == 1
         data = json.loads(out)
@@ -450,6 +622,7 @@ class TestDirVsDir:
 
 # ── unmatched / missing ───────────────────────────────────────────────────────
 
+
 class TestUnmatched:
     def test_removed_library_no_flag(self, tmp_path: Path) -> None:
         """Removed library warns but does not fail by default."""
@@ -473,7 +646,9 @@ class TestUnmatched:
         _write_snap(old_dir / "libbar.json", _snap())
         _write_snap(new_dir / "libfoo.json", _snap())
         code, _ = _invoke(
-            "compare", str(old_dir), str(new_dir),
+            "compare",
+            str(old_dir),
+            str(new_dir),
             "--fail-on-removed-library",
         )
         assert code == 8
@@ -489,7 +664,9 @@ class TestUnmatched:
         _write_snap(new_dir / "libfoo.json", new_foo)
         _write_snap(old_dir / "libremoved.json", _snap())  # removed
         code, _ = _invoke(
-            "compare", str(old_dir), str(new_dir),
+            "compare",
+            str(old_dir),
+            str(new_dir),
             "--fail-on-removed-library",
         )
         assert code == 4
@@ -526,6 +703,7 @@ class TestUnmatched:
 
 # ── vendored wheel hash pairing (G9) ────────────────────────────────────────
 
+
 class TestVendoredWheelPairing:
     """G9 workflow proof: two synthetic 'wheels' with auditwheel/delocate-style
     hashed vendored libraries must be paired by unhashed stem — not reported
@@ -550,7 +728,9 @@ class TestVendoredWheelPairing:
         assert data["unmatched_new"] == []
         assert len(data["libraries"]) == 1
 
-    def test_real_break_in_hashed_vendored_lib_still_surfaces(self, tmp_path: Path) -> None:
+    def test_real_break_in_hashed_vendored_lib_still_surfaces(
+        self, tmp_path: Path
+    ) -> None:
         """Regression anchor (pyzmq libsodium 23->26-shaped case): a real ABI
         break in a hash-paired vendored library must not be absorbed by the
         stem normalization — pairing only changes matching, never the diff."""
@@ -576,8 +756,12 @@ class TestVendoredWheelPairing:
         old_dir.mkdir()
         new_dir = tmp_path / "new"
         new_dir.mkdir()
-        _write_snap(old_dir / "libwebpdemux.so.2.0.14.json", _snap(library="libwebpdemux.so.2"))
-        _write_snap(new_dir / "libwebpdemux.so.2.0.14.json", _snap(library="libwebpdemux.so.2"))
+        _write_snap(
+            old_dir / "libwebpdemux.so.2.0.14.json", _snap(library="libwebpdemux.so.2")
+        )
+        _write_snap(
+            new_dir / "libwebpdemux.so.2.0.14.json", _snap(library="libwebpdemux.so.2")
+        )
         code, out = _invoke("compare", str(old_dir), str(new_dir), "--format", "json")
         assert code == 0
         data = json.loads(out)
@@ -586,6 +770,7 @@ class TestVendoredWheelPairing:
 
 
 # ── output-dir ────────────────────────────────────────────────────────────────
+
 
 class TestOutputDir:
     def test_per_library_reports_written(self, tmp_path: Path) -> None:
@@ -597,8 +782,11 @@ class TestOutputDir:
         _write_snap(old_dir / "libfoo.json", _snap())
         _write_snap(new_dir / "libfoo.json", _snap())
         code, _ = _invoke(
-            "compare", str(old_dir), str(new_dir),
-            "--output-dir", str(out_dir),
+            "compare",
+            str(old_dir),
+            str(new_dir),
+            "--output-dir",
+            str(out_dir),
         )
         assert code == 0
         assert (out_dir / "libfoo.json").exists()
@@ -612,7 +800,9 @@ class TestOutputDir:
         out_dir = tmp_path / "reports"
         _write_snap(old_dir / "libfoo.json", _snap())
         _write_snap(new_dir / "libfoo.json", _snap())
-        code, _ = _invoke("compare", str(old_dir), str(new_dir), "--output-dir", str(out_dir))
+        code, _ = _invoke(
+            "compare", str(old_dir), str(new_dir), "--output-dir", str(out_dir)
+        )
         assert code == 0
         summary = json.loads((out_dir / "summary.json").read_text())
         assert summary["verdict"] == "NO_CHANGE"
@@ -620,8 +810,12 @@ class TestOutputDir:
 
 
 def _rec(name: str, size: int) -> RecordType:
-    return RecordType(name=name, kind="struct", size_bits=size,
-                      fields=[TypeField(name="x", type="int")])
+    return RecordType(
+        name=name,
+        kind="struct",
+        size_bits=size,
+        fields=[TypeField(name="x", type="int")],
+    )
 
 
 class TestCompareReleaseScopeAndChangedLibraries:
@@ -651,18 +845,41 @@ class TestCompareReleaseScopeAndChangedLibraries:
         # Public api_call(Config*) -> int; InternalCache is private (unreachable).
         # New side adds a public function and shrinks InternalCache: the private
         # break is filtered, the public addition is reported.
-        pub_old = Function(name="api_call", mangled="api_call", return_type="int",
-                           params=[Param(name="c", type="Config *")], visibility=Visibility.PUBLIC)
-        pub_new = Function(name="new_api", mangled="new_api", return_type="int",
-                           visibility=Visibility.PUBLIC)
-        old = AbiSnapshot(library="libfoo.so", version="1", functions=[pub_old],
-                          types=[_rec("Config", 32), _rec("InternalCache", 64)])
-        new = AbiSnapshot(library="libfoo.so", version="2", functions=[pub_old, pub_new],
-                          types=[_rec("Config", 32), _rec("InternalCache", 128)])
+        pub_old = Function(
+            name="api_call",
+            mangled="api_call",
+            return_type="int",
+            params=[Param(name="c", type="Config *")],
+            visibility=Visibility.PUBLIC,
+        )
+        pub_new = Function(
+            name="new_api",
+            mangled="new_api",
+            return_type="int",
+            visibility=Visibility.PUBLIC,
+        )
+        old = AbiSnapshot(
+            library="libfoo.so",
+            version="1",
+            functions=[pub_old],
+            types=[_rec("Config", 32), _rec("InternalCache", 64)],
+        )
+        new = AbiSnapshot(
+            library="libfoo.so",
+            version="2",
+            functions=[pub_old, pub_new],
+            types=[_rec("Config", 32), _rec("InternalCache", 128)],
+        )
         _write_snap(old_dir / "libfoo.json", old)
         _write_snap(new_dir / "libfoo.json", new)
-        code, out = _invoke("compare", str(old_dir), str(new_dir),
-                            "--scope-public-headers", "--format", "json")
+        code, out = _invoke(
+            "compare",
+            str(old_dir),
+            str(new_dir),
+            "--scope-public-headers",
+            "--format",
+            "json",
+        )
         data = json.loads(out)
         assert data["scope"]["public_headers_applied"] is True
         assert data["scope"]["manual_review_required"] is False
@@ -676,14 +893,28 @@ class TestCompareReleaseScopeAndChangedLibraries:
         new_dir.mkdir()
         # No public symbols -> surface unresolvable -> fall back to full export
         # table and flag manual review (issue #235's "don't overclaim" half).
-        old = AbiSnapshot(library="libfoo.so", version="1", functions=[],
-                          types=[_rec("InternalCache", 64)])
-        new = AbiSnapshot(library="libfoo.so", version="2", functions=[],
-                          types=[_rec("InternalCache", 128)])
+        old = AbiSnapshot(
+            library="libfoo.so",
+            version="1",
+            functions=[],
+            types=[_rec("InternalCache", 64)],
+        )
+        new = AbiSnapshot(
+            library="libfoo.so",
+            version="2",
+            functions=[],
+            types=[_rec("InternalCache", 128)],
+        )
         _write_snap(old_dir / "libfoo.json", old)
         _write_snap(new_dir / "libfoo.json", new)
-        code, out = _invoke("compare", str(old_dir), str(new_dir),
-                            "--scope-public-headers", "--format", "json")
+        code, out = _invoke(
+            "compare",
+            str(old_dir),
+            str(new_dir),
+            "--scope-public-headers",
+            "--format",
+            "json",
+        )
         data = json.loads(out)
         assert data["scope"]["manual_review_required"] is True
         # The break is kept (fallback), so the library still shows as changed.
@@ -691,6 +922,7 @@ class TestCompareReleaseScopeAndChangedLibraries:
 
 
 # ── version-aware name matching ───────────────────────────────────────────────
+
 
 class TestMixedInputs:
     def test_so_versioned_name_matching(self, tmp_path: Path) -> None:
@@ -756,8 +988,12 @@ class TestFilterOutNonABIFiles:
             '{"data": [[1, 2, 3], [4, 5, 6]]}'
         )
         # Template file that starts with '{' (Jinja, etc.)
-        (old_dir / "html.tpl").write_text("{% extends 'base.tpl' %}\n{% block content %}\n...\n{% endblock %}")
-        (new_dir / "html.tpl").write_text("{% extends 'base.tpl' %}\n{% block content %}\n...\n{% endblock %}")
+        (old_dir / "html.tpl").write_text(
+            "{% extends 'base.tpl' %}\n{% block content %}\n...\n{% endblock %}"
+        )
+        (new_dir / "html.tpl").write_text(
+            "{% extends 'base.tpl' %}\n{% block content %}\n...\n{% endblock %}"
+        )
 
         code, out = _invoke("compare", str(old_dir), str(new_dir), "--format", "json")
         assert code == 0, f"Should pass (only one real library). Output: {out}"
@@ -782,8 +1018,12 @@ class TestFilterOutNonABIFiles:
         _write_snap(new_dir / "libfoo.so.json", snap)
 
         # Files that contain the substring "so" but are not .so libraries
-        (old_dir / "v0.7.1.some-named-index.parquet").write_bytes(b"PAR1" + b"fake data" * 100)
-        (new_dir / "v0.7.1.some-named-index.parquet").write_bytes(b"PAR1" + b"fake data" * 100)
+        (old_dir / "v0.7.1.some-named-index.parquet").write_bytes(
+            b"PAR1" + b"fake data" * 100
+        )
+        (new_dir / "v0.7.1.some-named-index.parquet").write_bytes(
+            b"PAR1" + b"fake data" * 100
+        )
         (old_dir / "solution.json").write_text('{"answer": 42}')
         (new_dir / "solution.json").write_text('{"answer": 42}')
         (old_dir / "something.dll.txt").write_text("Not a DLL")
@@ -826,7 +1066,10 @@ class TestFilterOutNonABIFiles:
 
 # ── _extract_if_package unit tests ───────────────────────────────────────────
 
-def _make_mock_extractor(lib_dir: Path, debug_dir: Path | None = None, header_dir: Path | None = None) -> MagicMock:
+
+def _make_mock_extractor(
+    lib_dir: Path, debug_dir: Path | None = None, header_dir: Path | None = None
+) -> MagicMock:
     """Return a mock PackageExtractor whose extract() returns the given paths."""
     result = ExtractResult(lib_dir=lib_dir, debug_dir=debug_dir, header_dir=header_dir)
     extractor = MagicMock()
@@ -843,7 +1086,9 @@ class TestExtractIfPackage:
         d.mkdir(parents=True, exist_ok=True)
         return d
 
-    def test_directory_input_no_side_pkgs_returns_path_unchanged(self, tmp_path: Path) -> None:
+    def test_directory_input_no_side_pkgs_returns_path_unchanged(
+        self, tmp_path: Path
+    ) -> None:
         """Plain directory with no side packages: lib_dir == input, debug/header None."""
         lib_dir = tmp_path / "lib"
         lib_dir.mkdir()
@@ -861,7 +1106,9 @@ class TestExtractIfPackage:
         assert debug_out is None
         assert header_out is None
 
-    def test_directory_input_with_debug_pkg_yields_debug_dir(self, tmp_path: Path) -> None:
+    def test_directory_input_with_debug_pkg_yields_debug_dir(
+        self, tmp_path: Path
+    ) -> None:
         """Directory input + standalone debug package: debug_dir must be non-None."""
         lib_dir = tmp_path / "lib"
         lib_dir.mkdir()
@@ -871,28 +1118,33 @@ class TestExtractIfPackage:
         extracted_debug.mkdir()
 
         counter = [0]
+
         def _make_temp(prefix: str) -> Path:
             d = tmp_path / f"{prefix}{counter[0]}"
             counter[0] += 1
             d.mkdir(exist_ok=True)
             return d
 
-        dbg_extractor = _make_mock_extractor(lib_dir=extracted_debug, debug_dir=extracted_debug)
+        dbg_extractor = _make_mock_extractor(
+            lib_dir=extracted_debug, debug_dir=extracted_debug
+        )
 
         lib_out, debug_out, header_out, _symbols_out = _extract_if_package(
             input_path=lib_dir,
             debug_pkg=dbg_pkg,
             devel_pkg=None,
             make_temp_dir=_make_temp,
-            is_package=lambda p: p != lib_dir,   # dir is not a package; debug pkg is
+            is_package=lambda p: p != lib_dir,  # dir is not a package; debug pkg is
             detect_extractor=lambda p: dbg_extractor if p == dbg_pkg else None,
         )
 
         assert lib_out == lib_dir
-        assert debug_out == extracted_debug   # debug_dir from ExtractResult
+        assert debug_out == extracted_debug  # debug_dir from ExtractResult
         assert header_out is None
 
-    def test_directory_input_with_devel_pkg_yields_header_dir(self, tmp_path: Path) -> None:
+    def test_directory_input_with_devel_pkg_yields_header_dir(
+        self, tmp_path: Path
+    ) -> None:
         """Directory input + standalone devel package: header_dir must be non-None."""
         lib_dir = tmp_path / "lib"
         lib_dir.mkdir()
@@ -902,13 +1154,16 @@ class TestExtractIfPackage:
         extracted_headers.mkdir()
 
         counter = [0]
+
         def _make_temp(prefix: str) -> Path:
             d = tmp_path / f"{prefix}{counter[0]}"
             counter[0] += 1
             d.mkdir(exist_ok=True)
             return d
 
-        dev_extractor = _make_mock_extractor(lib_dir=extracted_headers, header_dir=extracted_headers)
+        dev_extractor = _make_mock_extractor(
+            lib_dir=extracted_headers, header_dir=extracted_headers
+        )
 
         lib_out, debug_out, header_out, _symbols_out = _extract_if_package(
             input_path=lib_dir,
@@ -921,7 +1176,7 @@ class TestExtractIfPackage:
 
         assert lib_out == lib_dir
         assert debug_out is None
-        assert header_out == extracted_headers   # header_dir from ExtractResult
+        assert header_out == extracted_headers  # header_dir from ExtractResult
 
     def test_directory_input_with_both_side_pkgs(self, tmp_path: Path) -> None:
         """Directory input + both debug and devel packages: both are returned."""
@@ -937,14 +1192,19 @@ class TestExtractIfPackage:
         extracted_headers.mkdir()
 
         counter = [0]
+
         def _make_temp(prefix: str) -> Path:
             d = tmp_path / f"{prefix}{counter[0]}"
             counter[0] += 1
             d.mkdir(exist_ok=True)
             return d
 
-        dbg_extractor = _make_mock_extractor(lib_dir=extracted_debug, debug_dir=extracted_debug)
-        dev_extractor = _make_mock_extractor(lib_dir=extracted_headers, header_dir=extracted_headers)
+        dbg_extractor = _make_mock_extractor(
+            lib_dir=extracted_debug, debug_dir=extracted_debug
+        )
+        dev_extractor = _make_mock_extractor(
+            lib_dir=extracted_headers, header_dir=extracted_headers
+        )
 
         def _detect(p: Path) -> MagicMock | None:
             if p == dbg_pkg:
@@ -966,7 +1226,9 @@ class TestExtractIfPackage:
         assert debug_out == extracted_debug
         assert header_out == extracted_headers
 
-    def test_debug_pkg_fallback_to_lib_dir_when_no_debug_dir(self, tmp_path: Path) -> None:
+    def test_debug_pkg_fallback_to_lib_dir_when_no_debug_dir(
+        self, tmp_path: Path
+    ) -> None:
         """When ExtractResult.debug_dir is None, fall back to lib_dir."""
         lib_dir = tmp_path / "lib"
         lib_dir.mkdir()
@@ -976,6 +1238,7 @@ class TestExtractIfPackage:
         extracted.mkdir()
 
         counter = [0]
+
         def _make_temp(prefix: str) -> Path:
             d = tmp_path / f"{prefix}{counter[0]}"
             counter[0] += 1
@@ -997,7 +1260,9 @@ class TestExtractIfPackage:
         assert lib_out == lib_dir
         assert debug_out == extracted  # fallback to lib_dir
 
-    def test_package_input_uses_result_debug_dir_not_lib_dir(self, tmp_path: Path) -> None:
+    def test_package_input_uses_result_debug_dir_not_lib_dir(
+        self, tmp_path: Path
+    ) -> None:
         """When input is a package, side-pkg debug_dir uses .debug_dir, not .lib_dir."""
         pkg = tmp_path / "main.rpm"
         pkg.touch()
@@ -1012,6 +1277,7 @@ class TestExtractIfPackage:
         extracted_lib_in_dbg.mkdir()
 
         counter = [0]
+
         def _make_temp(prefix: str) -> Path:
             d = tmp_path / f"{prefix}{counter[0]}"
             counter[0] += 1
@@ -1020,7 +1286,9 @@ class TestExtractIfPackage:
 
         main_extractor = _make_mock_extractor(lib_dir=main_lib)
         # debug_dir differs from lib_dir — must pick debug_dir
-        dbg_extractor = _make_mock_extractor(lib_dir=extracted_lib_in_dbg, debug_dir=extracted_debug)
+        dbg_extractor = _make_mock_extractor(
+            lib_dir=extracted_lib_in_dbg, debug_dir=extracted_debug
+        )
 
         def _detect(p: Path) -> MagicMock | None:
             if p == pkg:
@@ -1103,7 +1371,9 @@ class TestDebianSymbolsWarning:
         assert note is not None
         assert "could not be parsed" in note
 
-    def test_prepare_inputs_folds_symbols_note_into_warnings(self, tmp_path: Path) -> None:
+    def test_prepare_inputs_folds_symbols_note_into_warnings(
+        self, tmp_path: Path
+    ) -> None:
         """End-to-end through _prepare_compare_release_inputs: a real
         extract_if_package callable returning differing symbols_file paths
         must land its note in the returned warning_msgs."""
@@ -1123,12 +1393,20 @@ class TestDebianSymbolsWarning:
             return p, None, None, symbols
 
         result = _prepare_compare_release_inputs(
-            old, new,
-            None, None, None, None,
-            False, False,
-            (), (), (),
+            old,
+            new,
+            None,
+            None,
+            None,
+            None,
+            False,
+            False,
             (),
-            (), (),
+            (),
+            (),
+            (),
+            (),
+            (),
             _fake_extract,
             lambda *_args, **_kwargs: [],
             lambda _p: False,
@@ -1150,7 +1428,9 @@ class TestCompareReleaseIncludes:
         assert root / "usr" / "include" / "x86_64-linux-gnu" in roots
         assert root / "usr" / "include" / "libxml2" in roots
 
-    def test_prepare_inputs_accepts_side_specific_includes(self, tmp_path: Path) -> None:
+    def test_prepare_inputs_accepts_side_specific_includes(
+        self, tmp_path: Path
+    ) -> None:
         """compare-release has compare-like --old-include/--new-include plumbing."""
         old = tmp_path / "old"
         new = tmp_path / "new"
@@ -1166,12 +1446,20 @@ class TestCompareReleaseIncludes:
         new_inc_only.mkdir()
 
         result = _prepare_compare_release_inputs(
-            old, new,
-            None, None, None, None,
-            False, False,
-            (), (), (),
+            old,
+            new,
+            None,
+            None,
+            None,
+            None,
+            False,
+            False,
             (),
-            (old_inc_only,), (new_inc_only,),
+            (),
+            (),
+            (),
+            (old_inc_only,),
+            (new_inc_only,),
             lambda p, _dbg, _dev: (p, None, None, None),
             lambda *_args, **_kwargs: [],
             lambda _p: False,
@@ -1193,12 +1481,17 @@ class TestLockstepSonameCoupling:
     @staticmethod
     def _entry(lib, changes, verdict):
         from abicheck.checker import DiffResult
+
         result = DiffResult(
-            old_version="1", new_version="2", library=lib,
-            changes=changes, verdict=verdict,
+            old_version="1",
+            new_version="2",
+            library=lib,
+            changes=changes,
+            verdict=verdict,
         )
         return {
-            "library": lib, "verdict": verdict.value,
+            "library": lib,
+            "verdict": verdict.value,
             "breaking": len(result.breaking),
             "source_breaks": len(result.source_breaks),
             "risk_changes": len(result.risk),
@@ -1211,9 +1504,11 @@ class TestLockstepSonameCoupling:
         from abicheck.cli_compare_release import _suppress_lockstep_soname_findings
 
         umbrella = self._entry(
-            "libonedal.so", [
+            "libonedal.so",
+            [
                 Change(ChangeKind.SONAME_BUMP_UNNECESSARY, "DT_SONAME", "bump"),
-            ], Verdict.COMPATIBLE,
+            ],
+            Verdict.COMPATIBLE,
         )
         core = self._entry(
             "libonedal_core.so",
@@ -1231,9 +1526,11 @@ class TestLockstepSonameCoupling:
         from abicheck.cli_compare_release import _suppress_lockstep_soname_findings
 
         umbrella = self._entry(
-            "libonedal.so", [
+            "libonedal.so",
+            [
                 Change(ChangeKind.SONAME_BUMP_UNNECESSARY, "DT_SONAME", "bump"),
-            ], Verdict.COMPATIBLE,
+            ],
+            Verdict.COMPATIBLE,
         )
         n = _suppress_lockstep_soname_findings([umbrella], "COMPATIBLE", None)
         assert n == 0
@@ -1247,9 +1544,11 @@ class TestLockstepSonameCoupling:
         from abicheck.cli_compare_release import _suppress_lockstep_soname_findings
 
         umbrella = self._entry(
-            "libonedal.so", [
+            "libonedal.so",
+            [
                 Change(ChangeKind.SONAME_BUMP_UNNECESSARY, "DT_SONAME", "bump"),
-            ], Verdict.COMPATIBLE,
+            ],
+            Verdict.COMPATIBLE,
         )
         n = _suppress_lockstep_soname_findings([umbrella], "API_BREAK", None)
         assert n == 0
@@ -1261,9 +1560,11 @@ class TestLockstepSonameCoupling:
         from abicheck.cli_compare_release import _suppress_lockstep_soname_findings
 
         umbrella = self._entry(
-            "libonedal.so.3", [
+            "libonedal.so.3",
+            [
                 Change(ChangeKind.SONAME_BUMP_UNNECESSARY, "DT_SONAME", "bump"),
-            ], Verdict.COMPATIBLE,
+            ],
+            Verdict.COMPATIBLE,
         )
         core = self._entry(
             "libonedal_core.so.3",
@@ -1283,8 +1584,19 @@ def test_release_json_emits_severity_block() -> None:
 
     cfg = resolve_severity_config("default", addition="error")
     out = _format_release_json(
-        "COMPATIBLE", Path("/o"), Path("/n"), [], [], [], {}, {}, [], None, None,
-        severity_config=cfg, severity_exit_code=1,
+        "COMPATIBLE",
+        Path("/o"),
+        Path("/n"),
+        [],
+        [],
+        [],
+        {},
+        {},
+        [],
+        None,
+        None,
+        severity_config=cfg,
+        severity_exit_code=1,
     )
     data = json.loads(out)
     assert data["severity"]["config"]["addition"] == "error"
@@ -1293,7 +1605,17 @@ def test_release_json_emits_severity_block() -> None:
 
 def test_release_json_omits_severity_block_without_config() -> None:
     out = _format_release_json(
-        "COMPATIBLE", Path("/o"), Path("/n"), [], [], [], {}, {}, [], None, None,
+        "COMPATIBLE",
+        Path("/o"),
+        Path("/n"),
+        [],
+        [],
+        [],
+        {},
+        {},
+        [],
+        None,
+        None,
     )
     assert "severity" not in json.loads(out)
 
@@ -1316,7 +1638,17 @@ def test_release_json_emits_contract_coverage_block_when_active() -> None:
         },
     ]
     out = _format_release_json(
-        "NO_CHANGE", Path("/o"), Path("/n"), libs, [], [], {}, {}, [], None, None,
+        "NO_CHANGE",
+        Path("/o"),
+        Path("/n"),
+        libs,
+        [],
+        [],
+        {},
+        {},
+        [],
+        None,
+        None,
         contract_coverage_exit_contribution=1,
     )
     assert json.loads(out)["contract_coverage_exit_contribution"] == 1
@@ -1325,6 +1657,16 @@ def test_release_json_emits_contract_coverage_block_when_active() -> None:
 def test_release_json_omits_contract_coverage_block_by_default() -> None:
     libs = [{"library": "liba.so", "verdict": "NO_CHANGE"}]
     out = _format_release_json(
-        "NO_CHANGE", Path("/o"), Path("/n"), libs, [], [], {}, {}, [], None, None,
+        "NO_CHANGE",
+        Path("/o"),
+        Path("/n"),
+        libs,
+        [],
+        [],
+        {},
+        {},
+        [],
+        None,
+        None,
     )
     assert "contract_coverage_exit_contribution" not in json.loads(out)

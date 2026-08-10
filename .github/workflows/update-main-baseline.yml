@@ -65,6 +65,16 @@ on:
         description: 'Forwarded to actions/baseline''s validation input (strict or none).'
         type: string
         default: 'strict'
+      snapshot-compression:
+        description: >-
+          Forwarded to actions/baseline's snapshot-compression input
+          (none/gzip/zstd, ADR-059). Set this when this workflow's
+          published `accepted-main` baseline-set is consumed as an
+          *extracted* directory (e.g. actions/cache) rather than re-
+          archived, so per-snapshot compression benefits the stored/
+          transferred size directly.
+        type: string
+        default: 'none'
       python-version:
         description: 'Python version for setup-python, every job.'
         type: string
@@ -288,6 +298,7 @@ jobs:
           depth: ${{ inputs.depth }}
           previous-manifest: ${{ steps.previous.outputs.manifest-path }}
           validation: ${{ inputs.validation }}
+          snapshot-compression: ${{ inputs.snapshot-compression }}
           python-version: ${{ inputs.python-version }}
           install-deps: ${{ inputs.install-deps }}
 

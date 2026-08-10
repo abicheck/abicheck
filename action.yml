@@ -420,6 +420,19 @@ inputs:
   output-file:
     description: 'Path to write the report file. If not set, output goes to stdout and job summary.'
     required: false
+  snapshot-compression:
+    description: >
+      dump mode only (ADR-059). Storage envelope for the written snapshot:
+      'auto' (default) infers gzip/zstd/plain from output-file's canonical
+      suffix (.abicheck.json.gz/.abicheck.json.zst/plain .abicheck.json);
+      an explicit 'none', 'gzip', or 'zstd' is used as-is and is a hard
+      error if it contradicts output-file's suffix, mirroring the CLI's
+      own --compression flag it maps to directly. Ignored by every other
+      mode -- compare/scan/deps-tree/deps-compare produce a report, not a
+      stored snapshot, and transparently read a compressed snapshot
+      operand either way via magic-byte detection regardless of this
+      input.
+    required: false
   policy:
     description: 'Built-in policy profile: strict_abi (default), sdk_vendor, plugin_abi.'
     required: false
@@ -637,6 +650,7 @@ runs:
         INPUT_VERIFY_RUNTIME: ${{ inputs.verify-runtime }}
         INPUT_REQUIRED_SYMBOL: ${{ inputs.required-symbol }}
         INPUT_REQUIRED_SYMBOLS: ${{ inputs.required-symbols }}
+        INPUT_SNAPSHOT_COMPRESSION: ${{ inputs.snapshot-compression }}
       run: bash "${{ github.action_path }}/action/validate-inputs.sh"
 
     # ── 1. Python ─────────────────────────────────────────────────────────────
@@ -773,6 +787,7 @@ runs:
         INPUT_NOSTDINC: ${{ inputs.nostdinc }}
         INPUT_FORMAT: ${{ inputs.format }}
         INPUT_OUTPUT_FILE: ${{ inputs.output-file }}
+        INPUT_SNAPSHOT_COMPRESSION: ${{ inputs.snapshot-compression }}
         INPUT_POLICY: ${{ inputs.policy }}
         INPUT_POLICY_FILE: ${{ inputs.policy-file }}
         INPUT_SUPPRESS: ${{ inputs.suppress }}

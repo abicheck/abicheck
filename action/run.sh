@@ -173,6 +173,16 @@ if [[ -n "$ABI_BASELINE" \
     # (Codex review).
     _GH_REPO_FLAG=()
     [[ -n "${GITHUB_REPOSITORY:-}" ]] && _GH_REPO_FLAG=(-R "$GITHUB_REPOSITORY")
+    # ADR-059 (Codex review): a release baseline may be stored under any of
+    # the three canonical snapshot suffixes (dump --compression writes
+    # .abicheck.json.gz/.abicheck.json.zst, not just plain .abicheck.json)
+    # -- gh's --pattern flag is a repeatable stringArray, so pass one per
+    # suffix rather than only matching the uncompressed form.
+    _ABI_JSON_PATTERNS=(
+      --pattern '*.abicheck.json'
+      --pattern '*.abicheck.json.gz'
+      --pattern '*.abicheck.json.zst'
+    )
     if [[ "$ABI_BASELINE" == "latest-release" ]]; then
       echo "::group::Fetch ABI baseline from latest release"
       # ${arr[@]+"${arr[@]}"}, not a bare "${arr[@]}": under macOS's stock
@@ -181,34 +191,34 @@ if [[ -n "$ABI_BASELINE" \
       # 4.4+ special-cased this away) -- the same portability trap
       # add_flag()'s callers already guard against elsewhere in this file
       # (Codex review).
-      if ! gh release download ${_GH_REPO_FLAG[@]+"${_GH_REPO_FLAG[@]}"} --pattern '*.abicheck.json' -D "$BASELINE_DIR"; then
-        _baseline_unavailable "No ABI baseline found in latest release. Run 'abicheck dump path/to/libfoo.so -o libfoo.abicheck.json' in your release workflow and upload the resulting *.abicheck.json file as a release asset."
+      if ! gh release download ${_GH_REPO_FLAG[@]+"${_GH_REPO_FLAG[@]}"} "${_ABI_JSON_PATTERNS[@]}" -D "$BASELINE_DIR"; then
+        _baseline_unavailable "No ABI baseline found in latest release. Run 'abicheck dump path/to/libfoo.so -o libfoo.abicheck.json' in your release workflow and upload the resulting *.abicheck.json (or compressed .abicheck.json.gz/.abicheck.json.zst) file as a release asset."
       fi
       echo "::endgroup::"
     else
       # Treat as a tag name
       echo "::group::Fetch ABI baseline from release $ABI_BASELINE"
-      if ! gh release download "$ABI_BASELINE" ${_GH_REPO_FLAG[@]+"${_GH_REPO_FLAG[@]}"} --pattern '*.abicheck.json' -D "$BASELINE_DIR"; then
-        _baseline_unavailable "No ABI baseline found in release '$ABI_BASELINE'. Ensure the release has a *.abicheck.json asset."
+      if ! gh release download "$ABI_BASELINE" ${_GH_REPO_FLAG[@]+"${_GH_REPO_FLAG[@]}"} "${_ABI_JSON_PATTERNS[@]}" -D "$BASELINE_DIR"; then
+        _baseline_unavailable "No ABI baseline found in release '$ABI_BASELINE'. Ensure the release has a *.abicheck.json (or compressed .abicheck.json.gz/.abicheck.json.zst) asset."
       fi
       echo "::endgroup::"
     fi
-    # Require exactly one *.abicheck.json in the download dir: `head -1`
-    # picking an arbitrary match on a multi-asset release could silently
-    # compare against the wrong library and produce an invalid verdict
-    # (Codex review). Built via a while/read loop (not `mapfile`, a bash 4+
-    # builtin) for macOS's stock (GPLv2-frozen) bash 3.2, same portability
-    # constraint as add_flag() above. An empty result also covers the
-    # download itself failing and _baseline_unavailable returning instead
-    # of exiting (e.g. under --dry-run).
+    # Require exactly one *.abicheck.json[.gz|.zst] in the download dir:
+    # `head -1` picking an arbitrary match on a multi-asset release could
+    # silently compare against the wrong library and produce an invalid
+    # verdict (Codex review). Built via a while/read loop (not `mapfile`, a
+    # bash 4+ builtin) for macOS's stock (GPLv2-frozen) bash 3.2, same
+    # portability constraint as add_flag() above. An empty result also
+    # covers the download itself failing and _baseline_unavailable
+    # returning instead of exiting (e.g. under --dry-run).
     BASELINE_FILES=()
     while IFS= read -r _found; do
       [[ -n "$_found" ]] && BASELINE_FILES+=("$_found")
-    done <<< "$(find "$BASELINE_DIR" -name '*.abicheck.json' 2>/dev/null)"
+    done <<< "$(find "$BASELINE_DIR" \( -name '*.abicheck.json' -o -name '*.abicheck.json.gz' -o -name '*.abicheck.json.zst' \) 2>/dev/null)"
     if [[ ${#BASELINE_FILES[@]} -eq 1 ]]; then
       BASELINE_FILE="${BASELINE_FILES[0]}"
     elif [[ ${#BASELINE_FILES[@]} -eq 0 ]]; then
-      _baseline_unavailable "No *.abicheck.json file found after download."
+      _baseline_unavailable "No *.abicheck.json (or compressed .abicheck.json.gz/.abicheck.json.zst) file found after download."
     else
       _baseline_unavailable "Multiple *.abicheck.json assets found (${BASELINE_FILES[*]}); ambiguous which is the baseline. Publish exactly one *.abicheck.json asset per release, or pass abi-baseline a direct file path instead."
     fi
@@ -301,6 +311,7 @@ if [[ "$MODE" == "dump" ]]; then
     # Output file — required for dump in action context (otherwise stdout)
     OUTPUT_FILE="${INPUT_OUTPUT_FILE:-abicheck-baseline.json}"
     CMD+=(-o "$OUTPUT_FILE")
+    add_single_flag "--compression" "${INPUT_SNAPSHOT_COMPRESSION:-}"
   fi
 
 elif [[ "$MODE" == "compare" ]]; then

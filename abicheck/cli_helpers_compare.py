@@ -176,11 +176,14 @@ def dry_run_compile_db_matched(
         resolved_hdrs = _expand_header_inputs(list(headers)) if headers else []
         if resolved_hdrs:
             ctx = build_context_for_header(
-                db_entries, resolved_hdrs[0], source_filter=compile_db_filter,
+                db_entries,
+                resolved_hdrs[0],
+                source_filter=compile_db_filter,
             )
         else:
             ctx = build_context_union_fallback(
-                db_entries, source_filter=compile_db_filter,
+                db_entries,
+                source_filter=compile_db_filter,
             )
         return ctx.compile_db_path is not None
     except (AbicheckError, OSError, ValueError, click.ClickException):
@@ -310,7 +313,8 @@ _collect_force_public_symbols = collect_force_public_symbols
 
 
 def load_required_symbols(
-    symbols: tuple[str, ...], symbols_file: Path | None,
+    symbols: tuple[str, ...],
+    symbols_file: Path | None,
 ) -> tuple[tuple[str, ...], tuple[str, ...], str | None]:
     """Combine ``--required-symbol`` values with a ``--required-symbols`` file.
 
@@ -396,6 +400,29 @@ def _version_sort_key(
     stale duplicate over the newer one (Codex review, PR #551).
     """
     lower = strip_vendor_hash(path.name.lower())
+    # ADR-059 (Codex review): strip a compressed snapshot's storage suffix
+    # (".json.gz"/".json.zst") up front, before anything else touches
+    # `lower` -- _canonical_library_key already groups a plain and a
+    # compressed snapshot of the same release under one bucket, but this
+    # function ranks candidates *within* that bucket to pick which one
+    # wins, and `lower` feeds both the token comparison below AND the
+    # raw-string tie-break returned at the end. Left unstripped, a ".gz"/
+    # ".zst" tail becomes an extra alphabetic sort token (and an
+    # alphabetically-later raw string) that always outranks a plain
+    # ".json" -- and ".zst" always outranks ".gz" -- regardless of which
+    # file is actually current. A stale compressed sibling left over from
+    # a previous release could then silently win over a freshly-written
+    # plain/differently-compressed snapshot. (Two candidates differing
+    # only by encoding now reduce to the same sort key -- genuinely
+    # ambiguous, indistinguishable from the filename alone, and already
+    # surfaced by `_build_match_map`'s own "Ambiguous match" warning for
+    # any multi-candidate bucket.)
+    from .snapshot_io import _COMPRESSED_SUFFIXES
+
+    for suffix, _compression in _COMPRESSED_SUFFIXES:
+        if lower.endswith(suffix):
+            lower = lower[: -len(suffix[len(".json") :])]
+            break
     remainder = lower
     if canonical_key.endswith(".so") and canonical_key in lower:
         remainder = lower[lower.find(canonical_key) + len(canonical_key) :]
@@ -432,7 +459,25 @@ def _collect_release_inputs(path: Path) -> list[Path]:
 
 
 def _build_match_map(paths: list[Path]) -> tuple[dict[str, Path], list[str]]:
-    """Build key->path map with version-aware duplicate resolution."""
+    """Build key->path map with version-aware duplicate resolution.
+
+    Raises ``click.ClickException`` for a genuine top-of-ranking tie (Codex
+    review, PR #699, second round on the same fix): stripping a compressed
+    snapshot's storage suffix (ADR-059) from the sort key makes two
+    candidates differing *only* by encoding -- e.g. ``libfoo.abicheck.json``
+    and a stale ``libfoo.abicheck.json.zst`` left over from a previous
+    release -- reduce to an *identical* sort key, not merely "multiple
+    candidates present". ``sorted()``'s stability then means the winner is
+    decided by each candidate's position in the original, lexically-sorted
+    input list -- itself alphabetically biased toward whichever compression
+    suffix sorts last (``.zst`` after ``.gz`` after plain) -- so silently
+    picking ``ordered[-1]`` and only warning would deterministically prefer
+    a stale compressed sibling over a fresh one every time. There is no
+    information left in the filename to break a genuine tie correctly, so
+    this is a hard error instead of a guess; a real multi-version bucket
+    (each candidate's sort key genuinely differs) is unaffected and still
+    resolves with a warning, exactly as before.
+    """
     buckets: dict[str, list[Path]] = {}
     for p in paths:
         buckets.setdefault(_canonical_library_key(p), []).append(p)
@@ -443,7 +488,15 @@ def _build_match_map(paths: list[Path]) -> tuple[dict[str, Path], list[str]]:
         # `partial` binds this iteration's key rather than closing over the
         # loop variable (the sort runs eagerly here, but the explicit binding
         # keeps that independent of when the key function is called).
-        ordered = sorted(vals, key=partial(_version_sort_key, canonical_key=key))
+        sort_key = partial(_version_sort_key, canonical_key=key)
+        ordered = sorted(vals, key=sort_key)
+        if len(ordered) > 1 and sort_key(ordered[-1]) == sort_key(ordered[-2]):
+            raise click.ClickException(
+                f"Ambiguous match for '{key}': {[v.name for v in ordered]} "
+                "are indistinguishable except by storage encoding -- cannot "
+                "tell which is current. Remove the stale duplicate(s), or "
+                "pass the intended file directly instead of a directory."
+            )
         selected = ordered[-1]
         mapping[key] = selected
         if len(ordered) > 1:
@@ -569,14 +622,18 @@ def resolve_compare_config(
     c_add = cfg.severity_addition if cfg else None
 
     eff_preset = cli_severity_preset if cli_severity_preset is not None else c_preset
-    eff_abi = cli_severity_abi_breaking if cli_severity_abi_breaking is not None else c_abi
+    eff_abi = (
+        cli_severity_abi_breaking if cli_severity_abi_breaking is not None else c_abi
+    )
     eff_pot = (
         cli_severity_potential_breaking
         if cli_severity_potential_breaking is not None
         else c_pot
     )
     eff_qual = (
-        cli_severity_quality_issues if cli_severity_quality_issues is not None else c_qual
+        cli_severity_quality_issues
+        if cli_severity_quality_issues is not None
+        else c_qual
     )
     eff_add = cli_severity_addition if cli_severity_addition is not None else c_add
 
@@ -860,8 +917,11 @@ def _verdict_exit_code(verdict: object) -> int:
 
 
 _VERDICT_SEVERITY_RANK = {
-    "BREAKING": 3, "API_BREAK": 2, "COMPATIBLE_WITH_RISK": 1,
-    "COMPATIBLE": 0, "NO_CHANGE": 0,
+    "BREAKING": 3,
+    "API_BREAK": 2,
+    "COMPATIBLE_WITH_RISK": 1,
+    "COMPATIBLE": 0,
+    "NO_CHANGE": 0,
 }
 
 
@@ -881,10 +941,15 @@ def _verdict_severity_rank(verdict: object) -> int:
 
 
 def _scoped_exit_code(
-    scoped: Any, relevant_changes: list[Any],
-    result: Any, exit_code_scheme: str, sev_config: Any,
-    policy: str, policy_file: PolicyFile | None,
-    *, has_missing_contract: bool = False,
+    scoped: Any,
+    relevant_changes: list[Any],
+    result: Any,
+    exit_code_scheme: str,
+    sev_config: Any,
+    policy: str,
+    policy_file: PolicyFile | None,
+    *,
+    has_missing_contract: bool = False,
 ) -> int:
     """Compute a scoped result's exit code under the active exit-code scheme.
 
@@ -906,7 +971,8 @@ def _scoped_exit_code(
         from .severity import compute_exit_code, missing_contract_exit_code
 
         code = compute_exit_code(
-            relevant_changes, sev_config,
+            relevant_changes,
+            sev_config,
             policy=policy,
             kind_sets=result._effective_kind_sets(),
             policy_file=policy_file,
@@ -918,8 +984,12 @@ def _scoped_exit_code(
 
 
 def _scoped_severity_summary(
-    relevant_changes: list[Any], missing: Iterable[str],
-    result: Any, sev_config: Any, policy: str, policy_file: PolicyFile | None,
+    relevant_changes: list[Any],
+    missing: Iterable[str],
+    result: Any,
+    sev_config: Any,
+    policy: str,
+    policy_file: PolicyFile | None,
 ) -> tuple[tuple[str, ...], dict[str, int]]:
     """(blocking_categories, per-category counts) for one scoped result.
 
@@ -946,8 +1016,10 @@ def _scoped_severity_summary(
     )
 
     categorized = categorize_changes(
-        relevant_changes, policy=policy,
-        kind_sets=result._effective_kind_sets(), policy_file=policy_file,
+        relevant_changes,
+        policy=policy,
+        kind_sets=result._effective_kind_sets(),
+        policy_file=policy_file,
     )
     counts = {
         "abi_breaking": len(categorized.abi_breaking),
@@ -956,8 +1028,11 @@ def _scoped_severity_summary(
         "addition": len(categorized.addition),
     }
     gate = compute_gate_decision(
-        relevant_changes, sev_config,
-        policy=policy, kind_sets=result._effective_kind_sets(), policy_file=policy_file,
+        relevant_changes,
+        sev_config,
+        policy=policy,
+        kind_sets=result._effective_kind_sets(),
+        policy_file=policy_file,
     )
     categories = list(gate.blocking_categories)
     uncovered = uncovered_missing_symbols(missing, relevant_changes)
@@ -972,7 +1047,10 @@ def _scoped_severity_summary(
 
 
 def _require_used_by_binary_evidence(
-    old_lib: Any, new_lib: Any, old_input: Path, new_input: Path,
+    old_lib: Any,
+    new_lib: Any,
+    old_input: Path,
+    new_input: Path,
 ) -> None:
     """Reject a ``--used-by`` run whose OLD/NEW side carries no binary evidence.
 
@@ -982,7 +1060,8 @@ def _require_used_by_binary_evidence(
     table/version list/PE ordinal table the scoping needs.
     """
     for lib, path, label in (
-        (old_lib, old_input, "OLD"), (new_lib, new_input, "NEW"),
+        (old_lib, old_input, "OLD"),
+        (new_lib, new_input, "NEW"),
     ):
         has_binary_evidence = isinstance(lib, Path) or any(
             getattr(lib, field, None) is not None for field in ("elf", "pe", "macho")
@@ -996,8 +1075,13 @@ def _require_used_by_binary_evidence(
 
 
 def _apply_runtime_probe(
-    scoped: Any, app: Path, old_lib: Path, new_lib: Path,
-    suppression: Any, policy: str, policy_file: PolicyFile | None,
+    scoped: Any,
+    app: Path,
+    old_lib: Path,
+    new_lib: Path,
+    suppression: Any,
+    policy: str,
+    policy_file: PolicyFile | None,
 ) -> None:
     """Run *app* against both libraries and fold a load regression into *scoped*.
 
@@ -1061,18 +1145,26 @@ def _apply_runtime_probe(
     from .appcompat import _compute_appcompat_verdict
 
     scoped.verdict = _compute_appcompat_verdict(
-        scoped.missing_symbols, scoped.missing_versions,
-        scoped.breaking_for_app, scoped.required_symbol_count,
-        policy, policy_file,
+        scoped.missing_symbols,
+        scoped.missing_versions,
+        scoped.breaking_for_app,
+        scoped.required_symbol_count,
+        policy,
+        policy_file,
     )
 
 
 def _apply_used_by_scoping(
-    result: Any, used_by_apps: tuple[Path, ...],
-    old_input: Path, new_input: Path,
-    old_snapshot: Any, new_snapshot: Any,
-    policy: str, policy_file: PolicyFile | None,
-    exit_code_scheme: str = "legacy", sev_config: Any = None,
+    result: Any,
+    used_by_apps: tuple[Path, ...],
+    old_input: Path,
+    new_input: Path,
+    old_snapshot: Any,
+    new_snapshot: Any,
+    policy: str,
+    policy_file: PolicyFile | None,
+    exit_code_scheme: str = "legacy",
+    sev_config: Any = None,
     verify_runtime: bool = False,
     suppression: Any = None,
 ) -> int:
@@ -1147,8 +1239,13 @@ def _apply_used_by_scoping(
     missing_labels: set[str] = set()
     for app in used_by_apps:
         scoped = scope_diff_to_app(
-            result, app, old_lib, new_lib,
-            policy=policy, policy_file=policy_file, suppression=suppression,
+            result,
+            app,
+            old_lib,
+            new_lib,
+            policy=policy,
+            policy_file=policy_file,
+            suppression=suppression,
             # ADR-057: old_lib above is the *path* whenever OLD is a real
             # binary, and a path carries no L5 graph -- pass the snapshot
             # compare's own pipeline already resolved so the consumer-impact
@@ -1158,7 +1255,13 @@ def _apply_used_by_scoping(
         )
         if verify_runtime and isinstance(old_lib, Path) and isinstance(new_lib, Path):
             _apply_runtime_probe(
-                scoped, app, old_lib, new_lib, suppression, policy, policy_file,
+                scoped,
+                app,
+                old_lib,
+                new_lib,
+                suppression,
+                policy,
+                policy_file,
             )
         summaries.append(_app_compat_summary(scoped))
         relevant_finding_ids.update(_finding_id(c) for c in scoped.breaking_for_app)
@@ -1176,9 +1279,16 @@ def _apply_used_by_scoping(
             )
         )
         exit_code = _scoped_exit_code(
-            scoped, scoped.breaking_for_app, result, exit_code_scheme, sev_config,
-            policy, policy_file,
-            has_missing_contract=bool(scoped.missing_symbols or scoped.missing_versions),
+            scoped,
+            scoped.breaking_for_app,
+            result,
+            exit_code_scheme,
+            sev_config,
+            policy,
+            policy_file,
+            has_missing_contract=bool(
+                scoped.missing_symbols or scoped.missing_versions
+            ),
         )
         # exit code (gating) and verdict (reporting) are maxed/ranked
         # independently: under a severity scheme the two can disagree (a
@@ -1189,10 +1299,16 @@ def _apply_used_by_scoping(
         if exit_code_scheme == "severity":
             if exit_code > worst_exit:
                 worst_changes = {_finding_id(c): c for c in scoped.breaking_for_app}
-                worst_missing = set(scoped.missing_symbols) | set(scoped.missing_versions)
+                worst_missing = set(scoped.missing_symbols) | set(
+                    scoped.missing_versions
+                )
             elif exit_code == worst_exit:
-                worst_changes.update({_finding_id(c): c for c in scoped.breaking_for_app})
-                worst_missing |= set(scoped.missing_symbols) | set(scoped.missing_versions)
+                worst_changes.update(
+                    {_finding_id(c): c for c in scoped.breaking_for_app}
+                )
+                worst_missing |= set(scoped.missing_symbols) | set(
+                    scoped.missing_versions
+                )
         worst_exit = max(worst_exit, exit_code)
         rank = _verdict_severity_rank(scoped.verdict)
         if worst_verdict is None or rank >= worst_verdict_rank:
@@ -1211,8 +1327,12 @@ def _apply_used_by_scoping(
     )
     if exit_code_scheme == "severity":
         categories, counts = _scoped_severity_summary(
-            list(worst_changes.values()), worst_missing,
-            result, sev_config, policy, policy_file,
+            list(worst_changes.values()),
+            worst_missing,
+            result,
+            sev_config,
+            policy,
+            policy_file,
         )
         result.scoped_blocking_categories = categories  # type: ignore[attr-defined]
         result.scoped_severity_counts = counts  # type: ignore[attr-defined]
@@ -1220,18 +1340,26 @@ def _apply_used_by_scoping(
 
 
 def _apply_required_symbol_scoping(
-    result: Any, required_symbols: tuple[str, ...],
-    old: Any, new: Any,
-    policy: str, policy_file: PolicyFile | None,
-    exit_code_scheme: str = "legacy", sev_config: Any = None,
+    result: Any,
+    required_symbols: tuple[str, ...],
+    old: Any,
+    new: Any,
+    policy: str,
+    policy_file: PolicyFile | None,
+    exit_code_scheme: str = "legacy",
+    sev_config: Any = None,
 ) -> int:
     """Scope *result* to an explicit ``--required-symbol(s)`` contract (ADR-043)."""
     from .appcompat import scope_diff_to_required_symbols, uncovered_missing_symbols
     from .reporter import _finding_id
 
     scoped = scope_diff_to_required_symbols(
-        result, old, new, required_symbols,
-        policy=policy, policy_file=policy_file,
+        result,
+        old,
+        new,
+        required_symbols,
+        policy=policy,
+        policy_file=policy_file,
     )
     result.required_symbols = _plugin_contract_summary(scoped)  # type: ignore[attr-defined]
     result.scoped_verdict = scoped.verdict  # type: ignore[attr-defined]
@@ -1242,9 +1370,13 @@ def _apply_required_symbol_scoping(
     # An entrypoint already covered by a relevant Change must not also
     # become a synthetic missing-contract finding (Codex review, mirrors
     # _apply_used_by_scoping's identical dedup).
-    result.scoped_missing_labels = tuple(sorted(  # type: ignore[attr-defined]
-        uncovered_missing_symbols(scoped.missing_entrypoints, scoped.breaking_for_host)
-    ))
+    result.scoped_missing_labels = tuple(
+        sorted(  # type: ignore[attr-defined]
+            uncovered_missing_symbols(
+                scoped.missing_entrypoints, scoped.breaking_for_host
+            )
+        )
+    )
     # Scoped-only changes: relevant to the host contract but never added to
     # result.changes (mirrors _apply_used_by_scoping's identical handling).
     _existing_ids = {_finding_id(c) for c in result.changes}
@@ -1252,16 +1384,25 @@ def _apply_required_symbol_scoping(
         c for c in scoped.breaking_for_host if _finding_id(c) not in _existing_ids
     )
     exit_code = _scoped_exit_code(
-        scoped, scoped.breaking_for_host, result, exit_code_scheme, sev_config,
-        policy, policy_file,
+        scoped,
+        scoped.breaking_for_host,
+        result,
+        exit_code_scheme,
+        sev_config,
+        policy,
+        policy_file,
         has_missing_contract=bool(scoped.missing_entrypoints),
     )
     result.scoped_exit_code = exit_code  # type: ignore[attr-defined]
     result.scoped_exit_code_scheme = exit_code_scheme  # type: ignore[attr-defined]
     if exit_code_scheme == "severity":
         categories, counts = _scoped_severity_summary(
-            scoped.breaking_for_host, scoped.missing_entrypoints,
-            result, sev_config, policy, policy_file,
+            scoped.breaking_for_host,
+            scoped.missing_entrypoints,
+            result,
+            sev_config,
+            policy,
+            policy_file,
         )
         result.scoped_blocking_categories = categories  # type: ignore[attr-defined]
         result.scoped_severity_counts = counts  # type: ignore[attr-defined]

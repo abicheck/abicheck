@@ -263,21 +263,33 @@ def lookup(
 
 
 def lookup_key(key: str, binary_path: Path) -> AbiSnapshot | None:
-    """Look up an entry using a key already bound to validated inputs."""
+    """Look up an entry using a key already bound to validated inputs.
+
+    ADR-059: new entries are written zstd-compressed (``<key>.json.zst``);
+    this checks that first, then falls back to a legacy plain ``<key>.json``
+    entry so a cache warmed by an older abicheck is not thrown away wholesale
+    on upgrade. A corrupt/truncated compressed entry is a cache miss, same as
+    any other read problem here -- never a caller-visible failure."""
     if not key:
         return None
-    cache_file = _CACHE_DIR / f"{key}.json"
-    try:
-        from .serialization import load_snapshot
+    from .serialization import load_snapshot
 
-        snap = load_snapshot(cache_file)
+    for cache_file in (_CACHE_DIR / f"{key}.json.zst", _CACHE_DIR / f"{key}.json"):
+        if not cache_file.exists():
+            continue
+        try:
+            snap = load_snapshot(cache_file)
+        except Exception:
+            _logger.debug("Cache read error for %s, treating as miss", key[:12])
+            continue
         # Touch mtime for LRU
-        cache_file.touch()
+        try:
+            cache_file.touch()
+        except OSError:
+            pass
         _logger.debug("Cache hit: %s → %s", binary_path.name, key[:12])
         return snap
-    except Exception:
-        _logger.debug("Cache read error for %s, treating as miss", key[:12])
-        return None
+    return None
 
 
 def store(
@@ -296,23 +308,35 @@ def store(
 
 
 def store_key(snap: AbiSnapshot, key: str, binary_path: Path) -> None:
-    """Store under a previously computed, post-execution-validated key."""
+    """Store under a previously computed, post-execution-validated key.
+
+    ADR-059: written zstd-compressed at the fast, cache-tuned level (this
+    runs on nearly every ``dump``/``compare`` invocation, unlike a baseline/
+    release write) via the canonical atomic writer -- a plain-JSON entry
+    from before this cache was compression-aware is never written again,
+    only read as a fallback by :func:`lookup_key`. If a stale legacy
+    ``<key>.json`` for the same key exists, it's removed so a lookup doesn't
+    keep preferring an old snapshot over a freshly stored one."""
     if not key:
         return
     try:
         _CACHE_DIR.mkdir(parents=True, exist_ok=True)
-        cache_file = _CACHE_DIR / f"{key}.json"
-        from .serialization import snapshot_to_json
+        cache_file = _CACHE_DIR / f"{key}.json.zst"
+        from .serialization import write_snapshot
+        from .snapshot_io import ZSTD_LEVEL_CACHE, SnapshotCompression
 
-        # Write to temp file then atomic rename to avoid corruption
-        fd, tmp_path = tempfile.mkstemp(dir=_CACHE_DIR, suffix=".tmp")
-        try:
-            with os.fdopen(fd, "w", encoding="utf-8") as f:
-                f.write(snapshot_to_json(snap))
-            os.replace(tmp_path, cache_file)
-        except BaseException:
-            os.unlink(tmp_path)
-            raise
+        write_snapshot(
+            snap,
+            cache_file,
+            compression=SnapshotCompression.ZSTD.value,
+            zstd_level=ZSTD_LEVEL_CACHE,
+        )
+        legacy_file = _CACHE_DIR / f"{key}.json"
+        if legacy_file.exists():
+            try:
+                legacy_file.unlink()
+            except OSError:
+                pass
         _logger.debug("Cache store: %s → %s", binary_path.name, key[:12])
         _evict_if_needed()
     except Exception as exc:
@@ -334,9 +358,16 @@ def _safe_mtime(p: Path) -> float:
 
 
 def _evict_if_needed() -> None:
-    """Remove oldest entries if cache exceeds MAX_ENTRIES."""
+    """Remove oldest entries if cache exceeds MAX_ENTRIES.
+
+    Globs both the current ``*.json.zst`` suffix and the legacy plain
+    ``*.json`` suffix (ADR-059) so LRU eviction accounts for a cache
+    directory that still has pre-upgrade entries mixed in with new ones."""
     try:
-        entries = sorted(_CACHE_DIR.glob("*.json"), key=_safe_mtime)
+        entries = sorted(
+            (*_CACHE_DIR.glob("*.json.zst"), *_CACHE_DIR.glob("*.json")),
+            key=_safe_mtime,
+        )
     except OSError:
         return
     excess = len(entries) - MAX_ENTRIES

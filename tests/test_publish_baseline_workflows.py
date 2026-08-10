@@ -411,6 +411,30 @@ class TestBaselineLibrariesDerivation:
                 == "${{ steps.libraries.outputs.libraries }}"
             )
 
+    def test_snapshot_compression_input_forwarded_to_baseline_action(self) -> None:
+        """ADR-059: each workflow declares its own ``snapshot-compression``
+        ``workflow_call`` input (default ``none``, unchanged behavior) and
+        forwards it verbatim to the nested ``actions/baseline`` call -- the
+        same declare-then-forward shape ``validation``/``depth`` already use
+        above, so a caller can opt a published or accepted-main baseline-set
+        into per-snapshot compression without either reusable workflow
+        hardcoding a choice."""
+        for path, job_name in (
+            (PUBLISH_BASELINE, "publish"),
+            (UPDATE_MAIN_BASELINE, "refresh"),
+        ):
+            data = _load(path)
+            inputs = data[True]["workflow_call"]["inputs"]
+            assert inputs["snapshot-compression"]["default"] == "none"
+            assert inputs["snapshot-compression"]["type"] == "string"
+
+            steps = _steps(data["jobs"][job_name])
+            dump_step = next(s for s in steps if s.get("name") == "Dump baseline-set")
+            assert (
+                dump_step["with"]["snapshot-compression"]
+                == "${{ inputs.snapshot-compression }}"
+            )
+
 
 class TestBaselineRotationFixture:
     """The plan's own P1.6 item requires a fixture asserting two consecutive

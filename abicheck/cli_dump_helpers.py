@@ -79,6 +79,7 @@ class _WriteSnapshotOutput(Protocol):
         include_dependencies: bool = ...,
         header_roots: tuple[Path, ...] = ...,
         clang_bin: str = ...,
+        snapshot_compression: str = ...,
     ) -> None: ...
 
 
@@ -206,11 +207,14 @@ def resolve_dump_depth(
     # dump/compare always resolve --depth source at target scope (ADR-043 D3):
     # the fix for the zero-TU defect where an explicit deep depth without a
     # change seed silently selected no translation units.
-    return level_to_collect_mode(method, evidence_depth, source_scope=SourceScope.TARGET)
+    return level_to_collect_mode(
+        method, evidence_depth, source_scope=SourceScope.TARGET
+    )
 
 
 def evidence_depth_label(
-    snap: AbiSnapshot, build_source: BuildSourcePack | None = None,
+    snap: AbiSnapshot,
+    build_source: BuildSourcePack | None = None,
 ) -> str:
     """Report which evidence depth a snapshot *actually* carries (CLI-audit P2).
 
@@ -423,7 +427,9 @@ def _gated_source_label(build_source: BuildSourcePack | None, snap: AbiSnapshot)
 
 
 def check_requested_depth_satisfied(
-    depth: str | None, snap: AbiSnapshot, build_source: BuildSourcePack | None = None,
+    depth: str | None,
+    snap: AbiSnapshot,
+    build_source: BuildSourcePack | None = None,
 ) -> None:
     """Hard-fail when an *explicitly* requested ``--depth`` was not reached.
 
@@ -470,8 +476,150 @@ def check_requested_depth_satisfied(
         )
 
 
+def fold_dump_provenance_into_dict(
+    payload: dict[str, Any],
+    depth: str | None,
+    snap: AbiSnapshot,
+) -> tuple[dict[str, Any], str]:
+    """Dict-level counterpart of :func:`fold_dump_provenance_into_json`.
+
+    Same computation, but operating on an already-decoded payload dict
+    in-place instead of a serialized JSON string — used by the normal
+    `dump` write path (ADR-059) so a 100+ MB snapshot is never
+    ``json.loads()``-ed and ``json.dumps()``-ed a second time just to
+    attach this one key. ``fold_dump_provenance_into_json`` below is now a
+    thin backward-compatible wrapper for callers (and tests) that still
+    want the string-in/string-out shape.
+
+    Returns ``(payload, effective_depth)`` — see
+    ``fold_dump_provenance_into_json``'s docstring for the full reasoning
+    behind every field and the ``effective``/``degraded`` semantics.
+    """
+    effective = _gated_source_label(snap.build_source, snap)
+    frontend = (
+        (_l4_source_abi_frontend(snap) or snap.ast_producer)
+        if effective == "source"
+        else (snap.ast_producer or _l4_source_abi_frontend(snap))
+    )
+    source_abi = snap.build_source.source_abi if snap.build_source is not None else None
+    source_scope = (
+        source_abi.coverage.get("replay_scope") if source_abi is not None else None
+    )
+    payload["dump_provenance"] = {
+        "requested_depth": depth,
+        "effective_depth": effective,
+        "degraded": (
+            depth is not None
+            and _DEPTH_RANK.get(effective, 0) < _DEPTH_RANK.get(depth, 0)
+        ),
+        "frontend": frontend,
+        "ast_toolchain": snap.ast_toolchain or None,
+        "ast_fallback_reason": snap.ast_fallback_reason,
+        "source_scope": source_scope,
+    }
+    return payload, effective
+
+
+def write_snapshot_payload(
+    payload: dict[str, Any],
+    path: Path,
+    *,
+    compression: Any,
+) -> Any:
+    """One JSON encode + one canonical, atomic, possibly-compressed write
+    (ADR-059) for the already-decoded ``dump`` payload dict — the write
+    chokepoint the real (non-dry) `dump` write path routes through so a
+    100+ MB snapshot is serialized exactly once, straight from the dict
+    ``snapshot_to_dict``/``fold_dump_provenance_into_dict`` already built
+    (no second ``json.loads``/``json.dumps`` round trip).
+
+    *compression* is a :class:`~abicheck.snapshot_io.SnapshotCompression`.
+    Returns a :class:`~abicheck.snapshot_io.SnapshotWriteResult`.
+    """
+    import json
+
+    from .snapshot_io import write_snapshot_text
+
+    text = json.dumps(payload, indent=2)
+    return write_snapshot_text(text, path, compression=compression)
+
+
+def reject_snapshot_compression_conflict(
+    output: Path | None, snapshot_compression: str
+) -> None:
+    """Validate ``--compression``/``-o`` suffix agreement up front (Codex
+    review): :func:`~abicheck.snapshot_io.resolve_write_compression` used to
+    run only at the very end of the write path, after a potentially
+    expensive extraction had already completed -- so ``--compression zstd
+    -o snapshot.json.gz`` wasted a full dump before failing. Calling it here
+    too, before any extraction work starts, makes the same conflict a fast
+    usage error (exit 64) like every other invalid-argument case, and keeps
+    ``--dry-run``'s own reporting of the same conflict consistent with the
+    real run's exit code (both go through this same resolver now)."""
+    if output is None:
+        return
+    from .errors import SnapshotError
+    from .snapshot_io import SnapshotCompression, resolve_write_compression
+
+    try:
+        resolve_write_compression(output, SnapshotCompression(snapshot_compression))
+    except SnapshotError as exc:
+        raise click.UsageError(str(exc)) from exc
+
+
+def write_snapshot_and_report(
+    payload: dict[str, Any],
+    output: Path,
+    snapshot_compression: str,
+    resolved_depth_label: str,
+) -> None:
+    """Write *payload* to *output* under *snapshot_compression* (ADR-059) and
+    echo the "written to"/storage-summary/evidence-depth stderr lines the
+    real (non-dry) ``dump`` write path always emits — split out of
+    ``cli.dump_cmd`` to keep that function's line count under the AI-
+    readiness file-size gate.
+    """
+    from .errors import SnapshotError
+    from .snapshot_io import SnapshotCompression
+
+    try:
+        write_result = write_snapshot_payload(
+            payload, output, compression=SnapshotCompression(snapshot_compression)
+        )
+    except SnapshotError as exc:
+        raise click.ClickException(str(exc)) from exc
+    except OSError as exc:
+        # Codex review: the canonical atomic writer can raise a plain OSError
+        # (unwritable destination, disk full, a chmod/os.replace failure --
+        # see snapshot_io._atomic_write_bytes) that isn't a SnapshotError.
+        # The old _safe_write_output() path translated exactly this class of
+        # failure into a ClickException instead of a raw traceback; match
+        # that here too.
+        raise click.ClickException(f"Cannot write to {output}: {exc}") from exc
+    click.echo(f"Snapshot written to {output}", err=True)
+    click.echo(
+        "Storage: "
+        f"{write_result.compression.value}, "
+        f"{write_result.decoded_size_bytes:,} -> {write_result.stored_size_bytes:,} bytes "
+        f"({write_result.ratio:.1%})",
+        err=True,
+    )
+    # Self-describing output (CLI-audit P2): report the evidence depth this
+    # snapshot actually reached -- computed from what it carries, not the
+    # requested --depth, so an explicit --depth source that collected
+    # nothing usable is never silently reported as if it had succeeded.
+    # Reuses fold_dump_provenance_into_dict's own returned label (the strict
+    # _gated_source_label, not the plain evidence_depth_label) so this line
+    # can never disagree with the JSON's effective_depth for the same dump
+    # -- they previously could, on the documented zero-match-source-only
+    # case (external review).
+    click.echo(f"Resolved evidence depth: {resolved_depth_label}", err=True)
+
+
 def fold_dump_provenance_into_json(
-    text: str, depth: str | None, snap: AbiSnapshot,
+    text: str,
+    depth: str | None,
+    snap: AbiSnapshot,
 ) -> tuple[str, str]:
     """Record the depth contract this dump actually satisfied (audit finding:
     "depth/scope provenance incomplete" -- a persisted ``.abi.json``/baseline
@@ -520,44 +668,7 @@ def fold_dump_provenance_into_json(
         payload = json.loads(text)
     except ValueError:
         return text, effective
-    # At "source" depth, the L4 replay extractor -- not the L2 header-AST
-    # backend -- is what actually produced the evidence that satisfied the
-    # requested depth: a header snapshot parsed with castxml/hybrid combined
-    # with a prebuilt Clang L4 pack (or vice versa) must record the L4
-    # extractor here, not the unrelated L2 one ast_producer names
-    # (CodeRabbit review). Below "source", ast_producer is the only
-    # frontend that ran at all, so it stays authoritative there.
-    frontend = (
-        (_l4_source_abi_frontend(snap) or snap.ast_producer)
-        if effective == "source"
-        else (snap.ast_producer or _l4_source_abi_frontend(snap))
-    )
-    # dump's own inline `--sources` embed always replays at "target" scope
-    # (ADR-043 D3) -- but dump also accepts a *prebuilt* `--build-info
-    # <pack>`/`abicheck_inputs` pack, which can have been collected with any
-    # scope (e.g. "changed"/"full" from a `collect --depth source --since
-    # ...`/`graph-full` run); hardcoding "target" unconditionally misreports
-    # that pack's actual replay scope (external review). The pack's own
-    # source_abi coverage already records which scope it was replayed at
-    # (buildsource.source_replay.scope_for_ci_mode's "off"/"changed"/
-    # "target"/"full"); read that when available instead of assuming, and
-    # report None (rather than fabricating "target") when there is no L4
-    # source_abi surface to read a scope from at all (e.g. a headers/binary-
-    # depth dump with no source replay).
-    source_abi = snap.build_source.source_abi if snap.build_source is not None else None
-    source_scope = source_abi.coverage.get("replay_scope") if source_abi is not None else None
-    payload["dump_provenance"] = {
-        "requested_depth": depth,
-        "effective_depth": effective,
-        "degraded": (
-            depth is not None
-            and _DEPTH_RANK.get(effective, 0) < _DEPTH_RANK.get(depth, 0)
-        ),
-        "frontend": frontend,
-        "ast_toolchain": snap.ast_toolchain or None,
-        "ast_fallback_reason": snap.ast_fallback_reason,
-        "source_scope": source_scope,
-    }
+    payload, effective = fold_dump_provenance_into_dict(payload, depth, snap)
     return json.dumps(payload, indent=2), effective
 
 
@@ -840,6 +951,7 @@ def render_dump_dry_run(
     collect_mode: str,
     header_backend: str,
     output: Path | None,
+    snapshot_compression: str = "auto",
     has_compile_db: bool = False,
     compile_db_matched: bool | None = None,
     build_info_is_pack: bool = False,
@@ -968,9 +1080,25 @@ def render_dump_dry_run(
         "Configuration and value origins",
         f".abicheck.yml: {cfg_path if cfg_path else '(none found)'}",
     )
+    if output is not None:
+        from .errors import SnapshotError
+        from .snapshot_io import SnapshotCompression, resolve_write_compression
+
+        try:
+            resolved_compression = resolve_write_compression(
+                output, SnapshotCompression(snapshot_compression)
+            )
+        except SnapshotError as exc:
+            raise click.UsageError(str(exc)) from exc
+        compression_line = (
+            f"compression: {resolved_compression.value} (file will not be created)"
+        )
+    else:
+        compression_line = "compression: (n/a -- stdout is always plain JSON)"
     result.add(
         "Output and exit-code behavior",
         f"output: {output if output else 'stdout'}",
+        compression_line,
         "exit codes: 0 valid, 1 requested depth not satisfiable, 64 usage error",
     )
     _add_dump_depth_feasibility(
@@ -1155,6 +1283,7 @@ def handle_non_elf_dump(
     depth: str | None = None,
     compile_db_context_matched: bool = False,
     include_dependencies: bool = False,
+    snapshot_compression: str = "auto",
 ) -> None:
     """Handle the PE/Mach-O native dump path and output writing (split from cli.py).
 
@@ -1185,7 +1314,9 @@ def handle_non_elf_dump(
     as only having reached "headers".
     """
     if follow_deps:
-        click.echo("Warning: --follow-deps is only supported for ELF binaries.", err=True)
+        click.echo(
+            "Warning: --follow-deps is only supported for ELF binaries.", err=True
+        )
     # L2 include fallback (parity with the ELF dump path): when -H headers are given
     # with --sources/--build-info but no explicit -I, seed the build's include dirs so
     # a PE/Mach-O header scope can resolve dependency headers instead of failing or
@@ -1211,7 +1342,12 @@ def handle_non_elf_dump(
     )
     try:
         snap = dump_native_binary(
-            so_path, binary_fmt, list(headers), list(eff_includes), version, lang,
+            so_path,
+            binary_fmt,
+            list(headers),
+            list(eff_includes),
+            version,
+            lang,
             pdb_path=pdb_path,
             public_headers=list(public_headers),
             public_header_dirs=list(public_header_dirs),
@@ -1247,15 +1383,26 @@ def handle_non_elf_dump(
     from .dumper_clang import resolve_source_frontend_clang_bin
 
     write_snapshot_output(
-        snap, output, build_info, sources, build_config, allow_build_query,
-        collect_mode, build_query=build_query, build_compile_db=build_compile_db,
-        extractor=header_backend, inputs_pack=inputs_pack, depth=depth,
-        include_dependencies=include_dependencies, header_roots=headers,
+        snap,
+        output,
+        build_info,
+        sources,
+        build_config,
+        allow_build_query,
+        collect_mode,
+        build_query=build_query,
+        build_compile_db=build_compile_db,
+        extractor=header_backend,
+        inputs_pack=inputs_pack,
+        depth=depth,
+        include_dependencies=include_dependencies,
+        header_roots=headers,
         clang_bin=resolve_source_frontend_clang_bin(
             getattr(compile_context, "gcc_path", None),
             getattr(compile_context, "gcc_prefix", None),
             exclude_cl_style=False,
         ),
+        snapshot_compression=snapshot_compression,
     )
 
 
@@ -1282,7 +1429,9 @@ def resolve_dump_collect_context(
     # ``compare``'s inline source-tree embed already resolved the mode and hands
     # it over via the private _resolved_collect_mode hook so we don't re-derive a
     # different default here (Codex review).
-    if resolved_collect_mode is not None:  # pragma: no cover - only via compare's inline embed (integration)
+    if (
+        resolved_collect_mode is not None
+    ):  # pragma: no cover - only via compare's inline embed (integration)
         collect_mode = resolved_collect_mode
     else:
         collect_mode = resolve_dump_depth(depth, "source-target")
@@ -1313,7 +1462,8 @@ def resolve_dump_collect_context(
     if (
         depth_requested
         and collect_mode != "off"
-        and sources is None and build_info is None
+        and sources is None
+        and build_info is None
         and inputs_pack is None
         and not _compile_db_serves_l3
     ):
@@ -1360,10 +1510,16 @@ def resolve_dump_compile_context(
 
     return resolve_compile_context(
         click.get_current_context(),
-        gcc_path=gcc_path, gcc_prefix=gcc_prefix, gcc_options=gcc_options,
-        gcc_option_tokens=gcc_option_tokens, sysroot=sysroot, nostdinc=nostdinc,
-        header_backend=header_backend, includes=includes,
-        build_config=build_config, sources=sources,
+        gcc_path=gcc_path,
+        gcc_prefix=gcc_prefix,
+        gcc_options=gcc_options,
+        gcc_option_tokens=gcc_option_tokens,
+        sysroot=sysroot,
+        nostdinc=nostdinc,
+        header_backend=header_backend,
+        includes=includes,
+        build_config=build_config,
+        sources=sources,
         frontend_context=frontend_context,
     )
 
@@ -1414,6 +1570,7 @@ def perform_elf_dump(
     dump_manifest: Any = None,
     include_labels: dict[Path, str] | None = None,
     include_dependencies: bool = False,
+    snapshot_compression: str = "auto",
 ) -> None:
     """Run the ELF dump pipeline and write output.
 
@@ -1493,7 +1650,9 @@ def perform_elf_dump(
         split_public_header_inputs,
     )
 
-    _, scope_header_dirs = split_public_header_inputs(list(headers)) if headers else ([], [])
+    _, scope_header_dirs = (
+        split_public_header_inputs(list(headers)) if headers else ([], [])
+    )
 
     inc_extra, deferred = (
         resolve_inferred_header_roots(
@@ -1786,4 +1945,5 @@ def perform_elf_dump(
         clang_bin=resolve_source_frontend_clang_bin(
             gcc_path, gcc_prefix, exclude_cl_style=False
         ),
+        snapshot_compression=snapshot_compression,
     )

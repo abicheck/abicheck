@@ -387,6 +387,37 @@ def _scan_candidate_include_dependencies(baseline: Path | None) -> bool:
 
     if detect_binary_format(baseline) is not None:
         return False
+    # ADR-059 (Codex review, fresh evidence): a gzip/zstd-compressed baseline
+    # (`dump --compression gzip|zstd`) fails `detect_binary_format` the same
+    # way plain JSON does (neither magic is ELF/PE/Mach-O), so it reaches
+    # this point same as before -- but its raw *stored* bytes are compressed,
+    # not JSON text, so both the tail-byte-scan trick below and a plain-text
+    # `json.load` would silently fail to find `dependency_scope` regardless
+    # of its real value, always falling through to the `False` (filtered)
+    # default even for a baseline explicitly dumped `--include-dependencies`
+    # (tagged `"full"`). Decode through the canonical snapshot I/O path
+    # first for a compressed file -- skipping the tail-scan heuristic
+    # entirely (it has no equivalent for compressed content: the *decoded*
+    # tail isn't at any fixed offset in the *stored* bytes), going straight
+    # to a full decode + parse. This is still cheap relative to a real dump:
+    # decompression is fast, and a "full"-tagged snapshot with the largest
+    # dependency surface is exactly the case that compresses best.
+    from .snapshot_io import SnapshotCompression, detect_snapshot_compression
+
+    try:
+        compression = detect_snapshot_compression(baseline)
+    except Exception:
+        compression = SnapshotCompression.NONE
+    if compression is not SnapshotCompression.NONE:
+        try:
+            from .snapshot_io import read_snapshot_text
+
+            data = json.loads(read_snapshot_text(baseline))
+        except Exception:
+            return False
+        if not isinstance(data, dict):
+            return False
+        return bool(data.get("dependency_scope") == "full")
     # `dependency_scope` (model.py) is declared as one of `AbiSnapshot`'s very
     # last fields -- serialized (via dataclasses.asdict field order) as one
     # of the last keys in the JSON object, right before `schema_version` is

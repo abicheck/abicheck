@@ -36,6 +36,7 @@
     "pyelftools>=0.29",
     "packaging>=21.0",
     "pefile>=2023.2.7",
-    "macholib>=1.16"
+    "macholib>=1.16",
+    "zstandard>=0.21"
   ]
 }

@@ -124,8 +124,29 @@ def detect_binary_format(path: Path) -> str | None:
 
 
 def sniff_text_format(path: Path) -> str:
-    """Read a small header chunk and return ``'json'``, ``'perl'``, or ``'unknown'``."""
+    """Read a small header chunk and return ``'json'``, ``'perl'``, or ``'unknown'``.
+
+    ADR-059: a gzip/zstd-compressed snapshot (``.abicheck.json.gz``/``.zst``,
+    or any neutrally-named file carrying those magic bytes) is detected here
+    too, via a *bounded* decoded prefix — never a full decompression just to
+    classify the input. A compressed non-snapshot payload (e.g. a baseline-
+    set ``.tar.zst`` archive) does not decode to a leading ``{`` and falls
+    through to ``'unknown'``, same as any other unrecognized input, so
+    archive/package resolution still gets its turn.
+    """
     from .compat.abicc_dump_import import looks_like_perl_dump
+    from .snapshot_io import bounded_decoded_prefix, detect_snapshot_compression
+
+    try:
+        compression = detect_snapshot_compression(path)
+    except SnapshotError:
+        return "unknown"
+    if compression.value != "none":
+        prefix = bounded_decoded_prefix(path)
+        if prefix is None:
+            return "unknown"
+        head = prefix.decode("utf-8", errors="replace").lstrip()
+        return "json" if head.startswith("{") else "unknown"
 
     try:
         with open(path, "rb") as f:

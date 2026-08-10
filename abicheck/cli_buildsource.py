@@ -76,7 +76,6 @@ if TYPE_CHECKING:
     from .model import AbiSnapshot
 
 
-
 # ── Attach / compare integration (ADR-028 D6, D7; ADR-029 D9) ─────────────────
 
 
@@ -215,7 +214,8 @@ def embed_build_source(
             # not fall through to inference) when it came from the CLI
             # --build-compile-db or an operator --config — never from an
             # auto-discovered .abicheck.yml (review).
-            compile_db_explicit=build_compile_db is not None or build_config is not None,
+            compile_db_explicit=build_compile_db is not None
+            or build_config is not None,
             base_build=bi_pack.build_evidence if bi_pack else None,
             clang_bin=clang_bin,
             extractor=extractor,
@@ -292,12 +292,20 @@ def embed_build_source(
     # combine would silently keep reporting L5 as not collected despite the
     # backfilled facts now being present.
     existing = snap.build_source
-    if merged.source_graph is None and existing is not None and existing.source_graph is not None:
+    if (
+        merged.source_graph is None
+        and existing is not None
+        and existing.source_graph is not None
+    ):
         import dataclasses
 
         graph_layer = DataLayer.L5_SOURCE_GRAPH.value
         graph_row = next(
-            (c for c in existing.manifest.coverage if _layer_value(c.layer) == graph_layer),
+            (
+                c
+                for c in existing.manifest.coverage
+                if _layer_value(c.layer) == graph_layer
+            ),
             None,
         )
         coverage = [
@@ -347,6 +355,7 @@ def dump_source_only(
     include_dependencies: bool = False,
     gcc_path: str | None = None,
     gcc_prefix: str | None = None,
+    snapshot_compression: str = "auto",
 ) -> None:
     """Write a binary-less snapshot carrying only the embedded build/source facts.
 
@@ -368,7 +377,7 @@ def dump_source_only(
     either), forwarded to ``_write_snapshot_output`` so L4 source-ABI replay
     honors the same compiler override a binary dump would.
     """
-    from .cli import _stamp_provenance, _write_snapshot_output
+    from .cli import _stamp_provenance
     from .dumper_clang import resolve_source_frontend_clang_bin
     from .model import AbiSnapshot
 
@@ -399,6 +408,7 @@ def dump_source_only(
         clang_bin=resolve_source_frontend_clang_bin(
             gcc_path, gcc_prefix, exclude_cl_style=False
         ),
+        snapshot_compression=snapshot_compression,
     )
 
 
@@ -522,6 +532,7 @@ def _write_snapshot_output(
     include_dependencies: bool = False,
     header_roots: tuple[Path, ...] = (),
     clang_bin: str = "clang",
+    snapshot_compression: str = "auto",
 ) -> None:
     """Serialize snapshot and write to file or stdout.
 
@@ -548,12 +559,12 @@ def _write_snapshot_output(
     happens to sit under a system prefix (e.g. an installed library dumped via its real
     ``/usr/include`` path).
     """
-    from .cli import _safe_write_output
     from .cli_dump_helpers import (
         check_requested_depth_satisfied,
-        fold_dump_provenance_into_json,
+        fold_dump_provenance_into_dict,
+        write_snapshot_and_report,
     )
-    from .serialization import snapshot_to_json
+    from .serialization import snapshot_to_dict
 
     if build_info is not None or sources is not None:
         from .cli_buildsource import embed_build_source
@@ -621,28 +632,22 @@ def _write_snapshot_output(
     check_requested_depth_satisfied(depth, snap)
     from .dumper_scoping import resolve_dependency_scope
     snap = resolve_dependency_scope(snap, include_dependencies, header_roots)
-    result = snapshot_to_json(snap)
-    # Audit finding: dump/baseline provenance didn't record requested vs.
-    # effective depth anywhere a later reader could inspect -- fold it into
-    # the written JSON now that the strict gate above has had its say.
-    result, resolved_depth_label = fold_dump_provenance_into_json(result, depth, snap)
+    # ADR-059: one payload dict, one JSON encode -- previously this built a
+    # full JSON *string* via snapshot_to_json(), then fold_dump_provenance_
+    # into_json() re-parsed and re-serialized that entire string just to
+    # attach one key. For a 100+ MB snapshot that's a second full parse and
+    # a second full encode for no reason; fold_dump_provenance_into_dict()
+    # does the same augmentation on the already-decoded payload dict.
+    payload = snapshot_to_dict(snap)
+    payload, resolved_depth_label = fold_dump_provenance_into_dict(payload, depth, snap)
     if output:
-        _safe_write_output(output, result)
-        click.echo(f"Snapshot written to {output}", err=True)
-        # Self-describing output (CLI-audit P2): report the evidence depth
-        # this snapshot actually reached -- computed from what it carries,
-        # not the requested --depth, so an explicit --depth source that
-        # collected nothing usable is never silently reported as if it had
-        # succeeded. Only alongside the file-write notice above (never for
-        # bare stdout output, which callers may pipe/parse as pure JSON).
-        # Reuses fold_dump_provenance_into_json's own returned label (the
-        # strict _gated_source_label, not the plain evidence_depth_label)
-        # so this line can never disagree with the JSON's effective_depth
-        # for the same dump -- they previously could, on the documented
-        # zero-match-source-only case (external review).
-        click.echo(f"Resolved evidence depth: {resolved_depth_label}", err=True)
+        write_snapshot_and_report(
+            payload, output, snapshot_compression, resolved_depth_label
+        )
     else:
-        click.echo(result)
+        import json
+
+        click.echo(json.dumps(payload, indent=2))
 
 
 # ── Back-compat re-export shim (lazy, to avoid an import cycle) ───────────────

@@ -600,6 +600,44 @@ def test_resolve_target_digest_match_resolves(tmp_path: Path) -> None:
     assert result.outcome == ResolveOutcome.RESOLVED
 
 
+@pytest.mark.parametrize(
+    ("suffix", "compression"),
+    [(".abicheck.json.gz", "gzip"), (".abicheck.json.zst", "zstd")],
+)
+def test_resolve_target_digest_match_resolves_compressed_snapshot(
+    tmp_path: Path, suffix: str, compression: str
+) -> None:
+    """ADR-059 (baseline-set manifest v2 slice): the resolver's digest check
+    must decode a gzip/zstd-compressed baseline snapshot the same way it
+    reads a plain one, keyed by the manifest's own recorded 'snapshot'
+    filename (whichever suffix the producer actually wrote)."""
+    from abicheck.snapshot_io import SnapshotCompression, write_snapshot_text
+
+    snapshot_content = {"library": "libpvxs", "schema_version": 9}
+    real_digest = compute_snapshot_content_hash(snapshot_content)
+    _write_manifest(
+        tmp_path,
+        artifacts=[
+            _target_artifact(
+                "libpvxs",
+                extra={
+                    "sha256": real_digest,
+                    "snapshot": f"libpvxs{suffix}",
+                    "compression": compression,
+                },
+            )
+        ],
+    )
+    write_snapshot_text(
+        json.dumps(snapshot_content),
+        tmp_path / f"libpvxs{suffix}",
+        compression=SnapshotCompression(compression),
+    )
+    result = resolve_target(tmp_path, target="libpvxs", profile=PROFILE, required=True)
+    assert result.outcome == ResolveOutcome.RESOLVED
+    assert result.snapshot_path == str(tmp_path / f"libpvxs{suffix}")
+
+
 def test_resolve_target_digest_mismatch_is_ambiguous(tmp_path: Path) -> None:
     # A truncated/replaced snapshot file (partial download, stale cache
     # restore) must never resolve just because a file with the right name

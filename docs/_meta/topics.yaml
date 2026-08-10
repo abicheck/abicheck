@@ -88,6 +88,15 @@ topics:
       - start/getting-started.md
       - skills-src/shared/baseline-and-comparability.md
 
+  snapshot-storage-compression:
+    canonical_page: reference/snapshot-format.md
+    fact_sources:
+      - abicheck/snapshot_io.py
+      - abicheck/serialization.py
+      - abicheck/snapshot_cache.py
+    task_pages:
+      - use/baseline-storage.md
+
   public-surface:
     canonical_page: learn/abi-surface.md
     fact_sources:
