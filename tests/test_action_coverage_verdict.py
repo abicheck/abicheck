@@ -1208,3 +1208,94 @@ class TestAnEscalatedCoverageGateKeepsItsOwnAxis:
         render it, leaving a bare tier name."""
         summary = self._summary(tmp_path)
         assert "export_table" in summary, summary
+
+
+class TestBothExitOneAxesAreReported:
+    """A displaced coverage axis must still be named.
+
+    With `severity.exit_code: 1` and `contract_coverage_exit_contribution: 1`
+    firing together, `GATE_TIER` holds the severity tier, so the
+    coverage-specific branch never ran and the summary mentioned neither the
+    missing provider nor that coverage contributed at all (Codex).
+    """
+
+    def _summary(self, tmp_path: Path) -> str:
+        report = {
+            "verdict": "BREAKING",
+            "exit_code": 1,
+            "diff": {"verdict": "BREAKING"},
+            "severity": {
+                "exit_code": 1,
+                "blocking": True,
+                "blocking_categories": ["addition"],
+            },
+            "contract_coverage_exit_contribution": 1,
+            "contract_coverage_failures": [COVERAGE_FAILURE],
+        }
+        bindir = _stub_abicheck(tmp_path, exit_code=1, report=report)
+        return _run_action(
+            tmp_path,
+            {
+                "INPUT_MODE": "compare",
+                "INPUT_OLD_LIBRARY": _lib(tmp_path, "libold.so"),
+                "INPUT_NEW_LIBRARY": _lib(tmp_path, "libnew.so"),
+                "INPUT_FORMAT": "json",
+                "INPUT_OUTPUT_FILE": str(tmp_path / "report.json"),
+            },
+            bindir,
+        )["_summary"]
+
+    def test_the_severity_categories_are_named(self, tmp_path: Path) -> None:
+        assert "addition" in self._summary(tmp_path)
+
+    def test_the_coverage_axis_is_named_too(self, tmp_path: Path) -> None:
+        summary = self._summary(tmp_path)
+        assert "Contract coverage also contributed" in summary, summary
+        assert "export_table" in summary, summary
+
+
+class TestTheFailOnClaimTracksTheTier:
+    """ "Independently of fail-on-*" is only true at the SEVERITY_ERROR tier.
+
+    At API_BREAK/BREAKING the severity policy produced the exit, but whether
+    the step fails still follows the fail-on flags — so the unconditional
+    claim was wrong for two of the three tiers (CodeRabbit).
+    """
+
+    def _summary(self, tmp_path: Path, exit_code: int, verdict: str) -> str:
+        report = {
+            "verdict": verdict,
+            "exit_code": exit_code,
+            "diff": {"verdict": verdict},
+            "severity": {
+                "exit_code": exit_code,
+                "blocking": True,
+                "blocking_categories": ["potential_breaking"],
+            },
+        }
+        bindir = _stub_abicheck(tmp_path, exit_code=exit_code, report=report)
+        return _run_action(
+            tmp_path,
+            {
+                "INPUT_MODE": "compare",
+                "INPUT_OLD_LIBRARY": _lib(tmp_path, "libold.so"),
+                "INPUT_NEW_LIBRARY": _lib(tmp_path, "libnew.so"),
+                "INPUT_FORMAT": "json",
+                "INPUT_OUTPUT_FILE": str(tmp_path / "report.json"),
+            },
+            bindir,
+        )["_summary"]
+
+    def test_at_the_api_tier_it_defers_to_the_flags(self, tmp_path: Path) -> None:
+        summary = self._summary(tmp_path, 2, "API_BREAK")
+        assert "still follows" in summary, summary
+        assert "independently of" not in summary, summary
+
+    def test_at_the_severity_tier_it_still_claims_independence(
+        self, tmp_path: Path
+    ) -> None:
+        """The escalated case is the one that reaches this note at all: a
+        SEVERITY_ERROR *verdict* renders its own branch, so the note only runs
+        when the verdict was escalated away and GATE_TIER kept the tier."""
+        summary = self._summary(tmp_path, 1, "BREAKING")
+        assert "independently of" in summary, summary

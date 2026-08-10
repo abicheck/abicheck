@@ -28,6 +28,8 @@ from enum import Enum
 from typing import Any
 
 #: Build-evidence schema version, independent of the pack/snapshot versions.
+from .comdat_groups import ComdatScan, collect_vague_linkage_symbols
+
 BUILD_EVIDENCE_VERSION: int = 1
 
 
@@ -323,6 +325,13 @@ class BuildEvidence:
     build_options: list[BuildOption] = field(default_factory=list)
     diagnostics: list[str] = field(default_factory=list)
     raw_artifacts: list[str] = field(default_factory=list)
+    #: COMDAT-group scan over this build's object files -- the only evidence
+    #: that proves *vague linkage* (see ``comdat_groups``). ``None`` means no
+    #: scan ran, which a consumer must never read as "nothing is vague".
+    #: Additive field: defensive .get() parsing keeps this forward/backward
+    #: compatible without a BUILD_EVIDENCE_VERSION bump, the same convention
+    #: ``CompileUnit.directory`` above already documents.
+    comdat: ComdatScan | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -338,6 +347,9 @@ class BuildEvidence:
             "build_options": [o.to_dict() for o in self.build_options],
             "diagnostics": list(self.diagnostics),
             "raw_artifacts": list(self.raw_artifacts),
+            # Omitted entirely when no scan ran, so an older reader and a
+            # newer one agree that absence means "not established".
+            **({"comdat": self.comdat.to_dict()} if self.comdat is not None else {}),
         }
 
     @classmethod
@@ -359,7 +371,35 @@ class BuildEvidence:
             ],
             diagnostics=list(d.get("diagnostics", [])),
             raw_artifacts=list(d.get("raw_artifacts", [])),
+            comdat=(
+                ComdatScan.from_dict(d["comdat"])
+                if isinstance(d.get("comdat"), dict)
+                else None
+            ),
         )
+
+    def scan_comdat(self) -> None:
+        """Populate ``comdat`` from the objects this build's compile units emit.
+
+        Lives here rather than in ``comdat_groups`` so that module stays a
+        leaf: it is a pure ELF parser and must not know about build evidence,
+        or the two form an import cycle (CLAUDE.md "M1-3").
+
+        Reads ``CompileUnit.output`` — already the normalized "this TU produced
+        this object" fact, and the same field ``source_graph``'s link
+        provenance mints its ``object_file`` nodes from — so no new discovery
+        step is introduced. Objects that no longer exist (a cleaned build tree,
+        a compile DB describing a build never run) fail their read and are
+        counted, which is why consumers must check ``resolvable`` rather than
+        the symbol set alone.
+
+        A no-op when the build recorded no object outputs: leaving ``comdat``
+        as ``None`` keeps "no scan ran" distinct from "scanned, found nothing
+        vague", and only the latter may license a demotion.
+        """
+        objects = [cu.output for cu in self.compile_units if cu.output]
+        if objects:
+            self.comdat = collect_vague_linkage_symbols(list(objects))
 
     def merge(self, other: BuildEvidence) -> None:
         """Fold another adapter's output into this one (in place).
@@ -386,6 +426,22 @@ class BuildEvidence:
                 seen_opts.add((opt.key, opt.value))
         self.diagnostics.extend(other.diagnostics)
         self.raw_artifacts = sorted(set(self.raw_artifacts) | set(other.raw_artifacts))
+        # Union, for the same reason the scan unions across object files: an
+        # entity emitted vaguely by any translation unit is vague for the
+        # library, so two adapters over one tree must not lose one's findings.
+        if other.comdat is not None:
+            self.comdat = (
+                other.comdat
+                if self.comdat is None
+                else ComdatScan(
+                    symbols=self.comdat.symbols | other.comdat.symbols,
+                    objects_scanned=self.comdat.objects_scanned
+                    + other.comdat.objects_scanned,
+                    objects_failed=self.comdat.objects_failed
+                    + other.comdat.objects_failed,
+                    diagnostics=[*self.comdat.diagnostics, *other.comdat.diagnostics],
+                )
+            )
 
 
 def _merge_by_id(dst: list[Any], src: list[Any]) -> None:

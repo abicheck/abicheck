@@ -579,6 +579,10 @@ outputs:
       (nothing gated), and a policy that demotes abi_breaking while some
       other gate still fires -- an error-level --crosscheck, or
       potential_breaking: error -- can publish BREAKING with exit code 2.
+      The same holds at exit code 1: a demoted abi_breaking alongside an
+      error-level addition/quality finding publishes BREAKING or API_BREAK
+      while the exit code names the severity tier that gated, so exit 1 is
+      not always SEVERITY_ERROR or COVERAGE_INCOMPLETE.
       In both cases the verdict stays truthful and the step still gates at
       the tier the exit code names, so fail-on-breaking does not re-gate a
       break the policy demoted. Branch on verdict for what was found, and on

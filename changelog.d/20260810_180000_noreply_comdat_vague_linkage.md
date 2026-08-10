@@ -22,3 +22,13 @@
   none" distinct from "nothing was scanned", so a consumer can never read an
   unscanned build as positive evidence; unreadable objects degrade to
   diagnostics rather than raising, per ADR-028 D3.
+
+  Section-group words are decoded in the ELF file's own `EI_DATA` byte order:
+  hardcoding little-endian reads `GRP_COMDAT` as `0x01000000` on s390x/ppc64
+  and skips every group, returning an empty set indistinguishable from "this
+  build has nothing vague".
+
+  ELF only: `SHT_GROUP` is an ELF construct, so a Mach-O or PE/COFF object
+  reads as "not an ELF file" and leaves the scan unresolvable rather than
+  claiming the build has nothing vague. Mach-O and PE express the same idea
+  through different structures and would need their own extractor.

@@ -54,6 +54,15 @@ implementation gets wrong:
    ``.data.rel.ro`` and EH sections for the same entity, so the scan walks
    every member section rather than assuming one.
 
+**ELF only.** ``SHT_GROUP`` is an ELF construct; a Mach-O or PE/COFF object
+reads as "not an ELF file" and is counted as a failure, so ``resolvable``
+stays false and nothing is established. That is the correct outcome rather
+than a gap to paper over — but it does mean any consumer of this evidence is
+inert on macOS and Windows builds. The other two formats express the same
+idea through different structures (Mach-O coalesced sections plus
+``N_WEAK_DEF``; PE/COFF ``IMAGE_COMDAT_SELECT_*`` in a section's auxiliary
+symbol record), so supporting them is a separate extractor, not a flag here.
+
 Pure parsing: no subprocess, no compiler. Degrades to a diagnostic per object
 file (missing, unreadable, non-ELF, malformed) rather than raising — ADR-028
 D3's rule that optional build evidence never breaks a comparison.
@@ -135,23 +144,40 @@ class ComdatScan:
 
 
 def _comdat_member_sections(elf: ELFFile) -> set[int]:
-    """Section indices belonging to a ``GRP_COMDAT`` group."""
+    """Section indices belonging to a ``GRP_COMDAT`` group.
+
+    Group words are plain ``Elf_Word``s in the file's own ``EI_DATA`` byte
+    order, so the prefix is taken from the ELF rather than assumed. Hardcoding
+    little-endian decodes ``GRP_COMDAT`` (1) as ``0x01000000`` on s390x/ppc64
+    and silently skips every group — an empty result that reads exactly like
+    "this build has nothing vague" (Codex review).
+    """
     members: set[int] = set()
     for sec in elf.iter_sections():
         if sec.header["sh_type"] != "SHT_GROUP":
             continue
-        data = sec.data()
-        if len(data) < 4:
-            continue
-        (flag,) = struct.unpack("<I", data[:4])
-        if not flag & GRP_COMDAT:
-            continue
-        # The remainder is a flat array of section indices. A truncated tail
-        # (malformed input) is dropped rather than raising.
-        count = (len(data) - 4) // 4
-        if count:
-            members.update(struct.unpack(f"<{count}I", data[4 : 4 + count * 4]))
+        members.update(decode_group(sec.data(), little_endian=elf.little_endian))
     return members
+
+
+def decode_group(data: bytes, *, little_endian: bool) -> frozenset[int]:
+    """Section indices of one ``SHT_GROUP`` payload, empty unless ``GRP_COMDAT``.
+
+    Split out of the ELF walk purely so the byte-order handling is directly
+    testable without fabricating a big-endian object file.
+    """
+    if len(data) < 4:
+        return frozenset()
+    endian = "<" if little_endian else ">"
+    (flag,) = struct.unpack(f"{endian}I", data[:4])
+    if not flag & GRP_COMDAT:
+        return frozenset()
+    # The remainder is a flat array of section indices. A truncated tail
+    # (malformed input) is dropped rather than raising.
+    count = (len(data) - 4) // 4
+    if not count:
+        return frozenset()
+    return frozenset(struct.unpack(f"{endian}{count}I", data[4 : 4 + count * 4]))
 
 
 def scan_object_comdat_symbols(path: Path | str) -> frozenset[str] | None:

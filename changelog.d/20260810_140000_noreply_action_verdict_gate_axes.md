@@ -27,4 +27,10 @@
   `COVERAGE_INCOMPLETE`, and describing that as a severity-policy failure is
   the exact confusion ADR-049's orthogonal axis exists to prevent — the note
   now names the coverage axis and still reports which provider fell short,
-  which escalation had been dropping along with the displaced verdict branch.
+  which escalation had been dropping along with the displaced verdict branch. Two further corrections to
+  that note: the "independently of `fail-on-*`" claim is now made only at the
+  `SEVERITY_ERROR` tier, since at `API_BREAK`/`BREAKING` the severity policy
+  produced the exit but the fail-on flags still decide whether the step fails;
+  and the contract-coverage axis is reported on its own terms rather than only
+  when it happens to own `GATE_TIER`, so a run where both exit-1 axes fire no
+  longer hides the missing provider behind the severity tier.

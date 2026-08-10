@@ -1097,7 +1097,23 @@ _blocking_gate_note() {
     | sed 's/^ *//;s/ *$//' | grep -v '^promoted_crosscheck$' | grep -v '^$' | paste -sd, -)
   if [[ -n "$_cats" ]]; then
     echo ">"
-    echo "> ⚠️ Also blocked by severity policy: \`$_cats\` configured as \`error\`. This fails the step independently of \`fail-on-breaking\`/\`fail-on-api-break\`."
+    if [[ "${GATE_TIER:-$VERDICT}" == "SEVERITY_ERROR" ]]; then
+      echo "> ⚠️ Also blocked by severity policy: \`$_cats\` configured as \`error\`. This fails the step independently of \`fail-on-breaking\`/\`fail-on-api-break\`."
+    else
+      # Only the SEVERITY_ERROR tier bypasses the fail-on flags. At the
+      # API_BREAK/BREAKING tiers the severity policy is what produced the
+      # exit, but whether the *step* fails still follows those flags -- the
+      # unconditional claim was wrong for two of the three tiers (CodeRabbit).
+      echo "> ⚠️ Also blocked by severity policy: \`$_cats\` configured as \`error\`, which is what produced exit ${ABICHECK_EXIT}. Whether this step fails still follows \`fail-on-breaking\`/\`fail-on-api-break\` for the \`${GATE_TIER:-$VERDICT}\` tier."
+    fi
+  fi
+  # The coverage axis is orthogonal, so it is reported on its own terms rather
+  # than only when it happens to own GATE_TIER: with both axes firing at exit 1
+  # the severity tier wins the slot and the missing provider went unmentioned
+  # entirely (Codex).
+  if _coverage_gated && [[ "$GATE_TIER" != "COVERAGE_INCOMPLETE" ]]; then
+    echo ">"
+    echo "> ⚠️ Contract coverage also contributed to this run's exit$(_coverage_where_suffix). Orthogonal to the compatibility verdict and to the severity policy — see \`contract_coverage_failures\` in the JSON report."
   fi
   [[ -n "$GATE_TIER" && "$GATE_TIER" != "$VERDICT" ]] || return 0
   echo ">"
