@@ -27,6 +27,7 @@ you only look at the verdict; the shim sees the flag, so the grader can too.
 
 from __future__ import annotations
 
+import functools
 import json
 import re
 from pathlib import Path
@@ -203,24 +204,104 @@ def determined_not_comparable(call: dict) -> bool:
     )
 
 
-def _positional_operands(argv: list[str]) -> list[str]:
-    """The tokens that are operands rather than flags or flag values.
+@functools.cache
+def valueless_options(command: str | None) -> frozenset[str] | None:
+    """Every option of this command that takes no value, from Click itself.
 
-    A separated option value is the only non-flag token that is not an operand,
-    and it is always immediately preceded by the option that takes it — so
-    "not a flag, and not preceded by one" identifies operands without needing
-    the option table. The attached spellings (`--format=json`, `-ojson`) keep
-    the value inside the flag token, so they never produce a token here at all.
+    Read off the real command tree rather than listed here: `compare` alone
+    declares 50 boolean flags, so a hand-maintained list would be wrong on
+    arrival and would rot silently after — the same failure the `--severity`
+    stem had.
 
-    Deliberately biased toward *not* claiming a token is an operand: `compare
-    a.so b.so -o b.so` writes a report named like an operand, and reading that
-    `b.so` as a third operand would fail a perfectly ordinary run.
+    `None` when the table cannot be built (abicheck not importable at grading
+    time). The caller then treats every option as value-taking, which is what
+    this code did before the table existed: it can miss a self-comparison,
+    where the opposite assumption would read `--policy-file p.yaml --suppress
+    p.yaml` as two operands named `p.yaml` and fail a correct run.
     """
-    return [
-        token
-        for index, token in enumerate(argv)
-        if not token.startswith("-") and not (index and argv[index - 1].startswith("-"))
-    ]
+    try:
+        import click
+
+        from abicheck.cli import main as cli_main
+    except Exception:  # pragma: no cover - depends on the grading environment
+        return None
+
+    def flags_of(cmd: object) -> set[str]:
+        return {
+            opt
+            for param in getattr(cmd, "params", [])
+            if isinstance(param, click.Option) and param.is_flag
+            for opt in (*param.opts, *param.secondary_opts)
+        }
+
+    found = flags_of(cli_main)  # global options, which precede the verb
+    target = cli_main.commands.get(command or "")
+    if isinstance(target, click.Group):
+        # `compat check` is the comparison; bare `compat` auto-invokes it.
+        target = target.commands.get("check", target)
+    if target is not None:
+        found |= flags_of(target)
+    return frozenset(found)
+
+
+def _consumes_a_value(token: str, command: str | None) -> bool:
+    """Whether this option token takes the *next* token as its value."""
+    if not token.startswith("-"):
+        return False
+    if "=" in token:  # `--format=json` carries its own value
+        return False
+    known = valueless_options(command)
+    if known is None:
+        return True
+    # An option the table does not know is assumed to take a value: guessing
+    # the other way invents an operand, and an invented operand is what fails
+    # a correct run.
+    return token not in known
+
+
+def _positional_operands(argv: list[str], command: str | None = None) -> list[str]:
+    """The tokens that are operands rather than options or option values.
+
+    Click lets options sit between positionals, so position alone says nothing
+    — `compare x --format json x` really does compare `x` with itself. The
+    complement is what identifies an operand: a non-option token that is not
+    being consumed as some option's value.
+
+    Arity is what makes that answerable, and it has to come from the command's
+    own definition. Treating *every* option as value-taking hid the operand
+    after a boolean flag (`compare x --verbose x` yielded one operand), and
+    `--verbose` is exactly that — `cli_options.py` declares it `is_flag=True`,
+    so Click accepts the placement without consuming `x`.
+    """
+    operands: list[str] = []
+    for index, token in enumerate(argv):
+        if token.startswith("-"):
+            continue
+        if index and _consumes_a_value(argv[index - 1], command):
+            continue
+        operands.append(token)
+    return operands
+
+
+#: Options that carry one of the two sides rather than a mere setting. Only
+#: `compare` names both sides positionally; `scan` takes the baseline through
+#: `--against`, and `compat check` takes both through `-old`/`-new` (with their
+#: `-d1`/`-d2`/`-n` aliases). Without these, `scan lib.so --against lib.so` and
+#: `compat check -old a.xml -new a.xml` are self-comparisons the operand rule
+#: cannot see, because each repeated token is an option's *value*.
+SIDE_OPTIONS = ("--against", "-old", "-d1", "-new", "-d2", "-n")
+
+
+def _named_sides(argv: list[str], command: str | None) -> list[str]:
+    """Every token this invocation names as one of the two sides."""
+    sides = _positional_operands(argv, command)
+    for index, token in enumerate(argv):
+        for option in SIDE_OPTIONS:
+            if token == option and index + 1 < len(argv):
+                sides.append(argv[index + 1])
+            elif token.startswith(f"{option}="):
+                sides.append(token.split("=", 1)[1])
+    return sides
 
 
 def compares_one_side_against_itself(call: dict) -> bool:
@@ -244,8 +325,8 @@ def compares_one_side_against_itself(call: dict) -> bool:
     all. Binding a call to its fixture needs the dump provenance Phase 4
     persists, not a cleverer read of the command line.
     """
-    operands = _positional_operands(call.get("argv", []))
-    return len(operands) != len(set(operands))
+    sides = _named_sides(call.get("argv", []), subcommand(call))
+    return len(sides) != len(set(sides))
 
 
 def suppression_flags(call: dict) -> list[str]:

@@ -64,6 +64,18 @@ filename denylist cannot see inside a file it correctly copied. A leak aborts
 the run rather than degrading it: the result would be evidence about the
 fixture, not about the skill.
 
+Both checks that can reject a run — this one and `check_treatment` — fire
+*after* `_run_once` has written `final.md`, so a rejected run is
+indistinguishable on disk from a crashed one. That is why `_recovered_record`
+re-runs them rather than trusting the file: recovering on the strength of
+`final.md` alone would launder a contaminated run into accepted evidence on the
+next resume.
+
+Tests for all of this live in `tests/test_skill_eval_harness.py` — the
+harness half — while `tests/test_skill_eval_graders.py` pins the grading rules.
+A grader cannot detect a run contaminated before it started, which is why the
+two are separate files rather than one.
+
 The `--out` restriction is not tidiness. Claude Code discovers skills from the
 project the working directory belongs to, and this repo's root carries all four
 published trees — so a workspace under it hands the *baseline* arm everything it

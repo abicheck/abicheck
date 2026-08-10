@@ -583,26 +583,72 @@ def _run_once(
     }
 
 
-def _bypassed_the_recorder(events: list[dict], calls: Path) -> bool:
-    """Whether the run invoked the tool by a route the shim does not wrap.
+#: The two names the interposer is installed under. A module entry spelled any
+#: other way — an absolute path, or a versioned `python3.12` — resolves to the
+#: real interpreter and never reaches the shim.
+INTERPOSED_INTERPRETERS = ("python", "python3")
 
-    The interposer prevents this where a POSIX shell exists; this backstop is
-    what makes the remaining case *visible*. An empty call log otherwise reads
-    identically whether the agent never reached the tool or reached it by a
-    route the recorder does not wrap — and those grade the same (dimensions 3
-    and 6 both fail) while meaning opposite things about the agent.
+
+def module_entry_interpreters(events: list[dict]) -> list[str]:
+    """The interpreter each observed `-m abicheck` invocation was spelled with.
+
+    `""` when the command begins with `-m abicheck` and names no interpreter,
+    which cannot reach the interposer either.
     """
-    if calls.is_file() and calls.read_text(encoding="utf-8").strip():
-        return False
+    found: list[str] = []
     for event in events:
         if event.get("type") != "assistant":
             continue
         for block in (event.get("message") or {}).get("content") or []:
             if not isinstance(block, dict) or block.get("type") != "tool_use":
                 continue
-            if "-m abicheck" in json.dumps(block.get("input") or {}):
-                return True
-    return False
+            command = json.dumps(block.get("input") or {})
+            tokens = command.replace('"', " ").replace("\\n", " ").split()
+            for index, token in enumerate(tokens):
+                if token != "-m" or index + 1 >= len(tokens):
+                    continue
+                if tokens[index + 1] != "abicheck":
+                    continue
+                found.append(tokens[index - 1] if index else "")
+    return found
+
+
+def _bypassed_the_recorder(
+    events: list[dict], calls: Path, interposed: bool | None = None
+) -> bool:
+    """Whether the run invoked the tool by a route the shim does not wrap.
+
+    The interposer prevents this where a POSIX shell exists; this backstop is
+    what makes the remaining case *visible*. An unrecorded call otherwise reads
+    identically whether the agent never reached the tool or reached it by a
+    route the recorder does not wrap — and those grade the same (dimensions 3
+    and 6 both fail) while meaning opposite things about the agent.
+
+    This used to return early whenever the log was non-empty, which made it
+    dead in practice rather than merely narrow: every published skill runs
+    `abicheck --version` at preflight, so the log is essentially always
+    non-empty by the time a comparison happens, and a later
+    `/usr/bin/python3.12 -m abicheck compare ...` — which resolves past the
+    `python`/`python3` interposer — was accepted as a complete transcript.
+
+    So each observed module entry is judged on its own spelling. A bare
+    `python`/`python3` reaches the interposer and is fine; anything else is a
+    bypass, as is *any* module entry on a host where the interposer was not
+    installed at all (Windows), and any module entry at all when nothing was
+    recorded — the interposer plainly did not do its job in that case however
+    the command was spelled.
+    """
+    if interposed is None:
+        interposed = os.name != "nt"
+    interpreters = module_entry_interpreters(events)
+    if not interpreters:
+        return False
+    if not interposed:
+        return True
+    recorded = calls.is_file() and bool(calls.read_text(encoding="utf-8").strip())
+    if not recorded:
+        return True
+    return any(Path(name).name not in INTERPOSED_INTERPRETERS for name in interpreters)
 
 
 def _recovered_record(
@@ -648,6 +694,13 @@ def _recovered_record(
     visible = visible_native_skills(events)
     record["visible_skills"] = visible
     problem = check_treatment(arm, scenario, visible)
+    if problem is None and _bypassed_the_recorder(events, out_dir / "calls.jsonl"):
+        # The same reasoning as the treatment check, for the other rejection
+        # `_run_once` can raise after writing `final.md`. On a host without the
+        # interposer every module entry bypasses the recorder, so this is the
+        # *likelier* of the two to be rediscovered on a resume — and recovering
+        # it would index a harness limitation as agent behaviour.
+        problem = "the run reached the tool by a route the recorder does not wrap"
     if problem is not None:
         raise RuntimeError(
             f"{sid}/{arm}/{rep}: {problem}. This run was left on disk without an "
