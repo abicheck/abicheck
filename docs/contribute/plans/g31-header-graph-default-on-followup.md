@@ -721,6 +721,39 @@ building a second identity-resolution mechanism from scratch.
      additive). Re-verified the end-to-end repro is now `COMPATIBLE`
      (`func_added` only, no `type_vtable_changed`).
   New regression tests for all three.
+
+  **A fourth review round found GNU `__restrict` was excluded from the
+  override signature key — and investigating it exposed a real, deeper,
+  pre-existing bug the second review round's own parameter-normalization
+  fix never actually closed.** Codex's finding: `virtual void a(int*
+  __restrict p);` and a derived `void a(int*) override;` mangle identically
+  (`__restrict` is a hint, not part of the type), but the signature key
+  read the raw `qualType` unmodified, so the override appended as a new
+  slot instead of replacing the inherited one. Investigating it against
+  real clang turned up the actual root cause: clang's real spelling has NO
+  space between `*` and the FIRST trailing qualifier word (`"int *const"`,
+  never `"int * const"`), while a SECOND stacked qualifier word IS
+  space-separated from the first (`"int *const volatile"`). The earlier
+  `_normalize_param_type` fix assumed every trailing qualifier had a
+  leading space — which meant it silently never matched ANY single-
+  qualifier pointer case at all, including the plain `"int *const"`/
+  `"int *volatile"` cases that fix's own docstring claimed were handled.
+  That gap went undetected because the earlier round's own regression
+  tests only exercised the *pointee*-const negative-control case (`"const
+  int *"`, correctly untouched) and a *leading*-qualifier positive case
+  (`"const int"`, handled by a different code path entirely) — never a
+  genuine `"T* const"` positive-match end to end. Fixed by normalizing the
+  glued-vs-separated asymmetry up front: a new `_POINTER_QUALIFIER_GLUE`
+  regex inserts a space after every `*` immediately followed by a letter,
+  after which one plain trailing-word-strip loop (extended to also strip
+  `__restrict`) handles every stacking combination uniformly. Re-verified
+  against seven real-clang-compiled cases end to end (`int* const`, `int*
+  volatile`, `int* const volatile`, `int* __restrict`, `int* const
+  __restrict`, plus the two pointee-qualified negative controls) — all now
+  correct, including the four that were silently broken before this round
+  despite not being what Codex's own finding named.
+
+  **A later pass closed the last of this phase's four originally-listed
   facts** (`deprecated`/`is_scoped`/bitfields/default-argument facts were
   the other three, already covered above): direct-clang now populates
   `TypeField.default` too, via `dumper_clang_expr._field_initializer_value`,

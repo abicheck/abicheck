@@ -25,7 +25,10 @@ for the exact empirical findings this module's design rests on.
 
 from __future__ import annotations
 
+import pytest
+
 from abicheck.dumper_clang import _ClangAstParser
+from abicheck.dumper_clang_vtable import _normalize_param_type
 
 
 def _tu(*inner: dict) -> dict:
@@ -578,3 +581,138 @@ def test_non_virtual_method_stays_non_virtual() -> None:
     parser = _ClangAstParser(root, set(), set())
     funcs = {f.mangled: f for f in parser.parse_functions()}
     assert funcs["_ZN1A5plainEv"].is_virtual is False
+
+
+# ── fourth review round: __restrict, and a deeper pre-existing bug it ─────
+# ── exposed in the pointer-itself-qualifier normalization ─────────────────
+
+
+@pytest.mark.parametrize(
+    "qualtype,expected",
+    [
+        # Real clang spelling has NO space between "*" and the FIRST
+        # trailing qualifier word -- confirmed against real clang builds.
+        # An earlier version of _normalize_param_type assumed a leading
+        # space on every trailing qualifier and so never matched ANY of
+        # these single-qualifier pointer cases at all (Codex review, fresh
+        # evidence -- caught while investigating the __restrict finding
+        # specifically, but the bug predates and is broader than that one
+        # case: plain "int *const"/"int *volatile" were silently never
+        # normalized either, despite the module's own docstring claiming
+        # they were).
+        ("int *const", "int *"),
+        ("int *volatile", "int *"),
+        ("int *__restrict", "int *"),
+        # A second stacked qualifier word IS space-separated from the
+        # first in real clang's spelling -- confirmed against real clang.
+        ("int *const volatile", "int *"),
+        ("int *const __restrict", "int *"),
+        # Pointee-level qualifiers must survive untouched.
+        ("const int *", "const int *"),
+        ("const int *__restrict", "const int *"),
+        ("const int *const", "const int *"),
+        ("const int &", "const int &"),
+        # Nested pointer-to-const-pointer: the inner "const" is one level
+        # in, not top-level on the outer pointer -- must survive (mangles
+        # to PKPi, confirmed against real clang in an earlier round).
+        ("int *const *", "int * const *"),
+        # Plain by-value leading qualifiers, unrelated to the pointer cases
+        # above but sharing the same function.
+        ("const int", "int"),
+        ("const volatile int", "int"),
+        ("int", "int"),
+        ("int *", "int *"),
+    ],
+)
+def test_normalize_param_type_matches_real_clang_spellings(
+    qualtype: str, expected: str
+) -> None:
+    assert _normalize_param_type(qualtype) == expected
+
+
+def test_pointer_itself_const_override_recognized_with_no_restrict() -> None:
+    """The specific case the pre-existing bug above silently broke:
+    `virtual void a(int* const p);` vs. a derived `void a(int* p) override;`
+    -- no __restrict involved at all, just a plain top-level pointer-const.
+    Confirmed against real clang this must be recognized as an override."""
+    root = _tu(
+        _record(
+            "A",
+            {
+                "kind": "CXXMethodDecl",
+                "name": "a",
+                "mangledName": "_ZN1A1aEPi",
+                "type": {"qualType": "void (int *const)"},
+                "virtual": True,
+                "inner": [{"kind": "ParmVarDecl", "type": {"qualType": "int *const"}}],
+            },
+        ),
+        _record(
+            "D",
+            _method("a", "_ZN1D1aEPi", override_attr=True, params=["int *"]),
+            bases=[_base("A")],
+        ),
+    )
+    types = _types(root)
+    assert types["D"].vtable == ["_ZN1D1aEPi"]  # replaced, not appended
+
+
+def test_restrict_qualified_base_param_override_recognized() -> None:
+    """`virtual void a(int* __restrict p);` vs. a derived
+    `void a(int* p) override;` -- confirmed against real clang both mangle
+    identically (`__restrict` is a hint, not part of the type)."""
+    root = _tu(
+        _record(
+            "A",
+            {
+                "kind": "CXXMethodDecl",
+                "name": "a",
+                "mangledName": "_ZN1A1aEPi",
+                "type": {"qualType": "void (int *__restrict)"},
+                "virtual": True,
+                "inner": [
+                    {"kind": "ParmVarDecl", "type": {"qualType": "int *__restrict"}}
+                ],
+            },
+        ),
+        _record(
+            "D",
+            _method("a", "_ZN1D1aEPi", override_attr=True, params=["int *"]),
+            bases=[_base("A")],
+        ),
+    )
+    types = _types(root)
+    assert types["D"].vtable == ["_ZN1D1aEPi"]  # replaced, not appended
+
+
+def test_pointee_restrict_qualified_param_is_not_an_override() -> None:
+    """`virtual void b(const int* __restrict p);` vs. a derived
+    `void b(int* p) override;` are genuinely DIFFERENT signatures -- the
+    const applies to the pointee, not the pointer itself. Must NOT be
+    treated as an override (the derived method still IS virtual, via
+    `override_attr`, so it appends as a genuinely new slot)."""
+    root = _tu(
+        _record(
+            "A",
+            {
+                "kind": "CXXMethodDecl",
+                "name": "b",
+                "mangledName": "_ZN1A1bEPKi",
+                "type": {"qualType": "void (const int *__restrict)"},
+                "virtual": True,
+                "inner": [
+                    {
+                        "kind": "ParmVarDecl",
+                        "type": {"qualType": "const int *__restrict"},
+                    }
+                ],
+            },
+        ),
+        _record(
+            "D",
+            _method("b", "_ZN1D1bEPi", override_attr=True, params=["int *"]),
+            bases=[_base("A")],
+        ),
+    )
+    types = _types(root)
+    assert types["D"].vtable == ["_ZN1A1bEPKi", "_ZN1D1bEPi"]  # both, distinct slots
