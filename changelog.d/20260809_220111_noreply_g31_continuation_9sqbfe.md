@@ -161,3 +161,37 @@ it should read in CHANGELOG.md. Delete the other sections.
   The new gate lives in a new leaf module,
   `abicheck/diff_symbols_param_defaults.py`, split out to keep
   `diff_symbols.py` under its line-count cap.
+- **Extended the pre-v20 `Param.default` gate above to a legacy hybrid
+  snapshot too** (Codex review, fresh evidence): the gate only recognized a
+  snapshot whose top-level `ast_producer` was exactly `"clang"`, missing a
+  hybrid snapshot's clang-only-appended function (`dumper_hybrid.py`'s
+  merge stamps that specific function's `param_defaults` provenance as
+  `"clang"` unconditionally) — the same false `PARAM_DEFAULT_VALUE_CHANGED`
+  risk, just reached through a different producer path. The gate now
+  consults the caller's already-resolved PER-FUNCTION producer instead of
+  the snapshot-level one, correctly covering both shapes uniformly.
+- **Fixed the referenced-declaration index still being built eagerly for a
+  plain literal default** (Codex review, fresh evidence): gating the build
+  on `hasInClassInitializer`/`_param_has_default` alone (an earlier fix)
+  still triggered it for e.g. `int timeout = 30;`, which never reaches the
+  point that actually needs it. The index is now threaded as a lazy,
+  memoized callable and invoked only at the exact point
+  `_canonical_expr` resolves a real `referencedDecl`.
+- **Documented a known, deliberately-deferred gap**: an MSVC
+  (`clang-cl`/`--target=*-windows-msvc`) direct-clang snapshot's template
+  specialization members mangle with a scheme neither existing scope
+  parser (`itanium_scope_components` nor `diff_cxx_rules.
+  msvc_scope_components`, the latter verified by its own design to reject
+  template-argument encoding) can decode — `A<int>::VALUE` vs.
+  `A<long>::VALUE` on such a snapshot still collide to the bare `"A"`. A
+  real fix needs new MSVC template-argument decoding with no existing
+  caller to verify it against yet; pinned with a regression test rather
+  than guessed at.
+- **Split `dumper_clang.py`'s initializer/default-argument fingerprinting
+  into a new leaf module**, `abicheck/dumper_clang_expr.py`: the fingerprint
+  chain grew substantially across this PR's several review rounds and kept
+  pushing the parent file over its 2000-line hard cap. Behavior-preserving
+  (every fingerprint byte-for-byte identical before/after, verified against
+  every case in this PR's own test suite) — existing test imports needed no
+  changes, since the moved names are re-exported back through
+  `dumper_clang`'s own namespace.

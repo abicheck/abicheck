@@ -1256,6 +1256,55 @@ def test_index_specialization_key_stable_across_member_insertion() -> None:
     assert index["0x1"] == "A#AIiE::VALUE"
 
 
+def test_specialization_scope_key_documents_msvc_gap() -> None:
+    """Codex review, PR #687, third round, fresh evidence: a real
+    ``clang-cl``/``--target=*-windows-msvc`` snapshot mangles a
+    specialization member as e.g. ``?VALUE@?$A@H@@2HB``, which neither
+    ``itanium_scope_components`` NOR ``diff_cxx_rules.msvc_scope_components``
+    can parse (both return ``None`` -- the latter by its own documented
+    design, since a specialization's class-name component always starts
+    with the ``?$`` template marker it deliberately rejects). This is a
+    KNOWN, deliberately deferred gap (see ``_specialization_scope_key``'s
+    own docstring) -- this test pins the current, honest behavior (falls
+    back to the bare, collision-prone name; never crashes or fabricates a
+    value) so a future fix has a concrete regression to flip, and so this
+    doesn't silently regress further (e.g. start raising)."""
+    from abicheck.dumper_clang import _index_decl_id_qualified_names
+
+    root = _tu(
+        {
+            "kind": "ClassTemplateSpecializationDecl",
+            "name": "A",
+            "inner": [
+                {
+                    "kind": "VarDecl",
+                    "id": "0x1",
+                    "name": "VALUE",
+                    "mangledName": "?VALUE@?$A@H@@2HB",
+                },
+            ],
+        },
+        {
+            "kind": "ClassTemplateSpecializationDecl",
+            "name": "A",
+            "inner": [
+                {
+                    "kind": "VarDecl",
+                    "id": "0x2",
+                    "name": "VALUE",
+                    "mangledName": "?VALUE@?$A@J@@2JB",
+                },
+            ],
+        },
+    )
+    index = _index_decl_id_qualified_names(root)
+
+    # Both fall back to the same bare, undisambiguated key -- the documented
+    # collision, not a crash.
+    assert index["0x1"] == "A::VALUE"
+    assert index["0x2"] == "A::VALUE"
+
+
 def test_parse_enums_is_scoped_false_for_plain_enum() -> None:
     root = _tu(
         {

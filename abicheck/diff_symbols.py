@@ -1311,7 +1311,7 @@ def _diff_param_defaults(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
                 and p_old.default != p_new.default
             ):
                 if param_default_fingerprint_comparison_unreliable(
-                    old, new, p_old.default, p_new.default
+                    old, new, old_producer, new_producer, p_old.default, p_new.default
                 ):
                     continue
                 changes.append(
