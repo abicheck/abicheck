@@ -4,8 +4,11 @@ A new changelog fragment. See changelog.d/README.md for the workflow.
 
 ### Changed
 
-- **Six CLI entry points were restructured to cut cyclomatic complexity**, with
-  no behaviour, output, or exit-code changes:
+- **All seven CLI entry points were restructured to cut cyclomatic
+  complexity**, with no behaviour, output, or exit-code changes:
+  - `cli.dump_cmd` — the `--dump-manifest` load (with the flags it is
+    mutually exclusive with) and the debug-format resolution plus its two
+    usage-error checks each became their own helper.
   - `cli_scan.scan_cmd` — the operand/flag mutual-exclusion checks, the project
     config discovery (with the digest that parsed it), and the ADR-049
     evaluation-config resolution each became their own helper.
@@ -43,3 +46,16 @@ A new changelog fragment. See changelog.d/README.md for the workflow.
   CLAUDE.md "M1-3" forbids — while `cli_helpers_compare` is already a member.
   `cli_compare_helpers._verdict_exit_code` (which `cli_scan_baseline` imports)
   and the existing test patch targets keep resolving unchanged.
+- Relocated the snapshot write path (`_write_snapshot_output`,
+  `_missing_requested_evidence_layers`, `_classify_missing_layers`,
+  `_layer_payload_empty`) from `cli.py` to `cli_buildsource.py`. `cli.py` was
+  within a handful of lines of the 2000-line hard cap, and this cluster is
+  cohesive with its new home: writing a snapshot *is* the step that folds
+  `cli_buildsource`'s own `embed_build_source`/`embed_inputs_pack` payloads in
+  and then enforces the requested evidence depth, and that module already
+  imported `_write_snapshot_output` back out of `cli`. `cli` re-exports all
+  four names. The two evidence-layer helpers are additionally called back
+  *through* the `cli` module rather than by bare name, so the existing
+  `monkeypatch.setattr(cli, "_missing_requested_evidence_layers", ...)` targets
+  keep taking effect — the same resolution the neighbouring
+  `cli._normalize_binary_input` calls already use.
