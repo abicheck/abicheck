@@ -189,6 +189,15 @@ model:
   dispatch, macro/config, callback/function-pointer, object/archive link
   provenance) implemented behind the same coverage-honesty discipline as the
   existing call/type graph (narrowed/degraded flags, `extractor_passes`).
+  **Object/archive link provenance is done** (`archive_graph.py`,
+  `extractor_passes["archive_graph"]`/`degraded_passes["archive_graph"]` —
+  see Phase 5 item 6 above). **Template instantiation is done**
+  (`template_graph.py`, `extractor_passes["template_graph"]`/
+  `degraded_passes["template_graph"]` — see Phase 5 item 1 above), for the
+  three populated edge kinds; the four reserved ones (`TEMPLATE_USES_DECL`
+  etc.) remain open, each its own follow-up. Virtual dispatch, macro/config,
+  and callback/function-pointer remain fully open — each needs its own
+  Clang AST pass this phase has not added.
 - **G29.7** — The minimal new user-facing detector set from the review
   (8 detector surfaces: 6 `ChangeKind`s and 2 report-level overlays — see
   Phase 6) plus `case194`-`case205` positive/negative example pairs and the
@@ -606,14 +615,32 @@ decisions.
 
 ### Phase 5 — New semantic graph families
 
-In review-stated priority order:
+In review-stated priority order. Items 1 and 6 are **done**; item 6 shipped
+out of order first since it needed no compiler frontend, unlike the rest,
+which all depend on a Clang AST pass.
 
-1. **Template instantiation**: `DECL_INSTANTIATES_TEMPLATE`,
-   `TEMPLATE_USES_DECL`/`TEMPLATE_USES_TYPE`, `INSTANTIATION_EMITS_SYMBOL`,
-   `INSTANTIATION_MAPS_TO_EXPORT`, `DECL_USES_DEFAULT_TEMPLATE_ARG`,
-   `CONSTRAINT_DEPENDS_ON_DECL` — closes the "public template → concrete
-   instantiation → internal specialization → emitted exported symbol →
-   consumer requirement" chain.
+1. **Template instantiation — done.** `abicheck/buildsource/template_graph.py`
+   is a third, independent `clang -ast-dump=json` pass (alongside the call
+   and type graph passes), driven by `inline_graph_fold.fold_template_graph`
+   whenever they run. Populates `template_decl`/`template_instantiation`
+   nodes and `DECL_INSTANTIATES_TEMPLATE`/`TEMPLATE_USES_TYPE`/
+   `INSTANTIATION_EMITS_SYMBOL` — closing the "public template → concrete
+   instantiation → internal specialization → emitted exported symbol" chain
+   for the load-bearing half: an instantiation's own template-argument
+   types (via clang's own `decl` cross-reference on the `TemplateArgument`
+   node — exact, not a textual heuristic) and its instantiated members'
+   emitted symbols (joined onto an existing `binary_symbol` node only,
+   ADR-057 D1's "one shared node id is the whole join mechanism" rule,
+   reapplied). `TEMPLATE_USES_DECL`/`INSTANTIATION_MAPS_TO_EXPORT`/
+   `DECL_USES_DEFAULT_TEMPLATE_ARG`/`CONSTRAINT_DEPENDS_ON_DECL` remain
+   reserved, unpopulated — see the module's own docstring (a non-type/
+   function-pointer argument needing its own AST verification, redundancy
+   with `BINARY_EXPORTS_SYMBOL` on the already-joined symbol node,
+   explicit-vs-defaulted argument detection, and C++20 concepts needing a
+   separate AST subsystem, respectively — none attempted this slice). See
+   `docs/reference/source-graph-schema.md` for the field-level detail,
+   including the two load-bearing empirical AST findings (the explicit-
+   instantiation detachment quirk, and typedef-alias argument resolution).
 2. **Macro/config dependency**: `DECL_USES_MACRO`, `MACRO_EXPANDS_TO_VALUE`/
    `MACRO_EXPANDS_TO_TYPE`, `MACRO_CONTROLS_DECL`/`MACRO_CONTROLS_EDGE`, each
    edge carrying a configuration condition (`_WIN32`, feature flags).
@@ -630,10 +657,27 @@ In review-stated priority order:
    default template argument, concept/constraint dependency, function-pointer
    signature, member-pointer type — feeds the Phase 2 per-role coverage
    matrix.
-6. **Object/link provenance**: a real `ar`/`nm`-style extractor for the
-   currently schema-only `ARCHIVE_CONTAINS_OBJECT`/`OBJECT_DEFINES_SYMBOL`
-   edges, so a removed-symbol finding can localize to
-   "`cache_dispatch.o` in `libinternal_dispatch.a`".
+6. **Object/link provenance — done.** `abicheck/buildsource/archive_graph.py`
+   is the real `ar`-index introspection pass: a pure parser over the
+   archive's own linker-written symbol index (GNU `/`/`/SYM64/` and
+   BSD/Mach-O `__.SYMDEF`/`__.SYMDEF_64`, both plain and thin-archive
+   flavors), driven by `inline_graph_fold.fold_archive_graph` over every
+   `static_library` node `source_graph._fold_link_provenance` already
+   creates from `BuildEvidence.link_units`. Populates `archive_member`
+   nodes and the previously schema-only `ARCHIVE_CONTAINS_OBJECT`/
+   `OBJECT_DEFINES_SYMBOL` edges, so a removed-symbol finding can localize
+   to "`cache_dispatch.o` in `libinternal_dispatch.a`" via
+   `archive_graph.defining_members`. Needs no compiler (unlike items 1-5
+   above), so it runs whenever an archive link input is present, gated only
+   on finding and reading the archive on disk — never on clang. An
+   `OBJECT_DEFINES_SYMBOL` edge only ever joins onto a `binary_symbol` node
+   the graph already carries (ADR-057 D1's "one shared node id is the whole
+   join mechanism" rule, reapplied here), so a real static library's
+   thousands of internal-only indexed symbols mint no new node.
+   `linker_script`/`export_map`/`comdat_group` (a member archive's other
+   three reserved node kinds) stay unpopulated — no normalized data source
+   for those; a real static-library symbol *removal* can already be
+   localized end to end today.
 
 ### Phase 6 — New detectors, examples, FP gates
 
@@ -684,9 +728,11 @@ validation, consumer/use-case attribution checks.
 
 New:
 ```text
-abicheck/buildsource/graph_facts.py  # GraphFact/FactConflict/merge, relation_key/occurrence_id (Phase 2 D1/D2, DONE); CONSUMER_NODE_KINDS/CONSUMER_EDGE_KINDS (Phase 4 D1, DONE — here rather than source_graph.py, which is at its line cap)
+abicheck/buildsource/graph_facts.py  # GraphFact/FactConflict/merge, relation_key/occurrence_id (Phase 2 D1/D2, DONE); CONSUMER_NODE_KINDS/CONSUMER_EDGE_KINDS/TEMPLATE_NODE_KINDS/TEMPLATE_EDGE_KINDS/LINK_PROVENANCE_NODE_KINDS/LINK_PROVENANCE_EDGE_KINDS (Phase 4 D1 + Phase 5 items 1/6, DONE — here rather than source_graph.py, which is at its line cap)
 abicheck/buildsource/graph_impact.py  # select_preferred_graph_path, attach_impact_metadata, _path_occurrence_id (Phase 2 D6/ADR-052 Slice 6, DONE — landed here, not under impact/)
 abicheck/buildsource/entity_resolver.py  # EntityResolver/EntityConflict (Phase 2 D4, DONE — scoped implementation)
+abicheck/buildsource/archive_graph.py  # ar-index introspection (Phase 5 item 6, DONE — archive_member/ARCHIVE_CONTAINS_OBJECT/OBJECT_DEFINES_SYMBOL)
+abicheck/buildsource/template_graph.py  # Clang template-instantiation pass (Phase 5 item 1, DONE — template_decl/template_instantiation, DECL_INSTANTIATES_TEMPLATE/TEMPLATE_USES_TYPE/INSTANTIATION_EMITS_SYMBOL)
 abicheck/internal_leak.py   # TraversalPolicy + effect_transitions (Phase 2 D5, DONE — landed here, not a separate impact/traversal.py)
 abicheck/impact/
     model.py           # ImpactAssessment, GraphProofPath, FindingDecision (Phase 3 slices 1/7, DONE — ADR-052)

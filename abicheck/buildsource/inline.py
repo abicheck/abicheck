@@ -801,7 +801,7 @@ def collect_inline_pack(
 
         if merged.compile_units:
             compile_db = None  # already seeded from a build-info pack
-        elif _maybe_collect_bazel_build_info(build_info, merged, extractors):
+        elif _maybe_collect_bazel_build_info(build_info, merged, extractors, sources):
             # A pre-captured Bazel aquery/cquery jsonproto produces BuildEvidence
             # directly (no compile_commands.json to load) — ADR-037 D5 #5 sniffing.
             compile_db = None
@@ -1155,6 +1155,7 @@ def _maybe_collect_bazel_build_info(
     build_info: Path | None,
     merged: BuildEvidence,
     extractors: list[ExtractorRecord],
+    sources: Path | None = None,
 ) -> bool:
     """Route a pre-captured Bazel aquery/cquery ``--build-info`` to the adapter.
 
@@ -1162,6 +1163,20 @@ def _maybe_collect_bazel_build_info(
     *merged*) when *build_info* is a Bazel jsonproto file, else ``False`` so the
     caller falls back to compile-DB resolution. Pre-captured only — the adapter is
     constructed with ``allow_query=False`` so no ``bazel`` subprocess ever runs.
+
+    *sources* (the caller's own ``--sources`` tree root, when given) is passed
+    through as the adapter's ``workspace`` -- the same anchor
+    :func:`~abicheck.buildsource.build_query.run_inferred_build_query`'s own
+    Bazel path already supplies (Codex review, fresh evidence): without a
+    workspace, a captured aquery's own relative exec paths (``bazel-out/.../
+    libfoo.a``) leave both ``CompileUnit.directory`` and ``LinkUnit.directory``
+    empty (the adapter deliberately refuses to persist a meaningless relative
+    ``"."`` when no workspace is known -- see ``BazelAdapter._compile_unit``),
+    so ``_default_archive_search_roots`` returns no roots at all and
+    ``archive_graph``'s own pass reports every such static library as missing.
+    ``None`` when the caller has no source tree (e.g. an out-of-tree
+    ``--build-info`` with no ``--sources``) -- unchanged from before, since
+    ``BazelAdapter``'s own ``workspace`` parameter already tolerates ``None``.
     """
     if build_info is None or not build_info.is_file():
         return False
@@ -1172,10 +1187,10 @@ def _maybe_collect_bazel_build_info(
 
     if fmt == "bazel_aquery":
         kind = "aquery"
-        adapter = BazelAdapter(aquery=build_info, allow_query=False)
+        adapter = BazelAdapter(aquery=build_info, workspace=sources, allow_query=False)
     else:
         kind = "cquery"
-        adapter = BazelAdapter(cquery=build_info, allow_query=False)
+        adapter = BazelAdapter(cquery=build_info, workspace=sources, allow_query=False)
     ev = adapter.collect()
     merged.merge(ev)
     extractors.append(
@@ -1749,14 +1764,18 @@ def _build_inline_graph(
     separate opt-in flag.
 
     When ``with_call_graph`` is set, :func:`inline_graph_fold.fold_semantic_graphs`
-    folds the Clang call/type/override/include-graph edges into the graph
-    (best-effort throughout — see its own docstring for the edge kinds and
-    scoping precedence); gated to the semantic L4 modes by the caller, with
-    no separate opt-in flag (ADR-041 header-only-graph addendum follow-up:
-    these used to be ``collect``-only, explicit-flag-gated passes with no
-    equivalent here at all).
+    folds the Clang call/type/override/template/include-graph edges into the
+    graph (best-effort throughout — see its own docstring for the edge kinds
+    and scoping precedence, including the template-instantiation pass, G29
+    Phase 5 item 1, see ``template_graph.py``); gated to the semantic L4
+    modes by the caller, with no separate opt-in flag (ADR-041
+    header-only-graph addendum follow-up: these used to be ``collect``-only,
+    explicit-flag-gated passes with no equivalent here at all).
+    ``fold_archive_graph`` (G29 Phase 5 item 6) needs no clang and always
+    runs, independent of ``with_call_graph``.
     """
-    has_build = bool(merged.compile_units or merged.targets)
+    # link_units too: build_source_graph() folds them regardless, so a link-only input must not return None first (Codex).
+    has_build = bool(merged.compile_units or merged.targets or merged.link_units)
     if not has_build and surface is None:
         return None
     from .source_graph import build_source_graph
@@ -1785,6 +1804,9 @@ def _build_inline_graph(
             changed_paths,
             scoped_units=call_graph_units,
         )
+    from .inline_graph_fold import fold_archive_graph
+
+    fold_archive_graph(graph, merged, extractors)
     graph.finalize()
     return graph
 

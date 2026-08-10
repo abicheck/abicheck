@@ -34,12 +34,58 @@ _ASCII_DIGITS = "0123456789"
 # operator overloads group (e.g. `operator[](int)` / `operator[](long)` both
 # `ix`). Deliberately excludes `cv` (conversion-to-T — carries a type and is not
 # an overload of other conversions) and variable forms (`li` literal, vendor).
-_ITANIUM_OPERATORS = frozenset({
-    "nw", "na", "dl", "da", "ng", "ad", "de", "co", "pl", "mi", "ml", "dv",
-    "rm", "an", "or", "eo", "aS", "pL", "mI", "mL", "dV", "rM", "aN", "oR",
-    "eO", "ls", "rs", "lS", "rS", "eq", "ne", "lt", "gt", "le", "ge", "ss",
-    "nt", "aa", "oo", "pp", "mm", "cm", "pm", "pt", "cl", "ix", "qu", "aw",
-})
+_ITANIUM_OPERATORS = frozenset(
+    {
+        "nw",
+        "na",
+        "dl",
+        "da",
+        "ng",
+        "ad",
+        "de",
+        "co",
+        "pl",
+        "mi",
+        "ml",
+        "dv",
+        "rm",
+        "an",
+        "or",
+        "eo",
+        "aS",
+        "pL",
+        "mI",
+        "mL",
+        "dV",
+        "rM",
+        "aN",
+        "oR",
+        "eO",
+        "ls",
+        "rs",
+        "lS",
+        "rS",
+        "eq",
+        "ne",
+        "lt",
+        "gt",
+        "le",
+        "ge",
+        "ss",
+        "nt",
+        "aa",
+        "oo",
+        "pp",
+        "mm",
+        "cm",
+        "pm",
+        "pt",
+        "cl",
+        "ix",
+        "qu",
+        "aw",
+    }
+)
 
 
 def _read_length_prefixed_name(s: str, i: int) -> tuple[str | None, int]:
@@ -150,6 +196,35 @@ def _parse_source_name_component(s: str, i: int) -> tuple[str | None, int]:
     if name is None:
         return None, i
     n = len(s)
+    # GNU ABI tags (`B<source-name>`, e.g. the libstdc++ `cxx11` tag, or a
+    # user `__attribute__((abi_tag(...)))`) attach to the unqualified name
+    # itself and are mangled *before* any template-argument list — verified
+    # against a real compiled `template <typename T> struct
+    # __attribute__((abi_tag("tag"))) C { C(); };` instantiated as `C<int>`:
+    # `nm`/`c++filt` show `_ZN1CB3tagIiEC1Ev` (Codex review, fresh
+    # evidence) -- name "C", then tag "B3tag", then template-args "IiE",
+    # not the reverse. Checking template-args first (the previous order)
+    # left a real ABI-tagged class template's own "IiE" unconsumed after
+    # the tag loop only found "B3tag" first, which made every caller of
+    # this component parser -- including :func:`itanium_scope_components`
+    # and :func:`itanium_ctor_dtor_marker_span` -- fail outright on this
+    # real, non-synthetic case instead of just mis-grouping it.
+    while i < n and s[i] == "B":
+        tag, j = _read_length_prefixed_name(s, i + 1)
+        if tag is None:
+            break
+        # Delimited as "[abi:tag]" -- not the raw "B<tag>" the mangling
+        # itself uses -- so a flattened identity can't collide with an
+        # unrelated, plainly-spelled class merely starting with the same
+        # letters (Codex review, fresh evidence): `C[abi_tag("tag")]<int>`
+        # (mangled ...CB3tagIiE...) and a class literally named `CBtag<int>`
+        # (mangled ...CBtagIiE...) both flattened to the identical
+        # "CBtagIiE" before this fix, confirmed against two real compiled
+        # symbols -- `_ZN1CB3tagIiE1fEv` vs. `_ZN5CBtagIiE1fEv`, genuinely
+        # different classes' own `f()`. No real C++ identifier can contain
+        # `[`/`:`/`]`, so this delimiter can never collide with a real name.
+        name = f"{name}[abi:{tag}]"
+        i = j
     # A directly-attached template-argument list belongs to this
     # component; keep it raw so Box<int> and Box<float> stay distinct.
     if i < n and s[i] == "I":
@@ -158,15 +233,6 @@ def _parse_source_name_component(s: str, i: int) -> tuple[str | None, int]:
             return None, i
         name = name + s[i:end]
         i = end
-    # GNU ABI tags (`B<source-name>`, e.g. the libstdc++ `cxx11` tag on
-    # std::string returns) are part of the unqualified-name identity;
-    # keep them so a tagged name groups with itself across overloads.
-    while i < n and s[i] == "B":
-        tag, j = _read_length_prefixed_name(s, i + 1)
-        if tag is None:
-            break
-        name = f"{name}B{tag}"
-        i = j
     return name, i
 
 
@@ -370,6 +436,68 @@ def itanium_qualified_name(mangled: str) -> str | None:
     return "::".join(comps) if comps else None
 
 
+def itanium_ctor_dtor_marker_span(mangled: str) -> tuple[int, int] | None:
+    """``(start, end)`` indices of *mangled*'s own Itanium ctor/dtor code
+    (``C1``/``C2``/``C3``/``D0``/``D1``/``D2``) -- the exact 2-character
+    span, structurally located the same length-prefix-aware way
+    :func:`itanium_scope_components` walks a nested name, so a class or
+    template-argument name that happens to embed the literal substring
+    ``"C1"``/``"D1"`` is never mistaken for the real marker: each
+    length-prefixed identifier is skipped as one whole unit via
+    :func:`_parse_source_name_component`, never scanned character-by-
+    character for a coincidental match.
+
+    Exists for a caller that needs to locate, not merely recognize, the
+    marker -- e.g. to derive a sibling ctor/dtor mangling (``buildsource.
+    template_graph._ctor_dtor_symbol_variants``, Codex review, fresh
+    evidence): a naive ``"C1E"`` substring search finds ``C1Evil<int>``'s
+    own embedded ``"C1E"`` inside its *class name* first (``_ZN6C1EvilIiE
+    C1Ev``), not the real ctor code that follows it, deriving the
+    genuinely different class ``C2Evil<int>``'s own real constructor
+    mangling by coincidence -- a false positive, not merely a missed one.
+
+    *mangled* need not be pre-normalized for the Mach-O double-underscore
+    prefix -- :func:`_itanium_strip_prefix` strips it on its own local
+    variable only, never mutating the caller's *mangled*, and this
+    function's own offset arithmetic (``offset = len(mangled) -
+    len(s)``) is computed against that same untouched *mangled*, so the
+    returned span is correct relative to whatever prefix form the caller
+    passed in (confirmed empirically: ``__ZN1CC1Ev`` and ``_ZN1CC1Ev``
+    both locate the identical ``"C1"`` text within their own respective
+    strings).
+
+    Returns ``None`` when *mangled* does not carry a ctor/dtor code this
+    parser can locate (a plain function/operator, a non-Itanium or
+    unmangled name, or any other form :func:`itanium_scope_components`
+    itself does not model)."""
+    prefix = _itanium_strip_prefix(mangled)
+    if prefix is None:
+        return None
+    s, nested = prefix
+    if not nested:
+        return None  # a free function's own single component is never a ctor/dtor
+    offset = len(mangled) - len(s)
+    i = 0
+    n = len(s)
+    if s[i : i + 2] == "St":
+        i += 2
+    while i < n:
+        c = s[i]
+        if c == "E":
+            return None  # nested name closed with no ctor/dtor component found
+        if c in _ASCII_DIGITS:
+            _name, new_i = _parse_source_name_component(s, i)
+            if new_i == i:
+                return None  # malformed source name
+            i = new_i
+            continue
+        label, new_i = _parse_ctor_dtor_component(s, i)
+        if label is not None:
+            return offset + i, offset + new_i
+        return None  # an operator or other non-source-name, non-ctor/dtor form
+    return None
+
+
 def msvc_scope_components(mangled: str) -> list[str] | None:
     """Scope components of an MSVC-mangled C++ symbol, parsed structurally.
 
@@ -521,11 +649,15 @@ def virtual_signature_key(f: Function) -> str:
     """
     leaf = f.name.rsplit("::", 1)[-1]
     params = ",".join(p.type for p in f.params)
-    quals = ("c" if f.is_const else "") + ("v" if f.is_volatile else "") + f.ref_qualifier
+    quals = (
+        ("c" if f.is_const else "") + ("v" if f.is_volatile else "") + f.ref_qualifier
+    )
     return f"{leaf}({params}){quals}"
 
 
-def _owner_descends_from(owner: str, ancestor: str, types: Mapping[str, RecordType]) -> bool:
+def _owner_descends_from(
+    owner: str, ancestor: str, types: Mapping[str, RecordType]
+) -> bool:
     """True if *owner* names *ancestor* itself, or a transitive base of it in *types*.
 
     Tolerant of qualified-vs-leaf naming the same way ``_transitive_bases``
@@ -687,9 +819,9 @@ def vtable_slot_is_override_reuse(
     new_owner = owner_class_of(f_new)
     if old_owner is None or new_owner is None:
         return False
-    return _owner_descends_from(new_owner, old_owner, new_types) or _owner_descends_from(
-        new_owner, old_owner, old_types
-    )
+    return _owner_descends_from(
+        new_owner, old_owner, new_types
+    ) or _owner_descends_from(new_owner, old_owner, old_types)
 
 
 def old_virtual_signatures(functions: Iterable[Function]) -> dict[str, set[str]]:
@@ -713,7 +845,9 @@ def old_virtual_signatures(functions: Iterable[Function]) -> dict[str, set[str]]
     return sigs
 
 
-def _transitive_bases(start: RecordType | None, types: Mapping[str, RecordType]) -> set[str]:
+def _transitive_bases(
+    start: RecordType | None, types: Mapping[str, RecordType]
+) -> set[str]:
     """All (transitive) base-class names reachable from record ``start``.
 
     Walks ``bases`` / ``virtual_bases``, resolving each base name through the
