@@ -746,3 +746,16 @@
   format would still have been reachable from the other direction, by an
   unusual literal member name that happens to look like a length-prefixed
   entry.
+
+  A twenty-fifth round found and fixed one more real gap in
+  `archive_graph.py`, confirmed by inspection of the caller/callee
+  contract. `augment_graph_with_archives`'s own docstring promises "never
+  raises" for every per-archive failure (ADR-028 D3), and its `try/except`
+  around `read_archive(path)` caught `ArchiveFormatError`/`OSError` --
+  but not `MemoryError`, which the `_MAX_SPECIAL_MEMBER_BYTES` cap added
+  in the twenty-second round still permits as a single 1 GiB allocation,
+  large enough to exhaust memory on a constrained host (CodeRabbit
+  review). Left uncaught, that would abort the whole L5 graph fold over
+  one archive instead of just skipping it. Fixed by adding an
+  `except MemoryError:` clause alongside the existing two, degrading to a
+  diagnostic the same way any other unreadable archive already does.

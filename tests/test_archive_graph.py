@@ -1077,6 +1077,33 @@ def test_augment_graph_unreadable_archive_diagnostic_is_redacted(
     assert "~project-root~" in result.diagnostics[0]
 
 
+def test_augment_graph_memory_error_degrades_to_diagnostic(
+    tmp_path, monkeypatch
+) -> None:
+    """The function's own docstring promises "never raises" every per-archive
+    failure into a diagnostic (ADR-028 D3), but ``_MAX_SPECIAL_MEMBER_BYTES``
+    only bounds a single special-member read at 1 GiB -- still large enough
+    to raise ``MemoryError`` on a memory-constrained host (CodeRabbit
+    review). Uncaught, that would abort the whole L5 graph fold over one
+    archive instead of just skipping it."""
+    from abicheck.buildsource import archive_graph as ag
+
+    data = build_gnu_archive([("a.o", b"SYM:foo\n")])
+    (tmp_path / "libtest.a").write_bytes(data)
+
+    def _boom(path):
+        raise MemoryError
+
+    monkeypatch.setattr(ag, "read_archive", _boom)
+    g = _graph_with_archive("libtest.a", ["foo"])
+
+    result = augment_graph_with_archives(g, search_roots=(tmp_path,))
+
+    assert result.archives_read == 0
+    assert result.diagnostics
+    assert "out of memory" in result.diagnostics[0]
+
+
 def test_augment_graph_macho_underscore_prefixed_symbol_joins_via_fallback(
     tmp_path,
 ) -> None:

@@ -1173,6 +1173,16 @@ def augment_graph_with_archives(
                 f"{label}: unreadable: {DEFAULT_REDACTION.path(str(exc))}"
             )
             continue
+        except MemoryError:
+            # This function's own docstring promises "never raises" (ADR-028
+            # D3), but _MAX_SPECIAL_MEMBER_BYTES only bounds a single
+            # special-member read at 1 GiB -- still large enough to raise
+            # MemoryError on a memory-constrained host (CodeRabbit review).
+            # Uncaught, that would abort the whole L5 graph fold over one
+            # archive. Degrade the same way any other unreadable archive
+            # does rather than let it propagate.
+            result.diagnostics.append(f"{label}: unreadable: out of memory")
+            continue
         result.archives_read += 1
         if not contents.has_symbol_index:
             result.diagnostics.append(
