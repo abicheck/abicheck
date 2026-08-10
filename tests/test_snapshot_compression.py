@@ -371,15 +371,20 @@ def test_zstd_decoder_rejects_window_above_ceiling(tmp_path):
     assert read_snapshot_bytes(p) == b"a" * (1 << 20)
 
 
-def test_oversized_stored_file_rejected_before_full_read(tmp_path):
-    """CodeRabbit review: the stored-file-size check (via stat(), before
-    read_bytes()) must reject a file whose *stored* size alone already
-    exceeds the limit (plus the compressed-file margin, see the boundary
-    test below) -- using low-entropy content, well beyond the margin, so
-    the compressed size stays large rather than shrinking under the limit
-    itself."""
+def test_oversized_stored_file_rejected_before_full_read(tmp_path, monkeypatch):
+    """CodeRabbit review, refined by two later Codex rounds: the stored-
+    file-size check (via fstat(), before a full read) must reject a file
+    whose *stored* size alone already exceeds the effective cap -- but (see
+    `DEFAULT_MAX_STORED_BYTES`'s docstring above) that cap is now an
+    independent, fixed ceiling rather than anything derived from the
+    caller's `max_decoded_bytes`, since a valid concatenated multi-member
+    gzip stream disproved both earlier margin-based formulas. Lower the
+    ceiling via its private env var to keep this test fast rather than
+    needing an actually-multi-gigabyte fixture."""
     import os as _os
     import random
+
+    import abicheck.snapshot_io as snapshot_io_mod
 
     random.seed(1234)
     incompressible = bytes(random.randrange(256) for _ in range(200_000))
@@ -387,8 +392,12 @@ def test_oversized_stored_file_rejected_before_full_read(tmp_path):
     p.write_bytes(gzip.compress(incompressible, compresslevel=9))
     stored_size = _os.path.getsize(p)
     assert stored_size > 100
+    monkeypatch.setenv(snapshot_io_mod._MAX_STORED_BYTES_ENV, "100")
+    # cap = max(max_decoded_bytes, effective _max_stored_bytes()) -- keep
+    # the decoded-size argument small too, so the lowered stored-bytes
+    # ceiling (not an incidentally large decoded limit) is what's exercised.
     with pytest.raises(SnapshotError, match="exceeds"):
-        read_snapshot_bytes(p, max_decoded_bytes=100)
+        read_snapshot_bytes(p, max_decoded_bytes=50)
 
 
 def test_tiny_compressed_payload_not_rejected_by_stored_size_precheck(tmp_path):
@@ -407,73 +416,39 @@ def test_tiny_compressed_payload_not_rejected_by_stored_size_precheck(tmp_path):
         assert read_snapshot_bytes(p, max_decoded_bytes=2) == b"{}"
 
 
-def test_stored_size_precheck_margin_scales_with_limit():
-    """Codex review, PR #699: a *fixed* margin isn't generous enough for a
-    large incompressible payload -- DEFLATE's "stored" block (used for data
-    it can't compress) caps at 65535 bytes with a 5-byte header each, so
-    overhead grows roughly linearly with payload size, not staying flat the
-    way it does for a tiny payload. Fresh evidence: a 220 MiB incompressible
-    gzip payload measured ~70 KiB of overhead, already exceeding the
-    previous fixed 64 KiB margin. Assert the margin scales with `limit`
-    once `limit` is large enough for the proportional term to dominate the
-    fixed floor -- the pure arithmetic, not a multi-hundred-MB fixture."""
-    from abicheck.snapshot_io import (
-        _STORED_SIZE_PRECHECK_MARGIN,
-        _stored_size_precheck_margin,
-    )
+def test_stored_size_cap_is_independent_of_max_decoded_bytes():
+    """Codex review, PR #699: the compressed-file stored-size cap is a
+    fixed, independent ceiling (`DEFAULT_MAX_STORED_BYTES`), not derived
+    from the caller's `max_decoded_bytes` -- verify the pure arithmetic
+    directly rather than only through an end-to-end fixture."""
+    from abicheck.snapshot_io import DEFAULT_MAX_STORED_BYTES, _max_stored_bytes
 
-    # Small limit: the fixed floor dominates (unchanged from before this fix).
-    assert _stored_size_precheck_margin(100) == _STORED_SIZE_PRECHECK_MARGIN
-    # Large limit (matching the real DEFAULT_MAX_DECODED_BYTES scale): the
-    # proportional term must exceed the old fixed margin by a comfortable
-    # safety factor over the measured ~0.03% worst-case overhead ratio.
-    large_limit = 1024 * 1024 * 1024  # 1 GiB, the real default ceiling
-    margin = _stored_size_precheck_margin(large_limit)
-    assert margin > _STORED_SIZE_PRECHECK_MARGIN
-    assert margin >= large_limit * 0.001  # >= 10x the measured overhead ratio
+    assert _max_stored_bytes() == DEFAULT_MAX_STORED_BYTES
+    # A tiny caller-requested decoded limit must not shrink the stored cap
+    # -- it stays at the independent default regardless.
+    assert DEFAULT_MAX_STORED_BYTES > 100
 
 
-def test_stored_size_precheck_tolerates_large_payload_overhead(tmp_path, monkeypatch):
-    """Codex review, PR #699: simulate the large-incompressible-payload
-    boundary case end to end via a monkeypatched fstat rather than an
-    actually-huge fixture -- a stored size that exceeds `limit` by more
-    than the *old* fixed 64 KiB margin, but less than the new proportional
-    one, must not be rejected by the precheck."""
-    import abicheck.snapshot_io as snapshot_io_mod
+def test_concatenated_multi_member_gzip_not_rejected_by_stored_size_precheck(
+    tmp_path,
+):
+    """Codex review, PR #699 (third round on this precheck): a *valid*
+    concatenated multi-member gzip stream (RFC 1952 permits this, and
+    Python's gzip module transparently decodes it as one logical stream)
+    can have stored-size overhead that scales with the *number of
+    members*, not the payload size -- disproving both an earlier fixed
+    margin and a later limit-proportional one. One gzip member per byte is
+    the worst realistic case; confirm it still round-trips correctly even
+    with `max_decoded_bytes` set exactly to the payload's own size (the
+    tightest possible boundary)."""
+    payload = json.dumps({"library": "x", "version": "1", "pad": "ab" * 500}).encode()
+    members = b"".join(gzip.compress(bytes([b]), compresslevel=9) for b in payload)
+    p = tmp_path / "concatenated.abicheck.json.gz"
+    p.write_bytes(members)
+    assert len(members) > len(payload) * 5  # overhead really does dominate here
 
-    snap = _sample_snapshot()
-    p = tmp_path / "big.abicheck.json.gz"
-    write_snapshot(snap, p)
-
-    limit = 500 * 1024 * 1024  # 500 MiB decoded-size ceiling
-    # ~100 KiB of simulated framing overhead: bigger than the old fixed
-    # 64 KiB margin (would previously have been rejected), well inside the
-    # new proportional one (500 MiB // 256 ≈ 1.95 MiB).
-    inflated_size = limit + 100_000
-    real_fstat = os.fstat
-
-    def _inflated_fstat(fd):
-        st = real_fstat(fd)
-        return os.stat_result(
-            (
-                st.st_mode,
-                st.st_ino,
-                st.st_dev,
-                st.st_nlink,
-                st.st_uid,
-                st.st_gid,
-                inflated_size,
-                int(st.st_atime),
-                int(st.st_mtime),
-                int(st.st_ctime),
-            )
-        )
-
-    monkeypatch.setattr(snapshot_io_mod.os, "fstat", _inflated_fstat)
-    # Must not raise -- the real (small) file content still decodes fine;
-    # only the simulated stored-size precheck comparison is exercised here.
-    decoded = read_snapshot_bytes(p, max_decoded_bytes=limit)
-    assert json.loads(decoded)["library"] == snap.library
+    decoded = read_snapshot_bytes(p, max_decoded_bytes=len(payload))
+    assert decoded == payload
 
 
 # ── Determinism ──────────────────────────────────────────────────────────

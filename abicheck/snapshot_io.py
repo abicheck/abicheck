@@ -85,27 +85,33 @@ _SNIFF_BYTES = 4096
 # without product need).
 DEFAULT_MAX_DECODED_BYTES = 1024 * 1024 * 1024  # 1 GiB
 
-# Margin added to the decoded-size limit when precheck-rejecting a
-# *compressed* file's stored size before a full read (Codex review, PR
-# #699): gzip/zstd container framing is overhead independent of a *small*
-# payload's size, so an exact stored-size == decoded-limit comparison can
-# reject a legitimately tiny/boundary decoded payload purely because of that
-# overhead (e.g. `{}` decodes to 2 bytes but gzip-compresses to 22). Generous
-# enough to absorb any realistic small-file framing cost.
-_STORED_SIZE_PRECHECK_MARGIN = 65536  # 64 KiB
-
-# Fresh Codex review evidence: for a *large* incompressible payload, this
-# overhead is NOT bounded by the fixed margin above -- DEFLATE's "stored"
-# block (used for data it can't compress) caps at 65535 bytes with a 5-byte
-# header each, so overhead grows roughly linearly with payload size (a 220
-# MiB incompressible payload measured ~70 KiB of gzip overhead, already
-# exceeding the fixed 64 KiB margin). A boundary case where the decoded size
-# sits right at `limit` therefore needs a margin that scales with `limit`
-# too, not just the fixed constant above -- 1/256th (~0.39%) is a >10x
-# safety factor over the measured ~0.03% worst-case overhead ratio, while
-# staying trivially small next to a genuine decompression-bomb-sized stored
-# file (which this precheck still exists to catch before a full read).
-_STORED_SIZE_PRECHECK_SCALE_DIVISOR = 256
+# Independent ceiling on a *compressed* file's stored size before a full
+# read (Codex review, PR #699 -- third round on this same precheck).
+#
+# History of why this is a fixed, INDEPENDENT ceiling rather than anything
+# derived from `max_decoded_bytes`/`limit`: two earlier attempts both tied
+# the stored-size cap to the decoded limit via a margin (first a fixed 64
+# KiB, then limit/256) on the assumption that "a stored file larger than
+# the decoded-size ceiling can only ever fail that ceiling anyway". Fresh
+# evidence disproved that assumption a second time, more fundamentally: a
+# *valid* concatenated multi-member gzip stream (RFC 1952 permits this, and
+# Python's gzip module transparently decodes it as one logical stream) can
+# have stored-size overhead that is essentially unbounded relative to its
+# decoded content -- one gzip member per byte turned a 3,974-byte payload
+# into an 83,454-byte stored file (~21x), and `gzip.decompress()` still
+# reproduces the original bytes exactly. No margin formula keyed off
+# `limit` can ever be generous enough for this, since the overhead scales
+# with the *number of members*, not the payload size the caller is
+# bounding. The real decompression-bomb defense already lives where it
+# actually belongs -- the incremental decode loops in `_decompress_gzip`/
+# `_decompress_zstd` below, which enforce `max_decoded_bytes` against the
+# growing *decoded* output on every chunk, independent of how much raw
+# input was fed in. This stored-size precheck's only remaining job is a
+# distinct, narrower one: refuse to buffer a truly enormous *raw* file into
+# memory before even attempting decompression -- so it gets its own
+# generous, fixed ceiling instead of borrowing (and distorting) the
+# decoded-size one.
+DEFAULT_MAX_STORED_BYTES = 2 * 1024 * 1024 * 1024  # 2 GiB
 
 # zstd window-size bound, independent of the decoded-size limit above: caps
 # how much memory a hostile frame can force the decompressor to allocate for
@@ -121,6 +127,7 @@ _ZSTD_MAX_WINDOW_LOG = 31  # 2 GiB window ceiling
 _ZSTD_MAX_WINDOW_SIZE_KIB = (1 << _ZSTD_MAX_WINDOW_LOG) // 1024
 
 _MAX_DECODED_BYTES_ENV = "_ABICHECK_SNAPSHOT_MAX_DECODED_BYTES"
+_MAX_STORED_BYTES_ENV = "_ABICHECK_SNAPSHOT_MAX_STORED_BYTES"
 
 
 def _max_decoded_bytes() -> int:
@@ -131,6 +138,16 @@ def _max_decoded_bytes() -> int:
         except ValueError:
             pass
     return DEFAULT_MAX_DECODED_BYTES
+
+
+def _max_stored_bytes() -> int:
+    override = os.environ.get(_MAX_STORED_BYTES_ENV)
+    if override:
+        try:
+            return int(override)
+        except ValueError:
+            pass
+    return DEFAULT_MAX_STORED_BYTES
 
 
 # Deterministic compression settings (Section 6). Fixed, project-owned —
@@ -371,18 +388,6 @@ def _decompress_zstd(data: bytes, *, max_decoded_bytes: int, source: str) -> byt
     return out.getvalue()
 
 
-def _stored_size_precheck_margin(limit: int) -> int:
-    """How much a *compressed* file's stored size may legitimately exceed
-    *limit* (the decoded-size ceiling) purely from container/block framing
-    overhead -- see :data:`_STORED_SIZE_PRECHECK_MARGIN` and
-    :data:`_STORED_SIZE_PRECHECK_SCALE_DIVISOR` above for why this is the
-    larger of a small fixed floor and a fraction of `limit` itself, not a
-    single fixed constant."""
-    return max(
-        _STORED_SIZE_PRECHECK_MARGIN, limit // _STORED_SIZE_PRECHECK_SCALE_DIVISOR
-    )
-
-
 def read_snapshot_bytes(
     path: str | Path, *, max_decoded_bytes: int | None = None
 ) -> bytes:
@@ -394,28 +399,27 @@ def read_snapshot_bytes(
     """
     p = Path(path)
     limit = max_decoded_bytes if max_decoded_bytes is not None else _max_decoded_bytes()
-    # CodeRabbit review: check the *stored* file size against the same
-    # safety limit before reading it fully into memory -- a stored file
-    # larger than the decoded-size ceiling can only ever fail that ceiling
-    # anyway (compression never expands a snapshot's own JSON payload by
-    # orders of magnitude), so there's no legitimate case this rejects that
-    # the post-read checks below wouldn't have rejected regardless; it just
-    # avoids buffering the whole oversized file first.
+    # CodeRabbit review: check the *stored* file size against a safety
+    # ceiling before reading it fully into memory -- avoids buffering a
+    # needlessly oversized file first.
     #
-    # Codex review: for a *compressed* file this comparison must not be
-    # exact -- gzip/zstd container framing adds overhead independent of
-    # payload size (e.g. `{}` decodes to 2 bytes but gzip-compresses to 22),
-    # so a tiny decoded payload right at (or just under) the limit can have
-    # a slightly larger stored size purely from that. A plain/uncompressed
-    # file has stored size == decoded size exactly, so it keeps the exact
-    # check; a compressed file's margin (see `_stored_size_precheck_margin`)
-    # scales with `limit` rather than being a single fixed constant -- a
-    # second Codex review round found that for a *large* incompressible
-    # payload near the limit, DEFLATE's per-block framing overhead grows
-    # roughly linearly with size and can exceed a small fixed margin (a 220
-    # MiB incompressible payload measured ~70 KiB of overhead). Still
-    # trivially small next to a genuine decompression-bomb-sized stored
-    # file, which this precheck still catches before a full read.
+    # Codex review (three rounds on this same precheck): a *plain*
+    # uncompressed file's stored size equals its decoded size exactly, so
+    # it's checked against `limit` itself with no margin. A *compressed*
+    # file's stored size must NOT be checked against anything derived from
+    # `limit` -- two earlier attempts (a fixed 64 KiB margin, then
+    # `limit`-proportional) both assumed stored size can only exceed
+    # decoded size by a small/bounded amount, which a valid concatenated
+    # multi-member gzip stream disproves: overhead scales with the *number
+    # of members*, not payload size (a 3,974-byte payload encoded as one
+    # gzip member per byte stored at 83,454 bytes, ~21x overhead, still
+    # decodes correctly). See `DEFAULT_MAX_STORED_BYTES` above for why this
+    # is instead an independent, fixed ceiling: the actual decompression-
+    # bomb defense already lives in `_decompress_gzip`/`_decompress_zstd`'s
+    # own incremental decoded-size enforcement below, so this precheck's
+    # only remaining job is refusing to buffer a truly enormous *raw* file,
+    # which has nothing to do with what decoded-size limit the caller
+    # requested.
     #
     # CodeRabbit review: the size probe and the actual content read must
     # come from the *same* open file descriptor. An earlier version stat()'d
@@ -434,20 +438,19 @@ def read_snapshot_bytes(
         stored_size = os.fstat(f.fileno()).st_size
         prefix = f.read(4)
         compression_hint = detect_compression_from_bytes(prefix)
-        margin = (
-            0
+        cap = (
+            limit
             if compression_hint is SnapshotCompression.NONE
-            else _stored_size_precheck_margin(limit)
+            else max(limit, _max_stored_bytes())
         )
-        cap = limit + margin
         if stored_size > cap:
             raise SnapshotError(
-                f"{p}: stored file exceeds the {limit} byte safety limit."
+                f"{p}: stored file exceeds the {cap} byte safety limit."
             )
         f.seek(0)
         raw = f.read(cap + 1)
     if len(raw) > cap:
-        raise SnapshotError(f"{p}: stored file exceeds the {limit} byte safety limit.")
+        raise SnapshotError(f"{p}: stored file exceeds the {cap} byte safety limit.")
 
     compression = detect_compression_from_bytes(raw[:4])
     suffix_hint = suffix_compression(p)
