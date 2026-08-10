@@ -420,16 +420,40 @@ def _template_arg_use(arg_node: dict[str, Any]) -> TemplateArgUse | None:
         return None
     if not spelling:
         return None
-    target: str | None = None
-    for child in arg_node.get("inner", []) or []:
-        decl = child.get("decl")
-        if isinstance(decl, dict):
-            # The decl reference is a *stub* (id/kind/name only) -- resolved
-            # against id_to_qname by the caller, which has the whole-TU
-            # index this function doesn't.
-            target = str(decl.get("id") or "") or None
-            break
-    return TemplateArgUse(spelling=spelling, target_qname=target)
+    return TemplateArgUse(spelling=spelling, target_qname=_first_decl_id(arg_node))
+
+
+def _first_decl_id(node: dict[str, Any]) -> str | None:
+    """Depth-first, first-found ``decl.id`` anywhere under *node*'s own
+    ``inner`` subtree.
+
+    A pointer/reference/array/cv-qualified template argument nests its
+    ``RecordType``/``EnumType`` (and that type's own ``decl`` cross-
+    reference) one or more wrapper levels deep instead of as a direct
+    ``TemplateArgument`` child — e.g. ``Box<internal::Detail *>`` produces
+    ``TemplateArgument -> PointerType -> RecordType -> decl``, and
+    ``Box<const internal::Detail &>`` nests two wrapper levels
+    (``LValueReferenceType -> QualType -> RecordType -> decl``) — empirically
+    confirmed against real clang AST output (Codex review; an earlier
+    revision only checked *direct* children, missing every wrapped
+    argument). Pre-order (checks *node* itself before recursing), so the
+    outermost decl wins for a nested specialization argument (e.g.
+    ``Box<Wrapper<internal::Detail>>`` resolves to ``Wrapper``'s own decl,
+    not `internal::Detail`'s, matching the existing unwrapped behavior)."""
+    decl = node.get("decl")
+    if isinstance(decl, dict):
+        # The decl reference is a *stub* (id/kind/name only) -- resolved
+        # against id_to_qname by the caller, which has the whole-TU index
+        # this function doesn't.
+        decl_id = str(decl.get("id") or "") or None
+        if decl_id:
+            return decl_id
+    for child in node.get("inner", []) or []:
+        if isinstance(child, dict):
+            found = _first_decl_id(child)
+            if found:
+                return found
+    return None
 
 
 def _resolve_specialization_qname(
@@ -995,10 +1019,10 @@ class ClangTemplateGraphExtractor:
     def _extract_from_compile_unit(
         self, cu: BuildEvidenceCompileUnit
     ) -> list[TemplateInstantiation]:
-        from .call_graph import _safe_clang_args_from_compile_unit
+        from .call_graph import _replay_cwd, _safe_clang_args_from_compile_unit
 
         argv = _safe_clang_args_from_compile_unit(cu)
-        return self._extract_from_safe_args(argv, cwd=cu.directory or None)
+        return self._extract_from_safe_args(argv, cwd=_replay_cwd(cu))
 
     def extract_from_build(self, build: BuildEvidence) -> list[TemplateInstantiation]:
         """Extract template instantiations across every compile unit in

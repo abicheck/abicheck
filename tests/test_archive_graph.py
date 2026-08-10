@@ -498,10 +498,12 @@ def test_augment_graph_creates_members_and_symbol_edges(tmp_path) -> None:
     assert result.diagnostics == []
     assert result.complete
 
-    # Node ids are offset-qualified now (archive_member_node_id(..., header_
-    # offset=...), Codex review -- disambiguates two same-named members in
-    # one archive), so look them up from the graph itself rather than
-    # reconstructing the id from the name alone.
+    # Node ids can carry an occurrence-index discriminator now
+    # (archive_member_node_id(..., discriminator=...), Codex review --
+    # disambiguates two same-named members in one archive; a unique name
+    # like these two keeps the plain name-only id), so look them up from
+    # the graph itself rather than reconstructing the id from the name
+    # alone.
     member_nodes = {n.label: n.id for n in g.nodes if n.kind == "archive_member"}
     assert set(member_nodes) == {"a.o", "b.o"}
     a_id, b_id = member_nodes["a.o"], member_nodes["b.o"]
@@ -632,8 +634,8 @@ def test_augment_graph_duplicate_member_name_within_one_archive_stays_distinct(
     """``ar`` permits two members sharing one name in the same archive (e.g.
     ``ar rc lib.a sub1/util.o sub2/util.o``) -- a name-keyed node id/lookup
     would collapse them onto one node, misattributing whichever member's
-    symbols got recorded last (Codex review, fresh evidence). Offset-
-    qualified node ids keep them distinct."""
+    symbols got recorded last (Codex review, fresh evidence). Occurrence-
+    index-qualified node ids keep them distinct."""
     data = build_gnu_archive(
         [("util.o", b"SYM:foo_impl\n"), ("util.o", b"SYM:bar_impl\n")]
     )
@@ -649,6 +651,39 @@ def test_augment_graph_duplicate_member_name_within_one_archive_stays_distinct(
     assert {n.label for n in member_nodes} == {"util.o"}
     assert defining_members(g, "foo_impl") == [("libboth.a", "util.o")]
     assert defining_members(g, "bar_impl") == [("libboth.a", "util.o")]
+
+
+def test_augment_graph_member_node_id_stable_when_an_earlier_member_resizes(
+    tmp_path,
+) -> None:
+    """A uniquely-named member's own node id must not change just because an
+    *earlier* member in the same archive grew or shrank -- every later
+    member's ``header_offset`` shifts on such a rebuild even though its own
+    content is byte-identical, so keying the persisted node id directly on
+    that offset (an earlier revision) would make a version-over-version
+    structural graph diff false-positively report the untouched member (and
+    its edges) as removed-and-re-added (Codex review, second round)."""
+    small = build_gnu_archive([("a.o", b"SYM:alpha\n"), ("b.o", b"SYM:beta\n")])
+    # "a.o"'s own data grows, shifting "b.o"'s header_offset -- "b.o" itself
+    # is otherwise unchanged.
+    grown = build_gnu_archive(
+        [("a.o", b"SYM:alpha\n" + b"x" * 64), ("b.o", b"SYM:beta\n")]
+    )
+    (tmp_path / "lib.a").write_bytes(small)
+    g_small = _graph_with_archive("lib.a", ["alpha", "beta"])
+    augment_graph_with_archives(g_small, search_roots=(tmp_path,))
+    b_id_small = next(
+        n.id for n in g_small.nodes if n.kind == "archive_member" and n.label == "b.o"
+    )
+
+    (tmp_path / "lib.a").write_bytes(grown)
+    g_grown = _graph_with_archive("lib.a", ["alpha", "beta"])
+    augment_graph_with_archives(g_grown, search_roots=(tmp_path,))
+    b_id_grown = next(
+        n.id for n in g_grown.nodes if n.kind == "archive_member" and n.label == "b.o"
+    )
+
+    assert b_id_small == b_id_grown
 
 
 def test_augment_graph_expands_redacted_home_placeholder(tmp_path, monkeypatch) -> None:

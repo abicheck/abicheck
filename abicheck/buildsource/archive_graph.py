@@ -674,7 +674,7 @@ def read_archive(path: Path) -> ArchiveContents:
 
 
 def archive_member_node_id(
-    archive_path: str, member: str, header_offset: int | None = None
+    archive_path: str, member: str, discriminator: int = 0
 ) -> str:
     """Node id for one member of one archive.
 
@@ -683,20 +683,24 @@ def archive_member_node_id(
     them onto one node would claim a symbol is defined in an archive that
     never contained it.
 
-    *header_offset*, when given, additionally disambiguates two members of
-    the *same* archive sharing one name — ``ar`` permits this (e.g. ``ar rc
-    lib.a sub1/util.o sub2/util.o``), and a name-only id would collapse them
-    onto one node, misattributing whichever member's symbols got recorded
-    second (Codex review, fresh evidence). Each member's own
-    :attr:`ArMember.header_offset` is already the unique join key the symbol-
-    index parsers resolve against (see :class:`ArSymbolRef`), so reusing it
-    here disambiguates without inventing new state. Omitted (``None``) keeps
-    the plain name-only id — used by callers that only ever see one member
-    per name (tests, mainly) and by any future caller not yet offset-aware.
+    *discriminator*, when non-zero, additionally disambiguates two members
+    of the *same* archive sharing one name — ``ar`` permits this (e.g.
+    ``ar rc lib.a sub1/util.o sub2/util.o``), and a name-only id would
+    collapse them onto one node, misattributing whichever member's symbols
+    got recorded second (Codex review, fresh evidence). It must be the
+    member's zero-based *occurrence index* among same-named members in file
+    order, never a raw byte offset: an earlier revision used
+    :attr:`ArMember.header_offset` directly, but that shifts for *every*
+    later member whenever any earlier member's own size changes, even when
+    the later member's own content is byte-identical — false-positively
+    reporting an unrelated member (and its edges) as removed-and-re-added
+    on a version-over-version structural graph diff (Codex review, second
+    round). Zero (the default, and the common case: a uniquely-named
+    member) keeps the plain name-only id unchanged.
     """
-    if header_offset is None:
+    if not discriminator:
         return f"archive_member://{archive_path}::{member}"
-    return f"archive_member://{archive_path}::{member}@{header_offset}"
+    return f"archive_member://{archive_path}::{member}#{discriminator}"
 
 
 def _symbol_node_ids(graph: SourceGraphSummary) -> frozenset[str]:
@@ -935,15 +939,23 @@ def augment_graph_with_archives(
                 f"{label}: no symbol index (built without 'ar s'/ranlib); "
                 "members recorded, no symbol edges"
             )
-        # Keyed by header_offset, not name -- `ar` permits two members
-        # sharing one name in the same archive (e.g. `ar rc lib.a
-        # sub1/util.o sub2/util.o`), and a name-keyed dict would collapse
-        # them onto one node, misattributing every symbol either member
-        # defines to whichever one was recorded last (Codex review, fresh
-        # evidence).
+        # The *lookup* is keyed by header_offset, not name -- `ar` permits
+        # two members sharing one name in the same archive (e.g. `ar rc
+        # lib.a sub1/util.o sub2/util.o`), and a name-keyed dict would
+        # collapse them onto one node, misattributing every symbol either
+        # member defines to whichever one was recorded last (Codex review,
+        # fresh evidence). The *node id itself* discriminates by occurrence
+        # index among same-named members instead of the offset directly --
+        # a raw offset shifts for every later member whenever an earlier
+        # one's size changes, which would false-positively report an
+        # unrelated, byte-identical member as removed-and-re-added on a
+        # structural graph diff (Codex review, second round).
         member_ids: dict[int, str] = {}
+        name_occurrences: dict[str, int] = {}
         for member in contents.members:
-            mid = archive_member_node_id(label, member.name, member.header_offset)
+            occurrence = name_occurrences.get(member.name, 0)
+            name_occurrences[member.name] = occurrence + 1
+            mid = archive_member_node_id(label, member.name, occurrence)
             member_ids[member.header_offset] = mid
             graph.add_node(
                 GraphNode(

@@ -147,3 +147,46 @@
   the class-template path had the two-pass id-indexed join needed to
   resolve it; `_walk_function_templates` now has the same join
   (`_collect_full_function_defs`), verified against real clang AST output.
+
+  A fifth review round found two more real gaps, both empirically confirmed.
+  `_template_arg_use()` only checked a `TemplateArgument`'s *direct* children
+  for clang's `decl` cross-reference, but a pointer/reference/array/cv-
+  qualified argument nests it one or more wrapper levels deep instead —
+  `Box<internal::Detail *>` produces `TemplateArgument -> PointerType ->
+  RecordType -> decl`, and `Box<const internal::Detail &>` nests two levels
+  (`LValueReferenceType -> QualType -> RecordType -> decl`) — verified
+  against real clang AST output for pointer, reference, and array wrapping
+  alike. `_template_arg_use` now recurses depth-first through a node's own
+  `inner` subtree (`_first_decl_id`), pre-order so the outermost decl still
+  wins for a nested specialization argument. Separately, `archive_graph.py`'s
+  `archive_member_node_id` disambiguated two same-named members of one
+  archive by the defining member's raw `header_offset` — but that offset
+  shifts for *every later* member whenever an *earlier* member's own size
+  changes, even when the later member's own content is byte-identical,
+  false-positively reporting an untouched member (and its edges) as
+  removed-and-re-added on a version-over-version structural graph diff. Now
+  keyed by a stable, zero-based *occurrence index* among same-named members
+  in file order instead of the offset itself.
+
+  A sixth round found and fixed a real, pre-existing bug this PR's own new
+  Windows integration test was the first to exercise end-to-end: every
+  normalized `BuildEvidenceCompileUnit` field (`source`, `directory`,
+  `include_paths`, ...) is persisted with its home-directory prefix redacted
+  to `~` (ADR-032 D7's `RedactionPolicy`), and `subprocess` never expands `~`
+  (no shell) — so replaying a redacted path straight into a real `clang`
+  invocation makes it fail to find the file. `call_graph.py`'s
+  `_safe_clang_args_from_compile_unit` (shared by all three clang-backed L5
+  passes: call/type/template graph) built its argv — including the source
+  positional — directly from these redacted fields, and each extractor's
+  `_extract_from_compile_unit` passed the equally-redacted `cu.directory` as
+  `cwd`, with no un-redaction anywhere on this path. Confirmed on real
+  Windows CI: the new `test_collect_source_graph_folds_template_graph_pass`
+  puts its temp source under the runner's own home directory
+  (`C:\Users\...\AppData\Local\Temp\...`), which redaction rewrites to
+  `~\AppData\...` — degrading call/type/template graph collection uniformly
+  (all three showed up `degraded_passes`) while the sibling `include_graph`
+  pass, which already un-redacts its own argv/cwd
+  (`ClangIncludeExtractor.extract_from_build`, same pattern already used by
+  `preprocessor_scan.py`/`archive_graph.py`), succeeded. Fixed by
+  un-redacting every argv token and the `cwd` the same way, via a new shared
+  `call_graph._replay_cwd` helper.

@@ -712,6 +712,57 @@ def test_extract_from_build_ignores_compile_unit_raw_argv(monkeypatch) -> None:
     assert cmd[-2:] == ["--", "victim.cpp"]
 
 
+def test_extract_from_build_unredacts_home_placeholder_in_source_and_cwd(
+    monkeypatch,
+) -> None:
+    """A normalized ``BuildEvidenceCompileUnit`` always carries its home-dir
+    prefix redacted to ``~`` (ADR-032 D7, ``adapters/compile_db.py``'s
+    ``RedactionPolicy``) -- confirmed on real Windows CI: the pass's own test
+    fixture puts its temp source under the runner's home directory, and
+    replaying the still-redacted ``~\\...`` path straight into a real
+    ``clang`` subprocess (no shell, so ``~`` never expands) made every TU fail
+    uniformly, degrading call/type/template graph collection together while
+    the sibling ``include_graph`` pass (which already un-redacts its own
+    argv) succeeded. The source positional and ``cwd`` passed to the
+    subprocess must always be the real, expanded path."""
+    import json as _json
+
+    import abicheck.buildsource.call_graph as cg
+
+    monkeypatch.setenv("HOME", "/home/realuser")
+    monkeypatch.delenv("USERPROFILE", raising=False)
+    ast = {"kind": "TranslationUnitDecl", "inner": []}
+    captured: dict[str, object] = {}
+    monkeypatch.setattr(cg.shutil, "which", lambda _b: "/usr/bin/clang++")
+
+    def fake_run(cmd, **kwargs):
+        captured["cmd"] = cmd
+        captured["cwd"] = kwargs.get("cwd")
+        return _FakeProc(_json.dumps(ast))
+
+    monkeypatch.setattr(cg.deadline, "run_bounded", fake_run)
+    build = BuildEvidence(
+        compile_units=[
+            CompileUnit(
+                id="cu://x",
+                source="~/AppData/Local/Temp/t.cpp",
+                directory="~/AppData/Local/Temp",
+                argv=["/usr/bin/g++", "victim.cpp"],
+                language="CXX",
+                standard="c++17",
+                include_paths=["~/AppData/Local/Temp/include"],
+            )
+        ]
+    )
+
+    ClangCallGraphExtractor().extract_from_build(build)
+
+    cmd = captured["cmd"]
+    assert cmd[-2:] == ["--", "/home/realuser/AppData/Local/Temp/t.cpp"]
+    assert "~" not in " ".join(cmd)
+    assert captured["cwd"] == "/home/realuser/AppData/Local/Temp"
+
+
 def test_extract_from_args_empty_stdout(monkeypatch) -> None:
     _patch_clang(monkeypatch, proc=_FakeProc("", stderr="boom"))
     ext = ClangCallGraphExtractor()

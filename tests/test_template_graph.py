@@ -366,6 +366,68 @@ def test_typedef_alias_argument_resolves_through_to_the_real_record() -> None:
     )
 
 
+def test_pointer_wrapped_argument_resolves_the_nested_decl() -> None:
+    """A pointer/reference/array/cv-qualified template argument nests its
+    ``RecordType``/``decl`` one or more wrapper levels deep instead of as a
+    direct ``TemplateArgument`` child -- ``Box<internal::Detail *>``
+    produces ``TemplateArgument -> PointerType -> RecordType -> decl``
+    (verified empirically against real clang AST output, Codex review: an
+    earlier revision only checked *direct* children, so a wrapped argument's
+    target_qname stayed unset and emitted no TEMPLATE_USES_TYPE edge)."""
+    ast = {
+        "kind": "TranslationUnitDecl",
+        "inner": [
+            {
+                "kind": "NamespaceDecl",
+                "name": "internal",
+                "inner": [
+                    {"id": "0xDETAIL_ID", "kind": "CXXRecordDecl", "name": "Detail"},
+                ],
+            },
+            {
+                "kind": "ClassTemplateDecl",
+                "name": "Box",
+                "inner": [
+                    {"kind": "TemplateTypeParmDecl", "name": "T"},
+                    {"kind": "CXXRecordDecl", "name": "Box"},
+                    {
+                        "id": "0xSPEC",
+                        "kind": "ClassTemplateSpecializationDecl",
+                        "name": "Box",
+                        "completeDefinition": True,
+                        "inner": [
+                            {
+                                "kind": "TemplateArgument",
+                                "type": {"qualType": "internal::Detail *"},
+                                "inner": [
+                                    {
+                                        "kind": "PointerType",
+                                        "inner": [
+                                            {
+                                                "kind": "RecordType",
+                                                "decl": {
+                                                    "id": "0xDETAIL_ID",
+                                                    "kind": "CXXRecordDecl",
+                                                    "name": "Detail",
+                                                },
+                                            }
+                                        ],
+                                    }
+                                ],
+                            },
+                        ],
+                    },
+                ],
+            },
+        ],
+    }
+    out = parse_clang_ast_templates(ast)
+    assert len(out) == 1
+    assert out[0].args == (
+        TemplateArgUse("internal::Detail *", "internal::Detail", "CXXRecordDecl"),
+    )
+
+
 def test_nested_specialization_argument_disambiguated_by_its_own_args() -> None:
     """Two distinct specializations of the *same* template
     (``Wrapper<int>``/``Wrapper<double>``), each used as a nested template

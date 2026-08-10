@@ -692,7 +692,26 @@ def _safe_clang_args_from_argv(argv: list[str], cwd: str | None = None) -> list[
 
 
 def _safe_clang_args_from_compile_unit(cu: BuildEvidenceCompileUnit) -> list[str]:
-    """Return safe clang AST-replay args for one normalized compile unit."""
+    """Return safe clang AST-replay args for one normalized compile unit.
+
+    Every field on a normalized :class:`BuildEvidenceCompileUnit` (``source``,
+    ``sysroot``, ``include_paths``, ...) is persisted with its home-directory
+    prefix redacted to ``~`` (ADR-032 D7, ``adapters/compile_db.py``'s
+    ``RedactionPolicy``). ``subprocess`` never expands ``~`` (no shell), so
+    handing a redacted path straight to a real ``clang`` invocation makes it
+    fail to find the file — every TU degrades uniformly, not just one, since
+    the source positional itself is always redacted the same way. Confirmed on
+    real Windows CI: this pass's own test fixture puts its temp source under
+    the runner's home directory (``C:\\Users\\...\\AppData\\Local\\Temp\\...``),
+    which redaction rewrites to ``~\\AppData\\...`` — degrading
+    call/type/template graph collection uniformly while the sibling
+    ``include_graph`` pass (which already un-redacts its own argv, see
+    ``include_graph.ClangIncludeExtractor.extract_from_build``) succeeded.
+    Un-redact every token here, the same pattern already used by
+    ``include_graph.py``/``preprocessor_scan.py``/``archive_graph.py``, so
+    every clang-backed L5 pass replays a real, resolvable path."""
+    from .source_extractors._argv import unredact_home
+
     flags = _safe_replay_flags_from_context(
         language=cu.language,
         standard=cu.standard,
@@ -704,7 +723,17 @@ def _safe_clang_args_from_compile_unit(cu: BuildEvidenceCompileUnit) -> list[str
         system_include_paths=cu.system_include_paths,
         abi_relevant_flags=cu.abi_relevant_flags,
     )
-    return [*flags, "--", cu.source]
+    return [*(unredact_home(a) for a in flags), "--", unredact_home(cu.source)]
+
+
+def _replay_cwd(cu: BuildEvidenceCompileUnit) -> str | None:
+    """Un-redact a compile unit's own ``directory`` for use as a real subprocess
+    ``cwd`` -- shared by all three clang-backed L5 extractors
+    (:mod:`call_graph`/:mod:`type_graph`/:mod:`template_graph`) for the same
+    reason :func:`_safe_clang_args_from_compile_unit` un-redacts its argv."""
+    from .source_extractors._argv import unredact_home
+
+    return unredact_home(cu.directory) if cu.directory else None
 
 
 def _call_graph_mem_cap() -> int | None:
@@ -840,7 +869,7 @@ class ClangCallGraphExtractor:
         self, cu: BuildEvidenceCompileUnit
     ) -> list[CallEdge]:
         argv = _safe_clang_args_from_compile_unit(cu)
-        return self._extract_from_safe_args(argv, cwd=cu.directory or None)
+        return self._extract_from_safe_args(argv, cwd=_replay_cwd(cu))
 
     def extract_from_build(self, build: BuildEvidence) -> list[CallEdge]:
         """Extract call edges across every compile unit in *build* (best effort)."""
