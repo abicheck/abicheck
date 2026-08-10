@@ -287,6 +287,15 @@ Verdict: COMPATIBLE
 Both are absent under the default legacy scheme, which runs no severity
 gate.
 
+`aggregate` reads that `diff.severity` block as the target's compatibility
+gate when it is present, exactly as it reads a `compare` report's own
+`severity` block (and with the same fail-closed validation). This is what
+keeps the two orthogonal axes separable for a scan target: a legacy-scheme
+scan has no native exit `1`, so a raw `1` can only be the coverage
+contribution — but a severity-scheme scan *does* (an error-level addition),
+and folding both to `1` would otherwise be indistinguishable. See
+[`abicheck aggregate`](#abicheck-aggregate).
+
 This is CLI/config-level parity only — a gate pack (`--pack`)
 does not yet fold a `gate.*` assignment into a scan's severity the way it
 does for `compare`; pass `--severity-*`/`--exit-code-scheme` directly
@@ -310,8 +319,11 @@ Phase 7), and the exit code is the worst contribution across them:
   those, it never recomputes a gate from the compatibility verdict. So a
   `COMPATIBLE` report with an `addition=error` policy still contributes exit
   `1`, and a `BREAKING` report under a demoted preset can contribute `0`. A
-  `scan` report is read via its own top-level `exit_code` (keyed on
-  `scan_schema_version`). Reports produced without any gate block fall back to
+  `scan` report is read via its own nested `diff.severity` gate block when it
+  has one (a severity-scheme `scan --against`, schema 1.9+ — read through the
+  identical validator a `compare` block goes through), and otherwise via its
+  top-level `exit_code` (keyed on `scan_schema_version`).
+  Reports produced without any gate block fall back to
   the legacy verdict→exit mapping (`0`/`2`/`4`). Reading is **fail-closed**: a
   report whose gate block is *present but corrupt* (an out-of-range or
   non-integer `exit_code`, a `blocking` flag that contradicts it, non-string

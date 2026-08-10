@@ -1363,7 +1363,7 @@ def scan_cmd(
     `--against` already means a one-build audit; it is not a separate mode flag.
 
     \b
-    Exit codes:
+    Exit codes (legacy scheme — the default):
       0  compatible (or advisory-only findings)
       1  incomplete contract coverage (ADR-049 Phase 7): with
          --contract-evaluation, the selected --contract domain's required
@@ -1375,6 +1375,17 @@ def scan_cmd(
       5  --budget overflow
       6  NOT_COMPARABLE (ADR-050 D2): ARTIFACT and --against were not
          extracted under a comparable profile/scope contract
+
+    \b
+    With --against, --severity-preset/--severity-*/--exit-code-scheme (or
+    .abicheck.yml's severity:/exit_code_scheme) select the severity-aware
+    scheme instead, exactly as for `compare`: the 0/2/4 codes above are then
+    computed from the per-category error levels rather than the verdict, so
+    --severity-preset info-only can exit 0 on a breaking comparison, and an
+    error-level addition or quality finding can exit 1 on an otherwise
+    compatible one. The report states which — a `severity gate:` line in the
+    text output, a `diff.severity` block in --format json. 5/6 are unaffected
+    (both are decided before the comparison runs).
 
     \b
     Examples:
