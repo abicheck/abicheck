@@ -20,8 +20,11 @@ from. abicheck exposes one dial, `--depth`, shared by `dump`, `compare`, and
 | `source` | source replay + call graph | reachability, consumer-relative impact, source-level root causes | nothing further in this ladder |
 
 `--depth build` and `--depth source` require real build evidence — pass
-`--sources` and/or `--build-info`. Requesting a depth the inputs cannot
-satisfy is an error, not a silent downgrade.
+`--sources` and/or `--build-info`. What happens when the inputs cannot
+satisfy the depth you asked for **depends on the command**: `dump` fails
+outright, while `compare` warns, downgrades, and still exits `0`. Since every
+workflow in these skills drives `compare`, treat the downgrade as the default
+case and confirm the depth actually reached — see below, which owns that rule.
 
 The full mental model, including what each transition buys in false-positive
 and false-negative terms, is owned by

@@ -203,9 +203,19 @@ _FRONT_MATTER_RE = re.compile(r"\A---\r?\n.*?\r?\n---\r?\n", re.DOTALL)
 #: End of document closes an unterminated fence (CommonMark §4.5), so the
 #: closer alternates with `\Z` — otherwise a block running to EOF never
 #: matched and its examples were processed as prose.
+#:
+#: Content is `(?:.*?\n)??` — optional, and lazy so the *empty* block is tried
+#: first. Writing it as `.*?` followed by a closer that began with its own
+#: `\n` made an empty block unmatchable: the opener already consumed the only
+#: newline, so `` ```\n``` `` found no closer, fell through to `\Z`, and
+#: masked the entire rest of the document — silently exempting every link
+#: after it from both validation and rewriting, which is worse than the
+#: mis-masking this pattern's earlier bugs caused.
 _FENCE_RE = re.compile(
-    r"^ {0,3}(?P<tick>`{3,})[^\n`]*\n.*?(?:\n {0,3}(?P=tick)`*[ \t]*$|\Z)"
-    r"|^ {0,3}(?P<tilde>~{3,})[^\n]*\n.*?(?:\n {0,3}(?P=tilde)~*[ \t]*$|\Z)",
+    r"^ {0,3}(?P<tick>`{3,})[^\n`]*\n"
+    r"(?:(?:.*?\n)?? {0,3}(?P=tick)`*[ \t]*$|.*?\Z)"
+    r"|^ {0,3}(?P<tilde>~{3,})[^\n]*\n"
+    r"(?:(?:.*?\n)?? {0,3}(?P=tilde)~*[ \t]*$|.*?\Z)",
     re.M | re.S,
 )
 _INLINE_CODE_RE = re.compile(r"(?<!`)(`+)(?!`)(.+?)(?<!`)\1(?!`)", re.DOTALL)

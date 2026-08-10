@@ -482,6 +482,31 @@ def test_a_long_container_prefix_does_not_blow_up(synthetic):
     assert time.monotonic() - start < 5.0
 
 
+@pytest.mark.parametrize(
+    "block",
+    ["```\n```", "~~~\n~~~", "```md\n```", "```\n```\n```\n```"],
+    ids=["tick", "tilde", "with-info-string", "two-in-a-row"],
+)
+def test_an_empty_fence_does_not_swallow_the_rest_of_the_document(synthetic, block):
+    """The opener consumes the only newline, so a closer written to start with
+    its own `\\n` could never match an empty block: it fell through to `\\Z`
+    and masked everything after it — exempting every later link from *both*
+    validation and rewriting, so a repo-relative target shipped verbatim.
+
+    The skill's only citation of the fragment sits *after* the block, so a
+    swallowed remainder is not a subtle difference in output: the fragment
+    reads as never cited at all.
+    """
+    body = f"---\nname: demo\n---\n\nIntro.\n\n{block}\n\n[a](../shared/a.md)\n"
+    assert "](" in gen.mask_code_regions(body)[0], "link masked as code"
+    synthetic(
+        skills={"demo": {"SKILL.md": body}},
+        shared={"a.md": "# A\n"},
+    )
+    rendered = gen.render_all(gen.SRC_DIR)["demo/SKILL.md"]
+    assert "references/shared/a.md" in rendered
+
+
 def test_a_tilde_run_does_not_close_a_backtick_fence(synthetic):
     """The delimiter character must be consistent: `~~~` cannot close a
     backtick fence, so the block runs on and its content stays masked."""
