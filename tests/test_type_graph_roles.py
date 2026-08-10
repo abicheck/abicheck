@@ -187,6 +187,95 @@ def test_typedef_underlying_edge_still_uses_the_alias_role() -> None:
     ]
 
 
+def _anonymous_enum_typedef(
+    tag_id: str, *, typedef_kind: str = "TypedefDecl"
+) -> tuple[dict, dict]:
+    """The exact real-Clang-18-verified shape of
+    ``typedef enum : detail::Handle { A } Public;`` -- an anonymous
+    ``EnumDecl`` (``"name": ""``) as a *sibling* of a named
+    ``TypedefDecl``/``TypeAliasDecl`` whose own nested ``ElaboratedType``
+    carries ``ownedTagDecl.id`` back to the enum's ``id``."""
+    enum_decl = {
+        "id": tag_id,
+        "kind": "EnumDecl",
+        "name": "",
+        "fixedUnderlyingType": {
+            "qualType": "detail::Handle",
+            "desugaredQualType": "long",
+        },
+        "inner": [
+            {
+                "kind": "EnumConstantDecl",
+                "name": "A",
+                "type": {"qualType": "api::Public"},
+            }
+        ],
+    }
+    typedef_decl = {
+        "id": "0xdead",
+        "kind": typedef_kind,
+        "name": "Public",
+        "type": {"qualType": "enum Public", "desugaredQualType": "api::Public"},
+        "inner": [
+            {
+                "kind": "ElaboratedType",
+                "type": {"qualType": "enum Public"},
+                "ownedTagDecl": {"id": tag_id, "kind": "EnumDecl", "name": ""},
+            }
+        ],
+    }
+    return enum_decl, typedef_decl
+
+
+def test_anonymous_enum_typedef_emits_underlying_edge_on_the_typedef_name() -> None:
+    """G29 Phase 5 item 5 gap (Codex review, fresh evidence): the C-style
+    ``typedef enum : U { ... } Name;`` idiom gives the enum itself no name
+    at all, so the pre-fix ``kind == "EnumDecl" and name`` guard silently
+    dropped its ``fixedUnderlyingType`` dependency -- the typedef's own
+    alias edge names only the anonymous enum's own (unresolvable) spelling,
+    never the underlying type."""
+    enum_decl, typedef_decl = _anonymous_enum_typedef("0x1")
+    ast = _tu(_detail_ns(), _namespace("api", enum_decl, typedef_decl))
+    assert _find(ast, "enum_underlying") == [
+        (EDGE_TYPE_HAS_FIELD_TYPE, "api::Public", "detail::Handle", CONF_HIGH)
+    ]
+
+
+def test_anonymous_enum_type_alias_emits_underlying_edge_too() -> None:
+    """The ``using Public = enum : U { A };`` spelling reaches the same fix
+    -- a ``TypeAliasDecl``, not just ``TypedefDecl``."""
+    enum_decl, typedef_decl = _anonymous_enum_typedef(
+        "0x2", typedef_kind="TypeAliasDecl"
+    )
+    ast = _tu(_detail_ns(), _namespace("api", enum_decl, typedef_decl))
+    assert _find(ast, "enum_underlying") == [
+        (EDGE_TYPE_HAS_FIELD_TYPE, "api::Public", "detail::Handle", CONF_HIGH)
+    ]
+
+
+def test_anonymous_enum_without_a_following_alias_emits_nothing_new() -> None:
+    """An anonymous enum with no aliasing typedef at all (unusual, but not
+    impossible -- e.g. only its enumerators are used) must not spuriously
+    attach its underlying-type edge to an unrelated later sibling."""
+    enum_decl, _ = _anonymous_enum_typedef("0x3")
+    unrelated = {"kind": "TypedefDecl", "name": "Other", "type": {"qualType": "int"}}
+    ast = _tu(_detail_ns(), _namespace("api", enum_decl, unrelated))
+    assert _find(ast, "enum_underlying") == []
+
+
+def test_anonymous_enum_typedef_that_does_not_own_the_preceding_tag_is_not_matched() -> (
+    None
+):
+    """A named typedef immediately following an anonymous enum, but whose
+    own ``ownedTagDecl``/``decl`` id does not match, must not be mistaken
+    for that enum's public alias (a different id -- two independent
+    anonymous constructs back to back)."""
+    enum_decl, typedef_decl = _anonymous_enum_typedef("0x4")
+    typedef_decl["inner"][0]["ownedTagDecl"]["id"] = "0xnotme"
+    ast = _tu(_detail_ns(), _namespace("api", enum_decl, typedef_decl))
+    assert _find(ast, "enum_underlying") == []
+
+
 # ── template_param (non-type template parameter type) ──────────────────────
 
 
@@ -787,6 +876,7 @@ void (detail::Impl::*pmf)(int);
 template <template <detail::Handle H> class C> struct Outer { C<0> c; };
 template <void (*Fn)()> struct Holder {};
 using Public = Holder<&detail::f>;
+typedef enum : detail::Handle { AnonA } AnonPublic;
 }
 """
 
@@ -833,6 +923,11 @@ def test_real_clang_emits_every_new_role_end_to_end(tmp_path) -> None:
     assert ("template_param", "api::Outer", "detail::Handle") in edges, (
         "a non-type parameter nested inside a template-template parameter "
         "still resolves onto the outer templated entity"
+    )
+    assert ("enum_underlying", "api::AnonPublic", "detail::Handle") in edges, (
+        "the C-style `typedef enum : U {...} Name;` idiom gives the enum no "
+        "name of its own -- the underlying-type edge must still land on the "
+        "typedef's own public name"
     )
 
 

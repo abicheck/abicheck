@@ -995,6 +995,27 @@ def _resolve_ref_identity(
     return ident, file, resolution
 
 
+def _anonymous_tag_id_referenced(node: Any, tag_id: str) -> bool:
+    """Whether *node* (or something nested under it) names *tag_id* as its
+    own tag declaration -- ``ownedTagDecl.id`` (an ``ElaboratedType``) or
+    ``decl.id`` (the sibling ``EnumType``), searched recursively since the
+    two can nest either directly or one inside the other depending on
+    clang's own version (verified against real Clang 18 for both shapes).
+    """
+    if not isinstance(node, dict):
+        return False
+    owned = node.get("ownedTagDecl")
+    if isinstance(owned, dict) and owned.get("id") == tag_id:
+        return True
+    decl = node.get("decl")
+    if isinstance(decl, dict) and decl.get("id") == tag_id:
+        return True
+    return any(
+        _anonymous_tag_id_referenced(child, tag_id)
+        for child in node.get("inner", []) or []
+    )
+
+
 def _walk_children(
     node: Any,
     scope: list[str],
@@ -1002,8 +1023,44 @@ def _walk_children(
     edges: list[TypeEdge],
     idx: _AstIndexes,
 ) -> None:
-    """Recurse into every child of *node* with the given scope/function."""
+    """Recurse into every child of *node* with the given scope/function.
+
+    Also closes a real gap in the ``enum_underlying`` role (Codex review,
+    fresh evidence): the C-style ``typedef enum : U { ... } Name;`` /
+    ``using Name = enum : U { ... };`` idiom gives the enum itself **no**
+    name at all -- clang emits it as an anonymous ``EnumDecl`` (``"name":
+    ""``), a *sibling* of the following ``TypedefDecl``/``TypeAliasDecl``,
+    never nested inside it (verified against real Clang 18). ``_walk_types``'s
+    own ``kind == "EnumDecl" and name`` guard on :func:`_emit_enum_underlying_edge`
+    is correct for every *named* enum, but an anonymous one has no ``name``
+    to satisfy it, so its ``fixedUnderlyingType`` dependency (``detail::Handle``
+    in the example above) was silently dropped -- the enclosing alias edge the
+    typedef itself produces names only the enum's own (anonymous) spelling,
+    never the underlying type. Fixed by remembering the immediately preceding
+    anonymous ``EnumDecl`` sibling and, when the next sibling is a named
+    ``TypedefDecl``/``TypeAliasDecl`` that resolves back to that exact tag
+    (via :func:`_anonymous_tag_id_referenced`, an ``id`` match, not a name
+    heuristic), emitting the ``enum_underlying`` edge under the typedef's own
+    name -- the only public identity this anonymous enum ever gets.
+    """
+    pending_anon_enum: dict[str, Any] | None = None
     for child in node.get("inner", []) or []:
+        if isinstance(child, dict):
+            tag_id = str((pending_anon_enum or {}).get("id") or "")
+            name = str(child.get("name") or "")
+            if (
+                tag_id
+                and name
+                and child.get("kind") in ("TypedefDecl", "TypeAliasDecl")
+                and _anonymous_tag_id_referenced(child, tag_id)
+            ):
+                assert pending_anon_enum is not None
+                _emit_enum_underlying_edge(pending_anon_enum, scope, name, edges, idx)
+            pending_anon_enum = (
+                child
+                if child.get("kind") == "EnumDecl" and not child.get("name")
+                else None
+            )
         _walk_types(child, scope, enclosing_func, edges, idx)
 
 
