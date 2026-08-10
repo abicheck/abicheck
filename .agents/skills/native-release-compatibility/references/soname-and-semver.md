@@ -42,8 +42,11 @@ least safe.
   A source-only break (`API_BREAK` — e.g. a removed overload never emitted)
   is still a major version by this scheme, but already-compiled consumers
   keep working, so the SONAME usually stays; see the source-only row below.
-- **MINOR** — additive only: new exports, new types, new enumerators
-  appended. Existing consumers keep working unmodified.
+- **MINOR** — additive only: new exports, new types, and an appended
+  enumerator *whose underlying type is fixed or whose value fits the old
+  representation* (an append that widens an unfixed underlying type is a
+  binary break — see the table below). Existing consumers keep working
+  unmodified.
 - **PATCH** — no public surface change at all; implementation only.
 
 Pre-1.0 makes no compatibility promise between minors — say so explicitly

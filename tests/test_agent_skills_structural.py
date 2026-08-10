@@ -220,7 +220,11 @@ def test_source_links_to_docs_pages_all_resolve():
     committed sources are clean rather than relying on generation order."""
     offenders: list[str] = []
     for path in sorted(SRC.rglob("*.md")):
-        for target in _MD_LINK_RE.findall(path.read_text(encoding="utf-8")):
+        # Code examples are masked for the same reason the generator masks
+        # them: link syntax shown inside a fence is content, not a link, and
+        # demanding it resolve would reject a source for demonstrating one.
+        masked, _ = gen.mask_code_regions(path.read_text(encoding="utf-8"))
+        for target in _MD_LINK_RE.findall(masked):
             if "://" in target or target.startswith(("#", "mailto:")):
                 continue
             bare = target.split("#", 1)[0]

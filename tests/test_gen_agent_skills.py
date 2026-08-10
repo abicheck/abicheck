@@ -263,6 +263,55 @@ def test_shared_output_path_collision_is_a_hard_error(synthetic):
         gen.render_all(gen.SRC_DIR)
 
 
+def test_link_syntax_inside_a_code_example_is_left_alone(synthetic):
+    """Link syntax inside a code block or span is content the renderer shows
+    literally. Rewriting its destination corrupts the example, and validating
+    it would reject a source for *demonstrating* a bad link."""
+    synthetic(
+        skills={
+            "demo": {
+                "SKILL.md": (
+                    "---\nname: demo\n---\n\n"
+                    "Real: [a](../shared/a.md)\n\n"
+                    "```markdown\n"
+                    "[example](../../docs/use/cli-usage.md)\n"
+                    '<a href="../../docs/use/cli-usage.md">html</a>\n'
+                    "[ref][label]\n\n[label]: ../../docs/use/cli-usage.md\n"
+                    "```\n\n"
+                    "Inline: `[inline](../../docs/use/cli-usage.md)`\n"
+                )
+            }
+        },
+        shared={"a.md": "# A\n"},
+    )
+    rendered = gen.render_all(gen.SRC_DIR)["demo/SKILL.md"]
+    # Examples survive byte-for-byte...
+    assert "[example](../../docs/use/cli-usage.md)" in rendered
+    assert '<a href="../../docs/use/cli-usage.md">html</a>' in rendered
+    assert "`[inline](../../docs/use/cli-usage.md)`" in rendered
+    # ...while the one real link outside code is still rewritten.
+    assert "references/shared/a.md" in rendered
+
+
+def test_a_fragment_cited_only_inside_a_code_example_is_not_a_citation(synthetic):
+    """Masking must apply to citation scanning too, or a fragment merely
+    *shown* in an example would be copied into the skill — and, if that were
+    its only mention, would satisfy the orphan check without a real citer."""
+    synthetic(
+        skills={
+            "demo": {
+                "SKILL.md": (
+                    "---\nname: demo\n---\n\n[a](../shared/a.md)\n\n"
+                    "```markdown\n[b](../shared/b.md)\n```\n"
+                )
+            }
+        },
+        shared={"a.md": "# A\n", "b.md": "# B\n"},
+    )
+    with pytest.raises(gen.SkillGenerationError, match="b.md"):
+        gen.render_all(gen.SRC_DIR)
+
+
 def test_markdown_image_is_a_hard_error(synthetic):
     """Same class as the reference-definition case: `_MD_LINK_RE`'s negative
     lookbehind skips images, and the generator copies only Markdown — so an

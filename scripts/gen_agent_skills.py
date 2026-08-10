@@ -135,6 +135,45 @@ _HTML_LINK_ATTR_RE = re.compile(
 _FRONT_MATTER_RE = re.compile(r"\A---\r?\n.*?\r?\n---\r?\n", re.DOTALL)
 
 
+#: Fenced code blocks, then inline code spans. Applied in that order so a
+#: backtick *inside* a fence is never mistaken for an inline span.
+_FENCE_RE = re.compile(r"^ {0,3}(`{3,}|~{3,})[^\n]*\n.*?\n {0,3}\1[^\n]*$", re.M | re.S)
+_INLINE_CODE_RE = re.compile(r"(?<!`)(`+)(?!`)(.+?)(?<!`)\1(?!`)", re.DOTALL)
+
+#: Placeholder body — `\x00` cannot occur in a Markdown source, so a masked
+#: region is invisible to every link pattern and cannot be produced by one.
+_MASK = "\x00m{index}\x00"
+
+
+def mask_code_regions(text: str) -> tuple[str, dict[str, str]]:
+    """Replace code blocks and spans with opaque placeholders.
+
+    Link syntax inside a code example is *content*, not a link: the renderer
+    shows it literally, so rewriting its destination corrupts the example, and
+    validating it rejects a source for demonstrating what a bad link looks
+    like. Both guards and the rewrite therefore run over masked text.
+
+    Each placeholder carries the masked region's newline count so error
+    messages keep reporting real source line numbers.
+    """
+    replacements: dict[str, str] = {}
+
+    def mask(match: re.Match[str]) -> str:
+        original = match.group(0)
+        token = _MASK.format(index=len(replacements))
+        placeholder = token + "\n" * original.count("\n")
+        replacements[placeholder] = original
+        return placeholder
+
+    return _INLINE_CODE_RE.sub(mask, _FENCE_RE.sub(mask, text)), replacements
+
+
+def unmask_code_regions(text: str, replacements: dict[str, str]) -> str:
+    for placeholder, original in replacements.items():
+        text = text.replace(placeholder, original)
+    return text
+
+
 class SkillGenerationError(RuntimeError):
     """A skill source tree that cannot be published as-is."""
 
@@ -288,8 +327,11 @@ def _markdown_files(skill_dir: Path) -> list[Path]:
 
 
 def _link_targets(path: Path) -> list[str]:
-    text = path.read_text(encoding="utf-8")
-    return [m.group(2) for m in _MD_LINK_RE.finditer(text)]
+    # Masked, so a fragment shown inside a code example is not counted as a
+    # citation — that would copy it into the skill and, if it were the only
+    # mention, make an orphan check pass on a fragment nothing really cites.
+    masked, _ = mask_code_regions(path.read_text(encoding="utf-8"))
+    return [m.group(2) for m in _MD_LINK_RE.finditer(masked)]
 
 
 def _shared_fragment_for(path: Path, target: str, shared_dir: Path) -> str | None:
@@ -473,6 +515,9 @@ def _render(
     docs_dir = DOCS_DIR if docs_dir is None else docs_dir
     text = source_path.read_text(encoding="utf-8")
     front_matter, body = _split_front_matter(text)
+    # Code examples are literal content: their link syntax must be neither
+    # rewritten nor validated. Everything below operates on masked text.
+    body, code_regions = mask_code_regions(body)
 
     ref_defs = [m.group(1) for m in _MD_REF_DEF_RE.finditer(body)]
     if ref_defs:
@@ -509,7 +554,7 @@ def _render(
         )
         return f"[{label}]({new_target}{title})"
 
-    body = _MD_LINK_RE.sub(replace, body)
+    body = unmask_code_regions(_MD_LINK_RE.sub(replace, body), code_regions)
     head = front_matter if keep_front_matter else ""
     return f"{head}{GENERATED_MARKER}\n\n{body.lstrip(chr(10))}"
 
