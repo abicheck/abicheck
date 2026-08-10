@@ -120,21 +120,43 @@ unresolved. Give exactly one such block.
 #: `python3` in the first PATH entry whose shebang is `/usr/bin/env python3`
 #: would re-resolve to itself.
 #:
-#: Both spellings, because CPython accepts both: `-m abicheck` and the attached
-#: `-mabicheck` (verified — `python -mabicheck --version` prints the version).
-#: Recognizing only the separated form sent the attached one straight to the
-#: real interpreter, and the backstop below searched for a separate `-m` token
-#: too, so the bypass was accepted rather than reported: a correct comparison
-#: left `calls.jsonl` empty and graded as having obtained no evidence.
+#: It walks the interpreter's own options to find the module selector rather
+#: than looking only at `$1`. CPython's usage is `python [option] ... [-m mod]`,
+#: and all three of `-m abicheck`, the attached `-mabicheck`, and
+#: `-X dev -m abicheck` run the tool (verified). Matching `$1` alone sent the
+#: latter two straight to the real interpreter — and the backstop below now
+#: correctly reads that command's interpreter as `python`, so it would have
+#: accepted the unrecorded call as interposed and graded a correct comparison
+#: as having obtained no evidence. Detection and interception have to agree
+#: about which spellings reach the shim, or one of them silently lies.
+#:
+#: `-X`, `-W` and `--check-hash-based-pycs` take a separate value, so their
+#: value is skipped rather than examined; `-c` and a bare script path both end
+#: option processing without a module, so the scan stops there.
 _PYTHON_INTERPOSER = """#!/bin/sh
-if [ "$1" = "-m" ] && [ "$2" = "abicheck" ]; then
-  shift 2
-  exec "$SKILL_EVAL_SHIM" "$@"
-fi
-if [ "$1" = "-mabicheck" ]; then
-  shift 1
-  exec "$SKILL_EVAL_SHIM" "$@"
-fi
+skip=0
+seen=0
+for arg in "$@"; do
+  if [ "$skip" = 1 ]; then skip=0; seen=$((seen+1)); continue; fi
+  case "$arg" in
+    -m)
+      if [ "$(eval echo \\"\\${$((seen+2))}\\")" = "abicheck" ]; then
+        shift $((seen+2))
+        exec "$SKILL_EVAL_SHIM" "$@"
+      fi
+      break
+      ;;
+    -mabicheck)
+      shift $((seen+1))
+      exec "$SKILL_EVAL_SHIM" "$@"
+      ;;
+    -X|-W|--check-hash-based-pycs) skip=1 ;;
+    -c) break ;;
+    -*) ;;
+    *) break ;;
+  esac
+  seen=$((seen+1))
+done
 exec "$SKILL_EVAL_REAL_PYTHON" "$@"
 """
 

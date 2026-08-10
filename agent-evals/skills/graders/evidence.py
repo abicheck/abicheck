@@ -72,10 +72,16 @@ _NOT_COMPARABLE_EXITS = {
 }
 
 #: Modes that resolve an invocation without running it. `--dry-run` is explicit
-#: about this ("never returns a verdict code", exits 0/1/64) and `--help` exits
-#: 0, so both looked like clean comparisons to an exit-code check alone — a
-#: guessed verdict could cite one and satisfy every evidence rule.
-NON_EXECUTING_FLAGS = ("--help", "-h", "--dry-run")
+#: about this ("never returns a verdict code", exits 0/1/64) and the help modes
+#: exit 0, so all of them looked like clean comparisons to an exit-code check
+#: alone — a guessed verdict could cite one and satisfy every evidence rule.
+#:
+#: `--help-all` ("Show every option") is a second help mode, not a variant of
+#: the first, and it is the one that was missing: verified that `compare old
+#: new --help-all` exits 0 having printed help rather than a report. Worse than
+#: an ordinary miss, since that help text names `verdict` many times over,
+#: which is exactly what the artifact readers scan.
+NON_EXECUTING_FLAGS = ("--help", "-h", "--help-all", "--dry-run")
 
 #: Flags that can make a report greener than the findings warrant. `--suppress`
 #: and `--policy-file` do it directly; the severity knobs do it by re-scoring

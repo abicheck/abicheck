@@ -27,6 +27,7 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import os
 import sys
 from pathlib import Path
 
@@ -280,14 +281,16 @@ class TestRunnerTreatment:
         calls.write_text(json.dumps({"seq": 0, "argv": ["compare"]}) + "\n")
         assert not runner._bypassed_the_recorder(events, calls, interposed=True)
 
-    def test_the_interposer_only_redirects_the_module_entry_form(self):
-        """It sits on PATH as `python`; everything else must exec untouched."""
+    def test_the_interposer_falls_through_to_the_real_interpreter(self):
+        """A `/bin/sh` script on purpose: one named `python3` whose shebang is
+        `/usr/bin/env python3` would re-resolve to itself.
+
+        What it *does* with each spelling is tested by running it —
+        `TestInterposerSpellings` — rather than by matching its source text,
+        which is how a rewrite silently stopped matching what it asserted.
+        """
         script = runner._PYTHON_INTERPOSER
         assert script.startswith("#!/bin/sh")
-        assert '"$1" = "-m"' in script and '"$2" = "abicheck"' in script
-        # CPython accepts the attached form too, and it was the spelling that
-        # went straight to the real interpreter.
-        assert '"$1" = "-mabicheck"' in script
         assert 'exec "$SKILL_EVAL_REAL_PYTHON" "$@"' in script
 
     def test_a_run_that_completed_but_was_never_indexed_is_recovered(self, tmp_path):
@@ -661,3 +664,56 @@ class TestShimShortOptionClusters:
     def test_a_following_option_is_not_recorded_as_a_path(self):
         """`-o --format json` otherwise put a phantom `--format` in the record."""
         assert shim._declared_outputs(["compare", "a", "b", "-o", "--format"]) == []
+
+
+class TestInterposerSpellings:
+    """Detection and interception must agree on which spellings reach the shim.
+
+    They did not: the backstop reads `python -X dev -m abicheck` as spelled
+    with `python` — correct — while the interposer matched `-m` only at `$1`
+    and sent that command to the real interpreter. The unrecorded call would
+    then have been accepted as interposed, grading a correct comparison as
+    having obtained no evidence.
+    """
+
+    def _run(self, tmp_path: Path, args: list[str]) -> str:
+        import os
+        import subprocess
+
+        script = tmp_path / "python"
+        script.write_text(runner._PYTHON_INTERPOSER, encoding="utf-8")
+        script.chmod(0o755)
+        for name, tag in (("shim", "SHIM"), ("real", "REALPY")):
+            stub = tmp_path / name
+            stub.write_text(f'#!/bin/sh\necho "{tag}: $*"\n', encoding="utf-8")
+            stub.chmod(0o755)
+        proc = subprocess.run(  # noqa: S603
+            [str(script), *args],
+            capture_output=True,
+            text=True,
+            env={
+                **os.environ,
+                "SKILL_EVAL_SHIM": str(tmp_path / "shim"),
+                "SKILL_EVAL_REAL_PYTHON": str(tmp_path / "real"),
+            },
+        )
+        return proc.stdout.strip()
+
+    @pytest.mark.parametrize(
+        ("args", "expected"),
+        [
+            (["-m", "abicheck", "compare", "a", "b"], "SHIM: compare a b"),
+            (["-mabicheck", "compare", "a", "b"], "SHIM: compare a b"),
+            (["-X", "dev", "-m", "abicheck", "compare", "a"], "SHIM: compare a"),
+            (["-X", "dev", "-mabicheck", "--version"], "SHIM: --version"),
+            (["-W", "ignore", "-m", "abicheck", "--version"], "SHIM: --version"),
+            (["-u", "-m", "abicheck", "compare", "a", "b"], "SHIM: compare a b"),
+            # Everything else must exec the real interpreter untouched.
+            (["-m", "json.tool", "f.json"], "REALPY: -m json.tool f.json"),
+            (["script.py", "--flag"], "REALPY: script.py --flag"),
+            (["-c", "print(1)"], "REALPY: -c print(1)"),
+        ],
+    )
+    @pytest.mark.skipif(os.name == "nt", reason="the interposer is /bin/sh")
+    def test_each_spelling_goes_where_it_should(self, tmp_path, args, expected):
+        assert self._run(tmp_path, args) == expected

@@ -1132,3 +1132,18 @@ class TestVerdictRanking:
         grade = dim.grade_run(run, scenario)
         assert grade["correct"] is False
         assert grade["zero_tolerance_failed"] == []
+
+
+class TestNonExecutingModes:
+    @pytest.mark.parametrize("flag", ["--help", "-h", "--help-all", "--dry-run"])
+    def test_a_mode_that_prints_instead_of_comparing_is_not_evidence(self, flag):
+        """`--help-all` was the missing one — verified that `compare old new
+        --help-all` exits 0 having printed help, and that help text names
+        `verdict` repeatedly, which is what the artifact readers scan."""
+        call = {"seq": 0, "argv": ["compare", "old.so", "new.so", flag], "exit_code": 0}
+        assert not ev.is_comparison(call)
+        assert not ev.ran_to_a_verdict(call)
+
+    def test_the_same_call_without_that_flag_is_evidence(self):
+        call = {"seq": 0, "argv": ["compare", "old.so", "new.so"], "exit_code": 0}
+        assert ev.ran_to_a_verdict(call)
