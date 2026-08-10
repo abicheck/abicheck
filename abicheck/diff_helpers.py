@@ -41,7 +41,10 @@ from typing import Any, Protocol, TypeVar, cast
 from .change_registry import REGISTRY
 from .checker_policy import ChangeKind
 from .checker_types import Change
-from .fact_provenance import both_known_backed_fact_qualified
+from .fact_provenance import (
+    both_known_backed_fact_qualified,
+    same_producer_backed_fact_qualified,
+)
 from .model import AbiSnapshot
 
 K = TypeVar("K")
@@ -409,6 +412,31 @@ def fact_known_qualified(
     *name* alone) since a matched pair's two sides can carry different
     qualified identities."""
     return both_known_backed_fact_qualified(
+        old, new, old_qualified_key, new_qualified_key, bare_key,
+        old_bare_unambiguous=old_map.bare_name_is_unambiguous(name),
+        new_bare_unambiguous=new_map.bare_name_is_unambiguous(name),
+    )
+
+
+def fact_same_producer_qualified(
+    old: AbiSnapshot,
+    new: AbiSnapshot,
+    old_map: TypeMap[Any],
+    new_map: TypeMap[Any],
+    name: str,
+    old_qualified_key: str,
+    new_qualified_key: str,
+    bare_key: str,
+) -> bool:
+    """:func:`fact_provenance.same_producer_backed_fact_qualified`, deriving
+    its ambiguity flags exactly as :func:`fact_known_qualified` above does.
+
+    The gate for a fact both header backends populate with values that are
+    NOT cross-comparable (``TypeField.default``) rather than one whose values
+    are (``deprecated``/``is_scoped``) — see that function's own docstring for
+    why the two need different answers.
+    """
+    return same_producer_backed_fact_qualified(
         old, new, old_qualified_key, new_qualified_key, bare_key,
         old_bare_unambiguous=old_map.bare_name_is_unambiguous(name),
         new_bare_unambiguous=new_map.bare_name_is_unambiguous(name),

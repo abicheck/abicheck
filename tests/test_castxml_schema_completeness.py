@@ -49,11 +49,12 @@ def _snap(
     ast_producer="castxml",
 ):
     # ast_producer defaults to "castxml" (not None): every detector under
-    # test here gates on _both_castxml_backed, since these facts are
-    # castxml-only today (the clang header backend doesn't populate them
-    # yet) — a bare from_headers=True snapshot with ast_producer=None would
-    # otherwise fail that gate and every test below would see zero changes
-    # (Codex review, PR #582).
+    # test here gates on castxml (is_override/is_abstract, still genuinely
+    # castxml-only) or a same-producer check (field default, G31 Phase C —
+    # clang now populates it too, but with a non-cross-comparable value
+    # representation) — a bare from_headers=True snapshot with
+    # ast_producer=None would fail either gate and every test below would
+    # see zero changes (Codex review, PR #582).
     return AbiSnapshot(
         library="libtest.so.1",
         version=version,
@@ -406,19 +407,26 @@ class TestEnumDeprecatedChanged:
 # changed.
 #
 # G31 Phase C (docs/contribute/plans/g31-header-graph-default-on-followup.md)
-# closed that gap for two of these facts specifically — deprecated (every
-# surface kind) and EnumType.is_scoped — by wiring real extraction into the
-# direct-clang backend too (dumper_clang.py's _clang_deprecated_message /
-# the enum's "scopedEnumTag" handling), verified against real
-# clang -ast-dump=json output. Both facts' VALUES are directly
-# cross-comparable between backends (a plain message string / a plain bool,
-# not a backend-specific encoding), so a castxml-vs-clang pair for either is
-# now a genuine, correctly-detected comparison, not a producer-mismatch
-# false positive — see TestDeprecatedCrossProducerNowComparable below,
-# which replaces what used to be four more "does not false-positive" cases
-# in this class. is_abstract, is_override, and TypeField.default remain
-# castxml-only (no clang-side extraction exists for any of the three), so
-# their producer-mismatch tests are unchanged.
+# closed that gap for three of these facts — deprecated (every surface
+# kind), EnumType.is_scoped, and TypeField.default — by wiring real
+# extraction into the direct-clang backend too (dumper_clang.py's
+# _clang_deprecated_message / the enum's "scopedEnumTag" handling /
+# _field_initializer_value), verified against real clang -ast-dump=json
+# output. deprecated/is_scoped's VALUES are directly cross-comparable
+# between backends (a plain message string / a plain bool, not a
+# backend-specific encoding), so a castxml-vs-clang pair for either is now a
+# genuine, correctly-detected comparison, not a producer-mismatch false
+# positive — see TestDeprecatedCrossProducerNowComparable below, which
+# replaces what used to be four more "does not false-positive" cases in
+# this class. TypeField.default is different: both backends now populate
+# it, but their VALUE REPRESENTATIONS are not cross-comparable (castxml
+# keeps the verbatim source expression, clang falls back to a
+# literal/structural fingerprint) — same shape as Param.default — so a
+# castxml-vs-clang MISMATCH is still correctly declined (the test below is
+# unchanged in outcome), while a same-producer clang-vs-clang pair now
+# fires for real — see TestFieldDefaultCrossProducer below. is_abstract and
+# is_override remain castxml-only (no clang-side extraction exists for
+# either), so their producer-mismatch tests are unchanged.
 
 
 def _clang_snap(**kwargs):
@@ -553,6 +561,96 @@ class TestDeprecatedCrossProducerNowComparable:
         unknown_producer_new = _snap(functions=[f_new], ast_producer="some_future_tool")
         r = compare(_snap(functions=[f_old]), unknown_producer_new)
         assert ChangeKind.FUNC_DEPRECATED_REMOVED not in _kinds(r)
+
+
+class TestFieldDefaultCrossProducer:
+    """G31 Phase C: TypeField.default is a different shape of cross-producer
+    fix than deprecated/is_scoped above — both backends now populate it, but
+    their VALUE representations are not directly comparable, so the correct
+    gate is SAME positively-known producer
+    (``fact_provenance.same_producer_backed_fact_qualified``), not "any known
+    producer" (both_known_backed_fact, only correct for deprecated/is_scoped's
+    directly-comparable values).
+
+    Unlike ``Param.default``'s own inline gate
+    (``diff_symbols._diff_param_defaults``, deliberately permissive when a
+    producer is merely unknown — see that function's own docstring), this
+    gate is NOT permissive on an unknown producer (Codex review, PR #687,
+    fresh evidence): an unknown side could just as easily be castxml (real
+    source text) as it could be an equivalent castxml pair, and this fact's
+    representation offers no way to tell those apart from the values alone —
+    so "unknown" must decline here, exactly like deprecated/is_scoped's own
+    both-positively-known gate, not stay permissive."""
+
+    def test_fires_across_clang_to_clang(self):
+        t_old = RecordType(
+            name="Cfg",
+            kind="struct",
+            size_bits=32,
+            fields=[TypeField("timeout", "int", 0, default="30")],
+        )
+        t_new = RecordType(
+            name="Cfg",
+            kind="struct",
+            size_bits=32,
+            fields=[TypeField("timeout", "int", 0, default=None)],
+        )
+        r = compare(_clang_snap(types=[t_old]), _clang_snap(types=[t_new]))
+        assert ChangeKind.FIELD_DEFAULT_INITIALIZER_REMOVED in _kinds(r)
+
+    def test_castxml_to_clang_mismatch_still_declines(self):
+        """The representation mismatch, not merely "producer unknown" —
+        both sides have a POSITIVELY known but DIFFERENT producer, which
+        must still skip (same outcome as
+        TestProducerMismatchDoesNotFalsePositive.
+        test_field_default_initializer_producer_mismatch, restated here
+        alongside the same-producer case it contrasts with)."""
+        t_old = RecordType(
+            name="Cfg",
+            kind="struct",
+            size_bits=32,
+            fields=[TypeField("timeout", "int", 0, default="30")],
+        )
+        t_new = RecordType(
+            name="Cfg",
+            kind="struct",
+            size_bits=32,
+            fields=[TypeField("timeout", "int", 0, default=None)],
+        )
+        r = compare(_snap(types=[t_old]), _clang_snap(types=[t_new]))
+        assert ChangeKind.FIELD_DEFAULT_INITIALIZER_REMOVED not in _kinds(r)
+
+    def test_declines_when_one_side_producer_is_unknown(self):
+        """Codex review, PR #687, fresh evidence: like deprecated/is_scoped
+        (both_known_backed_fact — declines unless BOTH sides are positively
+        known), the skip must fire here too when either producer is merely
+        unknown, not only when both are positively known and differ. An
+        earlier revision of this gate stayed permissive on "unknown" the
+        same way Param.default's own inline check deliberately does — but
+        unlike Param.default, an unknown side here could just as easily be
+        a real castxml source-text value the OTHER, positively-known
+        "castxml" side is genuinely comparable against as it could be
+        something else entirely; the fact's representation gives no way to
+        tell from the values alone, so treating "unknown" as "assume
+        comparable" risked reading a representation mismatch as a real
+        change (this detector's PREDECESSOR gate, both_castxml_backed_fact,
+        required POSITIVELY confirmed castxml on both sides — None never
+        passed it either)."""
+        t_old = RecordType(
+            name="Cfg",
+            kind="struct",
+            size_bits=32,
+            fields=[TypeField("timeout", "int", 0, default="30")],
+        )
+        t_new = RecordType(
+            name="Cfg",
+            kind="struct",
+            size_bits=32,
+            fields=[TypeField("timeout", "int", 0, default=None)],
+        )
+        unknown_producer_new = _snap(types=[t_new], ast_producer="some_future_tool")
+        r = compare(_snap(types=[t_old]), unknown_producer_new)
+        assert ChangeKind.FIELD_DEFAULT_INITIALIZER_REMOVED not in _kinds(r)
 
 
 # ── Real castxml XML → model field population ───────────────────────────────

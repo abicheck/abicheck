@@ -525,16 +525,21 @@ class AbiSnapshot:
     from_headers: bool = False  # True when the ABI surface was parsed from public headers (castxml/AST), as opposed to DWARF debug info or the symbol table. Drives the HEADER_AWARE evidence tier — DWARF-derived declarations populate the same functions/types lists but must NOT be mistaken for header-level evidence.
     # Which L2 header-AST backend produced this snapshot ("castxml" | "clang" |
     # "hybrid"), set only when from_headers is True. Some facts are captured by
-    # only one backend today (TypeField.default, RecordType.is_abstract,
-    # Function.is_override — castxml-only; see dumper_clang.py for why
-    # deprecated/EnumType.is_scoped are NOT in this list despite originally
-    # being castxml-only too, G31 Phase C closed that gap); detectors for
-    # those must gate on BOTH sides sharing the SAME producer, not merely on
-    # from_headers, or a producer mismatch reads as every such fact being
-    # silently removed (Codex review, PR #582; fact_provenance.py's
-    # both_castxml_backed_fact vs. both_known_backed_fact is the two
-    # variants of that gate). None for non-header snapshots (DWARF/
-    # symbols-only) and for snapshots predating this field.
+    # only one backend today (RecordType.is_abstract, Function.is_override —
+    # castxml-only; see dumper_clang.py for why deprecated/EnumType.is_scoped/
+    # TypeField.default are NOT in this list despite originally being
+    # castxml-only too, G31 Phase C closed that gap for all three);
+    # TypeField.default and Param.default (both now cross-producer but NOT
+    # cross-comparable — castxml keeps the verbatim source expression, clang
+    # a literal/structural fingerprint) still need detectors to gate on BOTH
+    # sides sharing the SAME producer, not merely on from_headers, or a
+    # producer mismatch reads as every such fact being silently removed
+    # (Codex review, PR #582; fact_provenance.py's
+    # same_producer_backed_fact_qualified/fact_producer vs.
+    # both_known_backed_fact is the two variants of that gate — the latter
+    # for a directly cross-comparable fact like deprecated/is_scoped). None
+    # for non-header snapshots (DWARF/symbols-only) and for snapshots
+    # predating this field.
     #
     # "hybrid" (G28 Phase 3, ``--ast-frontend hybrid``, ``dumper_hybrid.
     # merge_snapshots()``) means this snapshot was built by running BOTH
@@ -690,6 +695,40 @@ class AbiSnapshot:
     # provenance for a fact clang could never populate, so a legacy hybrid
     # snapshot carries no equivalent false-reliability risk.
     clang_deprecation_facts_reliable: bool = field(default=True, kw_only=True)
+
+    # True when this snapshot's TypeField.default (default member initializer)
+    # facts are known-reliable when its own ``ast_producer`` is ``"clang"`` OR
+    # ``"hybrid"`` -- G31 Phase C (schema v20) wired real extraction into the
+    # direct-clang backend (``dumper_clang_expr._field_initializer_value``),
+    # previously unconditionally None. Exactly the shape of
+    # ``clang_deprecation_facts_reliable`` above, and needed for the same
+    # reason: ``TypeField.default`` is documented (see the field itself) as
+    # ``None`` both for "no initializer" and "this dumper doesn't capture
+    # it", so a pre-v20 clang snapshot's blanket ``None`` is indistinguishable
+    # by value alone from a genuine "this field has no initializer". Without
+    # this marker, comparing a fresh clang dump against a persisted pre-v20
+    # clang baseline in the new-side-legacy direction reads as every
+    # initializer having been REMOVED. Tracked separately from the
+    # deprecation flag rather than folded into it because the two facts
+    # landed in different schema versions -- a v19 snapshot has reliable
+    # deprecated/is_scoped but unreliable field defaults, which a single
+    # shared flag could not express. Not needed for "castxml" (its own
+    # extraction predates both flags, G28 Phase 1). UNLIKE
+    # ``clang_deprecation_facts_reliable``, this one DOES need to cover a
+    # legacy "hybrid" snapshot too (Codex review, fresh evidence, second
+    # round): a pre-v20 hybrid merge's clang-only-APPENDED record types
+    # (``merge_snapshots()``'s ``clang_only_types`` loop) never had
+    # ``default`` provenance stamped at all -- only ``deprecated`` was, since
+    # clang couldn't populate ``default`` yet -- so an absent provenance
+    # entry for such a field on a pre-v20 hybrid snapshot is real-but-WRONG
+    # data (the field's own value is unconditionally None), not genuinely
+    # unrecorded. A MATCHED field's ``default`` provenance is unaffected
+    # either way -- it's unconditionally stamped "castxml" regardless of
+    # schema version (``_backfill_fact`` records provenance for every
+    # matched declaration; clang's own value was always None pre-fix, so
+    # there was nothing to ever backfill from), so it always has a real,
+    # trusted provenance entry and never depends on this flag.
+    clang_field_initializer_facts_reliable: bool = field(default=True, kw_only=True)
 
     # Phase 3: binary format platform — detected from ELF/PE/MachO metadata.
     # None = unknown / not yet detected.

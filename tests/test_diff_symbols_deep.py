@@ -500,13 +500,19 @@ class TestParamDefaultChanged:
             params=[Param(name="timeout", type="int", default=None)],
         )
         old = AbiSnapshot(
-            library="libtest.so.1", version="1.0", functions=[f_v1],
-            from_headers=True, ast_producer="hybrid",
+            library="libtest.so.1",
+            version="1.0",
+            functions=[f_v1],
+            from_headers=True,
+            ast_producer="hybrid",
             fact_provenance={"func:_Z7connectv:param_defaults": "castxml"},
         )
         new = AbiSnapshot(
-            library="libtest.so.1", version="1.0", functions=[f_v2],
-            from_headers=True, ast_producer="hybrid",
+            library="libtest.so.1",
+            version="1.0",
+            functions=[f_v2],
+            from_headers=True,
+            ast_producer="hybrid",
             fact_provenance={"func:_Z7connectv:param_defaults": "clang"},
         )
         r = compare(old, new)
@@ -531,13 +537,19 @@ class TestParamDefaultChanged:
             params=[Param(name="timeout", type="int", default=None)],
         )
         old = AbiSnapshot(
-            library="libtest.so.1", version="1.0", functions=[f_v1],
-            from_headers=True, ast_producer="hybrid",
+            library="libtest.so.1",
+            version="1.0",
+            functions=[f_v1],
+            from_headers=True,
+            ast_producer="hybrid",
             fact_provenance={"func:_Z7connectv:param_defaults": "clang"},
         )
         new = AbiSnapshot(
-            library="libtest.so.1", version="1.0", functions=[f_v2],
-            from_headers=True, ast_producer="hybrid",
+            library="libtest.so.1",
+            version="1.0",
+            functions=[f_v2],
+            from_headers=True,
+            ast_producer="hybrid",
             fact_provenance={"func:_Z7connectv:param_defaults": "clang"},
         )
         r = compare(old, new)
@@ -562,12 +574,18 @@ class TestParamDefaultChanged:
             params=[Param(name="timeout", type="int", default=None)],
         )
         old = AbiSnapshot(
-            library="libtest.so.1", version="1.0", functions=[f_old],
-            from_headers=True, ast_producer=None,
+            library="libtest.so.1",
+            version="1.0",
+            functions=[f_old],
+            from_headers=True,
+            ast_producer=None,
         )
         new = AbiSnapshot(
-            library="libtest.so.1", version="1.0", functions=[f_new],
-            from_headers=True, ast_producer="hybrid",
+            library="libtest.so.1",
+            version="1.0",
+            functions=[f_new],
+            from_headers=True,
+            ast_producer="hybrid",
             fact_provenance={"func:_Z7connectv:param_defaults": "castxml"},
         )
         r = compare(old, new)
@@ -592,12 +610,18 @@ class TestParamDefaultChanged:
             params=[Param(name="timeout", type="int", default=None)],
         )
         old = AbiSnapshot(
-            library="libtest.so.1", version="1.0", functions=[f_old],
-            from_headers=True, ast_producer="castxml",
+            library="libtest.so.1",
+            version="1.0",
+            functions=[f_old],
+            from_headers=True,
+            ast_producer="castxml",
         )
         new = AbiSnapshot(
-            library="libtest.so.1", version="1.0", functions=[f_new],
-            from_headers=True, ast_producer="clang",
+            library="libtest.so.1",
+            version="1.0",
+            functions=[f_new],
+            from_headers=True,
+            ast_producer="clang",
         )
         r = compare(old, new)
         assert ChangeKind.PARAM_DEFAULT_VALUE_REMOVED not in _kinds(r)
@@ -616,12 +640,287 @@ class TestParamDefaultChanged:
             params=[Param(name="timeout", type="int", default=None)],
         )
         old = AbiSnapshot(
-            library="libtest.so.1", version="1.0", functions=[f_old],
-            from_headers=True, ast_producer="clang",
+            library="libtest.so.1",
+            version="1.0",
+            functions=[f_old],
+            from_headers=True,
+            ast_producer="clang",
         )
         new = AbiSnapshot(
-            library="libtest.so.1", version="1.0", functions=[f_new],
-            from_headers=True, ast_producer="clang",
+            library="libtest.so.1",
+            version="1.0",
+            functions=[f_new],
+            from_headers=True,
+            ast_producer="clang",
+        )
+        r = compare(old, new)
+        assert ChangeKind.PARAM_DEFAULT_VALUE_REMOVED in _kinds(r)
+
+    def test_no_false_change_for_pre_v20_clang_fingerprint_algorithm_shift(self):
+        """Codex review, PR #687, fourth round, fresh evidence (P1): unlike a
+        literal default's plain value, a non-literal default's clang-side
+        representation is a structural fingerprint whose exact algorithm
+        changed within this same PR (referenced-declaration identity/scope,
+        sizeof operand types, anonymous-type location normalization -- see
+        dumper_clang._canonical_expr's own history). A persisted pre-v20
+        clang snapshot's fingerprint for an UNCHANGED non-literal default can
+        differ from a fresh one purely from that algorithm shift, not a real
+        edit -- must not report PARAM_DEFAULT_VALUE_CHANGED."""
+        f_old = _pub_func(
+            "connect",
+            "_Z7connectv",
+            params=[Param(name="timeout", type="int", default="expr:oldalgo1234")],
+        )
+        f_new = _pub_func(
+            "connect",
+            "_Z7connectv",
+            params=[Param(name="timeout", type="int", default="expr:newalgo5678")],
+        )
+        old = AbiSnapshot(
+            library="libtest.so.1",
+            version="1.0",
+            functions=[f_old],
+            from_headers=True,
+            ast_producer="clang",
+            clang_field_initializer_facts_reliable=False,
+        )
+        new = AbiSnapshot(
+            library="libtest.so.1",
+            version="2.0",
+            functions=[f_new],
+            from_headers=True,
+            ast_producer="clang",
+            clang_field_initializer_facts_reliable=True,
+        )
+        r = compare(old, new)
+        assert ChangeKind.PARAM_DEFAULT_VALUE_CHANGED not in _kinds(r)
+
+    def test_no_false_change_against_producer_less_legacy_clang_snapshot(self):
+        """Codex review, PR #687, fresh evidence, third round: a direct-clang
+        snapshot persisted BEFORE ast_producer provenance was tracked at all
+        (e.g. schema v9) has its per-function producer resolve to None, not
+        "clang" -- but its real value is still an "expr:"-shaped fingerprint
+        from that same unstable pre-v20 _canonical_expr algorithm. The
+        stricter `producer == "clang"` equality check let this producer-less
+        legacy fingerprint compare directly against a freshly-stabilized one
+        and report a false PARAM_DEFAULT_VALUE_CHANGED."""
+        f_old = _pub_func(
+            "connect",
+            "_Z7connectv",
+            params=[Param(name="timeout", type="int", default="expr:oldalgo1234")],
+        )
+        f_new = _pub_func(
+            "connect",
+            "_Z7connectv",
+            params=[Param(name="timeout", type="int", default="expr:newalgo5678")],
+        )
+        old = AbiSnapshot(
+            library="libtest.so.1",
+            version="1.0",
+            functions=[f_old],
+            from_headers=True,
+            ast_producer=None,
+            clang_field_initializer_facts_reliable=False,
+        )
+        new = AbiSnapshot(
+            library="libtest.so.1",
+            version="2.0",
+            functions=[f_new],
+            from_headers=True,
+            ast_producer="clang",
+            clang_field_initializer_facts_reliable=True,
+        )
+        r = compare(old, new)
+        assert ChangeKind.PARAM_DEFAULT_VALUE_CHANGED not in _kinds(r)
+
+    def test_no_false_change_against_snapshot_from_dict_producer_less_legacy(
+        self,
+    ):
+        """Codex review, PR #687, fresh evidence, fourth round: the test
+        above constructs ``clang_field_initializer_facts_reliable=False``
+        directly on the ``AbiSnapshot`` -- it never exercises
+        ``serialization.snapshot_from_dict``'s own DERIVATION of that flag
+        from a raw, producer-less legacy dict, which is where the actual bug
+        was: ``ast_producer_value not in ("clang", "hybrid")`` treated an
+        absent producer as "definitely not clang/hybrid" (i.e. reliable) --
+        backwards, since ``ast_producer`` has always had exactly three real
+        values and an absent one means unknown, not confirmed-castxml. This
+        end-to-end test goes through the real ``snapshot_from_dict`` load
+        path a persisted pre-v10 baseline would actually take."""
+        from abicheck.serialization import snapshot_from_dict, snapshot_to_dict
+
+        f_old = _pub_func(
+            "connect",
+            "_Z7connectv",
+            params=[Param(name="timeout", type="int", default="expr:oldalgo1234")],
+        )
+        f_new = _pub_func(
+            "connect",
+            "_Z7connectv",
+            params=[Param(name="timeout", type="int", default="expr:newalgo5678")],
+        )
+        legacy_dict = snapshot_to_dict(
+            AbiSnapshot(
+                library="libtest.so.1",
+                version="1.0",
+                functions=[f_old],
+                from_headers=True,
+                ast_producer="clang",
+            )
+        )
+        legacy_dict["schema_version"] = 9
+        del legacy_dict["ast_producer"]
+        legacy_dict.pop("clang_field_initializer_facts_reliable", None)
+        old = snapshot_from_dict(legacy_dict)
+        assert old.ast_producer is None
+        assert old.clang_field_initializer_facts_reliable is False
+
+        new = AbiSnapshot(
+            library="libtest.so.1",
+            version="2.0",
+            functions=[f_new],
+            from_headers=True,
+            ast_producer="clang",
+        )
+        r = compare(old, new)
+        assert ChangeKind.PARAM_DEFAULT_VALUE_CHANGED not in _kinds(r)
+
+    def test_real_change_from_literal_to_fingerprint_still_detected(self):
+        """Codex review, PR #687, fresh evidence: the gate above must be
+        checked PER SIDE, not "either value looks like a fingerprint ->
+        check both sides' reliability". A pre-v20 clang snapshot storing a
+        LITERAL default (``"42"``) never touched the unstable fingerprint
+        algorithm at all -- its own unreliability flag is irrelevant. When
+        the current snapshot changes that default to a non-literal
+        expression (``DEFAULT_TIMEOUT``, fingerprinted as ``"expr:..."``),
+        the change is real and must still be reported; the OLD side being a
+        legacy, algorithm-unreliable snapshot must not suppress it just
+        because the NEW value happens to be fingerprint-shaped."""
+        f_old = _pub_func(
+            "connect",
+            "_Z7connectv",
+            params=[Param(name="timeout", type="int", default="42")],
+        )
+        f_new = _pub_func(
+            "connect",
+            "_Z7connectv",
+            params=[Param(name="timeout", type="int", default="expr:newalgo5678")],
+        )
+        old = AbiSnapshot(
+            library="libtest.so.1",
+            version="1.0",
+            functions=[f_old],
+            from_headers=True,
+            ast_producer="clang",
+            clang_field_initializer_facts_reliable=False,
+        )
+        new = AbiSnapshot(
+            library="libtest.so.1",
+            version="2.0",
+            functions=[f_new],
+            from_headers=True,
+            ast_producer="clang",
+            clang_field_initializer_facts_reliable=True,
+        )
+        r = compare(old, new)
+        assert ChangeKind.PARAM_DEFAULT_VALUE_CHANGED in _kinds(r)
+
+    def test_real_fingerprint_change_still_detected_when_both_reliable(self):
+        """Control case: two RELIABLE (post-fix) clang snapshots with
+        genuinely different non-literal defaults must still compare -- the
+        gate above must not blanket-suppress every fingerprint-shaped
+        comparison, only the pre-v20-vs-current-algorithm risk."""
+        f_old = _pub_func(
+            "connect",
+            "_Z7connectv",
+            params=[Param(name="timeout", type="int", default="expr:aaaa")],
+        )
+        f_new = _pub_func(
+            "connect",
+            "_Z7connectv",
+            params=[Param(name="timeout", type="int", default="expr:bbbb")],
+        )
+        old = AbiSnapshot(
+            library="libtest.so.1",
+            version="1.0",
+            functions=[f_old],
+            from_headers=True,
+            ast_producer="clang",
+        )
+        new = AbiSnapshot(
+            library="libtest.so.1",
+            version="2.0",
+            functions=[f_new],
+            from_headers=True,
+            ast_producer="clang",
+        )
+        r = compare(old, new)
+        assert ChangeKind.PARAM_DEFAULT_VALUE_CHANGED in _kinds(r)
+
+    def test_literal_default_change_still_detected_against_pre_v20_side(self):
+        """A LITERAL default's plain value never touches _canonical_expr at
+        all, so it stays fully comparable regardless of schema version --
+        the gate must only apply to fingerprint-shaped ("expr:"-prefixed)
+        values, never blanket-suppress every comparison against a pre-v20
+        clang snapshot."""
+        f_old = _pub_func(
+            "connect",
+            "_Z7connectv",
+            params=[Param(name="timeout", type="int", default="30")],
+        )
+        f_new = _pub_func(
+            "connect",
+            "_Z7connectv",
+            params=[Param(name="timeout", type="int", default="60")],
+        )
+        old = AbiSnapshot(
+            library="libtest.so.1",
+            version="1.0",
+            functions=[f_old],
+            from_headers=True,
+            ast_producer="clang",
+            clang_field_initializer_facts_reliable=False,
+        )
+        new = AbiSnapshot(
+            library="libtest.so.1",
+            version="2.0",
+            functions=[f_new],
+            from_headers=True,
+            ast_producer="clang",
+            clang_field_initializer_facts_reliable=True,
+        )
+        r = compare(old, new)
+        assert ChangeKind.PARAM_DEFAULT_VALUE_CHANGED in _kinds(r)
+
+    def test_removal_still_detected_against_pre_v20_side(self):
+        """Presence/absence detection is unaffected by the fingerprint
+        algorithm -- PARAM_DEFAULT_VALUE_REMOVED must still fire even when
+        the removed default's OLD value was a pre-v20 fingerprint."""
+        f_old = _pub_func(
+            "connect",
+            "_Z7connectv",
+            params=[Param(name="timeout", type="int", default="expr:oldalgo1234")],
+        )
+        f_new = _pub_func(
+            "connect",
+            "_Z7connectv",
+            params=[Param(name="timeout", type="int", default=None)],
+        )
+        old = AbiSnapshot(
+            library="libtest.so.1",
+            version="1.0",
+            functions=[f_old],
+            from_headers=True,
+            ast_producer="clang",
+            clang_field_initializer_facts_reliable=False,
+        )
+        new = AbiSnapshot(
+            library="libtest.so.1",
+            version="2.0",
+            functions=[f_new],
+            from_headers=True,
+            ast_producer="clang",
+            clang_field_initializer_facts_reliable=True,
         )
         r = compare(old, new)
         assert ChangeKind.PARAM_DEFAULT_VALUE_REMOVED in _kinds(r)
@@ -809,7 +1108,9 @@ class TestVarConstChanged:
         r = compare(_snap(variables=[v_v1]), _snap(variables=[v_v2]))
         assert ChangeKind.VAR_TYPE_CHANGED in _kinds(r)
 
-    def test_member_function_pointer_own_const_is_type_changed_not_var_became_const(self):
+    def test_member_function_pointer_own_const_is_type_changed_not_var_became_const(
+        self,
+    ):
         """`void (C::*)(int)` -> `void (C::*)(int) const` (CodeRabbit
         review, PR #589): the trailing `const` here is the member-function-
         POINTER's own cv-qualification (it points to a const member
