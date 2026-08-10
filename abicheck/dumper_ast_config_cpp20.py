@@ -997,22 +997,26 @@ def _is_preprocessor_directive(line: bytes) -> bool:
     return re.match(rb"^\s*#", line) is not None
 
 
+#: The construct a :class:`Cpp20Requirement` names. Aliased so
+#: :func:`_requirement_kind`, which classifies a line into exactly one of
+#: these, is checked against the same closed set the dataclass accepts.
+Cpp20RequirementReason = Literal[
+    "concept-declaration",
+    "requires-expression",
+    "requires-clause",
+    "constrained-template-parameter",
+    "custom-constrained-auto-parameter",
+    "abbreviated-function-template-parameter",
+    "consteval-declaration",
+    "constinit-declaration",
+]
 
 
 @dataclass(frozen=True)
 class Cpp20Requirement:
     """A single structural C++20 construct found while scanning headers."""
 
-    reason: Literal[
-        "concept-declaration",
-        "requires-expression",
-        "requires-clause",
-        "constrained-template-parameter",
-        "custom-constrained-auto-parameter",
-        "abbreviated-function-template-parameter",
-        "consteval-declaration",
-        "constinit-declaration",
-    ]
+    reason: Cpp20RequirementReason
     path: str
     line: int
 
@@ -1138,6 +1142,207 @@ def _expand_with_quoted_includes(
     return expanded
 
 
+@dataclass(frozen=True)
+class _Cpp20ShadowFlags:
+    """Whether each C++20 keyword also names an ordinary type in the aggregate.
+
+    ORed across *every* header, not computed per file: *header_paths* is the
+    whole aggregate castxml/clang parses as a single translation unit, so a
+    pre-C++20 compatibility type shadowing one of these keywords can live in a
+    shared ``compat.hpp`` while the ambiguous bare use sits in ``api.hpp`` — a
+    per-file check would see only the latter and wrongly force C++20 mode on
+    the whole aggregate (Codex review, sixth round).
+    """
+
+    concept: bool = False
+    requires: bool = False
+    consteval: bool = False
+    constinit: bool = False
+
+
+def _preprocessed_header_content(
+    path: Path, *, for_language_mode_decision: bool
+) -> tuple[bytes, bytes] | None:
+    """``(scan_content, shadow_scan_content)`` for one header, or ``None``.
+
+    Raw string literals are blanked first — their body can contain arbitrary
+    quotes/backslashes that would otherwise confuse the ordinary string-literal
+    stripper. Then string/char literals, so a literal containing comment-like
+    text (``"/* not a comment */"``) is never mistaken for a real comment;
+    that pass is backslash-newline-continuation-tolerant (Codex review) so a
+    literal split across a continuation cannot leave its trapped text — e.g. a
+    fake ``struct concept {};`` inside an error message — visible to the shadow
+    scan. Block comments are replaced by their own newline count so
+    later-reported line numbers stay accurate (CodeRabbit review).
+
+    The two returned copies differ only in how dialect-fallback guards are
+    masked, and that difference is load-bearing (Codex review, nineteenth
+    round). The shadow scan asks "does ``concept`` name an ordinary type in
+    code still reachable *if C++20 were chosen*", so a ``struct concept {};``
+    shim confined to ``#if __cplusplus < 202002L`` — content that goes away
+    once C++20 is chosen — must not count; for the requirements scan that same
+    guarded arm is the unconditionally-relevant one.
+    """
+    try:
+        content = path.read_bytes()
+    except OSError:
+        return None
+    content = _strip_raw_strings(content)
+    content = _strip_literals_crossing_continuations(content)
+    content = re.sub(
+        rb"/\*.*?\*/",
+        lambda m: b"\n" * m.group(0).count(b"\n"),
+        content,
+        flags=re.DOTALL,
+    )
+    # A separate, additionally "//"-line-comment-stripped copy: raw
+    # strings/literals/block comments are already blanked above, but "//"
+    # comments are only stripped per-logical-line further down, and a
+    # "// struct concept {};" comment must never make a *real* concept
+    # declaration elsewhere look ambiguous (Codex review, fifth round).
+    # #if 0 / #if false regions go too — a disabled compatibility stub must not
+    # shadow a genuine keyword used elsewhere (Codex review).
+    no_double_slash = re.sub(rb"//[^\n]*", b"", content)
+    scan_content = _strip_inactive_if_zero_blocks(
+        no_double_slash, mask_cplusplus_defined_guards=for_language_mode_decision
+    )
+    shadow_content = _strip_inactive_if_zero_blocks(
+        no_double_slash, invert_dialect_fallback_guards=False
+    )
+    return scan_content, shadow_content
+
+
+def _preprocess_headers(
+    header_paths: list[Path], *, for_language_mode_decision: bool
+) -> tuple[list[tuple[Path, bytes]], _Cpp20ShadowFlags]:
+    """First pass: preprocess every header and OR the shadow flags across all.
+
+    The second pass reuses the returned content rather than re-reading, so the
+    per-line scan runs against aggregate-wide flags.
+    """
+    per_file: list[tuple[Path, bytes]] = []
+    concept = requires = consteval = constinit = False
+    for path in header_paths:
+        prepared = _preprocessed_header_content(
+            path, for_language_mode_decision=for_language_mode_decision
+        )
+        if prepared is None:
+            continue
+        scan_content, shadow_content = prepared
+        per_file.append((path, scan_content))
+        concept = concept or bool(
+            _CONCEPT_AS_TYPE_NAME_PATTERN.search(shadow_content)
+        )
+        requires = requires or bool(
+            _REQUIRES_AS_TYPE_NAME_PATTERN.search(shadow_content)
+        )
+        consteval = consteval or bool(
+            _CONSTEVAL_AS_TYPE_NAME_PATTERN.search(shadow_content)
+        )
+        constinit = constinit or bool(
+            _CONSTINIT_AS_TYPE_NAME_PATTERN.search(shadow_content)
+        )
+    return per_file, _Cpp20ShadowFlags(concept, requires, consteval, constinit)
+
+
+def _joined_lookahead(
+    logical_lines: list[tuple[int, bytes]], i: int, code: bytes
+) -> bytes:
+    """*code* plus any following lines a bare trailing keyword continues onto.
+
+    A bare ``requires``/``concept``/``consteval``/``constinit`` at end of line
+    (no parameter list/brace/name yet, or for consteval/constinit no declarator
+    at all) means the construct's continuation landed on a following physical
+    line with no backslash join — the per-line scan otherwise never sees the
+    two halves together (Codex review; the gap applies symmetrically to
+    ``concept`` split before its name, not just ``requires`` split before its
+    ``(``/``{``/constraint, and equally to consteval/constinit split before
+    their own declarator, e.g. ``consteval\nint f();`` — Codex review, second
+    round). Bounded, so a stray trailing keyword in unrelated code cannot scan
+    unboundedly.
+    """
+    lookahead = code
+    j = i
+    budget = 5
+    n = len(logical_lines)
+    while (
+        budget > 0
+        and re.search(
+            rb"\b(?:requires|concept|consteval|constinit)\s*$", lookahead.rstrip()
+        )
+        and j + 1 < n
+        and not _is_preprocessor_directive(logical_lines[j + 1][1])
+    ):
+        j += 1
+        nxt = _strip_literals_joined(logical_lines[j][1]).split(b"//")[0]
+        lookahead += b"\n" + nxt
+        budget -= 1
+    return lookahead
+
+
+def _requirement_kind(
+    lookahead: bytes, prev_nonblank_code: bytes, shadows: _Cpp20ShadowFlags
+) -> Cpp20RequirementReason | None:
+    """The C++20 construct this line requires, or ``None``. First match wins."""
+    concept_match = _CPP20_CONCEPT_PATTERN.search(lookahead)
+    if concept_match and _looks_like_genuine_concept(
+        lookahead, concept_match, prev_nonblank_code, shadows.concept
+    ):
+        return "concept-declaration"
+    requires_expr_match = _CPP20_REQUIRES_EXPR_PATTERN.search(lookahead)
+    if requires_expr_match and not _looks_like_requires_declarator(
+        lookahead, requires_expr_match, prev_nonblank_code
+    ):
+        return "requires-expression"
+    clause_match = _CPP20_REQUIRES_CLAUSE_PATTERN.search(lookahead)
+    if clause_match and _looks_like_genuine_requires_clause(
+        lookahead, clause_match.start(), prev_nonblank_code, shadows.requires
+    ):
+        return "requires-clause"
+    if _has_constrained_param_syntax(lookahead):
+        return "constrained-template-parameter"
+    if _has_custom_constrained_auto_param(lookahead, prev_nonblank_code):
+        return "custom-constrained-auto-parameter"
+    if _has_abbreviated_unconstrained_auto_param(lookahead):
+        return "abbreviated-function-template-parameter"
+    if not shadows.consteval and _CPP20_CONSTEVAL_PATTERN.search(lookahead):
+        return "consteval-declaration"
+    if not shadows.constinit and _CPP20_CONSTINIT_PATTERN.search(lookahead):
+        return "constinit-declaration"
+    return None
+
+
+def _scan_header_for_requirements(
+    path: Path, content: bytes, shadows: _Cpp20ShadowFlags
+) -> list[Cpp20Requirement]:
+    """Second pass: the per-logical-line scan of one already-preprocessed header.
+
+    Scans the same ``#if 0``-stripped content the shadow checks use — a genuine
+    consteval/constinit/concept/requires construct written only inside a
+    disabled ``#if 0`` block must not mark the header as needing C++20 (Codex
+    review): it is never actually compiled.
+    """
+    found: list[Cpp20Requirement] = []
+    logical_lines = _iter_logical_lines(content)
+    # Last non-blank line's own (un-extended) code, tracked across iterations --
+    # lets a concept-declaration candidate look backward for its template<...>
+    # header when "concept" itself starts a line (see
+    # _looks_like_genuine_concept).
+    prev_nonblank_code = b""
+    for i, (start_no, logical) in enumerate(logical_lines):
+        if _is_preprocessor_directive(logical):
+            continue
+        code = _strip_literals_joined(logical).split(b"//")[0]
+        kind = _requirement_kind(
+            _joined_lookahead(logical_lines, i, code), prev_nonblank_code, shadows
+        )
+        if kind is not None:
+            found.append(Cpp20Requirement(kind, str(path), start_no))
+        if code.strip():
+            prev_nonblank_code = code
+    return found
+
+
 def _find_cpp20_requirements(
     header_paths: list[Path], *, for_language_mode_decision: bool = False
 ) -> list[Cpp20Requirement]:
@@ -1182,193 +1387,15 @@ def _find_cpp20_requirements(
     unreachable under *this* decision's reasoning (e.g. ``#ifdef
     __cplusplus`` in a C-mode-decision scan) is not followed either.
     """
-    header_paths = _expand_with_quoted_includes(
-        header_paths, for_language_mode_decision=for_language_mode_decision
+    per_file, shadows = _preprocess_headers(
+        _expand_with_quoted_includes(
+            header_paths, for_language_mode_decision=for_language_mode_decision
+        ),
+        for_language_mode_decision=for_language_mode_decision,
     )
-    per_file: list[tuple[Path, bytes]] = []
-    concept_type_shadowed = False
-    requires_type_shadowed = False
-    consteval_type_shadowed = False
-    constinit_type_shadowed = False
-    for p in header_paths:
-        try:
-            content = p.read_bytes()
-        except OSError:
-            continue
-        # Blank raw string literals first — their body can contain arbitrary
-        # quotes/backslashes that would otherwise confuse the ordinary
-        # string-literal stripper below.
-        content = _strip_raw_strings(content)
-        # Blank string/char literals first so a literal containing comment-like
-        # text ("/* not a comment */") is never mistaken for a real comment.
-        # Backslash-newline-continuation-tolerant (Codex review): a literal
-        # split across a continuation must not leave its trapped text — e.g.
-        # a fake "struct concept {};" inside an error message — unblanked
-        # and visible to the shadow-name scan below.
-        content = _strip_literals_crossing_continuations(content)
-        # Strip real block comments, but preserve the embedded newline count so
-        # later-reported line numbers stay accurate for code following a
-        # multi-line comment (CodeRabbit review).
-        content = re.sub(
-            rb"/\*.*?\*/",
-            lambda m: b"\n" * m.group(0).count(b"\n"),
-            content,
-            flags=re.DOTALL,
-        )
-        # Whether this header defines "concept" as an ordinary type name
-        # anywhere (Codex review, fourth round) — a pre-C++20 header can
-        # declare a type literally named "concept" and initialize a
-        # variable template of that type via *any* expression convertible
-        # to it (not just a brace-init-list, which only covered the
-        # aggregate-init case), so no per-initializer-shape check can be
-        # complete. Once "concept" is confirmed to name a real type
-        # anywhere in the aggregate, every bare "concept NAME = ..." match
-        # in it is ambiguous and treated as non-genuine — see
-        # ``_looks_like_genuine_concept``. Checked against a *separate*,
-        # additionally "//"-line-comment-stripped copy of the content
-        # (raw strings/literals/block comments are already blanked in
-        # ``content`` itself at this point, but not "//" comments, which
-        # are only stripped per-logical-line further below) — a
-        # "// struct concept {};" comment must never make a *real*
-        # concept declaration elsewhere in the header look ambiguous
-        # (Codex review, fifth round).
-        # Also strip out #if 0/#if false regions before any of the three
-        # shadow scans below — a disabled compatibility stub must not shadow
-        # a genuine keyword used elsewhere in the header (Codex review).
-        content_no_double_slash_comments = re.sub(rb"//[^\n]*", b"", content)
-        content_no_line_comments = _strip_inactive_if_zero_blocks(
-            content_no_double_slash_comments,
-            mask_cplusplus_defined_guards=for_language_mode_decision,
-        )
-        per_file.append((p, content_no_line_comments))
-        # A *separate* masking pass, not the one above, feeds the shadow
-        # scans below: invert_dialect_fallback_guards=False (Codex review,
-        # nineteenth round) — the shadow scan asks "does 'concept' name an
-        # ordinary type in code still reachable if C++20 were chosen", so a
-        # ``struct concept {};`` compatibility shim confined to e.g.
-        # ``#if __cplusplus < 202002L`` (content that specifically goes
-        # away once C++20 is chosen) must not count, unlike for the
-        # requirements scan above where that same guarded arm is the
-        # unconditionally-relevant one. See the docstring of
-        # _strip_inactive_if_zero_blocks.
-        content_for_shadow_scan = _strip_inactive_if_zero_blocks(
-            content_no_double_slash_comments, invert_dialect_fallback_guards=False
-        )
-        concept_type_shadowed = concept_type_shadowed or bool(
-            _CONCEPT_AS_TYPE_NAME_PATTERN.search(content_for_shadow_scan)
-        )
-        # Same reasoning as concept_type_shadowed above, for "requires" used
-        # as an ordinary pre-C++20 type name (Codex review).
-        requires_type_shadowed = requires_type_shadowed or bool(
-            _REQUIRES_AS_TYPE_NAME_PATTERN.search(content_for_shadow_scan)
-        )
-        # Same reasoning and "//"-comment-stripped-copy caveat as
-        # concept_type_shadowed above, for "consteval"/"constinit" used as
-        # an ordinary pre-C++20 type name (Codex review, third round).
-        consteval_type_shadowed = consteval_type_shadowed or bool(
-            _CONSTEVAL_AS_TYPE_NAME_PATTERN.search(content_for_shadow_scan)
-        )
-        constinit_type_shadowed = constinit_type_shadowed or bool(
-            _CONSTINIT_AS_TYPE_NAME_PATTERN.search(content_for_shadow_scan)
-        )
-
     found: list[Cpp20Requirement] = []
-    for p, _content_no_line_comments in per_file:
-        # Scan the same #if-0-stripped content the shadow checks above use —
-        # a genuine consteval/constinit/concept/requires construct written
-        # only inside a disabled #if 0 block must not itself mark the header
-        # as needing C++20 (Codex review): it's never actually compiled.
-        logical_lines = _iter_logical_lines(_content_no_line_comments)
-        n = len(logical_lines)
-        # Last non-blank line's own (un-extended) code, tracked across
-        # iterations — lets a concept-declaration candidate look backward
-        # for its template<...> header when "concept" itself starts a line
-        # (see _looks_like_genuine_concept).
-        prev_nonblank_code = b""
-        for i, (start_no, logical) in enumerate(logical_lines):
-            if _is_preprocessor_directive(logical):
-                continue
-            code = _strip_literals_joined(logical)
-            code = code.split(b"//")[0]
-            # A bare "requires"/"concept"/"consteval"/"constinit" trailing at
-            # the end of a line (no parameter list/brace/name yet, or for
-            # consteval/constinit no declarator following at all) means the
-            # construct's continuation landed on a following physical line
-            # with no backslash join in between — the per-line scan
-            # otherwise never sees the two halves together (Codex review;
-            # the same gap applies symmetrically to "concept" split before
-            # its name, not just "requires" split before its "("/"{"/
-            # constraint, and equally to consteval/constinit split before
-            # their own declarator, e.g. ``consteval\nint f();`` — Codex
-            # review, second round). Pull in subsequent non-directive lines
-            # (bounded, so a stray trailing keyword in unrelated code can't
-            # scan unboundedly) until the bare-trailing condition no longer
-            # holds.
-            lookahead = code
-            j = i
-            lookahead_budget = 5
-            while (
-                lookahead_budget > 0
-                and re.search(
-                    rb"\b(?:requires|concept|consteval|constinit)\s*$",
-                    lookahead.rstrip(),
-                )
-                and j + 1 < n
-                and not _is_preprocessor_directive(logical_lines[j + 1][1])
-            ):
-                j += 1
-                nxt = _strip_literals_joined(logical_lines[j][1]).split(b"//")[0]
-                lookahead += b"\n" + nxt
-                lookahead_budget -= 1
-            concept_match = _CPP20_CONCEPT_PATTERN.search(lookahead)
-            requires_expr_match = _CPP20_REQUIRES_EXPR_PATTERN.search(lookahead)
-            if concept_match and _looks_like_genuine_concept(
-                lookahead, concept_match, prev_nonblank_code, concept_type_shadowed
-            ):
-                found.append(Cpp20Requirement("concept-declaration", str(p), start_no))
-            elif requires_expr_match and not _looks_like_requires_declarator(
-                lookahead, requires_expr_match, prev_nonblank_code
-            ):
-                found.append(Cpp20Requirement("requires-expression", str(p), start_no))
-            elif (
-                clause_match := _CPP20_REQUIRES_CLAUSE_PATTERN.search(lookahead)
-            ) and _looks_like_genuine_requires_clause(
-                lookahead,
-                clause_match.start(),
-                prev_nonblank_code,
-                requires_type_shadowed,
-            ):
-                found.append(Cpp20Requirement("requires-clause", str(p), start_no))
-            elif _has_constrained_param_syntax(lookahead):
-                found.append(
-                    Cpp20Requirement("constrained-template-parameter", str(p), start_no)
-                )
-            elif _has_custom_constrained_auto_param(lookahead, prev_nonblank_code):
-                found.append(
-                    Cpp20Requirement(
-                        "custom-constrained-auto-parameter", str(p), start_no
-                    )
-                )
-            elif _has_abbreviated_unconstrained_auto_param(lookahead):
-                found.append(
-                    Cpp20Requirement(
-                        "abbreviated-function-template-parameter", str(p), start_no
-                    )
-                )
-            elif not consteval_type_shadowed and _CPP20_CONSTEVAL_PATTERN.search(
-                lookahead
-            ):
-                found.append(
-                    Cpp20Requirement("consteval-declaration", str(p), start_no)
-                )
-            elif not constinit_type_shadowed and _CPP20_CONSTINIT_PATTERN.search(
-                lookahead
-            ):
-                found.append(
-                    Cpp20Requirement("constinit-declaration", str(p), start_no)
-                )
-            if code.strip():
-                prev_nonblank_code = code
+    for path, content in per_file:
+        found.extend(_scan_header_for_requirements(path, content, shadows))
     return found
 
 
