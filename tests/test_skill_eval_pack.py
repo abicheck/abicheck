@@ -265,14 +265,14 @@ def test_drift_report_names_the_entry_that_moved() -> None:
     assert any("abicheck_surface" in line for line in drift), drift
 
 
-def test_publication_build_digest_is_not_the_committed_one(
-    pack: dict[str, Any],
-) -> None:
-    """The committed value is repo content only, so `--check` is deterministic
-    on any checkout; the publication digest folds in the resolved runtime
-    dependency versions, which are a property of the environment publishing."""
-    assert gen.publication_build_digest() != pack["shared"]["build"]["digest"]
-    assert pack["shared"]["build"]["publication_only"] is True
+def test_the_pack_records_no_build_digest(pack: dict[str, Any]) -> None:
+    """Digesting `abicheck/` here would make every PR touching the package
+    regenerate the pack, and let two independently-green PRs merge into a stale
+    one. It bought nothing: no routine check read the entry — it was
+    publication-only — and publication computes the environment-bound value
+    live instead."""
+    assert "build" not in pack["shared"]
+    assert gen.publication_build_digest().startswith("sha256:")
 
 
 # --- the freshness mechanism ----------------------------------------------
@@ -302,8 +302,10 @@ def test_every_hash_maps_to_a_skill(pack: dict[str, Any]) -> None:
         "examples/ground_truth.json",
         "examples/case01_symbol_removal/old.h",
         "tests/agent_skills/trigger_corpus.yaml",
+        "docs/reference/cli-reference.md",
+        # Routed via SURFACE_ROOTS: it is not hashed, but a change here is what
+        # regenerates the reference that is.
         "abicheck/cli.py",
-        "pyproject.toml",
     ],
 )
 def test_known_inputs_route_to_a_hash(pack: dict[str, Any], path: str) -> None:
@@ -546,6 +548,48 @@ def test_an_input_routing_only_to_a_hash_this_bundle_lacks_fails(
         }
     )
     assert _check_bundle(monkeypatch, tmp_path, bundle) == 1
+
+
+def test_a_trigger_bundle_needs_no_scenario_hash(
+    pack: dict[str, Any], monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """A trigger run replays a corpus prompt and exercises no scenario.
+    Requiring one would force the runner to attach an arbitrary unrelated
+    scenario to every activation transcript, and then a scenario edit would
+    invalidate trigger evidence that never touched it."""
+    bundle = _bundle(pack)
+    bundle["kind"] = "trigger"
+    bundle["scenario_id"] = "positive-0"
+    del bundle["hashes"]["scenarios"]
+    assert _check_bundle(monkeypatch, tmp_path, bundle) == 0
+
+
+def test_a_behavioral_bundle_still_needs_its_scenario_hash(
+    pack: dict[str, Any], monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    bundle = _bundle(pack)
+    del bundle["hashes"]["scenarios"]
+    assert _check_bundle(monkeypatch, tmp_path, bundle) == 1
+
+
+def test_repetition_zero_is_valid(
+    pack: dict[str, Any], monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Presence, not truthiness: repetition 0 is the first of `k` runs, and a
+    falsy check would reject a third of every suite."""
+    bundle = _bundle(pack)
+    bundle["repetition"] = 0
+    assert _check_bundle(monkeypatch, tmp_path, bundle) == 0
+
+
+def test_a_publication_build_hash_is_not_compared_against_the_pack(
+    pack: dict[str, Any], monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """`hashes.build` is the environment-bound publication digest and the pack
+    records no counterpart, so comparing it here would reject every valid
+    Phase 6 bundle. Phase 6's own step is what verifies it."""
+    bundle = _bundle(pack, hashes={"build": "sha256:" + "7" * 64})
+    assert _check_bundle(monkeypatch, tmp_path, bundle) == 0
 
 
 def test_a_near_empty_bundle_fails(

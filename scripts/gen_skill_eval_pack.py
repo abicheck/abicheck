@@ -44,9 +44,11 @@ What it records, and why each entry exists (G37 D6):
                              every bundle on every source commit) and
                              deliberately not live introspection (that made the
                              pack a function of the host; see SURFACE_SOURCES)
-  build                      publication only: abicheck/ + pyproject.toml +
-                             resolved runtime dependency versions. abicheck/
-                             alone is not the build
+There is deliberately **no** `build` entry: the publication digest is
+environment-bound and is computed on demand by `publication_build_digest()`.
+Recording even its repo-content half here would make every PR touching
+`abicheck/` regenerate the pack, and let two independently-green PRs merge
+into a stale one.
 
 Every entry carries two fields beyond its digest, and both exist because a
 prose invariant already failed here twice in opposite directions (G37 D6):
@@ -285,15 +287,23 @@ def publication_build_digest() -> str:
     """The Phase 6 publication digest: repo content **plus** the resolved
     runtime dependency versions.
 
-    Deliberately not what the committed pack records. `abicheck/` and
-    `pyproject.toml` are repository content, so their digest is the same for
-    every checkout of a commit and `--check` stays deterministic; the resolved
-    dependency versions are a property of the *environment*, so folding them
-    into the committed value would make the pack fail its own drift check on
-    any machine whose lockfile resolved differently. Publication reads this
+    Computed on demand and **not recorded in the pack at all**, for two
+    reasons that point the same way.
+
+    The dependency versions are a property of the *environment*, so a
+    committed value would make the pack fail its own drift check on any
+    machine whose lockfile resolved differently. Publication reads this
     function at the moment it publishes, against the environment it publishes
-    from, which is the only moment the question "is this evidence about the
-    build being shipped" has a single answer.
+    from — the only moment "is this evidence about the build being shipped"
+    has a single answer.
+
+    And the repo-content half alone, had it stayed in the pack, would have
+    made *every* PR touching `abicheck/` regenerate the pack: it digests the
+    whole package tree. Worse, two independently-green PRs could then merge
+    into a stale pack on `main`, since neither saw the other's sources. That
+    is a real tax and a real merge hazard for an entry no routine check ever
+    reads — it was `publication_only` — so the pack carries no `build` entry
+    and Phase 6's publication step calls this function instead.
     """
     from importlib.metadata import (
         PackageNotFoundError,
@@ -450,16 +460,7 @@ def build_pack() -> dict[str, Any]:
                 "roots": _roots(SURFACE_ROOTS),
                 "affects": skills,
             },
-            # Repo-content half only; `publication_build_digest()` folds in the
-            # resolved runtime dependency versions at publication time. See
-            # that function for why the environment-bound half is not
-            # committed.
-            "build": {
-                "digest": _digest_paths(_expand(BUILD_SOURCES)),
-                "roots": _roots(BUILD_SOURCES),
-                "affects": skills,
-                "publication_only": True,
-            },
+            # No `build` entry, deliberately — see `publication_build_digest()`.
         },
     }
 

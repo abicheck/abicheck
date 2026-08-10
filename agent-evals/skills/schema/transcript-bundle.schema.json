@@ -61,8 +61,7 @@
         "skill_tree",
         "abicheck_surface",
         "harness",
-        "trigger_corpus",
-        "scenarios"
+        "trigger_corpus"
       ],
       "additionalProperties": false,
       "properties": {
@@ -80,7 +79,7 @@
         },
         "scenarios": {
           "type": "object",
-          "description": "Per scenario exercised: manifest record + fixture closure + ground-truth entry.",
+          "description": "Per scenario exercised: manifest record + fixture closure + ground-truth entry. Required (and non-empty) for a behavioral bundle; absent for a trigger bundle, which replays a corpus prompt and exercises no scenario — attaching an arbitrary one would let a scenario edit invalidate activation evidence that never touched it.",
           "minProperties": 1,
           "additionalProperties": {
             "$ref": "#/$defs/digest"
@@ -173,6 +172,29 @@
       }
     }
   },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "kind": {
+            "const": "behavioral"
+          }
+        },
+        "required": [
+          "kind"
+        ]
+      },
+      "then": {
+        "properties": {
+          "hashes": {
+            "required": [
+              "scenarios"
+            ]
+          }
+        }
+      }
+    }
+  ],
   "$defs": {
     "digest": {
       "type": "string",

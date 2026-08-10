@@ -44,6 +44,7 @@ Usage:
         --tools abicheck abicheck_full abidiff abidiff_headers abicc_dumper abicc_xml \\
         --freeze abidiff abidiff_headers abicc_dumper abicc_xml --check
 """
+
 from __future__ import annotations
 
 import argparse
@@ -132,7 +133,9 @@ def _status_counts(results: list[dict], tool_name: str) -> dict[str, int]:
     return counts
 
 
-def cache_state_for(bc_args: argparse.Namespace, tool_names: list[str]) -> dict[str, str]:
+def cache_state_for(
+    bc_args: argparse.Namespace, tool_names: list[str]
+) -> dict[str, str]:
     """Per tool: ``"live"`` if run this session, else its frozen provenance
     (``"frozen@<timestamp> (commit <sha>)"``), else ``"n/a"``.
 
@@ -172,7 +175,9 @@ def render_markdown(report: dict[str, Any], cache_state: dict[str, str]) -> str:
     """
     gt_sha = (report.get("ground_truth_sha256") or "")[:12]
     commit = (report.get("git_commit") or "unknown")[:12]
-    full = "yes" if report.get("full_catalog_run") else "no (partial run — see case list)"
+    full = (
+        "yes" if report.get("full_catalog_run") else "no (partial run — see case list)"
+    )
     lines = [
         f"# Benchmark report — {report['generated_at']}",
         "",
@@ -248,7 +253,7 @@ def parse_doc_table(text: str) -> dict[str, Any] | None:
     label_to_tool = {_clean_label(v): k for k, v in LANE_DOC_LABELS.items()}
     rows: dict[str, dict[str, Any]] = {}
     in_table = False
-    for line in text[heading.end():].splitlines():
+    for line in text[heading.end() :].splitlines():
         stripped = line.strip()
         if not stripped.startswith("|"):
             if in_table:
@@ -281,7 +286,9 @@ def parse_doc_table(text: str) -> dict[str, Any] | None:
     }
 
 
-def diff_against_doc(report: dict[str, Any], doc_table: dict[str, Any] | None) -> list[str]:
+def diff_against_doc(
+    report: dict[str, Any], doc_table: dict[str, Any] | None
+) -> list[str]:
     """Human-readable drift lines; empty means the doc matches this report."""
     if doc_table is None:
         return [
@@ -373,35 +380,75 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         description="Generate a reproducible benchmark report, optionally checked "
         "against docs/reference/tool-comparison.md.",
     )
-    p.add_argument("--tools", nargs="+", metavar="TOOL",
-                   choices=["abicheck", "abicheck_full",
-                            "abidiff", "abidiff_headers", "abicc_dumper", "abicc_xml"],
-                   help="Run only selected tools (default: all — see benchmark_comparison.py).")
-    p.add_argument("--cases", nargs="+", metavar="CASE",
-                   help="Run only these case prefixes (e.g. case09 case16). Disables the "
-                        "full-catalog numeric doc check (see --check).")
-    p.add_argument("--suite", choices=["all", "pinned74"], default="all",
-                   help="Case suite to run (default: all).")
+    p.add_argument(
+        "--tools",
+        nargs="+",
+        metavar="TOOL",
+        choices=[
+            "abicheck",
+            "abicheck_full",
+            "abidiff",
+            "abidiff_headers",
+            "abicc_dumper",
+            "abicc_xml",
+        ],
+        help="Run only selected tools (default: all — see benchmark_comparison.py).",
+    )
+    p.add_argument(
+        "--cases",
+        nargs="+",
+        metavar="CASE",
+        help="Run only these case prefixes (e.g. case09 case16). Disables the "
+        "full-catalog numeric doc check (see --check).",
+    )
+    p.add_argument(
+        "--suite",
+        choices=["all", "pinned74"],
+        default="all",
+        help="Case suite to run (default: all).",
+    )
     p.add_argument("--skip-abicc", action="store_true", help="Skip ABICC entirely.")
-    p.add_argument("--timeout", type=int, default=None,
-                   help="Per-tool-call timeout override, applied to every lane "
-                        "(abicheck/abidiff/abidiff+headers, abicheck_full, and ABICC — "
-                        "benchmark_comparison.py's --timeout/--abicheck-full-timeout/"
-                        "--abicc-timeout each default to a different value otherwise).")
-    p.add_argument("--freeze", nargs="+", metavar="TOOL",
-                   help="Persist named tools' results to the frozen-competitor cache "
-                        "(see benchmark_comparison.py --freeze).")
-    p.add_argument("--no-frozen", action="store_true",
-                   help="Don't merge in previously-frozen competitor data.")
-    p.add_argument("--json-out", type=Path, default=DEFAULT_JSON_OUT,
-                   help=f"Where to write the JSON report (default: {DEFAULT_JSON_OUT}).")
-    p.add_argument("--markdown-out", type=Path, default=DEFAULT_MARKDOWN_OUT,
-                   help=f"Where to write the Markdown report (default: {DEFAULT_MARKDOWN_OUT}).")
-    p.add_argument("--check", action="store_true",
-                   help="After generating the report, diff it against the committed "
-                        "table in docs/reference/tool-comparison.md and exit 1 on drift. "
-                        "The heading case-count is always checked; per-lane numeric rows "
-                        "are only checked on a full-catalog run (no --cases/pinned74).")
+    p.add_argument(
+        "--timeout",
+        type=int,
+        default=None,
+        help="Per-tool-call timeout override, applied to every lane "
+        "(abicheck/abidiff/abidiff+headers, abicheck_full, and ABICC — "
+        "benchmark_comparison.py's --timeout/--abicheck-full-timeout/"
+        "--abicc-timeout each default to a different value otherwise).",
+    )
+    p.add_argument(
+        "--freeze",
+        nargs="+",
+        metavar="TOOL",
+        help="Persist named tools' results to the frozen-competitor cache "
+        "(see benchmark_comparison.py --freeze).",
+    )
+    p.add_argument(
+        "--no-frozen",
+        action="store_true",
+        help="Don't merge in previously-frozen competitor data.",
+    )
+    p.add_argument(
+        "--json-out",
+        type=Path,
+        default=DEFAULT_JSON_OUT,
+        help=f"Where to write the JSON report (default: {DEFAULT_JSON_OUT}).",
+    )
+    p.add_argument(
+        "--markdown-out",
+        type=Path,
+        default=DEFAULT_MARKDOWN_OUT,
+        help=f"Where to write the Markdown report (default: {DEFAULT_MARKDOWN_OUT}).",
+    )
+    p.add_argument(
+        "--check",
+        action="store_true",
+        help="After generating the report, diff it against the committed "
+        "table in docs/reference/tool-comparison.md and exit 1 on drift. "
+        "The heading case-count is always checked; per-lane numeric rows "
+        "are only checked on a full-catalog run (no --cases/pinned74).",
+    )
     return p.parse_args(argv)
 
 

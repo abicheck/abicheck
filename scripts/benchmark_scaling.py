@@ -527,15 +527,23 @@ def _build_internal_leak(n_types: int) -> tuple[AbiSnapshot, AbiSnapshot]:
     funcs: list[Function] = []
     for i in range(n_types):
         # Unqualified base spelling forces the suffix-resolution path.
-        types_old.append(RecordType(name=f"Public_{i}", kind="class", bases=[f"Base_{i}"]))
-        types_new.append(RecordType(name=f"Public_{i}", kind="class", bases=[f"Base_{i}"]))
+        types_old.append(
+            RecordType(name=f"Public_{i}", kind="class", bases=[f"Base_{i}"])
+        )
+        types_new.append(
+            RecordType(name=f"Public_{i}", kind="class", bases=[f"Base_{i}"])
+        )
         base = [TypeField(name="a", type="int", offset_bits=0)]
         grown = base + [TypeField(name="b", type="int", offset_bits=32)]
         types_old.append(
-            RecordType(name=f"ns::detail::Base_{i}", kind="class", size_bits=32, fields=base)
+            RecordType(
+                name=f"ns::detail::Base_{i}", kind="class", size_bits=32, fields=base
+            )
         )
         types_new.append(
-            RecordType(name=f"ns::detail::Base_{i}", kind="class", size_bits=64, fields=grown)
+            RecordType(
+                name=f"ns::detail::Base_{i}", kind="class", size_bits=64, fields=grown
+            )
         )
         funcs.append(
             Function(

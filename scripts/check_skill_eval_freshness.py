@@ -171,24 +171,47 @@ def check_mapping(
 #: passes every comparison by having nothing to compare (Codex review). An
 #: omitted field must fail exactly as loudly as a stale one; a runner
 #: regression that drops provenance is the case this catches.
-REQUIRED_BUNDLE_FIELDS = ("schema_version", "kind", "scenario_id", "agent", "model")
-REQUIRED_BUNDLE_HASHES = (
-    "skill_tree",
-    "abicheck_surface",
-    "harness",
-    "trigger_corpus",
-    "scenarios",
+REQUIRED_BUNDLE_FIELDS = (
+    "schema_version",
+    "kind",
+    "scenario_id",
+    # Presence, not truthiness: repetition 0 is the first of `k` runs and is
+    # perfectly valid, so a falsy check would reject it.
+    "repetition",
+    "agent",
+    "model",
 )
+
+#: Hashes both bundle kinds must carry.
+REQUIRED_BUNDLE_HASHES = ("skill_tree", "abicheck_surface", "harness", "trigger_corpus")
+
+#: Plus this one, for `behavioral` bundles only. A trigger bundle replays a
+#: corpus prompt and exercises no scenario, so requiring one would force the
+#: runner to attach an arbitrary unrelated scenario to every activation
+#: transcript — and then a scenario edit would invalidate trigger evidence
+#: that never touched it (Codex review).
+BEHAVIORAL_ONLY_HASHES = ("scenarios",)
+
+#: Never compared here. `build` is the publication digest, which is
+#: environment-bound and computed on demand by the generator's
+#: `publication_build_digest()`; the pack deliberately records no counterpart.
+#: Comparing it against a pack entry would reject every valid Phase 6 bundle,
+#: and this module is stdlib-only, so it cannot compute the live value itself.
+#: Phase 6's publication step is what verifies it.
+PUBLICATION_ONLY_HASHES = frozenset({"build"})
 
 
 def check_bundle_completeness(rel: str, bundle: dict[str, Any], out: Findings) -> None:
     for field in REQUIRED_BUNDLE_FIELDS:
-        if bundle.get(field) in (None, ""):
+        if field not in bundle or bundle[field] in (None, ""):
             out.err(
                 "completeness", f"{rel}: no {field!r} — this is not a gradeable bundle"
             )
     hashes = bundle.get("hashes") or {}
-    for name in REQUIRED_BUNDLE_HASHES:
+    required = REQUIRED_BUNDLE_HASHES
+    if bundle.get("kind") == "behavioral":
+        required = (*required, *BEHAVIORAL_ONLY_HASHES)
+    for name in required:
         if not hashes.get(name):
             out.err(
                 "completeness",
@@ -274,6 +297,8 @@ def check_bundle(
     nominated: set[str] = set()
     recorded_ids: set[str] = set()
     for key, digest in _bundle_hash_ids(bundle).items():
+        if key in PUBLICATION_ONLY_HASHES:
+            continue
         hash_id = f"skill_tree:{skill}" if key == "skill_tree" else key
         recorded_ids.add(hash_id)
         entry = entries.get(hash_id)

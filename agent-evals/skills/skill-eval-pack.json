@@ -467,20 +467,6 @@
         "docs/reference/detector-spec.json"
       ]
     },
-    "build": {
-      "affects": [
-        "native-api-evolution",
-        "native-binary-compatibility-review",
-        "native-consumer-compatibility",
-        "native-release-compatibility"
-      ],
-      "digest": "sha256:c04ef171ad1b55103b731a42121497d075232f08fb7847fe75623488bbc69110",
-      "publication_only": true,
-      "roots": [
-        "abicheck",
-        "pyproject.toml"
-      ]
-    },
     "harness": {
       "affects": [
         "native-api-evolution",

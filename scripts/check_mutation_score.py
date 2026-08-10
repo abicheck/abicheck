@@ -46,6 +46,7 @@ The survivor-count *parser* is pure and unit-tested
 (``tests/test_mutation_score_gate.py``) so the gate logic stays correct even on
 machines without mutmut installed.
 """
+
 from __future__ import annotations
 
 import argparse

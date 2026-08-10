@@ -7,6 +7,7 @@ Run:
 Requires: castxml, zlib1g-dev
   apt install castxml zlib1g-dev
 """
+
 from __future__ import annotations
 
 import sys
@@ -74,10 +75,14 @@ def main() -> None:
                 f.return_type = "unsigned long"  # was uLong (typedef for unsigned long, but new name)
 
         # Compatible: add new function
-        snap_v2.functions.append(Function(
-            name="deflate2", mangled="deflate2",
-            return_type="int", visibility=Visibility.PUBLIC,
-        ))
+        snap_v2.functions.append(
+            Function(
+                name="deflate2",
+                mangled="deflate2",
+                return_type="int",
+                visibility=Visibility.PUBLIC,
+            )
+        )
 
         # The simulated future snapshot mutates headers/functions in memory, not
         # a real rebuilt .so. Drop stale ELF metadata so the comparison uses the
@@ -106,7 +111,9 @@ def main() -> None:
         print(to_markdown(result))
 
         # ── Step 4: Assert expected verdict ──────────────────────────────────
-        assert result.verdict == Verdict.BREAKING, f"Expected BREAKING, got {result.verdict}"
+        assert result.verdict == Verdict.BREAKING, (
+            f"Expected BREAKING, got {result.verdict}"
+        )
         assert any(c.kind.value == "func_removed" for c in result.changes)
         assert any(c.kind.value == "func_return_changed" for c in result.changes)
         assert any(c.kind.value == "func_added" for c in result.changes)

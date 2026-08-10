@@ -48,7 +48,9 @@ GENERATED_NOTE = (
 )
 
 
-def _subkey_type(block: str, subkey: str, bool_map: dict, str_map: dict, list_map: dict) -> str:
+def _subkey_type(
+    block: str, subkey: str, bool_map: dict, str_map: dict, list_map: dict
+) -> str:
     if subkey in bool_map.get(block, frozenset()):
         return "bool"
     if subkey in str_map.get(block, frozenset()):
@@ -87,8 +89,8 @@ def render() -> str:
         "`abicheck.buildsource.inline.BuildConfig` itself validates, with "
         "its exact required YAML type — generated directly from "
         "`BuildConfig`'s strict-schema registries (an unknown key or a "
-        "wrong-typed value is a hard error, ADR-043). \"Other recognized "
-        "top-level keys\" below are also accepted but parsed by a sibling "
+        'wrong-typed value is a hard error, ADR-043). "Other recognized '
+        'top-level keys" below are also accepted but parsed by a sibling '
         "module instead, so no type is claimed for them here. See [Config "
         "File Reference](../reference/config-file.md) for effective "
         "defaults, CLI-override precedence, and a worked example; this "
@@ -101,7 +103,9 @@ def render() -> str:
     for block in sorted(known_blocks):
         lines += [f"### `{block}:`", "", "| Sub-key | Type |", "|---|---|"]
         for subkey in sorted(known_blocks[block]):
-            type_str = _subkey_type(block, subkey, _BOOL_SUBKEYS, _STR_SUBKEYS, _LIST_SUBKEYS)
+            type_str = _subkey_type(
+                block, subkey, _BOOL_SUBKEYS, _STR_SUBKEYS, _LIST_SUBKEYS
+            )
             lines.append(f"| `{subkey}` | {type_str} |")
         lines.append("")
 

@@ -29,6 +29,7 @@ generous threshold) can be layered on later if desired.
 Usage:
     python scripts/summarize_test_durations.py [path] [--top N]
 """
+
 from __future__ import annotations
 
 import argparse

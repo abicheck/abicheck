@@ -303,7 +303,9 @@ def _ext_snap(version, *, stub):
 
     elf = ElfMetadata()
     elf.symbols = [
-        ElfSymbol(name="PyInit_ext", binding=SymbolBinding.GLOBAL, sym_type=SymbolType.FUNC)
+        ElfSymbol(
+            name="PyInit_ext", binding=SymbolBinding.GLOBAL, sym_type=SymbolType.FUNC
+        )
     ]
     snap = AbiSnapshot(
         library="ext.abi3.so", version=version, elf=elf, source_path="ext.abi3.so"
@@ -377,24 +379,38 @@ def _elf_only_helper_param_changed():
         "1",
         functions=[
             _fn("api"),
-            _fn("helper", mangled="helper", params=("int",),
-                vis=Visibility.ELF_ONLY, origin=ScopeOrigin.UNKNOWN),
+            _fn(
+                "helper",
+                mangled="helper",
+                params=("int",),
+                vis=Visibility.ELF_ONLY,
+                origin=ScopeOrigin.UNKNOWN,
+            ),
         ],
     )
     new = _snap(
         "2",
         functions=[
             _fn("api"),
-            _fn("helper", mangled="helper", params=("long long",),
-                vis=Visibility.ELF_ONLY, origin=ScopeOrigin.UNKNOWN),
+            _fn(
+                "helper",
+                mangled="helper",
+                params=("long long",),
+                vis=Visibility.ELF_ONLY,
+                origin=ScopeOrigin.UNKNOWN,
+            ),
         ],
     )
     return old, new
 
 
 def _internal_enum_value_changed():
-    old = _snap("1", functions=[_fn("api")], enums=[_enum("IMode", [("A", 0), ("B", 1)])])
-    new = _snap("2", functions=[_fn("api")], enums=[_enum("IMode", [("A", 0), ("B", 9)])])
+    old = _snap(
+        "1", functions=[_fn("api")], enums=[_enum("IMode", [("A", 0), ("B", 1)])]
+    )
+    new = _snap(
+        "2", functions=[_fn("api")], enums=[_enum("IMode", [("A", 0), ("B", 9)])]
+    )
     return old, new
 
 
@@ -423,21 +439,73 @@ def _cross_stdlib_same_size():
 
 CORPUS: list[TierCase] = [
     # breaking — low-level insufficiency (under-call at L0, caught at L1+)
-    TierCase("public_struct_size_changed", "struct-layout", 2, Tier.L2, _public_struct_size_changed),
-    TierCase("public_struct_field_type_changed", "struct-layout", 2, Tier.L2, _public_struct_field_type_changed),
+    TierCase(
+        "public_struct_size_changed",
+        "struct-layout",
+        2,
+        Tier.L2,
+        _public_struct_size_changed,
+    ),
+    TierCase(
+        "public_struct_field_type_changed",
+        "struct-layout",
+        2,
+        Tier.L2,
+        _public_struct_field_type_changed,
+    ),
     TierCase("c_param_widened", "symbol-signature", 2, Tier.L2, _c_param_widened),
-    TierCase("c_return_type_changed", "symbol-signature", 2, Tier.L2, _c_return_type_changed),
-    TierCase("public_enum_value_changed", "enum-reachability", 2, Tier.L2, _public_enum_value_changed),
+    TierCase(
+        "c_return_type_changed", "symbol-signature", 2, Tier.L2, _c_return_type_changed
+    ),
+    TierCase(
+        "public_enum_value_changed",
+        "enum-reachability",
+        2,
+        Tier.L2,
+        _public_enum_value_changed,
+    ),
     # G23: a Python-API break is only observable at L2 (the `.pyi` surface);
     # L0/L1 honestly under-call it — "what the header/stub layer buys".
-    TierCase("python_api_function_removed", "python-api", 2, Tier.L2, _python_api_function_removed),
+    TierCase(
+        "python_api_function_removed",
+        "python-api",
+        2,
+        Tier.L2,
+        _python_api_function_removed,
+    ),
     # non-breaking — false positive removed by the scoping layer (L2)
-    TierCase("internal_struct_size_changed", "struct-layout", 0, Tier.L2, _internal_struct_size_changed),
-    TierCase("internal_field_type_changed", "struct-layout", 0, Tier.L2, _internal_field_type_changed),
-    TierCase("elf_only_helper_param_changed", "symbol-signature", 0, Tier.L2, _elf_only_helper_param_changed),
-    TierCase("internal_enum_value_changed", "enum-reachability", 0, Tier.L2, _internal_enum_value_changed),
+    TierCase(
+        "internal_struct_size_changed",
+        "struct-layout",
+        0,
+        Tier.L2,
+        _internal_struct_size_changed,
+    ),
+    TierCase(
+        "internal_field_type_changed",
+        "struct-layout",
+        0,
+        Tier.L2,
+        _internal_field_type_changed,
+    ),
+    TierCase(
+        "elf_only_helper_param_changed",
+        "symbol-signature",
+        0,
+        Tier.L2,
+        _elf_only_helper_param_changed,
+    ),
+    TierCase(
+        "internal_enum_value_changed",
+        "enum-reachability",
+        0,
+        Tier.L2,
+        _internal_enum_value_changed,
+    ),
     # risk — only build context (L3) surfaces any signal
-    TierCase("cross_stdlib_same_size", "stdlib-impl", 1, Tier.L3, _cross_stdlib_same_size),
+    TierCase(
+        "cross_stdlib_same_size", "stdlib-impl", 1, Tier.L3, _cross_stdlib_same_size
+    ),
 ]
 
 
@@ -474,7 +542,9 @@ def evaluate(corpus: list[TierCase] | None = None) -> list[CaseTrajectory]:
         # build-context regression slip through (Codex review #487).
         bands = {t: band_at(old, new, t) for t in ALL_TIERS}
         out.append(
-            CaseTrajectory(case.name, case.axis, case.expected_band, case.top_tier, bands)
+            CaseTrajectory(
+                case.name, case.axis, case.expected_band, case.top_tier, bands
+            )
         )
     return out
 
@@ -531,7 +601,9 @@ def per_tier_counts(trajs: list[CaseTrajectory]) -> dict[str, dict[str, int]]:
     return out
 
 
-def resolved_by_transition(trajs: list[CaseTrajectory]) -> dict[str, dict[str, list[str]]]:
+def resolved_by_transition(
+    trajs: list[CaseTrajectory],
+) -> dict[str, dict[str, list[str]]]:
     """For each L(i)->L(i+1) transition, which cases had an over-call (FP) or
     under-call (FN) at L(i) that became correct at L(i+1). This is the direct
     "how much each next level removes" measurement."""
@@ -585,8 +657,11 @@ def render_markdown(trajs: list[CaseTrajectory] | None = None) -> str:
             + " |"
         )
     counts = per_tier_counts(trajs)
-    lines += ["", "| Tier | Cases | Correct | FP (over) | FN (under) |",
-              "|------|------:|--------:|----------:|-----------:|"]
+    lines += [
+        "",
+        "| Tier | Cases | Correct | FP (over) | FN (under) |",
+        "|------|------:|--------:|----------:|-----------:|",
+    ]
     for tier in ALL_TIERS:
         r = counts.get(tier.name)
         if r:
@@ -599,9 +674,13 @@ def render_markdown(trajs: list[CaseTrajectory] | None = None) -> str:
         for trans, d in resolved.items():
             parts = []
             if d["fp_removed"]:
-                parts.append(f"{len(d['fp_removed'])} FP removed ({', '.join(d['fp_removed'])})")
+                parts.append(
+                    f"{len(d['fp_removed'])} FP removed ({', '.join(d['fp_removed'])})"
+                )
             if d["fn_removed"]:
-                parts.append(f"{len(d['fn_removed'])} FN caught ({', '.join(d['fn_removed'])})")
+                parts.append(
+                    f"{len(d['fn_removed'])} FN caught ({', '.join(d['fn_removed'])})"
+                )
             lines.append(f"- `{trans}`: " + "; ".join(parts))
     return "\n".join(lines)
 
@@ -610,8 +689,12 @@ def main(argv: list[str] | None = None) -> int:
     import argparse
 
     parser = argparse.ArgumentParser(description="Per-evidence-tier accuracy gate.")
-    parser.add_argument("--json", action="store_true", help="Emit the tier metrics as JSON.")
-    parser.add_argument("--markdown", action="store_true", help="Emit the per-tier matrix as Markdown.")
+    parser.add_argument(
+        "--json", action="store_true", help="Emit the tier metrics as JSON."
+    )
+    parser.add_argument(
+        "--markdown", action="store_true", help="Emit the per-tier matrix as Markdown."
+    )
     args = parser.parse_args(argv)
 
     trajs = evaluate()
@@ -642,7 +725,10 @@ def main(argv: list[str] | None = None) -> int:
     mismatches = m["top_tier_mismatches"]
     violations = m["under_call_monotonicity_violations"]
     if mismatches:
-        print(f"ERROR: cases wrong at their top tier (should be 0): {mismatches}", file=err)
+        print(
+            f"ERROR: cases wrong at their top tier (should be 0): {mismatches}",
+            file=err,
+        )
         failed = True
     if violations:
         print(
