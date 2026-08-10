@@ -33,4 +33,15 @@
   produced the exit but the fail-on flags still decide whether the step fails;
   and the contract-coverage axis is reported on its own terms rather than only
   when it happens to own `GATE_TIER`, so a run where both exit-1 axes fire no
-  longer hides the missing provider behind the severity tier.
+  longer hides the missing provider behind the severity tier. `scan` is the
+  second case that bypasses the flags at every tier — its final branch blocks
+  unconditionally on a configured severity category — so the note claims
+  independence there too. Three more: a promoted `--crosscheck` is named as
+  itself rather than as the severity policy (it is filtered out of the
+  blocking-category list and still follows `fail-on-api-break`, so pointing at
+  the severity policy pointed at a knob that would not change the outcome);
+  and the verdict fallback parser now reads the release renderer's
+  `| **Verdict** | … |` table row, not only the `Verdict:` spelling — a
+  directory/package compare rejects `--secondary-format`, so a markdown
+  release comparison reaches that parser with no JSON at all and every one of
+  them published the gating tier for a report that said `BREAKING`.

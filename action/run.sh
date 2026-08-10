@@ -1033,7 +1033,18 @@ _report_compat_verdict() {
   # CI covers) has no alternation in BRE at all, so the pattern silently
   # matched nothing there and every demoted break read as COMPATIBLE on
   # macOS while passing on Linux. `-E` is accepted by both.
-  sed -nE 's/.*Verdict:[^A-Z]*(API_BREAK|BREAKING).*/\1/p' \
+  #
+  # `Verdict(:|**)` covers both spellings, because the per-library release
+  # fan-out has no third option: `--secondary-format` is rejected for a
+  # directory/package operand, so a markdown release compare reaches this
+  # fallback with no JSON at all -- and its renderer writes the verdict as a
+  # table row, `| **Verdict** | 💥 \`BREAKING\` |`, with no colon. Matching
+  # only the colon form left every release compare unescalated: an exit-2
+  # release whose own report said BREAKING still published API_BREAK, which is
+  # the whole thing this reconciliation exists to prevent (Codex review). The
+  # delimiter is still required rather than dropped -- a bare `Verdict`
+  # followed by uppercase-free filler would match prose.
+  sed -nE 's/.*Verdict(:|\*\*)[^A-Z]*(API_BREAK|BREAKING).*/\2/p' \
     <<<"$(_text_report_content)" | head -1
 }
 
@@ -1129,6 +1140,15 @@ _blocking_gate_note() {
     # missing-provider explanation with it -- so render that here rather than
     # leave the reader with a bare tier name (Codex review).
     echo "> ℹ️ Verdict escalated from the report: the compatibility finding above was demoted by the severity policy, and what actually produced this run's exit ${ABICHECK_EXIT} is the orthogonal contract-coverage axis$(_coverage_where_suffix). That is **not** an ABI/API break and **not** a severity-policy failure -- the compatibility verdict is unchanged. Supply the missing evidence, or accept incomplete assurance with \`contract.unresolved: warn\`."
+  elif [[ -z "$_cats" ]] && _severity_gate_categories | grep -q 'promoted_crosscheck'; then
+    # A promoted `--crosscheck KEY=error` raises the published gate the same
+    # way a severity category does, but it is not one: `_severity_gate_
+    # categories` filters the pseudo-category out of `$_cats` above, and the
+    # final gate deliberately leaves it subject to `fail-on-api-break` rather
+    # than blocking unconditionally. Naming the severity policy here pointed
+    # the reader at a mechanism that did not fire, and at a knob that would
+    # not change the outcome (Codex review).
+    echo "> ℹ️ Verdict escalated from the report: a promoted \`--crosscheck\` gated this run at \`$GATE_TIER\` (exit ${ABICHECK_EXIT}), so that tier -- not the verdict above -- is what \`fail-on-*\` applies to. This is a cross-check promotion, not a severity category: it follows \`fail-on-api-break\`."
   else
     echo "> ℹ️ Verdict escalated from the report: the severity policy gated this run at \`$GATE_TIER\` (exit ${ABICHECK_EXIT}), so that tier -- not the verdict above -- is what \`fail-on-*\` applies to."
   fi

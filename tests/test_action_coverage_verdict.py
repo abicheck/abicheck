@@ -1304,3 +1304,107 @@ class TestTheFailOnClaimTracksTheTier:
         when the verdict was escalated away and GATE_TIER kept the tier."""
         summary = self._summary(tmp_path, 1, "BREAKING")
         assert "independently of" in summary, summary
+
+
+class TestTheReleaseTableVerdictIsRead:
+    """A directory/package compare reaches the text fallback with no JSON.
+
+    `--secondary-format` is rejected for a release-style operand, so a
+    markdown release compare has no machine-readable report at all — and its
+    renderer writes the verdict as a table row (`| **Verdict** | 💥
+    `BREAKING` |`), with no colon. Matching only the colon form left every
+    release compare unescalated (Codex review).
+    """
+
+    def _summary(self, tmp_path: Path, verdict_line: str, exit_code: int) -> dict:
+        bindir = tmp_path / "bin"
+        bindir.mkdir()
+        report = tmp_path / "report.md"
+        report.write_text(
+            f"# ABI report\n\n| | |\n|---|---|\n{verdict_line}\n", encoding="utf-8"
+        )
+        stub = bindir / "abicheck"
+        stub.write_text(
+            f"#!/usr/bin/env bash\ncat {report}\nexit {exit_code}\n", encoding="utf-8"
+        )
+        stub.chmod(0o755)
+        old = tmp_path / "old_release"
+        new = tmp_path / "new_release"
+        for d in (old, new):
+            d.mkdir()
+            (d / "libfoo.so").write_bytes(b"\x7fELF")
+        return _run_action(
+            tmp_path,
+            {
+                "INPUT_MODE": "compare",
+                "INPUT_OLD_LIBRARY": str(old),
+                "INPUT_NEW_LIBRARY": str(new),
+                "INPUT_FORMAT": "markdown",
+                "INPUT_FAIL_ON_API_BREAK": "false",
+            },
+            bindir,
+        )
+
+    def test_the_table_row_escalates_the_published_verdict(self, tmp_path: Path) -> None:
+        outputs = self._summary(
+            tmp_path, "| **Verdict** | \U0001f4a5 `BREAKING` |", 2
+        )
+        assert outputs["verdict"] == "BREAKING", outputs
+
+    def test_the_colon_spelling_still_works(self, tmp_path: Path) -> None:
+        """The compare markdown header form, which the old pattern matched —
+        widening the pattern must not drop it."""
+        outputs = self._summary(tmp_path, "**Verdict:** \U0001f4a5 `BREAKING`", 2)
+        assert outputs["verdict"] == "BREAKING", outputs
+
+    def test_a_compatible_release_is_not_escalated(self, tmp_path: Path) -> None:
+        """Only a break may escalate; the looser pattern must not match a
+        `COMPATIBLE` row on some later word."""
+        outputs = self._summary(
+            tmp_path, "| **Verdict** | ✅ `COMPATIBLE` |", 2
+        )
+        assert outputs["verdict"] == "API_BREAK", outputs
+
+
+class TestThePromotedCrosscheckNoteNamesItsOwnMechanism:
+    """A promoted `--crosscheck KEY=error` raises the gate but is not a
+    severity category: it stays subject to `fail-on-api-break`, and
+    `_severity_gate_categories` filters the pseudo-category out. Attributing
+    the exit to the severity policy pointed at a knob that would not change
+    the outcome (Codex review).
+    """
+
+    def _summary(self, tmp_path: Path, category: str) -> str:
+        report = {
+            "verdict": "BREAKING",
+            "exit_code": 2,
+            "diff": {"verdict": "BREAKING"},
+            "severity": {
+                "exit_code": 2,
+                "blocking": True,
+                "blocking_categories": [category],
+            },
+        }
+        bindir = _stub_abicheck(tmp_path, exit_code=2, report=report)
+        return _run_action(
+            tmp_path,
+            {
+                "INPUT_MODE": "scan",
+                "INPUT_NEW_LIBRARY": _lib(tmp_path, "libnew.so"),
+                "INPUT_AGAINST": _lib(tmp_path, "libold.so"),
+                "INPUT_FORMAT": "json",
+                "INPUT_OUTPUT_FILE": str(tmp_path / "report.json"),
+            },
+            bindir,
+        )["_summary"]
+
+    def test_a_promoted_crosscheck_is_named_as_itself(self, tmp_path: Path) -> None:
+        summary = self._summary(tmp_path, "promoted_crosscheck")
+        assert "promoted `--crosscheck` gated this run" in summary, summary
+        assert "the severity policy gated this run" not in summary, summary
+
+    def test_a_real_category_still_names_the_severity_policy(
+        self, tmp_path: Path
+    ) -> None:
+        summary = self._summary(tmp_path, "potential_breaking")
+        assert "the severity policy gated this run" in summary, summary
