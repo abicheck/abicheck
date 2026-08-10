@@ -172,6 +172,34 @@ class TestInternalTemplateLeaks:
         new = _snap(funcs=[])
         assert detect_internal_template_leaks(old, new) == []
 
+    def test_purely_additive_instantiation_set_does_not_fire(self) -> None:
+        # Reported bug: an internal-namespace template that only gained new
+        # instantiations (every existing one is still there, unchanged) does
+        # not remove anything a consumer could already be linked against —
+        # an addition alone cannot break an already-linked consumer, so this
+        # must not be reported as INTERNAL_TEMPLATE_LEAKS_VIA_PUBLIC_API.
+        old = _snap(funcs=[_fn("lib::__detail::walk<int>")])
+        new = _snap(funcs=[
+            _fn("lib::__detail::walk<int>"),
+            _fn("lib::__detail::walk<char>"),
+        ])
+        assert detect_internal_template_leaks(old, new) == []
+
+    def test_removed_instantiation_alongside_addition_still_fires(self) -> None:
+        # A mix of "existing instantiation vanished" and "new one appeared"
+        # must still fire — the removal alone already breaks a consumer that
+        # linked against it.
+        old = _snap(funcs=[
+            _fn("lib::__detail::walk<int>"),
+            _fn("lib::__detail::walk<char>"),
+        ])
+        new = _snap(funcs=[
+            _fn("lib::__detail::walk<int>"),
+            _fn("lib::__detail::walk<double>"),
+        ])
+        changes = detect_internal_template_leaks(old, new)
+        assert len(changes) == 1
+
 
 # ---------------------------------------------------------------------------
 # CPO_KIND_CHANGED

@@ -88,6 +88,75 @@ def _compile_glob(glob: str | None, field_name: str) -> re.Pattern[str] | None:
         raise ValueError(f"Invalid {field_name} {glob!r}: {e}") from e
 
 
+_SEGMENT_RE_WRAPPER = re.compile(r"^\(\?s:(.*)\)\\Z$")
+
+
+def _fnmatch_segment_regex(segment: str) -> str:
+    """Translate one non-globstar namespace *segment* to a regex fragment.
+
+    Uses the same fnmatch semantics a single ``*``/``?`` has always had —
+    only :func:`_translate_namespace_glob`'s handling of a whole ``**``
+    segment changes.
+    """
+    translated = fnmatch.translate(segment)
+    m = _SEGMENT_RE_WRAPPER.match(translated)
+    return m.group(1) if m else translated
+
+
+def _translate_namespace_glob(pattern: str) -> str:
+    """Translate a ``namespace``/``entity_namespace``/``cause_namespace``
+    glob to a regex pattern string, with pathspec/gitignore-style semantics
+    for a ``**`` *segment*.
+
+    A straight ``fnmatch.translate(pattern)`` treats every run of ``*``
+    (single or doubled) as an ordinary ``.*`` wildcard glued to whatever
+    literal text follows it — so two starred regions are still separated by
+    a *mandatory* literal ``::``, and a pattern like
+    ``oneapi::dal::**::detail::**`` can never match the zero-segment case
+    ``oneapi::dal::detail::...`` (there is no room for a `::` that isn't
+    there). That defeats the documented intent of ``**`` as "zero or more
+    namespace segments" — every real-world use of this footgun so far has
+    been a double-star meant to *also* match the "nothing in between" case.
+
+    Here a ``**`` segment matches zero or more complete ``::``-separated
+    segments, absorbing its own adjoining ``::`` separator so it can match
+    nothing at all: ``a::**::b`` compiles to ``a(?:::.*)?::b``, which
+    matches ``a::b`` as well as ``a::x::b`` and ``a::x::y::b``. A single
+    ``*``/``?`` (never a full ``**`` segment on its own) keeps its original
+    fnmatch behavior unchanged, via :func:`_fnmatch_segment_regex`.
+    """
+    # A run of adjacent "**" segments means the same thing as one — collapse
+    # "a::**::**::b" to "a::**::b" before translating.
+    pattern = re.sub(r"(?:\*\*::)+\*\*", "**", pattern)
+    segments = pattern.split("::")
+    parts: list[str] = []
+    for i, seg in enumerate(segments):
+        if seg == "**":
+            parts.append("(?:.*::)?" if i == 0 else "(?:::.*)?")
+            continue
+        # A leading "**" already absorbs its own trailing "::" (or correctly
+        # contributes none, for the zero-segment match) — every other
+        # neighboring pair needs an explicit "::" joiner.
+        prev_is_leading_globstar = i == 1 and segments[0] == "**"
+        if i > 0 and not prev_is_leading_globstar:
+            parts.append("::")
+        parts.append(_fnmatch_segment_regex(seg))
+    return "(?s:" + "".join(parts) + ")\\Z"
+
+
+def _compile_namespace_glob(glob: str | None, field_name: str) -> re.Pattern[str] | None:
+    """Compile a namespace-selector glob (``namespace``/``entity_namespace``/
+    ``cause_namespace``) to a regex, using :func:`_translate_namespace_glob`'s
+    globstar semantics rather than plain ``fnmatch``. Raises
+    :class:`ValueError` on a malformed pattern."""
+    if glob is None:
+        return None
+    try:
+        return re.compile(_translate_namespace_glob(glob))
+    except re.error as e:
+        raise ValueError(f"Invalid {field_name} {glob!r}: {e}") from e
+
+
 def _validate_selectors(
     has_symbol: bool,
     has_sym_pattern: bool,
@@ -320,8 +389,8 @@ class Suppression:
         self._compiled_type_pattern = _compile_pattern(self.type_pattern, "type_pattern")
         self._compiled_member_pattern = _compile_pattern(self.member_name, "member_name")
         self._compiled_source_pattern = _compile_glob(self.source_location, "source_location")
-        self._compiled_entity_namespace_pattern = _compile_glob(effective_entity_ns, "namespace")
-        self._compiled_cause_namespace_pattern = _compile_glob(
+        self._compiled_entity_namespace_pattern = _compile_namespace_glob(effective_entity_ns, "namespace")
+        self._compiled_cause_namespace_pattern = _compile_namespace_glob(
             self.cause_namespace, "cause_namespace"
         )
         # Validate change_kind against known enum values

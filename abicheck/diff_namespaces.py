@@ -46,6 +46,7 @@ from typing import TYPE_CHECKING
 from .checker_policy import ChangeKind, ReachabilityState
 from .checker_types import Change
 from .diff_helpers import make_change
+from .diff_templates import _strip_param_signature
 
 if TYPE_CHECKING:
     from .model import AbiSnapshot, RecordType, ScopeOrigin
@@ -155,14 +156,29 @@ def _qualified_function_name(
     the per-symbol path is what makes namespace detection explode on large
     stripped libraries. The lazy single-symbol fallback is kept for callers
     that have no batch (and is itself memoised in ``demangle_batch``).
+
+    A demangled string is a *full declaration* — return type, qualified
+    name, parameter list, and trailing qualifiers (``ns::C::f(ns::T
+    const&, long) const``) — not merely a qualified name. Every caller here
+    ultimately feeds this into ``_segments()``, which only tracks ``<``/``>``
+    template-argument depth, not ``(``/``)`` parameter-list depth: an
+    unstripped signature whose parameter type is itself namespace-qualified
+    (``ns::T`` above) makes ``_segments()`` split *inside* the parameter
+    list, corrupting the leaf name derived from the last segment (reported:
+    a leaf of ``"data_type const&, long) const"`` — a parameter-type
+    fragment, never a real identifier). :func:`diff_templates._strip_param_signature`
+    already solves exactly this for the CPO detector; reused here rather
+    than re-implementing it.
     """
     if "::" in name or "<" in name:
         return name
     if mangled.startswith("_Z"):
         if demangled is not None:
-            return demangled.get(mangled, name)
-        from .demangle import demangle_batch
-        return demangle_batch([mangled]).get(mangled, name)
+            dm = demangled.get(mangled, name)
+        else:
+            from .demangle import demangle_batch
+            dm = demangle_batch([mangled]).get(mangled, name)
+        return _strip_param_signature(dm)
     return name
 
 

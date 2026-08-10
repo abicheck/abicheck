@@ -232,6 +232,88 @@ class TestSuppressionPatternMatching:
 
 
 # ═══════════════════════════════════════════════════════════════════════════
+# Namespace glob (``**``) semantics
+# ═══════════════════════════════════════════════════════════════════════════
+
+class TestNamespaceGlobstarSemantics:
+    """Reported bug: a plain ``fnmatch.translate`` compiles ``**`` as an
+    ordinary ``.*`` glued to whatever literal text follows it, so two
+    starred regions are still separated by a *mandatory* literal ``::`` —
+    ``oneapi::dal::**::detail::**`` could never match the zero-segment case
+    ``oneapi::dal::detail::...`` even though "zero or more namespace
+    segments" is exactly what ``**`` is documented to mean. Fixed with
+    pathspec/gitignore-style globstar semantics in
+    ``_translate_namespace_glob``.
+    """
+
+    def _change(self, symbol: str) -> Change:
+        return Change(
+            kind=ChangeKind.FUNC_REMOVED,
+            symbol=symbol,
+            description="removed",
+        )
+
+    def test_middle_globstar_matches_zero_segments(self):
+        s = Suppression(
+            namespace="oneapi::dal::**::detail::**",
+            reachability="any",
+            reason="internal detail churn",
+        )
+        assert s.matches(self._change("oneapi::dal::detail::foo"))
+
+    def test_middle_globstar_matches_one_segment(self):
+        s = Suppression(
+            namespace="oneapi::dal::**::detail::**",
+            reachability="any",
+            reason="internal detail churn",
+        )
+        assert s.matches(self._change("oneapi::dal::backend::detail::foo"))
+
+    def test_middle_globstar_matches_nested_trailing_segments(self):
+        s = Suppression(
+            namespace="oneapi::dal::**::detail::**",
+            reachability="any",
+            reason="internal detail churn",
+        )
+        assert s.matches(self._change("oneapi::dal::detail::foo::bar"))
+
+    def test_middle_globstar_rejects_unrelated_namespace(self):
+        s = Suppression(
+            namespace="oneapi::dal::**::detail::**",
+            reachability="any",
+            reason="internal detail churn",
+        )
+        assert not s.matches(self._change("oneapi::dal::public_ns::baz"))
+
+    def test_middle_globstar_rejects_lookalike_segment(self):
+        # "detailish" must not be treated as containing "detail".
+        s = Suppression(
+            namespace="oneapi::dal::**::detail::**",
+            reachability="any",
+            reason="internal detail churn",
+        )
+        assert not s.matches(self._change("oneapi::dal::detailish::baz"))
+
+    def test_leading_and_trailing_globstar_matches_bare_segment(self):
+        s = Suppression(
+            namespace="**::backend::**",
+            reachability="any",
+            reason="backend churn",
+        )
+        assert s.matches(self._change("backend"))
+        assert s.matches(self._change("oneapi::backend::foo"))
+
+    def test_leading_and_trailing_globstar_rejects_lookalike(self):
+        s = Suppression(
+            namespace="**::backend::**",
+            reachability="any",
+            reason="backend churn",
+        )
+        assert not s.matches(self._change("backendish::x"))
+        assert not s.matches(self._change("x::backendish"))
+
+
+# ═══════════════════════════════════════════════════════════════════════════
 # Type Pattern Matching
 # ═══════════════════════════════════════════════════════════════════════════
 

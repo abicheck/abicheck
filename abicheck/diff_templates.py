@@ -305,6 +305,17 @@ def detect_internal_template_leaks(
         new_sigs = _instantiation_set(new_by_stem.get(stem, []))
         if old_sigs == new_sigs:
             continue
+        # Direction matters: a (name, signature) pair that existed in OLD but
+        # is absent from NEW means a consumer TU that already resolved and
+        # linked against that mangled instantiation now has nothing to link
+        # against — that's the real "must rebuild every consumer" break this
+        # kind exists to report. A pair present only in NEW (a *new*
+        # instantiation the library started emitting, with every previously
+        # existing one still there unchanged) adds a symbol a consumer could
+        # not already be depending on; it cannot break an already-linked
+        # consumer, so it is not reported here.
+        if not (old_sigs - new_sigs):
+            continue
         changes.append(_leak_change(stem, old_sigs, new_sigs))
     return changes
 
