@@ -175,3 +175,82 @@ def test_partial_specialization_instantiation_gets_a_distinct_template_decl() ->
     }
     targets = {dst for _src, dst in instantiates_edges}
     assert len(targets) == 2
+
+
+def test_partial_specialization_offset_match_is_scoped_by_file() -> None:
+    """``loc.offset`` is *file*-relative in clang's AST dump, not
+    TU-relative -- two headers included by the same TU routinely reuse the
+    identical numeric offset for their own, entirely unrelated declarations
+    (Codex review, second round, fresh evidence, confirmed empirically: a
+    real two-header TU had an unrelated primary-pattern class ``B`` in one
+    header land at the exact same ``loc.offset`` as a genuine partial
+    specialization ``A<T*>`` in a different header). An earlier revision's
+    offset-only match let ``B<int>`` (which selects only its own, ordinary
+    primary pattern -- ``B`` declares no partial specialization at all)
+    wrongly inherit ``A``'s partial-pattern signature purely because their
+    declarations happened to share a byte position within their own,
+    different files -- ``B<int>`` and the real ``A<int*>`` would then
+    collide onto the same discriminated ``template_decl`` node. Fixture:
+    ``A``'s partial spec and ``B``'s own specialization share the identical
+    ``loc.offset`` (87) but declare different ``loc.file`` values."""
+    a_primary_pattern = {"kind": "CXXRecordDecl", "name": "A", "inner": []}
+    a_spec_ptr = {
+        "kind": "ClassTemplateSpecializationDecl",
+        "name": "A",
+        "id": "a_spec_ptr",
+        "completeDefinition": True,
+        "loc": {"offset": 87, "file": "h1.h"},
+        "inner": [{"kind": "TemplateArgument", "type": {"qualType": "int *"}}],
+    }
+    a_class_template = {
+        "kind": "ClassTemplateDecl",
+        "name": "A",
+        "inner": [
+            {"kind": "TemplateTypeParmDecl", "name": "T"},
+            a_primary_pattern,
+            a_spec_ptr,
+        ],
+    }
+    a_partial_spec = {
+        "kind": "ClassTemplatePartialSpecializationDecl",
+        "name": "A",
+        "id": "a_partial",
+        "loc": {"offset": 87, "file": "h1.h"},
+        "inner": [
+            {"kind": "TemplateArgument", "type": {"qualType": "type-parameter-0-0 *"}}
+        ],
+    }
+    # B declares no partial specialization at all -- an entirely ordinary
+    # class template whose own specialization coincidentally shares A's
+    # partial spec's numeric offset, but in a different file.
+    b_primary_pattern = {"kind": "CXXRecordDecl", "name": "B", "inner": []}
+    b_spec_int = {
+        "kind": "ClassTemplateSpecializationDecl",
+        "name": "B",
+        "id": "b_spec_int",
+        "completeDefinition": True,
+        "loc": {"offset": 87, "file": "h2.h"},
+        "inner": [{"kind": "TemplateArgument", "type": {"qualType": "int"}}],
+    }
+    b_class_template = {
+        "kind": "ClassTemplateDecl",
+        "name": "B",
+        "inner": [
+            {"kind": "TemplateTypeParmDecl", "name": "T"},
+            b_primary_pattern,
+            b_spec_int,
+        ],
+    }
+    ast = {
+        "kind": "TranslationUnitDecl",
+        "inner": [a_class_template, a_partial_spec, b_class_template],
+    }
+
+    out = parse_clang_ast_templates(ast)
+    record_insts = {i.label: i for i in out if i.kind == "record"}
+    assert set(record_insts) == {"A<int *>", "B<int>"}
+    # A<int*> genuinely selected the partial spec -- keeps its signature.
+    assert record_insts["A<int *>"].template_signature != ""
+    # B<int> must NOT inherit A's partial-spec signature just because their
+    # declarations share a numeric offset in different files.
+    assert record_insts["B<int>"].template_signature == ""

@@ -149,16 +149,13 @@ full, honest list of what's reserved but unpopulated):
   scoped piece of work, not attempted here.
 - **A template declared inside an anonymous namespace loses that scoping,
   merging distinct TUs' own anonymous-namespace templates of the same
-  name** (Codex review, confirmed against real clang AST output: an
-  anonymous namespace's own ``NamespaceDecl`` carries ``name: None``,
-  indistinguishable to ``_SCOPE_DECL_KINDS``'s ``[*scope, name] if name
-  else scope`` from no namespace at all -- despite C++'s *internal
-  linkage*, unique per TU). Needs a TU-unique discriminator threaded from
-  the caller through both walkers plus a merge policy
-  (``_merge_template_instantiations``) refusing cross-TU-discriminator
-  merges for an anonymous-scoped qname -- an architecture change, not a
-  drive-by fix; see this change's changelog fragment for why a narrower,
-  file-keyed fix doesn't address the actual cross-TU scenario.
+  name** (Codex review: an anonymous namespace's own ``NamespaceDecl``
+  carries ``name: None``, indistinguishable to ``_SCOPE_DECL_KINDS``'s
+  ``[*scope, name] if name else scope`` from no namespace at all, despite
+  C++'s internal linkage being unique per TU). Needs a TU-unique
+  discriminator threaded from the caller plus a merge-policy change -- an
+  architecture change, not a drive-by fix; see this change's changelog
+  for why a narrower, file-keyed fix doesn't address the cross-TU case.
 
 **Investigated and deliberately not attempted: joining a class
 instantiation's own node onto ``type_graph.py``'s record_type node for the
@@ -507,17 +504,14 @@ _CLASS_PARTIAL_SPECIALIZATION_KIND = "ClassTemplatePartialSpecializationDecl"
 
 def _partial_specialization_pattern_signature(node: dict[str, Any]) -> str:
     """A ``ClassTemplatePartialSpecializationDecl``'s own pattern-argument
-    spelling, joined into one discriminator string.
-
-    Built the same way a concrete instantiation's own argument list is
-    (:func:`_template_arg_use`), but over the partial specialization's own
-    *dependent* pattern arguments (e.g. clang spells ``template <typename T>
-    struct C<T*> {...}``'s own argument as the dependent type
-    ``"type-parameter-0-0 *"``, verified empirically against real clang AST
-    output) rather than a concrete instantiation's resolved ones. Stable
-    across TUs/recompiles of the same source (a compiler-derived spelling,
-    not a source position), unlike the ``loc.offset`` this module uses to
-    *detect* which pattern a given specialization came from -- see
+    spelling, joined into one discriminator string. Built the same way a
+    concrete instantiation's own argument list is (:func:`_template_arg_use`),
+    but over the partial spec's own *dependent* pattern arguments (e.g.
+    ``template <typename T> struct C<T*> {...}``'s own argument spells as
+    the dependent type ``"type-parameter-0-0 *"``, verified empirically).
+    Stable across TUs/recompiles (a compiler-derived spelling, not a source
+    position), unlike the ``loc.offset`` used only to *detect* which
+    pattern a specialization came from -- see
     :func:`_collect_partial_specialization_signatures`."""
     parts = []
     for child in node.get("inner", []) or []:
@@ -529,43 +523,42 @@ def _partial_specialization_pattern_signature(node: dict[str, Any]) -> str:
     return ",".join(parts)
 
 
-def _collect_partial_specialization_signatures(node: Any, sigs: dict[int, str]) -> None:
-    """Record ``loc.offset -> pattern signature`` for every
+def _collect_partial_specialization_signatures(
+    node: Any, id_to_file: dict[str, str], sigs: dict[tuple[str, int], str]
+) -> None:
+    """Record ``(file, loc.offset) -> pattern signature`` for every
     :data:`_CLASS_PARTIAL_SPECIALIZATION_KIND` node anywhere in the tree.
 
-    **Not** nested under its owning ``ClassTemplateDecl`` the way a
-    ``TemplateTypeParmDecl``/``CXXRecordDecl`` primary-pattern child is --
-    clang detaches every ``ClassTemplatePartialSpecializationDecl`` to a
-    top-level sibling of its owning scope instead (Codex review, fresh
-    evidence, confirmed against real clang AST output: a
-    ``ClassTemplatePartialSpecializationDecl`` for ``template <typename T>
-    struct C<T*> {...}`` appears as a direct child of the enclosing
-    ``TranslationUnitDecl``/namespace, a sibling of ``ClassTemplateDecl C``,
-    not nested inside it) -- the identical detachment quirk this module's
-    own docstring already documents for explicit specializations/
-    instantiations, applied here to partial specializations too. A single
-    whole-tree walk, mirroring :func:`_collect_full_specializations`'s own
-    "search everywhere, not just where structurally expected" approach.
+    **Not** nested under its owning ``ClassTemplateDecl`` -- clang detaches
+    every ``ClassTemplatePartialSpecializationDecl`` to a top-level sibling
+    of its owning scope instead (Codex review, confirmed against real clang
+    AST output), the identical detachment quirk this module's own docstring
+    already documents for explicit specializations/instantiations. A single
+    whole-tree walk, mirroring :func:`_collect_full_specializations`.
 
     A ``ClassTemplateSpecializationDecl`` generated by selecting a partial
-    specialization pattern carries the *exact same* ``loc.offset`` (and
-    ``range``) as that partial specialization's own declaration -- the
-    identical "shares source identity with its pattern" signal
-    :func:`_primary_pattern_member_locs` already relies on for member-
-    template disambiguation, applied here one level up: the implicit
-    ``ClassTemplateSpecializationDecl`` generated for ``C<int*>`` carries the
-    identical ``loc.offset``/``range`` as the partial spec's own declaration,
-    distinct from both the primary pattern's own span and ``C<int>``'s own
-    specialization, which instead shares the *primary*'s span."""
+    specialization pattern carries the *exact same* ``loc.offset`` as that
+    partial spec's own declaration -- the identical "shares source identity
+    with its pattern" signal :func:`_primary_pattern_member_locs` already
+    relies on one level down for member-template disambiguation.
+
+    Keyed by ``(file, offset)``, not offset alone (Codex review, second
+    round, confirmed empirically): ``loc.offset`` is *file*-relative, so two
+    headers in one TU routinely reuse the identical numeric offset for
+    unrelated declarations -- a bare-offset dict let an unrelated primary
+    pattern in one header wrongly inherit a partial spec's signature from a
+    different header sharing its byte position. *id_to_file* is the
+    already-built sticky-file index, keyed by this node's own clang id."""
     if not isinstance(node, dict):
         return
     if str(node.get("kind", "")) == _CLASS_PARTIAL_SPECIALIZATION_KIND:
         offset = _node_loc_offset(node)
         signature = _partial_specialization_pattern_signature(node)
         if offset is not None and signature:
-            sigs[offset] = signature
+            file = id_to_file.get(str(node.get("id") or ""), "")
+            sigs[(file, offset)] = signature
     for child in node.get("inner", []) or []:
-        _collect_partial_specialization_signatures(child, sigs)
+        _collect_partial_specialization_signatures(child, id_to_file, sigs)
 
 
 def _register_class_template(
@@ -573,7 +566,8 @@ def _register_class_template(
     template_qname: str,
     id_to_template_qname: dict[str, str],
     id_to_partial_signature: dict[str, str],
-    partial_sigs_by_offset: dict[int, str],
+    partial_sigs_by_offset: dict[tuple[str, int], str],
+    id_to_file: dict[str, str],
 ) -> None:
     """Record ``spec_id -> template_qname`` for every specialization *node*
     (a ``ClassTemplateDecl``) directly nests — the structural half of the
@@ -581,18 +575,19 @@ def _register_class_template(
 
     Also records ``spec_id -> partial-specialization pattern signature`` in
     *id_to_partial_signature* for a specialization generated by selecting a
-    partial-specialization pattern rather than the primary (Codex review,
-    fresh evidence): without this, ``C<int>`` (primary pattern) and
-    ``C<int*>`` (a partial-specialization-selected instantiation) both
-    resolved to the identical ``template_qname``, and since
-    :func:`template_decl_node_id` keyed a class template by qname alone,
-    both ``DECL_INSTANTIATES_TEMPLATE`` edges landed on the same
-    ``template_decl://C`` node even though the latter genuinely instantiates
-    a distinct declared pattern -- merging the two patterns' provenance.
-    *partial_sigs_by_offset* is the whole-AST index built once by
+    partial-specialization pattern rather than the primary (Codex review):
+    without this, ``C<int>`` (primary pattern) and ``C<int*>`` (partial-
+    specialization-selected) both resolved to the identical ``template_qname``,
+    and since :func:`template_decl_node_id` keyed a class template by qname
+    alone, both ``DECL_INSTANTIATES_TEMPLATE`` edges landed on the same
+    ``template_decl://C`` node despite instantiating distinct declared
+    patterns -- merging their provenance. *partial_sigs_by_offset* is the
+    whole-AST index built once by
     :func:`_collect_partial_specialization_signatures` (a partial spec is
     never a child of *this* ``ClassTemplateDecl`` node itself -- see that
-    function's own docstring for why)."""
+    function's own docstring for why), keyed by ``(file, offset)`` -- this
+    specialization's own file (via *id_to_file*) must match too, not offset
+    alone (see that function's docstring for the cross-header collision)."""
     for child in node.get("inner", []) or []:
         if str(child.get("kind", "")) == _CLASS_SPECIALIZATION_KIND:
             spec_id = str(child.get("id") or "")
@@ -600,10 +595,12 @@ def _register_class_template(
                 id_to_template_qname[spec_id] = template_qname
                 if partial_sigs_by_offset:
                     offset = _node_loc_offset(child)
-                    if offset is not None and offset in partial_sigs_by_offset:
-                        id_to_partial_signature[spec_id] = partial_sigs_by_offset[
-                            offset
-                        ]
+                    if offset is not None:
+                        key = (id_to_file.get(spec_id, ""), offset)
+                        if key in partial_sigs_by_offset:
+                            id_to_partial_signature[spec_id] = partial_sigs_by_offset[
+                                key
+                            ]
 
 
 def _node_loc_offset(node: dict[str, Any]) -> int | None:
@@ -1491,7 +1488,8 @@ def _walk_class_templates(
     id_to_qname: dict[str, str],
     id_to_template_qname: dict[str, str],
     id_to_partial_signature: dict[str, str],
-    partial_sigs_by_offset: dict[int, str],
+    partial_sigs_by_offset: dict[tuple[str, int], str],
+    id_to_file: dict[str, str],
     qname_to_member_locs: dict[str, dict[tuple[str, str], int]],
     qname_has_auto_nttp: set[str],
 ) -> None:
@@ -1509,6 +1507,7 @@ def _walk_class_templates(
                 id_to_template_qname,
                 id_to_partial_signature,
                 partial_sigs_by_offset,
+                id_to_file,
             )
             # See _primary_pattern_member_locs's own docstring: this is the
             # signal _walk_function_templates needs to tell a genuinely
@@ -1544,6 +1543,7 @@ def _walk_class_templates(
                 id_to_template_qname,
                 id_to_partial_signature,
                 partial_sigs_by_offset,
+                id_to_file,
                 qname_to_member_locs,
                 qname_has_auto_nttp,
             )
@@ -1557,6 +1557,7 @@ def _walk_class_templates(
             id_to_template_qname,
             id_to_partial_signature,
             partial_sigs_by_offset,
+            id_to_file,
             qname_to_member_locs,
             qname_has_auto_nttp,
         )
@@ -1591,8 +1592,8 @@ def parse_clang_ast_templates(ast: dict[str, Any]) -> list[TemplateInstantiation
 
     full_by_id: dict[str, dict[str, Any]] = {}
     _collect_full_specializations(ast, full_by_id)
-    partial_sigs_by_offset: dict[int, str] = {}
-    _collect_partial_specialization_signatures(ast, partial_sigs_by_offset)
+    partial_sigs_by_offset: dict[tuple[str, int], str] = {}
+    _collect_partial_specialization_signatures(ast, id_to_file, partial_sigs_by_offset)
     id_to_template_qname: dict[str, str] = {}
     id_to_partial_signature: dict[str, str] = {}
     qname_to_member_locs: dict[str, dict[tuple[str, str], int]] = {}
@@ -1604,6 +1605,7 @@ def parse_clang_ast_templates(ast: dict[str, Any]) -> list[TemplateInstantiation
         id_to_template_qname,
         id_to_partial_signature,
         partial_sigs_by_offset,
+        id_to_file,
         qname_to_member_locs,
         qname_has_auto_nttp,
     )

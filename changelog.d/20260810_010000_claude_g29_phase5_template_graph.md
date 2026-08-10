@@ -822,3 +822,25 @@
   `archive_member_node_id("x::6:a", "b")` both produced the identical
   `"archive_member://x::6:a::1:b#0"`). Fixed by length-prefixing
   `archive_path` too, the identical technique already applied to `member`.
+
+  A twenty-seventh round found and fixed a real gap in the twenty-sixth
+  round's own partial-specialization fix, confirmed empirically (Codex
+  review). `loc.offset` is *file*-relative, not TU-relative -- two headers
+  included by the same TU routinely reuse the identical numeric offset for
+  their own, entirely unrelated declarations, confirmed via a real
+  two-header TU where an unrelated primary-pattern class `B` in one header
+  landed at the exact same `loc.offset` as a genuine partial specialization
+  `A<T*>` in a different header. The previous round's offset-only match let
+  `B<int>` (which selects only its own, ordinary primary pattern) wrongly
+  inherit `A`'s partial-pattern signature purely because their declarations
+  shared a byte position in different files. Fixed by keying
+  `_collect_partial_specialization_signatures`'s index and
+  `_register_class_template`'s lookup by `(file, offset)` instead of offset
+  alone, using the already-built sticky-file index (`id_to_file`) both
+  functions now thread through. The same round's independent background
+  triage of the PR's other outstanding review threads confirmed 16 of 18
+  were already fixed by earlier rounds (several explicitly citing the
+  reviewer's own repro case in their docstrings); the remaining two
+  (vtable/typeinfo symbol discovery, anonymous-namespace cross-TU merging)
+  are the same deliberately-deferred, already-documented known gaps this
+  changelog's earlier rounds describe.
