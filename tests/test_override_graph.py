@@ -28,6 +28,7 @@ from abicheck.buildsource.override_graph import (
     RESOLUTION_OVERRIDE_SIGNATURE_MATCH,
     ClangOverrideGraphExtractor,
     OverrideEdge,
+    _strip_exception_spec,
     augment_graph_with_overrides,
     parse_clang_ast_overrides,
 )
@@ -70,6 +71,41 @@ def _record(name: str, *, bases: list[str] | None = None, inner: list[dict]) -> 
 
 def _tu(*decls: dict) -> dict:
     return {"kind": "TranslationUnitDecl", "inner": list(decls)}
+
+
+# ── _strip_exception_spec ────────────────────────────────────────────────
+
+
+def test_strip_exception_spec_bare_noexcept() -> None:
+    assert _strip_exception_spec("void () noexcept") == "void ()"
+
+
+def test_strip_exception_spec_preserves_cv_and_ref_qualifiers() -> None:
+    assert _strip_exception_spec("void () const noexcept") == "void () const"
+    assert _strip_exception_spec("void () & noexcept") == "void () &"
+    assert _strip_exception_spec("void () const & noexcept") == "void () const &"
+
+
+def test_strip_exception_spec_throw_spec() -> None:
+    assert _strip_exception_spec("int (int) throw()") == "int (int)"
+
+
+def test_strip_exception_spec_dependent_noexcept_expression() -> None:
+    # A parenthesized noexcept(...) expression may itself contain balanced
+    # parens; the balance-counted strip must consume the whole group as one
+    # unit, not stop at the first inner ")".
+    assert _strip_exception_spec("void () noexcept(sizeof(int) == 4)") == "void ()"
+
+
+def test_strip_exception_spec_no_exception_spec_is_unchanged() -> None:
+    assert _strip_exception_spec("void ()") == "void ()"
+    assert _strip_exception_spec("void (int)") == "void (int)"
+    assert _strip_exception_spec("void () const") == "void () const"
+    assert _strip_exception_spec("void () &") == "void () &"
+
+
+def test_strip_exception_spec_no_qualifiers_and_no_parens() -> None:
+    assert _strip_exception_spec("int") == "int"
 
 
 # ── parse_clang_ast_overrides ────────────────────────────────────────────
@@ -208,6 +244,167 @@ def test_non_virtual_base_method_is_not_an_override_target() -> None:
         ),
     )
     assert parse_clang_ast_overrides(ast) == []
+
+
+def test_override_reaches_through_non_redeclaring_intermediate_class() -> None:
+    # Codex review, fresh evidence, verified against real Clang 17 output:
+    # Base declares a virtual run(); Mid : Base does NOT redeclare it at
+    # all; Derived : Mid overrides it. The real target is Base::run,
+    # reached only by walking PAST the non-redeclaring Mid -- a direct-
+    # bases-only lookup finds nothing (Mid has no "run" method at all).
+    ast = _tu(
+        _record(
+            "Base",
+            inner=[_method("run", "_ZN4Base3runEv", "void ()", is_virtual=True)],
+        ),
+        _record("Mid", bases=["Base"], inner=[]),
+        _record(
+            "Derived",
+            bases=["Mid"],
+            inner=[
+                _method("run", "_ZN7Derived3runEv", "void ()", has_override_attr=True)
+            ],
+        ),
+    )
+    edges = parse_clang_ast_overrides(ast)
+    assert edges == [
+        OverrideEdge(
+            "_ZN7Derived3runEv",
+            "_ZN4Base3runEv",
+            CONF_HIGH,
+            RESOLUTION_OVERRIDE_CONFIRMED,
+        )
+    ]
+
+
+def test_override_reaches_through_two_non_redeclaring_intermediates() -> None:
+    ast = _tu(
+        _record(
+            "Base",
+            inner=[_method("run", "_ZN4Base3runEv", "void ()", is_virtual=True)],
+        ),
+        _record("Mid1", bases=["Base"], inner=[]),
+        _record("Mid2", bases=["Mid1"], inner=[]),
+        _record(
+            "Derived",
+            bases=["Mid2"],
+            inner=[
+                _method("run", "_ZN7Derived3runEv", "void ()", has_override_attr=True)
+            ],
+        ),
+    )
+    edges = parse_clang_ast_overrides(ast)
+    assert edges == [
+        OverrideEdge(
+            "_ZN7Derived3runEv",
+            "_ZN4Base3runEv",
+            CONF_HIGH,
+            RESOLUTION_OVERRIDE_CONFIRMED,
+        )
+    ]
+
+
+def test_noexcept_strengthened_override_still_matches() -> None:
+    # Codex review, fresh evidence, verified against real Clang 17 output:
+    # `virtual void run();` overridden by `void run() noexcept override;`
+    # is a real, clang-confirmed override (OverrideAttr present) even
+    # though the qualType strings differ ("void ()" vs "void () noexcept").
+    ast = _tu(
+        _record(
+            "Base",
+            inner=[_method("run", "_ZN4Base3runEv", "void ()", is_virtual=True)],
+        ),
+        _record(
+            "Derived",
+            bases=["Base"],
+            inner=[
+                _method(
+                    "run",
+                    "_ZN7Derived3runEv",
+                    "void () noexcept",
+                    has_override_attr=True,
+                )
+            ],
+        ),
+    )
+    edges = parse_clang_ast_overrides(ast)
+    assert edges == [
+        OverrideEdge(
+            "_ZN7Derived3runEv",
+            "_ZN4Base3runEv",
+            CONF_HIGH,
+            RESOLUTION_OVERRIDE_CONFIRMED,
+        )
+    ]
+
+
+def test_throw_spec_normalizes_the_same_as_noexcept() -> None:
+    ast = _tu(
+        _record(
+            "Base",
+            inner=[
+                _method("run", "_ZN4Base3runEi", "int (int) throw()", is_virtual=True)
+            ],
+        ),
+        _record(
+            "Derived",
+            bases=["Base"],
+            inner=[
+                _method(
+                    "run",
+                    "_ZN7Derived3runEi",
+                    "int (int) noexcept",
+                    has_override_attr=True,
+                )
+            ],
+        ),
+    )
+    edges = parse_clang_ast_overrides(ast)
+    assert edges == [
+        OverrideEdge(
+            "_ZN7Derived3runEi",
+            "_ZN4Base3runEi",
+            CONF_HIGH,
+            RESOLUTION_OVERRIDE_CONFIRMED,
+        )
+    ]
+
+
+def test_noexcept_normalization_preserves_cv_and_ref_qualifiers() -> None:
+    # The exception spec strip must not eat the const/&/&& qualifiers that
+    # precede it -- "void () const noexcept" -> "void () const", not
+    # "void ()"; a const-qualified override must still NOT match a
+    # non-const base of the same name.
+    ast = _tu(
+        _record(
+            "Base",
+            inner=[
+                _method("run", "_ZN4Base3runEv", "void ()", is_virtual=True),
+                _method("runc", "_ZNK4Base4runcEv", "void () const", is_virtual=True),
+            ],
+        ),
+        _record(
+            "Derived",
+            bases=["Base"],
+            inner=[
+                _method(
+                    "runc",
+                    "_ZNK7Derived4runcEv",
+                    "void () const noexcept",
+                    has_override_attr=True,
+                )
+            ],
+        ),
+    )
+    edges = parse_clang_ast_overrides(ast)
+    assert edges == [
+        OverrideEdge(
+            "_ZNK7Derived4runcEv",
+            "_ZNK4Base4runcEv",
+            CONF_HIGH,
+            RESOLUTION_OVERRIDE_CONFIRMED,
+        )
+    ]
 
 
 def test_different_signature_does_not_match() -> None:

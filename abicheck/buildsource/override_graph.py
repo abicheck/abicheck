@@ -27,10 +27,21 @@ written) with no target info either. So this module reconstructs the
 override chain itself: build the class hierarchy from
 ``type_graph.py``'s already-resolved ``TYPE_INHERITS`` edges (reusing its
 output rather than re-deriving base-name resolution), collect each class's
-own methods, and match a derived method against a direct base's method by
-``(name, type.qualType)`` — the same shape "approximate, name/signature-only
-matching" every edge family in this file's sibling modules already accepts
-(``type_graph.py``'s own module docstring: "best-effort and approximate").
+own methods, and match a derived method against the NEAREST ancestor that
+declares a same-signature method — not necessarily a DIRECT base, since an
+intermediate class in the chain may not redeclare the method at all (e.g.
+``Base`` declares a virtual ``run()``, ``Mid : Base`` doesn't redeclare it,
+``Derived : Mid`` overrides it — the real override target is ``Base::run``,
+reached by walking past the non-redeclaring ``Mid``; verified against real
+Clang 17 output, Codex review). Matching itself is by ``(name,
+type.qualType)`` with the exception specification normalized out first
+(:func:`_strip_exception_spec` — an override may legally STRENGTHEN it, e.g.
+adding ``noexcept`` to an unmarked base virtual, and clang appends the
+exception spec as the qualType's trailing token regardless of surrounding
+cv/ref qualifiers; verified against real Clang 17 output, Codex review) —
+the same shape "approximate, name/signature-only matching" every edge
+family in this file's sibling modules already accepts (``type_graph.py``'s
+own module docstring: "best-effort and approximate").
 
 Architecture mirrors ``call_graph.py``/``type_graph.py`` deliberately:
 
@@ -58,8 +69,9 @@ omissions):
   correctness work for; not reattempted here without equivalent
   verification.
 - Multiple/virtual inheritance: a derived method matching more than one
-  direct base's virtual method (a real but rare shape — multiple-interface
-  inheritance) emits an edge to EACH matching base method, not just one.
+  ancestor's virtual method (a real but rare shape — multiple-interface
+  inheritance) emits an edge to EACH nearest declaring ancestor, not just
+  one.
 - Covariant return types are not modeled: an override with a covariant
   return type has a DIFFERENT ``type.qualType`` than its base (the return
   type differs), so this genuinely misses it (a known false negative, not a
@@ -133,6 +145,44 @@ class _MethodInfo:
     own_virtual: bool
 
 
+def _strip_exception_spec(qual_type: str) -> str:
+    """Drop a trailing ``noexcept``/``noexcept(...)``/``throw(...)`` exception
+    specification from a method's ``type.qualType`` before it's used as a
+    signature-matching key (Codex review, fresh evidence): an override may
+    legally STRENGTHEN the exception spec (e.g. adding ``noexcept`` to an
+    unmarked base virtual) while remaining a real, clang-confirmed override,
+    and clang always appends the exception spec as the qualType's trailing
+    token regardless of any preceding cv/ref qualifiers — verified against
+    real Clang 17 output (``void ()`` vs. ``void () noexcept``, ``void ()
+    const &`` vs. ``void () const & noexcept``, ``int (int) throw()`` vs.
+    ``int (int) noexcept``, ...). Exact equality on the raw spelling would
+    reject every one of these as a signature mismatch.
+
+    A trailing ``)`` is only stripped when the matching (balance-counted, so
+    a dependent ``noexcept(sizeof(int) == 4)`` strips as one unit) opening
+    ``(`` is immediately preceded by ``noexcept``/``throw`` — an ordinary
+    parameter list's own closing paren (e.g. plain ``void (int)``) is left
+    untouched, since its prefix is neither keyword.
+    """
+    s = qual_type.rstrip()
+    if s.endswith(")"):
+        depth = 0
+        for i in range(len(s) - 1, -1, -1):
+            if s[i] == ")":
+                depth += 1
+            elif s[i] == "(":
+                depth -= 1
+                if depth == 0:
+                    prefix = s[:i].rstrip()
+                    for kw in ("noexcept", "throw"):
+                        if prefix.endswith(kw):
+                            return prefix[: -len(kw)].rstrip()
+                    break
+    if s.endswith("noexcept"):
+        return s[: -len("noexcept")].rstrip()
+    return s
+
+
 def _method_info(node: dict[str, Any], scope: list[str]) -> _MethodInfo | None:
     name = str(node.get("name") or "")
     if not name:
@@ -141,6 +191,10 @@ def _method_info(node: dict[str, Any], scope: list[str]) -> _MethodInfo | None:
     type_obj = node.get("type")
     type_qual = str(type_obj.get("qualType", "")) if isinstance(type_obj, dict) else ""
     qualified_name = "::".join([*scope, name]) if scope else name
+    # function_decl_identity needs the REAL, un-normalized type_qual to match
+    # SourceEntity.identity()'s own hash for the same declaration elsewhere
+    # (source_graph.function_decl_identity's own docstring) -- only the
+    # sig_key used for override MATCHING is exception-spec-normalized.
     identity = function_decl_identity(mangled, name, qualified_name, type_qual)
     has_override_attr = any(
         isinstance(c, dict) and c.get("kind") == "OverrideAttr"
@@ -148,7 +202,7 @@ def _method_info(node: dict[str, Any], scope: list[str]) -> _MethodInfo | None:
     )
     return _MethodInfo(
         identity=identity,
-        sig_key=(name, type_qual),
+        sig_key=(name, _strip_exception_spec(type_qual)),
         has_override_attr=has_override_attr,
         own_virtual=bool(node.get("virtual")),
     )
@@ -190,6 +244,89 @@ def _collect_class_methods(ast: dict[str, Any]) -> dict[str, list[_MethodInfo]]:
     return result
 
 
+_SlotKey = tuple[str, tuple[str, str]]
+
+
+def _nearest_declaring_ancestors(
+    qname: str,
+    sig_key: tuple[str, str],
+    bases_of: dict[str, list[str]],
+    declared: dict[_SlotKey, _MethodInfo],
+    memo: dict[_SlotKey, list[str]],
+    visiting: frozenset[str] = frozenset(),
+) -> list[str]:
+    """The nearest ancestor class(es) of *qname* that actually DECLARE a
+    method matching *sig_key* — walking PAST an intermediate class that
+    doesn't redeclare the method at all (Codex review, fresh evidence,
+    verified against real Clang 17 output: ``Base`` declares a virtual
+    ``run()``, ``Mid : Base`` doesn't redeclare it, ``Derived : Mid``
+    overrides it — the real override target is ``Base::run``, reached only
+    by walking past the non-redeclaring ``Mid``). Memoized per
+    ``(qname, sig_key)``; *visiting* guards against a cyclic
+    (malformed/hand-built test) hierarchy real compiler output never
+    produces.
+    """
+    key = (qname, sig_key)
+    if key in memo:
+        return memo[key]
+    if qname in visiting:
+        return []
+    visiting = visiting | {qname}
+    result: list[str] = []
+    for base_qname in bases_of.get(qname, []):
+        if (base_qname, sig_key) in declared:
+            result.append(base_qname)
+        else:
+            result.extend(
+                _nearest_declaring_ancestors(
+                    base_qname, sig_key, bases_of, declared, memo, visiting
+                )
+            )
+    memo[key] = result
+    return result
+
+
+def _is_virtual(
+    qname: str,
+    sig_key: tuple[str, str],
+    bases_of: dict[str, list[str]],
+    declared: dict[_SlotKey, _MethodInfo],
+    ancestor_memo: dict[_SlotKey, list[str]],
+    virtual_memo: dict[_SlotKey, bool],
+    visiting: frozenset[str] = frozenset(),
+) -> bool:
+    """Whether the ``sig_key`` slot is virtual on *qname* — directly (clang
+    said so), or transitively through the NEAREST declaring ancestor(s)
+    (real C++'s own "once virtual, always virtual down the hierarchy" rule
+    — clang does NOT repeat ``"virtual": true`` on an override, so this must
+    be derived). Recurses through :func:`_nearest_declaring_ancestors`
+    rather than only direct bases, for the same non-redeclaring-intermediate
+    reason that function documents. Memoized; *visiting* guards a cyclic
+    fixture the same way.
+    """
+    key = (qname, sig_key)
+    if key in virtual_memo:
+        return virtual_memo[key]
+    m = declared.get(key)
+    if m is not None and m.own_virtual:
+        virtual_memo[key] = True
+        return True
+    if qname in visiting:
+        virtual_memo[key] = False
+        return False
+    visiting = visiting | {qname}
+    result = any(
+        _is_virtual(
+            ancestor, sig_key, bases_of, declared, ancestor_memo, virtual_memo, visiting
+        )
+        for ancestor in _nearest_declaring_ancestors(
+            qname, sig_key, bases_of, declared, ancestor_memo
+        )
+    )
+    virtual_memo[key] = result
+    return result
+
+
 def parse_clang_ast_overrides(ast: dict[str, Any]) -> list[OverrideEdge]:
     """Pure function: a ``clang -ast-dump=json`` tree -> possible-override
     edges. See this module's own docstring for the full algorithm/scope.
@@ -200,73 +337,52 @@ def parse_clang_ast_overrides(ast: dict[str, Any]) -> list[OverrideEdge]:
             bases_of.setdefault(e.src, []).append(e.dst)
 
     methods_by_class = _collect_class_methods(ast)
-
-    # Fixed-point closure: a method is virtual if clang says so directly, OR
-    # if ANY direct base has a same-signature method already known virtual
-    # (real C++'s own "once virtual, always virtual down the hierarchy"
-    # rule -- clang does NOT repeat `"virtual": true` on an override, so
-    # this must be derived, not read off any single node). Bounded by the
-    # number of classes -- malformed/cyclic input (a hand-built test
-    # fixture, never real compiler output) still terminates.
-    virtual_slots: dict[tuple[str, tuple[str, str]], bool] = {
-        (qname, m.sig_key): True
+    declared: dict[_SlotKey, _MethodInfo] = {
+        (qname, m.sig_key): m
         for qname, methods in methods_by_class.items()
         for m in methods
-        if m.own_virtual
     }
-    for _ in range(len(methods_by_class) + 1):
-        changed = False
-        for qname, methods in methods_by_class.items():
-            bases = bases_of.get(qname, [])
-            for m in methods:
-                slot = (qname, m.sig_key)
-                if virtual_slots.get(slot):
-                    continue
-                if any(virtual_slots.get((b, m.sig_key)) for b in bases):
-                    virtual_slots[slot] = True
-                    changed = True
-        if not changed:
-            break
+    ancestor_memo: dict[_SlotKey, list[str]] = {}
+    virtual_memo: dict[_SlotKey, bool] = {}
 
     edges: list[OverrideEdge] = []
     seen: set[tuple[str, str]] = set()
     for qname, methods in methods_by_class.items():
-        bases = bases_of.get(qname, [])
-        if not bases:
-            continue
+        if qname not in bases_of:
+            continue  # no bases at all -> no ancestor can be reached
         for m in methods:
-            if not virtual_slots.get((qname, m.sig_key)):
+            if not _is_virtual(
+                qname, m.sig_key, bases_of, declared, ancestor_memo, virtual_memo
+            ):
                 continue
-            for base_qname in bases:
-                for bm in methods_by_class.get(base_qname, []):
-                    if bm.sig_key != m.sig_key:
-                        continue
-                    if not virtual_slots.get((base_qname, bm.sig_key)):
-                        continue
-                    if m.identity == bm.identity:
-                        continue
-                    key = (m.identity, bm.identity)
-                    if key in seen:
-                        continue
-                    seen.add(key)
-                    if m.has_override_attr:
-                        confidence, resolution = (
-                            CONF_HIGH,
-                            RESOLUTION_OVERRIDE_CONFIRMED,
-                        )
-                    else:
-                        confidence, resolution = (
-                            CONF_REDUCED,
-                            RESOLUTION_OVERRIDE_SIGNATURE_MATCH,
-                        )
-                    edges.append(
-                        OverrideEdge(
-                            src=m.identity,
-                            dst=bm.identity,
-                            confidence=confidence,
-                            resolution=resolution,
-                        )
+            for base_qname in _nearest_declaring_ancestors(
+                qname, m.sig_key, bases_of, declared, ancestor_memo
+            ):
+                bm = declared[(base_qname, m.sig_key)]
+                if m.identity == bm.identity:
+                    continue
+                key = (m.identity, bm.identity)
+                if key in seen:
+                    continue
+                seen.add(key)
+                if m.has_override_attr:
+                    confidence, resolution = (
+                        CONF_HIGH,
+                        RESOLUTION_OVERRIDE_CONFIRMED,
                     )
+                else:
+                    confidence, resolution = (
+                        CONF_REDUCED,
+                        RESOLUTION_OVERRIDE_SIGNATURE_MATCH,
+                    )
+                edges.append(
+                    OverrideEdge(
+                        src=m.identity,
+                        dst=bm.identity,
+                        confidence=confidence,
+                        resolution=resolution,
+                    )
+                )
     return edges
 
 

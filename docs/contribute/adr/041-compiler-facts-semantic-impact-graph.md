@@ -1353,11 +1353,15 @@ there is no equivalent "should this be automatic" question for them.
    `CALL_KIND_VIRTUAL`/`RESOLUTION_OVERAPPROX` opened. Built from the class
    hierarchy `type_graph.py`'s own resolved `TYPE_INHERITS` edges already
    provide (reused rather than re-derived) plus each class's own methods,
-   matched by `(name, type.qualType)` against an already-virtual base slot;
+   matched against the NEAREST ancestor that actually declares a
+   same-signature method — walking past an intermediate class that doesn't
+   redeclare it at all — with the exception specification normalized out of
+   the `(name, type.qualType)` match first, since an override may legally
+   strengthen it (both verified against real Clang 17 output, Codex review);
    an edge is `override_confirmed` when the overriding declaration wrote the
    `override` keyword (clang's `OverrideAttr`, compiler-checked) or the
    weaker `override_signature_match` otherwise. Multiple inheritance emits
-   an edge to each matching base. Deliberately scoped out of this first
+   an edge to each matching ancestor. Deliberately scoped out of this first
    slice: constructors/destructors (the Itanium two-symbol dtor mangling
    needs its own matching rule), class-template specializations, and
    covariant-return overrides (a documented false negative — a covariant
