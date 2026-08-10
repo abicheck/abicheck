@@ -38,6 +38,7 @@ from abicheck.buildsource.archive_graph import (
     ArchiveFormatError,
     ArchiveGraphResult,
     BytesReader,
+    archive_member_node_id,
     augment_graph_with_archives,
     defining_members,
     parse_ar_archive,
@@ -465,6 +466,28 @@ def test_bsd_symdef_index() -> None:
         ("alpha", "a.o"),
         ("beta", "b.o"),
     ]
+
+
+def test_archive_member_node_id_does_not_collide_across_discriminators() -> None:
+    """``#`` is a legal ``ar`` member-name character -- a uniquely-named
+    member literally called ``"foo#1"`` (discriminator 0) and an ordinary
+    member named ``"foo"`` at occurrence index 1 (discriminator 1)
+    previously both produced the identical id
+    ``"archive_member://lib.a::foo#1"``, merging two genuinely distinct
+    members onto one graph node (Codex review, fresh evidence). The
+    member name is now length-prefixed so no combination of legal
+    characters can reproduce another (member, discriminator) pair's id."""
+    colliding_pairs = [
+        ("foo#1", 0),  # the exact motivating case
+        ("foo", 1),
+        ("3:foo", 1),  # a name that itself looks like a length-prefixed entry
+        ("foo", 31),  # "3:foo#31" vs. "3:foo#1" -- discriminator digits too
+    ]
+    ids = {
+        archive_member_node_id("lib.a", member, disc)
+        for member, disc in colliding_pairs
+    }
+    assert len(ids) == len(colliding_pairs)  # every pair gets its own id
 
 
 def test_bsd_symdef_offset_into_middle_of_another_name_is_rejected() -> None:

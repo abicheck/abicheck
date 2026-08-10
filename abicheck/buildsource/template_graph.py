@@ -1050,7 +1050,21 @@ def _function_template_pattern_signature(node: dict[str, Any]) -> str:
        edge from either one point at a declaration the other didn't
        actually come from. Confirmed via a real compiled/dumped
        `template<class T> void f()` / `template<class T,class U> void f()`
-       pair reducing to the identical `"void ()"` printed type.
+       pair reducing to the identical `"void ()"` printed type. A
+       ``NonTypeTemplateParmDecl``'s own *kind* alone still wasn't enough
+       (Codex review, second round, fresh evidence): ``template <E1 N>
+       void f()`` and ``template <E2 N> void f()`` (two distinct enum
+       types) both counted as one bare ``"NonTypeTemplateParmDecl"``,
+       colliding the identical way -- confirmed via a real compiled/dumped
+       pair (`f<E1::A>`/`f<E2::A>`) reducing to the identical
+       ``"NonTypeTemplateParmDecl|void ()"`` signature. Each NTTP
+       parameter's own descriptor now also folds in its declared
+       ``type.qualType`` (always present, reliably differs), as
+       ``"NonTypeTemplateParmDecl:E1"`` vs. ``"...:E2"``.
+       ``TemplateTypeParmDecl``/``TemplateTemplateParmDecl`` stay
+       kind-only -- no confirmed real-world collision source for either
+       found yet, so no unverified extension of this discriminator was
+       added for them.
 
     Returns ``"<param-kinds>|<pattern-type>"`` (the param-kind half always
     present even when no pattern spelling is found, so two templates
@@ -1076,7 +1090,26 @@ def _function_template_pattern_signature(node: dict[str, Any]) -> str:
     for child in node.get("inner", []) or []:
         child_kind = str(child.get("kind", ""))
         if child_kind in _TEMPLATE_PARAM_DECL_KINDS:
-            param_kinds.append(child_kind)
+            descriptor = child_kind
+            if child_kind == "NonTypeTemplateParmDecl":
+                # Two NTTP parameters differing only in their own declared
+                # type (`template <E1 N> void f()` vs. `template <E2 N>
+                # void f()`) both still counted as an identical bare
+                # "NonTypeTemplateParmDecl" kind, so distinct templates
+                # collided the same way the earlier kind-count-only fix
+                # was meant to prevent (Codex review, fresh evidence,
+                # confirmed against real clang output: both instantiations
+                # -- f<E1::A>, f<E2::A> -- reduced to the identical
+                # "NonTypeTemplateParmDecl|void ()" signature). A
+                # NonTypeTemplateParmDecl's own type.qualType (e.g. "E1"/
+                # "E2") is always present and reliably differs, so it's
+                # folded into this parameter's own descriptor.
+                nttp_type = child.get("type")
+                if isinstance(nttp_type, dict):
+                    nttp_spelling = nttp_type.get("qualType")
+                    if isinstance(nttp_spelling, str) and nttp_spelling:
+                        descriptor = f"{child_kind}:{nttp_spelling}"
+            param_kinds.append(descriptor)
             continue
         if pattern_type or child_kind not in _MEMBER_FUNCTION_KINDS | {"FunctionDecl"}:
             continue

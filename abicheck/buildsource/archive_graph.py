@@ -915,12 +915,32 @@ def archive_member_node_id(
     the later member's own content is byte-identical — false-positively
     reporting an unrelated member (and its edges) as removed-and-re-added
     on a version-over-version structural graph diff (Codex review, second
-    round). Zero (the default, and the common case: a uniquely-named
-    member) keeps the plain name-only id unchanged.
+    round).
+
+    *member* is length-prefixed in the returned id (Codex review, third
+    round, fresh evidence), not simply concatenated with ``#discriminator``
+    or embedded plain: ``#`` is a legal ``ar`` member-name character (no
+    format-level restriction on it), so a uniquely-named member literally
+    called ``"foo#1"`` (discriminator 0, the plain-name branch an earlier
+    revision kept) and an ordinary member named ``"foo"`` at occurrence
+    index 1 both produced the identical id ``"archive_member://<archive>::
+    foo#1"`` — two genuinely distinct members merged onto one graph node,
+    misattributing whichever member's symbols got recorded second, the
+    same failure mode this discriminator exists to prevent. Length-
+    prefixing *member* the same way Itanium mangling length-prefixes a
+    source-name (this module already relies on that technique's safety
+    elsewhere) makes the encoding unambiguous regardless of what
+    characters *member* itself contains: two distinct ``(member,
+    discriminator)`` pairs can never produce the identical string, since a
+    matching id requires the length digits to match first (fixing where
+    the member text ends), then that exact substring to match (fixing
+    *member*), then the trailing ``#<discriminator>`` to match. Applied
+    uniformly regardless of whether *discriminator* is zero, rather than
+    keeping a separate unprefixed "common case" format that the same
+    ambiguity could reach from the other direction (an unusual literal
+    member name that happens to *look like* a length-prefixed entry).
     """
-    if not discriminator:
-        return f"archive_member://{archive_path}::{member}"
-    return f"archive_member://{archive_path}::{member}#{discriminator}"
+    return f"archive_member://{archive_path}::{len(member)}:{member}#{discriminator}"
 
 
 def _symbol_node_ids(graph: SourceGraphSummary) -> frozenset[str]:

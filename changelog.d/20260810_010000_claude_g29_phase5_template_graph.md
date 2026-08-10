@@ -717,3 +717,32 @@
   regression test; split identity-discriminator tests into a new sibling
   `tests/test_template_graph_identity.py` rather than further growing the
   parent file, per this repo's own file-size guidance.
+
+  A twenty-fourth round found and fixed two more real gaps, both confirmed
+  empirically. First, `template_graph.py`'s newly added template-parameter
+  discriminator counted only each parameter's structural *kind*, not a
+  non-type template parameter's own declared *type* -- `template <E1 N>
+  void f()` and `template <E2 N> void f()` (two distinct enum types) both
+  counted as one bare `"NonTypeTemplateParmDecl"`, colliding the identical
+  way the parameter-list fix itself was meant to prevent (Codex review,
+  second round, fresh evidence, confirmed via a real compiled/dumped pair:
+  `f<E1::A>`/`f<E2::A>` reduced to the identical
+  `"NonTypeTemplateParmDecl|void ()"` signature). Fixed by folding the
+  NTTP's own `type.qualType` (always present, reliably differs) into its
+  parameter descriptor. `TemplateTypeParmDecl`/`TemplateTemplateParmDecl`
+  deliberately stay kind-only -- no confirmed real-world collision source
+  found for either, so no unverified extension was added preemptively.
+  Second, `archive_graph.py`'s `archive_member_node_id` disambiguated two
+  same-named members by appending `#<discriminator>` to the raw member
+  name -- but `#` is a legal `ar` member-name character, so a uniquely-
+  named member literally called `"foo#1"` (discriminator 0) and an
+  ordinary member named `"foo"` at occurrence index 1 (discriminator 1)
+  both produced the identical id `"archive_member://<archive>::foo#1"`,
+  merging two genuinely distinct members onto one graph node (Codex
+  review, third round, fresh evidence). Fixed by length-prefixing the
+  member name in the id (the same technique this module already trusts
+  for Itanium source-name parsing), applied uniformly regardless of
+  whether the discriminator is zero -- a plain, unprefixed "common case"
+  format would still have been reachable from the other direction, by an
+  unusual literal member name that happens to look like a length-prefixed
+  entry.
