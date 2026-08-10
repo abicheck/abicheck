@@ -205,7 +205,13 @@ def augment_graph_with_virtual_call_targets(
                 (e.src, str(e.resolved.get("resolution", "")))
             )
 
-    for e in graph.edges:
+    # Snapshot before folding (Codex review, fresh evidence): this loop
+    # calls graph.add_edge() below, and every edge it adds is itself kind
+    # VIRTUAL_CALL_MAY_DISPATCH_TO -- always rejected by the
+    # "!= DECL_CALLS_DECL" guard above, so iterating the live list is safe
+    # today, but a future DECL_CALLS_DECL-kind emitter elsewhere would feed
+    # this loop its own output.
+    for e in list(graph.edges):
         if e.kind != "DECL_CALLS_DECL":
             continue
         if e.resolved.get("call_kind") != "virtual":

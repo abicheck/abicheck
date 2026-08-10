@@ -484,10 +484,23 @@ class TestAugmentGraphWithVirtualDispatch:
         assert b.polymorphic_types == 1
 
 
+def _mark_prereqs_fully_covered(g: SourceGraphSummary) -> None:
+    """Simulate a realistic post-``fold_semantic_graphs`` state where all
+    three clang-backed prerequisites ran to completion over the whole
+    compile DB -- the only state ``fold_virtual_dispatch_graph`` should
+    itself claim full coverage from (Codex review, fresh evidence, third
+    round: a hand-built fixture with none of these set is indistinguishable,
+    from this pass's own vantage point, from a real run where clang was
+    never even available -- see that fix's own docstring)."""
+    for p in ("call_graph", "type_graph", "override_graph"):
+        g.extractor_passes[p] = True
+
+
 class TestFoldVirtualDispatchGraph:
     def test_wiring_stamps_extractor_pass_and_folds_edges(self) -> None:
         g = _multi_override_graph()
         g.add_node(_record_node("Base"))
+        _mark_prereqs_fully_covered(g)
 
         fold_virtual_dispatch_graph(g)
 
@@ -495,10 +508,22 @@ class TestFoldVirtualDispatchGraph:
         assert any(e.kind == EDGE_VIRTUAL_CALL_MAY_DISPATCH_TO for e in g.edges)
         assert any(e.kind == EDGE_TYPE_HAS_VTABLE for e in g.edges)
 
-    def test_wiring_on_empty_graph_still_stamps_the_pass(self) -> None:
+    def test_no_prerequisite_coverage_at_all_degrades_this_pass(self) -> None:
+        """Codex review, fresh evidence, third round: when ``clang``/
+        ``clang++`` isn't on ``PATH`` at all, each clang-backed prerequisite
+        pass returns early without setting ANY of its own
+        ``extractor_passes``/``narrowed_passes``/``degraded_passes`` entry
+        (there's no per-TU diagnostic to attach a degraded stamp to -- the
+        extractor never ran). The second-round fix's ``narrowed``/
+        ``degraded`` checks both read as ``False`` in exactly this case, so
+        it fell through to claiming full coverage from zero prerequisite
+        facts. A hand-built graph with none of the three prerequisites'
+        coverage dicts populated at all reproduces the identical state."""
         g = SourceGraphSummary()
         fold_virtual_dispatch_graph(g)
-        assert g.extractor_passes.get("virtual_dispatch_graph") is True
+        assert g.degraded_passes.get("virtual_dispatch_graph") is True
+        assert "virtual_dispatch_graph" not in g.extractor_passes
+        assert "virtual_dispatch_graph" not in g.narrowed_passes
         assert g.edges == []
         assert g.nodes == []
 
@@ -511,6 +536,7 @@ class TestFoldVirtualDispatchGraph:
         surface. ``narrowed_scope`` must also carry over."""
         g = _multi_override_graph()
         g.add_node(_record_node("Base"))
+        _mark_prereqs_fully_covered(g)
         g.narrowed_passes["call_graph"] = True
         g.narrowed_scope["call_graph"] = frozenset({"a.cpp"})
 
@@ -528,6 +554,8 @@ class TestFoldVirtualDispatchGraph:
     def test_degraded_prerequisite_propagates_to_this_pass(self) -> None:
         g = _multi_override_graph()
         g.add_node(_record_node("Base"))
+        _mark_prereqs_fully_covered(g)
+        del g.extractor_passes["override_graph"]
         g.degraded_passes["override_graph"] = True
 
         fold_virtual_dispatch_graph(g)
@@ -536,9 +564,35 @@ class TestFoldVirtualDispatchGraph:
         assert not g.narrowed_passes.get("virtual_dispatch_graph")
         assert "virtual_dispatch_graph" not in g.extractor_passes
 
-    def test_unscoped_prerequisites_leave_this_pass_unnarrowed(self) -> None:
+    def test_degraded_prerequisite_outranks_a_narrowed_one(self) -> None:
+        """Codex review, fresh evidence, fourth round: the three
+        prerequisites stamp independently, so one can narrow cleanly while
+        another degrades (a real per-TU clang failure) -- e.g. ``call_graph``
+        narrows, ``override_graph`` degrades. A version that checked
+        ``narrowed`` before ``degraded`` stamped only the narrowed key,
+        silently dropping the untracked gap from the failed TUs, contrary to
+        ``SourceGraphSummary.degraded_passes``'s own documented precedence."""
         g = _multi_override_graph()
         g.add_node(_record_node("Base"))
+        _mark_prereqs_fully_covered(g)
+        del g.extractor_passes["call_graph"]
+        g.narrowed_passes["call_graph"] = True
+        g.narrowed_scope["call_graph"] = frozenset({"a.cpp"})
+        del g.extractor_passes["override_graph"]
+        g.degraded_passes["override_graph"] = True
+
+        fold_virtual_dispatch_graph(g)
+
+        assert g.degraded_passes.get("virtual_dispatch_graph") is True
+        assert "virtual_dispatch_graph" not in g.narrowed_passes
+        assert "virtual_dispatch_graph" not in g.extractor_passes
+
+    def test_unscoped_fully_covered_prerequisites_leave_this_pass_unnarrowed(
+        self,
+    ) -> None:
+        g = _multi_override_graph()
+        g.add_node(_record_node("Base"))
+        _mark_prereqs_fully_covered(g)
 
         fold_virtual_dispatch_graph(g)
 

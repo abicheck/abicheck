@@ -473,20 +473,58 @@ def fold_virtual_dispatch_graph(
     that only checks ``extractor_passes`` could still trust a scoped run as
     complete. Fixed by only stamping ``extractor_passes`` when neither
     condition holds.
+
+    **Full coverage requires every prerequisite to have its OWN full-coverage
+    stamp, not merely "neither narrowed nor degraded" (Codex review, fresh
+    evidence, third round).** When ``clang``/``clang++`` isn't on ``PATH`` at
+    all, each of :func:`fold_call_graph`/:func:`fold_type_graph`/
+    :func:`fold_override_graph` returns early after recording a `"failed"`
+    :class:`ExtractorRecord` — setting **none** of ``extractor_passes``/
+    ``narrowed_passes``/``degraded_passes`` for its own pass at all (there is
+    no per-TU diagnostic to attach a degraded stamp to; the extractor never
+    ran). A naive ``narrowed``/``degraded`` check both reads as ``False`` in
+    exactly this case — nothing is *narrowed*, nothing recorded a
+    *diagnostic* — which would fall through to claiming full virtual-
+    dispatch coverage from zero prerequisite facts.
+
+    **A degraded prerequisite outranks a narrowed one (Codex review, fresh
+    evidence, fourth round):** the three prerequisites stamp independently,
+    so one can land in ``narrowed_passes`` (a clean, explicitly-scoped run)
+    while another lands in ``degraded_passes`` (a per-TU clang failure) —
+    e.g. ``call_graph`` narrows cleanly while ``override_graph`` degrades. A
+    version that checked ``narrowed`` before ``degraded`` stamped only the
+    narrowed key for that mix, silently dropping the untracked gap from the
+    failed TUs — contradicting ``SourceGraphSummary.degraded_passes``'s own
+    documented precedence ("a narrowed run with diagnostics lands here too
+    ... since it is even less trustworthy than either"). Fixed by folding
+    both the "some prerequisite recorded a real diagnostic" case and the
+    "some prerequisite never ran at all" case (the third-round finding
+    above) into one ``degraded`` check, and checking it *first*: only when
+    no prerequisite is missing or degraded, and at least one is narrowed,
+    does this pass count as narrowed; only when every prerequisite has its
+    own confirmed full-coverage stamp does it count as fully covered.
     """
     augment_graph_with_virtual_dispatch(graph)
     _PREREQ_PASSES = ("call_graph", "type_graph", "override_graph")
-    narrowed = any(graph.narrowed_passes.get(p) for p in _PREREQ_PASSES)
     degraded = any(graph.degraded_passes.get(p) for p in _PREREQ_PASSES)
-    if narrowed:
+    narrowed = any(graph.narrowed_passes.get(p) for p in _PREREQ_PASSES)
+    # A prerequisite that never ran at all (clang unavailable) carries none
+    # of the three stamps -- as untrustworthy as a real per-TU diagnostic.
+    missing = any(
+        p not in graph.extractor_passes
+        and p not in graph.narrowed_passes
+        and p not in graph.degraded_passes
+        for p in _PREREQ_PASSES
+    )
+    if degraded or missing:
+        graph.degraded_passes["virtual_dispatch_graph"] = True
+    elif narrowed:
         graph.narrowed_passes["virtual_dispatch_graph"] = True
         for p in _PREREQ_PASSES:
             scope = graph.narrowed_scope.get(p)
             if scope:
                 graph.narrowed_scope["virtual_dispatch_graph"] = scope
                 break
-    elif degraded:
-        graph.degraded_passes["virtual_dispatch_graph"] = True
     else:
         graph.extractor_passes["virtual_dispatch_graph"] = True
 
@@ -839,8 +877,8 @@ def fold_semantic_graphs(
     :func:`fold_callback_graph` (G29 Phase 5 item 4), then
     :func:`fold_include_graph` — the exact sequence ``inline._build_inline_graph``
     ran inline before this wrapper existed, kept together here (rather than
-    six separate call sites in ``inline.py``, which sits at its own
-    line-count cap) so a future eighth pass adds one call here instead of
+    one call site per pass in ``inline.py``, which sits at its own
+    line-count cap) so a future pass adds one call here instead of
     growing that file too. ``fold_macro_graph`` sits right after
     ``fold_template_graph`` — both are Clang-backed passes needing the same
     scoping decision, and both close over one of G29 Phase 5's originally

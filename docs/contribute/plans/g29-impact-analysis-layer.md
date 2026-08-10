@@ -991,6 +991,79 @@ which all depend on a Clang AST pass.
      eighth finding's triage read past without flagging as its own separate
      bug). Fixed by converting to the same mutually-exclusive if/elif/else
      shape as the sibling passes.
+   - **A twelfth finding, on the very fix that closed the eleventh, found the
+     mutual-exclusion fix's own `elif`/`else` split was still too permissive
+     — "not narrowed and not degraded" is not the same claim as "fully
+     covered."** When `clang`/`clang++` isn't on `PATH` at all, each of
+     `fold_call_graph`/`fold_type_graph`/`fold_override_graph` returns early
+     after recording a `"failed"` `ExtractorRecord` — setting **none** of
+     `extractor_passes`/`narrowed_passes`/`degraded_passes` for its own pass
+     (there's no per-TU diagnostic to attach a degraded stamp to; the
+     extractor never ran at all). The eleventh finding's own fix read
+     `narrowed`/`degraded` as both `False` in exactly this state — nothing
+     is narrowed, nothing recorded a diagnostic — so it fell through to the
+     `else` branch and claimed full virtual-dispatch coverage from zero
+     prerequisite facts, the identical class of bug the eleventh finding
+     itself closed, one level down. Fixed by requiring `fully_covered` —
+     every one of the three prerequisites has its *own* `extractor_passes`
+     entry set, not merely the absence of narrowed/degraded — before
+     stamping this pass's own full coverage; the fallback (neither narrowed
+     nor fully covered) now stamps `degraded_passes`, covering both "some
+     prerequisite recorded a real diagnostic" and "some prerequisite never
+     ran at all" uniformly. This also changed what a hand-built test fixture
+     with no prerequisite coverage stamps at all means: it is now
+     indistinguishable, from this pass's own vantage point, from a real
+     clang-unavailable run — so the existing unit tests were updated to
+     explicitly mark the three prerequisites `extractor_passes`-covered
+     before asserting this pass's own full coverage, and a new dedicated
+     test pins the previously-mishandled all-prerequisites-absent case.
+   - **A thirteenth finding, on the same push, found the third round's own
+     fix still ordered its checks wrong.** The three prerequisites stamp
+     independently, so one can land in `narrowed_passes` (a clean,
+     explicitly-scoped run) while another lands in `degraded_passes` (a real
+     per-TU clang failure) — e.g. `call_graph` narrows cleanly while
+     `override_graph` degrades. Checking `narrowed` before `degraded` (the
+     third round's own order) stamped only the narrowed key for that mix,
+     silently dropping the untracked gap from the failed TUs — contradicting
+     `SourceGraphSummary.degraded_passes`'s own documented precedence ("a
+     narrowed run with diagnostics lands here too ... since it is even less
+     trustworthy than either"). Fixed by folding the "some prerequisite
+     recorded a real diagnostic" case and the "some prerequisite never ran
+     at all" case (the twelfth finding above) into one `degraded` check,
+     checked *first* — only when nothing is degraded or missing, and at
+     least one prerequisite is narrowed, does this pass count as narrowed.
+     A dedicated regression test covers the mixed narrowed+degraded case.
+   - **Three more findings in the same review round, unrelated to the
+     coverage-stamping bug above.** (1) `macro_graph.py`'s unmodeled-
+     conditional fallback (`_IF_RE`) matched only bare/compound `#if`, not
+     `#ifdef`/`#ifndef` — `\b` fails right after "if" since "d"/"n" are word
+     characters too — so a malformed-but-compiler-accepted directive with
+     trailing tokens (`#ifdef FEATURE_X extra`, which real compilers accept
+     with a warning) or a line continuation matched none of the four simple
+     patterns *and* none of the fallback, pushing no frame at all; the
+     matching `#endif` then popped the *enclosing* guard's frame instead,
+     truncating it early — a real violation of the module's own documented
+     "an unmodeled block never desyncs an enclosing guard's depth"
+     invariant. Fixed by widening `_IF_RE` to also match `#ifdef`/`#ifndef`.
+     (2) `test_inline_graph_folds_macro_edges_when_clang_available` (a fast,
+     non-`integration`-marked test) faked `ClangCallGraphExtractor`/
+     `ClangTypeGraphExtractor`/`ClangMacroGraphExtractor` but not
+     `ClangOverrideGraphExtractor`/`ClangTemplateGraphExtractor`/
+     `ClangCallbackGraphExtractor` — all three of which `with_call_graph=
+     True` also constructs via `fold_semantic_graphs` — so the test could
+     shell out to a real `clang++` if one happened to be on the runner's
+     PATH. Fixed by faking all six. (3) `docs/reference/source-graph-schema.
+     md`'s callback-family section still said every edge "joins onto
+     pre-existing `source_decl` nodes only," contradicting the callback-
+     endpoint-minting fix from an earlier round (documented correctly in
+     this plan doc, but not in the schema reference) — fixed to describe the
+     implemented minting behavior instead. Two lower-priority defensive
+     nitpicks from the same round were also applied: `callback_graph.py`'s
+     and `virtual_dispatch_graph.py`'s own edge-folding loops now iterate a
+     `list(graph.edges)` snapshot rather than the live list before calling
+     `graph.add_edge()` inside the loop — currently safe only because every
+     edge kind each loop adds is itself rejected by that loop's own kind
+     filter, a coupling a future edge kind could silently break.
    - **`DECL_OVERRIDES_DECL` needed no new producer at all — a closed gap,
      not a deferred one.** `override_graph.py` (ADR-041 P2 item 1, which
      predates this item) already emits `METHOD_POSSIBLE_OVERRIDE` edges whose

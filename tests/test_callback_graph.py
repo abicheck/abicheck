@@ -756,13 +756,14 @@ class TestFoldCallbackGraphEndToEnd:
             "void signal_register(handler_t h);\n"
             "void invoke_it(handler_t h) { h(1); }\n"
             "void use(void) {\n"
-            # `my_handler` must itself appear as some direct-call callee
-            # somewhere in the TU, or call_graph.py never mints a
-            # source_decl node for it at all -- and the join-only-onto-an-
-            # existing-node discipline this module reapplies means
-            # DECL_REGISTERS_CALLBACK is correctly skipped, not minted,
-            # for an endpoint the graph doesn't already carry (verified:
-            # omitting this line reproduces exactly that skip).
+            # `my_handler` also appearing as a direct-call callee here isn't
+            # needed for DECL_REGISTERS_CALLBACK itself anymore --
+            # augment_graph_with_callback_registrations mints a missing
+            # source_decl endpoint rather than requiring one to already
+            # exist (Codex review, fresh evidence; see this module's own
+            # docstring) -- but it still exercises call_graph.py's ordinary
+            # DECL_CALLS_DECL edge for `my_handler`, which this end-to-end
+            # fixture also wants covered.
             "    my_handler(0);\n"
             "    signal_register(&my_handler);\n"
             "    invoke_it(my_handler);\n"

@@ -742,7 +742,12 @@ def augment_graph_with_callback_invocations(
         if e.kind in (EDGE_DECL_REGISTERS_CALLBACK, EDGE_DECL_TAKES_ADDRESS_OF):
             registrants_of.setdefault(e.dst, []).append((e.src, e.kind))
 
-    for e in graph.edges:
+    # Snapshot before folding: this loop calls graph.add_edge() below, and
+    # every edge it adds is itself kind CALLBACK_MAY_INVOKE -- always
+    # rejected by the "!= DECL_CALLS_DECL" guard above, so iterating the
+    # live list is safe today, but a future edge kind that passed the guard
+    # would feed the loop its own output (Codex review, fresh evidence).
+    for e in list(graph.edges):
         if e.kind != "DECL_CALLS_DECL":
             continue
         if e.resolved.get("call_kind") != "function_pointer":

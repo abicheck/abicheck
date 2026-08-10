@@ -392,7 +392,17 @@ _IF_DEFINED_RE = re.compile(
 _IF_NOT_DEFINED_RE = re.compile(
     rf"^\s*#\s*if\s+!\s*defined\s*\(\s*(\w+)\s*\)\s*{_TRAILING_COMMENT}$"
 )
-_IF_RE = re.compile(r"^\s*#\s*if\b")
+#: The unmodeled-frame fallback -- also matches `#ifdef`/`#ifndef` (Codex
+#: review, fresh evidence), not just bare/compound `#if`: a malformed-but-
+#: compiler-accepted directive with trailing tokens (`#ifdef FEATURE_X
+#: extra`) or a line continuation fails all four simple-form patterns above,
+#: and the original `#\s*if\b` alone doesn't match `#ifdef`/`#ifndef` either
+#: (`\b` fails right after "if", since "d"/"n" are both word characters) --
+#: so no frame was pushed at all, and the matching `#endif` popped the
+#: *enclosing* guard's frame instead, truncating it early. This still
+#: correctly matches plain `#if`/`#ifdef`/`#ifndef` alike as an unmodeled
+#: frame push when the four simple patterns didn't already claim the line.
+_IF_RE = re.compile(r"^\s*#\s*if(?:def|ndef)?\b")
 _ELIF_RE = re.compile(r"^\s*#\s*elif\b")
 _ELSE_RE = re.compile(r"^\s*#\s*else\b")
 _ENDIF_RE = re.compile(r"^\s*#\s*endif\b")

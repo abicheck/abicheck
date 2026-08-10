@@ -251,6 +251,29 @@ def test_scan_compound_condition_skipped_but_nesting_maintained() -> None:
     assert len(regions) == 2
 
 
+def test_scan_ifdef_with_trailing_extra_tokens_does_not_desync_outer_guard() -> None:
+    """Codex review, fresh evidence: a malformed-but-compiler-accepted
+    ``#ifdef FEATURE_X extra`` (real compilers accept trailing tokens after
+    ``#ifdef``/``#ifndef`` with a warning) failed all four simple-guard
+    patterns AND the original ``_IF_RE`` fallback (``#\\s*if\\b`` doesn't
+    match ``#ifdef``/``#ifndef`` -- ``\\b`` fails right after "if", since
+    "d"/"n" are both word characters) -- so no frame was pushed at all, and
+    the matching ``#endif`` popped the *enclosing* ``OUTER`` guard's frame
+    instead, truncating it before the real declaration it should cover."""
+    text = (
+        "#ifdef OUTER\n"
+        "#ifdef INNER extra\n"
+        "void inner_fn();\n"
+        "#endif\n"
+        "void outer_fn();\n"
+        "#endif\n"
+    )
+    regions = scan_conditional_regions(text)
+    assert ConditionalRegion("OUTER", False, 2, 5) in regions
+    assert not any(r.macro == "INNER" for r in regions)
+    assert len(regions) == 1
+
+
 def test_scan_ignores_directives_inside_block_comment() -> None:
     # Codex review, fresh evidence: a block-commented-out #ifdef/#endif pair
     # around an ordinary declaration must not be treated as a live directive
@@ -944,6 +967,7 @@ def test_parse_real_clang_ast_decl_ranges_end_to_end(tmp_path) -> None:
         text=True,
         timeout=60,
     )
+    assert proc.returncode == 0, proc.stderr
     ast = json.loads(proc.stdout)
     ranges = parse_clang_ast_decl_ranges(ast)
     # clang's C++ mode also emits an implicit injected-class-name CXXRecordDecl

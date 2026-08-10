@@ -775,7 +775,14 @@ def _surface_with_macro_and_function() -> SourceAbiSurface:
 
 
 def test_inline_graph_folds_macro_edges_when_clang_available(monkeypatch, tmp_path):
-    from abicheck.buildsource import call_graph, macro_graph, type_graph
+    from abicheck.buildsource import (
+        call_graph,
+        callback_graph,
+        macro_graph,
+        override_graph,
+        template_graph,
+        type_graph,
+    )
     from abicheck.buildsource.macro_graph import DeclRange
 
     header = tmp_path / "t.h"
@@ -789,6 +796,9 @@ def test_inline_graph_folds_macro_edges_when_clang_available(monkeypatch, tmp_pa
             self.diagnostics: list[str] = []
             self.last_jobs = 0
             self.last_elapsed_s = 0.0
+            # ClangOverrideGraphExtractor's own extra field
+            # (fold_override_graph reads it after extract_from_build).
+            self.last_virtual_methods: set[str] = set()
 
         def available(self) -> bool:
             return True
@@ -800,9 +810,24 @@ def test_inline_graph_folds_macro_edges_when_clang_available(monkeypatch, tmp_pa
         def extract_from_build(self, build):
             return [DeclRange("_Z1fv", str(header), 3, 3)]
 
+    # Codex review, fresh evidence: `with_call_graph=True` runs
+    # `fold_semantic_graphs`, which also constructs real
+    # `ClangOverrideGraphExtractor`/`ClangTemplateGraphExtractor`/
+    # `ClangCallbackGraphExtractor` instances -- previously unfaked here, so
+    # this fast (non-`integration`-marked) test could shell out to a real
+    # `clang++` if one happens to be on the runner's PATH.
     monkeypatch.setattr(call_graph, "ClangCallGraphExtractor", _FakeNoEdgeExtractor)
     monkeypatch.setattr(type_graph, "ClangTypeGraphExtractor", _FakeNoEdgeExtractor)
     monkeypatch.setattr(macro_graph, "ClangMacroGraphExtractor", _FakeMacroExtractor)
+    monkeypatch.setattr(
+        override_graph, "ClangOverrideGraphExtractor", _FakeNoEdgeExtractor
+    )
+    monkeypatch.setattr(
+        template_graph, "ClangTemplateGraphExtractor", _FakeNoEdgeExtractor
+    )
+    monkeypatch.setattr(
+        callback_graph, "ClangCallbackGraphExtractor", _FakeNoEdgeExtractor
+    )
     merged = _build_with_one_unit()
     rows: list = []
     graph = inline._build_inline_graph(

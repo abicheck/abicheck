@@ -399,10 +399,16 @@ separate `fold_*` functions.
 | `CALLBACK_MAY_INVOKE` *(edge)* | populated | The original calling `source_decl` → a registered function `source_decl`. A pure join, no new clang pass: joins `call_graph.py`'s already-folded function-pointer-kind `DECL_CALLS_DECL` edge (caller → slot) against every `DECL_REGISTERS_CALLBACK`/`DECL_TAKES_ADDRESS_OF` edge naming that same slot. `attrs.resolution` is always `"overapprox"`, never `"exact"`; `attrs.slot` names the joined slot; `attrs.registration_kind` records which of the two edge kinds contributed the candidate. `CONF_REDUCED`. A slot with no function registered anywhere this pass examined contributes no edge — not a spurious self-edge and not a "definitely unused" claim: the fact is genuinely unknown, not empty. |
 | `FUNCTION_POINTER_HAS_SIGNATURE` *(edge)* | **registered, no edge producer — populated as a node-level fact instead** | Investigated and found genuinely unmet by any pre-existing edge (unlike `DECL_OVERRIDES_DECL` in the virtual-dispatch family, which was already covered) — but a function pointer's signature is a property of exactly one declaration, not a relation between two entities, so it doesn't fit this schema's edge shape. `callback_graph.py` instead stamps a `function_pointer_signature` **node-level** fact (the slot's own desugared-preferred `qualType` spelling) on the slot's `source_decl` node whenever a `DECL_REGISTERS_CALLBACK`/`DECL_TAKES_ADDRESS_OF` join succeeds. Registered as edge vocabulary only so a hand-built or future graph naming it directly is never rejected. |
 
-No new **node** kind — every edge above joins onto pre-existing `source_decl`
-nodes only (the address-taking function and the slot are both already
-seeded by `call_graph.py`/`type_graph.py`), the same join-only-onto-an-
-existing-node discipline every sibling family in this phase reapplies.
+No new **node** kind — both `source_decl` endpoints of `DECL_REGISTERS_CALLBACK`/
+`DECL_TAKES_ADDRESS_OF` are minted when missing rather than requiring a
+pre-existing node from `call_graph.py`/`type_graph.py` (a private
+callback-only handler, or a registration API's own callback parameter,
+routinely has neither) — the exception to the join-only-onto-an-existing-
+node discipline every sibling family in this phase otherwise reapplies, the
+same precedent `override_graph.py` already establishes for its own
+fully-resolved edge endpoints. See
+`docs/contribute/plans/g29-impact-analysis-layer.md`'s G29 Phase 5 item 4
+section for the full reasoning.
 
 **Identity design — the single load-bearing correctness property.** Part A's
 join only connects when Part B's edges land on *exactly* the same `dst`
