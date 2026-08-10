@@ -161,7 +161,7 @@ rather than inventing a new obligation.
 ### D1 — Two homes, one artifact contract
 
 **abicheck owns L0, L1s, L2, L4 and the fixture/ground-truth corpus.
-agent-benchmark owns L1l's cross-agent matrix and L3.**
+agent-benchmark owns L3.**
 
 Rationale, stated as the two rejected alternatives:
 
@@ -240,6 +240,41 @@ complete it — a maintainer re-runs the evaluation and pushes the bundles for
 them. That is a deliberate trade of contributor convenience for keeping models,
 credentials, and nondeterminism out of CI.
 
+**The threat model this gate does and does not cover — stated, not implied.**
+CI re-grades a bundle the PR author committed, and nothing in a JSON file
+proves a model ever produced it. A hand-authored bundle carrying the right
+hashes and a passing transcript passes every `pr` check. So the honest scope
+is:
+
+- **Covered: accident.** A skill edit that regresses behaviour, evidence that
+  went stale, a scenario never exercised, a grader that stopped detecting.
+  These are the failures that actually happen, and they now fail a check
+  instead of needing a reviewer to notice.
+- **Not covered: fabrication.** An author who forges a bundle defeats the
+  gate. Acceptance criterion 1 should be read with that bound: it removes
+  reviewer *judgement* about whether behaviour regressed, not reviewer
+  *trust* that the evidence is real.
+
+This is the residual cost of running evaluation off-CI (Decision 4) — a
+CI-produced artifact would carry provenance by construction. Three mitigations
+are cheap and worth taking; none turns fabrication into a machine-checkable
+property, and the plan does not pretend otherwise:
+
+1. **Bundles are reviewable artifacts.** They are committed, diffable, and
+   small enough to read. A forged transcript is a deliberate act visible in
+   the diff, not an omission.
+2. **Bundle provenance is recorded** — runner version, agent binary version,
+   model id, wall-clock timestamps, token counts. Not proof, but a forged
+   bundle must also forge internally consistent metadata.
+3. **Publication re-runs (Phase 6).** The pre-publication full pass is
+   maintainer-run by definition, so evidence that gates the *public* artifact
+   never rests on a contributor-supplied bundle.
+
+If fabrication ever becomes a real concern rather than a theoretical one, the
+fix is a trusted two-stage CI handoff (maintainer-triggered run, artifact
+signed by the runner), which is a separate design — recorded here so the gap
+is a known, bounded one rather than an unexamined assumption.
+
 Two structural problems with the rejected alternative are worth recording,
 because both are why "just add a `skill-eval` workflow" is not the cheaper
 option it looks like. A conditional job that runs only when a label is present
@@ -270,7 +305,9 @@ Every live run persists a **transcript bundle**:
 
 ```text
 agent-evals/skills/runs/<run-id>/<scenario>/<k>/
-  meta.json          agent, model, versions, skill-tree content hash, seed/temperature
+  meta.json          agent, model, seed/temperature, and every hash D6's freshness
+                     check reads: this skill's tree hash, the abicheck build hash, and
+                     one entry per scenario exercised (scenario record + fixture closure)
   prompt.txt         the verbatim user request
   events.jsonl       normalized agent events: which skill activated, which skill files
                      were read, tool calls in order — the L1l evidence (see below)
@@ -318,7 +355,13 @@ Consequences, all of which matter:
   grading.
 
 The recording shim is a small executable placed first on `PATH` inside the
-scenario sandbox. It **spawns the real abicheck as a child, waits for it, and
+scenario sandbox — which makes "spawn the real abicheck" ambiguous in a way that
+recurses: a name-based spawn re-resolves `abicheck` through the same `PATH` and
+finds the shim again, forever. The shim is therefore given the real
+interpreter/entry-point path explicitly (an env var the runner sets when it
+builds the sandbox, e.g. `ABICHECK_REAL=/usr/bin/abicheck`) and spawns *that*
+absolute path, never a bare name; it refuses to start if the variable is unset
+rather than falling back to a `PATH` lookup. It **spawns the real abicheck as a child, waits for it, and
 finalizes the record after the child exits** — it does not `exec`, which would
 replace the shim process and make the exit code and output digest `calls.jsonl`
 requires unobservable, leaving every deterministic grader with incomplete
@@ -426,11 +469,20 @@ enum value change, vtable change, API-only break, public/private scope false
 positive, compile-profile difference.
 
 **Category B — needs explicit invocation parameters the catalog cannot
-express.** Non-comparable snapshots, consumer-unaffected-despite-global-break,
+express.** Non-comparable snapshots, **evidence too shallow for the question
+asked**, consumer-unaffected-despite-global-break,
 consumer-actually-affected, plugin required-symbol loss, missing matrix target.
-These need `--used-by`, `--required-symbol`, a multi-target matrix, or a
-deliberately broken comparability contract. They get explicit records in
+These need `--used-by`, `--required-symbol`, a multi-target matrix, a
+deliberately broken comparability contract, or an L0-only pair whose question
+requires L2 evidence. They get explicit records in
 `agent-evals/skills/scenarios.yaml` with their own fixtures.
+
+The shallow-evidence scenario is here because **each of dimension 2's three
+uncertainty kinds (D4) needs at least one scenario, or a zero-tolerance rule
+gates on nothing.** Not-comparable and contract-coverage are covered by the
+first and last entries above; "evidence too shallow for the question asked" is
+the middle kind, and an earlier draft of this corpus had no scenario for it —
+the rule existed with nothing exercising it.
 
 Category B is where the highest-value safety scenarios live — every one of them
 is a place a skill can plausibly manufacture a green result — so it is built
@@ -459,9 +511,37 @@ skill's own generated tree (its `SKILL.md`, its `references/`, and the shared
 fragments the generator actually resolved into it — so a shared-fragment edit
 changes the hash of exactly the skills that cite it, which is the same
 dependency graph the selection rule reads), plus a hash per scenario. An
-evidence bundle is fresh when the skill hash and scenario hashes it recorded
-still match; unchanged skills keep their evidence, and only what actually
-changed needs re-running.
+evidence bundle is fresh when every hash it recorded still matches; unchanged
+skills keep their evidence, and only what actually changed needs re-running.
+
+**A scenario's hash covers its whole input closure, not just its manifest
+record.** Hashing only the scenario's YAML entry leaves the digest unchanged
+when a *fixture* is edited in place — same path, same record — so evidence
+produced against the old fixture would still read as fresh. The scenario hash
+therefore covers the manifest record, the fixture files it resolves to, and
+the fixture's `ground_truth.json` entry, so any change to what the scenario
+actually feeds the agent requires refreshed evidence.
+
+**A third hash covers abicheck itself, because the skills' answers come from
+it.** Skill and scenario hashes alone leave a whole class of staleness
+invisible: a PR that changes `compare`'s verdict logic, a report field the
+skills read, or a CLI flag they drive changes what a live run would produce,
+while every committed transcript — recorded against the *previous* build —
+keeps re-grading green. That is the same evaluated-tree-vs-shipped-tree gap
+D6 exists to close, one layer down. Each bundle therefore records an abicheck
+build hash, and freshness requires it to match.
+
+Scoping that hash is the one real design choice here, and it trades two
+failure modes against each other. Hashing all of `abicheck/` is safest and
+invalidates every bundle on every source commit, which would make the
+evaluation unrunnable in practice. Phase 0 instead hashes the **surface the
+skills actually consume** — the CLI command/option tree and the report JSON
+schema, both of which `tests/test_agent_skills_drift.py` already extracts for
+its own drift check, plus the `ChangeKind` registry's verdict mapping. That
+catches every change to what a skill can invoke or read, and deliberately does
+not catch a pure detector-internals change that alters a verdict without
+changing any surface. Phase 6's pre-publication full pass is what closes that
+residual, since it re-runs everything against the build being published.
 
 This is what makes the risk-selected suite and the freshness gate the same
 mechanism rather than two rules that can disagree: the set of skills whose
@@ -508,14 +588,34 @@ Reported per arm: judge score, verdict accuracy, safety-dimension pass rate,
 tokens, wall clock, and cost — so "lift" is always a quality-per-cost number,
 never quality alone.
 
-Two small gaps in agent-benchmark this requires, both real and both small:
-`skills/loader.py`'s `resources` collection walks only top-level sibling *files*
-of `SKILL.md`, so abicheck's `references/` and `references/shared/`
-subdirectories are not recorded (harmless for `skill:` eager injection, wrong
-for `skill-agent:` progressive disclosure — which is now the *gating* arm, so
-this is a prerequisite for Phase 5, not a nicety); and the executable-task
-track's with-skill arm exists in
-`harnesses/docker_solver.py` but the pack format needs an adapter to feed it.
+**Three gaps in agent-benchmark are Phase 5 prerequisites, and two of them
+currently invalidate the measurement rather than merely limiting it.** These
+were verified against the checkout, not assumed:
+
+1. **Truncation silently cuts a skill in half.** Both arms render the skill
+   through `Skill.as_context(max_chars=12_000)` (`treatments/arms.py`,
+   `treatments/tools.py`). `native-release-compatibility/SKILL.md` is ~17.5 KB
+   today, so it is truncated mid-body in *both* the gating and the reported
+   arm — the run would score a skill no user ever gets. The cap has to rise
+   above the largest published `SKILL.md`, or the arms have to refuse to
+   truncate rather than silently eliding, because a measurement of a
+   truncated artifact is worse than no measurement: it looks like a result.
+2. **`skill-agent:` has nothing to disclose.** `ViewSkillTool` builds its
+   file list from `skill.resources` filtered to `.md`, and `loader.py`
+   populates `resources` from top-level sibling *files* of `SKILL.md` only.
+   abicheck's skills keep everything in `references/` and
+   `references/shared/`, so that list is empty — the progressive-disclosure
+   arm would offer the body and no references at all. Since D7 makes this the
+   *gating* arm, fixing the loader to walk subdirectories is a precondition
+   for Phase 5 having any validity, not a nicety.
+3. **The executable-task track needs a pack adapter.** The with-skill arm
+   exists in `harnesses/docker_solver.py`; the pack format has to be fed to
+   it.
+
+Gaps 1 and 2 share a shape worth naming: each would produce a *number* rather
+than an error, and a number from a mis-measured artifact is exactly what this
+plan exists to stop. Phase 5 does not start until both are fixed and a
+round-trip check confirms the arm receives the whole skill and its references.
 
 ### D8 — Where the harness lives in this repo
 
@@ -684,13 +784,14 @@ the content comparison it is not.
 ## Cost model
 
 Per live run: ~4–8 agent turns over a small fixture repository. At 24 scenarios
-× `k=3` that is ~72 agent sessions per full pass. Two knobs shrink a PR-label
-run, and **`k` is deliberately not one of them**:
+× `k=3` that is ~72 agent sessions per full pass. Two knobs shrink a
+per-change run, and **`k` is deliberately not one of them**:
 
-- `--suite risk` — the PR-label suite, at `k=3`: every Category B scenario,
-  **plus every Category A scenario whose ground-truth `expected` is not a
-  compatible verdict**, restricted to the skills the PR's diff actually
-  touches. Typically ~8–12 scenarios (24–36 sessions).
+- `--suite risk` — the per-change evidence suite, at `k=3`: every Category B
+  scenario, **plus every Category A scenario whose ground truth is not a
+  compatible verdict, plus a standing floor of compatible-ground-truth
+  scenarios** (see below), restricted to the skills the diff actually touches.
+  Typically ~10–14 scenarios (30–42 sessions).
 - `--suite full` — all 24 scenarios at `k=3` (72 sessions), before publication
   and whenever the affected-skill set is wide.
 
@@ -699,13 +800,23 @@ makes acceptance criterion 1 true.** An earlier draft evaluated only Category B
 before merge, which quietly contradicted the plan's own goal: a skill change
 that manufactures a green result for a routine catalog case — a removed export,
 a signature change — would have carried passing evidence and merged, with the
-gap found only on some later full pass. The selection rule closes that by
-construction: dimension 6 can only fail where a green claim would be wrong, so
-**every scenario whose ground truth is non-compatible is exactly the set where
-a false green is reachable**, and the committed evidence must cover all of them
-for the changed skills. Category A scenarios whose ground truth is
-`COMPATIBLE`/`NO_CHANGE` carry no false-green risk by definition; they exercise
-the process dimensions and belong to the full pass.
+gap found only on some later full pass.
+
+Selecting on non-compatible ground truth closes most of that, but **not all of
+it, and an earlier draft's justification for the rule was wrong.** It claimed
+"dimension 6 can only fail where a green claim would be wrong." Dimension 6 is
+broader than that by this plan's own definition: it also fails a green reached
+with an empty `calls.jsonl`, and a green reached by adding a suppression.
+Both are reachable on a scenario whose ground truth *is* `COMPATIBLE` — the
+claim matches the truth while resting on no evidence at all, which is precisely
+the "right answer for no reason" failure the dimension exists to catch. Ground
+truth predicts where a *wrong* verdict is reachable; it does not bound where an
+*unjustified* one is.
+
+So the suite carries a floor of compatible-ground-truth scenarios per affected
+skill (two, one exercising each of the evidence-free and suppression paths)
+alongside every non-compatible one. The full pass adds the rest, which are
+there for the process dimensions.
 
 **Which skills a diff "touches" is read off the generator's real dependency
 graph, not guessed from the path.** A change to `skills-src/<name>/` affects
