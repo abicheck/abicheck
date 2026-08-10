@@ -667,6 +667,54 @@ def _template_param_kinds(class_template_decl: dict[str, Any]) -> list[str | Non
     return kinds
 
 
+def _register_template_param_metadata(
+    idx: dict[str, list[str | None]],
+    ambiguous: set[str],
+    node_ids: dict[str, str],
+    qualname: str,
+    node: dict[str, Any],
+    value: list[str | None],
+) -> None:
+    """Register *value* for *qualname* in *idx*, treating a conflicting
+    second registration as ambiguous UNLESS clang's own ``previousDecl``
+    link says it's a legal redeclaration of the SAME entity, not a
+    coincidentally same-named different one.
+
+    Shared by :func:`_index_template_param_kinds`/:func:`_index_template_
+    param_defaults`/:func:`_index_template_param_names` (Codex review,
+    fresh evidence, fourth round): the *names* list specifically can
+    legally differ across a redeclaration of the identical template --
+    ``template<class T, class U=T> struct A;`` followed later by
+    ``template<class X, class Y> struct A {...};`` is one C++ entity, and
+    clang always spells a dependent default's inherited text using the
+    ORIGINAL declaration's parameter name (``"T"``, never renamed to
+    ``"X"``/``"Y"`` on the later declaration) -- confirmed empirically, so
+    treating the differing NAME lists as a genuine conflict (the third
+    round's fix did, unconditionally) broke dependent-default substitution
+    for this ordinary, legal C++ shape. Distinguished from a genuine
+    conflict (two nested templates in two different outer specializations
+    coincidentally sharing a bare qualname, e.g. ``Outer<int>``'s and
+    ``Outer<double>``'s own nested ``struct A``) via ``previousDecl``:
+    confirmed empirically that clang stamps it on every legal
+    redeclaration and NEVER on two genuinely unrelated declarations.
+    """
+    existing = idx.get(qualname)
+    node_id = node.get("id")
+    if existing is None:
+        idx[qualname] = value
+        if node_id:
+            node_ids[qualname] = node_id
+        return
+    previous_decl = node.get("previousDecl")
+    if existing == value or (previous_decl and previous_decl == node_ids.get(qualname)):
+        if node_id:
+            node_ids[qualname] = node_id
+        return
+    ambiguous.add(qualname)
+    del idx[qualname]
+    node_ids.pop(qualname, None)
+
+
 def _index_template_param_kinds(root: dict[str, Any]) -> dict[str, list[str | None]]:
     """``qualified template name -> per-position param-kind list`` (see
     :func:`_template_param_kinds`) over every ``ClassTemplateDecl`` in the
@@ -699,6 +747,7 @@ def _index_template_param_kinds(root: dict[str, Any]) -> dict[str, list[str | No
     """
     idx: dict[str, list[str | None]] = {}
     ambiguous: set[str] = set()
+    node_ids: dict[str, str] = {}
 
     def walk(node: Any, scope: tuple[str, ...]) -> None:
         if not isinstance(node, dict):
@@ -708,13 +757,9 @@ def _index_template_param_kinds(root: dict[str, Any]) -> dict[str, list[str | No
         if kind == "ClassTemplateDecl" and name and (
             qualname := ("::".join((*scope, name)) if scope else name)
         ) not in ambiguous:
-            value = _template_param_kinds(node)
-            existing = idx.get(qualname)
-            if existing is None:
-                idx[qualname] = value
-            elif existing != value:
-                ambiguous.add(qualname)
-                del idx[qualname]
+            _register_template_param_metadata(
+                idx, ambiguous, node_ids, qualname, node, _template_param_kinds(node)
+            )
         child_scope = (*scope, name) if kind in _SCOPE_NODE_KINDS and name else scope
         for child in node.get("inner", []) or []:
             walk(child, child_scope)
@@ -770,6 +815,7 @@ def _index_template_param_defaults(root: dict[str, Any]) -> dict[str, list[str |
     """
     idx: dict[str, list[str | None]] = {}
     ambiguous: set[str] = set()
+    node_ids: dict[str, str] = {}
 
     def walk(node: Any, scope: tuple[str, ...]) -> None:
         if not isinstance(node, dict):
@@ -779,13 +825,9 @@ def _index_template_param_defaults(root: dict[str, Any]) -> dict[str, list[str |
         if kind == "ClassTemplateDecl" and name and (
             qualname := ("::".join((*scope, name)) if scope else name)
         ) not in ambiguous:
-            value = _template_param_defaults(node)
-            existing = idx.get(qualname)
-            if existing is None:
-                idx[qualname] = value
-            elif existing != value:
-                ambiguous.add(qualname)
-                del idx[qualname]
+            _register_template_param_metadata(
+                idx, ambiguous, node_ids, qualname, node, _template_param_defaults(node)
+            )
         child_scope = (*scope, name) if kind in _SCOPE_NODE_KINDS and name else scope
         for child in node.get("inner", []) or []:
             walk(child, child_scope)
@@ -829,6 +871,7 @@ def _index_template_param_names(root: dict[str, Any]) -> dict[str, list[str | No
     """
     idx: dict[str, list[str | None]] = {}
     ambiguous: set[str] = set()
+    node_ids: dict[str, str] = {}
 
     def walk(node: Any, scope: tuple[str, ...]) -> None:
         if not isinstance(node, dict):
@@ -838,13 +881,9 @@ def _index_template_param_names(root: dict[str, Any]) -> dict[str, list[str | No
         if kind == "ClassTemplateDecl" and name and (
             qualname := ("::".join((*scope, name)) if scope else name)
         ) not in ambiguous:
-            value = _template_param_names(node)
-            existing = idx.get(qualname)
-            if existing is None:
-                idx[qualname] = value
-            elif existing != value:
-                ambiguous.add(qualname)
-                del idx[qualname]
+            _register_template_param_metadata(
+                idx, ambiguous, node_ids, qualname, node, _template_param_names(node)
+            )
         child_scope = (*scope, name) if kind in _SCOPE_NODE_KINDS and name else scope
         for child in node.get("inner", []) or []:
             walk(child, child_scope)

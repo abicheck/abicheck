@@ -1065,3 +1065,66 @@ def test_clang_backend_safely_degrades_on_conflicting_nested_template_defaults(
     result = compare(old_snap, new_snap)
     assert ChangeKind.VPTR_INTRODUCED not in {c.kind for c in result.changes}
     assert ChangeKind.TYPE_VTABLE_CHANGED not in {c.kind for c in result.changes}
+
+
+def test_clang_backend_resolves_dependent_default_across_legal_redeclaration(
+    tmp_path: Path,
+) -> None:
+    """Codex review, fresh evidence (fourth round): an ordinary, LEGAL C++
+    redeclaration of the same template with renamed parameters
+    (`template<class T, class U=T> struct A;` followed by `template<class
+    X, class Y> struct A {...};`) must not be treated as ambiguous just
+    because the literal parameter names differ across declarations --
+    that would break dependent-default substitution for this ordinary
+    shape, previously masking a real virtual-method addition entirely.
+    """
+    if not (_have("clang") and _have("g++")):
+        pytest.skip(
+            "clang and g++ are required for the clang L2 backend integration test"
+        )
+
+    def _header(extra: str) -> str:
+        return (
+            "template <class T, class U = T>\nstruct A;\n\n"
+            "template <class X, class Y>\nstruct A {\n"
+            "    virtual void f();\n};\n\n"
+            "struct D : A<double> {\n" + extra + "};\n"
+        )
+
+    old_dir = tmp_path / "old"
+    old_dir.mkdir()
+    old_header = old_dir / "api.h"
+    old_header.write_text(_header(""))
+    old_src = old_dir / "old.cpp"
+    old_src.write_text('#include "api.h"\ntemplate struct A<double>;\n')
+    v1_so = tmp_path / "libv1.so"
+    subprocess.run(
+        ["g++", "-shared", "-fPIC", "-o", str(v1_so), str(old_src), f"-I{old_dir}"],
+        check=True,
+        capture_output=True,
+    )
+
+    new_dir = tmp_path / "new"
+    new_dir.mkdir()
+    new_header = new_dir / "api.h"
+    new_header.write_text(_header("    void f() override;\n"))
+    new_src = new_dir / "new.cpp"
+    new_src.write_text('#include "api.h"\ntemplate struct A<double>;\n')
+    v2_so = tmp_path / "libv2.so"
+    subprocess.run(
+        ["g++", "-shared", "-fPIC", "-o", str(v2_so), str(new_src), f"-I{new_dir}"],
+        check=True,
+        capture_output=True,
+    )
+
+    old_snap = dump(v1_so, [old_header], header_backend="clang")
+    new_snap = dump(v2_so, [new_header], header_backend="clang")
+    old_d = next(t for t in old_snap.types if t.name == "D")
+    new_d = next(t for t in new_snap.types if t.name == "D")
+    assert old_d.vtable != []
+    assert old_d.vptr_offset_bits == 0
+    assert new_d.vtable != []
+
+    result = compare(old_snap, new_snap)
+    assert ChangeKind.VPTR_INTRODUCED not in {c.kind for c in result.changes}
+    assert ChangeKind.TYPE_VTABLE_CHANGED not in {c.kind for c in result.changes}

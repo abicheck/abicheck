@@ -1617,3 +1617,67 @@ def test_conflicting_nested_template_defaults_across_sibling_specializations_sta
     # base shape in this module degrades to), never a fabricated slot.
     types = _types(root)
     assert types["D"].vtable == []
+
+
+def test_legal_redeclaration_with_renamed_params_still_resolves_dependent_default() -> (
+    None
+):
+    """Codex review, fresh evidence (fourth round): the third round's
+    conflicting-registration-is-ambiguous fix was too broad -- an ordinary,
+    LEGAL C++ redeclaration of the SAME template with renamed parameters
+    (`template<class T, class U=T> struct A;` followed by `template<class
+    X, class Y> struct A {...};`) must not be treated as a genuine
+    conflict just because the literal parameter NAMES differ across the
+    two declarations. Clang always spells a dependent default's inherited
+    text using the ORIGINAL declaration's parameter name (`"T"`, never
+    renamed to `"X"`/`"Y"` on the later declaration, confirmed
+    empirically), so dropping the NAMES metadata here broke dependent-
+    default substitution for this ordinary shape -- distinguished from a
+    genuine conflict via clang's own `previousDecl` link (present on every
+    legal redeclaration, absent between two genuinely unrelated
+    declarations that coincidentally share a bare qualname).
+    """
+    root = _tu(
+        {
+            "kind": "ClassTemplateDecl",
+            "name": "A",
+            "id": "0x1",
+            "inner": [
+                {"kind": "TemplateTypeParmDecl", "name": "T"},
+                {
+                    "kind": "TemplateTypeParmDecl",
+                    "name": "U",
+                    "defaultArg": {
+                        "kind": "TemplateArgument",
+                        "type": {"qualType": "T"},
+                    },
+                },
+            ],
+        },
+        {
+            "kind": "ClassTemplateDecl",
+            "name": "A",
+            "id": "0x2",
+            "previousDecl": "0x1",
+            "inner": [
+                {"kind": "TemplateTypeParmDecl", "name": "X"},
+                {"kind": "TemplateTypeParmDecl", "name": "Y"},
+                _record("A"),
+                _specialization(
+                    "A",
+                    {
+                        "kind": "CXXMethodDecl",
+                        "name": "f",
+                        "mangledName": "_ZN1AIddE1fEv",
+                        "type": {"qualType": "void ()"},
+                        "virtual": True,
+                    },
+                    type_args=["double", "double"],
+                ),
+            ],
+        },
+        _record("D", bases=[_base("A<double>")]),
+    )
+    types = _types(root)
+    assert types["D"].vtable == ["_ZN1AIddE1fEv"]
+    assert types["D"].vptr_offset_bits == 0
