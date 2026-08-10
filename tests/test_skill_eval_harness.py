@@ -751,3 +751,29 @@ class TestOneModelPerBatch:
         would fail a run for the harness's own blind spot."""
         assert runner.check_one_model([{"model": "claude-sonnet-5"}], {}) is None
         assert runner.check_one_model([{}], {"model": "claude-sonnet-5"}) is None
+
+
+class TestRecoveryPreservesTheModel:
+    def test_a_recovered_row_carries_the_model_it_ran_on(self, tmp_path):
+        """The resume path is what the one-model guard was written for, and a
+        recovered row without a model is invisible to it — the batch would
+        then accept the next run on whatever the default moved to."""
+        out_dir = tmp_path / "sid" / "skill" / "0"
+        out_dir.mkdir(parents=True)
+        (out_dir / "final.md").write_text("done", encoding="utf-8")
+        (out_dir / "events.jsonl").write_text(
+            json.dumps(
+                {
+                    "type": "system",
+                    "subtype": "init",
+                    "skills": [SCENARIO_BREAKING["skill"]],
+                    "model": "claude-sonnet-5",
+                }
+            ),
+            encoding="utf-8",
+        )
+        record = runner._recovered_record(
+            out_dir, "sid", "skill", 0, SCENARIO_BREAKING, interposed=True
+        )
+        assert record["model"] == "claude-sonnet-5"
+        assert runner.check_one_model([record], {"model": "claude-opus-5"}) is not None

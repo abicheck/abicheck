@@ -813,6 +813,11 @@ def _recovered_record(
                     continue
     visible = visible_native_skills(events)
     record["visible_skills"] = visible
+    # The resume path is exactly what `check_one_model` was written for, and a
+    # recovered row without a model is invisible to it: the batch would then
+    # accept the next run on whatever the default has moved to, and the arm
+    # comparison would carry the model difference the guard exists to catch.
+    record["model"] = resolved_model(events)
     problem = check_treatment(arm, scenario, visible)
     if problem is None:
         # The third rejection `_run_once` can raise. It fires *before* the model
@@ -890,6 +895,13 @@ def main(argv: list[str] | None = None) -> int:
     unknown = sorted(set(arms) - set(ARMS))
     if unknown:
         print(f"unknown arm(s): {', '.join(unknown)}", file=sys.stderr)
+        return 1
+    if not arms:
+        # `--arms ""` (or only commas) passes the unknown-arm check, since the
+        # empty set contains nothing unknown. The batch then runs nothing and
+        # exits 0 — the same "invalid input reads as a completed evaluation"
+        # shape as a non-positive repetition count.
+        print(f"--arms selected none of {', '.join(ARMS)}", file=sys.stderr)
         return 1
 
     out_root = Path(args.out)
