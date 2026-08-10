@@ -153,6 +153,32 @@ def test_scan_if_not_defined() -> None:
     assert regions == [ConditionalRegion("FEATURE_X", True, 2, 2)]
 
 
+def test_scan_ifdef_with_trailing_line_comment() -> None:
+    # Codex review, PR #708: a trailing `//` comment on an otherwise-simple
+    # guard must not defeat the end-anchored simple-form patterns.
+    text = "#ifdef FEATURE_X // enabled by build\nvoid f();\n#endif\n"
+    regions = scan_conditional_regions(text)
+    assert regions == [ConditionalRegion("FEATURE_X", False, 2, 2)]
+
+
+def test_scan_ifndef_with_trailing_line_comment() -> None:
+    text = "#ifndef FEATURE_X // disabled by build\nvoid f();\n#endif\n"
+    regions = scan_conditional_regions(text)
+    assert regions == [ConditionalRegion("FEATURE_X", True, 2, 2)]
+
+
+def test_scan_if_defined_with_trailing_block_comment() -> None:
+    text = "#if defined(FEATURE_X) /* config */\nvoid f();\n#endif\n"
+    regions = scan_conditional_regions(text)
+    assert regions == [ConditionalRegion("FEATURE_X", False, 2, 2)]
+
+
+def test_scan_if_not_defined_with_trailing_block_comment() -> None:
+    text = "#if !defined(FEATURE_X) /* config */\nvoid f();\n#endif\n"
+    regions = scan_conditional_regions(text)
+    assert regions == [ConditionalRegion("FEATURE_X", True, 2, 2)]
+
+
 def test_scan_else_branch_negates_simple_ifdef() -> None:
     text = "#ifdef FEATURE_X\nvoid a();\n#else\nvoid b();\n#endif\n"
     regions = scan_conditional_regions(text)

@@ -346,10 +346,25 @@ class ConditionalRegion:
     end_line: int
 
 
-_IFDEF_RE = re.compile(r"^\s*#\s*ifdef\s+(\w+)\s*$")
-_IFNDEF_RE = re.compile(r"^\s*#\s*ifndef\s+(\w+)\s*$")
-_IF_DEFINED_RE = re.compile(r"^\s*#\s*if\s+defined\s*\(\s*(\w+)\s*\)\s*$")
-_IF_NOT_DEFINED_RE = re.compile(r"^\s*#\s*if\s+!\s*defined\s*\(\s*(\w+)\s*\)\s*$")
+# A trailing same-line comment (`// ...` or a single-line `/* ... */`) after
+# an otherwise-simple guard must not defeat the end-anchored match below —
+# `#ifdef FEATURE_X // enabled by build` is still a simple, single-macro
+# guard, not a compound condition (Codex review, PR #708: the original
+# end-anchored patterns had no allowance for one, so a real-world guard
+# carrying an explanatory comment silently produced zero regions/edges for
+# its whole body). Anchored to the true end of line either way — a `/* ...
+# */` that doesn't close on the same line is not matched by this suffix,
+# which correctly falls through to `_IF_RE` below (unmodeled) rather than
+# guessing where a multi-line comment ends.
+_TRAILING_COMMENT = r"(?:\s*(?://.*|/\*.*?\*/\s*))?"
+_IFDEF_RE = re.compile(rf"^\s*#\s*ifdef\s+(\w+)\s*{_TRAILING_COMMENT}$")
+_IFNDEF_RE = re.compile(rf"^\s*#\s*ifndef\s+(\w+)\s*{_TRAILING_COMMENT}$")
+_IF_DEFINED_RE = re.compile(
+    rf"^\s*#\s*if\s+defined\s*\(\s*(\w+)\s*\)\s*{_TRAILING_COMMENT}$"
+)
+_IF_NOT_DEFINED_RE = re.compile(
+    rf"^\s*#\s*if\s+!\s*defined\s*\(\s*(\w+)\s*\)\s*{_TRAILING_COMMENT}$"
+)
 _IF_RE = re.compile(r"^\s*#\s*if\b")
 _ELIF_RE = re.compile(r"^\s*#\s*elif\b")
 _ELSE_RE = re.compile(r"^\s*#\s*else\b")
