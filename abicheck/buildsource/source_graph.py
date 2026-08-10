@@ -689,11 +689,10 @@ def _version_script_node_id(path: str) -> str:
     return f"version_script://{path}"
 
 
-#: Suffixes that identify a static-library archive among a LinkUnit's inputs
-#: (ADR-041 P1 #2) — everything else is an object file. Lowercase only —
-#: compared case-insensitively below (Codex review): Windows evidence can
-#: spell this uppercase (``FOO.LIB``), hidden from ``archive_graph.py``
-#: otherwise, same as ``adapters/make.py``'s own lowercased filter.
+#: Suffixes identifying a static-library archive among a LinkUnit's inputs
+#: (ADR-041 P1 #2). Lowercase only — compared case-insensitively below
+#: (Codex review): Windows evidence can spell this uppercase (``FOO.LIB``),
+#: hidden from ``archive_graph.py`` otherwise, same as ``adapters/make.py``.
 _STATIC_LIBRARY_SUFFIXES = (".a", ".lib")
 
 
