@@ -303,8 +303,17 @@ def _indented_code_spans(text: str) -> list[tuple[int, int]]:
             index += 1
             continue
         indent = _indent_width(line)
-        while columns and indent < columns[-1]:
-            columns.pop()  # dedent closes every item it fell out of
+        # Document start is a boundary too: with front matter already split
+        # off, a reference file can legitimately open on an indented block.
+        blank_before = index == 0 or not lines[index - 1].strip()
+        if blank_before:
+            while columns and indent < columns[-1]:
+                columns.pop()  # a dedent after a blank line closes the item
+        # An under-indented line that directly follows paragraph text is a
+        # *lazy continuation* (CommonMark §5.2): it stays in the paragraph and
+        # closes nothing. Popping on it too dropped the item, after which a
+        # later properly-indented paragraph measured as top-level code and its
+        # links were masked instead of rewritten.
         floor = (columns[-1] if columns else 0) + 4
         marker = _LIST_ITEM_RE.match(line) if indent < floor else None
         if marker is not None:
@@ -314,9 +323,6 @@ def _indented_code_spans(text: str) -> list[tuple[int, int]]:
             columns.append(_column_width(marker.group()))
             index += 1
             continue
-        # Document start is a boundary too: with front matter already split
-        # off, a reference file can legitimately open on an indented block.
-        blank_before = index == 0 or not lines[index - 1].strip()
         if indent >= floor and blank_before:
             start = index
             while index < len(lines) and (

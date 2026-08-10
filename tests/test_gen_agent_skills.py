@@ -1127,3 +1127,45 @@ def test_nested_list_levels_each_get_their_own_code_floor(body, masked):
     the second level's column in force, and masked that item's ordinary
     paragraph as code — dangling its links in every generated tree."""
     assert bool(gen._indented_code_spans(body)) is masked
+
+
+#: Shapes whose classification this generator got wrong in successive review
+#: rounds: fence closing, container prefixes, tab stops, list nesting, and
+#: lazy continuation. Each was hand-derived from the spec and each was wrong
+#: in a different way, so they are now checked against a real parser instead.
+_COMMONMARK_SHAPES = [
+    "   - b\n    - c\n\n     [g](../../docs/foo.md)\n",
+    "p:\n\n    [g](../../docs/foo.md)\n\nq\n",
+    "    [g](../../docs/foo.md)\n\nq\n",
+    "- a:\n\n    [g](../../docs/foo.md)\n",
+    "- a:\n\n      [g](../../docs/foo.md)\n\nq\n",
+    "1. a:\n\n      [g](../../docs/foo.md)\n",
+    "1. a:\n\n       [g](../../docs/foo.md)\n\nq\n",
+    "- a\n  - b\n\n    [g](../../docs/foo.md)\n",
+    "- a\n  - b\n\n        [g](../../docs/foo.md)\n\nq\n",
+    "- a\n  - b\n    - c\n\n        [g](../../docs/foo.md)\n",
+    "- a\n  - b\n    - c\n\n          [g](../../docs/foo.md)\n\nq\n",
+    "- a\n  - b\n- c\n\n    [g](../../docs/foo.md)\n",
+    "- a\n  - b\n\nq:\n\n    [g](../../docs/foo.md)\n\nr\n",
+    "- a:\n\n  \t [g](../../docs/foo.md)\n",
+    "- a\n- b\n\n  [g](../../docs/foo.md)\n",
+]
+
+
+@pytest.mark.parametrize("source", _COMMONMARK_SHAPES)
+def test_masking_agrees_with_a_real_commonmark_parser(source):
+    """Oracle test: a link the renderer makes navigable must stay visible to
+    the rewrite, and one it renders as code must be masked.
+
+    `markdown_it` is guarded rather than required — it reaches this
+    environment transitively (via `scriv`), so declaring a dependency for a
+    test-only oracle is the maintainer's call, not this test's. Every shape
+    below is also pinned by an explicit hand-written case elsewhere in this
+    file, so a skip here loses the cross-check, not the coverage.
+    """
+    markdown_it = pytest.importorskip("markdown_it")
+    rendered = markdown_it.MarkdownIt("commonmark").render(source)
+    masked, _ = gen.mask_code_regions(source)
+    assert ("](" in masked) is ("<a href" in rendered), (
+        f"classification disagrees with CommonMark for {source!r}"
+    )
