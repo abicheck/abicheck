@@ -1082,6 +1082,60 @@ def _diff_type_bases(name: str, t_old: RecordType, t_new: RecordType) -> list[Ch
     return changes
 
 
+def _vtable_transition_is_evidenced(t_old: RecordType, t_new: RecordType) -> bool:
+    """Whether an *empty↔non-empty* vtable difference rests on real evidence.
+
+    ``RecordType.vtable`` cannot express "not captured": it is a plain list,
+    and on the DWARF path it is simply the class's own virtual-method DIEs in
+    child order (``dwarf_snapshot._process_virtual_method_child``). So an
+    empty list means either "this class has no virtuals of its own" *or*
+    "this side's debug info did not carry them" -- and the two are
+    indistinguishable from the list alone.
+
+    That ambiguity produced a real false positive: identical headers on both
+    sides, no DWARF vtable, and not one ``_ZTV`` symbol anywhere still
+    emitted ``TYPE_VTABLE_CHANGED`` as BREAKING, because one side's virtual
+    methods happened to live in a translation unit only the other side's
+    debug info covered (differing ``-g`` level, a differently-inlined TU, or
+    ODR first-definition-wins in ``dwarf_snapshot``). The neighbouring
+    ``diff_vtable_layout`` already names this exact hazard for its own
+    detector and answers it with a tri-state ``None``; ``diff_elf_layout``
+    answers it by only ever comparing a ``_ZTV`` present on *both* sides.
+    This is the same principle applied to the type-level detector: degrade to
+    silence rather than fabricate a break.
+
+    An independent *layout* signal is what makes the transition real. A class
+    that genuinely gains its first virtual function also gains a vptr, so it
+    grows; one that gains or loses a virtual base says so directly. When
+    neither moved and both sizes are known, no real polymorphism change can
+    have occurred and the differing list is capture noise.
+
+    Deliberately conservative in the other direction: an *unknown* size on
+    either side corroborates nothing but also refutes nothing, so the finding
+    is kept. The suppression needs positive evidence that layout held still;
+    it is not a fallback for missing information.
+
+    Known false negative, accepted for now rather than papered over: a class
+    already polymorphic through a base, declaring no virtuals of its own,
+    that gains one. Its vtable grows while the object size does not, so it
+    looks exactly like capture noise here. Catching it needs a real
+    polymorphism walk over both sides' base chains (``diff_vtable_layout``'s
+    ``_is_polymorphic``) plus a per-finding provenance the model does not yet
+    carry -- see AGENTS.md's evidence-provider entry. This module already
+    prefers a false negative to a fabricated break, and that is the same
+    trade.
+    """
+    if t_old.vtable and t_new.vtable:
+        # Both sides captured something, so the difference is a real
+        # reorder/replace rather than one side's evidence going missing.
+        return True
+    if t_old.size_bits is None or t_new.size_bits is None:
+        return True
+    if t_old.size_bits != t_new.size_bits:
+        return True
+    return list(t_old.virtual_bases) != list(t_new.virtual_bases)
+
+
 def _diff_type_vtable(
     name: str,
     t_old: RecordType,
@@ -1092,6 +1146,8 @@ def _diff_type_vtable(
     new_types: Mapping[str, RecordType],
 ) -> list[Change]:
     if t_old.vtable == t_new.vtable:
+        return []
+    if not _vtable_transition_is_evidenced(t_old, t_new):
         return []
     # Same slot count, same order, and every differing slot is a same-signature
     # override reusing its base's slot (case185) -> no real layout change, just

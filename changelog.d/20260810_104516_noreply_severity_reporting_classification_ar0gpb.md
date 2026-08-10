@@ -1,0 +1,25 @@
+### Fixed
+
+- **`type_vtable_changed` no longer fires from absent evidence** —
+  `RecordType.vtable` is a plain list and cannot express "not captured", so
+  an asymmetric DWARF capture (one side's virtual-method DIEs living in a
+  translation unit only the other side's debug info covered — a differing
+  `-g` level, a differently-inlined TU, ODR first-definition-wins) made an
+  *identical* class look like it gained a whole vtable, reported `BREAKING`
+  with no `_ZTV` symbol anywhere and no layout movement at all. An
+  empty↔non-empty vtable difference now requires an independent layout
+  signal — a size change (the vptr a genuinely-polymorphic class gains) or a
+  virtual-base change — mirroring the tri-state discipline
+  `diff_vtable_layout.py` and `diff_elf_layout.py` already apply. An unknown
+  size on either side keeps the finding: the suppression needs positive
+  evidence that layout held still, and is not a fallback for missing
+  information.
+
+### Added
+
+- **Severity-blocking compatible findings are named in `scan --against`
+  reports** — with `--severity-addition error` (or `--severity-quality-issues
+  error`) a compatible diff exits 1, but the report named only the blocking
+  category and count, giving no symbol, kind, or description for the finding
+  that actually failed the scan. Those findings are now itemized when — and
+  only when — severity made them the blocking cause.

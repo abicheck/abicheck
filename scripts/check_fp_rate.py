@@ -858,6 +858,63 @@ def _python_ext_internal_symbol_churn() -> tuple[AbiSnapshot, AbiSnapshot]:
     return old, new
 
 
+def _vtable_capture_asymmetry_stays_filtered() -> tuple[AbiSnapshot, AbiSnapshot]:
+    # `RecordType.vtable` cannot express "not captured" -- it is a plain list,
+    # and on the DWARF path it is just the class's own virtual-method DIEs in
+    # child order. So one side's debug info covering a TU the other's did not
+    # (differing -g level, a differently-inlined TU, ODR first-definition-wins)
+    # made an *identical* class look like it gained a whole vtable, and
+    # `type_vtable_changed` fired BREAKING with no `_ZTV` symbol anywhere and
+    # no layout movement at all. Size and virtual bases hold still here, which
+    # is what proves no real polymorphism change happened.
+    def cls(vtable: list[str]) -> RecordType:
+        return RecordType(name="Widget", kind="class", size_bits=128, vtable=vtable)
+
+    return (
+        _snap("1", functions=[_fn("api", ret="Widget *")], types=[cls([])]),
+        _snap("2", functions=[_fn("api", ret="Widget *")], types=[cls(["Widget::draw()"])]),
+    )
+
+
+def _vtable_became_polymorphic_stays_breaking() -> tuple[AbiSnapshot, AbiSnapshot]:
+    # The FN sentinel for the guard above: a class that *genuinely* gains its
+    # first virtual function also gains a vptr, so it grows. That size movement
+    # is the independent evidence the capture-artifact case lacks, and the
+    # break must still be reported.
+    def cls(vtable: list[str], size: int) -> RecordType:
+        return RecordType(name="Widget", kind="class", size_bits=size, vtable=vtable)
+
+    return (
+        _snap("1", functions=[_fn("api", ret="Widget *")], types=[cls([], 128)]),
+        _snap(
+            "2",
+            functions=[_fn("api", ret="Widget *")],
+            types=[cls(["Widget::draw()"], 192)],
+        ),
+    )
+
+
+def _vtable_reorder_stays_breaking() -> tuple[AbiSnapshot, AbiSnapshot]:
+    # The other FN sentinel: when *both* sides captured a vtable, there is no
+    # missing evidence to reason about and a reorder is a real break. The guard
+    # must not widen into "any vtable difference is suspect".
+    def cls(vtable: list[str]) -> RecordType:
+        return RecordType(name="Widget", kind="class", size_bits=128, vtable=vtable)
+
+    return (
+        _snap(
+            "1",
+            functions=[_fn("api", ret="Widget *")],
+            types=[cls(["Widget::a()", "Widget::b()"])],
+        ),
+        _snap(
+            "2",
+            functions=[_fn("api", ret="Widget *")],
+            types=[cls(["Widget::b()", "Widget::a()"])],
+        ),
+    )
+
+
 def _python_api_function_dropped() -> tuple[AbiSnapshot, AbiSnapshot]:
     # A public function disappears from the extension's Python API — a real
     # source break the oracle must never scope away (authority rule).
@@ -873,6 +930,19 @@ CORPUS: list[Case] = [
     # a real Python-API break stays breaking (FN sentinel / authority rule).
     Case("python_ext_internal_symbol_churn", True, _python_ext_internal_symbol_churn),
     Case("python_api_function_dropped", False, _python_api_function_dropped),
+    # Evidence-absence vs. real polymorphism change: one FP guard plus two FN
+    # sentinels, so the guard cannot widen into suppressing real vtable breaks.
+    Case(
+        "vtable_capture_asymmetry_stays_filtered",
+        True,
+        _vtable_capture_asymmetry_stays_filtered,
+    ),
+    Case(
+        "vtable_became_polymorphic_stays_breaking",
+        False,
+        _vtable_became_polymorphic_stays_breaking,
+    ),
+    Case("vtable_reorder_stays_breaking", False, _vtable_reorder_stays_breaking),
     Case("elf_only_function_removed", True, _elf_only_function_removed),
     Case("internal_field_type_changed", True, _internal_field_type_changed),
     Case("hidden_function_signature_changed", True, _hidden_function_signature_changed),
@@ -1357,6 +1427,10 @@ CASE_CATEGORY: dict[str, str] = {
     "public_stdlib_type_used_directly_layout_changed": "stdlib-direct-reference",
     "public_std_string_typedef_alias_layout_changed": "stdlib-direct-reference",
     "stdlib_internal_owner_method_stays_filtered": "stdlib-direct-reference",
+    # evidence-absence vs. real change (a finding must rest on evidence)
+    "vtable_capture_asymmetry_stays_filtered": "evidence-absence",
+    "vtable_became_polymorphic_stays_breaking": "evidence-absence",
+    "vtable_reorder_stays_breaking": "evidence-absence",
     # versioned-symbol scheme / multi-.so bundle
     "versioned_scheme_internal_churn": "versioned-scheme",
     "bundle_sibling_soname_churn": "versioned-scheme",

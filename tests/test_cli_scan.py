@@ -218,6 +218,42 @@ def test_scan_severity_gate_block_explains_a_nonzero_compatible_exit(
     assert gate["config"]["addition"] == "error", gate
 
 
+def test_scan_severity_blocking_addition_is_named_in_findings(
+    runner, baseline_snap, new_snap_compatible
+):
+    # Codex review: the gate named the blocking *category* and count while
+    # `_baseline_summary` omitted compatible findings, so the report gave no
+    # symbol/kind/description for the finding that actually failed the scan.
+    res = runner.invoke(
+        main,
+        ["scan", str(new_snap_compatible), "--against", str(baseline_snap),
+         "--severity-addition", "error", "--format", "json"],
+    )
+    assert res.exit_code == 1, res.output
+    findings = _payload(res)["diff"].get("findings") or []
+    assert any(
+        f["bucket"] == "compatible" and f["symbol"] == "_Z3bazv" for f in findings
+    ), findings
+
+
+def test_scan_non_blocking_compatible_findings_stay_unitemized(
+    runner, baseline_snap, new_snap_compatible
+):
+    # The complement: when additions do NOT gate, itemizing them would be the
+    # noise `_baseline_summary` deliberately omits. Legacy output unchanged.
+    res = runner.invoke(
+        main,
+        ["scan", str(new_snap_compatible), "--against", str(baseline_snap),
+         "--format", "json"],
+    )
+    assert res.exit_code == 0, res.output
+    diff = _payload(res)["diff"]
+    assert diff["compatible"] >= 1, diff
+    assert not [
+        f for f in (diff.get("findings") or []) if f["bucket"] == "compatible"
+    ], diff
+
+
 def test_scan_legacy_scheme_emits_no_severity_gate_block(
     runner, baseline_snap, new_snap_breaking
 ):

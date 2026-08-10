@@ -199,6 +199,50 @@ def _load_risk_rules(path: Path | None) -> RiskRules:
 _MAX_BASELINE_FINDINGS = 20
 
 
+#: The two severity categories made up of findings ``_baseline_summary``
+#: deliberately does not itemize -- they carry no verdict, so under the legacy
+#: scheme they are exactly the "additions/quality noise" that comment names.
+_COMPATIBLE_SEVERITY_CATEGORIES = frozenset({"addition", "quality_issues"})
+
+
+def _add_severity_blocking_compatible_findings(
+    summary: dict[str, Any], diff: Any, gate: dict[str, Any]
+) -> None:
+    """Itemize compatible findings when severity made *them* the blocking cause.
+
+    ``_baseline_summary`` omits ``diff.compatible`` from ``findings`` because
+    under the legacy scheme those findings never gate -- so naming them would
+    be noise. Severity inverts that for two categories: with
+    ``--severity-addition error`` a compatible diff exits 1, and the report
+    then named the blocking *category* and count while giving no symbol, kind,
+    or description for the finding that actually failed the scan (Codex
+    review).
+
+    Only the blocking case is added, and only for the two categories that can
+    be blocking-yet-compatible, so every other run's summary is byte-identical.
+    The cap is the shared ``_MAX_BASELINE_FINDINGS`` budget the gating buckets
+    already spent from -- an addition that blocks is worth naming, but not at
+    the price of unbounded output.
+    """
+    if not gate.get("blocking"):
+        return
+    blamed = set(gate.get("blocking_categories") or ())
+    if not (blamed & _COMPATIBLE_SEVERITY_CATEGORIES):
+        return
+    compatible = list(getattr(diff, "compatible", ()) or ())
+    if not compatible:
+        return
+    findings: list[dict[str, Any]] = list(summary.get("findings") or [])
+    remaining = _MAX_BASELINE_FINDINGS - len(findings)
+    if remaining <= 0:
+        summary["findings_truncated"] = True
+        return
+    findings.extend(_baseline_finding_dicts(compatible[:remaining], "compatible"))
+    summary["findings"] = findings
+    if len(compatible) > remaining:
+        summary["findings_truncated"] = True
+
+
 def _baseline_finding_dicts(changes: list[Any], bucket: str) -> list[dict[str, Any]]:
     """Project *changes* (one verdict bucket) into small, renderable dicts.
 
@@ -709,6 +753,7 @@ def _run_baseline_compare(
             policy_file=diff.policy_file,
         )
         summary["severity"] = gate
+        _add_severity_blocking_compatible_findings(summary, diff, gate)
         # Taken *off the emitted block* rather than computed alongside it:
         # `_build_severity_json` routes through `severity.compute_gate_decision`,
         # whose whole purpose is that an exit code and the categories blamed
