@@ -117,6 +117,36 @@ full, honest list of what's reserved but unpopulated):
   neither decl shape is walked; both fall through as an ordinary,
   unrecognized child (no crash, no data, the same silent-skip default this
   whole module uses throughout).
+- **A polymorphic class instantiation's vtable/typeinfo symbols are never
+  discovered** (Codex review, fresh evidence, confirmed against a real
+  compiled object: ``template <typename T> struct Poly { virtual ~Poly()
+  {} virtual void foo(T) {} }; template struct Poly<int>;`` exports
+  ``_ZTV4PolyIiE``/``_ZTI4PolyIiE``/``_ZTS4PolyIiE`` — vtable, typeinfo,
+  and typeinfo-name — alongside its member functions, per ``nm``). These
+  are never AST decl children with their own ``mangledName`` the way an
+  ordinary member function is — they're synthesized by codegen from the
+  class's own identity, so :func:`_member_symbols`'s child-scanning walk
+  structurally cannot see them regardless of how many decl kinds it's
+  taught to recognize. A real fix needs two new pieces this module
+  doesn't have today, not a drive-by extension of the existing scan: (1) a
+  way to tell whether a given ``ClassTemplateSpecializationDecl`` is
+  polymorphic (a ``virtual`` method somewhere in its own member list —
+  present in the AST, but not currently read by any pass here) combined
+  with C++'s own vague-linkage rules for *when* a vtable/typeinfo is
+  actually emitted for a given instantiation (always, for an explicit
+  instantiation definition; only when a "key function" is defined in this
+  TU, for an implicit one — a real, non-trivial linkage rule this module
+  has no existing model of); and (2) a way to derive the exact mangled
+  ``_ZTV``/``_ZTI``/``_ZTS`` class-name substring, which needs a
+  *position*-returning structural split of the nested-name body into
+  "everything but the trailing unqualified-name component" —
+  :func:`~abicheck.diff_cxx_rules.itanium_scope_components` only returns
+  the demangled component *strings*, not their spans in the original
+  mangled text, so there is no existing utility to slice from today. The
+  existing join-only-onto-an-existing-``binary_symbol``-node discipline
+  (ADR-057 D1) means a wrong derived name would simply fail to join rather
+  than mint a bad edge, but getting the derivation right at all is its own
+  scoped piece of work, not attempted here.
 
 **Investigated and deliberately not attempted: joining a class
 instantiation's own node onto ``type_graph.py``'s record_type node for the
@@ -444,6 +474,56 @@ def _register_class_template(
                 id_to_template_qname[spec_id] = template_qname
 
 
+def _node_loc_offset(node: dict[str, Any]) -> int | None:
+    """*node*'s own ``loc.offset`` -- a byte position within the TU, present
+    on every located node regardless of whether ``loc.file`` itself was
+    omitted (clang's sticky-file convention). ``None`` when absent."""
+    loc = node.get("loc")
+    if not isinstance(loc, dict):
+        return None
+    offset = loc.get("offset")
+    return offset if isinstance(offset, int) else None
+
+
+def _primary_pattern_member_locs(class_template_node: dict[str, Any]) -> dict[str, int]:
+    """``member name -> loc.offset`` for each direct ``FunctionTemplateDecl``
+    child of a ``ClassTemplateDecl``'s own primary pattern (its un-
+    specialized ``CXXRecordDecl`` child) -- the signal
+    :func:`_walk_function_templates` needs to tell a genuinely *shared*
+    member (an implicit instantiation, or an explicit-instantiation
+    *definition* that forces the primary pattern's own body without writing
+    a new one) from an independently-authored member on a distinct
+    *explicit specialization* (Codex review, second round, fresh evidence,
+    verified empirically against real clang AST output): every copy of a
+    shared member -- whether nested directly under the ``ClassTemplateDecl``
+    or detached to a top-level sibling by the identical explicit-
+    instantiation-definition quirk an explicit specialization also
+    triggers -- carries the *exact same* ``loc``/``range`` as the primary
+    pattern's own declaration (the same source text, reused), while an
+    explicit specialization's own member has its *own*, different ``loc``
+    (independently written, at its own specialization's source position).
+    Comparing structural position alone (a detached top-level sibling)
+    cannot distinguish these two cases -- both detach identically -- so this
+    compares source identity instead. Returns ``{}`` when the primary
+    pattern's own record isn't found (an unmodeled shape; degrades to no
+    shared members recognized, this module's usual conservative default)."""
+    pattern: dict[str, Any] | None = None
+    for child in class_template_node.get("inner", []) or []:
+        if str(child.get("kind", "")) in ("CXXRecordDecl", "RecordDecl"):
+            pattern = child
+            break
+    if pattern is None:
+        return {}
+    locs: dict[str, int] = {}
+    for child in pattern.get("inner", []) or []:
+        if str(child.get("kind", "")) == _FUNCTION_TEMPLATE_KIND:
+            name = str(child.get("name") or "")
+            offset = _node_loc_offset(child)
+            if name and offset is not None:
+                locs[name] = offset
+    return locs
+
+
 def _collect_full_specializations(
     node: Any, full_by_id: dict[str, dict[str, Any]]
 ) -> None:
@@ -757,10 +837,15 @@ def _ctor_dtor_symbol_variants(mangled: str, *, is_ctor: bool) -> tuple[str, ...
     exists and is exported, a false positive rather than merely a missed
     one (the join-only-onto-an-existing-node safety net this module relies
     on elsewhere does not save this case, since the corrupted string can
-    coincidentally *be* a real, different symbol). ``mangled`` must already
-    be Mach-O-normalized (:func:`_normalize_mangled`) before calling this --
-    see ``itanium_ctor_dtor_marker_span``'s own docstring for why an
-    unnormalized ``__Z...`` input would misalign the located span.
+    coincidentally *be* a real, different symbol). ``mangled`` does not need
+    to be pre-normalized for the Mach-O double-underscore prefix -- see
+    ``itanium_ctor_dtor_marker_span``'s own docstring, which confirms
+    empirically that it handles an unnormalized ``__Z...`` input correctly.
+    This function's own caller still normalizes first anyway (see
+    ``_member_symbols``), purely so the *substituted* sibling manglings this
+    function returns come out in the same normalized form as every other
+    symbol this module joins against, not because normalizing first is
+    required for correctness here.
 
     Returns ``()`` when the marker parser doesn't recognize *mangled* as a
     ctor/dtor mangling at all (an unmangled or non-Itanium name, or a form
@@ -799,10 +884,13 @@ def _member_symbols(node: dict[str, Any]) -> tuple[str, ...]:
         if kind in _MEMBER_FUNCTION_KINDS | {"VarDecl"}:
             mangled = child.get("mangledName")
             if isinstance(mangled, str) and mangled:
-                # Normalize (strip a Mach-O double-underscore) once, before
-                # deriving sibling ctor/dtor manglings: the derivation's own
-                # offset arithmetic requires an already-normalized "_Z..."
-                # input (see _ctor_dtor_symbol_variants's docstring).
+                # Normalize (strip a Mach-O double-underscore) once, up
+                # front: not required for _ctor_dtor_symbol_variants's own
+                # offset arithmetic (it handles an unnormalized "__Z..."
+                # input correctly -- see its docstring), but doing it here
+                # keeps every symbol this function returns, including the
+                # substituted siblings, in the same normalized form the
+                # rest of this module joins binary_symbol nodes against.
                 normalized = _normalize_mangled(mangled)
                 symbols.append(normalized)
                 if kind in ("CXXConstructorDecl", "CXXDestructorDecl"):
@@ -864,8 +952,7 @@ def _walk_function_templates(
     full_function_by_id: dict[str, dict[str, Any]],
     id_to_file: dict[str, str],
     out: list[TemplateInstantiation],
-    *,
-    via_primary_template: bool = False,
+    qname_to_member_locs: dict[str, dict[str, int]],
 ) -> None:
     if not isinstance(node, dict):
         return
@@ -934,45 +1021,59 @@ def _walk_function_templates(
         # one shared template_decl node as if they instantiated the same
         # template).
         #
-        # The bare, unparameterized name is correct *only* when this node
-        # was reached by direct nesting under its own ClassTemplateDecl
-        # (via_primary_template=True, set by that branch below) -- this
-        # isn't trying to distinguish Holder<int>::apply from
-        # Holder<double>::apply (both are genuinely the same syntactic
-        # template declaration -- apply is written once, in the primary
-        # Holder pattern -- correctly sharing one template_decl node,
-        # matching how Holder's own class-template pattern is already
-        # shared across all its instantiations), only Holder's own member
-        # templates from an unrelated Wrapper's.
+        # The bare, unparameterized name is correct for a genuinely *shared*
+        # member -- Holder<int>::apply and Holder<double>::apply are the
+        # same syntactic template declaration (apply is written once, in
+        # the primary Holder pattern) and correctly share one template_decl
+        # node, matching how Holder's own class-template pattern is already
+        # shared across all its instantiations. An earlier revision decided
+        # this from *where* the node was reached (nested under its own
+        # ClassTemplateDecl vs. a detached top-level sibling), on the theory
+        # that only an *explicit specialization*'s own independently-
+        # authored content detaches. Codex review, second round, fresh
+        # evidence, empirically confirmed against real clang AST output:
+        # that's wrong -- an *explicit instantiation definition* (`template
+        # struct Holder<int>;`, forcing the shared primary body without
+        # writing a new one) detaches identically, and its member's
+        # template_qname was then wrongly disambiguated from every other
+        # Holder<T>::apply, splitting one shared declaration into two.
+        # Structural position alone cannot tell these two detachment causes
+        # apart.
         #
-        # When via_primary_template is False, this node was instead reached
-        # as a detached top-level sibling -- the same explicit-specialization
-        # detachment quirk this module's docstring already documents for
-        # class-level resolution (an empty stub nested under the
-        # ClassTemplateDecl, full content detached to a top-level sibling
-        # sharing the stub's id). An *explicit* specialization's own member
-        # template is a genuinely separate, independently-authored
-        # declaration, not an instantiation of one shared primary-pattern
-        # member (Codex review, second round, fresh evidence, empirically
-        # confirmed against real clang AST output): `template<> struct
-        # H<int> { template<typename U> void f(U); };` and `template<>
-        # struct H<double> { template<typename U> void f(U); };` each write
-        # their *own* `f` from scratch -- H has no generic member `f` on its
-        # primary template at all -- so H<int>::f and H<double>::f
-        # previously still collapsed onto the identical bare qname "H::f"
-        # and, sharing the same printed signature, the same template_decl
-        # id, falsely identifying two unrelated member templates as one
-        # declaration. Disambiguated the same way a nested type argument
-        # already is (:func:`_specialization_scope_name`) -- degrades to
-        # the bare name when the specialization's own args aren't
-        # resolvable, this module's usual conservative fallback.
-        name = (
-            str(node.get("name") or "")
-            if via_primary_template
-            else _specialization_scope_name(node, str(node.get("name") or ""))
-        )
-        child_scope = [*scope, name] if name else scope
+        # The reliable signal is source identity, not position: every copy
+        # of a genuinely shared member -- however it was reached -- carries
+        # the *exact same* `loc`/`range` as the primary pattern's own
+        # declaration (the same source text, reused), while an explicit
+        # specialization's own member has its own, different `loc`
+        # (independently written, at its own specialization's position) --
+        # see _primary_pattern_member_locs's own docstring for the full
+        # empirical evidence, including the H<int>::f / H<double>::f
+        # counter-example (H has no generic member `f` on its primary
+        # template at all, so both previously collapsed onto the identical
+        # bare qname "H::f", sharing one template_decl id). Decided per
+        # member (not per specialization) since only a FunctionTemplateDecl
+        # child's own identity is in question here.
+        bare_name = str(node.get("name") or "")
+        class_qname = "::".join([*scope, bare_name]) if bare_name else ""
+        member_locs = qname_to_member_locs.get(class_qname, {})
+        disambiguated_name: str | None = None
         for child in node.get("inner", []) or []:
+            if str(child.get("kind", "")) == _FUNCTION_TEMPLATE_KIND:
+                member_name = str(child.get("name") or "")
+                shared = (
+                    member_name
+                    and member_name in member_locs
+                    and _node_loc_offset(child) == member_locs[member_name]
+                )
+                if shared:
+                    name = bare_name
+                else:
+                    if disambiguated_name is None:
+                        disambiguated_name = _specialization_scope_name(node, bare_name)
+                    name = disambiguated_name
+            else:
+                name = bare_name
+            child_scope = [*scope, name] if name else scope
             _walk_function_templates(
                 child,
                 child_scope,
@@ -983,32 +1084,7 @@ def _walk_function_templates(
                 full_function_by_id,
                 id_to_file,
                 out,
-            )
-        return
-
-    if kind == _CLASS_TEMPLATE_KIND:
-        # Recurse into a ClassTemplateDecl's own children (template param
-        # decls, the primary pattern's CXXRecordDecl, and any specialization
-        # stub/full-content nodes nested directly here) flagged so the
-        # _CLASS_SPECIALIZATION_KIND branch above can tell "reached by
-        # direct nesting under my own primary template" (an implicit
-        # instantiation, or a stub with no member content to find anyway)
-        # apart from "reached as a detached top-level sibling" (an explicit
-        # specialization's own independently-authored content) -- see that
-        # branch's own docstring for why the distinction matters. Does not
-        # itself change scope; a ClassTemplateDecl doesn't introduce one.
-        for child in node.get("inner", []) or []:
-            _walk_function_templates(
-                child,
-                scope,
-                id_to_qname,
-                id_to_decl_kind,
-                id_to_template_qname,
-                full_by_id,
-                full_function_by_id,
-                id_to_file,
-                out,
-                via_primary_template=True,
+                qname_to_member_locs,
             )
         return
 
@@ -1026,6 +1102,7 @@ def _walk_function_templates(
                 full_function_by_id,
                 id_to_file,
                 out,
+                qname_to_member_locs,
             )
         return
 
@@ -1040,6 +1117,7 @@ def _walk_function_templates(
             full_function_by_id,
             id_to_file,
             out,
+            qname_to_member_locs,
         )
 
 
@@ -1048,6 +1126,7 @@ def _walk_class_templates(
     scope: list[str],
     id_to_qname: dict[str, str],
     id_to_template_qname: dict[str, str],
+    qname_to_member_locs: dict[str, dict[str, int]],
 ) -> None:
     if not isinstance(node, dict):
         return
@@ -1058,6 +1137,14 @@ def _walk_class_templates(
         qname = "::".join([*scope, name]) if name else ""
         if qname:
             _register_class_template(node, qname, id_to_template_qname)
+            # See _primary_pattern_member_locs's own docstring: this is the
+            # signal _walk_function_templates needs to tell a genuinely
+            # shared member (implicit instantiation, or explicit-
+            # instantiation *definition*) from an independently-authored one
+            # on a distinct explicit *specialization* -- both detach
+            # identically (a stub nested here, full content elsewhere), so
+            # structural position alone can't distinguish them.
+            qname_to_member_locs[qname] = _primary_pattern_member_locs(node)
         # Stop here: a ClassTemplateDecl's own pattern CXXRecordDecl child
         # would open a scope for its own members if recursed into
         # generically. A template nested inside a template pattern is
@@ -1072,11 +1159,19 @@ def _walk_class_templates(
         name = str(node.get("name") or "")
         child_scope = [*scope, name] if name else scope
         for child in node.get("inner", []) or []:
-            _walk_class_templates(child, child_scope, id_to_qname, id_to_template_qname)
+            _walk_class_templates(
+                child,
+                child_scope,
+                id_to_qname,
+                id_to_template_qname,
+                qname_to_member_locs,
+            )
         return
 
     for child in node.get("inner", []) or []:
-        _walk_class_templates(child, scope, id_to_qname, id_to_template_qname)
+        _walk_class_templates(
+            child, scope, id_to_qname, id_to_template_qname, qname_to_member_locs
+        )
 
 
 def parse_clang_ast_templates(ast: dict[str, Any]) -> list[TemplateInstantiation]:
@@ -1109,7 +1204,10 @@ def parse_clang_ast_templates(ast: dict[str, Any]) -> list[TemplateInstantiation
     full_by_id: dict[str, dict[str, Any]] = {}
     _collect_full_specializations(ast, full_by_id)
     id_to_template_qname: dict[str, str] = {}
-    _walk_class_templates(ast, [], id_to_qname, id_to_template_qname)
+    qname_to_member_locs: dict[str, dict[str, int]] = {}
+    _walk_class_templates(
+        ast, [], id_to_qname, id_to_template_qname, qname_to_member_locs
+    )
     # _walk_class_templates above only *registers* class-template membership
     # (id_to_template_qname); the actual instantiation objects are built
     # here, once, over the join of both indices -- doing it inline in the
@@ -1159,6 +1257,7 @@ def parse_clang_ast_templates(ast: dict[str, Any]) -> list[TemplateInstantiation
         full_function_by_id,
         id_to_file,
         out,
+        qname_to_member_locs,
     )
     return out
 

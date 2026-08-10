@@ -558,7 +558,18 @@ def _bsd_symbol_index(
         if member is None or str_off >= len(strings):
             continue
         terminator = strings.find(b"\x00", str_off)
-        raw = strings[str_off:] if terminator == -1 else strings[str_off:terminator]
+        if terminator == -1:
+            # Every real BSD/Mach-O __.SYMDEF string-table entry is
+            # NUL-terminated, including the last one (confirmed against a
+            # real llvm-ar --format=bsd archive's raw bytes) -- a missing
+            # terminator means the string table itself is truncated or
+            # corrupted, not that this symbol's name legitimately runs to
+            # the table's own end. Skip it the same way any other
+            # individually-unresolvable entry here is skipped, rather than
+            # silently accepting a truncated/corrupted run of bytes as a
+            # complete symbol name (Codex review, fresh evidence).
+            continue
+        raw = strings[str_off:terminator]
         symbol = raw.decode("utf-8", "replace")
         if symbol:
             refs.append(

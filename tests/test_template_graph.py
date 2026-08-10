@@ -1141,9 +1141,21 @@ def _cross_class_member_template_ast() -> dict:
     matches real clang output (verified empirically): a
     ``ClassTemplateSpecializationDecl``'s own nested ``FunctionTemplateDecl``
     needs the specialization's name in scope, or the two collapse onto one
-    qname."""
+    qname.
 
-    def holder(class_name: str, mangled_prefix: str) -> dict:
+    The specialization's own ``apply`` shares the identical ``loc`` with the
+    primary pattern's own ``apply`` -- matching real clang output for a
+    genuinely shared member (this is what :func:`_primary_pattern_member_locs`
+    keys its "shared vs. independently-authored" decision on, not merely
+    structural position)."""
+
+    def holder(class_name: str, mangled_prefix: str, loc_offset: int) -> dict:
+        pattern_apply = {
+            "kind": "FunctionTemplateDecl",
+            "name": "apply",
+            "loc": {"offset": loc_offset},
+            "inner": [{"kind": "TemplateTypeParmDecl", "name": "U"}],
+        }
         spec = {
             "id": f"0xSPEC_{class_name}",
             "kind": "ClassTemplateSpecializationDecl",
@@ -1154,6 +1166,7 @@ def _cross_class_member_template_ast() -> dict:
                 {
                     "kind": "FunctionTemplateDecl",
                     "name": "apply",
+                    "loc": {"offset": loc_offset},
                     "inner": [
                         {"kind": "TemplateTypeParmDecl", "name": "U"},
                         {"kind": "FunctionDecl", "name": "apply", "inner": []},
@@ -1177,7 +1190,7 @@ def _cross_class_member_template_ast() -> dict:
             "name": class_name,
             "inner": [
                 {"kind": "TemplateTypeParmDecl", "name": "T"},
-                {"kind": "CXXRecordDecl", "name": class_name},
+                {"kind": "CXXRecordDecl", "name": class_name, "inner": [pattern_apply]},
                 spec,
             ],
         }
@@ -1186,8 +1199,8 @@ def _cross_class_member_template_ast() -> dict:
         "kind": "NamespaceDecl",
         "name": "api",
         "inner": [
-            holder("Holder", "6HolderIiE"),
-            holder("Wrapper", "7WrapperIiE"),
+            holder("Holder", "6HolderIiE", 100),
+            holder("Wrapper", "7WrapperIiE", 200),
         ],
     }
     return {"kind": "TranslationUnitDecl", "inner": [ns]}
@@ -1305,6 +1318,115 @@ def test_member_template_in_explicit_specializations_does_not_collide_on_qname()
     augment_graph_with_templates(graph, out)
     tdecl_nodes = {n.id for n in graph.nodes if n.kind == NODE_TEMPLATE_DECL}
     assert len([n for n in tdecl_nodes if "::f" in n]) == 2  # not one shared node
+
+
+def test_explicit_instantiation_definition_member_still_shares_the_primary_decl() -> (
+    None
+):
+    """An *explicit instantiation definition* (``template struct
+    Holder<int>;`` -- forcing the primary pattern's own shared body without
+    writing a new one) detaches to a top-level sibling the *identical* way
+    an explicit *specialization*'s own independently-authored content does
+    (Codex review, second round, fresh evidence, empirically confirmed
+    against real clang AST output): an earlier revision decided bare-vs-
+    disambiguated scope from *where* a specialization was reached (nested
+    under its own ClassTemplateDecl vs. a detached top-level sibling), on
+    the assumption that only an explicit specialization detaches -- but a
+    real ``template struct Holder<int>;`` combined with an implicit
+    ``Holder<double>`` use produces exactly this shape too, and
+    ``Holder<int>::apply``'s member is the *same* declaration as
+    ``Holder<double>::apply``'s (``apply`` is written once, in the primary
+    pattern) -- wrongly disambiguating it split one shared declaration into
+    two. This module now decides from source identity (matching ``loc``
+    against the primary pattern's own member -- see
+    :func:`_primary_pattern_member_locs`) rather than structural position,
+    so both must still resolve to the same qname/template_decl."""
+    pattern_apply = {
+        "kind": "FunctionTemplateDecl",
+        "name": "apply",
+        "loc": {"offset": 100},
+        "inner": [{"kind": "TemplateTypeParmDecl", "name": "U"}],
+    }
+
+    def holder_member(mangled_prefix: str) -> dict:
+        return {
+            "kind": "FunctionTemplateDecl",
+            "name": "apply",
+            "loc": {"offset": 100},  # same source position as the pattern's own
+            "inner": [
+                {"kind": "TemplateTypeParmDecl", "name": "U"},
+                {"kind": "FunctionDecl", "name": "apply", "inner": []},
+                {
+                    "kind": "FunctionDecl",
+                    "name": "apply",
+                    "mangledName": f"_ZN6Holder{mangled_prefix}5applyI{mangled_prefix[1]}EET_S2_",
+                    "inner": [
+                        {"kind": "TemplateArgument", "type": {"qualType": "int"}}
+                    ],
+                },
+            ],
+        }
+
+    # The explicit-instantiation-definition Holder<int>: an empty stub
+    # nested under ClassTemplateDecl, full content (with the shared-loc
+    # apply member) detached to a top-level sibling.
+    int_stub = {
+        "id": "0xSPEC_INT",
+        "kind": "ClassTemplateSpecializationDecl",
+        "name": "Holder",
+    }
+    int_full = {
+        "id": "0xSPEC_INT",
+        "kind": "ClassTemplateSpecializationDecl",
+        "name": "Holder",
+        "completeDefinition": True,
+        "inner": [
+            {"kind": "TemplateArgument", "type": {"qualType": "int"}},
+            holder_member("IiE"),
+        ],
+    }
+    # The implicit Holder<double>: full content nested directly, same as
+    # any ordinary implicit instantiation.
+    double_full = {
+        "id": "0xSPEC_DOUBLE",
+        "kind": "ClassTemplateSpecializationDecl",
+        "name": "Holder",
+        "completeDefinition": True,
+        "inner": [
+            {"kind": "TemplateArgument", "type": {"qualType": "double"}},
+            holder_member("IdE"),
+        ],
+    }
+    ast = {
+        "kind": "TranslationUnitDecl",
+        "inner": [
+            {
+                "kind": "ClassTemplateDecl",
+                "name": "Holder",
+                "inner": [
+                    {"kind": "TemplateTypeParmDecl", "name": "T"},
+                    {
+                        "kind": "CXXRecordDecl",
+                        "name": "Holder",
+                        "inner": [pattern_apply],
+                    },
+                    int_stub,
+                    double_full,
+                ],
+            },
+            int_full,
+        ],
+    }
+    out = parse_clang_ast_templates(ast)
+    function_insts = [i for i in out if i.kind == "function"]
+    assert len(function_insts) == 2
+    qnames = {i.template_qname for i in function_insts}
+    assert qnames == {"Holder::apply"}  # shared, not split by detachment
+
+    graph = SourceGraphSummary()
+    augment_graph_with_templates(graph, out)
+    tdecl_nodes = {n.id for n in graph.nodes if n.kind == NODE_TEMPLATE_DECL}
+    assert len([n for n in tdecl_nodes if "apply" in n]) == 1  # one shared node
 
 
 # ── graph augmentation tests ─────────────────────────────────────────────────

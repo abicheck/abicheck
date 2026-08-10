@@ -196,6 +196,25 @@ def _parse_source_name_component(s: str, i: int) -> tuple[str | None, int]:
     if name is None:
         return None, i
     n = len(s)
+    # GNU ABI tags (`B<source-name>`, e.g. the libstdc++ `cxx11` tag, or a
+    # user `__attribute__((abi_tag(...)))`) attach to the unqualified name
+    # itself and are mangled *before* any template-argument list — verified
+    # against a real compiled `template <typename T> struct
+    # __attribute__((abi_tag("tag"))) C { C(); };` instantiated as `C<int>`:
+    # `nm`/`c++filt` show `_ZN1CB3tagIiEC1Ev` (Codex review, fresh
+    # evidence) -- name "C", then tag "B3tag", then template-args "IiE",
+    # not the reverse. Checking template-args first (the previous order)
+    # left a real ABI-tagged class template's own "IiE" unconsumed after
+    # the tag loop only found "B3tag" first, which made every caller of
+    # this component parser -- including :func:`itanium_scope_components`
+    # and :func:`itanium_ctor_dtor_marker_span` -- fail outright on this
+    # real, non-synthetic case instead of just mis-grouping it.
+    while i < n and s[i] == "B":
+        tag, j = _read_length_prefixed_name(s, i + 1)
+        if tag is None:
+            break
+        name = f"{name}B{tag}"
+        i = j
     # A directly-attached template-argument list belongs to this
     # component; keep it raw so Box<int> and Box<float> stay distinct.
     if i < n and s[i] == "I":
@@ -204,15 +223,6 @@ def _parse_source_name_component(s: str, i: int) -> tuple[str | None, int]:
             return None, i
         name = name + s[i:end]
         i = end
-    # GNU ABI tags (`B<source-name>`, e.g. the libstdc++ `cxx11` tag on
-    # std::string returns) are part of the unqualified-name identity;
-    # keep them so a tagged name groups with itself across overloads.
-    while i < n and s[i] == "B":
-        tag, j = _read_length_prefixed_name(s, i + 1)
-        if tag is None:
-            break
-        name = f"{name}B{tag}"
-        i = j
     return name, i
 
 
@@ -436,12 +446,15 @@ def itanium_ctor_dtor_marker_span(mangled: str) -> tuple[int, int] | None:
     genuinely different class ``C2Evil<int>``'s own real constructor
     mangling by coincidence -- a false positive, not merely a missed one.
 
-    *mangled* must already be Mach-O-normalized (no ``__Z`` double-
-    underscore prefix) by the caller: :func:`_itanium_strip_prefix`
-    strips that prefix on a *local* copy internally, and this function's
-    own offset arithmetic is relative to the *mangled* the caller passed
-    in, so an unnormalized ``__Z...`` input would misalign the returned
-    span by exactly one character.
+    *mangled* need not be pre-normalized for the Mach-O double-underscore
+    prefix -- :func:`_itanium_strip_prefix` strips it on its own local
+    variable only, never mutating the caller's *mangled*, and this
+    function's own offset arithmetic (``offset = len(mangled) -
+    len(s)``) is computed against that same untouched *mangled*, so the
+    returned span is correct relative to whatever prefix form the caller
+    passed in (confirmed empirically: ``__ZN1CC1Ev`` and ``_ZN1CC1Ev``
+    both locate the identical ``"C1"`` text within their own respective
+    strings).
 
     Returns ``None`` when *mangled* does not carry a ctor/dtor code this
     parser can locate (a plain function/operator, a non-Itanium or

@@ -408,6 +408,46 @@ def test_bsd_symdef_index() -> None:
     ]
 
 
+def test_bsd_symdef_unterminated_string_table_entry_is_skipped_not_accepted() -> None:
+    """Every real BSD/Mach-O ``__.SYMDEF`` string-table entry is
+    NUL-terminated, including the last one (confirmed against a real
+    ``llvm-ar --format=bsd``-produced archive's raw bytes) — a name with no
+    terminator within the declared string-table bounds means the table
+    itself is truncated or corrupted, not that this symbol's name
+    legitimately runs to the table's own end (Codex review, fresh
+    evidence: an earlier revision silently accepted the unterminated
+    remainder as a complete name instead of treating it as an
+    unresolvable, skippable entry the way every other malformed index
+    entry in this parser already degrades).
+    """
+    # "alpha" is well-formed (NUL-terminated); the second entry's declared
+    # bytes ("garbageNoNul") run to the string table's own declared end
+    # with no terminating NUL anywhere in them.
+    strtab = b"alpha\x00garbageNoNul"
+    a_data, b_data = b"OBJA", b"OBJB"
+    a_offset = len(ARCHIVE_MAGIC)
+    b_offset = a_offset + 60 + len(_pad(a_data))
+    entries = struct.pack("<II", 0, a_offset) + struct.pack(
+        "<II", len(b"alpha\x00"), b_offset
+    )
+    body = struct.pack("<I", 16) + entries + struct.pack("<I", len(strtab)) + strtab
+    data = (
+        ARCHIVE_MAGIC
+        + _header("a.o", len(a_data))
+        + _pad(a_data)
+        + _header("b.o", len(b_data))
+        + _pad(b_data)
+        + _header("__.SYMDEF", len(body))
+        + _pad(body)
+    )
+    contents = parse_ar_archive(BytesReader(data))
+    assert {m.name for m in contents.members} == {"a.o", "b.o"}
+    # Only the well-formed, NUL-terminated "alpha" entry resolves — the
+    # unterminated second entry is skipped rather than surfaced as a
+    # (corrupted) "garbageNoNul" symbol.
+    assert [(s.symbol, s.member) for s in contents.symbols] == [("alpha", "a.o")]
+
+
 def test_bsd_symdef_via_extended_name_is_recognized_as_index_not_a_member() -> None:
     """A real macOS ``ar``/``ranlib`` writes its ``__.SYMDEF SORTED`` index
     member's name via the BSD ``#1/<len>`` self-referential extended-name

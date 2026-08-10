@@ -460,3 +460,95 @@
   the same way a nested type argument already does
   (`_specialization_scope_name`), degrading to the bare name when those
   arguments aren't resolvable, this module's usual conservative fallback.
+
+  A seventeenth review round found the sixteenth round's own
+  `via_primary_template` fix was itself wrong, confirmed empirically
+  against real clang AST output: the flag was set from *structural
+  position* alone (reached directly from a `ClassTemplateDecl`'s own
+  children vs. reached from a detached top-level sibling), on the
+  assumption that only an explicit specialization ever detaches to a
+  top-level sibling. That assumption doesn't hold — an *explicit
+  instantiation definition* (`template struct Holder<int>;`, forcing
+  instantiation of the primary template's own shared member body, as
+  opposed to `template<> struct H<int> { ... };`, which writes an
+  independent body) detaches in the identical structural shape (empty stub
+  nested under the `ClassTemplateDecl`, full content a top-level sibling
+  sharing the stub's id) while its members remain the *same* declaration
+  as any other instantiation's. The position-only heuristic disambiguated
+  it anyway, wrongly splitting `Holder<int>::apply<int>` off from
+  `Holder<double>::apply<double>` (an ordinary implicit instantiation of
+  the same shared member) onto two different `template_decl` nodes instead
+  of keeping them merged. Fixed by replacing the structural-position
+  signal with a source-identity one: clang's AST `loc.offset` is identical
+  across every AST node that represents the same source declaration (a
+  copied/instantiated/shared member), and differs for one that was
+  independently written. `_walk_class_templates` now also records, per
+  class template, its primary pattern's own member function-templates'
+  `loc.offset` (`_primary_pattern_member_locs`); `_walk_function_templates`
+  compares each specialization's own member's `loc.offset` against that
+  recorded value — a match means "same declaration as the primary
+  pattern's", so the bare name is kept; a mismatch (or no recorded primary
+  member at all, the `H`/explicit-specialization case) means independently
+  authored content, so the specialization's own arguments disambiguate the
+  scope name as before. This subsumes the sixteenth round's fix rather
+  than special-casing on top of it: an explicit specialization's member
+  never shares the primary pattern's `loc`, so it still disambiguates,
+  while an explicit-instantiation-definition's member now correctly
+  doesn't.
+
+  An eighteenth round found and fixed two more real gaps, both in
+  `diff_cxx_rules.py`, plus one confirmed-false CodeRabbit docstring
+  finding. First, a genuine correctness bug shared by every caller of
+  `_parse_source_name_component` (`itanium_scope_components`,
+  `itanium_ctor_dtor_marker_span`, and therefore `owner_class_of` and
+  `template_graph._ctor_dtor_symbol_variants` transitively): the helper
+  checked for a directly-attached template-argument list (`I…E`) *before*
+  checking for a GNU ABI tag (`B<source-name>`), but real GCC mangles a
+  tagged, templated name in the opposite order -- name, then tag, then
+  template-args -- confirmed empirically by compiling `template
+  <typename T> struct __attribute__((abi_tag("tag"))) C { C(); ~C(); };`
+  instantiated as `C<int>` and reading its real symbols via `nm`/
+  `c++filt`: `_ZN1CB3tagIiEC1Ev`. Checking template-args first meant the
+  component parser stopped at the tag, left `"IiE"` completely
+  unconsumed, and every caller of it failed outright (returned `None`) on
+  this real, non-synthetic case -- not merely mis-grouped it. Fixed by
+  swapping the check order (tags before template-args), matching the real
+  mangling grammar. Second, the docstring on `itanium_ctor_dtor_marker_span`
+  claiming the caller must pre-normalize a Mach-O `__Z`-prefixed *mangled*
+  before calling (else the returned span misaligns by one character) was
+  itself wrong, confirmed empirically (CodeRabbit finding): the function's
+  offset arithmetic (`offset = len(mangled) - len(s)`) is computed against
+  the caller's own untouched `mangled` -- `_itanium_strip_prefix` only
+  reassigns its own local variable internally, never the caller's -- so
+  `__ZN1CC1Ev` and `_ZN1CC1Ev` both correctly locate their own `"C1"` text
+  today, no pre-normalization required. Corrected the docstring (and the
+  two matching, equally-wrong claims in `template_graph.py`'s
+  `_ctor_dtor_symbol_variants` docstring and the `_member_symbols` comment
+  that cited it) rather than the code, since the code was already correct.
+
+  A nineteenth round found and fixed one more real gap in
+  `archive_graph.py`, plus documented one confirmed-real, deliberately
+  deferred gap in `template_graph.py`. `_bsd_symbol_index` fell back to
+  `strings[str_off:]` (the string table's own remaining bytes) whenever a
+  symbol name's declared offset had no NUL terminator within the table —
+  silently accepting a truncated/corrupted run of bytes as a complete
+  symbol name instead of treating the missing terminator as the
+  corruption signal it is. Confirmed empirically against a real
+  `llvm-ar --format=bsd` archive's raw bytes that every string-table
+  entry, including the very last one, is genuinely NUL-terminated in a
+  well-formed archive — so a missing terminator is unambiguously
+  malformed, not a legitimate "runs to the end" case. Fixed to skip the
+  entry instead, matching this parser's existing policy of degrading an
+  individually-unresolvable entry rather than surfacing corrupted data
+  (Codex review, fresh evidence). Separately, confirmed and documented (not
+  fixed) that a polymorphic class template instantiation's vtable/typeinfo
+  symbols (`_ZTV`/`_ZTI`/`_ZTS`) are never AST decl children with their own
+  `mangledName` the way an ordinary member function is — they're
+  synthesized by codegen from the class's own identity — so
+  `_member_symbols`'s child-scanning walk structurally cannot discover
+  them regardless of which decl kinds it recognizes; a real fix needs both
+  a polymorphism/vague-linkage model this module doesn't have and a new
+  position-returning structural Itanium class-name splitter neither this
+  module nor `diff_cxx_rules.py` currently exposes — each its own scoped
+  follow-up, documented in the module's own docstring rather than
+  attempted as a drive-by extension here.

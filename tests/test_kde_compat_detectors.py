@@ -786,6 +786,22 @@ class TestItaniumScopeParser:
             # code -- the structural walk must skip that whole identifier as
             # one unit rather than pattern-matching into the middle of it.
             ("_ZN6C1EvilIiEC1Ev", "C1"),
+            # CodeRabbit nitpick: exercise the other real ctor/dtor codes
+            # (C2/C3/D0/D2), not just the C1/D1 clang always reports, and a
+            # Mach-O double-underscore-prefixed input -- confirmed these are
+            # the exact sibling spellings a real compiled object exports
+            # (buildsource.template_graph's own fourteenth review round).
+            ("_ZN1CC2Ev", "C2"),
+            ("_ZN1CC3Ev", "C3"),
+            ("_ZN1CD0Ev", "D0"),
+            ("_ZN1CD2Ev", "D2"),
+            ("__ZN1CC1Ev", "C1"),  # Mach-O double-underscore prefix
+            # ABI-tagged class template (Codex review, fresh evidence,
+            # confirmed via a real `g++ -c` of `template <typename T> struct
+            # __attribute__((abi_tag("tag"))) C { C(); };` instantiated as
+            # C<int>): the tag ("B3tag") mangles *before* the template-args
+            # ("IiE"), not after -- the real ctor code still follows both.
+            ("_ZN1CB3tagIiEC1Ev", "C1"),
         ],
     )
     def test_ctor_dtor_marker_span_locates_the_real_code(self, mangled, expected):
