@@ -378,16 +378,31 @@ def test_atomic_write_leaves_no_temp_file(tmp_path):
 
 
 @pytest.mark.skipif(os.name == "nt", reason="POSIX file mode semantics only")
-def test_new_file_gets_fixed_world_readable_mode_not_owner_only(tmp_path):
+def test_new_file_honors_umask_not_owner_only(tmp_path):
     """tempfile.mkstemp() always creates 0600; a snapshot write must not
-    silently make every new file owner-only -- it should land at a fixed,
-    world-readable 0o644 (Codex/CodeRabbit review: reading/restoring the
-    process umask to derive this would be a process-wide, non-thread-safe
-    operation, so a fixed mode is used instead of introspecting umask)."""
-    snap = _sample_snapshot()
-    p = tmp_path / "new.abicheck.json"
-    write_snapshot(snap, p)
-    assert oct(p.stat().st_mode & 0o777) == oct(0o644)
+    silently make every new file owner-only. It should also not ignore an
+    explicit, more restrictive umask by forcing a fixed mode (two rounds of
+    Codex/CodeRabbit review): the temp file is created via a direct
+    os.open(..., 0o666) so the kernel applies the *caller's* umask
+    atomically at creation time -- no process-wide os.umask() read/toggle
+    involved either way."""
+    old_umask = os.umask(0o022)
+    try:
+        snap = _sample_snapshot()
+        p = tmp_path / "new.abicheck.json"
+        write_snapshot(snap, p)
+        assert oct(p.stat().st_mode & 0o777) == oct(0o644)
+    finally:
+        os.umask(old_umask)
+
+    old_umask = os.umask(0o077)
+    try:
+        snap = _sample_snapshot()
+        p2 = tmp_path / "restrictive.abicheck.json"
+        write_snapshot(snap, p2)
+        assert oct(p2.stat().st_mode & 0o777) == oct(0o600)
+    finally:
+        os.umask(old_umask)
 
 
 @pytest.mark.skipif(os.name == "nt", reason="POSIX file mode semantics only")

@@ -36,7 +36,6 @@ import gzip
 import hashlib
 import io
 import os
-import tempfile
 from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
@@ -517,34 +516,50 @@ def encode_snapshot_bytes(
     raise SnapshotError(f"Cannot encode with compression={compression!r}")
 
 
+def _open_unique_temp(parent: Path, prefix: str, suffix: str) -> tuple[int, Path]:
+    """Atomically create a unique, exclusively-owned temp file in *parent*,
+    with mode ``0o666`` filtered through the process umask by the kernel at
+    creation time (``os.O_CREAT`` respects umask the same way a plain
+    ``open(path, "w")`` does) -- unlike :func:`tempfile.mkstemp`, which
+    hard-codes mode ``0o600`` regardless of umask specifically for its own
+    security stance, which is the wrong default for a file meant to become
+    a shared, group/world-readable snapshot. Retries on a name collision
+    (vanishingly unlikely with a 16-byte random suffix) rather than reusing
+    :func:`os.umask`'s read-zero-restore dance, which is process-wide and
+    not thread-safe (CodeRabbit review, citing CPython's own documented
+    caveat: a concurrent thread creating a file during that window could
+    observe the temporarily-zeroed umask)."""
+    import secrets
+
+    for _ in range(100):
+        candidate = parent / f"{prefix}{secrets.token_hex(8)}{suffix}"
+        try:
+            fd = os.open(candidate, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o666)
+            return fd, candidate
+        except FileExistsError:
+            continue
+    raise SnapshotError(f"Could not create a unique temp file in {parent}")
+
+
 def _atomic_write_bytes(data: bytes, path: Path) -> None:
     """Write *data* to *path* atomically: temp file in the same directory,
     flush, best-effort fsync, then os.replace(). Never leaves a partial file
     at *path* on failure, and cleans up its own temp file either way.
 
-    ``tempfile.mkstemp()`` always creates its temp file mode ``0600``
-    (owner-only) regardless of umask, and ``os.replace()`` carries that mode
-    over onto *path* verbatim — silently turning every snapshot write into
-    an owner-only file, including rewriting an existing world/group-readable
-    one, breaking a shared baseline directory or a consumer running under a
-    different account (Codex review, fresh evidence). Restored below: an
-    *existing* destination keeps its own current mode; a genuinely *new*
-    destination gets a fixed, world-readable ``0o644`` rather than a plain
-    ``open(path, "w")``'s umask-derived default -- reading the process
-    umask needs the read-zero-restore ``os.umask()`` dance, which is
-    process-wide and not thread-safe (CodeRabbit review, citing CPython's
-    own documented caveat): a concurrent thread creating a file during that
-    window could see the temporarily-zeroed umask and get an
-    unintentionally permissive file. A fixed mode for the new-file case
-    sidesteps that hazard entirely, at the cost of not honoring an
-    unusually restrictive umask (e.g. 0077) for a snapshot's first write --
-    an accepted trade-off given every other consumer of a *shared* baseline
-    file needs it group/world-readable anyway.
+    File mode (Codex/CodeRabbit review, two rounds): the temp file is
+    created via :func:`_open_unique_temp`, so a genuinely *new* destination
+    gets the normal umask-derived default -- honoring a caller's
+    restrictive umask (e.g. 0077) exactly like a plain ``open(path, "w")``
+    would, with no process-wide umask read/toggle involved. An *existing*
+    destination's mode is explicitly preserved across the rewrite (a single
+    ``os.chmod`` on our own just-created temp file -- not process-global,
+    not racy), so re-dumping a shared, group/world-readable baseline does
+    not silently strip its permissions down to whatever the current umask
+    happens to be.
     """
     parent = path.parent
     parent.mkdir(parents=True, exist_ok=True)
-    fd, tmp_name = tempfile.mkstemp(dir=parent, prefix=f".{path.name}.", suffix=".tmp")
-    tmp_path = Path(tmp_name)
+    fd, tmp_path = _open_unique_temp(parent, f".{path.name}.", ".tmp")
     try:
         with os.fdopen(fd, "wb") as f:
             f.write(data)
@@ -557,7 +572,8 @@ def _atomic_write_bytes(data: bytes, path: Path) -> None:
             existing_mode = path.stat().st_mode & 0o777
         except OSError:
             existing_mode = None
-        os.chmod(tmp_path, existing_mode if existing_mode is not None else 0o644)
+        if existing_mode is not None:
+            os.chmod(tmp_path, existing_mode)
         os.replace(tmp_path, path)
     except BaseException:
         try:
