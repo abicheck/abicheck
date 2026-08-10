@@ -115,6 +115,7 @@ Reusable workflow (`workflow_call`); wire it to a `release: types:
 | `build-info` | `''` | Path to a shared build/source facts pack, relative to the downloaded build-output artifact. |
 | `depth` | `''` | Evidence depth passed to every dump call. |
 | `validation` | `strict` | Forwarded to `actions/baseline`'s `validation` input. |
+| `snapshot-compression` | `none` | Forwarded to `actions/baseline`'s `snapshot-compression` input (ADR-059) — independent of this workflow's own `tar --zstd` packaging of the *whole* baseline-set directory; see [Storing Baselines](../use/baseline-storage.md#compressing-stored-snapshots). |
 
 Secret: `github-token` (optional) — falls back to the job's own
 `GITHUB_TOKEN` (`permissions: contents: write` on the `publish` job).
@@ -136,7 +137,7 @@ branch>]` trigger.
 | `build-output-artifact-prefix` | `abicheck-build-` | Same as above. |
 | `key-prefix` | `abicheck-baseline-main` | Actions-cache key prefix (§10). |
 | `head-sha` | `github.sha` | Recorded as `project-ref`; folded into the cache key. |
-| `build-info` / `depth` / `validation` | same as above | |
+| `build-info` / `depth` / `validation` / `snapshot-compression` | same as above | |
 
 ### Cache key contract (read before wiring a consumer)
 

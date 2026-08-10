@@ -6,6 +6,7 @@ audience:
 level: beginner
 summarizes:
   - baseline-lifecycle
+  - snapshot-storage-compression
 lifecycle: active
 generated: false
 ---
@@ -17,6 +18,28 @@ abicheck does not mandate where baselines are stored — it has no opinion on
 Baseline](create-baseline.md) produces. Choose the pattern below that fits
 your team. For what a baseline is and why you may need two of them, see
 [Baseline Management](baseline-management.md).
+
+## Compressing stored snapshots
+
+Every recipe below writes/reads a baseline as an `.abicheck.json` file, but
+that file may just as well be gzip- or zstd-compressed on disk
+(`.abicheck.json.gz`/`.abicheck.json.zst`) — every abicheck entry point
+(`dump`, `compare`, `scan --against`, the `abicheck/abicheck` Action, and
+`actions/baseline`) detects the encoding transparently from magic bytes, not
+the filename, so a compressed baseline is a drop-in replacement for a plain
+one everywhere on this page. It's a pure storage/transport envelope around
+identical JSON content — see [Snapshot Format's storage encoding
+section](../reference/snapshot-format.md#storage-encoding-adr-059) for the
+format details and the file suffix each encoding canonically uses.
+
+Recipe C (Actions Cache) and Recipe D (an external artifact store) are where
+compression pays for itself most directly — smaller cache entries and
+smaller transferred objects — since neither one already compresses the
+asset the way Recipe A's release upload or Recipe A2's `tar --zstd`
+packaging step does. Request it with `dump`'s `--compression {gzip,zstd}`
+(CLI) or the Action's `snapshot-compression` input, and give the output
+file a matching canonical suffix so every later reader's own suffix checks
+(where applicable) agree with what's actually on disk.
 
 ## Recipe A: GitHub Releases (Recommended)
 
