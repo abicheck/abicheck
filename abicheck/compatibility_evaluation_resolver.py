@@ -289,7 +289,36 @@ def resolve_field(
         )
 
     all_candidates = (*candidates, default)
+    _reject_unresolvable_candidates(
+        field_name, all_candidates, allow_run_profile=allow_run_profile
+    )
+    shadowed_legacy = _shadowed_legacy_candidate(
+        field_name,
+        all_candidates,
+        require_legacy_alias_agreement=require_legacy_alias_agreement,
+    )
+    winner = _winning_candidate(field_name, all_candidates)
+    provenance = winner.provenance
+    if shadowed_legacy is not None:
+        provenance = dataclasses.replace(
+            provenance, shadowed_legacy=shadowed_legacy.provenance
+        )
+    return winner.value, provenance
 
+
+def _reject_unresolvable_candidates(
+    field_name: str,
+    all_candidates: Sequence[FieldCandidate],
+    *,
+    allow_run_profile: bool,
+) -> None:
+    """Reject a candidate this resolver cannot place, before any tier runs.
+
+    Two distinct failures, both plain ``ValueError`` rather than a D7 usage
+    error: a layer no ``_PRECEDENCE_TIERS`` entry covers (a resolver/enum
+    mismatch that would otherwise silently drop the candidate), and a
+    ``RUN_PROFILE`` candidate for a field that did not opt in.
+    """
     for candidate in all_candidates:
         if candidate.layer not in _KNOWN_LAYERS:
             # `.name` assumes a real (or duck-typed enum-shaped) layer --
@@ -318,38 +347,66 @@ def resolve_field(
                 "pass allow_run_profile=True when resolving one of those"
             )
 
+
+def _shadowed_legacy_candidate(
+    field_name: str,
+    all_candidates: Sequence[FieldCandidate],
+    *,
+    require_legacy_alias_agreement: bool,
+) -> FieldCandidate | None:
+    """The legacy-alias candidate an explicit value overrides, if any.
+
+    Raises :class:`LegacyAliasConflictError` when an explicit CLI/API value
+    disagrees with a legacy-alias value for the same field, unless
+    *require_legacy_alias_agreement* is ``False`` (the documented
+    ``--policy``/``--policy-file`` exception, D7) -- in which case the
+    suppressed legacy candidate is returned so the winner's provenance can
+    record it for audit/replay.
+    """
     explicit_candidates = [c for c in all_candidates if c.layer in _EXPLICIT_LAYERS]
     legacy_candidates = [
         c for c in all_candidates if c.layer is SelectorLayer.LEGACY_ALIAS
     ]
-    shadowed_legacy: FieldCandidate | None = None
-    if explicit_candidates and legacy_candidates:
-        # Same runtime-type-blind collision _value_identity_key documents
-        # for the same-tier/pack-conflict checks: if the explicit candidate
-        # itself carries an unnormalized raw value equal to a typed legacy
-        # candidate (e.g. explicit="public" vs. legacy=ContractMode.PUBLIC),
-        # plain equality treated that as agreement, and the winner-selection
-        # loop below then returns the explicit tier's own value verbatim --
-        # the malformed raw string -- since EXPLICIT_CLI always wins
-        # precedence regardless of this check. Comparing type-aware here
-        # instead surfaces that malformed explicit input as the intended
-        # LegacyAliasConflictError (Codex review, fresh evidence: this
-        # module's front ends are documented to construct FieldCandidate
-        # from already-normalized values, so a raw spelling reaching here
-        # is itself the adapter bug this check exists to catch).
-        explicit_values = {_value_identity_key(c.value) for c in explicit_candidates}
-        legacy_values = {_value_identity_key(c.value) for c in legacy_candidates}
-        if (
-            len(explicit_values) == 1
-            and len(legacy_values) == 1
-            and explicit_values != legacy_values
-        ):
-            if require_legacy_alias_agreement:
-                raise LegacyAliasConflictError(
-                    field_name, explicit_candidates[0], legacy_candidates[0]
-                )
-            shadowed_legacy = legacy_candidates[0]
+    if not (explicit_candidates and legacy_candidates):
+        return None
+    # Same runtime-type-blind collision _value_identity_key documents
+    # for the same-tier/pack-conflict checks: if the explicit candidate
+    # itself carries an unnormalized raw value equal to a typed legacy
+    # candidate (e.g. explicit="public" vs. legacy=ContractMode.PUBLIC),
+    # plain equality treated that as agreement, and the winner-selection
+    # loop below then returns the explicit tier's own value verbatim --
+    # the malformed raw string -- since EXPLICIT_CLI always wins
+    # precedence regardless of this check. Comparing type-aware here
+    # instead surfaces that malformed explicit input as the intended
+    # LegacyAliasConflictError (Codex review, fresh evidence: this
+    # module's front ends are documented to construct FieldCandidate
+    # from already-normalized values, so a raw spelling reaching here
+    # is itself the adapter bug this check exists to catch).
+    explicit_values = {_value_identity_key(c.value) for c in explicit_candidates}
+    legacy_values = {_value_identity_key(c.value) for c in legacy_candidates}
+    if (
+        len(explicit_values) == 1
+        and len(legacy_values) == 1
+        and explicit_values != legacy_values
+    ):
+        if require_legacy_alias_agreement:
+            raise LegacyAliasConflictError(
+                field_name, explicit_candidates[0], legacy_candidates[0]
+            )
+        return legacy_candidates[0]
+    return None
 
+
+def _winning_candidate(
+    field_name: str, all_candidates: Sequence[FieldCandidate]
+) -> FieldCandidate:
+    """The highest-precedence candidate, after checking every populated tier.
+
+    ADR-049 D7's "contradictory values at the same selector layer are usage
+    errors" is not scoped to only the winning tier: a shadowed layer's
+    internal conflict must still be caught now, not silently exposed later if
+    the higher-precedence override is ever removed.
+    """
     winner: FieldCandidate | None = None
     for tier in _PRECEDENCE_TIERS:
         tier_candidates = [c for c in all_candidates if c.layer in tier]
@@ -364,17 +421,11 @@ def resolve_field(
         if winner is None:
             winner = tier_candidates[0]
 
-    if winner is not None:
-        provenance = winner.provenance
-        if shadowed_legacy is not None:
-            provenance = dataclasses.replace(
-                provenance, shadowed_legacy=shadowed_legacy.provenance
-            )
-        return winner.value, provenance
-
-    raise AssertionError(  # pragma: no cover - default always matches a tier
-        f"{field_name}: no candidate matched any precedence tier"
-    )
+    if winner is None:
+        raise AssertionError(  # pragma: no cover - default always matches a tier
+            f"{field_name}: no candidate matched any precedence tier"
+        )
+    return winner
 
 
 class PackConflictError(ValueError):
@@ -432,6 +483,37 @@ def detect_pack_conflicts(
     conflict is detected first never depends on ``pack_assignments`` input
     order ("pack order never decides semantics").
     """
+    _validate_explicit_overrides(explicit_overrides)
+    by_field = _collect_pack_assignments(pack_assignments)
+
+    for field_name in sorted(by_field):
+        if field_name in explicit_overrides:
+            continue
+        contributors = by_field[field_name]
+        # Same runtime-type-blind collision _value_identity_key documents
+        # for resolve_field's tier/legacy-alias comparisons: a plain
+        # `{value for _, value in contributors}` would treat
+        # ContractMode.PUBLIC and the raw string "public" as one value
+        # (ContractMode subclasses str, so they hash/compare equal),
+        # silently picking whichever pack happened to be sorted first
+        # instead of flagging the genuine pack-vs-pack disagreement.
+        if len({_value_identity_key(value) for _, value in contributors}) > 1:
+            raise PackConflictError(field_name, contributors)
+
+
+def _validate_explicit_overrides(
+    explicit_overrides: Mapping[str, Hashable],
+) -> None:
+    """Reject an ``explicit_overrides`` mapping this function cannot trust.
+
+    Three separate annotation-isn't-runtime-enforced gaps, each found
+    independently (Codex review): the collection shape, its key types, and
+    its value hashability. All three matter because the only use downstream
+    is a key-only ``field_name in explicit_overrides`` membership test, which
+    silently succeeds on a list, on non-``str`` keys, and on an unhashable
+    value -- each of which would exempt a field from conflict detection
+    without any real override ever having been supplied.
+    """
     # The `Mapping[str, Hashable]` annotation isn't runtime-enforced -- an
     # untyped pack adapter passing a plain collection (e.g.
     # explicit_overrides=["exit_code_scheme"]) was previously accepted
@@ -478,6 +560,20 @@ def detect_pack_conflicts(
                 f"{override_field_name!r} must be hashable, not "
                 f"{override_value!r} ({exc})."
             ) from exc
+
+
+def _collect_pack_assignments(
+    pack_assignments: Sequence[tuple[ImmutableIdentity, Mapping[str, Hashable]]],
+) -> dict[str, list[tuple[ImmutableIdentity, Hashable]]]:
+    """Group every selected pack's assignments by field name, validating each.
+
+    Same class of guard as :func:`_validate_explicit_overrides`, applied to the
+    pack side: an untyped pack-manifest adapter supplying a bare identity, a
+    non-mapping assignment block, a non-``str`` field key, or an unhashable
+    value would otherwise crash later with an uncontextualized ``AttributeError``
+    / ``TypeError`` instead of the deliberate configuration error naming the
+    pack and field responsible (Codex review, four rounds).
+    """
     by_field: dict[str, list[tuple[ImmutableIdentity, Hashable]]] = {}
     for identity, assignments in pack_assignments:
         # A future untyped pack-manifest adapter supplying a bare/decoded
@@ -505,47 +601,41 @@ def detect_pack_conflicts(
                 f"{identity!r})."
             )
         for field_name, value in assignments.items():
-            # A non-str field/ChangeKind-slug key (e.g. an untyped pack
-            # adapter supplying {2: "legacy"}) previously reached
-            # sorted(by_field) unvalidated below, crashing with "TypeError:
-            # '<' not supported between instances of 'int' and 'str'"
-            # instead of the deliberate PackConflictError this function
-            # exists to raise (Codex review).
-            if not isinstance(field_name, str):
-                raise TypeError(
-                    "detect_pack_conflicts: every assignment key must be a "
-                    f"str, not {field_name!r} (from pack {identity!r})."
-                )
-            # An untyped pack adapter supplying a decoded collection-valued
-            # assignment (e.g. {"contract.overlays": ["api"]}) previously
-            # reached the `{value for _, value in contributors}` set
-            # comprehension below unvalidated, crashing with an
-            # uncontextualized "TypeError: unhashable type: 'list'" instead
-            # of a message identifying which pack/field caused it --
-            # FieldCandidate.__post_init__ guards this same
-            # annotation-isn't-runtime-enforced gap for individual
-            # candidates, but this separate pack-conflict path wasn't
-            # covered (Codex review).
-            try:
-                hash(value)
-            except TypeError as exc:
-                raise TypeError(
-                    "detect_pack_conflicts: assignment value for field "
-                    f"{field_name!r} from pack {identity!r} must be "
-                    f"hashable, not {value!r} ({exc})."
-                ) from exc
+            _reject_invalid_assignment(identity, field_name, value)
             by_field.setdefault(field_name, []).append((identity, value))
+    return by_field
 
-    for field_name in sorted(by_field):
-        if field_name in explicit_overrides:
-            continue
-        contributors = by_field[field_name]
-        # Same runtime-type-blind collision _value_identity_key documents
-        # for resolve_field's tier/legacy-alias comparisons: a plain
-        # `{value for _, value in contributors}` would treat
-        # ContractMode.PUBLIC and the raw string "public" as one value
-        # (ContractMode subclasses str, so they hash/compare equal),
-        # silently picking whichever pack happened to be sorted first
-        # instead of flagging the genuine pack-vs-pack disagreement.
-        if len({_value_identity_key(value) for _, value in contributors}) > 1:
-            raise PackConflictError(field_name, contributors)
+
+def _reject_invalid_assignment(
+    identity: ImmutableIdentity, field_name: object, value: object
+) -> None:
+    """Reject one pack assignment entry this function cannot group or compare."""
+    # A non-str field/ChangeKind-slug key (e.g. an untyped pack
+    # adapter supplying {2: "legacy"}) previously reached
+    # sorted(by_field) unvalidated below, crashing with "TypeError:
+    # '<' not supported between instances of 'int' and 'str'"
+    # instead of the deliberate PackConflictError this function
+    # exists to raise (Codex review).
+    if not isinstance(field_name, str):
+        raise TypeError(
+            "detect_pack_conflicts: every assignment key must be a "
+            f"str, not {field_name!r} (from pack {identity!r})."
+        )
+    # An untyped pack adapter supplying a decoded collection-valued
+    # assignment (e.g. {"contract.overlays": ["api"]}) previously
+    # reached the `{value for _, value in contributors}` set
+    # comprehension below unvalidated, crashing with an
+    # uncontextualized "TypeError: unhashable type: 'list'" instead
+    # of a message identifying which pack/field caused it --
+    # FieldCandidate.__post_init__ guards this same
+    # annotation-isn't-runtime-enforced gap for individual
+    # candidates, but this separate pack-conflict path wasn't
+    # covered (Codex review).
+    try:
+        hash(value)
+    except TypeError as exc:
+        raise TypeError(
+            "detect_pack_conflicts: assignment value for field "
+            f"{field_name!r} from pack {identity!r} must be "
+            f"hashable, not {value!r} ({exc})."
+        ) from exc
