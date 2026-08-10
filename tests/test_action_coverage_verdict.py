@@ -345,6 +345,98 @@ class TestCompareTellsTheTwoAxesApart:
             bindir,
         )
 
+    def _scan_outputs(self, tmp_path: Path, report: dict, exit_code: int = 1) -> dict:
+        bindir = _stub_abicheck(tmp_path, exit_code=exit_code, report=report)
+        return _run_action(
+            tmp_path,
+            {
+                "INPUT_MODE": "scan",
+                "INPUT_NEW_LIBRARY": _lib(tmp_path, "libnew.so"),
+                "INPUT_FORMAT": "json",
+                "INPUT_OUTPUT_FILE": str(tmp_path / "report.json"),
+            },
+            bindir,
+        )
+
+    def test_a_scan_severity_gate_is_not_an_operational_error(
+        self, tmp_path: Path
+    ) -> None:
+        """Codex review: the scan branch reasoned that "scan's own verdict
+        codes are 0/2/4/5, so 1 can only come from the contract-coverage
+        axis". A severity-scheme `scan --against` gates natively at 1 on an
+        error-level addition, so that published ERROR -- an operational
+        failure -- for a severity-policy result.
+        """
+        outputs = self._scan_outputs(
+            tmp_path,
+            {
+                "verdict": "COMPATIBLE",
+                "exit_code": 1,
+                "diff": {
+                    "severity": {
+                        "exit_code": 1,
+                        "blocking": True,
+                        "blocking_categories": ["addition"],
+                    }
+                },
+            },
+        )
+        assert outputs["verdict"] == "SEVERITY_ERROR", outputs
+
+    def test_a_scan_severity_gate_survives_a_coincident_coverage_failure(
+        self, tmp_path: Path
+    ) -> None:
+        """The other half: with coverage also contributing 1, the old branch
+        reported only COVERAGE_INCOMPLETE and lost the blocking severity gate.
+        """
+        outputs = self._scan_outputs(
+            tmp_path,
+            {
+                "verdict": "COMPATIBLE",
+                "exit_code": 1,
+                "diff": {
+                    "severity": {
+                        "exit_code": 1,
+                        "blocking": True,
+                        "blocking_categories": ["addition"],
+                    },
+                    "contract_coverage_exit_contribution": 1,
+                    "contract_coverage_failures": [COVERAGE_FAILURE],
+                },
+            },
+        )
+        assert outputs["verdict"] == "SEVERITY_ERROR", outputs
+        assert "also reports incomplete contract coverage" in outputs["_stdout"]
+
+    def test_a_scan_coverage_only_exit_is_unchanged(self, tmp_path: Path) -> None:
+        """The pre-existing behaviour must survive: a legacy-scheme scan
+        publishes no `severity` block, so coverage alone still reads as
+        COVERAGE_INCOMPLETE rather than being promoted to a severity failure.
+        """
+        outputs = self._scan_outputs(
+            tmp_path,
+            {
+                "verdict": "COMPATIBLE",
+                "exit_code": 1,
+                "diff": {
+                    "contract_coverage_exit_contribution": 1,
+                    "contract_coverage_failures": [COVERAGE_FAILURE],
+                },
+            },
+        )
+        assert outputs["verdict"] == "COVERAGE_INCOMPLETE", outputs
+
+    def test_a_scan_exit_one_with_neither_signal_stays_an_error(
+        self, tmp_path: Path
+    ) -> None:
+        """A crash also exits 1. With no severity gate and no coverage
+        contribution to attribute it to, it must stay ERROR.
+        """
+        outputs = self._scan_outputs(
+            tmp_path, {"verdict": "COMPATIBLE", "exit_code": 1, "diff": {}}
+        )
+        assert outputs["verdict"] == "ERROR", outputs
+
     def test_coverage_alone_is_not_a_severity_failure(self, tmp_path: Path) -> None:
         outputs = self._compare_outputs(
             tmp_path, _report(coverage=1, severity_exit=0)

@@ -862,7 +862,13 @@ def _either(key, default):
 
 
 def _severity():
+    # Compare keeps its gate at the document root; a severity-scheme
+    # `scan --against` nests it under `diff` (scan schema 1.9+), exactly
+    # as it nests the coverage ledger `_either` already reaches for. Root
+    # first so a compare report is unaffected.
     block = report.get("severity")
+    if not isinstance(block, dict):
+        block = nested.get("severity")
     return block if isinstance(block, dict) else {}
 
 
@@ -870,10 +876,11 @@ query = sys.argv[2]
 if query == "coverage_contribution":
     print(_either("contract_coverage_exit_contribution", 0))
 elif query == "severity_exit":
-    # An absent `severity` block is the legacy scheme, whose compare exit
-    # codes are 0/2/4 and never 1 -- so the compatibility axis contributed 0
-    # by construction. Only an unreadable report is "cannot tell", and that
-    # exits above without printing.
+    # An absent `severity` block is the legacy scheme, whose exit codes are
+    # 0/2/4 for compare and 0/2/4/5/6 for scan -- never 1 either way -- so
+    # the compatibility axis contributed 0 by construction. Only an
+    # unreadable report is "cannot tell", and that exits above without
+    # printing.
     print(_severity().get("exit_code", 0))
 elif query == "blocking_categories":
     print(", ".join(str(c) for c in (_severity().get("blocking_categories") or [])))
@@ -990,8 +997,10 @@ elif [[ "$MODE" == "dump" ]]; then
   fi
 
 elif [[ "$MODE" == "scan" ]]; then
-  # scan exit codes: 0=compatible/advisory, 2=API break, 4=ABI break,
-  # 5=budget overflow. Click usage errors also use exit 2 — distinguish via stderr.
+  # scan exit codes: 0=compatible/advisory, 1=severity error or incomplete
+  # contract coverage (see below), 2=API break, 4=ABI break, 5=budget
+  # overflow, 6=not_comparable. Click usage errors also use exit 2 —
+  # distinguish via stderr.
   if [[ $ABICHECK_EXIT -eq 2 ]] && echo "$STDERR_CONTENT" | grep -qE '(^Usage:|^Error:|^Try )'; then
     VERDICT="ERROR"
     echo "::error::abicheck scan failed due to a CLI argument or configuration error (exit code 2)."
@@ -1000,17 +1009,32 @@ elif [[ "$MODE" == "scan" ]]; then
     case $ABICHECK_EXIT in
       0) VERDICT="COMPATIBLE" ;;
       1)
-        # `scan`'s own verdict codes are 0/2/4/5, so 1 can only come from the
-        # orthogonal contract-coverage axis — but only claim that when the run
-        # actually says so, since a crash also exits 1 and must stay ERROR.
-        if _coverage_gated; then
+        # `scan` exit 1 now has three possible sources, not one. It used to
+        # be coverage-only ("scan's own verdict codes are 0/2/4/5, so 1 can
+        # only come from the orthogonal contract-coverage axis"), but a
+        # severity-scheme `scan --against` gates natively at 1 on an
+        # error-level addition/quality finding — so that reasoning would
+        # publish ERROR for a severity-policy result, or drop the severity
+        # gate when coverage happened to contribute too (Codex review).
+        # A crash also exits 1 and must still stay ERROR.
+        #
+        # Resolved the same way, and in the same order, as the compare branch
+        # below: the report's pre-fold `severity.exit_code` tells the axes
+        # apart rather than a guess.
+        _sev_exit=$(_severity_gate_exit)
+        if _is_cli_error; then
+          VERDICT="ERROR"
+          echo "::error::abicheck scan failed due to a CLI error (exit code 1)."
+        elif [[ "$_sev_exit" != "0" && -n "$_sev_exit" ]]; then
+          VERDICT="SEVERITY_ERROR"
+          if _coverage_gated; then
+            echo "::warning::abicheck scan also reports incomplete contract coverage for the selected --contract domain; see contract_coverage_failures in the JSON report."
+          fi
+        elif _coverage_gated; then
           VERDICT="COVERAGE_INCOMPLETE"
           echo "::warning::abicheck scan could not close the selected contract domain on the available evidence (exit code 1). This is NOT an ABI or API break — the compatibility verdict is unchanged; the contract-coverage axis is reporting that part of the surface could not be checked."
         else
           VERDICT="ERROR"
-          if _is_cli_error; then
-            echo "::error::abicheck scan failed due to a CLI error (exit code 1)."
-          fi
         fi
         ;;
       2) VERDICT="API_BREAK" ;;
