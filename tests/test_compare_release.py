@@ -114,6 +114,23 @@ class TestCanonicalLibraryKey:
     def test_dll(self, tmp_path: Path) -> None:
         assert _canonical_library_key(Path("libfoo.dll")) == "libfoo.dll"
 
+    def test_compressed_snapshot_matches_plain(self, tmp_path: Path) -> None:
+        # Codex review, PR #699: a compressed snapshot (ADR-059) must key-match
+        # the same release's plain JSON -- the storage envelope is not part of
+        # the release identity, so switching only the compression must not
+        # turn a matched pair into an unrelated removal+addition.
+        plain = _canonical_library_key(Path("libfoo.abicheck.json"))
+        gz = _canonical_library_key(Path("libfoo.abicheck.json.gz"))
+        zst = _canonical_library_key(Path("libfoo.abicheck.json.zst"))
+        assert plain == gz == zst == "libfoo.abicheck.json"
+
+    def test_compressed_snapshot_with_so_version(self, tmp_path: Path) -> None:
+        assert (
+            _canonical_library_key(Path("libfoo.so.1.2.zst"))
+            == _canonical_library_key(Path("libfoo.so.1.2"))
+            == "libfoo.so"
+        )
+
 
 class TestStripVendorHash:
     """G9: auditwheel/delocate rewrite vendored libs to lib<name>-<hash>.so.<ver>,

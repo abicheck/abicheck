@@ -173,8 +173,25 @@ def _canonical_library_key(path: Path) -> str:
     can use it without a ``bundle -> cli_helpers_compare -> service ->
     service_scan -> bundle`` import cycle (`service_scan.py` imports `bundle`
     for the ``--artifact-set`` audit path).
+
+    A compressed snapshot's storage suffix (``.json.gz``/``.json.zst``, ADR-059)
+    is stripped first, same as the vendor hash: the storage envelope is not
+    part of a release's identity, so an old release publishing
+    ``libfoo.abicheck.json`` and a new release publishing the identical
+    snapshot as ``libfoo.abicheck.json.gz`` must still key-match as the same
+    library rather than surfacing as an unrelated removal+addition pair.
     """
+    from .snapshot_io import _COMPRESSED_SUFFIXES
+
     lower = strip_vendor_hash(path.name.lower())
+    for suffix, _compression in _COMPRESSED_SUFFIXES:
+        if lower.endswith(suffix):
+            # Strip only the compression extension (".gz"/".zst"), keeping the
+            # ".json" so a compressed and an uncompressed snapshot of the same
+            # release still reduce to the same key.
+            trailing_ext = suffix[len(".json") :]
+            lower = lower[: -len(trailing_ext)]
+            break
     m = re.search(r"\.so(?:\.|$)", lower)
     if m:
         return lower[: m.start() + 3]

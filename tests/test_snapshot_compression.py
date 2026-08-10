@@ -310,6 +310,42 @@ def test_plain_snapshot_overflow(tmp_path):
         read_snapshot_bytes(p, max_decoded_bytes=100)
 
 
+def test_zstd_max_window_size_is_kibibytes_not_bytes():
+    """Codex review, PR #699: python-zstandard's ``ZstdDecompressor(
+    max_window_size=...)`` takes its argument in *kibibytes*, confirmed
+    against its own docstring -- passing a raw byte count (as an earlier
+    version of this module did) silently permitted a window 1024x larger
+    than the documented "2 GiB window ceiling" (effectively ~2 TiB)."""
+    from abicheck.snapshot_io import _ZSTD_MAX_WINDOW_LOG, _ZSTD_MAX_WINDOW_SIZE_KIB
+
+    intended_byte_ceiling = 1 << _ZSTD_MAX_WINDOW_LOG
+    assert _ZSTD_MAX_WINDOW_SIZE_KIB * 1024 == intended_byte_ceiling
+    assert intended_byte_ceiling == 2 * 1024 * 1024 * 1024  # 2 GiB, per the comment
+
+
+def test_zstd_decoder_rejects_window_above_ceiling(tmp_path):
+    """The *effective* max_window_size passed to python-zstandard's
+    ZstdDecompressor must actually cap accepted windows at the ceiling --
+    not silently allow an oversized one because of a unit-conversion bug.
+    zstd's own ZSTD_WINDOWLOG_MAX is 31 (2 GiB) on a 64-bit build, i.e.
+    exactly this module's ceiling, so a legitimate max-size frame (window_log
+    31) must still decode successfully with the fixed KiB-denominated value
+    -- if the conversion silently permitted a *smaller* effective window than
+    intended, this would fail instead."""
+    zstandard = pytest.importorskip("zstandard")
+
+    params = zstandard.ZstdCompressionParameters(window_log=31)
+    cctx = zstandard.ZstdCompressor(compression_params=params)
+    compressed = cctx.compress(b"a" * (1 << 20))
+    p = tmp_path / "max_window.abicheck.json.zst"
+    p.write_bytes(compressed)
+    # Not real JSON, so it'll fail JSON parsing downstream, but the
+    # decompression step itself (the thing max_window_size gates) must
+    # succeed rather than raising "too much memory" for a legitimate,
+    # at-the-ceiling window.
+    read_snapshot_bytes(p)
+
+
 def test_oversized_stored_file_rejected_before_full_read(tmp_path):
     """CodeRabbit review: the stored-file-size check (via stat(), before
     read_bytes()) must reject a file whose *stored* size alone already
