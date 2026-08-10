@@ -57,6 +57,18 @@ on:
         description: 'Forwarded to actions/baseline''s validation input (strict or none).'
         type: string
         default: 'strict'
+      snapshot-compression:
+        description: >-
+          Forwarded to actions/baseline's snapshot-compression input
+          (none/gzip/zstd, ADR-059). Independent of this workflow's own
+          outer `tar --zstd` packaging step below: that step archives the
+          whole baseline-set directory into one release asset regardless
+          of this setting, so 'none' (default) is normally sufficient --
+          set this only when a consumer of the *extracted* baseline-set
+          (not the published archive) benefits from each snapshot already
+          being individually compressed.
+        type: string
+        default: 'none'
       python-version:
         description: 'Python version for setup-python, every job.'
         type: string
@@ -264,6 +276,7 @@ jobs:
           build-info: ${{ inputs.build-info != '' && format('build-output/{0}/{1}', matrix.profile_id, inputs.build-info) || '' }}
           depth: ${{ inputs.depth }}
           validation: ${{ inputs.validation }}
+          snapshot-compression: ${{ inputs.snapshot-compression }}
           python-version: ${{ inputs.python-version }}
           install-deps: ${{ inputs.install-deps }}
 
