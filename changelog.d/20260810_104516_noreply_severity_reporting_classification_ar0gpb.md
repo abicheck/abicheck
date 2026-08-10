@@ -36,4 +36,7 @@
   `format: text` is the documented default and `scan` writes no JSON sidecar,
   so the verdict mapping had nothing to read and published `ERROR` (an
   operational failure) for a severity-policy result. It now falls back to the
-  gate line the CLI prints on that path.
+  gate line the CLI prints on that path — read from the output file as well
+  as stdout — and a severity category configured as `error` now fails the
+  step whatever exit code it produced, instead of `potential_breaking=error`
+  (exit 2) being waved through by `fail-on-api-break`'s `false` default.

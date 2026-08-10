@@ -460,6 +460,49 @@ class TestCompareTellsTheTwoAxesApart:
         )
         assert outputs["verdict"] == "SEVERITY_ERROR", outputs
 
+    def _text_stub(self, tmp_path: Path, text: str, exit_code: int, to_file: bool):
+        bindir = tmp_path / "bin"
+        bindir.mkdir()
+        stub = bindir / "abicheck"
+        body = "#!/usr/bin/env bash\n"
+        if to_file:
+            body += (
+                "prev=''\nfor arg in \"$@\"; do\n"
+                '  if [[ "$prev" == "-o" ]]; then printf %s '
+                + json.dumps(text)
+                + ' > "$arg"; fi\n  prev="$arg"\ndone\n'
+            )
+        else:
+            body += "printf '%s' " + json.dumps(text) + "\n"
+        stub.write_text(body + f"exit {exit_code}\n", encoding="utf-8")
+        stub.chmod(0o755)
+        return bindir
+
+    def test_a_text_report_written_to_a_file_is_still_read(
+        self, tmp_path: Path
+    ) -> None:
+        """`format: text` with `output-file` leaves stdout empty, so a
+        stdout-only search published ERROR for a severity-policy result --
+        the same defect as the JSON-only search before it (Codex review).
+        """
+        text = (
+            "Baseline comparison\n"
+            "  severity gate: exit 1 \u2014 blocking: addition\n\n"
+            "Verdict: COMPATIBLE\n"
+        )
+        bindir = self._text_stub(tmp_path, text, 1, to_file=True)
+        outputs = _run_action(
+            tmp_path,
+            {
+                "INPUT_MODE": "scan",
+                "INPUT_NEW_LIBRARY": _lib(tmp_path, "libnew.so"),
+                "INPUT_FORMAT": "text",
+                "INPUT_OUTPUT_FILE": str(tmp_path / "report.txt"),
+            },
+            bindir,
+        )
+        assert outputs["verdict"] == "SEVERITY_ERROR", outputs
+
     def test_a_scan_exit_one_with_neither_signal_stays_an_error(
         self, tmp_path: Path
     ) -> None:

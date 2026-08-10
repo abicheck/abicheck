@@ -965,14 +965,39 @@ _severity_gate_exit() {
   fi
   # `severity gate: exit N — blocking: <categories>`
   sed -n 's/.*severity gate: exit \([0-9][0-9]*\).*blocking:.*/\1/p' \
-    <<<"${ABICHECK_OUTPUT:-}" | head -1
+    <<<"$(_text_report_content)" | head -1
 }
 
-# The blocking categories named on the same text line, for the job summary.
-_severity_gate_categories_text() {
-  sed -n 's/.*severity gate: exit [0-9][0-9]* — blocking: \(.*\)$/\1/p' \
-    <<<"${ABICHECK_OUTPUT:-}" | head -1
+# The text report, wherever this invocation put it. `format: text` with an
+# `output-file` writes the report to that file and leaves stdout empty, so a
+# stdout-only search still published ERROR for a severity-policy result
+# (Codex review) -- the same defect as the JSON-only search before it, one
+# level down.
+_text_report_content() {
+  if [[ "${FORMAT:-}" != "json" && -n "${OUTPUT_FILE:-}" && -s "${OUTPUT_FILE:-}" ]]; then
+    cat "${OUTPUT_FILE}"
+  else
+    printf '%s' "${ABICHECK_OUTPUT:-}"
+  fi
 }
+
+# The categories the published gate blames, from JSON when there is one and
+# otherwise from the text gate line. Used by the scan final gate to tell a
+# severity-configured block (which the user asked to be an error) from a
+# promoted cross-check (which keeps following fail-on-api-break).
+_severity_gate_categories() {
+  local _src _answer
+  _src=$(_json_report_src)
+  _answer=$(_report_query "$_src" blocking_categories)
+  if [[ -n "$_answer" ]]; then
+    echo "$_answer"
+    return
+  fi
+  sed -n 's/.*severity gate: exit [0-9][0-9]* — blocking: \(.*\)$/\1/p' \
+    <<<"$(_text_report_content)" | head -1
+}
+
+
 
 if [[ "$MODE" == "deps-compare" ]]; then
   # deps-compare exit codes: 0=PASS, 1=WARN, 4=FAIL
@@ -1558,6 +1583,25 @@ elif [[ "$MODE" == "scan" ]]; then
   # nothing to do with API breaks.
   if [[ "$VERDICT" == "SEVERITY_ERROR" ]]; then
     echo "::error::Severity-level error detected by abicheck scan."
+    FINAL_EXIT=1
+  fi
+
+  # A severity gate does not only produce exit 1. `potential_breaking=error`
+  # gates at 2 and `abi_breaking=error` at 4, and those map to the API_BREAK /
+  # BREAKING labels above -- where `fail-on-api-break` defaults to *false*, so
+  # a category the user explicitly configured as an error let the step succeed
+  # (Codex review). The verdict label is left alone (it is the right one for
+  # the compatibility axis); what changes is that an explicitly-configured
+  # severity block is not subject to a compatibility flag.
+  #
+  # A promoted cross-check is deliberately excluded: it also raises the
+  # published gate (`_promote_published_gate`), but it is not a severity
+  # category and keeps following fail-on-api-break, as it did before.
+  _sev_cats=$(_severity_gate_categories)
+  _sev_cats_real=$(tr ',' '\n' <<<"$_sev_cats" | sed 's/^ *//;s/ *$//' \
+    | grep -v '^promoted_crosscheck$' | grep -v '^$' | head -1)
+  if [[ -n "$_sev_cats_real" && "$VERDICT" != "SEVERITY_ERROR" ]]; then
+    echo "::error::abicheck scan is blocked by severity policy (${_sev_cats_real} configured as error); see the severity gate in the report."
     FINAL_EXIT=1
   fi
 
