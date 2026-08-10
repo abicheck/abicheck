@@ -447,26 +447,6 @@
     }
   },
   "shared": {
-    "abicheck_surface": {
-      "affects": [
-        "native-api-evolution",
-        "native-binary-compatibility-review",
-        "native-consumer-compatibility",
-        "native-release-compatibility"
-      ],
-      "digest": "sha256:84f9d4a5dd12a0deda9927608bdb526fa76529532086237e707fd98178a36966",
-      "roots": [
-        "abicheck/change_registry.py",
-        "abicheck/checker_policy.py",
-        "abicheck/cli.py",
-        "abicheck/cli_options.py",
-        "abicheck/cli_options_contract.py",
-        "abicheck/schemas",
-        "abicheck/schemas/compare_report.schema.json",
-        "docs/reference/cli-reference.md",
-        "docs/reference/detector-spec.json"
-      ]
-    },
     "harness": {
       "affects": [
         "native-api-evolution",

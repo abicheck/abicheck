@@ -50,6 +50,7 @@ def _load_script(name: str) -> Any:
 
 
 gen = _load_script("gen_skill_eval_pack")
+surface = _load_script("skill_eval_surface")
 freshness = _load_script("check_skill_eval_freshness")
 
 
@@ -192,15 +193,45 @@ def test_surface_digest_is_a_function_of_committed_files_only(
     somewhere — which is how the macOS lane failed while every other passed.
     Reading committed files is what makes it reproducible; this pins that the
     digest is exactly that and nothing else."""
-    surface = tmp_path / "surface.md"
-    surface.write_text("one", encoding="utf-8")
-    monkeypatch.setattr(gen, "ROOT", tmp_path)
-    monkeypatch.setattr(gen, "SURFACE_SOURCES", (Path("surface.md"),))
+    surface_file = tmp_path / "surface.md"
+    surface_file.write_text("one", encoding="utf-8")
+    monkeypatch.setattr(surface, "SURFACE_SOURCES", (Path("surface.md"),))
 
-    before = gen._surface_digest()
-    assert gen._surface_digest() == before, "not deterministic within one process"
-    surface.write_text("two", encoding="utf-8")
-    assert gen._surface_digest() != before
+    before = surface.surface_digest(tmp_path)
+    assert surface.surface_digest(tmp_path) == before, (
+        "not deterministic in one process"
+    )
+    surface_file.write_text("two", encoding="utf-8")
+    assert surface.surface_digest(tmp_path) != before
+
+
+def test_the_pack_does_not_depend_on_files_other_prs_change(
+    pack: dict[str, Any],
+) -> None:
+    """The merge-skew property, as a check rather than a comment.
+
+    `cli-reference.md` moves whenever any PR adds a CLI option — twice during
+    this feature's own review. If the pack committed a digest of it, every such
+    PR would owe a regeneration, and one could merge cleanly into a `main`
+    whose pack is stale, because the two touch different files and git sees no
+    conflict. So no pack entry may route to the CLI surface or the package
+    tree; the checker computes that digest live instead.
+    """
+    volatile = {"abicheck_surface", "build"}
+    assert not (volatile & set(pack["shared"])), (
+        f"pack records a digest derived from files other PRs change: "
+        f"{sorted(volatile & set(pack['shared']))}"
+    )
+
+
+def test_the_surface_digest_still_invalidates_bundles(
+    pack: dict[str, Any], monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Moving it out of the pack must not weaken it: a bundle recorded against
+    a different surface is still stale, because the checker compares what the
+    bundle recorded to what the surface is now."""
+    bundle = _bundle(pack, hashes={"abicheck_surface": "sha256:" + "3" * 64})
+    assert _check_bundle(monkeypatch, tmp_path, bundle) == 1
 
 
 def test_surface_sources_are_the_generated_projections() -> None:
@@ -208,12 +239,12 @@ def test_surface_sources_are_the_generated_projections() -> None:
     what lets this digest be file-based without going blind to a real surface
     change: a renamed flag reaches `cli-reference.md` in the PR that renames
     it, or `gen_cli_reference.py --check` fails."""
-    assert set(gen.SURFACE_SOURCES) == {
+    assert set(surface.SURFACE_SOURCES) == {
         Path("docs/reference/cli-reference.md"),
         Path("docs/reference/detector-spec.json"),
         Path("abicheck/schemas/compare_report.schema.json"),
     }
-    for source in gen.SURFACE_SOURCES:
+    for source in surface.SURFACE_SOURCES:
         assert (REPO / source).is_file(), source
 
 
@@ -240,7 +271,7 @@ def test_every_hashed_input_is_tracked_by_git() -> None:
         hashed += gen._tree_files(gen.PUBLISHED_SKILLS / name)
     for scenario in gen._load_scenarios()["scenarios"]:
         hashed += gen._fixture_paths(scenario)
-    hashed += gen._expand(gen.SURFACE_SOURCES) + gen._expand(gen.HARNESS_SOURCES)
+    hashed += gen._expand(surface.SURFACE_SOURCES) + gen._expand(gen.HARNESS_SOURCES)
     # BUILD_SOURCES walks all of `abicheck/`, which is where install residue
     # would land — the remaining candidate for the cross-platform mismatch
     # that motivated this test.
@@ -259,10 +290,10 @@ def test_drift_report_names_the_entry_that_moved() -> None:
     cross-platform failure hard to diagnose."""
     committed = json.loads(PACK.read_text(encoding="utf-8"))
     mutated = json.loads(json.dumps(committed))
-    mutated["shared"]["abicheck_surface"]["digest"] = "sha256:" + "f" * 64
+    mutated["shared"]["trigger_corpus"]["digest"] = "sha256:" + "f" * 64
 
     drift = gen.describe_drift(json.dumps(committed), json.dumps(mutated))
-    assert any("abicheck_surface" in line for line in drift), drift
+    assert any("trigger_corpus" in line for line in drift), drift
 
 
 def test_the_pack_records_no_build_digest(pack: dict[str, Any]) -> None:
@@ -336,7 +367,8 @@ def _bundle(pack: dict[str, Any], **overrides: Any) -> dict[str, Any]:
     scenario = "removed-export"
     hashes = {
         "skill_tree": pack["skills"][skill]["tree"],
-        "abicheck_surface": pack["shared"]["abicheck_surface"]["digest"],
+        # Computed, not read from the pack — see skill_eval_surface.py.
+        "abicheck_surface": freshness.hash_entries(pack)["abicheck_surface"]["digest"],
         "harness": pack["shared"]["harness"]["digest"],
         "trigger_corpus": pack["shared"]["trigger_corpus"]["digest"],
         "scenarios": {scenario: pack["scenarios"][scenario]["digest"]},

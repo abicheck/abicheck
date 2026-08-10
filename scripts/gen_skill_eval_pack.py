@@ -37,18 +37,18 @@ What it records, and why each entry exists (G37 D6):
   harness                    the runner, the recording shim and the graders — a
                              transcript produced under a different treatment is
                              not evidence about the same thing
-  abicheck_surface           the surface the skills actually consume — the CLI
-                             command/option reference, the detector spec, and the
-                             report schema, read as committed files. Deliberately
-                             narrow (hashing all of abicheck/ would invalidate
-                             every bundle on every source commit) and
-                             deliberately not live introspection (that made the
-                             pack a function of the host; see SURFACE_SOURCES)
-There is deliberately **no** `build` entry: the publication digest is
-environment-bound and is computed on demand by `publication_build_digest()`.
-Recording even its repo-content half here would make every PR touching
-`abicheck/` regenerate the pack, and let two independently-green PRs merge
-into a stale one.
+Two hashes are deliberately **absent** from the pack, both because they are
+derived from files other pull requests change — committing them would tax every
+such PR with a regeneration and, worse, let one merge cleanly into a `main`
+whose pack is now stale (git sees no conflict when the two touch different
+files). Neither loses any invalidation: a bundle records what it ran against
+and the checker recomputes the current value.
+
+  abicheck_surface           `scripts/skill_eval_surface.py` owns it; the
+                             freshness checker computes it at check time
+  build                      publication only, and environment-bound:
+                             `publication_build_digest()` folds the resolved
+                             runtime dependency versions in on demand
 
 Every entry carries two fields beyond its digest, and both exist because a
 prose invariant already failed here twice in opposite directions (G37 D6):
@@ -87,6 +87,8 @@ from typing import Any
 
 import yaml
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+
 ROOT = Path(__file__).resolve().parent.parent
 # The *generated* tree, deliberately not `skills-src/` — see `_skill_tree_digest`.
 PUBLISHED_SKILLS = ROOT / ".agents" / "skills"
@@ -101,46 +103,6 @@ PACK = EVAL_DIR / "skill-eval-pack.json"
 #: Bumped when the pack's own shape changes, so a consumer reading an older
 #: shape fails loudly rather than misreading a field.
 PACK_VERSION = 1
-
-#: The consumed surface, hashed through the repository's own *generated*
-#: projections of it rather than through live introspection.
-#:
-#: An earlier version walked the live Click tree and registry. That is a
-#: function of the running interpreter, and the pack is a committed artifact
-#: whose `--check` runs on Linux, macOS and Windows alike — so any component
-#: that varies with the host makes this gate unsatisfiable on some platform,
-#: which is exactly what happened (the macOS unit lane failed while every
-#: other lane passed). A digest over committed files cannot.
-#:
-#: These three are not a compromise on narrowness: `cli-reference.md` is
-#: generated from the live command tree and carries every command, option,
-#: default, choice and help string; `detector-spec.json` carries every
-#: `ChangeKind`'s verdict, severity and minimum evidence; the report schema is
-#: what a skill parses. All three are drift-gated against the live objects in
-#: the same `pr` profile (`gen_cli_reference.py --check`,
-#: `gen_detector_spec.py --check`), so a real surface change reaches them in
-#: the PR that makes it, while an edit to `cli.py` that changes no user-facing
-#: surface moves nothing here — the asymmetry D6 asks for, now without the
-#: host dependence.
-SURFACE_SOURCES = (
-    Path("docs/reference/cli-reference.md"),
-    Path("docs/reference/detector-spec.json"),
-    Path("abicheck/schemas/compare_report.schema.json"),
-)
-
-#: Routing declarations for the surface hash: the artifacts above plus the
-#: sources whose change is what regenerates them. Routes over-nominate on
-#: purpose (see the module docstring), and a route to the *source* is what
-#: makes an observed read of `cli.py` resolve to this hash at all.
-SURFACE_ROOTS = (
-    *SURFACE_SOURCES,
-    Path("abicheck/cli.py"),
-    Path("abicheck/cli_options.py"),
-    Path("abicheck/cli_options_contract.py"),
-    Path("abicheck/schemas"),
-    Path("abicheck/change_registry.py"),
-    Path("abicheck/checker_policy.py"),
-)
 
 #: Everything that determines the installed checker's behaviour, for the
 #: publication-grade digest. Defined by inclusion so the committed evidence
@@ -256,20 +218,6 @@ def _scenario_digest(scenario: dict[str, Any], ground_truth: dict[str, Any]) -> 
         entry = ground_truth.get("verdicts", {}).get(scenario["case"], {})
         h.update(json.dumps(entry, sort_keys=True).encode())
     return "sha256:" + h.hexdigest()
-
-
-def _surface_digest() -> str:
-    """Digest the surface a skill can actually invoke or read.
-
-    Read off `SURFACE_SOURCES` — three committed, drift-gated projections of
-    the live objects — rather than by introspecting those objects here. See
-    that constant for why: a committed artifact checked on three operating
-    systems cannot be a function of the running interpreter, and hashing
-    `abicheck/`'s bytes instead would invalidate every bundle on every source
-    commit. The residual — a verdict that changes with no surface change — is
-    what Phase 6's full-build-digest pass exists to close.
-    """
-    return _digest_paths(_expand(SURFACE_SOURCES))
 
 
 def _expand(sources: tuple[Path, ...]) -> list[Path]:
@@ -453,11 +401,6 @@ def build_pack() -> dict[str, Any]:
             "harness": {
                 "digest": _digest_paths(_expand(HARNESS_SOURCES)),
                 "roots": _roots(HARNESS_SOURCES),
-                "affects": skills,
-            },
-            "abicheck_surface": {
-                "digest": _surface_digest(),
-                "roots": _roots(SURFACE_ROOTS),
                 "affects": skills,
             },
             # No `build` entry, deliberately — see `publication_build_digest()`.

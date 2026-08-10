@@ -922,11 +922,23 @@ writing the checks made the gap visible:
   that changes no user-facing surface moves nothing; a renamed flag reaches
   the reference in the PR that renames it) without any host dependence, and it
   covers *more* than the live walk did — defaults, choices and help text
-  included. The source paths stay in the pack as *routes*, which is what the
-  completeness check needs them for. Two mechanisms keep the class closed
-  rather than the instance: a test asserts every hashed input is a git-tracked
-  file, and `--check` now names the entry that moved instead of reporting only
-  that the file differs.
+  included. Two mechanisms keep the class closed rather than the instance: a
+  test asserts every hashed input is a git-tracked file, and `--check` now
+  names the entry that moved instead of reporting only that the file differs.
+- **Two digests are computed on demand rather than committed**, for a reason
+  the review itself demonstrated twice. `cli-reference.md` moves whenever any
+  PR adds a CLI option — `scan`'s severity flags and `dump --compression` both
+  landed during this feature's review. A committed surface digest would make
+  every such PR owe a pack regeneration, and, worse, one could merge cleanly
+  into a `main` whose pack is stale, because the two touch different files and
+  git reports no conflict. The publication build digest had the same shape over
+  all of `abicheck/`. Both now live outside the pack —
+  `scripts/skill_eval_surface.py` for the surface,
+  `publication_build_digest()` for the build — and the freshness checker
+  computes the surface value at check time. **Invalidation is unchanged**: a
+  bundle still records the digest it ran against, and a CLI change still makes
+  every bundle stale. What disappears is only a committed copy that nothing
+  needed and that other people's PRs could silently invalidate.
 - **A consumer-scoped scenario states both verdicts.** In a scoped run the
   top-level `verdict` is the *scoped* answer and `full_verdict` is the
   library-wide one — `native-consumer-compatibility/SKILL.md` uses exactly the

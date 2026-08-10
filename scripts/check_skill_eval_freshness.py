@@ -70,6 +70,7 @@ from typing import Any
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from findings_report import Findings as _SharedFindings  # noqa: E402
+from skill_eval_surface import surface_digest, surface_roots  # noqa: E402
 
 ROOT = Path(__file__).resolve().parent.parent
 PACK = ROOT / "agent-evals" / "skills" / "skill-eval-pack.json"
@@ -128,6 +129,17 @@ def hash_entries(pack: dict[str, Any]) -> dict[str, dict[str, Any]]:
         entries[f"scenario:{scenario_id}"] = entry
     for shared_id, entry in pack.get("shared", {}).items():
         entries[shared_id] = entry
+
+    # Synthesized, not read from the pack: the consumed surface is derived from
+    # files other PRs change, so committing its digest would make every CLI
+    # change regenerate the pack and let one merge into a stale `main`. It is
+    # computed here instead, which preserves invalidation exactly — a bundle
+    # records what it ran against and this is what it now differs from.
+    entries["abicheck_surface"] = {
+        "digest": surface_digest(ROOT),
+        "roots": surface_roots(),
+        "affects": sorted(pack.get("skills", {})),
+    }
     return entries
 
 
