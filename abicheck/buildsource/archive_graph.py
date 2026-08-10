@@ -285,12 +285,26 @@ class ArchiveContents:
     carries **no evidence** about which member defines what, whereas an
     indexed archive with an empty index genuinely defines no global symbols.
     Only the second is a fact; the first is an absence.
+
+    ``index_kind`` (``"gnu"``/``"bsd"``/``""``) records which symbol-index
+    *format* was actually decoded — independent of ``flavor``, which is
+    about the archive *container*'s own magic (GNU vs. thin), not which
+    ranlib wrote the index inside it. A BSD/Mach-O ``__.SYMDEF`` index is
+    the one reliable signal that the archive's own symbol names may carry a
+    leading-underscore C-symbol convention worth normalizing against; a
+    GNU/ELF archive's ``/``/``/SYM64/`` index never does (Codex review,
+    fresh evidence: a real GNU/ELF archive's own symbol table can
+    legitimately contain a name that already starts with ``_``, e.g.
+    ``_foo``, so blindly trying the underscore-stripped spelling risked a
+    false join onto an unrelated binary export sharing the stripped name).
+    ``""`` when the archive carries no index at all.
     """
 
     flavor: str
     members: tuple[ArMember, ...] = ()
     symbols: tuple[ArSymbolRef, ...] = ()
     has_symbol_index: bool = False
+    index_kind: str = ""
 
 
 # ── pure ar-format parsing ───────────────────────────────────────────────────
@@ -640,22 +654,26 @@ def parse_ar_archive(reader: ByteReader) -> ArchiveContents:
     # Pass 2: decode the index members now that offsets resolve to names.
     offsets_by_member = {m.header_offset: m.name for m in members}
     symbols: list[ArSymbolRef] = []
+    index_kind = ""
     for index_name, body in pending_index:
         if index_name in _GNU_INDEX_NAMES:
             symbols.extend(
                 _gnu_symbol_index(body, offsets_by_member, wide=index_name == "/SYM64/")
             )
+            index_kind = index_kind or "gnu"
         else:
             symbols.extend(
                 _bsd_symbol_index(
                     body, offsets_by_member, wide=_is_bsd_index_wide(index_name)
                 )
             )
+            index_kind = index_kind or "bsd"
     return ArchiveContents(
         flavor=flavor,
         members=tuple(members),
         symbols=tuple(symbols),
         has_symbol_index=bool(pending_index),
+        index_kind=index_kind,
     )
 
 
@@ -982,17 +1000,27 @@ def augment_graph_with_archives(
             if member_id is None:
                 continue
             sid = _symbol_node_id(ref.symbol)
-            if sid not in known_symbols and ref.symbol.startswith("_"):
+            if (
+                sid not in known_symbols
+                and ref.symbol.startswith("_")
+                and contents.index_kind == "bsd"
+            ):
                 # A Mach-O/BSD ranlib index keeps the platform's C-symbol
                 # leading underscore (`_foo`), but `macho_metadata.py`'s own
                 # export-trie walk strips exactly one before a `binary_symbol`
                 # node is minted from it (Codex review, fresh evidence: the
                 # exact-name join above therefore missed every Mach-O archive
                 # symbol, counting each as unjoined and emitting no
-                # OBJECT_DEFINES_SYMBOL edges at all on that platform).
-                # Exact match is still tried first — a GNU/ELF archive's
-                # symbol names never carry this prefix, so this fallback is
-                # a no-op there.
+                # OBJECT_DEFINES_SYMBOL edges at all on that platform). Exact
+                # match is still tried first. Gated on the archive's own
+                # decoded index *format* (BSD/Mach-O ``__.SYMDEF``, not the
+                # container's ``flavor``) rather than applied unconditionally
+                # (Codex review, second round, fresh evidence): a real GNU/ELF
+                # archive's own symbol table can legitimately contain a name
+                # that already starts with `_` (reproduced with a real `cc`+
+                # `ar` build), and trying the stripped spelling there risked a
+                # false join onto an unrelated binary export merely sharing
+                # the stripped name.
                 stripped_sid = _symbol_node_id(ref.symbol[1:])
                 if stripped_sid in known_symbols:
                     sid = stripped_sid

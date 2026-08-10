@@ -154,6 +154,58 @@ def build_gnu_archive(
     return out
 
 
+def build_bsd_archive(members: list[tuple[str, bytes]]) -> bytes:
+    """Hand-assemble a BSD/Mach-O ``ar`` archive with a real ``__.SYMDEF``
+    ranlib index (mirrors :func:`build_gnu_archive`'s ``SYM:`` convention
+    and member layout, BSD index format instead of GNU) -- needed to
+    exercise the underscore-stripping join fallback, which is gated on a
+    genuinely BSD-indexed archive (Codex review: an archive built with
+    :func:`build_gnu_archive` no longer reaches that fallback at all)."""
+
+    def extract_symbols(data: bytes) -> list[str]:
+        out = []
+        for line in data.split(b"\n"):
+            if line.startswith(b"SYM:"):
+                out.append(line[4:].decode("ascii"))
+        return out
+
+    symbol_entries: list[tuple[str, int]] = []  # (symbol, member_index)
+    for i, (_name, data) in enumerate(members):
+        for sym in extract_symbols(data):
+            symbol_entries.append((sym, i))
+
+    strtab = b"".join(s.encode("ascii") + b"\x00" for s, _ in symbol_entries)
+    str_offsets: list[int] = []
+    pos = 0
+    for s, _ in symbol_entries:
+        str_offsets.append(pos)
+        pos += len(s) + 1
+
+    ranlib_bytes = len(symbol_entries) * 8
+    body_len = 4 + ranlib_bytes + 4 + len(strtab)
+    index_total = 60 + body_len + (body_len % 2)
+
+    header_offsets: list[int] = []
+    pos = len(ARCHIVE_MAGIC) + index_total
+    member_blob = b""
+    for name, data in members:
+        header_offsets.append(pos)
+        member_blob += _header(name, len(data)) + _pad(data)
+        pos += 60 + (len(data) + (len(data) % 2))
+
+    entries = b"".join(
+        struct.pack("<II", str_offsets[i], header_offsets[member_index])
+        for i, (_sym, member_index) in enumerate(symbol_entries)
+    )
+    body = (
+        struct.pack("<I", ranlib_bytes)
+        + entries
+        + struct.pack("<I", len(strtab))
+        + strtab
+    )
+    return ARCHIVE_MAGIC + _header("__.SYMDEF", len(body)) + _pad(body) + member_blob
+
+
 # ── pure parser tests ────────────────────────────────────────────────────────
 
 
@@ -828,8 +880,11 @@ def test_augment_graph_macho_underscore_prefixed_symbol_joins_via_fallback(
     (``_foo``), while ``macho_metadata.py`` strips exactly one before a
     ``binary_symbol`` node is minted from it — the exact-name join alone
     (an earlier revision) missed every Mach-O archive symbol (Codex review,
-    fresh evidence)."""
-    data = build_gnu_archive([("a.o", b"SYM:_foo\n")])
+    fresh evidence). Uses a genuinely BSD-indexed archive: the fallback is
+    gated on ``index_kind == "bsd"`` (a later Codex round, fresh evidence),
+    since an ordinary GNU/ELF archive's own symbol table can legitimately
+    contain a name that already starts with ``_``."""
+    data = build_bsd_archive([("a.o", b"SYM:_foo\n")])
     (tmp_path / "libtest.a").write_bytes(data)
     g = _graph_with_archive("libtest.a", ["foo"])  # node has no leading underscore
 
@@ -838,6 +893,27 @@ def test_augment_graph_macho_underscore_prefixed_symbol_joins_via_fallback(
     assert result.symbol_edges == 1
     assert result.unjoined_symbols == 0
     assert defining_members(g, "foo") == [("libtest.a", "a.o")]
+
+
+def test_augment_graph_underscore_symbol_not_stripped_on_gnu_archive(
+    tmp_path,
+) -> None:
+    """A real GNU/ELF archive's own symbol table can legitimately contain a
+    name that already starts with ``_`` (e.g. `_foo`, confirmed with a real
+    ``cc``+``ar`` build) -- the underscore-stripping fallback must not apply
+    there, or an unrelated binary export merely sharing the stripped name
+    gets a false ``OBJECT_DEFINES_SYMBOL`` edge (Codex review, fresh
+    evidence: an earlier revision applied this fallback to any archive,
+    Mach-O/BSD-indexed or not)."""
+    data = build_gnu_archive([("a.o", b"SYM:_foo\n")])
+    (tmp_path / "libtest.a").write_bytes(data)
+    g = _graph_with_archive("libtest.a", ["foo"])  # unrelated node, no underscore
+
+    result = augment_graph_with_archives(g, search_roots=(tmp_path,))
+
+    assert result.symbol_edges == 0
+    assert result.unjoined_symbols == 1
+    assert defining_members(g, "foo") == []
 
 
 def test_augment_graph_underscore_symbol_prefers_exact_match(tmp_path) -> None:

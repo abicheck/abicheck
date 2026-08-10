@@ -261,7 +261,15 @@ class TemplateInstantiation:
     used only for the node's display label — never parsed back apart, since
     clang's own arg list (:attr:`args`) is the structured form. ``file`` is
     the instantiation's own declaring file, when known (best-effort, from
-    the first ``loc.file`` clang emits for it).
+    the first ``loc.file`` clang emits for it). ``template_signature`` is a
+    **function**-kind instantiation's own pattern signature (e.g. ``"T (T,
+    T)"``, clang's own printed, unspecialized function type) — see
+    :func:`template_decl_node_id` for why this exists: a class template's
+    qname alone already identifies its declaration (a class template can't
+    be overloaded), but two distinct function-template *overloads* sharing
+    one name (``f<T>(T)`` vs. ``f<T>(T,T)``) need a discriminator beyond the
+    bare qname or their abstract ``template_decl`` nodes collapse onto one
+    identity. Empty for a class-kind instantiation.
     """
 
     kind: str  # _RECORD_KIND or _FUNCTION_KIND
@@ -270,6 +278,7 @@ class TemplateInstantiation:
     args: tuple[TemplateArgUse, ...] = ()
     emitted_symbols: tuple[str, ...] = ()
     file: str = ""
+    template_signature: str = ""
 
 
 def _node_file(node: dict[str, Any]) -> str:
@@ -693,6 +702,29 @@ def _member_symbols(node: dict[str, Any]) -> tuple[str, ...]:
     return tuple(symbols)
 
 
+def _function_template_pattern_signature(node: dict[str, Any]) -> str:
+    """A ``FunctionTemplateDecl``'s own pattern signature (clang's printed,
+    unspecialized function type, e.g. ``"T (T, T)"``) -- the discriminator
+    :func:`template_decl_node_id` needs between two overloaded function
+    templates sharing one name (``f<T>(T)`` vs. ``f<T>(T,T)``), verified
+    empirically against real clang AST output: each overload's own pattern
+    ``FunctionDecl`` child (no ``mangledName``) carries a distinct ``type.
+    qualType`` -- ``"T (T)"``/``"T (T, T)"`` -- reliably differing between
+    overloads without depending on any particular instantiation's argument
+    substitution. Returns the first such spelling found among *node*'s
+    direct function-shaped children; ``""`` when none carry one (degrade to
+    the bare-qname identity, this module's usual discipline)."""
+    for child in node.get("inner", []) or []:
+        if str(child.get("kind", "")) not in _MEMBER_FUNCTION_KINDS | {"FunctionDecl"}:
+            continue
+        qual_type = child.get("type")
+        if isinstance(qual_type, dict):
+            spelling = qual_type.get("qualType")
+            if isinstance(spelling, str) and spelling:
+                return spelling
+    return ""
+
+
 def _walk_function_templates(
     node: Any,
     scope: list[str],
@@ -712,6 +744,7 @@ def _walk_function_templates(
         name = str(node.get("name") or "")
         qname = "::".join([*scope, name]) if name else ""
         if qname:
+            signature = _function_template_pattern_signature(node)
             for child in node.get("inner", []) or []:
                 if str(child.get("kind", "")) not in _MEMBER_FUNCTION_KINDS | {
                     "FunctionDecl"
@@ -749,6 +782,7 @@ def _walk_function_templates(
                         label=_instantiation_label(qname, resolved_args),
                         args=resolved_args,
                         emitted_symbols=(mangled,),
+                        template_signature=signature,
                         file=id_to_file.get(str(child.get("id") or ""), ""),
                     )
                 )
@@ -944,7 +978,24 @@ def parse_clang_ast_templates(ast: dict[str, Any]) -> list[TemplateInstantiation
 # ── graph augmentation ───────────────────────────────────────────────────────
 
 
-def template_decl_node_id(qname: str) -> str:
+def template_decl_node_id(qname: str, signature: str | None = None) -> str:
+    """Node id for one template declaration (the abstract pattern).
+
+    A **class** template is keyed by its qname alone — a class template
+    can't be overloaded, so two declarations sharing a qname really are the
+    same template (matches how ``Holder<int>``'s and ``Holder<double>``'s
+    own class-template pattern is correctly shared across every
+    instantiation). A **function** template is additionally disambiguated
+    by its own pattern *signature* (e.g. ``"T (T, T)"``) when known: two
+    distinct overloads sharing one name (``f<T>(T)`` vs. ``f<T>(T,T)``)
+    would otherwise collapse their abstract declarations onto one shared
+    ``template_decl`` node even after their own instantiation nodes were
+    separated by mangled name — a real gap the earlier instantiation-id fix
+    didn't close (Codex review, empirically confirmed against real clang
+    AST output: both overloads' ``DECL_INSTANTIATES_TEMPLATE`` edges still
+    terminated at the identical ``template_decl://f`` node)."""
+    if signature:
+        return f"template_decl://{qname}#{signature}"
     return f"template_decl://{qname}"
 
 
@@ -1038,7 +1089,9 @@ def augment_graph_with_templates(
         added += len(graph.edges) - before
 
     for inst in instantiations:
-        template_id = template_decl_node_id(inst.template_qname)
+        template_id = template_decl_node_id(
+            inst.template_qname, inst.template_signature
+        )
         ensure_node(template_id, NODE_TEMPLATE_DECL, inst.template_qname)
 
         function_mangled = (

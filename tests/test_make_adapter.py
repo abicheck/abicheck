@@ -81,8 +81,12 @@ def test_make_link_unit_records_its_own_directory():
     input could never be found)."""
     ev = MakeAdapter(dry_run=DRY_RUN).collect()
     by_output = {lu.output: lu for lu in ev.link_units}
-    assert by_output["libfoo.so"].directory == "/home/user/proj"
-    assert by_output["libbar.a"].directory == "/home/user/proj"
+    # Path(...) comparison, not a literal string one: Path normalizes "/home/
+    # user/proj" to the platform's own separator convention (backslash on
+    # Windows), and directory is recorded via str(Path) (Codex/CI: a bare
+    # string compare failed on windows-latest for exactly this reason).
+    assert Path(by_output["libfoo.so"].directory) == Path("/home/user/proj")
+    assert Path(by_output["libbar.a"].directory) == Path("/home/user/proj")
 
 
 def test_make_executable_link_unit_recognized():

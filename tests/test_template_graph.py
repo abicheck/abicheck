@@ -725,7 +725,12 @@ def _overloaded_function_template_ast() -> dict:
         "name": "f",
         "inner": [
             {"kind": "TemplateTypeParmDecl", "name": "T"},
-            {"kind": "FunctionDecl", "name": "f", "inner": []},
+            {
+                "kind": "FunctionDecl",
+                "name": "f",
+                "type": {"qualType": "T (T)"},
+                "inner": [],
+            },
             {
                 "kind": "FunctionDecl",
                 "name": "f",
@@ -741,7 +746,12 @@ def _overloaded_function_template_ast() -> dict:
         "name": "f",
         "inner": [
             {"kind": "TemplateTypeParmDecl", "name": "T"},
-            {"kind": "FunctionDecl", "name": "f", "inner": []},
+            {
+                "kind": "FunctionDecl",
+                "name": "f",
+                "type": {"qualType": "T (T, T)"},
+                "inner": [],
+            },
             {
                 "kind": "FunctionDecl",
                 "name": "f",
@@ -794,6 +804,30 @@ def test_overloaded_function_templates_get_distinct_instantiation_nodes() -> Non
         (
             template_instantiation_node_id("f<int>", "_Z1fIiET_S0_S0_"),
             "binary_symbol://_Z1fIiET_S0_S0_",
+        ),
+    }
+    # The two overloads' abstract *declarations* must also stay distinct --
+    # the instantiation-id fix above didn't close this: both DECL_INSTANTIATES_
+    # TEMPLATE edges previously still terminated at one shared template_decl://f
+    # node, since template_qname is name-only ("f" for both) (Codex review,
+    # empirically confirmed against real clang output).
+    decl_nodes = {n.id for n in graph.nodes if n.kind == NODE_TEMPLATE_DECL}
+    assert len(decl_nodes) == 2
+    assert decl_nodes == {
+        template_decl_node_id("f", "T (T)"),
+        template_decl_node_id("f", "T (T, T)"),
+    }
+    instantiates_edges = {
+        (e.src, e.dst) for e in graph.edges if e.kind == EDGE_DECL_INSTANTIATES_TEMPLATE
+    }
+    assert instantiates_edges == {
+        (
+            template_instantiation_node_id("f<int>", "_Z1fIiET_S0_"),
+            template_decl_node_id("f", "T (T)"),
+        ),
+        (
+            template_instantiation_node_id("f<int>", "_Z1fIiET_S0_S0_"),
+            template_decl_node_id("f", "T (T, T)"),
         ),
     }
 
