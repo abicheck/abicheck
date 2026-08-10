@@ -43,10 +43,13 @@ see [evidence-and-depth.md](evidence-and-depth.md).
 
 **Read the verdict the right way round.** In a scoped run the top-level
 `verdict` is the *scoped* answer — the CLI promotes it there because it is
-what the gate acts on — and `full_verdict` carries the library-wide result,
-present only when the two differ. Treating `verdict` as the global answer
-inverts the report contract and discards the very thing a consumer-scoped run
-exists to produce.
+what the gate acts on — and `full_verdict` carries the library-wide result.
+Treating `verdict` as the global answer inverts the report contract and
+discards the very thing a consumer-scoped run exists to produce.
+
+`full_verdict` is written on every scoped run, equal or not, so **compare the
+two values** rather than reading anything into the field being there. They
+diverge when `full_verdict != verdict`.
 
 Findings carry consumer-relevant fields when the run establishes them:
 

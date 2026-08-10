@@ -127,11 +127,12 @@ answer for one consumer only when the run scoped to one consumer (above):
   `--used-by`/`--required-symbol(s)` the CLI promotes the scoped result into
   the top-level `verdict`, because that is the gate-relevant one. This is the
   answer you were asked for; do not reach past it.
-- `full_verdict` — the library-wide result, preserved separately. It appears
-  **only when it differs** from the scoped verdict, which makes its presence
-  itself the signal that the two diverge (e.g. `full_verdict: "BREAKING"`
-  with `verdict: "COMPATIBLE"` — globally breaking, this consumer unaffected).
-  Report both when it is present, and say which is which.
+- `full_verdict` — the library-wide result, preserved separately. Present on
+  **every** scoped run, whether or not it differs, so its presence signals
+  nothing on its own: **compare the two values.** They diverge when
+  `full_verdict != verdict` (e.g. `full_verdict: "BREAKING"` with
+  `verdict: "COMPATIBLE"` — globally breaking, this consumer unaffected), and
+  that is the case worth calling out. Report both, and say which is which.
 - `changes[].affected_symbols` — what each finding touches.
 - `changes[].public_reachable`, `reachability_state`, `reachability_kind`,
   `reachability_proof_path` — whether the finding reaches the scoped surface.
