@@ -398,6 +398,58 @@ _ELSE_RE = re.compile(r"^\s*#\s*else\b")
 _ENDIF_RE = re.compile(r"^\s*#\s*endif\b")
 
 
+def _lines_starting_inside_block_comment(text: str) -> list[bool]:
+    """For each line of *text* (1-indexed, matching
+    ``enumerate(text.splitlines(), start=1)``), whether that line's very
+    first character is already inside an unterminated ``/* ... */`` block
+    comment carried over from an earlier line (Codex review, fresh evidence:
+    a block-commented-out ``#ifdef``/``#endif`` pair around an ordinary,
+    real declaration was previously treated as a live directive, since
+    directive matching had no notion of comment state at all — a false
+    ``CONF_HIGH`` ``MACRO_CONTROLS_DECL`` edge from documentation, not code).
+
+    A simple, single-pass toggle scan — this deliberately does not attempt
+    string/char-literal awareness (a ``"/*"`` inside a string literal would
+    be mis-tracked) or a same-line-closed comment before a real trailing
+    directive (``/* note */ #ifdef X`` already can't match the ``^\\s*#``-
+    anchored directive patterns regardless, so that shape needs no special
+    handling here) — the same "textual heuristic, not real preprocessing"
+    discipline the rest of this module already documents. ``//`` line
+    comments need no tracking here: they only ever affect the one line they
+    start on, and a directive-family regex already requires the line to
+    *start* with (optional whitespace then) ``#``, which a ``// #ifdef X``
+    line can never satisfy.
+    """
+    starts_in_comment: list[bool] = []
+    in_block = False
+    # Split the same way the caller enumerates lines (``splitlines()``,
+    # keeping line-ending characters so a mid-line ``//`` skip-to-end-of-line
+    # below has something to skip to) — guarantees this function's per-line
+    # output aligns exactly with every caller's ``enumerate(text.
+    # splitlines(), start=1)`` regardless of line-ending convention, rather
+    # than hand-tracking only ``"\n"``.
+    for raw_line in text.splitlines(keepends=True):
+        starts_in_comment.append(in_block)
+        i = 0
+        n = len(raw_line)
+        while i < n:
+            if in_block:
+                if raw_line[i] == "*" and i + 1 < n and raw_line[i + 1] == "/":
+                    in_block = False
+                    i += 2
+                    continue
+                i += 1
+                continue
+            if raw_line[i] == "/" and i + 1 < n and raw_line[i + 1] == "*":
+                in_block = True
+                i += 2
+                continue
+            if raw_line[i] == "/" and i + 1 < n and raw_line[i + 1] == "/":
+                break  # rest of the line is a line comment
+            i += 1
+    return starts_in_comment
+
+
 @dataclass
 class _GuardFrame:
     """One open ``#if``-family directive on :func:`scan_conditional_regions`'s
@@ -430,10 +482,19 @@ def scan_conditional_regions(text: str) -> list[ConditionalRegion]:
     either of its branches, but its ``#endif`` still pops the stack — an
     unmodeled block nested inside or beside a simple guard never desyncs
     that guard's own nesting depth.
+
+    A line that starts inside an unterminated ``/* ... */`` block comment
+    (:func:`_lines_starting_inside_block_comment`) is skipped entirely —
+    none of the directive-family regexes below are even attempted for it —
+    so a block-commented-out example directive never opens/closes a real
+    region or desyncs real nesting depth (Codex review, fresh evidence).
     """
     stack: list[_GuardFrame] = []
     regions: list[ConditionalRegion] = []
+    in_comment = _lines_starting_inside_block_comment(text)
     for lineno, line in enumerate(text.splitlines(), start=1):
+        if in_comment[lineno - 1]:
+            continue
         m = _IFDEF_RE.match(line)
         if m:
             stack.append(_GuardFrame(False, m.group(1), False, lineno + 1))
@@ -503,18 +564,37 @@ def _macro_definition_lines(text: str) -> dict[str, int]:
     output) rather than a second copy of the regex. First definition wins —
     a later ``#undef``/redefinition of the same name is not modeled, the
     same "don't guess at partial semantics" discipline the module docstring
-    already applies to compound conditionals; a function-like macro
-    (``#define F(x) ...``) is skipped, same as ``parse_defined_macros``,
-    since it has no fixed name-only textual join target here either.
+    already applies to compound conditionals.
+
+    Unlike ``preprocessor_scan.parse_defined_macros`` (which skips a
+    function-like macro, ``#define F(x) ...``, since it has "no single ABI
+    *value* to diff" — a different question that module answers), this
+    function keeps a function-like macro's name and definition line too
+    (Codex review, fresh evidence): a function-like macro is still a real,
+    stably-named entity the graph's own ``macros_from_preprocessor()`` seeds
+    a reachable ``macro`` node for, and this function's only job —
+    :func:`find_decl_macro_uses`'s textual join — needs exactly the name and
+    line, never the macro's value or parameter list. Dropping it here made
+    ``DECL_USES_MACRO`` structurally unable to ever fire for a function-like
+    macro, even though the name-based join target the rest of this module
+    uses is identical for both macro kinds.
+
+    Same block-comment awareness as :func:`scan_conditional_regions`
+    (Codex review, fresh evidence's same root cause, applied consistently
+    here too): a ``#define`` line that starts inside an unterminated
+    ``/* ... */`` block comment is not a real definition and must not be
+    recorded, or a later real declaration could be treated as textually
+    "using" a macro that was only ever mentioned in a comment.
     """
     out: dict[str, int] = {}
+    in_comment = _lines_starting_inside_block_comment(text)
     for lineno, line in enumerate(text.splitlines(), start=1):
+        if in_comment[lineno - 1]:
+            continue
         m = _DEFINE_RE.match(line)
         if m is None:
             continue
-        name, params = m.group(1), m.group(2)
-        if params is not None:
-            continue
+        name = m.group(1)
         if name not in out:
             out[name] = lineno
     return out

@@ -31,6 +31,7 @@ from abicheck.buildsource.macro_graph import (
     ClangMacroGraphExtractor,
     ConditionalRegion,
     DeclRange,
+    _macro_definition_lines,
     augment_graph_with_macro_dependencies,
     find_decl_macro_uses,
     parse_clang_ast_decl_ranges,
@@ -247,6 +248,43 @@ def test_scan_compound_condition_skipped_but_nesting_maintained() -> None:
     assert ConditionalRegion("SIBLING", False, 8, 8) in regions
     assert not any(r.macro in ("X", "Y") for r in regions)
     assert len(regions) == 2
+
+
+def test_scan_ignores_directives_inside_block_comment() -> None:
+    # Codex review, fresh evidence: a block-commented-out #ifdef/#endif pair
+    # around an ordinary declaration must not be treated as a live directive
+    # -- no region, no false CONF_HIGH MACRO_CONTROLS_DECL edge.
+    text = "/*\n#ifdef FEATURE_X\nvoid a();\n#endif\n*/\nvoid real_decl();\n"
+    assert scan_conditional_regions(text) == []
+
+
+def test_scan_real_guard_after_block_comment_still_recognized() -> None:
+    text = (
+        "/* an old example:\n"
+        "#ifdef OLD\n"
+        "#endif\n"
+        "*/\n"
+        "#ifdef FEATURE_X\n"
+        "void f();\n"
+        "#endif\n"
+    )
+    regions = scan_conditional_regions(text)
+    assert regions == [ConditionalRegion("FEATURE_X", False, 6, 6)]
+
+
+def test_lines_starting_inside_block_comment_single_line_comment_unaffected() -> None:
+    from abicheck.buildsource.macro_graph import _lines_starting_inside_block_comment
+
+    text = "/* one-line comment */\n#ifdef FEATURE_X\nvoid f();\n#endif\n"
+    starts = _lines_starting_inside_block_comment(text)
+    assert starts == [False, False, False, False]
+    regions = scan_conditional_regions(text)
+    assert regions == [ConditionalRegion("FEATURE_X", False, 3, 3)]
+
+
+def test_macro_definition_lines_ignores_define_inside_block_comment() -> None:
+    text = "/* #define FEATURE_X 1 */\nvoid f() { return FEATURE_X; }\n"
+    assert _macro_definition_lines(text) == {}
 
 
 def test_scan_compound_condition_else_branch_also_unmodeled() -> None:
