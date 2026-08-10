@@ -223,10 +223,17 @@ def test_every_hashed_input_is_tracked_by_git() -> None:
     is gitignored and would otherwise land in a scenario's fixture closure."""
     import subprocess
 
+    # -z, not plain output: git quotes paths with unusual characters and
+    # whitespace-splitting would silently mis-tokenize a path with a space,
+    # failing this test for a reason that has nothing to do with what it checks.
     tracked = set(
         subprocess.run(
-            ["git", "ls-files"], cwd=REPO, capture_output=True, text=True, check=True
-        ).stdout.split()
+            ["git", "ls-files", "-z"],
+            cwd=REPO,
+            capture_output=True,
+            text=True,
+            check=True,
+        ).stdout.split("\0")
     )
     hashed: list[Path] = []
     for name in gen._published_skill_names():
