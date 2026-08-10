@@ -471,7 +471,18 @@ def encode_snapshot_bytes(
 def _atomic_write_bytes(data: bytes, path: Path) -> None:
     """Write *data* to *path* atomically: temp file in the same directory,
     flush, best-effort fsync, then os.replace(). Never leaves a partial file
-    at *path* on failure, and cleans up its own temp file either way."""
+    at *path* on failure, and cleans up its own temp file either way.
+
+    ``tempfile.mkstemp()`` always creates its temp file mode ``0600``
+    (owner-only) regardless of umask, and ``os.replace()`` carries that mode
+    over onto *path* verbatim — silently turning every snapshot write into
+    an owner-only file, including rewriting an existing world/group-readable
+    one, breaking a shared baseline directory or a consumer running under a
+    different account (Codex review, fresh evidence). Restored below: a
+    *new* destination gets the normal umask-derived default (``0666`` minus
+    umask, matching what ``open(path, "w")``/``Path.write_text()`` would
+    have produced); an *existing* destination keeps its own current mode.
+    """
     parent = path.parent
     parent.mkdir(parents=True, exist_ok=True)
     fd, tmp_name = tempfile.mkstemp(dir=parent, prefix=f".{path.name}.", suffix=".tmp")
@@ -484,6 +495,16 @@ def _atomic_write_bytes(data: bytes, path: Path) -> None:
                 os.fsync(f.fileno())
             except OSError:
                 pass  # best-effort; some filesystems/platforms don't support it
+        try:
+            existing_mode = path.stat().st_mode & 0o777
+        except OSError:
+            existing_mode = None
+        if existing_mode is not None:
+            os.chmod(tmp_path, existing_mode)
+        else:
+            umask = os.umask(0)
+            os.umask(umask)
+            os.chmod(tmp_path, 0o666 & ~umask)
         os.replace(tmp_path, path)
     except BaseException:
         try:

@@ -24,6 +24,7 @@ from __future__ import annotations
 import gzip
 import hashlib
 import json
+import os
 
 import pytest
 
@@ -332,6 +333,33 @@ def test_atomic_write_leaves_no_temp_file(tmp_path):
     write_snapshot(snap, p)
     leftovers = [f for f in tmp_path.iterdir() if f != p]
     assert leftovers == []
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX file mode semantics only")
+def test_new_file_gets_umask_derived_mode_not_owner_only(tmp_path):
+    """tempfile.mkstemp() always creates 0600; a snapshot write must not
+    silently make every new file owner-only -- it should land at the normal
+    umask-derived default, like open(path, "w") would (Codex review)."""
+    old_umask = os.umask(0o022)
+    try:
+        snap = _sample_snapshot()
+        p = tmp_path / "new.abicheck.json"
+        write_snapshot(snap, p)
+        assert oct(p.stat().st_mode & 0o777) == oct(0o644)
+    finally:
+        os.umask(old_umask)
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX file mode semantics only")
+def test_existing_file_mode_is_preserved_across_rewrite(tmp_path):
+    """Rewriting an existing snapshot (e.g. re-dumping a shared baseline)
+    must not silently strip its group/world-readable permissions."""
+    snap = _sample_snapshot()
+    p = tmp_path / "existing.abicheck.json"
+    p.write_text("placeholder")
+    os.chmod(p, 0o640)
+    write_snapshot(snap, p)
+    assert oct(p.stat().st_mode & 0o777) == oct(0o640)
 
 
 def test_failed_write_preserves_existing_destination(tmp_path, monkeypatch):
