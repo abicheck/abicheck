@@ -397,3 +397,43 @@ extern "C" E* get_e() { return &g_e; }
         assert not types["E"].bases  # only a virtual base, no non-virtual one
         assert types["E"].virtual_bases == ["A"]
         assert types["E"].vptr_offset_bits == 0
+
+    @pytest.fixture()
+    def namespaced_inherited_only_virtual_base_lib(self, tmp_path: Path) -> Path:
+        """Same shape as inherited_only_virtual_base_lib, but namespaced --
+        reproduces the gap Codex review found in the virtual-only fallback
+        tier specifically: RecordType.virtual_bases stores the bare name
+        ("A"), but self.types is keyed by the qualified name ("ns::A") once
+        a namespace is involved, so a bare-name lookup on its own silently
+        fails to find ns::A's already-resolved offset -- the same class of
+        gap the non-virtual primary-base walk already closed, reproduced
+        here for the tier that predates that closure."""
+        cpp_src = tmp_path / "ns_inherited_only_virtual.cpp"
+        cpp_src.write_text("""\
+namespace ns {
+struct A { virtual void a(); };
+struct E : virtual A {};
+}
+
+void ns::A::a() {}
+static ns::E g_e;
+extern "C" ns::E* get_e() { return &g_e; }
+""")
+        so_path = tmp_path / "libnsinheritedonlyvirtual.so"
+        result = subprocess.run(
+            [_GPP, "-shared", "-fPIC", "-g", "-O0", "-o", str(so_path), str(cpp_src)],
+            capture_output=True, text=True, timeout=30,
+        )
+        assert result.returncode == 0, f"Compilation failed: {result.stderr}"
+        return so_path
+
+    def test_namespaced_inherited_only_virtual_primary_base_resolves(
+        self, namespaced_inherited_only_virtual_base_lib: Path
+    ) -> None:
+        """ns::E's virtual base is namespaced -- must resolve via ns::A's
+        DIE identity, not a bare-name lookup that would only ever find an
+        unqualified "A" that doesn't exist as a top-level type here."""
+        types = self._types_by_name(namespaced_inherited_only_virtual_base_lib)
+        assert types["ns::E"].virtual_bases == ["A"]
+        assert types["ns::A"].vptr_offset_bits == 0
+        assert types["ns::E"].vptr_offset_bits == 0

@@ -471,6 +471,29 @@ building a second identity-resolution mechanism from scratch.
   `A`/`E` shape, confirming both `E.vtable` and `E.bases` are empty (only
   `virtual_bases == ["A"]`) before asserting the resolved offset.
 
+  **A sixth review round found the fifth finding's own tier still had the
+  namespace-ambiguity gap the first review round already closed for the
+  non-virtual walk.** `namespace ns { struct A { virtual void a(); };
+  struct E : virtual A {}; }` — the fifth finding's fallback resolved a
+  virtual base by bare-name `by_name` lookup, which silently fails once a
+  namespace is involved for exactly the same reason the very first
+  DIE-identity fix in this section exists: `rec.virtual_bases` stores the
+  bare name (`"A"`), but `self.types` is keyed by the qualified name
+  (`"ns::A"`) — reproduced empirically (`ns::A.vptr_offset_bits == 0`,
+  `ns::E.vptr_offset_bits` stayed `None`). Fixed by giving virtual bases
+  the same DIE-identity tracking non-virtual `base_edges` already has —
+  a new `_virtual_base_edges_by_record` (name + DIE key per edge, no
+  offset field, since a virtual base's own subobject offset is inherently
+  dynamic and this tier only ever answers "0 or unknown" regardless) — and
+  factoring the three-tier resolution logic (retained DIE identity →
+  ODR-duplicate/declaration-stub alias → bare-name fallback) that was
+  previously inline in the non-virtual fixed-point loop into a shared
+  `_resolve_base_record` closure, so both the primary-base walk and the
+  virtual-primary-base fallback tier resolve a namespaced base identically
+  instead of drifting into two independent (and, as this finding showed,
+  unequally correct) implementations. New regression test with the exact
+  namespaced repro shape.
+
   **A later pass closed the last of this phase's four originally-listed
   facts** (`deprecated`/`is_scoped`/bitfields/default-argument facts were
   the other three, already covered above): direct-clang now populates

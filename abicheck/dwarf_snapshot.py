@@ -449,6 +449,22 @@ class _DwarfSnapshotBuilder:
         self._base_edges_by_record: dict[
             int, list[tuple[str, int | None, tuple[int, int] | None]]
         ] = {}
+        # id(derived RecordType) -> ordered list of (virtual base bare name,
+        # (CU offset, base DIE offset) or None) -- the virtual-base
+        # counterpart of ``_base_edges_by_record`` above, minus an offset
+        # field (a virtual base's own subobject offset is inherently
+        # dynamic, never something this resolution derives). Exists so
+        # _finalize_vptr_offsets's virtual-primary-base fallback tier can
+        # resolve a namespaced virtual base by DIE identity the same way
+        # the non-virtual primary-base walk already does, instead of a
+        # bare-name lookup that silently fails once a namespace is involved
+        # (`ns::E : virtual A` failing to resolve via `ns::A`'s already-known
+        # offset -- Codex review, fresh evidence, the same class of gap as
+        # the earlier namespace-ambiguity finding, just for the virtual-only
+        # fallback tier that finding predates).
+        self._virtual_base_edges_by_record: dict[
+            int, list[tuple[str, tuple[int, int] | None]]
+        ] = {}
 
     def extract(self, session: DwarfSession | None = None) -> None:
         """Walk DWARF and populate result lists.
@@ -867,6 +883,7 @@ class _DwarfSnapshotBuilder:
             base_offsets,
             own_vptr_offset_bits,
             base_edges,
+            virtual_base_edges,
         ) = self._collect_record_type_children(die, CU, children)
 
         alignment = _attr_int(die, "DW_AT_alignment")
@@ -923,6 +940,8 @@ class _DwarfSnapshotBuilder:
             self._record_die_index[(CU.cu_offset, die.offset)] = rec
         if base_edges:
             self._base_edges_by_record[id(rec)] = base_edges
+        if virtual_base_edges:
+            self._virtual_base_edges_by_record[id(rec)] = virtual_base_edges
 
     def _check_and_register_type_name(self, qualified: str) -> bool:
         """Return True and register *qualified* if it is new; False if already seen.
@@ -964,6 +983,7 @@ class _DwarfSnapshotBuilder:
         dict[str, int],
         int | None,
         list[tuple[str, int | None, tuple[int, int] | None]],
+        list[tuple[str, tuple[int, int] | None]],
     ]:
         """Iterate over the children of a record-type DIE.
 
@@ -972,7 +992,7 @@ class _DwarfSnapshotBuilder:
         is ``None`` only on the anonymous-typedef path, which iterates on demand.
 
         Returns ``(fields, bases, virtual_bases, vtable, base_offsets,
-        own_vptr_offset_bits, base_edges)``.
+        own_vptr_offset_bits, base_edges, virtual_base_edges)``.
 
         - *fields*: data member ``TypeField`` objects (in order).
         - *bases*: names of direct (non-virtual) base classes.
@@ -995,6 +1015,14 @@ class _DwarfSnapshotBuilder:
           (``D : one::A, two::A``) each keep their own offset/identity
           instead of the second overwriting the first. Only
           ``_finalize_vptr_offsets`` consumes this.
+        - *virtual_base_edges*: the virtual-base counterpart of *base_edges*
+          — one ``(virtual base bare name, (CU offset, base DIE offset) or
+          None)`` tuple per virtual ``DW_TAG_inheritance`` child, no offset
+          field (a virtual base's own subobject offset is inherently
+          dynamic). Lets ``_finalize_vptr_offsets``'s virtual-primary-base
+          fallback tier resolve a namespaced virtual base by DIE identity
+          instead of a bare-name lookup that fails once a namespace is
+          involved (``ns::E : virtual A`` — Codex review, fresh evidence).
         """
         fields: list[TypeField] = []
         bases: list[str] = []
@@ -1005,6 +1033,7 @@ class _DwarfSnapshotBuilder:
         # DW_AT_data_member_location); empty when no such offset is present.
         base_offsets: dict[str, int] = {}
         base_edges: list[tuple[str, int | None, tuple[int, int] | None]] = []
+        virtual_base_edges: list[tuple[str, tuple[int, int] | None]] = []
         own_vptr_offset_bits: int | None = None
         default_access = _default_member_access_for_tag(die.tag)
 
@@ -1016,7 +1045,13 @@ class _DwarfSnapshotBuilder:
                 fields.extend(self._process_field(child, CU, default_access))
             elif child.tag == "DW_TAG_inheritance":
                 self._process_inheritance_child(
-                    child, CU, bases, virtual_bases, base_offsets, base_edges
+                    child,
+                    CU,
+                    bases,
+                    virtual_bases,
+                    base_offsets,
+                    base_edges,
+                    virtual_base_edges,
                 )
             elif child.tag == "DW_TAG_subprogram":
                 self._process_virtual_method_child(child, vtable)
@@ -1029,6 +1064,7 @@ class _DwarfSnapshotBuilder:
             base_offsets,
             own_vptr_offset_bits,
             base_edges,
+            virtual_base_edges,
         )
 
     def _process_inheritance_child(
@@ -1039,6 +1075,7 @@ class _DwarfSnapshotBuilder:
         virtual_bases: list[str],
         base_offsets: dict[str, int],
         base_edges: list[tuple[str, int | None, tuple[int, int] | None]],
+        virtual_base_edges: list[tuple[str, tuple[int, int] | None]],
     ) -> None:
         """Process a single ``DW_TAG_inheritance`` child DIE in-place.
 
@@ -1054,14 +1091,15 @@ class _DwarfSnapshotBuilder:
         is_virtual_base = _attr_int(child, "DW_AT_virtuality") > 0
         if is_virtual_base:
             virtual_bases.append(base_name)
-        else:
-            bases.append(base_name)
+            virtual_base_edges.append((base_name, base_die_key))
+            return
+        bases.append(base_name)
         # Record the (non-virtual) base subobject offset when present.
         # A virtual base's location is dynamic, so only capture the
         # static, direct-base offset. Same condition gates both the
         # pre-existing base_offsets write and the new base_edges append —
         # a virtual base is never a primary-base candidate either way.
-        if not is_virtual_base and "DW_AT_data_member_location" in child.attributes:
+        if "DW_AT_data_member_location" in child.attributes:
             offset_bits = (
                 _decode_member_location(
                     child.attributes["DW_AT_data_member_location"].value
@@ -1192,6 +1230,33 @@ class _DwarfSnapshotBuilder:
         offset instead.
         """
         by_name = {t.name: t for t in self.types}
+
+        def _resolve_base_record(
+            base_name: str, base_key: tuple[int, int] | None
+        ) -> RecordType | None:
+            """Resolve a base-edge (name, DIE key) to its RecordType.
+
+            Three tiers, tried in order: the retained definition itself
+            (``_record_die_index``, the common case); an ODR-duplicate or
+            declaration-only stub DIE that names a *different* qualified
+            type than its own bare name would suggest
+            (``_die_key_to_qualified_name`` → ``_record_by_qualified_name``);
+            and, only once both DIE-identity tiers miss (or *base_key* is
+            ``None``), the bare-name ``by_name`` fallback. Shared by both
+            the primary-base walk and the virtual-primary-base fallback
+            tier below, so a namespaced base resolves identically in both.
+            """
+            base_rec = (
+                self._record_die_index.get(base_key) if base_key is not None else None
+            )
+            if base_rec is None and base_key is not None:
+                aliased_name = self._die_key_to_qualified_name.get(base_key)
+                if aliased_name is not None:
+                    base_rec = self._record_by_qualified_name.get(aliased_name)
+            if base_rec is None:
+                base_rec = by_name.get(base_name)
+            return base_rec
+
         unresolved = [t for t in self.types if t.vptr_offset_bits is None and t.bases]
         progressed = True
         while progressed and unresolved:
@@ -1203,17 +1268,7 @@ class _DwarfSnapshotBuilder:
                 for base_name, offset_bits, base_key in edges:
                     if offset_bits != 0:
                         continue
-                    base_rec = (
-                        self._record_die_index.get(base_key)
-                        if base_key is not None
-                        else None
-                    )
-                    if base_rec is None and base_key is not None:
-                        aliased_name = self._die_key_to_qualified_name.get(base_key)
-                        if aliased_name is not None:
-                            base_rec = self._record_by_qualified_name.get(aliased_name)
-                    if base_rec is None:
-                        base_rec = by_name.get(base_name)
+                    base_rec = _resolve_base_record(base_name, base_key)
                     if base_rec is not None and base_rec.vptr_offset_bits is not None:
                         resolved = base_rec.vptr_offset_bits
                         break
@@ -1266,23 +1321,34 @@ class _DwarfSnapshotBuilder:
         # shape, since `vtable` was always empty here -- there was no prior
         # "0" answer for this case to preserve. Resolved by checking whether
         # any of this class's OWN virtual bases is itself already known to
-        # be polymorphic (`by_name` bare lookup, matching this tier's own
-        # best-effort character -- virtual bases were never given DIE-key
-        # tracking the way non-virtual `base_edges` are, since a virtual
-        # base's real offset is inherently dynamic in the general case; this
-        # tier only ever answers "0 or unknown," never a real non-zero
-        # offset, for exactly that reason). A polymorphic virtual base is
-        # positive evidence *this* class shares that vtable pointer under
-        # the same virtual-primary-base rule the first tier's own comment
-        # documents, so 0 is used unconditionally here too -- not the base's
-        # own (possibly different, if it isn't nearly-empty) offset.
+        # be polymorphic. A polymorphic virtual base is positive evidence
+        # *this* class shares that vtable pointer under the same
+        # virtual-primary-base rule the first tier's own comment documents,
+        # so 0 is used unconditionally here too -- not the base's own
+        # (possibly different, if it isn't nearly-empty) offset.
+        #
+        # Resolution is DIE-identity-first, the same three-tier lookup the
+        # non-virtual primary-base walk above uses, NOT a bare `by_name`
+        # lookup on its own: a namespaced virtual base (`ns::E : virtual A`)
+        # has its bare name `"A"` recorded in `rec.virtual_bases`, so a
+        # pure-name lookup silently fails to find `ns::A`'s already-resolved
+        # offset -- the identical namespace-ambiguity gap the non-virtual
+        # walk's own docstring documents, reproduced here for the
+        # virtual-only fallback tier specifically (Codex review, fresh
+        # evidence). `_virtual_base_edges_by_record` carries only a name +
+        # DIE key per edge, no offset field (a virtual base's own subobject
+        # offset is inherently dynamic, unlike a non-virtual `base_edges`
+        # entry) -- this tier only ever answers "0 or unknown," never a real
+        # non-zero offset, so it has no arithmetic to do once a candidate
+        # resolves.
         for rec in self.types:
             if rec.vptr_offset_bits is not None or not rec.virtual_bases:
                 continue
+            virtual_edges = self._virtual_base_edges_by_record.get(id(rec), [])
             if any(
-                (vbase := by_name.get(vbase_name)) is not None
+                (vbase := _resolve_base_record(vbase_name, vbase_key)) is not None
                 and vbase.vptr_offset_bits is not None
-                for vbase_name in rec.virtual_bases
+                for vbase_name, vbase_key in virtual_edges
             ):
                 rec.vptr_offset_bits = 0
 
