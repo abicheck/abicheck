@@ -402,28 +402,6 @@ def dump_source_only(
     )
 
 
-# ── Back-compat re-export shim (lazy, to avoid an import cycle) ───────────────
-# `_load_source_graph` / `_resolve_symbol_from_report` historically lived here
-# (re-exported from `cli_buildsource_helpers`, like the block above). They moved
-# to `cli_graph` when the `graph` command group was extracted. A *static*
-# `from .cli_graph import ...` would form a `cli_buildsource → cli_graph → cli →
-# … → cli_buildsource` import cycle (the AI-readiness gate rejects it), so this
-# module-level `__getattr__` (PEP 562) resolves them lazily via
-# `importlib.import_module` — a runtime call, not a static import edge. It
-# preserves the historical path `from abicheck.cli_buildsource import
-# _load_source_graph` without coupling the two modules. New code should import
-# from `cli_graph` directly.
-_GRAPH_REEXPORTS = frozenset({"_load_source_graph", "_resolve_symbol_from_report"})
-
-
-def __getattr__(name: str) -> Any:
-    if name in _GRAPH_REEXPORTS:
-        import importlib
-
-        return getattr(importlib.import_module("abicheck.cli_graph"), name)
-    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
-
-
 # ---------------------------------------------------------------------------
 # Snapshot output (dump's write path)
 #
@@ -665,3 +643,25 @@ def _write_snapshot_output(
         click.echo(f"Resolved evidence depth: {resolved_depth_label}", err=True)
     else:
         click.echo(result)
+
+
+# ── Back-compat re-export shim (lazy, to avoid an import cycle) ───────────────
+# `_load_source_graph` / `_resolve_symbol_from_report` historically lived here
+# (re-exported from `cli_buildsource_helpers`, like the block above). They moved
+# to `cli_graph` when the `graph` command group was extracted. A *static*
+# `from .cli_graph import ...` would form a `cli_buildsource → cli_graph → cli →
+# … → cli_buildsource` import cycle (the AI-readiness gate rejects it), so this
+# module-level `__getattr__` (PEP 562) resolves them lazily via
+# `importlib.import_module` — a runtime call, not a static import edge. It
+# preserves the historical path `from abicheck.cli_buildsource import
+# _load_source_graph` without coupling the two modules. New code should import
+# from `cli_graph` directly.
+_GRAPH_REEXPORTS = frozenset({"_load_source_graph", "_resolve_symbol_from_report"})
+
+
+def __getattr__(name: str) -> Any:
+    if name in _GRAPH_REEXPORTS:
+        import importlib
+
+        return getattr(importlib.import_module("abicheck.cli_graph"), name)
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

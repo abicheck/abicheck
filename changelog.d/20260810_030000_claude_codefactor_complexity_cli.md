@@ -54,7 +54,13 @@ A new changelog fragment. See changelog.d/README.md for the workflow.
   `cli_buildsource`'s own `embed_build_source`/`embed_inputs_pack` payloads in
   and then enforces the requested evidence depth, and that module already
   imported `_write_snapshot_output` back out of `cli`. `cli` re-exports all
-  four names. The two evidence-layer helpers are additionally called back
+  four names through a lazy module-level `__getattr__` shim (AGENTS.md's
+  required pattern for a relocated helper kept at its old path, modelled on
+  the one at the tail of `cli_buildsource.py`), so `cli` never grows a
+  top-level import of a module that reaches back into it. `dump_cmd`'s own
+  two bare-name uses take a function-local import instead — PEP 562's module
+  `__getattr__` serves attribute access on the module, never a global lookup
+  inside it. The two evidence-layer helpers are additionally called back
   *through* the `cli` module rather than by bare name, so the existing
   `monkeypatch.setattr(cli, "_missing_requested_evidence_layers", ...)` targets
   keep taking effect — the same resolution the neighbouring

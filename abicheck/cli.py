@@ -38,16 +38,6 @@ except ImportError:  # pragma: no cover - rich-click is a declared dependency
 from . import deadline
 from .checker import DiffResult, LibraryMetadata
 from .cli_audit import echo_filtered_surface, echo_reconciled
-from .cli_buildsource import (
-    # The snapshot write path lives there (cli.py is at the file-size cap);
-    # re-exported so ``abicheck.cli._write_snapshot_output`` and its two
-    # evidence-layer helpers keep resolving for dump_cmd, cli_buildsource's
-    # own caller, and the tests that import them from here.
-    _classify_missing_layers as _classify_missing_layers,
-    _layer_payload_empty as _layer_payload_empty,
-    _missing_requested_evidence_layers as _missing_requested_evidence_layers,
-    _write_snapshot_output as _write_snapshot_output,
-)
 from .cli_dump_helpers import (
     _dump_will_attempt_hybrid_l4_extraction,
     handle_non_elf_dump,
@@ -511,6 +501,14 @@ def dump_cmd(so_path: Path | None, headers: tuple[Path, ...], includes: tuple[Pa
       abicheck dump libfoo.so.1 -H include/foo.h --version 1.2.3 -o snap.json
       abicheck dump --sources ./libfoo-src/ -o libfoo.src.json  # source-only (no binary)
     """
+    # Imported here, not at module level: the snapshot write path lives in
+    # `cli_buildsource`, which reaches back into this module, so a static
+    # top-level import would be the very edge the lazy `__getattr__` shim at
+    # the tail of this file exists to avoid (AGENTS.md, "Moving helpers out of
+    # a module that re-exports them"). That shim only serves *attribute*
+    # access on the module (`cli._write_snapshot_output`); a bare name inside
+    # this module needs a real import.
+    from .cli_buildsource import _write_snapshot_output as _write_snapshot_output_fn
     from .cli_options import warn_deprecated_header_graph_flags
     from .dry_run import emit_dry_run, reject_dry_run_with_output
 
@@ -741,7 +739,7 @@ def dump_cmd(so_path: Path | None, headers: tuple[Path, ...], includes: tuple[Pa
         handle_non_elf_dump(
             so_path, binary_fmt, headers, includes, version, lang, pdb_path,
             follow_deps, git_tag, build_id, no_git, output,
-            _dump_native_binary, _stamp_provenance, _write_snapshot_output,
+            _dump_native_binary, _stamp_provenance, _write_snapshot_output_fn,
             public_headers, public_header_dirs, build_info, sources, build_config,
             allow_build_query, collect_mode, build_query, build_compile_db,
             header_backend=header_backend, compile_context=native_cc,
@@ -800,7 +798,7 @@ def dump_cmd(so_path: Path | None, headers: tuple[Path, ...], includes: tuple[Pa
         expand_header_inputs=_expand_header_inputs,
         populate_dependency_info=_populate_dependency_info,
         stamp_provenance=_stamp_provenance,
-        write_snapshot_output=_write_snapshot_output,
+        write_snapshot_output=_write_snapshot_output_fn,
         build_query=build_query,
         build_compile_db=build_compile_db,
         compile_context=_cc,
@@ -1814,3 +1812,29 @@ from . import (  # noqa: E402  — must run after `main` and helpers are defined
 
 if __name__ == "__main__":
     main()
+
+
+# The snapshot write path moved to `cli_buildsource` (this module sits near the
+# AI-readiness file-size cap; see that module's own "Snapshot output" section).
+# These names are kept resolvable at their historical `abicheck.cli` path for
+# tests and for `cli_dump_helpers`' `cli._layer_payload_empty` /
+# `cli._missing_requested_evidence_layers` lookups. A module-level `__getattr__`
+# (PEP 562) resolves them lazily via `importlib.import_module` -- a runtime
+# call, not a static import edge -- so `cli` never grows a top-level dependency
+# on `cli_buildsource`, which imports back into `cli` (AGENTS.md, "Moving
+# helpers out of a module that re-exports them"). New code should import from
+# `cli_buildsource` directly.
+_SNAPSHOT_OUTPUT_REEXPORTS = frozenset({
+    "_classify_missing_layers",
+    "_layer_payload_empty",
+    "_missing_requested_evidence_layers",
+    "_write_snapshot_output",
+})
+
+
+def __getattr__(name: str) -> Any:
+    if name in _SNAPSHOT_OUTPUT_REEXPORTS:
+        import importlib
+
+        return getattr(importlib.import_module("abicheck.cli_buildsource"), name)
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
