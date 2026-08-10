@@ -155,6 +155,30 @@ def test_scan_if_not_defined() -> None:
     assert regions == [ConditionalRegion("FEATURE_X", True, 2, 2)]
 
 
+def test_scan_if_defined_without_parens() -> None:
+    # Codex review, fresh evidence: `defined X` (no parens) is equally valid
+    # preprocessor syntax, real-compiler-accepted the same as `defined(X)` --
+    # previously fell through to the unmodeled fallback with no diagnostic.
+    text = "#if defined FEATURE_X\nvoid f();\n#endif\n"
+    regions = scan_conditional_regions(text)
+    assert regions == [ConditionalRegion("FEATURE_X", False, 2, 2)]
+
+
+def test_scan_if_not_defined_without_parens() -> None:
+    text = "#if !defined FEATURE_X\nvoid f();\n#endif\n"
+    regions = scan_conditional_regions(text)
+    assert regions == [ConditionalRegion("FEATURE_X", True, 2, 2)]
+
+
+def test_scan_if_defined_mismatched_parens_stays_unmodeled() -> None:
+    # A malformed, unbalanced operand must not be accepted as either valid
+    # form -- falls through to the unmodeled fallback instead of guessing.
+    text = "#if defined(FEATURE_X\nvoid f();\n#endif\n"
+    assert scan_conditional_regions(text) == []
+    text2 = "#if defined FEATURE_X)\nvoid f();\n#endif\n"
+    assert scan_conditional_regions(text2) == []
+
+
 def test_scan_ifdef_with_trailing_line_comment() -> None:
     # Codex review, PR #708: a trailing `//` comment on an otherwise-simple
     # guard must not defeat the end-anchored simple-form patterns.

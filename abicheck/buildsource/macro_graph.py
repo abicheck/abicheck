@@ -413,11 +413,20 @@ class ConditionalRegion:
 _TRAILING_COMMENT = r"(?:\s*(?://.*|/\*.*?\*/\s*))?"
 _IFDEF_RE = re.compile(rf"^\s*#\s*ifdef\s+(\w+)\s*{_TRAILING_COMMENT}$")
 _IFNDEF_RE = re.compile(rf"^\s*#\s*ifndef\s+(\w+)\s*{_TRAILING_COMMENT}$")
+#: `defined`'s operand may be parenthesized (`defined(X)`) or bare (`defined
+#: X`) -- both are valid, real-compiler-accepted preprocessor syntax (Codex
+#: review, fresh evidence: `#if defined FEATURE_X` fell through to the
+#: unmodeled `_IF_RE` fallback, silently omitting a real guard's
+#: `MACRO_CONTROLS_DECL` edge with no diagnostic to signal it). The
+#: alternation is written so a MISMATCHED form (`defined(X` with no closing
+#: paren, or `defined X)` with a stray one) still fails to match either
+#: branch, falling through to the unmodeled fallback rather than accepting
+#: malformed input as if it were one of the two valid forms.
 _IF_DEFINED_RE = re.compile(
-    rf"^\s*#\s*if\s+defined\s*\(\s*(\w+)\s*\)\s*{_TRAILING_COMMENT}$"
+    rf"^\s*#\s*if\s+defined\s*(?:\(\s*(\w+)\s*\)|(\w+))\s*{_TRAILING_COMMENT}$"
 )
 _IF_NOT_DEFINED_RE = re.compile(
-    rf"^\s*#\s*if\s+!\s*defined\s*\(\s*(\w+)\s*\)\s*{_TRAILING_COMMENT}$"
+    rf"^\s*#\s*if\s+!\s*defined\s*(?:\(\s*(\w+)\s*\)|(\w+))\s*{_TRAILING_COMMENT}$"
 )
 #: The unmodeled-frame fallback -- also matches `#ifdef`/`#ifndef` (Codex
 #: review, fresh evidence), not just bare/compound `#if`: a malformed-but-
@@ -644,11 +653,13 @@ def scan_conditional_regions(text: str) -> list[ConditionalRegion]:
             continue
         m = _IF_DEFINED_RE.match(line)
         if m:
-            stack.append(_GuardFrame(False, m.group(1), False, lineno + 1))
+            stack.append(
+                _GuardFrame(False, m.group(1) or m.group(2), False, lineno + 1)
+            )
             continue
         m = _IF_NOT_DEFINED_RE.match(line)
         if m:
-            stack.append(_GuardFrame(False, m.group(1), True, lineno + 1))
+            stack.append(_GuardFrame(False, m.group(1) or m.group(2), True, lineno + 1))
             continue
         if _IF_RE.match(line):
             # A bare/compound #if (not one of the four simple forms above,

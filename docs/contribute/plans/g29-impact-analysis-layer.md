@@ -1396,6 +1396,19 @@ which all depend on a Clang AST pass.
      honest gap. Documented in the module's own docstring ("a third
      accepted, documented limitation") and pinned by a dedicated regression
      test rather than silently accepted.
+   - **A twenty-third finding, confirmed real and fixed: `#if defined X`
+     (no parentheses) was unrecognized.** `_IF_DEFINED_RE`/`_IF_NOT_DEFINED_
+     RE` required `defined(X)`'s parentheses, but `defined X` is equally
+     valid, real-compiler-accepted preprocessor syntax — the unparenthesized
+     form fell through to the unmodeled `_IF_RE` fallback with no
+     diagnostic, so `fold_macro_graph()` could still stamp the pass as
+     fully covered despite silently missing the guard's
+     `MACRO_CONTROLS_DECL` edge. Fixed by widening both regexes to a proper
+     alternation between the parenthesized and bare forms (not
+     independently-optional `\(?`/`\)?`, which would have accepted a
+     mismatched operand like `defined(X` or `defined X)` as if it were
+     valid) — a malformed, unbalanced operand still falls through to the
+     unmodeled fallback rather than being guessed at.
 5. **Full type-role coverage** to parity: variable type, typedef target,
    alias-template target, enum underlying type, non-type template argument,
    default template argument, concept/constraint dependency, function-pointer
