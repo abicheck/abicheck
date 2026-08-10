@@ -753,6 +753,68 @@ building a second identity-resolution mechanism from scratch.
   correct, including the four that were silently broken before this round
   despite not being what Codex's own finding named.
 
+  **A fifth review round found two more real gaps, both surfaced by chasing
+  a base-lookup fix to a genuine end-to-end verification instead of
+  stopping once the vtable list itself looked right.** (1) A base that is a
+  CONCRETE template specialization (`struct D : A<int> {...};`) was
+  entirely unresolvable: clang emits the usable definition as a
+  `ClassTemplateSpecializationDecl`, a different node kind from the
+  `CXXRecordDecl`/`RecordDecl` pair the base-lookup index collected, so
+  `A<int>`'s own vtable was invisible to `D` — an old `D` resolved to an
+  empty vtable/no vptr regardless of what `A<int>` itself provides, and a
+  no-keyword override in a new `D` then made the vtable appear to gain its
+  FIRST entry, a false `VPTR_INTRODUCED`. Fixed with a new
+  `build_specialization_index()` (`dumper_clang_vtable.py`) that
+  reconstructs the specialization's own `Name<Arg1, Arg2>` spelling from
+  its `TemplateArgument` children — a type argument's own `type.qualType`,
+  or a non-type argument's own `value`, joined with `", "` — confirmed
+  against real clang output to exactly reproduce the base-reference
+  spelling for both a namespaced two-type-argument specialization
+  (`"ns::A<int, double>"`) and a non-type-argument one (`"A<3>"`); an
+  unindexable specialization (template-template argument, pack expansion)
+  degrades to the same already-accepted "unresolvable base" false-negative
+  every other unresolvable-base shape already degrades to. (2) Verifying
+  fix (1) end-to-end (not just at the vtable-list level) surfaced a
+  SEPARATE, previously-unreachable gap: `owner_class_of()`'s mangled-name
+  fallback recovers a specialization's *raw*, un-spelled Itanium
+  template-argument encoding (`"AIiE"` for `A<int>`, confirmed empirically
+  — this is `itanium_scope_components`'s own documented, deliberate
+  behavior for a DIFFERENT caller's purpose), which never matches
+  `RecordType.bases`'s spelled form (`"A<int>"`, built from clang's own
+  type printer) — so `vtable_slot_is_override_reuse()`'s owner check failed
+  even after the base resolved correctly, producing a false
+  `TYPE_VTABLE_CHANGED` for the exact no-keyword-override-through-a-
+  specialization-base scenario fix (1) was meant to make work. This gap was
+  UNREACHABLE before fix (1) (a specialization base's vtable was always
+  empty, so this owner comparison never ran) — fixing (1) alone would have
+  traded one false positive for a different one on the same scenario. Fixed
+  by making `ClassTemplateSpecializationDecl` scope-forming in
+  `_ClangAstParser._walk` (using the same `_specialization_spelling`
+  reconstruction as fix (1), so both consumers agree on one spelling) and
+  qualifying a specialization-owned method's `Function.name` with that
+  spelled owner in `parse_functions()` — mirroring what DWARF already does
+  for every member unconditionally (`owner_class_of`'s own docstring),
+  scoped here to ONLY the specialization-owned case so the already-working
+  plain-class path (mangled-fallback owner resolution, verified unaffected
+  by a targeted before/after repro) is untouched. `_specialization_spelling`
+  and the whole-AST specialization walk were moved into
+  `dumper_clang_vtable.py` (as `build_specialization_index`) rather than
+  grown further inside `dumper_clang.py`, which was already within 10% of
+  its 2000-line hard cap. A separate, narrower fix in the SAME review round:
+  the vtable module's own override-signature qualifier-tail search used
+  `qualtype.rfind(")")` to find the parameter list's closing paren — correct
+  when a method carries no trailing exception specification, but a C++14+
+  ref-qualified declaration with one (`"void () & throw()"`) has its OWN
+  trailing `()` sitting textually LAST, so the naive search matched the
+  exception spec's close paren instead and both a base `& throw()` and an
+  unrelated derived `&& throw()` reduced to an identical EMPTY qualifier
+  tail — discarding the ref-qualifier difference and misclassifying the
+  derived declaration as an override that replaces the base's slot in
+  place. Fixed with a new `_top_level_param_list_close()`, mirroring
+  `dumper_clang._function_qualifiers`'s own depth-aware forward scan (find
+  the first top-level `(`, then walk forward counting paren depth until it
+  closes) instead of searching from the end of the string.
+
   **A later pass closed the last of this phase's four originally-listed
   facts** (`deprecated`/`is_scoped`/bitfields/default-argument facts were
   the other three, already covered above): direct-clang now populates

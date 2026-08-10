@@ -28,7 +28,10 @@ from __future__ import annotations
 import pytest
 
 from abicheck.dumper_clang import _ClangAstParser
-from abicheck.dumper_clang_vtable import _normalize_param_type
+from abicheck.dumper_clang_vtable import (
+    _normalize_param_type,
+    _top_level_param_list_close,
+)
 
 
 def _tu(*inner: dict) -> dict:
@@ -716,3 +719,185 @@ def test_pointee_restrict_qualified_param_is_not_an_override() -> None:
     )
     types = _types(root)
     assert types["D"].vtable == ["_ZN1A1bEPKi", "_ZN1D1bEPi"]  # both, distinct slots
+
+
+# ── fifth review round: the parameter-list close paren vs. an exception ───
+# ── specification's own trailing `()` ──────────────────────────────────
+
+
+@pytest.mark.parametrize(
+    ("qual_type", "expected_char"),
+    [
+        # Real clang spelling (Clang 18, -std=c++14) for a ref-qualified
+        # method that ALSO carries a dynamic exception spec: the spec's own
+        # `()` sits textually LAST, so a naive `rfind(")")` finds ITS close
+        # paren instead of the parameter list's own.
+        ("void () & throw()", ")"),
+        ("void () && throw()", ")"),
+        ("void (int, ...)", ")"),
+        ("void (void (*)(int)) const", ")"),
+        ("void ()", ")"),
+    ],
+)
+def test_top_level_param_list_close_skips_exception_spec_parens(
+    qual_type: str, expected_char: str
+) -> None:
+    idx = _top_level_param_list_close(qual_type)
+    assert idx != -1
+    assert qual_type[idx] == expected_char
+    # The parameter list's own close paren is always the FIRST top-level
+    # `)` reachable by walking forward from the FIRST top-level `(` -- for
+    # every case above (with a trailing exception spec or not) this must
+    # NOT be the string's last character index unless there is genuinely
+    # nothing after it (the bare `"void ()"` case).
+    if "throw" in qual_type or qual_type.endswith("..."):
+        assert idx != len(qual_type) - 1
+
+
+def test_ref_qualifier_mismatch_survives_trailing_exception_spec() -> None:
+    """Codex review, fresh evidence: a base `virtual void g() & throw();`
+    and an unrelated derived `void g() && throw();` used to reduce to an
+    IDENTICAL empty qualifier tail (the naive `rfind(")")` search matched
+    `throw()`'s own close paren, discarding both ref-qualifiers), so the
+    derived declaration was misclassified as an override that REPLACES the
+    base's slot in place. Must instead be recognized as a genuinely
+    DIFFERENT signature -- the base's slot is untouched, and since the
+    derived method carries no `virtual`/`override` marker and doesn't match
+    any known signature, it is not virtual and does not appear in the
+    vtable at all.
+    """
+    root = _tu(
+        _record(
+            "A",
+            {
+                "kind": "CXXMethodDecl",
+                "name": "g",
+                "mangledName": "_ZN1A1gEvRO",  # arbitrary but distinct
+                "type": {"qualType": "void () & throw()"},
+                "virtual": True,
+            },
+        ),
+        _record(
+            "D",
+            {
+                "kind": "CXXMethodDecl",
+                "name": "g",
+                "mangledName": "_ZN1D1gEvRR",  # arbitrary but distinct
+                "type": {"qualType": "void () && throw()"},
+            },
+            bases=[_base("A")],
+        ),
+    )
+    types = _types(root)
+    assert types["D"].vtable == ["_ZN1A1gEvRO"]  # base slot untouched
+
+
+# ── a base that is a CONCRETE template specialization, not an ordinary ────
+# ── record (Codex review, fresh evidence, P1) ──────────────────────────
+
+
+def _specialization(name: str, *inner: dict, type_args: list[str]) -> dict:
+    """A ``ClassTemplateSpecializationDecl`` node, mirroring real clang
+    output: one ``TemplateArgument`` child per type argument (each carrying
+    only the ``type.qualType`` this module's spelling-reconstruction
+    reads), followed by *inner*'s own children.
+    """
+    args = [{"kind": "TemplateArgument", "type": {"qualType": t}} for t in type_args]
+    return {
+        "kind": "ClassTemplateSpecializationDecl",
+        "name": name,
+        "completeDefinition": True,
+        "inner": [*args, *inner],
+    }
+
+
+def test_base_resolved_via_concrete_template_specialization() -> None:
+    """A base that is a CONCRETE template specialization (``struct D :
+    A<int> {...};``) used to be entirely unresolvable: clang emits the
+    usable definition as a ``ClassTemplateSpecializationDecl``, a different
+    node kind from the ``CXXRecordDecl``/``RecordDecl`` pair the ordinary
+    base-lookup index collects, so ``A<int>``'s own vtable was invisible to
+    ``D`` (Codex review, fresh evidence, P1). An old ``D`` deriving from
+    ``A<int>`` resolved to an empty vtable/no vptr regardless of what
+    ``A<int>`` itself provides -- confirmed via the sibling live-clang
+    integration test (``test_clang_backend_resolves_concrete_template_
+    specialization_base``); this is the same shape reduced to a hand-built
+    fixture.
+    """
+    root = _tu(
+        {
+            "kind": "ClassTemplateDecl",
+            "name": "A",
+            "inner": [
+                {"kind": "TemplateTypeParmDecl", "name": "T"},
+                _record("A"),  # the uninstantiated pattern -- irrelevant here
+                _specialization(
+                    "A",
+                    {
+                        "kind": "CXXMethodDecl",
+                        "name": "f",
+                        "mangledName": "_ZN1AIiE1fEi",
+                        "type": {"qualType": "void (int)"},
+                        "virtual": True,
+                        "inner": [{"kind": "ParmVarDecl", "type": {"qualType": "int"}}],
+                    },
+                    type_args=["int"],
+                ),
+            ],
+        },
+        _record("D", bases=[_base("A<int>")]),
+    )
+    types = _types(root)
+    assert types["D"].vtable == ["_ZN1AIiE1fEi"]
+    assert types["D"].vptr_offset_bits == 0
+
+
+def test_specialization_base_override_with_no_keyword_replaces_slot_in_place() -> None:
+    """The flagship no-keyword-override scenario, through a concrete
+    template specialization base instead of an ordinary one: ``D::f``
+    repeats neither ``virtual`` nor ``override``, yet must still be
+    recognized as overriding ``A<int>::f`` via signature matching and
+    replace its slot in place, not append a duplicate."""
+    root = _tu(
+        {
+            "kind": "ClassTemplateDecl",
+            "name": "A",
+            "inner": [
+                {"kind": "TemplateTypeParmDecl", "name": "T"},
+                _record("A"),
+                _specialization(
+                    "A",
+                    {
+                        "kind": "CXXMethodDecl",
+                        "name": "f",
+                        "mangledName": "_ZN1AIiE1fEi",
+                        "type": {"qualType": "void (int)"},
+                        "virtual": True,
+                        "inner": [{"kind": "ParmVarDecl", "type": {"qualType": "int"}}],
+                    },
+                    type_args=["int"],
+                ),
+            ],
+        },
+        _record(
+            "D",
+            _method("f", "_ZN1D1fEi", params=["int"]),  # no virtual, no OverrideAttr
+            bases=[_base("A<int>")],
+        ),
+    )
+    types = _types(root)
+    assert types["D"].vtable == ["_ZN1D1fEi"]  # replaced, not appended
+
+    funcs = {
+        f.mangled: f for f in _ClangAstParser(root, set(), set()).parse_functions()
+    }
+    # The inferred virtuality must propagate to Function.is_virtual (feeds
+    # diff_cxx_rules.vtable_slot_is_override_reuse()'s own requirement)...
+    assert funcs["_ZN1D1fEi"].is_virtual is True
+    # ...and the specialization's own occupant must be qualified with its
+    # SPELLED specialization name (matching what D.bases records), not left
+    # bare -- otherwise owner_class_of()'s mangled-name fallback recovers
+    # only the RAW, un-spelled Itanium encoding ("AIiE"), which never
+    # matches D.bases == ["A<int>"] and produces a false
+    # TYPE_VTABLE_CHANGED once the base above is resolved at all.
+    assert funcs["_ZN1AIiE1fEi"].name == "A<int>::f"

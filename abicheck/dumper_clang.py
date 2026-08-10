@@ -81,7 +81,11 @@ from .dumper_clang_expr import (  # noqa: F401  (some re-exported for tests)
     _specialization_scope_key,
     _unwrap_expr,
 )
-from .dumper_clang_vtable import build_vtable as _build_clang_vtable
+from .dumper_clang_vtable import (
+    _specialization_spelling,
+    build_specialization_index as _build_specialization_index,
+    build_vtable as _build_clang_vtable,
+)
 from .errors import AstContextMissingError, SnapshotError
 from .model import (
     AccessLevel,
@@ -768,6 +772,13 @@ class _ClangAstParser:
         # itself is built in _build_record. Only needed by
         # dumper_clang_vtable.build_vtable's base-lookup recursion.
         self._record_by_qualname: dict[str, dict[str, Any]] | None = None
+        # Built lazily (on first vtable reconstruction, via
+        # _specialization_record_index()) -- the SAME kind of index as
+        # _record_by_qualname above, but over concrete
+        # ClassTemplateSpecializationDecl nodes (`struct D : A<int> {...};`),
+        # a different clang node kind self._records never collects at all.
+        # See _specialization_record_index()'s own docstring.
+        self._specialization_by_qualname: dict[str, dict[str, Any]] | None = None
         # Built lazily (on first parse_functions() call, via
         # _virtual_mangled_names()) -- every mangled name appearing in ANY
         # record's reconstructed vtable, across the whole TU. Lets
@@ -828,7 +839,29 @@ class _ClangAstParser:
         child_extern_c = extern_c or (
             kind == "LinkageSpecDecl" and node.get("language") == "C"
         )
-        child_scope = (*scope, name) if kind in _SCOPE_NODE_KINDS and name else scope
+        if kind in _SCOPE_NODE_KINDS and name:
+            child_scope = (*scope, name)
+        elif kind == "ClassTemplateSpecializationDecl" and name:
+            # A concrete template specialization's own members (e.g. `A<int>
+            # ::f`) are otherwise scoped as if declared at the SAME level as
+            # the specialization itself (`ClassTemplateSpecializationDecl`
+            # is deliberately not in `_SCOPE_NODE_KINDS` -- it isn't an
+            # ordinary namespace/class/linkage-spec scope) -- so a member's
+            # `entry.scope` silently dropped the owning specialization
+            # entirely (Codex review, fresh evidence: this is what let
+            # `_specialization_record_index`'s base-lookup fix resolve the
+            # base's vtable correctly while `owner_class_of`'s mangled-name
+            # fallback still couldn't match it against `RecordType.bases`
+            # -- see `parse_functions`'s own comment on this). Reuses
+            # `_specialization_spelling` (already built for that base-lookup
+            # index) so both consumers agree on the exact same spelling;
+            # falls back to the unscoped behavior (bare `name`, degrading
+            # the SAME way an unresolvable base already degrades elsewhere
+            # in this module) when the spelling can't be reconstructed.
+            spelling = _specialization_spelling(node, name)
+            child_scope = (*scope, spelling) if spelling else scope
+        else:
+            child_scope = scope
         running = (
             _default_record_access(node)
             if kind in ("CXXRecordDecl", "RecordDecl")
@@ -1019,6 +1052,29 @@ class _ClangAstParser:
             self._record_by_qualname = idx
         return self._record_by_qualname
 
+    def _specialization_record_index(self) -> dict[str, dict[str, Any]]:
+        """Lazily-built, memoized :func:`build_specialization_index` over
+        this parser's own AST root -- see that function's docstring
+        (``dumper_clang_vtable.py``) for the full "why".
+        """
+        if self._specialization_by_qualname is None:
+            self._specialization_by_qualname = _build_specialization_index(self._root)
+        return self._specialization_by_qualname
+
+    def _base_lookup_index(self) -> dict[str, dict[str, Any]]:
+        """Merged ``_record_index()`` + ``_specialization_record_index()``,
+        for ``dumper_clang_vtable.build_vtable``'s base-lookup recursion.
+
+        Safe to merge into one dict: an ordinary record's qualname never
+        contains ``"<"``, so the two key spaces never collide. An ordinary
+        record wins on the rare case both indexes somehow produced the same
+        key (shouldn't occur given the above, but a plain record is always
+        the more trustworthy of the two if it ever did).
+        """
+        merged = dict(self._specialization_record_index())
+        merged.update(self._record_index())
+        return merged
+
     def _virtual_mangled_names(self) -> frozenset[str]:
         """Every mangled name occupying a slot in ANY record's reconstructed
         vtable, across the whole TU.
@@ -1047,7 +1103,7 @@ class _ClangAstParser:
         recover one clang's JSON otherwise drops silently.
         """
         if self._virtual_mangled is None:
-            idx = self._record_index()
+            idx = self._base_lookup_index()
             names: set[str] = set()
             for qualname in idx:
                 names.update(_build_clang_vtable(qualname, idx))
@@ -1065,6 +1121,32 @@ class _ClangAstParser:
             name = str(node.get("name", ""))
             if not name:
                 continue
+            if entry.scope and "<" in entry.scope[-1]:
+                # A method of a concrete class-template specialization
+                # (`A<int>::f`) -- unlike an ordinary member, whose name
+                # this backend deliberately leaves bare everywhere else
+                # (`owner_class_of` recovers its owner from the MANGLED
+                # name instead, which works fine there since a plain
+                # class's mangled scope component already IS its matching
+                # spelling). A specialization's own mangled scope component
+                # is the RAW, un-spelled Itanium template-argument encoding
+                # (`"AIiE"`, confirmed with a real clang build) -- which
+                # never matches `RecordType.bases`'s spelled form
+                # (`"A<int>"`, built from clang's own type printer) at all,
+                # so `owner_class_of`'s mangled fallback silently failed to
+                # recognize an inherited-slot override whose base is a
+                # template specialization, producing a false
+                # `TYPE_VTABLE_CHANGED` (Codex review, fresh evidence: found
+                # while verifying the base-lookup fix end to end -- the
+                # vtable itself now resolves correctly, but this SEPARATE
+                # owner-matching gap was still reachable once it did).
+                # Qualifying the name here lets `owner_class_of`'s
+                # PREFERRED (already-qualified-name) branch resolve the
+                # SAME spelling `RecordType.bases` records, sidestepping
+                # the mismatched mangled fallback entirely -- mirroring
+                # what DWARF already does for every member unconditionally
+                # (`owner_class_of`'s own docstring).
+                name = "::".join((*entry.scope, name))
             qualtype = _qualtype(node)
             mangled = str(node.get("mangledName", "")) or name
             quals = _function_qualifiers(qualtype)
@@ -1288,7 +1370,7 @@ class _ClangAstParser:
         # a `bases` array, so using it here (rather than the node's own bare
         # "") is what lets it still resolve if ever referenced as a base.
         own_qualname = "::".join([*entry.scope, own_name]) if entry.scope else own_name
-        vtable = _build_clang_vtable(own_qualname, self._record_index())
+        vtable = _build_clang_vtable(own_qualname, self._base_lookup_index())
         return RecordType(
             name=own_name,
             kind=kind,

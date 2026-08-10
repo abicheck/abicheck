@@ -179,6 +179,8 @@ from __future__ import annotations
 import re
 from typing import Any
 
+from .dumper_clang_expr import _SCOPE_NODE_KINDS
+
 #: Sentinel signature key for a destructor slot -- unifies a base's own
 #: `~Base` and a derived class's own `~Derived` under one signature-index
 #: entry, since their literal names never match but they occupy the SAME
@@ -342,16 +344,13 @@ def _method_signature_key(node: dict[str, Any]) -> _Signature | None:
     )
     type_obj = node.get("type")
     qual_type = str(type_obj.get("qualType", "")) if isinstance(type_obj, dict) else ""
-    # The outer function type's own closing paren is always the LAST ")" in
-    # the qualType string -- any parenthesized sub-expression inside a
-    # parameter type (e.g. a function-pointer parameter) closes strictly
-    # before it. Everything after it is the cv/ref/noexcept qualifier
-    # suffix; splitting off a trailing `noexcept(...)` defensively before
-    # keeping the rest avoids folding noexcept's own operand into the
-    # qualifier identity (not observed in this clang version's output, but
-    # cheap to guard). Whitespace-collapsed so "const  &" and "const &"
-    # (if either ever occurs) compare equal.
-    paren_end = qual_type.rfind(")")
+    paren_end = _top_level_param_list_close(qual_type)
+    # Everything after the parameter list's OWN matching close paren is the
+    # cv/ref/exception-spec suffix; splitting off a trailing `noexcept(...)`
+    # defensively before keeping the rest avoids folding noexcept's own
+    # operand into the qualifier identity (not observed in this clang
+    # version's output, but cheap to guard). Whitespace-collapsed so
+    # "const  &" and "const &" (if either ever occurs) compare equal.
     tail = qual_type[paren_end + 1 :] if paren_end != -1 else ""
     qualifier_tail = " ".join(tail.split("noexcept", 1)[0].split())
     # The ellipsis, when present, is always the last token inside the
@@ -362,6 +361,49 @@ def _method_signature_key(node: dict[str, Any]) -> _Signature | None:
         qual_type[:paren_end].rstrip().endswith("...") if paren_end != -1 else False
     )
     return (str(name), params, is_variadic, qualifier_tail)
+
+
+def _top_level_param_list_close(qual_type: str) -> int:
+    """Index of the parameter list's OWN matching close paren in a
+    function's ``qualType`` spelling, or ``-1`` if none is found.
+
+    NOT ``qual_type.rfind(")")`` -- a C++14+ ref-qualified/exception-spec
+    declaration (``"void () & throw()"``) has its OWN trailing ``()`` from
+    the exception specification, which is textually LAST, so a plain
+    right-to-left search finds `throw()`'s close paren instead of the
+    parameter list's (confirmed against real clang output: both a base
+    ``virtual void g() & throw();`` and an unrelated derived
+    ``void g() && throw();`` reduce to an IDENTICAL empty qualifier tail
+    under the naive `rfind` search, since the last `)` sits at the very end
+    of the string for both -- the ref-qualifier difference that should keep
+    them distinct signatures is silently discarded, misclassifying the
+    derived declaration as an override that replaces the base's slot
+    in-place (Codex review, fresh evidence); the same masking also breaks
+    variadic detection when a parenthesized exception spec follows `...`).
+    Mirrors ``_function_qualifiers`` (``dumper_clang.py``) exactly: find the
+    FIRST top-level ``(`` (skipping over ``<...>``/``[...]`` nesting, e.g. a
+    template-typed return type or an array-typed parameter), then walk
+    forward counting paren depth until it closes -- correctly stepping over
+    a nested parenthesized sub-expression inside the parameter list itself
+    (a function-pointer parameter) without stopping early.
+    """
+    bracket = 0
+    for idx, ch in enumerate(qual_type):
+        if ch in "<[":
+            bracket += 1
+        elif ch in ">]":
+            bracket = max(0, bracket - 1)
+        elif ch == "(" and bracket == 0:
+            depth = 1
+            j = idx + 1
+            while j < len(qual_type) and depth:
+                if qual_type[j] == "(":
+                    depth += 1
+                elif qual_type[j] == ")":
+                    depth -= 1
+                j += 1
+            return j - 1
+    return -1
 
 
 def _has_override_attr(node: dict[str, Any]) -> bool:
@@ -497,3 +539,106 @@ def build_vtable(
     """
     slots, _ = _collect_virtual_slots(qualname, records_by_qualname, set())
     return list(slots.values())
+
+
+def _specialization_spelling(node: dict[str, Any], name: str) -> str | None:
+    """A ``ClassTemplateSpecializationDecl``'s own ``Name<Arg1, Arg2>``
+    spelling, reconstructed from its direct ``TemplateArgument`` children --
+    matching what clang's own type printer produces on a base-reference
+    site's ``type.qualType``/``desugaredQualType`` (confirmed with real
+    clang builds, see :func:`build_specialization_index`'s docstring for the
+    exact repros this reproduces).
+
+    ``None`` when any argument isn't a plain type or non-type literal (no
+    ``type`` or ``value`` field at all -- a template-template argument or a
+    pack expansion, neither reproducible this way) or when there are no
+    arguments at all -- the caller skips indexing entirely rather than
+    guessing at a spelling that might not match the referring site's own.
+    """
+    args: list[str] = []
+    for child in node.get("inner", []) or []:
+        if not isinstance(child, dict) or child.get("kind") != "TemplateArgument":
+            continue
+        type_obj = child.get("type")
+        if isinstance(type_obj, dict) and type_obj.get("qualType"):
+            args.append(str(type_obj["qualType"]))
+            continue
+        if "value" in child:
+            args.append(str(child["value"]))
+            continue
+        return None
+    if not args:
+        return None
+    return f"{name}<{', '.join(args)}>"
+
+
+def build_specialization_index(root: dict[str, Any]) -> dict[str, dict[str, Any]]:
+    """``qualified spelling -> node`` index over every concrete
+    ``ClassTemplateSpecializationDecl`` reachable from the parsed AST, for
+    :func:`build_vtable`'s base-lookup recursion (via
+    ``dumper_clang.py``'s ``_ClangAstParser._base_lookup_index``, which
+    merges this with its own ``_record_index()``).
+
+    ``dumper_clang.py``'s own categorizing walk (``self._records``, and
+    therefore its ``_record_index()``) only ever collects
+    ``CXXRecordDecl``/``RecordDecl`` nodes -- a concrete template
+    specialization used as a base (``struct D : A<int> {...};``) is a
+    DIFFERENT clang node kind entirely (``ClassTemplateSpecializationDecl``,
+    confirmed with a real clang build: nested inside its own
+    ``ClassTemplateDecl``, sibling to the uninstantiated pattern's own
+    ``CXXRecordDecl``, and never visited by that walk's ``kind in
+    ("CXXRecordDecl", "RecordDecl")`` check), so it was never reachable from
+    the base-lookup index at all. An old ``D`` deriving from ``A<int>``
+    resolved to an empty `vtable`/no vptr, and adding a no-keyword override
+    in a new ``D`` then made the vtable appear to gain its FIRST entry -- a
+    false breaking ``VPTR_INTRODUCED`` (Codex review, fresh evidence).
+
+    Unlike an ordinary record, a specialization's own ``name`` is always the
+    BARE primary-template name (``"A"``, never ``"A<int>"``, confirmed with
+    a real clang build) -- the template-argument spelling only exists on the
+    REFERRING site's own ``type.qualType``/``desugaredQualType`` (what
+    ``_base_qualnames`` already reads for an ordinary base). So this
+    reconstructs the matching spelling itself from each direct
+    ``TemplateArgument`` child, via :func:`_specialization_spelling` -- a
+    type argument's own ``type.qualType``, or a non-type argument's own
+    ``value`` -- joined with ``", "``, confirmed against real clang output
+    to exactly reproduce the base-reference spelling for both a namespaced
+    two-type-argument specialization (``"ns::A<int, double>"``) and a
+    non-type-argument one (``"A<3>"``). A specialization carrying any OTHER
+    kind of argument (template-template, pack expansion -- no ``type`` or
+    ``value`` field on that argument) is skipped entirely rather than
+    guessed at: an unindexed specialization degrades to the same
+    already-accepted "unresolvable base" false-negative every other
+    unresolvable-base shape in this module already degrades to (see the
+    module docstring's own "known limitation" section) -- never a false
+    positive.
+
+    Scope-tracked the same way ``dumper_clang.py``'s own ``_walk`` tracks it
+    for an ordinary record (extended on ``NamespaceDecl``/``CXXRecordDecl``/
+    ``RecordDecl``/``LinkageSpecDecl``, via the shared ``_SCOPE_NODE_KINDS``
+    -- a ``ClassTemplateDecl``/``ClassTemplateSpecializationDecl`` itself is
+    deliberately NOT scope-forming here, matching ``_SCOPE_NODE_KINDS``'s
+    own membership) so a namespaced template's specialization indexes under
+    its fully-qualified spelling, not a bare one. A dedicated whole-AST walk
+    (independent of ``dumper_clang.py``'s own categorizing walk, the same
+    shape as ``dumper_clang_expr._index_decl_id_qualified_names``) since a
+    specialization is never collected by that walk at all.
+    """
+    idx: dict[str, dict[str, Any]] = {}
+
+    def walk(node: Any, scope: tuple[str, ...]) -> None:
+        if not isinstance(node, dict):
+            return
+        kind = node.get("kind")
+        name = str(node.get("name") or "")
+        if kind == "ClassTemplateSpecializationDecl" and name:
+            spelling = _specialization_spelling(node, name)
+            if spelling is not None:
+                qualname = "::".join((*scope, spelling)) if scope else spelling
+                idx.setdefault(qualname, node)
+        child_scope = (*scope, name) if kind in _SCOPE_NODE_KINDS and name else scope
+        for child in node.get("inner", []) or []:
+            walk(child, child_scope)
+
+    walk(root, ())
+    return idx

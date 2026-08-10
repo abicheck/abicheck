@@ -408,3 +408,81 @@ def test_clang_backend_reconstructs_vtable_and_flags_vptr_introduced(
 
     result = compare(old_snap, new_snap)
     assert ChangeKind.VPTR_INTRODUCED in {c.kind for c in result.changes}
+
+
+def test_clang_backend_resolves_concrete_template_specialization_base(
+    tmp_path: Path,
+) -> None:
+    """Codex review, fresh evidence (P1): a class deriving from a CONCRETE
+    template specialization (``struct D : A<int> {...};``) used to resolve
+    to an empty vtable/no vptr regardless of what ``A<int>`` itself
+    provides -- clang emits the usable definition as a
+    ``ClassTemplateSpecializationDecl``, a different node kind from the
+    ``CXXRecordDecl``/``RecordDecl`` pair the base-lookup index collected,
+    so the base was silently unresolvable. Adding a no-keyword override in
+    the new side then made the vtable appear to gain its FIRST entry -- a
+    false breaking ``VPTR_INTRODUCED``, even though `D` was already
+    genuinely polymorphic (via its inherited `A<int>::f`) in the OLD
+    snapshot too.
+    """
+    if not (_have("clang") and _have("g++")):
+        pytest.skip(
+            "clang and g++ are required for the clang L2 backend integration test"
+        )
+    old_dir = tmp_path / "old"
+    old_dir.mkdir()
+    old_header = old_dir / "api.h"
+    old_header.write_text(
+        "template <typename T>\n"
+        "struct A {\n"
+        "    virtual void f(T x);\n"
+        "};\n"
+        "struct D : A<int> {\n"
+        "};\n"
+    )
+    old_src = old_dir / "old.cpp"
+    old_src.write_text('#include "api.h"\ntemplate struct A<int>;\n')
+    v1_so = tmp_path / "libv1.so"
+    subprocess.run(
+        ["g++", "-shared", "-fPIC", "-o", str(v1_so), str(old_src), f"-I{old_dir}"],
+        check=True,
+        capture_output=True,
+    )
+
+    new_dir = tmp_path / "new"
+    new_dir.mkdir()
+    new_header = new_dir / "api.h"
+    new_header.write_text(
+        "template <typename T>\n"
+        "struct A {\n"
+        "    virtual void f(T x);\n"
+        "};\n"
+        # Deliberately repeats NEITHER `virtual` NOR `override` -- the same
+        # implicit-virtual-via-signature-match shape the sibling test above
+        # exercises for a non-template base, here through a concrete
+        # specialization base instead.
+        "struct D : A<int> {\n    void f(int x);\n};\n"
+    )
+    new_src = new_dir / "new.cpp"
+    new_src.write_text('#include "api.h"\ntemplate struct A<int>;\n')
+    v2_so = tmp_path / "libv2.so"
+    subprocess.run(
+        ["g++", "-shared", "-fPIC", "-o", str(v2_so), str(new_src), f"-I{new_dir}"],
+        check=True,
+        capture_output=True,
+    )
+
+    old_snap = dump(v1_so, [old_header], header_backend="clang")
+    new_snap = dump(v2_so, [new_header], header_backend="clang")
+    old_d = next(t for t in old_snap.types if t.name == "D")
+    new_d = next(t for t in new_snap.types if t.name == "D")
+    # The old side is ALREADY polymorphic via its inherited A<int>::f --
+    # base resolution must find that slot even though A<int> is a concrete
+    # template specialization, not an ordinary record.
+    assert old_d.vtable != []
+    assert old_d.vptr_offset_bits == 0
+    assert new_d.vtable != []
+
+    result = compare(old_snap, new_snap)
+    assert ChangeKind.VPTR_INTRODUCED not in {c.kind for c in result.changes}
+    assert ChangeKind.TYPE_VTABLE_CHANGED not in {c.kind for c in result.changes}
