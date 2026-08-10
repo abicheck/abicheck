@@ -596,6 +596,56 @@ def test_failed_write_preserves_existing_destination(tmp_path, monkeypatch):
     assert leftovers == []
 
 
+def test_fsync_storage_failure_aborts_write_and_preserves_destination(
+    tmp_path, monkeypatch
+):
+    """Codex review, PR #699: a real storage failure from fsync() (disk
+    full, I/O error, ...) must abort the write rather than being swallowed
+    as "this platform doesn't support fsync" -- the previous blanket
+    `except OSError: pass` would proceed to os.replace() with data the
+    kernel just reported it could not durably flush, overwriting a
+    known-good destination with unconfirmed content."""
+    import errno
+
+    import abicheck.snapshot_io as snapshot_io_mod
+
+    snap = _sample_snapshot()
+    p = tmp_path / "existing.abicheck.json"
+    write_snapshot(snap, p)
+    original_bytes = p.read_bytes()
+
+    def _enospc(fd):
+        raise OSError(errno.ENOSPC, "No space left on device")
+
+    monkeypatch.setattr(snapshot_io_mod.os, "fsync", _enospc)
+    with pytest.raises(OSError):
+        write_snapshot(snap, p)
+    # Destination must be untouched (os.replace() must never have run), and
+    # no stray temp file left behind.
+    assert p.read_bytes() == original_bytes
+    leftovers = [f for f in tmp_path.iterdir() if f != p]
+    assert leftovers == []
+
+
+def test_fsync_unsupported_error_is_still_best_effort(tmp_path, monkeypatch):
+    """The narrowed fsync error handling must still swallow the specific
+    "this filesystem/platform doesn't support fsync" errnos (EINVAL/
+    ENOTSUP/EOPNOTSUPP), not turn every fsync failure into a hard abort."""
+    import errno
+
+    import abicheck.snapshot_io as snapshot_io_mod
+
+    snap = _sample_snapshot()
+    p = tmp_path / "new.abicheck.json"
+
+    def _einval(fd):
+        raise OSError(errno.EINVAL, "fsync not supported on this filesystem")
+
+    monkeypatch.setattr(snapshot_io_mod.os, "fsync", _einval)
+    write_snapshot(snap, p)  # must not raise
+    assert p.is_file()
+
+
 # ── Content ──────────────────────────────────────────────────────────────
 
 

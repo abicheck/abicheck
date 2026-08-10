@@ -32,6 +32,7 @@ CLI/service code without creating an import cycle.
 
 from __future__ import annotations
 
+import errno
 import gzip
 import hashlib
 import io
@@ -633,8 +634,27 @@ def _atomic_write_bytes(data: bytes, path: Path) -> None:
             f.flush()
             try:
                 os.fsync(f.fileno())
-            except OSError:
-                pass  # best-effort; some filesystems/platforms don't support it
+            except OSError as exc:
+                # Codex review: only swallow an error that specifically
+                # means "this filesystem/platform doesn't support fsync"
+                # (EINVAL/ENOTSUP/EOPNOTSUPP -- seen on some network/overlay
+                # filesystems and platforms) -- best-effort in that narrow
+                # sense only. A real storage failure (ENOSPC disk full,
+                # EIO, EDQUOT, EROFS a filesystem remounted read-only mid-
+                # write, ...) means the data the kernel just reported
+                # flushing may not actually be durable on disk; swallowing
+                # that and proceeding to os.replace() would silently
+                # overwrite a known-good snapshot with unconfirmed content,
+                # contradicting this function's own atomic-write guarantee.
+                # Let anything else propagate to the outer except, which
+                # cleans up the temp file and leaves the existing
+                # destination untouched.
+                if exc.errno not in (
+                    errno.EINVAL,
+                    errno.ENOTSUP,
+                    errno.EOPNOTSUPP,
+                ):
+                    raise
         try:
             existing_stat = target.stat()
             existing_mode: int | None = existing_stat.st_mode & 0o777
