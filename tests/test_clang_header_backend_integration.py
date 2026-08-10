@@ -991,3 +991,77 @@ def test_clang_backend_resolves_nested_specialization_with_defaulted_argument(
     result = compare(old_snap, new_snap)
     assert ChangeKind.VPTR_INTRODUCED not in {c.kind for c in result.changes}
     assert ChangeKind.TYPE_VTABLE_CHANGED not in {c.kind for c in result.changes}
+
+
+def test_clang_backend_safely_degrades_on_conflicting_nested_template_defaults(
+    tmp_path: Path,
+) -> None:
+    """Codex review, fresh evidence (P1, third round): two different
+    explicit outer specializations each defining their OWN same-named
+    nested member template with DIFFERING defaults (`Outer<int>`'s
+    `template<class U=int> struct A` vs. `Outer<double>`'s `template
+    <class U=double> struct A`) must not let one specialization's default
+    silently leak into the other's. Before the fix this left the base
+    unresolvable in a way that, combined with the pre-existing empty-
+    vtable-on-both-sides shape, could mask a real virtual-method addition
+    entirely (NO_CHANGE) -- the fix's job is to keep this a safe,
+    unresolvable-base degradation (no crash, no wrong resolution), not to
+    make it fully resolvable (which would need per-specialization keying,
+    a larger change).
+    """
+    if not (_have("clang") and _have("g++")):
+        pytest.skip(
+            "clang and g++ are required for the clang L2 backend integration test"
+        )
+
+    def _header(extra: str) -> str:
+        return (
+            "template <class T>\nstruct Outer;\n\n"
+            "template <>\nstruct Outer<int> {\n"
+            "    template <class U = int>\n"
+            "    struct A {\n        virtual void f();\n    };\n};\n\n"
+            "template <>\nstruct Outer<double> {\n"
+            "    template <class U = double>\n"
+            "    struct A {\n        virtual void f();\n    };\n};\n\n"
+            "struct D : Outer<double>::A<> {\n" + extra + "};\n"
+        )
+
+    old_dir = tmp_path / "old"
+    old_dir.mkdir()
+    old_header = old_dir / "api.h"
+    old_header.write_text(_header(""))
+    old_src = old_dir / "old.cpp"
+    old_src.write_text('#include "api.h"\ntemplate struct Outer<double>::A<>;\n')
+    v1_so = tmp_path / "libv1.so"
+    subprocess.run(
+        ["g++", "-shared", "-fPIC", "-o", str(v1_so), str(old_src), f"-I{old_dir}"],
+        check=True,
+        capture_output=True,
+    )
+
+    new_dir = tmp_path / "new"
+    new_dir.mkdir()
+    new_header = new_dir / "api.h"
+    new_header.write_text(_header("    void f() override;\n"))
+    new_src = new_dir / "new.cpp"
+    new_src.write_text('#include "api.h"\ntemplate struct Outer<double>::A<>;\n')
+    v2_so = tmp_path / "libv2.so"
+    subprocess.run(
+        ["g++", "-shared", "-fPIC", "-o", str(v2_so), str(new_src), f"-I{new_dir}"],
+        check=True,
+        capture_output=True,
+    )
+
+    old_snap = dump(v1_so, [old_header], header_backend="clang")
+    new_snap = dump(v2_so, [new_header], header_backend="clang")
+    old_d = next(t for t in old_snap.types if t.name == "D")
+    new_d = next(t for t in new_snap.types if t.name == "D")
+    # Safe degradation: unresolvable on BOTH sides (not a crash, not a
+    # fabricated resolution using the wrong default) -- symmetric, so no
+    # false VPTR_INTRODUCED/TYPE_VTABLE_CHANGED fires either.
+    assert old_d.vtable == []
+    assert new_d.vtable == []
+
+    result = compare(old_snap, new_snap)
+    assert ChangeKind.VPTR_INTRODUCED not in {c.kind for c in result.changes}
+    assert ChangeKind.TYPE_VTABLE_CHANGED not in {c.kind for c in result.changes}

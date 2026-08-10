@@ -678,18 +678,43 @@ def _index_template_param_kinds(root: dict[str, Any]) -> dict[str, list[str | No
     depth, confirmed with a real clang build for both an implicit and an
     explicit specialization). A redeclaration of the same template (e.g.
     seen again through a second ``#include``) shares an identical parameter
-    list, so first-registration-wins is safe.
+    list, so keeping the first registration is safe THERE -- but a bare,
+    unspelled qualname (this function never extends scope through a
+    ``ClassTemplateSpecializationDecl``, see :func:`build_specialization_index`'s
+    own *lookup_scope* split) collapses a member template nested in one
+    explicit outer specialization with a SAME-NAMED, genuinely DIFFERENT
+    member template nested in a sibling outer specialization -- e.g.
+    ``Outer<int>``'s own nested ``template<class U=int> struct A`` and
+    ``Outer<double>``'s own nested ``template<class U=double> struct A``
+    both register under the bare key ``"A"`` (Codex review, fresh evidence,
+    real end-to-end repro: with first-registration-wins, ``Outer<double>::
+    A<>``'s trailing default couldn't be trimmed against the WRONG
+    (``Outer<int>``-borrowed) default, leaving the base unresolvable and an
+    added virtual method on the derived class completely undetected). A
+    conflicting SECOND registration under the same qualname is therefore
+    treated as genuinely ambiguous and dropped entirely (equivalent to no
+    entry at all, degrading to this module's usual unresolvable-base false
+    negative) rather than trusting either candidate -- only an EXACTLY
+    matching redeclaration is safe to keep.
     """
     idx: dict[str, list[str | None]] = {}
+    ambiguous: set[str] = set()
 
     def walk(node: Any, scope: tuple[str, ...]) -> None:
         if not isinstance(node, dict):
             return
         kind = node.get("kind")
         name = str(node.get("name") or "")
-        if kind == "ClassTemplateDecl" and name:
-            qualname = "::".join((*scope, name)) if scope else name
-            idx.setdefault(qualname, _template_param_kinds(node))
+        if kind == "ClassTemplateDecl" and name and (
+            qualname := ("::".join((*scope, name)) if scope else name)
+        ) not in ambiguous:
+            value = _template_param_kinds(node)
+            existing = idx.get(qualname)
+            if existing is None:
+                idx[qualname] = value
+            elif existing != value:
+                ambiguous.add(qualname)
+                del idx[qualname]
         child_scope = (*scope, name) if kind in _SCOPE_NODE_KINDS and name else scope
         for child in node.get("inner", []) or []:
             walk(child, child_scope)
@@ -738,18 +763,29 @@ def _index_template_param_defaults(root: dict[str, Any]) -> dict[str, list[str |
     """``qualified template name -> per-position default-spelling list``
     (see :func:`_template_param_defaults`), scope-tracked identically to
     :func:`_index_template_param_kinds` (same reasoning applies here for
-    why a specialization's scope+name always matches its owning template's).
+    why a specialization's scope+name always matches its owning template's,
+    and the same conflicting-registration-is-ambiguous discipline for a
+    same-named member template nested in two DIFFERENT explicit outer
+    specializations -- see that function's own docstring).
     """
     idx: dict[str, list[str | None]] = {}
+    ambiguous: set[str] = set()
 
     def walk(node: Any, scope: tuple[str, ...]) -> None:
         if not isinstance(node, dict):
             return
         kind = node.get("kind")
         name = str(node.get("name") or "")
-        if kind == "ClassTemplateDecl" and name:
-            qualname = "::".join((*scope, name)) if scope else name
-            idx.setdefault(qualname, _template_param_defaults(node))
+        if kind == "ClassTemplateDecl" and name and (
+            qualname := ("::".join((*scope, name)) if scope else name)
+        ) not in ambiguous:
+            value = _template_param_defaults(node)
+            existing = idx.get(qualname)
+            if existing is None:
+                idx[qualname] = value
+            elif existing != value:
+                ambiguous.add(qualname)
+                del idx[qualname]
         child_scope = (*scope, name) if kind in _SCOPE_NODE_KINDS and name else scope
         for child in node.get("inner", []) or []:
             walk(child, child_scope)
@@ -788,18 +824,27 @@ def _template_param_names(class_template_decl: dict[str, Any]) -> list[str | Non
 def _index_template_param_names(root: dict[str, Any]) -> dict[str, list[str | None]]:
     """``qualified template name -> per-position parameter-name list`` (see
     :func:`_template_param_names`), scope-tracked identically to
-    :func:`_index_template_param_kinds`.
+    :func:`_index_template_param_kinds`, including its same conflicting-
+    registration-is-ambiguous discipline.
     """
     idx: dict[str, list[str | None]] = {}
+    ambiguous: set[str] = set()
 
     def walk(node: Any, scope: tuple[str, ...]) -> None:
         if not isinstance(node, dict):
             return
         kind = node.get("kind")
         name = str(node.get("name") or "")
-        if kind == "ClassTemplateDecl" and name:
-            qualname = "::".join((*scope, name)) if scope else name
-            idx.setdefault(qualname, _template_param_names(node))
+        if kind == "ClassTemplateDecl" and name and (
+            qualname := ("::".join((*scope, name)) if scope else name)
+        ) not in ambiguous:
+            value = _template_param_names(node)
+            existing = idx.get(qualname)
+            if existing is None:
+                idx[qualname] = value
+            elif existing != value:
+                ambiguous.add(qualname)
+                del idx[qualname]
         child_scope = (*scope, name) if kind in _SCOPE_NODE_KINDS and name else scope
         for child in node.get("inner", []) or []:
             walk(child, child_scope)

@@ -1515,3 +1515,105 @@ def test_nested_specialization_indexes_under_outer_specialization_qualname() -> 
     types = _types(root)
     assert types["D"].vtable == ["_ZN5OuterIiE1AIdE1fEv"]
     assert types["D"].vptr_offset_bits == 0
+
+
+def test_conflicting_nested_template_defaults_across_sibling_specializations_stay_ambiguous() -> (
+    None
+):
+    """Codex review, fresh evidence (P1, third round): when TWO different
+    explicit outer specializations each define their OWN same-named nested
+    member template with DIFFERING defaults (``Outer<int>``'s ``template
+    <class U=int> struct A`` vs. ``Outer<double>``'s ``template<class
+    U=double> struct A``), both register under the identical BARE qualname
+    ``"A"`` -- neither ``_index_template_param_kinds`` nor its two
+    siblings ever extend scope through a ``ClassTemplateSpecializationDecl``.
+    First-registration-wins previously trusted whichever was visited
+    first, silently borrowing the WRONG default for the other -- confirmed
+    end-to-end this left the base unresolvable and a real virtual-method
+    addition on the derived class completely undetected (`NO_CHANGE`).
+    Fixed by treating a conflicting second registration as genuinely
+    ambiguous and dropping it entirely, rather than trusting either
+    candidate.
+    """
+    outer_int_spec = {
+        "kind": "ClassTemplateSpecializationDecl",
+        "name": "Outer",
+        "completeDefinition": True,
+        "inner": [
+            {"kind": "TemplateArgument", "type": {"qualType": "int"}},
+            {
+                "kind": "ClassTemplateDecl",
+                "name": "A",
+                "inner": [
+                    {
+                        "kind": "TemplateTypeParmDecl",
+                        "name": "U",
+                        "defaultArg": {
+                            "kind": "TemplateArgument",
+                            "type": {"qualType": "int"},
+                        },
+                    },
+                    _record("A"),
+                ],
+            },
+        ],
+    }
+    outer_double_spec = {
+        "kind": "ClassTemplateSpecializationDecl",
+        "name": "Outer",
+        "completeDefinition": True,
+        "inner": [
+            {"kind": "TemplateArgument", "type": {"qualType": "double"}},
+            {
+                "kind": "ClassTemplateDecl",
+                "name": "A",
+                "inner": [
+                    {
+                        "kind": "TemplateTypeParmDecl",
+                        "name": "U",
+                        "defaultArg": {
+                            "kind": "TemplateArgument",
+                            "type": {"qualType": "double"},
+                        },
+                    },
+                    _record("A"),
+                    _specialization(
+                        "A",
+                        {
+                            "kind": "CXXMethodDecl",
+                            "name": "f",
+                            "mangledName": "_ZN5OuterIdE1AIdE1fEv",
+                            "type": {"qualType": "void ()"},
+                            "virtual": True,
+                        },
+                        type_args=["double"],
+                    ),
+                ],
+            },
+        ],
+    }
+    root = _tu(
+        {
+            "kind": "ClassTemplateDecl",
+            "name": "Outer",
+            "inner": [
+                {"kind": "TemplateTypeParmDecl", "name": "T"},
+                _record("Outer"),
+            ],
+        },
+        outer_int_spec,
+        outer_double_spec,
+        _record("D", bases=[_base("Outer<double>::A<>")]),
+    )
+    from abicheck.dumper_clang_vtable import _index_template_param_defaults
+
+    # Both nested "A"s are type-only parameters (the KINDS list -- type vs.
+    # non-type -- is identical, [None], for both), so only the DEFAULTS
+    # index (where the two genuinely differ, "int" vs. "double") is the one
+    # that must detect the conflict and drop the ambiguous entry.
+    assert "A" not in _index_template_param_defaults(root)
+    # Safe degradation, not a crash or a wrong resolution: the base stays
+    # unresolvable (same accepted false negative every other unresolvable-
+    # base shape in this module degrades to), never a fabricated slot.
+    types = _types(root)
+    assert types["D"].vtable == []
