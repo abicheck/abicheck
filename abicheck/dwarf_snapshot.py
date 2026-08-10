@@ -274,6 +274,26 @@ def _default_member_access_for_tag(tag: str) -> AccessLevel:
     return AccessLevel.PRIVATE if tag == "DW_TAG_class_type" else AccessLevel.PUBLIC
 
 
+def _local_vptr_member_offset_bits(child: Any) -> int | None:
+    """Bit offset of *child* if it is the compiler's artificial vptr member.
+
+    GCC names it ``_vptr.<Class>``, Clang ``_vptr$<Class>`` — both emit it as
+    an ``DW_TAG_member`` with ``DW_AT_artificial: true`` and a real
+    ``DW_AT_data_member_location`` (verified against real GCC 13/Clang 18
+    ``-g`` output). Returns ``None`` for any other member, including a
+    non-artificial member and an artificial member that isn't the vptr (e.g.
+    a compiler-synthesized default argument holder) — the ``_vptr`` name
+    prefix is the identifying signal, not artificiality alone.
+    """
+    if child.tag != "DW_TAG_member" or not _attr_bool(child, "DW_AT_artificial"):
+        return None
+    member_name = _attr_str(child, "DW_AT_name") or ""
+    if not member_name.startswith("_vptr"):
+        return None
+    loc = child.attributes.get("DW_AT_data_member_location")
+    return _decode_member_location(loc.value if loc is not None else None) * 8
+
+
 # DIE tags whose children can hold ABI-relevant *top-level* declarations the
 # main traversal dispatches on (nested types, member functions, namespace/CU
 # members). Only these are descended into: every other tag — variables,
@@ -423,7 +443,12 @@ class _DwarfSnapshotBuilder:
             if low_memory:
                 free_cu_die_cache(CU)
 
-        # Second pass: filter types to only those reachable from
+        # Second pass: resolve vptr_offset_bits for types whose vtable is
+        # entirely inherited — needs every record type in self.types, not
+        # just this CU's (see _finalize_vptr_offsets's own docstring).
+        self._finalize_vptr_offsets()
+
+        # Third pass: filter types to only those reachable from
         # exported symbols (transitive closure)
         self._filter_types_by_reachability()
 
@@ -758,7 +783,7 @@ class _DwarfSnapshotBuilder:
         is_union = tag == "DW_TAG_union_type"
         kind = _record_kind_from_tag(tag)
 
-        fields, bases, virtual_bases, vtable, base_offsets = (
+        fields, bases, virtual_bases, vtable, base_offsets, own_vptr_offset_bits = (
             self._collect_record_type_children(die, CU, children)
         )
 
@@ -766,12 +791,18 @@ class _DwarfSnapshotBuilder:
         is_opaque = byte_size == 0 and not fields
         source_loc = self._resolve_decl_file(die, CU)
 
-        # Best-effort vptr offset: a class with virtual methods (non-empty
-        # vtable) is polymorphic, so the compiler embeds a vtable pointer at
-        # offset 0 (no virtual bases). None (not 0) when non-polymorphic, so the
-        # diff can tell "gained a vptr" (None → 0) from "vptr stayed". Tri-state
-        # by design — left None when we cannot tell.
-        vptr_offset_bits = 0 if vtable else None
+        # Real vptr offset, read from the compiler's own artificial vptr
+        # member when this class introduces one. A class that only extends
+        # or overrides an already-inherited vtable (no local vptr member,
+        # even when every one of its own declared methods is virtual) is
+        # left None here and resolved in a later pass, once every record
+        # type in this binary is known — see _finalize_vptr_offsets's
+        # docstring for why that can't be done eagerly, here, per-type.
+        # Tri-state by design: None also covers genuinely non-polymorphic
+        # and "only reachable through a virtual base" (whose offset is
+        # dynamic, never a fixed one this model can express), so the diff
+        # can tell "gained a vptr" (None → a real offset) from "vptr stayed".
+        vptr_offset_bits = own_vptr_offset_bits
         # is_standard_layout / is_trivially_copyable / data_size_bits are
         # deliberately *not* derived here. "not polymorphic and no virtual bases"
         # is NOT a sound standard-layout signal: a class can already be
@@ -819,14 +850,17 @@ class _DwarfSnapshotBuilder:
         die: Any,
         CU: Any,
         children: list[Any] | None = None,
-    ) -> tuple[list[TypeField], list[str], list[str], list[str], dict[str, int]]:
+    ) -> tuple[
+        list[TypeField], list[str], list[str], list[str], dict[str, int], int | None
+    ]:
         """Iterate over the children of a record-type DIE.
 
         *children*, when provided, is the already-materialized child DIE list
         (from the main traversal) and is reused instead of re-walking the DIE; it
         is ``None`` only on the anonymous-typedef path, which iterates on demand.
 
-        Returns ``(fields, bases, virtual_bases, vtable, base_offsets)``.
+        Returns ``(fields, bases, virtual_bases, vtable, base_offsets,
+        own_vptr_offset_bits)``.
 
         - *fields*: data member ``TypeField`` objects (in order).
         - *bases*: names of direct (non-virtual) base classes.
@@ -834,6 +868,11 @@ class _DwarfSnapshotBuilder:
         - *vtable*: mangled names of virtual member functions.
         - *base_offsets*: base-name → bit offset for direct bases that carry a
           ``DW_AT_data_member_location``; empty when none do.
+        - *own_vptr_offset_bits*: bit offset of *this* class's own artificial
+          vptr member (``_vptr.<Class>``/``_vptr$<Class>``), when this class
+          introduces one; ``None`` when it has no local vptr member (either
+          non-polymorphic, or its vtable is entirely inherited — see
+          ``_finalize_vptr_offsets``, which resolves the inherited case).
         """
         fields: list[TypeField] = []
         bases: list[str] = []
@@ -843,11 +882,14 @@ class _DwarfSnapshotBuilder:
         # base name → bit offset within this object (from the inheritance DIE's
         # DW_AT_data_member_location); empty when no such offset is present.
         base_offsets: dict[str, int] = {}
+        own_vptr_offset_bits: int | None = None
         default_access = _default_member_access_for_tag(die.tag)
 
         kids = children if children is not None else die.iter_children()
         for child in kids:
             if child.tag == "DW_TAG_member":
+                if own_vptr_offset_bits is None:
+                    own_vptr_offset_bits = _local_vptr_member_offset_bits(child)
                 fields.extend(self._process_field(child, CU, default_access))
             elif child.tag == "DW_TAG_inheritance":
                 self._process_inheritance_child(
@@ -856,7 +898,7 @@ class _DwarfSnapshotBuilder:
             elif child.tag == "DW_TAG_subprogram":
                 self._process_virtual_method_child(child, vtable)
 
-        return fields, bases, virtual_bases, vtable, base_offsets
+        return fields, bases, virtual_bases, vtable, base_offsets, own_vptr_offset_bits
 
     def _process_inheritance_child(
         self,
@@ -904,6 +946,77 @@ class _DwarfSnapshotBuilder:
             )
             if vt_mangled:
                 vtable.append(vt_mangled)
+
+    def _finalize_vptr_offsets(self) -> None:
+        """Resolve ``vptr_offset_bits`` for types whose vtable is inherited.
+
+        ``_process_record_type_named`` already set ``vptr_offset_bits`` from
+        each class's own artificial vptr member
+        (``_vptr.<Class>``/``_vptr$<Class>``, read directly off DWARF instead
+        of assumed to be 0 — G31 Phase C's "vptr placement is only a
+        0-if-polymorphic heuristic" gap; verified against real GCC 13/Clang
+        18 ``-g`` output for plain, multiple-inheritance, and virtual-base
+        cases before writing this). Left ``None`` there is a class that only
+        *extends or overrides* an already-inherited vtable (adds a new
+        virtual method, or overrides one, without introducing a new vtable
+        slot of its own) — it has no local vptr member at all, not even when
+        every one of its own declared methods is virtual, or, in the most
+        extreme case, when it declares no virtual methods of its own
+        whatsoever and is polymorphic purely by inheritance (confirmed
+        empirically: a class that neither adds nor overrides anything still
+        carries no local ``vtable`` entries).
+
+        This runs as a separate, whole-binary pass — *after* every CU has
+        been walked and every record type is in ``self.types`` — rather than
+        resolving eagerly per-class during the walk, because DWARF's
+        per-child-DIE order does not correlate with declaration order (a
+        compiler may emit a type's full definition at its first point of
+        *use* in codegen, not at its point of *declaration* in the source —
+        confirmed empirically: a subclass with no local vtable slot can be
+        emitted by GCC before its own base class is). An eager, walk-order
+        lookup would therefore silently miss a base processed later and
+        leave a real inherited vptr resolved as unknown.
+
+        Per Itanium C++ ABI (and, empirically, this is also what MSVC's
+        non-virtual-inheritance layout does), the primary base — the one
+        non-virtual base whose vtable pointer a derived class shares — is
+        always placed at absolute offset 0 within the derived object, when
+        one exists; a virtual base is never primary (its offset is resolved
+        dynamically through the vbase-offset table, never a static
+        ``DW_AT_data_member_location``) and is therefore never a candidate —
+        mirrored by ``base_offsets`` only ever holding non-virtual bases
+        (``_process_inheritance_child``'s own population of it). Since the
+        primary base sits at offset 0, its own absolute vptr offset *is* the
+        derived class's absolute vptr offset — no arithmetic needed, just a
+        lookup once the base's own offset is known.
+
+        A fixed-point loop (bounded by the actually-unresolved count, not a
+        fixed depth) over the whole-binary type list handles a
+        derived-of-derived chain (``M : N : A``) regardless of which of the
+        three DWARF happened to emit first, converging once no further
+        progress is made in a full pass over what remains unresolved.
+        """
+        by_name = {t.name: t for t in self.types}
+        unresolved = [t for t in self.types if t.vptr_offset_bits is None and t.bases]
+        progressed = True
+        while progressed and unresolved:
+            progressed = False
+            still_unresolved = []
+            for rec in unresolved:
+                resolved = None
+                for base_name in rec.bases:
+                    if rec.base_offsets.get(base_name) != 0:
+                        continue
+                    base_rec = by_name.get(base_name)
+                    if base_rec is not None and base_rec.vptr_offset_bits is not None:
+                        resolved = base_rec.vptr_offset_bits
+                        break
+                if resolved is not None:
+                    rec.vptr_offset_bits = resolved
+                    progressed = True
+                else:
+                    still_unresolved.append(rec)
+            unresolved = still_unresolved
 
     def _resolve_decl_file(self, die: Any, CU: Any) -> str | None:
         """Resolve DW_AT_decl_file to a source file path.

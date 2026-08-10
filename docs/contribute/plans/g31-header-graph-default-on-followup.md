@@ -282,6 +282,63 @@ building a second identity-resolution mechanism from scratch.
   entry below, appended rather than edited in place so this section stays
   an accurate as-of-time record of what each review round actually found.
 
+  **A later pass closed the DWARF backend's half of the vptr-placement gap
+  — the L2 header-only backends (castxml/clang) remain unstarted.**
+  `dwarf_snapshot.py`'s `vptr_offset_bits` used the identical
+  `0`-if-polymorphic heuristic this section flags for castxml, with a real,
+  verified-against-GCC-13/Clang-18 fix available: GCC/Clang both emit an
+  artificial `_vptr.<Class>`/`_vptr$<Class>` `DW_TAG_member` — with a real
+  `DW_AT_data_member_location` — on whichever class *introduces* a given
+  vtable, already discarded (not surfaced as an ordinary field) by
+  `_process_field` but never read for its offset. Now read directly instead
+  of assumed. This also closed a genuine correctness gap the heuristic
+  never covered at all, not just an accuracy one: a class that only
+  *inherits* a vtable — adds or overrides no virtual method of its own
+  (`struct N : A { int ni; };` with no override) — has an empty
+  DWARF-visible `vtable` list even though it is genuinely polymorphic, so
+  the old heuristic reported `vptr_offset_bits=None` (unknown) for it
+  unconditionally. Resolved via a whole-binary fixed-point pass
+  (`_finalize_vptr_offsets`, run after every CU is walked, not eagerly
+  per-class during the walk) that looks up the one non-virtual base placed
+  at absolute offset 0 — the ABI's primary base, whose vtable pointer a
+  derived class always shares — since DWARF's own per-child-DIE emission
+  order does not correlate with declaration order (confirmed empirically: a
+  subclass with no local vtable slot can be emitted before its own base).
+  Verified end-to-end against real compiled libraries (GCC and Clang alike)
+  covering plain polymorphism, multiple inheritance (confirming this model
+  still only tracks the *primary* vptr — a secondary base's own vtable
+  pointer at a non-zero offset, e.g. `struct C : A, B` in the reasoning
+  above, is the still-open "real multi-inheritance secondary-vtable
+  placement" gap this note doesn't close), a virtual base (never primary,
+  so the derived class gets its own local vptr at 0), a two-level
+  inheritance chain, and a non-polymorphic base reordered by the ABI to lay
+  out after a polymorphic one. Checked against `diff_layout.py`'s two
+  `vptr_offset_bits`-consuming detectors for a stale-baseline phantom-flip
+  risk (the same class of bug G31 Phase C already found once for
+  `is_standard_layout`/`is_trivially_copyable` in `_has_layout_descriptor`):
+  `_check_vptr_introduced` requires the *new* side's `vtable` list to be
+  non-empty too, which this fix does not change, so the newly-resolved
+  inherited-only case can never trip it; `_has_layout_descriptor`'s
+  `old_has`/`new_has` comparison is dominated by `size_bits`, which DWARF
+  always populates for any concrete (non-opaque) class regardless of this
+  fix, so no realistic phantom `LAYOUT_UNVERIFIABLE` was found. No schema or
+  whole-snapshot disk-cache version bump: this DWARF-only fix doesn't touch
+  the header-AST cache path (`snapshot_cache.py` caches only castxml/clang
+  header dumps, not binary/DWARF extraction) and never *loses* a
+  previously-known non-`None` value, only turns some `None`s into a real
+  offset — the precedent that required a version bump elsewhere in this
+  phase (a stale `None` being misread as a reliably-known negative answer)
+  doesn't apply here. Castxml's own heuristic turned out not to share the
+  DWARF backend's specific bug: its `vtable` list (`_build_vtable`/
+  `_collect_virtual_methods`) is already transitively inherited across
+  bases by construction, unlike DWARF's per-DIE-local list, so castxml's
+  `N`-shaped case was never actually broken the way DWARF's was — leaving
+  the real, still-open castxml/clang gap narrower than this section
+  originally scoped it: secondary-vtable placement under multiple
+  inheritance (a genuine model-schema gap, needing a new field beyond the
+  single `vptr_offset_bits` scalar), not the inherited-only case this pass
+  closed for DWARF.
+
   **A later pass closed the last of this phase's four originally-listed
   facts** (`deprecated`/`is_scoped`/bitfields/default-argument facts were
   the other three, already covered above): direct-clang now populates

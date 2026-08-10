@@ -22,7 +22,7 @@ from abicheck.dwarf_snapshot import (
 )
 from abicheck.dwarf_utils import _evaluate_location_expr
 from abicheck.elf_metadata import ElfMetadata, ElfSymbol, SymbolBinding, SymbolType
-from abicheck.model import Visibility
+from abicheck.model import RecordType, Visibility
 
 # ── helpers ──────────────────────────────────────────────────────────────────
 
@@ -1250,6 +1250,137 @@ extern "C" SensorData make_sensor(int c, int s) {
         assert "status" in field_map
         assert field_map["config"].is_const is True
         assert field_map["status"].is_volatile is True
+
+
+# ── vptr offset extraction (G31 Phase C) ─────────────────────────────────────
+
+
+@pytest.mark.skipif(not _HAS_GPP, reason="g++ not available")
+class TestDwarfSnapshotVptrOffset:
+    """Real bit offset of a class's vtable pointer, read from DWARF's own
+    artificial ``_vptr.<Class>`` member instead of assumed to be 0 for any
+    polymorphic type -- see ``_resolve_vptr_offset_bits``'s docstring.
+    """
+
+    @pytest.fixture()
+    def vptr_lib(self, tmp_path: Path) -> Path:
+        """Compile a library exercising several vptr-placement shapes."""
+        cpp_src = tmp_path / "vptr.cpp"
+        cpp_src.write_text("""\
+// Plain non-polymorphic type.
+struct Plain { int x; };
+
+// Introduces its own vtable at offset 0.
+struct A { virtual void a(); int ai; };
+struct B { virtual void b(); int bi; };
+
+// Multiple inheritance: A is the primary base (offset 0); B's own vtable
+// pointer sits at B's own base offset within C, not covered by this
+// model's single vptr_offset_bits field (that's the still-open
+// "secondary vtable placement" gap, not this fix).
+struct C : A, B { virtual void c(); int ci; };
+
+// Virtual base can never be primary -- D introduces its own vptr at 0.
+struct D : virtual A { virtual void d(); int di; };
+
+// Inherits its vtable from A without adding or overriding anything of its
+// own -- no local vptr member in DWARF at all. This is the case the old
+// "0 if own vtable list is non-empty else None" heuristic got wrong (its
+// own vtable list is empty here), and the one this fix closes.
+struct N : A { int ni; };
+
+// Two-level inheritance chain, still no local vtable slot anywhere in the
+// chain -- exercises the fixed-point resolution over the whole binary.
+struct M : N { int mi; };
+
+// A non-polymorphic base placed before a polymorphic one is reordered by
+// the ABI so the polymorphic one is still primary (offset 0), confirmed
+// against real GCC output before writing this test.
+struct X { int x; };
+struct Y : X, A { virtual void y(); int yi; };
+
+void A::a() {}
+void B::b() {}
+void C::c() {}
+void D::d() {}
+void Y::y() {}
+
+static Plain g_plain;
+static N g_n;
+static M g_m;
+static Y g_y;
+extern "C" Plain* get_plain() { return &g_plain; }
+extern "C" N* get_n() { return &g_n; }
+extern "C" M* get_m() { return &g_m; }
+extern "C" Y* get_y() { return &g_y; }
+""")
+        so_path = tmp_path / "libvptr.so"
+        result = subprocess.run(
+            [_GPP, "-shared", "-fPIC", "-g", "-O0", "-o", str(so_path), str(cpp_src)],
+            capture_output=True, text=True, timeout=30,
+        )
+        assert result.returncode == 0, f"Compilation failed: {result.stderr}"
+        return so_path
+
+    @staticmethod
+    def _types_by_name(lib: Path) -> dict[str, RecordType]:
+        from abicheck.dwarf_unified import parse_dwarf
+        from abicheck.elf_metadata import parse_elf_metadata
+
+        elf_meta = parse_elf_metadata(lib)
+        dwarf_meta, dwarf_adv = parse_dwarf(lib)
+        snap = build_snapshot_from_dwarf(lib, elf_meta, dwarf_meta, dwarf_adv)
+        return {t.name: t for t in snap.types}
+
+    def test_non_polymorphic_is_none(self, vptr_lib: Path) -> None:
+        """A type with no vtable anywhere in its hierarchy stays None."""
+        types = self._types_by_name(vptr_lib)
+        assert types["Plain"].vptr_offset_bits is None
+
+    def test_own_vtable_is_offset_zero(self, vptr_lib: Path) -> None:
+        """A class introducing its own vtable has its vptr at bit offset 0."""
+        types = self._types_by_name(vptr_lib)
+        assert types["A"].vptr_offset_bits == 0
+        assert types["B"].vptr_offset_bits == 0
+
+    def test_multiple_inheritance_primary_base_at_zero(self, vptr_lib: Path) -> None:
+        """The primary base's vtable pointer (offset 0) is still resolved
+        correctly under multiple inheritance -- this model tracks only the
+        primary vptr, not B's own secondary one at a non-zero offset."""
+        types = self._types_by_name(vptr_lib)
+        assert types["C"].vptr_offset_bits == 0
+        assert types["C"].base_offsets.get("B") != 0  # B is the secondary base
+
+    def test_virtual_base_gets_own_local_vptr(self, vptr_lib: Path) -> None:
+        """A virtual base can never be primary, so the derived class
+        introduces its own vptr at offset 0."""
+        types = self._types_by_name(vptr_lib)
+        assert types["D"].vptr_offset_bits == 0
+
+    def test_inherited_vtable_with_no_own_override_resolves(
+        self, vptr_lib: Path
+    ) -> None:
+        """A class that adds/overrides nothing of its own still has a real
+        vptr offset resolved via its primary base -- the case the old
+        "0 if own vtable non-empty else None" heuristic missed entirely
+        (its own DWARF-visible vtable list is empty here)."""
+        types = self._types_by_name(vptr_lib)
+        assert types["N"].vptr_offset_bits == 0
+        assert not types["N"].vtable  # confirms this exercises the empty-own-vtable path
+
+    def test_two_level_inheritance_chain_resolves(self, vptr_lib: Path) -> None:
+        """A derived-of-derived chain (M : N : A) resolves regardless of
+        which of the three DWARF happened to emit first."""
+        types = self._types_by_name(vptr_lib)
+        assert types["M"].vptr_offset_bits == 0
+
+    def test_reordered_base_still_resolves_to_zero(self, vptr_lib: Path) -> None:
+        """A non-polymorphic base declared first is laid out after the
+        polymorphic one; the primary-base lookup follows the real (ABI)
+        offset, not declaration order."""
+        types = self._types_by_name(vptr_lib)
+        assert types["Y"].base_offsets.get("X") != 0
+        assert types["Y"].vptr_offset_bits == 0
 
 
 # ── CLI tests via CliRunner (in-process for coverage) ────────────────────────
