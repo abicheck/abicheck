@@ -711,14 +711,22 @@ workflow run, which is not expressible as a single `verify.py` `Step` — the
 same structural reason `benchmark_scaling.py`'s own sibling `regression` job
 was never routed through `verify.py` either.
 
-**Synthetic-consumer compile-probe layer, or a deferring ADR.** If a
-compile-probe layer (actually compiling a synthetic consumer against
-old/new headers to observe real compiler diagnostics as corroborating
-evidence, distinct from the existing runtime `app.c`/`app.cpp` fixtures in
-`examples/`) turns out to be out of scope for this initiative, record that
-explicitly as an ADR rather than silently dropping it — the same
-discipline G28 Phase 5 used when deferring concepts/`requires` handling to
-[G4](g4-header-ast-extractor.md) instead of quietly not doing it.
+**Synthetic-consumer compile-probe layer — deferred via ADR, not dropped
+silently.** A compile-probe layer (actually compiling a synthetic consumer
+against old/new headers to observe real compiler diagnostics as
+corroborating evidence, distinct from the existing runtime `app.c`/`app.cpp`
+fixtures in `examples/`, from `probe_harness.py`'s header-only-library
+snapshot-extraction probe, and from `contrib/abicheck-clang-plugin`'s
+compile-time facts extraction) turned out to be out of scope for this
+initiative — no driving false-positive/false-negative case in the FP-rate
+or per-tier-accuracy corpora motivates it today, and a real implementation
+needs its own scoped design (synthesis strategy, evidence-model placement,
+verdict mapping, trust/sandboxing — see the ADR for detail), not a drive-by
+addition to Phase D. Recorded as
+[ADR-059](../adr/059-synthetic-consumer-compile-probe-deferral.md), the
+same discipline G28 Phase 5 used when deferring concepts/`requires`
+handling to [G4](g4-header-ast-extractor.md) instead of quietly not doing
+it. Revisit only per the ADR's own "Revisiting this decision" criteria.
 
 **Files likely to change.** `abicheck/change_registry.py` (or a sibling
 `change_registry_<topic>.py`), the relevant `diff_*.py` detector module(s),
