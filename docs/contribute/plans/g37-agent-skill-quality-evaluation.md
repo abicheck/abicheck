@@ -304,7 +304,32 @@ constraints are properties of the problem, not of this plan's phasing.
 
 ### D3 — Replay-first: grade artifacts, not prose
 
-Every live run persists a **transcript bundle**:
+Every live run persists a **transcript bundle**, of one of two `kind`s —
+`behavioral` (an L2 scenario) or `trigger` (an L1l corpus prompt). The
+distinction is load-bearing, not bookkeeping: **a correct `trigger` run for a
+negative prompt activates no skill, runs no abicheck, and states no verdict.**
+Graded by the behavioral rules it would fail three ways at once — no claim
+envelope (dimension 6), an empty `calls.jsonl` (dimension 3), and no verdict to
+check uncertainty against (dimension 2) — so the harness would reject exactly
+the evidence proving the skills correctly stayed out of a REST or Java
+question.
+
+So the rubric is scoped by kind, and this is stated as a hard split rather than
+left implied:
+
+- **`behavioral` bundles** are graded on all six dimensions, and carry
+  `claim.json`, `calls.jsonl`, and `captured/`.
+- **`trigger` bundles** are graded on activation alone — which skill activated,
+  against the corpus label — and carry `events.jsonl` and `final.md` only. None
+  of dimensions 1–6 apply, the claim envelope is not required, and an empty
+  call log is the expected result for a negative prompt rather than a failure.
+  A trigger run stops once activation is observed; making it complete the
+  workflow would duplicate L2 at seven times the cost while measuring nothing
+  L2 doesn't already cover.
+
+The schema carries `kind`, and `grade_bundle.py` dispatches on it, so a bundle
+cannot be graded by the wrong rule set. The layout below is the `behavioral`
+shape:
 
 ```text
 agent-evals/skills/runs/<run-id>/<scenario>/<k>/
@@ -933,6 +958,7 @@ skills, and the suite is the union over all moved hashes.** Concretely —
 | A skill's own tree hash | that skill (a `skills-src/shared/` edit resolves through the generator's citation graph, below) |
 | A scenario hash (manifest record, fixture closure, or ground-truth entry) | every skill whose scenarios reference that scenario |
 | The live-trigger corpus hash (`tests/agent_skills/trigger_corpus.yaml`) | all of them — L1l precision is computed per skill across the whole corpus, so any prompt or label change invalidates every skill's activation evidence |
+| The harness hash — the runner's own prompt/instruction text, its launch configuration, the agent binary and model identifiers, and the recording shim | all of them; a transcript produced under a different treatment is not evidence about the same thing |
 | The abicheck build-surface hash | all of them |
 
 The last row's practical effect is that a CLI/report-schema change costs a
@@ -952,9 +978,14 @@ corresponds to anything.
 
 So Phase 0 carries **two** round-trip checks over one list of inputs:
 
-1. **Completeness** — every input a run reads (skill trees, scenario
-   manifest, fixtures, ground-truth entries, trigger corpus, the abicheck
-   surface) contributes to some hash the freshness check reads.
+1. **Completeness** — every input a run reads contributes to some hash the
+   freshness check reads. **The list is declared by the runner, not by this
+   plan**: an enumeration in prose has now been found short three times
+   (fixtures, then the trigger corpus, then the harness's own prompt and
+   agent-version configuration), each time because a real input existed that
+   nobody had written down. The runner therefore emits its input set with each
+   bundle, and the check verifies that set is fully covered by hashes — so a
+   newly-read input is caught by construction rather than by the next reviewer.
 2. **Mapping** — every such hash resolves to a set of skills, so a moved hash
    always nominates something to re-run.
 
