@@ -344,3 +344,460 @@ def test_clang_backend_field_default_initializer_removed_end_to_end(
     assert ChangeKind.FIELD_DEFAULT_INITIALIZER_REMOVED in {
         c.kind for c in result.changes
     }
+
+
+def test_clang_backend_reconstructs_vtable_and_flags_vptr_introduced(
+    tmp_path: Path,
+) -> None:
+    """G31 Phase C: the clang backend used to hardcode ``vtable=[]``
+    unconditionally, so ``VPTR_INTRODUCED``/``TYPE_VTABLE_CHANGED`` were
+    silently inert for every clang-only comparison. Real end-to-end repro of
+    the specific gap ``dumper_clang_vtable.py``'s docstring documents: a
+    derived-class override that repeats neither `virtual` nor `override`
+    (only `Widget::paint()` re-declared with the same signature as its base)
+    carries no signal in clang's JSON AST distinguishing it from an
+    unrelated new method -- must still be recognized as an override via
+    signature matching, not silently dropped from the vtable.
+    """
+    if not (_have("clang") and _have("g++")):
+        pytest.skip(
+            "clang and g++ are required for the clang L2 backend integration test"
+        )
+    old_dir = tmp_path / "old"
+    old_dir.mkdir()
+    old_header = old_dir / "api.h"
+    old_header.write_text("struct Widget {\n    int value_;\n};\n")
+    old_src = old_dir / "old.cpp"
+    old_src.write_text('#include "api.h"\n')
+    v1_so = tmp_path / "libv1.so"
+    subprocess.run(
+        ["g++", "-shared", "-fPIC", "-o", str(v1_so), str(old_src), f"-I{old_dir}"],
+        check=True,
+        capture_output=True,
+    )
+
+    new_dir = tmp_path / "new"
+    new_dir.mkdir()
+    new_header = new_dir / "api.h"
+    new_header.write_text(
+        "struct Base { virtual void paint(); };\n"
+        # Deliberately repeats NEITHER `virtual` NOR `override` -- pure
+        # implicit-virtual-via-signature-match, the one case clang's own
+        # JSON AST dump gives no direct signal for.
+        "struct Widget : Base {\n    int value_;\n    void paint();\n};\n"
+    )
+    new_src = new_dir / "new.cpp"
+    new_src.write_text(
+        '#include "api.h"\nvoid Base::paint() {}\nvoid Widget::paint() {}\n'
+    )
+    v2_so = tmp_path / "libv2.so"
+    subprocess.run(
+        ["g++", "-shared", "-fPIC", "-o", str(v2_so), str(new_src), f"-I{new_dir}"],
+        check=True,
+        capture_output=True,
+    )
+
+    old_snap = dump(v1_so, [old_header], header_backend="clang")
+    new_snap = dump(v2_so, [new_header], header_backend="clang")
+    old_widget = next(t for t in old_snap.types if t.name == "Widget")
+    new_widget = next(t for t in new_snap.types if t.name == "Widget")
+    assert old_widget.vtable == []
+    assert old_widget.vptr_offset_bits is None
+    assert new_widget.vtable != []
+    assert new_widget.vptr_offset_bits == 0
+
+    result = compare(old_snap, new_snap)
+    assert ChangeKind.VPTR_INTRODUCED in {c.kind for c in result.changes}
+
+
+def test_clang_backend_resolves_concrete_template_specialization_base(
+    tmp_path: Path,
+) -> None:
+    """Codex review, fresh evidence (P1): a class deriving from a CONCRETE
+    template specialization (``struct D : A<int> {...};``) used to resolve
+    to an empty vtable/no vptr regardless of what ``A<int>`` itself
+    provides -- clang emits the usable definition as a
+    ``ClassTemplateSpecializationDecl``, a different node kind from the
+    ``CXXRecordDecl``/``RecordDecl`` pair the base-lookup index collected,
+    so the base was silently unresolvable. Adding a no-keyword override in
+    the new side then made the vtable appear to gain its FIRST entry -- a
+    false breaking ``VPTR_INTRODUCED``, even though `D` was already
+    genuinely polymorphic (via its inherited `A<int>::f`) in the OLD
+    snapshot too.
+    """
+    if not (_have("clang") and _have("g++")):
+        pytest.skip(
+            "clang and g++ are required for the clang L2 backend integration test"
+        )
+    old_dir = tmp_path / "old"
+    old_dir.mkdir()
+    old_header = old_dir / "api.h"
+    old_header.write_text(
+        "template <typename T>\n"
+        "struct A {\n"
+        "    virtual void f(T x);\n"
+        "};\n"
+        "struct D : A<int> {\n"
+        "};\n"
+    )
+    old_src = old_dir / "old.cpp"
+    old_src.write_text('#include "api.h"\ntemplate struct A<int>;\n')
+    v1_so = tmp_path / "libv1.so"
+    subprocess.run(
+        ["g++", "-shared", "-fPIC", "-o", str(v1_so), str(old_src), f"-I{old_dir}"],
+        check=True,
+        capture_output=True,
+    )
+
+    new_dir = tmp_path / "new"
+    new_dir.mkdir()
+    new_header = new_dir / "api.h"
+    new_header.write_text(
+        "template <typename T>\n"
+        "struct A {\n"
+        "    virtual void f(T x);\n"
+        "};\n"
+        # Deliberately repeats NEITHER `virtual` NOR `override` -- the same
+        # implicit-virtual-via-signature-match shape the sibling test above
+        # exercises for a non-template base, here through a concrete
+        # specialization base instead.
+        "struct D : A<int> {\n    void f(int x);\n};\n"
+    )
+    new_src = new_dir / "new.cpp"
+    new_src.write_text('#include "api.h"\ntemplate struct A<int>;\n')
+    v2_so = tmp_path / "libv2.so"
+    subprocess.run(
+        ["g++", "-shared", "-fPIC", "-o", str(v2_so), str(new_src), f"-I{new_dir}"],
+        check=True,
+        capture_output=True,
+    )
+
+    old_snap = dump(v1_so, [old_header], header_backend="clang")
+    new_snap = dump(v2_so, [new_header], header_backend="clang")
+    old_d = next(t for t in old_snap.types if t.name == "D")
+    new_d = next(t for t in new_snap.types if t.name == "D")
+    # The old side is ALREADY polymorphic via its inherited A<int>::f --
+    # base resolution must find that slot even though A<int> is a concrete
+    # template specialization, not an ordinary record.
+    assert old_d.vtable != []
+    assert old_d.vptr_offset_bits == 0
+    assert new_d.vtable != []
+
+    result = compare(old_snap, new_snap)
+    assert ChangeKind.VPTR_INTRODUCED not in {c.kind for c in result.changes}
+    assert ChangeKind.TYPE_VTABLE_CHANGED not in {c.kind for c in result.changes}
+
+
+def test_clang_backend_narrowed_dynamic_exception_spec_is_not_a_new_slot(
+    tmp_path: Path,
+) -> None:
+    """Codex review, fresh evidence: a C++14-and-earlier dynamic exception
+    specification participated in the override signature key unstripped,
+    so a base ``virtual void f() throw(int);`` overridden by a derived
+    ``void f() throw() override;`` (a legal narrowing) compared as a
+    different signature and appended a spurious second vtable slot instead
+    of replacing the inherited one.
+    """
+    if not (_have("clang") and _have("g++")):
+        pytest.skip(
+            "clang and g++ are required for the clang L2 backend integration test"
+        )
+    old_dir = tmp_path / "old"
+    old_dir.mkdir()
+    old_header = old_dir / "api.h"
+    old_header.write_text(
+        "struct A {\n    virtual void f() throw(int);\n};\nstruct D : A {\n};\n"
+    )
+    old_src = old_dir / "old.cpp"
+    old_src.write_text('#include "api.h"\nvoid A::f() throw(int) {}\n')
+    v1_so = tmp_path / "libv1.so"
+    subprocess.run(
+        [
+            "g++",
+            "-std=c++14",
+            "-shared",
+            "-fPIC",
+            "-o",
+            str(v1_so),
+            str(old_src),
+            f"-I{old_dir}",
+        ],
+        check=True,
+        capture_output=True,
+    )
+
+    new_dir = tmp_path / "new"
+    new_dir.mkdir()
+    new_header = new_dir / "api.h"
+    new_header.write_text(
+        "struct A {\n    virtual void f() throw(int);\n};\n"
+        "struct D : A {\n    void f() throw() override;\n};\n"
+    )
+    new_src = new_dir / "new.cpp"
+    new_src.write_text(
+        '#include "api.h"\nvoid A::f() throw(int) {}\nvoid D::f() throw() {}\n'
+    )
+    v2_so = tmp_path / "libv2.so"
+    subprocess.run(
+        [
+            "g++",
+            "-std=c++14",
+            "-shared",
+            "-fPIC",
+            "-o",
+            str(v2_so),
+            str(new_src),
+            f"-I{new_dir}",
+        ],
+        check=True,
+        capture_output=True,
+    )
+
+    old_snap = dump(
+        v1_so, [old_header], header_backend="clang", gcc_options="-std=c++14"
+    )
+    new_snap = dump(
+        v2_so, [new_header], header_backend="clang", gcc_options="-std=c++14"
+    )
+    old_d = next(t for t in old_snap.types if t.name == "D")
+    new_d = next(t for t in new_snap.types if t.name == "D")
+    # old_d has no override of its own -- its one slot is A::f. new_d's
+    # OWN f() replaces that slot in place (still exactly one slot, not
+    # two) -- the override must be recognized despite the narrowed
+    # exception spec, not appended as a spurious second entry.
+    assert old_d.vtable == ["_ZN1A1fEv"]
+    assert new_d.vtable == ["_ZN1D1fEv"]
+
+    result = compare(old_snap, new_snap)
+    assert ChangeKind.TYPE_VTABLE_CHANGED not in {c.kind for c in result.changes}
+
+
+def test_clang_backend_resolves_base_with_omitted_default_template_argument(
+    tmp_path: Path,
+) -> None:
+    """Codex review, fresh evidence (P1): a specialization always carries a
+    ``TemplateArgument`` for every parameter, including one a base
+    reference omitted because it equals its own default -- joining all of
+    them unconditionally produced a spelling the referring site's own
+    (defaults-collapsed) spelling never matches, leaving the base
+    unresolvable.
+    """
+    if not (_have("clang") and _have("g++")):
+        pytest.skip(
+            "clang and g++ are required for the clang L2 backend integration test"
+        )
+    old_dir = tmp_path / "old"
+    old_dir.mkdir()
+    old_header = old_dir / "api.h"
+    old_header.write_text(
+        "template <class T, class U = int>\n"
+        "struct A {\n    virtual void f();\n};\n"
+        "struct D : A<double> {\n};\n"
+    )
+    old_src = old_dir / "old.cpp"
+    old_src.write_text('#include "api.h"\ntemplate struct A<double>;\n')
+    v1_so = tmp_path / "libv1.so"
+    subprocess.run(
+        ["g++", "-shared", "-fPIC", "-o", str(v1_so), str(old_src), f"-I{old_dir}"],
+        check=True,
+        capture_output=True,
+    )
+
+    new_dir = tmp_path / "new"
+    new_dir.mkdir()
+    new_header = new_dir / "api.h"
+    new_header.write_text(
+        "template <class T, class U = int>\n"
+        "struct A {\n    virtual void f();\n};\n"
+        # No `virtual`/`override` keyword -- the flagship no-keyword-
+        # override scenario, through a defaulted-argument specialization
+        # base this time.
+        "struct D : A<double> {\n    void f();\n};\n"
+    )
+    new_src = new_dir / "new.cpp"
+    new_src.write_text('#include "api.h"\ntemplate struct A<double>;\n')
+    v2_so = tmp_path / "libv2.so"
+    subprocess.run(
+        ["g++", "-shared", "-fPIC", "-o", str(v2_so), str(new_src), f"-I{new_dir}"],
+        check=True,
+        capture_output=True,
+    )
+
+    old_snap = dump(v1_so, [old_header], header_backend="clang")
+    new_snap = dump(v2_so, [new_header], header_backend="clang")
+    old_d = next(t for t in old_snap.types if t.name == "D")
+    new_d = next(t for t in new_snap.types if t.name == "D")
+    assert old_d.vtable != []
+    assert old_d.vptr_offset_bits == 0
+    assert new_d.vtable != []
+
+    result = compare(old_snap, new_snap)
+    assert ChangeKind.VPTR_INTRODUCED not in {c.kind for c in result.changes}
+    assert ChangeKind.TYPE_VTABLE_CHANGED not in {c.kind for c in result.changes}
+
+
+def test_clang_backend_bool_specialization_base_override_does_not_false_positive(
+    tmp_path: Path,
+) -> None:
+    """Codex review, fresh evidence (P1): a `bool` non-type template
+    argument's specialization is deliberately left unresolvable (its raw
+    JSON `value` doesn't reliably print the way a base reference spells
+    it), but an old snapshot alone already reads that as an empty vtable
+    -- adding only an EXPLICIT `override` on the new side used to be
+    fabricated as a brand-new slot rather than recognized as ambiguous,
+    producing a real `VPTR_INTRODUCED`/`TYPE_VTABLE_CHANGED` false
+    positive.
+    """
+    if not (_have("clang") and _have("g++")):
+        pytest.skip(
+            "clang and g++ are required for the clang L2 backend integration test"
+        )
+    old_dir = tmp_path / "old"
+    old_dir.mkdir()
+    old_header = old_dir / "api.h"
+    old_header.write_text(
+        "template <bool B>\nstruct A {\n    virtual void f();\n};\n"
+        "struct D : A<true> {\n};\n"
+    )
+    old_src = old_dir / "old.cpp"
+    old_src.write_text('#include "api.h"\ntemplate struct A<true>;\n')
+    v1_so = tmp_path / "libv1.so"
+    subprocess.run(
+        ["g++", "-shared", "-fPIC", "-o", str(v1_so), str(old_src), f"-I{old_dir}"],
+        check=True,
+        capture_output=True,
+    )
+
+    new_dir = tmp_path / "new"
+    new_dir.mkdir()
+    new_header = new_dir / "api.h"
+    new_header.write_text(
+        "template <bool B>\nstruct A {\n    virtual void f();\n};\n"
+        "struct D : A<true> {\n    void f() override;\n};\n"
+    )
+    new_src = new_dir / "new.cpp"
+    new_src.write_text('#include "api.h"\ntemplate struct A<true>;\n')
+    v2_so = tmp_path / "libv2.so"
+    subprocess.run(
+        ["g++", "-shared", "-fPIC", "-o", str(v2_so), str(new_src), f"-I{new_dir}"],
+        check=True,
+        capture_output=True,
+    )
+
+    old_snap = dump(v1_so, [old_header], header_backend="clang")
+    new_snap = dump(v2_so, [new_header], header_backend="clang")
+    old_d = next(t for t in old_snap.types if t.name == "D")
+    new_d = next(t for t in new_snap.types if t.name == "D")
+    assert old_d.vtable == []
+    assert new_d.vtable == []  # ambiguous own override, suppressed on both sides
+
+    result = compare(old_snap, new_snap)
+    assert ChangeKind.VPTR_INTRODUCED not in {c.kind for c in result.changes}
+    assert ChangeKind.TYPE_VTABLE_CHANGED not in {c.kind for c in result.changes}
+
+
+def test_clang_backend_resolves_dependent_default_template_argument(
+    tmp_path: Path,
+) -> None:
+    """Codex review, fresh evidence (P1): a default that depends on an
+    earlier parameter (`template <class T, class U = T> struct A;`)
+    reports the literal, unsubstituted default spelling (`"T"`), which
+    never equals the real resolved argument by plain string comparison,
+    leaving the base unresolvable.
+    """
+    if not (_have("clang") and _have("g++")):
+        pytest.skip(
+            "clang and g++ are required for the clang L2 backend integration test"
+        )
+    old_dir = tmp_path / "old"
+    old_dir.mkdir()
+    old_header = old_dir / "api.h"
+    old_header.write_text(
+        "template <class T, class U = T>\n"
+        "struct A {\n    virtual void f();\n};\n"
+        "struct D : A<double> {\n};\n"
+    )
+    old_src = old_dir / "old.cpp"
+    old_src.write_text('#include "api.h"\ntemplate struct A<double>;\n')
+    v1_so = tmp_path / "libv1.so"
+    subprocess.run(
+        ["g++", "-shared", "-fPIC", "-o", str(v1_so), str(old_src), f"-I{old_dir}"],
+        check=True,
+        capture_output=True,
+    )
+
+    new_dir = tmp_path / "new"
+    new_dir.mkdir()
+    new_header = new_dir / "api.h"
+    new_header.write_text(
+        "template <class T, class U = T>\n"
+        "struct A {\n    virtual void f();\n};\n"
+        "struct D : A<double> {\n    void f() override;\n};\n"
+    )
+    new_src = new_dir / "new.cpp"
+    new_src.write_text('#include "api.h"\ntemplate struct A<double>;\n')
+    v2_so = tmp_path / "libv2.so"
+    subprocess.run(
+        ["g++", "-shared", "-fPIC", "-o", str(v2_so), str(new_src), f"-I{new_dir}"],
+        check=True,
+        capture_output=True,
+    )
+
+    old_snap = dump(v1_so, [old_header], header_backend="clang")
+    new_snap = dump(v2_so, [new_header], header_backend="clang")
+    old_d = next(t for t in old_snap.types if t.name == "D")
+    new_d = next(t for t in new_snap.types if t.name == "D")
+    assert old_d.vtable != []
+    assert old_d.vptr_offset_bits == 0
+    assert new_d.vtable != []
+
+    result = compare(old_snap, new_snap)
+    assert ChangeKind.VPTR_INTRODUCED not in {c.kind for c in result.changes}
+    assert ChangeKind.TYPE_VTABLE_CHANGED not in {c.kind for c in result.changes}
+
+
+def test_clang_backend_does_not_widen_extern_c_function_virtuality(
+    tmp_path: Path,
+) -> None:
+    """Codex review, fresh evidence (P2): an uninstantiated template method
+    carries no `mangledName` at all, so `_collect_virtual_slots` falls back
+    to its bare, unmangled `name` as the slot's "mangled" identity (e.g.
+    `"f"`). A free `extern "C"` function sharing that same bare name mangles
+    to the identical string by C-linkage design, so
+    `_virtual_mangled_names()`'s plain membership test must not widen that
+    unrelated free function's `is_virtual` to True purely from the name
+    collision -- confirmed with a real clang dump of a template `f()` and an
+    unrelated `extern "C" void f();` sharing the same TU.
+    """
+    if not (_have("clang") and _have("g++")):
+        pytest.skip(
+            "clang and g++ are required for the clang L2 backend integration test"
+        )
+    old_dir = tmp_path / "old"
+    old_dir.mkdir()
+    old_header = old_dir / "api.h"
+    old_header.write_text(
+        "template <class T>\nstruct A {\n    virtual void f();\n};\n"
+        'extern "C" void f();\n'
+    )
+    old_src = old_dir / "old.cpp"
+    old_src.write_text('#include "api.h"\nvoid f() {}\n')
+    v1_so = tmp_path / "libv1.so"
+    subprocess.run(
+        ["g++", "-shared", "-fPIC", "-o", str(v1_so), str(old_src), f"-I{old_dir}"],
+        check=True,
+        capture_output=True,
+    )
+
+    old_snap = dump(v1_so, [old_header], header_backend="clang")
+    # Both the template's own uninstantiated method and the unrelated free
+    # extern "C" function share the identical bare name/fallback-mangled
+    # identity ("f"/"f") -- there is nothing in the Function model to pick
+    # one out from the other by name/mangled alone, so assert on the set:
+    # exactly one of the two is genuinely virtual (the template method,
+    # which carries clang's own `virtual` keyword directly, node.get
+    # ("virtual") -- untouched by this fix). Before the fix, BOTH read as
+    # virtual (the free function widened purely from the name collision).
+    f_funcs = [fn for fn in old_snap.functions if fn.name == "f" and fn.mangled == "f"]
+    assert len(f_funcs) == 2
+    assert sum(fn.is_virtual for fn in f_funcs) == 1

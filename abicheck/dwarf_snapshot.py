@@ -274,6 +274,26 @@ def _default_member_access_for_tag(tag: str) -> AccessLevel:
     return AccessLevel.PRIVATE if tag == "DW_TAG_class_type" else AccessLevel.PUBLIC
 
 
+def _local_vptr_member_offset_bits(child: Any) -> int | None:
+    """Bit offset of *child* if it is the compiler's artificial vptr member.
+
+    GCC names it ``_vptr.<Class>``, Clang ``_vptr$<Class>`` — both emit it as
+    an ``DW_TAG_member`` with ``DW_AT_artificial: true`` and a real
+    ``DW_AT_data_member_location`` (verified against real GCC 13/Clang 18
+    ``-g`` output). Returns ``None`` for any other member, including a
+    non-artificial member and an artificial member that isn't the vptr (e.g.
+    a compiler-synthesized default argument holder) — the ``_vptr`` name
+    prefix is the identifying signal, not artificiality alone.
+    """
+    if child.tag != "DW_TAG_member" or not _attr_bool(child, "DW_AT_artificial"):
+        return None
+    member_name = _attr_str(child, "DW_AT_name") or ""
+    if not member_name.startswith("_vptr"):
+        return None
+    loc = child.attributes.get("DW_AT_data_member_location")
+    return _decode_member_location(loc.value if loc is not None else None) * 8
+
+
 # DIE tags whose children can hold ABI-relevant *top-level* declarations the
 # main traversal dispatches on (nested types, member functions, namespace/CU
 # members). Only these are descended into: every other tag — variables,
@@ -371,6 +391,81 @@ class _DwarfSnapshotBuilder:
         self._logged_type_dups: set[str] = set()
         self._logged_enum_dups: set[str] = set()
 
+        # (CU offset, DIE offset) -> the RecordType built from that DIE.
+        # Used only by _finalize_vptr_offsets to resolve a base class to its
+        # own already-built RecordType by DIE identity rather than by name:
+        # RecordType.bases stores each base's *bare* DW_AT_name (matching
+        # this class's own long-standing behavior, unrelated to this vptr
+        # fix), but self.types is keyed by *qualified* name once a namespace
+        # or enclosing class is involved -- a name-only lookup would silently
+        # fail to resolve `ns::N : ns::A`'s inherited vptr (Codex review,
+        # reproduced against a real GCC-compiled namespaced example). Every
+        # ODR-duplicate DIE of an already-registered type (the same header
+        # parsed in a second CU) is ALSO registered here, aliased to the one
+        # retained RecordType (see _check_and_register_type_name's caller) --
+        # otherwise a base referenced from that second CU would resolve to a
+        # DIE identity this dict never learned about at all (a second, real
+        # gap Codex review also caught, reproduced with two TUs sharing one
+        # header).
+        self._record_die_index: dict[tuple[int, int], RecordType] = {}
+        # qualified name -> the retained RecordType, kept in lockstep with
+        # self.types -- consulted only from _finalize_vptr_offsets (via
+        # _die_key_to_qualified_name below), not for the primary base-name
+        # lookup (that stays the bare-name `by_name` fallback there).
+        self._record_by_qualified_name: dict[str, RecordType] = {}
+        # (CU offset, DIE offset) -> qualified name, for a DIE that is NOT
+        # the retained definition -- either an ODR-duplicate (a second CU's
+        # own copy of an already-seen type) or a declaration-only forward
+        # reference (the shape GCC emits for a base class referenced from a
+        # CU that never defines it itself). Populated unconditionally at the
+        # point such a DIE is encountered, regardless of whether the real
+        # definition has been walked yet -- DWARF's per-CU emission order
+        # does not guarantee the real definition comes first (see
+        # _finalize_vptr_offsets's own docstring for the general version of
+        # this ordering problem), so resolving through
+        # ``_record_by_qualified_name`` is deferred to _finalize_vptr_offsets
+        # time, once every CU is known, rather than attempted eagerly here.
+        self._die_key_to_qualified_name: dict[tuple[int, int], str] = {}
+        # id(derived RecordType) -> ordered list of (base bare name, this
+        # edge's own bit offset or None, (CU offset, base DIE offset) or
+        # None), ONE ENTRY PER DW_TAG_inheritance CHILD -- not a dict keyed
+        # by base name. A derived class can directly inherit two distinct
+        # bases sharing the same bare name in different namespaces (e.g.
+        # `D : one::A, two::A`); a bare-name-keyed dict (the shape this
+        # started as) collapses the second edge onto the first, corrupting
+        # both the offset and the DIE identity for whichever edge lost —
+        # reproduced with exactly that shape (Codex review): a polymorphic
+        # `one::A` at real offset 0 and a non-polymorphic `two::A` at a
+        # non-zero offset, where the second write to a shared key made the
+        # true offset-0 candidate unrecoverable. Only non-virtual edges are
+        # appended (mirroring `base_offsets`'s own population condition — a
+        # virtual base's offset is dynamic and can never be primary), one
+        # entry per edge regardless of how many other edges share its bare
+        # name. Captured at inheritance-edge-processing time (while the base
+        # DIE is still directly at hand) since a base is not guaranteed to
+        # already be in ``_record_die_index`` at that point -- DWARF's
+        # per-CU DIE emission order does not correlate with declaration
+        # order (see _finalize_vptr_offsets's own docstring).
+        self._base_edges_by_record: dict[
+            int, list[tuple[str, int | None, tuple[int, int] | None]]
+        ] = {}
+        # id(derived RecordType) -> ordered list of (virtual base bare name,
+        # (CU offset, base DIE offset) or None) -- the virtual-base
+        # counterpart of ``_base_edges_by_record`` above, minus an offset
+        # field (a virtual base's own subobject offset is inherently
+        # dynamic, never something this resolution derives). Exists so
+        # _finalize_vptr_offsets's virtual-primary-base fallback tier can
+        # resolve a namespaced virtual base by DIE identity the same way
+        # the non-virtual primary-base walk already does, instead of a
+        # bare-name lookup that silently fails once a namespace is involved
+        # (`ns::E : virtual A` failing to resolve via `ns::A`'s already-known
+        # offset -- Codex review, fresh evidence, the same class of gap as
+        # the earlier namespace-ambiguity finding, just for the virtual-only
+        # fallback tier that finding predates).
+        self._virtual_base_edges_by_record: dict[
+            int, list[tuple[str, tuple[int, int] | None]]
+        ] = {}
+
     def extract(self, session: DwarfSession | None = None) -> None:
         """Walk DWARF and populate result lists.
 
@@ -423,7 +518,12 @@ class _DwarfSnapshotBuilder:
             if low_memory:
                 free_cu_die_cache(CU)
 
-        # Second pass: filter types to only those reachable from
+        # Second pass: resolve vptr_offset_bits for types whose vtable is
+        # entirely inherited — needs every record type in self.types, not
+        # just this CU's (see _finalize_vptr_offsets's own docstring).
+        self._finalize_vptr_offsets()
+
+        # Third pass: filter types to only those reachable from
         # exported symbols (transitive closure)
         self._filter_types_by_reachability()
 
@@ -749,29 +849,59 @@ class _DwarfSnapshotBuilder:
         """
         byte_size = _attr_int(die, "DW_AT_byte_size")
         if byte_size == 0 and _attr_bool(die, "DW_AT_declaration"):
-            return  # forward declaration only
+            # Forward declaration only -- but an inheritance edge in another
+            # CU can (and does — this is the exact shape GCC emits for a
+            # base class referenced from a CU that doesn't itself define it:
+            # a declaration-only stub DIE, distinct from the real
+            # definition's own DIE elsewhere) reference exactly THIS DIE, so
+            # it still needs to resolve to the real type's qualified name or
+            # that edge's lookup finds nothing (Codex review, reproduced
+            # with two TUs sharing one header, one of which only
+            # forward-references the base).
+            self._register_die_qualified_name(die, CU, qualified)
+            return
 
         if not self._check_and_register_type_name(qualified):
-            return  # ODR: first definition wins (duplicate logged inside)
+            # ODR: first definition wins (duplicate logged inside) -- but
+            # THIS DIE's own identity still needs to resolve to the
+            # already-retained RecordType, or a base reference from a
+            # *different* CU pointing at this exact (now-discarded) DIE
+            # would find nothing in _record_die_index at all (Codex review,
+            # reproduced with two TUs sharing one header).
+            self._register_die_qualified_name(die, CU, qualified)
+            return
 
         tag = die.tag
         is_union = tag == "DW_TAG_union_type"
         kind = _record_kind_from_tag(tag)
 
-        fields, bases, virtual_bases, vtable, base_offsets = (
-            self._collect_record_type_children(die, CU, children)
-        )
+        (
+            fields,
+            bases,
+            virtual_bases,
+            vtable,
+            base_offsets,
+            own_vptr_offset_bits,
+            base_edges,
+            virtual_base_edges,
+        ) = self._collect_record_type_children(die, CU, children)
 
         alignment = _attr_int(die, "DW_AT_alignment")
         is_opaque = byte_size == 0 and not fields
         source_loc = self._resolve_decl_file(die, CU)
 
-        # Best-effort vptr offset: a class with virtual methods (non-empty
-        # vtable) is polymorphic, so the compiler embeds a vtable pointer at
-        # offset 0 (no virtual bases). None (not 0) when non-polymorphic, so the
-        # diff can tell "gained a vptr" (None → 0) from "vptr stayed". Tri-state
-        # by design — left None when we cannot tell.
-        vptr_offset_bits = 0 if vtable else None
+        # Real vptr offset, read from the compiler's own artificial vptr
+        # member when this class introduces one. A class that only extends
+        # or overrides an already-inherited vtable (no local vptr member,
+        # even when every one of its own declared methods is virtual) is
+        # left None here and resolved in a later pass, once every record
+        # type in this binary is known — see _finalize_vptr_offsets's
+        # docstring for why that can't be done eagerly, here, per-type.
+        # Tri-state by design: None also covers genuinely non-polymorphic
+        # and "only reachable through a virtual base" (whose offset is
+        # dynamic, never a fixed one this model can express), so the diff
+        # can tell "gained a vptr" (None → a real offset) from "vptr stayed".
+        vptr_offset_bits = own_vptr_offset_bits
         # is_standard_layout / is_trivially_copyable / data_size_bits are
         # deliberately *not* derived here. "not polymorphic and no virtual bases"
         # is NOT a sound standard-layout signal: a class can already be
@@ -783,23 +913,35 @@ class _DwarfSnapshotBuilder:
         # a user-provided one. Without a real trait signal these stay None and the
         # detector stays quiet rather than guessing.
 
-        self.types.append(
-            RecordType(
-                name=qualified,
-                kind=kind,
-                size_bits=byte_size * 8 if byte_size > 0 else None,
-                alignment_bits=alignment * 8 if alignment > 0 else None,
-                fields=fields,
-                bases=bases,
-                virtual_bases=virtual_bases,
-                vtable=vtable,
-                is_union=is_union,
-                is_opaque=is_opaque,
-                source_location=source_loc,
-                vptr_offset_bits=vptr_offset_bits,
-                base_offsets=base_offsets,
-            )
+        rec = RecordType(
+            name=qualified,
+            kind=kind,
+            size_bits=byte_size * 8 if byte_size > 0 else None,
+            alignment_bits=alignment * 8 if alignment > 0 else None,
+            fields=fields,
+            bases=bases,
+            virtual_bases=virtual_bases,
+            vtable=vtable,
+            is_union=is_union,
+            is_opaque=is_opaque,
+            source_location=source_loc,
+            vptr_offset_bits=vptr_offset_bits,
+            base_offsets=base_offsets,
         )
+        self.types.append(rec)
+        self._record_by_qualified_name[qualified] = rec
+        # Registered unconditionally (not just when base_edges is non-empty)
+        # so _finalize_vptr_offsets can resolve THIS type as somebody else's
+        # base by DIE identity too, not just by name. CU is None only in a
+        # handful of unit tests exercising the dedup-logging path directly
+        # (not a real DWARF walk) — skip registration rather than fail,
+        # since there is no real DIE identity to key on anyway.
+        if CU is not None:
+            self._record_die_index[(CU.cu_offset, die.offset)] = rec
+        if base_edges:
+            self._base_edges_by_record[id(rec)] = base_edges
+        if virtual_base_edges:
+            self._virtual_base_edges_by_record[id(rec)] = virtual_base_edges
 
     def _check_and_register_type_name(self, qualified: str) -> bool:
         """Return True and register *qualified* if it is new; False if already seen.
@@ -814,26 +956,73 @@ class _DwarfSnapshotBuilder:
         self._seen_type_names.add(qualified)
         return True
 
+    def _register_die_qualified_name(self, die: Any, CU: Any, qualified: str) -> None:
+        """Record that *die* — not itself the retained definition — names
+        *qualified*, for ``_finalize_vptr_offsets`` to resolve later.
+
+        Covers both non-retained shapes a base-class reference can point at:
+        an ODR-duplicate (a second CU's own copy of an already-seen type)
+        and a declaration-only forward reference. CU is None only in a
+        handful of unit tests exercising the dedup-logging path directly
+        (not a real DWARF walk) — skip registration rather than fail, since
+        there is no real DIE identity to key on anyway.
+        """
+        if CU is not None:
+            self._die_key_to_qualified_name[(CU.cu_offset, die.offset)] = qualified
+
     def _collect_record_type_children(
         self,
         die: Any,
         CU: Any,
         children: list[Any] | None = None,
-    ) -> tuple[list[TypeField], list[str], list[str], list[str], dict[str, int]]:
+    ) -> tuple[
+        list[TypeField],
+        list[str],
+        list[str],
+        list[str],
+        dict[str, int],
+        int | None,
+        list[tuple[str, int | None, tuple[int, int] | None]],
+        list[tuple[str, tuple[int, int] | None]],
+    ]:
         """Iterate over the children of a record-type DIE.
 
         *children*, when provided, is the already-materialized child DIE list
         (from the main traversal) and is reused instead of re-walking the DIE; it
         is ``None`` only on the anonymous-typedef path, which iterates on demand.
 
-        Returns ``(fields, bases, virtual_bases, vtable, base_offsets)``.
+        Returns ``(fields, bases, virtual_bases, vtable, base_offsets,
+        own_vptr_offset_bits, base_edges, virtual_base_edges)``.
 
         - *fields*: data member ``TypeField`` objects (in order).
         - *bases*: names of direct (non-virtual) base classes.
         - *virtual_bases*: names of virtual base classes.
         - *vtable*: mangled names of virtual member functions.
         - *base_offsets*: base-name → bit offset for direct bases that carry a
-          ``DW_AT_data_member_location``; empty when none do.
+          ``DW_AT_data_member_location``; empty when none do. Pre-existing,
+          bare-name-keyed field, unrelated to this vptr fix and left as-is —
+          note it can itself collide when two direct bases share a bare name
+          (see *base_edges* below, which does not have this problem).
+        - *own_vptr_offset_bits*: bit offset of *this* class's own artificial
+          vptr member (``_vptr.<Class>``/``_vptr$<Class>``), when this class
+          introduces one; ``None`` when it has no local vptr member (either
+          non-polymorphic, or its vtable is entirely inherited — see
+          ``_finalize_vptr_offsets``, which resolves the inherited case).
+        - *base_edges*: one ``(base bare name, this edge's own bit offset or
+          None, (CU offset, base DIE offset) or None)`` tuple per direct
+          (non-virtual) ``DW_TAG_inheritance`` child, in DIE order — NOT a
+          dict keyed by name, so two distinct bases sharing a bare name
+          (``D : one::A, two::A``) each keep their own offset/identity
+          instead of the second overwriting the first. Only
+          ``_finalize_vptr_offsets`` consumes this.
+        - *virtual_base_edges*: the virtual-base counterpart of *base_edges*
+          — one ``(virtual base bare name, (CU offset, base DIE offset) or
+          None)`` tuple per virtual ``DW_TAG_inheritance`` child, no offset
+          field (a virtual base's own subobject offset is inherently
+          dynamic). Lets ``_finalize_vptr_offsets``'s virtual-primary-base
+          fallback tier resolve a namespaced virtual base by DIE identity
+          instead of a bare-name lookup that fails once a namespace is
+          involved (``ns::E : virtual A`` — Codex review, fresh evidence).
         """
         fields: list[TypeField] = []
         bases: list[str] = []
@@ -843,20 +1032,40 @@ class _DwarfSnapshotBuilder:
         # base name → bit offset within this object (from the inheritance DIE's
         # DW_AT_data_member_location); empty when no such offset is present.
         base_offsets: dict[str, int] = {}
+        base_edges: list[tuple[str, int | None, tuple[int, int] | None]] = []
+        virtual_base_edges: list[tuple[str, tuple[int, int] | None]] = []
+        own_vptr_offset_bits: int | None = None
         default_access = _default_member_access_for_tag(die.tag)
 
         kids = children if children is not None else die.iter_children()
         for child in kids:
             if child.tag == "DW_TAG_member":
+                if own_vptr_offset_bits is None:
+                    own_vptr_offset_bits = _local_vptr_member_offset_bits(child)
                 fields.extend(self._process_field(child, CU, default_access))
             elif child.tag == "DW_TAG_inheritance":
                 self._process_inheritance_child(
-                    child, CU, bases, virtual_bases, base_offsets
+                    child,
+                    CU,
+                    bases,
+                    virtual_bases,
+                    base_offsets,
+                    base_edges,
+                    virtual_base_edges,
                 )
             elif child.tag == "DW_TAG_subprogram":
                 self._process_virtual_method_child(child, vtable)
 
-        return fields, bases, virtual_bases, vtable, base_offsets
+        return (
+            fields,
+            bases,
+            virtual_bases,
+            vtable,
+            base_offsets,
+            own_vptr_offset_bits,
+            base_edges,
+            virtual_base_edges,
+        )
 
     def _process_inheritance_child(
         self,
@@ -865,30 +1074,40 @@ class _DwarfSnapshotBuilder:
         bases: list[str],
         virtual_bases: list[str],
         base_offsets: dict[str, int],
+        base_edges: list[tuple[str, int | None, tuple[int, int] | None]],
+        virtual_base_edges: list[tuple[str, tuple[int, int] | None]],
     ) -> None:
         """Process a single ``DW_TAG_inheritance`` child DIE in-place.
 
         Appends to *bases* or *virtual_bases* as appropriate, and records the
-        static bit-offset in *base_offsets* for direct (non-virtual) bases.
+        static bit-offset in *base_offsets* for direct (non-virtual) bases
+        (pre-existing, bare-name-keyed — see its own docstring note above on
+        why *base_edges* exists as a non-colliding alternative for the one
+        consumer that actually needs exact per-edge identity).
         """
-        base_name = self._resolve_base_name(child, CU)
+        base_name, base_die_key = self._resolve_base_name_and_key(child, CU)
         if not base_name:
             return
         is_virtual_base = _attr_int(child, "DW_AT_virtuality") > 0
         if is_virtual_base:
             virtual_bases.append(base_name)
-        else:
-            bases.append(base_name)
+            virtual_base_edges.append((base_name, base_die_key))
+            return
+        bases.append(base_name)
         # Record the (non-virtual) base subobject offset when present.
         # A virtual base's location is dynamic, so only capture the
-        # static, direct-base offset.
-        if not is_virtual_base and "DW_AT_data_member_location" in child.attributes:
-            base_offsets[base_name] = (
+        # static, direct-base offset. Same condition gates both the
+        # pre-existing base_offsets write and the new base_edges append —
+        # a virtual base is never a primary-base candidate either way.
+        if "DW_AT_data_member_location" in child.attributes:
+            offset_bits = (
                 _decode_member_location(
                     child.attributes["DW_AT_data_member_location"].value
                 )
                 * 8
             )
+            base_offsets[base_name] = offset_bits
+            base_edges.append((base_name, offset_bits, base_die_key))
 
     @staticmethod
     def _process_virtual_method_child(child: Any, vtable: list[str]) -> None:
@@ -904,6 +1123,253 @@ class _DwarfSnapshotBuilder:
             )
             if vt_mangled:
                 vtable.append(vt_mangled)
+
+    def _finalize_vptr_offsets(self) -> None:
+        """Resolve ``vptr_offset_bits`` for types whose vtable is inherited.
+
+        ``_process_record_type_named`` already set ``vptr_offset_bits`` from
+        each class's own artificial vptr member
+        (``_vptr.<Class>``/``_vptr$<Class>``, read directly off DWARF instead
+        of assumed to be 0 — G31 Phase C's "vptr placement is only a
+        0-if-polymorphic heuristic" gap; verified against real GCC 13/Clang
+        18 ``-g`` output for plain, multiple-inheritance, and virtual-base
+        cases before writing this). Left ``None`` there is a class that only
+        *extends or overrides* an already-inherited vtable (adds a new
+        virtual method, or overrides one, without introducing a new vtable
+        slot of its own) — it has no local vptr member at all, not even when
+        every one of its own declared methods is virtual, or, in the most
+        extreme case, when it declares no virtual methods of its own
+        whatsoever and is polymorphic purely by inheritance (confirmed
+        empirically: a class that neither adds nor overrides anything still
+        carries no local ``vtable`` entries).
+
+        This runs as a separate, whole-binary pass — *after* every CU has
+        been walked and every record type is in ``self.types`` — rather than
+        resolving eagerly per-class during the walk, because DWARF's
+        per-child-DIE order does not correlate with declaration order (a
+        compiler may emit a type's full definition at its first point of
+        *use* in codegen, not at its point of *declaration* in the source —
+        confirmed empirically: a subclass with no local vtable slot can be
+        emitted by GCC before its own base class is). An eager, walk-order
+        lookup would therefore silently miss a base processed later and
+        leave a real inherited vptr resolved as unknown.
+
+        Per Itanium C++ ABI (and, empirically, this is also what MSVC's
+        non-virtual-inheritance layout does), the primary base — the one
+        non-virtual base whose vtable pointer a derived class shares — is
+        always placed at absolute offset 0 within the derived object, when
+        one exists; a virtual base is never primary (its offset is resolved
+        dynamically through the vbase-offset table, never a static
+        ``DW_AT_data_member_location``) and is therefore never a candidate —
+        mirrored by ``base_offsets`` only ever holding non-virtual bases
+        (``_process_inheritance_child``'s own population of it). Since the
+        primary base sits at offset 0, its own absolute vptr offset *is* the
+        derived class's absolute vptr offset — no arithmetic needed, just a
+        lookup once the base's own offset is known.
+
+        A fixed-point loop (bounded by the actually-unresolved count, not a
+        fixed depth) over the whole-binary type list handles a
+        derived-of-derived chain (``M : N : A``) regardless of which of the
+        three DWARF happened to emit first, converging once no further
+        progress is made in a full pass over what remains unresolved.
+
+        Resolving *which* base a bare name refers to is itself two-tiered,
+        and deliberately does NOT walk ``RecordType.bases``/``base_offsets``
+        (both pre-existing, bare-name-keyed fields, unrelated to this fix)
+        directly. Two independent gaps were found and fixed here (both
+        Codex review, both reproduced against real compiled binaries before
+        fixing):
+
+        1. **Namespace ambiguity.** ``self.types`` is keyed by *qualified*
+           name the moment a namespace or enclosing class is involved
+           (``qualified = f"{scope}::{name}"``), so a bare-name lookup alone
+           silently fails to resolve `ns::N : ns::A`'s inherited vptr even
+           though `ns::A`'s own offset is already known. Fixed by resolving
+           each edge via the base DIE's own identity
+           (``_base_edges_by_record``/``_record_die_index``, captured while
+           each inheritance edge was still directly at hand — see
+           ``_resolve_base_name_and_key``'s docstring), falling back to a
+           bare-name lookup only when a base DIE didn't resolve to a key at
+           all. A DIE for the SAME logical type discarded by ODR dedup (the
+           same header parsed in a second CU) is separately aliased into
+           ``_record_die_index`` at dedup time — see
+           ``_process_record_type_named`` — so a base referenced from that
+           second CU still resolves instead of finding an unregistered key.
+        2. **Same-bare-name collision across two DIRECT bases of one
+           class.** `D : one::A, two::A` — two distinct bases sharing a bare
+           name in different namespaces — cannot be represented by a dict
+           keyed on that bare name at all: the second edge's offset/identity
+           silently overwrites the first's. This is why the walk below
+           iterates ``_base_edges_by_record``'s ordered *list* of `(name,
+           offset, key)` tuples, one per DW_TAG_inheritance child, rather
+           than ``rec.bases`` (a plain name list) paired with
+           ``rec.base_offsets``/a name-keyed dict (either pairing reopens
+           the same collision `base_edges` exists specifically to avoid).
+
+        A base DIE key can point at three different shapes, tried in order:
+        the retained definition itself (``_record_die_index``, the common
+        case); an ODR-duplicate or declaration-only stub DIE that names a
+        *different* qualified type than its own bare name would suggest
+        (``_die_key_to_qualified_name`` → ``_record_by_qualified_name`` —
+        the exact shape GCC emits for a base referenced from a CU that
+        never defines it itself, resolved here rather than eagerly, since
+        the real definition is not guaranteed to already be known at the
+        point the stub DIE was encountered); and, only once both DIE-identity
+        tiers miss, the original bare-name ``by_name`` fallback.
+
+        A LAST, final pass (after the fixed-point loop below) restores the
+        original blanket "0 if polymorphic" heuristic for whatever remains
+        unresolved — see that pass's own comment for the real case requiring
+        it (a virtual-only base sharing a "nearly empty" primary base's
+        vptr, which never enters this loop at all since virtual bases are
+        excluded from ``bases``/``base_edges`` for the same static-offset
+        reason ``base_offsets`` excludes them). This makes the whole
+        function strictly additive over the pre-fix behavior: every type the
+        old code resolved to 0 still resolves to (at worst) 0, and several
+        classes it could only guess at now resolve to a real, DWARF-derived
+        offset instead.
+        """
+        by_name = {t.name: t for t in self.types}
+
+        def _resolve_base_record(
+            base_name: str, base_key: tuple[int, int] | None
+        ) -> RecordType | None:
+            """Resolve a base-edge (name, DIE key) to its RecordType.
+
+            Three tiers, tried in order: the retained definition itself
+            (``_record_die_index``, the common case); an ODR-duplicate or
+            declaration-only stub DIE that names a *different* qualified
+            type than its own bare name would suggest
+            (``_die_key_to_qualified_name`` → ``_record_by_qualified_name``);
+            and, only once both DIE-identity tiers miss (or *base_key* is
+            ``None``), the bare-name ``by_name`` fallback. Shared by both
+            the primary-base walk and the virtual-primary-base fallback
+            tier below, so a namespaced base resolves identically in both.
+            """
+            base_rec = (
+                self._record_die_index.get(base_key) if base_key is not None else None
+            )
+            if base_rec is None and base_key is not None:
+                aliased_name = self._die_key_to_qualified_name.get(base_key)
+                if aliased_name is not None:
+                    base_rec = self._record_by_qualified_name.get(aliased_name)
+            if base_rec is None:
+                base_rec = by_name.get(base_name)
+            return base_rec
+
+        unresolved = [t for t in self.types if t.vptr_offset_bits is None and t.bases]
+        progressed = True
+        while progressed and unresolved:
+            progressed = False
+            still_unresolved = []
+            for rec in unresolved:
+                edges = self._base_edges_by_record.get(id(rec), [])
+                resolved = None
+                for base_name, offset_bits, base_key in edges:
+                    if offset_bits != 0:
+                        continue
+                    base_rec = _resolve_base_record(base_name, base_key)
+                    if base_rec is not None and base_rec.vptr_offset_bits is not None:
+                        resolved = base_rec.vptr_offset_bits
+                        break
+                if resolved is not None:
+                    rec.vptr_offset_bits = resolved
+                    progressed = True
+                else:
+                    still_unresolved.append(rec)
+            unresolved = still_unresolved
+
+        # Final fallback: restore the original "0 if polymorphic" heuristic
+        # for whatever remains unresolved, rather than leaving it None.
+        # Real gap (Codex review, reproduced against real GCC output):
+        # `struct E : virtual A { virtual void e(); };` where A is "nearly
+        # empty" (no data members beyond its own vtable pointer) can be laid
+        # out under the Itanium ABI's virtual-primary-base rule so E and A
+        # SHARE one vptr slot at offset 0 with no local `_vptr.E` member of
+        # E's own — GCC emits no such member here, unlike every other
+        # virtual-base case this fix already handles (`struct D : virtual A
+        # { virtual void d(); int di; };`, which DOES get its own
+        # `_vptr.D`, confirmed by DIE dump, since D has a real data member
+        # forcing a non-degenerate layout). Because E's only base is
+        # virtual, it's entirely absent from `bases`/`base_edges` (mirroring
+        # `base_offsets`'s own long-standing exclusion of virtual bases —
+        # their offset is dynamic, not a fixed one this resolution walks),
+        # so the loop above never even considers it. Every class this
+        # applies to has `own_vptr_offset_bits is None` (no local member)
+        # AND is unreachable via the primary-base walk (no resolvable
+        # non-virtual base, or none at all) — exactly the shape the
+        # original heuristic covered by assuming 0 for any type with a
+        # non-empty `vtable`, so restoring it here for the specific
+        # remaining unresolved set is a pure regression fix, not a
+        # reintroduction of the original guess for cases this pass already
+        # resolves more precisely (those are excluded here since their
+        # `vptr_offset_bits` is already set).
+        for rec in self.types:
+            if rec.vptr_offset_bits is None and rec.vtable:
+                rec.vptr_offset_bits = 0
+
+        # Second final-fallback tier: a class that is polymorphic ONLY
+        # through a "nearly empty" virtual base, adding or overriding no
+        # virtual method of its own at all, has neither a local vptr member
+        # nor any entry in its own `vtable` list -- confirmed with
+        # `struct A { virtual void a(); }; struct E : virtual A {};`: GCC
+        # emits no local `_vptr.E` and `E.vtable` is empty, so the tier
+        # above (gated on `rec.vtable`) never applies (Codex review, fresh
+        # evidence). Unlike the first fallback tier, this one is a genuine
+        # accuracy improvement, not a regression fix: the pre-fix heuristic
+        # (`0 if vtable else None`) ALSO returned `None` for this exact
+        # shape, since `vtable` was always empty here -- there was no prior
+        # "0" answer for this case to preserve. Resolved by checking whether
+        # any of this class's OWN virtual bases is itself already known to
+        # be polymorphic. A polymorphic virtual base is positive evidence
+        # *this* class shares that vtable pointer under the same
+        # virtual-primary-base rule the first tier's own comment documents,
+        # so 0 is used unconditionally here too -- not the base's own
+        # (possibly different, if it isn't nearly-empty) offset.
+        #
+        # Resolution is DIE-identity-first, the same three-tier lookup the
+        # non-virtual primary-base walk above uses, NOT a bare `by_name`
+        # lookup on its own: a namespaced virtual base (`ns::E : virtual A`)
+        # has its bare name `"A"` recorded in `rec.virtual_bases`, so a
+        # pure-name lookup silently fails to find `ns::A`'s already-resolved
+        # offset -- the identical namespace-ambiguity gap the non-virtual
+        # walk's own docstring documents, reproduced here for the
+        # virtual-only fallback tier specifically (Codex review, fresh
+        # evidence). `_virtual_base_edges_by_record` carries only a name +
+        # DIE key per edge, no offset field (a virtual base's own subobject
+        # offset is inherently dynamic, unlike a non-virtual `base_edges`
+        # entry) -- this tier only ever answers "0 or unknown," never a real
+        # non-zero offset, so it has no arithmetic to do once a candidate
+        # resolves.
+        #
+        # This must be a fixed-point loop, not a single pass, for the same
+        # reason the primary-base walk above is one: a multi-level virtual
+        # chain (`struct F : virtual E {}; struct E : virtual A {};`) needs
+        # E resolved before F can resolve through it, and `self.types`
+        # iteration order follows DWARF emission order, not dependency
+        # order (Codex review, reproduced against real GCC AND Clang output
+        # with exactly this A/E/F shape: `self.types` came out as
+        # `[F, A, E]` under GCC, so a single pass checked F while E was
+        # still `None`, set E to 0, and left F unresolved).
+        virtual_unresolved = [
+            t for t in self.types if t.vptr_offset_bits is None and t.virtual_bases
+        ]
+        progressed = True
+        while progressed and virtual_unresolved:
+            progressed = False
+            still_unresolved = []
+            for rec in virtual_unresolved:
+                virtual_edges = self._virtual_base_edges_by_record.get(id(rec), [])
+                if any(
+                    (vbase := _resolve_base_record(vbase_name, vbase_key)) is not None
+                    and vbase.vptr_offset_bits is not None
+                    for vbase_name, vbase_key in virtual_edges
+                ):
+                    rec.vptr_offset_bits = 0
+                    progressed = True
+                else:
+                    still_unresolved.append(rec)
+            virtual_unresolved = still_unresolved
 
     def _resolve_decl_file(self, die: Any, CU: Any) -> str | None:
         """Resolve DW_AT_decl_file to a source file path.
@@ -1101,15 +1567,53 @@ class _DwarfSnapshotBuilder:
                 )
         return flattened
 
-    def _resolve_base_name(self, die: Any, CU: Any) -> str:
-        """Resolve DW_TAG_inheritance → base class name."""
+    def _resolve_base_name_and_key(
+        self, die: Any, CU: Any
+    ) -> tuple[str, tuple[int, int] | None]:
+        """Resolve ``DW_TAG_inheritance`` → ``(base class bare name, DIE key)``.
+
+        The name is bare (``DW_AT_name`` only, no namespace/enclosing-class
+        qualification), matching this method's long-standing behavior — every
+        other consumer of ``RecordType.bases``/``base_offsets`` already
+        expects that. The DIE key (``(base_die.cu.cu_offset, base_die.offset)``,
+        matching ``_type_cache``'s own convention) is the base DIE's own
+        identity, returned so a caller that specifically needs to resolve
+        *which* record type this base refers to (unambiguous even when two
+        distinct bases share the same bare name in different namespaces) can
+        do so without a second, name-based lookup — see
+        ``_finalize_vptr_offsets``. ``None`` for the key when the base type
+        DIE itself can't be resolved (only the name lookup then degrades).
+
+        Deliberately keyed on ``base_die.cu`` -- the resolved DIE's OWN
+        owning compilation unit -- rather than *CU* (the referencing
+        ``DW_TAG_inheritance`` DIE's own CU), even though for a CU-relative
+        form (``DW_FORM_ref1``/``ref2``/``ref4``/``ref8``/``ref_udata``) the
+        two are always identical (`resolve_die_ref`'s own arithmetic derives
+        the target from *CU*'s own header offset, so it cannot land outside
+        *CU*). ``DW_FORM_ref_addr`` is the one form this is NOT true for:
+        it is section-absolute by construction (DWARF's own definition), so
+        it can in principle name a DIE genuinely owned by a *different* CU
+        than the referencing one -- and pyelftools's ``DIE.cu`` always
+        records a DIE's real owning unit regardless of which CU's
+        ``get_DIE_from_refaddr`` happened to resolve it (Codex review).
+        Every real GCC/Clang producer checked while investigating this
+        (GCC plain, GCC with `-flto`, GCC with `-fdebug-types-section`,
+        Clang) keeps an inheritance edge CU-local in practice -- each always
+        emits its own declaration-only stub for an out-of-CU base rather
+        than a genuine cross-CU `DW_FORM_ref_addr` -- so this fix has no
+        empirical repro on real compiler output the way this section's
+        other fixes do; it closes a real, pyelftools-confirmed risk in the
+        general case at zero cost (identical result whenever the two CUs
+        already agree, which is every case tested), not a reproduced bug.
+        """
         if "DW_AT_type" not in die.attributes:
-            return ""
+            return "", None
         try:
             base_die = _resolve_ref(die, "DW_AT_type", CU)
-            return _attr_str(base_die, "DW_AT_name") or ""
+            name = _attr_str(base_die, "DW_AT_name") or ""
+            return name, (base_die.cu.cu_offset, base_die.offset)
         except Exception:  # noqa: BLE001
-            return ""
+            return "", None
 
     # -------------------------------------------------------------------
     # Enum extraction

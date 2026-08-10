@@ -1799,7 +1799,7 @@ class TestDwarfSnapshotFallbacks:
         assert builder.enums == []
 
     def test_resolve_base_name_no_type(self):
-        """_resolve_base_name with no DW_AT_type returns ''."""
+        """_resolve_base_name_and_key with no DW_AT_type returns ("", None)."""
         from abicheck.dwarf_snapshot import _DwarfSnapshotBuilder
 
         elf_meta = self._make_elf_meta()
@@ -1807,10 +1807,10 @@ class TestDwarfSnapshotFallbacks:
 
         die = MockDIE(tag="DW_TAG_inheritance", attributes={})
         cu = MockCU()
-        assert builder._resolve_base_name(die, cu) == ""
+        assert builder._resolve_base_name_and_key(die, cu) == ("", None)
 
     def test_resolve_base_name_exception(self):
-        """_resolve_base_name handles resolve exception."""
+        """_resolve_base_name_and_key handles resolve exception."""
         from abicheck.dwarf_snapshot import _DwarfSnapshotBuilder
 
         elf_meta = self._make_elf_meta()
@@ -1823,7 +1823,7 @@ class TestDwarfSnapshotFallbacks:
             tag="DW_TAG_inheritance",
             attributes={"DW_AT_type": MockAttr(999, form="DW_FORM_ref4")},
         )
-        assert builder._resolve_base_name(die, cu) == ""
+        assert builder._resolve_base_name_and_key(die, cu) == ("", None)
 
     def test_resolve_type_no_type(self):
         """_resolve_type with no DW_AT_type returns ('void', 0)."""

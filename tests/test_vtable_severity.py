@@ -379,3 +379,164 @@ class TestOwnerDescendsFrom:
             "ns::Base": RecordType(name="ns::Base", kind="class", bases=["Base"]),
         }
         assert _owner_descends_from("ns::Base", "Base", types)
+
+
+class TestClangVtableFactsReliabilityGate:
+    """G31 Phase C, Codex review (fresh evidence): a persisted, pre-v21
+    direct-clang snapshot's ``RecordType.vtable``/``vptr_offset_bits`` are
+    unconditionally empty/None for EVERY record -- real but WRONG data for
+    an already-polymorphic class, not merely absent -- so comparing it
+    against a fresh dump of the SAME, unchanged headers must not read as
+    every polymorphic class gaining its first vptr.
+    """
+
+    def _legacy_clang_record(self) -> RecordType:
+        # Shape a pre-v21 direct-clang backend actually produced: vtable=[]
+        # and vptr_offset_bits=None regardless of the class's real
+        # polymorphism, since the reconstruction this flag guards didn't
+        # exist yet.
+        return RecordType(name="A", kind="class", vtable=[], vptr_offset_bits=None)
+
+    def _fresh_clang_record(self) -> RecordType:
+        # The same class, dumped with the fixed backend: genuinely
+        # polymorphic, vtable/vptr populated for real.
+        return RecordType(
+            name="A", kind="class", vtable=["_ZN1A1fEv"], vptr_offset_bits=0
+        )
+
+    def test_reproduces_without_the_flag(self) -> None:
+        """Establishes the bug is real absent the fix: two snapshots that
+        both claim reliable clang vtable facts (the pre-fix world, where the
+        flag didn't exist) genuinely produce a breaking finding for this
+        old/new pair -- confirming the suppression below isn't just masking
+        an already-inert case."""
+        old = _snap(
+            from_headers=True,
+            ast_producer="clang",
+            clang_vtable_facts_reliable=True,
+            types=[self._legacy_clang_record()],
+        )
+        new = _snap(
+            from_headers=True,
+            ast_producer="clang",
+            clang_vtable_facts_reliable=True,
+            types=[self._fresh_clang_record()],
+        )
+        result = compare(old, new)
+        kinds = {c.kind for c in result.changes}
+        assert ChangeKind.VPTR_INTRODUCED in kinds
+        assert result.verdict == Verdict.BREAKING
+
+    def test_legacy_clang_baseline_suppresses_vptr_introduced(self) -> None:
+        old = _snap(
+            from_headers=True,
+            ast_producer="clang",
+            clang_vtable_facts_reliable=False,
+            types=[self._legacy_clang_record()],
+        )
+        new = _snap(
+            from_headers=True,
+            ast_producer="clang",
+            clang_vtable_facts_reliable=True,
+            types=[self._fresh_clang_record()],
+        )
+        result = compare(old, new)
+        kinds = {c.kind for c in result.changes}
+        assert ChangeKind.VPTR_INTRODUCED not in kinds
+        assert ChangeKind.TYPE_VTABLE_CHANGED not in kinds
+
+    def test_legacy_clang_baseline_suppresses_type_vtable_changed(self) -> None:
+        """Same suppression, but for a class whose vtable differs in slot
+        count between the two sides rather than empty-vs-non-empty (so
+        _vtable_transition_is_evidenced's own guard would NOT have
+        suppressed it on its own -- both sizes/virtual_bases are identical,
+        which that guard treats as evidence of a real change)."""
+        old = _snap(
+            from_headers=True,
+            ast_producer="clang",
+            clang_vtable_facts_reliable=False,
+            types=[
+                RecordType(
+                    name="A",
+                    kind="class",
+                    vtable=[],
+                    vptr_offset_bits=None,
+                    size_bits=64,
+                )
+            ],
+        )
+        new = _snap(
+            from_headers=True,
+            ast_producer="clang",
+            clang_vtable_facts_reliable=True,
+            types=[
+                RecordType(
+                    name="A",
+                    kind="class",
+                    vtable=["_ZN1A1fEv", "_ZN1A1gEv"],
+                    vptr_offset_bits=0,
+                    size_bits=64,
+                )
+            ],
+        )
+        result = compare(old, new)
+        kinds = {c.kind for c in result.changes}
+        assert ChangeKind.TYPE_VTABLE_CHANGED not in kinds
+
+    def test_both_reliable_stays_unaffected(self) -> None:
+        """A genuinely fresh-vs-fresh comparison (both True, the common
+        case) must be entirely untouched by this gate."""
+        old = _snap(
+            from_headers=True,
+            ast_producer="clang",
+            types=[
+                RecordType(name="A", kind="class", vtable=[], vptr_offset_bits=None)
+            ],
+        )
+        new = _snap(
+            from_headers=True,
+            ast_producer="clang",
+            types=[self._fresh_clang_record()],
+        )
+        result = compare(old, new)
+        kinds = {c.kind for c in result.changes}
+        assert ChangeKind.VPTR_INTRODUCED in kinds
+
+    def test_legacy_layout_unverifiable_suppressed_for_vptr_only_evidence(
+        self,
+    ) -> None:
+        """LAYOUT_UNVERIFIABLE must not fire purely because a legacy
+        clang baseline's blanket-None vptr_offset_bits appears to "gain
+        evidence" on a fresh dump, when no other layout descriptor field
+        (data_size_bits/base_offsets) is involved on either side."""
+        old = _snap(
+            from_headers=True,
+            ast_producer="clang",
+            clang_vtable_facts_reliable=False,
+            types=[
+                RecordType(
+                    name="A",
+                    kind="class",
+                    vtable=[],
+                    vptr_offset_bits=None,
+                    size_bits=None,
+                )
+            ],
+        )
+        new = _snap(
+            from_headers=True,
+            ast_producer="clang",
+            clang_vtable_facts_reliable=True,
+            types=[
+                RecordType(
+                    name="A",
+                    kind="class",
+                    vtable=["_ZN1A1fEv"],
+                    vptr_offset_bits=0,
+                    size_bits=None,
+                )
+            ],
+        )
+        result = compare(old, new)
+        kinds = {c.kind for c in result.changes}
+        assert ChangeKind.LAYOUT_UNVERIFIABLE not in kinds

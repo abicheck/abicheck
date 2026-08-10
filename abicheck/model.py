@@ -730,6 +730,34 @@ class AbiSnapshot:
     # trusted provenance entry and never depends on this flag.
     clang_field_initializer_facts_reliable: bool = field(default=True, kw_only=True)
 
+    # True when this snapshot's RecordType.vtable/vptr_offset_bits facts are
+    # known-reliable when its own ``ast_producer`` is ``"clang"`` -- G31
+    # Phase C (schema v21) wired real virtual-method-table reconstruction
+    # into the direct-clang backend (``dumper_clang_vtable.py``), previously
+    # unconditionally ``vtable=[]``/``vptr_offset_bits=None`` for EVERY
+    # record regardless of whether it was actually polymorphic. Same
+    # "real but WRONG data" shape as ``clang_field_initializer_facts_reliable``
+    # above: a pre-v21 clang-producer record's blanket empty vtable is
+    # indistinguishable by value alone from a genuine "this class has no
+    # virtuals", so only a snapshot-level marker can tell them apart. Without
+    # this flag, comparing a fresh clang dump of an UNCHANGED, already-
+    # polymorphic header against a persisted pre-v21 clang baseline reads as
+    # every polymorphic class gaining its first vptr (Codex review, fresh
+    # evidence, real end-to-end repro: a persisted schema-v20 clang snapshot
+    # of ``struct A { virtual void f(); };`` compared against a fresh dump of
+    # the identical, unchanged header emitted a false ``VPTR_INTRODUCED`` --
+    # and, for a class whose vtable differs in slot count/order from the
+    # blanket-empty legacy reading, a false ``TYPE_VTABLE_CHANGED`` too).
+    # False only for a snapshot rehydrated from a persisted pre-v21,
+    # clang-producer schema (see serialization.SCHEMA_VERSION); a freshly-
+    # built in-memory snapshot defaults True, since it was necessarily
+    # produced by the current, fixed parser. Not needed for "castxml" or
+    # "hybrid" producers: castxml's own vtable reconstruction predates this
+    # field entirely (always reliable), and DWARF's own vtable/vptr
+    # extraction (``dwarf_snapshot.py``) is a wholly separate code path this
+    # flag does not describe.
+    clang_vtable_facts_reliable: bool = field(default=True, kw_only=True)
+
     # Phase 3: binary format platform — detected from ELF/PE/MachO metadata.
     # None = unknown / not yet detected.
     # Populated by detect_platform() in pipeline or by the dumper.

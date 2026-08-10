@@ -281,6 +281,666 @@ building a second identity-resolution mechanism from scratch.
   list still marked castxml-only here; closed in a later pass — see the new
   entry below, appended rather than edited in place so this section stays
   an accurate as-of-time record of what each review round actually found.
+  (The "not populated by the clang backend at all" half of this specific
+  claim is also now stale — closed in a still-later pass; see the
+  "closed half of the still-open vptr-placement gap" entry further below,
+  same append-don't-edit convention.)
+
+  **A later pass closed the DWARF backend's half of the vptr-placement gap
+  — the L2 header-only backends (castxml/clang) remain unstarted.**
+  `dwarf_snapshot.py`'s `vptr_offset_bits` used the identical
+  `0`-if-polymorphic heuristic this section flags for castxml, with a real,
+  verified-against-GCC-13/Clang-18 fix available: GCC/Clang both emit an
+  artificial `_vptr.<Class>`/`_vptr$<Class>` `DW_TAG_member` — with a real
+  `DW_AT_data_member_location` — on whichever class *introduces* a given
+  vtable, already discarded (not surfaced as an ordinary field) by
+  `_process_field` but never read for its offset. Now read directly instead
+  of assumed. This also closed a genuine correctness gap the heuristic
+  never covered at all, not just an accuracy one: a class that only
+  *inherits* a vtable — adds or overrides no virtual method of its own
+  (`struct N : A { int ni; };` with no override) — has an empty
+  DWARF-visible `vtable` list even though it is genuinely polymorphic, so
+  the old heuristic reported `vptr_offset_bits=None` (unknown) for it
+  unconditionally. Resolved via a whole-binary fixed-point pass
+  (`_finalize_vptr_offsets`, run after every CU is walked, not eagerly
+  per-class during the walk) that looks up the one non-virtual base placed
+  at absolute offset 0 — the ABI's primary base, whose vtable pointer a
+  derived class always shares — since DWARF's own per-child-DIE emission
+  order does not correlate with declaration order (confirmed empirically: a
+  subclass with no local vtable slot can be emitted before its own base).
+  Verified end-to-end against real compiled libraries (GCC and Clang alike)
+  covering plain polymorphism, multiple inheritance (confirming this model
+  still only tracks the *primary* vptr — a secondary base's own vtable
+  pointer at a non-zero offset, e.g. `struct C : A, B` in the reasoning
+  above, is the still-open "real multi-inheritance secondary-vtable
+  placement" gap this note doesn't close), a virtual base (never primary,
+  so the derived class gets its own local vptr at 0), a two-level
+  inheritance chain, and a non-polymorphic base reordered by the ABI to lay
+  out after a polymorphic one. Checked against `diff_layout.py`'s two
+  `vptr_offset_bits`-consuming detectors for a stale-baseline phantom-flip
+  risk (the same class of bug G31 Phase C already found once for
+  `is_standard_layout`/`is_trivially_copyable` in `_has_layout_descriptor`):
+  `_check_vptr_introduced` requires the *new* side's `vtable` list to be
+  non-empty too, which this fix does not change, so the newly-resolved
+  inherited-only case can never trip it; `_has_layout_descriptor`'s
+  `old_has`/`new_has` comparison is dominated by `size_bits`, which DWARF
+  always populates for any concrete (non-opaque) class regardless of this
+  fix, so no realistic phantom `LAYOUT_UNVERIFIABLE` was found. No schema or
+  whole-snapshot disk-cache version bump: this DWARF-only fix doesn't touch
+  the header-AST cache path (`snapshot_cache.py` caches only castxml/clang
+  header dumps, not binary/DWARF extraction) and never *loses* a
+  previously-known non-`None` value, only turns some `None`s into a real
+  offset — the precedent that required a version bump elsewhere in this
+  phase (a stale `None` being misread as a reliably-known negative answer)
+  doesn't apply here. Castxml's own heuristic turned out not to share the
+  DWARF backend's specific bug: its `vtable` list (`_build_vtable`/
+  `_collect_virtual_methods`) is already transitively inherited across
+  bases by construction, unlike DWARF's per-DIE-local list, so castxml's
+  `N`-shaped case was never actually broken the way DWARF's was — leaving
+  the real, still-open castxml/clang gap narrower than this section
+  originally scoped it: secondary-vtable placement under multiple
+  inheritance (a genuine model-schema gap, needing a new field beyond the
+  single `vptr_offset_bits` scalar), not the inherited-only case this pass
+  closed for DWARF.
+
+  **A review round found a real gap in the inherited-vptr resolution
+  itself, once a namespace is involved.** `RecordType.bases` stores each
+  base's *bare* `DW_AT_name` (unrelated, pre-existing convention this fix
+  doesn't change — every other bare-name-keyed field in this codebase does
+  the same), but `self.types` — and therefore the `by_name` lookup
+  `_finalize_vptr_offsets` used — is keyed by *qualified* name the moment a
+  namespace or enclosing class is involved. `ns::N : ns::A`'s inherited
+  vptr silently failed to resolve (stayed `None`) even though `ns::A`'s own
+  offset was already known, because the lookup searched for a type named
+  bare `"A"` and never found `"ns::A"` — reproduced against a real
+  GCC-compiled namespaced example before fixing (Codex review). Fixed by
+  resolving each inheritance edge to the base type DIE's own identity
+  (`(CU.cu_offset, base_die.offset)`, matching `_type_cache`'s existing
+  convention) at the point the edge is processed — while the DIE is still
+  directly at hand — rather than only by name: `_resolve_base_name` became
+  `_resolve_base_name_and_key`, `_collect_record_type_children` threads a
+  new `base_die_keys` map alongside `bases`/`base_offsets`, and
+  `_process_record_type_named` registers every built `RecordType` by its
+  own DIE identity (`_record_die_index`), independent of vptr resolution,
+  so a later-processed derived class can look its base up unambiguously.
+  `_finalize_vptr_offsets` now resolves by DIE identity first, falling back
+  to the original bare-name lookup only when a base DIE didn't resolve to a
+  key at all. Verified this doesn't just fix the missing case but avoids a
+  worse one: a same-bare-name base in an *unrelated* namespace
+  (`other::A`, non-polymorphic, sharing the bare name `"A"` with `ns::A`)
+  is never mistakenly treated as `ns::N`'s base — the DIE-identity lookup
+  is exact, not a name collision waiting to happen the way the pure-name
+  fallback would be on its own. New regression tests compile a real
+  namespaced GCC binary covering both the resolution case and the
+  same-bare-name non-confusion case.
+
+  **The next review round on the same fix found two more real gaps in the
+  DIE-identity resolution itself, both reproduced against real compiled
+  binaries before fixing.** (1) **Cross-CU/declaration-only stub DIEs.** A
+  base class defined in one translation unit and only *inherited from* (not
+  redefined) in another is referenced, from the inheriting TU's own CU, by
+  a DIE that is neither the retained definition (ODR first-definition-wins
+  discarded any duplicate full definition) nor previously registered
+  anywhere — GCC represents an inherited-but-not-redefined base in a
+  non-defining CU as either a second full-definition DIE (discarded by ODR
+  dedup) or a `DW_AT_declaration: true` stub carrying no `DW_AT_byte_size`
+  (hits the pre-existing "forward declaration only" early return). Both
+  shapes left the inheritance edge's `base_die_key` pointing at a DIE
+  `_record_die_index` never learned about, falling through to the
+  bare-name lookup and failing for a namespaced base exactly like the
+  first finding. Fixed by recording, at both of those two early-return
+  points, which qualified name the non-retained DIE names
+  (`_register_die_qualified_name` → `_die_key_to_qualified_name`) —
+  deliberately *not* resolved eagerly (the real definition is not
+  guaranteed to already be known at the point a forward-reference stub is
+  encountered, the identical DWARF-emission-order problem
+  `_finalize_vptr_offsets`'s own docstring already documents for the
+  general case), only resolved back through
+  `_record_by_qualified_name` once every CU is known, at
+  `_finalize_vptr_offsets` time — extending its lookup to three tiers:
+  the retained DIE identity, this alias tier, then the original bare-name
+  fallback. (2) **Same-bare-name collision across two *direct* bases of
+  one class.** `D : one::A, two::A` — two distinct bases sharing a bare
+  name in different namespaces — cannot be represented by the
+  bare-name-keyed dict the fix originally used for per-edge identity at
+  all: the second edge's offset and DIE key silently overwrote the
+  first's, corrupting exactly the offset-0 candidate the resolution needed
+  (verified: `D.base_offsets` collapsed to only `two::A`'s non-zero
+  offset, losing `one::A`'s real offset 0 entirely). Fixed by replacing
+  the bare-name-keyed per-edge structures with `_base_edges_by_record`, an
+  *ordered list* of `(base name, this edge's own offset, this edge's own
+  DIE key)` tuples — one per `DW_TAG_inheritance` child, duplicates
+  preserved — so two edges sharing a name can never overwrite each other.
+  `RecordType.bases`/`base_offsets` themselves are untouched (their
+  pre-existing bare-name-keyed shape is a separate, unrelated convention);
+  only the internal structure this fix's own resolution walks changed.
+  Three more regression tests added, each compiling a real GCC binary:
+  cross-translation-unit inheritance-only resolution, and same-bare-name
+  colliding direct bases.
+
+  **A fourth review round on the same fix found a real regression, not a
+  missing enhancement.** `struct E : virtual A { virtual void e(); };`,
+  where `A` has no data members of its own ("nearly empty" for the Itanium
+  ABI's virtual-primary-base rule), can be laid out so `E` and `A` SHARE
+  one vptr slot at offset 0 with GCC emitting no local `_vptr.E` member for
+  `E` at all — confirmed by DIE dump, and different from every other
+  virtual-base case this fix already covered (`struct D : virtual A {
+  virtual void d(); int di; };` DOES get its own `_vptr.D`, since a real
+  data member of its own forces a non-degenerate layout). Because `E`'s
+  only base is virtual, it's entirely excluded from the primary-base walk
+  (mirroring `base_offsets`'s own long-standing virtual-base exclusion —
+  the offset is dynamic, not static), so `E` fell through to `None` where
+  the pre-fix code — which never distinguished "resolved via a real
+  mechanism" from "just assumed 0 whenever `vtable` is non-empty" — used
+  to give the (here, correct) answer `0`. Fixed with a final fallback pass
+  in `_finalize_vptr_offsets`, after the fixed-point resolution loop
+  completes: any type still `None` with a non-empty `vtable` is set to `0`,
+  restoring the original blanket heuristic exactly for the residual set
+  this fix's more precise mechanisms cannot explain — a change verified to
+  be strictly additive over the pre-fix behavior (every case the old code
+  resolved to 0 still resolves to at worst 0; several cases it could only
+  guess at now resolve to a real, DWARF-derived offset instead). New
+  regression test with exactly this shape.
+
+  **The same pass's fourth regression test pushed `test_dwarf_snapshot.py`
+  over the file-size hard cap** (2045 lines against the 2000-line ERROR
+  threshold, `scripts/check_ai_readiness.py`'s `file-size` check) — the
+  whole `TestDwarfSnapshotVptrOffset` class (all vptr-offset coverage
+  added across this fix's several review rounds) moved to a new sibling
+  file, `tests/test_dwarf_vptr_offset.py`, self-contained with its own
+  `g++`-availability check rather than importing across test modules
+  (matching this repo's existing test-file-splitting convention for a
+  large module — see `AGENTS.md`'s "Files that are large" section).
+
+  **A fifth review round on the same fix found the immediately-adjacent
+  case the fourth's fallback tier didn't cover.** `struct A { virtual void
+  a(); }; struct E : virtual A {};` — `E` is polymorphic ONLY through the
+  virtual base `A`, adding or overriding no virtual method of its own at
+  all — has neither a local vptr member NOR any entry in its own `vtable`
+  list (confirmed: `E.vtable == []`), so the fourth finding's fallback
+  (gated on `rec.vtable` being non-empty) never applies here, leaving `E`
+  unresolved as `None`. Unlike that finding, this one is a genuine accuracy
+  improvement, not a regression fix: the pre-fix heuristic (`0 if vtable
+  else None`) ALSO returned `None` for this exact shape (its `vtable` was
+  always empty), so there was no prior "0" answer here to lose. Fixed with
+  a second final-fallback tier: a class with `virtual_bases` and no
+  resolved `vptr_offset_bits` gets `0` when at least one of its own virtual
+  bases is itself already known to be polymorphic (a bare-name `by_name`
+  lookup — virtual bases were never given DIE-key tracking the way
+  non-virtual `base_edges` are, since a virtual base's real offset is
+  inherently dynamic in the general case; this tier only ever answers "0
+  or unknown," matching the same virtual-primary-base-sharing rule the
+  fourth finding's own tier already documents, never a real non-zero
+  offset it has no way to derive). New regression test with this exact
+  `A`/`E` shape, confirming both `E.vtable` and `E.bases` are empty (only
+  `virtual_bases == ["A"]`) before asserting the resolved offset.
+
+  **A sixth review round found the fifth finding's own tier still had the
+  namespace-ambiguity gap the first review round already closed for the
+  non-virtual walk.** `namespace ns { struct A { virtual void a(); };
+  struct E : virtual A {}; }` — the fifth finding's fallback resolved a
+  virtual base by bare-name `by_name` lookup, which silently fails once a
+  namespace is involved for exactly the same reason the very first
+  DIE-identity fix in this section exists: `rec.virtual_bases` stores the
+  bare name (`"A"`), but `self.types` is keyed by the qualified name
+  (`"ns::A"`) — reproduced empirically (`ns::A.vptr_offset_bits == 0`,
+  `ns::E.vptr_offset_bits` stayed `None`). Fixed by giving virtual bases
+  the same DIE-identity tracking non-virtual `base_edges` already has —
+  a new `_virtual_base_edges_by_record` (name + DIE key per edge, no
+  offset field, since a virtual base's own subobject offset is inherently
+  dynamic and this tier only ever answers "0 or unknown" regardless) — and
+  factoring the three-tier resolution logic (retained DIE identity →
+  ODR-duplicate/declaration-stub alias → bare-name fallback) that was
+  previously inline in the non-virtual fixed-point loop into a shared
+  `_resolve_base_record` closure, so both the primary-base walk and the
+  virtual-primary-base fallback tier resolve a namespaced base identically
+  instead of drifting into two independent (and, as this finding showed,
+  unequally correct) implementations. New regression test with the exact
+  namespaced repro shape.
+
+  **A review round found the earlier "no cache bump needed" conclusion
+  above was wrong, and fixed it.** The very first note on this DWARF vptr
+  fix (above) concluded "No schema or whole-snapshot disk-cache version
+  bump: this DWARF-only fix doesn't touch the header-AST cache path
+  (`snapshot_cache.py` caches only castxml/clang header dumps, not
+  binary/DWARF extraction)" — that premise turned out to be false.
+  `dumper_layout_backfill.backfill_dwarf_layout()` backfills a header-AST
+  (castxml/clang) snapshot's `vptr_offset_bits` from real DWARF whenever
+  the header-derived value is `None`, and it runs on the ordinary,
+  cacheable "binary + public headers" dump shape, not only the always-
+  uncacheable `--dwarf-only` path this note originally had in mind — so
+  the DWARF-side fix reaches a cacheable snapshot indirectly, through the
+  backfill step, even though `dwarf_snapshot.py` itself is never on the
+  cache-key-computing path. A warm cache entry from before this fix would
+  have kept serving the old, less-accurate backfilled value indefinitely,
+  matching the same "stale `None`/heuristic misread as a reliably-known
+  answer" precedent this section already required a bump for elsewhere.
+  Fixed by bumping `_SNAPSHOT_CACHE_VERSION` 8 → 9, following the
+  identical v7/v8 precedent already documented in `snapshot_cache.py`
+  itself.
+
+  **A review round found the virtual-only fallback tier (the fifth/sixth
+  findings above) had the same single-pass-vs-fixed-point gap the
+  non-virtual primary-base walk's own loop was built to avoid.** A
+  multi-level virtual-inheritance chain — `struct A { virtual void a(); };
+  struct E : virtual A {}; struct F : virtual E {};`, neither E nor F
+  adding a virtual method of its own — needs E resolved before F can
+  resolve through it, but the fallback tier was a single
+  `for rec in self.types:` pass, and `self.types` iteration order follows
+  DWARF emission order, not dependency order. Reproduced empirically with
+  real GCC output: `self.types` came out as `[F, A, E]`, so the single
+  pass checked F while `E.vptr_offset_bits` was still `None`, resolved E
+  to `0` moments later in the very same pass, and left F stuck at `None`
+  with no second pass to pick it back up. Fixed by converting the tier
+  into the identical `while progressed and unresolved:` fixed-point loop
+  shape the primary-base walk already uses just above it in the same
+  function, rather than a bespoke single pass with its own, narrower
+  correctness envelope. New regression test with this exact A/E/F chain.
+
+  **A review round flagged a real, pyelftools-confirmed risk in the base
+  DIE key itself, without a real-compiler repro to back it.** The DIE key
+  every tier above resolves through (`_record_die_index`,
+  `_base_edges_by_record`, `_virtual_base_edges_by_record`) is built in
+  `_resolve_base_name_and_key` as `(CU.cu_offset, base_die.offset)` — *CU*
+  being the referencing `DW_TAG_inheritance` edge's own compilation unit,
+  not necessarily the resolved *base_die*'s. `DW_FORM_ref_addr` is
+  section-absolute by DWARF's own definition, so it can in principle name a
+  DIE genuinely owned by a *different* CU — and pyelftools's `DIE.cu`
+  always records a DIE's real owning unit regardless of which CU's
+  `get_DIE_from_refaddr` happened to resolve it, so a key built from the
+  wrong CU would silently miss both DIE-identity resolution tiers. Unlike
+  every other finding in this section, this one does NOT reproduce against
+  a real compiler: GCC (plain, `-flto`, and `-fdebug-types-section`) and
+  Clang were all tried against a base class defined in one TU and inherited
+  in another, and every producer kept the inheritance edge CU-local —
+  always emitting its own declaration-only stub for the out-of-CU base
+  rather than a genuine cross-CU `DW_FORM_ref_addr`. Fixed anyway, since
+  the fix is free: for every CU-relative form (the only forms actually
+  observed), the referencing die's CU and the resolved DIE's own CU are
+  identical by construction, so keying on `base_die.cu.cu_offset` instead
+  produces the exact same result in every case tested while closing the
+  theoretical gap for a producer this investigation didn't cover.
+
+  **A later pass closed half of the still-open vptr-placement gap: the
+  direct-clang header-AST backend went from populating `vtable`/
+  `vptr_offset_bits` NOT AT ALL to matching castxml's own primary-vptr
+  heuristic.** Before this, `dumper_clang.py`'s `_build_record` hardcoded
+  `vtable=[]` unconditionally and never set `vptr_offset_bits` — not an
+  imprecise heuristic the way castxml's `0`-if-polymorphic guess is, a
+  total gap, silently disabling both `vtable`-consuming detectors
+  (`diff_layout._check_vptr_introduced`'s `VPTR_INTRODUCED`,
+  `diff_types`'s `TYPE_VTABLE_CHANGED`) for every direct-clang-only
+  comparison. Closing it turned out to need more than copying castxml's
+  own mechanism, because castxml/GCC-XML tags every effectively-virtual
+  method `virtual="1"` in its own XML (real semantic analysis, verified
+  empirically) while clang's `-ast-dump=json` output does not: a
+  `CXXMethodDecl` gets `"virtual": true` only when the `virtual` keyword
+  is literally written, and an `OverrideAttr` child only when `override`
+  is written — a re-declaration that writes neither (compiles fine, only
+  triggers clang's own `-Winconsistent-missing-override` warning) carries
+  **no signal at all** in the JSON tree, confirmed with a real
+  `clang++ -Xclang -ast-dump=json` run (the equivalent *textual*
+  `-ast-dump` DOES print an `Overrides: [...]` annotation for the same
+  input — a JSON-serializer-specific gap, not a semantic-analysis one).
+  Fixed with a new leaf module, `dumper_clang_vtable.py`
+  (`dumper_clang.py` was already over its own soft line-count limit),
+  reconstructing virtuality via signature matching instead: a method is
+  virtual if explicitly marked, OR if its (name, parameter types,
+  const-qualifier) identity — deliberately excluding the return type, so
+  a covariant override still matches — equals an already-known virtual
+  slot inherited from a base. A destructor needed a separate mechanism
+  (verified empirically both for a user-declared and a compiler-implicit
+  destructor): it's virtual the moment ANY base contributes a virtual
+  destructor, regardless of keywords, and `~Base`/`~Derived` never share a
+  name for signature matching to key on — resolved via a fixed sentinel
+  slot key instead. Verified end-to-end against a real compiled example
+  (an override with neither `virtual` nor `override` written correctly
+  fires `VPTR_INTRODUCED` through the live `dump()`/`compare()` pipeline,
+  not just at the unit level) plus 12 unit-level cases covering multiple
+  inheritance ordering, namespaced/nested base resolution, an
+  unresolvable base's graceful degradation, and the const-qualifier/
+  covariant-return disambiguation. **Deliberately still open, not
+  attempted in this pass**: castxml's own remaining gap (no real
+  multi-inheritance secondary-vtable placement — the class-level
+  refinement this phase's own "still open" note below already scoped as
+  needing a model-schema change, since the current `vptr_offset_bits` is
+  a single scalar tracking only the class's own *primary* vptr slot at
+  offset 0, never a secondary base's own separate vtable pointer at a
+  non-zero offset) applies identically to the now-fixed clang backend —
+  this pass gave clang PARITY with castxml's existing primary-vptr
+  heuristic, not a capability neither backend has.
+
+  **A review round found six real gaps in the clang vtable reconstruction
+  above, all fixed with real-compiler verification.** In descending order
+  of severity:
+  1. A forward declaration (`struct A;`) followed by its complete
+     definition (`struct A { virtual void f(); };`) — a real, common
+     shape confirmed with clang emitting BOTH `CXXRecordDecl` nodes for
+     it — made the record index's first-registration-wins policy keep
+     the empty forward-decl stub whenever it preceded the definition in
+     source order, silently losing every virtual method. Fixed by
+     preferring a complete definition over a forward-decl stub
+     regardless of walk order (`_is_record_definition`, the same guard
+     `parse_types` already uses).
+  2. The ordinary unqualified spelling for a base declared in the SAME
+     namespace as the derived class (`namespace ns { struct C : A {}; }`
+     where `A` is `ns::A`) reports `qualType: "A"` (bare), not `"ns::A"`
+     — confirmed with a real clang build, along with the equivalent gap
+     for a type-alias base. Both carry the fully-qualified spelling in a
+     separate `desugaredQualType` field (absent, not merely identical,
+     whenever nothing needs desugaring). Fixed by preferring
+     `desugaredQualType` when present.
+  3. Two UNRELATED bases independently declaring an identically-signed
+     virtual method (`struct D : B1, B2` where both declare
+     `virtual void q();`, no inheritance relationship between them) is a
+     real, compiling shape with two genuinely separate vtable-group
+     slots — the first version's single signature-keyed dict collapsed
+     them onto one, silently discarding one slot. Fixed by splitting
+     "signature" from "physical slot identity": an ordered
+     `slots: dict[key, mangled]` (one key per real vtable-group entry,
+     keyed on Python object identity) plus a
+     `sig_index: dict[signature, list[key]]` tracking every currently-live
+     key a signature resolves to, unioned across bases rather than
+     overwritten. A genuine override (`D`'s own `void q() override;`)
+     correctly replaces BOTH physical keys at once — verified this
+     compiles and is the valid final overrider for both per
+     [class.virtual], the same "non-virtual multiple inheritance" case
+     castxml's own `_resolved_override_keys` already documents.
+  4. The signature key's cv-qualifier field was a single `is_const`
+     boolean, so a ref-qualifier (`virtual void f() &;`) or `volatile`
+     mismatch was invisible to it — confirmed both compile with distinct
+     manglings, so an unrelated re-declaration could have falsely
+     replaced a ref-/volatile-qualified base slot. Fixed by keeping the
+     full, whitespace-normalized qualifier tail string in the key instead
+     of reducing it to one boolean.
+  5. A virtual conversion operator (`virtual operator int() const;`) is a
+     separate clang node kind, `CXXConversionDecl`, not `CXXMethodDecl`
+     — confirmed with a real clang build — so it was silently excluded
+     from the vtable entirely regardless of virtuality. Fixed by handling
+     both kinds identically everywhere in the walk.
+  6. Top-level cv-qualification on a by-value parameter doesn't
+     participate in override identity in real C++ (`virtual void
+     f(const int)` and a derived `void f(int)` ARE the same override) —
+     confirmed both mangle to an identical parameter-encoding tail — but
+     the signature key used each parameter's raw `qualType` string
+     verbatim, so this case fell through as an unrelated new method.
+     Fixed with `_normalize_param_type`, stripping a top-level leading
+     (`"const int"`) or trailing-after-pointer (`"int *const"`) qualifier
+     word while leaving a *pointee*-level one (`"const int *"`,
+     confirmed this DOES survive mangling) untouched — verified against
+     six real clang parameter spellings, including the nested
+     pointer-to-const-pointer case (`"int *const *"`) that a naive
+     strip-anywhere approach would have corrupted.
+  New regression tests for all six, each traced back to a real clang
+  compile before being reduced to a hand-built fixture.
+
+  **A review round found a confirmed-real but pre-existing limitation
+  (non-virtual diamond inheritance duplicates a base subobject, giving TWO
+  physical vtable-group slots for one shared virtual method) that this
+  module shares symmetrically with castxml's own `_collect_virtual_methods`
+  — both key a base's virtual-method slot on the base's single declaring
+  AST/XML node, which is reachable-once regardless of how many derived
+  paths reach it, so both backends collapse the two real slots onto one.
+  Documented in `dumper_clang_vtable.py`'s own docstring rather than fixed:
+  a real fix needs path-local slot identity for both backends together, and
+  fixing only clang would trade one asymmetry (a total gap, now closed) for
+  a different one (clang more precise than castxml on this one shape).
+
+  **A third review round found three more real gaps, all verified against
+  real clang before fixing:**
+  1. A variadic base method (`virtual void g(int, ...);`) and a derived,
+     genuinely unrelated fixed-arity method (`void g(int);`) report the
+     IDENTICAL single `ParmVarDecl` list — the `...` is visible only inside
+     the outer function `qualType` string (and in the two methods' distinct
+     manglings) — so the signature key missed it entirely and let the
+     unrelated method incorrectly replace the variadic slot. Fixed by
+     checking the text immediately before the parameter list's closing
+     paren for a trailing `...` and folding that into the signature key.
+  2. A parameter typed through an alias (`using I = int; virtual void
+     f(I);`) reports `qualType: "I"` with the resolved `"int"` only in a
+     separate `desugaredQualType` field — confirmed both mangle to an
+     identical parameter encoding (typedefs are transparent to Itanium
+     mangling) — but the signature key read only `qualType`, missing this
+     common shape. Fixed by preferring `desugaredQualType` for parameter
+     types too, the same fix already applied to base-class names.
+  3. The most consequential of the three: `dumper_clang_vtable` correctly
+     recognizes a no-keyword override and replaces the inherited slot in
+     the reconstructed `RecordType.vtable` — but `parse_functions()`'s own
+     `Function.is_virtual` still read clang's raw, keyword-only
+     `node.get("virtual")`, the exact signal this whole module exists to
+     work around. Since `diff_cxx_rules.vtable_slot_is_override_reuse()`
+     requires both sides' `Function.is_virtual` before recognizing a vtable
+     slot as reused rather than changed, this silently undercut the
+     feature's own flagship scenario: confirmed end-to-end through the live
+     `dump()`/`compare()` pipeline that adding a no-keyword override (with
+     no other real change) produced a spurious `TYPE_VTABLE_CHANGED`
+     BREAKING finding. Fixed with a new `_virtual_mangled_names()` cache —
+     every mangled name occupying a slot in any record's reconstructed
+     vtable across the whole TU — consulted by `parse_functions()` to widen
+     `is_virtual` from `False` to `True` (never the reverse, so purely
+     additive). Re-verified the end-to-end repro is now `COMPATIBLE`
+     (`func_added` only, no `type_vtable_changed`).
+  New regression tests for all three.
+
+  **A fourth review round found GNU `__restrict` was excluded from the
+  override signature key — and investigating it exposed a real, deeper,
+  pre-existing bug the second review round's own parameter-normalization
+  fix never actually closed.** Codex's finding: `virtual void a(int*
+  __restrict p);` and a derived `void a(int*) override;` mangle identically
+  (`__restrict` is a hint, not part of the type), but the signature key
+  read the raw `qualType` unmodified, so the override appended as a new
+  slot instead of replacing the inherited one. Investigating it against
+  real clang turned up the actual root cause: clang's real spelling has NO
+  space between `*` and the FIRST trailing qualifier word (`"int *const"`,
+  never `"int * const"`), while a SECOND stacked qualifier word IS
+  space-separated from the first (`"int *const volatile"`). The earlier
+  `_normalize_param_type` fix assumed every trailing qualifier had a
+  leading space — which meant it silently never matched ANY single-
+  qualifier pointer case at all, including the plain `"int *const"`/
+  `"int *volatile"` cases that fix's own docstring claimed were handled.
+  That gap went undetected because the earlier round's own regression
+  tests only exercised the *pointee*-const negative-control case (`"const
+  int *"`, correctly untouched) and a *leading*-qualifier positive case
+  (`"const int"`, handled by a different code path entirely) — never a
+  genuine `"T* const"` positive-match end to end. Fixed by normalizing the
+  glued-vs-separated asymmetry up front: a new `_POINTER_QUALIFIER_GLUE`
+  regex inserts a space after every `*` immediately followed by a letter,
+  after which one plain trailing-word-strip loop (extended to also strip
+  `__restrict`) handles every stacking combination uniformly. Re-verified
+  against seven real-clang-compiled cases end to end (`int* const`, `int*
+  volatile`, `int* const volatile`, `int* __restrict`, `int* const
+  __restrict`, plus the two pointee-qualified negative controls) — all now
+  correct, including the four that were silently broken before this round
+  despite not being what Codex's own finding named.
+
+  **A fifth review round found two more real gaps, both surfaced by chasing
+  a base-lookup fix to a genuine end-to-end verification instead of
+  stopping once the vtable list itself looked right.** (1) A base that is a
+  CONCRETE template specialization (`struct D : A<int> {...};`) was
+  entirely unresolvable: clang emits the usable definition as a
+  `ClassTemplateSpecializationDecl`, a different node kind from the
+  `CXXRecordDecl`/`RecordDecl` pair the base-lookup index collected, so
+  `A<int>`'s own vtable was invisible to `D` — an old `D` resolved to an
+  empty vtable/no vptr regardless of what `A<int>` itself provides, and a
+  no-keyword override in a new `D` then made the vtable appear to gain its
+  FIRST entry, a false `VPTR_INTRODUCED`. Fixed with a new
+  `build_specialization_index()` (`dumper_clang_vtable.py`) that
+  reconstructs the specialization's own `Name<Arg1, Arg2>` spelling from
+  its `TemplateArgument` children — a type argument's own `type.qualType`,
+  or a non-type argument's own `value`, joined with `", "` — confirmed
+  against real clang output to exactly reproduce the base-reference
+  spelling for both a namespaced two-type-argument specialization
+  (`"ns::A<int, double>"`) and a non-type-argument one (`"A<3>"`); an
+  unindexable specialization (template-template argument, pack expansion)
+  degrades to the same already-accepted "unresolvable base" false-negative
+  every other unresolvable-base shape already degrades to. (2) Verifying
+  fix (1) end-to-end (not just at the vtable-list level) surfaced a
+  SEPARATE, previously-unreachable gap: `owner_class_of()`'s mangled-name
+  fallback recovers a specialization's *raw*, un-spelled Itanium
+  template-argument encoding (`"AIiE"` for `A<int>`, confirmed empirically
+  — this is `itanium_scope_components`'s own documented, deliberate
+  behavior for a DIFFERENT caller's purpose), which never matches
+  `RecordType.bases`'s spelled form (`"A<int>"`, built from clang's own
+  type printer) — so `vtable_slot_is_override_reuse()`'s owner check failed
+  even after the base resolved correctly, producing a false
+  `TYPE_VTABLE_CHANGED` for the exact no-keyword-override-through-a-
+  specialization-base scenario fix (1) was meant to make work. This gap was
+  UNREACHABLE before fix (1) (a specialization base's vtable was always
+  empty, so this owner comparison never ran) — fixing (1) alone would have
+  traded one false positive for a different one on the same scenario. Fixed
+  by making `ClassTemplateSpecializationDecl` scope-forming in
+  `_ClangAstParser._walk` (using the same `_specialization_spelling`
+  reconstruction as fix (1), so both consumers agree on one spelling) and
+  qualifying a specialization-owned method's `Function.name` with that
+  spelled owner in `parse_functions()` — mirroring what DWARF already does
+  for every member unconditionally (`owner_class_of`'s own docstring),
+  scoped here to ONLY the specialization-owned case so the already-working
+  plain-class path (mangled-fallback owner resolution, verified unaffected
+  by a targeted before/after repro) is untouched. `_specialization_spelling`
+  and the whole-AST specialization walk were moved into
+  `dumper_clang_vtable.py` (as `build_specialization_index`) rather than
+  grown further inside `dumper_clang.py`, which was already within 10% of
+  its 2000-line hard cap. A separate, narrower fix in the SAME review round:
+  the vtable module's own override-signature qualifier-tail search used
+  `qualtype.rfind(")")` to find the parameter list's closing paren — correct
+  when a method carries no trailing exception specification, but a C++14+
+  ref-qualified declaration with one (`"void () & throw()"`) has its OWN
+  trailing `()` sitting textually LAST, so the naive search matched the
+  exception spec's close paren instead and both a base `& throw()` and an
+  unrelated derived `&& throw()` reduced to an identical EMPTY qualifier
+  tail — discarding the ref-qualifier difference and misclassifying the
+  derived declaration as an override that replaces the base's slot in
+  place. Fixed with a new `_top_level_param_list_close()`, mirroring
+  `dumper_clang._function_qualifiers`'s own depth-aware forward scan (find
+  the first top-level `(`, then walk forward counting paren depth until it
+  closes) instead of searching from the end of the string.
+
+  **A sixth review round found two more real gaps in the same
+  `build_specialization_index()`, both in what makes a specialization
+  reliably indexable, not in the base-resolution mechanism itself.** (1) An
+  explicit specialization can be forward-declared
+  (`template<> struct A<int>;`) before its complete definition
+  (`template<> struct A<int> { ... };`) — both emit their own
+  `ClassTemplateSpecializationDecl` node sharing the IDENTICAL `"A<int>"`
+  spelling, confirmed with a real clang build. The index's
+  first-registration-wins insertion permanently kept the empty
+  forward-decl stub whenever it was walked first — the same
+  forward-decl-shadows-definition shape `_record_index()` already guards
+  for an ordinary record, reproduced one level up for a specialization.
+  Fixed by applying the identical "a complete definition always wins"
+  tie-break, via the shared `_is_record_definition` (moved into
+  `dumper_clang_vtable.py` so both indexes can use it). (2) A non-type
+  template argument's raw JSON `value` does not always print the same way
+  a base reference spells it: `template <bool B> struct A; ... A<true>`
+  reports `value: -1` (confirmed empirically — not even `1`), while the
+  base reference still spells it `"A<true>"`, so the previous
+  reconstruction fabricated an `"A<-1>"` key that could never match — an
+  old `D : A<true>` stayed unresolvable while a new side adding a
+  no-keyword override made it appear to gain its first vptr, the exact
+  false `VPTR_INTRODUCED`/`TYPE_VTABLE_CHANGED` shape this whole index was
+  built to prevent. Fixed conservatively rather than attempting a general
+  non-type-argument printer: a new whole-AST pass
+  (`_index_template_param_kinds`) records, per `ClassTemplateDecl`, which
+  positional non-type parameters are declared with one of a small,
+  CONFIRMED-safe set of plain builtin integer types (`int`, `unsigned
+  int`, `long`, ... — verified these DO round-trip: `A<3>`'s `value: 3`
+  matches the base reference's `"A<3>"` exactly); `_specialization_spelling`
+  now consults this by position and returns `None` for the WHOLE
+  specialization the moment any non-type argument's parameter isn't
+  confirmed safe (`bool`, an enum, a pointer, floating-point, structural
+  C++20 arguments — none of these have any reason to share the plain-int
+  round-trip property, and none were verified to). Both fixes verified
+  end-to-end through the live `dump()`/`compare()` pipeline in addition to
+  unit fixtures: the forward-decl case now correctly resolves and reports
+  no findings; the `bool` case now correctly degrades to `D.vtable == []`
+  on both sides (unresolvable, matching every other unresolvable-base
+  shape) rather than fabricating a false break.
+
+  **A seventh review round found two more real gaps, plus a memoization
+  fix, all confirmed against real clang output.** (1) A dynamic exception
+  specification (`throw(int)`, `throw()`) participated in the override
+  qualifier tail unstripped — only `noexcept` was — so a base `virtual
+  void f() throw(int);` overridden by a derived `void f() throw()
+  override;` (a legal C++14-and-earlier narrowing, confirmed compiling
+  with real clang) compared as a different signature and appended a
+  spurious second slot instead of replacing the inherited one. Fixed by
+  cutting the qualifier tail at whichever of `noexcept`/`throw` appears
+  first, alongside the pre-existing `noexcept` handling. (2) A
+  specialization always carries a `TemplateArgument` for EVERY parameter,
+  including one a base reference omitted because it equals its own
+  default — `template <class T, class U = int> struct A; struct D :
+  A<double> {...};` reports arguments for BOTH `T` and `U`, confirmed with
+  a real clang build — so joining all of them unconditionally produced
+  `"A<double, int>"`, which never matches the referring site's own
+  `"A<double>"`. Fixed with a new whole-AST pass
+  (`_index_template_param_defaults`, mirroring `_index_template_param_kinds`'s
+  own shape) recording each TYPE parameter's own default spelling
+  (`defaultArg.type.qualType`); `_specialization_spelling` now pops
+  trailing arguments that exactly equal their own parameter's default
+  before building the key. Verified this reproduces clang's own canonical
+  spelling for BOTH an omitted default and one explicitly repeated with
+  the identical value: `struct D : A<double, int> {...}` reports
+  `type.qualType == "A<double, int>"` (as literally written) but
+  `type.desugaredQualType == "A<double>"` (defaults collapsed) —
+  `_base_qualnames` already prefers `desugaredQualType`, so both shapes
+  resolve to the identical trimmed spelling this collapses to. Fixing (2)
+  surfaced a THIRD, narrower gap in the specialization-owner-qualification
+  fix from the fifth review round: `dumper_clang.py`'s own `_walk` call
+  site passed no `param_kinds`/`param_defaults` context to
+  `_specialization_spelling` at all (only the base-lookup index's own call
+  did), so a confirmed-safe non-type specialization (`A<3>`) or a
+  defaulted-argument one still left `Function.name` bare — reintroducing
+  the exact owner-mismatch false `TYPE_VTABLE_CHANGED` that fix was built
+  to prevent, just via a different argument shape. Fixed by computing both
+  indices once, eagerly, in `_ClangAstParser.__init__` (before `_walk`
+  runs, since `_walk` itself is what needs them) and threading them into
+  both call sites; `build_specialization_index()` now accepts these as
+  optional parameters so the eager computation isn't paid for twice.
+  Separately, `_base_lookup_index()` was rebuilding its merged dict on
+  every call — `_build_record` calls it once per record in the TU, so this
+  was an O(records × index size) cost; now memoized the same way the other
+  per-parse indices already are.
+
+  **An eighth review round found two more real gaps, both in the
+  unresolvable-base degradation path itself rather than in resolving a
+  new argument shape.** (1) A class deriving from an unresolvable
+  specialization (e.g. the `bool` non-type case above) is correctly
+  invisible to the reconstruction, but an own member carrying an
+  EXPLICIT `virtual`/`override` keyword was still unconditionally added
+  as a brand-new slot, since nothing recognized it as a possible override
+  of something in the invisible base. Confirmed end-to-end: an old `D :
+  A<true> {}` (empty vtable) and a new `D` adding only `void f()
+  override;` produced a real `VPTR_INTRODUCED`/`TYPE_VTABLE_CHANGED`
+  false positive — the module docstring's own "known limitation" section
+  had claimed this shape was "never a false positive," which was true
+  only for an IMPLICIT (no-keyword) override; an explicit one was
+  reachable as a genuine false positive the whole time. Fixed by tracking
+  whether ANY of a record's own bases failed to resolve to a node at all,
+  and suppressing any new (non-candidate-matching) own slot -- explicit
+  or not -- when so: ambiguous whether such a member is a genuine
+  addition or an invisible override, and this module's established
+  posture is to prefer that accepted false negative over a false
+  positive. Deliberately coarse (per-record, not per-method) — a
+  genuinely unrelated new virtual on the same class is silently
+  suppressed too, since there's no way to tell the two cases apart from
+  available data; documented with its own regression test rather than
+  left implicit. (2) A template default that depends on an EARLIER
+  parameter (`template <class T, class U = T> struct A;`) reports the
+  literal, unsubstituted default spelling (`"T"`), which never equals a
+  real resolved argument (`"double"`) by plain string comparison — the
+  identical false-positive shape the plain-default-collapse fix closed
+  one review round earlier, just for a dependent default instead of a
+  literal one. Fixed with a new `_index_template_param_names`
+  (mirroring `_index_template_param_kinds`/`_index_template_param_defaults`'s
+  own shape) recording each parameter's own bare name; when a trailing
+  argument's default spelling exactly matches an EARLIER parameter's
+  name, it's substituted with that parameter's own already-resolved
+  argument before comparing — always safe, since a dependent default can
+  only name an earlier parameter, never itself or a later one. Anything
+  more complex (a default only partially referencing an earlier
+  parameter, e.g. `U = Wrapper<T>`) is conservatively left unsubstituted
+  rather than guessed at. Both fixes verified end-to-end through
+  `dump()`/`compare()` in addition to unit and integration tests.
 
   **A later pass closed the last of this phase's four originally-listed
   facts** (`deprecated`/`is_scoped`/bitfields/default-argument facts were
@@ -577,6 +1237,63 @@ building a second identity-resolution mechanism from scratch.
   traits started being populated for real (G31 Phase C) — the exact
   toolchain-noise-vs-real-break distinction the stdlib filter exists to
   draw. Fixed to match `_is_abi_surface_type`'s identity split exactly.
+
+  **A ninth review round found the exact same class of legacy-baseline
+  false positive one more time, this time for the clang vtable
+  reconstruction feature itself (Codex review, fresh evidence, real
+  end-to-end repro against a persisted schema-v20 direct-clang
+  snapshot).** The vtable/vptr reconstruction (`dumper_clang_vtable.py`)
+  made `RecordType.vtable`/`vptr_offset_bits` real for the first time on
+  the direct-clang backend — before it, EVERY record read `vtable=[]`/
+  `vptr_offset_bits=None`, unconditionally, regardless of the class's real
+  polymorphism. Exactly the same shape as the `is_standard_layout`/
+  `is_trivially_copyable` false positive above and the `deprecated`/
+  `is_scoped`/`TypeField.default` false positives before it: a persisted,
+  pre-fix clang snapshot's blanket-empty vtable is real but WRONG data for
+  an already-polymorphic class, indistinguishable by value alone from a
+  genuine non-polymorphic class — so comparing it against a fresh dump of
+  the SAME, unchanged headers read as every polymorphic class gaining its
+  first vptr (confirmed: `struct A { virtual void f(); };` unchanged,
+  `VPTR_INTRODUCED` fired). Worse than the semantic-trait case: the same
+  legacy-vs-fresh asymmetry also reaches `TYPE_VTABLE_CHANGED` (a vtable
+  differing in slot count between the two sides) and
+  `_has_layout_descriptor()`'s `vptr_offset_bits is not None` check — the
+  identical `LAYOUT_UNVERIFIABLE` phantom the sixth review round fixed for
+  the two semantic traits, now reachable through the vptr field this
+  reconstruction feature newly populates. Fixed with the same
+  established pattern: schema bumped to **v21**, a new
+  `AbiSnapshot.clang_vtable_facts_reliable` marker (mirroring
+  `clang_deprecation_facts_reliable`'s shape — clang-producer-only, not
+  hybrid, since the reconstruction lives entirely in
+  `dumper_clang_vtable.py`, a module the hybrid merge path never invokes),
+  threaded into `_diff_type_vtable` (declines `TYPE_VTABLE_CHANGED`
+  entirely when unreliable), `_check_vptr_introduced` (declines
+  `VPTR_INTRODUCED` entirely), and `_has_layout_descriptor` (excludes
+  `vptr_offset_bits` from the evidence check when unreliable, mirroring
+  the sixth round's semantic-trait exclusion). Verified end-to-end through
+  `compare()` for all three findings, plus a positive-control test
+  confirming the bug reproduces when both sides claim reliable facts (so
+  the suppression isn't just masking an already-inert case).
+
+  **The same round found a second, independent gap in the reconstruction
+  itself: an uninstantiated template method's bare fallback name collided
+  with an unrelated `extern "C"` free function's real mangled name.** A
+  template method with no `mangledName` at all falls back to its bare
+  `name` (e.g. `"f"`) as the vtable slot's identity in
+  `_collect_virtual_slots`; a free `extern "C"` function sharing that same
+  bare name mangles to the identical string by C-linkage design. Since
+  `parse_functions()`'s inferred-virtuality recovery
+  (`_virtual_mangled_names()`) is a plain string-membership test with no
+  owner/kind context, the free function was incorrectly widened to
+  `is_virtual=True` purely from the name collision — confirmed with a real
+  clang dump of `template<class T> struct A { virtual void f(); };
+  extern "C" void f();`, where both `f`s share the identical unmangled
+  fallback string. Fixed by restricting the widening to actual
+  member-function declaration kinds (`kind != "FunctionDecl"`) — only a
+  class member can be virtual in C++ at all, and `_collect_virtual_slots`
+  only ever walks member kinds when building the set this check consults,
+  so a bare `FunctionDecl` can never legitimately appear in it.
+
 - ~~Single-AST reuse for the direct-clang backend~~ **Done** (see above) —
   via in-process memoization of `_clang_header_dump`'s result, not by
   threading the parser's already-consumed AST object through
@@ -711,14 +1428,28 @@ workflow run, which is not expressible as a single `verify.py` `Step` — the
 same structural reason `benchmark_scaling.py`'s own sibling `regression` job
 was never routed through `verify.py` either.
 
-**Synthetic-consumer compile-probe layer, or a deferring ADR.** If a
-compile-probe layer (actually compiling a synthetic consumer against
-old/new headers to observe real compiler diagnostics as corroborating
-evidence, distinct from the existing runtime `app.c`/`app.cpp` fixtures in
-`examples/`) turns out to be out of scope for this initiative, record that
-explicitly as an ADR rather than silently dropping it — the same
-discipline G28 Phase 5 used when deferring concepts/`requires` handling to
-[G4](g4-header-ast-extractor.md) instead of quietly not doing it.
+**Synthetic-consumer compile-probe layer — deferred via ADR, not dropped
+silently.** A compile-probe layer (actually compiling a synthetic consumer
+against old/new headers to observe real compiler diagnostics as
+corroborating evidence, distinct from the existing runtime `app.c`/`app.cpp`
+fixtures in `examples/`, from `probe_harness.py`'s header-only-library
+snapshot-extraction probe, from `contrib/abicheck-clang-plugin`'s
+compile-time facts extraction, and — closest of the four —
+`abicheck/source_smoke.py`'s hand-authored two-sided consumer compile/link
+oracle) turned out to be out of scope for this initiative as a *general*
+mechanism. A driving case already exists —
+`case111_enumerable_thread_specific_lambda_ambiguity`'s `source_smoke` spec
+proves a real `API_BREAK` no L0–L5 evidence tier reaches
+(`known_detector_gap: "constructor_overload_ambiguity"`) — but that case is
+one hand-authored probe, not a procedure for synthesizing the right consumer
+automatically per finding; the open blocker is that synthesis-strategy
+design (plus evidence-model placement, verdict mapping, trust/sandboxing —
+see the ADR for detail), not the absence of a motivating case. Recorded as
+[ADR-060](../adr/060-synthetic-consumer-compile-probe-deferral.md), the
+same discipline G28 Phase 5 used when deferring concepts/`requires`
+handling to [G4](g4-header-ast-extractor.md) instead of quietly not doing
+it. Revisit once a scoped synthesis-strategy design exists, per the ADR's
+own "Revisiting this decision" criteria.
 
 **Files likely to change.** `abicheck/change_registry.py` (or a sibling
 `change_registry_<topic>.py`), the relevant `diff_*.py` detector module(s),

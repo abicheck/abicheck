@@ -211,7 +211,19 @@ from .model import (
 #     rather than reusing v19's: a v19 snapshot has reliable
 #     deprecated/is_scoped but unreliable field defaults, which one shared
 #     flag could not express.
-SCHEMA_VERSION: int = 20
+#   21 — G31 Phase C (dumper_clang_vtable.py): the direct-clang backend's
+#     RecordType.vtable/vptr_offset_bits became real, reconstructed facts
+#     instead of an unconditional vtable=[]/vptr_offset_bits=None stub for
+#     EVERY record. A pre-v21, clang-producer record's blanket-empty vtable
+#     is real-but-WRONG, not merely absent, and cannot be told from a
+#     genuine non-polymorphic class by value alone. `snapshot_from_dict`
+#     marks such a snapshot's `AbiSnapshot.clang_vtable_facts_reliable`
+#     False so `diff_types`/`diff_layout` decline to trust it, instead of
+#     reporting a false `VPTR_INTRODUCED`/`TYPE_VTABLE_CHANGED` for every
+#     already-polymorphic class purely from a tool upgrade (Codex review,
+#     fresh evidence, real end-to-end repro against a persisted schema-v20
+#     clang snapshot).
+SCHEMA_VERSION: int = 21
 
 # Schema version at which CastXML field CV facts became reliable (see v9 above).
 _MIN_SCHEMA_VERSION_FOR_CV_FACTS = 9
@@ -223,6 +235,10 @@ _MIN_SCHEMA_VERSION_FOR_CLANG_DEPRECATION_FACTS = 19
 # Schema version at which the direct-clang backend's TypeField.default facts
 # became reliable (see v20 above).
 _MIN_SCHEMA_VERSION_FOR_CLANG_FIELD_INITIALIZER_FACTS = 20
+
+# Schema version at which the direct-clang backend's RecordType.vtable/
+# vptr_offset_bits facts became reliable (see v21 above).
+_MIN_SCHEMA_VERSION_FOR_CLANG_VTABLE_FACTS = 21
 
 # ADR-050 D1 — the schema version at which a verdict-blocking field
 # (``AbiSnapshot.contract``) was first introduced. This constant only takes
@@ -710,9 +726,7 @@ def _python_api_from_dict(d: dict[str, Any]) -> Any:
 _T = TypeVar("_T")
 
 
-def _sub_block(
-    parser: Callable[[dict[str, Any]], _T], raw: Any
-) -> _T | None:
+def _sub_block(parser: Callable[[dict[str, Any]], _T], raw: Any) -> _T | None:
     """Parse one optional sub-block of a serialized snapshot, or ``None``.
 
     Every ``elf``/``pe``/``macho``/``dwarf``/... section of a snapshot document
@@ -1125,6 +1139,25 @@ def snapshot_from_dict(d: dict[str, Any]) -> AbiSnapshot:
             or _schema_version >= _MIN_SCHEMA_VERSION_FOR_CLANG_FIELD_INITIALIZER_FACTS
         )
 
+    if "clang_vtable_facts_reliable" in d:
+        # Same explicit-marker-wins reasoning as the flags above.
+        clang_vtable_facts_reliable_value = bool(d["clang_vtable_facts_reliable"])
+    else:
+        # Only the direct-clang ("clang") producer path is affected, same as
+        # clang_deprecation_facts_reliable above -- not "hybrid" too: the
+        # vtable/vptr reconstruction lives entirely in dumper_clang_vtable.py,
+        # a direct-clang-backend-only module never invoked by the hybrid
+        # merge path, so a legacy hybrid snapshot's own vtable facts came
+        # from castxml (dumper_hybrid.py's "prefer castxml" merge policy)
+        # and carry no equivalent false-reliability risk. A castxml (or
+        # non-header) snapshot's own vtable extraction predates this field
+        # entirely, so it's always reliable regardless of schema version.
+        clang_vtable_facts_reliable_value = (
+            not from_headers
+            or ast_producer_value != "clang"
+            or _schema_version >= _MIN_SCHEMA_VERSION_FOR_CLANG_VTABLE_FACTS
+        )
+
     # ADR-050 D1 (schema v12) — profile/scope fingerprints. Missing key (every
     # snapshot predating this field) loads as None, same as every other
     # additive optional field.
@@ -1225,6 +1258,10 @@ def snapshot_from_dict(d: dict[str, Any]) -> AbiSnapshot:
         clang_field_initializer_facts_reliable=(
             clang_field_initializer_facts_reliable_value
         ),
+        # See clang_vtable_facts_reliable_value's computation above: prefers
+        # an explicit dict key, falling back to a schema_version + producer
+        # derivation scoped to the direct-clang path specifically.
+        clang_vtable_facts_reliable=clang_vtable_facts_reliable_value,
         # G28 Phase 3 — per-fact provenance map for a hybrid (castxml+clang
         # merged) snapshot. Absent on every non-hybrid / pre-Phase-3 snapshot,
         # loads as the empty dict (same "unknown" default as a fresh snapshot).

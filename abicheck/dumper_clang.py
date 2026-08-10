@@ -81,6 +81,15 @@ from .dumper_clang_expr import (  # noqa: F401  (some re-exported for tests)
     _specialization_scope_key,
     _unwrap_expr,
 )
+from .dumper_clang_vtable import (
+    _index_template_param_defaults,
+    _index_template_param_kinds,
+    _index_template_param_names,
+    _is_record_definition,
+    _specialization_spelling,
+    build_specialization_index as _build_specialization_index,
+    build_vtable as _build_clang_vtable,
+)
 from .errors import AstContextMissingError, SnapshotError
 from .model import (
     AccessLevel,
@@ -761,6 +770,42 @@ class _ClangAstParser:
         # paying on every dump when nothing in this TU has a referenced-decl
         # initializer to fingerprint.
         self._decl_id_qualified_names: dict[str, str] | None = None
+        # Built lazily (on first vtable reconstruction, via _record_index())
+        # -- "::".join(scope + [name]) -> node for every CXXRecordDecl/
+        # RecordDecl in this TU, keyed the same way RecordType.qualified_name
+        # itself is built in _build_record. Only needed by
+        # dumper_clang_vtable.build_vtable's base-lookup recursion.
+        self._record_by_qualname: dict[str, dict[str, Any]] | None = None
+        # Built lazily (on first vtable reconstruction, via
+        # _specialization_record_index()) -- the SAME kind of index as
+        # _record_by_qualname above, but over concrete
+        # ClassTemplateSpecializationDecl nodes (`struct D : A<int> {...};`),
+        # a different clang node kind self._records never collects at all.
+        # See _specialization_record_index()'s own docstring.
+        self._specialization_by_qualname: dict[str, dict[str, Any]] | None = None
+        # Built lazily (on first vtable reconstruction, via
+        # _base_lookup_index()) -- the merged _record_index() +
+        # _specialization_record_index() dict (CodeRabbit review: previously
+        # rebuilt on every _base_lookup_index() call, an O(records) cost
+        # since _build_record calls it once per record).
+        self._base_lookup: dict[str, dict[str, Any]] | None = None
+        # Built lazily (on first parse_functions() call, via
+        # _virtual_mangled_names()) -- every mangled name appearing in ANY
+        # record's reconstructed vtable, across the whole TU. Lets
+        # parse_functions() recognize a method as virtual even when clang's
+        # JSON gives it no direct signal at all (no `virtual` keyword, no
+        # `OverrideAttr`) -- see _virtual_mangled_names()'s own docstring.
+        self._virtual_mangled: frozenset[str] | None = None
+        # Computed eagerly (not lazily like the caches above) because
+        # `_walk` itself -- run immediately below, during __init__ -- needs
+        # these to correctly scope a specialization's own members (see the
+        # `ClassTemplateSpecializationDecl` branch below); a per-call lazy
+        # build wouldn't help since the first call IS during this walk.
+        # Cheap: one extra whole-AST pass each, the same shape
+        # `_id_index()` already pays lazily for a different purpose.
+        self._template_param_kinds_by_qualname = _index_template_param_kinds(root)
+        self._template_param_defaults_by_qualname = _index_template_param_defaults(root)
+        self._template_param_names_by_qualname = _index_template_param_names(root)
         self._walk(
             root,
             scope=(),
@@ -814,7 +859,48 @@ class _ClangAstParser:
         child_extern_c = extern_c or (
             kind == "LinkageSpecDecl" and node.get("language") == "C"
         )
-        child_scope = (*scope, name) if kind in _SCOPE_NODE_KINDS and name else scope
+        if kind in _SCOPE_NODE_KINDS and name:
+            child_scope = (*scope, name)
+        elif kind == "ClassTemplateSpecializationDecl" and name:
+            # A concrete template specialization's own members (e.g. `A<int>
+            # ::f`) are otherwise scoped as if declared at the SAME level as
+            # the specialization itself (`ClassTemplateSpecializationDecl`
+            # is deliberately not in `_SCOPE_NODE_KINDS` -- it isn't an
+            # ordinary namespace/class/linkage-spec scope) -- so a member's
+            # `entry.scope` silently dropped the owning specialization
+            # entirely (Codex review, fresh evidence: this is what let
+            # `_specialization_record_index`'s base-lookup fix resolve the
+            # base's vtable correctly while `owner_class_of`'s mangled-name
+            # fallback still couldn't match it against `RecordType.bases`
+            # -- see `parse_functions`'s own comment on this). Reuses
+            # `_specialization_spelling` (already built for that base-lookup
+            # index) so both consumers agree on the exact same spelling --
+            # INCLUDING the same `param_kinds`/`param_defaults` context, not
+            # just the bare function call: an earlier version of this branch
+            # passed `None` for both, which produced the UNTRIMMED
+            # `"A<double, int>"` form for a specialization using a defaulted
+            # template argument while `_base_lookup_index()`'s own call
+            # (through `D.bases`) correctly trimmed it to `"A<double>"` --
+            # the same qualname mismatch the specialization-owner fix
+            # itself was built to prevent, just for a different reason
+            # (Codex review, fresh evidence: confirmed end-to-end that this
+            # reintroduced a false `TYPE_VTABLE_CHANGED` for exactly the
+            # no-keyword-override-through-a-defaulted-specialization-base
+            # scenario the base-lookup fix was meant to make work). Falls
+            # back to the unscoped behavior (bare `name`, degrading the SAME
+            # way an unresolvable base already degrades elsewhere in this
+            # module) when the spelling can't be reconstructed.
+            template_qualname = "::".join((*scope, name)) if scope else name
+            spelling = _specialization_spelling(
+                node,
+                name,
+                self._template_param_kinds_by_qualname.get(template_qualname),
+                self._template_param_defaults_by_qualname.get(template_qualname),
+                self._template_param_names_by_qualname.get(template_qualname),
+            )
+            child_scope = (*scope, spelling) if spelling else scope
+        else:
+            child_scope = scope
         running = (
             _default_record_access(node)
             if kind in ("CXXRecordDecl", "RecordDecl")
@@ -968,6 +1054,119 @@ class _ClangAstParser:
             self._decl_id_qualified_names = _index_decl_id_qualified_names(self._root)
         return self._decl_id_qualified_names
 
+    def _record_index(self) -> dict[str, dict[str, Any]]:
+        """Lazily-built ``qualified name -> node`` index over every parsed
+        record, for ``dumper_clang_vtable.build_vtable``'s base-lookup
+        recursion.
+
+        A forward declaration (``struct A;``) and its later complete
+        definition (``struct A { ... };``) share the same qualname and both
+        land in ``self._records`` -- confirmed with a real clang build that
+        clang emits BOTH `CXXRecordDecl` nodes for exactly this shape, the
+        forward one carrying neither `completeDefinition` nor any member
+        children. A plain first-registration-wins policy silently kept
+        whichever was encountered first, which is the forward decl whenever
+        one precedes the definition in source order -- the common style --
+        losing every virtual method the real definition carries (Codex
+        review, fresh evidence: `struct A; struct A { virtual void f(); };`
+        resolved to an empty `vtable` for A and any of its derived classes).
+        A complete definition always wins over a forward-declaration stub
+        for the same qualname, regardless of which one was walked first;
+        ties among non-definitions (there's at most one real forward decl
+        in practice, but this stays defensive) keep the first seen.
+        """
+        if self._record_by_qualname is None:
+            idx: dict[str, dict[str, Any]] = {}
+            for entry in self._records:
+                name = str(entry.node.get("name") or "")
+                if not name:
+                    continue
+                qualname = self._qualified(entry)
+                existing = idx.get(qualname)
+                if existing is None or (
+                    not _is_record_definition(existing)
+                    and _is_record_definition(entry.node)
+                ):
+                    idx[qualname] = entry.node
+            self._record_by_qualname = idx
+        return self._record_by_qualname
+
+    def _specialization_record_index(self) -> dict[str, dict[str, Any]]:
+        """Lazily-built, memoized :func:`build_specialization_index` over
+        this parser's own AST root -- see that function's docstring
+        (``dumper_clang_vtable.py``) for the full "why". Passes through the
+        param-kinds/param-defaults indices already computed eagerly in
+        ``__init__`` (for ``_walk``'s own specialization-scoping use)
+        instead of paying for a second whole-AST pass over each.
+        """
+        if self._specialization_by_qualname is None:
+            self._specialization_by_qualname = _build_specialization_index(
+                self._root,
+                self._template_param_kinds_by_qualname,
+                self._template_param_defaults_by_qualname,
+                self._template_param_names_by_qualname,
+            )
+        return self._specialization_by_qualname
+
+    def _base_lookup_index(self) -> dict[str, dict[str, Any]]:
+        """Lazily-built, memoized merge of ``_record_index()`` +
+        ``_specialization_record_index()``, for
+        ``dumper_clang_vtable.build_vtable``'s base-lookup recursion.
+
+        Safe to merge into one dict: an ordinary record's qualname never
+        contains ``"<"``, so the two key spaces never collide. An ordinary
+        record wins on the rare case both indexes somehow produced the same
+        key (shouldn't occur given the above, but a plain record is always
+        the more trustworthy of the two if it ever did).
+
+        Memoized (CodeRabbit review, fresh evidence): ``_build_record`` calls
+        this once per record, so leaving it unmemoized meant ``parse_types()``
+        rebuilt the whole merged dict -- and ``_virtual_mangled_names()``
+        separately re-ran ``build_vtable`` over every qualname in it -- once
+        per record in the TU, an O(records × index size) cost for what
+        should be a one-time merge.
+        """
+        if self._base_lookup is None:
+            merged = dict(self._specialization_record_index())
+            merged.update(self._record_index())
+            self._base_lookup = merged
+        return self._base_lookup
+
+    def _virtual_mangled_names(self) -> frozenset[str]:
+        """Every mangled name occupying a slot in ANY record's reconstructed
+        vtable, across the whole TU.
+
+        The gap this closes (Codex review, fresh evidence, real end-to-end
+        repro): ``dumper_clang_vtable.build_vtable`` correctly recognizes a
+        signature-matched override with no `virtual`/`override` keyword and
+        replaces the inherited slot with the derived method's own mangled
+        name -- but that knowledge lived only inside the vtable list itself.
+        `parse_functions()`'s own `Function.is_virtual` still read clang's
+        raw, keyword-only `node.get("virtual")` -- the exact signal this
+        whole module exists to work around -- so `diff_cxx_rules.
+        vtable_slot_is_override_reuse()` (which requires both sides'
+        `Function.is_virtual` to be `True` before recognizing a slot as
+        reused rather than changed) rejected the reuse and
+        `diff_types._diff_type_vtable` emitted a spurious
+        `TYPE_VTABLE_CHANGED` BREAKING finding for exactly the no-keyword
+        override case this module was built to recognize. Confirmed
+        end-to-end through the live `dump()`/`compare()` pipeline: adding a
+        keyword-less override in a derived class (with no other change)
+        produced `type_vtable_changed` before this fix.
+
+        Only ever WIDENS `is_virtual` from `False` to `True` (parse_functions
+        still ORs this in, never overrides an already-`True` reading) --
+        purely additive, so it cannot suppress a real virtuality signal, only
+        recover one clang's JSON otherwise drops silently.
+        """
+        if self._virtual_mangled is None:
+            idx = self._base_lookup_index()
+            names: set[str] = set()
+            for qualname in idx:
+                names.update(_build_clang_vtable(qualname, idx))
+            self._virtual_mangled = frozenset(names)
+        return self._virtual_mangled
+
     # ── parse_* (mirror _CastxmlParser's public surface) ─────────────────────
 
     def parse_functions(self) -> list[Function]:
@@ -979,6 +1178,32 @@ class _ClangAstParser:
             name = str(node.get("name", ""))
             if not name:
                 continue
+            if entry.scope and "<" in entry.scope[-1]:
+                # A method of a concrete class-template specialization
+                # (`A<int>::f`) -- unlike an ordinary member, whose name
+                # this backend deliberately leaves bare everywhere else
+                # (`owner_class_of` recovers its owner from the MANGLED
+                # name instead, which works fine there since a plain
+                # class's mangled scope component already IS its matching
+                # spelling). A specialization's own mangled scope component
+                # is the RAW, un-spelled Itanium template-argument encoding
+                # (`"AIiE"`, confirmed with a real clang build) -- which
+                # never matches `RecordType.bases`'s spelled form
+                # (`"A<int>"`, built from clang's own type printer) at all,
+                # so `owner_class_of`'s mangled fallback silently failed to
+                # recognize an inherited-slot override whose base is a
+                # template specialization, producing a false
+                # `TYPE_VTABLE_CHANGED` (Codex review, fresh evidence: found
+                # while verifying the base-lookup fix end to end -- the
+                # vtable itself now resolves correctly, but this SEPARATE
+                # owner-matching gap was still reachable once it did).
+                # Qualifying the name here lets `owner_class_of`'s
+                # PREFERRED (already-qualified-name) branch resolve the
+                # SAME spelling `RecordType.bases` records, sidestepping
+                # the mismatched mangled fallback entirely -- mirroring
+                # what DWARF already does for every member unconditionally
+                # (`owner_class_of`'s own docstring).
+                name = "::".join((*entry.scope, name))
             qualtype = _qualtype(node)
             mangled = str(node.get("mangledName", "")) or name
             quals = _function_qualifiers(qualtype)
@@ -1017,7 +1242,41 @@ class _ClangAstParser:
                     return_type=ret_type,
                     params=params,
                     visibility=self._visibility(str(node.get("mangledName", "")), name),
-                    is_virtual=bool(node.get("virtual")),
+                    # bool(node.get("virtual")) alone misses a signature-
+                    # matched override with neither `virtual` nor `override`
+                    # written -- clang's JSON gives no direct signal for that
+                    # case at all (see dumper_clang_vtable.py's own
+                    # docstring). _virtual_mangled_names() recovers it from
+                    # the reconstructed vtables, which already do this
+                    # matching; only ever widens False -> True.
+                    #
+                    # Restricted to actual member-function kinds (Codex
+                    # review, fresh evidence): an uninstantiated template
+                    # method carries no `mangledName` at all, so
+                    # `_collect_virtual_slots` falls back to its bare,
+                    # unmangled `name` as the slot's "mangled" identity (e.g.
+                    # `"f"`). A free `extern "C"` function sharing that same
+                    # bare name mangles to the identical string by design (C
+                    # linkage), so the plain `mangled in
+                    # self._virtual_mangled_names()` membership test above
+                    # matched an unrelated global FunctionDecl purely by
+                    # name collision -- confirmed with a real clang dump of
+                    # `template<class T> struct A { virtual void f(); };
+                    # extern "C" void f();`, where both `f`s share the
+                    # identical unmangled fallback string. Only a
+                    # CXXMethodDecl/CXXConstructorDecl/CXXDestructorDecl/
+                    # CXXConversionDecl can be virtual at all in C++, and
+                    # `_collect_virtual_slots` only ever walks those same
+                    # member kinds when building `_virtual_mangled_names()`
+                    # -- a bare `FunctionDecl` (never a class member) can
+                    # never legitimately appear in that set, so excluding it
+                    # here closes the collision without narrowing any real
+                    # member-override case.
+                    is_virtual=bool(node.get("virtual"))
+                    or (
+                        kind != "FunctionDecl"
+                        and mangled in self._virtual_mangled_names()
+                    ),
                     is_noexcept=_is_noexcept_qualifier(quals),
                     # An ``extern "C"`` linkage spec is authoritative; fall back
                     # to the mangled==name heuristic for a plain C-mode parse
@@ -1183,6 +1442,18 @@ class _ClangAstParser:
         injected = _anonymous_member_names(node)
         own_name = override_name or str(node.get("name", ""))
         is_standard_layout, is_trivially_copyable = _clang_record_type_traits(node)
+        # G31 Phase C: reconstruct the vtable (and, from it, the same
+        # 0-if-polymorphic vptr_offset_bits heuristic castxml already uses)
+        # via dumper_clang_vtable's own signature-matching walk -- see that
+        # module's docstring for why this can't be a simple `node.get
+        # ("virtual")` check the way castxml's real semantic analysis allows.
+        # Keyed by the SAME qualname _base_qualnames'/_record_index's own
+        # lookups use, not `qualified_name` (which is None for a top-level
+        # record) -- an anonymous-record's `override_name` never appears in
+        # a `bases` array, so using it here (rather than the node's own bare
+        # "") is what lets it still resolve if ever referenced as a base.
+        own_qualname = "::".join([*entry.scope, own_name]) if entry.scope else own_name
+        vtable = _build_clang_vtable(own_qualname, self._base_lookup_index())
         return RecordType(
             name=own_name,
             kind=kind,
@@ -1204,7 +1475,13 @@ class _ClangAstParser:
             fields=fields,
             bases=bases,
             virtual_bases=virtual_bases,
-            vtable=[],
+            vtable=vtable,
+            # Same convention as dumper_castxml.py: polymorphic (non-empty
+            # vtable) -> vtable pointer at offset 0 (the Itanium ABI's
+            # primary-base-at-offset-0 rule); None (unknown) otherwise. Real
+            # multi-inheritance secondary-vtable placement is still not
+            # tracked by either backend -- see the G31 plan doc.
+            vptr_offset_bits=0 if vtable else None,
             is_union=kind == "union",
             is_opaque=False,
             is_final=_clang_record_is_final(node),
@@ -1553,17 +1830,6 @@ def _is_builtin_file(file: str) -> bool:
 def _default_record_access(node: dict[str, Any]) -> str:
     """Default member access before any ``AccessSpecDecl`` (``class`` → private)."""
     return "private" if node.get("tagUsed") == "class" else "public"
-
-
-def _is_record_definition(node: dict[str, Any]) -> bool:
-    """Whether a record node is a definition (has a body) vs. a forward decl."""
-    if node.get("completeDefinition"):
-        return True
-    return any(
-        isinstance(c, dict)
-        and c.get("kind") in ("FieldDecl", "AccessSpecDecl", "CXXMethodDecl")
-        for c in node.get("inner", []) or []
-    )
 
 
 def _param_has_default(param: dict[str, Any]) -> bool:
