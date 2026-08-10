@@ -902,6 +902,46 @@ def test_extractor_missing_clang_returns_empty() -> None:
     assert ext.diagnostics
 
 
+def test_extract_from_build_unredacts_home_placeholder_in_cwd(monkeypatch) -> None:
+    """Override extraction must replay the redacted compile-db cwd as a path.
+
+    ``BuildEvidence`` redacts home prefixes to ``~``; subprocess does not
+    expand that placeholder, so passing ``cu.directory`` directly makes every
+    home-rooted Windows CI TU fail before Clang can emit its AST.
+    """
+    import os
+
+    import abicheck.buildsource.override_graph as og
+
+    home = os.path.expanduser("~")
+    captured: dict[str, object] = {}
+    monkeypatch.setattr(og.shutil, "which", lambda _b: "/usr/bin/clang++")
+
+    def fake_dump(clang_bin, argv, *, cwd, diagnostics):
+        captured["argv"] = argv
+        captured["cwd"] = cwd
+        return {"kind": "TranslationUnitDecl", "inner": []}
+
+    monkeypatch.setattr(og, "run_clang_ast_dump", fake_dump)
+    ClangOverrideGraphExtractor().extract_from_build(
+        BuildEvidence(
+            compile_units=[
+                CompileUnit(
+                    id="cu://x",
+                    source="~/AppData/Local/Temp/t.cpp",
+                    directory="~/AppData/Local/Temp",
+                    argv=["/usr/bin/g++", "victim.cpp"],
+                    language="CXX",
+                    standard="c++17",
+                )
+            ]
+        )
+    )
+
+    assert captured["argv"][-2:] == ["--", f"{home}/AppData/Local/Temp/t.cpp"]
+    assert captured["cwd"] == f"{home}/AppData/Local/Temp"
+
+
 def test_extract_from_build_dedupes_across_compile_units(monkeypatch) -> None:
     ext = ClangOverrideGraphExtractor(clang_bin="clang++")
     monkeypatch.setattr(ext, "available", lambda: True)

@@ -746,10 +746,10 @@ class ClangOverrideGraphExtractor:
     def _extract_from_compile_unit(
         self, cu: BuildEvidenceCompileUnit
     ) -> list[OverrideEdge]:
-        from .call_graph import _safe_clang_args_from_compile_unit
+        from .call_graph import _replay_cwd, _safe_clang_args_from_compile_unit
 
         argv = _safe_clang_args_from_compile_unit(cu)
-        return self._extract_from_safe_args(argv, cwd=cu.directory or None)
+        return self._extract_from_safe_args(argv, cwd=_replay_cwd(cu))
 
     def extract_from_build(self, build: BuildEvidence) -> list[OverrideEdge]:
         """Extract override edges across every compile unit in *build*
