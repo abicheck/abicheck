@@ -24,9 +24,10 @@
   legal C++ shape (`override` only requires overriding at least ONE base
   virtual, and clang accepts it) that must not be recorded as a second,
   false override target (Codex review, fresh evidence, verified against
-  real Clang 17 output); only `CXXMethodDecl` participates in this
-  first slice (constructors/destructors and class-template specializations
-  are deliberately out of scope — see the module's own docstring); a
+  real Clang 17 output); only `CXXMethodDecl`/`CXXConversionDecl`
+  participate in this first slice (constructors/destructors and
+  class-template specializations are deliberately out of scope — see the
+  module's own docstring); a
   covariant return type is a documented false negative, not a false
   positive, and so is a base method spelling a parameter/return type
   through a typedef that the override spells as the underlying type

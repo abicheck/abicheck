@@ -1773,6 +1773,114 @@ class TestFieldDefaultUnreliableLegacyHybridSnapshot:
         assert ChangeKind.FIELD_DEFAULT_INITIALIZER_REMOVED in _kinds(r)
 
 
+class TestFieldDefaultHybridConfirmedRemoval:
+    """Codex review, PR #687, fresh evidence: a REAL hybrid-merge removal
+    where the two matched sides' per-field ``default`` provenance is
+    POSITIVELY known but DIFFERENT -- the exact shape
+    ``fact_same_producer_qualified`` declines outright, but which is safe
+    for a presence/absence comparison (unlike a VALUE comparison) as long as
+    BOTH sides are a genuine hybrid-merge result. See
+    ``diff_types_field_facts._diff_field_default_initializer``'s own
+    docstring/inline comments for the full reasoning."""
+
+    def test_removal_detected_across_hybrid_backfill_producer_mismatch(self):
+        """OLD side: castxml found no default, clang backfilled a real value
+        (`dumper_hybrid._backfill_fact` stamps this field's provenance
+        "clang"). NEW side: BOTH castxml and clang independently confirm the
+        initializer is gone (`_backfill_fact(None, None)` stamps "castxml"
+        per its own documented convention, even though clang re-confirmed
+        the absence too). Two positively known, DIFFERENT per-field
+        producers for a real removal -- must still fire."""
+        from abicheck.dumper_hybrid import merge_snapshots
+
+        def _type(default):
+            return RecordType(
+                name="Cfg",
+                kind="struct",
+                size_bits=32,
+                fields=[TypeField("timeout", "int", 0, default=default)],
+            )
+
+        hybrid_old = merge_snapshots(
+            AbiSnapshot(
+                library="libtest.so.1",
+                version="1.0",
+                types=[_type(None)],
+                from_headers=True,
+                ast_producer="castxml",
+            ),
+            AbiSnapshot(
+                library="libtest.so.1",
+                version="1.0",
+                types=[_type("expr:oldvalue")],
+                from_headers=True,
+                ast_producer="clang",
+            ),
+        )
+        assert hybrid_old.fact_provenance["type:Cfg:field:timeout:default"] == "clang"
+
+        hybrid_new = merge_snapshots(
+            AbiSnapshot(
+                library="libtest.so.1",
+                version="2.0",
+                types=[_type(None)],
+                from_headers=True,
+                ast_producer="castxml",
+            ),
+            AbiSnapshot(
+                library="libtest.so.1",
+                version="2.0",
+                types=[_type(None)],
+                from_headers=True,
+                ast_producer="clang",
+            ),
+        )
+        assert hybrid_new.fact_provenance["type:Cfg:field:timeout:default"] == "castxml"
+
+        r = compare(hybrid_old, hybrid_new)
+        assert ChangeKind.FIELD_DEFAULT_INITIALIZER_REMOVED in _kinds(r)
+
+    def test_pure_castxml_vs_clang_mismatch_still_declines(self):
+        """The control case: the SAME two-known-different-producers shape,
+        but NEITHER side is a hybrid merge -- a pure single-backend
+        snapshot's ``None`` carries no dual-backend-confirmation guarantee
+        (it's one backend's own opinion, which this PR's own documented
+        direct-clang extraction gaps show can under-report a real
+        initializer as absent), so this must still decline -- exactly
+        ``TestProducerMismatchDoesNotFalsePositive.
+        test_field_default_initializer_producer_mismatch``'s existing
+        scenario, restated here alongside the hybrid case it contrasts
+        with."""
+        t_old = RecordType(
+            name="Cfg",
+            kind="struct",
+            size_bits=32,
+            fields=[TypeField("timeout", "int", 0, default="30")],
+        )
+        t_new = RecordType(
+            name="Cfg",
+            kind="struct",
+            size_bits=32,
+            fields=[TypeField("timeout", "int", 0, default=None)],
+        )
+        old = AbiSnapshot(
+            library="libtest.so.1",
+            version="1.0",
+            types=[t_old],
+            from_headers=True,
+            ast_producer="castxml",
+        )
+        new = AbiSnapshot(
+            library="libtest.so.1",
+            version="2.0",
+            types=[t_new],
+            from_headers=True,
+            ast_producer="clang",
+        )
+        r = compare(old, new)
+        assert ChangeKind.FIELD_DEFAULT_INITIALIZER_REMOVED not in _kinds(r)
+
+
 class TestEmittedSymbolStaysBare:
     """The qualified matching key introduced for FP-1 must stay internal to
     old/new type matching. Every emitted ``Change.symbol`` for a namespaced

@@ -467,7 +467,7 @@ def _merge_field(
     for attr in ("default", "deprecated"):
         # Both facts are genuinely cross-producer since G31 Phase C
         # ("deprecated" from that phase's first pass, "default" from
-        # dumper_clang._field_initializer_value), so both need the qualified
+        # dumper_clang_expr._field_initializer_value), so both need the qualified
         # key: a clang-only sibling type sharing t's bare name independently
         # writes to this same provenance dict (see merge_snapshots'
         # clang-only-type append loop below), and a bare key would let one
@@ -643,7 +643,7 @@ def merge_snapshots(castxml_snap: AbiSnapshot, clang_snap: AbiSnapshot) -> AbiSn
         for f in t.fields:
             provenance[field_fact_key(type_key, f.name, "deprecated")] = "clang"
             # "default" joined "deprecated" as a genuinely clang-sourced field
-            # fact in G31 Phase C (dumper_clang._field_initializer_value).
+            # fact in G31 Phase C (dumper_clang_expr._field_initializer_value).
             # Its detector gates on SAME producer rather than any-known
             # producer (the two backends' initializer representations aren't
             # cross-comparable), so this stamp is what lets a hybrid-vs-hybrid

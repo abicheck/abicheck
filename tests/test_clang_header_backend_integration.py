@@ -101,7 +101,9 @@ def _have(tool: str) -> bool:
 def built_lib(tmp_path: Path) -> tuple[Path, Path]:
     """Build a tiny ELF .so + its public header, returning (so_path, header)."""
     if not (_have("clang") and _have("g++")):
-        pytest.skip("clang and g++ are required for the clang L2 backend integration test")
+        pytest.skip(
+            "clang and g++ are required for the clang L2 backend integration test"
+        )
     header = tmp_path / "api.h"
     header.write_text(_HEADER)
     src = tmp_path / "api.cpp"
@@ -174,7 +176,9 @@ def test_clang_backend_recovers_c_anonymous_typedef_enum(tmp_path: Path) -> None
         ("LOG_ERR", 1),
         ("LOG_WARN", 2),
     ]
-    assert {v.name: v.type for v in snap.variables}["default_log_level"] == "log_level_t"
+    assert {v.name: v.type for v in snap.variables}[
+        "default_log_level"
+    ] == "log_level_t"
 
 
 def test_clang_and_castxml_snapshots_agree_on_public_surface(
@@ -197,7 +201,9 @@ def test_clang_and_castxml_snapshots_agree_on_public_surface(
     assert public_funcs(clang_snap) == public_funcs(castxml_snap)
     # Both see the same named record and enum types.
     assert {t.name for t in clang_snap.types} >= {"Point", "Widget"}
-    assert {t.name for t in castxml_snap.types} & {t.name for t in clang_snap.types} >= {
+    assert {t.name for t in castxml_snap.types} & {
+        t.name for t in clang_snap.types
+    } >= {
         "Point",
         "Widget",
     }
@@ -223,7 +229,9 @@ def test_clang_backend_still_false_positives_case61_alignment_risk(
     assertion instead of silently going unnoticed.
     """
     if not (_have("clang") and _have("gcc")):
-        pytest.skip("clang and gcc are required for the clang-frontend case61 regression")
+        pytest.skip(
+            "clang and gcc are required for the clang-frontend case61 regression"
+        )
 
     # Same header basename ("api.h") on both sides, in separate directories
     # (ADR-050 D1: scope_fingerprint is keyed on each dump's own
@@ -237,11 +245,14 @@ def test_clang_backend_still_false_positives_case61_alignment_risk(
     old_header = old_dir / "api.h"
     old_header.write_text("extern int lib_version;\nint get_version(void);\n")
     old_src = old_dir / "old.c"
-    old_src.write_text("int lib_version = 1;\nint get_version(void) { return lib_version; }\n")
+    old_src.write_text(
+        "int lib_version = 1;\nint get_version(void) { return lib_version; }\n"
+    )
     v1_so = tmp_path / "libv1.so"
     subprocess.run(
         ["gcc", "-O2", "-shared", "-fPIC", "-o", str(v1_so), str(old_src)],
-        check=True, capture_output=True,
+        check=True,
+        capture_output=True,
     )
 
     new_dir = tmp_path / "new"
@@ -258,7 +269,8 @@ def test_clang_backend_still_false_positives_case61_alignment_risk(
     v2_so = tmp_path / "libv2.so"
     subprocess.run(
         ["gcc", "-O2", "-shared", "-fPIC", "-o", str(v2_so), str(new_src)],
-        check=True, capture_output=True,
+        check=True,
+        capture_output=True,
     )
 
     old_snap = dump(v1_so, [old_header], header_backend="clang")
@@ -270,7 +282,9 @@ def test_clang_backend_still_false_positives_case61_alignment_risk(
     # corroboration is available to suppress it -- castxml (dumper_castxml.py,
     # TestCastxmlExtraction.test_variable_alignment) does not have this gap.
     assert result.verdict == Verdict.COMPATIBLE_WITH_RISK
-    assert ChangeKind.EXPORTED_OBJECT_ALIGNMENT_REDUCED in {c.kind for c in result.changes}
+    assert ChangeKind.EXPORTED_OBJECT_ALIGNMENT_REDUCED in {
+        c.kind for c in result.changes
+    }
 
 
 def test_clang_backend_field_default_initializer_removed_end_to_end(
@@ -278,7 +292,7 @@ def test_clang_backend_field_default_initializer_removed_end_to_end(
 ) -> None:
     """G31 Phase C: TypeField.default (default member initializer) is now
     extracted for real on the clang L2 header backend
-    (dumper_clang._field_initializer_value). Verified end-to-end against a
+    (dumper_clang_expr._field_initializer_value). Verified end-to-end against a
     real compiled library through the actual dump()/compare() pipeline —
     not just at the parser-unit level (test_dumper_clang.py) or the
     hand-built-snapshot detector level (test_castxml_schema_completeness.py)
@@ -301,15 +315,14 @@ def test_clang_backend_field_default_initializer_removed_end_to_end(
     v1_so = tmp_path / "libv1.so"
     subprocess.run(
         ["g++", "-shared", "-fPIC", "-o", str(v1_so), str(old_src), f"-I{old_dir}"],
-        check=True, capture_output=True,
+        check=True,
+        capture_output=True,
     )
 
     new_dir = tmp_path / "new"
     new_dir.mkdir()
     new_header = new_dir / "api.h"
-    new_header.write_text(
-        "struct Cfg { int timeout; };\nint use_cfg(const Cfg&);\n"
-    )
+    new_header.write_text("struct Cfg { int timeout; };\nint use_cfg(const Cfg&);\n")
     new_src = new_dir / "new.cpp"
     new_src.write_text(
         '#include "api.h"\nint use_cfg(const Cfg& c) { return c.timeout; }\n'
@@ -317,7 +330,8 @@ def test_clang_backend_field_default_initializer_removed_end_to_end(
     v2_so = tmp_path / "libv2.so"
     subprocess.run(
         ["g++", "-shared", "-fPIC", "-o", str(v2_so), str(new_src), f"-I{new_dir}"],
-        check=True, capture_output=True,
+        check=True,
+        capture_output=True,
     )
 
     old_snap = dump(v1_so, [old_header], header_backend="clang")
@@ -327,4 +341,6 @@ def test_clang_backend_field_default_initializer_removed_end_to_end(
     assert next(f for f in cfg.fields if f.name == "timeout").default == "30"
 
     result = compare(old_snap, new_snap)
-    assert ChangeKind.FIELD_DEFAULT_INITIALIZER_REMOVED in {c.kind for c in result.changes}
+    assert ChangeKind.FIELD_DEFAULT_INITIALIZER_REMOVED in {
+        c.kind for c in result.changes
+    }

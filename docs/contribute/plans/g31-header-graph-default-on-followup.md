@@ -285,7 +285,7 @@ building a second identity-resolution mechanism from scratch.
   **A later pass closed the last of this phase's four originally-listed
   facts** (`deprecated`/`is_scoped`/bitfields/default-argument facts were
   the other three, already covered above): direct-clang now populates
-  `TypeField.default` too, via `dumper_clang._field_initializer_value`,
+  `TypeField.default` too, via `dumper_clang_expr._field_initializer_value`,
   verified against real Clang 18 `-ast-dump=json` output before wiring it
   up. The one real trap found and fixed while verifying: a `FieldDecl`'s
   `inner` list is overloaded — a **bitfield width** is nested there as a

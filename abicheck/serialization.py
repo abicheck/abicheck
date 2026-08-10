@@ -195,7 +195,7 @@ from .model import (
 # v20: the direct-clang L2 header backend started populating
 #     `TypeField.default` (the default member initializer) — G31 Phase C's
 #     last remaining fact-completeness gap that backend can actually close,
-#     see `dumper_clang._field_initializer_value`. Exactly v19's shape, one
+#     see `dumper_clang_expr._field_initializer_value`. Exactly v19's shape, one
 #     version later and for one more fact: a pre-v20 CLANG-producer
 #     snapshot's `TypeField.default` is unconditionally `None`, and that
 #     field's own docstring makes `None` mean "no initializer" AND "this

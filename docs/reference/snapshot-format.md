@@ -56,7 +56,7 @@ genuinely populated by the clang backend at this version; see
 `dumper_clang.py`), and (v20) whether the direct-clang backend's
 `TypeField.default` (default member initializer) facts are reliable
 (`clang_field_initializer_facts_reliable`, G31 Phase C — same shape as v19,
-one fact and one version later; see `dumper_clang._field_initializer_value`).
+one fact and one version later; see `dumper_clang_expr._field_initializer_value`).
 
 ### Forward / backward compatibility
 

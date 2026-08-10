@@ -446,6 +446,17 @@ def _canonical_expr(node: Any, id_index: _IdIndexProvider | None = None) -> Any:
     the parenthesized form, with the nested ``CXXConstructExpr`` additionally
     carrying ``zeroing: true`` only for the latter; neither key was in this
     function's whitelist. Both are now kept verbatim alongside ``isGlobal``.
+
+    A fifth gap, also found and fixed (Codex review, fresh evidence):
+    ``typeid(int)`` vs. ``typeid(long)`` — a ``CXXTypeidExpr`` applied to a
+    TYPE operand (as opposed to a polymorphic expression, which nests an
+    ordinary expression child under ``inner`` and is already handled)
+    previously fingerprinted identically too. Confirmed against real Clang
+    18 output: this node is childless and its own ``type`` is always the
+    fixed result type ``"const std::type_info"`` regardless of operand — the
+    same "result type, not operand type" trap ``argType`` was already added
+    for ``sizeof``/``alignof`` above, except clang spells this one's operand
+    key differently: ``typeArg``, not ``argType``. Now read alongside it.
     """
     if not isinstance(node, dict):
         return node
@@ -474,6 +485,15 @@ def _canonical_expr(node: Any, id_index: _IdIndexProvider | None = None) -> Any:
     arg_type_obj = node.get("argType")
     if isinstance(arg_type_obj, dict) and "qualType" in arg_type_obj:
         out["argType"] = _normalize_qual_type(arg_type_obj["qualType"])
+    # A CXXTypeidExpr applied to a TYPE operand (`typeid(int)`) stores it
+    # EXCLUSIVELY in "typeArg" -- a different key than sizeof/alignof's
+    # "argType" above, verified against real Clang 18 output (Codex review:
+    # `typeid(int)` vs. `typeid(long)` fingerprinted identically without
+    # this, since the node's own "type" is always the fixed result type
+    # `const std::type_info`, never the operand).
+    type_arg_obj = node.get("typeArg")
+    if isinstance(type_arg_obj, dict) and "qualType" in type_arg_obj:
+        out["typeArg"] = _normalize_qual_type(type_arg_obj["qualType"])
     for decl_key in ("referencedDecl", "operatorNewDecl", "operatorDeleteDecl"):
         decl_out = _decl_stub(node.get(decl_key), id_index)
         if decl_out is not None:

@@ -306,3 +306,34 @@ it should read in CHANGELOG.md. Delete the other sections.
   schema-v9 dict with no `ast_producer` key loaded as reliable before this
   fix) before fixing; safe for a genuine legacy castxml snapshot, since
   castxml never produces an `"expr:"`-prefixed value in the first place.
+- **Fixed a missed `FIELD_DEFAULT_INITIALIZER_CHANGED`/
+  `PARAM_DEFAULT_VALUE_CHANGED` for a `typeid` operand change** (Codex
+  review, fresh evidence): `typeid(int)` vs. `typeid(long)` previously
+  fingerprinted identically too — a `CXXTypeidExpr` applied to a TYPE
+  operand is childless and its own `type` is always the fixed result type
+  `"const std::type_info"` regardless of operand; the real operand lives
+  exclusively in a separate `typeArg` key (a different key than
+  `sizeof`/`alignof`'s `argType`), verified against real Clang 18 output.
+  Now read alongside `argType`.
+- **Fixed a missed `FIELD_DEFAULT_INITIALIZER_REMOVED` on a hybrid pair
+  where the two matched sides' per-field `default` provenance is
+  positively known but DIFFERENT** (Codex review, fresh evidence): a hybrid
+  merge's own `dumper_hybrid._backfill_fact` convention stamps a
+  matched-but-unset field's provenance `"castxml"` even when clang
+  independently re-confirmed the absence, so an OLD side that backfilled
+  its real value from clang (`"clang"`) compared against a NEW side whose
+  dual-confirmed absence recorded `"castxml"` was declined outright by
+  `fact_same_producer_qualified`'s same-producer requirement — even though
+  a presence/absence comparison carries none of the representation-mismatch
+  risk that gate exists to guard (unlike a VALUE comparison, `None` means
+  "confirmed absent" regardless of which backend confirmed it). Fixed by
+  using the any-known-producer gate (`fact_known_qualified`) for the
+  REMOVED branch specifically, but only when BOTH sides are a genuine
+  `"hybrid"`-merge result — a pure single-backend snapshot's `None` carries
+  no such dual-confirmation guarantee (it's one backend's own opinion,
+  which this module's own documented direct-clang extraction gaps show can
+  under-report a real initializer as absent), so a pure castxml-vs-clang
+  mismatch still declines via the same, stricter same-producer gate CHANGED
+  uses — verified against the pre-existing
+  `TestProducerMismatchDoesNotFalsePositive` regression, which a first,
+  unscoped version of this fix broke.

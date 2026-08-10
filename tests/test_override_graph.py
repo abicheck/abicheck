@@ -551,9 +551,10 @@ def test_different_signature_does_not_match() -> None:
 
 
 def test_constructors_and_destructors_excluded() -> None:
-    # Only CXXMethodDecl participates -- CXXConstructorDecl/CXXDestructorDecl
-    # are deliberately out of scope for this first slice (see the module's
-    # own docstring: the Itanium two-symbol dtor mangling needs its own rule).
+    # Only CXXMethodDecl/CXXConversionDecl participate --
+    # CXXConstructorDecl/CXXDestructorDecl are deliberately out of scope for
+    # this first slice (see the module's own docstring: the Itanium
+    # two-symbol dtor mangling needs its own rule).
     ast = _tu(
         _record(
             "Base",

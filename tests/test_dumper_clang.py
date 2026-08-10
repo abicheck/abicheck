@@ -586,7 +586,7 @@ def test_parse_types_populates_field_default_initializer() -> None:
     TypeField.default (the default member initializer) previously stayed
     None unconditionally on this backend -- verified against real
     Clang 18 ``-ast-dump=json`` output before wiring this up (see
-    dumper_clang._field_initializer_value's docstring for the exact shapes
+    dumper_clang_expr._field_initializer_value's docstring for the exact shapes
     below)."""
     root = _tu(
         {
@@ -1673,6 +1673,56 @@ def test_new_expr_init_style_distinguishes_fingerprints() -> None:
     assert value_default is not None
     assert value_value is not None
     assert value_default != value_value
+
+
+def test_typeid_operand_distinguishes_fingerprints() -> None:
+    """Codex review, PR #687, fresh evidence: ``typeid(int)`` vs.
+    ``typeid(long)`` -- clang's ``CXXTypeidExpr`` node applied to a TYPE
+    operand -- previously fingerprinted identically. Confirmed against real
+    Clang 18 output: this node is childless and its own ``type`` is always
+    the fixed result type ``"const std::type_info"`` regardless of operand;
+    the real operand lives exclusively in a separate ``typeArg`` key
+    (a different key than sizeof/alignof's ``argType``), which
+    ``_canonical_expr`` didn't read. Node shape below is trimmed verbatim
+    from real ``clang++ --std=c++17 -Xclang -ast-dump=json`` output for
+    exactly this pair."""
+    from abicheck.dumper_clang_expr import _field_initializer_value
+
+    def _typeid_field(type_arg: str) -> dict:
+        return {
+            "kind": "FieldDecl",
+            "name": "t",
+            "type": {"qualType": "const std::type_info *"},
+            "hasInClassInitializer": True,
+            "inner": [
+                {
+                    "kind": "UnaryOperator",
+                    "type": {"qualType": "const std::type_info *"},
+                    "valueCategory": "prvalue",
+                    "isPostfix": False,
+                    "opcode": "&",
+                    "canOverflow": False,
+                    "inner": [
+                        {
+                            "kind": "CXXTypeidExpr",
+                            "type": {"qualType": "const std::type_info"},
+                            "valueCategory": "lvalue",
+                            "typeArg": {"qualType": type_arg},
+                        }
+                    ],
+                }
+            ],
+        }
+
+    field_int = _typeid_field("int")
+    field_long = _typeid_field("long")
+
+    value_int = _field_initializer_value(field_int)
+    value_long = _field_initializer_value(field_long)
+
+    assert value_int is not None
+    assert value_long is not None
+    assert value_int != value_long
 
 
 def test_parse_enums_is_scoped_false_for_plain_enum() -> None:

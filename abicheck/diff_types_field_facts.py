@@ -260,7 +260,7 @@ def _diff_field_default_initializer(old: AbiSnapshot, new: AbiSnapshot) -> list[
     would treat an unconfirmed/legacy side's unset ``ast_producer`` as
     "unknown, don't skip"). Used to be ``both_castxml_backed_fact`` because
     clang did not populate this fact at all (Codex review, PR #582); G31
-    Phase C closed that gap (``dumper_clang._field_initializer_value``), but
+    Phase C closed that gap (``dumper_clang_expr._field_initializer_value``), but
     the two backends' VALUE representations still differ (castxml: verbatim
     source expression; clang: a literal/structural fingerprint) — the same
     shape ``Param.default`` has, hence ``_diff_param_defaults``'s
@@ -307,7 +307,7 @@ def _diff_field_default_initializer(old: AbiSnapshot, new: AbiSnapshot) -> list[
             f_new = new_fields.get(fname)
             if f_new is None or f_old.default is None:
                 continue
-            if not fact_same_producer_qualified(
+            fact_key_args = (
                 old,
                 new,
                 old_map,
@@ -316,9 +316,35 @@ def _diff_field_default_initializer(old: AbiSnapshot, new: AbiSnapshot) -> list[
                 field_fact_key(type_map_key(t_old), fname, "default"),
                 field_fact_key(type_map_key(t_new), fname, "default"),
                 field_fact_key(name, fname, "default"),
-            ):
-                continue
+            )
             if f_new.default is None:
+                # REMOVED carries no representation-mismatch risk the way
+                # CHANGED below does -- None means "confirmed absent"
+                # regardless of which backend confirmed it. But that only
+                # holds when BOTH sides are a "hybrid" MERGE result: a
+                # hybrid merge's own dumper_hybrid._backfill_fact convention
+                # stamps a matched-but-unset field's provenance "castxml"
+                # even when clang independently re-confirmed the absence --
+                # so a hybrid pair can legitimately show two POSITIVELY
+                # KNOWN but DIFFERENT per-field producers (old side
+                # backfilled its VALUE from clang, "clang"; new side's
+                # dual-confirmed absence, "castxml") for a real removal that
+                # fact_same_producer_qualified would otherwise decline
+                # outright (Codex review, fresh evidence). A pure
+                # single-backend snapshot's `None` carries no such dual-
+                # confirmation guarantee -- it is one backend's own opinion,
+                # which (per this module's own documented direct-clang
+                # extraction gaps) can under-report a real initializer as
+                # absent, so a pure castxml-vs-clang mismatch must still
+                # decline via the same, stricter gate CHANGED uses (verified
+                # against TestProducerMismatchDoesNotFalsePositive's own
+                # existing castxml-vs-clang regression, which a plain
+                # any-known relaxation broke).
+                if old.ast_producer == "hybrid" and new.ast_producer == "hybrid":
+                    if not fact_known_qualified(*fact_key_args):
+                        continue
+                elif not fact_same_producer_qualified(*fact_key_args):
+                    continue
                 changes.append(
                     make_change(
                         ChangeKind.FIELD_DEFAULT_INITIALIZER_REMOVED,
@@ -329,6 +355,12 @@ def _diff_field_default_initializer(old: AbiSnapshot, new: AbiSnapshot) -> list[
                     )
                 )
             elif f_old.default != f_new.default:
+                # CHANGED compares two REAL values, so the representation-
+                # mismatch risk fact_same_producer_qualified guards against
+                # (castxml's verbatim source text vs. clang's fingerprint)
+                # is live here -- same producer, not merely known, required.
+                if not fact_same_producer_qualified(*fact_key_args):
+                    continue
                 changes.append(
                     make_change(
                         ChangeKind.FIELD_DEFAULT_INITIALIZER_CHANGED,

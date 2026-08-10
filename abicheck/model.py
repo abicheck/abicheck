@@ -699,7 +699,7 @@ class AbiSnapshot:
     # True when this snapshot's TypeField.default (default member initializer)
     # facts are known-reliable when its own ``ast_producer`` is ``"clang"`` OR
     # ``"hybrid"`` -- G31 Phase C (schema v20) wired real extraction into the
-    # direct-clang backend (``dumper_clang._field_initializer_value``),
+    # direct-clang backend (``dumper_clang_expr._field_initializer_value``),
     # previously unconditionally None. Exactly the shape of
     # ``clang_deprecation_facts_reliable`` above, and needed for the same
     # reason: ``TypeField.default`` is documented (see the field itself) as
