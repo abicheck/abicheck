@@ -235,7 +235,7 @@ jobs:
           # directly, same as publish-baseline.yml's identical step
           # (including the trailing `|| true`, matching the former CLI
           # call's own blanket tolerance for any unexpected failure here).
-          python3 -c "
+          python3 -I -c "
           import json
           import os
           from pathlib import Path
@@ -251,7 +251,7 @@ jobs:
           report = derive_baseline_libraries(build_output, directory)
           Path('baseline-libraries.json').write_text(json.dumps(report.to_dict()))
           " || true
-          python3 -c "
+          python3 -I -c "
           import json, sys
 
           try:
