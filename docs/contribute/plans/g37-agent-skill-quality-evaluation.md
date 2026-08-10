@@ -315,7 +315,8 @@ agent-evals/skills/runs/<run-id>/<scenario>/<k>/
                      stdout/stderr digests, and the path of every artifact the call
                      produced — both a `-o`/`--output` file and the captured stdout
   captured/<n>.out   the verbatim stdout of call <n>, always persisted (see below)
-  reports/*.json     report files the agent wrote via `-o`/`--output`
+  captured/<n>.out.d/  a per-call immutable copy of every file call <n> wrote via
+                     `-o`/`--output`, snapshotted when the child exits (see below)
   final.md           the agent's final answer text
   claim.json         the machine-readable verdict envelope parsed out of final.md
   usage.json         turns, tool calls, tokens in/out, wall clock, retries
@@ -385,6 +386,19 @@ right branch" is derivable from `calls.jsonl`. The runner therefore emits a
 normalized event stream, and because vendors expose very different amounts of
 this, the contract is explicitly two-tier:
 
+**L1l drives the existing trigger corpus, not the behavioral scenarios.**
+`tests/agent_skills/trigger_corpus.yaml` is already the canonical labelled
+set L1s grades statically, and it is the *only* input here that contains
+negatives — out-of-scope requests (REST/OpenAPI compatibility, a database
+migration, Java binary compatibility) that no `native-*` skill should claim,
+plus two positives deliberately labelled `expected_skill: null` for ADR-058's
+P1 candidates. Running only the Category A/B scenarios would measure recall
+against in-scope prompts and nothing else, and **activation precision is not
+computable without negatives** — a skill that triggers on everything would
+score perfectly. So the live runner replays that same corpus and grades which
+skill actually activated per prompt, reusing the file rather than defining a
+second labelled set that could disagree with the one L1s already gates on.
+
 - **Tier 1 — the vendor reports activation.** The runner maps its native
   events onto one vocabulary (`skill_activated`, `skill_file_read`,
   `tool_call`) and L1l is graded deterministically from the bundle, same as
@@ -407,8 +421,18 @@ document `abicheck compare OLD NEW --format json` with no `-o`. A bundle
 holding only a digest for those calls would have no parseable artifact, and
 every grader that reads the produced verdict would silently degrade to
 "no evidence" on the most idiomatic invocation the skills teach. Each call's
-stdout therefore lands in `captured/<n>.out` and the record points at it, with
-the `-o` file recorded alongside when one exists. **Requiring `-o` instead was
+stdout therefore lands in `captured/<n>.out` and the record points at it.
+
+**An `-o` file is snapshotted per call, not merely referenced by path.** An
+agent iterating on a comparison naturally reuses one output path — `-o
+report.json`, look, adjust flags, run again — so a record holding only that
+path describes a file a later call has already overwritten. A claim citing
+call 3 would then be replay-graded against call 5's report, and a digest
+recorded at write time detects the overwrite without being able to
+reconstruct what call 3 actually produced. The shim therefore copies every
+file the call wrote into `captured/<n>.out.d/` when the child exits and
+digests the copy, so each call's evidence is immutable regardless of what
+later calls do to the working tree. **Requiring `-o` instead was
 rejected**: that would make the harness measure a command shape the skills do
 not teach, and the eval must exercise the workflow as published.
 
@@ -654,6 +678,7 @@ agent-evals/
   skills/
     CLAUDE.md                        scoped agent context for this sub-tree
     scenarios.yaml                   Category A refs + Category B explicit records
+                                     (L2); L1l reuses tests/agent_skills/trigger_corpus.yaml
     schema/
       scenario.schema.json           scenario manifest contract
       transcript-bundle.schema.json  the bundle shape every runner must emit
@@ -746,7 +771,8 @@ everything after is about producing transcripts.
 ### Phase 2 — Live runner (Claude Code), off-CI + the evidence gate *(M)*
 
 Headless Claude Code runner at `k=3`, run by a maintainer rather than by a
-workflow; `check_skill_eval_evidence.py` and the freshness check wired into
+workflow, driving **two** inputs — the L2 scenario manifest and, for L1l,
+`tests/agent_skills/trigger_corpus.yaml` (see below); `check_skill_eval_evidence.py` and the freshness check wired into
 `verify.py`'s `pr` profile; the first committed evidence set; and the first
 real baseline for dimensions 1, 3, 4, 5. Dimensions 2 and 6 gate at zero from
 the first run — including if that first run fails, which blocks rather than
@@ -760,7 +786,7 @@ the evaluation non-optional rather than merely available.
 
 ### Phase 3 — Scenario corpus buildout *(M)*
 
-Category B first (the five scenarios `ground_truth.json` structurally cannot
+Category B first (every scenario `ground_truth.json` structurally cannot
 index), then Category A across the eight named categories. Target ~6 scenarios
 per skill, ~24 total.
 
