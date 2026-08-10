@@ -810,10 +810,22 @@ def _atomic_write_bytes(data: bytes, path: Path) -> None:
     both the type check and the direct write below; ``os.path.realpath()``
     is only ever called afterward, on the regular-file/atomic-rename path,
     where it does not have this failure mode.
+
+    Stat-failure handling (Codex review, third finding): both stat() calls
+    below only treat *absence* -- ``FileNotFoundError``/
+    ``NotADirectoryError`` (a path component genuinely doesn't exist) -- as
+    "no pre-existing destination to worry about." Any other ``OSError``
+    (a transient ``EIO``, ``EACCES``, ``ELOOP``, ...) propagates instead of
+    being silently treated as absence: swallowing it would let the
+    function fall through to the atomic-rename path for a destination
+    whose real type was never actually established, bypassing the non-
+    regular and hard-link safeguards above for an inode that may well
+    still be a FIFO/device/multiply-linked file once the transient error
+    clears.
     """
     try:
         initial_stat = os.stat(path)
-    except OSError:
+    except (FileNotFoundError, NotADirectoryError):
         initial_stat = None
     if initial_stat is not None and not stat.S_ISREG(initial_stat.st_mode):
         # open() itself follows a symlink to reach the real FIFO/device/
@@ -829,7 +841,7 @@ def _atomic_write_bytes(data: bytes, path: Path) -> None:
     target = Path(os.path.realpath(path)) if os.path.islink(path) else path
     try:
         existing_stat_for_type = target.stat()
-    except OSError:
+    except (FileNotFoundError, NotADirectoryError):
         pass
     else:
         if (

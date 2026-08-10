@@ -933,6 +933,40 @@ def test_write_through_a_symlink_to_a_fifo_does_not_need_realpath(
         os.close(read_fd)
 
 
+def test_non_absence_stat_failure_on_destination_propagates(tmp_path, monkeypatch):
+    """Codex review, PR #699 (third finding): the non-regular/hard-link
+    destination checks in _atomic_write_bytes() only treat
+    FileNotFoundError/NotADirectoryError (a path component genuinely
+    doesn't exist) as "no pre-existing destination to worry about." Any
+    other OSError (a transient EIO/EACCES/ELOOP, ...) must propagate
+    instead of being silently treated as absence -- swallowing it would
+    let the write fall through to the atomic-rename path for a
+    destination whose real type (FIFO, device, multiply-linked file, ...)
+    was never actually established, bypassing the non-regular/hard-link
+    safeguards for an inode that may still be exactly that once the
+    transient error clears."""
+    import errno
+
+    target_path = tmp_path / "out.abicheck.json"
+    real_stat = os.stat
+
+    def _flaky_stat(path, *args, **kwargs):
+        if os.fspath(path) == os.fspath(target_path):
+            raise OSError(errno.EIO, "simulated transient I/O error")
+        return real_stat(path, *args, **kwargs)
+
+    monkeypatch.setattr(os, "stat", _flaky_stat)
+
+    snap = _sample_snapshot()
+    with pytest.raises(OSError):
+        write_snapshot(snap, target_path, compression="none")
+    # No partial/replacement file was created at the destination (checked
+    # via the real os.stat, since the monkeypatched one always raises for
+    # this exact path).
+    with pytest.raises(FileNotFoundError):
+        real_stat(target_path)
+
+
 @pytest.mark.skipif(os.name == "nt", reason="POSIX FIFOs only")
 def test_read_snapshot_from_a_fifo(tmp_path):
     """Codex review, PR #699: read_snapshot_bytes() used to rewind via
