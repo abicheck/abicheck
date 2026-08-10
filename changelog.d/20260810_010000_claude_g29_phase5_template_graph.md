@@ -216,3 +216,14 @@
   archive, no compile actions of its own) made the function return `None`
   before ever calling `build_source_graph()`, which folds `link_units`
   unconditionally regardless; `link_units` now counts toward `has_build` too.
+
+  An eighth round found a real gap in variadic-template handling, confirmed
+  against real clang AST output: a parameter pack argument is *itself* one
+  `TemplateArgument` node (`isPack: true`, no `type`/`value` of its own)
+  whose real per-element arguments are nested one level deeper in its own
+  `inner` — `Pack<int>` and `Pack<double>` both produce this pack-wrapper
+  shape, and the previous code treated the wrapper as a plain, unspellable
+  argument and dropped the whole pack, collapsing both instantiations onto
+  the identical, argument-less label `"Pack"`. A new `_flatten_template_args`
+  helper (used everywhere a decl's direct `TemplateArgument` children are
+  collected) recurses into a pack wrapper's own `inner` instead.

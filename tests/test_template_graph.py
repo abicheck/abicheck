@@ -309,6 +309,54 @@ def test_non_type_template_argument_has_no_target() -> None:
     assert out[0].label == "FixedArray<int, 4>"
 
 
+def test_variadic_pack_arguments_are_flattened_not_dropped() -> None:
+    """A variadic template's pack argument is *itself* one
+    ``TemplateArgument`` node (``isPack: true``, no ``type``/``value`` of
+    its own) whose real per-element arguments are nested one level deeper
+    in its own ``inner`` -- verified empirically against real clang AST
+    output (Codex review): ``Pack<int>`` and ``Pack<double>`` both produce
+    this pack-wrapper shape, and treating the wrapper as a plain,
+    unspellable ``TemplateArgument`` (an earlier revision) dropped the
+    whole pack, collapsing both instantiations onto the identical,
+    argument-less label ``"Pack"``."""
+
+    def pack_spec(spec_id: str, arg_type: str) -> dict:
+        return {
+            "id": spec_id,
+            "kind": "ClassTemplateSpecializationDecl",
+            "name": "Pack",
+            "completeDefinition": True,
+            "inner": [
+                {
+                    "kind": "TemplateArgument",
+                    "isPack": True,
+                    "inner": [
+                        {"kind": "TemplateArgument", "type": {"qualType": arg_type}},
+                    ],
+                },
+            ],
+        }
+
+    ast = {
+        "kind": "TranslationUnitDecl",
+        "inner": [
+            {
+                "kind": "ClassTemplateDecl",
+                "name": "Pack",
+                "inner": [
+                    pack_spec("0xPINT", "int"),
+                    pack_spec("0xPDOUBLE", "double"),
+                ],
+            },
+        ],
+    }
+    out = parse_clang_ast_templates(ast)
+    by_label = {i.label: i for i in out}
+    assert set(by_label) == {"Pack<int>", "Pack<double>"}
+    assert by_label["Pack<int>"].args == (TemplateArgUse("int"),)
+    assert by_label["Pack<double>"].args == (TemplateArgUse("double"),)
+
+
 def test_typedef_alias_argument_resolves_through_to_the_real_record() -> None:
     """clang's own printer resolves a ``using``/typedef alias argument
     straight to the underlying record's ``decl`` -- no typedef-chain

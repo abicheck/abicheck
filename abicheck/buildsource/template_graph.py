@@ -295,11 +295,7 @@ def _specialization_scope_name(node: dict[str, Any], name: str) -> str:
     if str(node.get("kind", "")) != _CLASS_SPECIALIZATION_KIND:
         return name
     spellings = [
-        use.spelling
-        for child in node.get("inner", []) or []
-        if str(child.get("kind", "")) == "TemplateArgument"
-        for use in (_template_arg_use(child),)
-        if use is not None
+        use.spelling for use in _flatten_template_args(node.get("inner", []) or [])
     ]
     return f"{name}<{', '.join(spellings)}>" if spellings else name
 
@@ -491,6 +487,37 @@ def _template_arg_use(arg_node: dict[str, Any]) -> TemplateArgUse | None:
     return TemplateArgUse(spelling=spelling, target_qname=_first_decl_id(arg_node))
 
 
+def _flatten_template_args(children: list[dict[str, Any]]) -> list[TemplateArgUse]:
+    """Collect every :class:`TemplateArgUse` from a decl's direct
+    ``TemplateArgument`` children, flattening a parameter pack.
+
+    A variadic template's pack argument is *itself* one ``TemplateArgument``
+    node (``isPack: true``, no ``type``/``value`` of its own) whose real
+    per-element arguments are nested one level deeper in its own ``inner`` —
+    empirically confirmed against real clang AST output (Codex review):
+    ``Pack<int>`` and ``Pack<double>`` both produce a pack-wrapper
+    ``TemplateArgument`` with no ``type``/``value``, and the actual
+    ``int``/``double`` argument nested inside it. :func:`_template_arg_use`
+    alone treats that wrapper as an unspellable node (its own documented
+    "a pack expansion's own wrapper" skip case) and drops it entirely, so a
+    caller that only ever called it on each *direct* child lost the whole
+    pack — both instantiations reduced to the identical, argument-less label
+    ``"Pack"`` and collided onto one graph node. Recurses (rather than a
+    single flattening pass) in case a pack itself nests another pack node,
+    though not empirically observed."""
+    out: list[TemplateArgUse] = []
+    for child in children:
+        if str(child.get("kind", "")) != "TemplateArgument":
+            continue
+        if child.get("isPack") and child.get("type") is None and "value" not in child:
+            out.extend(_flatten_template_args(child.get("inner", []) or []))
+            continue
+        use = _template_arg_use(child)
+        if use is not None:
+            out.append(use)
+    return out
+
+
 def _first_decl_id(node: dict[str, Any]) -> str | None:
     """Depth-first, first-found ``decl.id`` anywhere under *node*'s own
     ``inner`` subtree.
@@ -561,12 +588,7 @@ def _resolve_specialization_qname(
         # typedef target, or a specialization stub with no recorded content
         # anywhere in this TU. The bare qname is already exact for these.
         return id_to_qname.get(spec_id)
-    args: list[TemplateArgUse] = []
-    for child in full.get("inner", []) or []:
-        if str(child.get("kind", "")) == "TemplateArgument":
-            use = _template_arg_use(child)
-            if use is not None:
-                args.append(use)
+    args = _flatten_template_args(full.get("inner", []) or [])
     resolved_args = _resolve_arg_targets(
         args,
         id_to_qname,
@@ -666,12 +688,7 @@ def _walk_function_templates(
                     child = full
                     mangled = child.get("mangledName")
                 mangled = _normalize_mangled(mangled)
-                args: list[TemplateArgUse] = []
-                for grandchild in child.get("inner", []) or []:
-                    if str(grandchild.get("kind", "")) == "TemplateArgument":
-                        use = _template_arg_use(grandchild)
-                        if use is not None:
-                            args.append(use)
+                args = _flatten_template_args(child.get("inner", []) or [])
                 resolved_args = _resolve_arg_targets(
                     args, id_to_qname, id_to_decl_kind, id_to_template_qname, full_by_id
                 )
@@ -831,12 +848,7 @@ def parse_clang_ast_templates(ast: dict[str, Any]) -> list[TemplateInstantiation
         full = full_by_id.get(spec_id)
         if full is None:
             continue  # a stub with no corresponding full definition anywhere
-        args: list[TemplateArgUse] = []
-        for child in full.get("inner", []) or []:
-            if str(child.get("kind", "")) == "TemplateArgument":
-                use = _template_arg_use(child)
-                if use is not None:
-                    args.append(use)
+        args = _flatten_template_args(full.get("inner", []) or [])
         resolved_args = _resolve_arg_targets(
             args, id_to_qname, id_to_decl_kind, id_to_template_qname, full_by_id
         )
