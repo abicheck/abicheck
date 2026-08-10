@@ -565,7 +565,9 @@ outputs:
       REMOVED_LIBRARY (directory/package operands with
       fail-on-removed-library set), or ERROR.
       For dump: COMPATIBLE or ERROR.
-      For scan: COMPATIBLE, COVERAGE_INCOMPLETE, API_BREAK, BREAKING,
+      For scan: COMPATIBLE, SEVERITY_ERROR (with --against and a
+      --severity-*/--exit-code-scheme setting, when an error-level category
+      has findings), COVERAGE_INCOMPLETE, API_BREAK, BREAKING,
       BUDGET_OVERFLOW, or ERROR.
       For deps-compare: PASS, WARN, FAIL, or ERROR.
       For deps-tree: PASS, FAIL, or ERROR.

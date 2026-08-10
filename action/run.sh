@@ -1525,6 +1525,23 @@ elif [[ "$MODE" == "scan" ]]; then
     FINAL_EXIT=1
   fi
 
+  # A severity-scheme `scan --against` gates natively at exit 1 on an
+  # error-level addition/quality finding, so scan can now publish
+  # SEVERITY_ERROR. Without this branch the mapping above named the verdict
+  # and the step still succeeded -- the explicitly configured policy gate
+  # silently did nothing (Codex review).
+  #
+  # Unconditional, exactly like the compare branch below: fail-on-breaking /
+  # fail-on-api-break select which *compatibility* tiers gate, and a severity
+  # policy is not one of those tiers -- it is the user having already said
+  # "this category is an error". Routing it through a compatibility flag
+  # would let fail-on-api-break: false switch off an addition gate that has
+  # nothing to do with API breaks.
+  if [[ "$VERDICT" == "SEVERITY_ERROR" ]]; then
+    echo "::error::Severity-level error detected by abicheck scan."
+    FINAL_EXIT=1
+  fi
+
 else
   # compare mode: BREAKING/API_BREAK follow fail-on flags; REMOVED_LIBRARY
   # only appears when --fail-on-removed-library was passed to the CLI

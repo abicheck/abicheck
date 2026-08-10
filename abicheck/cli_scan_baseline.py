@@ -229,18 +229,53 @@ def _add_severity_blocking_compatible_findings(
     blamed = set(gate.get("blocking_categories") or ())
     if not (blamed & _COMPATIBLE_SEVERITY_CATEGORIES):
         return
-    compatible = list(getattr(diff, "compatible", ()) or ())
-    if not compatible:
+    blocking = _blocking_compatible_changes(diff, blamed)
+    if not blocking:
         return
     findings: list[dict[str, Any]] = list(summary.get("findings") or [])
-    remaining = _MAX_BASELINE_FINDINGS - len(findings)
-    if remaining <= 0:
+    added = _baseline_finding_dicts(blocking, "compatible")
+    # Reserved, not appended-if-there-is-room. The cap is spent first by the
+    # legacy buckets, and under a demoting preset those are exactly the
+    # findings that did *not* gate -- so a plain append handed all 20 slots to
+    # non-blocking findings and dropped the one that failed the scan, leaving
+    # the report failing with no actionable cause again (Codex review).
+    # Blocking findings go first and keep their slots; the demoted ones fill
+    # whatever is left.
+    keep_blocking = added[:_MAX_BASELINE_FINDINGS]
+    room_left = _MAX_BASELINE_FINDINGS - len(keep_blocking)
+    merged = keep_blocking + findings[:room_left]
+    summary["findings"] = merged
+    if len(added) > len(keep_blocking) or len(findings) > room_left:
         summary["findings_truncated"] = True
-        return
-    findings.extend(_baseline_finding_dicts(compatible[:remaining], "compatible"))
-    summary["findings"] = findings
-    if len(compatible) > remaining:
-        summary["findings_truncated"] = True
+
+
+def _blocking_compatible_changes(diff: Any, blamed: set[str]) -> list[Any]:
+    """The compatible findings whose own category is one severity blamed.
+
+    Slicing all of ``diff.compatible`` spent the report's budget on the
+    *non-blocking* compatible category too -- with ``--severity-addition
+    error`` a quality finding is as compatible as an addition, but only the
+    addition failed the run (Codex review). Classified through
+    ``classify_change_object`` -- the same ``classify_effective_change`` the
+    gate itself routed through -- so the two cannot disagree about which
+    category a finding belongs to, and an ADR-027 per-finding demotion is
+    honoured identically in both.
+    """
+    from .severity import classify_change_object
+
+    kept: list[Any] = []
+    for change in list(getattr(diff, "compatible", ()) or ()):
+        try:
+            category = classify_change_object(
+                change,
+                policy=getattr(diff, "policy", None),
+                kind_sets=diff._effective_kind_sets(),
+            )
+        except Exception:  # pragma: no cover - duck-typed stand-ins in tests
+            continue
+        if getattr(category, "value", str(category)) in blamed:
+            kept.append(change)
+    return kept
 
 
 def _baseline_finding_dicts(changes: list[Any], bucket: str) -> list[dict[str, Any]]:

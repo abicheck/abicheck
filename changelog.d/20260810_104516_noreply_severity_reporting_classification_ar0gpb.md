@@ -23,3 +23,10 @@
   category and count, giving no symbol, kind, or description for the finding
   that actually failed the scan. Those findings are now itemized when — and
   only when — severity made them the blocking cause.
+
+- **A severity-blocking `scan` result now fails the composite Action** — the
+  Action mapped a severity-scheme `scan --against` exit 1 to
+  `SEVERITY_ERROR` but its scan final-gate handled only
+  `BREAKING`/`API_BREAK`/`BUDGET_OVERFLOW`, so the step succeeded despite an
+  explicitly blocking severity policy. `SEVERITY_ERROR` is now declared in
+  `action.yml`'s scan output vocabulary (and its generated reference) too.

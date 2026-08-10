@@ -151,9 +151,29 @@ FACT_LOSS_BASELINE = 0
 #: check reports a drop as well as a rise.
 UNRESOLVED_LOSS_BASELINE: dict[str, int] = {
     "public": 1,
-    "exports": 20,
+    "exports": 23,
     "all": 0,
 }
+#: `exports` moved 20 -> 23 when the `evidence-absence` corpus cases landed.
+#: Measured per case rather than assumed, since a budget raised without
+#: attribution is indistinguishable from one hiding a regression:
+#:
+#:   vtable_became_polymorphic_stays_breaking   +2
+#:   vtable_reorder_stays_breaking              +1
+#:   vtable_capture_asymmetry_stays_filtered     0
+#:
+#: Both contributors are the FN *sentinels* -- real breaks, which under
+#: `--contract exports` cannot resolve against a corpus that carries no
+#: export tables. That is exactly the benign reason this domain has a
+#: standing budget at all (see the module docstring's item 5), not a new
+#: defect: the same finding under `public` resolves fine, which is why that
+#: domain's budget did not move.
+#:
+#: The third case contributing **0** is the load-bearing part. It is the FP
+#: guard, and it emits no finding at all after `diff_types.
+#: _vtable_transition_is_evidenced` -- so this budget doubles as independent
+#: end-to-end confirmation that the suppression really reaches the contract
+#: pipeline, not just the detector's own unit tests.
 #: The `public` entry's remaining case, named so the budget cannot be
 #: mistaken for "nothing left to do".
 #:
