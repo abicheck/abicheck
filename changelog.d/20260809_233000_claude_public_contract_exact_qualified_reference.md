@@ -24,4 +24,7 @@ A new changelog fragment. See changelog.d/README.md for the workflow.
   inside the ordinary (deliberately over-keeping) closure walk — a type
   reached only by speculatively following one of several same-tail
   candidates' fields/bases is never marked exact, even if its own spelling
-  happens to be otherwise unique.
+  happens to be otherwise unique. A publicly-reachable typedef alias's own
+  name (not just the record/enum its target resolves to) is also recorded
+  exact, so a `TYPEDEF_REMOVED`/`TYPEDEF_BASE_CHANGED` finding on a directly-
+  exposed alias confirms correctly too.

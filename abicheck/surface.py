@@ -642,9 +642,10 @@ def _walk_exact_type_closure(
     enum_by_name: dict[str, list[EnumType]],
     seed_types: set[str],
 ) -> None:
-    """Fills ``surface.exact_type_identities``: every record/enum reachable
-    from a seed via a chain where *every* step resolved to precisely one
-    candidate -- never through an ambiguous ``::``-tail fork.
+    """Fills ``surface.exact_type_identities``: every record/enum (and
+    typedef alias name) reachable from a seed via a chain where *every* step
+    resolved to precisely one candidate -- never through an ambiguous
+    ``::``-tail fork.
 
     A separate walk from :func:`_walk_type_closure`, not a flag threaded
     through it, because the two questions need opposite behavior at an
@@ -691,6 +692,18 @@ def _walk_exact_type_closure(
         seen.add(name)
         target = snap.typedefs.get(name)
         if target:
+            # A typedef alias is a 1:1 mapping (``snap.typedefs`` is
+            # ``dict[str, str]``) -- there is no ambiguity concept for it the
+            # way a bare record/enum tail can collide, so reaching *this*
+            # name at all (which, by this walk's own invariant, only ever
+            # happens via an already-all-exact chain) makes the alias name
+            # itself exact too, not just whatever record/enum its target
+            # eventually resolves to. Confirms a ``TYPEDEF_REMOVED``/
+            # ``TYPEDEF_BASE_CHANGED``-shaped finding whose own candidate
+            # *is* the alias name (Codex review -- omitting this made such a
+            # finding on a publicly-reachable alias wrongly UNKNOWN_UNRESOLVED,
+            # since public-mode confirmation now checks only this set).
+            surface.exact_type_identities.add(name)
             for ident in _type_identifiers(target):
                 if ident not in seen:
                     queue.append(ident)

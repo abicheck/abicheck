@@ -523,3 +523,41 @@ class TestPublicModeAmbiguousTypeRoot:
         )
         decision = evaluate_change_contract_relevance(c, s, s, mode=ContractMode.PUBLIC)
         assert decision.relevance is ContractRelevance.UNKNOWN_UNRESOLVED
+
+    def test_a_publicly_reachable_typedef_alias_itself_confirms(self) -> None:
+        """Regression (Codex review): a public function returning a typedef
+        alias directly (``Alias`` -- no record/enum collision anywhere)
+        makes ``_walk_exact_type_closure`` follow ``Alias``'s target, but
+        that alone doesn't confirm a ``TYPEDEF_REMOVED``/
+        ``TYPEDEF_BASE_CHANGED`` finding, whose own candidate *is* the alias
+        name itself, not whatever record its target resolves to. Since
+        public-mode confirmation now checks only ``exact_type_identities``
+        (not ``_confirmed_type_matches``'s broader ``public_types``
+        membership), omitting the alias name itself from that set would
+        wrongly leave such a finding ``UNKNOWN_UNRESOLVED`` even though it
+        is unambiguously, directly reached. A typedef alias is a strict 1:1
+        mapping with no ambiguity concept of its own, so reaching it at all
+        (always via an already-all-exact chain, by this walk's own
+        invariant) makes the alias name itself exact too.
+        """
+        snap = AbiSnapshot(
+            library="l",
+            version="1",
+            functions=[_fn("api", ret="Alias")],
+            types=[
+                RecordType(
+                    name="Foo",
+                    kind="struct",
+                    size_bits=64,
+                    origin=ScopeOrigin.PUBLIC_HEADER,
+                ),
+            ],
+            typedefs={"Alias": "Foo"},
+        )
+        s = compute_public_surface(snap)
+        assert "Alias" in s.exact_type_identities
+        assert "Foo" in s.exact_type_identities
+        c = Change(kind=ChangeKind.TYPEDEF_REMOVED, symbol="Alias", description="")
+        decision = evaluate_change_contract_relevance(c, s, s, mode=ContractMode.PUBLIC)
+        assert decision.relevance is ContractRelevance.IN_CONTRACT
+        assert decision.reason_code == "public_root_membership"
