@@ -50,6 +50,7 @@ import argparse
 import json
 import os
 import platform
+import re
 import shutil
 import subprocess
 import sys
@@ -59,6 +60,11 @@ from typing import Any
 
 ROOT = Path(__file__).resolve().parents[3]
 EVAL_DIR = ROOT / "agent-evals" / "skills"
+
+sys.path.insert(0, str(EVAL_DIR))
+
+from graders import claim as claim_mod  # noqa: E402
+
 SHIM = EVAL_DIR / "shim" / "abicheck"
 PUBLISHED_SKILLS = ROOT / ".claude" / "skills"
 PACK = EVAL_DIR / "skill-eval-pack.json"
@@ -141,6 +147,39 @@ def supported_here(scenario: dict) -> bool:
     return not platforms or host_platform() in platforms
 
 
+#: Compilers that can build a fixture, per language. `cl` appears in both:
+#: MSVC is one driver for C and C++ (`/TC`, `/TP`), and it is the *normal*
+#: toolchain on Windows — a host with Visual Studio and no GNU or LLVM install
+#: was told it lacked both compilers and refused to run, which made the two
+#: scenarios the pack marks windows-supported unreachable on the platform they
+#: were marked for. Unlike everything else in this file, this entry is reasoned
+#: from the pack's own platform declarations rather than verified by running
+#: it: this host is Linux, so the MSVC path is untested here.
+_C_COMPILERS = ("gcc", "cc", "clang", "cl")
+_CXX_COMPILERS = ("g++", "c++", "clang++", "cl")
+
+#: What a fixture's own sources say it needs built.
+_CXX_SUFFIXES = (".cpp", ".cc", ".cxx")
+
+
+def required_languages(scenarios: dict[str, dict]) -> set[str]:
+    """Which languages the *selected* scenarios actually need compiled.
+
+    Read off each fixture's own sources. Requiring both unconditionally made a
+    C-only selection fail on a host with only a C compiler — a refusal that
+    describes the corpus rather than the run being asked for.
+    """
+    needed: set[str] = set()
+    for entry in scenarios.values():
+        fixture = ROOT / entry["inputs"]
+        for path in fixture.rglob("*"):
+            if path.suffix.lower() in _CXX_SUFFIXES:
+                needed.add("c++")
+            elif path.suffix.lower() == ".c":
+                needed.add("c")
+    return needed
+
+
 def missing_toolchain(scenarios: dict[str, dict]) -> list[str]:
     """What this host lacks for the selected scenarios to be runnable at all.
 
@@ -151,10 +190,11 @@ def missing_toolchain(scenarios: dict[str, dict]) -> list[str]:
     scenario additionally needs a header extractor.
     """
     missing: list[str] = []
-    if not any(shutil.which(cc) for cc in ("gcc", "cc", "clang")):
-        missing.append("a C compiler (gcc/cc/clang)")
-    if not any(shutil.which(cxx) for cxx in ("g++", "c++", "clang++")):
-        missing.append("a C++ compiler (g++/c++/clang++)")
+    languages = required_languages(scenarios)
+    if "c" in languages and not any(shutil.which(cc) for cc in _C_COMPILERS):
+        missing.append(f"a C compiler ({'/'.join(_C_COMPILERS)})")
+    if "c++" in languages and not any(shutil.which(cxx) for cxx in _CXX_COMPILERS):
+        missing.append(f"a C++ compiler ({'/'.join(_CXX_COMPILERS)})")
     needs_headers = [
         sid
         for sid, entry in scenarios.items()
@@ -186,10 +226,176 @@ def is_inside_repo(path: Path) -> bool:
     return resolved == ROOT or ROOT in resolved.parents
 
 
+#: Files in a catalog case that exist to *explain* it, and must never reach the
+#: workspace. `README.md` states the verdict in its second line, gives the exact
+#: `abicheck compare` command, and quotes the expected findings; `CMakeLists.txt`
+#: calls `abicheck_add_case`, naming the tool. Both defeat the measurement in the
+#: same way the in-repo workspace did — the baseline arm is handed the tool it is
+#: supposed to have to find and the answer it is about to be graded on, and the
+#: A/B then reports "the skill changes nothing" for a reason that has nothing to
+#: do with the skill. Neither is a library input: an agent building the two sides
+#: needs the sources and headers, and `abicheck_add_case` is a macro that exists
+#: only inside this repository's own CMake.
+EXPLANATORY_FILES = ("README.md", "CMakeLists.txt")
+
+#: What must not appear anywhere in a prepared workspace: the tool's own name,
+#: and the verdict vocabulary the run is graded against.
+_LEAK_TERMS = ("abicheck", *claim_mod.VERDICT_ORDER)
+_LEAK = re.compile("|".join(re.escape(t) for t in _LEAK_TERMS), re.IGNORECASE)
+
+#: Text this scan can read. A compiled artifact or an image is not answer-
+#: bearing prose, and decoding one as text produces noise rather than findings.
+_SCANNED_SUFFIXES = (".c", ".h", ".cc", ".cpp", ".cxx", ".hpp", ".hh", ".md", ".txt")
+
+#: Translation units whose comments are stripped on the way into a workspace.
+SOURCE_SUFFIXES = (".c", ".h", ".cc", ".cpp", ".cxx", ".hpp", ".hh")
+
+
+def strip_comments(text: str) -> str | None:
+    """`text` with its C/C++ comments removed, or None if that isn't safe.
+
+    Needed because excluding explanatory *files* is not enough: the catalog
+    annotates its own fixtures with the answer (`/* helper() removed —
+    BREAKING change */`, and one header that names the tool and the exact
+    change kinds it reports). Those are genuinely useful catalog documentation
+    and belong in `examples/`; they just must not travel into a workspace whose
+    whole premise is that the agent has to work the answer out. Stripping at
+    copy time keeps the corpus intact and the measurement honest, rather than
+    degrading published documentation to suit an evaluation.
+
+    Comments only. String and character literals are program *behaviour* — the
+    demo consumer prints its own conclusions — so they are preserved here and
+    left to `workspace_leaks`, which fails the run rather than rewriting what a
+    program does. Newlines inside a block comment are kept so a compiler error
+    still names the line the reader is looking at.
+
+    Answers None for a C++ raw string literal (`R"delim(...)"`), whose body may
+    contain `//` or `/*` with no comment meaning at all. None of the current
+    fixtures uses one; refusing beats mis-stripping, since the scan then still
+    sees whatever the file carries and stops the run.
+    """
+    if re.search(r'\bR"', text):
+        return None
+    out: list[str] = []
+    i, n = 0, len(text)
+    while i < n:
+        ch = text[i]
+        if ch in ('"', "'"):
+            quote = ch
+            out.append(ch)
+            i += 1
+            while i < n:
+                out.append(text[i])
+                if text[i] == "\\" and i + 1 < n:
+                    out.append(text[i + 1])
+                    i += 2
+                    continue
+                if text[i] == quote:
+                    i += 1
+                    break
+                i += 1
+            continue
+        if text.startswith("//", i):
+            while i < n and text[i] != "\n":
+                i += 1
+            continue
+        if text.startswith("/*", i):
+            end = text.find("*/", i + 2)
+            body = text[i:] if end == -1 else text[i : end + 2]
+            out.append("\n" * body.count("\n"))
+            i = n if end == -1 else end + 2
+            continue
+        out.append(ch)
+        i += 1
+    return "".join(out)
+
+
+def workspace_leaks(work: Path) -> list[str]:
+    """Places in this workspace that name the tool or state the answer.
+
+    Run *after* the workspace is built and before any model call, because the
+    exclusion above is necessary and not sufficient: the catalog's own sources
+    carry answer comments too (`/* helper() removed — BREAKING change */`), and
+    a denylist of filenames cannot see inside a file it correctly copied. A
+    scan can, and it fails the run rather than quietly measuring a leak — the
+    same reason `check_treatment` refuses when the arms are not what they claim.
+
+    Deliberately case-insensitive and substring-based. A false positive here
+    costs one fixture a rename; a false negative costs the whole experiment its
+    meaning.
+    """
+    found: list[str] = []
+    for path in sorted(work.rglob("*")):
+        if not path.is_file() or path.suffix.lower() not in _SCANNED_SUFFIXES:
+            continue
+        if ".claude" in path.parts:
+            continue  # the treatment itself; naming the tool is its whole job
+        text = path.read_text(encoding="utf-8", errors="replace")
+        for number, line in enumerate(text.splitlines(), start=1):
+            match = _LEAK.search(line)
+            if match:
+                rel = path.relative_to(work)
+                found.append(f"{rel}:{number}: {match.group(0)!r} in {line.strip()!r}")
+    return found
+
+
+#: A token that starts a new argument group in `abicheck_add_case`. Matched by
+#: shape rather than against a fixed keyword list: `case05_soname` carries a
+#: `V2_LINK_OPTIONS` this code has no interest in, and a fixed list silently
+#: folded its value into the preceding group.
+_CMAKE_KEYWORD = re.compile(r"^[A-Z][A-Z0-9_]*$")
+
+
+def demo_app_sources(fixture: Path) -> list[str]:
+    """The case's own consumer demo, which is apparatus rather than a library input.
+
+    Read from the case's `abicheck_add_case(APP_SOURCES ...)` rather than
+    guessed from a filename, and empty when there is nothing to read — a case
+    with no parsable declaration simply keeps everything, and `workspace_leaks`
+    is what stops a run if that turns out to matter.
+
+    Excluded because these programs *print the case's conclusion*
+    (`"NO_CHANGE at binary ABI level"`), and unlike a comment that text is
+    program behaviour this harness will not rewrite. The library sources and
+    headers the two sides are built from are what the question is about.
+    """
+    cml = fixture / "CMakeLists.txt"
+    if not cml.is_file() or "abicheck_add_case" not in cml.read_text(encoding="utf-8"):
+        return []
+    body = cml.read_text(encoding="utf-8").split("abicheck_add_case", 1)[1]
+    tokens = body.split(")", 1)[0].split()
+    found: list[str] = []
+    group: str | None = None
+    for token in tokens[1:]:  # tokens[0] is the case name
+        if _CMAKE_KEYWORD.match(token):
+            group = token
+        elif group == "APP_SOURCES":
+            found.append(token)
+    return found
+
+
 def _prepare_workspace(work: Path, scenario: dict, arm: str) -> None:
     """A disposable copy of the fixture, plus the arm's skill configuration."""
     fixture = ROOT / scenario["inputs"]
-    shutil.copytree(fixture, work / "library")
+    # Basenames, because `ignore_patterns` matches per directory entry and a
+    # pattern containing a separator therefore matches nothing at all. Every
+    # current case declares a bare `app.c`/`app.cpp`, but a declared `src/app.c`
+    # would silently stop being excluded — and an over-broad basename here only
+    # ever drops an extra demo file, which the scan does not care about, while
+    # under-exclusion is what puts the answer in the workspace.
+    apps = [Path(name).name for name in demo_app_sources(fixture)]
+    excluded = (*EXPLANATORY_FILES, *apps)
+    shutil.copytree(
+        fixture,
+        work / "library",
+        ignore=shutil.ignore_patterns(*excluded),
+    )
+    for path in sorted((work / "library").rglob("*")):
+        if not path.is_file() or path.suffix.lower() not in SOURCE_SUFFIXES:
+            continue
+        stripped = strip_comments(path.read_text(encoding="utf-8"))
+        if stripped is not None:
+            path.write_text(stripped, encoding="utf-8")
     if arm == "skill":
         skills = work / ".claude" / "skills"
         skills.mkdir(parents=True)
@@ -259,6 +465,17 @@ def _run_once(
     work = out_dir / "workspace"
     work.mkdir(parents=True)
     _prepare_workspace(work, scenario, arm)
+
+    leaks = workspace_leaks(work)
+    if leaks:
+        # Before the model call, not after: a leaked answer does not degrade
+        # this run, it makes it evidence about the fixture rather than about
+        # the skill, and spending the call would only buy a number that cannot
+        # be interpreted.
+        raise RuntimeError(
+            f"{scenario_id}: the workspace names the tool or states the answer, "
+            "so neither arm's result would be about the skill:\n  " + "\n  ".join(leaks)
+        )
 
     bin_dir = out_dir / "bin"
     bin_dir.mkdir()

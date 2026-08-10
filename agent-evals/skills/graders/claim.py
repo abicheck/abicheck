@@ -91,6 +91,43 @@ def _envelopes(text: str) -> tuple[list[Any], list[Any]]:
     return candidates, [c for c in candidates if "confident" in c]
 
 
+#: `native-release-compatibility`'s five per-cell states, as `claim.schema.json`
+#: publishes them. Kept as a literal rather than read off the schema at import
+#: time, with `tests/test_skill_eval_graders.py` pinning the two together — the
+#: graders stay file-I/O-free at import, and drift fails loudly instead of
+#: silently widening what a zero-tolerance rule accepts.
+MATRIX_STATES = frozenset({"pass", "risk", "break", "not_comparable", "not_run"})
+
+
+def _validate_matrix(matrix: object) -> str | None:
+    """Why this matrix block is not gradeable, or None if it is.
+
+    Checked against what the schema actually requires, not merely against what
+    would crash a grader. A target carrying only `{"state": "not_run"}` is
+    schema-invalid — `id` is required — yet it satisfied `_rule_unrun`, so the
+    zero-tolerance matrix rule could pass on a claim that reports *some* target
+    went unrun without ever saying which platform was skipped. "A cell is
+    missing" is not the finding; "the Windows cell is missing" is.
+    """
+    if not isinstance(matrix, dict) or not isinstance(matrix.get("targets"), list):
+        return "matrix does not carry a list of targets"
+    targets = matrix["targets"]
+    if not targets:
+        return "matrix carries no targets"
+    for target in targets:
+        # An AttributeError here aborted the whole batch instead of failing the
+        # one run that produced it, which is why shape is checked before use.
+        if not isinstance(target, dict):
+            return "a matrix target is not a record"
+        if not isinstance(target.get("id"), str) or not target["id"].strip():
+            return "a matrix target does not name which target it is"
+        if target.get("state") not in MATRIX_STATES:
+            return (
+                f"matrix target state {target.get('state')!r} is outside the vocabulary"
+            )
+    return None
+
+
 def validate(claim: dict) -> str | None:
     """Why this envelope is not a gradeable claim, or None if it is."""
     verdict = claim.get("verdict")
@@ -112,16 +149,9 @@ def validate(claim: dict) -> str | None:
         return "evidence is not a list of non-negative call ids"
     matrix = claim.get("matrix")
     if matrix is not None:
-        # Validated here so a malformed shape becomes an invalid *claim* rather
-        # than an AttributeError inside a grader — `{"targets": [1]}` aborted
-        # the whole batch instead of failing the one run that produced it.
-        if not isinstance(matrix, dict) or not isinstance(matrix.get("targets"), list):
-            return "matrix does not carry a list of targets"
-        if any(
-            not isinstance(target, dict) or not isinstance(target.get("state"), str)
-            for target in matrix["targets"]
-        ):
-            return "a matrix target is not a record with a state"
+        problem = _validate_matrix(matrix)
+        if problem is not None:
+            return problem
     if verdict is None and claim["confident"]:
         # `null` means "no verdict exists for this pair", which is a statement
         # of uncertainty, not a confident finding — the rubric's own

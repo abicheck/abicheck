@@ -200,6 +200,10 @@ class TestClaimExtraction:
             {"targets": [1]},
             {"targets": "all"},
             {"targets": [{"id": "x"}]},
+            {"targets": [{"state": "not_run"}]},
+            {"targets": [{"id": "  ", "state": "not_run"}]},
+            {"targets": [{"id": "linux-x86_64", "state": "probably fine"}]},
+            {"targets": []},
             "everything",
         ],
     )
@@ -1236,3 +1240,205 @@ class TestRunnerTreatment:
         out_dir = self._unindexed_run(tmp_path, ["native-api-evolution"])
         with pytest.raises(RuntimeError, match="should see exactly"):
             runner._recovered_record(out_dir, "sid", "skill", 0, SCENARIO_BREAKING)
+
+
+class TestWorkspaceIsolation:
+    """The workspace must not hand either arm the tool or the answer.
+
+    The prompt deliberately never names abicheck — a skill that has to be
+    *found* is the thing being measured — so a fixture that names it in a
+    README, a build file, or a source comment reproduces one directory down the
+    exact confound the out-of-repo `--out` rule exists to prevent.
+    """
+
+    def _case(self, tmp_path, files: dict[str, str]) -> Path:
+        case = tmp_path / "case99"
+        for rel, text in files.items():
+            target = case / rel
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_text(text, encoding="utf-8")
+        return case
+
+    def test_the_readme_and_build_file_never_reach_the_workspace(self, tmp_path):
+        """Both name the tool; the README also states the verdict outright."""
+        self._case(
+            tmp_path,
+            {
+                "README.md": "**Verdict:** BREAKING\n\n`abicheck compare v1.so v2.so`\n",
+                "CMakeLists.txt": "abicheck_add_case(case99 V1_SOURCES v1.c)\n",
+                "v1.c": "int f(void){return 1;}\n",
+            },
+        )
+        work = tmp_path / "ws"
+        work.mkdir()
+        runner.ROOT = tmp_path
+        try:
+            runner._prepare_workspace(work, {"inputs": "case99"}, "baseline")
+        finally:
+            runner.ROOT = ROOT
+        present = {p.name for p in (work / "library").rglob("*") if p.is_file()}
+        assert present == {"v1.c"}
+
+    def test_the_demo_consumer_is_read_from_the_case_definition(self, tmp_path):
+        """Not guessed from a filename, and tolerant of keywords it ignores —
+        `case05_soname` carries a `V2_LINK_OPTIONS` that a fixed keyword list
+        folded into the preceding group."""
+        case = self._case(
+            tmp_path,
+            {
+                "CMakeLists.txt": (
+                    "abicheck_add_case(case99\n"
+                    "    V1_SOURCES old/lib.c\n"
+                    "    V2_LINK_OPTIONS -Wl,-soname,libv2.so\n"
+                    "    APP_SOURCES demo.c\n"
+                    ")\n"
+                ),
+            },
+        )
+        assert runner.demo_app_sources(case) == ["demo.c"]
+
+    def test_a_case_with_no_build_file_excludes_nothing_extra(self, tmp_path):
+        assert runner.demo_app_sources(self._case(tmp_path, {"v1.c": "\n"})) == []
+
+    def test_an_answer_bearing_comment_is_stripped_on_the_way_in(self, tmp_path):
+        source = "/* helper() removed — BREAKING change */\nint f(void){return 1;}\n"
+        assert "BREAKING" not in runner.strip_comments(source)
+        assert "int f(void){return 1;}" in runner.strip_comments(source)
+
+    def test_stripping_preserves_line_numbers(self, tmp_path):
+        """A compiler error must still name the line the reader is looking at."""
+        stripped = runner.strip_comments("/* a\nb\nc */\nint f(void);\n")
+        assert stripped.splitlines()[3] == "int f(void);"
+
+    def test_a_string_containing_comment_markers_survives(self):
+        """String literals are program behaviour, not annotation."""
+        source = 'const char *s = "http://x /* not a comment */";\n'
+        assert runner.strip_comments(source) == source
+
+    def test_a_raw_string_makes_stripping_refuse_rather_than_guess(self):
+        """Its body can hold `//` with no comment meaning; the scan is the backstop."""
+        assert runner.strip_comments('auto s = R"(// not a comment)";\n') is None
+
+    def test_the_scan_finds_the_tool_name_and_the_verdict_vocabulary(self, tmp_path):
+        work = tmp_path / "ws"
+        (work / "library").mkdir(parents=True)
+        (work / "library" / "notes.md").write_text(
+            "run abicheck compare\nthis is COMPATIBLE\n", encoding="utf-8"
+        )
+        leaks = runner.workspace_leaks(work)
+        assert len(leaks) == 2
+        assert any("abicheck" in leak for leak in leaks)
+        assert any("COMPATIBLE" in leak for leak in leaks)
+
+    def test_the_installed_skill_is_not_scanned_as_a_leak(self, tmp_path):
+        """Naming the tool is the treatment's whole job."""
+        work = tmp_path / "ws"
+        skill = work / ".claude" / "skills" / "native-api-evolution"
+        skill.mkdir(parents=True)
+        (skill / "SKILL.md").write_text("run abicheck compare\n", encoding="utf-8")
+        assert runner.workspace_leaks(work) == []
+
+    def test_every_ready_fixture_reaches_the_workspace_clean(self, tmp_path):
+        """The corpus itself, not a synthetic stand-in: three of the eight
+        leaked before this — one naming the tool and the exact change kinds it
+        reports."""
+        pack = json.loads((EVAL_DIR / "skill-eval-pack.json").read_text())
+        ready = {s: e for s, e in pack["scenarios"].items() if e["status"] == "ready"}
+        assert ready, "the pack lists no ready scenario to check"
+        for sid, entry in ready.items():
+            work = tmp_path / sid
+            work.mkdir()
+            runner._prepare_workspace(work, entry, "baseline")
+            assert runner.workspace_leaks(work) == [], sid
+
+
+class TestToolchainPreflight:
+    def _scenarios(self, inputs: str) -> dict[str, dict]:
+        return {"s": {"inputs": inputs, "expected": {"min_evidence": "L0"}}}
+
+    def test_a_c_only_selection_does_not_demand_a_cxx_compiler(self):
+        """Requiring both unconditionally described the corpus, not the run."""
+        assert runner.required_languages(
+            self._scenarios("examples/case01_symbol_removal")
+        ) == {"c"}
+
+    def test_a_cxx_fixture_is_recognized(self):
+        assert "c++" in runner.required_languages(
+            self._scenarios("examples/case09_cpp_vtable")
+        )
+
+    def test_msvc_counts_as_both_compilers(self):
+        """`cl` is one driver for C and C++, and is the normal Windows
+        toolchain — without it a Visual Studio host refused to run the two
+        scenarios the pack marks windows-supported."""
+        assert "cl" in runner._C_COMPILERS and "cl" in runner._CXX_COMPILERS
+
+
+class TestPublishedContractsAgree:
+    def test_the_matrix_state_vocabulary_matches_the_schema(self):
+        """The graders stay file-I/O-free at import, so the vocabulary is a
+        literal — which only stays safe if drift fails loudly."""
+        schema = json.loads((EVAL_DIR / "schema" / "claim.schema.json").read_text())
+        published = schema["properties"]["matrix"]["properties"]["targets"]["items"][
+            "properties"
+        ]["state"]["enum"]
+        assert claim_mod.MATRIX_STATES == set(published)
+
+    def test_a_target_without_an_id_does_not_satisfy_the_matrix_rule(self, tmp_path):
+        """ "A cell is missing" is not the finding; "the Windows cell is missing"
+        is — and the schema requires `id` for exactly that reason."""
+        scenario = {
+            "skill": "native-release-compatibility",
+            "expected": {"verdict": "COMPATIBLE", "uncertainty": "matrix_target_unrun"},
+        }
+        text = envelope(
+            verdict="COMPATIBLE",
+            evidence=[0],
+            confident=False,
+            uncertainty={"reason": "matrix_target_unrun", "unresolved": "a target"},
+            matrix={"targets": [{"state": "not_run"}]},
+        )
+        run = build_run(tmp_path, final=text, calls=[a_breaking_call()])
+        parsed, status = claim_mod.extract(text)
+        assert parsed is None
+        result = dim.dimension_2(run, scenario, ev.load_calls(run), parsed)
+        assert result.status == "fail"
+
+
+class TestSelfComparisonDetection:
+    @pytest.mark.parametrize(
+        "argv",
+        [
+            ["compare", "x.so", "x.so"],
+            ["compare", "x.so", "--format", "json", "x.so"],
+            ["compare", "--format", "json", "x.so", "x.so"],
+        ],
+    )
+    def test_one_operand_named_twice_is_caught_however_it_is_spelled(self, argv):
+        """Verified against the real CLI: `compare x.so --format json x.so` runs
+        the comparison and reports NO_CHANGE, while the operands sit three
+        apart — so the adjacency test this replaced walked straight past it."""
+        assert ev.compares_one_side_against_itself({"argv": argv})
+
+    @pytest.mark.parametrize(
+        "argv",
+        [
+            ["compare", "old.so", "new.so"],
+            ["compare", "a.so", "b.so", "--policy-file", "p.yaml"],
+            ["compare", "a.so", "b.so", "-o", "b.so"],
+            [
+                "compare",
+                "a.so",
+                "b.so",
+                "--suppress",
+                "r.yaml",
+                "--policy-file",
+                "r.yaml",
+            ],
+            ["scan", "lib.so", "--against", "base.json"],
+        ],
+    )
+    def test_ordinary_invocations_are_not_flagged(self, argv):
+        """A report written to a path named like an operand is normal usage;
+        reading that as a third operand would fail a correct run."""
+        assert not ev.compares_one_side_against_itself({"argv": argv})

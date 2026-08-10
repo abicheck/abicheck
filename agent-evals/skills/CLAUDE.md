@@ -42,6 +42,28 @@ python agent-evals/skills/runners/claude_code.py --out /tmp/skill-eval --repetit
 python agent-evals/skills/run_skill_eval.py --runs /tmp/skill-eval --json /tmp/grades.json
 ```
 
+## The workspace must not contain the answer
+
+Same failure as the `--out` rule below, one directory further in. A catalog case
+is *documentation* — its `README.md` states the verdict in its second line and
+gives the exact `abicheck compare` command, its `CMakeLists.txt` calls
+`abicheck_add_case`, its demo consumer prints `"NO_CHANGE at binary ABI level"`,
+and three of the eight ready fixtures annotate their own sources
+(`/* helper() removed — BREAKING change */`; one header names the tool and the
+change kinds it reports). Copying a case wholesale handed both arms the tool the
+prompt deliberately never names and the answer they were about to be graded on.
+
+So the workspace gets the library sources and headers with their comments
+stripped, and neither the explanatory files nor the case's demo consumer. The
+corpus is not edited to suit the evaluation — those annotations are useful where
+they live. Stripping was verified by compiling every ready fixture both ways:
+16/16 translation units built, with identical exported symbol sets.
+
+`workspace_leaks()` is the backstop and runs before any model call, because a
+filename denylist cannot see inside a file it correctly copied. A leak aborts
+the run rather than degrading it: the result would be evidence about the
+fixture, not about the skill.
+
 The `--out` restriction is not tidiness. Claude Code discovers skills from the
 project the working directory belongs to, and this repo's root carries all four
 published trees — so a workspace under it hands the *baseline* arm everything it

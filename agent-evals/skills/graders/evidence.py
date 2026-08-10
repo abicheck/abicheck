@@ -203,25 +203,49 @@ def determined_not_comparable(call: dict) -> bool:
     )
 
 
-def compares_one_side_against_itself(call: dict) -> bool:
-    """Whether this call names the same operand twice in a row (`compare x x`).
+def _positional_operands(argv: list[str]) -> list[str]:
+    """The tokens that are operands rather than flags or flag values.
 
-    A deliberately narrow check for a real hole: such a call exits cleanly with
-    a verdict, so citing it satisfied every evidence rule while comparing
-    nothing. Overstating severity is not a dimension-6 failure, so an agent
-    could cite `compare x x` on a breaking scenario, claim BREAKING, and pass.
+    A separated option value is the only non-flag token that is not an operand,
+    and it is always immediately preceded by the option that takes it — so
+    "not a flag, and not preceded by one" identifies operands without needing
+    the option table. The attached spellings (`--format=json`, `-ojson`) keep
+    the value inside the flag token, so they never produce a token here at all.
 
-    Narrow because the general question — did this call compare the scenario's
-    two sides? — is not answerable from argv. Identifying which tokens are
-    operands needs the option table (`--format json` contributes a non-flag
-    token too), and guessing wrong fails correct runs. Two *adjacent, equal*
-    non-flag tokens is unambiguous and has no legitimate spelling. Binding a
-    call to the fixture properly needs the dump provenance Phase 4 persists,
-    not a cleverer read of the command line.
+    Deliberately biased toward *not* claiming a token is an operand: `compare
+    a.so b.so -o b.so` writes a report named like an operand, and reading that
+    `b.so` as a third operand would fail a perfectly ordinary run.
     """
-    argv = call.get("argv", [])
-    words = [(i, t) for i, t in enumerate(argv) if not t.startswith("-")]
-    return any(b == a and j == i + 1 for (i, a), (j, b) in zip(words, words[1:]))
+    return [
+        token
+        for index, token in enumerate(argv)
+        if not token.startswith("-") and not (index and argv[index - 1].startswith("-"))
+    ]
+
+
+def compares_one_side_against_itself(call: dict) -> bool:
+    """Whether this call names one operand twice (`compare x x`).
+
+    A real hole rather than a hypothetical one: such a call exits cleanly with
+    a verdict, so citing it satisfies every evidence rule while comparing
+    nothing. Overstating severity is not a dimension-6 failure, so an agent
+    could cite it on a breaking scenario, claim BREAKING, and pass having
+    compared nothing.
+
+    This used to test *adjacency*, which Click does not require. Verified
+    against the real CLI: `abicheck compare x.so --format json x.so` runs the
+    comparison, exits 0 and reports `NO_CHANGE`, while the two `x.so` tokens
+    sit three apart — so the interleaved spelling walked straight through the
+    check the plain one is caught by. Operand identification (above) closes
+    that without needing the option table.
+
+    Still narrow, and deliberately so: the general question — did this call
+    compare the scenario's *own* two sides? — is not answerable from argv at
+    all. Binding a call to its fixture needs the dump provenance Phase 4
+    persists, not a cleverer read of the command line.
+    """
+    operands = _positional_operands(call.get("argv", []))
+    return len(operands) != len(set(operands))
 
 
 def suppression_flags(call: dict) -> list[str]:
