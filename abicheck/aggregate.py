@@ -953,19 +953,35 @@ class AggregateResult:
         lines.append("Compatibility:")
         lines.append("  " + self._render_compatibility_line())
 
+        lines.extend(self._render_contract_coverage_lines())
+        lines.extend(self._render_profile_matrix_lines())
+        lines.extend(render_finding_matrix_lines(self.finding_matrix))
+
+        lines.extend(self._render_coverage_and_gate_lines())
+
+        return "\n".join(lines)
+
+    def _render_contract_coverage_lines(self) -> list[str]:
+        """The ADR-049 contract-coverage block, empty when every domain closed.
+
+        Named separately from the required-target coverage line for the same
+        reason the JSON block is: a bare exit 1 with neither of them explained
+        is the failure this axis most easily causes.
+        """
+        out: list[str] = []
         # Named separately from the required-target coverage line above for
         # the same reason the JSON block is: a bare exit 1 with neither of
         # them explained is the failure this axis most easily causes.
         incomplete = self.contract_coverage_targets
         if incomplete:
-            lines.append("")
-            lines.append("Contract coverage:")
+            out.append("")
+            out.append("Contract coverage:")
             # The contribution is stated separately from the target list
             # rather than folded into one clause: with `contract.unresolved=
             # warn` a listed target contributes 0, so "incomplete on X —
             # contributes 0" would read as a contradiction rather than as the
             # acceptance it is.
-            lines.append(f"  incomplete on {', '.join(incomplete)}")
+            out.append(f"  incomplete on {', '.join(incomplete)}")
             accepted = tuple(
                 t.target_id
                 for t in list(self.analyzed) + list(self._gated_unexpected)
@@ -981,91 +997,104 @@ class AggregateResult:
                 # _neutralize_gate`), and this side cannot tell them apart --
                 # both look like "declared 0 with failures listed". Naming
                 # one of them was wrong for the other (Codex review).
-                lines.append(
+                out.append(
                     f"  not gated on {', '.join(sorted(accepted))} "
                     "(that run contributed 0; listed, not gated)"
                 )
-            lines.append(
+            out.append(
                 f"  contributes {self.contract_coverage_exit} to the exit code "
                 "(ADR-049 contract-coverage axis)"
             )
 
+        return out
+
+    def _render_profile_matrix_lines(self) -> list[str]:
+        """The per-base-target profile matrix, empty when no profiles ran."""
+        out: list[str] = []
         matrix = self.profile_matrix
         if matrix:
-            lines.append("")
-            lines.append("Profile matrix:")
+            out.append("")
+            out.append("Profile matrix:")
             for entry in matrix:
-                unanalyzed = entry.unanalyzed_profiles
-                if entry.affected_profiles:
-                    line = (
-                        f"  {entry.base_target}: affected on "
-                        f"{', '.join(entry.affected_profiles)} "
-                        f"(checked on {', '.join(entry.profiles)})"
-                    )
-                    if unanalyzed:
-                        # An affected profile and an unanalyzed one can
-                        # coexist on the same target -- don't let "checked
-                        # on" imply the unanalyzed one produced a result too
-                        # (Codex review).
-                        line += f"; no analyzed result on {', '.join(unanalyzed)}"
-                elif not unanalyzed:
-                    line = (
-                        f"  {entry.base_target}: clean on all checked profiles "
-                        f"({', '.join(entry.profiles)})"
-                    )
-                elif len(unanalyzed) < len(entry.profiles):
-                    # Some profiles are clean, others never produced an
-                    # analyzed result at all -- never call the latter
-                    # "clean" (Codex review).
-                    clean = [p for p in entry.profiles if p not in unanalyzed]
-                    line = (
-                        f"  {entry.base_target}: clean on {', '.join(clean)} "
-                        f"(checked on {', '.join(entry.profiles)}); "
-                        f"no analyzed result on {', '.join(unanalyzed)}"
-                    )
-                else:
-                    line = (
-                        f"  {entry.base_target}: no analyzed result on any "
-                        f"checked profile ({', '.join(entry.profiles)})"
-                    )
-                if entry.incomplete_profiles:
-                    line += (
-                        f" [incomplete coverage on "
-                        f"{', '.join(entry.incomplete_profiles)}]"
-                    )
-                if entry.contract_incomplete_profiles:
-                    # Qualifies whatever precedes it, exactly as the
-                    # incomplete-coverage suffix above does -- including a
-                    # "clean" line, which stays accurate: clean is a
-                    # statement about compatibility, and this is the
-                    # orthogonal evidence axis saying the domain never
-                    # closed. Without it a profile that raised the exit to 1
-                    # on contract coverage alone read as flatly clean.
-                    line += (
-                        f" [contract evidence incomplete on "
-                        f"{', '.join(entry.contract_incomplete_profiles)}]"
-                    )
-                lines.append(line)
+                out.append(self._render_profile_entry_line(entry))
 
-        lines.extend(render_finding_matrix_lines(self.finding_matrix))
+        return out
 
-        lines.append("Coverage:")
+    def _render_profile_entry_line(self, entry: ProfileMatrixEntry) -> str:
+        """One base target's row in the profile matrix.
+
+        Four mutually exclusive shapes -- affected, clean everywhere, partly
+        clean with some profile never producing an analyzed result, and
+        nothing analyzed at all -- then two independent suffixes that qualify
+        whichever shape was chosen.
+        """
+        unanalyzed = entry.unanalyzed_profiles
+        if entry.affected_profiles:
+            line = (
+                f"  {entry.base_target}: affected on "
+                f"{', '.join(entry.affected_profiles)} "
+                f"(checked on {', '.join(entry.profiles)})"
+            )
+            if unanalyzed:
+                # An affected profile and an unanalyzed one can
+                # coexist on the same target -- don't let "checked
+                # on" imply the unanalyzed one produced a result too
+                # (Codex review).
+                line += f"; no analyzed result on {', '.join(unanalyzed)}"
+        elif not unanalyzed:
+            line = (
+                f"  {entry.base_target}: clean on all checked profiles "
+                f"({', '.join(entry.profiles)})"
+            )
+        elif len(unanalyzed) < len(entry.profiles):
+            # Some profiles are clean, others never produced an
+            # analyzed result at all -- never call the latter
+            # "clean" (Codex review).
+            clean = [p for p in entry.profiles if p not in unanalyzed]
+            line = (
+                f"  {entry.base_target}: clean on {', '.join(clean)} "
+                f"(checked on {', '.join(entry.profiles)}); "
+                f"no analyzed result on {', '.join(unanalyzed)}"
+            )
+        else:
+            line = (
+                f"  {entry.base_target}: no analyzed result on any "
+                f"checked profile ({', '.join(entry.profiles)})"
+            )
+        if entry.incomplete_profiles:
+            line += f" [incomplete coverage on {', '.join(entry.incomplete_profiles)}]"
+        if entry.contract_incomplete_profiles:
+            # Qualifies whatever precedes it, exactly as the
+            # incomplete-coverage suffix above does -- including a
+            # "clean" line, which stays accurate: clean is a
+            # statement about compatibility, and this is the
+            # orthogonal evidence axis saying the domain never
+            # closed. Without it a profile that raised the exit to 1
+            # on contract coverage alone read as flatly clean.
+            line += (
+                f" [contract evidence incomplete on "
+                f"{', '.join(entry.contract_incomplete_profiles)}]"
+            )
+        return line
+
+    def _render_coverage_and_gate_lines(self) -> list[str]:
+        """The closing Coverage: and Gate: blocks."""
+        out: list[str] = []
+        out.append("Coverage:")
         if self.coverage is CoverageStatus.COMPLETE:
-            lines.append("  Complete — every required target was analyzed.")
+            out.append("  Complete — every required target was analyzed.")
         else:
             missing = ", ".join(self.missing_required) or "(none)"
             gated = "" if self.coverage_blocking else " (advisory)"
-            lines.append(
-                f"  Incomplete — required target(s) unknown: {missing}.{gated}"
-            )
+            out.append(f"  Incomplete — required target(s) unknown: {missing}.{gated}")
 
-        lines.append("Gate:")
+        out.append("Gate:")
         if self.passed:
             # Deliberately does NOT claim "coverage complete": under
             # --on-missing-required warn a required gap is reported above but
             # does not fail the gate, so a passing result can still have an
             # (advisory) coverage gap.
-            lines.append(
+            out.append(
                 "  Passed — no gate-blocking findings under the configured policies."
             )
         else:
@@ -1081,9 +1110,9 @@ class AggregateResult:
             ):
                 ids = ", ".join(t.target_id for t in self.unexpected_targets)
                 parts.append(f"unexpected target(s) present: {ids}")
-            lines.append("  Failed — " + "; ".join(parts) + ".")
+            out.append("  Failed — " + "; ".join(parts) + ".")
 
-        return "\n".join(lines)
+        return out
 
     def _render_target_line(self, t: TargetReport) -> str:
         tag = "" if t.required else " (optional)"
