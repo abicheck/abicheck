@@ -571,11 +571,18 @@ outputs:
       BUDGET_OVERFLOW, or ERROR.
       For deps-compare: PASS, WARN, FAIL, or ERROR.
       For deps-tree: PASS, FAIL, or ERROR.
-      On compare and scan alike, BREAKING/API_BREAK follows the report's
-      compatibility verdict and can therefore accompany exit code 0 when a
-      demoting severity policy (e.g. --severity-preset info-only) asked for
-      the break to be reported and not gated -- the verdict stays truthful
-      and fail-on-breaking/fail-on-api-break do not fail the step for it.
+      On compare and scan alike, verdict and exit-code are different axes and
+      may disagree: BREAKING/API_BREAK follows the report's compatibility
+      verdict (what was *detected*) while the exit code follows what the
+      severity policy chose to *gate* on. So a demoting policy (e.g.
+      --severity-preset info-only) can publish BREAKING with exit code 0
+      (nothing gated), and a policy that demotes abi_breaking while some
+      other gate still fires -- an error-level --crosscheck, or
+      potential_breaking: error -- can publish BREAKING with exit code 2.
+      In both cases the verdict stays truthful and the step still gates at
+      the tier the exit code names, so fail-on-breaking does not re-gate a
+      break the policy demoted. Branch on verdict for what was found, on
+      exit-code for whether the run was blocked.
     value: ${{ steps.run-abicheck.outputs.verdict }}
   exit-code:
     description: >

@@ -1054,6 +1054,9 @@ _report_compat_verdict() {
 # two possible causes, it just had no severity-aware scan beside it to make
 # the asymmetry visible.
 ADVISORY_BREAK=false
+# The compatibility tier the *gate* follows. Empty means "same as VERDICT" —
+# only an escalation (see `_escalate_verdict_to_report`) makes the two differ.
+GATE_TIER=""
 _resolve_clean_exit_verdict() {
   local _v
   VERDICT="COMPATIBLE"
@@ -1062,6 +1065,44 @@ _resolve_clean_exit_verdict() {
     VERDICT="$_v"
     ADVISORY_BREAK=true
     echo "::notice::abicheck reports $_v, but the configured severity policy resolved this run to exit 0 — the step is not failed. Raise the category to \`error\` to gate on it."
+  fi
+}
+
+# Compatibility tiers, most severe last. Only these three are ranked: every
+# other verdict (ERROR, BUDGET_OVERFLOW, SEVERITY_ERROR, ...) is a different
+# axis and must never be escalated away by this comparison.
+_verdict_rank() {
+  case "$1" in
+    BREAKING) echo 3 ;;
+    API_BREAK) echo 2 ;;
+    COMPATIBLE) echo 1 ;;
+    *) echo 0 ;;
+  esac
+}
+
+# Exit 0 is not the only exit a severity policy can understate, which is what
+# `_resolve_clean_exit_verdict` above fixed for exit 0 alone. A policy that
+# demotes `abi_breaking` below `error` while something else still gates --
+# an error-level `--crosscheck KEY=error`, or `potential_breaking: error` --
+# exits 2 with a report that still says BREAKING. Mapping exit 2 straight to
+# API_BREAK then published a source-level break for a binary ABI break
+# (Codex review).
+#
+# So the published verdict follows the report whenever the report is the more
+# severe of the two. The *gate* deliberately does not move with it: GATE_TIER
+# keeps the tier the exit code actually gated at, because the severity policy
+# switching a break's gate off is precisely what the user asked for -- letting
+# an escalated BREAKING verdict reach `fail-on-breaking` (default true) would
+# re-gate the very finding the policy demoted. Truth in the output, the user's
+# policy in the gate.
+_escalate_verdict_to_report() {
+  local _v
+  _v=$(_report_compat_verdict)
+  [[ -n "$_v" ]] || return 0
+  if (( $(_verdict_rank "$_v") > $(_verdict_rank "$VERDICT") )); then
+    echo "::notice::abicheck's report records $_v while the severity policy resolved this run to exit ${ABICHECK_EXIT} (gated as ${VERDICT}); publishing the report's verdict. The step still gates at ${VERDICT}."
+    GATE_TIER="$VERDICT"
+    VERDICT="$_v"
   fi
 }
 
@@ -1147,7 +1188,7 @@ elif [[ "$MODE" == "scan" ]]; then
           VERDICT="ERROR"
         fi
         ;;
-      2) VERDICT="API_BREAK" ;;
+      2) VERDICT="API_BREAK"; _escalate_verdict_to_report ;;
       4) VERDICT="BREAKING" ;;
       5) VERDICT="BUDGET_OVERFLOW" ;;
       *)
@@ -1196,7 +1237,7 @@ else
           VERDICT="SEVERITY_ERROR"
         fi
         ;;
-      2) VERDICT="API_BREAK" ;;
+      2) VERDICT="API_BREAK"; _escalate_verdict_to_report ;;
       4) VERDICT="BREAKING" ;;
       8) VERDICT="REMOVED_LIBRARY" ;;
       *) VERDICT="ERROR" ;;
@@ -1642,7 +1683,7 @@ elif [[ "$MODE" == "dump" ]]; then
 elif [[ "$MODE" == "scan" ]]; then
   # scan: BREAKING/API_BREAK follow the fail-on flags; a budget overflow always
   # fails the step (the budget is a guard that must not be silently swallowed).
-  if [[ "$VERDICT" == "BREAKING" && "${INPUT_FAIL_ON_BREAKING:-true}" == "true" \
+  if [[ "${GATE_TIER:-$VERDICT}" == "BREAKING" && "${INPUT_FAIL_ON_BREAKING:-true}" == "true" \
         && "$ADVISORY_BREAK" != "true" ]]; then
     echo "::error::ABI break detected by scan. Set fail-on-breaking: false to continue despite breaks."
     FINAL_EXIT=1
@@ -1654,7 +1695,7 @@ elif [[ "$MODE" == "scan" ]]; then
   # cannot tell from the exit code alone whether a promoted check fired, so
   # keying off the crosscheck flag would wrongly fail an unrelated API break
   # when fail-on-api-break is false (Codex review).
-  if [[ "$VERDICT" == "API_BREAK" && "${INPUT_FAIL_ON_API_BREAK:-false}" == "true" \
+  if [[ "${GATE_TIER:-$VERDICT}" == "API_BREAK" && "${INPUT_FAIL_ON_API_BREAK:-false}" == "true" \
         && "$ADVISORY_BREAK" != "true" ]]; then
     echo "::error::API/source break detected by scan (includes promoted --crosscheck=error gates). Set fail-on-api-break: false to ignore."
     FINAL_EXIT=1
@@ -1705,13 +1746,13 @@ else
   # compare mode: BREAKING/API_BREAK follow fail-on flags; REMOVED_LIBRARY
   # only appears when --fail-on-removed-library was passed to the CLI
   # (directory/package operands only).
-  if [[ "$VERDICT" == "BREAKING" && "${INPUT_FAIL_ON_BREAKING:-true}" == "true" \
+  if [[ "${GATE_TIER:-$VERDICT}" == "BREAKING" && "${INPUT_FAIL_ON_BREAKING:-true}" == "true" \
         && "$ADVISORY_BREAK" != "true" ]]; then
     echo "::error::ABI break detected. Set fail-on-breaking: false to continue despite breaks."
     FINAL_EXIT=1
   fi
 
-  if [[ "$VERDICT" == "API_BREAK" && "${INPUT_FAIL_ON_API_BREAK:-false}" == "true" \
+  if [[ "${GATE_TIER:-$VERDICT}" == "API_BREAK" && "${INPUT_FAIL_ON_API_BREAK:-false}" == "true" \
         && "$ADVISORY_BREAK" != "true" ]]; then
     echo "::error::API break detected. Set fail-on-api-break: false to ignore API-level breaks."
     FINAL_EXIT=1

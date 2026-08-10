@@ -881,3 +881,124 @@ class TestADemotedBreakStaysVisible:
             text="Verdict: COMPATIBLE — no BREAKING changes detected\n",
         )
         assert outputs["verdict"] == "COMPATIBLE", outputs
+
+
+class TestAPromotedExitDoesNotUnderstateTheReport:
+    """Exit 0 was not the only exit a severity policy can understate.
+
+    A policy demoting ``abi_breaking`` below ``error`` while something else
+    still gates -- an error-level ``--crosscheck KEY=error``, or
+    ``potential_breaking: error`` -- exits **2** with a report that still says
+    ``BREAKING``. Mapping exit 2 unconditionally to ``API_BREAK`` published a
+    source-level break for a binary ABI break, so a workflow branching on
+    ``verdict`` acted on the wrong tier (Codex review).
+
+    The gate deliberately does *not* move with the verdict: the policy
+    switching that break's gate off is what the user asked for, so an
+    escalated ``BREAKING`` must not reach ``fail-on-breaking`` (default true)
+    and re-gate the very finding the policy demoted.
+    """
+
+    @staticmethod
+    def _report(compat_verdict: str, category: str = "promoted_crosscheck") -> dict:
+        """Exit 2 from a gate that is *not* the demoted compatibility tier.
+
+        The category matters: a *configured* severity category (`addition`,
+        `potential_breaking`, ...) is one the user already called an error, so
+        the scan gate fails the step on it unconditionally. A promoted
+        cross-check is the case that still follows `fail-on-api-break`, and so
+        the only one where the verdict-vs-gate separation is observable.
+        """
+        return {
+            "verdict": compat_verdict,
+            "exit_code": 2,
+            "diff": {"verdict": compat_verdict},
+            "severity": {
+                "exit_code": 2,
+                "blocking": True,
+                "blocking_categories": [category],
+            },
+        }
+
+    def _outputs(self, tmp_path: Path, mode: str, **env_extra: str) -> dict:
+        bindir = _stub_abicheck(tmp_path, exit_code=2, report=self._report("BREAKING"))
+        env = {
+            "INPUT_MODE": mode,
+            "INPUT_NEW_LIBRARY": _lib(tmp_path, "libnew.so"),
+            "INPUT_FORMAT": "json",
+            "INPUT_OUTPUT_FILE": str(tmp_path / "report.json"),
+            **env_extra,
+        }
+        if mode == "compare":
+            env["INPUT_OLD_LIBRARY"] = _lib(tmp_path, "libold.so")
+        return _run_action(tmp_path, env, bindir)
+
+    @pytest.mark.parametrize("mode", ["scan", "compare"])
+    def test_the_published_verdict_follows_the_report(
+        self, tmp_path: Path, mode: str
+    ) -> None:
+        outputs = self._outputs(tmp_path, mode)
+        assert outputs["verdict"] == "BREAKING", outputs
+        assert outputs["exit-code"] == "2", outputs
+
+    def test_the_gate_still_follows_the_tier_the_exit_gated_at(
+        self, tmp_path: Path
+    ) -> None:
+        """`fail-on-breaking` defaults to true, so a naive escalation would
+        fail this step -- re-gating the break the severity policy demoted.
+        The exit gated at the API tier, and `fail-on-api-break` is false."""
+        outputs = self._outputs(
+            tmp_path,
+            "scan",
+            INPUT_FAIL_ON_API_BREAK="false",
+            INPUT_FAIL_ON_BREAKING="true",
+        )
+        assert outputs["_exit"] == 0, outputs["_stdout"]
+
+    def test_the_tier_the_exit_gated_at_still_gates(self, tmp_path: Path) -> None:
+        """The mirror: turning the *API* flag on must still fail the step,
+        even though the published verdict now reads BREAKING."""
+        outputs = self._outputs(tmp_path, "scan", INPUT_FAIL_ON_API_BREAK="true")
+        assert outputs["_exit"] == 1, outputs["_stdout"]
+
+    @pytest.mark.parametrize("mode", ["scan", "compare"])
+    def test_an_agreeing_report_is_left_alone(self, tmp_path: Path, mode: str) -> None:
+        """No escalation when the report agrees with the exit -- the ordinary
+        case, which must keep gating through `fail-on-api-break` unchanged."""
+        bindir = _stub_abicheck(
+            tmp_path, exit_code=2, report=self._report("API_BREAK")
+        )
+        env = {
+            "INPUT_MODE": mode,
+            "INPUT_NEW_LIBRARY": _lib(tmp_path, "libnew.so"),
+            "INPUT_FORMAT": "json",
+            "INPUT_OUTPUT_FILE": str(tmp_path / "report.json"),
+            "INPUT_FAIL_ON_API_BREAK": "true",
+        }
+        if mode == "compare":
+            env["INPUT_OLD_LIBRARY"] = _lib(tmp_path, "libold.so")
+        outputs = _run_action(tmp_path, env, bindir)
+        assert outputs["verdict"] == "API_BREAK", outputs
+        assert outputs["_exit"] == 1, outputs["_stdout"]
+
+    def test_a_usage_error_is_not_escalated(self, tmp_path: Path) -> None:
+        """Click's usage errors also exit 2. That path sets ERROR before the
+        case statement is reached, so no report reading may override it."""
+        bindir = _stub_abicheck(
+            tmp_path,
+            exit_code=2,
+            report=self._report("BREAKING"),
+            stderr="Usage: abicheck compare [OPTIONS]",
+        )
+        outputs = _run_action(
+            tmp_path,
+            {
+                "INPUT_MODE": "compare",
+                "INPUT_OLD_LIBRARY": _lib(tmp_path, "libold.so"),
+                "INPUT_NEW_LIBRARY": _lib(tmp_path, "libnew.so"),
+                "INPUT_FORMAT": "json",
+                "INPUT_OUTPUT_FILE": str(tmp_path / "report.json"),
+            },
+            bindir,
+        )
+        assert outputs["verdict"] == "ERROR", outputs
