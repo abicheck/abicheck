@@ -95,7 +95,23 @@ full, honest list of what's reserved but unpopulated):
   verified this slice.
 - ``CONSTRAINT_DEPENDS_ON_DECL`` — C++20 concepts/``requires`` clauses are a
   separate AST subsystem (``ConceptSpecializationExpr``, ``RequiresExpr``)
-  needing its own empirical pass, not a drive-by extension of this one.
+  needing its own empirical pass, not a drive-by extension of this one. A
+  consequence of that deferral, confirmed empirically (Codex review, fresh
+  evidence): two *constrained* overloads sharing both a qualified name and
+  an identical function type (``requires integral<T> void f(T)`` vs.
+  ``requires floating_point<T> void f(T)`` both print the pattern signature
+  ``"void (T)"``) still collide onto one ``template_decl`` node under
+  :func:`template_decl_node_id`'s signature discriminator, even though the
+  underlying `FunctionTemplateDecl`s are genuinely distinct and their own
+  instantiations correctly stay separate (each instantiation's own mangled
+  name embeds the Itanium requires-clause encoding, e.g.
+  ``_Z1fIiQsr3stdE8integralIT_EEvS0_`` vs. ``..14floating_pointIT_EE..``, so
+  `template_instantiation_node_id` never merges them). A real fix needs a
+  discriminator pulled from inside `ConceptSpecializationExpr`'s own nested
+  `ImplicitConceptSpecializationDecl.loc` (the only place two distinct,
+  identically-typed constraints differ in the dump) — squarely the
+  "separate AST subsystem" this bullet already defers, not a one-line
+  extension of the plain-signature discriminator.
 - Variable templates (``template <typename T> constexpr T pi = ...;``) and a
   member function template nested inside a class template instantiation —
   neither decl shape is walked; both fall through as an ordinary,

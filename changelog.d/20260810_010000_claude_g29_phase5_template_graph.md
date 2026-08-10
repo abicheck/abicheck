@@ -286,3 +286,18 @@
   far more common case (a genuinely redacted home-path macro that must
   expand or replay fails to find the right header). Documented in place
   rather than narrowed, for consistency with that established precedent.
+
+  An eleventh review round found one more real, empirically-confirmed gap,
+  but one that falls squarely inside a scope this module's own docstring
+  already defers rather than warranting new code: two C++20 *constrained*
+  function-template overloads sharing both a qualified name and an
+  identical function type (`requires integral<T> void f(T)` vs. `requires
+  floating_point<T> void f(T)` both print the pattern signature `"void
+  (T)"`) still collide onto one `template_decl` node under the new
+  signature discriminator, since the constraint text itself lives in a
+  separate `ConceptSpecializationExpr` AST subsystem the discriminator
+  never reads. Their own instantiations correctly stay distinct regardless
+  (the Itanium requires-clause mangling differs per constraint), so only
+  the coarser declaration-identity edge is affected. Documented as an
+  explicit consequence of the module's pre-existing, deliberate C++20-
+  concepts deferral rather than a one-line extension into that subsystem.
