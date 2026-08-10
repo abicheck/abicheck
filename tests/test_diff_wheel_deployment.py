@@ -1026,3 +1026,88 @@ class TestWheelRpathAndClosureCliEndToEnd:
         assert ChangeKind.WHEEL_CLOSURE_DEPENDENCY_VIOLATION not in _kinds(
             result.changes
         )
+
+
+# ---------------------------------------------------------------------------
+# Ordering of env-matrix findings vs. their own suppression diagnostics
+# (Codex review, PR #697).
+# ---------------------------------------------------------------------------
+
+
+def test_env_matrix_diagnostics_stay_beside_their_own_check(monkeypatch):
+    """Each declared-floor/wheel check's findings are followed by that same
+    check's suppression diagnostics, not by every other check's findings first.
+
+    ``_filter_suppressed_changes`` appends the diagnostics it raises to the END
+    of its own return value, so running all six checks through one combined
+    call would reorder the report from ``[floor, floor-diagnostic, musl,
+    musl-diagnostic, …]`` to ``[floor, musl, …, floor-diagnostic,
+    musl-diagnostic, …]``. ``DiffResult.changes`` preserves list order and the
+    reporters render it, so that is observable output, not an internal detail.
+    """
+    import abicheck.diff_versioning as dv
+    import abicheck.diff_wheel_deployment as dw
+    from abicheck.checker import _env_matrix_contract_changes
+    from abicheck.checker_policy import ChangeKind
+    from abicheck.checker_types import Change
+    from abicheck.model import AbiSnapshot
+    from abicheck.suppression import SuppressionOutcome
+
+    names = ["floor", "musl", "macos", "arch", "rpath", "closure"]
+    for module, attr, name in [
+        (dv, "check_platform_baseline_floor", "floor"),
+        (dv, "check_musllinux_glibc_dependency", "musl"),
+        (dw, "check_macos_deployment_target_floor", "macos"),
+        (dw, "check_wheel_tag_architecture_mismatch", "arch"),
+        (dw, "check_wheel_rpath_not_portable", "rpath"),
+        (dw, "check_wheel_closure_dependency_violation", "closure"),
+    ]:
+        monkeypatch.setattr(
+            module,
+            attr,
+            (
+                lambda n: lambda *a, **k: [
+                    Change(kind=ChangeKind.FUNC_REMOVED, symbol=n, description=n)
+                ]
+            )(name),
+        )
+
+    class _WithheldRule:
+        namespace = "ns::*"
+        entity_namespace = None
+        cause_namespace = None
+        source_location = None
+
+        def rule_label(self):
+            return "r1"
+
+    class _AlwaysWithheld:
+        """Nothing is suppressed, but every change has a withheld rule -- so
+        each one produces exactly one SUPPRESSION_WOULD_HIDE_PUBLIC_BREAK."""
+
+        def evaluate(self, change, today=None):
+            return SuppressionOutcome(
+                suppressed=False,
+                withheld_rule=_WithheldRule(),
+                withheld_unknown_rule=None,
+                matched_rule=None,
+            )
+
+    class _Env:
+        runtime_floors = {"GLIBC": "2.17", "WHEEL_CONTEXT": "manylinux_2_17_x86_64"}
+
+    produced = _env_matrix_contract_changes(
+        AbiSnapshot(library="libx.so", version="1"),
+        [],
+        [],
+        _AlwaysWithheld(),
+        [],
+        _Env(),
+    )
+    assert [
+        (
+            c.symbol,
+            c.kind is ChangeKind.SUPPRESSION_WOULD_HIDE_PUBLIC_BREAK,
+        )
+        for c in produced
+    ] == [(n, is_diag) for n in names for is_diag in (False, True)]
