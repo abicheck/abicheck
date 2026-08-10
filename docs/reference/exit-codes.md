@@ -263,7 +263,20 @@ keys) — and, like `compare`, uses them to compute the `0`/`2`/`4` portion of
 the exit code above from `severity.compute_exit_code` instead of the raw
 verdict when the resolved scheme is `severity`. A `BREAKING` verdict under
 `--severity-preset info-only` can therefore exit `0`, exactly as it can with
-`compare`. This is CLI/config-level parity only — a gate pack (`--pack`)
+`compare`.
+
+Under the `severity` scheme the JSON report's `diff` block also carries a
+`severity` gate object — the same `config`/`categories`/`exit_code`/
+`blocking`/`blocking_categories` shape `compare`'s own report uses (one
+shared builder, so the two are comparable field by field), added in
+`scan_schema_version` 1.9. It is what makes a non-zero exit on an otherwise
+*compatible* diff self-explanatory: `--severity-addition error` on an
+additions-only diff exits `1`, and `blocking_categories: ["addition"]` names
+the cause, distinguishing it from the orthogonal contract-coverage `1`
+above. The block is absent under the default legacy scheme, which runs no
+severity gate.
+
+This is CLI/config-level parity only — a gate pack (`--pack`)
 does not yet fold a `gate.*` assignment into a scan's severity the way it
 does for `compare`; pass `--severity-*`/`--exit-code-scheme` directly
 instead. Every flag in this family is a comparison-only flag (rejected as a
@@ -521,9 +534,9 @@ one of those.
 |-----------------|------------------------|--------------------------|-------------|-------------------|----------------------|---------------|
 | `NO_CHANGE` / `PASS` / compatible | `0` | `0` | `0` | `0` | `0` | `0` |
 | `COMPATIBLE` | `0` | `0` | `0`‡ | — | — | `0` |
-| `COMPATIBLE_WITH_RISK` | `0` | `0`–`2`* | `0`‡ | — | — | `0` |
-| Additions only | `0` | `0`–`1`* | `0`‡ | — | — | n/a |
-| Quality issues only | `0` | `0`–`1`* | `0`‡ | — | — | n/a |
+| `COMPATIBLE_WITH_RISK` | `0` | `0`–`2`* | `0`–`2`‡ | — | — | `0` |
+| Additions only | `0` | `0`–`1`* | `0`–`1`‡ | — | — | n/a |
+| Quality issues only | `0` | `0`–`1`* | `0`–`1`‡ | — | — | n/a |
 | `WARN` (ABI risk) | — | — | — | — | `1` | — |
 | `API_BREAK` | `2` | `0`–`2`* | `2` | — | — | `2` |
 | `BREAKING` / `FAIL` | `4` | `4` | `4` | — | `4` | `1` |
@@ -559,9 +572,15 @@ space so a usage error is never mistaken for a compatibility result. To
 reliably distinguish verdicts from errors in a script, use `--format json` and
 read the `verdict` field where available.
 
-‡ `scan`'s own scheme collapses every compatible/advisory-only state (no
-break, deployment risk, additions, quality signals) to exit `0` — read
-`--format json` if your pipeline needs to distinguish them.
+‡ `scan`'s **legacy** scheme (the default) collapses every
+compatible/advisory-only state (no break, deployment risk, additions,
+quality signals) to exit `0` — read `--format json` if your pipeline needs
+to distinguish them. Under a resolved `severity` scheme (`scan --against`
+with any `--severity-*`/`--exit-code-scheme severity`, or a config
+`severity:` block), `scan` follows the `compare` exit (severity) column
+instead, so these rows become `0`–`1`/`0`–`2` on the same `*` terms — e.g.
+`--severity-addition error` exits `1` on an additions-only diff. See
+["`scan --against` and severity"](#scan-against-and-severity-mirrors-compare).
 
 ---
 

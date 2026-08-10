@@ -188,6 +188,57 @@ def test_scan_breaking_with_severity_default_still_exits_four(
     assert res.exit_code == 4, res.output
 
 
+def test_scan_severity_gate_block_explains_a_nonzero_compatible_exit(
+    runner, baseline_snap, new_snap_compatible
+):
+    # Codex review: under the severity scheme a *compatible* diff can exit
+    # non-zero (`--severity-addition error` on an additions-only diff exits
+    # 1). Without a gate block in the report that reads as "COMPATIBLE, exit
+    # 1, no stated cause" -- indistinguishable from ADR-049 Phase 7's
+    # orthogonal contract-coverage 1. The block names the culprit category.
+    res = runner.invoke(
+        main,
+        [
+            "scan",
+            str(new_snap_compatible),
+            "--against",
+            str(baseline_snap),
+            "--severity-addition",
+            "error",
+            "--format",
+            "json",
+        ],
+    )
+    assert res.exit_code == 1, res.output
+    payload = _payload(res)
+    gate = payload["diff"]["severity"]
+    assert gate["exit_code"] == 1, gate
+    assert gate["blocking"] is True, gate
+    assert gate["blocking_categories"] == ["addition"], gate
+    assert gate["config"]["addition"] == "error", gate
+
+
+def test_scan_legacy_scheme_emits_no_severity_gate_block(
+    runner, baseline_snap, new_snap_breaking
+):
+    # The default (legacy) scheme runs no severity gate, so reporting one
+    # would claim a gate the run never used -- an ordinary scan's summary
+    # stays byte-identical to before this feature.
+    res = runner.invoke(
+        main,
+        [
+            "scan",
+            str(new_snap_breaking),
+            "--against",
+            str(baseline_snap),
+            "--format",
+            "json",
+        ],
+    )
+    assert res.exit_code == 4, res.output
+    assert "severity" not in _payload(res)["diff"]
+
+
 def test_scan_severity_preset_without_against_is_usage_error(tmp_path: Path):
     # --severity-preset only configures the --against baseline comparison,
     # like the rest of _COMPARISON_ONLY_FLAGS (test_scan_rejects_comparison_

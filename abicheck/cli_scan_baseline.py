@@ -687,10 +687,30 @@ def _run_baseline_compare(
     # BREAKING verdict at exit 0. Default ("legacy") is the prior,
     # unconditional verdict->exit mapping, unchanged.
     if exit_code_scheme == "severity" and sev_config is not None:
+        from .reporter import _build_severity_json
         from .severity import compute_exit_code
 
         base_exit = compute_exit_code(
             diff.changes,
+            sev_config,
+            policy=diff.policy,
+            kind_sets=diff._effective_kind_sets(),
+            policy_file=diff.policy_file,
+        )
+        # §6.4 cross-command parity, and the reason this block is not
+        # optional: under the severity scheme a *compatible* diff can exit
+        # non-zero (`--severity-addition error` on an additions-only diff
+        # exits 1), and without the gate block the report said `COMPATIBLE`
+        # with exit 1 and no stated cause -- indistinguishable from ADR-049's
+        # orthogonal contract-coverage 1 (Codex review). Built by
+        # `reporter._build_severity_json`, the same function that produces
+        # `compare`'s own `severity` block, so the two commands' gate
+        # receipts are comparable field-by-field rather than merely both
+        # present. Emitted only under the severity scheme: a legacy-scheme
+        # scan has no gate to report, so its summary stays byte-identical
+        # to before.
+        summary["severity"] = _build_severity_json(
+            list(diff.changes),
             sev_config,
             policy=diff.policy,
             kind_sets=diff._effective_kind_sets(),

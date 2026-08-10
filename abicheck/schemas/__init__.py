@@ -439,9 +439,23 @@ REPORT_SCHEMA_VERSION = "2.27"
 #:       section 6.4 requires the two commands to be comparable field by
 #:       field, and a row stating only the relevance was not (Codex review).
 #:       Not ``gate_contribution``: that is a property of a severity gate
-#:       ``scan --against`` does not run. Absent without the opt-in, so an
-#:       ordinary scan is still unchanged.
-SCAN_SCHEMA_VERSION = "1.8"
+#:       ``scan --against`` did not run at the time. Absent without the
+#:       opt-in, so an ordinary scan is still unchanged. (1.9 gave ``scan
+#:       --against`` a real severity gate; ``gate_contribution`` is still
+#:       not emitted per finding, which stays a deliberate follow-up.)
+#: 1.9 — the ``diff`` block gained a ``severity`` gate object (the same shape
+#:       ``compare``'s own report carries: ``config``/``categories``/
+#:       ``exit_code``/``blocking``/``blocking_categories``, built by the one
+#:       shared ``reporter._build_severity_json``), emitted when ``scan
+#:       --against`` resolves the ``severity`` exit-code scheme. Under that
+#:       scheme a *compatible* diff can exit non-zero (``--severity-addition
+#:       error`` on an additions-only diff exits 1), so without this block a
+#:       report read ``COMPATIBLE`` with exit 1 and no stated cause --
+#:       indistinguishable from ADR-049 Phase 7's orthogonal
+#:       contract-coverage 1 (Codex review). Absent under the default legacy
+#:       scheme, where there is no gate to report, so an ordinary scan is
+#:       unchanged from 1.8.
+SCAN_SCHEMA_VERSION = "1.9"
 
 _SCHEMA_DIR = Path(__file__).resolve().parent
 COMPARE_REPORT_SCHEMA_PATH = _SCHEMA_DIR / "compare_report.schema.json"
