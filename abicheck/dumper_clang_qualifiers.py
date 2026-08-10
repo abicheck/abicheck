@@ -348,6 +348,22 @@ def _clang_param_is_va_list(node: dict[str, Any]) -> bool:
     wrappers), which is a plain pointer parameter, not a ``va_list``
     parameter itself -- the regex's anchored single trailing ``*`` already
     excludes it.
+
+    **A residual, deliberately-not-closed gap this scope note implies**
+    (Codex review): the snapshot-level ``clang_va_list_facts_reliable``
+    flag records only whether THIS producer's extraction ran with the fix
+    applied -- it carries no per-snapshot record of WHICH target ABI a
+    clang parse actually ran against. Two genuinely different-target clang
+    snapshots (x86-64 System V vs. AArch64, say) can both be marked
+    reliable, and a real cross-architecture comparison (which this tool's
+    comparability layer permits in general) would then read the x86-64
+    side's real detections against the AArch64 side's uniform ``False`` as
+    a spurious ``PARAM_BECAME_VA_LIST``/``PARAM_LOST_VA_LIST``. This is the
+    same class of gap as the already-documented "toolchain-identity probe"
+    entry in ``AGENTS.md``'s Known gaps (no resolved-target validation
+    exists for ANY header-AST fact today, not just this one) rather than a
+    new, isolated problem -- closing it here alone, ahead of that general
+    mechanism, would be an inconsistent one-off fix for a structural gap.
     """
     desugared = _desugared_qualtype(node)
     return bool(_VA_LIST_TAG_PTR_RE.match(desugared.strip()))
