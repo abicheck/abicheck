@@ -717,3 +717,37 @@ class TestInterposerSpellings:
     @pytest.mark.skipif(os.name == "nt", reason="the interposer is /bin/sh")
     def test_each_spelling_goes_where_it_should(self, tmp_path, args, expected):
         assert self._run(tmp_path, args) == expected
+
+
+class TestOneModelPerBatch:
+    """The arms run sequentially and nothing pinned a model.
+
+    A default that moves between them — or between a batch and the resume that
+    finishes it — would be aggregated by arm alone, so what reads as skill lift
+    could be a model difference. Same class of silent confound as the in-repo
+    workspace, answered the same way: observe it, record it, refuse when the
+    arms are not comparable.
+    """
+
+    def test_the_model_is_read_out_of_the_init_event(self):
+        events = [{"type": "system", "subtype": "init", "model": "claude-sonnet-5"}]
+        assert runner.resolved_model(events) == "claude-sonnet-5"
+
+    def test_an_unreported_model_is_none_rather_than_a_guess(self):
+        assert runner.resolved_model([]) is None
+        assert runner.resolved_model([{"type": "system", "subtype": "init"}]) is None
+
+    def test_a_run_on_a_different_model_is_refused(self):
+        index = [{"model": "claude-sonnet-5"}, {"model": "claude-sonnet-5"}]
+        problem = runner.check_one_model(index, {"model": "claude-opus-5"})
+        assert problem and "claude-opus-5" in problem and "--model" in problem
+
+    def test_the_same_model_is_accepted(self):
+        index = [{"model": "claude-sonnet-5"}]
+        assert runner.check_one_model(index, {"model": "claude-sonnet-5"}) is None
+
+    def test_an_unknown_model_does_not_refuse_the_batch(self):
+        """None means the CLI never said, not that it differs — refusing there
+        would fail a run for the harness's own blind spot."""
+        assert runner.check_one_model([{"model": "claude-sonnet-5"}], {}) is None
+        assert runner.check_one_model([{}], {"model": "claude-sonnet-5"}) is None

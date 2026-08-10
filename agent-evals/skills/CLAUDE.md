@@ -92,6 +92,15 @@ graders assume every option takes a value, which can miss a self-comparison;
 the opposite assumption invents an operand and fails a *correct* run, and that
 is the direction that gets a gate switched off.
 
+One more confound the arms carry by construction: they run **sequentially**,
+and nothing pinned a model. A configured default that moves between them — or
+between a batch and the resume that finishes it — is aggregated by arm alone,
+so what reads as skill lift could be a model difference. `--model` pins one;
+either way the resolved model is recorded per run and a batch that mixes two is
+refused. Same answer as the in-repo workspace and the answer-bearing fixture:
+observe it, record it next to the outcome, refuse when the arms are not
+comparable.
+
 A test that pins a platform-dependent default must say so. `_bypassed_the_
 recorder` defaults `interposed` to `os.name != "nt"` — on Windows no
 interposer is installed, so every module entry really is a bypass — and three

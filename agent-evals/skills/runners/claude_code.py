@@ -450,6 +450,39 @@ def visible_native_skills(events: list[dict]) -> list[str] | None:
     return None
 
 
+def resolved_model(events: list[dict]) -> str | None:
+    """The model the CLI actually used, or None if it never said.
+
+    Recorded because the two arms run *sequentially* and neither pins a model:
+    if the configured or default model changes between them — or between a
+    batch and the resume that finishes it — `run_skill_eval.py` still
+    aggregates every row by arm alone, and what it would report as skill lift
+    could be a model difference. The same class of silent confound as the
+    in-repo workspace and the answer-bearing fixture, and answered the same
+    way: observe it, record it next to the outcome, and refuse when the arms
+    are not comparable.
+    """
+    for event in events:
+        if event.get("type") == "system" and event.get("subtype") == "init":
+            model = event.get("model")
+            return model if isinstance(model, str) else None
+    return None
+
+
+def check_one_model(index: list[dict], record: dict) -> str | None:
+    """Why this run is not comparable with the batch so far, if it is not."""
+    models = {row["model"] for row in index if isinstance(row.get("model"), str)}
+    model = record.get("model")
+    if not isinstance(model, str) or not models or model in models:
+        return None
+    return (
+        f"this run used {model} while the batch so far used "
+        f"{', '.join(sorted(models))}; an arm-to-arm difference would not be "
+        f"attributable to the skill. Pass --model to pin one, or start a fresh "
+        f"output root."
+    )
+
+
 def check_treatment(arm: str, scenario: dict, visible: list[str] | None) -> str | None:
     """The reason this run is not evidence about its arm, if it is not."""
     if visible is None:
@@ -493,7 +526,13 @@ def _usage(events: list[dict], elapsed: float) -> dict[str, Any]:
 
 
 def _run_once(
-    scenario_id: str, scenario: dict, arm: str, rep: int, out_dir: Path, timeout: int
+    scenario_id: str,
+    scenario: dict,
+    arm: str,
+    rep: int,
+    out_dir: Path,
+    timeout: int,
+    model: str | None = None,
 ) -> dict:
     work = out_dir / "workspace"
     work.mkdir(parents=True)
@@ -562,6 +601,10 @@ def _run_once(
             # get the identical list, so the treatment stays the skill alone.
             "--allowedTools",
             *ALLOWED_TOOLS,
+            # Pinning is optional but recorded either way: the arms run
+            # sequentially, so a default that moves between them would show up
+            # as skill lift.
+            *(("--model", model) if model else ()),
         ],
         cwd=work,
         env=env,
@@ -612,6 +655,7 @@ def _run_once(
         "skill": scenario["skill"],
         "exit_code": proc.returncode,
         "visible_skills": visible,
+        "model": resolved_model(events),
         "wall_clock_seconds": usage["wall_clock_seconds"],
     }
 
@@ -805,6 +849,11 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--out", required=True, help="Directory to write runs into")
     parser.add_argument("--repetitions", type=int, default=3)
     parser.add_argument(
+        "--model",
+        default=None,
+        help="Pin the model for every run. Recorded either way; see --help notes.",
+    )
+    parser.add_argument(
         "--arms",
         default=",".join(ARMS),
         help=f"Comma-separated subset of {','.join(ARMS)}",
@@ -825,6 +874,15 @@ def main(argv: list[str] | None = None) -> int:
         print(
             "abicheck is not on PATH; every recorded call would be a shim "
             "misconfiguration. Install it with `pip install -e .`.",
+            file=sys.stderr,
+        )
+        return 1
+    if args.repetitions < 1:
+        # `range(0)` is empty, so the run would print that zero runs were
+        # written and exit 0 — an accidental count reading as a completed
+        # evaluation.
+        print(
+            f"--repetitions must be at least 1, got {args.repetitions}",
             file=sys.stderr,
         )
         return 1
@@ -861,6 +919,22 @@ def main(argv: list[str] | None = None) -> int:
     }
     if not scenarios:
         print("no ready scenarios selected", file=sys.stderr)
+        return 1
+
+    unrunnable = sorted(
+        sid for sid in wanted if sid in scenarios and not supported_here(scenarios[sid])
+    )
+    if unrunnable:
+        # Skipping is right for the default all-scenarios sweep — several
+        # catalog cases are Linux-only — but an *explicitly named* one that
+        # this host cannot run is a request the batch cannot honour, and
+        # exiting 0 with it silently omitted reports an experiment that did
+        # not happen.
+        print(
+            f"requested scenario(s) not supported on {host_platform()}: "
+            f"{', '.join(unrunnable)}",
+            file=sys.stderr,
+        )
         return 1
 
     runnable = {sid: entry for sid, entry in scenarios.items() if supported_here(entry)}
@@ -932,7 +1006,9 @@ def main(argv: list[str] | None = None) -> int:
                 out_dir.mkdir(parents=True)
                 print(f"run  {sid}/{arm}/{rep}", flush=True)
                 try:
-                    record = _run_once(sid, scenario, arm, rep, out_dir, args.timeout)
+                    record = _run_once(
+                        sid, scenario, arm, rep, out_dir, args.timeout, args.model
+                    )
                 except subprocess.TimeoutExpired:
                     record = {
                         "scenario_id": sid,
@@ -943,6 +1019,9 @@ def main(argv: list[str] | None = None) -> int:
                         "timed_out": True,
                     }
                     (out_dir / "final.md").write_text("", encoding="utf-8")
+                mixed = check_one_model(index, record)
+                if mixed:
+                    raise RuntimeError(f"{sid}/{arm}/{rep}: {mixed}")
                 index.append(record)
                 flush()
 

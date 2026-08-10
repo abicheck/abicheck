@@ -83,6 +83,26 @@ _NOT_COMPARABLE_EXITS = {
 #: which is exactly what the artifact readers scan.
 NON_EXECUTING_FLAGS = ("--help", "-h", "--help-all", "--dry-run")
 
+#: Eager *global* options that print and exit before the verb runs at all.
+#: Position is the whole distinction and cannot be skipped: `compare` declares
+#: its own value-taking `--version` ("Version label used when an input is a
+#: bare .so file"), so `compare a.so b.so --version 1.2` is an ordinary
+#: comparison, while `abicheck --version compare a.so b.so` prints the version
+#: and exits 0 having compared nothing. Matching the token anywhere would have
+#: failed the correct run to catch the empty one.
+EAGER_GLOBAL_FLAGS = ("--version",)
+
+
+def exits_before_the_verb(call: dict) -> bool:
+    """Whether an eager global option resolved this call before it ran."""
+    for token in call.get("argv", []):
+        if token in EAGER_GLOBAL_FLAGS:
+            return True
+        if not token.startswith("-"):
+            return False  # the verb; anything after it belongs to the command
+    return False
+
+
 #: Flags that can make a report greener than the findings warrant. `--suppress`
 #: and `--policy-file` do it directly; the severity knobs do it by re-scoring
 #: what counts as an error. Spelled out in full rather than as a `--severity`
@@ -181,6 +201,8 @@ def comparison_command(call: dict) -> str | None:
     if verb not in COMPARISON_SUBCOMMANDS:
         return None
     if any(token in NON_EXECUTING_FLAGS for token in call.get("argv", [])):
+        return None
+    if exits_before_the_verb(call):
         return None
     if verb == "scan":
         argv = call.get("argv", [])

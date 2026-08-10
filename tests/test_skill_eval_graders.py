@@ -1147,3 +1147,31 @@ class TestNonExecutingModes:
     def test_the_same_call_without_that_flag_is_evidence(self):
         call = {"seq": 0, "argv": ["compare", "old.so", "new.so"], "exit_code": 0}
         assert ev.ran_to_a_verdict(call)
+
+
+class TestEagerGlobalOptions:
+    def test_a_global_version_exit_is_not_a_comparison(self):
+        """`abicheck --version compare old new` prints the version and exits 0
+        having compared nothing — verified against the real CLI."""
+        call = {
+            "seq": 0,
+            "argv": ["--version", "compare", "old.so", "new.so"],
+            "exit_code": 0,
+        }
+        assert not ev.is_comparison(call)
+        assert not ev.ran_to_a_verdict(call)
+
+    def test_the_commands_own_version_option_is_untouched(self):
+        """`compare` declares a value-taking `--version` ("Version label used
+        when an input is a bare .so file"), so matching the token anywhere
+        would have failed a correct run to catch the empty one."""
+        call = {
+            "seq": 0,
+            "argv": ["compare", "old.so", "new.so", "--version", "1.2"],
+            "exit_code": 0,
+        }
+        assert ev.ran_to_a_verdict(call)
+
+    def test_a_global_flag_before_the_verb_is_not_an_eager_exit(self):
+        call = {"seq": 0, "argv": ["-v", "compare", "old.so", "new.so"], "exit_code": 0}
+        assert ev.ran_to_a_verdict(call)
