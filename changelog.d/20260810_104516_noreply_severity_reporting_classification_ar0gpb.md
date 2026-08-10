@@ -40,3 +40,15 @@
   as stdout — and a severity category configured as `error` now fails the
   step whatever exit code it produced, instead of `potential_breaking=error`
   (exit 2) being waved through by `fail-on-api-break`'s `false` default.
+
+- **A break the severity policy chose not to gate stays visible in the
+  Action** — under a demoting scheme (`--severity-preset info-only`, or any
+  `--severity-*` putting the breaking categories below `error`) abicheck exits
+  0 while its report still says `BREAKING`, and the Action mapped that exit
+  straight to `COMPATIBLE` — claiming no break was detected for the one thing
+  the run did detect. The published `verdict` now follows the report's
+  compatibility axis on both `compare` and `scan`, while
+  `fail-on-breaking`/`fail-on-api-break` deliberately do not fail the step for
+  it, so `info-only` still does not gate. `action.yml`'s `exit-code` output
+  contract (and its generated reference) also declares the severity-driven
+  scan exit 1 it had described as coverage-only.

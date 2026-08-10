@@ -882,6 +882,13 @@ elif query == "severity_exit":
     # unreadable report is "cannot tell", and that exits above without
     # printing.
     print(_severity().get("exit_code", 0))
+elif query == "compat_verdict":
+    # The *compatibility* axis's own verdict, which a severity scheme never
+    # rewrites -- `scan_engine` explicitly leaves a BREAKING/API_BREAK label
+    # alone when the gate demotes the exit code, and `compare` reports
+    # `result.verdict` unconditionally. It is therefore the only signal that
+    # tells a genuinely clean run from a break the user chose not to gate on.
+    print(_either("verdict", "") or "")
 elif query == "blocking_categories":
     print(", ".join(str(c) for c in (_severity().get("blocking_categories") or [])))
 elif query == "coverage_where":
@@ -1003,6 +1010,56 @@ _severity_gate_categories() {
 
 
 
+# The compatibility verdict the report itself published, JSON first and
+# otherwise the rendered report -- the same two-source rule as the severity
+# gate readers above, and for the same reason: `format: text` is the Action's
+# documented default for scan and writes no JSON sidecar.
+#
+# The label spelling is shared by both renderers (`Verdict: BREAKING` in the
+# scan text footer, ``**Verdict:** 💥 `BREAKING`  — …`` in the compare
+# markdown header), so one pattern reads both. Only uppercase-free filler is
+# allowed between the two halves, which is what stops a `COMPATIBLE` verdict
+# line from matching on a later "breaking" word in its own explanatory tail.
+_report_compat_verdict() {
+  local _src _answer
+  _src=$(_json_report_src)
+  _answer=$(_report_query "$_src" compat_verdict)
+  if [[ -n "$_answer" ]]; then
+    echo "$_answer"
+    return
+  fi
+  sed -n 's/.*Verdict:[^A-Z]*\(API_BREAK\|BREAKING\).*/\1/p' \
+    <<<"$(_text_report_content)" | head -1
+}
+
+# Exit 0 is not the same fact as "no break was found". Under a demoting
+# severity scheme -- `--severity-preset info-only`, or any `--severity-*`
+# putting the breaking categories below `error` -- abicheck deliberately
+# publishes 0 while its own report still says BREAKING/API_BREAK: the user
+# asked for the finding to be *reported and not gated*. Mapping that exit
+# straight to COMPATIBLE made the Action's `verdict` output and job summary
+# claim no ABI break was detected, which is the one thing the report says it
+# did detect (Codex review).
+#
+# So the published verdict follows the report, and the *gate* is what the
+# severity policy switches off: ADVISORY_BREAK below suppresses the
+# fail-on-breaking / fail-on-api-break blocks, so `info-only` keeps not
+# failing the step exactly as before. Both modes resolve it here rather than
+# only the one the review named -- compare's exit 0 has always had the same
+# two possible causes, it just had no severity-aware scan beside it to make
+# the asymmetry visible.
+ADVISORY_BREAK=false
+_resolve_clean_exit_verdict() {
+  local _v
+  VERDICT="COMPATIBLE"
+  _v=$(_report_compat_verdict)
+  if [[ "$_v" == "BREAKING" || "$_v" == "API_BREAK" ]]; then
+    VERDICT="$_v"
+    ADVISORY_BREAK=true
+    echo "::notice::abicheck reports $_v, but the configured severity policy resolved this run to exit 0 — the step is not failed. Raise the category to \`error\` to gate on it."
+  fi
+}
+
 if [[ "$MODE" == "deps-compare" ]]; then
   # deps-compare exit codes: 0=PASS, 1=WARN, 4=FAIL
   if _is_cli_error; then
@@ -1055,7 +1112,7 @@ elif [[ "$MODE" == "scan" ]]; then
     echo "::error::Check the command and inputs above. This is NOT an API break — the scan did not run."
   else
     case $ABICHECK_EXIT in
-      0) VERDICT="COMPATIBLE" ;;
+      0) _resolve_clean_exit_verdict ;;
       1)
         # `scan` exit 1 now has three possible sources, not one. It used to
         # be coverage-only ("scan's own verdict codes are 0/2/4/5, so 1 can
@@ -1108,7 +1165,7 @@ else
     echo "::error::Check the command and inputs above. This is NOT an API break — the check did not run."
   else
     case $ABICHECK_EXIT in
-      0) VERDICT="COMPATIBLE" ;;
+      0) _resolve_clean_exit_verdict ;;
       1)
         if _is_cli_error; then
           VERDICT="ERROR"
@@ -1216,9 +1273,22 @@ if [[ "${INPUT_ADD_JOB_SUMMARY:-true}" == "true" && "$MODE" != "dump" ]]; then
           echo ">"
           echo "> ⚠️ Also blocked by severity policy: \`$_sev_cats_summary\` configured as \`error\`. This fails the step independently of \`fail-on-api-break\`."
         fi
+        if [[ "$ADVISORY_BREAK" == "true" ]]; then
+          echo ">"
+          echo "> ℹ️ Reported, not gated: the configured severity policy resolved this run to exit 0, so the step is **not** failed. Raise the blocking category to \`error\` to gate on it."
+        fi
         ;;
       BREAKING)
         echo "> **Verdict: BREAKING** — Binary ABI break detected. Existing binaries will fail at runtime."
+        # The mirror of the API_BREAK note above, for the opposite direction:
+        # there, a severity category gated a run the fail-on flag would have
+        # let pass; here, the severity policy resolved a real break to exit 0
+        # and the step is green. Both are cases where the step's outcome does
+        # not follow from the verdict alone, and both have to say so.
+        if [[ "$ADVISORY_BREAK" == "true" ]]; then
+          echo ">"
+          echo "> ℹ️ Reported, not gated: the configured severity policy resolved this run to exit 0, so the step is **not** failed. Raise the blocking category to \`error\` to gate on it."
+        fi
         ;;
       REMOVED_LIBRARY)
         echo "> **Verdict: REMOVED_LIBRARY** — A library present in the old package is missing from the new package."
@@ -1567,7 +1637,8 @@ elif [[ "$MODE" == "dump" ]]; then
 elif [[ "$MODE" == "scan" ]]; then
   # scan: BREAKING/API_BREAK follow the fail-on flags; a budget overflow always
   # fails the step (the budget is a guard that must not be silently swallowed).
-  if [[ "$VERDICT" == "BREAKING" && "${INPUT_FAIL_ON_BREAKING:-true}" == "true" ]]; then
+  if [[ "$VERDICT" == "BREAKING" && "${INPUT_FAIL_ON_BREAKING:-true}" == "true" \
+        && "$ADVISORY_BREAK" != "true" ]]; then
     echo "::error::ABI break detected by scan. Set fail-on-breaking: false to continue despite breaks."
     FINAL_EXIT=1
   fi
@@ -1578,7 +1649,8 @@ elif [[ "$MODE" == "scan" ]]; then
   # cannot tell from the exit code alone whether a promoted check fired, so
   # keying off the crosscheck flag would wrongly fail an unrelated API break
   # when fail-on-api-break is false (Codex review).
-  if [[ "$VERDICT" == "API_BREAK" && "${INPUT_FAIL_ON_API_BREAK:-false}" == "true" ]]; then
+  if [[ "$VERDICT" == "API_BREAK" && "${INPUT_FAIL_ON_API_BREAK:-false}" == "true" \
+        && "$ADVISORY_BREAK" != "true" ]]; then
     echo "::error::API/source break detected by scan (includes promoted --crosscheck=error gates). Set fail-on-api-break: false to ignore."
     FINAL_EXIT=1
   fi
@@ -1628,12 +1700,14 @@ else
   # compare mode: BREAKING/API_BREAK follow fail-on flags; REMOVED_LIBRARY
   # only appears when --fail-on-removed-library was passed to the CLI
   # (directory/package operands only).
-  if [[ "$VERDICT" == "BREAKING" && "${INPUT_FAIL_ON_BREAKING:-true}" == "true" ]]; then
+  if [[ "$VERDICT" == "BREAKING" && "${INPUT_FAIL_ON_BREAKING:-true}" == "true" \
+        && "$ADVISORY_BREAK" != "true" ]]; then
     echo "::error::ABI break detected. Set fail-on-breaking: false to continue despite breaks."
     FINAL_EXIT=1
   fi
 
-  if [[ "$VERDICT" == "API_BREAK" && "${INPUT_FAIL_ON_API_BREAK:-false}" == "true" ]]; then
+  if [[ "$VERDICT" == "API_BREAK" && "${INPUT_FAIL_ON_API_BREAK:-false}" == "true" \
+        && "$ADVISORY_BREAK" != "true" ]]; then
     echo "::error::API break detected. Set fail-on-api-break: false to ignore API-level breaks."
     FINAL_EXIT=1
   fi

@@ -136,6 +136,7 @@ def _run_action(tmp_path: Path, env_extra: dict[str, str], bindir: Path) -> dict
             key, value = line.split("=", 1)
             outputs[key] = value
     outputs["_stdout"] = proc.stdout
+    outputs["_exit"] = proc.returncode
     outputs["_summary"] = summary.read_text(encoding="utf-8")
     outputs["_runner_temp"] = str(runner_temp)
     return outputs
@@ -705,3 +706,178 @@ class TestCompareTellsTheTwoAxesApart:
             },
         )
         assert outputs["verdict"] == "SEVERITY_ERROR", outputs
+
+
+class TestADemotedBreakStaysVisible:
+    """Exit 0 is not the same fact as "no break was found".
+
+    Under a demoting severity scheme (``--severity-preset info-only``, or any
+    ``--severity-*`` putting the breaking categories below ``error``) abicheck
+    publishes exit 0 while its own report still says ``BREAKING`` -- the user
+    asked for the finding to be reported and not gated. Mapping that exit
+    straight to ``COMPATIBLE`` made the Action's ``verdict`` output and job
+    summary claim no break was detected, which is the one thing the report
+    says it did detect (Codex review).
+    """
+
+    def _outputs(
+        self,
+        tmp_path: Path,
+        mode: str,
+        report: dict | None = None,
+        *,
+        fmt: str = "json",
+        stdout_report: bool = False,
+        text: str | None = None,
+        env_extra: dict[str, str] | None = None,
+    ) -> dict:
+        out_file = tmp_path / ("report.json" if fmt == "json" else "report.txt")
+        if text is not None:
+            # A rendered (non-JSON) report, which is what `format: text` --
+            # the Action's documented default for scan -- actually produces.
+            bindir = tmp_path / "bin"
+            bindir.mkdir()
+            stub = bindir / "abicheck"
+            stub.write_text(
+                "#!/usr/bin/env bash\n"
+                "prev=''\n"
+                'for arg in "$@"; do\n'
+                '  if [[ "$prev" == "-o" ]]; then\n'
+                f"    cat > \"$arg\" <<'REPORT'\n{text}\nREPORT\n"
+                "  fi\n"
+                '  prev="$arg"\n'
+                "done\n"
+                "exit 0\n",
+                encoding="utf-8",
+            )
+            stub.chmod(0o755)
+        else:
+            bindir = _stub_abicheck(
+                tmp_path, exit_code=0, report=report, to_stdout=stdout_report
+            )
+        env = {
+            "INPUT_MODE": mode,
+            "INPUT_NEW_LIBRARY": _lib(tmp_path, "libnew.so"),
+            "INPUT_FORMAT": fmt,
+            "INPUT_OUTPUT_FILE": str(out_file),
+        }
+        if mode == "compare":
+            env["INPUT_OLD_LIBRARY"] = _lib(tmp_path, "libold.so")
+        env.update(env_extra or {})
+        return _run_action(tmp_path, env, bindir)
+
+    @staticmethod
+    def _demoted(verdict: str) -> dict:
+        """A report whose compatibility verdict breaks and whose gate cleared.
+
+        `blocking: false` is what a demoting preset produces -- the gate ran
+        and found no *error-level* category -- which is exactly why the exit
+        code alone cannot tell this apart from a genuinely clean run.
+        """
+        return {
+            "verdict": verdict,
+            "exit_code": 0,
+            "diff": {"verdict": verdict},
+            "severity": {
+                "exit_code": 0,
+                "blocking": False,
+                "blocking_categories": [],
+            },
+        }
+
+    @pytest.mark.parametrize("mode", ["scan", "compare"])
+    @pytest.mark.parametrize("verdict", ["BREAKING", "API_BREAK"])
+    def test_the_verdict_follows_the_report_not_the_exit_code(
+        self, tmp_path: Path, mode: str, verdict: str
+    ) -> None:
+        outputs = self._outputs(tmp_path, mode, self._demoted(verdict))
+        assert outputs["verdict"] == verdict, outputs
+        assert outputs["exit-code"] == "0", outputs
+
+    @pytest.mark.parametrize("mode", ["scan", "compare"])
+    def test_the_step_still_passes_because_the_policy_said_so(
+        self, tmp_path: Path, mode: str
+    ) -> None:
+        """The verdict becoming truthful must not turn `info-only` into a gate.
+
+        `fail-on-breaking` defaults to true, so publishing BREAKING without
+        this would fail every run of the preset whose entire purpose is not to
+        -- trading one misreport for a worse regression.
+        """
+        outputs = self._outputs(tmp_path, mode, self._demoted("BREAKING"))
+        assert outputs["_exit"] == 0, outputs["_stdout"]
+        assert "::notice::" in outputs["_stdout"], outputs["_stdout"]
+        # ...and the summary says why a break did not fail the step, rather
+        # than leaving a green check next to a BREAKING verdict unexplained.
+        assert "Reported, not gated" in outputs["_summary"], outputs["_summary"]
+
+    @pytest.mark.parametrize("mode", ["scan", "compare"])
+    def test_api_break_is_not_gated_either(self, tmp_path: Path, mode: str) -> None:
+        """`fail-on-api-break` is off by default, so this passes either way --
+        pinned explicitly on, so the guard is what is being tested."""
+        outputs = self._outputs(
+            tmp_path,
+            mode,
+            self._demoted("API_BREAK"),
+            env_extra={"INPUT_FAIL_ON_API_BREAK": "true"},
+        )
+        assert outputs["verdict"] == "API_BREAK", outputs
+        assert outputs["_exit"] == 0, outputs["_stdout"]
+
+    @pytest.mark.parametrize("mode", ["scan", "compare"])
+    def test_a_genuinely_clean_run_is_unchanged(
+        self, tmp_path: Path, mode: str
+    ) -> None:
+        outputs = self._outputs(
+            tmp_path,
+            mode,
+            {"verdict": "COMPATIBLE", "exit_code": 0},
+        )
+        assert outputs["verdict"] == "COMPATIBLE", outputs
+        assert outputs["_exit"] == 0, outputs["_stdout"]
+        assert "Reported, not gated" not in outputs["_summary"], outputs["_summary"]
+
+    def test_an_unreadable_report_falls_back_to_compatible(
+        self, tmp_path: Path
+    ) -> None:
+        """No report to read is not evidence of a break. Exit 0 with nothing
+        to contradict it stays COMPATIBLE, as it always has."""
+        outputs = self._outputs(tmp_path, "scan", _MALFORMED)  # type: ignore[arg-type]
+        assert outputs["verdict"] == "COMPATIBLE", outputs
+        assert outputs["_exit"] == 0, outputs["_stdout"]
+
+    def test_the_text_report_is_read_too(self, tmp_path: Path) -> None:
+        """`format: text` is the Action's documented default for scan and
+        writes no JSON sidecar -- a JSON-only reader would leave the most
+        common invocation on the wrong verdict, the same defect already fixed
+        twice for the severity-gate readers beside this one.
+        """
+        outputs = self._outputs(
+            tmp_path,
+            "scan",
+            fmt="text",
+            text=(
+                "abicheck scan\n"
+                "  severity gate: pass (no error-level findings)\n"
+                "\n"
+                "Verdict: BREAKING\n"
+            ),
+        )
+        assert outputs["verdict"] == "BREAKING", outputs
+        assert outputs["_exit"] == 0, outputs["_stdout"]
+
+    def test_a_compatible_text_verdict_does_not_match_its_own_prose(
+        self, tmp_path: Path
+    ) -> None:
+        """The renderers put an explanatory tail on the same line as the
+        label, and that tail can spell "breaking". Only uppercase-free filler
+        is allowed between `Verdict:` and the label, so the tail cannot be
+        read as the verdict.
+        """
+        outputs = self._outputs(
+            tmp_path,
+            "scan",
+            fmt="text",
+            text="Verdict: COMPATIBLE — no BREAKING changes detected\n",
+        )
+        assert outputs["verdict"] == "COMPATIBLE", outputs
