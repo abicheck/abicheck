@@ -366,11 +366,52 @@ class TestExperimentalRemovedWithoutReplacement:
         assert len(changes) == 1
         c = changes[0]
         assert c.kind == ChangeKind.EXPERIMENTAL_REMOVED_WITHOUT_REPLACEMENT
-        # The leaf named in the description must be the real member name,
-        # not a parameter-type fragment split out of the unstripped
-        # signature.
+        # The reported *leaf* must be the real member name, not a
+        # parameter-type fragment split out of the unstripped signature —
+        # unlike the leaf, the '{old}' declaration text legitimately still
+        # carries the full signature (Codex review: needed to distinguish
+        # one overload from another; see _index_funcs_by_stable_key).
         assert "leaf 'get_alloc_kind'" in c.description
-        assert "data_type" not in c.description
+        assert "leaf 'data_type" not in c.description
+
+    def test_removed_overload_reported_when_sibling_overload_survives(self) -> None:
+        """Codex review: stripping the parameter list when deriving the
+        *identity* used to index functions (not just the reported leaf)
+        would collapse two overloads (``f(int)``, ``f(double)``) onto one
+        key — so removing one overload while its sibling survives would
+        read as "still present" and go unreported. The identity used for
+        matching must keep the full signature; only the reported leaf name
+        strips it.
+        """
+        import abicheck.demangle as dm
+
+        def fake_demangle(mangled_list: list[str]) -> dict[str, str]:
+            sigs = {
+                "_ZN2ns13experimental1fEi": "ns::experimental::f(int)",
+                "_ZN2ns13experimental1fEd": "ns::experimental::f(double)",
+            }
+            return {m: sigs[m] for m in mangled_list if m in sigs}
+
+        orig = dm.demangle_batch
+        dm.demangle_batch = fake_demangle  # type: ignore[assignment]
+        try:
+            old = _snap(funcs=[
+                _fn("", mangled="_ZN2ns13experimental1fEi"),
+                _fn("", mangled="_ZN2ns13experimental1fEd"),
+            ])
+            # Only the int overload disappears; the double overload survives
+            # unchanged (still in experimental::, no stable replacement).
+            new = _snap(funcs=[_fn("", mangled="_ZN2ns13experimental1fEd")])
+            changes = detect_experimental_namespace_changes(old, new)
+        finally:
+            dm.demangle_batch = orig  # type: ignore[assignment]
+
+        removed = [
+            c for c in changes
+            if c.kind == ChangeKind.EXPERIMENTAL_REMOVED_WITHOUT_REPLACEMENT
+        ]
+        assert len(removed) == 1
+        assert "f(int)" in removed[0].symbol
 
 
 # ---------------------------------------------------------------------------

@@ -159,26 +159,24 @@ def _qualified_function_name(
 
     A demangled string is a *full declaration* — return type, qualified
     name, parameter list, and trailing qualifiers (``ns::C::f(ns::T
-    const&, long) const``) — not merely a qualified name. Every caller here
-    ultimately feeds this into ``_segments()``, which only tracks ``<``/``>``
-    template-argument depth, not ``(``/``)`` parameter-list depth: an
-    unstripped signature whose parameter type is itself namespace-qualified
-    (``ns::T`` above) makes ``_segments()`` split *inside* the parameter
-    list, corrupting the leaf name derived from the last segment (reported:
-    a leaf of ``"data_type const&, long) const"`` — a parameter-type
-    fragment, never a real identifier). :func:`diff_templates._strip_param_signature`
-    already solves exactly this for the CPO detector; reused here rather
-    than re-implementing it.
+    const&, long) const``) — not merely a qualified name. This is
+    deliberately returned as-is, signature included: it is what
+    distinguishes one overload from another for callers that index
+    functions by qualified name (:func:`_index_funcs_by_stable_key`) — a
+    caller that needs only the *leaf* member name must strip the signature
+    itself (via :func:`diff_templates._strip_param_signature`) before
+    segmenting, rather than have it stripped here, or two overloads
+    (``f(int)``, ``f(double)``) collapse onto one identity and an overload
+    that is removed while a sibling survives goes unreported (Codex
+    review).
     """
     if "::" in name or "<" in name:
         return name
     if mangled.startswith("_Z"):
         if demangled is not None:
-            dm = demangled.get(mangled, name)
-        else:
-            from .demangle import demangle_batch
-            dm = demangle_batch([mangled]).get(mangled, name)
-        return _strip_param_signature(dm)
+            return demangled.get(mangled, name)
+        from .demangle import demangle_batch
+        return demangle_batch([mangled]).get(mangled, name)
     return name
 
 
@@ -215,11 +213,20 @@ def _index_funcs_by_stable_key(
     for f in snap.functions:
         if f.visibility != Visibility.PUBLIC:
             continue
+        # qname keeps its parameter list (when demangled) — that's what
+        # distinguishes one overload from another for the (stripped, leaf)
+        # index key below; collapsing it here would let two overloads
+        # (`f(int)`, `f(double)`) share one identity, so removing just one
+        # of them while the other survives would go unreported (Codex
+        # review). Only the *leaf* — the reported member name — needs the
+        # signature stripped, since `_segments()` doesn't track `(`/`)`
+        # depth and would otherwise split inside a namespace-qualified
+        # parameter type.
         qname = _qualified_function_name(f.name, f.mangled, demangled)
-        segs = _segments(qname)
-        if not segs:
+        leaf_segs = _segments(_strip_param_signature(qname))
+        if not leaf_segs:
             continue
-        leaf = segs[-1]
+        leaf = leaf_segs[-1]
         stripped, _ = _strip_experimental(qname, experimental_namespaces)
         out.setdefault((stripped, leaf), []).append(qname)
     return out

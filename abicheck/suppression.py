@@ -132,7 +132,17 @@ def _translate_namespace_glob(pattern: str) -> str:
     parts: list[str] = []
     for i, seg in enumerate(segments):
         if seg == "**":
-            parts.append("(?:.*::)?" if i == 0 else "(?:::.*)?")
+            if i == 0 and i == len(segments) - 1:
+                # A standalone "**" (the whole pattern, after the collapse
+                # above) is a catch-all — it must consume arbitrary
+                # namespace text, not just "" or a "::"-terminated prefix
+                # (Codex review: the two-way leading/trailing form below
+                # left this case matching only the empty string or text
+                # ending in "::", so "namespace: '**'" stopped matching an
+                # ordinary name like "oneapi::dal::foo" entirely).
+                parts.append(".*")
+            else:
+                parts.append("(?:.*::)?" if i == 0 else "(?:::.*)?")
             continue
         # A leading "**" already absorbs its own trailing "::" (or correctly
         # contributes none, for the zero-segment match) — every other

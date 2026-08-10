@@ -312,6 +312,22 @@ class TestNamespaceGlobstarSemantics:
         assert not s.matches(self._change("backendish::x"))
         assert not s.matches(self._change("x::backendish"))
 
+    def test_standalone_globstar_matches_any_namespace(self):
+        # Codex review: the leading/trailing two-way branch above produced
+        # "(?:.*::)?" for a standalone "**", which matches only "" or text
+        # ending in "::" — so an ordinary name like "oneapi::dal::foo"
+        # never matched at all, silently disabling an otherwise-valid
+        # catch-all suppression rule.
+        s = Suppression(namespace="**", reachability="any", reason="catch-all")
+        assert s.matches(self._change("oneapi::dal::foo"))
+        assert s.matches(self._change("plain"))
+
+    def test_collapsed_standalone_globstar_matches_any_namespace(self):
+        # "**::**" collapses to "**" before translation — must hit the same
+        # standalone-catch-all fix.
+        s = Suppression(namespace="**::**", reachability="any", reason="catch-all")
+        assert s.matches(self._change("oneapi::dal::foo"))
+
 
 # ═══════════════════════════════════════════════════════════════════════════
 # Type Pattern Matching
