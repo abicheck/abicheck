@@ -127,8 +127,8 @@ def _qualified_function_name(name: str, mangled: str) -> str:
 
 
 def _strip_param_signature(qualified: str) -> str:
-    """Strip a function's parameter-list signature (from the first
-    top-level ``(``), preserving any ``::`` namespace/class qualification.
+    """Strip a function's parameter-list signature (from its own top-level
+    ``(``), preserving any ``::`` namespace/class qualification.
 
     Used to compare a function's demangled name (``lib::sort(int*, int*)``)
     against a variable's demangled name (``lib::sort``) so the two sides of
@@ -137,22 +137,47 @@ def _strip_param_signature(qualified: str) -> str:
     unrelated namespaces reusing the same leaf identifier (``ns1::sort`` vs
     ``ns2::sort``) must never collapse together (see :func:`detect_cpo_kind_changed`).
 
-    A call operator's own name is spelled ``operator()`` — those parentheses
-    are the identifier, not an argument list. Naively stopping at the first
-    top-level ``(`` corrupts ``ns::C::operator()(ns::T const&) const`` down
-    to just ``ns::C::operator`` (Codex review). When the text immediately
-    before a ``(`` is the ``operator`` token, that pair is skipped and the
-    search continues for the real parameter-list opener.
+    Two shapes make "the first top-level ``(`` in the string" the wrong
+    thing to stop at (both Codex review, both verified with real c++filt
+    output shapes):
+
+    * A call operator's own name is spelled ``operator()`` — those
+      parentheses are the identifier, not an argument list. Naively
+      stopping at the first ``(`` corrupted
+      ``ns::C::operator()(ns::T const&) const`` down to just
+      ``ns::C::operator``. Skipping it needs an actual ``operator`` *token*
+      immediately before an *empty* ``()`` pair, not merely a name ending
+      in the substring ``"operator"`` — ``ns::cooperator(int)`` is a plain
+      function, not a disguised call operator, and stripping its params
+      must behave normally.
+    * A function template returning a function pointer demangles with the
+      return type's own declarator wrapped *around* the name and its real
+      arguments — ``int (*ns::f<int>(int))()`` — so the very first ``(``
+      opens that wrapping group, not ``f``'s own parameter list; truncating
+      there left a leaf of ``"int "`` instead of ``"f"``. A ``(`` that
+      opens a declarator wrapper is recognized by what immediately follows
+      it (``*``/``&``, never how a real call's parameter list starts);
+      everything else, including every well-formed argument list and every
+      symbolic operator's own (``operator+(int)`` and friends), is
+      unaffected.
     """
     i = qualified.find("(")
     while i != -1:
-        if qualified[:i].endswith("operator"):
-            close = qualified.find(")", i)
-            if close == -1:
-                return qualified
-            i = qualified.find("(", close)
+        if i + 1 < len(qualified) and qualified[i + 1] in "*&":
+            # Not a parameter list at all — the opening paren of a
+            # function-pointer/reference declarator wrapping the return
+            # type around the real name. Keep looking.
+            i = qualified.find("(", i + 1)
             continue
-        return qualified[:i]
+        prefix = qualified[:i]
+        m = _OPERATOR_TOKEN_RE.search(prefix)
+        if m is not None and m.end() == len(prefix) and qualified[i:i + 2] == "()":
+            # operator()'s own, empty parentheses are part of the
+            # identifier — skip exactly that pair and keep searching for
+            # the real parameter-list opener.
+            i = qualified.find("(", i + 2)
+            continue
+        return prefix
     return qualified
 
 

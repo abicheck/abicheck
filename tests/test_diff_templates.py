@@ -154,6 +154,34 @@ class TestStripParamSignature:
     def test_no_parens_returns_unchanged(self) -> None:
         assert _strip_param_signature("lib::sort") == "lib::sort"
 
+    def test_lookalike_operator_suffix_is_not_special_cased(self) -> None:
+        # Codex review: "cooperator" merely *ends with* the substring
+        # "operator" — it is an ordinary identifier, not a disguised call
+        # operator, and its parameter list must strip normally.
+        assert _strip_param_signature("ns::cooperator(int)") == "ns::cooperator"
+
+    def test_function_pointer_return_type_does_not_truncate_at_wrapper_paren(
+        self,
+    ) -> None:
+        # Codex review: a function template returning a function pointer
+        # demangles with the return type's own declarator wrapped *around*
+        # the name and its real arguments — the first "(" in the string
+        # opens that wrapper, not the function's own parameter list.
+        sig = "int (*ns::experimental::bar<int>(int))()"
+        result = _strip_param_signature(sig)
+        # The real fix is that _segments() (the actual downstream leaf
+        # consumer) still recovers the correct leaf despite the wrapper
+        # prefix surviving in the stripped text.
+        from abicheck.diff_namespaces import _segments
+        assert _segments(result)[-1] == "bar"
+
+    def test_call_operator_after_function_pointer_wrapper(self) -> None:
+        # Both fixes composed: a wrapping declarator paren followed later
+        # by a genuine call operator's own empty parentheses.
+        sig = "int (*ns::C::operator()(int))()"
+        result = _strip_param_signature(sig)
+        assert result.endswith("operator()")
+
 
 # ---------------------------------------------------------------------------
 # INTERNAL_TEMPLATE_LEAKS_VIA_PUBLIC_API
