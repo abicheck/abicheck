@@ -362,6 +362,165 @@ def test_parse_member_call_unresolved_id_is_dropped_not_misattributed() -> None:
     assert parse_clang_ast_calls(ast) == []
 
 
+def test_parse_member_call_to_later_declared_sibling_still_resolves() -> None:
+    """Codex review, fresh evidence, verified against real Clang 17
+    ``-ast-dump=json`` output for ``struct A { virtual void f(){ g(); }
+    virtual void g(); };``: clang visits ``f``'s body -- and its call to
+    ``g`` -- before ``g``'s own ``CXXMethodDecl`` sibling in the pre-order
+    dump. ``member_index`` was previously built incrementally during the
+    single combined walk, so at the moment ``f -> g`` was resolved, ``g``
+    was not yet indexed and the call was silently dropped rather than
+    misattributed. This reproduces the exact ordering (``f`` first, ``g``
+    declared after) end to end; the whole-AST pre-pass
+    (``_index_member_decls``) must make ``g`` resolvable regardless of
+    visit order.
+    """
+    ast = {
+        "kind": "TranslationUnitDecl",
+        "inner": [
+            {
+                "kind": "CXXRecordDecl",
+                "name": "A",
+                "inner": [
+                    {
+                        "kind": "CXXMethodDecl",
+                        "id": "0x1",
+                        "name": "f",
+                        "mangledName": "_ZN1A1fEv",
+                        "type": {"qualType": "void ()"},
+                        "virtual": True,
+                        "inner": [
+                            {
+                                "kind": "CompoundStmt",
+                                "inner": [
+                                    {
+                                        "kind": "CXXMemberCallExpr",
+                                        "inner": [
+                                            {
+                                                "kind": "MemberExpr",
+                                                "referencedMemberDecl": "0x2",
+                                                "inner": [
+                                                    {
+                                                        "kind": "CXXThisExpr",
+                                                    }
+                                                ],
+                                            }
+                                        ],
+                                    }
+                                ],
+                            }
+                        ],
+                    },
+                    {
+                        "kind": "CXXMethodDecl",
+                        "id": "0x2",
+                        "name": "g",
+                        "mangledName": "_ZN1A1gEv",
+                        "type": {"qualType": "void ()"},
+                        "virtual": True,
+                    },
+                ],
+            },
+        ],
+    }
+    edges = parse_clang_ast_calls(ast)
+    assert edges == [
+        CallEdge(
+            "_ZN1A1fEv",
+            "_ZN1A1gEv",
+            CALL_KIND_VIRTUAL,
+            RESOLUTION_OVERAPPROX,
+        )
+    ]
+
+
+def test_parse_call_to_override_without_own_virtual_flag_is_still_virtual() -> None:
+    """Codex review, fresh evidence, verified against a real Clang 17 AST for
+    ``struct B { virtual void f(); }; struct D : B { void f() override;
+    void h(){ f(); } };``: clang repeats ``"virtual": true`` only on the
+    slot's *original* declaring ancestor (``B::f``), never on the override's
+    own ``CXXMethodDecl`` (``D::f``). When the resolved static target of a
+    member call *is itself* an override, reading only
+    ``ref.get("virtual")`` misclassified the call as
+    ``CALL_KIND_DIRECT``/``RESOLUTION_EXACT`` -- excluding a real
+    further-derived-override chain from ``VIRTUAL_CALL_MAY_DISPATCH_TO``
+    entirely. This reproduces that shape directly: ``D::f`` (the resolved
+    static target of ``h``'s call) carries no ``"virtual": true`` of its
+    own, only ``B::f`` does.
+    """
+    ast = {
+        "kind": "TranslationUnitDecl",
+        "inner": [
+            {
+                "kind": "CXXRecordDecl",
+                "name": "B",
+                "inner": [
+                    {
+                        "kind": "CXXMethodDecl",
+                        "id": "0xb",
+                        "name": "f",
+                        "mangledName": "_ZN1B1fEv",
+                        "type": {"qualType": "void ()"},
+                        "virtual": True,
+                    }
+                ],
+            },
+            {
+                "kind": "CXXRecordDecl",
+                "name": "D",
+                "bases": [{"type": {"qualType": "B"}}],
+                "inner": [
+                    {
+                        "kind": "CXXMethodDecl",
+                        "id": "0xd",
+                        "name": "f",
+                        "mangledName": "_ZN1D1fEv",
+                        "type": {"qualType": "void ()"},
+                        # No "virtual": true here -- clang only repeats it on
+                        # the original declaring ancestor.
+                        "inner": [
+                            {"kind": "OverrideAttr"},
+                        ],
+                    },
+                    {
+                        "kind": "CXXMethodDecl",
+                        "id": "0xh",
+                        "name": "h",
+                        "mangledName": "_ZN1D1hEv",
+                        "type": {"qualType": "void ()"},
+                        "inner": [
+                            {
+                                "kind": "CompoundStmt",
+                                "inner": [
+                                    {
+                                        "kind": "CXXMemberCallExpr",
+                                        "inner": [
+                                            {
+                                                "kind": "MemberExpr",
+                                                "referencedMemberDecl": "0xd",
+                                                "inner": [{"kind": "CXXThisExpr"}],
+                                            }
+                                        ],
+                                    }
+                                ],
+                            }
+                        ],
+                    },
+                ],
+            },
+        ],
+    }
+    edges = parse_clang_ast_calls(ast)
+    assert edges == [
+        CallEdge(
+            "_ZN1D1hEv",
+            "_ZN1D1fEv",
+            CALL_KIND_VIRTUAL,
+            RESOLUTION_OVERAPPROX,
+        )
+    ]
+
+
 def test_parse_function_pointer_call_is_unknown() -> None:
     ast = {
         "kind": "TranslationUnitDecl",

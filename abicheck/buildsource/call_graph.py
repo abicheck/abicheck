@@ -338,8 +338,62 @@ def _resolve_ref_callee_identity(
     return indexed or _identity(ref)
 
 
+#: clang AST node kinds that mark a method as overriding/finalizing a base
+#: virtual slot *without* repeating ``"virtual": true`` on the override's own
+#: declaration (see ``_ref_is_virtual``'s docstring for the empirical finding).
+_OVERRIDE_MARKER_KINDS = frozenset({"OverrideAttr", "FinalAttr"})
+
+
+def _ref_is_virtual(ref: dict[str, Any]) -> bool:
+    """Whether *ref* — a resolved callee declaration node — is virtual, own or
+    inherited.
+
+    ``bool(ref.get("virtual"))`` alone under-classifies a real, common case
+    (Codex review, fresh evidence, verified against real Clang 17 output for
+    ``struct B { virtual void f(); }; struct D : B { void f() override; void
+    h(){ f(); } };``): clang repeats ``"virtual": true`` only on the slot's
+    *original* declaring ancestor (``B::f``), never on the override's own
+    ``CXXMethodDecl`` (``D::f``) — so when the resolved static target of a
+    member call *is itself* an override, reading only ``ref["virtual"]``
+    misclassified the call as ``CALL_KIND_DIRECT``/``RESOLUTION_EXACT``,
+    excluding a real further-derived-override chain from
+    ``VIRTUAL_CALL_MAY_DISPATCH_TO`` entirely — the opposite of the
+    over-approximation this classification exists to make honest.
+
+    Fixed locally (no cross-module dependency on ``override_graph.py``'s own
+    hierarchy-walking ``parse_clang_ast_virtual_methods`` — threading its
+    output through here as a precomputed set would make ``call_graph.py``
+    import from ``override_graph.py``, which already function-locally
+    imports several helpers *from* this module; the reverse edge forms a
+    real cycle the AI-readiness ``import-cycle-growth`` gate correctly
+    rejects, confirmed empirically against this exact change): clang always
+    marks a written ``override``/``final`` keyword with an ``OverrideAttr``/
+    ``FinalAttr`` child on the override's own declaration (verified against
+    the same real AST above — ``D::f`` carries no ``"virtual": true`` but
+    does carry an ``OverrideAttr`` child), and ``ref`` here is always the
+    *full* declaration node (not a compact stub) whenever this matters: the
+    only caller (``_classify_call``) only consults this for a
+    ``CXXMemberCallExpr``, whose target always resolves through
+    ``member_index`` (see ``_find_referenced_decl``), which stores full
+    nodes. A derived method that redeclares a virtual signature with
+    *neither* the ``override``/``final`` keyword *nor* a repeated
+    ``"virtual": true`` (legal but unusual C++ style) is a documented,
+    remaining false negative — the same conservative
+    false-negative-over-false-positive default this module already uses
+    throughout (ADR-028 D3).
+    """
+    if bool(ref.get("virtual")):
+        return True
+    return any(
+        isinstance(child, dict) and child.get("kind") in _OVERRIDE_MARKER_KINDS
+        for child in ref.get("inner", []) or []
+    )
+
+
 def _classify_call(
-    call_node: dict[str, Any], ref: dict[str, Any] | None, id_index: Mapping[str, str]
+    call_node: dict[str, Any],
+    ref: dict[str, Any] | None,
+    id_index: Mapping[str, str],
 ) -> tuple[str, str, str]:
     """Return ``(callee_identity, call_kind, resolution)`` for one call site."""
     if ref is None:
@@ -352,7 +406,7 @@ def _classify_call(
         # Called through a variable/parameter/field → a function pointer; the
         # static target is unknown (could be any compatible function).
         return callee, CALL_KIND_FUNCTION_POINTER, RESOLUTION_UNKNOWN
-    if call_node.get("kind") == "CXXMemberCallExpr" and bool(ref.get("virtual")):
+    if call_node.get("kind") == "CXXMemberCallExpr" and _ref_is_virtual(ref):
         # A virtual member call: the static target is one possible override, so
         # the edge over-approximates the real dynamic dispatch.
         return callee, CALL_KIND_VIRTUAL, RESOLUTION_OVERAPPROX
@@ -527,6 +581,43 @@ def _dedupe_edges(edges: list[CallEdge]) -> list[CallEdge]:
     return out
 
 
+def _index_member_decls(node: Any, index: dict[str, dict[str, Any]]) -> None:
+    """Pre-index every function-decl node's ``id -> full node`` over the *whole*
+    AST, before any call site is resolved (Codex review, fresh evidence).
+
+    ``member_index`` was previously built incrementally, only as
+    :func:`_walk_calls`'s single combined pre-order walk actually reached each
+    declaration (:func:`_enter_function_scope`'s ``member_index.setdefault``).
+    That silently mis-resolves a call to a member declared *later* in the same
+    class body — verified against real Clang 17 output for
+    ``struct A { virtual void f(){ g(); } virtual void g(); };``: clang visits
+    ``f``'s body (and its call to ``g``) before ``g``'s own ``CXXMethodDecl``
+    sibling, so at the moment ``f -> g`` is resolved, ``g`` is not yet in the
+    index and the call is dropped entirely rather than misattributed —
+    consistent with this module's degrade-to-no-fact default, but still a real
+    coverage gap for an extremely common declare-after-use shape (mutually
+    calling sibling methods, a class's public API calling a private helper
+    declared below it, ...).
+
+    Fixed by running this separate, scope-tracking-free pre-pass first: a
+    plain ``id -> node`` index needs no caller/file context, so completeness
+    doesn't depend on visit order. :func:`_enter_function_scope`'s own
+    incremental population is left in place rather than removed — it costs
+    nothing extra (``setdefault`` is idempotent against this pre-pass having
+    already populated the same id) and keeps that function's index
+    self-contained for any future caller that walks without this pre-pass.
+    """
+    if not isinstance(node, dict):
+        return
+    kind = str(node.get("kind", ""))
+    if kind in _FUNCTION_DECL_KINDS:
+        node_id = str(node.get("id") or "")
+        if node_id:
+            index.setdefault(node_id, node)
+    for child in node.get("inner", []) or []:
+        _index_member_decls(child, index)
+
+
 def parse_clang_ast_calls(ast: dict[str, Any]) -> list[CallEdge]:
     """Extract static call edges from a ``clang -ast-dump=json`` tree (pure).
 
@@ -556,6 +647,10 @@ def parse_clang_ast_calls(ast: dict[str, Any]) -> list[CallEdge]:
     # own `virtual`/`type.qualType` fields -- see `_find_referenced_decl`'s
     # own docstring for the full empirical finding this closes.
     member_index: dict[str, dict[str, Any]] = {}
+    # Pre-index every function-decl node up front (Codex review, fresh
+    # evidence) so a call to a member declared *later* in the same class body
+    # still resolves -- see `_index_member_decls`'s own docstring.
+    _index_member_decls(ast, member_index)
     _walk_calls(ast, "", "", "", [], edges, decl_files, id_index, member_index)
     return _dedupe_edges(_fill_callee_files(edges, decl_files))
 

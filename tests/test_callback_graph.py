@@ -404,6 +404,43 @@ class TestCallbackMayInvoke:
         assert dispatch[0].resolved["slot"] == "decl://h"
         assert dispatch[0].confidence == CONF_REDUCED
 
+    def test_bare_name_collision_across_unrelated_functions_is_a_known_false_positive(
+        self,
+    ) -> None:
+        """Documents a known, accepted correctness gap (Codex review, fresh
+        evidence -- see the module docstring's own "real consequence"
+        section), not a bug to silently chase here: two *unrelated*
+        functions each declaring their own same-named function-pointer
+        parameter `h` (`register(handler_t h)` and `invoke(handler_t h)`)
+        collide onto the identical `decl://h` slot node, since neither this
+        module nor `call_graph.py` scope-qualifies a parameter/field
+        identity. A function registered only via `register`'s `h` is
+        therefore (incorrectly) reported as a possible target of a call
+        made through `invoke`'s completely unrelated `h`. Fixing this needs
+        a scope-qualified identity in `call_graph.py` itself (shared
+        infrastructure, its own scoped follow-up) -- this test pins the
+        current, documented behavior rather than asserting it should not
+        happen, so a future identity fix has a clear regression signal to
+        flip."""
+        g = SourceGraphSummary()
+        for ident in ("register_caller", "invoke_caller", "h", "my_handler"):
+            g.add_node(_decl_node(ident))
+        # `invoke_caller` calls through its OWN, unrelated `h` parameter --
+        # never through `register_caller`'s.
+        g.add_edge(_fp_call_edge("invoke_caller", "h"))
+        # `my_handler` was registered only onto `register_caller`'s `h`.
+        g.add_edge(_registration_edge("my_handler", "h"))
+
+        result = augment_graph_with_callback_invocations(g)
+
+        # The known-bad outcome: invoke_caller's call is (incorrectly)
+        # reported as possibly invoking my_handler, purely because both
+        # slots share the bare identity "h".
+        assert result.dispatch_edges_added == 1
+        dispatch = [e for e in g.edges if e.kind == EDGE_CALLBACK_MAY_INVOKE]
+        assert dispatch[0].src == "decl://invoke_caller"
+        assert dispatch[0].dst == "decl://my_handler"
+
     def test_unregistered_slot_contributes_no_edge(self) -> None:
         g = SourceGraphSummary()
         g.add_node(_decl_node("caller"))
@@ -518,7 +555,6 @@ class TestAugmentGraphWithCallbackRegistrations:
 
         assert result.edges_seen == 1
         assert result.edges_joined == 1
-        assert result.edges_skipped_unjoined == 0
         joined = [e for e in g.edges if e.kind == EDGE_DECL_REGISTERS_CALLBACK]
         assert len(joined) == 1
         assert joined[0].src == "decl://my_handler"
@@ -526,7 +562,13 @@ class TestAugmentGraphWithCallbackRegistrations:
         slot_node = next(n for n in g.nodes if n.id == "decl://h")
         assert slot_node.resolved.get("function_pointer_signature") == "void (*)(int)"
 
-    def test_join_only_onto_existing_node_skips_when_src_missing(self) -> None:
+    def test_mints_missing_src_node(self) -> None:
+        """Codex review, fresh evidence: a private handler used only as a
+        callback (never itself called, so call_graph.py never creates a
+        node for it) has no pre-existing source_decl node -- an earlier,
+        strict join-only version silently dropped the whole registration.
+        This module's own AST pass has complete, real information about
+        the function, so it mints the missing node rather than skip."""
         g = SourceGraphSummary()
         g.add_node(_decl_node("h"))  # only the slot exists, not the function
         edges = [
@@ -535,11 +577,14 @@ class TestAugmentGraphWithCallbackRegistrations:
 
         result = augment_graph_with_callback_registrations(g, edges)
 
-        assert result.edges_joined == 0
-        assert result.edges_skipped_unjoined == 1
-        assert g.edges == []
+        assert result.edges_joined == 1
+        joined = [e for e in g.edges if e.kind == EDGE_DECL_REGISTERS_CALLBACK]
+        assert len(joined) == 1
+        minted = next(n for n in g.nodes if n.id == "decl://my_handler")
+        assert minted.kind == "source_decl"
+        assert minted.confidence == CONF_REDUCED
 
-    def test_join_only_onto_existing_node_skips_when_dst_missing(self) -> None:
+    def test_mints_missing_dst_node(self) -> None:
         g = SourceGraphSummary()
         g.add_node(_decl_node("my_handler"))  # only the function exists, not the slot
         edges = [
@@ -548,11 +593,12 @@ class TestAugmentGraphWithCallbackRegistrations:
 
         result = augment_graph_with_callback_registrations(g, edges)
 
-        assert result.edges_joined == 0
-        assert result.edges_skipped_unjoined == 1
-        assert g.edges == []
+        assert result.edges_joined == 1
+        minted = next(n for n in g.nodes if n.id == "decl://h")
+        assert minted.kind == "source_decl"
+        assert minted.confidence == CONF_REDUCED
 
-    def test_never_mints_new_nodes(self) -> None:
+    def test_mints_both_endpoints_when_neither_exists(self) -> None:
         g = SourceGraphSummary()
         edges = [
             CallbackEdge("my_handler", "h", EDGE_DECL_REGISTERS_CALLBACK, CONF_HIGH, "")
@@ -560,8 +606,9 @@ class TestAugmentGraphWithCallbackRegistrations:
 
         result = augment_graph_with_callback_registrations(g, edges)
 
-        assert result.edges_skipped_unjoined == 1
-        assert g.nodes == []
+        assert result.edges_joined == 1
+        assert {n.id for n in g.nodes} == {"decl://my_handler", "decl://h"}
+        assert len(g.edges) == 1
 
     def test_empty_signature_stamps_no_node_fact(self) -> None:
         g = SourceGraphSummary()

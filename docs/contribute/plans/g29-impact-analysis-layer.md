@@ -793,6 +793,64 @@ which all depend on a Clang AST pass.
      classification for the first time. `p->f()` now correctly classifies
      as `call_kind="virtual"`, which is what makes `VIRTUAL_CALL_MAY_DISPATCH_TO`
      actually reachable in the common case this feature exists for.
+   - **A fourth and fifth Codex-review round found two more real gaps in
+     `call_graph.py`'s own resolution, both empirically verified against
+     real Clang 17 output and both fixed without touching this item's own
+     modules.** (1) `member_index` was built *incrementally* during
+     `_walk_calls`'s single combined pre-order walk
+     (`_enter_function_scope`'s `member_index.setdefault`), so a call to a
+     member declared *later* in the same class body silently dropped
+     instead of resolving — confirmed for
+     `struct A { virtual void f(){ g(); } virtual void g(); };`: clang
+     visits `f`'s body (and its call to `g`) before `g`'s own
+     `CXXMethodDecl` sibling, so `member_index` doesn't yet have `g` at the
+     moment the call needs it, and the earlier fix's own "unresolved id ->
+     no edge" rule (correctly) dropped it rather than misattributing it.
+     Fixed with a new, separate whole-AST pre-pass (`_index_member_decls`,
+     no scope tracking needed — a plain `id -> node` index is
+     order-independent) run once at the top of `parse_clang_ast_calls`,
+     before `_walk_calls` starts resolving any call site; the existing
+     incremental population is left in place (harmless — `setdefault`
+     against an already-populated id) rather than removed. (2) Separately,
+     when the resolved *static* target of a member call is itself an
+     override, clang commonly omits `"virtual": true` from that override's
+     own `CXXMethodDecl` (only the slot's *original* declaring ancestor
+     carries it) — confirmed for
+     `struct B { virtual void f(); }; struct D : B { void f() override; void h(){ f(); } };`:
+     `D::f` (the resolved target of `h()`'s call) carries no
+     `"virtual": true`, so `_classify_call` misclassified the call as
+     `direct`/`exact`, excluding a real further-derived-override chain from
+     `VIRTUAL_CALL_MAY_DISPATCH_TO` entirely. The first fix attempt threaded
+     a precomputed `virtual_identities` set from
+     `override_graph.parse_clang_ast_virtual_methods` into `_classify_call`
+     — correct in isolation, but it makes `call_graph.py` import from
+     `override_graph.py`, which already function-locally imports several
+     helpers *from* `call_graph.py`
+     (`_safe_clang_args_from_compile_unit`/`_call_graph_jobs`/
+     `_deadline_bound_worker`) — even as a function-local import, the
+     AI-readiness `import-cycle-growth` gate walks *all* `Import`/
+     `ImportFrom` nodes regardless of nesting, so it correctly flagged the
+     resulting new cycle
+     (`call_graph -> override_graph -> type_graph -> call_graph`) as an
+     ERROR; confirmed reproducing the same rejection locally before
+     reverting that approach. Fixed instead with a self-contained,
+     dependency-free check: clang always marks a written `override`/`final`
+     keyword with an `OverrideAttr`/`FinalAttr` child on the override's own
+     declaration (verified against the same real AST — `D::f` carries an
+     `OverrideAttr` child; a second real-clang repro with `final` instead of
+     `override` confirmed the identical `FinalAttr` shape), and the `ref`
+     `_classify_call` receives for a `CXXMemberCallExpr` is always the
+     *full* declaration node (resolved through `member_index`, never a
+     compact stub) — so a new `_ref_is_virtual()` helper checks
+     `ref["virtual"]` first, then falls back to scanning `ref`'s own
+     `inner` children for `OverrideAttr`/`FinalAttr`, entirely within
+     `call_graph.py`. A derived method that redeclares a virtual signature
+     with *neither* the `override`/`final` keyword *nor* a repeated
+     `"virtual": true` (legal but unusual C++ style) remains a documented,
+     conservative false negative — the same
+     false-negative-over-false-positive default this module already uses
+     throughout (ADR-028 D3), and out of scope for a fix that specifically
+     targets the empirically-confirmed common case.
    - **`DECL_OVERRIDES_DECL` needed no new producer at all — a closed gap,
      not a deferred one.** `override_graph.py` (ADR-041 P2 item 1, which
      predates this item) already emits `METHOD_POSSIBLE_OVERRIDE` edges whose
@@ -906,6 +964,33 @@ which all depend on a Clang AST pass.
      strengthen every function-pointer `DECL_CALLS_DECL` edge, not just this
      module's own — shared infrastructure, not a same-slice fix);
      `CXXMemberCallExpr`/`CXXOperatorCallExpr` registration detection.
+   - Post-merge Codex review found and fixed one real completeness gap, and
+     surfaced (without fixing — see below) one real correctness gap already
+     latent in the design. **Fixed:** an earlier, strict join-only-onto-an-
+     existing-node version of `augment_graph_with_callback_registrations`
+     silently dropped the whole registration whenever either endpoint had
+     no pre-existing `source_decl` node — the common case for a private
+     handler used *only* as a callback (never itself called, so
+     `call_graph.py` never creates a node for it either) or a registration
+     API's own callback parameter (never a standalone type-graph node).
+     Fixed by minting the missing endpoint instead, the same precedent
+     `override_graph.augment_graph_with_overrides` already establishes in
+     this family (this module's own AST pass already has complete, real
+     information about both declarations — minting isn't a guess).
+     **Surfaced, not fixed — a genuine false-positive risk, not merely a
+     missing-edge one:** because Part A's join keys strictly on the shared,
+     unqualified slot identity (see "Identity design" above), two
+     *unrelated* functions each declaring their own same-named
+     function-pointer parameter (`register(handler_t h)` and
+     `invoke(handler_t h)`) collapse onto one `decl://h` node — so a
+     function registered only via `register`'s `h` is reported as a
+     possible target of a call made through `invoke`'s completely unrelated
+     `h`. This is the sharpest concrete case for the scope-qualified-
+     identity follow-up already named above; a fix confined to this module
+     alone cannot close it, since the ambiguity originates in
+     `call_graph.py`'s own edge identity. Pinned by a dedicated regression
+     test documenting the current, known-bad behavior rather than silently
+     accepted.
 5. **Full type-role coverage** to parity: variable type, typedef target,
    alias-template target, enum underlying type, non-type template argument,
    default template argument, concept/constraint dependency, function-pointer

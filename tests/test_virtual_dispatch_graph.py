@@ -501,3 +501,40 @@ class TestFoldVirtualDispatchGraph:
         assert g.extractor_passes.get("virtual_dispatch_graph") is True
         assert g.edges == []
         assert g.nodes == []
+
+    def test_narrowed_prerequisite_propagates_to_this_pass(self) -> None:
+        """Codex review, fresh evidence: an earlier version stamped only
+        ``extractor_passes`` unconditionally, so a run scoped to
+        ``changed_paths``/``scoped_units`` -- which correctly narrows
+        ``call_graph``/``type_graph``/``override_graph`` -- let a reader see
+        this pass as fully covered despite reading only a scoped, partial
+        surface. ``narrowed_scope`` must also carry over."""
+        g = _multi_override_graph()
+        g.add_node(_record_node("Base"))
+        g.narrowed_passes["call_graph"] = True
+        g.narrowed_scope["call_graph"] = frozenset({"a.cpp"})
+
+        fold_virtual_dispatch_graph(g)
+
+        assert g.narrowed_passes.get("virtual_dispatch_graph") is True
+        assert g.narrowed_scope.get("virtual_dispatch_graph") == frozenset({"a.cpp"})
+        assert not g.degraded_passes.get("virtual_dispatch_graph")
+
+    def test_degraded_prerequisite_propagates_to_this_pass(self) -> None:
+        g = _multi_override_graph()
+        g.add_node(_record_node("Base"))
+        g.degraded_passes["override_graph"] = True
+
+        fold_virtual_dispatch_graph(g)
+
+        assert g.degraded_passes.get("virtual_dispatch_graph") is True
+        assert not g.narrowed_passes.get("virtual_dispatch_graph")
+
+    def test_unscoped_prerequisites_leave_this_pass_unnarrowed(self) -> None:
+        g = _multi_override_graph()
+        g.add_node(_record_node("Base"))
+
+        fold_virtual_dispatch_graph(g)
+
+        assert "virtual_dispatch_graph" not in g.narrowed_passes
+        assert "virtual_dispatch_graph" not in g.degraded_passes

@@ -443,9 +443,36 @@ def fold_virtual_dispatch_graph(
     pass's silence ("zero edges") means anything should check those three
     passes' own coverage, not invent a fourth clang-availability check for a
     pass that never touches a compiler.
+
+    **``narrowed_passes``/``degraded_passes`` are propagated from the three
+    prerequisite passes, not left unstamped** (Codex review, fresh
+    evidence): an earlier version set only ``extractor_passes`` unconditionally,
+    so a run scoped to ``changed_paths``/``scoped_units`` — which correctly
+    stamps ``narrowed_passes["call_graph"]``/``["type_graph"]``/
+    ``["override_graph"]`` — let a reader see ``extractor_passes
+    ["virtual_dispatch_graph"] = True`` with no accompanying narrowed flag,
+    misreading a scoped, partial virtual-dispatch surface (candidates and
+    vtables from only the scanned TUs) as complete coverage. Since all three
+    prerequisite passes share one ``changed_paths``/``scoped_units`` call
+    from :func:`fold_semantic_graphs`, "any of the three narrowed" implies
+    the same scope, so this pass is narrowed to that same scope; "any of the
+    three degraded" (a per-TU clang failure with no explicit scope) makes
+    this pass degraded too, since a class/override missed by a failed TU
+    silently narrows what this pass can see exactly the same way an explicit
+    scope would.
     """
     augment_graph_with_virtual_dispatch(graph)
     graph.extractor_passes["virtual_dispatch_graph"] = True
+    _PREREQ_PASSES = ("call_graph", "type_graph", "override_graph")
+    if any(graph.narrowed_passes.get(p) for p in _PREREQ_PASSES):
+        graph.narrowed_passes["virtual_dispatch_graph"] = True
+        for p in _PREREQ_PASSES:
+            scope = graph.narrowed_scope.get(p)
+            if scope:
+                graph.narrowed_scope["virtual_dispatch_graph"] = scope
+                break
+    if any(graph.degraded_passes.get(p) for p in _PREREQ_PASSES):
+        graph.degraded_passes["virtual_dispatch_graph"] = True
 
 
 def fold_template_graph(

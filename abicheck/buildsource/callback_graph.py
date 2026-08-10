@@ -119,6 +119,30 @@ than *silently unreachable* (a stronger identity here would simply never
 match anything ``call_graph.py`` itself produces). Fixing the underlying
 weak identity is out of scope for this slice — see "Deferred" below.
 
+**A real consequence of this weak identity, not merely a theoretical one:
+Part A's join can produce a genuinely false ``CALLBACK_MAY_INVOKE`` edge,
+not just a missing one** (Codex review, fresh evidence). Two *unrelated*
+functions each declaring their own same-named function-pointer parameter
+(e.g. ``void register(handler_t h)`` and ``void invoke(handler_t h)``, both
+naming their parameter ``h``) collapse onto the identical ``decl://h`` slot
+node — a collision that already existed in ``call_graph.py`` alone, but with
+no consumer able to draw a *specific* conclusion from it. Once this
+module's Part B joins a registration onto that same shared node, Part A's
+join in :func:`augment_graph_with_callback_invocations` reads it back
+without distinguishing which of the colliding *scopes* the registration
+and the call actually belong to: a function registered only ever with
+``register``'s ``h`` is reported as a possible target of a call made
+through ``invoke``'s completely unrelated ``h`` — a fabricated cross-
+function association, not merely an unresolved one. This is a real,
+outstanding correctness gap in the current identity scheme (not
+hypothetical, not covered by ``resolution: "overapprox"``'s existing
+"possible dispatch target" framing, since the two slots are not actually
+the same runtime object at all), and it is the sharpest concrete argument
+for the scope-qualified-identity follow-up named above — a fix here alone
+cannot close it, since the ambiguity originates in ``call_graph.py``'s own
+``DECL_CALLS_DECL`` identity, which this module's join must match exactly
+to connect at all.
+
 **A load-bearing negative empirical finding, not a design choice of this
 module's own: a struct-field-typed callback slot invoked through
 member-call syntax (``w->cb(x)``) still never joins in Part A.** Originally
@@ -714,37 +738,71 @@ def augment_graph_with_callback_invocations(
 
 @dataclass
 class CallbackRegistrationResult:
-    """What one :func:`augment_graph_with_callback_registrations` pass did."""
+    """What one :func:`augment_graph_with_callback_registrations` pass did.
+
+    No ``edges_skipped_unjoined`` field: since that function now mints a
+    missing endpoint's ``source_decl`` node rather than skipping the edge
+    (Codex review, fresh evidence — see its own docstring), every edge it
+    is given always joins; a permanently-zero counter would be dead
+    bookkeeping, not real coverage information.
+    """
 
     edges_seen: int = 0
     edges_joined: int = 0
-    edges_skipped_unjoined: int = 0
 
 
 def augment_graph_with_callback_registrations(
     graph: SourceGraphSummary, edges: list[CallbackEdge]
 ) -> CallbackRegistrationResult:
     """Fold Part B's ``DECL_REGISTERS_CALLBACK``/``DECL_TAKES_ADDRESS_OF``
-    edges into *graph* -- join-only-onto-an-existing-node (ADR-057 D1,
-    reapplied throughout this family): an edge whose ``src`` (the
-    address-taken function) or ``dst`` (the slot) has no already-existing
-    ``source_decl`` node in *graph* mints nothing. Also stamps the slot's own
+    edges into *graph*. Also stamps the slot's own
     ``function_pointer_signature`` node-level fact (see the module
     docstring's ``FUNCTION_POINTER_HAS_SIGNATURE`` section) whenever a join
     succeeds and the edge carries a non-empty signature.
+
+    **Mints a ``source_decl`` node for either endpoint missing one, rather
+    than skipping the edge** (Codex review, fresh evidence) — a real, and
+    common, gap in an earlier version's strict join-only-onto-an-existing-
+    node behavior: a private handler used *only* as a callback (never
+    itself called, so ``call_graph.py`` never creates a node for it either)
+    or a registration API's own callback parameter (never a standalone
+    type-graph node — ``type_graph.py`` doesn't mint one for a bare
+    parameter declaration on its own) routinely has **no** pre-existing
+    node for either side of a ``DECL_REGISTERS_CALLBACK``/
+    ``DECL_TAKES_ADDRESS_OF`` edge, silently dropping the exact
+    plugin/event-loop/C-API registration pattern this family exists to
+    capture — the whole feature was live only for the narrower case where
+    some *other* pass happened to have already created both nodes for an
+    unrelated reason. This module's own AST pass (:func:`parse_clang_ast_callbacks`)
+    already has complete, real information about both declarations (their
+    exact identity, from the same full AST node — not a guess or an
+    inference), so minting here is the same "mint for this producer's own,
+    fully-resolved edge endpoints" precedent ``override_graph.
+    augment_graph_with_overrides`` already establishes in this exact
+    module family, not a new, weaker exception to it. ``CONF_REDUCED`` for a
+    freshly-minted node (this module alone vouches for its existence,
+    unlike an already-multiply-confirmed node) — merges into an existing
+    node's own (possibly higher) confidence via the standard evidence-
+    preserving fold when one is already present.
     """
     from .source_graph import _decl_node_id
 
-    node_by_id: dict[str, GraphNode] = {n.id: n for n in graph.nodes}
     result = CallbackRegistrationResult()
 
     for e in edges:
         result.edges_seen += 1
         src_id, dst_id = _decl_node_id(e.src), _decl_node_id(e.dst)
-        src_node, dst_node = node_by_id.get(src_id), node_by_id.get(dst_id)
-        if src_node is None or dst_node is None:
-            result.edges_skipped_unjoined += 1
-            continue
+        for node_id in (src_id, dst_id):
+            if not graph.has_node(node_id):
+                graph.add_node(
+                    GraphNode(
+                        id=node_id,
+                        kind="source_decl",
+                        provenance="callback_graph",
+                        confidence=CONF_REDUCED,
+                    )
+                )
+        dst_node = next(n for n in graph.nodes if n.id == dst_id)
         before = len(graph.edges)
         graph.add_edge(
             GraphEdge(
