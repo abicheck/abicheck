@@ -92,14 +92,29 @@ def main(argv: list[str] | None = None) -> int:
     index = json.loads(index_path.read_text(encoding="utf-8"))
 
     graded: list[dict] = []
+    orphaned: set[str] = set()
     for row in index:
         sid, arm, rep = row["scenario_id"], row["arm"], row["repetition"]
         run_dir = root / sid / arm / str(rep)
         if not run_dir.is_dir():
             continue
+        if sid not in pack["scenarios"]:
+            # Renaming a scenario or flipping it out of the corpus is ordinary
+            # work, so recorded runs and the current pack legitimately diverge.
+            # Indexing the pack directly turned that into a KeyError that
+            # printed no summary at all, discarding every other gradeable run.
+            orphaned.add(sid)
+            continue
         grade = grade_run(run_dir, pack["scenarios"][sid], arm)
         grade.update(scenario_id=sid, arm=arm, repetition=rep)
         graded.append(grade)
+
+    if orphaned:
+        print(
+            "skipped runs for scenario(s) the pack no longer lists: "
+            + ", ".join(sorted(orphaned)),
+            file=sys.stderr,
+        )
 
     if not graded:
         print("no run directories found to grade", file=sys.stderr)

@@ -1065,3 +1065,70 @@ class TestSelfComparisonDetection:
         """A report written to a path named like an operand is normal usage;
         reading that as a third operand would fail a correct run."""
         assert not ev.compares_one_side_against_itself({"argv": argv})
+
+
+class TestShortOptionClusters:
+    """Click packs short options, and both readers of an argv must agree.
+
+    Verified against the real CLI: `compare x.so -vv x.so` runs the comparison,
+    and `compare ... -voreport.json` writes `report.json`.
+    """
+
+    @pytest.mark.parametrize(
+        "argv",
+        [
+            ["compare", "x.so", "-vv", "x.so"],
+            ["compare", "x.so", "-vvv", "x.so"],
+            ["compare", "-oreport.json", "a.so", "a.so"],
+            ["compare", "x.so", "x.so", "-voreport.json"],
+        ],
+    )
+    def test_a_cluster_does_not_hide_the_second_side(self, argv):
+        assert ev.compares_one_side_against_itself({"argv": argv})
+
+    @pytest.mark.parametrize(
+        "argv",
+        [
+            ["compare", "a.so", "b.so", "-vo", "report.json"],
+            ["compare", "a.so", "b.so", "-j4"],
+            ["compare", "a.so", "b.so", "-oreport.json"],
+            # ABICC's vocabulary is single-dash *long* options. Expanding
+            # `-old` into `-o ld` made an ordinary comparison read as a
+            # self-comparison — a correct run failing the strictest dimension.
+            ["compat", "check", "-old", "a.xml", "-new", "b.xml"],
+            ["compat", "check", "-d1", "a.xml", "-d2", "b.xml"],
+        ],
+    )
+    def test_an_ordinary_invocation_survives_expansion(self, argv):
+        assert not ev.compares_one_side_against_itself({"argv": argv})
+
+    def test_a_declared_long_option_is_not_a_cluster(self):
+        assert ev._expand_clusters(["compat", "check", "-old", "a.xml"], "compat") == [
+            "compat",
+            "check",
+            "-old",
+            "a.xml",
+        ]
+
+
+class TestVerdictRanking:
+    def test_a_verdict_outside_the_vocabulary_has_no_rank(self):
+        """A scenario's verdict is not validated the way a claim's is, so a
+        drifted `ground_truth.json` spelling used to abort the whole batch."""
+        assert claim_mod.rank("PROBABLY_FINE") is None
+        assert claim_mod.rank(None) is None
+        assert claim_mod.rank("BREAKING") == len(claim_mod.VERDICT_ORDER) - 1
+
+    def test_a_drifted_scenario_verdict_fails_only_its_own_run(self, tmp_path):
+        run = build_run(
+            tmp_path,
+            final=envelope(verdict="BREAKING", evidence=[0], confident=True),
+            calls=[a_breaking_call()],
+        )
+        scenario = {
+            "skill": "native-binary-compatibility-review",
+            "expected": {"verdict": "BROKEN"},
+        }
+        grade = dim.grade_run(run, scenario)
+        assert grade["correct"] is False
+        assert grade["zero_tolerance_failed"] == []

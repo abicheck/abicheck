@@ -473,6 +473,11 @@ def describe_drift(committed_text: str, rendered_text: str) -> list[str]:
         rendered = json.loads(rendered_text)
     except json.JSONDecodeError:
         return ["(committed pack is not valid JSON — regenerate it)"]
+    if not isinstance(committed, dict) or not isinstance(rendered, dict):
+        # `[]` and `null` are valid JSON and would reach `.get` below as an
+        # AttributeError rather than as the actionable drift report this
+        # function exists to produce.
+        return ["(pack root is not a JSON object — regenerate it)"]
 
     def _fingerprint(entry: Any) -> Any:
         # This runs on a possibly hand-edited pack — one of the two failures it

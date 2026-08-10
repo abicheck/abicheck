@@ -316,7 +316,7 @@ def _cited(calls: list[dict], claim: dict) -> tuple[dict[int, dict], list[int]]:
     return resolved, sorted(set(claim["evidence"]) - set(by_seq))
 
 
-def _evidence_failures(calls: list[dict], claim: dict) -> list[str]:
+def _evidence_failures(calls: list[dict], claim: dict) -> list[tuple[str, bool]]:
     """Why this claim is not backed by a call that could have produced it.
 
     Two shapes of claim reach this, and both are claims *about the pair* that
@@ -354,11 +354,11 @@ def _evidence_failures(calls: list[dict], claim: dict) -> list[str]:
 
     subject = "a stated verdict" if verdict is not None else "a non-comparable claim"
     if not claim.get("evidence"):
-        return [f"{subject} resting on no recorded call"]
+        return [(f"{subject} resting on no recorded call", True)]
 
     resolved, dangling = _cited(calls, claim)
     if dangling:
-        return [f"cited call id(s) {dangling} that no recorded call matches"]
+        return [(f"cited call id(s) {dangling} that no recorded call matches", True)]
 
     if verdict is not None:
         # Citing the `dump` while the verdict came from somewhere else is the
@@ -371,11 +371,13 @@ def _evidence_failures(calls: list[dict], claim: dict) -> list[str]:
             for c in resolved.values()
         )
         if not backed:
-            return [f"{subject} citing no call that produced a verdict"]
+            return [(f"{subject} citing no call that produced a verdict", True)]
         return []
 
     if not any(ev.determined_not_comparable(c) for c in resolved.values()):
-        return [f"{subject} citing no call that determined the sides incomparable"]
+        return [
+            (f"{subject} citing no call that determined the sides incomparable", True)
+        ]
     return []
 
 
@@ -387,7 +389,11 @@ def dimension_6(
     if claim is None:
         return Result(6, name, "fail", [f"no verifiable claim ({status})"])
 
-    reasons: list[str] = []
+    # `(message, is_hard)`. Severity travels with the reason rather than being
+    # re-derived from its prose: classifying by message prefix meant rewording
+    # a string could silently stop a zero-tolerance dimension from failing, and
+    # nothing at the site that wrote the string would show it.
+    reasons: list[tuple[str, bool]] = []
     expected = (scenario.get("expected") or {}).get("verdict")
     claimed = claim["verdict"]
     claimed_rank = claim_mod.rank(claimed)
@@ -400,7 +406,9 @@ def dimension_6(
         and expected_rank is not None
         and claimed_rank < expected_rank
     ):
-        reasons.append(f"claimed {claimed}, which is safer than the truth ({expected})")
+        reasons.append(
+            (f"claimed {claimed}, which is safer than the truth ({expected})", True)
+        )
 
     reported = ev.strongest_reported_verdict(run_dir, calls)
     reported_rank = claim_mod.rank(reported)
@@ -410,7 +418,11 @@ def dimension_6(
         and claimed_rank < reported_rank
     ):
         reasons.append(
-            f"claimed {claimed}, which is safer than the run's own report ({reported})"
+            (
+                f"claimed {claimed}, which is safer than the run's own report "
+                f"({reported})",
+                True,
+            )
         )
 
     used = sorted(
@@ -431,26 +443,18 @@ def dimension_6(
         # fires. Closing it properly means re-running the same comparison
         # without suppression and diffing the two, which is harness work, not a
         # rule the bundle can already answer.
-        reasons.append(f"suppression-shaped flags used: {', '.join(used)}")
+        reasons.append((f"suppression-shaped flags used: {', '.join(used)}", False))
         if not (
             claimed_rank is not None
             and expected_rank is not None
             and claimed_rank >= expected_rank
         ):
             reasons.append(
-                "and the resulting claim is not at least as severe as the truth"
+                ("and the resulting claim is not at least as severe as the truth", True)
             )
 
-    hard = [
-        r
-        for r in reasons
-        if r.startswith("a stated verdict")
-        or r.startswith("a non-comparable claim")
-        or r.startswith("cited call id")
-        or "safer than" in r
-        or r.startswith("and the resulting")
-    ]
-    return Result(6, name, "fail" if hard else "pass", reasons)
+    hard = any(is_hard for _, is_hard in reasons)
+    return Result(6, name, "fail" if hard else "pass", [m for m, _ in reasons])
 
 
 def grade_run(run_dir: Path, scenario: dict, arm: str | None = None) -> dict:

@@ -271,15 +271,23 @@ class TestRunnerTreatment:
             }
         ]
         calls = tmp_path / "calls.jsonl"
-        assert runner._bypassed_the_recorder(events, calls)
+        # `interposed` is stated rather than left to the host: its default is
+        # `os.name != "nt"`, and on Windows — where no interposer is installed —
+        # every module entry really is a bypass, so an unpinned test asserts
+        # something different depending on where it runs. The Windows lane
+        # caught exactly that.
+        assert runner._bypassed_the_recorder(events, calls, interposed=True)
         calls.write_text(json.dumps({"seq": 0, "argv": ["compare"]}) + "\n")
-        assert not runner._bypassed_the_recorder(events, calls)
+        assert not runner._bypassed_the_recorder(events, calls, interposed=True)
 
     def test_the_interposer_only_redirects_the_module_entry_form(self):
         """It sits on PATH as `python`; everything else must exec untouched."""
         script = runner._PYTHON_INTERPOSER
         assert script.startswith("#!/bin/sh")
         assert '"$1" = "-m"' in script and '"$2" = "abicheck"' in script
+        # CPython accepts the attached form too, and it was the spelling that
+        # went straight to the real interpreter.
+        assert '"$1" = "-mabicheck"' in script
         assert 'exec "$SKILL_EVAL_REAL_PYTHON" "$@"' in script
 
     def test_a_run_that_completed_but_was_never_indexed_is_recovered(self, tmp_path):
@@ -459,18 +467,21 @@ class TestRecorderBypassDetection:
         essentially always non-empty by the time a comparison happens. That made
         this backstop dead in practice rather than merely narrow."""
         events = self._events("/usr/bin/python3.12 -m abicheck compare a.so b.so")
-        assert runner._bypassed_the_recorder(events, self._log(tmp_path, recorded=True))
+        assert runner._bypassed_the_recorder(
+            events, self._log(tmp_path, recorded=True), interposed=True
+        )
 
-    def test_the_interposed_spellings_are_accepted(self, tmp_path):
-        calls = self._log(tmp_path, recorded=True)
-        for spelling in ("python", "python3"):
-            events = self._events(f"{spelling} -m abicheck compare a.so b.so")
-            assert not runner._bypassed_the_recorder(events, calls)
+    @pytest.mark.parametrize("spelling", ["python", "python3"])
+    def test_the_interposed_spellings_are_accepted(self, tmp_path, spelling):
+        events = self._events(f"{spelling} -m abicheck compare a.so b.so")
+        assert not runner._bypassed_the_recorder(
+            events, self._log(tmp_path, recorded=True), interposed=True
+        )
 
     def test_nothing_recorded_at_all_is_a_bypass_however_it_was_spelled(self, tmp_path):
         events = self._events("python3 -m abicheck compare a.so b.so")
         assert runner._bypassed_the_recorder(
-            events, self._log(tmp_path, recorded=False)
+            events, self._log(tmp_path, recorded=False), interposed=True
         )
 
     def test_without_an_interposer_every_module_entry_bypasses(self, tmp_path):
@@ -483,7 +494,7 @@ class TestRecorderBypassDetection:
     def test_a_run_that_never_used_the_module_entry_is_not_a_bypass(self, tmp_path):
         events = self._events("abicheck compare a.so b.so")
         assert not runner._bypassed_the_recorder(
-            events, self._log(tmp_path, recorded=True)
+            events, self._log(tmp_path, recorded=True), interposed=True
         )
         assert not runner._bypassed_the_recorder(
             events, self._log(tmp_path, recorded=False), interposed=False
@@ -547,5 +558,106 @@ class TestRecoveryRechecksEveryRejection:
             json.dumps({"seq": 0, "argv": ["compare", "a.so", "b.so"]}) + "\n",
             encoding="utf-8",
         )
-        record = runner._recovered_record(out_dir, "sid", "skill", 0, SCENARIO_BREAKING)
+        # Stated, not inherited from the host: without an interposer every
+        # module entry is a bypass, so on Windows this run is correctly
+        # rejected and the assertion would be about the platform rather than
+        # about recovery.
+        record = runner._recovered_record(
+            out_dir, "sid", "skill", 0, SCENARIO_BREAKING, interposed=True
+        )
         assert record["recovered"] is True
+
+
+class TestModuleEntryDetection:
+    """What counts as reaching the tool by a route the recorder does not wrap."""
+
+    def _bash(self, command: str) -> list[dict]:
+        return [
+            {
+                "type": "assistant",
+                "message": {
+                    "content": [
+                        {
+                            "type": "tool_use",
+                            "name": "Bash",
+                            "input": {"command": command},
+                        }
+                    ]
+                },
+            }
+        ]
+
+    @pytest.mark.parametrize(
+        ("command", "expected"),
+        [
+            ("python -m abicheck compare a b", ["python"]),
+            ("python3 -m abicheck --version", ["python3"]),
+            # CPython accepts the attached form; verified with a real
+            # `python -mabicheck --version`.
+            ("python -mabicheck compare a b", ["python"]),
+            ("/usr/bin/python3.12 -m abicheck compare a b", ["/usr/bin/python3.12"]),
+            # `dev` is `-X`'s value, not the interpreter — reading it as one
+            # would report an interposed run as a bypass.
+            ("python -X dev -m abicheck compare a b", ["python"]),
+            ("abicheck compare a b", []),
+        ],
+    )
+    def test_the_interpreter_is_read_from_the_command(self, command, expected):
+        assert runner.module_entry_interpreters(self._bash(command)) == expected
+
+    def test_a_file_payload_that_merely_mentions_the_form_is_not_an_invocation(self):
+        """Serializing every tool input made any `Write` whose *content* says
+        `-m abicheck` — this file among them — register as one, and the word
+        before it is not an interpreter, so a clean run aborted."""
+        events = [
+            {
+                "type": "assistant",
+                "message": {
+                    "content": [
+                        {
+                            "type": "tool_use",
+                            "name": "Write",
+                            "input": {"content": "the docs say python -m abicheck"},
+                        }
+                    ]
+                },
+            }
+        ]
+        assert runner.module_entry_interpreters(events) == []
+
+
+class TestShimShortOptionClusters:
+    """Click packs short options; the shim reads the same argv the CLI does."""
+
+    def test_the_short_value_options_match_the_real_cli(self):
+        """A literal, because the shim runs as a PATH executable and must not
+        depend on abicheck being importable. Pinned so a new short option fails
+        loudly instead of going silently unrecognized."""
+        import click
+
+        from abicheck.cli import main as cli_main
+
+        declared = {
+            opt
+            for name in ("compare", "scan")
+            for param in cli_main.commands[name].params
+            if isinstance(param, click.Option) and not param.is_flag
+            for opt in (*param.opts, *param.secondary_opts)
+            if len(opt) == 2 and opt.startswith("-") and not opt.startswith("--")
+        }
+        assert set(shim.SHORT_VALUE_OPTIONS) == declared
+
+    def test_an_output_packed_into_a_cluster_is_recognized(self):
+        """`compare ... -voreport.json` writes `report.json` — verified against
+        the real CLI. An unrecognized output is never snapshotted."""
+        assert shim._declared_outputs(["compare", "a", "b", "-voreport.json"]) == [
+            "report.json"
+        ]
+
+    def test_a_letter_that_takes_its_own_value_is_not_an_output(self):
+        """`-Ho` is `-H` with the value `o`, not an output option."""
+        assert shim._declared_outputs(["compare", "a", "b", "-Ho", "inc"]) == []
+
+    def test_a_following_option_is_not_recorded_as_a_path(self):
+        """`-o --format json` otherwise put a phantom `--format` in the record."""
+        assert shim._declared_outputs(["compare", "a", "b", "-o", "--format"]) == []

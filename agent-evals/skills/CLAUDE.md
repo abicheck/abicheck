@@ -76,6 +76,28 @@ harness half — while `tests/test_skill_eval_graders.py` pins the grading rules
 A grader cannot detect a run contaminated before it started, which is why the
 two are separate files rather than one.
 
+## Reading an argv is not obvious, and two readers must agree
+
+The shim and the graders both parse the same command line, and Click accepts
+more spellings than either originally handled — each gap verified against the
+real CLI before it was closed. Options sit *between* positionals
+(`compare x --format json x`); boolean flags consume nothing
+(`compare x -vv x`); short options pack into clusters that can carry a value
+(`-voreport.json` writes `report.json`); and `compat check` speaks ABICC's
+single-dash *long* options (`-old`, `-d1`), which are not clusters at all.
+
+Arity therefore comes from Click's own command tree rather than a list here —
+`compare` alone declares 50 boolean flags. When the table cannot be built the
+graders assume every option takes a value, which can miss a self-comparison;
+the opposite assumption invents an operand and fails a *correct* run, and that
+is the direction that gets a gate switched off.
+
+A test that pins a platform-dependent default must say so. `_bypassed_the_
+recorder` defaults `interposed` to `os.name != "nt"` — on Windows no
+interposer is installed, so every module entry really is a bypass — and three
+tests that left it to the host asserted something different depending on where
+they ran. The Windows lane caught it; pass `interposed=` explicitly.
+
 The `--out` restriction is not tidiness. Claude Code discovers skills from the
 project the working directory belongs to, and this repo's root carries all four
 published trees — so a workspace under it hands the *baseline* arm everything it

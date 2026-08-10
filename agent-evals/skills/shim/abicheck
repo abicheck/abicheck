@@ -82,6 +82,17 @@ from pathlib import Path
 OUTPUT_OPTIONS = ("-o", "--output", "--secondary-output", "--output-dir")
 
 
+#: How many times to re-attempt a contended Windows lock. Each `LK_LOCK` call
+#: already spends ~10s retrying internally, so this bounds the wait at minutes
+#: rather than forever — a hung lock should fail loudly, not stall the run.
+_WINDOWS_LOCK_ATTEMPTS = 3
+
+#: Seconds before the shim gives up on the real executable. The runner's own
+#: timeout kills `claude`, not this grandchild, so without one a hung call
+#: leaves an orphaned process and a record stuck at `exit_code: null` forever.
+_CALL_TIMEOUT_SECONDS = float(os.environ.get("SKILL_EVAL_CALL_TIMEOUT", "600"))
+
+
 @contextlib.contextmanager
 def _exclusive(lock_path: Path) -> Iterator[None]:
     """Hold an exclusive lock on `lock_path` for the duration of the block."""
@@ -90,7 +101,19 @@ def _exclusive(lock_path: Path) -> Iterator[None]:
             import msvcrt
 
             handle.seek(0)
-            msvcrt.locking(handle.fileno(), msvcrt.LK_LOCK, 1)
+            # `LK_LOCK` is not a blocking wait: it retries ten times at one
+            # second and then raises. Two shims contending for the record —
+            # which is exactly what the lock is here for, since the agent can
+            # run Bash calls concurrently — would make one of them fail before
+            # ever spawning the real executable, losing the call entirely.
+            for attempt in range(_WINDOWS_LOCK_ATTEMPTS):
+                try:
+                    msvcrt.locking(handle.fileno(), msvcrt.LK_LOCK, 1)
+                    break
+                except OSError:
+                    if attempt == _WINDOWS_LOCK_ATTEMPTS - 1:
+                        raise
+                    handle.seek(0)
             try:
                 yield
             finally:
@@ -114,31 +137,72 @@ def _is_short(option: str) -> bool:
     return len(option) == 2 and not option.startswith("--")
 
 
+#: Short options this CLI declares that take a value. Needed to read a cluster:
+#: Click packs short options, so `-voreport.json` is `-v -o report.json`, and
+#: the letters *before* `o` have to be known valueless for the remainder to be
+#: `-o`'s value. A literal rather than an import — this file runs as a PATH
+#: executable and must not depend on abicheck being importable by whatever
+#: interpreter its shebang resolves to — and pinned against the real Click tree
+#: by `tests/test_skill_eval_harness.py`, so a new short option fails loudly
+#: instead of silently going unrecognized here.
+SHORT_VALUE_OPTIONS = ("-H", "-I", "-j", "-o")
+
+
+def _cluster_output(token: str) -> str | None:
+    """The output path packed into a short-option cluster, if there is one.
+
+    `-voreport.json` writes `report.json` — verified against the real CLI, and
+    missed entirely before, since the token starts with neither `-o` nor `-o=`.
+    An unrecognized output is never snapshotted, so a later call reusing the
+    path silently overwrites the evidence a claim cites, which is the exact
+    failure per-call snapshotting exists to prevent.
+
+    Answers None when a letter before the output option takes a value of its
+    own (`-Ho` is `-H` with the value `o`), because then no output was declared
+    here at all.
+    """
+    for position, letter in enumerate(token[1:], start=2):
+        option = f"-{letter}"
+        if option in OUTPUT_OPTIONS:
+            return token[position:] or None
+        if option in SHORT_VALUE_OPTIONS:
+            return None  # this letter consumes the rest as its own value
+    return None
+
+
 def _declared_outputs(argv: list[str]) -> list[str]:
     """Paths this invocation asked abicheck to write.
 
-    Three spellings, because Click accepts three and the shim has to recognize
-    every one the real command does: `-o path`, `-o=path`, and the attached
-    short form `-opath`. The attached form was missed, and the consequence was
-    not a cosmetic gap — an unrecognized output is never snapshotted, so a
-    later call reusing the same path silently overwrites the evidence a claim
-    cites, which is the exact failure per-call snapshotting exists to prevent.
-    Verified against the real CLI: `compare ... -oreport.json` writes
-    `report.json`.
+    Four spellings, because Click accepts four and the shim has to recognize
+    every one the real command does: `-o path`, `-o=path`, the attached short
+    form `-opath`, and the same attached form inside a cluster (`-voreport.json`).
     """
     found: list[str] = []
     for i, token in enumerate(argv):
         if token in OUTPUT_OPTIONS:
-            if i + 1 < len(argv):
+            # A following option is not a path. `compare a b -o --format json`
+            # otherwise recorded `--format` as a declared output, which shows
+            # up in the transcript as a phantom `"status": "absent"` entry.
+            if i + 1 < len(argv) and not argv[i + 1].startswith("-"):
                 found.append(argv[i + 1])
             continue
+        matched = False
         for opt in OUTPUT_OPTIONS:
             if token.startswith(f"{opt}="):
                 found.append(token.split("=", 1)[1])
+                matched = True
                 break
             if _is_short(opt) and token.startswith(opt) and len(token) > len(opt):
                 found.append(token[len(opt) :])
+                matched = True
                 break
+        if matched or not (
+            len(token) > 2 and token.startswith("-") and not token.startswith("--")
+        ):
+            continue
+        clustered = _cluster_output(token)
+        if clustered is not None:
+            found.append(clustered)
     return found
 
 
@@ -257,7 +321,18 @@ def main() -> int:
     }
     seq = _append_locked(calls, record)
 
-    proc = subprocess.run([real, *argv], capture_output=True)  # noqa: S603
+    try:
+        proc = subprocess.run(  # noqa: S603
+            [real, *argv], capture_output=True, timeout=_CALL_TIMEOUT_SECONDS
+        )
+    except subprocess.TimeoutExpired:
+        # Recorded rather than swallowed: a call that never returned is a fact
+        # about the run, and leaving the provisional record at `exit_code:
+        # null` would read as "the shim crashed" instead.
+        record.update(exit_code=None, timed_out=True)
+        _rewrite_locked(calls, record)
+        sys.stderr.write(f"shim: the call exceeded {_CALL_TIMEOUT_SECONDS}s\n")
+        return 70
 
     out_path = captured / f"{seq}.out"
     out_path.write_bytes(proc.stdout)

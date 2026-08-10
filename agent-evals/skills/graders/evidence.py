@@ -205,6 +205,47 @@ def determined_not_comparable(call: dict) -> bool:
 
 
 @functools.cache
+def _option_tables(command: str | None) -> tuple[frozenset[str], frozenset[str]] | None:
+    """`(every option this command declares, the subset taking no value)`.
+
+    Both halves come from Click's own command tree. The first is what keeps a
+    single-dash *long* option from being mistaken for a cluster of short ones:
+    `compat check` speaks ABICC's vocabulary (`-old`, `-new`, `-d1`), and
+    expanding `-old` into `-o ld` turned an ordinary comparison into a
+    self-comparison — a correct run failing the strictest dimension, which is
+    the one outcome that gets a gate switched off.
+    """
+    try:
+        import click
+
+        from abicheck.cli import main as cli_main
+    except Exception:  # pragma: no cover - depends on the grading environment
+        return None
+
+    def options_of(cmd: object) -> tuple[set[str], set[str]]:
+        every: set[str] = set()
+        valueless: set[str] = set()
+        for param in getattr(cmd, "params", []):
+            if not isinstance(param, click.Option):
+                continue
+            for opt in (*param.opts, *param.secondary_opts):
+                every.add(opt)
+                if param.is_flag:
+                    valueless.add(opt)
+        return every, valueless
+
+    every, valueless = options_of(cli_main)  # global options precede the verb
+    target = cli_main.commands.get(command or "")
+    if isinstance(target, click.Group):
+        # `compat check` is the comparison; bare `compat` auto-invokes it.
+        target = target.commands.get("check", target)
+    if target is not None:
+        more_every, more_valueless = options_of(target)
+        every |= more_every
+        valueless |= more_valueless
+    return frozenset(every), frozenset(valueless)
+
+
 def valueless_options(command: str | None) -> frozenset[str] | None:
     """Every option of this command that takes no value, from Click itself.
 
@@ -219,29 +260,8 @@ def valueless_options(command: str | None) -> frozenset[str] | None:
     where the opposite assumption would read `--policy-file p.yaml --suppress
     p.yaml` as two operands named `p.yaml` and fail a correct run.
     """
-    try:
-        import click
-
-        from abicheck.cli import main as cli_main
-    except Exception:  # pragma: no cover - depends on the grading environment
-        return None
-
-    def flags_of(cmd: object) -> set[str]:
-        return {
-            opt
-            for param in getattr(cmd, "params", [])
-            if isinstance(param, click.Option) and param.is_flag
-            for opt in (*param.opts, *param.secondary_opts)
-        }
-
-    found = flags_of(cli_main)  # global options, which precede the verb
-    target = cli_main.commands.get(command or "")
-    if isinstance(target, click.Group):
-        # `compat check` is the comparison; bare `compat` auto-invokes it.
-        target = target.commands.get("check", target)
-    if target is not None:
-        found |= flags_of(target)
-    return frozenset(found)
+    tables = _option_tables(command)
+    return None if tables is None else tables[1]
 
 
 def _consumes_a_value(token: str, command: str | None) -> bool:
@@ -259,6 +279,53 @@ def _consumes_a_value(token: str, command: str | None) -> bool:
     return token not in known
 
 
+def _expand_clusters(argv: list[str], command: str | None) -> list[str]:
+    """`argv` with Click's short-option clusters written out one option each.
+
+    Click packs short options: `-vv` is `-v -v`, and `-voreport.json` is
+    `-v -o report.json` (both verified against the real CLI). An unexpanded
+    cluster is not in the arity table under its own spelling, so it fell to the
+    "unknown options take a value" default and swallowed the token after it —
+    `compare x -vv x` then showed one operand, and a self-comparison passed.
+
+    A cluster ends at the first option that takes a value: everything after
+    that letter is its value, or the next token when nothing follows. Chars the
+    table does not recognize are treated as value-taking, the same conservative
+    default `_consumes_a_value` uses — it can leave a self-comparison
+    undetected, where the opposite invents an operand and fails a correct run.
+    """
+    tables = _option_tables(command)
+    if tables is None:
+        return list(argv)
+    every, known = tables
+    out: list[str] = []
+    for token in argv:
+        if (
+            not (
+                len(token) > 2
+                and token.startswith("-")
+                and not token.startswith("--")
+                and "=" not in token
+            )
+            # A declared single-dash *long* option is not a cluster. `compat
+            # check` speaks ABICC's vocabulary, and expanding `-old` into
+            # `-o ld` made an ordinary comparison read as a self-comparison —
+            # a correct run failing the strictest dimension, which is the one
+            # outcome that gets a gate switched off.
+            or token in every
+        ):
+            out.append(token)
+            continue
+        for position, letter in enumerate(token[1:], start=2):
+            option = f"-{letter}"
+            out.append(option)
+            if option not in known:  # takes a value; the rest of the token is it
+                if token[position:]:
+                    out.append(token[position:])
+                break
+    return out
+
+
 def _positional_operands(argv: list[str], command: str | None = None) -> list[str]:
     """The tokens that are operands rather than options or option values.
 
@@ -274,10 +341,11 @@ def _positional_operands(argv: list[str], command: str | None = None) -> list[st
     so Click accepts the placement without consuming `x`.
     """
     operands: list[str] = []
-    for index, token in enumerate(argv):
+    expanded = _expand_clusters(argv, command)
+    for index, token in enumerate(expanded):
         if token.startswith("-"):
             continue
-        if index and _consumes_a_value(argv[index - 1], command):
+        if index and _consumes_a_value(expanded[index - 1], command):
             continue
         operands.append(token)
     return operands

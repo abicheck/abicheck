@@ -119,9 +119,20 @@ unresolved. Give exactly one such block.
 #: Written as `/bin/sh` rather than Python on purpose: a Python script named
 #: `python3` in the first PATH entry whose shebang is `/usr/bin/env python3`
 #: would re-resolve to itself.
+#:
+#: Both spellings, because CPython accepts both: `-m abicheck` and the attached
+#: `-mabicheck` (verified — `python -mabicheck --version` prints the version).
+#: Recognizing only the separated form sent the attached one straight to the
+#: real interpreter, and the backstop below searched for a separate `-m` token
+#: too, so the bypass was accepted rather than reported: a correct comparison
+#: left `calls.jsonl` empty and graded as having obtained no evidence.
 _PYTHON_INTERPOSER = """#!/bin/sh
 if [ "$1" = "-m" ] && [ "$2" = "abicheck" ]; then
   shift 2
+  exec "$SKILL_EVAL_SHIM" "$@"
+fi
+if [ "$1" = "-mabicheck" ]; then
+  shift 1
   exec "$SKILL_EVAL_SHIM" "$@"
 fi
 exec "$SKILL_EVAL_REAL_PYTHON" "$@"
@@ -589,11 +600,33 @@ def _run_once(
 INTERPOSED_INTERPRETERS = ("python", "python3")
 
 
+def _interpreter_before(tokens: list[str], index: int) -> str:
+    """The interpreter this module entry was spelled with, or `""` for none.
+
+    Identified by its own name — every spelling that can reach `-m` is some
+    `python`: bare, versioned (`python3.12`), or absolute. Nothing before the
+    module entry is answerable structurally, since an interpreter option's
+    value (`-X dev`) is an ordinary word and indistinguishable from a program
+    name by position alone.
+    """
+    for token in reversed(tokens[:index]):
+        if Path(token).name.lower().startswith("python"):
+            return token
+    return ""
+
+
 def module_entry_interpreters(events: list[dict]) -> list[str]:
     """The interpreter each observed `-m abicheck` invocation was spelled with.
 
-    `""` when the command begins with `-m abicheck` and names no interpreter,
-    which cannot reach the interposer either.
+    `""` when the command names no interpreter before the module entry, which
+    cannot reach the interposer either.
+
+    Read from a `Bash` block's `command` alone, not from a serialization of
+    every tool input. Serializing the whole payload made any `Write` or `Edit`
+    whose *content* mentions `-m abicheck` — this file and its tests among them
+    — register as an invocation, and the token before it is then some ordinary
+    prose word rather than an interpreter, so the run aborted having bypassed
+    nothing. A check that fails correct runs is worse than the gap it closes.
     """
     found: list[str] = []
     for event in events:
@@ -602,14 +635,30 @@ def module_entry_interpreters(events: list[dict]) -> list[str]:
         for block in (event.get("message") or {}).get("content") or []:
             if not isinstance(block, dict) or block.get("type") != "tool_use":
                 continue
-            command = json.dumps(block.get("input") or {})
-            tokens = command.replace('"', " ").replace("\\n", " ").split()
+            if block.get("name") != "Bash":
+                continue
+            command = (block.get("input") or {}).get("command")
+            if not isinstance(command, str):
+                continue
+            tokens = command.split()
             for index, token in enumerate(tokens):
-                if token != "-m" or index + 1 >= len(tokens):
+                # Both spellings CPython accepts. `-mabicheck` is not a
+                # variant worth ignoring: it is the one the interposer used to
+                # miss, so it is exactly the spelling a bypass arrives as.
+                separated = (
+                    token == "-m"
+                    and index + 1 < len(tokens)
+                    and tokens[index + 1] == "abicheck"
+                )
+                if not separated and token != "-mabicheck":
                     continue
-                if tokens[index + 1] != "abicheck":
-                    continue
-                found.append(tokens[index - 1] if index else "")
+                # The nearest preceding token that *is* an interpreter, rather
+                # than whatever sits immediately before `-m`: `python -X dev -m
+                # abicheck` is spelled with `python`, and reading `dev` as the
+                # interpreter would report an interposed run as a bypass.
+                # Walking back over options alone cannot do it — `dev` is
+                # `-X`'s value and looks like any other word.
+                found.append(_interpreter_before(tokens, index))
     return found
 
 
@@ -652,7 +701,12 @@ def _bypassed_the_recorder(
 
 
 def _recovered_record(
-    out_dir: Path, sid: str, arm: str, rep: int, scenario: dict
+    out_dir: Path,
+    sid: str,
+    arm: str,
+    rep: int,
+    scenario: dict,
+    interposed: bool | None = None,
 ) -> dict:
     """An index row for a run whose directory exists but whose row does not.
 
@@ -694,7 +748,21 @@ def _recovered_record(
     visible = visible_native_skills(events)
     record["visible_skills"] = visible
     problem = check_treatment(arm, scenario, visible)
-    if problem is None and _bypassed_the_recorder(events, out_dir / "calls.jsonl"):
+    if problem is None:
+        # The third rejection `_run_once` can raise. It fires *before* the model
+        # call, so a leaked workspace never reaches `final.md` and this is
+        # unreachable in the crash-resume path it was written for — but the
+        # workspace is still on disk and still answerable, and a check that is
+        # cheap and cannot be wrong is worth more than the argument that it
+        # cannot trigger.
+        leaks = workspace_leaks(out_dir / "workspace")
+        if leaks:
+            problem = "the workspace names the tool or states the answer: " + "; ".join(
+                leaks
+            )
+    if problem is None and _bypassed_the_recorder(
+        events, out_dir / "calls.jsonl", interposed
+    ):
         # The same reasoning as the treatment check, for the other rejection
         # `_run_once` can raise after writing `final.md`. On a host without the
         # interposer every module entry bypasses the recorder, so this is the
@@ -789,15 +857,31 @@ def main(argv: list[str] | None = None) -> int:
     # an empty list and rewriting on the first new run drops every completed
     # repetition from the index while its directory still sits on disk.
     index_path = out_root / "index.json"
-    index: list[dict] = (
-        json.loads(index_path.read_text(encoding="utf-8"))
-        if index_path.is_file()
-        else []
-    )
+    index: list[dict] = []
+    if index_path.is_file():
+        try:
+            index = json.loads(index_path.read_text(encoding="utf-8"))
+        except json.JSONDecodeError as exc:
+            # Naming the file and the remedy, because the alternative is a bare
+            # decode error on every later resume while the run directories are
+            # all still on disk and individually recoverable.
+            print(
+                f"{index_path} is not valid JSON ({exc}) — most likely an "
+                f"interrupted write. Delete it and re-run: each completed run "
+                f"directory is recovered into a fresh index.",
+                file=sys.stderr,
+            )
+            return 1
     done = {(r["scenario_id"], r["arm"], r["repetition"]) for r in index}
 
     def flush() -> None:
-        index_path.write_text(json.dumps(index, indent=2), encoding="utf-8")
+        # Write-then-rename, so an interruption leaves the previous index
+        # intact rather than a truncated one. `write_text` truncates first, and
+        # a partial index is exactly what makes the whole output root
+        # unresumable — the failure this index exists to prevent.
+        tmp = index_path.with_suffix(".json.tmp")
+        tmp.write_text(json.dumps(index, indent=2), encoding="utf-8")
+        os.replace(tmp, index_path)
 
     for sid, scenario in scenarios.items():
         if not supported_here(scenario):

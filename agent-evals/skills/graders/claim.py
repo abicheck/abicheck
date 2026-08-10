@@ -57,8 +57,17 @@ _FENCE = re.compile(r"```(?:json)?\s*\n(.*?)```", re.DOTALL)
 
 
 def rank(verdict: str | None) -> int | None:
-    """Where a verdict sits on the severity ordinal, or None for `null`."""
-    if verdict is None:
+    """Where a verdict sits on the severity ordinal.
+
+    None for `null` *and* for anything outside the vocabulary. A claim's
+    verdict reaches here only after `validate`, but a **scenario's** does not:
+    `dimension_6` ranks `scenario["expected"]["verdict"]` straight from the
+    pack, so a drifted spelling in a `ground_truth.json` entry would raise and
+    abort the whole batch instead of failing the one scenario carrying it. The
+    severity comparisons that consume this read None as "no ordinal to
+    compare", which is the right answer for a verdict nobody can place.
+    """
+    if verdict is None or verdict not in VERDICT_ORDER:
         return None
     return VERDICT_ORDER.index(verdict)
 
