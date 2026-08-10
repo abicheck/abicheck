@@ -183,6 +183,160 @@ def _one_match_or_raise(
     return matches[0]
 
 
+class _BracketState:
+    """The bracket/string-escape state machine one JSON document is scanned
+    with.
+
+    A naive brace counter is wrong in general -- a JSON string value can itself
+    contain a literal ``{``/``}`` -- so string and escape state are tracked
+    alongside nesting depth. Fed one character at a time so the caller can
+    stream, never needing the document in memory to find its end.
+    """
+
+    __slots__ = ("depth", "escape", "in_string")
+
+    def __init__(self) -> None:
+        self.depth = 0
+        self.in_string = False
+        self.escape = False
+
+    def feed(self, c: str) -> bool:
+        """Consume one character; ``True`` when it closed the top-level
+        document."""
+        if self.in_string:
+            self._feed_in_string(c)
+            return False
+        return self._feed_structural(c)
+
+    def _feed_in_string(self, c: str) -> None:
+        if self.escape:
+            self.escape = False
+        elif c == "\\":
+            self.escape = True
+        elif c == '"':
+            self.in_string = False
+
+    def _feed_structural(self, c: str) -> bool:
+        if c == '"':
+            self.in_string = True
+        elif c in "{[":
+            self.depth += 1
+        elif c in "}]":
+            self.depth -= 1
+            return self.depth == 0
+        return False
+
+
+class _ChunkCursor:
+    """A one-chunk-at-a-time cursor over the text *read_more* feeds.
+
+    Holds exactly one chunk at a time: as ``pos`` runs off the end, ``cur`` is
+    replaced wholesale -- never appended to a list, never ``+=``'d onto a
+    growing ``str`` -- so the just-exhausted chunk becomes unreferenced and
+    eligible for GC immediately, unless a caller archived a piece of it first
+    (see :meth:`scan_document`).
+
+    This is what makes the scan linear. Repeatedly retrying
+    ``json.JSONDecoder.raw_decode`` from position 0 over an ever-growing
+    ``str`` was quadratic in a single document's size for any document
+    spanning more than one chunk (Codex review): each incomplete
+    ``raw_decode`` attempt re-parses the *entire* accumulated buffer, and
+    ``buf += chunk`` on an immutable ``str`` additionally re-copies the whole
+    accumulated buffer on every append. A hundreds-of-MB or multi-GB
+    single-pass AST -- this module's whole reason to exist -- made both costs
+    dominate. Here each byte is inspected exactly once across the whole
+    stream.
+    """
+
+    __slots__ = ("_read_more", "cur", "eof", "pos")
+
+    def __init__(self, read_more: Callable[[], str]) -> None:
+        self._read_more = read_more
+        self.cur = ""
+        self.pos = 0
+        self.eof = False
+
+    def ensure_char(self) -> bool:
+        """Make ``cur[pos]`` valid, pulling further chunks as needed. Returns
+        ``False`` only at genuine end of stream.
+
+        Calls :func:`abicheck.deadline.check` once per underlying *read_more*
+        call (P2, Codex review): a single document can take minutes to stream
+        through on a multi-GB DPC++ AST pass, and the only deadline checks
+        around this decode live in the caller (before/after the whole decode),
+        so a budget that expired early would otherwise still burn through the
+        rest of that time before the timeout is ever reported.
+        """
+        while self.pos >= len(self.cur):
+            if self.eof:  # pragma: no cover - defensive: every call site
+                # halts (return/raise) on this method's first False, so a
+                # second call after eof is already set never happens in
+                # practice; guarded anyway so a future call site that doesn't
+                # halt immediately can't call read_more() again past genuine
+                # end of stream.
+                return False
+            deadline.check()
+            chunk = self._read_more()
+            if not chunk:
+                self.eof = True
+                return False
+            self.cur = chunk
+            self.pos = 0
+        return True
+
+    def skip_whitespace(self) -> bool:
+        """Advance to the next non-whitespace character. Returns ``False`` at
+        genuine end of stream, with no partial document pending."""
+        if not self.ensure_char():
+            return False
+        while self.cur[self.pos].isspace():
+            self.pos += 1
+            if not self.ensure_char():
+                return False
+        return True
+
+    def scan_document(self, *, collect: bool) -> str | None:
+        """Scan from the current position past the end of one top-level JSON
+        document, returning its raw text when *collect* and ``None`` otherwise.
+
+        When not collecting, each chunk is dropped the moment it is fully
+        consumed rather than archived into *pieces*. Skipping only the final
+        join -- or only the caller's ``json.loads`` -- was not enough (P1,
+        Codex review, twice): the boundary scan itself must never accumulate
+        an unwanted document's chunks, or peak memory for a non-matching
+        multi-GB pass is still that pass's own full size, live at the same
+        time as an already-selected multi-GB match's dict.
+        """
+        pieces: list[str] = []
+        piece_start = self.pos
+        state = _BracketState()
+        while True:
+            if self.pos >= len(self.cur):
+                if collect:
+                    pieces.append(self.cur[piece_start:])
+                if not self.ensure_char():
+                    raise SnapshotError(
+                        "DPC++ frontend produced a truncated or malformed AST "
+                        "document stream: unexpected end of input"
+                    )
+                piece_start = self.pos  # == 0, freshly replaced `cur`
+                continue
+            closed = state.feed(self.cur[self.pos])
+            self.pos += 1
+            if closed:
+                break
+        if not collect:
+            return None
+        pieces.append(self.cur[piece_start : self.pos])
+        return _join_pieces(pieces)
+
+
+def _join_pieces(pieces: list[str]) -> str:
+    """One piece is the common case (a document wholly inside one chunk);
+    returning it directly avoids copying the whole document."""
+    return pieces[0] if len(pieces) == 1 else "".join(pieces)
+
+
 def _iter_json_documents(
     read_more: Callable[[], str], want_text: Callable[[int], bool] | None = None
 ) -> Iterator[str | None]:
@@ -200,19 +354,10 @@ def _iter_json_documents(
     Each document must be a top-level JSON **object or array** (``{...}``/
     ``[...]``) -- always true for a clang ``-ast-dump=json`` document, never
     a bare scalar. Boundary detection is a hand-rolled bracket/string-escape
-    scan over the CURRENT chunk only (never a growing list of chunks, never
-    an ever-growing single ``str``): repeatedly retrying
-    ``json.JSONDecoder.raw_decode`` from position 0 over an ever-growing
-    ``str`` was quadratic in a single document's size for any document
-    spanning more than one chunk (Codex review) -- each incomplete
-    ``raw_decode`` attempt re-parses the *entire* accumulated buffer, and
-    ``buf += chunk`` on an immutable ``str`` additionally re-copies the
-    whole accumulated buffer on every single append. A hundreds-of-MB or
-    multi-GB single-pass AST (this module's whole reason to exist) made
-    both costs dominate. Here, each byte is inspected exactly once across
-    the whole stream, and only ONE chunk is ever held onto beyond the
-    currently-scanned one (the collected pieces of a *wanted* document --
-    see *want_text* below).
+    scan over the CURRENT chunk only, never a growing list of chunks and
+    never an ever-growing single ``str`` -- see :class:`_ChunkCursor` for why
+    the obvious ``raw_decode``-over-a-growing-buffer approach was quadratic,
+    and :class:`_BracketState` for why a naive brace counter is wrong.
 
     *want_text*, if given, is called with each document's 0-based index
     BEFORE that document is scanned at all -- when it returns ``False``,
@@ -220,20 +365,14 @@ def _iter_json_documents(
     (so the boundary of the NEXT one can be found) but discards each chunk
     the moment it's fully consumed, never retaining more than the single
     chunk currently being scanned, and yields ``None`` for that document
-    instead of its text (P1, Codex review, twice: skipping ``json.loads``
-    for a definitely-non-matching document, as
-    :func:`_select_from_document_stream` already did, was not enough on its
-    own, and neither was skipping just the final join -- the boundary scan
-    itself must never accumulate an unwanted document's chunks into a list
-    at all, or peak memory for a non-matching multi-GB pass is still that
-    pass's full size, live at the same time as an already-selected
-    multi-GB match's dict. The *kind* of the pass that produced a document
-    is knowable from ``stderr`` alone, positionally, before this function's
-    ``read_more`` is ever called for that document's bytes at all, so a
-    definitely-non-matching multi-GB document now costs at most one
-    chunk's worth of memory to scan past, not its own full size).
-    ``want_text=None`` (the default) always collects and yields the text,
-    same as before this parameter existed.
+    instead of its text (P1, Codex review, twice; see
+    :meth:`_ChunkCursor.scan_document`). The *kind* of the pass that produced
+    a document is knowable from ``stderr`` alone, positionally, before this
+    function's ``read_more`` is ever called for that document's bytes at all,
+    so a definitely-non-matching multi-GB document costs at most one chunk's
+    worth of memory to scan past, not its own full size. ``want_text=None``
+    (the default) always collects and yields the text, same as before this
+    parameter existed.
 
     Deliberately does NOT call ``json.loads`` here -- that decision belongs
     to the caller (:func:`_select_from_document_stream`). Only a genuinely
@@ -243,105 +382,22 @@ def _iter_json_documents(
     when that surfaces as an error depends on whether the caller parses it.
 
     Calls :func:`abicheck.deadline.check` once per underlying *read_more*
-    call (P2, Codex review): a single document can take minutes to stream
-    through on a multi-GB DPC++ AST pass, and the only deadline checks
-    around this decode live in the caller (before/after the whole decode),
-    so a budget that expired early would otherwise still burn through the
-    rest of that time before the timeout is ever reported.
+    call (P2, Codex review; see :meth:`_ChunkCursor.ensure_char`).
     """
-    cur = ""
-    pos = 0
-    eof = False
-
-    def _ensure_char() -> bool:
-        """Ensure ``cur[pos]`` is valid, replacing ``cur`` wholesale (never
-        appending to a list) as it's exhausted -- the just-exhausted chunk
-        becomes unreferenced and eligible for GC immediately unless the
-        caller archived a piece of it first (see *pieces* below). Returns
-        ``False`` only at genuine end of stream."""
-        nonlocal cur, pos, eof
-        while pos >= len(cur):
-            if eof:  # pragma: no cover - defensive: every call site below
-                # halts (return/raise) on this function's first False,
-                # so a second call after eof is already set never happens
-                # in practice; guarded anyway so a future call site that
-                # doesn't halt immediately can't call read_more() again
-                # past genuine end of stream.
-                return False
-            deadline.check()
-            chunk = read_more()
-            if not chunk:
-                eof = True
-                return False
-            cur = chunk
-            pos = 0
-        return True
-
+    cursor = _ChunkCursor(read_more)
     doc_index = 0
-    while True:
-        if not _ensure_char():
-            return  # genuine end of stream, no partial document pending
-        while cur[pos].isspace():
-            pos += 1
-            if not _ensure_char():
-                return
-        c = cur[pos]
+    while cursor.skip_whitespace():
+        c = cursor.cur[cursor.pos]
         if c not in "{[":
             raise SnapshotError(
                 "DPC++ frontend produced a truncated or malformed AST "
                 f"document stream: expected an object/array, found {c!r}"
             )
-
         # Decided BEFORE scanning a single byte of this document -- purely
         # from *stderr*'s positional invocation list, never this document's
         # own content -- so an unwanted document never accumulates chunks
-        # below at all, not even transiently.
-        wants_this = want_text is None or want_text(doc_index)
-        pieces: list[str] = []
-        piece_start = pos
-
-        depth = 0
-        in_string = False
-        escape = False
-        end_pos: int | None = None
-        while end_pos is None:
-            if pos >= len(cur):
-                if wants_this:
-                    pieces.append(cur[piece_start:])
-                if not _ensure_char():
-                    raise SnapshotError(
-                        "DPC++ frontend produced a truncated or malformed AST "
-                        "document stream: unexpected end of input"
-                    )
-                piece_start = pos  # == 0, freshly replaced `cur`
-                continue
-            c = cur[pos]
-            if in_string:
-                if escape:
-                    escape = False
-                elif c == "\\":
-                    escape = True
-                elif c == '"':
-                    in_string = False
-            elif c == '"':
-                in_string = True
-            elif c in "{[":
-                depth += 1
-            elif c in "}]":
-                depth -= 1
-                if depth == 0:
-                    pos += 1
-                    end_pos = pos
-                    continue
-            pos += 1
-
-        doc_text: str | None
-        if wants_this:
-            pieces.append(cur[piece_start:end_pos])
-            doc_text = pieces[0] if len(pieces) == 1 else "".join(pieces)
-        else:
-            doc_text = None
-        yield doc_text
+        # inside scan_document at all, not even transiently.
+        yield cursor.scan_document(collect=want_text is None or want_text(doc_index))
         doc_index += 1
 
 
