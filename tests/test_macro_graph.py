@@ -584,6 +584,62 @@ def test_augment_skips_decl_not_already_in_graph() -> None:
     assert graph.edges == []
 
 
+def test_augment_never_reads_source_for_unjoinable_decl() -> None:
+    """Codex review, PR #708, fresh evidence: a TU's full declaration set
+    routinely includes every system/dependency header it transitively
+    includes, none of which the graph carries a node for — filtering to
+    joinable declarations *before* grouping by file means this pass never
+    opens a source file it has no use for (a real TU including ``<vector>``
+    produced 4,258 ranges across 47 files, none joinable). A file whose only
+    declarations are unjoinable must never even reach ``source_lookup``."""
+    graph = _seeded_graph()  # has decl://f, no node for "unrelated"
+
+    def _lookup(path: str) -> str | None:
+        raise AssertionError(f"source_lookup called for {path!r}")
+
+    decls = [DeclRange("unrelated", "system_header.h", 1, 1)]
+    result = augment_graph_with_macro_dependencies(graph, decls, source_lookup=_lookup)
+    assert result.decls_seen == 1
+    assert result.decls_joined == 0
+    assert result.files_scanned == 0
+    assert graph.edges == []
+
+
+def test_augment_unreadable_file_diagnostic_is_redacted(tmp_path, monkeypatch) -> None:
+    """Codex review, PR #708, fresh evidence: `_extract_from_compile_unit`
+    resolves a relative source path against the compile unit's own replayed
+    cwd, so by the time a file reaches this function it may already be an
+    absolute, un-redacted home/build path — and `OSError.__str__` typically
+    embeds that same real path a second time. Both must be redacted before
+    landing in `MacroGraphResult.diagnostics` (which `fold_macro_graph`
+    copies straight into the persisted `BuildEvidence.diagnostics`), the
+    same leak class + fix as `archive_graph.py`'s identical try/except
+    (mirrors that module's own
+    ``test_augment_graph_unreadable_archive_diagnostic_is_redacted``)."""
+    from abicheck.buildsource import redaction as redaction_mod
+
+    monkeypatch.setattr(
+        redaction_mod,
+        "DEFAULT_REDACTION",
+        redaction_mod.RedactionPolicy(
+            home_replacements={str(tmp_path): "~project-root~"}
+        ),
+    )
+    graph = _seeded_graph()
+    real_path = str(tmp_path / "t.h")
+    decls = [DeclRange("f", real_path, 3, 3)]
+
+    def _raising_lookup(path: str) -> str | None:
+        raise OSError(f"[Errno 13] Permission denied: '{path}'")
+
+    result = augment_graph_with_macro_dependencies(
+        graph, decls, source_lookup=_raising_lookup
+    )
+    assert result.diagnostics
+    assert str(tmp_path) not in result.diagnostics[0]
+    assert "~project-root~" in result.diagnostics[0]
+
+
 def test_augment_skips_macro_not_already_in_graph() -> None:
     graph = SourceGraphSummary()
     graph.add_node(_decl_node("f"))  # no macro node at all

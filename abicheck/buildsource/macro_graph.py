@@ -608,6 +608,7 @@ def augment_graph_with_macro_dependencies(
     in), ``DECL_USES_MACRO`` is ``CONF_REDUCED`` (a textual heuristic — see
     :func:`find_decl_macro_uses`).
     """
+    from .redaction import DEFAULT_REDACTION
     from .source_graph import _decl_node_id
 
     result = MacroGraphResult()
@@ -619,9 +620,22 @@ def augment_graph_with_macro_dependencies(
     }
     known_decl_ids = frozenset(n.id for n in graph.nodes if n.kind == "source_decl")
 
+    # Group only declarations that can actually join onto an existing
+    # source_decl node (see the join-only-onto-an-existing-node discipline
+    # above) — a TU's full declaration set from Pass A routinely includes
+    # every system/dependency header it transitively includes, none of
+    # which the graph carries a node for (Codex review, fresh evidence: a
+    # single real TU including <vector> produced 4,258 ranges across 47
+    # files, none joinable). Filtering *before* grouping by file, rather
+    # than after reading each file's text, means this pass never opens a
+    # source file it has no use for, and an unreadable/irrelevant header
+    # with zero joinable declarations no longer contributes a diagnostic
+    # that falsely marks the whole pass degraded.
     by_file: dict[str, list[DeclRange]] = {}
     for d in decl_ranges:
         result.decls_seen += 1
+        if _decl_node_id(d.identity) not in known_decl_ids:
+            continue
         by_file.setdefault(d.file, []).append(d)
 
     for file in sorted(by_file):
@@ -633,10 +647,25 @@ def augment_graph_with_macro_dependencies(
                 else source_lookup.get(file)
             )
         except (OSError, UnicodeDecodeError, ValueError) as exc:
-            result.diagnostics.append(f"{file}: unreadable: {exc}")
+            # A raised OSError/etc. can embed the real, resolved (i.e.
+            # un-redacted) path in both the filename operand and the
+            # exception's own text — *file* itself may already be
+            # un-redacted too, since ClangMacroGraphExtractor resolves a
+            # relative source path against the compile unit's own replayed
+            # cwd before this function ever sees it. Redact both before
+            # this diagnostic reaches `merged.diagnostics`/the persisted
+            # build-source artifact — same leak class + fix as
+            # archive_graph.augment_graph_with_archives' identical
+            # try/except (Codex review, fresh evidence).
+            result.diagnostics.append(
+                f"{DEFAULT_REDACTION.path(file)}: unreadable: "
+                f"{DEFAULT_REDACTION.path(str(exc))}"
+            )
             continue
         if text is None:
-            result.diagnostics.append(f"{file}: no source text available")
+            result.diagnostics.append(
+                f"{DEFAULT_REDACTION.path(file)}: no source text available"
+            )
             continue
         result.files_scanned += 1
         regions = scan_conditional_regions(text)
@@ -645,6 +674,10 @@ def augment_graph_with_macro_dependencies(
 
         for d in decls:
             decl_id = _decl_node_id(d.identity)
+            # Guaranteed true now that `by_file` is pre-filtered to joinable
+            # declarations above — kept as a defensive no-op rather than
+            # removed, so a future refactor that stops pre-filtering doesn't
+            # silently regress the join-only-onto-an-existing-node rule.
             if decl_id not in known_decl_ids:
                 continue
             result.decls_joined += 1
