@@ -49,7 +49,7 @@
         "native-consumer-compatibility"
       ],
       "category": "B",
-      "digest": "sha256:f90c3adc9ab040713b52657ef6b46dc309d03edd41deae2f065dd37d778fae53",
+      "digest": "sha256:3f28803e0f513eb9fc3c73d8f0afb91d710cfbf2ee10a0eb27e998a121c25ea8",
       "roots": [
         "agent-evals/skills/fixtures/consumer-actually-affected",
         "agent-evals/skills/scenarios.yaml",
@@ -63,7 +63,7 @@
         "native-consumer-compatibility"
       ],
       "category": "B",
-      "digest": "sha256:f058a95802d4e6a5fa0dc4d2bf0f2a4759ef374c36526a996e5636ed03b9398d",
+      "digest": "sha256:2e5043ad64f898c1b87e542037a0e0758878147cd71a2df7197ff5c9a3a9938c",
       "roots": [
         "agent-evals/skills/fixtures/consumer-unaffected-despite-break",
         "agent-evals/skills/scenarios.yaml",
@@ -147,7 +147,7 @@
         "native-consumer-compatibility"
       ],
       "category": "B",
-      "digest": "sha256:0ced4accba0fcc0efc1359138cc98a9f0741a3ae6475eccdcb6192655b2c83e1",
+      "digest": "sha256:21e42361d34137f135aa25330768b20ac228607b3f78506c6b5afbb1074612d5",
       "roots": [
         "agent-evals/skills/fixtures/plugin-required-symbol-loss",
         "agent-evals/skills/scenarios.yaml",
@@ -221,7 +221,7 @@
         "native-consumer-compatibility",
         "native-release-compatibility"
       ],
-      "digest": "sha256:79990f7e5660258a065341eadcce649a20044df2c0331dfede979f35f29d5f86",
+      "digest": "sha256:08c1ecfd58cec2794de6409970cfd2ac7bdd54f52dd1ec30a7ffd929b7c7f946",
       "roots": [
         "abicheck/change_registry.py",
         "abicheck/checker_policy.py",

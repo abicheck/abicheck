@@ -171,6 +171,41 @@ def test_every_dimension_two_uncertainty_kind_has_a_scenario(
     )
 
 
+def _scoped(scenarios: list[dict]) -> list[dict]:
+    """Scenarios whose invocation scopes the run to a consumer or entrypoint."""
+    return [
+        s
+        for s in scenarios
+        if s.get("invocation", {}).get("used_by")
+        or s.get("invocation", {}).get("required_symbols")
+    ]
+
+
+def test_consumer_scoped_scenarios_state_both_verdicts(scenarios: list[dict]) -> None:
+    """In a scoped run the top-level `verdict` is the *scoped* answer and
+    `full_verdict` is the library-wide one. A scenario stating only one of them
+    cannot distinguish a correct scoped answer from an agent reading the report
+    the wrong way round — the inversion the skill explicitly warns against."""
+    scoped = _scoped(scenarios)
+    assert scoped, "expected at least one consumer-scoped scenario"
+    for scenario in scoped:
+        assert "full_verdict" in scenario["expected"], (
+            f"{scenario['id']} is consumer-scoped but states no full_verdict"
+        )
+
+
+def test_at_least_one_scoped_scenario_diverges(scenarios: list[dict]) -> None:
+    """The divergent case is the whole reason consumer scoping exists. If every
+    scoped scenario had `verdict == full_verdict`, an agent that always reported
+    the library-wide result would pass all of them."""
+    diverging = [
+        s
+        for s in _scoped(scenarios)
+        if s["expected"]["verdict"] != s["expected"]["full_verdict"]
+    ]
+    assert diverging, "no scoped scenario has verdict != full_verdict"
+
+
 # --- the rubric ------------------------------------------------------------
 
 

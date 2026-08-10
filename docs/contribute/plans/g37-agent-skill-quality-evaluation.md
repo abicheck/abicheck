@@ -911,7 +911,19 @@ writing the checks made the gap visible:
   hash on every unrelated edit to a 2000-line file, reproducing at file
   granularity exactly the invalidate-everything behaviour D6 rejects at
   package granularity. The pack records those paths as *routes* instead, which
-  is what the completeness check needs them for.
+  is what the completeness check needs them for. The digest covers each
+  parameter's default, type, choices, arity and flag-ness alongside its
+  spelling: an option that keeps its name while its default flips or its
+  choice set widens changes the result of the exact command a skill runs, and
+  a spelling-only digest would pass every committed bundle straight through
+  that change.
+- **A consumer-scoped scenario states both verdicts.** In a scoped run the
+  top-level `verdict` is the *scoped* answer and `full_verdict` is the
+  library-wide one — `native-consumer-compatibility/SKILL.md` uses exactly the
+  divergent pair as its worked example and warns against reading it the other
+  way round. A scenario stating only the global value would have made the
+  grader reject the correct consumer answer and reward the inversion, so
+  `expected.full_verdict` exists to give the grader the distractor.
 
 **Done when:** `pr` fails on a hand-edited pack, an unresolvable fixture
 reference, and a stale results artifact. All three are covered:

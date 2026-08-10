@@ -80,7 +80,11 @@
           "required": ["verdict"],
           "properties": {
             "verdict": {
-              "description": "compare's ordinal verdict, or null for a pair that cannot be compared.",
+              "description": "compare's ordinal verdict, or null for a pair that cannot be compared. For a consumer-scoped scenario (--used-by / --required-symbol) this is the *scoped* answer, matching where the CLI promotes it and what the skill instructs the agent to report — never the library-wide result.",
+              "enum": ["NO_CHANGE", "COMPATIBLE", "COMPATIBLE_WITH_RISK", "API_BREAK", "BREAKING", null]
+            },
+            "full_verdict": {
+              "description": "Consumer-scoped scenarios only: the library-wide result the report preserves in `full_verdict`. Recorded because the interesting scenarios are exactly the ones where it diverges from `verdict`, and a grader that cannot see the distractor value cannot tell a correct scoped answer from an agent reading the report the wrong way round.",
               "enum": ["NO_CHANGE", "COMPATIBLE", "COMPATIBLE_WITH_RISK", "API_BREAK", "BREAKING", null]
             },
             "uncertainty": {

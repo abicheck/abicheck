@@ -146,6 +146,59 @@ def test_scenario_digest_covers_the_ground_truth_entry() -> None:
     assert gen._scenario_digest(scenario, mutated) != original
 
 
+def _compare_option(name: str) -> Any:
+    from abicheck.cli import main as cli_main
+
+    compare = cli_main.commands["compare"]
+    return next(p for p in compare.params if name in (p.opts or []))
+
+
+@pytest.mark.parametrize(
+    ("attribute", "value"),
+    [
+        ("default", "a-different-default"),
+        ("required", True),
+        ("multiple", True),
+        ("nargs", 2),
+    ],
+)
+def test_surface_digest_moves_on_an_option_semantics_change(
+    attribute: str, value: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """An option keeping its name while its default, arity or requiredness
+    changes alters the result of the exact command a skill runs. A digest over
+    spellings alone would leave every committed bundle passing the freshness
+    gate through that change."""
+    before = gen._surface_digest()
+    monkeypatch.setattr(_compare_option("--format"), attribute, value)
+    assert gen._surface_digest() != before
+
+
+def test_surface_digest_moves_when_a_choice_is_added(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The concrete case: a `--format`/`--contract`-style option gaining a
+    value is new surface a skill can reach, under an unchanged spelling."""
+    import click
+
+    option = _compare_option("--format")
+    before = gen._surface_digest()
+    widened = click.Choice([*option.type.choices, "a-new-format"])
+    monkeypatch.setattr(option, "type", widened)
+    assert gen._surface_digest() != before
+
+
+def test_surface_digest_ignores_help_text(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The other half of the asymmetry: rewording help does not change what a
+    command does, and invalidating every bundle over prose is the
+    invalidate-everything behaviour D6 rejects."""
+    before = gen._surface_digest()
+    monkeypatch.setattr(
+        _compare_option("--format"), "help", "totally rewritten help text"
+    )
+    assert gen._surface_digest() == before
+
+
 def test_publication_build_digest_is_not_the_committed_one(
     pack: dict[str, Any],
 ) -> None:
@@ -383,6 +436,40 @@ def test_a_trigger_bundle_is_not_held_to_the_scenario_rules(
     bundle["kind"] = "trigger"
     bundle["scenario_id"] = "positive-0"
     assert _check_bundle(monkeypatch, tmp_path, bundle) == 0
+
+
+@pytest.mark.parametrize(
+    "dropped",
+    ["schema_version", "kind", "scenario_id", "agent", "model", "observed_inputs"],
+)
+def test_a_bundle_missing_provenance_fails(
+    pack: dict[str, Any], monkeypatch: pytest.MonkeyPatch, tmp_path: Path, dropped: str
+) -> None:
+    """Every check here compares recorded values, so a bundle that records
+    nothing passes by having nothing to compare. An omitted field has to fail
+    exactly as loudly as a stale one."""
+    bundle = _bundle(pack)
+    del bundle[dropped]
+    assert _check_bundle(monkeypatch, tmp_path, bundle) == 1
+
+
+@pytest.mark.parametrize(
+    "dropped",
+    ["skill_tree", "abicheck_surface", "harness", "trigger_corpus", "scenarios"],
+)
+def test_a_bundle_missing_a_required_hash_fails(
+    pack: dict[str, Any], monkeypatch: pytest.MonkeyPatch, tmp_path: Path, dropped: str
+) -> None:
+    bundle = _bundle(pack)
+    del bundle["hashes"][dropped]
+    assert _check_bundle(monkeypatch, tmp_path, bundle) == 1
+
+
+def test_a_near_empty_bundle_fails(
+    pack: dict[str, Any], monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """The limiting case a truncated write or a runner regression produces."""
+    assert _check_bundle(monkeypatch, tmp_path, {"kind": "trigger"}) == 1
 
 
 def test_a_newer_pack_version_fails_closed(

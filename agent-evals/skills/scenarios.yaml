@@ -98,6 +98,13 @@ scenarios:
       verdict: COMPATIBLE
       uncertainty: contract_coverage_incomplete
 
+  # The two consumer scenarios state both verdicts on purpose. In a scoped run
+  # the top-level `verdict` is the *scoped* answer and `full_verdict` carries
+  # the library-wide one; the skill's own worked example is this exact pair
+  # (`full_verdict: BREAKING` with `verdict: COMPATIBLE`). Stating only the
+  # global value here would reward reading the report the wrong way round —
+  # the inversion the skill explicitly warns against.
+
   - id: consumer-unaffected-despite-break
     category: B
     skill: native-consumer-compatibility
@@ -110,7 +117,8 @@ scenarios:
     invocation:
       used_by: ["renderer"]
     expected:
-      verdict: BREAKING
+      verdict: COMPATIBLE
+      full_verdict: BREAKING
 
   - id: consumer-actually-affected
     category: B
@@ -124,7 +132,10 @@ scenarios:
     invocation:
       used_by: ["analytics-daemon"]
     expected:
+      # The non-diverging half of the pair: scoped and global agree, so an
+      # agent cannot pass both consumer scenarios by always reporting one field.
       verdict: BREAKING
+      full_verdict: BREAKING
 
   - id: plugin-required-symbol-loss
     category: B
@@ -137,7 +148,10 @@ scenarios:
     invocation:
       required_symbols: ["plugin_register", "plugin_teardown"]
     expected:
+      # `--required-symbol` scopes the same way `--used-by` does, so this one
+      # states both verdicts too.
       verdict: BREAKING
+      full_verdict: BREAKING
 
   # ---------------------------------------------------------------- Category A
   # Expected outcome comes from examples/ground_truth.json — never restated.

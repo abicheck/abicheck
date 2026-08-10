@@ -162,6 +162,47 @@ def check_mapping(
             )
 
 
+#: The provenance every bundle must carry, both kinds alike — the same set
+#: `transcript-bundle.schema.json` marks required. Checked explicitly rather
+#: than by validating the schema, because this module is stdlib-only (the same
+#: constraint the other structural gates run under) and `jsonschema` is a dev
+#: dependency. Without it the checks below iterate whatever fields happen to
+#: exist, so a truncated `meta.json` — in the limit `{"kind": "trigger"}` —
+#: passes every comparison by having nothing to compare (Codex review). An
+#: omitted field must fail exactly as loudly as a stale one; a runner
+#: regression that drops provenance is the case this catches.
+REQUIRED_BUNDLE_FIELDS = ("schema_version", "kind", "scenario_id", "agent", "model")
+REQUIRED_BUNDLE_HASHES = (
+    "skill_tree",
+    "abicheck_surface",
+    "harness",
+    "trigger_corpus",
+    "scenarios",
+)
+
+
+def check_bundle_completeness(rel: str, bundle: dict[str, Any], out: Findings) -> None:
+    for field in REQUIRED_BUNDLE_FIELDS:
+        if bundle.get(field) in (None, ""):
+            out.err(
+                "completeness", f"{rel}: no {field!r} — this is not a gradeable bundle"
+            )
+    hashes = bundle.get("hashes") or {}
+    for name in REQUIRED_BUNDLE_HASHES:
+        if not hashes.get(name):
+            out.err(
+                "completeness",
+                f"{rel}: records no {name!r} hash, so nothing here can go stale when "
+                f"that input changes",
+            )
+    if not bundle.get("observed_inputs"):
+        out.err(
+            "completeness",
+            f"{rel}: records no observed inputs — the completeness check reads what the "
+            f"accessor observed, so an empty set asserts the run read nothing at all",
+        )
+
+
 def _bundle_hash_ids(bundle: dict[str, Any]) -> dict[str, str]:
     """The recorded hashes, keyed the same way `hash_entries` keys the pack."""
     hashes = bundle.get("hashes", {})
@@ -200,6 +241,8 @@ def check_bundle(
     except ValueError:
         out.err("bundle", f"{rel}: not under {_rel(EVIDENCE)}/<skill>/")
         return set()
+
+    check_bundle_completeness(rel, bundle, out)
 
     # A behavioral bundle is evidence for one scenario, so it must hash *that*
     # scenario. Without this a bundle could carry a perfectly fresh hash for an

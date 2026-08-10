@@ -224,6 +224,14 @@ def _surface_digest() -> str:
     every source commit and make the evaluation unrunnable. The residual — a
     verdict that changes with no surface change — is what Phase 6's
     full-build-digest pass exists to close.
+
+    **Spellings alone are not the surface.** An option that keeps its name
+    while its default, type, choices, arity or flag-ness changes alters the
+    result of the exact command a skill runs, so each parameter contributes its
+    behaviourally relevant metadata too — otherwise a `--contract` gaining a
+    domain, or a default flipping, would leave every bundle passing this gate
+    (Codex review). Positional arguments are recorded for the same reason:
+    `compare OLD NEW` is as much the invocation contract as any flag.
     """
     import click
 
@@ -231,12 +239,31 @@ def _surface_digest() -> str:
     from abicheck.cli import main as cli_main
     from abicheck.schemas import load_compare_report_schema
 
-    def walk(cmd: click.Command, path: tuple[str, ...] = ()) -> dict[str, list[str]]:
-        options: list[str] = []
-        for param in cmd.params:
-            options.extend(getattr(param, "opts", []) or [])
-            options.extend(getattr(param, "secondary_opts", []) or [])
-        tree = {" ".join(path): sorted(set(options))}
+    def param_shape(param: click.Parameter) -> dict[str, Any]:
+        param_type = getattr(param, "type", None)
+        return {
+            "kind": param.param_type_name,
+            "opts": sorted(set(param.opts or [])),
+            "secondary_opts": sorted(set(param.secondary_opts or [])),
+            # repr, not the value: a default may be a Path, a sentinel, or a
+            # callable, none of which are JSON-serializable — and a changed
+            # repr is exactly the signal wanted here.
+            "default": repr(getattr(param, "default", None)),
+            "type": getattr(param_type, "name", None) or type(param_type).__name__,
+            "choices": sorted(str(c) for c in getattr(param_type, "choices", []) or []),
+            "required": bool(getattr(param, "required", False)),
+            "multiple": bool(getattr(param, "multiple", False)),
+            "nargs": getattr(param, "nargs", None),
+            "is_flag": bool(getattr(param, "is_flag", False)),
+        }
+
+    def walk(cmd: click.Command, path: tuple[str, ...] = ()) -> dict[str, Any]:
+        tree: dict[str, Any] = {
+            " ".join(path): sorted(
+                (param_shape(p) for p in cmd.params),
+                key=lambda shape: (shape["opts"], shape["kind"]),
+            )
+        }
         if isinstance(cmd, click.Group):
             for name, sub in cmd.commands.items():
                 tree.update(walk(sub, (*path, name)))
