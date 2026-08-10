@@ -962,6 +962,40 @@ Once a root command genuinely clears the bar above, pick the right home:
     a broad task suite plus a scoring/leaderboard story, which should grow
     from real usage of the one-task harness rather than being speculatively
     built out now.
+- **Findings emitted from absent evidence — `type_vtable_changed` fixed;
+  `type_base_changed` carries the identical shape and is not.** A list-valued
+  `RecordType` field cannot express "not captured", so an empty-vs-non-empty
+  difference conflates a real change with one side's debug info simply not
+  covering the declaring TU. Confirmed for `vtable`: identical headers, no
+  DWARF vtable, and zero `_ZTV` symbols on either side still produced a
+  `BREAKING` `type_vtable_changed`, because `_diff_type_vtable` guarded on
+  `t_old.vtable == t_new.vtable` and nothing else. Fixed by requiring an
+  independent layout signal (a size change — the vptr a genuinely polymorphic
+  class gains — or a virtual-base change) before an empty↔non-empty
+  transition is reported; both-sides-captured differences are untouched, and
+  an unknown size on either side keeps the finding, since the suppression
+  needs positive evidence that layout held still rather than being a fallback
+  for missing information. This is the discipline `diff_vtable_layout.py`
+  (tri-state `None`, "degrading to B1's L0 view rather than fabricating a
+  break") and `diff_elf_layout.py` (compare only a `_ZTV` present on *both*
+  sides) already state in their own docstrings; the type-level detector had
+  neither. **Two things remain open.** (1) `_diff_type_bases`
+  (`set(t_old.bases) != set(t_new.bases)`, and its virtual-base half) has the
+  same unguarded shape and was deliberately not changed in the same pass — a
+  base-list difference has different corroborating signals than a vtable one
+  (a gained base almost always moves size, but an *empty*-side capture gap
+  does not, and `surface.py`'s reachability closure also reads `bases`), so
+  it needs its own evidence design and its own FP-corpus cases rather than a
+  drive-by copy of the vtable guard. (2) One accepted false negative in the
+  fix itself: a class already polymorphic *through a base*, declaring no
+  virtuals of its own, that gains one — its vtable grows while its object
+  size does not, making it indistinguishable from capture noise without a
+  real polymorphism walk over both sides' base chains
+  (`diff_vtable_layout._is_polymorphic`) plus the per-finding provenance the
+  entry below describes. Guarded by three FP-corpus cases under the
+  `evidence-absence` axis (one FP guard, two FN sentinels) and three
+  Hypothesis properties in `tests/test_detector_properties.py`.
+
 - **Evidence-provider model — investigated, found not to reproduce as
   described; no fix applied.** A status-review follow-up asked whether
   `evidence_status_for_result`'s report-level downgrade (kind-level
