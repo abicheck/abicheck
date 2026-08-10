@@ -48,10 +48,35 @@ from typing import Any
 # docstring above.
 from abicheck.buildsource.baseline_set import compute_snapshot_content_hash
 
+#: Canonical storage suffixes a dumped snapshot may carry (ADR-059), longest
+#: first so ``.abicheck.json.zst`` is tried before the bare ``.abicheck.json``
+#: fallback -- mirrors abicheck.snapshot_io's own suffix table, but this
+#: script deliberately doesn't import that (or anything else) from the main
+#: abicheck.snapshot_io/serialization surface beyond the one content-hash
+#: utility above, per its own docstring.
+_SNAPSHOT_SUFFIXES = (".abicheck.json.zst", ".abicheck.json.gz", ".abicheck.json")
+
+
+def _find_snapshot_path(output_dir: Path, name: str) -> Path | None:
+    """Locate library *name*'s dumped snapshot regardless of which storage
+    encoding (ADR-059's ``--compression``) produced it."""
+    for suffix in _SNAPSHOT_SUFFIXES:
+        candidate = output_dir / f"{name}{suffix}"
+        if candidate.is_file():
+            return candidate
+    return None
+
 
 def _read_snapshot_meta(path: Path) -> dict[str, Any]:
-    with path.open(encoding="utf-8") as f:
-        raw = json.load(f)
+    # ADR-059: transparently decode a gzip/zstd-compressed snapshot the same
+    # way a plain one is read -- detected by magic bytes, not by trusting
+    # the filename suffix. Imported lazily (this script otherwise has no
+    # dependency on abicheck.snapshot_io) to keep this module's own import
+    # surface exactly what its docstring documents.
+    from abicheck.snapshot_io import detect_snapshot_compression, read_snapshot_bytes
+
+    raw = json.loads(read_snapshot_bytes(path).decode("utf-8"))
+    compression = detect_snapshot_compression(path).value
     # Hash the snapshot with volatile fields removed, not the raw file
     # bytes: dumper.py/collect-facts stamp several fields fresh on every run
     # (absent SOURCE_DATE_EPOCH) even when the actual ABI/source-fact
@@ -83,6 +108,7 @@ def _read_snapshot_meta(path: Path) -> dict[str, Any]:
         "build_id": raw.get("build_id"),
         "fact_set": fact_set,
         "sha256": sha256,
+        "compression": compression,
         # cli_dump_helpers.fold_dump_provenance_into_json's requested_depth/
         # effective_depth/degraded/frontend/source_scope block -- absent (None)
         # for a snapshot dumped without --depth (audit finding: the baseline
@@ -126,12 +152,17 @@ def build_manifest(
     fact_set_absent = 0
     for entry in entries:
         name = entry["name"]
-        snap_path = output_dir / f"{name}.abicheck.json"
-        if not snap_path.is_file():
+        # ADR-059: the dump step may have written any of the three canonical
+        # storage suffixes (plain/gzip/zstd, per --compression) -- discover
+        # whichever one actually landed rather than assuming plain JSON.
+        snap_path = _find_snapshot_path(output_dir, name)
+        if snap_path is None:
+            expected = output_dir / (name + ".abicheck.json")
+            suffixes = "/".join(_SNAPSHOT_SUFFIXES)
             raise SystemExit(
                 f"expected a dumped snapshot for library '{name}' at "
-                f"{snap_path}, but it does not exist -- the dump step for "
-                f"this library must have failed silently."
+                f"{expected} (or a {suffixes} sibling), but none exist -- "
+                "the dump step for this library must have failed silently."
             )
         meta = _read_snapshot_meta(snap_path)
         # A missing schema_version is not a legitimate "unknown" state to
@@ -182,6 +213,12 @@ def build_manifest(
             "library": name,
             "artifact": entry.get("artifact", ""),
             "snapshot": snap_path.name,
+            # ADR-059: informational only -- resolution/verification both
+            # detect compression from the snapshot's own magic bytes
+            # regardless of this field, so an older resolver reading this
+            # (purely additive) field via its existing defensive .get()
+            # access is unaffected whether or not it recognizes the key.
+            "compression": meta["compression"],
             "sha256": meta["sha256"],
             "git_commit": meta["git_commit"],
             "git_tag": meta["git_tag"],
