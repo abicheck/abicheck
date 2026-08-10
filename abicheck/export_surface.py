@@ -62,7 +62,7 @@ from typing import NamedTuple
 
 from .diff_cxx_rules import owner_class_of
 from .elf_symbol_filter import is_abi_relevant_elf_symbol
-from .model import AbiSnapshot, EnumType, RecordType
+from .model import AbiSnapshot, EnumType, Function, RecordType
 from .name_classification import (
     STDLIB_TYPE_NAMESPACE_PREFIXES,
     is_cxx_runtime_library,
@@ -463,77 +463,16 @@ def _seed_export_roots(
     ``all_*`` universe alone (nothing can match) rather than that path keeping
     its own copy of the same key derivation (CodeRabbit review).
     """
-    owner_seed_by_identity = owner_seed_by_identity or {}
-    # Every export name a declaration claims by exact linker identity --
-    # computed before any matching so the Mach-O shift can refuse to steal
-    # one (see `_matched_export_names`).
-    exact_owners: set[str] = set()
-    identities = [_linker_identity(f.name, f.mangled) for f in snap.functions]
-    identities += [_linker_identity(v.name, v.mangled) for v in snap.variables]
-    for ident in identities:
-        if ident and any(ident in names for names in tables.values()):
-            exact_owners.add(ident)
-
-    seed_types: set[str] = set()
-    nonroot_keys: set[str] = set()
-    root_identities: set[str] = set()
-    matched_pairs: set[tuple[str, str]] = set()
-    for fn in snap.functions:
-        keys = _symbol_keys(fn.name, fn.mangled)
-        surface.all_symbols |= keys
-        matched = _matched_export_names(fn.name, fn.mangled, tables, exact_owners)
-        if not matched:
-            nonroot_keys |= keys
-            continue
-        matched_pairs |= matched
-        # Truthiness-guarded: an empty identity in this set would make every
-        # *other* identity-less declaration look like a root to
-        # `_unresolved_type_edges` (CodeRabbit review). Unreachable today --
-        # `_matched_export_names` returns nothing for an empty identity, so a
-        # declaration carrying one never matches -- but the invariant belongs
-        # where the set is built, not in a reader's head.
-        if identity := _linker_identity(fn.name, fn.mangled):
-            root_identities.add(identity)
-        surface.matched_exports |= {n for _, n in matched}
-        surface.export_symbols |= keys
-        surface.has_roots = True
-        if fn.params or _is_real_type(fn.return_type):
-            surface.has_typed_roots = True
-        # `all_roots_typed` is strict where `has_typed_roots` is permissive:
-        # a *single* parameter recorded as the `"?"` sentinel (what
-        # `dwarf_snapshot._process_param` writes for a missing `DW_AT_type`)
-        # leaves that root's closure incomplete just as surely as a wholly
-        # untyped root does, even though the root as a whole looks typed
-        # (Codex review). Every parameter and the return type must be real.
-        if not _is_real_type(fn.return_type) or not all(
-            _is_real_type(getattr(p, "type", None)) for p in fn.params
-        ):
-            surface.all_roots_typed = False
-        seed_types |= _type_identifiers(fn.return_type)
-        for p in fn.params:
-            seed_types |= _type_identifiers(getattr(p, "type", None))
-        owner = owner_class_of(fn)
-        owner_seed = owner_seed_by_identity.get(owner) if owner else None
-        if owner_seed:
-            seed_types.add(owner_seed)
-    for var in snap.variables:
-        keys = _symbol_keys(var.name, var.mangled)
-        surface.all_symbols |= keys
-        matched = _matched_export_names(var.name, var.mangled, tables, exact_owners)
-        if not matched:
-            nonroot_keys |= keys
-            continue
-        matched_pairs |= matched
-        if identity := _linker_identity(var.name, var.mangled):
-            root_identities.add(identity)
-        surface.matched_exports |= {n for _, n in matched}
-        surface.export_symbols |= keys
-        surface.has_roots = True
-        if _is_real_type(var.type):
-            surface.has_typed_roots = True
-        else:
-            surface.all_roots_typed = False
-        seed_types |= _type_identifiers(var.type)
+    exact_owners = _exact_export_owners(snap, tables)
+    acc = _RootAccumulator()
+    _seed_function_roots(
+        snap, surface, tables, exact_owners, acc, owner_seed_by_identity or {}
+    )
+    _seed_variable_roots(snap, surface, tables, exact_owners, acc)
+    seed_types = acc.seed_types
+    nonroot_keys = acc.nonroot_keys
+    root_identities = acc.root_identities
+    matched_pairs = acc.matched_pairs
 
     # Drop every lookup alias a *non*-root declaration also answers to: the
     # inverse of the linker-identity fix on the rootness decision (Codex
@@ -557,6 +496,124 @@ def _seed_export_roots(
     # export name is -- only the *derived* aliases around it can be shared.
     surface.export_symbols -= nonroot_keys - surface.matched_exports - root_identities
     return _RootSeeding(seed_types, matched_pairs, root_identities)
+
+
+@dataclass
+class _RootAccumulator:
+    """The four sets :func:`_seed_export_roots`'s two declaration passes build
+    up together. ``nonroot_keys`` is the one that never leaves this function --
+    it exists only to prune shared aliases at the end (see there)."""
+
+    seed_types: set[str] = field(default_factory=set)
+    nonroot_keys: set[str] = field(default_factory=set)
+    root_identities: set[str] = field(default_factory=set)
+    matched_pairs: set[tuple[str, str]] = field(default_factory=set)
+
+
+def _exact_export_owners(snap: AbiSnapshot, tables: dict[str, set[str]]) -> set[str]:
+    """Every export name a declaration claims by exact linker identity.
+
+    Computed before any matching so the Mach-O underscore shift can refuse to
+    steal one (see :func:`_matched_export_names`).
+    """
+    identities = [_linker_identity(f.name, f.mangled) for f in snap.functions]
+    identities += [_linker_identity(v.name, v.mangled) for v in snap.variables]
+    return {
+        ident
+        for ident in identities
+        if ident and any(ident in names for names in tables.values())
+    }
+
+
+def _record_export_root(
+    surface: ExportSurface,
+    acc: _RootAccumulator,
+    name: str,
+    mangled: str,
+    keys: set[str],
+    matched: set[tuple[str, str]],
+) -> None:
+    """The bookkeeping every matched root does, function and variable alike."""
+    acc.matched_pairs |= matched
+    # Truthiness-guarded: an empty identity in this set would make every
+    # *other* identity-less declaration look like a root to
+    # `_unresolved_type_edges` (CodeRabbit review). Unreachable today --
+    # `_matched_export_names` returns nothing for an empty identity, so a
+    # declaration carrying one never matches -- but the invariant belongs
+    # where the set is built, not in a reader's head.
+    if identity := _linker_identity(name, mangled):
+        acc.root_identities.add(identity)
+    surface.matched_exports |= {n for _, n in matched}
+    surface.export_symbols |= keys
+    surface.has_roots = True
+
+
+def _record_function_root_typing(surface: ExportSurface, fn: Function) -> None:
+    """Fold one function root into the surface's two typed-root flags."""
+    if fn.params or _is_real_type(fn.return_type):
+        surface.has_typed_roots = True
+    # `all_roots_typed` is strict where `has_typed_roots` is permissive:
+    # a *single* parameter recorded as the `"?"` sentinel (what
+    # `dwarf_snapshot._process_param` writes for a missing `DW_AT_type`)
+    # leaves that root's closure incomplete just as surely as a wholly
+    # untyped root does, even though the root as a whole looks typed
+    # (Codex review). Every parameter and the return type must be real.
+    if not _is_real_type(fn.return_type) or not all(
+        _is_real_type(getattr(p, "type", None)) for p in fn.params
+    ):
+        surface.all_roots_typed = False
+
+
+def _seed_function_roots(
+    snap: AbiSnapshot,
+    surface: ExportSurface,
+    tables: dict[str, set[str]],
+    exact_owners: set[str],
+    acc: _RootAccumulator,
+    owner_seed_by_identity: dict[str, str],
+) -> None:
+    """The function half of :func:`_seed_export_roots`: signature types seed the
+    closure, and a method root additionally seeds its own enclosing class."""
+    for fn in snap.functions:
+        keys = _symbol_keys(fn.name, fn.mangled)
+        surface.all_symbols |= keys
+        matched = _matched_export_names(fn.name, fn.mangled, tables, exact_owners)
+        if not matched:
+            acc.nonroot_keys |= keys
+            continue
+        _record_export_root(surface, acc, fn.name, fn.mangled, keys, matched)
+        _record_function_root_typing(surface, fn)
+        acc.seed_types |= _type_identifiers(fn.return_type)
+        for p in fn.params:
+            acc.seed_types |= _type_identifiers(getattr(p, "type", None))
+        owner = owner_class_of(fn)
+        owner_seed = owner_seed_by_identity.get(owner) if owner else None
+        if owner_seed:
+            acc.seed_types.add(owner_seed)
+
+
+def _seed_variable_roots(
+    snap: AbiSnapshot,
+    surface: ExportSurface,
+    tables: dict[str, set[str]],
+    exact_owners: set[str],
+    acc: _RootAccumulator,
+) -> None:
+    """The variable half of :func:`_seed_export_roots`. A variable has one type
+    and no owner, so both typed-root flags follow from that single answer."""
+    for var in snap.variables:
+        keys = _symbol_keys(var.name, var.mangled)
+        surface.all_symbols |= keys
+        matched = _matched_export_names(var.name, var.mangled, tables, exact_owners)
+        if not matched:
+            acc.nonroot_keys |= keys
+            continue
+        _record_export_root(surface, acc, var.name, var.mangled, keys, matched)
+        if _is_real_type(var.type):
+            surface.has_typed_roots = True
+        else:
+            surface.all_roots_typed = False
+        acc.seed_types |= _type_identifiers(var.type)
 
 
 #: ``typename``/``template`` as whole words -- C++'s explicit markers for a
@@ -682,56 +739,107 @@ def _resolvable_type_spellings(
       stripping, every C++ library using a standard-library type looks
       riddled with missing edges and can never prove an exclusion.
     """
-    # Spelling -> node identity. Registered per *node*, so a later lookup can
-    # ask whether the node a spelling names is the node the walk reached --
-    # a global spelling set cannot answer that (see `_edge_is_unresolved`).
-    nodes_by_spelling: dict[str, set[str]] = {}
+    return _SpellingIndex(
+        _nodes_by_spelling(snap, record_by_name, enum_by_name),
+        _nodes_by_walk_key(snap, record_by_name, enum_by_name),
+        _unscoped_identities(snap),
+        _toolchain_owned_aliases(snap, record_by_name, enum_by_name),
+    )
 
-    def _register(spelling: str, node_id: str) -> None:
-        nodes_by_spelling.setdefault(spelling, set()).add(node_id)
 
-    def _register_all(identity: str, node_id: str) -> None:
-        for form in (identity, _stripped_signature_spelling(identity)):
-            if not form:
-                continue
-            _register(form, node_id)
-            for suffix in _namespace_suffix_spellings(form):
-                _register(suffix, node_id)
+def _nodes_by_spelling(
+    snap: AbiSnapshot,
+    record_by_name: dict[str, list[RecordType]],
+    enum_by_name: dict[str, list[EnumType]],
+) -> dict[str, frozenset[str]]:
+    """Spelling -> the node identities that spelling can name.
 
-    # A record/enum's node identity is its own `name`: that is what
-    # `_walk_type_closure` records when it reaches one, so both maps agree
-    # on what "the same node" means. Its *spellings* come from `name` and
-    # `qualified_name` alike, since backends split the two differently.
-    for rec_nodes in record_by_name.values():
-        for rec in rec_nodes:
-            _register_all(rec.name, rec.name)
-            if rec.qualified_name:
-                _register_all(rec.qualified_name, rec.name)
-    for en_nodes in enum_by_name.values():
-        for en in en_nodes:
-            _register_all(en.name, en.name)
-            if en.qualified_name:
-                _register_all(en.qualified_name, en.name)
+    Registered per *node*, so a later lookup can ask whether the node a
+    spelling names is the node the walk reached -- a global spelling set
+    cannot answer that (see :func:`_edge_is_unresolved`).
+
+    A record/enum's node identity is its own ``name``: that is what
+    ``_walk_type_closure`` records when it reaches one, so both indices agree
+    on what "the same node" means. Its *spellings* come from ``name`` and
+    ``qualified_name`` alike, since backends split the two differently, plus
+    every partially-qualified and stdlib-stripped form of each (see this
+    module's :func:`_resolvable_type_spellings` docstring for why).
+    """
+    spellings: dict[str, set[str]] = {}
+    for name, qualified in _indexed_node_identities(record_by_name, enum_by_name):
+        _register_spellings(spellings, name, name)
+        if qualified:
+            _register_spellings(spellings, qualified, name)
     for alias in snap.typedefs:
-        _register_all(alias, _typedef_node_id(alias))
+        _register_spellings(spellings, alias, _typedef_node_id(alias))
+    return {k: frozenset(v) for k, v in spellings.items()}
 
-    # Lookup key -> node identities the walk reaches through it: the two
-    # index dicts (whose keys `_index_surface_types` builds as each node's
-    # own name plus, for a namespaced one, its bare `::` tail) and
-    # `snap.typedefs` by *exact* key, with no tail tolerance of its own.
-    nodes_by_walk_key: dict[str, set[str]] = {}
+
+def _register_spellings(
+    spellings: dict[str, set[str]], identity: str, node_id: str
+) -> None:
+    """Record *identity*, and every equivalent spelling of it, as naming
+    *node_id* in the in-progress *spellings* index."""
+    for form in (identity, _stripped_signature_spelling(identity)):
+        if not form:
+            continue
+        spellings.setdefault(form, set()).add(node_id)
+        for suffix in _namespace_suffix_spellings(form):
+            spellings.setdefault(suffix, set()).add(node_id)
+
+
+def _indexed_node_identities(
+    record_by_name: dict[str, list[RecordType]],
+    enum_by_name: dict[str, list[EnumType]],
+) -> list[tuple[str, str | None]]:
+    """Every indexed record/enum node as ``(name, qualified_name)``.
+
+    Plain tuples, and the two maps flattened by two separately-typed
+    comprehensions rather than one loop over a mixed
+    ``(*records, *enums)`` tuple -- mypy widens that tuple's element type to
+    ``object``, the same reason :func:`_unscoped_identities` builds its own
+    list this way.
+    """
+    identities: list[tuple[str, str | None]] = [
+        (rec.name, rec.qualified_name)
+        for rec_nodes in record_by_name.values()
+        for rec in rec_nodes
+    ]
+    identities += [
+        (en.name, en.qualified_name)
+        for en_nodes in enum_by_name.values()
+        for en in en_nodes
+    ]
+    return identities
+
+
+def _nodes_by_walk_key(
+    snap: AbiSnapshot,
+    record_by_name: dict[str, list[RecordType]],
+    enum_by_name: dict[str, list[EnumType]],
+) -> dict[str, frozenset[str]]:
+    """Lookup key -> node identities the walk reaches through it: the two index
+    dicts (whose keys ``_index_surface_types`` builds as each node's own name
+    plus, for a namespaced one, its bare ``::`` tail) and ``snap.typedefs`` by
+    *exact* key, with no tail tolerance of its own."""
+    by_key: dict[str, set[str]] = {}
     for key, rec_nodes in record_by_name.items():
-        nodes_by_walk_key.setdefault(key, set()).update(r.name for r in rec_nodes)
+        by_key.setdefault(key, set()).update(r.name for r in rec_nodes)
     for key, en_nodes in enum_by_name.items():
-        nodes_by_walk_key.setdefault(key, set()).update(e.name for e in en_nodes)
+        by_key.setdefault(key, set()).update(e.name for e in en_nodes)
     for alias in snap.typedefs:
-        nodes_by_walk_key.setdefault(alias, set()).add(_typedef_node_id(alias))
+        by_key.setdefault(alias, set()).add(_typedef_node_id(alias))
+    return {k: frozenset(v) for k, v in by_key.items()}
 
-    # A node whose own recorded identity carries no scope: its bare name is
-    # everything the snapshot knows about where it lives, so a token that
-    # spells it with a scope contradicts nothing. A node that *does* record
-    # a scope is excluded -- its leaf must not absorb a differently-scoped
-    # token (see `_edge_is_unresolved`).
+
+def _unscoped_identities(snap: AbiSnapshot) -> frozenset[str]:
+    """Nodes whose own recorded identity carries no scope.
+
+    A bare name is everything the snapshot knows about where such a node
+    lives, so a token that spells it with a scope contradicts nothing. A node
+    that *does* record a scope is excluded -- its leaf must not absorb a
+    differently-scoped token (see :func:`_edge_is_unresolved`).
+    """
     # Two separately-typed comprehensions rather than one over a mixed
     # `(*snap.types, *snap.enums)` tuple, whose element type mypy widens to
     # `object`.
@@ -744,28 +852,31 @@ def _resolvable_type_spellings(
         for name, qualified in identities
         if qualified and qualified != name
     }
-    unscoped: set[str] = set()
-    for name, qualified in identities:
-        identity = qualified or name
-        if "::" not in identity and identity not in scoped_leaves:
-            unscoped.add(identity)
-    for alias in snap.typedefs:
-        if "::" not in alias and alias not in scoped_leaves:
-            unscoped.add(alias)
+    candidates = [qualified or name for name, qualified in identities]
+    candidates += list(snap.typedefs)
+    return frozenset(c for c in candidates if "::" not in c and c not in scoped_leaves)
 
-    # An alias key a record or enum also owns, where *every* colliding node
-    # is toolchain-owned: libstdc++'s bare-key alias templates. Measured on a
-    # real `g++` library -- `"vector" -> "std::vector<_Tp,
-    # polymorphic_allocator<_Tp>>"` collides with the record `std::vector`,
-    # and `"basic_string"` with `std::__cxx11::basic_string`. Judging those
-    # targets reports the template *parameter* names in them (`_Tp`,
-    # `_CharT`, `_Traits`) as missing edges, which is the same
-    # toolchain-internals noise `_unresolved_type_edges` already declines one
-    # level up -- and any one of them blocks every exclusion for every C++
-    # library. "Every colliding node" rather than "any" keeps the
-    # conservative direction: a library's own record sharing the key means
-    # the alias may well be its own, so it is still followed.
-    toolchain_aliases: set[str] = set()
+
+def _toolchain_owned_aliases(
+    snap: AbiSnapshot,
+    record_by_name: dict[str, list[RecordType]],
+    enum_by_name: dict[str, list[EnumType]],
+) -> frozenset[str]:
+    """Alias keys a record or enum also owns, where *every* colliding node is
+    toolchain-owned: libstdc++'s bare-key alias templates.
+
+    Measured on a real ``g++`` library -- ``"vector" -> "std::vector<_Tp,
+    polymorphic_allocator<_Tp>>"`` collides with the record ``std::vector``,
+    and ``"basic_string"`` with ``std::__cxx11::basic_string``. Judging those
+    targets reports the template *parameter* names in them (``_Tp``,
+    ``_CharT``, ``_Traits``) as missing edges, which is the same
+    toolchain-internals noise :func:`_unresolved_type_edges` already declines
+    one level up -- and any one of them blocks every exclusion for every C++
+    library. "Every colliding node" rather than "any" keeps the conservative
+    direction: a library's own record sharing the key means the alias may well
+    be its own, so it is still followed.
+    """
+    aliases: set[str] = set()
     for alias in snap.typedefs:
         colliding = [
             *record_by_name.get(alias, ()),
@@ -777,14 +888,8 @@ def _resolvable_type_spellings(
             )
             for node in colliding
         ):
-            toolchain_aliases.add(alias)
-
-    return _SpellingIndex(
-        {k: frozenset(v) for k, v in nodes_by_spelling.items()},
-        {k: frozenset(v) for k, v in nodes_by_walk_key.items()},
-        frozenset(unscoped),
-        frozenset(toolchain_aliases),
-    )
+            aliases.add(alias)
+    return frozenset(aliases)
 
 
 def _edge_is_unresolved(
