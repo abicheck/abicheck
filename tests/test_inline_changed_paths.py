@@ -1033,6 +1033,38 @@ def test_inline_graph_builds_for_link_only_evidence_with_no_compile_units(
     assert any(e.kind == "ARCHIVE_CONTAINS_OBJECT" for e in graph.edges)
 
 
+def test_inline_graph_link_only_relative_archive_resolves_via_link_unit_directory(
+    tmp_path: Path,
+) -> None:
+    """A link-only Make transcript names its archive input *relative* (e.g.
+    ``libfoo.a``, not an absolute path) -- with no ``compile_units`` at all,
+    ``_default_archive_search_roots`` previously derived search roots only
+    from compile-unit directories, so it returned none whatsoever for this
+    input and the relative archive could never be found even though the
+    fixed ``has_build`` gate now reaches the archive pass (Codex review,
+    fresh evidence). ``adapters/make.py`` is the one adapter that records a
+    ``LinkUnit``'s own working directory (the one build system with no
+    absolute-path-carrying target graph to lean on); that directory must now
+    be tried as a search root too."""
+    archive = tmp_path / "libfoo.a"
+    _write_minimal_gnu_archive(archive, {"a.o": ["alpha"]})
+    merged = BuildEvidence(  # no compile_units, no targets -- link-only
+        link_units=[
+            LinkUnit(
+                id="link://libbar.so",
+                output="libbar.so",
+                kind="shared_library",
+                inputs=["libfoo.a"],  # relative -- only resolvable via directory
+                directory=str(tmp_path),
+            )
+        ]
+    )
+    graph = inline._build_inline_graph(merged, surface=None, with_call_graph=False)
+    assert graph is not None
+    assert any(n.kind == "archive_member" for n in graph.nodes)
+    assert any(e.kind == "ARCHIVE_CONTAINS_OBJECT" for e in graph.edges)
+
+
 def test_inline_graph_archive_symbol_edge_joins_binary_symbol_node(
     tmp_path: Path,
 ) -> None:

@@ -357,6 +357,47 @@ def test_variadic_pack_arguments_are_flattened_not_dropped() -> None:
     assert by_label["Pack<double>"].args == (TemplateArgUse("double"),)
 
 
+def test_template_template_argument_instantiation_is_skipped_not_merged() -> None:
+    """A template-template argument (a template passed as a template
+    argument, e.g. ``Use<A>``/``Use<B>`` for ``template <template <typename>
+    class C> struct Use;``) produces a completely bare ``TemplateArgument``
+    node -- no ``type``, ``value``, ``isPack``, or ``inner`` at all --
+    verified empirically against real clang AST output (Codex review):
+    clang's ``-ast-dump=json`` serializes zero identifying information for
+    this argument shape, so ``Use<A>`` and ``Use<B>`` are indistinguishable
+    from the dump alone. Silently dropping the opaque argument (an earlier
+    revision) would still emit a TemplateInstantiation for each -- both
+    reducing to the identical, argument-less label ``"Use"`` and merging two
+    genuinely distinct instantiations' emitted-symbol/type-dependency edges
+    onto one shared node. The fix skips the instantiation entirely rather
+    than record a wrong, merged identity."""
+
+    def use_spec(spec_id: str) -> dict:
+        return {
+            "id": spec_id,
+            "kind": "ClassTemplateSpecializationDecl",
+            "name": "Use",
+            "completeDefinition": True,
+            "inner": [{"kind": "TemplateArgument"}],
+        }
+
+    ast = {
+        "kind": "TranslationUnitDecl",
+        "inner": [
+            {
+                "kind": "ClassTemplateDecl",
+                "name": "Use",
+                "inner": [
+                    use_spec("0xUA"),
+                    use_spec("0xUB"),
+                ],
+            },
+        ],
+    }
+    out = parse_clang_ast_templates(ast)
+    assert out == []
+
+
 def test_typedef_alias_argument_resolves_through_to_the_real_record() -> None:
     """clang's own printer resolves a ``using``/typedef alias argument
     straight to the underlying record's ``decl`` -- no typedef-chain

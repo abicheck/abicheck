@@ -294,10 +294,10 @@ def _specialization_scope_name(node: dict[str, Any], name: str) -> str:
     usual "skip rather than guess" discipline)."""
     if str(node.get("kind", "")) != _CLASS_SPECIALIZATION_KIND:
         return name
-    spellings = [
-        use.spelling for use in _flatten_template_args(node.get("inner", []) or [])
-    ]
-    return f"{name}<{', '.join(spellings)}>" if spellings else name
+    args = _flatten_template_args(node.get("inner", []) or [])
+    if not args:
+        return name
+    return f"{name}<{', '.join(use.spelling for use in args)}>"
 
 
 def _index_type_decls(
@@ -487,7 +487,23 @@ def _template_arg_use(arg_node: dict[str, Any]) -> TemplateArgUse | None:
     return TemplateArgUse(spelling=spelling, target_qname=_first_decl_id(arg_node))
 
 
-def _flatten_template_args(children: list[dict[str, Any]]) -> list[TemplateArgUse]:
+def _is_opaque_template_argument(node: dict[str, Any]) -> bool:
+    """Whether a ``TemplateArgument`` node carries none of the fields this
+    module can ever spell anything from — no ``type``, no ``value``, not a
+    pack wrapper (``isPack``). A **template-template argument** (a template
+    passed as a template argument, e.g. ``Use<A>``/``Use<B>`` for
+    ``template <template <typename> class C> struct Use;``) produces exactly
+    this shape — empirically confirmed against real clang AST output (Codex
+    review): the ``TemplateArgument`` node is entirely bare (``{"kind":
+    "TemplateArgument"}``, no ``id``, no ``inner``, nothing distinguishing
+    ``A`` from ``B``) with clang's own ``-ast-dump=json`` serializing zero
+    identifying information for it at all."""
+    return not node.get("isPack") and node.get("type") is None and "value" not in node
+
+
+def _flatten_template_args(
+    children: list[dict[str, Any]],
+) -> list[TemplateArgUse] | None:
     """Collect every :class:`TemplateArgUse` from a decl's direct
     ``TemplateArgument`` children, flattening a parameter pack.
 
@@ -504,14 +520,34 @@ def _flatten_template_args(children: list[dict[str, Any]]) -> list[TemplateArgUs
     pack — both instantiations reduced to the identical, argument-less label
     ``"Pack"`` and collided onto one graph node. Recurses (rather than a
     single flattening pass) in case a pack itself nests another pack node,
-    though not empirically observed."""
+    though not empirically observed.
+
+    Returns ``None`` — instead of the args collected so far — when any
+    argument is :func:`_is_opaque_template_argument` (a template-template
+    argument is the confirmed real case, see that function's docstring):
+    silently dropping just that one argument would still let the caller
+    build a `TemplateInstantiation` for this decl, but with a label/args
+    that omit it entirely — so two genuinely distinct instantiations
+    differing *only* in that one opaque argument (``Use<A>`` vs. ``Use<B>``)
+    would collide onto one shared graph-node identity, merging their real,
+    distinct emitted-symbol/type-dependency edges (Codex review, empirically
+    confirmed: both instantiations reduce to the identical label ``"Use"``).
+    The caller must treat ``None`` as "skip this instantiation entirely",
+    never as "empty argument list" — the same "degrade rather than fabricate
+    an identity" discipline this whole module already applies elsewhere.
+    """
     out: list[TemplateArgUse] = []
     for child in children:
         if str(child.get("kind", "")) != "TemplateArgument":
             continue
         if child.get("isPack") and child.get("type") is None and "value" not in child:
-            out.extend(_flatten_template_args(child.get("inner", []) or []))
+            nested = _flatten_template_args(child.get("inner", []) or [])
+            if nested is None:
+                return None
+            out.extend(nested)
             continue
+        if _is_opaque_template_argument(child):
+            return None
         use = _template_arg_use(child)
         if use is not None:
             out.append(use)
@@ -589,6 +625,13 @@ def _resolve_specialization_qname(
         # anywhere in this TU. The bare qname is already exact for these.
         return id_to_qname.get(spec_id)
     args = _flatten_template_args(full.get("inner", []) or [])
+    if args is None:
+        # An opaque argument (e.g. a template-template argument -- see
+        # _is_opaque_template_argument) means this specialization's own
+        # disambiguated label can't be trusted; fall back to the bare,
+        # unparameterized qname rather than risk merging two genuinely
+        # distinct nested specializations onto one identity.
+        return id_to_qname.get(spec_id)
     resolved_args = _resolve_arg_targets(
         args,
         id_to_qname,
@@ -689,6 +732,13 @@ def _walk_function_templates(
                     mangled = child.get("mangledName")
                 mangled = _normalize_mangled(mangled)
                 args = _flatten_template_args(child.get("inner", []) or [])
+                if args is None:
+                    # An opaque argument (e.g. a template-template argument
+                    # -- see _is_opaque_template_argument) means this
+                    # instantiation's own identity can't be trusted; skip
+                    # rather than record a wrong, possibly-merged one
+                    # (same reasoning as the class-kind loop above).
+                    continue
                 resolved_args = _resolve_arg_targets(
                     args, id_to_qname, id_to_decl_kind, id_to_template_qname, full_by_id
                 )
@@ -849,6 +899,18 @@ def parse_clang_ast_templates(ast: dict[str, Any]) -> list[TemplateInstantiation
         if full is None:
             continue  # a stub with no corresponding full definition anywhere
         args = _flatten_template_args(full.get("inner", []) or [])
+        if args is None:
+            # An opaque argument (e.g. a template-template argument -- see
+            # _is_opaque_template_argument) means this instantiation's own
+            # identity can't be trusted -- two genuinely distinct
+            # instantiations differing only in that argument (Use<A> vs.
+            # Use<B>) would otherwise collide onto one shared label/node,
+            # merging their real, distinct emitted-symbol/type-dependency
+            # edges (Codex review, empirically confirmed against real clang
+            # AST output: clang's -ast-dump=json serializes zero
+            # identifying information for a template-template argument).
+            # Skip rather than record a wrong identity.
+            continue
         resolved_args = _resolve_arg_targets(
             args, id_to_qname, id_to_decl_kind, id_to_template_qname, full_by_id
         )

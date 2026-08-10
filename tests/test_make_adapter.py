@@ -13,6 +13,7 @@
 # limitations under the License.
 
 """Make adapter coverage (ADR-029 D7)."""
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -30,7 +31,9 @@ make: Leaving directory '/home/user/proj'
 
 
 def _has_response_arg(argv: list[str], path: Path) -> bool:
-    return any(arg.startswith("@") and Path(arg[1:]).expanduser() == path for arg in argv)
+    return any(
+        arg.startswith("@") and Path(arg[1:]).expanduser() == path for arg in argv
+    )
 
 
 def test_make_dry_run_extracts_compile_units():
@@ -68,10 +71,22 @@ def test_make_dry_run_extracts_shared_and_static_link_units():
     assert any("link/archive units" in d for d in ev.diagnostics)
 
 
+def test_make_link_unit_records_its_own_directory():
+    """A link unit's own working directory must be recorded (mirrors
+    ``CompileUnit.directory``) -- Make is the one build system with no
+    absolute-path-carrying target graph to lean on, so a relative archive
+    link-input can only be resolved against the recipe's own directory
+    (Codex review, fresh evidence: an earlier revision left ``LinkUnit``
+    with no directory field at all, so a link-only build's relative archive
+    input could never be found)."""
+    ev = MakeAdapter(dry_run=DRY_RUN).collect()
+    by_output = {lu.output: lu for lu in ev.link_units}
+    assert by_output["libfoo.so"].directory == "/home/user/proj"
+    assert by_output["libbar.a"].directory == "/home/user/proj"
+
+
 def test_make_executable_link_unit_recognized():
-    ev = MakeAdapter(
-        dry_run="gcc -o build/app build/main.o build/lib.a -lm"
-    ).collect()
+    ev = MakeAdapter(dry_run="gcc -o build/app build/main.o build/lib.a -lm").collect()
     assert len(ev.link_units) == 1
     lu = ev.link_units[0]
     assert lu.kind == "executable"
@@ -95,9 +110,7 @@ def test_make_msvc_style_flag_shaped_token_not_mistaken_for_a_link_input():
     # "/Fsomething.obj" is shaped like a single-segment MSVC-style flag (no
     # further "/") and happens to end in a recognized link-input extension --
     # it must still be excluded, not mistaken for a real object input.
-    ev = MakeAdapter(
-        dry_run="gcc -o build/app build/main.o /Fsomething.obj"
-    ).collect()
+    ev = MakeAdapter(dry_run="gcc -o build/app build/main.o /Fsomething.obj").collect()
     assert len(ev.link_units) == 1
     assert ev.link_units[0].inputs == ["build/main.o"]
 
@@ -173,13 +186,17 @@ def test_make_unrelated_recipe_lines_produce_no_link_unit():
 
 def test_make_forced_include_not_mistaken_for_source():
     # `-include config.hpp` is a forced header, not the TU; foo.cc must win.
-    ev = MakeAdapter(dry_run="g++ -include config.hpp -std=c++17 -c src/foo.cc -o foo.o").collect()
+    ev = MakeAdapter(
+        dry_run="g++ -include config.hpp -std=c++17 -c src/foo.cc -o foo.o"
+    ).collect()
     assert [c.source for c in ev.compile_units] == ["src/foo.cc"]
 
 
 def test_make_absolute_posix_source_path():
     # An absolute Unix source path must be recognized (not mistaken for an option).
-    ev = MakeAdapter(dry_run="gcc -std=c11 -c /work/src/foo.c -o /work/build/foo.o").collect()
+    ev = MakeAdapter(
+        dry_run="gcc -std=c11 -c /work/src/foo.c -o /work/build/foo.o"
+    ).collect()
     assert [c.source for c in ev.compile_units] == ["/work/src/foo.c"]
 
 
@@ -191,13 +208,15 @@ def test_make_msvc_slash_c_compile_marker():
 
 def test_make_cd_prefixed_recipe_resolves_in_subdir():
     # `cd sub && …` makes the source and -I paths relative to sub/, not the parent.
-    ev = MakeAdapter(build_dir="/proj/build",
-                     dry_run="cd sub && gcc -Iinclude -std=c17 -c foo.c -o foo.o").collect()
+    ev = MakeAdapter(
+        build_dir="/proj/build",
+        dry_run="cd sub && gcc -Iinclude -std=c17 -c foo.c -o foo.o",
+    ).collect()
     cu = ev.compile_units[0]
     assert cu.source == "foo.c"
     assert cu.standard == "c17"
     # Path separators differ across OSes (sub\include on Windows); normalize.
-    assert cu.directory.replace("\\", "/").endswith("sub")    # advanced into cd target
+    assert cu.directory.replace("\\", "/").endswith("sub")  # advanced into cd target
     assert any(p.replace("\\", "/").endswith("sub/include") for p in cu.include_paths)
 
 
@@ -310,7 +329,11 @@ def test_make_does_not_expand_response_file_outside_build_dir(tmp_path):
     src.write_text("int f() { return 0; }\n")
     outside.write_text("LEAKED_TOKEN\n")
 
-    cu = MakeAdapter(build_dir=build, dry_run=f"g++ @{outside} -c foo.cc -o foo.o").collect().compile_units[0]
+    cu = (
+        MakeAdapter(build_dir=build, dry_run=f"g++ @{outside} -c foo.cc -o foo.o")
+        .collect()
+        .compile_units[0]
+    )
 
     assert _has_response_arg(cu.argv, outside)
     assert "LEAKED_TOKEN" not in cu.argv
@@ -341,7 +364,11 @@ def test_make_does_not_expand_large_response_file(tmp_path):
     src.write_text("int f() { return 0; }\n")
     rsp.write_text("A" * (1024 * 1024 + 1))
 
-    cu = MakeAdapter(build_dir=tmp_path, dry_run="g++ @large.rsp -c foo.cc -o foo.o").collect().compile_units[0]
+    cu = (
+        MakeAdapter(build_dir=tmp_path, dry_run="g++ @large.rsp -c foo.cc -o foo.o")
+        .collect()
+        .compile_units[0]
+    )
 
     assert "@large.rsp" in cu.argv
 
@@ -352,7 +379,13 @@ def test_make_does_not_expand_response_file_directory(tmp_path):
     src.write_text("int f() { return 0; }\n")
     rsp_dir.mkdir()
 
-    cu = MakeAdapter(build_dir=tmp_path, dry_run="g++ @not-a-file.rsp -c foo.cc -o foo.o").collect().compile_units[0]
+    cu = (
+        MakeAdapter(
+            build_dir=tmp_path, dry_run="g++ @not-a-file.rsp -c foo.cc -o foo.o"
+        )
+        .collect()
+        .compile_units[0]
+    )
 
     assert "@not-a-file.rsp" in cu.argv
 
@@ -360,7 +393,9 @@ def test_make_does_not_expand_response_file_directory(tmp_path):
 def test_make_msvc_combined_forced_include_not_source():
     # `/FIsrc/config.hpp` is a combined MSVC forced-include with an embedded
     # path; despite the `.hpp` it must not be read as the TU — foo.cc wins.
-    ev = MakeAdapter(dry_run="cl.exe /FIsrc/config.hpp /std:c++17 /c foo.cc /Fofoo.obj").collect()
+    ev = MakeAdapter(
+        dry_run="cl.exe /FIsrc/config.hpp /std:c++17 /c foo.cc /Fofoo.obj"
+    ).collect()
     assert [c.source for c in ev.compile_units] == ["foo.cc"]
 
 
@@ -373,7 +408,9 @@ def test_make_msvc_tp_explicit_source():
 
 
 def test_make_no_compile_lines_yields_no_units():
-    ev = MakeAdapter(dry_run="echo hello\nrm -f *.o\nmake[1]: Nothing to be done").collect()
+    ev = MakeAdapter(
+        dry_run="echo hello\nrm -f *.o\nmake[1]: Nothing to be done"
+    ).collect()
     assert not ev.compile_units
     assert not any("reduced confidence" in d for d in ev.diagnostics)
 

@@ -482,15 +482,30 @@ def fold_include_graph(
 
 
 def _default_archive_search_roots(merged: BuildEvidence) -> tuple[Path, ...]:
-    """Every distinct compile-unit ``directory`` — the default base a
+    """Every distinct compile-unit ``directory``, plus every distinct
+    link-unit's own ``directory`` when recorded — the default base a
     relative archive link-input path is tried against (G29 Phase 5 item 6):
     for most generators it's the same directory the link step itself ran
     from. An absolute link-input path ignores this entirely (see
-    :func:`~abicheck.buildsource.archive_graph._resolve_archive_path`)."""
+    :func:`~abicheck.buildsource.archive_graph._resolve_archive_path`).
+
+    The link-unit directories matter for **link-only** evidence (no
+    ``compile_units`` at all, e.g. a Make transcript linking prebuilt
+    objects against a static archive) — without them this function returned
+    no roots whatsoever for exactly that input, so a relative archive input
+    could never be found even though the fixed `has_build` gate now reaches
+    this pass for it (Codex review, fresh evidence). Only ``adapters/
+    make.py`` populates ``LinkUnit.directory`` today (the one build system
+    with no absolute-path-carrying target graph to lean on instead); every
+    other adapter's own ``LinkUnit.inputs``/``output`` are already absolute.
+    """
     roots: list[Path] = []
     for cu in merged.compile_units:
         if cu.directory and Path(cu.directory) not in roots:
             roots.append(Path(cu.directory))
+    for link in merged.link_units:
+        if link.directory and Path(link.directory) not in roots:
+            roots.append(Path(link.directory))
     return tuple(roots)
 
 

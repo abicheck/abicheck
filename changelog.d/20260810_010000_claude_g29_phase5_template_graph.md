@@ -227,3 +227,30 @@
   the identical, argument-less label `"Pack"`. A new `_flatten_template_args`
   helper (used everywhere a decl's direct `TemplateArgument` children are
   collected) recurses into a pack wrapper's own `inner` instead.
+
+  A ninth round found two more real gaps, both empirically confirmed. A
+  **template-template argument** (a template passed as a template argument,
+  e.g. `Use<A>`/`Use<B>` for `template <template <typename> class C> struct
+  Use;`) produces a completely bare `TemplateArgument` node — no `type`,
+  `value`, `isPack`, or `inner` at all: clang's `-ast-dump=json` serializes
+  zero identifying information for it, so `Use<A>` and `Use<B>` are
+  indistinguishable from the dump alone. The previous code silently dropped
+  this one opaque argument (same as any other unmodeled shape), but that
+  still let both instantiations reduce to the identical, argument-less label
+  `"Use"` and collide onto one shared graph-node identity, merging their
+  real, distinct emitted-symbol/type-dependency edges — a correctness bug,
+  not merely an incomplete args list. `_flatten_template_args` now returns
+  `None` (not an empty/partial list) when any argument is opaque, and every
+  caller treats `None` as "skip this instantiation entirely" instead of
+  recording a wrong, merged one. Separately, `inline_graph_fold.
+  _default_archive_search_roots` derived search roots only from
+  compile-unit directories — for **link-only** evidence (no `compile_units`
+  at all, the exact Make-transcript scenario the previous round's
+  `has_build` fix newly reaches) it returned no roots whatsoever, so a
+  relative archive link-input could still never be found even though the
+  archive pass now runs for it. `LinkUnit` gains an additive `directory`
+  field (defensive `.get()` parsing, no `BUILD_EVIDENCE_VERSION` bump
+  needed, mirroring `CompileUnit.directory`), populated only by
+  `adapters/make.py` — the one build system with no absolute-path-carrying
+  target graph to lean on instead — and `_default_archive_search_roots` now
+  also tries each link unit's own directory.

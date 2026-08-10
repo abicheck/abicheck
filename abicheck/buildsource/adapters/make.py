@@ -35,6 +35,7 @@ explicit opt-in (ADR-032 D5) and is not implemented here.
 The recovered compile units are always **reduced confidence** (a Make dry run
 is not an authoritative target graph), recorded via a diagnostic.
 """
+
 from __future__ import annotations
 
 import os
@@ -103,7 +104,11 @@ class MakeAdapter:
                 directory = event_dir
                 continue
             if event == "leave":
-                directory = directory_stack.pop() if directory_stack else (self.build_dir or Path("."))
+                directory = (
+                    directory_stack.pop()
+                    if directory_stack
+                    else (self.build_dir or Path("."))
+                )
                 continue
             cu = self._compile_unit(line, directory)
             if cu is not None:
@@ -183,13 +188,20 @@ class MakeAdapter:
             argv=red_argv,
             language=effective_language(argv, source),
             standard=ctx.language_standard or "",
-            defines={k: self.redaction.define_value(k, v or "") for k, v in ctx.defines.items()},
+            defines={
+                k: self.redaction.define_value(k, v or "")
+                for k, v in ctx.defines.items()
+            },
             undefines=sorted(ctx.undefines),
             include_paths=[self.redaction.path(str(p)) for p in ctx.include_paths],
-            system_include_paths=[self.redaction.path(str(p)) for p in ctx.system_includes],
+            system_include_paths=[
+                self.redaction.path(str(p)) for p in ctx.system_includes
+            ],
             sysroot=self.redaction.path(str(ctx.sysroot)) if ctx.sysroot else None,
             target_triple=ctx.target_triple or "",
-            abi_relevant_flags=[self.redaction.arg(f) for f in extract_abi_relevant_flags(argv)],
+            abi_relevant_flags=[
+                self.redaction.arg(f) for f in extract_abi_relevant_flags(argv)
+            ],
         )
 
     def _link_unit(self, line: str, directory: Path) -> LinkUnit | None:
@@ -211,14 +223,14 @@ class MakeAdapter:
         argv, _expanded_rsp = _expand_response_files(argv, directory, self.build_dir)
         prog = Path(argv[0]).name
         if _AR_PROG_RE.match(prog):
-            return self._archive_link_unit(argv)
+            return self._archive_link_unit(argv, directory)
         # A compile line was already ruled out by the caller (it tried
         # _compile_unit first); anything left with an -o/-shared-shaped
         # output and at least one object/archive input is treated as a
         # link line.
-        return self._compiler_link_unit(argv)
+        return self._compiler_link_unit(argv, directory)
 
-    def _archive_link_unit(self, argv: list[str]) -> LinkUnit | None:
+    def _archive_link_unit(self, argv: list[str], directory: Path) -> LinkUnit | None:
         # `ar <flags> output.a input1.o input2.o ...` -- ar's traditional
         # (BSD-style) flag syntax has no leading '-' at all ("ar rcs a.a
         # b.o"), unlike every other tool this module recognizes, so a plain
@@ -250,9 +262,10 @@ class MakeAdapter:
             kind="static_library",
             inputs=[self.redaction.path(i) for i in inputs],
             linker_argv=self.redaction.argv(argv),
+            directory=self.redaction.path(str(directory)),
         )
 
-    def _compiler_link_unit(self, argv: list[str]) -> LinkUnit | None:
+    def _compiler_link_unit(self, argv: list[str], directory: Path) -> LinkUnit | None:
         output = _output_from_argv(argv)
         if not output:
             return None
@@ -283,6 +296,7 @@ class MakeAdapter:
             kind=kind,
             inputs=[self.redaction.path(i) for i in inputs],
             linker_argv=self.redaction.argv(argv),
+            directory=self.redaction.path(str(directory)),
         )
 
 
@@ -301,7 +315,9 @@ def _consume_cd_prefix(argv: list[str], directory: Path) -> tuple[list[str], Pat
 
 def _split_recipe(line: str) -> list[str]:
     """Tokenize one make recipe line, tolerating the usual ``@``/trace noise."""
-    stripped = line.strip().lstrip("@+-")  # make recipe prefixes: @ (silent), + (force), - (ignore)
+    stripped = line.strip().lstrip(
+        "@+-"
+    )  # make recipe prefixes: @ (silent), + (force), - (ignore)
     if not stripped:
         return []
     try:
