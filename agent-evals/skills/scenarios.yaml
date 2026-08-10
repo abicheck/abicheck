@@ -206,15 +206,24 @@ scenarios:
       A virtual function was added to a class our users derive from. Review
       this for compatibility.
 
+  # Deliberately NOT case106_ctor_became_explicit, which looks like the
+  # obvious API-only case: its own `known_gap` in ground_truth.json records
+  # that CTOR_EXPLICIT_ADDED is not exercised end to end by the default
+  # castxml path on Linux/macOS. A run there would find nothing while the
+  # catalog says API_BREAK, so grading would either punish a correctly
+  # grounded answer or reward a claim the captured tool output contradicts.
+  # A scenario must be one the correct implementation already passes — the
+  # same rule the FP-rate corpus is grown under.
   - id: api-only-break
     category: A
     skill: native-api-evolution
     status: ready
-    coverage_note: "API-only break"
-    case: case106_ctor_became_explicit
+    coverage_note: "API-only break — source-breaking, binary-compatible"
+    case: case32_param_defaults
     prompt: >-
-      We want to make this constructor explicit. Can we do that without
-      breaking people, and if not, what is the safe way to land it?
+      We changed some default argument values in our public C++ header. Do
+      programs already built against this library keep working, and does
+      anything need to happen before we ship it?
 
   - id: compatible-addition
     category: A

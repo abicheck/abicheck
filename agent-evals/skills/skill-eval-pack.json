@@ -77,21 +77,22 @@
         "native-api-evolution"
       ],
       "category": "A",
-      "digest": "sha256:e0500c13c313902cadd1549f27e883ef73a62041c070dab6bdc8a54a5ff6099e",
+      "digest": "sha256:618b2732cad67a6ab9cb218f897827fe6b8b073088eaf384a83fb31f5708654e",
       "expected": {
         "kinds": [
-          "ctor_explicit_added"
+          "param_default_value_changed",
+          "param_default_value_removed"
         ],
         "min_evidence": "L2",
         "resolved_from": "examples/ground_truth.json",
         "verdict": "API_BREAK"
       },
-      "inputs": "examples/case106_ctor_became_explicit",
+      "inputs": "examples/case32_param_defaults",
       "invocation": {},
-      "prompt": "We want to make this constructor explicit. Can we do that without breaking people, and if not, what is the safe way to land it?",
+      "prompt": "We changed some default argument values in our public C++ header. Do programs already built against this library keep working, and does anything need to happen before we ship it?",
       "roots": [
         "agent-evals/skills/scenarios.yaml",
-        "examples/case106_ctor_became_explicit",
+        "examples/case32_param_defaults",
         "examples/ground_truth.json"
       ],
       "skill": "native-api-evolution",
@@ -454,7 +455,7 @@
         "native-consumer-compatibility",
         "native-release-compatibility"
       ],
-      "digest": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "digest": "sha256:b9608b36471fe790409bef5bfc6825b789d349e690bbdd04b9ffd5f6b16e7424",
       "roots": [
         "agent-evals/skills/grade_bundle.py",
         "agent-evals/skills/graders",

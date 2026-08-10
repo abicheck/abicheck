@@ -1,0 +1,95 @@
+#!/usr/bin/env python3
+# Copyright 2026 Nikolay Petrov
+# SPDX-License-Identifier: Apache-2.0
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+"""Recording shim: what makes grading a function of a stored transcript (G37 D3).
+
+Placed first on PATH for an evaluated run, so every `abicheck ...` the agent
+issues lands here. It spawns the real executable, **waits**, tees both streams,
+and only then finalizes the record — deliberately not `exec`, which would
+replace this process and lose the exit status and stdout the graders need.
+
+One record per call, appended to `$SKILL_EVAL_CALLS` as JSON lines:
+
+    seq, argv, cwd, exit_code, stdout_path, stdout_digest, stderr_digest
+
+The stdout is persisted, not only digested: a skill may legitimately run
+`compare --format json` with no `-o`, in which case the report exists nowhere
+else and a digest alone cannot be re-read at grading time.
+
+A provisional record is written *before* the child runs and rewritten after it
+exits, so a crash between the two leaves evidence that the call happened rather
+than no evidence at all.
+"""
+
+from __future__ import annotations
+
+import hashlib
+import json
+import os
+import subprocess
+import sys
+from pathlib import Path
+
+
+def _digest(data: bytes) -> str:
+    return "sha256:" + hashlib.sha256(data).hexdigest()
+
+
+def main() -> int:
+    calls_path = os.environ.get("SKILL_EVAL_CALLS")
+    real = os.environ.get("SKILL_EVAL_REAL_ABICHECK")
+    if not calls_path or not real:
+        print(
+            "shim misconfigured: SKILL_EVAL_CALLS/SKILL_EVAL_REAL_ABICHECK unset",
+            file=sys.stderr,
+        )
+        return 70
+
+    calls = Path(calls_path)
+    calls.parent.mkdir(parents=True, exist_ok=True)
+    captured = calls.parent / "captured"
+    captured.mkdir(exist_ok=True)
+    seq = sum(1 for _ in calls.open()) if calls.exists() else 0
+
+    argv = sys.argv[1:]
+    record = {"seq": seq, "argv": argv, "cwd": os.getcwd(), "exit_code": None}
+    with calls.open("a", encoding="utf-8") as fh:  # provisional
+        fh.write(json.dumps(record) + "\n")
+
+    proc = subprocess.run(  # noqa: S603 - argv is the agent's, executed verbatim by design
+        [real, *argv], capture_output=True
+    )
+
+    out_path = captured / f"{seq}.out"
+    out_path.write_bytes(proc.stdout)
+    record.update(
+        exit_code=proc.returncode,
+        stdout_path=str(out_path.relative_to(calls.parent)),
+        stdout_digest=_digest(proc.stdout),
+        stderr_digest=_digest(proc.stderr),
+    )
+
+    lines = [ln for ln in calls.read_text(encoding="utf-8").splitlines() if ln.strip()]
+    lines[-1] = json.dumps(record)
+    calls.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+    sys.stdout.buffer.write(proc.stdout)
+    sys.stderr.buffer.write(proc.stderr)
+    return proc.returncode
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
