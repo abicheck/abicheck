@@ -160,28 +160,26 @@ _FENCE_RE = re.compile(
 )
 _INLINE_CODE_RE = re.compile(r"(?<!`)(`+)(?!`)(.+?)(?<!`)\1(?!`)", re.DOTALL)
 
-#: A fence opened inside a block quote (`> ```md`). `_FENCE_RE` anchors on the
-#: line start and does not know about container prefixes, so such a block is
-#: never masked and its examples are rewritten as prose.
+#: Any fence delimiter and whatever precedes it on its line. `_FENCE_RE`
+#: anchors on the line start and accepts at most three spaces, so a fence
+#: carrying a *container* prefix — block-quote markers, a list item's own
+#: four-space content indent, a tab, or any interleaving — is never masked and
+#: its examples are rewritten as prose.
 #:
-#: Rejected rather than supported, deliberately. Handling containers properly
-#: means real block-level parsing — quotes nest, hold lists, and continue
-#: lazily — and a *partial* container parser is worse than none here: it can
-#: mask the wrong span and leave a genuine link unrewritten, which fails
-#: silently. Same rule as every other construct the rewrite cannot handle.
-_BLOCKQUOTED_FENCE_RE = re.compile(r"^ {0,3}(?:> ?)+ {0,3}(?:`{3,}|~{3,})", re.M)
-
-#: A fence carrying container indentation — four or more spaces, which under a
-#: list item is the item's own content indent rather than an indented code
-#: block. `_FENCE_RE` allows at most three, so such a block is never masked and
-#: its examples are rewritten as prose, exactly as in the block-quote case.
+#: One pattern for every container rather than one per container, and the
+#: prefix is inspected instead of enumerated. Containers **compose**: a guard
+#: for `> ~~~` beside a guard for `    ~~~` still passed `    > ~~~` (a quote
+#: inside a list item) straight through, because neither shape was the one it
+#: was written for. This is the same inversion `_MD_LINK_LIKE_RE` already
+#: applies to link syntax — assert the property the mask actually needs (the
+#: prefix is one `_FENCE_RE` can read) rather than listing the ways it can
+#: fail.
 #:
-#: Only meaningful against text the two *block-level* passes have already
-#: masked (`_mask_block_code`): a four-space-indented fence at top level is
-#: literal content inside an indented code block, and the fence delimiters
-#: printed inside a top-level fenced block are content too. Both are masked by
-#: then, so what survives this pattern is a genuine list-nested fence.
-_CONTAINER_INDENTED_FENCE_RE = re.compile(r"^(?: {4,}|\t)[ \t]*(?:`{3,}|~{3,})")
+#: Containers are rejected, not supported. Handling them properly means real
+#: block-level parsing — quotes nest, hold lists, and continue lazily — and a
+#: *partial* container parser is worse than none: it can mask the wrong span
+#: and leave a genuine link unrewritten, which fails silently.
+_CONTAINED_FENCE_RE = re.compile(r"^(?P<prefix>[ \t>]*)(?:`{3,}|~{3,})")
 
 #: Placeholder body — `\x00` cannot occur in a Markdown source, so a masked
 #: region is invisible to every link pattern and cannot be produced by one.
@@ -277,22 +275,34 @@ def _mask_block_code(text: str, replacements: dict[str, str]) -> str:
     return _FENCE_RE.sub(_masker(replacements), "\n".join(lines))
 
 
-def _container_indented_fence_line(text: str) -> int | None:
-    """1-based line of a fence opened under a list item, or `None`.
+def _contained_fence_line(text: str) -> tuple[int, str] | None:
+    """1-based line and container prefix of a fence the mask cannot see.
 
-    A four-space indent is ambiguous in Markdown, so this cannot be answered
-    by a pattern alone: at top level it opens an indented code block (the
-    fence characters are literal content), while under a list item it is the
-    item's own content indent and the fence is real. `_indented_code_spans`
-    already resolves that ambiguity — deliberately declining to treat anything
-    inside a list as an indented block — so running the two block-level masks
-    first and asking what is *left* distinguishes the two cases without a
-    second, independently-drifting notion of list state.
+    Checked against the `_mask_block_code` midpoint — after indented and
+    top-level fenced blocks are masked, before inline spans are paired — and
+    both halves of that placement matter.
+
+    *After* the block-level passes, because a four-space indent is ambiguous
+    in Markdown: at top level it opens an indented code block, where the fence
+    characters are literal content, while under a list item it is the item's
+    own content indent and the fence is real. `_indented_code_spans` already
+    resolves that ambiguity, so asking what survives it reuses that answer
+    instead of growing a second, independently-drifting notion of list state.
+    Fence characters printed inside a top-level fenced block are content too,
+    and `_FENCE_RE` has already masked those.
+
+    *Before* inline pairing, because that pass incidentally masks the backtick
+    form of the very construct being looked for — leaving only the tilde form
+    visible, and making the guard's coverage depend on an accident.
     """
     residue = _mask_block_code(text, {})
     for index, line in enumerate(residue.split("\n")):
-        if _CONTAINER_INDENTED_FENCE_RE.match(line):
-            return index + 1
+        match = _CONTAINED_FENCE_RE.match(line)
+        if match is None:
+            continue
+        prefix = match.group("prefix")
+        if prefix.strip(" ") or len(prefix) > 3:
+            return index + 1, prefix
     return None
 
 
@@ -673,32 +683,18 @@ def _render(
     text = source_path.read_text(encoding="utf-8")
     front_matter, body = _split_front_matter(text)
 
-    # Checked *before* masking, unlike every other guard. A backtick fence in
-    # a block quote is incidentally covered by inline-code pairing, so after
-    # masking only the tilde form is still visible — rejecting both requires
-    # looking at the raw body. Relying on that accident for the backtick form
-    # would be fragile besides.
-    quoted_fence = _BLOCKQUOTED_FENCE_RE.search(body)
-    if quoted_fence is not None:
-        line = body.count("\n", 0, quoted_fence.start()) + 1
+    # One guard for every container — block quote, list indent, tab, and any
+    # nesting of them. Enumerating containers separately left their
+    # combinations uncovered; see `_CONTAINED_FENCE_RE`.
+    contained = _contained_fence_line(body)
+    if contained is not None:
+        line, prefix = contained
         raise SkillGenerationError(
-            f"{source_path}: line ~{line}: fenced code block inside a block "
-            "quote. The mask anchors on the line start and does not read "
-            "container prefixes, so the block would be processed as prose and "
-            "its example links rewritten. Move the example out of the quote."
-        )
-
-    # Same failure, the other container: a fence indented to a list item's own
-    # content column. Rejected for the same reason the block-quote form is —
-    # supporting it means real container parsing, and a partial parser that
-    # masks the wrong span fails silently.
-    nested_fence = _container_indented_fence_line(body)
-    if nested_fence is not None:
-        raise SkillGenerationError(
-            f"{source_path}: line ~{nested_fence}: fenced code block indented "
-            "under a list item. The mask reads at most three leading spaces, "
-            "so the block would be processed as prose and its example links "
-            "rewritten. Move the example out of the list, to the left margin."
+            f"{source_path}: line ~{line}: fenced code block behind the "
+            f"container prefix {prefix!r}. The mask anchors on the line start "
+            "and reads at most three leading spaces, so the block would be "
+            "processed as prose and its example links rewritten. Move the "
+            "example out of its container, to the left margin."
         )
 
     # Code examples are literal content: their link syntax must be neither

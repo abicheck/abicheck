@@ -360,48 +360,35 @@ def test_a_fence_running_to_end_of_file_is_still_masked(synthetic, opener):
 
 
 @pytest.mark.parametrize("fence", ["```md", "~~~md"], ids=["tick", "tilde"])
-def test_a_fence_inside_a_block_quote_is_a_hard_error(synthetic, fence):
-    """The mask anchors on the line start and does not read container
-    prefixes, so a blockquoted fence would be processed as prose. Rejected
+@pytest.mark.parametrize(
+    "prefix",
+    ["> ", "    ", "    > ", ">> ", "\t"],
+    ids=["quote", "list-indent", "quote-in-list", "nested-quote", "tab"],
+)
+def test_a_fence_behind_a_container_prefix_is_a_hard_error(synthetic, fence, prefix):
+    """The mask anchors on the line start and reads at most three spaces, so a
+    fence behind any container prefix would be processed as prose. Rejected
     rather than partially supported: a half-built container parser can mask
-    the wrong span and leave a genuine link unrewritten, which fails
-    silently."""
+    the wrong span and leave a genuine link unrewritten, which fails silently.
+
+    Parametrized over combinations, not just the two containers, because they
+    compose — a quote *inside* a list item passed cleanly between a
+    block-quote guard and a list-indent guard standing side by side.
+    """
     synthetic(
         skills={
             "demo": {
                 "SKILL.md": (
-                    "---\nname: demo\n---\n\n[a](../shared/a.md)\n\n"
-                    f"> {fence}\n> [example](../../docs/use/cli-usage.md)\n> ```\n"
+                    "---\nname: demo\n---\n\n[a](../shared/a.md)\n\n- step:\n\n"
+                    f"{prefix}{fence}\n"
+                    f"{prefix}[example](../../docs/use/cli-usage.md)\n"
+                    f"{prefix}{fence[:3]}\n"
                 )
             }
         },
         shared={"a.md": "# A\n"},
     )
-    with pytest.raises(gen.SkillGenerationError, match="block\nquote|block quote"):
-        gen.render_all(gen.SRC_DIR)
-
-
-@pytest.mark.parametrize("fence", ["```md", "~~~md"], ids=["tick", "tilde"])
-def test_a_fence_indented_under_a_list_item_is_a_hard_error(synthetic, fence):
-    """A list item's content indent is four spaces; the fence mask reads at
-    most three, so such a block is processed as prose and its example links
-    rewritten. Rejected rather than partially supported, same as the
-    block-quote container."""
-    synthetic(
-        skills={
-            "demo": {
-                "SKILL.md": (
-                    "---\nname: demo\n---\n\n[a](../shared/a.md)\n\n"
-                    "- step one:\n\n"
-                    f"    {fence}\n"
-                    "    [example](../../docs/use/cli-usage.md)\n"
-                    f"    {fence[:3]}\n"
-                )
-            }
-        },
-        shared={"a.md": "# A\n"},
-    )
-    with pytest.raises(gen.SkillGenerationError, match="under a list item"):
+    with pytest.raises(gen.SkillGenerationError, match="container prefix"):
         gen.render_all(gen.SRC_DIR)
 
 
@@ -425,11 +412,17 @@ def test_a_fence_indented_under_a_list_item_is_a_hard_error(synthetic, fence):
     ],
     ids=["indented-block", "fence-in-fence", "flush-left-after-list"],
 )
-def test_an_ambiguous_four_space_indent_is_not_read_as_a_nested_fence(body, why):
+def test_an_ambiguous_four_space_indent_is_not_read_as_a_contained_fence(body, why):
     """The guard runs after both block-level masks precisely so these cases
     are already masked by the time it looks. Flagging any of them would reject
     a valid source for demonstrating what Markdown syntax looks like."""
-    assert gen._container_indented_fence_line(body) is None, why
+    assert gen._contained_fence_line(body) is None, why
+
+
+def test_a_fence_indented_three_spaces_is_not_a_container():
+    """`_FENCE_RE` accepts up to three leading spaces, so that prefix is one
+    the mask *can* read — the guard must not reject what already works."""
+    assert gen._contained_fence_line("   ```bash\nrun\n   ```\n") is None
 
 
 def test_a_tilde_run_does_not_close_a_backtick_fence(synthetic):
