@@ -315,8 +315,9 @@ agent-evals/skills/runs/<run-id>/<scenario>/<k>/
                      stdout/stderr digests, and the path of every artifact the call
                      produced — both a `-o`/`--output` file and the captured stdout
   captured/<n>.out   the verbatim stdout of call <n>, always persisted (see below)
-  captured/<n>.out.d/  a per-call immutable copy of every file call <n> wrote via
-                     `-o`/`--output`, snapshotted when the child exits (see below)
+  captured/<n>.out.d/  a per-call immutable copy of every file call <n> produced —
+                     `-o`/`--output` and the whole `--output-dir` tree alike —
+                     snapshotted when the child exits (see below)
   final.md           the agent's final answer text
   claim.json         the machine-readable verdict envelope parsed out of final.md
   usage.json         turns, tool calls, tokens in/out, wall clock, retries
@@ -423,7 +424,8 @@ every grader that reads the produced verdict would silently degrade to
 "no evidence" on the most idiomatic invocation the skills teach. Each call's
 stdout therefore lands in `captured/<n>.out` and the record points at it.
 
-**An `-o` file is snapshotted per call, not merely referenced by path.** An
+**Every file a call produced is snapshotted per call, not merely referenced by
+path — `--output-dir` included.** An
 agent iterating on a comparison naturally reuses one output path — `-o
 report.json`, look, adjust flags, run again — so a record holding only that
 path describes a file a later call has already overwritten. A claim citing
@@ -432,7 +434,16 @@ recorded at write time detects the overwrite without being able to
 reconstruct what call 3 actually produced. The shim therefore copies every
 file the call wrote into `captured/<n>.out.d/` when the child exits and
 digests the copy, so each call's evidence is immutable regardless of what
-later calls do to the working tree. **Requiring `-o` instead was
+later calls do to the working tree.
+
+`--output-dir` matters as much as `-o` here and is easy to overlook: the
+release workflow `native-release-compatibility/SKILL.md` teaches drives
+`compare old_release_dir/ new_dir/ --output-dir release-reports/`, which
+writes a per-library report per library plus a summary. Those files are
+overwritten or replaced by the next invocation exactly like a reused `-o`
+path, so a claim resting on one library's report would be unauditable from
+the bundle. The shim snapshots the directory's full contents, not just the
+files it can name from argv. **Requiring `-o` instead was
 rejected**: that would make the harness measure a command shape the skills do
 not teach, and the eval must exercise the workflow as published.
 
@@ -871,20 +882,35 @@ than restating the topology here; a fragment every skill really does cite
 escalates to every skill by that rule anyway, without the plan hard-coding
 which fragments those are.
 
-**A build-surface change affects every skill, and the selector must say so —
-otherwise the two halves deadlock.** D6's third hash covers the abicheck
-surface the skills consume, and it is not reachable from any `skills-src/`
-path: a PR touching only the CLI tree, the report schema, or the `ChangeKind`
-verdict mapping moves that hash, invalidating every committed bundle, while a
-selector reading only `skills-src/` diffs would nominate *no* skill to refresh.
-The freshness check then fails with nothing the author can run to satisfy it.
-So affected-skill selection is the union of two rules: the skills whose own
-tree hash moved, **plus every skill when the build-surface hash moves**. The
-practical effect is that a CLI/report-schema change costs a full re-evaluation
-— which is the correct price, since it is exactly the change class that can
-silently alter what every skill's workflow produces, and the hash is
+**Selection is derived from which hashes moved — it is not a list of
+path rules.** This is stated as an invariant rather than as another rule
+because the rule-list form has now produced the same deadlock twice: D6
+invalidates a bundle whenever *any* hash it records changes, so a selector
+enumerating only some of those inputs can reject evidence while nominating no
+skill to regenerate it, leaving the author with a failing check and nothing to
+run. Both instances were real. A PR touching only the CLI tree, report schema,
+or `ChangeKind` verdict mapping moves the build-surface hash while no
+`skills-src/` path changes. A PR editing `scenarios.yaml`, a fixture, or a
+`ground_truth.json` entry moves a scenario hash while neither of the other two
+moves.
+
+**The invariant: every hash the freshness check reads maps back to a set of
+skills, and the suite is the union over all moved hashes.** Concretely —
+
+| Moved hash | Skills selected |
+|---|---|
+| A skill's own tree hash | that skill (a `skills-src/shared/` edit resolves through the generator's citation graph, below) |
+| A scenario hash (manifest record, fixture closure, or ground-truth entry) | every skill whose scenarios reference that scenario |
+| The abicheck build-surface hash | all of them |
+
+The last row's practical effect is that a CLI/report-schema change costs a
+full re-evaluation, which is the correct price for the one change class that
+can silently alter what every skill's workflow produces; the hash is
 deliberately scoped to consumed surface (D6) so ordinary detector-internals
-commits do not trigger it.
+commits do not trigger it. Phase 0's checker builds the mapping from the same
+data D6 hashes, so a hash added later cannot be forgotten by the selector
+without failing its own round-trip test — which is what stops this from
+happening a third time.
 
 Deterministic rotation was considered and rejected for the wide cases: a
 rotating subset would make the gate's strength depend on when a PR happened to
