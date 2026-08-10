@@ -674,7 +674,53 @@ building a second identity-resolution mechanism from scratch.
   New regression tests for all six, each traced back to a real clang
   compile before being reduced to a hand-built fixture.
 
-  **A later pass closed the last of this phase's four originally-listed
+  **A review round found a confirmed-real but pre-existing limitation
+  (non-virtual diamond inheritance duplicates a base subobject, giving TWO
+  physical vtable-group slots for one shared virtual method) that this
+  module shares symmetrically with castxml's own `_collect_virtual_methods`
+  — both key a base's virtual-method slot on the base's single declaring
+  AST/XML node, which is reachable-once regardless of how many derived
+  paths reach it, so both backends collapse the two real slots onto one.
+  Documented in `dumper_clang_vtable.py`'s own docstring rather than fixed:
+  a real fix needs path-local slot identity for both backends together, and
+  fixing only clang would trade one asymmetry (a total gap, now closed) for
+  a different one (clang more precise than castxml on this one shape).
+
+  **A third review round found three more real gaps, all verified against
+  real clang before fixing:**
+  1. A variadic base method (`virtual void g(int, ...);`) and a derived,
+     genuinely unrelated fixed-arity method (`void g(int);`) report the
+     IDENTICAL single `ParmVarDecl` list — the `...` is visible only inside
+     the outer function `qualType` string (and in the two methods' distinct
+     manglings) — so the signature key missed it entirely and let the
+     unrelated method incorrectly replace the variadic slot. Fixed by
+     checking the text immediately before the parameter list's closing
+     paren for a trailing `...` and folding that into the signature key.
+  2. A parameter typed through an alias (`using I = int; virtual void
+     f(I);`) reports `qualType: "I"` with the resolved `"int"` only in a
+     separate `desugaredQualType` field — confirmed both mangle to an
+     identical parameter encoding (typedefs are transparent to Itanium
+     mangling) — but the signature key read only `qualType`, missing this
+     common shape. Fixed by preferring `desugaredQualType` for parameter
+     types too, the same fix already applied to base-class names.
+  3. The most consequential of the three: `dumper_clang_vtable` correctly
+     recognizes a no-keyword override and replaces the inherited slot in
+     the reconstructed `RecordType.vtable` — but `parse_functions()`'s own
+     `Function.is_virtual` still read clang's raw, keyword-only
+     `node.get("virtual")`, the exact signal this whole module exists to
+     work around. Since `diff_cxx_rules.vtable_slot_is_override_reuse()`
+     requires both sides' `Function.is_virtual` before recognizing a vtable
+     slot as reused rather than changed, this silently undercut the
+     feature's own flagship scenario: confirmed end-to-end through the live
+     `dump()`/`compare()` pipeline that adding a no-keyword override (with
+     no other real change) produced a spurious `TYPE_VTABLE_CHANGED`
+     BREAKING finding. Fixed with a new `_virtual_mangled_names()` cache —
+     every mangled name occupying a slot in any record's reconstructed
+     vtable across the whole TU — consulted by `parse_functions()` to widen
+     `is_virtual` from `False` to `True` (never the reverse, so purely
+     additive). Re-verified the end-to-end repro is now `COMPATIBLE`
+     (`func_added` only, no `type_vtable_changed`).
+  New regression tests for all three.
   facts** (`deprecated`/`is_scoped`/bitfields/default-argument facts were
   the other three, already covered above): direct-clang now populates
   `TypeField.default` too, via `dumper_clang_expr._field_initializer_value`,

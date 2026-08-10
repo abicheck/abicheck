@@ -768,6 +768,13 @@ class _ClangAstParser:
         # itself is built in _build_record. Only needed by
         # dumper_clang_vtable.build_vtable's base-lookup recursion.
         self._record_by_qualname: dict[str, dict[str, Any]] | None = None
+        # Built lazily (on first parse_functions() call, via
+        # _virtual_mangled_names()) -- every mangled name appearing in ANY
+        # record's reconstructed vtable, across the whole TU. Lets
+        # parse_functions() recognize a method as virtual even when clang's
+        # JSON gives it no direct signal at all (no `virtual` keyword, no
+        # `OverrideAttr`) -- see _virtual_mangled_names()'s own docstring.
+        self._virtual_mangled: frozenset[str] | None = None
         self._walk(
             root,
             scope=(),
@@ -1012,6 +1019,41 @@ class _ClangAstParser:
             self._record_by_qualname = idx
         return self._record_by_qualname
 
+    def _virtual_mangled_names(self) -> frozenset[str]:
+        """Every mangled name occupying a slot in ANY record's reconstructed
+        vtable, across the whole TU.
+
+        The gap this closes (Codex review, fresh evidence, real end-to-end
+        repro): ``dumper_clang_vtable.build_vtable`` correctly recognizes a
+        signature-matched override with no `virtual`/`override` keyword and
+        replaces the inherited slot with the derived method's own mangled
+        name -- but that knowledge lived only inside the vtable list itself.
+        `parse_functions()`'s own `Function.is_virtual` still read clang's
+        raw, keyword-only `node.get("virtual")` -- the exact signal this
+        whole module exists to work around -- so `diff_cxx_rules.
+        vtable_slot_is_override_reuse()` (which requires both sides'
+        `Function.is_virtual` to be `True` before recognizing a slot as
+        reused rather than changed) rejected the reuse and
+        `diff_types._diff_type_vtable` emitted a spurious
+        `TYPE_VTABLE_CHANGED` BREAKING finding for exactly the no-keyword
+        override case this module was built to recognize. Confirmed
+        end-to-end through the live `dump()`/`compare()` pipeline: adding a
+        keyword-less override in a derived class (with no other change)
+        produced `type_vtable_changed` before this fix.
+
+        Only ever WIDENS `is_virtual` from `False` to `True` (parse_functions
+        still ORs this in, never overrides an already-`True` reading) --
+        purely additive, so it cannot suppress a real virtuality signal, only
+        recover one clang's JSON otherwise drops silently.
+        """
+        if self._virtual_mangled is None:
+            idx = self._record_index()
+            names: set[str] = set()
+            for qualname in idx:
+                names.update(_build_clang_vtable(qualname, idx))
+            self._virtual_mangled = frozenset(names)
+        return self._virtual_mangled
+
     # ── parse_* (mirror _CastxmlParser's public surface) ─────────────────────
 
     def parse_functions(self) -> list[Function]:
@@ -1061,7 +1103,15 @@ class _ClangAstParser:
                     return_type=ret_type,
                     params=params,
                     visibility=self._visibility(str(node.get("mangledName", "")), name),
-                    is_virtual=bool(node.get("virtual")),
+                    # bool(node.get("virtual")) alone misses a signature-
+                    # matched override with neither `virtual` nor `override`
+                    # written -- clang's JSON gives no direct signal for that
+                    # case at all (see dumper_clang_vtable.py's own
+                    # docstring). _virtual_mangled_names() recovers it from
+                    # the reconstructed vtables, which already do this
+                    # matching; only ever widens False -> True.
+                    is_virtual=bool(node.get("virtual"))
+                    or mangled in self._virtual_mangled_names(),
                     is_noexcept=_is_noexcept_qualifier(quals),
                     # An ``extern "C"`` linkage spec is authoritative; fall back
                     # to the mangled==name heuristic for a plain C-mode parse

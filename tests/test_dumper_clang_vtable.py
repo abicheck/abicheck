@@ -474,3 +474,107 @@ def test_pointee_level_const_is_not_normalized_away() -> None:
     )
     types = _types(root)
     assert types["D"].vtable == ["_ZN1A1bEPKi"]  # unchanged, inherited as-is
+
+
+# ── third review round: variadics, param-type desugaring, and the ─────────
+# ── inferred-virtuality leak into Function.is_virtual ──────────────────────
+
+
+def test_variadic_base_slot_is_not_replaced_by_unrelated_fixed_arity_method() -> None:
+    """`virtual void g(int, ...);` and a derived, genuinely unrelated
+    `void g(int);` report the IDENTICAL single ParmVarDecl list -- the `...`
+    is only visible in the outer function qualType and in the two methods'
+    distinct manglings (confirmed against real clang: `...gEiz` vs
+    `...gEi`). Must NOT be treated as an override."""
+    root = _tu(
+        _record(
+            "A",
+            {
+                "kind": "CXXMethodDecl",
+                "name": "g",
+                "mangledName": "_ZN1A1gEiz",
+                "type": {"qualType": "void (int, ...)"},
+                "virtual": True,
+                "inner": [{"kind": "ParmVarDecl", "type": {"qualType": "int"}}],
+            },
+        ),
+        _record("D", _method("g", "_ZN1D1gEi", params=["int"]), bases=[_base("A")]),
+    )
+    types = _types(root)
+    assert types["D"].vtable == ["_ZN1A1gEiz"]  # unchanged, inherited as-is
+
+
+def test_typedef_param_resolved_via_desugared_qualtype() -> None:
+    """`using I = int; virtual void f(I x);` vs. a derived `void f(int x)
+    override;` mangle to an IDENTICAL parameter encoding (typedefs are
+    transparent to Itanium mangling, confirmed against real clang), but the
+    base's own qualType spells the parameter as the alias name `"I"` with
+    the resolved `"int"` only in a separate `desugaredQualType` field."""
+    root = _tu(
+        _record(
+            "A",
+            {
+                "kind": "CXXMethodDecl",
+                "name": "f",
+                "mangledName": "_ZN1A1fEi",
+                "type": {"qualType": "void (I)"},
+                "virtual": True,
+                "inner": [
+                    {
+                        "kind": "ParmVarDecl",
+                        "type": {"qualType": "I", "desugaredQualType": "int"},
+                    }
+                ],
+            },
+        ),
+        _record(
+            "D",
+            _method("f", "_ZN1D1fEi", override_attr=True, params=["int"]),
+            bases=[_base("A")],
+        ),
+    )
+    types = _types(root)
+    assert types["D"].vtable == ["_ZN1D1fEi"]  # replaced, not appended
+
+
+def test_inferred_virtuality_propagates_to_function_is_virtual() -> None:
+    """The gap this fix closes: dumper_clang_vtable correctly recognizes a
+    no-keyword override and replaces the inherited slot, but
+    parse_functions()'s own Function.is_virtual used to read only clang's
+    raw `node.get("virtual")` -- missing exactly this case. Without the fix,
+    diff_cxx_rules.vtable_slot_is_override_reuse() (which requires both
+    sides' Function.is_virtual) would reject the reuse and
+    diff_types._diff_type_vtable would emit a spurious TYPE_VTABLE_CHANGED
+    for a benign in-place slot rename (confirmed end-to-end through the live
+    dump()/compare() pipeline before this fix)."""
+    root = _tu(
+        _record("A", _method("a", "_ZN1A1aEv", virtual=True)),
+        _record(
+            "F",
+            _method("a", "_ZN1F1aEv"),  # no virtual, no OverrideAttr
+            bases=[_base("A")],
+        ),
+    )
+    parser = _ClangAstParser(root, set(), set())
+    funcs = {f.mangled: f for f in parser.parse_functions()}
+    assert funcs["_ZN1F1aEv"].is_virtual is True
+
+
+def test_explicit_virtual_keyword_still_recognized_without_vtable_lookup() -> None:
+    """Baseline: a method with the literal `virtual` keyword must still be
+    recognized correctly (the OR in the fixed expression must not somehow
+    suppress the pre-existing signal)."""
+    root = _tu(_record("A", _method("a", "_ZN1A1aEv", virtual=True)))
+    parser = _ClangAstParser(root, set(), set())
+    funcs = {f.mangled: f for f in parser.parse_functions()}
+    assert funcs["_ZN1A1aEv"].is_virtual is True
+
+
+def test_non_virtual_method_stays_non_virtual() -> None:
+    """A method that matches nothing in any vtable must stay non-virtual --
+    the fix only ever widens False -> True, never fabricates a False -> True
+    flip for an unrelated ordinary method."""
+    root = _tu(_record("A", _method("plain", "_ZN1A5plainEv")))
+    parser = _ClangAstParser(root, set(), set())
+    funcs = {f.mangled: f for f in parser.parse_functions()}
+    assert funcs["_ZN1A5plainEv"].is_virtual is False

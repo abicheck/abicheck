@@ -184,7 +184,7 @@ from typing import Any
 #: vtable slot whenever either is virtual. No real method can be named
 #: this (a C++ identifier can't start with `~` followed by this exact
 #: spelling), so there is no risk of an ordinary method colliding with it.
-_DTOR_SLOT_KEY: tuple[str, tuple[str, ...], str] = ("~dtor~", (), "")
+_DTOR_SLOT_KEY: tuple[str, tuple[str, ...], bool, str] = ("~dtor~", (), False, "")
 
 #: Node kinds that can occupy a vtable slot. Constructors, fields, and
 #: everything else are structurally excluded (a constructor is never
@@ -208,7 +208,7 @@ _CONVERSION_KIND = "CXXConversionDecl"
 #: within one parse (``id(child)``, Python object identity -- not clang's
 #: own hex-string "id" attribute, which this module never needs).
 _SlotKey = object
-_Signature = tuple[str, tuple[str, ...], str]
+_Signature = tuple[str, tuple[str, ...], bool, str]
 
 
 def _normalize_param_type(qualtype: str) -> str:
@@ -253,9 +253,28 @@ def _normalize_param_type(qualtype: str) -> str:
     return s
 
 
+def _param_type_spelling(child: dict[str, Any]) -> str:
+    """A ``ParmVarDecl``'s type, preferring clang's desugared spelling.
+
+    A parameter typed through an alias (``using I = int; virtual void
+    f(I);``) reports ``qualType: "I"`` with the resolved ``int`` only in a
+    separate ``desugaredQualType`` field -- confirmed with a real clang
+    build: the base's `f(I)` and a derived override's plain `f(int)` mangle
+    to an *identical* parameter encoding (typedefs are transparent to
+    Itanium mangling), but reading only `qualType` made them compare as
+    different signatures (Codex review, fresh evidence -- the same
+    qualType-vs-desugaredQualType gap ``_base_qualnames`` already had to
+    handle for base specifiers, reproduced here for parameter types).
+    """
+    type_obj = child.get("type")
+    if not isinstance(type_obj, dict):
+        return ""
+    return str(type_obj.get("desugaredQualType") or type_obj.get("qualType") or "")
+
+
 def _method_signature_key(node: dict[str, Any]) -> _Signature | None:
-    """``(name, param_qualtypes, qualifier_tail)`` identity for a
-    ``CXXMethodDecl``/``CXXConversionDecl``.
+    """``(name, param_qualtypes, is_variadic, qualifier_tail)`` identity for
+    a ``CXXMethodDecl``/``CXXConversionDecl``.
 
     Deliberately excludes the return type (covariant returns are a
     different spelling for the SAME slot, never a different slot).
@@ -264,19 +283,25 @@ def _method_signature_key(node: dict[str, Any]) -> _Signature | None:
     of it participates in override identity — reducing this to a single
     ``is_const`` boolean (an earlier version of this function) incorrectly
     treated a ref-qualifier or `volatile`-qualifier mismatch as a match
-    (Codex review, fresh evidence). ``None`` for an unnamed node (shouldn't
-    occur for a real method, but keeps this total rather than raising).
+    (Codex review, fresh evidence). ``is_variadic`` is tracked separately
+    from ``param_qualtypes`` because a variadic parameter (``...``) is NOT
+    a ``ParmVarDecl`` child at all -- confirmed with a real clang build
+    that ``virtual void g(int, ...);`` and a derived, genuinely unrelated
+    `void g(int);` both report the identical single `ParmVarDecl` list,
+    with the `...` visible only inside the outer function `qualType`
+    string (and in the two methods' distinct manglings, `...gEiz` vs
+    `...gEi`) -- omitting it let an unrelated fixed-arity overload replace
+    a variadic base slot (Codex review, fresh evidence). ``None`` for an
+    unnamed node (shouldn't occur for a real method, but keeps this total
+    rather than raising).
     """
     name = node.get("name")
     if not name:
         return None
     params = tuple(
-        _normalize_param_type(str(child["type"]["qualType"]))
+        _normalize_param_type(_param_type_spelling(child))
         for child in node.get("inner", []) or []
-        if isinstance(child, dict)
-        and child.get("kind") == "ParmVarDecl"
-        and isinstance(child.get("type"), dict)
-        and "qualType" in child["type"]
+        if isinstance(child, dict) and child.get("kind") == "ParmVarDecl"
     )
     type_obj = node.get("type")
     qual_type = str(type_obj.get("qualType", "")) if isinstance(type_obj, dict) else ""
@@ -289,9 +314,17 @@ def _method_signature_key(node: dict[str, Any]) -> _Signature | None:
     # qualifier identity (not observed in this clang version's output, but
     # cheap to guard). Whitespace-collapsed so "const  &" and "const &"
     # (if either ever occurs) compare equal.
-    tail = qual_type[qual_type.rfind(")") + 1 :] if ")" in qual_type else ""
+    paren_end = qual_type.rfind(")")
+    tail = qual_type[paren_end + 1 :] if paren_end != -1 else ""
     qualifier_tail = " ".join(tail.split("noexcept", 1)[0].split())
-    return (str(name), params, qualifier_tail)
+    # The ellipsis, when present, is always the last token inside the
+    # parameter-list parens (C++ forbids a fixed parameter after `...`), so
+    # checking the text immediately before the matched closing paren is
+    # exact -- no need to parse the parameter list itself.
+    is_variadic = (
+        qual_type[:paren_end].rstrip().endswith("...") if paren_end != -1 else False
+    )
+    return (str(name), params, is_variadic, qualifier_tail)
 
 
 def _has_override_attr(node: dict[str, Any]) -> bool:
