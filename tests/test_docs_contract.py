@@ -1923,3 +1923,28 @@ def test_a_malformed_summarizes_in_an_unregistered_fragment_is_reported(
     f = dc.Findings()
     dc._check_external_pages_claim_only_registered_topics(f, topics)
     assert any("summarizes must be a list" in str(e) for e in f.errors)
+
+
+@pytest.mark.parametrize(
+    ("body", "counts"),
+    [
+        ("See [o](docs/learn/owner.md).\n", True),
+        ("Prose:\n\n    [o](docs/learn/owner.md)\n\nmore\n", False),
+        ("- step\n\n    [o](docs/learn/owner.md)\n", True),
+        ("p:\n\n    code\n\nSee [o](docs/learn/owner.md).\n", True),
+    ],
+    ids=["prose", "indented-example", "list-continuation", "after-example"],
+)
+def test_a_backlink_inside_an_indented_example_is_not_navigable(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, body: str, counts: bool
+) -> None:
+    """A link shown as an indented code example is example text, exactly like
+    one inside a fence. The stripping is deliberately top-level-only: over-
+    stripping would fail the build on a correct page, so a backlink in a list
+    continuation must keep counting."""
+    docs = tmp_path / "docs"
+    (docs / "learn").mkdir(parents=True)
+    monkeypatch.setattr(dc, "DOCS", docs)
+    page = tmp_path / "frag.md"
+    page.write_text(body, encoding="utf-8")
+    assert dc._page_links_to(page, "learn/owner.md") is counts

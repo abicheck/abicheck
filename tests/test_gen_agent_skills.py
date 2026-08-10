@@ -1100,3 +1100,30 @@ def test_a_tab_advances_to_the_next_stop_not_by_four(text, width):
 )
 def test_tab_indented_runs_classify_against_the_real_column(body, masked):
     assert bool(gen._indented_code_spans(body)) is masked
+
+
+@pytest.mark.parametrize(
+    ("body", "masked"),
+    [
+        ("- a\n  - b\n\n    x\n", False),
+        ("- a\n  - b\n\n        x\n\nq\n", True),
+        ("- a\n  - b\n    - c\n\n        x\n", False),
+        ("- a\n  - b\n    - c\n\n          x\n\nq\n", True),
+        ("- a\n  - b\n- c\n\n    x\n", False),
+        ("- a\n  - b\n\nq:\n\n    x\n\nr\n", True),
+    ],
+    ids=[
+        "l2-paragraph-4",
+        "l2-code-8",
+        "l3-paragraph-8",
+        "l3-code-10",
+        "sibling-dedent-reopens-l1",
+        "dedent-to-top-closes-list",
+    ],
+)
+def test_nested_list_levels_each_get_their_own_code_floor(body, masked):
+    """Open item columns are a stack, not one value. A third-level marker sits
+    at four spaces, so bounding markers to an absolute 0-3 skipped it, left
+    the second level's column in force, and masked that item's ordinary
+    paragraph as code — dangling its links in every generated tree."""
+    assert bool(gen._indented_code_spans(body)) is masked

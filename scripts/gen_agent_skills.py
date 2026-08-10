@@ -259,7 +259,13 @@ _FENCE_DELIMITER_RE = re.compile(r"`{3,}|~{3,}")
 #: region is invisible to every link pattern and cannot be produced by one.
 _MASK = "\x00m{index}\x00"
 
-_LIST_ITEM_RE = re.compile(r"^ {0,3}(?:[-*+]|\d{1,9}[.)])\s")
+#: A list marker at *any* indentation. The bound that decides whether a given
+#: line is a marker or code is the enclosing container's own floor, computed
+#: per line in `_indented_code_spans` — not an absolute ` {0,3}`. A
+#: third-level marker normally sits at four spaces, so an absolute bound
+#: skipped it and left the second level's column in force, which then masked
+#: that item's ordinary paragraph as code.
+_LIST_ITEM_RE = re.compile(r"^[ \t]*(?:[-*+]|\d{1,9}[.)])\s")
 
 
 def _indented_code_spans(text: str) -> list[tuple[int, int]]:
@@ -276,36 +282,42 @@ def _indented_code_spans(text: str) -> list[tuple[int, int]]:
     `column + 4` — the same rule CommonMark states, and the reason `2. ` and
     `- ` legitimately differ by one.
 
+    Nesting is tracked as a *stack* of open item columns, not a single value.
+    A third-level marker normally sits at four spaces; bounding markers to an
+    absolute `0-3` skipped it, left the second level's column in force, and so
+    masked that third item's ordinary paragraph as code. Whether a line is a
+    marker or code is therefore decided against the enclosing container's own
+    floor, and a line indented less than the innermost item's column closes it.
+
     An indented code block also cannot interrupt a paragraph (CommonMark
     §4.4), which the blank-line requirement already encodes.
     """
     lines = text.split("\n")
     spans: list[tuple[int, int]] = []
-    #: Content column of the innermost open list item, or `None` at top level.
-    item_column: int | None = None
+    #: Content columns of every open list item, outermost first.
+    columns: list[int] = []
     index = 0
     while index < len(lines):
         line = lines[index]
         if not line.strip():
             index += 1
             continue
-        marker = _LIST_ITEM_RE.match(line)
+        indent = _indent_width(line)
+        while columns and indent < columns[-1]:
+            columns.pop()  # dedent closes every item it fell out of
+        floor = (columns[-1] if columns else 0) + 4
+        marker = _LIST_ITEM_RE.match(line) if indent < floor else None
         if marker is not None:
             # The whole matched prefix, not its leading whitespace: the item's
             # content begins after the marker and its trailing space, so `- `
             # opens at column 2 and `10. ` at column 4.
-            item_column = _column_width(marker.group())
+            columns.append(_column_width(marker.group()))
             index += 1
             continue
-        if not line.startswith((" ", "\t")):
-            item_column = None  # a flush-left line closes any open list
-            index += 1
-            continue
-        floor = 4 if item_column is None else item_column + 4
         # Document start is a boundary too: with front matter already split
         # off, a reference file can legitimately open on an indented block.
         blank_before = index == 0 or not lines[index - 1].strip()
-        if _indent_width(line) >= floor and blank_before:
+        if indent >= floor and blank_before:
             start = index
             while index < len(lines) and (
                 not lines[index].strip() or _indent_width(lines[index]) >= floor

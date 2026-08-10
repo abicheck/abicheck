@@ -542,6 +542,44 @@ _MD_REF_DEF_RE = re.compile(r"^[ \t]{0,3}\[([^\]]+)\]:\s*(\S+)", re.MULTILINE)
 _HTML_COMMENT_RE = re.compile(r"<!--.*?-->", re.DOTALL)
 
 
+def _strip_top_level_indented_code(text: str) -> str:
+    """Blank out top-level indented (4-space) code blocks, line count intact.
+
+    Deliberately narrower than `gen_agent_skills._indented_code_spans`, which
+    tracks each open list item's content column so it can classify indents
+    *inside* lists. That machinery does not belong in this gate: here the two
+    error directions are asymmetric. Over-stripping would reject a real
+    backlink and fail the build on a correct page; under-stripping only lets a
+    backlink shown inside a list-nested example count, which is the behaviour
+    that already shipped. So a run is treated as code only where the reading
+    is unambiguous — blank-line separated, at top level, with no list open.
+    """
+    lines = text.split("\n")
+    out: list[str] = []
+    list_open = False
+    in_code = False
+    for index, line in enumerate(lines):
+        indented = line.startswith(("    ", "\t"))
+        if not line.strip():
+            out.append(line)  # a blank line neither opens nor closes a block
+            continue
+        if in_code and indented:
+            out.append("")
+            continue
+        in_code = False
+        if re.match(r"^ {0,3}(?:[-*+]|\d{1,9}[.)])\s", line):
+            list_open = True
+        elif not line.startswith((" ", "\t")):
+            list_open = False
+        blank_before = index == 0 or not lines[index - 1].strip()
+        if indented and blank_before and not list_open:
+            in_code = True
+            out.append("")
+        else:
+            out.append(line)
+    return "\n".join(out)
+
+
 def _strip_inline_code(text: str) -> str:
     """Remove CommonMark inline code spans, whose delimiter is a run of one
     or more backticks -- not just a single backtick. A span's content ends
@@ -610,7 +648,8 @@ def _page_links_to(path: Path, target_rel_to_docs: str) -> bool:
     path). The whole point of `summarizes` is "link back to the canonical
     page instead of restating it" — being a permitted summarizer (registered
     in topics.yaml) isn't the same as actually doing that, so this enforces
-    the link exists. Fenced code blocks, inline code spans, and HTML
+    the link exists. Fenced code blocks, top-level indented code blocks,
+    inline code spans, and HTML
     comments are stripped first: a link shown inside a ``` fence or as
     inline code (e.g. `` `[owner](owner.md)` ``, showing the link syntax
     itself rather than a real link) is example text, and a link hidden
@@ -618,6 +657,7 @@ def _page_links_to(path: Path, target_rel_to_docs: str) -> bool:
     navigable backlink, even though the raw regex would otherwise match
     both."""
     text = _strip_fenced_code(_strip_front_matter(path.read_text(encoding="utf-8")))
+    text = _strip_top_level_indented_code(text)
     text = _strip_inline_code(text)
     text = _HTML_COMMENT_RE.sub("", text)
     for m in _MD_LINK_TARGET_RE.finditer(text):
