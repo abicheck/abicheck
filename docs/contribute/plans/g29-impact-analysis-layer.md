@@ -737,6 +737,30 @@ which all depend on a Clang AST pass.
      conservative false negative for a class-template specialization, whose
      raw Itanium encoding doesn't equal `type_graph.py`'s spelled record
      identity — never a wrong match on an unrelated same-named type).
+   - Post-merge Codex review (PR #708) found and fixed two real correctness
+     gaps in the first cut, both in the same "one-hop only" shape: (1)
+     `VIRTUAL_CALL_MAY_DISPATCH_TO` only reached the *direct*, one-hop
+     override candidates of a call's static target — `override_graph.py`
+     records each override against its nearest declaring ancestor only
+     (chains, never flattened), so a multi-level chain `Base::f <- Mid::f <-
+     Derived::f` previously reached `Mid::f` but not the equally real
+     runtime target `Derived::f`. Fixed with `_all_reachable_overrides`, a
+     cycle-safe transitive closure over `METHOD_POSSIBLE_OVERRIDE`, each
+     candidate keeping its own edge's resolution label. (2) `TYPE_HAS_VTABLE`
+     seeded polymorphism only from `METHOD_POSSIBLE_OVERRIDE` edges — blind
+     to arguably the single most common polymorphic-class shape, a virtual
+     method with no override anywhere in the scanned codebase (a base
+     class's own leaf virtual method, or any method on a class with no base
+     at all). Fixed by extending `override_graph.py` itself: a new pure
+     function, `parse_clang_ast_virtual_methods`, returns every virtual
+     method's identity (own or inherited) independent of whether it has an
+     override candidate; `ClangOverrideGraphExtractor.last_virtual_methods`
+     exposes the per-TU-aggregated set the same side-effecting way
+     `last_jobs`/`diagnostics` already are, and
+     `augment_graph_with_overrides`'s new `virtual_methods` parameter stamps
+     an `is_virtual: True` fact onto each identity's *already-existing*
+     `source_decl` node (never minting one, same join-only discipline) —
+     which `augment_graph_with_vtable_presence`'s seed loop now also reads.
    - **`DECL_OVERRIDES_DECL` needed no new producer at all — a closed gap,
      not a deferred one.** `override_graph.py` (ADR-041 P2 item 1, which
      predates this item) already emits `METHOD_POSSIBLE_OVERRIDE` edges whose

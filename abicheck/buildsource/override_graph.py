@@ -465,8 +465,60 @@ def parse_clang_ast_overrides(ast: dict[str, Any]) -> list[OverrideEdge]:
     return edges
 
 
+def parse_clang_ast_virtual_methods(ast: dict[str, Any]) -> frozenset[str]:
+    """Pure function: a ``clang -ast-dump=json`` tree -> the identity of
+    EVERY method whose slot is virtual (own or inherited), regardless of
+    whether it has any override candidate at all.
+
+    :func:`parse_clang_ast_overrides` only ever visits a class that
+    ``bases_of`` names (``if qname not in bases_of: continue`` — correct for
+    finding override *pairs*, since a class with no base can't be the
+    *overriding* side of one) and only ever emits an edge when a matching
+    ancestor slot exists — so a method that IS virtual but has no override
+    anywhere in the scanned codebase (a base class's own leaf virtual method
+    with no override, or ANY method on a class with no base at all, e.g. the
+    common ``struct Base { virtual void run(); };`` with nothing deriving
+    from it in scope) never appears in that function's output at all
+    (Codex review, fresh evidence: this silently made
+    ``virtual_dispatch_graph.augment_graph_with_vtable_presence`` blind to
+    the single most common shape of polymorphic class — one with no override
+    the scanned codebase happens to also declare).
+
+    This function answers the narrower, genuinely different question
+    "is this slot virtual", independent of whether an override edge exists
+    for it — reusing the exact same ``bases_of``/``declared``/``_is_virtual``
+    machinery :func:`parse_clang_ast_overrides` already builds, but iterating
+    over every class :func:`_collect_class_methods` found (no ``bases_of``
+    membership gate) and every one of its methods.
+    """
+    bases_of: dict[str, list[str]] = {}
+    for e in parse_clang_ast_types(ast):
+        if e.kind == EDGE_TYPE_INHERITS:
+            bases_of.setdefault(e.src, []).append(e.dst)
+
+    methods_by_class = _collect_class_methods(ast)
+    declared: dict[_SlotKey, _MethodInfo] = {
+        (qname, m.sig_key): m
+        for qname, methods in methods_by_class.items()
+        for m in methods
+    }
+    ancestor_memo: dict[_SlotKey, list[str]] = {}
+    virtual_memo: dict[_SlotKey, bool] = {}
+
+    virtual_identities: set[str] = set()
+    for qname, methods in methods_by_class.items():
+        for m in methods:
+            if _is_virtual(
+                qname, m.sig_key, bases_of, declared, ancestor_memo, virtual_memo
+            ):
+                virtual_identities.add(m.identity)
+    return frozenset(virtual_identities)
+
+
 def augment_graph_with_overrides(
-    graph: SourceGraphSummary, edges: list[OverrideEdge]
+    graph: SourceGraphSummary,
+    edges: list[OverrideEdge],
+    virtual_methods: frozenset[str] = frozenset(),
 ) -> int:
     """Fold possible-override edges into *graph*. Both endpoints are
     ``decl://`` (``source_decl``) nodes — the same id scheme
@@ -481,6 +533,24 @@ def augment_graph_with_overrides(
     ``resolution`` label rides in ``attrs`` (``GraphEdge`` has no such
     field of its own) — the same place ``DECL_CALLS_DECL``'s ``call_kind``/
     ``resolution`` pair lives (``call_graph.augment_graph_with_calls``).
+
+    *virtual_methods* (:func:`parse_clang_ast_virtual_methods`'s output,
+    aggregated across every TU — see :attr:`ClangOverrideGraphExtractor.
+    last_virtual_methods`) additionally stamps an ``is_virtual: True`` fact
+    (``CONF_HIGH`` — a real, clang-confirmed structural fact, not a guess)
+    onto every identity's ``decl://`` node the graph **already carries**
+    (Codex review, fresh evidence): a method that is virtual but has no
+    override anywhere in the scanned codebase — the single most common
+    polymorphic-class shape, e.g. a base class with no override in scope, or
+    ANY method on a class with no base at all — never appears as either
+    endpoint of an ``OverrideEdge`` at all, so
+    ``virtual_dispatch_graph.augment_graph_with_vtable_presence``'s own
+    override-edge-based seeding was blind to it. Never mints a new node for
+    a virtual-method identity the graph doesn't already know about (the
+    same join-only-onto-an-existing-node discipline this whole graph
+    family applies) — ``graph.add_node`` on an already-present id merges
+    facts rather than creating a duplicate, so gating on ``has_node`` first
+    is what keeps this purely additive.
 
     Returns the number of edges added.
     """
@@ -509,6 +579,18 @@ def augment_graph_with_overrides(
             )
         )
         added += len(graph.edges) - before
+    for identity in virtual_methods:
+        node_id = _decl_node_id(identity)
+        if graph.has_node(node_id):
+            graph.add_node(
+                GraphNode(
+                    id=node_id,
+                    kind="source_decl",
+                    provenance="override_graph",
+                    confidence=CONF_HIGH,
+                    attrs={"is_virtual": True},
+                )
+            )
     return added
 
 
@@ -528,6 +610,19 @@ class ClangOverrideGraphExtractor:
     diagnostics: list[str] = field(default_factory=list)
     last_jobs: int = 0
     last_elapsed_s: float = 0.0
+    #: Every virtual-method identity found across the most recent
+    #: :meth:`extract_from_build` call (:func:`parse_clang_ast_virtual_methods`,
+    #: unioned across every TU) — a side-effecting sibling to ``diagnostics``/
+    #: ``last_jobs``, not a second return value, following the same pattern
+    #: those already use. Consumed by ``inline_graph_fold.fold_override_graph``
+    #: to close the "leaf virtual method has no override edge at all" gap in
+    #: :func:`augment_graph_with_overrides`'s ``virtual_methods`` parameter
+    #: (Codex review, fresh evidence — see that function's own docstring).
+    #: Mutated from :meth:`_extract_from_safe_args`, which may run inside a
+    #: thread-pool worker (same as ``diagnostics.append`` already does) —
+    #: ``set.update`` from multiple threads is the same accepted CPython/GIL
+    #: pattern this class already relies on for ``diagnostics``.
+    last_virtual_methods: set[str] = field(default_factory=set)
 
     def available(self) -> bool:
         return shutil.which(self.clang_bin) is not None
@@ -544,7 +639,9 @@ class ClangOverrideGraphExtractor:
         if ast is None:
             return []
         try:
-            return parse_clang_ast_overrides(ast)
+            edges = parse_clang_ast_overrides(ast)
+            self.last_virtual_methods.update(parse_clang_ast_virtual_methods(ast))
+            return edges
         except (ValueError, RecursionError) as exc:
             self.diagnostics.append(f"could not parse clang AST JSON: {exc}")
             return []
@@ -563,6 +660,7 @@ class ClangOverrideGraphExtractor:
         exactly, including its cross-TU dedup-by-(src,dst) merge."""
         from .call_graph import _call_graph_jobs, _deadline_bound_worker
 
+        self.last_virtual_methods = set()
         start = time.monotonic()
         units = [cu for cu in build.compile_units if cu.source]
         self.last_jobs = _call_graph_jobs(len(units))

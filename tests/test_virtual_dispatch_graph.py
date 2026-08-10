@@ -63,6 +63,21 @@ def _decl_node(ident: str, *, confidence: str = CONF_HIGH) -> GraphNode:
     )
 
 
+def _virtual_decl_node(ident: str) -> GraphNode:
+    """A ``source_decl`` node carrying the ``is_virtual`` fact
+    ``override_graph.augment_graph_with_overrides``' ``virtual_methods``
+    parameter stamps — mirrors that function's own real construction
+    (``provenance="override_graph"``, ``CONF_HIGH``) rather than mutating a
+    plain node's ``attrs``/``resolved`` after the fact."""
+    return GraphNode(
+        id=f"decl://{ident}",
+        kind="source_decl",
+        provenance="override_graph",
+        confidence=CONF_HIGH,
+        attrs={"is_virtual": True},
+    )
+
+
 def _call_edge(caller: str, callee: str, *, virtual: bool = True) -> GraphEdge:
     attrs = (
         {"call_kind": "virtual", "resolution": "overapprox"}
@@ -188,6 +203,35 @@ class TestVirtualCallMayDispatchTo:
             for e in g.edges
         )
 
+    def test_multi_level_override_chain_reaches_every_level(self) -> None:
+        """Codex review, fresh evidence: ``override_graph.py`` records each
+        override against its *nearest* declaring ancestor only (chains, not
+        flattened), so a virtual call statically resolved to `Base::f` must
+        still reach `Derived::f` two levels down, not just the immediate
+        `Mid::f`."""
+        mid_run = "_ZN3Mid3runEv"
+        g = SourceGraphSummary()
+        for ident in (CALLER, BASE_RUN, mid_run, DERIVED1_RUN):
+            g.add_node(_decl_node(ident))
+        g.add_edge(_call_edge(CALLER, BASE_RUN))
+        g.add_edge(_override_edge(mid_run, BASE_RUN))
+        g.add_edge(_override_edge(DERIVED1_RUN, mid_run, confirmed=False))
+
+        result = augment_graph_with_virtual_call_targets(g)
+
+        assert result.dispatch_edges_added == 2
+        dispatch_edges = [
+            e for e in g.edges if e.kind == EDGE_VIRTUAL_CALL_MAY_DISPATCH_TO
+        ]
+        assert {e.dst for e in dispatch_edges} == {
+            f"decl://{mid_run}",
+            f"decl://{DERIVED1_RUN}",
+        }
+        assert all(e.src == f"decl://{CALLER}" for e in dispatch_edges)
+        by_dst = {e.dst: e.resolved["override_resolution"] for e in dispatch_edges}
+        assert by_dst[f"decl://{mid_run}"] == "override_confirmed"
+        assert by_dst[f"decl://{DERIVED1_RUN}"] == "override_signature_match"
+
     def test_non_virtual_call_is_ignored(self) -> None:
         g = SourceGraphSummary()
         g.add_node(_decl_node(CALLER))
@@ -252,6 +296,54 @@ class TestTypeHasVtable:
         assert result.polymorphic_types == 0
         assert not [e for e in g.edges if e.kind == EDGE_TYPE_HAS_VTABLE]
         assert not [n for n in g.nodes if n.kind == NODE_VTABLE]
+
+    def test_leaf_virtual_method_with_no_override_still_gets_vtable(self) -> None:
+        """Codex review, fresh evidence: a class with a virtual method but
+        no override anywhere in the scanned codebase (arguably the single
+        most common polymorphic-class shape) previously left the class
+        non-polymorphic, since it never appears as either endpoint of a
+        METHOD_POSSIBLE_OVERRIDE edge. Seeded instead from the `is_virtual`
+        fact `override_graph.augment_graph_with_overrides` now stamps on
+        the method's own decl node directly."""
+        g = SourceGraphSummary()
+        g.add_node(_record_node("Base"))
+        g.add_node(_virtual_decl_node(BASE_RUN))
+
+        result = augment_graph_with_vtable_presence(g)
+
+        assert result.polymorphic_types == 1
+        vtable_edges = [e for e in g.edges if e.kind == EDGE_TYPE_HAS_VTABLE]
+        assert len(vtable_edges) == 1
+        assert vtable_edges[0].src == "type://Base"
+        assert vtable_edges[0].dst == "vtable://Base"
+
+    def test_leaf_virtual_method_seeds_transitively_inheriting_classes_too(
+        self,
+    ) -> None:
+        g = SourceGraphSummary()
+        g.add_node(_record_node("Base"))
+        g.add_node(_record_node("Derived"))
+        g.add_node(_virtual_decl_node(BASE_RUN))
+        g.add_edge(_inherits_edge("Derived", "Base"))
+
+        result = augment_graph_with_vtable_presence(g)
+
+        assert result.polymorphic_types == 2
+        polymorphic_srcs = {e.src for e in g.edges if e.kind == EDGE_TYPE_HAS_VTABLE}
+        assert polymorphic_srcs == {"type://Base", "type://Derived"}
+
+    def test_is_virtual_fact_on_unknown_owner_mints_nothing(self) -> None:
+        """A decl node's `is_virtual` fact whose owner class has no
+        `record_type` node in the graph must mint nothing — the same
+        join-only-onto-an-existing-node discipline the override-edge seed
+        already follows."""
+        g = SourceGraphSummary()
+        g.add_node(_virtual_decl_node(BASE_RUN))
+
+        augment_graph_with_vtable_presence(g)
+
+        assert not [n for n in g.nodes if n.kind == NODE_VTABLE]
+        assert not [e for e in g.edges if e.kind == EDGE_TYPE_HAS_VTABLE]
 
     def test_inheriting_but_not_overriding_class_still_gets_vtable(self) -> None:
         """Derived2 inherits from Base (which owns a virtual slot via

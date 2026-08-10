@@ -60,14 +60,23 @@ already names the only possible target directly.
 **Part B — :func:`augment_graph_with_vtable_presence`
 (``TYPE_HAS_VTABLE``).** Per the Itanium C++ ABI, a class is polymorphic
 (has a vtable) iff it declares or inherits at least one virtual function.
-This function derives that fact from two already-collected sources: the
-class hierarchy (``TYPE_INHERITS`` edges, from ``type_graph.py``) and
-*which* classes own a method appearing in a ``METHOD_POSSIBLE_OVERRIDE`` edge
+This function derives that fact from three already-collected sources: the
+class hierarchy (``TYPE_INHERITS`` edges, from ``type_graph.py``), *which*
+classes own a method appearing in a ``METHOD_POSSIBLE_OVERRIDE`` edge
 (either endpoint — an overriding method or an overridden base method is, by
-definition, virtual). The second half needs an owning-class join
-``override_graph.py``'s own folded edges don't carry directly (its edges
-name methods, not their owner types) — solved by decoding the method's own
-Itanium/MSVC mangled identity via
+definition, virtual), and — a second, independent seed (Codex review, fresh
+evidence) — *which* classes own a method ``override_graph.py`` stamped
+``is_virtual: True`` directly onto its own ``source_decl`` node
+(``augment_graph_with_overrides``'s ``virtual_methods`` parameter). The
+second seed exists because the first one alone is blind to arguably the
+single most common polymorphic-class shape: a virtual method with no
+override anywhere in the *scanned* codebase (a base class's own leaf virtual
+method, or ANY method on a class with no base at all) never appears as
+either endpoint of a ``METHOD_POSSIBLE_OVERRIDE`` edge, so it was previously
+never seeded as polymorphic at all — nor was anything inheriting from it.
+Both seeds need an owning-class join ``override_graph.py``'s own folded
+edges/facts don't carry directly (they name methods, not owner types) —
+solved by decoding the method's own Itanium/MSVC mangled identity via
 :func:`~abicheck.diff_cxx_rules.itanium_scope_components`/
 :func:`~abicheck.diff_cxx_rules.msvc_scope_components` (the same structural,
 no-external-demangler decoders ``diff_cxx_rules.owner_class_of`` already uses
@@ -149,6 +158,32 @@ class VirtualDispatchResult:
     dispatch_edges_added: int = 0
 
 
+def _all_reachable_overrides(
+    base_id: str, overrides_of: dict[str, list[tuple[str, str]]]
+) -> list[tuple[str, str]]:
+    """Every override candidate transitively reachable from *base_id* over
+    ``overrides_of`` (a one-hop ``base -> [(override, resolution), ...]``
+    map, ``override_graph.py``'s own chain-not-flattened edge shape) — not
+    just the direct, one-hop candidates (Codex review, fresh evidence: see
+    the caller's own comment for why a multi-level override chain needs
+    this). A plain BFS/DFS over the chain, deduplicated and cycle-safe via
+    *visited* (a real class hierarchy is a DAG, but this makes no such
+    assumption); each candidate keeps its own edge's resolution label.
+    """
+    reached: list[tuple[str, str]] = []
+    visited: set[str] = {base_id}
+    stack = [base_id]
+    while stack:
+        current = stack.pop()
+        for candidate_id, resolution in overrides_of.get(current, []):
+            if candidate_id in visited:
+                continue
+            visited.add(candidate_id)
+            reached.append((candidate_id, resolution))
+            stack.append(candidate_id)
+    return reached
+
+
 def augment_graph_with_virtual_call_targets(
     graph: SourceGraphSummary,
 ) -> VirtualDispatchResult:
@@ -176,7 +211,20 @@ def augment_graph_with_virtual_call_targets(
         if e.resolved.get("call_kind") != "virtual":
             continue
         result.virtual_call_edges_seen += 1
-        candidates = overrides_of.get(e.dst)
+        # Transitive closure over METHOD_POSSIBLE_OVERRIDE, not just the
+        # one-hop candidates of the call's own static target (Codex review,
+        # fresh evidence): `override_graph.py` records each override
+        # against its *nearest* declaring ancestor only (chains, never
+        # flattened -- its own `OverrideEdge` docstring), so for a
+        # multi-level chain `Base::f <- Mid::f <- Derived::f`, a virtual
+        # call statically resolved to `Base::f` previously reached only
+        # `Mid::f` -- `Derived::f` is an equally real runtime target (a
+        # `Base*`/`Base&` can be bound to a `Derived` object) but was never
+        # surfaced. `_all_reachable_overrides` walks every level, each
+        # candidate keeping its OWN edge's resolution label (not the base
+        # call's), and a `visited` set both dedupes a diamond-shaped
+        # hierarchy and guarantees termination.
+        candidates = _all_reachable_overrides(e.dst, overrides_of)
         if not candidates:
             continue  # leaf virtual method: no ambiguity to represent
         for candidate_id, override_resolution in candidates:
@@ -244,7 +292,9 @@ def augment_graph_with_vtable_presence(
     """Fold ``TYPE_HAS_VTABLE`` edges (and their ``vtable`` nodes) into
     *graph* (Part B — see the module docstring for the full derivation).
     Pure graph transformation over already-folded ``TYPE_INHERITS``/
-    ``METHOD_POSSIBLE_OVERRIDE`` edges; mints at most one ``vtable`` node per
+    ``METHOD_POSSIBLE_OVERRIDE`` edges and ``is_virtual``-tagged
+    ``source_decl`` node facts (the second, leaf-virtual-method seed —
+    see the module docstring); mints at most one ``vtable`` node per
     genuinely polymorphic ``record_type`` node already in *graph*.
     """
     result = VtablePresenceResult()
@@ -279,6 +329,24 @@ def augment_graph_with_vtable_presence(
             owner = _owner_identity(method_id[len(decl_prefix) :])
             if owner is not None and owner in record_identities:
                 polymorphic.add(owner)
+
+    # Second seed: every source_decl node override_graph.py stamped
+    # `is_virtual: True` on directly (`augment_graph_with_overrides`'s
+    # `virtual_methods` parameter) -- independent of any
+    # METHOD_POSSIBLE_OVERRIDE edge (Codex review, fresh evidence: the
+    # override-edge-only seed above leaves a class with no override
+    # anywhere in the scanned codebase non-polymorphic, even though a
+    # base class with a leaf virtual method -- arguably the single most
+    # common polymorphic-class shape -- is exactly this case). Reads a
+    # plain node fact, mints nothing.
+    for n in graph.nodes:
+        if n.kind != "source_decl" or not n.id.startswith(decl_prefix):
+            continue
+        if not n.resolved.get("is_virtual"):
+            continue
+        owner = _owner_identity(n.id[len(decl_prefix) :])
+        if owner is not None and owner in record_identities:
+            polymorphic.add(owner)
 
     # Transitive closure over TYPE_INHERITS: inheriting from a polymorphic
     # base makes the derived class polymorphic too, per the Itanium ABI rule

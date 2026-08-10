@@ -371,7 +371,16 @@ def fold_override_graph(
         merged, changed_paths, scoped_units
     )
     edges = extractor.extract_from_build(target)
-    added = augment_graph_with_overrides(graph, edges)
+    # `virtual_methods` closes a real gap (Codex review, fresh evidence):
+    # a virtual method with no override anywhere in the scanned codebase
+    # never appears as either endpoint of an OverrideEdge at all, so
+    # augment_graph_with_overrides also needs the extractor's own
+    # per-TU-aggregated virtual-method identity set to stamp an
+    # `is_virtual` fact for `virtual_dispatch_graph.py`'s vtable-presence
+    # seeding to read (see that function's own docstring).
+    added = augment_graph_with_overrides(
+        graph, edges, virtual_methods=frozenset(extractor.last_virtual_methods)
+    )
     # Recorded regardless of `added` — mirrors fold_call_graph/fold_type_graph's
     # coverage gate. project_source_files() isn't consulted here: unlike a call
     # or type/field edge, an override edge's endpoints are always declarations
