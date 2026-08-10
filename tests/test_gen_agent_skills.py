@@ -151,28 +151,48 @@ def test_reference_style_link_definition_is_a_hard_error(synthetic):
 
 
 @pytest.mark.parametrize(
-    "destination",
-    ["<../../docs/use/a b.md>", "<../../docs/use/cli-usage.md>"],
-    ids=["with-space", "without-space"],
+    "link",
+    [
+        "[g](<../../docs/use/a b.md>)",
+        "[g](<../../docs/use/cli-usage.md>)",
+        "[g](../../docs/use/cli-usage.md 'Guide')",
+        "[g](../../docs/use/cli-usage.md (Guide))",
+    ],
+    ids=["angle-space", "angle-plain", "single-quote-title", "paren-title"],
 )
-def test_angle_bracket_link_destination_is_a_hard_error(synthetic, destination):
-    """Third syntax `_MD_LINK_RE` cannot rewrite, and it fails two ways: a
-    whitespace-bearing target is skipped by the `[^)\\s]+` destination class
-    and published verbatim, while a whitespace-free one matches with the angle
-    brackets stuck to the path. Both leave a repo-relative target behind."""
+def test_link_syntax_the_rewrite_cannot_handle_is_a_hard_error(synthetic, link):
+    """Each of these is valid Markdown that `_MD_LINK_RE` skips, so each would
+    publish an unrewritten repo-relative target.
+
+    Parametrized against the *inverted* guard rather than one check per
+    syntax: enumeration was tried and missed a new variant four times, so the
+    generator now asserts that no `](` escaped the rewrite at all.
+    """
     synthetic(
         skills={
             "demo": {
-                "SKILL.md": (
-                    f"---\nname: demo\n---\n\n[guide]({destination})\n\n"
-                    "[a](../shared/a.md)\n"
-                )
+                "SKILL.md": (f"---\nname: demo\n---\n\n{link}\n\n[a](../shared/a.md)\n")
             }
         },
         shared={"a.md": "# A\n"},
     )
-    with pytest.raises(gen.SkillGenerationError, match="angle-bracket"):
+    with pytest.raises(gen.SkillGenerationError, match="cannot handle|angle-bracket"):
         gen.render_all(gen.SRC_DIR)
+
+
+def test_a_double_quoted_title_is_still_accepted(synthetic):
+    """The one title form the rewrite does handle must keep working — the
+    inverted guard must not reject what `_MD_LINK_RE` already matches."""
+    synthetic(
+        skills={
+            "demo": {
+                "SKILL.md": ('---\nname: demo\n---\n\n[a](../shared/a.md "Fragment")\n')
+            }
+        },
+        shared={"a.md": "# A\n"},
+    )
+    rendered = gen.render_all(gen.SRC_DIR)
+    assert "demo/references/shared/a.md" in rendered
 
 
 def test_markdown_image_is_a_hard_error(synthetic):

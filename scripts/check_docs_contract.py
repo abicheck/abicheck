@@ -66,6 +66,16 @@ if str(Path(__file__).resolve().parent) not in sys.path:
 from findings_report import Findings as _SharedFindings  # noqa: E402
 
 DOCS = ROOT / "docs"
+
+#: Trees outside `docs/` whose Markdown may be registered as a topic's
+#: `task_pages`/`allowed_summaries` entry (ADR-058 / G36 P0.6). Only
+#: `skills-src/` qualifies today: its `shared/*.md` fragments are genuine
+#: summary owners that live outside the published tree by design. Kept as an
+#: explicit list rather than "any existing file" so a registry entry cannot be
+#: satisfied by a source or data file, which carries no front matter and so
+#: would pass the ownership round-trip vacuously.
+EXTERNAL_PAGE_ROOTS = ("skills-src",)
+
 TOPICS_FILE = DOCS / "_meta" / "topics.yaml"
 TERMINOLOGY_FILE = DOCS / "_meta" / "terminology.yaml"
 
@@ -317,8 +327,26 @@ def _is_registered_page(value: str) -> bool:
     published tree by design -- they are the DRY source the `.agents/skills/`
     trees are generated from, not doc pages. Everything else about the
     `summarizes` round-trip below applies to them unchanged.
+
+    The outside-`docs/` half is deliberately narrow: a Markdown file under
+    `EXTERNAL_PAGE_ROOTS`, not any path that happens to exist. Accepting any
+    real file let a registry entry naming, say, `abicheck/foo.py` satisfy
+    both this existence check and the ownership round-trip — `load_front_matter`
+    returns `None` for a `.py` file, so the round-trip had nothing to
+    contradict and passed silently. A source file cannot own or summarize a
+    documentation topic; the exception exists for the fragments, not for the
+    repository at large.
     """
-    return _is_file_under(DOCS, value) or _is_file_under(ROOT, value)
+    if _is_file_under(DOCS, value):
+        return True
+    if not value.endswith(".md"):
+        return False
+    candidate = _resolves_under(ROOT, value)
+    if candidate is None or not candidate.is_file():
+        return False
+    return any(
+        (ROOT / tree).resolve() in candidate.parents for tree in EXTERNAL_PAGE_ROOTS
+    )
 
 
 def _page_key(value: object) -> str:
@@ -365,9 +393,10 @@ def _registered_external_pages(topics: dict[str, dict[str, object]]) -> list[Pat
             if not isinstance(values, list):
                 continue
             for value in values:
-                if _is_file_under(DOCS, str(value)):
+                text = str(value)
+                if _is_file_under(DOCS, text) or not _is_registered_page(text):
                     continue
-                candidate = _resolves_under(ROOT, str(value))
+                candidate = _resolves_under(ROOT, text)
                 if candidate is not None and candidate.is_file():
                     out.add(candidate)
     return sorted(out)

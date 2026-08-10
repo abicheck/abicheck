@@ -105,19 +105,72 @@ _MD_REF_DEF_RE = re.compile(r"^ {0,3}\[([^\]^][^\]]*)\]:\s*\S+", re.MULTILINE)
 #: that makes a single skill directory installable on its own.
 _MD_IMAGE_RE = re.compile(r"!\[([^\]]*)\]\(([^)\s]+)")
 
-#: Angle-bracket link destinations (`[text](<path with spaces>)`) — the third
-#: syntax `_MD_LINK_RE` cannot rewrite, and the reason all three are rejected
-#: rather than accommodated. Its destination class is `[^)\s]+`, so a
-#: whitespace-bearing target is skipped entirely and published verbatim, while
-#: a whitespace-free one matches with the angle brackets stuck to the path.
-#: Both leave a repo-relative target in an installed skill.
-_MD_ANGLE_DEST_RE = re.compile(r"(?<!!)\[[^\]]*\]\(\s*<")
+#: Every `](` in a body, rewritable or not. Used to *invert* the guard below:
+#: rather than enumerating the link syntaxes this generator cannot rewrite,
+#: it asserts that every link-shaped construct was matched by `_MD_LINK_RE`
+#: or `_MD_IMAGE_RE`.
+#:
+#: Enumeration was tried and failed four times. Reference definitions, images,
+#: angle-bracket destinations, and `'single'`/`(paren)` title delimiters are
+#: each valid Markdown that `_MD_LINK_RE` skips, and each shipped an
+#: unrewritten repo-relative target until a guard was added for it
+#: specifically. A denylist of syntaxes is only ever as complete as the last
+#: review; the property actually wanted is "nothing outbound escaped the
+#: rewrite", and that is checkable directly.
+_MD_LINK_LIKE_RE = re.compile(r"\]\(")
 
 _FRONT_MATTER_RE = re.compile(r"\A---\r?\n.*?\r?\n---\r?\n", re.DOTALL)
 
 
 class SkillGenerationError(RuntimeError):
     """A skill source tree that cannot be published as-is."""
+
+
+def _reject_unrewritable_links(source_path: Path, body: str) -> None:
+    """Fail unless every link-shaped construct is one the rewrite can handle.
+
+    The inverse of a denylist: instead of naming the syntaxes that escape
+    `_MD_LINK_RE`, this checks that no `](` falls outside a span it (or
+    `_MD_IMAGE_RE`) actually matched. Anything left over is a link this
+    generator would copy verbatim into a self-contained skill directory,
+    where a repo-relative target does not resolve.
+    """
+    for match in _MD_LINK_RE.finditer(body):
+        target = match.group(2)
+        if target.startswith("<") or target.endswith(">"):
+            # Matched, but only because this destination happens to carry no
+            # whitespace: the angle brackets are captured as part of the path,
+            # so the rewrite resolves a target that does not exist and leaves
+            # it alone. Malformed-but-matching is as broken as unmatched.
+            raise SkillGenerationError(
+                f"{source_path}: angle-bracket link destination `{target}` — "
+                "write the path plainly. The brackets are captured as part of "
+                "the target, so the rewrite cannot resolve it and publishes "
+                "it verbatim."
+            )
+
+    covered = [
+        match.span()
+        for pattern in (_MD_LINK_RE, _MD_IMAGE_RE)
+        for match in pattern.finditer(body)
+    ]
+    escaped = [
+        marker.start()
+        for marker in _MD_LINK_LIKE_RE.finditer(body)
+        if not any(start <= marker.start() < end for start, end in covered)
+    ]
+    if not escaped:
+        return
+    line = body.count("\n", 0, escaped[0]) + 1
+    excerpt = body[escaped[0] : escaped[0] + 60].splitlines()[0]
+    raise SkillGenerationError(
+        f"{source_path}: line ~{line}: link syntax the rewrite cannot handle "
+        f"(`...{excerpt}`). Skill sources use plain inline "
+        '`[text](target)` links, optionally with a `"double-quoted"` title. '
+        "An angle-bracket destination, a `'single'`/`(paren)` title, or any "
+        "other variant is skipped by the rewrite and would be published "
+        "verbatim, leaving a repo-relative target in an installed skill."
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -384,14 +437,6 @@ def _render(
             "point outside the installed skill."
         )
 
-    if _MD_ANGLE_DEST_RE.search(body):
-        raise SkillGenerationError(
-            f"{source_path}: angle-bracket link destination — write "
-            "`[text](target)` with a plain, space-free path. The rewrite "
-            "cannot see a `<...>` destination, so it would be published "
-            "verbatim and point outside the installed skill."
-        )
-
     images = [m.group(2) for m in _MD_IMAGE_RE.finditer(body)]
     if images:
         raise SkillGenerationError(
@@ -401,6 +446,8 @@ def _render(
             "does not contain. Describe the diagram in text, or link the "
             "published docs page that hosts it."
         )
+
+    _reject_unrewritable_links(source_path, body)
 
     def replace(match: re.Match[str]) -> str:
         label, target, title = match.group(1), match.group(2), match.group(3) or ""

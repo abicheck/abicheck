@@ -1509,6 +1509,34 @@ def _external_registry(tmp_path: Path) -> tuple[dict, Path]:
     return topics, fragment
 
 
+@pytest.mark.parametrize(
+    "entry",
+    ["abicheck/foo.py", "skills-src/shared/notes.txt", "repo_facts.json"],
+    ids=["source-file", "non-markdown", "data-file"],
+)
+def test_registered_summary_entry_outside_the_approved_tree_is_rejected(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, entry: str
+) -> None:
+    """The out-of-docs exception is for `skills-src/**.md`, not for any file
+    that happens to exist.
+
+    A non-Markdown target carries no front matter, so `load_front_matter`
+    returns `None` and the ownership round-trip has nothing to contradict —
+    the entry would satisfy the registry vacuously. A source or data file
+    cannot own or summarize a documentation topic.
+    """
+    topics, _ = _external_registry(tmp_path)
+    target = tmp_path / entry
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text("whatever\n", encoding="utf-8")
+    topics["a-topic"]["allowed_summaries"] = [entry]
+    monkeypatch.setattr(dc, "ROOT", tmp_path)
+    monkeypatch.setattr(dc, "DOCS", tmp_path / "docs")
+    f = dc.Findings()
+    dc._check_referenced_paths_exist(f, topics)
+    assert f.errors, f"{entry} must not satisfy a documentation-page entry"
+
+
 def test_registered_summary_page_outside_docs_is_accepted(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
