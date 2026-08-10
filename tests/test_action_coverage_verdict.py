@@ -1002,3 +1002,90 @@ class TestAPromotedExitDoesNotUnderstateTheReport:
             bindir,
         )
         assert outputs["verdict"] == "ERROR", outputs
+
+
+class TestExitOneAlsoReconcilesWithTheReport:
+    """Exit 2 was not the only promoted exit that can understate a break.
+
+    A policy that demotes ``abi_breaking`` below ``error`` while an addition
+    or quality finding stays at ``error`` gates at **1** with a report whose
+    compatibility verdict is still ``BREAKING``. Escalation was wired into the
+    exit-2 branches only, so this case still published ``SEVERITY_ERROR`` and
+    hid the detected break (Codex review) -- the same class as the finding
+    that motivated the escalation, one exit code over.
+    """
+
+    @staticmethod
+    def _report(compat_verdict: str, *, coverage: bool = False) -> dict:
+        report = {
+            "verdict": compat_verdict,
+            "exit_code": 1,
+            "diff": {"verdict": compat_verdict},
+            "severity": {
+                "exit_code": 1,
+                "blocking": True,
+                "blocking_categories": ["addition"],
+            },
+        }
+        if coverage:
+            report["contract_coverage_exit_contribution"] = 1
+            report["contract_coverage_failures"] = [COVERAGE_FAILURE]
+        return report
+
+    def _outputs(self, tmp_path: Path, mode: str, report: dict) -> dict:
+        bindir = _stub_abicheck(tmp_path, exit_code=1, report=report)
+        env = {
+            "INPUT_MODE": mode,
+            "INPUT_NEW_LIBRARY": _lib(tmp_path, "libnew.so"),
+            "INPUT_FORMAT": "json",
+            "INPUT_OUTPUT_FILE": str(tmp_path / "report.json"),
+        }
+        if mode == "compare":
+            env["INPUT_OLD_LIBRARY"] = _lib(tmp_path, "libold.so")
+        return _run_action(tmp_path, env, bindir)
+
+    @pytest.mark.parametrize("mode", ["scan", "compare"])
+    @pytest.mark.parametrize("verdict", ["BREAKING", "API_BREAK"])
+    def test_the_demoted_break_is_published(
+        self, tmp_path: Path, mode: str, verdict: str
+    ) -> None:
+        outputs = self._outputs(tmp_path, mode, self._report(verdict))
+        assert outputs["verdict"] == verdict, outputs
+        assert outputs["exit-code"] == "1", outputs
+
+    @pytest.mark.parametrize("mode", ["scan", "compare"])
+    def test_the_severity_gate_still_fails_the_step(
+        self, tmp_path: Path, mode: str
+    ) -> None:
+        """The gate the escalated verdict displaced must keep gating: the
+        user configured `addition: error`, so the step fails whatever the
+        published verdict now reads."""
+        outputs = self._outputs(tmp_path, mode, self._report("BREAKING"))
+        assert outputs["_exit"] == 1, outputs["_stdout"]
+
+    @pytest.mark.parametrize("mode", ["scan", "compare"])
+    def test_a_compatible_report_does_not_displace_the_severity_verdict(
+        self, tmp_path: Path, mode: str
+    ) -> None:
+        """The ordinary severity-gate run: nothing to escalate, so the
+        published verdict stays SEVERITY_ERROR."""
+        outputs = self._outputs(tmp_path, mode, self._report("COMPATIBLE"))
+        assert outputs["verdict"] == "SEVERITY_ERROR", outputs
+
+    @pytest.mark.parametrize("mode", ["scan", "compare"])
+    def test_a_coverage_only_exit_is_not_displaced_by_a_compatible_report(
+        self, tmp_path: Path, mode: str
+    ) -> None:
+        """COMPATIBLE outranks nothing. Ranking it above the non-compatibility
+        verdicts let it overwrite COVERAGE_INCOMPLETE, inverting the point of
+        the escalation."""
+        report = {
+            "verdict": "COMPATIBLE",
+            "exit_code": 1,
+            "diff": {"verdict": "COMPATIBLE"},
+            "severity": {"exit_code": 0, "blocking": False, "blocking_categories": []},
+            "contract_coverage_exit_contribution": 1,
+            "contract_coverage_failures": [COVERAGE_FAILURE],
+        }
+        outputs = self._outputs(tmp_path, mode, report)
+        assert outputs["verdict"] == "COVERAGE_INCOMPLETE", outputs

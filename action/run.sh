@@ -1098,7 +1098,12 @@ _verdict_rank() {
 _escalate_verdict_to_report() {
   local _v
   _v=$(_report_compat_verdict)
-  [[ -n "$_v" ]] || return 0
+  # Only a *break* may escalate. This exists to stop the published verdict
+  # understating what was detected, so a COMPATIBLE report is never an
+  # escalation over anything -- without this guard it outranked the
+  # non-compatibility verdicts (COVERAGE_INCOMPLETE, SEVERITY_ERROR) and
+  # overwrote them with COMPATIBLE, which is the opposite of the point.
+  [[ "$_v" == "BREAKING" || "$_v" == "API_BREAK" ]] || return 0
   if (( $(_verdict_rank "$_v") > $(_verdict_rank "$VERDICT") )); then
     echo "::notice::abicheck's report records $_v while the severity policy resolved this run to exit ${ABICHECK_EXIT} (gated as ${VERDICT}); publishing the report's verdict. The step still gates at ${VERDICT}."
     GATE_TIER="$VERDICT"
@@ -1187,6 +1192,15 @@ elif [[ "$MODE" == "scan" ]]; then
         else
           VERDICT="ERROR"
         fi
+        # Exit 1 carries a demoted break just as exit 2 does: a policy that
+        # puts `abi_breaking` below `error` while an addition/quality finding
+        # stays at `error` gates at 1 with a report that still says BREAKING
+        # (Codex review). ERROR is left alone -- that is an operational
+        # failure, not a gated compatibility result, and `_verdict_rank`
+        # ranks it 0 only because it must never be escalated *from* here.
+        if [[ "$VERDICT" != "ERROR" ]]; then
+          _escalate_verdict_to_report
+        fi
         ;;
       2) VERDICT="API_BREAK"; _escalate_verdict_to_report ;;
       4) VERDICT="BREAKING" ;;
@@ -1235,6 +1249,9 @@ else
           fi
         else
           VERDICT="SEVERITY_ERROR"
+        fi
+        if [[ "$VERDICT" != "ERROR" ]]; then
+          _escalate_verdict_to_report
         fi
         ;;
       2) VERDICT="API_BREAK"; _escalate_verdict_to_report ;;
@@ -1718,7 +1735,7 @@ elif [[ "$MODE" == "scan" ]]; then
   # "this category is an error". Routing it through a compatibility flag
   # would let fail-on-api-break: false switch off an addition gate that has
   # nothing to do with API breaks.
-  if [[ "$VERDICT" == "SEVERITY_ERROR" ]]; then
+  if [[ "${GATE_TIER:-$VERDICT}" == "SEVERITY_ERROR" ]]; then
     echo "::error::Severity-level error detected by abicheck scan."
     FINAL_EXIT=1
   fi
@@ -1764,7 +1781,7 @@ else
   fi
 
   # Severity-driven exit code 1 (from --severity-* flags)
-  if [[ "$VERDICT" == "SEVERITY_ERROR" ]]; then
+  if [[ "${GATE_TIER:-$VERDICT}" == "SEVERITY_ERROR" ]]; then
     echo "::error::Severity-level error detected by abicheck."
     FINAL_EXIT=1
   fi
