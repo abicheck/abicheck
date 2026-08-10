@@ -671,9 +671,37 @@ decisions.
   with what the graph actually records. An unresolved entrypoint is never a
   command failure (only a malformed manifest or a graph-less/unreadable
   `--against` snapshot is), matching the manifest format's own
-  absence-is-not-evidence discipline. Still not done: any report-level
-  field/finding actually *consuming* the joined graph (that's G29 Phase 6's
-  `USE_CASE_IMPACT_CONFIRMED`) and runtime-trace ingestion.
+  absence-is-not-evidence discipline. **Done** (this pass, closing the
+  "manifest folded into a real diff" gap `use-case-impact.md` named): a new
+  `impact.use_cases.explain_use_case_impact(definitions, library_graph,
+  symbols)` — for each of a real diff's own changed symbols, which declared
+  use case(s)' own resolved entrypoints reach it, via the identical
+  restricted call-graph walk (`internal_leak._consumer_compiled_reachability`
+  under `CALL_GRAPH_TRAVERSAL_POLICY`) `consumer_graph.
+  explain_required_symbols` already uses for `--used-by`, just rooted at the
+  manifest's own entrypoints instead of every public entry in the library —
+  attributing a change to *every* use case whenever *any* public entry
+  reaches it would make the field meaningless. `project
+  validate-use-cases`'s new `--against-new <snapshot>` option (requires
+  `--against`) is its CLI front door: diffs OLD against NEW via the Tier-2
+  `service.compare_snapshots` (same routing every other front end uses,
+  `cli-contract` AI-readiness check), then reports which use case each
+  resulting change reaches, per use case, text or JSON. Deliberately a
+  **read-only report view**, not a `Change` mutation or a `compare`-native
+  surface — no new node/edge, no field set on any `Change` object, no
+  schema bump, no effect on any exit code — the same scope boundary D9's
+  contract-relevance work drew between "answer the question" and "gate on
+  the answer." Two structural limitations carried over unmodified from
+  `explain_required_symbols` rather than introduced here: only a
+  function/variable-shaped change (backed by a `SOURCE_DECL_MAPS_TO_SYMBOL`
+  edge) can be named, never a type layout change; and only a
+  consumer-compiled entrypoint can walk transitively past its own
+  declaration. Still not done: a `compare --use-cases <manifest>` flag on
+  the native `compare` command itself (today only reachable via `project
+  validate-use-cases --against-new`, a separate invocation over the same
+  two snapshots), any `Change.affected_use_cases` field, any
+  `USE_CASE_IMPACT_CONFIRMED` finding (both G29 Phase 6, needing their own
+  schema bump and FP-gate examples), and runtime-trace ingestion.
 - `docs/contribute/use-case-impact.md` (new, **done**): manifest format, entrypoint
   mapping, test association, declared-vs-observed use (**trace ingestion
   itself remains unimplemented** — documented honestly as not-yet-built, not

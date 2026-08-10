@@ -407,6 +407,7 @@ Validate MANIFEST, an ``impact-use-cases.yaml`` file (G29 Phase 4, ADR-057 amend
 | Option | Required | Default | Description |
 |---|:--:|---|---|
 | `--against` | no | — | A dumped .abi.json snapshot (dump --sources/--build-info, or one carrying the always-on header-only graph) to resolve MANIFEST's entrypoints against. Without it, only the manifest's own structure is checked — no entrypoint is resolved or reported as unresolved. |
+| `--against-new` | no | — | A second .abi.json snapshot (the NEW side) to diff against --against (the OLD side) and report which declared use cases the resulting changes reach — the manifest folded into a real diff (G29 Phase 4). Requires --against. A use case is only ever named for a change its own resolved entrypoints can be shown to reach; this is a read-only report, not a compare exit-code/verdict input. |
 | `--format` | no | `text` | Output format for the validation report. Choices: `text`, `json`. |
 | `--output`, `-o` | no | — | Write output to this path (default: stdout). |
 | `--verbose`, `-v` | no | `False` | Enable verbose/debug output. |

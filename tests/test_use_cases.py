@@ -37,6 +37,7 @@ from abicheck.impact.use_cases import (
     UseCaseDefinition,
     UseCaseResolution,
     build_use_case_graph,
+    explain_use_case_impact,
     join_use_case_graph,
     load_use_case_manifest,
     parse_use_case_manifest,
@@ -655,6 +656,139 @@ def test_resolve_use_case_entrypoints_preserves_manifest_declared_order() -> Non
         "does_not_exist_a",
         "does_not_exist_b",
     )
+
+
+# ── explain_use_case_impact ──────────────────────────────────────────────
+
+
+def _walkable_library_graph() -> SourceGraphSummary:
+    """Two independent public entries, one of which calls an internal
+    helper — the minimal shape needed to distinguish direct vs. transitive
+    use-case attribution. `train` -> (calls) -> `detail::helper`; `evaluate`
+    stands alone."""
+    g = SourceGraphSummary()
+    g.add_node(
+        GraphNode(
+            id="decl://train",
+            kind="source_decl",
+            label="train",
+            attrs={"visibility": "public_header"},
+        )
+    )
+    g.add_node(
+        GraphNode(id="binary_symbol://train", kind="binary_symbol", label="train")
+    )
+    g.add_edge(
+        GraphEdge(
+            src="decl://train",
+            dst="binary_symbol://train",
+            kind="SOURCE_DECL_MAPS_TO_SYMBOL",
+        )
+    )
+    g.add_node(
+        GraphNode(
+            id="decl://_ZN6detail6helperEv",
+            kind="source_decl",
+            label="detail::helper",
+            attrs={"visibility": "source"},
+        )
+    )
+    g.add_node(
+        GraphNode(
+            id="binary_symbol://_ZN6detail6helperEv",
+            kind="binary_symbol",
+            label="_ZN6detail6helperEv",
+        )
+    )
+    g.add_edge(
+        GraphEdge(
+            src="decl://_ZN6detail6helperEv",
+            dst="binary_symbol://_ZN6detail6helperEv",
+            kind="SOURCE_DECL_MAPS_TO_SYMBOL",
+        )
+    )
+    g.add_edge(
+        GraphEdge(
+            src="decl://train", dst="decl://_ZN6detail6helperEv", kind="DECL_CALLS_DECL"
+        )
+    )
+    g.add_node(
+        GraphNode(
+            id="decl://evaluate",
+            kind="source_decl",
+            label="evaluate",
+            attrs={"visibility": "public_header"},
+        )
+    )
+    g.add_node(
+        GraphNode(id="binary_symbol://evaluate", kind="binary_symbol", label="evaluate")
+    )
+    g.add_edge(
+        GraphEdge(
+            src="decl://evaluate",
+            dst="binary_symbol://evaluate",
+            kind="SOURCE_DECL_MAPS_TO_SYMBOL",
+        )
+    )
+    return g
+
+
+def test_explain_use_case_impact_direct_and_transitive_attribution() -> None:
+    library = _walkable_library_graph()
+    definitions = [
+        UseCaseDefinition(use_case="training workflow", entrypoints=("train",)),
+        UseCaseDefinition(use_case="evaluation workflow", entrypoints=("evaluate",)),
+    ]
+    result = explain_use_case_impact(
+        definitions,
+        library,
+        symbols=["train", "_ZN6detail6helperEv", "evaluate", "does_not_exist"],
+    )
+    assert result == {
+        "train": ("training workflow",),
+        "_ZN6detail6helperEv": ("training workflow",),
+        "evaluate": ("evaluation workflow",),
+    }
+
+
+def test_explain_use_case_impact_overlapping_use_cases_both_attributed() -> None:
+    library = _walkable_library_graph()
+    definitions = [
+        UseCaseDefinition(use_case="uc_a", entrypoints=("train",)),
+        UseCaseDefinition(use_case="uc_b", entrypoints=("train",)),
+    ]
+    result = explain_use_case_impact(
+        definitions, library, symbols=["_ZN6detail6helperEv"]
+    )
+    assert result == {"_ZN6detail6helperEv": ("uc_a", "uc_b")}
+
+
+def test_explain_use_case_impact_unresolvable_entrypoint_yields_no_attribution() -> (
+    None
+):
+    library = _walkable_library_graph()
+    definitions = [
+        UseCaseDefinition(use_case="ghost", entrypoints=("does_not_exist_entry",))
+    ]
+    result = explain_use_case_impact(definitions, library, symbols=["train"])
+    assert result == {}
+
+
+def test_explain_use_case_impact_empty_symbols_or_definitions() -> None:
+    library = _walkable_library_graph()
+    definitions = [UseCaseDefinition(use_case="uc1", entrypoints=("train",))]
+    assert explain_use_case_impact(definitions, library, symbols=[]) == {}
+    assert explain_use_case_impact([], library, symbols=["train"]) == {}
+
+
+def test_explain_use_case_impact_type_shaped_symbol_never_attributed() -> None:
+    # No SOURCE_DECL_MAPS_TO_SYMBOL edge backs a bare type name -- the same
+    # structural limitation explain_required_symbols has, documented rather
+    # than silently different.
+    library = _walkable_library_graph()
+    definitions = [UseCaseDefinition(use_case="uc1", entrypoints=("train",))]
+    result = explain_use_case_impact(definitions, library, symbols=["SomeInternalType"])
+    assert result == {}
 
 
 # ── join_use_case_graph ───────────────────────────────────────────────────

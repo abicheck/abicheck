@@ -302,6 +302,18 @@ def project_validate_build_cmd(
     "entrypoints against. Without it, only the manifest's own structure is "
     "checked — no entrypoint is resolved or reported as unresolved.",
 )
+@click.option(
+    "--against-new",
+    "against_new",
+    type=click.Path(exists=True, dir_okay=False, path_type=Path),
+    default=None,
+    help="A second .abi.json snapshot (the NEW side) to diff against "
+    "--against (the OLD side) and report which declared use cases the "
+    "resulting changes reach — the manifest folded into a real diff (G29 "
+    "Phase 4). Requires --against. A use case is only ever named for a "
+    "change its own resolved entrypoints can be shown to reach; this is a "
+    "read-only report, not a compare exit-code/verdict input.",
+)
 @output_options(
     ["text", "json"],
     default="text",
@@ -311,6 +323,7 @@ def project_validate_build_cmd(
 def project_validate_use_cases_cmd(
     manifest: Path,
     against: Path | None,
+    against_new: Path | None,
     fmt: str,
     output: Path | None,
     verbose: bool,
@@ -326,8 +339,11 @@ def project_validate_use_cases_cmd(
     entrypoints matched a real public entry point and which didn't —
     exactly the resolution :func:`abicheck.impact.use_cases.
     build_use_case_graph` performs silently when folding the manifest into
-    a real comparison, given visibility here for the first time. An
-    unresolved entrypoint is reported, never treated as a failure: per
+    a real comparison, given visibility here for the first time. With
+    ``--against-new`` too, additionally diffs ``--against`` (OLD) against
+    it (NEW) and reports which declared use cases each resulting change
+    reaches, via :func:`abicheck.impact.use_cases.explain_use_case_impact`.
+    An unresolved entrypoint is reported, never treated as a failure: per
     this manifest format's own documented discipline, an entrypoint the
     graph can't yet resolve is not evidence the entrypoint doesn't exist
     (a header-only graph, a not-yet-covered declaration, or simply a typo
@@ -336,13 +352,15 @@ def project_validate_use_cases_cmd(
     \b
     Exit codes:
       0   Valid — manifest is well-formed (some entrypoints may be
-          unresolved; that is reported, not a failure).
-      64  Usage error (MANIFEST is malformed, or AGAINST has no source
-          graph to resolve against).
+          unresolved, and some changes may name no use case; both are
+          reported, not a failure).
+      64  Usage error (MANIFEST is malformed, AGAINST has no source graph
+          to resolve against, AGAINST_NEW given without AGAINST, or either
+          snapshot fails to load/compare).
     """
     _setup_verbosity(verbose)
 
-    from .errors import UseCaseManifestError
+    from .errors import AbicheckError, UseCaseManifestError
     from .impact.use_cases import (
         UseCaseResolution,
         load_use_case_manifest,
@@ -361,7 +379,13 @@ def project_validate_use_cases_cmd(
         # with a bare traceback instead of the documented usage-error path.
         raise click.UsageError(str(exc)) from exc
 
+    if against_new is not None and against is None:
+        raise click.UsageError("--against-new requires --against.")
+
     resolutions: list[UseCaseResolution] | None = None
+    diff_by_use_case: dict[str, list[tuple[str, str]]] | None = None
+    unattributed_count = 0
+    total_changes = 0
     if against is not None:
         from .serialization import load_snapshot
 
@@ -386,6 +410,37 @@ def project_validate_use_cases_cmd(
             )
         resolutions = resolve_use_case_entrypoints(definitions, library_graph)
 
+        if against_new is not None:
+            try:
+                new_snapshot = load_snapshot(against_new)
+            except Exception as exc:
+                raise click.UsageError(f"cannot read {against_new}: {exc}") from exc
+            from .impact.use_cases import explain_use_case_impact
+            from .service import compare_snapshots
+
+            try:
+                diff = compare_snapshots(snapshot, new_snapshot)
+            except AbicheckError as exc:
+                # ADR-050's comparability contract (ScopeMismatchError,
+                # IncompatibleSnapshotSchemaError, ...) is a real, expected
+                # usage error here -- AGAINST/AGAINST_NEW are two arbitrary
+                # user-supplied snapshots, not a pair this command already
+                # knows are comparable.
+                raise click.UsageError(
+                    f"cannot compare {against} to {against_new}: {exc}"
+                ) from exc
+            total_changes = len(diff.changes)
+            symbols = {c.symbol for c in diff.changes if c.symbol}
+            mapping = explain_use_case_impact(definitions, library_graph, symbols)
+            diff_by_use_case = {}
+            for change in diff.changes:
+                for use_case in mapping.get(change.symbol, ()):
+                    diff_by_use_case.setdefault(use_case, []).append(
+                        (change.symbol, change.kind.value)
+                    )
+                if not mapping.get(change.symbol):
+                    unattributed_count += 1
+
     if fmt == "json":
         payload: dict[str, object] = {
             "manifest": str(manifest),
@@ -404,6 +459,18 @@ def project_validate_use_cases_cmd(
                 }
                 for r in resolutions
             ]
+        if diff_by_use_case is not None:
+            payload["against_new"] = str(against_new)
+            payload["diff_impact"] = {
+                "total_changes": total_changes,
+                "unattributed_changes": unattributed_count,
+                "by_use_case": {
+                    use_case: [
+                        {"symbol": symbol, "kind": kind} for symbol, kind in changes
+                    ]
+                    for use_case, changes in diff_by_use_case.items()
+                },
+            }
         text = json.dumps(payload, indent=2)
     else:
         lines = [f"use-case manifest validation: {manifest}"]
@@ -423,6 +490,23 @@ def project_validate_use_cases_cmd(
                     lines.append("    (no entrypoints declared)")
                 if r.tests:
                     lines.append(f"    tests: {', '.join(r.tests)}")
+        if diff_by_use_case is not None:
+            lines.append(
+                f"Diff impact ({against} -> {against_new}): "
+                f"{total_changes} change(s), "
+                f"{total_changes - unattributed_count} attributed to a "
+                "declared use case."
+            )
+            if diff_by_use_case:
+                for use_case in sorted(diff_by_use_case):
+                    lines.append(f"  {use_case}:")
+                    for symbol, kind in diff_by_use_case[use_case]:
+                        lines.append(f"    {kind}: {symbol}")
+            else:
+                lines.append(
+                    "  (no change is reachable from any declared use case's "
+                    "own entrypoints)"
+                )
         text = "\n".join(lines)
 
     if output is not None:

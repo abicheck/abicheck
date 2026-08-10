@@ -32,9 +32,9 @@ from pathlib import Path
 from click.testing import CliRunner, Result
 
 from abicheck.buildsource.pack import BuildSourcePack
-from abicheck.buildsource.source_graph import GraphNode, SourceGraphSummary
+from abicheck.buildsource.source_graph import GraphEdge, GraphNode, SourceGraphSummary
 from abicheck.cli import main
-from abicheck.model import AbiSnapshot
+from abicheck.model import AbiSnapshot, Function
 from abicheck.serialization import save_snapshot
 
 
@@ -70,6 +70,45 @@ def _snapshot_with_graph(tmp_path: Path) -> Path:
 def _snapshot_without_graph(tmp_path: Path) -> Path:
     snap = AbiSnapshot(library="libfoo.so", version="1.0")
     out = tmp_path / "snap.json"
+    save_snapshot(snap, out)
+    return out
+
+
+def _snapshot_with_walkable_graph(
+    tmp_path: Path, name: str, *, with_train_function: bool
+) -> Path:
+    """A snapshot carrying both a real ``train`` `Function` (so
+    `compare_snapshots` sees a genuine diff when it's removed) and a
+    matching graph node/edge pair, mirroring ``test_use_cases.py``'s own
+    ``_walkable_library_graph`` for exactly the one entrypoint these tests
+    need."""
+    graph = SourceGraphSummary()
+    graph.add_node(
+        GraphNode(
+            id="decl://train",
+            kind="source_decl",
+            label="train",
+            attrs={"visibility": "public_header"},
+        )
+    )
+    graph.add_node(
+        GraphNode(id="binary_symbol://train", kind="binary_symbol", label="train")
+    )
+    graph.add_edge(
+        GraphEdge(
+            src="decl://train",
+            dst="binary_symbol://train",
+            kind="SOURCE_DECL_MAPS_TO_SYMBOL",
+        )
+    )
+    functions = (
+        [Function(name="train", mangled="train", return_type="void")]
+        if with_train_function
+        else []
+    )
+    snap = AbiSnapshot(library="libfoo.so", version=name, functions=functions)
+    snap.build_source = BuildSourcePack(root="", source_graph=graph)
+    out = tmp_path / f"{name}.json"
     save_snapshot(snap, out)
     return out
 
@@ -245,4 +284,167 @@ class TestResolutionAgainstALibraryGraph:
     def test_nonexistent_against_path_is_a_usage_error(self, tmp_path: Path) -> None:
         manifest = _write_manifest(tmp_path, "- use_case: x\n  entrypoints: [train]\n")
         res = _run([str(manifest), "--against", str(tmp_path / "does-not-exist.json")])
+        assert res.exit_code != 0
+
+
+class TestDiffImpactAgainstNew:
+    """``--against-new``: the manifest folded into a real two-snapshot diff
+    (G29 Phase 4) via `impact.use_cases.explain_use_case_impact`."""
+
+    def test_against_new_requires_against(self, tmp_path: Path) -> None:
+        manifest = _write_manifest(tmp_path, "- use_case: x\n  entrypoints: [train]\n")
+        new_snapshot = _snapshot_with_walkable_graph(
+            tmp_path, "new", with_train_function=False
+        )
+        res = _run([str(manifest), "--against-new", str(new_snapshot)])
+        assert res.exit_code == 64
+        assert "--against-new requires --against" in res.output
+
+    def test_removed_function_attributed_to_declaring_use_case_text(
+        self, tmp_path: Path
+    ) -> None:
+        manifest = _write_manifest(
+            tmp_path, "- use_case: training workflow\n  entrypoints: [train]\n"
+        )
+        old_snapshot = _snapshot_with_walkable_graph(
+            tmp_path, "old", with_train_function=True
+        )
+        new_snapshot = _snapshot_with_walkable_graph(
+            tmp_path, "new", with_train_function=False
+        )
+        res = _run(
+            [
+                str(manifest),
+                "--against",
+                str(old_snapshot),
+                "--against-new",
+                str(new_snapshot),
+            ]
+        )
+        assert res.exit_code == 0, res.output
+        assert "1 change(s), 1 attributed" in res.output
+        assert "training workflow:" in res.output
+        assert "func_removed: train" in res.output
+
+    def test_removed_function_attributed_to_declaring_use_case_json(
+        self, tmp_path: Path
+    ) -> None:
+        manifest = _write_manifest(
+            tmp_path, "- use_case: training workflow\n  entrypoints: [train]\n"
+        )
+        old_snapshot = _snapshot_with_walkable_graph(
+            tmp_path, "old", with_train_function=True
+        )
+        new_snapshot = _snapshot_with_walkable_graph(
+            tmp_path, "new", with_train_function=False
+        )
+        res = _run(
+            [
+                str(manifest),
+                "--against",
+                str(old_snapshot),
+                "--against-new",
+                str(new_snapshot),
+                "--format",
+                "json",
+            ]
+        )
+        assert res.exit_code == 0, res.output
+        payload = json.loads(res.output)
+        assert payload["against_new"] == str(new_snapshot)
+        assert payload["diff_impact"] == {
+            "total_changes": 1,
+            "unattributed_changes": 0,
+            "by_use_case": {
+                "training workflow": [{"symbol": "train", "kind": "func_removed"}]
+            },
+        }
+
+    def test_change_unreachable_from_any_use_case_is_unattributed(
+        self, tmp_path: Path
+    ) -> None:
+        # A use case whose own entrypoint does not name the removed symbol
+        # at all -- the change is real but attributed to no declared use
+        # case, reported distinctly from "no changes at all".
+        manifest = _write_manifest(
+            tmp_path,
+            "- use_case: unrelated workflow\n  entrypoints: [does_not_exist]\n",
+        )
+        old_snapshot = _snapshot_with_walkable_graph(
+            tmp_path, "old", with_train_function=True
+        )
+        new_snapshot = _snapshot_with_walkable_graph(
+            tmp_path, "new", with_train_function=False
+        )
+        res = _run(
+            [
+                str(manifest),
+                "--against",
+                str(old_snapshot),
+                "--against-new",
+                str(new_snapshot),
+            ]
+        )
+        assert res.exit_code == 0, res.output
+        assert "1 change(s), 0 attributed" in res.output
+        assert "no change is reachable from any declared use case" in res.output
+
+    def test_no_changes_between_identical_snapshots(self, tmp_path: Path) -> None:
+        manifest = _write_manifest(
+            tmp_path, "- use_case: training workflow\n  entrypoints: [train]\n"
+        )
+        old_snapshot = _snapshot_with_walkable_graph(
+            tmp_path, "old", with_train_function=True
+        )
+        same_snapshot = _snapshot_with_walkable_graph(
+            tmp_path, "old", with_train_function=True
+        )
+        res = _run(
+            [
+                str(manifest),
+                "--against",
+                str(old_snapshot),
+                "--against-new",
+                str(same_snapshot),
+            ]
+        )
+        assert res.exit_code == 0, res.output
+        assert "0 change(s), 0 attributed" in res.output
+
+    def test_malformed_against_new_snapshot_is_a_usage_error(
+        self, tmp_path: Path
+    ) -> None:
+        manifest = _write_manifest(tmp_path, "- use_case: x\n  entrypoints: [train]\n")
+        old_snapshot = _snapshot_with_walkable_graph(
+            tmp_path, "old", with_train_function=True
+        )
+        bad_new = tmp_path / "bad_new.abi.json"
+        bad_new.write_text(json.dumps({"not": "a snapshot"}))
+        res = _run(
+            [
+                str(manifest),
+                "--against",
+                str(old_snapshot),
+                "--against-new",
+                str(bad_new),
+            ]
+        )
+        assert res.exit_code == 64
+
+    def test_nonexistent_against_new_path_is_a_usage_error(
+        self, tmp_path: Path
+    ) -> None:
+        manifest = _write_manifest(tmp_path, "- use_case: x\n  entrypoints: [train]\n")
+        old_snapshot = _snapshot_with_walkable_graph(
+            tmp_path, "old", with_train_function=True
+        )
+        res = _run(
+            [
+                str(manifest),
+                "--against",
+                str(old_snapshot),
+                "--against-new",
+                str(tmp_path / "does-not-exist.json"),
+            ]
+        )
         assert res.exit_code != 0

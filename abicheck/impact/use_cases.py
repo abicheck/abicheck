@@ -40,14 +40,30 @@ that's not a mapping, a missing/blank ``use_case`` name) raises
 **Not implemented in this slice** (see ADR-057's "Deliberately not
 implemented this slice", G29 Phase 4): runtime-trace ingestion
 (``TRACE_OBSERVED_ENTRY``/``TRACE_OBSERVED_EDGE`` stay reserved vocabulary,
-same as :mod:`abicheck.impact.consumer_graph`'s reserved consumer kinds) and
-any report-level ``affected_use_cases``/``USE_CASE_IMPACT_CONFIRMED``
-surface (G29 Phase 6). This module only builds and joins the graph facts.
+same as :mod:`abicheck.impact.consumer_graph`'s reserved consumer kinds), and
+any *report-schema* ``Change.affected_use_cases`` field or
+``USE_CASE_IMPACT_CONFIRMED`` finding kind wired into ``compare`` itself
+(G29 Phase 6 — that needs its own schema bump and FP-gate examples, not a
+drive-by extension here).
+
+:func:`explain_use_case_impact` (G29 Phase 4, added alongside the
+``project validate-use-cases --against-new`` CLI mode) is a narrower, real
+step past graph-building alone: given a real two-snapshot diff's changed
+symbols, it answers *which declared use case(s)' own entrypoints reach
+each one* — but it is a **read-only report view**, not a `Change`
+mutation. It constructs no new node/edge, sets no field on any `Change`
+object, and is invisible to `compare`'s own report schema/exit code; a
+caller renders its answer directly (today, only the CLI command above
+does). This is the same "enrichment lives outside the object being
+enriched" shape :mod:`abicheck.impact.engine`'s `assess_change` already
+uses for `ImpactAssessment` — just without even a cached field on `Change`,
+since nothing in this slice re-reads the answer more than once per run.
 """
 
 from __future__ import annotations
 
 import copy
+from collections.abc import Iterable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -701,3 +717,130 @@ def join_use_case_graph(
             node.provenance, node.confidence = restore
     joined.graph_id = ""
     return joined
+
+
+def explain_use_case_impact(
+    definitions: list[UseCaseDefinition],
+    library_graph: SourceGraphSummary,
+    symbols: Iterable[str],
+) -> dict[str, tuple[str, ...]]:
+    """For each of *symbols* (an ordinary two-snapshot diff's own
+    ``Change.symbol`` values), which declared use case(s)' own resolved
+    entrypoints reach it via *library_graph*'s call/reference edges (G29
+    Phase 4, the use-case counterpart of
+    :func:`abicheck.impact.consumer_graph.explain_required_symbols`).
+
+    The key difference from that function: its root set is *every*
+    consumer-compiled public entry in the library, because a real
+    consumer's requirement is proven by the export table alone, independent
+    of which declared use case (if any) covers it. Here the roots are
+    restricted to exactly the entrypoints *this manifest itself declares* —
+    "every public entry reaches it" says nothing about whether a
+    *specific* use case's own surface does, and attributing a change to
+    every use case whenever *any* public entry reaches it would make the
+    field meaningless (every use case would show every public-reachable
+    change). No :func:`join_use_case_graph` fold is needed for this walk:
+    entrypoint resolution reads only :func:`_public_entry_index` against the
+    plain library graph, the identical resolution :func:`build_use_case_graph`
+    and :func:`resolve_use_case_entrypoints` already perform.
+
+    Returns ``{symbol: (use_case_name, ...)}`` for exactly the symbols this
+    manifest's own entrypoints can be shown to reach — a symbol absent from
+    the mapping is not evidence no use case touches it, only that this
+    function found no proof, mirroring
+    :func:`~abicheck.impact.consumer_graph.explain_required_symbols`'s own
+    "absent, never speculative" contract. Two structural limitations, both
+    inherited from that same sibling function rather than introduced here:
+    a *type*-shaped change (no ``SOURCE_DECL_MAPS_TO_SYMBOL`` edge — no
+    declaration ever backs a `record_type`/`enum_type` node) can never be
+    named, only a function/variable-shaped one; and only a
+    *consumer-compiled* entrypoint (:func:`~abicheck.buildsource.
+    source_graph.is_consumer_compiled_public_entry` — inline/template
+    bodies, not an ordinary out-of-line exported function's own internal
+    calls) can walk past its own declaration, so a use case naming only
+    ordinary exported functions as entrypoints still gets direct-hit
+    attribution (the symbol's own declaration is one of the resolved
+    entrypoints) but never transitive attribution through it.
+    """
+    wanted = set(symbols)
+    if not wanted or not definitions:
+        return {}
+
+    from ..buildsource.source_graph import is_consumer_compiled_public_entry
+    from ..internal_leak import (
+        CALL_GRAPH_TRAVERSAL_POLICY,
+        _consumer_compiled_reachability,
+    )
+
+    entry_index = _public_entry_index(library_graph)
+    use_case_entries: dict[str, set[str]] = {}
+    for definition in definitions:
+        ids = {entry_index[e] for e in definition.entrypoints if e in entry_index}
+        if ids:
+            use_case_entries[definition.use_case] = ids
+    if not use_case_entries:
+        return {}
+
+    # decl node id -> symbol name (restricted to *wanted*), and the reverse
+    # symbol id -> decl id -- the latter to resolve a coalesced
+    # ``binary_symbol://`` entry (`_public_entry_index` prefers the mapped
+    # symbol id over the declaring decl id, see its own docstring) back to
+    # the decl node the call-graph's own edges are keyed on: a
+    # ``DECL_CALLS_DECL``/``DECL_REFERENCES_DECL`` edge's src/dst is always a
+    # decl (or type) node id, never a bare exported-symbol one, so walking
+    # from the coalesced binary_symbol id directly would find no outgoing
+    # edges at all and silently explain nothing.
+    decl_to_symbol: dict[str, str] = {}
+    symbol_to_decl: dict[str, str] = {}
+    for edge in library_graph.edges:
+        if edge.kind != "SOURCE_DECL_MAPS_TO_SYMBOL":
+            continue
+        symbol_to_decl.setdefault(edge.dst, edge.src)
+        name = edge.dst.removeprefix("binary_symbol://")
+        if name in wanted:
+            decl_to_symbol[edge.src] = name
+
+    def walk_root(entry: str) -> str:
+        return symbol_to_decl.get(entry, entry)
+
+    node_by_id = {n.id: n for n in library_graph.nodes}
+    exported_decls = {
+        e.src for e in library_graph.edges if e.kind == "SOURCE_DECL_MAPS_TO_SYMBOL"
+    }
+    all_entries = sorted({eid for ids in use_case_entries.values() for eid in ids})
+    walk_roots = sorted(
+        {
+            root
+            for eid in all_entries
+            for root in (walk_root(eid),)
+            if is_consumer_compiled_public_entry(root, node_by_id, exported_decls)
+        }
+    )
+    reachability = (
+        _consumer_compiled_reachability(
+            library_graph, CALL_GRAPH_TRAVERSAL_POLICY, walk_roots, node_by_id
+        )
+        if walk_roots
+        else {}
+    )
+
+    result: dict[str, set[str]] = {}
+    for use_case, entry_ids in use_case_entries.items():
+        for entry in entry_ids:
+            # walk_root(entry) is *entry* itself for an entry that is
+            # already a decl id (or an unmapped binary_symbol id), and the
+            # declaring decl id for a coalesced binary_symbol one -- either
+            # way, decl_to_symbol (keyed by decl id) answers the direct
+            # case uniformly.
+            direct_symbol = decl_to_symbol.get(walk_root(entry))
+            if direct_symbol is not None:
+                result.setdefault(direct_symbol, set()).add(use_case)
+            seen, _came_from, _degraded = reachability.get(
+                walk_root(entry), (frozenset(), {}, frozenset())
+            )
+            for decl in seen:
+                sym = decl_to_symbol.get(decl)
+                if sym is not None:
+                    result.setdefault(sym, set()).add(use_case)
+
+    return {symbol: tuple(sorted(names)) for symbol, names in result.items()}
