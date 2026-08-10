@@ -1135,15 +1135,31 @@ def _vtable_transition_is_evidenced(
     is kept. The suppression needs positive evidence that layout held still;
     it is not a fallback for missing information.
 
-    Known false negative, accepted for now rather than papered over: a class
-    already polymorphic through a base, declaring no virtuals of its own,
-    that gains one. Its vtable grows while the object size does not, so it
-    looks exactly like capture noise here. Catching it needs a real
-    polymorphism walk over both sides' base chains (``diff_vtable_layout``'s
-    ``_is_polymorphic``) plus a per-finding provenance the model does not yet
-    carry -- see AGENTS.md's evidence-provider entry. This module already
-    prefers a false negative to a fabricated break, and that is the same
-    trade.
+    Two known false negatives, accepted rather than papered over -- both are
+    a class whose vtable grows while its object size does not, which is
+    indistinguishable from capture noise on the evidence this detector
+    receives:
+
+    * A class already polymorphic through a base, declaring no virtuals of
+      its own, that gains one.
+    * An over-aligned class gaining its first *pure* virtual. A pure virtual
+      has no out-of-line definition, so ``dwarf_snapshot`` drops its
+      declaration-only DIE from ``snapshot.functions`` while still counting
+      it as a vtable child -- both owned-signature sets read empty -- and
+      ``alignas`` absorbs the new vptr into existing padding so the size
+      does not move either (reproduced against g++ with
+      ``struct alignas(8) A { virtual void f() = 0; }``).
+
+    Neither loses the *break*: ``diff_layout._check_vptr_introduced`` fires
+    independently on the same None -> 0 vptr transition and the verdict stays
+    BREAKING. Only this detector's own ``TYPE_VTABLE_CHANGED`` is withheld.
+    Leaning on a sibling detector is not a comfortable place to be, and a
+    previous revision tried to close the second case here directly by reading
+    ``vptr_offset_bits`` -- see the body for why that witness is circular and
+    made this guard inert. Closing it for real needs evidence the model does
+    not carry (a per-finding provider record, or a polymorphism walk over
+    both base chains) -- see AGENTS.md's evidence-provider entry -- not a
+    cleverer reading of the fields already here.
     """
     if t_old.vtable and t_new.vtable:
         # Both sides captured something, so the difference is a real
@@ -1154,7 +1170,7 @@ def _vtable_transition_is_evidenced(
     ):
         # The class's own virtual *functions* -- a different projection of
         # the debug info from `RecordType.vtable`, and the signal that keeps
-        # an over-aligned class honest (see below).
+        # an over-aligned class honest when the size check below cannot.
         #
         # Not fully independent, and the docstring used to overclaim that:
         # on the DWARF path both ultimately derive from `DW_TAG_subprogram`
@@ -1167,26 +1183,19 @@ def _vtable_transition_is_evidenced(
         # artifact or provenance evidence (`_ZTV` presence, per-finding
         # providers) the type-level detector does not yet receive.
         return True
-    if (t_old.vptr_offset_bits is None) != (t_new.vptr_offset_bits is None):
-        # The layout descriptor's own witness of polymorphism, and the one
-        # signal here that is not another projection of the same subprogram
-        # DIEs. It closes the case both checks above miss: a *pure* virtual
-        # has no out-of-line definition, so ``dwarf_snapshot`` drops its
-        # declaration-only DIE from ``snapshot.functions`` while still
-        # counting it as a vtable child of the class -- leaving both owned
-        # signature sets empty. With ``alignas`` absorbing the new vptr into
-        # existing padding the size does not move either, so an over-aligned
-        # class gaining its first pure virtual reached the size check and was
-        # suppressed (Codex review; reproduced against g++ with
-        # ``struct alignas(8) A { virtual void f() = 0; }``).
-        #
-        # The break was not actually hidden in that run -- ``diff_layout``'s
-        # independent ``_check_vptr_introduced`` fires on the same transition
-        # and the verdict stayed BREAKING -- but a guard that leans on a
-        # sibling detector to cover its own blind spot is one refactor away
-        # from being wrong, and this reads the same field that detector
-        # trusts.
-        return True
+    # NOT consulted here: ``vptr_offset_bits``. It reads like the one
+    # independent layout witness available, and a previous revision of this
+    # function used it as exactly that -- wrongly. Both producers assign it
+    # as ``0 if vtable else None`` (``dwarf_snapshot.py``,
+    # ``dumper_castxml.py``), so on those two backends
+    # ``(old.vptr is None) != (new.vptr is None)`` is *identical* to the
+    # empty-vs-non-empty vtable transition being guarded: it was true by
+    # construction for every input reaching this point, which silently made
+    # the whole guard a no-op and let the original capture-gap false positive
+    # straight back through (Codex review). Only the optional
+    # ``ABICHECK_CLANG_LAYOUT_TOOL`` path computes it from a real layout
+    # query, and nothing in the model distinguishes that value from the
+    # derived one -- so it cannot be trusted as evidence here at all.
     if t_old.size_bits is None or t_new.size_bits is None:
         return True
     if t_old.size_bits != t_new.size_bits:

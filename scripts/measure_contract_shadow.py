@@ -151,15 +151,21 @@ FACT_LOSS_BASELINE = 0
 #: check reports a drop as well as a rise.
 UNRESOLVED_LOSS_BASELINE: dict[str, int] = {
     "public": 1,
-    "exports": 31,
+    "exports": 30,
     "all": 0,
 }
-#: `exports` moved 20 -> 23 -> 26 -> 27 -> 29 -> 31 (the last +2 is
-#: `overaligned_pure_virtual_stays_breaking`, the FN sentinel for a pure
-#: virtual: its declaration-only DIE never reaches `snapshot.functions`, so
-#: the owned-signature check cannot see it and `vptr_offset_bits` answers
-#: instead. Same reading as every step below -- a real break with no export
-#: table to resolve against. The step before that +2 is
+#: `exports` moved 20 -> 23 -> 26 -> 27 -> 29 -> 31 -> 30. The +2 to 31 was
+#: `overaligned_pure_virtual_stays_breaking`, an FN sentinel for a pure
+#: virtual whose declaration-only DIE never reaches `snapshot.functions`, so
+#: the owned-signature check cannot see it; the guard answered from
+#: `vptr_offset_bits` instead. That witness turned out to be circular -- both
+#: producers derive it as `0 if vtable else None`, so reading it made the
+#: whole evidence guard inert (see `diff_types._vtable_transition_is_evidenced`)
+#: -- and reverting it takes one of those two back off: the sentinel's
+#: `type_vtable_changed` is now an accepted false negative, still `BREAKING`
+#: via `diff_layout`'s independent `vptr_introduced`. Same reading as every
+#: step below -- a real break with no export table to resolve against. The
+#: step before that +2 is
 #: `namespaced_leaf_vtable_removal_stays_breaking`, another FN sentinel --
 #: a real vtable removal an exact owner comparison had been suppressing) as the `evidence-absence` corpus cases
 #: landed (vtable first, then bases). Attribution for the second step, same

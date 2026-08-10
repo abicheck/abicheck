@@ -12,6 +12,7 @@ measures *verdicts*, and ``diff_layout._check_vptr_introduced`` independently
 reports the same transition, so a verdict-level case cannot tell whether this
 guard did its own job or was carried by its neighbour.
 """
+
 from __future__ import annotations
 
 import pytest
@@ -22,19 +23,32 @@ from abicheck.model import Function, RecordType, Visibility
 NAME = "Abstract"
 
 
+_UNSET = object()
+
+
 def _cls(
     vtable: list[str],
     *,
     size_bits: int | None = 64,
-    vptr_offset_bits: int | None = None,
+    vptr_offset_bits: object = _UNSET,
     virtual_bases: list[str] | None = None,
 ) -> RecordType:
+    """A record shaped the way a real dump produces one.
+
+    ``vptr_offset_bits`` defaults to the producers' own derivation rather
+    than to ``None``: both ``dwarf_snapshot`` and ``dumper_castxml`` assign
+    it as ``0 if vtable else None``. Leaving it ``None`` on both sides built
+    a record no backend can emit, and that is precisely how a guard that had
+    become inert on every real snapshot still passed its own tests.
+    """
     return RecordType(
         name=NAME,
         kind="class",
         size_bits=size_bits,
         vtable=vtable,
-        vptr_offset_bits=vptr_offset_bits,
+        vptr_offset_bits=(0 if vtable else None)
+        if vptr_offset_bits is _UNSET
+        else vptr_offset_bits,  # type: ignore[arg-type]
         virtual_bases=list(virtual_bases or []),
     )
 
@@ -50,48 +64,105 @@ def _virtual() -> dict[str, Function]:
     return {fn.mangled: fn}
 
 
-class TestVptrDescriptorIsIndependentEvidence:
-    """A *pure* virtual has no out-of-line definition, so ``dwarf_snapshot``
-    drops its declaration-only DIE from ``snapshot.functions`` while still
-    counting it as a vtable child of the class — both owned-signature sets
-    read empty. With ``alignas`` absorbing the new vptr the size does not
-    move either, so the size backstop was reached and suppressed a class
-    gaining its first vptr (Codex review; reproduced against g++ with
-    ``struct alignas(8) A { virtual void f() = 0; }``).
+class TestVptrIsNotEvidence:
+    """``vptr_offset_bits`` must never gate this guard — it is circular.
+
+    Both producers assign it ``0 if vtable else None``, so on a real DWARF or
+    CastXML snapshot the descriptor's None↔set transition *is* the vtable
+    transition being guarded, not a second witness of it. A revision that
+    read it here was true by construction for every input reaching that
+    branch, which made the whole guard inert and let the capture-gap false
+    positive back through (Codex review).
     """
 
-    def test_a_gained_vptr_is_kept_with_no_function_and_no_size_change(self) -> None:
-        assert _vtable_transition_is_evidenced(
-            NAME,
-            _cls([], vptr_offset_bits=None),
-            _cls([f"{NAME}::f()"], vptr_offset_bits=0),
-            {},
-            {},
+    @pytest.mark.parametrize(
+        "module", ["abicheck.dwarf_snapshot", "abicheck.dumper_castxml"]
+    )
+    def test_the_producer_derivation_this_rests_on(self, module: str) -> None:
+        """Pin the premise, not just the conclusion.
+
+        The argument above is only sound while both producers derive the
+        field from the vtable list. If one ever computes a real vptr, this
+        fails and the reasoning must be revisited before the field is
+        trusted as evidence again.
+        """
+        import importlib
+        from pathlib import Path
+
+        src = Path(importlib.import_module(module).__file__ or "").read_text(
+            encoding="utf-8"
+        )
+        assert "vptr_offset_bits=0 if vtable else None" in src or (
+            "vptr_offset_bits = 0 if vtable else None" in src
+        ), f"{module} no longer derives vptr_offset_bits from the vtable list"
+
+    def test_capture_gap_is_suppressed_on_producer_shaped_records(self) -> None:
+        """The regression: identical layout, no owned virtuals either side,
+        one side's vtable simply absent — with the vptr set the way a real
+        dump sets it."""
+        assert not _vtable_transition_is_evidenced(
+            NAME, _cls([]), _cls([f"{NAME}::f()"]), {}, {}
         )
 
-    def test_a_lost_vptr_is_kept_the_same_way(self) -> None:
-        assert _vtable_transition_is_evidenced(
-            NAME,
-            _cls([f"{NAME}::f()"], vptr_offset_bits=0),
-            _cls([], vptr_offset_bits=None),
-            {},
-            {},
+    def test_the_reverse_direction_too(self) -> None:
+        assert not _vtable_transition_is_evidenced(
+            NAME, _cls([f"{NAME}::f()"]), _cls([]), {}, {}
         )
 
-    @pytest.mark.parametrize("vptr", [None, 0])
-    def test_an_unchanged_descriptor_still_falls_through_to_the_size_check(
-        self, vptr: int | None
+    @pytest.mark.parametrize(
+        "old_vptr,new_vptr", [(None, 0), (0, None), (0, 0), (None, None)]
+    )
+    def test_no_descriptor_pairing_changes_the_answer(
+        self, old_vptr: int | None, new_vptr: int | None
     ) -> None:
-        """The descriptor agreeing on both sides is not evidence of a change,
-        so it must not become a blanket "keep everything" — that would undo
-        the capture-gap suppression this guard exists for."""
+        """Including the pairing an ``ABICHECK_CLANG_LAYOUT_TOOL`` backfill
+        could produce: the field is simply not read."""
         assert not _vtable_transition_is_evidenced(
             NAME,
-            _cls([], vptr_offset_bits=vptr),
-            _cls([f"{NAME}::f()"], vptr_offset_bits=vptr),
+            _cls([], vptr_offset_bits=old_vptr),
+            _cls([f"{NAME}::f()"], vptr_offset_bits=new_vptr),
             {},
             {},
         )
+
+
+class TestTheAcceptedFalseNegativeDoesNotHideTheBreak:
+    """The guard's docstring leans on a *neighbouring* detector, so pin it.
+
+    Suppressing ``TYPE_VTABLE_CHANGED`` for an over-aligned class gaining its
+    first pure virtual is only acceptable because ``diff_layout``'s
+    independent ``_check_vptr_introduced`` reports the same transition and
+    the verdict stays BREAKING. If that ever stops holding, this guard is
+    hiding a real ABI break and must be revisited — a unit test on the
+    predicate alone cannot see that.
+    """
+
+    @staticmethod
+    def _snap(vtable: list[str]) -> object:
+        from abicheck.model import AbiSnapshot
+
+        return AbiSnapshot(
+            library="libx.so",
+            version="1",
+            types=[
+                RecordType(
+                    name="A",
+                    kind="class",
+                    size_bits=64,  # alignas absorbs the new vptr
+                    vtable=list(vtable),
+                    vptr_offset_bits=0 if vtable else None,
+                )
+            ],
+        )
+
+    def test_the_verdict_is_still_breaking(self) -> None:
+        from abicheck.checker import Verdict, compare
+
+        result = compare(self._snap([]), self._snap(["A::f()"]))
+        kinds = {c.kind.value for c in result.changes}
+        assert "type_vtable_changed" not in kinds, "the guard should suppress its own"
+        assert "vptr_introduced" in kinds, "the break must still be reported"
+        assert result.verdict is Verdict.BREAKING
 
 
 class TestPreExistingSignalsStillHold:

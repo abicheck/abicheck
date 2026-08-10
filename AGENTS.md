@@ -1018,28 +1018,51 @@ Once a root command genuinely clears the bar above, pick the right home:
   size does not, making it indistinguishable from capture noise without a
   real polymorphism walk over both sides' base chains
   (`diff_vtable_layout._is_polymorphic`) plus the per-finding provenance the
-  entry below describes. (4) A *pure* virtual reached that same size backstop
-  for a different reason, and this one **was** closed: a pure virtual has no
-  out-of-line definition, so `dwarf_snapshot` drops its declaration-only DIE
-  from `snapshot.functions` while still counting it as a vtable child of the
-  class, leaving both owned-signature sets empty — and with `alignas`
-  absorbing the new vptr the size does not move either. Reproduced against
-  g++ (`struct alignas(8) A { virtual void f() = 0; }` compiled alongside a
+  entry below describes. (4) A *pure* virtual reaches that same size backstop
+  for a different reason: it has no out-of-line definition, so
+  `dwarf_snapshot` drops its declaration-only DIE from `snapshot.functions`
+  while still counting it as a vtable child of the class, leaving both
+  owned-signature sets empty — and with `alignas` absorbing the new vptr the
+  size does not move either. Reproduced against g++
+  (`struct alignas(8) A { virtual void f() = 0; }` compiled alongside a
   concrete derived class, which is what makes GCC emit A's complete DIE
   rather than a `DW_AT_declaration` stub): old vtable `[]`, new vtable
   `['_ZN1A1fEv']`, both 8 bytes, `_ZN1A1fEv` absent from the function map on
-  both sides. The guard now also consults `RecordType.vptr_offset_bits`, the
-  layout descriptor's own witness and the only signal here that is not
-  another projection of the same subprogram DIEs. Worth recording that the
-  break was **not** actually hidden: `diff_layout._check_vptr_introduced`
-  fires independently on the same transition and the verdict stayed
-  `BREAKING`, which is also why the FP-rate corpus (a verdict-level gate)
-  could not catch this and the regression coverage is a direct unit test on
-  the predicate (`tests/test_vtable_evidence_guard.py`) instead. A guard
-  leaning on a sibling detector to cover its own blind spot is one refactor
-  from being wrong, so it was fixed anyway. Guarded by four FP-corpus cases
-  under the `evidence-absence` axis (one FP guard, three FN sentinels), the
-  unit tests above, and three Hypothesis properties in
+  both sides. **An attempt to close this one was written, merged into the
+  branch, and then reverted — the reason is the most useful thing in this
+  entry.** The fix consulted `RecordType.vptr_offset_bits` as "the layout
+  descriptor's own witness, the only signal here that is not another
+  projection of the same subprogram DIEs." That claim was false, and
+  checkably so: **both** producers assign the field as `0 if vtable else
+  None` (`dwarf_snapshot.py`, `dumper_castxml.py`), so on every real DWARF
+  or CastXML snapshot `(old.vptr is None) != (new.vptr is None)` is
+  *identical to* the empty↔non-empty vtable transition being guarded. It was
+  therefore true by construction for every input that reached it, which did
+  not merely weaken the guard — it made the guard **inert**, restoring the
+  original capture-gap false positive in full (Codex review). Only the
+  optional `ABICHECK_CLANG_LAYOUT_TOOL` path computes a real vptr, and
+  nothing in the model distinguishes that value from the derived one, so the
+  field cannot be trusted here at all. Reverted; case (4) joins case (3) as
+  an accepted false negative. **The tests are the second lesson**: the
+  guard's unit tests built `RecordType`s with `vptr_offset_bits` left `None`
+  on both sides — a record no backend can emit — so the entire suite,
+  including the pre-existing test for the guard's whole purpose, passed
+  against a guard that suppressed nothing on real input. The helper now
+  derives the field the way the producers do, one test pins that derivation
+  in the producers' own source (so the reasoning fails loudly if a producer
+  ever computes a real vptr), and five of these tests fail against the
+  reverted revision. Worth recording for both (3) and (4) that the break is
+  **not** hidden: `diff_layout._check_vptr_introduced` fires independently
+  on the same `None → 0` transition and the verdict stays `BREAKING`
+  (verified end to end, and now pinned by its own test) — which is also why
+  the FP-rate corpus, a verdict-level gate, could not catch either the
+  original false positive or the inert-guard regression, and why the
+  regression coverage is a direct unit test on the predicate
+  (`tests/test_vtable_evidence_guard.py`) instead. Leaning on a sibling
+  detector remains uncomfortable, but the alternative on offer was a witness
+  that only appeared independent. Guarded by four FP-corpus cases under the
+  `evidence-absence` axis (one FP guard, three FN sentinels), the unit tests
+  above, and three Hypothesis properties in
   `tests/test_detector_properties.py`.
 
 - **Evidence-provider model — investigated, found not to reproduce as
