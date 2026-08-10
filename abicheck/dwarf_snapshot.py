@@ -399,16 +399,56 @@ class _DwarfSnapshotBuilder:
         # fix), but self.types is keyed by *qualified* name once a namespace
         # or enclosing class is involved -- a name-only lookup would silently
         # fail to resolve `ns::N : ns::A`'s inherited vptr (Codex review,
-        # reproduced against a real GCC-compiled namespaced example).
+        # reproduced against a real GCC-compiled namespaced example). Every
+        # ODR-duplicate DIE of an already-registered type (the same header
+        # parsed in a second CU) is ALSO registered here, aliased to the one
+        # retained RecordType (see _check_and_register_type_name's caller) --
+        # otherwise a base referenced from that second CU would resolve to a
+        # DIE identity this dict never learned about at all (a second, real
+        # gap Codex review also caught, reproduced with two TUs sharing one
+        # header).
         self._record_die_index: dict[tuple[int, int], RecordType] = {}
-        # id(derived RecordType) -> {base_name: (CU offset, base DIE offset)},
-        # captured at inheritance-edge-processing time (while the base DIE is
-        # still directly at hand) since a base is not guaranteed to already
-        # be in ``_record_die_index`` at that point -- DWARF's per-CU DIE
-        # emission order does not correlate with declaration order (see
-        # _finalize_vptr_offsets's own docstring). Resolved back into
-        # ``_record_die_index`` only after every CU has been walked.
-        self._base_die_keys_by_record: dict[int, dict[str, tuple[int, int]]] = {}
+        # qualified name -> the retained RecordType, kept in lockstep with
+        # self.types -- consulted only from _finalize_vptr_offsets (via
+        # _die_key_to_qualified_name below), not for the primary base-name
+        # lookup (that stays the bare-name `by_name` fallback there).
+        self._record_by_qualified_name: dict[str, RecordType] = {}
+        # (CU offset, DIE offset) -> qualified name, for a DIE that is NOT
+        # the retained definition -- either an ODR-duplicate (a second CU's
+        # own copy of an already-seen type) or a declaration-only forward
+        # reference (the shape GCC emits for a base class referenced from a
+        # CU that never defines it itself). Populated unconditionally at the
+        # point such a DIE is encountered, regardless of whether the real
+        # definition has been walked yet -- DWARF's per-CU emission order
+        # does not guarantee the real definition comes first (see
+        # _finalize_vptr_offsets's own docstring for the general version of
+        # this ordering problem), so resolving through
+        # ``_record_by_qualified_name`` is deferred to _finalize_vptr_offsets
+        # time, once every CU is known, rather than attempted eagerly here.
+        self._die_key_to_qualified_name: dict[tuple[int, int], str] = {}
+        # id(derived RecordType) -> ordered list of (base bare name, this
+        # edge's own bit offset or None, (CU offset, base DIE offset) or
+        # None), ONE ENTRY PER DW_TAG_inheritance CHILD -- not a dict keyed
+        # by base name. A derived class can directly inherit two distinct
+        # bases sharing the same bare name in different namespaces (e.g.
+        # `D : one::A, two::A`); a bare-name-keyed dict (the shape this
+        # started as) collapses the second edge onto the first, corrupting
+        # both the offset and the DIE identity for whichever edge lost —
+        # reproduced with exactly that shape (Codex review): a polymorphic
+        # `one::A` at real offset 0 and a non-polymorphic `two::A` at a
+        # non-zero offset, where the second write to a shared key made the
+        # true offset-0 candidate unrecoverable. Only non-virtual edges are
+        # appended (mirroring `base_offsets`'s own population condition — a
+        # virtual base's offset is dynamic and can never be primary), one
+        # entry per edge regardless of how many other edges share its bare
+        # name. Captured at inheritance-edge-processing time (while the base
+        # DIE is still directly at hand) since a base is not guaranteed to
+        # already be in ``_record_die_index`` at that point -- DWARF's
+        # per-CU DIE emission order does not correlate with declaration
+        # order (see _finalize_vptr_offsets's own docstring).
+        self._base_edges_by_record: dict[
+            int, list[tuple[str, int | None, tuple[int, int] | None]]
+        ] = {}
 
     def extract(self, session: DwarfSession | None = None) -> None:
         """Walk DWARF and populate result lists.
@@ -793,10 +833,27 @@ class _DwarfSnapshotBuilder:
         """
         byte_size = _attr_int(die, "DW_AT_byte_size")
         if byte_size == 0 and _attr_bool(die, "DW_AT_declaration"):
-            return  # forward declaration only
+            # Forward declaration only -- but an inheritance edge in another
+            # CU can (and does — this is the exact shape GCC emits for a
+            # base class referenced from a CU that doesn't itself define it:
+            # a declaration-only stub DIE, distinct from the real
+            # definition's own DIE elsewhere) reference exactly THIS DIE, so
+            # it still needs to resolve to the real type's qualified name or
+            # that edge's lookup finds nothing (Codex review, reproduced
+            # with two TUs sharing one header, one of which only
+            # forward-references the base).
+            self._register_die_qualified_name(die, CU, qualified)
+            return
 
         if not self._check_and_register_type_name(qualified):
-            return  # ODR: first definition wins (duplicate logged inside)
+            # ODR: first definition wins (duplicate logged inside) -- but
+            # THIS DIE's own identity still needs to resolve to the
+            # already-retained RecordType, or a base reference from a
+            # *different* CU pointing at this exact (now-discarded) DIE
+            # would find nothing in _record_die_index at all (Codex review,
+            # reproduced with two TUs sharing one header).
+            self._register_die_qualified_name(die, CU, qualified)
+            return
 
         tag = die.tag
         is_union = tag == "DW_TAG_union_type"
@@ -809,7 +866,7 @@ class _DwarfSnapshotBuilder:
             vtable,
             base_offsets,
             own_vptr_offset_bits,
-            base_die_keys,
+            base_edges,
         ) = self._collect_record_type_children(die, CU, children)
 
         alignment = _attr_int(die, "DW_AT_alignment")
@@ -855,16 +912,17 @@ class _DwarfSnapshotBuilder:
             base_offsets=base_offsets,
         )
         self.types.append(rec)
-        # Registered unconditionally (not just when base_die_keys is
-        # non-empty) so _finalize_vptr_offsets can resolve THIS type as
-        # somebody else's base by DIE identity too, not just by name. CU is
-        # None only in a handful of unit tests exercising the dedup-logging
-        # path directly (not a real DWARF walk) — skip registration rather
-        # than fail, since there is no real DIE identity to key on anyway.
+        self._record_by_qualified_name[qualified] = rec
+        # Registered unconditionally (not just when base_edges is non-empty)
+        # so _finalize_vptr_offsets can resolve THIS type as somebody else's
+        # base by DIE identity too, not just by name. CU is None only in a
+        # handful of unit tests exercising the dedup-logging path directly
+        # (not a real DWARF walk) — skip registration rather than fail,
+        # since there is no real DIE identity to key on anyway.
         if CU is not None:
             self._record_die_index[(CU.cu_offset, die.offset)] = rec
-        if base_die_keys:
-            self._base_die_keys_by_record[id(rec)] = base_die_keys
+        if base_edges:
+            self._base_edges_by_record[id(rec)] = base_edges
 
     def _check_and_register_type_name(self, qualified: str) -> bool:
         """Return True and register *qualified* if it is new; False if already seen.
@@ -879,6 +937,20 @@ class _DwarfSnapshotBuilder:
         self._seen_type_names.add(qualified)
         return True
 
+    def _register_die_qualified_name(self, die: Any, CU: Any, qualified: str) -> None:
+        """Record that *die* — not itself the retained definition — names
+        *qualified*, for ``_finalize_vptr_offsets`` to resolve later.
+
+        Covers both non-retained shapes a base-class reference can point at:
+        an ODR-duplicate (a second CU's own copy of an already-seen type)
+        and a declaration-only forward reference. CU is None only in a
+        handful of unit tests exercising the dedup-logging path directly
+        (not a real DWARF walk) — skip registration rather than fail, since
+        there is no real DIE identity to key on anyway.
+        """
+        if CU is not None:
+            self._die_key_to_qualified_name[(CU.cu_offset, die.offset)] = qualified
+
     def _collect_record_type_children(
         self,
         die: Any,
@@ -891,7 +963,7 @@ class _DwarfSnapshotBuilder:
         list[str],
         dict[str, int],
         int | None,
-        dict[str, tuple[int, int]],
+        list[tuple[str, int | None, tuple[int, int] | None]],
     ]:
         """Iterate over the children of a record-type DIE.
 
@@ -900,24 +972,29 @@ class _DwarfSnapshotBuilder:
         is ``None`` only on the anonymous-typedef path, which iterates on demand.
 
         Returns ``(fields, bases, virtual_bases, vtable, base_offsets,
-        own_vptr_offset_bits, base_die_keys)``.
+        own_vptr_offset_bits, base_edges)``.
 
         - *fields*: data member ``TypeField`` objects (in order).
         - *bases*: names of direct (non-virtual) base classes.
         - *virtual_bases*: names of virtual base classes.
         - *vtable*: mangled names of virtual member functions.
         - *base_offsets*: base-name → bit offset for direct bases that carry a
-          ``DW_AT_data_member_location``; empty when none do.
+          ``DW_AT_data_member_location``; empty when none do. Pre-existing,
+          bare-name-keyed field, unrelated to this vptr fix and left as-is —
+          note it can itself collide when two direct bases share a bare name
+          (see *base_edges* below, which does not have this problem).
         - *own_vptr_offset_bits*: bit offset of *this* class's own artificial
           vptr member (``_vptr.<Class>``/``_vptr$<Class>``), when this class
           introduces one; ``None`` when it has no local vptr member (either
           non-polymorphic, or its vtable is entirely inherited — see
           ``_finalize_vptr_offsets``, which resolves the inherited case).
-        - *base_die_keys*: base-name → ``(CU offset, base DIE offset)`` for
-          every base whose type DIE resolved, regardless of virtuality —
-          only ``_finalize_vptr_offsets`` consumes this, to disambiguate a
-          base name that may not be unique once namespaces are involved
-          (``RecordType.bases`` itself stays bare-named, unchanged).
+        - *base_edges*: one ``(base bare name, this edge's own bit offset or
+          None, (CU offset, base DIE offset) or None)`` tuple per direct
+          (non-virtual) ``DW_TAG_inheritance`` child, in DIE order — NOT a
+          dict keyed by name, so two distinct bases sharing a bare name
+          (``D : one::A, two::A``) each keep their own offset/identity
+          instead of the second overwriting the first. Only
+          ``_finalize_vptr_offsets`` consumes this.
         """
         fields: list[TypeField] = []
         bases: list[str] = []
@@ -927,7 +1004,7 @@ class _DwarfSnapshotBuilder:
         # base name → bit offset within this object (from the inheritance DIE's
         # DW_AT_data_member_location); empty when no such offset is present.
         base_offsets: dict[str, int] = {}
-        base_die_keys: dict[str, tuple[int, int]] = {}
+        base_edges: list[tuple[str, int | None, tuple[int, int] | None]] = []
         own_vptr_offset_bits: int | None = None
         default_access = _default_member_access_for_tag(die.tag)
 
@@ -939,7 +1016,7 @@ class _DwarfSnapshotBuilder:
                 fields.extend(self._process_field(child, CU, default_access))
             elif child.tag == "DW_TAG_inheritance":
                 self._process_inheritance_child(
-                    child, CU, bases, virtual_bases, base_offsets, base_die_keys
+                    child, CU, bases, virtual_bases, base_offsets, base_edges
                 )
             elif child.tag == "DW_TAG_subprogram":
                 self._process_virtual_method_child(child, vtable)
@@ -951,7 +1028,7 @@ class _DwarfSnapshotBuilder:
             vtable,
             base_offsets,
             own_vptr_offset_bits,
-            base_die_keys,
+            base_edges,
         )
 
     def _process_inheritance_child(
@@ -961,20 +1038,19 @@ class _DwarfSnapshotBuilder:
         bases: list[str],
         virtual_bases: list[str],
         base_offsets: dict[str, int],
-        base_die_keys: dict[str, tuple[int, int]],
+        base_edges: list[tuple[str, int | None, tuple[int, int] | None]],
     ) -> None:
         """Process a single ``DW_TAG_inheritance`` child DIE in-place.
 
         Appends to *bases* or *virtual_bases* as appropriate, and records the
-        static bit-offset in *base_offsets* for direct (non-virtual) bases,
-        and the base type DIE's own identity in *base_die_keys* (any base,
-        virtual or not — see ``_finalize_vptr_offsets`` for the one consumer).
+        static bit-offset in *base_offsets* for direct (non-virtual) bases
+        (pre-existing, bare-name-keyed — see its own docstring note above on
+        why *base_edges* exists as a non-colliding alternative for the one
+        consumer that actually needs exact per-edge identity).
         """
         base_name, base_die_key = self._resolve_base_name_and_key(child, CU)
         if not base_name:
             return
-        if base_die_key is not None:
-            base_die_keys[base_name] = base_die_key
         is_virtual_base = _attr_int(child, "DW_AT_virtuality") > 0
         if is_virtual_base:
             virtual_bases.append(base_name)
@@ -982,14 +1058,18 @@ class _DwarfSnapshotBuilder:
             bases.append(base_name)
         # Record the (non-virtual) base subobject offset when present.
         # A virtual base's location is dynamic, so only capture the
-        # static, direct-base offset.
+        # static, direct-base offset. Same condition gates both the
+        # pre-existing base_offsets write and the new base_edges append —
+        # a virtual base is never a primary-base candidate either way.
         if not is_virtual_base and "DW_AT_data_member_location" in child.attributes:
-            base_offsets[base_name] = (
+            offset_bits = (
                 _decode_member_location(
                     child.attributes["DW_AT_data_member_location"].value
                 )
                 * 8
             )
+            base_offsets[base_name] = offset_bits
+            base_edges.append((base_name, offset_bits, base_die_key))
 
     @staticmethod
     def _process_virtual_method_child(child: Any, vtable: list[str]) -> None:
@@ -1055,21 +1135,49 @@ class _DwarfSnapshotBuilder:
         three DWARF happened to emit first, converging once no further
         progress is made in a full pass over what remains unresolved.
 
-        Resolving *which* base a bare name refers to is itself two-tiered.
-        ``RecordType.bases`` stores each base's bare ``DW_AT_name`` (matching
-        every other bare-name-keyed field on this class — an existing,
-        unrelated convention this fix doesn't change), but ``self.types`` is
-        keyed by *qualified* name the moment a namespace or enclosing class
-        is involved (``qualified = f"{scope}::{name}"``) — so a bare-name
-        lookup alone silently fails to resolve `ns::N : ns::A`'s inherited
-        vptr even though `ns::A`'s own offset is already known (Codex
-        review, reproduced against a real GCC-compiled namespaced example).
-        The primary lookup is therefore by the base DIE's own identity
-        (``_base_die_keys_by_record``/``_record_die_index``, captured while
-        each inheritance edge was still directly at hand — see
-        ``_resolve_base_name_and_key``'s docstring), with the original
-        bare-name lookup kept only as a fallback for the rare case a base
-        DIE didn't resolve to a key at all.
+        Resolving *which* base a bare name refers to is itself two-tiered,
+        and deliberately does NOT walk ``RecordType.bases``/``base_offsets``
+        (both pre-existing, bare-name-keyed fields, unrelated to this fix)
+        directly. Two independent gaps were found and fixed here (both
+        Codex review, both reproduced against real compiled binaries before
+        fixing):
+
+        1. **Namespace ambiguity.** ``self.types`` is keyed by *qualified*
+           name the moment a namespace or enclosing class is involved
+           (``qualified = f"{scope}::{name}"``), so a bare-name lookup alone
+           silently fails to resolve `ns::N : ns::A`'s inherited vptr even
+           though `ns::A`'s own offset is already known. Fixed by resolving
+           each edge via the base DIE's own identity
+           (``_base_edges_by_record``/``_record_die_index``, captured while
+           each inheritance edge was still directly at hand — see
+           ``_resolve_base_name_and_key``'s docstring), falling back to a
+           bare-name lookup only when a base DIE didn't resolve to a key at
+           all. A DIE for the SAME logical type discarded by ODR dedup (the
+           same header parsed in a second CU) is separately aliased into
+           ``_record_die_index`` at dedup time — see
+           ``_process_record_type_named`` — so a base referenced from that
+           second CU still resolves instead of finding an unregistered key.
+        2. **Same-bare-name collision across two DIRECT bases of one
+           class.** `D : one::A, two::A` — two distinct bases sharing a bare
+           name in different namespaces — cannot be represented by a dict
+           keyed on that bare name at all: the second edge's offset/identity
+           silently overwrites the first's. This is why the walk below
+           iterates ``_base_edges_by_record``'s ordered *list* of `(name,
+           offset, key)` tuples, one per DW_TAG_inheritance child, rather
+           than ``rec.bases`` (a plain name list) paired with
+           ``rec.base_offsets``/a name-keyed dict (either pairing reopens
+           the same collision `base_edges` exists specifically to avoid).
+
+        A base DIE key can point at three different shapes, tried in order:
+        the retained definition itself (``_record_die_index``, the common
+        case); an ODR-duplicate or declaration-only stub DIE that names a
+        *different* qualified type than its own bare name would suggest
+        (``_die_key_to_qualified_name`` → ``_record_by_qualified_name`` —
+        the exact shape GCC emits for a base referenced from a CU that
+        never defines it itself, resolved here rather than eagerly, since
+        the real definition is not guaranteed to already be known at the
+        point the stub DIE was encountered); and, only once both DIE-identity
+        tiers miss, the original bare-name ``by_name`` fallback.
         """
         by_name = {t.name: t for t in self.types}
         unresolved = [t for t in self.types if t.vptr_offset_bits is None and t.bases]
@@ -1078,17 +1186,20 @@ class _DwarfSnapshotBuilder:
             progressed = False
             still_unresolved = []
             for rec in unresolved:
-                base_keys = self._base_die_keys_by_record.get(id(rec), {})
+                edges = self._base_edges_by_record.get(id(rec), [])
                 resolved = None
-                for base_name in rec.bases:
-                    if rec.base_offsets.get(base_name) != 0:
+                for base_name, offset_bits, base_key in edges:
+                    if offset_bits != 0:
                         continue
-                    base_key = base_keys.get(base_name)
                     base_rec = (
                         self._record_die_index.get(base_key)
                         if base_key is not None
                         else None
                     )
+                    if base_rec is None and base_key is not None:
+                        aliased_name = self._die_key_to_qualified_name.get(base_key)
+                        if aliased_name is not None:
+                            base_rec = self._record_by_qualified_name.get(aliased_name)
                     if base_rec is None:
                         base_rec = by_name.get(base_name)
                     if base_rec is not None and base_rec.vptr_offset_bits is not None:

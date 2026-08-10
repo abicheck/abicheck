@@ -370,6 +370,50 @@ building a second identity-resolution mechanism from scratch.
   namespaced GCC binary covering both the resolution case and the
   same-bare-name non-confusion case.
 
+  **The next review round on the same fix found two more real gaps in the
+  DIE-identity resolution itself, both reproduced against real compiled
+  binaries before fixing.** (1) **Cross-CU/declaration-only stub DIEs.** A
+  base class defined in one translation unit and only *inherited from* (not
+  redefined) in another is referenced, from the inheriting TU's own CU, by
+  a DIE that is neither the retained definition (ODR first-definition-wins
+  discarded any duplicate full definition) nor previously registered
+  anywhere — GCC represents an inherited-but-not-redefined base in a
+  non-defining CU as either a second full-definition DIE (discarded by ODR
+  dedup) or a `DW_AT_declaration: true` stub carrying no `DW_AT_byte_size`
+  (hits the pre-existing "forward declaration only" early return). Both
+  shapes left the inheritance edge's `base_die_key` pointing at a DIE
+  `_record_die_index` never learned about, falling through to the
+  bare-name lookup and failing for a namespaced base exactly like the
+  first finding. Fixed by recording, at both of those two early-return
+  points, which qualified name the non-retained DIE names
+  (`_register_die_qualified_name` → `_die_key_to_qualified_name`) —
+  deliberately *not* resolved eagerly (the real definition is not
+  guaranteed to already be known at the point a forward-reference stub is
+  encountered, the identical DWARF-emission-order problem
+  `_finalize_vptr_offsets`'s own docstring already documents for the
+  general case), only resolved back through
+  `_record_by_qualified_name` once every CU is known, at
+  `_finalize_vptr_offsets` time — extending its lookup to three tiers:
+  the retained DIE identity, this alias tier, then the original bare-name
+  fallback. (2) **Same-bare-name collision across two *direct* bases of
+  one class.** `D : one::A, two::A` — two distinct bases sharing a bare
+  name in different namespaces — cannot be represented by the
+  bare-name-keyed dict the fix originally used for per-edge identity at
+  all: the second edge's offset and DIE key silently overwrote the
+  first's, corrupting exactly the offset-0 candidate the resolution needed
+  (verified: `D.base_offsets` collapsed to only `two::A`'s non-zero
+  offset, losing `one::A`'s real offset 0 entirely). Fixed by replacing
+  the bare-name-keyed per-edge structures with `_base_edges_by_record`, an
+  *ordered list* of `(base name, this edge's own offset, this edge's own
+  DIE key)` tuples — one per `DW_TAG_inheritance` child, duplicates
+  preserved — so two edges sharing a name can never overwrite each other.
+  `RecordType.bases`/`base_offsets` themselves are untouched (their
+  pre-existing bare-name-keyed shape is a separate, unrelated convention);
+  only the internal structure this fix's own resolution walks changed.
+  Three more regression tests added, each compiling a real GCC binary:
+  cross-translation-unit inheritance-only resolution, and same-bare-name
+  colliding direct bases.
+
   **A later pass closed the last of this phase's four originally-listed
   facts** (`deprecated`/`is_scoped`/bitfields/default-argument facts were
   the other three, already covered above): direct-clang now populates

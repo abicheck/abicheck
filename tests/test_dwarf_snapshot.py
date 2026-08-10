@@ -1440,6 +1440,97 @@ extern "C" other::A* get_other_a() { return &g_other_a; }
         assert types["other::A"].vptr_offset_bits is None
         assert types["ns::N"].vptr_offset_bits == 0
 
+    @pytest.fixture()
+    def cross_cu_vptr_lib(self, tmp_path: Path) -> Path:
+        """A base class defined in one TU, inherited-only from another --
+        the derived class's own CU only carries a declaration-only stub DIE
+        for the base (or, depending on emission, its own separate full
+        definition later deduplicated), never the retained definition's own
+        DIE. Reproduces the gap Codex review found: a base-class reference
+        can point at a DIE that is neither the retained definition nor
+        registered anywhere, unless that DIE is itself resolved back to the
+        real type's qualified name."""
+        (tmp_path / "a.h").write_text(
+            "#pragma once\n"
+            "namespace ns { struct A { virtual void a(); int ai; }; }\n"
+        )
+        (tmp_path / "u1.cpp").write_text(
+            '#include "a.h"\n'
+            "void ns::A::a() {}\n"
+            "static ns::A g_a;\n"
+            "extern \"C\" ns::A* get_a() { return &g_a; }\n"
+        )
+        (tmp_path / "u2.cpp").write_text(
+            '#include "a.h"\n'
+            "namespace ns { struct D : A { int di; }; }\n"
+            "static ns::D g_d;\n"
+            "extern \"C\" ns::D* get_d() { return &g_d; }\n"
+        )
+        o1 = tmp_path / "u1.o"
+        o2 = tmp_path / "u2.o"
+        for src, obj in ((tmp_path / "u1.cpp", o1), (tmp_path / "u2.cpp", o2)):
+            result = subprocess.run(
+                [_GPP, "-g", "-O0", "-fPIC", "-c", str(src), "-o", str(obj)],
+                capture_output=True, text=True, timeout=30,
+            )
+            assert result.returncode == 0, f"Compilation failed: {result.stderr}"
+        so_path = tmp_path / "libcrosscu.so"
+        result = subprocess.run(
+            [_GPP, "-shared", "-o", str(so_path), str(o1), str(o2)],
+            capture_output=True, text=True, timeout=30,
+        )
+        assert result.returncode == 0, f"Link failed: {result.stderr}"
+        return so_path
+
+    def test_inherited_vtable_across_translation_units_resolves(
+        self, cross_cu_vptr_lib: Path
+    ) -> None:
+        """A base defined in one TU and only inherited-from (never
+        redefined) in another must still resolve -- the inheriting TU's own
+        reference to the base is not the retained definition's DIE."""
+        types = self._types_by_name(cross_cu_vptr_lib)
+        assert types["ns::A"].vptr_offset_bits == 0
+        assert types["ns::D"].vptr_offset_bits == 0
+
+    @pytest.fixture()
+    def same_bare_name_direct_bases_lib(self, tmp_path: Path) -> Path:
+        """One class directly inheriting two DISTINCT bases that happen to
+        share a bare name in different namespaces -- reproduces the second
+        gap Codex review found: a bare-name-keyed structure can't represent
+        two simultaneous direct-base edges with the same name without one
+        silently overwriting the other's offset/identity."""
+        cpp_src = tmp_path / "collide.cpp"
+        cpp_src.write_text("""\
+namespace one { struct A { virtual void a(); int ai; }; }
+namespace two { struct A { int aj; }; }
+
+// one::A (polymorphic, real offset 0) and two::A (non-polymorphic, a
+// non-zero offset) are both named bare "A" -- D's own vptr must resolve
+// via one::A specifically, not be lost to the bare-name collision.
+struct D : one::A, two::A { int di; };
+
+void one::A::a() {}
+static D g_d;
+extern "C" D* get_d() { return &g_d; }
+""")
+        so_path = tmp_path / "libcollide.so"
+        result = subprocess.run(
+            [_GPP, "-shared", "-fPIC", "-g", "-O0", "-o", str(so_path), str(cpp_src)],
+            capture_output=True, text=True, timeout=30,
+        )
+        assert result.returncode == 0, f"Compilation failed: {result.stderr}"
+        return so_path
+
+    def test_same_bare_name_direct_bases_do_not_collide(
+        self, same_bare_name_direct_bases_lib: Path
+    ) -> None:
+        """D's primary base (one::A, at the real offset 0) must resolve
+        even though a second, unrelated direct base shares its bare name."""
+        types = self._types_by_name(same_bare_name_direct_bases_lib)
+        assert types["one::A"].vptr_offset_bits == 0
+        assert types["two::A"].vptr_offset_bits is None
+        assert types["D"].vptr_offset_bits == 0
+
 
 # ── CLI tests via CliRunner (in-process for coverage) ────────────────────────
 
