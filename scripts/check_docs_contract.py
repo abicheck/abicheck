@@ -209,8 +209,12 @@ def _rel(p: Path) -> str:
         return p.relative_to(ROOT).as_posix()
     except ValueError:
         # Outside ROOT — only reachable when a test monkeypatches DOCS to a
-        # tmp_path fixture; real runs always resolve under ROOT.
-        return str(p)
+        # tmp_path fixture; real runs always resolve under ROOT. `.as_posix()`
+        # here too (not `str(p)`) so a warning message uses forward slashes
+        # on every platform, including Windows CI, where `str(p)` would use
+        # backslashes and break any test asserting a `"dir/file.md"`-shaped
+        # substring against the message.
+        return p.as_posix()
 
 
 def load_front_matter(path: Path) -> dict[str, object] | None:
