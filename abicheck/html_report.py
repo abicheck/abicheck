@@ -32,7 +32,7 @@ from __future__ import annotations
 import html
 from collections.abc import Callable
 from pathlib import Path
-from typing import TYPE_CHECKING, cast
+from typing import TYPE_CHECKING, Any, cast
 
 from .checker_policy import HasKind
 
@@ -671,6 +671,102 @@ def _build_impact_html(
     )
 
 
+def _gate_card_html(
+    result: DiffResult,
+    all_changes: list[Any],
+    severity_config: Any,
+    *,
+    h: Any,
+) -> str:
+    """Render the CI-gate card, or ``""`` when no severity gate is configured.
+
+    Split out of :func:`generate_html_report`; the reasoning behind the
+    scoped-vs-full gate split and the blocking-category naming is kept with the
+    code below.
+    """
+    if severity_config is None:
+        return ""
+    from .severity import compute_gate_decision
+
+    _eff_kind_sets_fn2 = getattr(result, "_effective_kind_sets", None)
+    full_gate = compute_gate_decision(
+        cast(list[HasKind], all_changes),
+        severity_config,
+        policy=getattr(result, "policy", None),
+        kind_sets=_eff_kind_sets_fn2() if callable(_eff_kind_sets_fn2) else None,
+        policy_file=getattr(result, "policy_file", None),
+    )
+    # `--used-by`/`--required-symbol(s)` scoping (ADR-043): the CLI
+    # process actually exits on the *scoped* gate, not this full-library
+    # one -- without this, the card could say "CI Gate: FAIL (exit 4)"
+    # for a run that just exited 0 because the scoped contract was
+    # compatible (CodeRabbit review). Mirrors the JSON severity block's
+    # full_severity/severity split.
+    scoped_exit_code = getattr(result, "scoped_exit_code", None)
+    scoped_exit_code_scheme = getattr(result, "scoped_exit_code_scheme", None)
+    gate_exit_code: int
+    # blocking_categories only corresponds 1:1 to full_gate in the
+    # non-scoped branch below (gate_passed derives directly from
+    # full_gate.blocking there); the scoped exit code can fail for a
+    # reason full_gate's categories don't describe at all (e.g. a
+    # missing --required-symbol entrypoint), so it's left blank there
+    # rather than risk naming the wrong cause.
+    gate_blocking_categories: tuple[str, ...] = ()
+    if scoped_exit_code is not None and scoped_exit_code_scheme == "severity":
+        gate_passed = scoped_exit_code == 0
+        gate_exit_code = scoped_exit_code
+        gate_title = "CI Gate (scoped)"
+        full_gate_label = (
+            "PASS" if not full_gate.blocking else f"FAIL (exit {full_gate.exit_code})"
+        )
+        gate_note = (
+            f"Reflects the scoped --used-by/--required-symbol severity gate "
+            f"the CLI process actually exits on (full-library gate: "
+            f"{h(full_gate_label)})."
+        )
+    else:
+        gate_passed = not full_gate.blocking
+        gate_exit_code = full_gate.exit_code
+        gate_title = "CI Gate"
+        gate_note = (
+            "Reflects the configured severity gate — may differ from the "
+            "Compatibility verdict above (e.g. an addition promoted to "
+            "<code>error</code> still fails CI)."
+        )
+        gate_blocking_categories = full_gate.blocking_categories
+    gate_fg, gate_bg = (
+        ("#1b5e20", "#e8f5e9") if gate_passed else ("#b71c1c", "#ffebee")
+    )
+    gate_label = "PASS" if gate_passed else f"FAIL (exit {gate_exit_code})"
+    gate_icon = "✅" if gate_passed else "🛑"
+    # Names which severity category(ies) actually gated CI — without
+    # this, "FAIL" reads as an undifferentiated red box even when the
+    # cause is a policy-blocked COMPATIBLE addition rather than a
+    # genuine ABI/API break (same category-naming this PR already
+    # added to the sticky PR comment and the Action's Job Summary).
+    gate_categories_html = ""
+    if not gate_passed and gate_blocking_categories:
+        cats = ", ".join(
+            f"<code>{h(c)}</code>" for c in sorted(gate_blocking_categories)
+        )
+        gate_categories_html = (
+            f"<div class='bc-metric' style='font-size:0.85em; opacity:0.85;'>"
+            f"Blocked by: {cats}</div>"
+        )
+    gate_html = (
+        f"<div class='verdict-box' "
+        f"style='background:{gate_bg}; color:{gate_fg}; "
+        f"border-left:6px solid {gate_fg};'>"
+        f"<h2>{gate_icon} {h(gate_title)}: {h(gate_label)}</h2>"
+        f"<div class='bc-metric' style='font-size:0.85em; opacity:0.85;'>"
+        f"{gate_note}"
+        f"</div>"
+        f"{gate_categories_html}"
+        f"</div>"
+    )
+    return gate_html
+
+
 def generate_html_report(
     result: DiffResult,
     lib_name: str = "",
@@ -823,86 +919,9 @@ def generate_html_report(
 
     verdict_icon = _verdict_icon(verdict)
 
-    gate_html = ""
-    if severity_config is not None:
-        from .severity import compute_gate_decision
-
-        _eff_kind_sets_fn2 = getattr(result, "_effective_kind_sets", None)
-        full_gate = compute_gate_decision(
-            cast(list[HasKind], all_changes),
-            severity_config,
-            policy=getattr(result, "policy", None),
-            kind_sets=_eff_kind_sets_fn2() if callable(_eff_kind_sets_fn2) else None,
-            policy_file=getattr(result, "policy_file", None),
-        )
-        # `--used-by`/`--required-symbol(s)` scoping (ADR-043): the CLI
-        # process actually exits on the *scoped* gate, not this full-library
-        # one -- without this, the card could say "CI Gate: FAIL (exit 4)"
-        # for a run that just exited 0 because the scoped contract was
-        # compatible (CodeRabbit review). Mirrors the JSON severity block's
-        # full_severity/severity split.
-        scoped_exit_code = getattr(result, "scoped_exit_code", None)
-        scoped_exit_code_scheme = getattr(result, "scoped_exit_code_scheme", None)
-        gate_exit_code: int
-        # blocking_categories only corresponds 1:1 to full_gate in the
-        # non-scoped branch below (gate_passed derives directly from
-        # full_gate.blocking there); the scoped exit code can fail for a
-        # reason full_gate's categories don't describe at all (e.g. a
-        # missing --required-symbol entrypoint), so it's left blank there
-        # rather than risk naming the wrong cause.
-        gate_blocking_categories: tuple[str, ...] = ()
-        if scoped_exit_code is not None and scoped_exit_code_scheme == "severity":
-            gate_passed = scoped_exit_code == 0
-            gate_exit_code = scoped_exit_code
-            gate_title = "CI Gate (scoped)"
-            full_gate_label = (
-                "PASS" if not full_gate.blocking else f"FAIL (exit {full_gate.exit_code})"
-            )
-            gate_note = (
-                f"Reflects the scoped --used-by/--required-symbol severity gate "
-                f"the CLI process actually exits on (full-library gate: "
-                f"{h(full_gate_label)})."
-            )
-        else:
-            gate_passed = not full_gate.blocking
-            gate_exit_code = full_gate.exit_code
-            gate_title = "CI Gate"
-            gate_note = (
-                "Reflects the configured severity gate — may differ from the "
-                "Compatibility verdict above (e.g. an addition promoted to "
-                "<code>error</code> still fails CI)."
-            )
-            gate_blocking_categories = full_gate.blocking_categories
-        gate_fg, gate_bg = (
-            ("#1b5e20", "#e8f5e9") if gate_passed else ("#b71c1c", "#ffebee")
-        )
-        gate_label = "PASS" if gate_passed else f"FAIL (exit {gate_exit_code})"
-        gate_icon = "✅" if gate_passed else "🛑"
-        # Names which severity category(ies) actually gated CI — without
-        # this, "FAIL" reads as an undifferentiated red box even when the
-        # cause is a policy-blocked COMPATIBLE addition rather than a
-        # genuine ABI/API break (same category-naming this PR already
-        # added to the sticky PR comment and the Action's Job Summary).
-        gate_categories_html = ""
-        if not gate_passed and gate_blocking_categories:
-            cats = ", ".join(
-                f"<code>{h(c)}</code>" for c in sorted(gate_blocking_categories)
-            )
-            gate_categories_html = (
-                f"<div class='bc-metric' style='font-size:0.85em; opacity:0.85;'>"
-                f"Blocked by: {cats}</div>"
-            )
-        gate_html = (
-            f"<div class='verdict-box' "
-            f"style='background:{gate_bg}; color:{gate_fg}; "
-            f"border-left:6px solid {gate_fg};'>"
-            f"<h2>{gate_icon} {h(gate_title)}: {h(gate_label)}</h2>"
-            f"<div class='bc-metric' style='font-size:0.85em; opacity:0.85;'>"
-            f"{gate_note}"
-            f"</div>"
-            f"{gate_categories_html}"
-            f"</div>"
-        )
+    gate_html = _gate_card_html(
+        result, all_changes, severity_config, h=h
+    )
 
     scoped_verdict = getattr(result, "scoped_verdict", None)
     scoped_html = ""
