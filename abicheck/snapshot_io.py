@@ -392,6 +392,15 @@ def _decompress_zstd(data: bytes, *, max_decoded_bytes: int, source: str) -> byt
     # is `False` exactly when a frame's decompression didn't reach its own
     # end, `.unused_data` holds the remaining, not-yet-processed bytes).
     #
+    # A third round found the second round's fix still stopped short: a
+    # frame with no declared size (CONTENTSIZE_UNKNOWN) used to abandon
+    # validation for *that* frame and every subsequent one, so a truncated
+    # frame anywhere after an unknown-size frame could hit the exact silent
+    # short-read this whole pass exists to catch, unchecked. `.eof` is
+    # checked unconditionally now (see the loop body below); only the
+    # declared-length comparison is skipped when there's genuinely nothing
+    # to compare against.
+    #
     # Memory safety of this second pass (Codex review would flag this too,
     # unprompted, if left unexplained): ``decompressobj().decompress()`` has
     # no output-size cap the way ``stream_reader``'s bounded chunked reads
@@ -410,18 +419,23 @@ def _decompress_zstd(data: bytes, *, max_decoded_bytes: int, source: str) -> byt
     try:
         while remaining:
             frame_declared = zstandard.get_frame_parameters(remaining).content_size
-            if frame_declared == zstandard.CONTENTSIZE_UNKNOWN:
-                # This frame carries no declared size to validate against
-                # (only possible for a foreign encoder that didn't set
-                # zstd's content-size flag -- this module's own writer
-                # always does) -- nothing left to cross-check for the rest
-                # of the stream; the bounded primary decode above already
-                # completed cleanly, which is the best available signal
-                # for this residual case.
-                break
             dobj = dctx.decompressobj()
             frame_out = dobj.decompress(remaining)
-            if not dobj.eof or len(frame_out) != frame_declared:
+            # Codex review, third round: a frame with no declared size
+            # (CONTENTSIZE_UNKNOWN -- only possible for a foreign encoder
+            # that didn't set zstd's content-size flag; this module's own
+            # writer always does) used to abandon validation for that frame
+            # *and every subsequent frame* entirely -- a truncated *later*
+            # frame could then hit the exact same silent-short-read
+            # behavior this whole pass exists to catch, with nothing left
+            # checking it. `.eof` (frame completeness) is independent of
+            # whether a declared size exists at all, so it's still checked
+            # unconditionally; only the length-equality cross-check is
+            # skipped when there's no declared length to compare against.
+            if not dobj.eof or (
+                frame_declared != zstandard.CONTENTSIZE_UNKNOWN
+                and len(frame_out) != frame_declared
+            ):
                 raise SnapshotError(
                     f"{source}: corrupt or truncated zstd stream (a frame "
                     f"declares {frame_declared} bytes but only "

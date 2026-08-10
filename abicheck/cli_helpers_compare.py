@@ -459,7 +459,25 @@ def _collect_release_inputs(path: Path) -> list[Path]:
 
 
 def _build_match_map(paths: list[Path]) -> tuple[dict[str, Path], list[str]]:
-    """Build key->path map with version-aware duplicate resolution."""
+    """Build key->path map with version-aware duplicate resolution.
+
+    Raises ``click.ClickException`` for a genuine top-of-ranking tie (Codex
+    review, PR #699, second round on the same fix): stripping a compressed
+    snapshot's storage suffix (ADR-059) from the sort key makes two
+    candidates differing *only* by encoding -- e.g. ``libfoo.abicheck.json``
+    and a stale ``libfoo.abicheck.json.zst`` left over from a previous
+    release -- reduce to an *identical* sort key, not merely "multiple
+    candidates present". ``sorted()``'s stability then means the winner is
+    decided by each candidate's position in the original, lexically-sorted
+    input list -- itself alphabetically biased toward whichever compression
+    suffix sorts last (``.zst`` after ``.gz`` after plain) -- so silently
+    picking ``ordered[-1]`` and only warning would deterministically prefer
+    a stale compressed sibling over a fresh one every time. There is no
+    information left in the filename to break a genuine tie correctly, so
+    this is a hard error instead of a guess; a real multi-version bucket
+    (each candidate's sort key genuinely differs) is unaffected and still
+    resolves with a warning, exactly as before.
+    """
     buckets: dict[str, list[Path]] = {}
     for p in paths:
         buckets.setdefault(_canonical_library_key(p), []).append(p)
@@ -470,7 +488,15 @@ def _build_match_map(paths: list[Path]) -> tuple[dict[str, Path], list[str]]:
         # `partial` binds this iteration's key rather than closing over the
         # loop variable (the sort runs eagerly here, but the explicit binding
         # keeps that independent of when the key function is called).
-        ordered = sorted(vals, key=partial(_version_sort_key, canonical_key=key))
+        sort_key = partial(_version_sort_key, canonical_key=key)
+        ordered = sorted(vals, key=sort_key)
+        if len(ordered) > 1 and sort_key(ordered[-1]) == sort_key(ordered[-2]):
+            raise click.ClickException(
+                f"Ambiguous match for '{key}': {[v.name for v in ordered]} "
+                "are indistinguishable except by storage encoding -- cannot "
+                "tell which is current. Remove the stale duplicate(s), or "
+                "pass the intended file directly instead of a directory."
+            )
         selected = ordered[-1]
         mapping[key] = selected
         if len(ordered) > 1:

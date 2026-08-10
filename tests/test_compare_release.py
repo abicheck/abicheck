@@ -6,6 +6,7 @@ import json
 from pathlib import Path
 from unittest.mock import MagicMock
 
+import pytest
 from click.testing import CliRunner
 
 from abicheck.cli import (
@@ -306,6 +307,51 @@ class TestBuildMatchMapVendorHash:
         new.write_bytes(b"\x7fELF")
         mapping, warnings = _build_match_map([old, new])
         assert mapping["libfoo.so"] == new
+        assert warnings
+
+
+class TestBuildMatchMapEncodingOnlyDuplicates:
+    """Codex review, PR #699 (second round on the same fix): stripping a
+    compressed snapshot's storage suffix from the sort key makes two
+    candidates differing *only* by encoding reduce to an identical sort
+    key -- sorted()'s stability then means the winner is decided by
+    original list order, itself alphabetically biased toward whichever
+    compression suffix sorts last, so silently picking one and only
+    warning would deterministically prefer a stale compressed sibling
+    over a fresh plain one every time. Confirm this is now a hard error
+    instead."""
+
+    def test_plain_and_zstd_duplicate_is_rejected(self, tmp_path: Path) -> None:
+        plain = tmp_path / "libfoo.so.1.abicheck.json"
+        zst = tmp_path / "libfoo.so.1.abicheck.json.zst"
+        plain.write_text("{}")
+        zst.write_bytes(b"\x28\xb5\x2f\xfd")
+        import click.exceptions
+
+        with pytest.raises(click.exceptions.ClickException, match="indistinguishable"):
+            _build_match_map([plain, zst])
+
+    def test_all_three_encodings_duplicate_is_rejected(self, tmp_path: Path) -> None:
+        plain = tmp_path / "libfoo.so.1.abicheck.json"
+        gz = tmp_path / "libfoo.so.1.abicheck.json.gz"
+        zst = tmp_path / "libfoo.so.1.abicheck.json.zst"
+        for p in (plain, gz, zst):
+            p.write_bytes(b"{}")
+        import click.exceptions
+
+        with pytest.raises(click.exceptions.ClickException, match="indistinguishable"):
+            _build_match_map([plain, gz, zst])
+
+    def test_genuinely_different_versions_still_only_warn(self, tmp_path: Path) -> None:
+        """Sanity: a real multi-version bucket (distinct sort keys) must
+        not be caught by the new tie check -- only an exact tie is a hard
+        error."""
+        v1 = tmp_path / "libfoo.so.1.abicheck.json"
+        v2 = tmp_path / "libfoo.so.2.abicheck.json.zst"
+        v1.write_text("{}")
+        v2.write_bytes(b"\x28\xb5\x2f\xfd")
+        mapping, warnings = _build_match_map([v1, v2])
+        assert mapping["libfoo.so"] == v2
         assert warnings
 
 

@@ -358,6 +358,54 @@ def test_truncated_second_frame_of_multi_frame_zstd_detected(tmp_path):
         read_snapshot_bytes(p)
 
 
+def test_truncated_frame_after_unknown_size_frame_still_detected(tmp_path):
+    """Codex review, PR #699 (third round on the same multi-frame fix): a
+    frame with no declared content size (CONTENTSIZE_UNKNOWN -- a foreign
+    encoder that didn't set zstd's content-size flag) used to abandon
+    per-frame validation entirely, for that frame *and every subsequent
+    one*. A truncated frame anywhere after it could then hit the exact
+    same silent short-read this whole validation pass exists to catch,
+    with nothing left checking it. Confirm a truncated third frame is
+    still caught even though the second frame in between has no declared
+    size."""
+    zstandard = pytest.importorskip("zstandard")
+
+    payload = json.dumps({"library": "x", "version": "1", "extra": "y" * 80}).encode()
+    third = len(payload) // 3
+    cctx1 = zstandard.ZstdCompressor(write_content_size=True)
+    frame1 = cctx1.compress(payload[:third])
+    cctx2 = zstandard.ZstdCompressor(write_content_size=False)  # unknown size
+    frame2 = cctx2.compress(payload[third : 2 * third])
+    cctx3 = zstandard.ZstdCompressor(write_content_size=True)
+    frame3 = cctx3.compress(payload[2 * third :])
+    truncated_frame3 = frame3[: len(frame3) - 2]
+    p = tmp_path / "multiframe_unknown_then_truncated.abicheck.json.zst"
+    p.write_bytes(frame1 + frame2 + truncated_frame3)
+
+    with pytest.raises(SnapshotError, match="corrupt or truncated"):
+        read_snapshot_bytes(p)
+
+
+def test_unknown_size_frame_among_valid_frames_not_rejected(tmp_path):
+    """Sanity: a legitimate unknown-size frame surrounded by otherwise-
+    valid, intact frames must still round-trip correctly -- only a real
+    truncation should be flagged."""
+    zstandard = pytest.importorskip("zstandard")
+
+    payload = json.dumps({"library": "x", "version": "1", "extra": "y" * 80}).encode()
+    third = len(payload) // 3
+    cctx1 = zstandard.ZstdCompressor(write_content_size=True)
+    frame1 = cctx1.compress(payload[:third])
+    cctx2 = zstandard.ZstdCompressor(write_content_size=False)
+    frame2 = cctx2.compress(payload[third : 2 * third])
+    cctx3 = zstandard.ZstdCompressor(write_content_size=True)
+    frame3 = cctx3.compress(payload[2 * third :])
+    p = tmp_path / "multiframe_unknown_valid.abicheck.json.zst"
+    p.write_bytes(frame1 + frame2 + frame3)
+
+    assert read_snapshot_bytes(p) == payload
+
+
 # ── Decompression limits ────────────────────────────────────────────────
 
 
