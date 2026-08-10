@@ -195,7 +195,7 @@ from __future__ import annotations
 
 import shutil
 import time
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field, replace
 from functools import partial
@@ -510,10 +510,9 @@ def _partial_specialization_pattern_signature(node: dict[str, Any]) -> str:
     spelling, joined into one discriminator string. Built the same way a
     concrete instantiation's own argument list is (:func:`_template_arg_use`),
     but over the partial spec's own *dependent* pattern arguments (e.g.
-    ``template <typename T> struct C<T*> {...}``'s own argument spells as
-    the dependent type ``"type-parameter-0-0 *"``, verified empirically).
-    Stable across TUs/recompiles (a compiler-derived spelling, not a source
-    position), unlike the ``loc.offset`` used only to *detect* which
+    ``struct C<T*> {...}``'s own argument spells as the dependent type
+    ``"type-parameter-0-0 *"``, verified empirically). Stable across
+    TUs/recompiles, unlike the ``loc.offset`` used only to *detect* which
     pattern a specialization came from -- see
     :func:`_collect_partial_specialization_signatures`."""
     parts = []
@@ -683,22 +682,19 @@ def _class_template_has_auto_nttp(class_template_node: dict[str, Any]) -> bool:
     (e.g. ``template <auto V> struct A;``) -- the signal
     :func:`parse_clang_ast_templates`'s class-instantiation loop needs to
     know a specialization's own NTTP argument spelling can't be trusted as
-    a unique identity (Codex review, fresh evidence, confirmed against real
-    clang 18 AST output): for an ``auto`` NTTP whose deduced type is a
-    scoped-enum, clang's ``-ast-dump=json`` serializes the ``TemplateArgument``
-    as bare ``{"value": 1}`` -- no ``type`` field, nothing distinguishing an
-    argument's *deduced* type at all -- so ``A<E1::X>`` and ``A<E2::X>``
-    (two different enum types sharing the same underlying value) both
-    reduce to the identical label ``"A<1>"`` and collide onto the same
-    ``template_instantiation`` graph node, merging their genuinely distinct
-    emitted-symbol edges. A concrete, non-``auto`` NTTP (``template <int
-    V>``) carries no such ambiguity -- its type is fixed and known from the
-    parameter declaration itself, so the identical bare ``{"value": N}``
-    shape means the identical, single-typed argument every time; only the
-    ``auto`` case is deliberately checked, not every bare-``value`` shape
-    (that would needlessly discard the common, unambiguous case too, the
-    opposite of this module's usual false-negative-over-false-positive
-    default).
+    a unique identity (Codex review, confirmed against clang 18): for an
+    ``auto`` NTTP whose deduced type is a scoped-enum, clang's dump
+    serializes the ``TemplateArgument`` as bare ``{"value": 1}`` -- no
+    ``type`` field, nothing distinguishing an argument's *deduced* type at
+    all -- so ``A<E1::X>``/``A<E2::X>`` (two different enum types sharing
+    the same underlying value) both reduce to the identical label
+    ``"A<1>"`` and collide onto the same ``template_instantiation`` node,
+    merging their genuinely distinct emitted-symbol edges. A concrete,
+    non-``auto`` NTTP carries no such ambiguity -- its type is fixed and
+    known from the parameter declaration, so the identical bare
+    ``{"value": N}`` shape means the identical argument every time; only
+    the ``auto`` case is deliberately checked, not every bare-``value``
+    shape (that would needlessly discard the common, unambiguous case too).
 
     **Class instantiations only** -- a ``FunctionTemplateDecl`` with its own
     ``auto`` NTTP parameter (``template <auto V> void f();``) has the
@@ -1169,17 +1165,11 @@ def _function_template_pattern_signature(node: dict[str, Any]) -> str:
 
     Skipping a ``mangledName``-carrying child for the pattern-type half is
     defense-in-depth, not a fix for an observed collision (CodeRabbit
-    review): empirically, across every AST shape checked against real
-    clang output -- a plain overload pair, multiple instantiations of one
-    overload, an explicit full specialization's detached unmangled stub, a
-    forward-declared-then-defined template, and an out-of-line class-member
-    template -- the unmangled pattern child is always clang's *first*
-    function-shaped child, so the prior first-match behavior already
-    returned it in every case tried. There is no structural AST reason
-    this could differ (a primary template must be declared before
-    anything instantiates or specializes it, so its pattern child is
-    always emitted first), but filtering explicitly removes the dependency
-    on that ordering rather than relying on it implicitly."""
+    review): empirically the unmangled pattern child is always clang's
+    *first* function-shaped child (a primary template must be declared
+    before anything instantiates/specializes it), so the prior first-match
+    behavior already returned it every time tried -- filtering explicitly
+    just removes the dependency on that ordering."""
     param_kinds: list[str] = []
     pattern_type = ""
     for child in node.get("inner", []) or []:
@@ -1187,18 +1177,12 @@ def _function_template_pattern_signature(node: dict[str, Any]) -> str:
         if child_kind in _TEMPLATE_PARAM_DECL_KINDS:
             descriptor = child_kind
             if child_kind == "NonTypeTemplateParmDecl":
-                # Two NTTP parameters differing only in their own declared
-                # type (`template <E1 N> void f()` vs. `template <E2 N>
-                # void f()`) both still counted as an identical bare
-                # "NonTypeTemplateParmDecl" kind, so distinct templates
-                # collided the same way the earlier kind-count-only fix
-                # was meant to prevent (Codex review, fresh evidence,
-                # confirmed against real clang output: both instantiations
-                # -- f<E1::A>, f<E2::A> -- reduced to the identical
-                # "NonTypeTemplateParmDecl|void ()" signature). A
-                # NonTypeTemplateParmDecl's own type.qualType (e.g. "E1"/
-                # "E2") is always present and reliably differs, so it's
-                # folded into this parameter's own descriptor.
+                # Two NTTP params differing only in declared type
+                # (`E1 N` vs `E2 N`) still counted as one bare kind,
+                # colliding the same way the kind-count fix was meant to
+                # prevent (Codex review, confirmed: f<E1::A>/f<E2::A>
+                # both reduced to "NonTypeTemplateParmDecl|void ()").
+                # type.qualType always differs, so fold it in too.
                 nttp_type = child.get("type")
                 if isinstance(nttp_type, dict):
                     nttp_spelling = nttp_type.get("qualType")
@@ -1713,6 +1697,30 @@ def _symbol_node_ids(graph: SourceGraphSummary) -> frozenset[str]:
     return frozenset(n.id for n in graph.nodes if n.kind == "binary_symbol")
 
 
+def _resolve_emitted_symbol(
+    symbol: str,
+    known_symbols: frozenset[str],
+    symbol_node_id: Callable[[str], str],
+) -> str | None:
+    """The ``binary_symbol`` node id *symbol* should join onto, or ``None``
+    (self-review round: collapses two near-identical ``compute id -> check
+    known_symbols -> add_edge`` branches that could otherwise drift apart).
+    Tries *symbol* exactly first; only when unmatched does it retry
+    :func:`_normalize_mangled`'s Mach-O-stripped form -- an asm-labeled
+    ``__Z``-prefixed symbol is indistinguishable from the Mach-O artifact
+    by spelling alone. **Narrower than** :mod:`archive_graph`'s own
+    fallback (gates on real object-magic evidence); this one falls back
+    unconditionally, though still safer than the pre-fix strip."""
+    sid = symbol_node_id(symbol)
+    if sid in known_symbols:
+        return sid
+    normalized = _normalize_mangled(symbol)
+    if normalized == symbol:
+        return None
+    nid = symbol_node_id(normalized)
+    return nid if nid in known_symbols else None
+
+
 def augment_graph_with_templates(
     graph: SourceGraphSummary,
     instantiations: list[TemplateInstantiation],
@@ -1734,13 +1742,10 @@ def augment_graph_with_templates(
     mangled name the graph already carries a ``binary_symbol://`` node
     for** — the identical ADR-057 D1 "one shared node id is the whole join
     mechanism" rule :mod:`archive_graph` already applies: an instantiated
-    member the linker discarded (never ODR-used, or inlined away) has no
-    export-table entry and no finding can ever be about it, so minting a
-    symbol node for it would inflate the graph for no analytical gain. The
-    join tries the raw spelling first, falling back to
-    :func:`_normalize_mangled`'s Mach-O-stripped form only when unmatched
-    (a literal ``__Z``-prefixed ``asm(...)`` label is indistinguishable
-    from the Mach-O artifact by spelling alone).
+    member the linker discarded has no export-table entry, so minting a
+    symbol node for it would inflate the graph for no analytical gain. See
+    :func:`_resolve_emitted_symbol` for the exact-then-fallback resolution
+    order this join uses and why.
 
     Returns the number of edges added.
     """
@@ -1787,8 +1792,12 @@ def augment_graph_with_templates(
         )
         ensure_node(template_id, NODE_TEMPLATE_DECL, inst.template_qname)
 
+        # Normalized here even though emitted_symbols stays raw (self-review
+        # round): a stable node *identity*, not a join key, so leaving it
+        # raw would have churned a Mach-O instantiation's own node id
+        # (single- vs double-underscore) purely from this fix.
         function_mangled = (
-            inst.emitted_symbols[0]
+            _normalize_mangled(inst.emitted_symbols[0])
             if inst.kind == _FUNCTION_KIND and inst.emitted_symbols
             else None
         )
@@ -1825,17 +1834,9 @@ def augment_graph_with_templates(
             add_edge(inst_id, type_id, EDGE_TEMPLATE_USES_TYPE, CONF_HIGH)
 
         for symbol in inst.emitted_symbols:
-            sid = _symbol_node_id(symbol)
-            if sid in known_symbols:
+            sid = _resolve_emitted_symbol(symbol, known_symbols, _symbol_node_id)
+            if sid is not None:
                 add_edge(inst_id, sid, EDGE_INSTANTIATION_EMITS_SYMBOL, CONF_REDUCED)
-                continue
-            # Guarded fallback -- see this function's own docstring.
-            normalized = _normalize_mangled(symbol)
-            if normalized == symbol:
-                continue
-            nid = _symbol_node_id(normalized)
-            if nid in known_symbols:
-                add_edge(inst_id, nid, EDGE_INSTANTIATION_EMITS_SYMBOL, CONF_REDUCED)
 
     return added
 

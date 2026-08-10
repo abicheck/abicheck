@@ -31,6 +31,7 @@ from abicheck.buildsource.template_graph import (
     EDGE_DECL_INSTANTIATES_TEMPLATE,
     EDGE_INSTANTIATION_EMITS_SYMBOL,
     NODE_TEMPLATE_DECL,
+    NODE_TEMPLATE_INSTANTIATION,
     augment_graph_with_templates,
     parse_clang_ast_templates,
 )
@@ -310,3 +311,46 @@ def test_literal_asm_label_mangled_name_is_not_mach_o_stripped_at_collection() -
     # "_Zfake" one, even though it also exists in the graph.
     targets = {dst for _src, dst in emits_edges}
     assert targets == {"binary_symbol://__Zfake"}
+
+
+def test_function_instantiation_node_id_stays_normalized_on_mach_o() -> None:
+    """The node *identity* (:func:`template_instantiation_node_id`) for a
+    function-kind instantiation must stay the platform-independent,
+    normalized spelling even though :attr:`TemplateInstantiation.
+    emitted_symbols` itself now keeps clang's raw spelling (self-review
+    round, fresh evidence): the identity is a stable key, not a symbol-join
+    target, so leaving it raw would silently change a Mach-O function
+    instantiation's own graph node id (single- vs double-underscore) purely
+    as a side effect of moving the join's own stripping to a guarded
+    fallback -- an undocumented identity churn with no reason to accept."""
+    pattern = {"kind": "FunctionDecl", "name": "identity", "inner": []}
+    instantiation = {
+        "kind": "FunctionDecl",
+        "name": "identity",
+        "mangledName": "__Z8identityIiET_S0_",
+        "inner": [
+            {"kind": "TemplateArgument", "type": {"qualType": "int"}, "inner": []},
+        ],
+    }
+    function_template = {
+        "kind": "FunctionTemplateDecl",
+        "name": "identity",
+        "inner": [
+            {"kind": "TemplateTypeParmDecl", "name": "T"},
+            pattern,
+            instantiation,
+        ],
+    }
+    ast = {"kind": "TranslationUnitDecl", "inner": [function_template]}
+
+    out = parse_clang_ast_templates(ast)
+    assert len(out) == 1
+    # emitted_symbols itself stays raw...
+    assert out[0].emitted_symbols == ("__Z8identityIiET_S0_",)
+
+    graph = SourceGraphSummary()
+    augment_graph_with_templates(graph, out)
+    inst_nodes = [n for n in graph.nodes if n.kind == NODE_TEMPLATE_INSTANTIATION]
+    assert len(inst_nodes) == 1
+    # ...but the node's own id is the normalized, single-underscore form.
+    assert inst_nodes[0].id == "template_instantiation://_Z8identityIiET_S0_"

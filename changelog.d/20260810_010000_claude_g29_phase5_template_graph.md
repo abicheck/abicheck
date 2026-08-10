@@ -865,3 +865,45 @@
   `..._joins_via_fallback`) was updated to match the new raw-storage
   contract; a new regression test confirms the asm-label case joins the
   real, exact export and never the unrelated one.
+
+  A `/code-review self` self-review pass over the twenty-eighth round's own
+  diff (three independent angle agents: conventions, cleanup/reuse, removed-
+  behavior) found and fixed two more real gaps, plus documented two
+  deliberately-deferred ones:
+
+  1. **Fixed.** Two independent agents traced that `augment_graph_with_
+  templates`'s `function_mangled = inst.emitted_symbols[0]` (feeding
+  `template_instantiation_node_id`) now read the *raw*, unnormalized
+  spelling -- a side effect of moving the strip to the symbol-join fallback
+  -- so a Mach-O function instantiation's own node **identity** silently
+  changed shape (`__Z...` instead of `_Z...`) purely from this fix, with no
+  version bump. Confirmed currently inert (`template_instantiation` isn't in
+  any reconciliation/finding path today) but a real, undocumented identity
+  churn. Fixed by normalizing `function_mangled` specifically for identity
+  purposes -- the node id is a stable key, not a join target, so the exact-
+  vs-fallback distinction the symbol join needs doesn't apply to it.
+  2. **Fixed.** The join loop's exact-match and fallback branches duplicated
+  the identical "compute id -> check known_symbols -> add_edge" shape.
+  Collapsed into one `_resolve_emitted_symbol` helper with a single
+  `add_edge` call site, closing a future confidence/provenance drift risk
+  between the two paths.
+  3. **Documented, not fixed.** The new guarded fallback in this module
+  falls back to the Mach-O-stripped form unconditionally on any unmatched
+  spelling, unlike `archive_graph.py`'s own analogous fallback (hardened
+  over five prior review rounds), which additionally gates on real object-
+  magic evidence. Still strictly safer than the pre-fix unconditional
+  strip; left as a known, narrower limitation rather than porting that
+  evidence infrastructure in as a drive-by extension.
+  4. **Documented, not fixed.** Two independent agents (and independent
+  verification: `header_graph._decl_identity` -- the flat-model join
+  target -- has no `_normalize_mangled` call at all, since Mach-O
+  normalization already happened upstream in `macho_metadata.py`) confirmed
+  `call_graph._identity`/`type_graph._decl_identity` still apply their own
+  `_normalize_mangled` unconditionally at node-identity time -- the
+  identical asm-label bug class this round fixed for `template_graph.py`,
+  live in two more modules. A real fix needs the same guarded-fallback
+  restructuring ported into each module's own join
+  (`augment_graph_with_calls`/the type-graph join), a scoped follow-up per
+  module, not a drive-by extension of this round. Documented directly on
+  each module's own `_normalize_mangled` docstring rather than silently
+  left unaddressed.
