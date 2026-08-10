@@ -454,6 +454,62 @@ def test_bsd_symdef_via_extended_name_is_recognized_as_index_not_a_member() -> N
     ]
 
 
+def test_bsd_extended_name_declaring_more_bytes_than_member_size_is_unresolved() -> (
+    None
+):
+    """A BSD ``#1/<len>`` header whose declared name length exceeds the
+    member's own ``size`` never occurs in a real archive -- the name is a
+    strict prefix of the member's own data, so a declared length overrunning
+    ``size`` is malformed (Codex review, fresh evidence). An earlier
+    revision silently clamped via ``min(len, size)``, fabricating a
+    truncated name out of what is actually the member's real content
+    instead of reporting the corruption; the member must be skipped (name
+    unresolved) like any other dangling/unreadable name, not parsed with a
+    garbled label and its data zeroed out."""
+    member_data = b"OBJDATA123"  # 10 bytes -- shorter than the declared name
+    data = (
+        ARCHIVE_MAGIC
+        + _header("#1/20", len(member_data))  # declares a 20-byte name
+        + _pad(member_data)
+    )
+    contents = parse_ar_archive(BytesReader(data))
+    # The member is still counted (byte alignment stays correct) but its
+    # name could not be resolved, so it is dropped rather than fabricated.
+    assert contents.members == ()
+
+
+def test_bsd_extended_name_declaring_exact_member_size_still_resolves() -> None:
+    """The boundary case immediately adjacent to the fix above: a declared
+    name length equal to (not exceeding) the member's own size is the
+    legitimate real-world shape (the whole member *is* its own name, no
+    trailing content) and must keep resolving exactly as before."""
+    name = "a_long_name_that_needs_extended_encoding"
+    member_data = name.encode("ascii")
+    data = (
+        ARCHIVE_MAGIC + _header(f"#1/{len(name)}", len(member_data)) + _pad(member_data)
+    )
+    contents = parse_ar_archive(BytesReader(data))
+    assert [m.name for m in contents.members] == [name]
+
+
+def test_ordinary_member_merely_named_with_the_bsd_index_prefix_is_not_misparsed() -> (
+    None
+):
+    """``_is_bsd_index_name`` must not match by unbounded prefix (Codex
+    review, fresh evidence): ``__.SYMDEFECT.o`` is a legal, if unusual, ar
+    member name that happens to start with the ``__.SYMDEF`` magic. An
+    earlier revision's bare ``startswith(_BSD_INDEX_PREFIX)`` misrouted its
+    real bytes into the BSD ranlib-index decoder, raising
+    ``ArchiveFormatError`` for an otherwise perfectly valid archive."""
+    data = build_gnu_archive([("__.SYMDEFECT.o", b"SYM:alpha\n")])
+    contents = parse_ar_archive(BytesReader(data))
+    assert [m.name for m in contents.members] == ["__.SYMDEFECT.o"]
+    assert contents.has_symbol_index
+    assert sorted((s.symbol, s.member) for s in contents.symbols) == [
+        ("alpha", "__.SYMDEFECT.o")
+    ]
+
+
 def test_coff_second_linker_member_is_skipped_not_misparsed() -> None:
     """A standard COFF ``.lib`` writes *two* members named ``/`` — the GNU-
     compatible "first linker member" this parser already decodes, and a
@@ -887,6 +943,30 @@ def test_augment_graph_macho_underscore_prefixed_symbol_joins_via_fallback(
     an ordinary GNU/ELF archive's own symbol table can legitimately contain
     a name that already starts with ``_``."""
     data = build_bsd_archive([("a.o", b"\xfe\xed\xfa\xcf\nSYM:_foo\n")])
+    (tmp_path / "libtest.a").write_bytes(data)
+    g = _graph_with_archive("libtest.a", ["foo"])  # node has no leading underscore
+
+    result = augment_graph_with_archives(g, search_roots=(tmp_path,))
+
+    assert result.symbol_edges == 1
+    assert result.unjoined_symbols == 0
+    assert defining_members(g, "foo") == [("libtest.a", "a.o")]
+
+
+def test_augment_graph_macho_symbol_joins_via_fallback_on_gnu_indexed_archive(
+    tmp_path,
+) -> None:
+    """The archive container's own index *encoding* and the archived
+    object's *format* are independent choices (Codex review, fresh
+    evidence, empirically confirmed): a real Mach-O object cross-compiled
+    with ``clang --target=x86_64-apple-darwin`` and archived via
+    ``llvm-ar --format=gnu`` produces a genuinely GNU-encoded ``/`` index
+    (``index_kind="gnu"``) around real Mach-O member content. An earlier
+    revision additionally required ``index_kind == "bsd"`` before trusting
+    the underscore-stripping fallback, so this real, valid shape was
+    silently missed entirely -- ``object_magic`` alone (direct evidence of
+    the member's own bytes) must be sufficient."""
+    data = build_gnu_archive([("a.o", b"\xfe\xed\xfa\xcf\nSYM:_foo\n")])
     (tmp_path / "libtest.a").write_bytes(data)
     g = _graph_with_archive("libtest.a", ["foo"])  # node has no leading underscore
 

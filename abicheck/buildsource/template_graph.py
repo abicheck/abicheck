@@ -728,10 +728,27 @@ def _function_template_pattern_signature(node: dict[str, Any]) -> str:
     qualType`` -- ``"T (T)"``/``"T (T, T)"`` -- reliably differing between
     overloads without depending on any particular instantiation's argument
     substitution. Returns the first such spelling found among *node*'s
-    direct function-shaped children; ``""`` when none carry one (degrade to
-    the bare-qname identity, this module's usual discipline)."""
+    direct function-shaped children that carries no ``mangledName``; ``""``
+    when none qualify (degrade to the bare-qname identity, this module's
+    usual discipline).
+
+    Skipping a ``mangledName``-carrying child is defense-in-depth, not a
+    fix for an observed collision (CodeRabbit review): empirically, across
+    every AST shape checked against real clang output -- a plain overload
+    pair, multiple instantiations of one overload, an explicit full
+    specialization's detached unmangled stub, a forward-declared-then-
+    defined template, and an out-of-line class-member template -- the
+    unmangled pattern child is always clang's *first* function-shaped
+    child, so the prior first-match behavior already returned it in every
+    case tried. There is no structural AST reason this could differ (a
+    primary template must be declared before anything instantiates or
+    specializes it, so its pattern child is always emitted first), but
+    filtering explicitly removes the dependency on that ordering rather
+    than relying on it implicitly."""
     for child in node.get("inner", []) or []:
         if str(child.get("kind", "")) not in _MEMBER_FUNCTION_KINDS | {"FunctionDecl"}:
+            continue
+        if child.get("mangledName"):
             continue
         qual_type = child.get("type")
         if isinstance(qual_type, dict):

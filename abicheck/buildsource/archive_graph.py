@@ -103,22 +103,31 @@ _MACHO_MAGICS = frozenset(
     }
 )
 
-#: The BSD/Mach-O symbol index is matched **by prefix**, not an exact-name
-#: set (real macOS CI evidence, Codex/CI review): Apple's ``libtool``/
-#: ``ranlib`` writes ``__.SYMDEF`` (unsorted) or ``__.SYMDEF SORTED``
-#: (sorted) for a 32-bit index and the ``_64`` spellings for 64-bit, and the
-#: 16-byte ``ar`` name field silently truncates a longer one
-#: (``__.SYMDEF_64 SORTED`` is 19 bytes and truncates to
-#: ``__.SYMDEF_64 SOR``) — an exact-string allowlist an earlier revision
-#: used missed that case, and a real macOS ``ar`` run in CI additionally
-#: produced a plain ``__.SYMDEF SORTED`` this parser failed to recognize as
-#: special at all (folding it into ``members`` instead of the symbol index —
-#: confirmed by the macOS integration lane, root cause not otherwise
-#: reproducible without a real BSD ``ar``). Prefix matching on the fixed
-#: ``__.SYMDEF`` magic name — which every one of these variants shares and
-#: which a truncated-to-16-bytes name still contains — covers the exact,
-#: sorted, 64-bit, and truncated-64-bit-sorted spellings uniformly instead
-#: of chasing individual suffixes.
+#: The BSD/Mach-O symbol index is matched by the fixed magic prefix plus a
+#: bounded set of known suffixes (real macOS CI evidence, Codex/CI review):
+#: Apple's ``libtool``/``ranlib`` writes ``__.SYMDEF`` (unsorted) or
+#: ``__.SYMDEF SORTED`` (sorted) for a 32-bit index and the ``_64``
+#: spellings for 64-bit, and the 16-byte ``ar`` name field silently
+#: truncates a longer one (``__.SYMDEF_64 SORTED`` is 19 bytes and
+#: truncates to ``__.SYMDEF_64 SOR``) — an exact-string allowlist an
+#: earlier revision used missed that case, and a real macOS ``ar`` run in
+#: CI additionally produced a plain ``__.SYMDEF SORTED`` this parser
+#: failed to recognize as special at all (folding it into ``members``
+#: instead of the symbol index — confirmed by the macOS integration lane,
+#: root cause not otherwise reproducible without a real BSD ``ar``).
+#: **Not** matched by unbounded prefix (Codex review, fresh evidence): an
+#: earlier revision's bare ``stripped.startswith(_BSD_INDEX_PREFIX)``
+#: also matched an ordinary, unrelated member merely *named* with this
+#: prefix (``__.SYMDEFECT.o`` is a legal ar member name, and
+#: ``"__.SYMDEFECT.o".startswith("__.SYMDEF")`` is true), misrouting a
+#: real object file's bytes into the BSD symbol-index decoder and raising
+#: ``ArchiveFormatError`` for what is otherwise a perfectly valid archive.
+#: Every real spelling above is either exactly one of the two bare magic
+#: names or that name immediately followed by a space (the sorted variant,
+#: truncated or not) — never any other trailing byte — so requiring an
+#: exact match or a match through that literal space closes the false
+#: positive without reintroducing the truncated-name misses the original
+#: exact-string allowlist had.
 _BSD_INDEX_PREFIX = "__.SYMDEF"
 _BSD_INDEX_WIDE_PREFIX = "__.SYMDEF_64"
 
@@ -126,8 +135,15 @@ _BSD_INDEX_WIDE_PREFIX = "__.SYMDEF_64"
 def _is_bsd_index_name(stripped: str) -> bool:
     """Whether *stripped* (an ``ar`` header name field, right-padding
     already removed) is a BSD/Mach-O symbol-index member — see
-    :data:`_BSD_INDEX_PREFIX`."""
-    return stripped.startswith(_BSD_INDEX_PREFIX)
+    :data:`_BSD_INDEX_PREFIX`. Matches only the bare magic name or that
+    name followed by a literal space (the " SORTED" variant, truncated or
+    not) — not an unbounded prefix, so an ordinary member merely named
+    with this prefix (``__.SYMDEFECT.o``) is never misidentified."""
+    if stripped in (_BSD_INDEX_PREFIX, _BSD_INDEX_WIDE_PREFIX):
+        return True
+    return stripped.startswith(_BSD_INDEX_PREFIX + " ") or stripped.startswith(
+        _BSD_INDEX_WIDE_PREFIX + " "
+    )
 
 
 def _is_bsd_index_wide(stripped: str) -> bool:
@@ -321,11 +337,22 @@ class ArchiveContents:
     --format=bsd`` produces a valid ``__.SYMDEF``-indexed archive around
     ordinary ELF objects too (empirically confirmed: `llvm-ar --format=bsd
     rcs lib.a a.o` over a real ELF `a.o`). ``object_magic`` is the first
-    regular member's own leading 4 bytes — real object-format evidence, so
-    the join fallback can require *both* a BSD index *and* genuine Mach-O
-    member magic before trusting the underscore convention. ``b""`` when
-    the archive has no regular members (index-only) or a truncated first
-    member.
+    regular member's own leading 4 bytes — real object-format evidence.
+    ``b""`` when the archive has no regular members (index-only) or a
+    truncated first member.
+
+    The converse also holds, and the join fallback (``augment_graph_with_
+    archives``) relies on ``object_magic`` **alone**, not a conjunction with
+    ``index_kind == "bsd"`` (Codex review, third round, fresh evidence): a
+    real Mach-O object cross-compiled with clang and archived via
+    ``llvm-ar --format=gnu`` produces a genuinely GNU-encoded index
+    (``index_kind == "gnu"``) around real Mach-O member content
+    (empirically confirmed the same way). The archive container's chosen
+    index format and the member's own object format are independent
+    choices one tool run cannot infer from the other, so ``object_magic``
+    — direct evidence of the member's own bytes — is the correct,
+    sufficient gate on its own; requiring ``index_kind == "bsd"`` in
+    addition only narrowed which real Mach-O archives were recognized.
     """
 
     flavor: str
@@ -387,8 +414,12 @@ def _resolve_member_name(
     """``(resolved name, bytes of member data consumed by an inline name)``.
 
     ``None`` marks a member whose name could not be resolved (a dangling
-    GNU ``/<index>``); the member is still counted and skipped over, so one
-    bad name never desynchronizes the walk.
+    GNU ``/<index>``, or a BSD ``#1/<len>`` declaring a name longer than the
+    member's own data — Codex review, fresh evidence: a real BSD header
+    never encodes that, since the name is a strict prefix of the member's
+    own ``size``, so a declared length exceeding it is malformed rather
+    than a legitimately oversized name); the member is still counted and
+    skipped over, so one bad name never desynchronizes the walk.
     """
     stripped = name_field.rstrip(" ")
     if stripped.startswith("#1/"):
@@ -397,7 +428,14 @@ def _resolve_member_name(
         digits = stripped[3:]
         if not digits.isdigit():
             return None, 0
-        n = min(int(digits), size)
+        n = int(digits)
+        if n > size:
+            # A declared name length that overruns the member's own data
+            # would previously silently clamp to `size` (`min(n, size)`),
+            # fabricating a truncated name out of what is actually the
+            # member's real content instead of reporting the malformed
+            # header. Treat it the same as any other unresolvable name.
+            return None, 0
         raw = reader.read(data_offset, n)
         return raw.split(b"\x00", 1)[0].decode("utf-8", "replace"), n
     if stripped.startswith("/") and stripped[1:].isdigit():
@@ -1044,7 +1082,6 @@ def augment_graph_with_archives(
             if (
                 sid not in known_symbols
                 and ref.symbol.startswith("_")
-                and contents.index_kind == "bsd"
                 and contents.object_magic in _MACHO_MAGICS
             ):
                 # A Mach-O/BSD ranlib index keeps the platform's C-symbol
@@ -1068,7 +1105,21 @@ def augment_graph_with_archives(
                 # around ordinary ELF objects too (empirically reproduced),
                 # so the first regular member's own magic bytes must also
                 # confirm genuine Mach-O object content before trusting the
-                # underscore convention.
+                # underscore convention. Gated on ``object_magic`` **alone**,
+                # not also ``index_kind == "bsd"`` (Codex review, fourth
+                # round, fresh evidence): a real Mach-O object cross-compiled
+                # with clang and archived via `llvm-ar --format=gnu` produces
+                # a genuinely GNU-encoded index (`index_kind="gnu"`) around
+                # real Mach-O member content (confirmed empirically —
+                # `object_magic` decodes to a real ``MH_MAGIC_64`` byte
+                # sequence while the index member itself is the GNU
+                # big-endian layout) — the object format and the archive's
+                # own index encoding are independent choices, and requiring
+                # both silently dropped every Mach-O archive built with a
+                # non-BSD `ar`. ``object_magic`` is already the strictly
+                # stronger signal (direct evidence of the member's own
+                # bytes, not an inference from how the *index* happened to
+                # be written), so it is sufficient on its own.
                 stripped_sid = _symbol_node_id(ref.symbol[1:])
                 if stripped_sid in known_symbols:
                     sid = stripped_sid

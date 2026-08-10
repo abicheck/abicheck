@@ -301,3 +301,41 @@
   the coarser declaration-identity edge is affected. Documented as an
   explicit consequence of the module's pre-existing, deliberate C++20-
   concepts deferral rather than a one-line extension into that subsystem.
+
+  A twelfth review round found three more real gaps in `archive_graph.py`,
+  all empirically confirmed, plus one defensive hardening in
+  `template_graph.py` with no observed failure. A BSD `#1/<len>` extended
+  member name declaring a length longer than the member's own `size` — a
+  shape that never occurs in a real archive, since the name is a strict
+  prefix of the member's own data — was silently clamped via `min(len,
+  size)`, fabricating a truncated name out of what is actually the
+  member's real content instead of reporting the corruption; it now
+  resolves to `None` (unresolvable), matching how every other malformed-
+  name case in the same function already degrades. `_is_bsd_index_name`
+  matched the `__.SYMDEF` magic by unbounded prefix, so an ordinary,
+  legally-named member merely starting with those bytes
+  (`__.SYMDEFECT.o`) was misrouted into the BSD ranlib-index decoder and
+  raised `ArchiveFormatError` for an otherwise valid archive; it now
+  matches only the bare magic name or that name followed by a literal
+  space (the real " SORTED" variant, truncated or not), closing the false
+  positive without reintroducing the truncated-name misses the original
+  exact-string allowlist had. And the Mach-O underscore-stripping join
+  fallback required *both* `index_kind == "bsd"` and genuine Mach-O
+  `object_magic` — but empirically, a real Mach-O object cross-compiled
+  with `clang --target=x86_64-apple-darwin` and archived via `llvm-ar
+  --format=gnu` produces a genuinely GNU-encoded index around real Mach-O
+  member content, so the conjunction silently dropped every Mach-O archive
+  built with a non-BSD `ar`; the fallback now gates on `object_magic`
+  alone, since it is already the strictly stronger, direct signal.
+  Separately, `_function_template_pattern_signature` returned the first
+  function-shaped child's printed type regardless of whether it carried a
+  `mangledName`, relying implicitly on clang always emitting the unmangled
+  pattern child first — verified true across five distinct real-clang AST
+  shapes (a plain overload pair, multiple instantiations, an explicit
+  specialization's detached stub, a forward-declared-then-defined
+  template, an out-of-line class-member template), and structurally
+  guaranteed by C++'s own requirement that a primary template be declared
+  before anything instantiates or specializes it. No collision was
+  observed or reproduced; the function now explicitly skips a
+  `mangledName`-carrying child anyway, removing the implicit ordering
+  dependency rather than merely relying on it.
