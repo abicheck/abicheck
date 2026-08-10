@@ -971,3 +971,48 @@ def test_missing_site_url_is_a_hard_error_not_a_root_relative_link(
 
     with pytest.raises(gen.SkillGenerationError, match="site_url"):
         gen.render_all(gen.SRC_DIR)
+
+
+@pytest.mark.parametrize(
+    "escaped", ["\\`", "\\[", "\\]", "\\(", "\\)"], ids=["tick", "lb", "rb", "lp", "rp"]
+)
+def test_a_structural_backslash_escape_is_a_hard_error(synthetic, escaped):
+    """CommonMark makes these literals, but the code-span and link patterns
+    here still read them structurally: an escaped backtick pair masks a real
+    link (which then ships repo-relative), and an escaped bracket makes prose
+    look like a link. Rejected rather than handled — masking escapes before
+    inline spans would invert CommonMark's precedence and mask the wrong
+    region, which fails silently."""
+    synthetic(
+        skills={
+            "demo": {
+                "SKILL.md": (
+                    "---\nname: demo\n---\n\n[a](../shared/a.md)\n\n"
+                    f"Prose with {escaped} in it.\n"
+                )
+            }
+        },
+        shared={"a.md": "# A\n"},
+    )
+    with pytest.raises(gen.SkillGenerationError, match="backslash-escaped"):
+        gen.render_all(gen.SRC_DIR)
+
+
+@pytest.mark.parametrize(
+    "escaped", ["\\*", "\\_", "\\#", "\\!"], ids=["star", "underscore", "hash", "bang"]
+)
+def test_a_non_structural_escape_passes_through(synthetic, escaped):
+    """No pattern here reads these structurally, so they cannot mis-mask
+    anything — rejecting them would be gratuitous."""
+    synthetic(
+        skills={
+            "demo": {
+                "SKILL.md": (
+                    "---\nname: demo\n---\n\n[a](../shared/a.md)\n\n"
+                    f"Prose with {escaped} in it.\n"
+                )
+            }
+        },
+        shared={"a.md": "# A\n"},
+    )
+    assert escaped in gen.render_all(gen.SRC_DIR)["demo/SKILL.md"]

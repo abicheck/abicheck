@@ -220,6 +220,23 @@ _FENCE_RE = re.compile(
 )
 _INLINE_CODE_RE = re.compile(r"(?<!`)(`+)(?!`)(.+?)(?<!`)\1(?!`)", re.DOTALL)
 
+#: A backslash-escaped character this pipeline's own patterns treat as
+#: structural. CommonMark makes each of these a *literal*, so it neither opens
+#: a code span nor delimits a link — but `_INLINE_CODE_RE` and `_MD_LINK_RE`
+#: read them structurally anyway. An escaped backtick pair around a real link
+#: masks it, and the link then ships repo-relative into every installed tree;
+#: an escaped bracket makes literal prose look like a link and get rewritten.
+#:
+#: Rejected rather than handled, and the tempting fix is the wrong one:
+#: masking escapes *before* inline spans inverts CommonMark's precedence
+#: (code spans are parsed first, so `` `a\` `` is a span containing `a\`) and
+#: would consume that span's closing delimiter — masking the wrong region and
+#: leaving a genuine link unrewritten. Getting it right needs a real inline
+#: parser with backslash-parity tracking, which is well past what a publisher
+#: should carry. Other escapes (`\*`, `\_`, `\#`, …) pass through untouched:
+#: no pattern here reads them structurally, so they cannot mis-mask anything.
+_STRUCTURAL_ESCAPE_RE = re.compile(r"\\[`\[\]()]")
+
 #: Any fence delimiter and whatever precedes it on its line. `_FENCE_RE`
 #: anchors on the line start and accepts at most three spaces, so a fence
 #: carrying a `_CONTAINER_PREFIX` — a block quote, a list item's content
@@ -771,6 +788,21 @@ def _render(
             "and reads at most three leading spaces, so the block would be "
             "processed as prose and its example links rewritten. Move the "
             "example out of its container, to the left margin."
+        )
+
+    # Checked on the raw body, like the container guard and for the same
+    # reason: masking is exactly what an escaped delimiter corrupts, so asking
+    # after the fact would be asking the damaged text.
+    escape = _STRUCTURAL_ESCAPE_RE.search(body)
+    if escape is not None:
+        line = body.count("\n", 0, escape.start()) + 1
+        raise SkillGenerationError(
+            f"{source_path}: line ~{line}: backslash-escaped {escape.group()!r}. "
+            "CommonMark makes it a literal, but the code-span and link "
+            "patterns here still read it structurally — an escaped backtick "
+            "pair masks a real link (which then ships repo-relative), and an "
+            "escaped bracket makes prose look like a link. Use a code span, "
+            "or reword to avoid the escape."
         )
 
     # Code examples are literal content: their link syntax must be neither
