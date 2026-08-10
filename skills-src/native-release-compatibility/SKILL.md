@@ -201,8 +201,11 @@ report; keying the matrix off `verdict` alone is how a policy-blocked or
 evidence-incomplete cell becomes a silent minor release.
 
 **`COMPATIBLE_WITH_RISK` is the one that silently disappears if you let it.**
-It exits `0`, exactly like `COMPATIBLE`, so an exit-code-only reading of the
-matrix cannot see it — you must read the `verdict` field. It means the change
+On the legacy path — no severity-aware grading resolved — it exits `0`,
+exactly like `COMPATIBLE`, so an exit-code-only reading of the matrix cannot
+see it. Under a resolved severity gate the same verdict can exit `2` instead,
+since its findings grade as `potential_breaking`. Neither number is safe to
+reason backwards from: **read the `verdict` field**. It means the change
 does not break already-linked consumers but carries a deployment risk that has
 to be verified by a human: a raised dependency floor that some target
 environments lack, or a change that links fine yet is semantically unsafe for
