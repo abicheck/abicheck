@@ -1155,6 +1155,15 @@
       "examples": "case21_method_became_static"
     },
     {
+      "kind": "func_vague_export_dropped",
+      "category": "risk",
+      "default_verdict": "COMPATIBLE_WITH_RISK",
+      "severity": "warning",
+      "min_evidence": "L3",
+      "doc_slug": "func_vague_export_dropped",
+      "examples": ""
+    },
+    {
       "kind": "func_variadic_added",
       "category": "breaking",
       "default_verdict": "BREAKING",

@@ -76,6 +76,10 @@ EVIDENCE_TIER_BY_KIND: dict[str, str] = {
     # ── L0: visible in the exported symbol table / linker metadata alone ──
     "func_removed": "L0",
     "func_removed_elf_only": "L0",
+    # L3, not L0: the export table shows the symbol gone, but what makes this
+    # kind *this* kind is the old build's COMDAT proof of vague linkage, which
+    # only object files carry.
+    "func_vague_export_dropped": "L3",
     "func_added": "L0",
     "var_added": "L0",
     "var_removed": "L0",
