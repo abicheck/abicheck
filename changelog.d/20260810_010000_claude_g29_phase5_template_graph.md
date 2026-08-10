@@ -367,3 +367,28 @@
   plumbing this parser doesn't have today — so it is deferred the same way
   this module already defers its other documented thin-archive gaps,
   rather than attempted as a drive-by extension of this read.
+
+  A fourteenth review round found one more real gap in `template_graph.py`,
+  fixed and empirically confirmed both against real clang AST output and a
+  real compiled object's own symbol table: clang's AST `mangledName` on a
+  constructor/destructor always reports only the complete-object variant
+  (`C1`/`D1`), never its siblings, but a real Mach-O/ELF binary separately
+  exports `C2` alongside every `C1`, and `D0`/`D2` alongside every (virtual)
+  `D1`, as genuinely distinct symbol-table entries — confirmed with both a
+  trivial and a parameterized/virtual constructor/destructor via `nm` on a
+  real compiled object. `_member_symbols` previously only recorded the
+  AST-reported spelling, so an instantiation's own `C2`/`D0`/`D2` export
+  (when the graph already carries a `binary_symbol` node for it) received
+  no `INSTANTIATION_EMITS_SYMBOL` edge. A new `_ctor_dtor_symbol_variants`
+  helper locates the `C1E`/`D1E` marker — always immediately followed by
+  the nested-name-closing `E`, verified with and without constructor
+  parameters — and substitutes each sibling code in its place; this is a
+  textual substitution rather than a full Itanium parse, but it is safe by
+  construction under this module's existing join-only-onto-an-existing-node
+  discipline (ADR-057 D1): a garbled derived string from a pathological
+  class/argument name embedding a literal `C1E`/`D1E` substring earlier in
+  the mangling would simply fail to match any real `binary_symbol` node,
+  never produce a wrong edge, since Itanium manglings are unique by
+  construction. `C3` (the allocating constructor) is deliberately omitted —
+  not observed emitted by clang/GCC in either test, unlike `C1`/`C2` which
+  were always both present.

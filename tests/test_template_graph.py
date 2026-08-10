@@ -175,6 +175,80 @@ def test_parses_explicit_instantiation_detached_from_its_template_decl() -> None
     assert int_inst.emitted_symbols == ("_ZNK7WrapperIiE3getEv",)
 
 
+def test_ctor_dtor_symbol_variants_match_real_compiled_binary_exports() -> None:
+    """``_ctor_dtor_symbol_variants`` -- verified against real clang AST +
+    real compiled-object ``nm`` output (Codex review, fresh evidence):
+    clang's AST only ever reports the ``C1``/``D1`` complete-object
+    mangling, but the compiled binary separately exports ``C2`` alongside
+    every ``C1``, and ``D0``/``D2`` alongside every (virtual) ``D1``."""
+    from abicheck.buildsource.template_graph import _ctor_dtor_symbol_variants
+
+    assert _ctor_dtor_symbol_variants("_ZN3BoxIiEC1Ev", is_ctor=True) == (
+        "_ZN3BoxIiEC2Ev",
+    )
+    assert _ctor_dtor_symbol_variants("_ZN3BoxIiEC1Eii", is_ctor=True) == (
+        "_ZN3BoxIiEC2Eii",
+    )
+    assert _ctor_dtor_symbol_variants("_ZN3BoxIiED1Ev", is_ctor=False) == (
+        "_ZN3BoxIiED0Ev",
+        "_ZN3BoxIiED2Ev",
+    )
+    # No marker found (not a ctor/dtor-shaped mangling) -- degrades to no
+    # derived variants rather than guessing.
+    assert _ctor_dtor_symbol_variants("_ZN3BoxIiE5valueE", is_ctor=True) == ()
+
+
+def test_class_template_instantiation_includes_constructor_sibling_symbol() -> None:
+    """End to end through :func:`parse_clang_ast_templates`: an
+    instantiated constructor's ``emitted_symbols`` includes both the
+    AST-reported ``C1`` mangling and the derived ``C2`` sibling the real
+    binary also exports (Codex review, fresh evidence)."""
+    ast = {
+        "kind": "TranslationUnitDecl",
+        "inner": [
+            {
+                "kind": "ClassTemplateDecl",
+                "name": "Box",
+                "inner": [
+                    {"kind": "TemplateTypeParmDecl", "name": "T"},
+                    {
+                        "kind": "CXXRecordDecl",
+                        "name": "Box",
+                        "completeDefinition": True,
+                        "inner": [],
+                    },
+                    {
+                        "id": "0xSPEC_BOX_CTOR",
+                        "kind": "ClassTemplateSpecializationDecl",
+                        "name": "Box",
+                    },
+                ],
+            },
+            {
+                "id": "0xSPEC_BOX_CTOR",
+                "kind": "ClassTemplateSpecializationDecl",
+                "name": "Box",
+                "completeDefinition": True,
+                "inner": [
+                    {
+                        "kind": "TemplateArgument",
+                        "type": {"qualType": "int"},
+                        "inner": [],
+                    },
+                    {
+                        "kind": "CXXConstructorDecl",
+                        "name": "Box",
+                        "mangledName": "_ZN3BoxIiEC1Ev",
+                    },
+                ],
+            },
+        ],
+    }
+    out = parse_clang_ast_templates(ast)
+    assert len(out) == 1
+    assert out[0].emitted_symbols == ("_ZN3BoxIiEC1Ev", "_ZN3BoxIiEC2Ev")
+
+
 def test_class_template_instantiation_includes_static_data_member_symbol() -> None:
     """An instantiated *static data member* carries its mangled name on a
     ``VarDecl`` child, not one of the member-function kinds -- Codex review,

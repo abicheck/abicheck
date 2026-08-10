@@ -708,6 +708,51 @@ def _instantiation_label(template_qname: str, args: Iterable[TemplateArgUse]) ->
     return f"{template_qname}<{spellings}>" if spellings else template_qname
 
 
+#: Additional Itanium ctor/dtor manglings implied by the one clang's AST
+#: reports -- see :func:`_ctor_dtor_symbol_variants`. clang's ``mangledName``
+#: on a ``CXXConstructorDecl``/``CXXDestructorDecl`` is always the complete-
+#: object variant (``C1``/``D1``), never the sibling(s), verified empirically
+#: (real clang output for both a trivial and a parameterized/virtual case
+#: only ever reports ``C1``/``D1``).  ``C3`` (the allocating constructor) is
+#: omitted -- not observed emitted by clang/GCC in practice, unlike ``C1``/
+#: ``C2`` which are always both present for any non-trivial constructor.
+_CTOR_SIBLING_MARKERS = ("C2E",)
+_DTOR_SIBLING_MARKERS = ("D0E", "D2E")
+
+
+def _ctor_dtor_symbol_variants(mangled: str, *, is_ctor: bool) -> tuple[str, ...]:
+    """The sibling Itanium ctor/dtor manglings ``mangled`` (clang's reported
+    ``C1``/``D1`` complete-object variant) implies -- Codex review, verified
+    empirically against real clang + compiled-object output: a real Mach-O/
+    ELF binary commonly exports ``C1``/``C2`` (and, for a virtual
+    destructor, ``D0``/``D1``/``D2``) as **separate** symbol-table entries,
+    not aliases collapsed to one, while clang's AST ``mangledName`` only
+    ever reports the ``C1``/``D1`` spelling -- so an instantiated ctor/dtor
+    that legitimately emits (say) a ``C2`` export previously had no way to
+    join that export's ``binary_symbol`` node at all.
+
+    Locates the ``C1E``/``D1E`` marker (the ctor/dtor code is always
+    immediately followed by the ``E`` closing the nested-name it lives in --
+    confirmed with and without constructor parameters, and with a virtual
+    destructor) and substitutes each sibling code in its place. This is a
+    textual substitution, not a full Itanium parse -- a class/argument name
+    that happened to embed a literal ``C1E``/``D1E`` substring earlier in
+    the mangled string could in principle mismatch, but this is harmless
+    even then: the caller's own join (:func:`augment_graph_with_templates`)
+    only ever creates an edge onto a ``binary_symbol`` node the graph
+    already carries (ADR-057 D1), so a garbled derived string simply fails
+    to match anything, the same as not deriving it at all -- it can never
+    produce a *wrong* edge to an unrelated symbol, since Itanium manglings
+    are unique by construction. Returns ``()`` when no such marker is found
+    (an unmangled or non-Itanium name)."""
+    marker = "C1E" if is_ctor else "D1E"
+    idx = mangled.find(marker)
+    if idx == -1:
+        return ()
+    siblings = _CTOR_SIBLING_MARKERS if is_ctor else _DTOR_SIBLING_MARKERS
+    return tuple(mangled[:idx] + sib + mangled[idx + len(marker) :] for sib in siblings)
+
+
 def _member_symbols(node: dict[str, Any]) -> tuple[str, ...]:
     """A class-template instantiation's own emitted member symbols --
     ``node`` is the full-content ``ClassTemplateSpecializationDecl``, and
@@ -723,13 +768,25 @@ def _member_symbols(node: dict[str, Any]) -> tuple[str, ...]:
     direct child here but is never mistaken for one: a non-static field has
     no linkage and clang never gives it a ``mangledName``, so the existing
     ``isinstance(mangled, str) and mangled`` guard already excludes it
-    without kind-specific filtering."""
+    without kind-specific filtering.
+
+    A constructor/destructor child additionally contributes its sibling
+    Itanium manglings (``C2``, and for a destructor ``D0``/``D2``) -- see
+    :func:`_ctor_dtor_symbol_variants`."""
     symbols: list[str] = []
     for child in node.get("inner", []) or []:
-        if str(child.get("kind", "")) in _MEMBER_FUNCTION_KINDS | {"VarDecl"}:
+        kind = str(child.get("kind", ""))
+        if kind in _MEMBER_FUNCTION_KINDS | {"VarDecl"}:
             mangled = child.get("mangledName")
             if isinstance(mangled, str) and mangled:
                 symbols.append(_normalize_mangled(mangled))
+                if kind in ("CXXConstructorDecl", "CXXDestructorDecl"):
+                    symbols.extend(
+                        _normalize_mangled(v)
+                        for v in _ctor_dtor_symbol_variants(
+                            mangled, is_ctor=kind == "CXXConstructorDecl"
+                        )
+                    )
     return tuple(symbols)
 
 
