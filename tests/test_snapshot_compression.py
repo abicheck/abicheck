@@ -315,6 +315,12 @@ def test_gzip_header_has_no_embedded_filename_or_mtime(tmp_path):
     assert data[4:8] == b"\x00\x00\x00\x00"
     flags = data[3]
     assert not (flags & 0x08), "gzip FNAME flag must not be set (no embedded filename)"
+    # OS-identifier byte: CPython's gzip module disagrees on this across
+    # supported 3.10-3.14 interpreters (3 "Unix" vs. 255 "unknown") even with
+    # mtime pinned, so it's forced to 255 explicitly -- see _compress_gzip.
+    assert data[9] == 0xFF, (
+        "gzip OS byte must be forced to 255 (unknown) for cross-version determinism"
+    )
 
 
 # ── Atomic writes ────────────────────────────────────────────────────────

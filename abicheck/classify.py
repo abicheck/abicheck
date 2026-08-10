@@ -36,6 +36,7 @@ To add support for a new ABI snapshot format (e.g. libabigail JSON v2):
 
 Zero changes to ``cli.py`` are needed for either extension path.
 """
+
 from __future__ import annotations
 
 import logging
@@ -50,15 +51,18 @@ logger = logging.getLogger(__name__)
 # Helpers shared with cli.py
 # ---------------------------------------------------------------------------
 
+
 def _detect_binary_format(path: Path) -> str | None:
     """Delegate to the existing binary-format detector (ELF/PE/Mach-O)."""
     from .binary_utils import detect_binary_format
+
     return detect_binary_format(path)
 
 
 def _looks_like_perl_dump(head: str) -> bool:
     """Return True if the text looks like an ABICC Perl dump."""
     from .compat.abicc_dump_import import looks_like_perl_dump
+
     return looks_like_perl_dump(head)
 
 
@@ -80,6 +84,7 @@ def _sniff_head(path: Path) -> str:
 # Base classifier
 # ---------------------------------------------------------------------------
 
+
 class FileClassifier(ABC):
     """Single-responsibility file classifier.
 
@@ -90,13 +95,13 @@ class FileClassifier(ABC):
     """
 
     @abstractmethod
-    def accepts(self, path: Path) -> bool | None:
-        ...
+    def accepts(self, path: Path) -> bool | None: ...
 
 
 # ---------------------------------------------------------------------------
 # Concrete classifiers
 # ---------------------------------------------------------------------------
+
 
 class BinaryExtensionClassifier(FileClassifier):
     """Fast accept based on known binary file extensions.
@@ -179,6 +184,43 @@ class AbiJsonClassifier(FileClassifier):
         return any(pat.search(head) for _, pat in self.FINGERPRINTS) or False
 
 
+class CompressedAbiJsonClassifier(FileClassifier):
+    """Accept gzip/zstd-compressed ABI snapshots (ADR-059).
+
+    Mirrors :class:`AbiJsonClassifier`'s fingerprint check, but reads a
+    bounded *decoded* prefix (:func:`abicheck.snapshot_io.
+    bounded_decoded_prefix`) instead of the raw file bytes, so a directory
+    of ``*.abicheck.json.gz``/``*.abicheck.json.zst`` release assets is
+    discovered the same way a plain ``.json`` one is — never a full
+    decompression just to classify the file, and never misrouting an
+    unrelated compressed archive (a baseline-set ``.tar.zst``, which does
+    not decode to a leading ``{`` fingerprint match).
+    """
+
+    def accepts(self, path: Path) -> bool | None:
+        from .snapshot_io import (
+            SnapshotCompression,
+            bounded_decoded_prefix,
+            detect_snapshot_compression,
+        )
+
+        try:
+            compression = detect_snapshot_compression(path)
+        except Exception:
+            return None
+        if compression is SnapshotCompression.NONE:
+            return None  # not a compressed file at all; let other classifiers try
+        prefix = bounded_decoded_prefix(path, AbiJsonClassifier._JSON_PROBE_BYTES)
+        if prefix is None:
+            return (
+                False  # recognizably compressed but undecodable -- reject, don't guess
+            )
+        head = prefix.decode("utf-8", errors="replace")
+        return (
+            any(pat.search(head) for _, pat in AbiJsonClassifier.FINGERPRINTS) or False
+        )
+
+
 class PerlDumpClassifier(FileClassifier):
     """Accept ``.pl`` / ``.pm`` files that look like ABICC Perl dumps."""
 
@@ -211,9 +253,14 @@ class FallbackSniffClassifier(FileClassifier):
                         "utf-8", errors="replace"
                     )
             except OSError as exc:
-                logger.warning("classify: cannot read fallback JSON candidate %s: %s", path, exc)
+                logger.warning(
+                    "classify: cannot read fallback JSON candidate %s: %s", path, exc
+                )
                 return False
-            return any(pat.search(probe) for _, pat in AbiJsonClassifier.FINGERPRINTS) or False
+            return (
+                any(pat.search(probe) for _, pat in AbiJsonClassifier.FINGERPRINTS)
+                or False
+            )
         return False
 
 
@@ -225,6 +272,7 @@ _PIPELINE: list[FileClassifier] = [
     BinaryExtensionClassifier(),
     MagicByteClassifier(),
     AbiJsonClassifier(),
+    CompressedAbiJsonClassifier(),
     PerlDumpClassifier(),
     FallbackSniffClassifier(),
 ]
@@ -233,6 +281,7 @@ _PIPELINE: list[FileClassifier] = [
 # ---------------------------------------------------------------------------
 # Public API
 # ---------------------------------------------------------------------------
+
 
 def is_supported_compare_input(path: Path) -> bool:
     """Return ``True`` if *path* is a valid compare-release ABI input.

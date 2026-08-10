@@ -427,7 +427,19 @@ def bounded_decoded_prefix(path: str | Path, n: int = _SNIFF_BYTES) -> bytes | N
 
 
 def _compress_gzip(data: bytes) -> bytes:
-    return gzip.compress(data, compresslevel=GZIP_COMPRESSLEVEL, mtime=0)
+    encoded = bytearray(gzip.compress(data, compresslevel=GZIP_COMPRESSLEVEL, mtime=0))
+    # Byte 9 of the gzip header is the OS-identifier field. mtime=0 fixes the
+    # mtime bytes deterministically, but the OS byte is not otherwise pinned:
+    # CPython's gzip module takes different internal code paths across
+    # supported versions (a direct zlib.compress(..., wbits=31) fast path on
+    # some, GzipFile-based framing on others), and they disagree on this byte
+    # -- confirmed empirically (3 "Unix" vs. 255 "unknown" across supported
+    # 3.10-3.14 interpreters). Force it to 255 (unknown/not specified, the
+    # conventional cross-platform-safe value) unconditionally so stored bytes
+    # -- and therefore stored_sha256 -- are identical for identical input
+    # regardless of which Python produced them, not just within one version.
+    encoded[9] = 0xFF
+    return bytes(encoded)
 
 
 def _compress_zstd(data: bytes, *, level: int) -> bytes:
