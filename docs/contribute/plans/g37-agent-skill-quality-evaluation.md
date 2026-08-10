@@ -489,29 +489,43 @@ retains reports from earlier calls: `cli_compare_release.py` creates it with
 current comparison, clearing nothing. Capturing everything present would
 attribute an earlier call's per-library report to this one, and replay would
 accept it as this call's evidence — the same misattribution the per-call
-snapshot exists to prevent, reintroduced one level up. So the shim gives the child a **private
-output directory** and copies its contents into the requested path when the
-child exits, keeping the private directory as the call's snapshot. Content
-comparison alone cannot do this job: it misses a rewrite that produces
-byte-identical output (an agent repeating the same comparison writes the same
-report, so no digest moves and the call's own evidence would be dropped), and
-mtime comparison misses a rewrite inside the filesystem's timestamp
-granularity. Both failures are silent, and no refinement of "diff the
-directory" separates a file this call wrote from one an earlier call left —
-that information does not exist in the directory's state. Redirecting supplies
-it directly: whatever lands in the private directory is exactly what this call
-produced.
+snapshot exists to prevent, reintroduced one level up. So the shim redirects **every output path the call names** — `-o`/`--output`
+and `--output-dir` alike — to a per-call private location, and copies the
+result back to the requested path when the child exits, keeping the private
+copy as the snapshot. Content comparison alone cannot do this job: it misses a
+rewrite that produces byte-identical output (an agent repeating the same
+comparison writes the same report, so no digest moves and the call's own
+evidence would be dropped), and mtime comparison misses a rewrite inside the
+filesystem's timestamp granularity. A failed call is worse than either — it
+writes nothing, so a post-hoc snapshot of the requested path captures the
+*previous* call's file and attributes it to the failure. None of these are
+fixable by comparing the directory before and after, because "which file did
+this call write" is not information the directory's state contains.
+Redirection supplies it directly.
 
-An earlier draft rejected redirection because the agent reads the requested
-path back in later steps. Copying back on exit removes that objection — the
-agent sees the requested path populated exactly as a real run leaves it
-(pre-existing files retained, since `cli_compare_release.py` clears nothing,
-plus this call's own outputs written over them). The cost is honest and worth
-naming: the real abicheck receives a rewritten `--output-dir` argument, so the
-recorded argv shows the private path. The record therefore keeps both — what
-the agent asked for and where it was redirected — so dimension 1's
-invocation-shape check reads the agent's own argument, not the harness's
-substitution.
+**Redirection is visibly imperfect, and the plan states the cost rather than
+claiming the copy-back erases it.** An earlier draft asserted the agent sees
+the requested path exactly as a real run leaves it. That is false in one
+observable way: abicheck prints paths. `cli_compare_release.py` emits
+`Per-library reports written to {output_dir}/` on stderr, so a naive redirect
+puts the harness's private path in front of the agent, which may then read or
+report it. Two mechanisms close that, and Phase 1 picks between them against a
+real runner rather than this plan guessing:
+
+- **Path substitution on the teed streams** — replace the private prefix with
+  the requested one on the way out. Cheap and portable, but it makes the shim
+  edit what the agent sees, so the substitution count is recorded in the call
+  record; a grader can then tell a clean run from one where a path was emitted
+  in a form the substitution did not match.
+- **A filesystem view** (bind mount / overlay) that makes the requested path
+  itself resolve to per-call private storage. Nothing is rewritten and the
+  child's own argument is untouched, which is strictly better where the
+  platform and privileges allow it — and not available everywhere, which is
+  why it is not the only option.
+
+Either way the record keeps both the requested and the effective path, so
+dimension 1's invocation-shape check reads the agent's own argument rather
+than the harness's substitution.
 
 ### D4 — The rubric, and which dimensions gate how
 
@@ -929,9 +943,10 @@ comparisons — the gating `skill-agent:` vs `baseline` and the reported
 ### Phase 6 — Publication gate *(S)*
 
 G36 P1.4's publication precondition becomes a check: publication requires a
-fresh per-skill hashes across every published skill, a **source digest matching
-the commit being published** (D6 — the narrow surface hash is not sufficient
-here), a complete evidence set for the full suite, zero failures on
+fresh per-skill hashes across every published skill, an `abicheck/` **tree digest equal to the one at
+the published commit** (D6 — the narrow surface hash is not sufficient here,
+and the digest is over the engine tree so committing the evidence itself
+cannot invalidate it), a complete evidence set for the full suite, zero failures on
 dimensions 2 and 6, dimensions 1/3/4/5 at or
 above baseline, and a Phase 5 scorecard showing non-negative lift on
 **`skill-agent:` vs `baseline`** — D7's declared deployment comparator. The
@@ -1034,13 +1049,18 @@ corresponds to anything.
 So Phase 0 carries **two** round-trip checks over one list of inputs:
 
 1. **Completeness** — every input a run reads contributes to some hash the
-   freshness check reads. **The list is declared by the runner, not by this
-   plan**: an enumeration in prose has now been found short three times
-   (fixtures, then the trigger corpus, then the harness's own prompt and
-   agent-version configuration), each time because a real input existed that
-   nobody had written down. The runner therefore emits its input set with each
-   bundle, and the check verifies that set is fully covered by hashes — so a
-   newly-read input is caught by construction rather than by the next reviewer.
+   freshness check reads. **The list is observed, not declared**: an enumeration
+   in prose was found short three times (fixtures, then the trigger corpus,
+   then the harness's own prompt and agent-version configuration), each time
+   because a real input existed that nobody had written down — and a runner
+   *self-reporting* its inputs has the identical failure mode one level up, as
+   a runner that starts reading a new config file and forgets to add it to its
+   own declaration produces a fully-hashed declared set and stale evidence
+   that passes. So every input reaches the runner through one accessor that
+   records what it read, the bundle carries that observed set, and a test
+   asserts no runner or shim module opens a file outside it — the same shape
+   as this repository's existing `banned-imports` check. A self-report would
+   recreate exactly the gap this mechanism exists to close.
 2. **Mapping** — every such hash resolves to a set of skills, so a moved hash
    always nominates something to re-run.
 
