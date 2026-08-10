@@ -201,9 +201,9 @@ satisfied (see below); criterion 2 is the actual blocker:
    (`PUBLIC_API_IMPACT_PROOF_PATH_CHANGED` and its siblings) already shows
    this needs Phase B's canonical-identity work in place first if the
    compile-probe result is to be linked to a specific graph proof path — so
-   a future proposal should cross-reference [ADR-048](048-canonical-entity-
-   identity-and-graph-reconciliation.md) rather than treat the probe layer
-   as independent of it.
+   a future proposal should cross-reference
+   [ADR-048](048-canonical-entity-identity-and-graph-reconciliation.md)
+   rather than treat the probe layer as independent of it.
 
 ## Consequences
 
