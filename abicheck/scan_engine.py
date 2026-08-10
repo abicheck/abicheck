@@ -1078,13 +1078,25 @@ def run_scan_core(
                 exit_code = sev_exit
                 # Keep the reported verdict in sync with the promoted exit code so a
                 # consumer keying off the verdict string isn't misled (Codex review).
-                # `_run_baseline_compare` ties exit_code to verdict exactly
-                # (BREAKING->4, API_BREAK->2, else->0), and `sev_exit` is at
-                # most 2, so `sev_exit > exit_code` only holds when
-                # exit_code was 0 -- i.e. verdict is already one of these
-                # three non-breaking values. Never downgrades a real
-                # BREAKING/API_BREAK from the artifact diff.
-                verdict = "API_BREAK"
+                # `_run_baseline_compare` used to tie exit_code to verdict exactly
+                # (BREAKING->4, API_BREAK->2, else->0), so `sev_exit > exit_code`
+                # only held when exit_code was 0 -- i.e. verdict was already one of
+                # the three non-breaking values, and relabeling it "API_BREAK" was
+                # always a genuine promotion.
+                #
+                # That invariant broke once `exit_code_scheme == "severity"`
+                # started feeding `_run_baseline_compare` (Codex review): a
+                # `--severity-preset info-only` run can leave a genuinely
+                # BREAKING/API_BREAK diff at exit 0, so `exit_code == 0` no longer
+                # implies the verdict was non-breaking. Raise the promoted exit
+                # code either way (a maintainer-promoted cross-check must still
+                # gate), but only relabel the verdict when it wasn't already
+                # BREAKING/API_BREAK -- else a severity-demoted BREAKING diff
+                # would be misreported as the *less* severe API_BREAK merely
+                # because its own severity-gated exit happened to be lower than
+                # the cross-check's.
+                if verdict not in ("BREAKING", "API_BREAK"):
+                    verdict = "API_BREAK"
         _record_stage("baseline_compare", _stage)
     else:
         if baseline is not None:

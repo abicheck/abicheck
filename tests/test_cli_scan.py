@@ -714,6 +714,61 @@ def test_baseline_compare_promoted_crosscheck_still_gates(runner, tmp_path):
     assert payload["verdict"] == "API_BREAK"
 
 
+def test_severity_demoted_breaking_verdict_survives_crosscheck_promotion(
+    runner, tmp_path
+):
+    # Codex review: the promoted-crosscheck block used to assume
+    # `sev_exit > exit_code` only holds when `exit_code == 0` implies the
+    # diff verdict was already non-breaking (true under the legacy scheme,
+    # where BREAKING always maps to exit 4). `--severity-preset info-only`
+    # breaks that assumption -- a genuinely BREAKING diff can now exit 0 --
+    # so a promoted crosscheck (exit 2) must still raise the exit code, but
+    # must NOT relabel the verdict "API_BREAK": that would understate a real
+    # BREAKING diff as the less severe API_BREAK.
+    old = _header_context_mismatch_snap(tmp_path, "old.abi.json")
+    # Same crosscheck-triggering shape as `old`, but with `bar` removed --
+    # a hard ABI break -- so the baseline diff verdict is BREAKING.
+    from abicheck.buildsource.build_evidence import BuildEvidence, BuildOption
+    from abicheck.buildsource.pack import BuildSourcePack
+
+    new_snap = AbiSnapshot(
+        library="libfoo.so",
+        version="2.0",
+        from_headers=True,
+        parsed_with_build_context=False,
+        functions=[],
+        elf=_elf(),
+    )
+    new_snap.build_source = BuildSourcePack(
+        root=Path(""),
+        build_evidence=BuildEvidence(
+            build_options=[
+                BuildOption(key="glibcxx_use_cxx11_abi", value="1", abi_relevant=True)
+            ]
+        ),
+    )
+    new = _write_snapshot(tmp_path / "new.abi.json", new_snap)
+
+    res = runner.invoke(
+        main,
+        [
+            "scan",
+            str(new),
+            "--against",
+            str(old),
+            "--crosscheck",
+            "header_build_context_mismatch=error",
+            "--severity-preset",
+            "info-only",
+            "--format",
+            "json",
+        ],
+    )
+    assert res.exit_code == 2, res.output
+    payload = _payload(res)
+    assert payload["verdict"] == "BREAKING"
+
+
 def _snap_with_build_flag(tmp_path: Path, name: str, value: str) -> Path:
     # Embed an L3 build-evidence pack carrying one ABI-relevant define, so a
     # baseline compare exercises the embedded-source diff path (no compiler).
