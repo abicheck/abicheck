@@ -430,3 +430,50 @@ def test_two_asm_labeled_instantiations_never_merge_onto_one_node() -> None:
         ("template_instantiation://__Zfake", "binary_symbol://__Zfake"),
         ("template_instantiation://_Zfake", "binary_symbol://_Zfake"),
     }
+
+
+def test_decltype_auto_nttp_bare_value_argument_instantiation_is_skipped() -> None:
+    """A ``decltype(auto)`` non-type template parameter (``template
+    <decltype(auto) V> struct A;``) has the identical bare-``{"value": N}``
+    ambiguity as a plain ``auto`` NTTP (see ``test_auto_nttp_bare_value_
+    argument_instantiation_is_skipped_not_merged`` in the parent file), but
+    clang spells its own ``NonTypeTemplateParmDecl.type.qualType`` as
+    ``"decltype(auto)"``, not ``"auto"`` -- verified empirically against
+    real clang 20 AST output (Codex review, fresh evidence, second round on
+    this same guard): an exact ``== "auto"`` check missed this spelling
+    entirely, so ``A<E1::X>``/``A<E2::X>`` (two distinct scoped enums
+    sharing the same underlying value) still reduced to the identical
+    ambiguous label ``"A<0>"`` and collapsed onto one node. Fixed by
+    matching the substring ``"auto"`` instead of exact equality, covering
+    ``"decltype(auto)"`` (and any cv/ref/pointer-decorated form) too."""
+
+    def a_spec(spec_id: str) -> dict:
+        return {
+            "id": spec_id,
+            "kind": "ClassTemplateSpecializationDecl",
+            "name": "A",
+            "completeDefinition": True,
+            "inner": [{"kind": "TemplateArgument", "value": 0}],
+        }
+
+    ast = {
+        "kind": "TranslationUnitDecl",
+        "inner": [
+            {
+                "kind": "ClassTemplateDecl",
+                "name": "A",
+                "inner": [
+                    {
+                        "kind": "NonTypeTemplateParmDecl",
+                        "name": "V",
+                        "type": {"qualType": "decltype(auto)"},
+                    },
+                    {"kind": "CXXRecordDecl", "name": "A", "inner": []},
+                    a_spec("0xA_E1"),
+                    a_spec("0xA_E2"),
+                ],
+            },
+        ],
+    }
+    out = parse_clang_ast_templates(ast)
+    assert out == []

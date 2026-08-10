@@ -445,8 +445,21 @@ def _long_name_at(table: bytes, index: int) -> str | None:
     Returns ``None`` for an out-of-range index rather than raising — a
     single unresolvable name degrades that one member, it does not make the
     archive unparseable.
-    """
+
+    *index* must name the *start* of an entry -- offset 0, or the byte
+    immediately after a preceding entry's own ``\\n`` terminator -- not an
+    arbitrary mid-entry byte position (Codex review, fresh evidence,
+    confirmed empirically): a real archive's own ``/<index>`` references
+    always name a genuine entry start, but a crafted one pointing into the
+    *middle* of another entry (e.g. offset 1 into ``b"xfoo/\\n"``) previously
+    resolved to a fabricated ``"foo"`` -- a real-looking, but entirely
+    smuggled, member name silently accepted rather than flagged as
+    malformed. The identical boundary check `_bsd_symbol_index` already
+    applies to a BSD ``str_off`` reference, applied here to its GNU
+    counterpart."""
     if index < 0 or index >= len(table):
+        return None
+    if index != 0 and table[index - 1] != 0x0A:
         return None
     end = table.find(b"\n", index)
     raw = table[index:] if end == -1 else table[index:end]

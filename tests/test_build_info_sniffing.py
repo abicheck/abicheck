@@ -139,7 +139,11 @@ def test_bazel_aquery_with_sources_anchors_directory(tmp_path: Path) -> None:
     ``_default_archive_search_roots`` has a real root to try a relative
     archive link-input path against (Codex review, fresh evidence: this was
     previously threaded only through the inferred-query path, never through
-    a pre-captured ``--build-info`` aquery/cquery)."""
+    a pre-captured ``--build-info`` aquery/cquery). Asserts the *suffix*, not
+    exact equality: ``DEFAULT_REDACTION`` replaces the runner's own home
+    directory with ``~``, and CI's own ``tmp_path`` genuinely falls under it
+    on Windows (unlike a typical Linux ``/tmp`` sandbox) -- exact equality
+    passed locally but failed on the ``windows-latest`` CI lane."""
     merged = BuildEvidence()
     workspace = tmp_path / "ws"
     workspace.mkdir()
@@ -148,7 +152,9 @@ def test_bazel_aquery_with_sources_anchors_directory(tmp_path: Path) -> None:
     )
     assert routed is True
     assert merged.compile_units
-    assert merged.compile_units[0].directory == str(workspace.resolve())
+    directory = merged.compile_units[0].directory
+    assert directory
+    assert directory.replace("\\", "/").endswith("/ws")
 
 
 def test_bazel_cquery_routed_to_adapter(tmp_path: Path) -> None:

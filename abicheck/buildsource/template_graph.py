@@ -674,38 +674,39 @@ def _primary_pattern_member_locs(
 
 def _class_template_has_auto_nttp(class_template_node: dict[str, Any]) -> bool:
     """Whether *class_template_node* (a ``ClassTemplateDecl``) declares a
-    non-type template parameter (``NonTypeTemplateParmDecl``) via ``auto``
-    (e.g. ``template <auto V> struct A;``) -- the signal
-    :func:`parse_clang_ast_templates`'s class-instantiation loop needs to
-    know a specialization's own NTTP argument spelling can't be trusted as
-    a unique identity (Codex review, confirmed against clang 18): for an
-    ``auto`` NTTP whose deduced type is a scoped-enum, clang's dump
-    serializes the ``TemplateArgument`` as bare ``{"value": 1}`` -- no
-    ``type`` field, nothing distinguishing an argument's *deduced* type at
-    all -- so ``A<E1::X>``/``A<E2::X>`` (two different enum types sharing
-    the same underlying value) both reduce to the identical label
-    ``"A<1>"`` and collide onto the same ``template_instantiation`` node,
-    merging their genuinely distinct emitted-symbol edges. A concrete,
-    non-``auto`` NTTP carries no such ambiguity -- its type is fixed and
-    known from the parameter declaration, so the identical bare
-    ``{"value": N}`` shape means the identical argument every time; only
-    the ``auto`` case is deliberately checked, not every bare-``value``
-    shape (that would needlessly discard the common, unambiguous case too).
+    non-type template parameter (``NonTypeTemplateParmDecl``) via a deduced
+    placeholder type -- ``auto``, ``decltype(auto)``, or a decorated form of
+    either -- the signal :func:`parse_clang_ast_templates`'s class-
+    instantiation loop needs to know a specialization's own NTTP argument
+    spelling can't be trusted as a unique identity: for a deduced-
+    placeholder NTTP whose deduced type is a scoped-enum, clang's dump
+    serializes the argument as bare ``{"value": 1}`` -- so ``A<E1::X>``/
+    ``A<E2::X>`` (different enum types, same value) both reduce to
+    identical label ``"A<1>"`` and collide, merging distinct emitted-
+    symbol edges. A concrete, non-deduced NTTP has no such ambiguity --
+    only the deduced-placeholder case is checked, not every bare value.
+
+    Matched by substring, not exact equality (Codex review, second round):
+    clang spells this several ways -- bare ``"auto"``, ``"decltype(auto)"``
+    (an exact ``== "auto"`` check missed this, confirmed via a real repro),
+    and decorated forms (``"auto &"``, ``"auto *"``). A false-positive
+    substring match only means conservatively skipping.
 
     **Class instantiations only** -- a ``FunctionTemplateDecl`` with its own
-    ``auto`` NTTP has the identical ambiguity, and this helper isn't applied
-    there (CodeRabbit nitpick, confirmed real but low-impact): a function
-    instantiation's own node identity already keys on its unique mangled
-    name, not the label, so two ambiguous NTTP arguments still mint
+    deduced-placeholder NTTP has the identical ambiguity, and this helper
+    isn't applied there (CodeRabbit nitpick, confirmed real but low-impact):
+    a function instantiation's node identity already keys on its unique
+    mangled name, not the label, so two ambiguous NTTP arguments still mint
     distinct, correctly-joined nodes -- only the cosmetic label collides,
-    and the shared ``template_decl`` node is semantically correct anyway. A
-    ``FunctionTemplateDecl`` equivalent needs its own verification pass,
-    deferred rather than added as a drive-by extension here."""
+    and the shared ``template_decl`` node is correct anyway. A
+    ``FunctionTemplateDecl`` equivalent needs its own verification pass."""
     for child in class_template_node.get("inner", []) or []:
         if str(child.get("kind", "")) != "NonTypeTemplateParmDecl":
             continue
         param_type = child.get("type")
-        if isinstance(param_type, dict) and param_type.get("qualType") == "auto":
+        if isinstance(param_type, dict) and "auto" in str(
+            param_type.get("qualType") or ""
+        ):
             return True
     return False
 

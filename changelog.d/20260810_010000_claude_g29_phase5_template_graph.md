@@ -964,3 +964,29 @@
   identity probe, already tracked as separate, deferred work (AGENTS.md's
   "toolchain profile" known-gaps entry). Strengthened the docstring with
   the concrete repro rather than leaving the gap only abstractly described.
+
+  A fourth Codex round found and fixed two more real gaps, both confirmed
+  empirically. First, `_class_template_has_auto_nttp`'s exact `qualType ==
+  "auto"` check missed every other deduced-placeholder NTTP spelling --
+  confirmed via a real `template <decltype(auto) V>` repro: clang serializes
+  its own `NonTypeTemplateParmDecl.type.qualType` as `"decltype(auto)"`, not
+  `"auto"`, so `A<E1::X>`/`A<E2::X>` (two distinct scoped enums sharing the
+  same underlying value) both still reduced to the identical, ambiguous bare
+  `{"value": 0}` argument and collapsed onto one `template_instantiation`
+  node -- exactly the merge the `auto` guard exists to prevent. Also
+  confirmed `"auto &"`/`"auto *"` as further real spellings (`auto&`/
+  `const auto`/`auto*` NTTP declarators). Fixed by matching the substring
+  `"auto"` rather than exact equality -- a false-positive match only means
+  conservatively skipping one instantiation, this module's existing safe
+  direction, not fabricating a wrong identity.
+
+  Second, `archive_graph.py`'s `_long_name_at` (GNU `//` long-name-table
+  resolution) accepted any in-range byte offset as a valid entry start,
+  including a mid-entry offset -- confirmed via a real repro: offset 1 into
+  `b"xfoo/\n"` resolved to the plausible-looking but entirely spoofed name
+  `"foo"`, the same "smuggled substring accepted as a real entry" class of
+  bug already closed for the BSD symbol index's own `str_off` reference
+  earlier in this changelog. Fixed by requiring the offset to be either 0
+  or immediately after a preceding entry's own `\n` terminator -- the
+  identical boundary check `_bsd_symbol_index` already applies, ported to
+  its GNU counterpart.

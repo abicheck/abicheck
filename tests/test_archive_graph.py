@@ -38,6 +38,7 @@ from abicheck.buildsource.archive_graph import (
     ArchiveFormatError,
     ArchiveGraphResult,
     BytesReader,
+    _long_name_at,
     archive_member_node_id,
     augment_graph_with_archives,
     defining_members,
@@ -251,6 +252,52 @@ def test_parse_archive_with_gnu_long_names() -> None:
         ("alpha", long_name),
         ("beta", "b.o"),
     ]
+
+
+def test_long_name_at_rejects_a_mid_entry_offset() -> None:
+    """A real GNU ``/<index>`` reference always names the *start* of a
+    ``//`` long-name-table entry -- either offset 0 or immediately after a
+    preceding entry's own ``\\n`` terminator. A malformed/hostile
+    reference pointing one byte into ``b"xfoo/\\n"`` previously decoded as
+    the plausible-looking but entirely spoofed name ``"foo"`` instead of
+    being rejected as malformed (Codex review, fresh evidence) -- the same
+    boundary check ``_bsd_symbol_index`` already applies to a BSD
+    ``str_off`` reference, applied here to its GNU counterpart."""
+    table = b"xfoo/\n"
+    assert _long_name_at(table, 1) is None
+    assert _long_name_at(table, 0) == "xfoo"
+
+    two_entries = b"foo.o/\nbar.o/\n"
+    assert _long_name_at(two_entries, 8) is None  # 1 byte into "bar.o/\n"
+    assert _long_name_at(two_entries, 7) == "bar.o"  # the real second entry
+
+
+def test_gnu_long_name_reference_into_middle_of_another_entry_is_rejected() -> None:
+    """End-to-end: a member whose name field is a GNU ``/<index>`` pointing
+    into the middle of another ``//`` table entry must be dropped as
+    unresolvable -- the same degradation an unresolvable name already gets
+    elsewhere in this parser -- never fabricate a spoofed name from the
+    smuggled substring (Codex review, fresh evidence). A sibling member
+    with an ordinary short name must be unaffected."""
+    long_name_table = b"foo.o/\nbar.o/\n"
+    spoofed_data = b"SYM:spoofed\n"
+    real_data = b"SYM:real\n"
+    # "/8" points one byte into the second entry ("bar.o/\n" starts at 7) --
+    # not a real long-name reference any producer would ever write.
+    members = (
+        _header("//", len(long_name_table))
+        + _pad(long_name_table)
+        + _header("/8", len(spoofed_data))
+        + _pad(spoofed_data)
+        + _header("real.o", len(real_data))
+        + _pad(real_data)
+    )
+    data = ARCHIVE_MAGIC + members
+    contents = parse_ar_archive(BytesReader(data))
+    # The malformed reference's member is dropped entirely, not kept under
+    # a fabricated "bar"/"ar.o"-shaped name -- only the legitimate member
+    # survives.
+    assert [m.name for m in contents.members] == ["real.o"]
 
 
 def test_parse_thin_archive() -> None:
