@@ -58,9 +58,19 @@ abicheck compare OLD NEW \
 ## Plugin branch, in practice
 
 ```bash
-abicheck compare OLD NEW --required-symbols host-contract.txt --format json
+abicheck compare OLD NEW --required-symbols host-contract.txt \
+  --header old=../old-side/include/plugin_api.h \
+  --header new=include/plugin_api.h \
+  --include old=../old-side/include/ --include new=include/ \
+  --depth headers --format json
 ```
 
+- **Headers are not optional here**, and neither is checking that they were
+  read. Without them a native binary falls back to symbols-only, so a plugin
+  that keeps exporting the required symbol while changing its signature — or
+  the layout of a struct passed through it — looks unchanged. Require
+  `evidence_tier: header_aware` before accepting a pass; the parent skill's
+  step 2B owns this rule.
 - The required list is the host's contract. If the user cannot produce one,
   that itself is the finding: the boundary is undocumented, and no tool can
   verify an undeclared contract.

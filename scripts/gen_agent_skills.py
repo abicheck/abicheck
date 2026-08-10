@@ -159,6 +159,17 @@ _FENCE_RE = re.compile(
 )
 _INLINE_CODE_RE = re.compile(r"(?<!`)(`+)(?!`)(.+?)(?<!`)\1(?!`)", re.DOTALL)
 
+#: A fence opened inside a block quote (`> ```md`). `_FENCE_RE` anchors on the
+#: line start and does not know about container prefixes, so such a block is
+#: never masked and its examples are rewritten as prose.
+#:
+#: Rejected rather than supported, deliberately. Handling containers properly
+#: means real block-level parsing — quotes nest, hold lists, and continue
+#: lazily — and a *partial* container parser is worse than none here: it can
+#: mask the wrong span and leave a genuine link unrewritten, which fails
+#: silently. Same rule as every other construct the rewrite cannot handle.
+_BLOCKQUOTED_FENCE_RE = re.compile(r"^ {0,3}(?:> ?)+ {0,3}(?:`{3,}|~{3,})", re.M)
+
 #: Placeholder body — `\x00` cannot occur in a Markdown source, so a masked
 #: region is invisible to every link pattern and cannot be produced by one.
 _MASK = "\x00m{index}\x00"
@@ -609,6 +620,22 @@ def _render(
     docs_dir = DOCS_DIR if docs_dir is None else docs_dir
     text = source_path.read_text(encoding="utf-8")
     front_matter, body = _split_front_matter(text)
+
+    # Checked *before* masking, unlike every other guard. A backtick fence in
+    # a block quote is incidentally covered by inline-code pairing, so after
+    # masking only the tilde form is still visible — rejecting both requires
+    # looking at the raw body. Relying on that accident for the backtick form
+    # would be fragile besides.
+    quoted_fence = _BLOCKQUOTED_FENCE_RE.search(body)
+    if quoted_fence is not None:
+        line = body.count("\n", 0, quoted_fence.start()) + 1
+        raise SkillGenerationError(
+            f"{source_path}: line ~{line}: fenced code block inside a block "
+            "quote. The mask anchors on the line start and does not read "
+            "container prefixes, so the block would be processed as prose and "
+            "its example links rewritten. Move the example out of the quote."
+        )
+
     # Code examples are literal content: their link syntax must be neither
     # rewritten nor validated. Everything below operates on masked text.
     body, code_regions = mask_code_regions(body)

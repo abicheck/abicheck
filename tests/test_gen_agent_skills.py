@@ -359,6 +359,28 @@ def test_a_fence_running_to_end_of_file_is_still_masked(synthetic, opener):
     assert "[example](../../docs/use/cli-usage.md)" in rendered
 
 
+@pytest.mark.parametrize("fence", ["```md", "~~~md"], ids=["tick", "tilde"])
+def test_a_fence_inside_a_block_quote_is_a_hard_error(synthetic, fence):
+    """The mask anchors on the line start and does not read container
+    prefixes, so a blockquoted fence would be processed as prose. Rejected
+    rather than partially supported: a half-built container parser can mask
+    the wrong span and leave a genuine link unrewritten, which fails
+    silently."""
+    synthetic(
+        skills={
+            "demo": {
+                "SKILL.md": (
+                    "---\nname: demo\n---\n\n[a](../shared/a.md)\n\n"
+                    f"> {fence}\n> [example](../../docs/use/cli-usage.md)\n> ```\n"
+                )
+            }
+        },
+        shared={"a.md": "# A\n"},
+    )
+    with pytest.raises(gen.SkillGenerationError, match="block\nquote|block quote"):
+        gen.render_all(gen.SRC_DIR)
+
+
 def test_a_tilde_run_does_not_close_a_backtick_fence(synthetic):
     """The delimiter character must be consistent: `~~~` cannot close a
     backtick fence, so the block runs on and its content stays masked."""
