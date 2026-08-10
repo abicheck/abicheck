@@ -219,7 +219,7 @@ contract without ever calling a model.
 
 | Where | Trigger | Needs | Contains | Blocking |
 |---|---|---|---|---|
-| `pr` profile (CI) | every PR | nothing beyond `[dev]` | L0, L1s, pack build `--check`, scenario-manifest validity, fixture resolution, shim unit tests, **L4 replay grading of golden transcripts**, **replay grading of the committed evidence bundles**, **D6 freshness** | yes, required |
+| `pr` profile (CI) | every PR | these steps need nothing beyond `[dev]` (the profile as a whole still needs `[dev,docs,dist]` for its pre-existing `docs-build`/`distribution-build` steps — see AGENTS.md) | L0, L1s, pack build `--check`, scenario-manifest validity, fixture resolution, shim unit tests, **L4 replay grading of golden transcripts**, **replay grading of the committed evidence bundles**, **D6 freshness** | yes, required |
 | `run_skill_eval.py` (off-CI) | a maintainer, on demand | agent binary + model credentials + network | L1l, L2 live runs at `k=3`, producing committed bundles | not a check — it *produces* what CI checks |
 | agent-benchmark (off-CI, other repo) | on demand | full LLM provider matrix | L3 arms, cost, cross-model variance, scorecard | no — a publication precondition, checked as an artifact |
 
@@ -446,8 +446,18 @@ release workflow `native-release-compatibility/SKILL.md` teaches drives
 writes a per-library report per library plus a summary. Those files are
 overwritten or replaced by the next invocation exactly like a reused `-o`
 path, so a claim resting on one library's report would be unauditable from
-the bundle. The shim snapshots the directory's full contents, not just the
-files it can name from argv. **Requiring `-o` instead was
+the bundle. The shim snapshots that directory, but **only what this call actually
+produced** — not its full contents. A reused output directory legitimately
+retains reports from earlier calls: `cli_compare_release.py` creates it with
+`mkdir(parents=True, exist_ok=True)` and overwrites only the libraries in the
+current comparison, clearing nothing. Capturing everything present would
+attribute an earlier call's per-library report to this one, and replay would
+accept it as this call's evidence — the same misattribution the per-call
+snapshot exists to prevent, reintroduced one level up. So the shim records the
+directory's entries and mtimes *before* spawning and captures only what is new
+or modified when the child exits. Redirecting each call to a private directory
+was rejected: the agent reads that path back in later steps, so relocating it
+would change the workflow being measured. **Requiring `-o` instead was
 rejected**: that would make the harness measure a command shape the skills do
 not teach, and the eval must exercise the workflow as published.
 
