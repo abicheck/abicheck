@@ -387,7 +387,15 @@ def _registered_external_pages(topics: dict[str, dict[str, object]]) -> list[Pat
     """Every registered `task_pages`/`allowed_summaries` entry that resolves
     outside `docs/`. `_check_front_matter_schema` scans `DOCS.rglob("*.md")`,
     so without this these pages' `summarizes` claims would sit in the registry
-    entirely unchecked."""
+    entirely unchecked.
+
+    Registry-derived by design, and deliberately not widened to every file
+    under `EXTERNAL_PAGE_ROOTS`: this feeds a `DOCS`-scoped scan whose callers
+    patch `DOCS` alone, so pulling real repo files in through `ROOT` would
+    make that scan depend on the working tree. The *unregistered* fragment
+    that claims a topic is caught by
+    `_check_external_pages_claim_only_registered_topics` instead.
+    """
     out: set[Path] = set()
     for entry in topics.values():
         if not isinstance(entry, dict):
@@ -625,6 +633,52 @@ def _page_links_to(path: Path, target_rel_to_docs: str) -> bool:
         if url and _resolve_href(path, url) == target_rel_to_docs:
             return True
     return False
+
+
+def _check_external_pages_claim_only_registered_topics(
+    f: Findings, topics: dict[str, dict[str, object]]
+) -> None:
+    """The page-to-registry direction for out-of-`docs/` fragments.
+
+    `_check_front_matter_schema` performs that round-trip, but only over pages
+    the registry already names — so a fragment declaring `summarizes: topic-x`
+    that was never added to `topic-x` is invisible to it, which is precisely
+    the violation it exists to catch. Scanned by tree here rather than by
+    registry, so an unregistered claim cannot hide by being unregistered.
+    """
+    for tree in EXTERNAL_PAGE_ROOTS:
+        for path in sorted((ROOT / tree).rglob("*.md")):
+            try:
+                fm = load_front_matter(path)
+            except (yaml.YAMLError, ValueError) as exc:
+                f.err("front-matter", f"{_rel(path)}: invalid front matter: {exc}")
+                continue
+            if not isinstance(fm, dict):
+                continue
+            claims = fm.get("summarizes")
+            for topic_id in (
+                [str(c) for c in claims] if isinstance(claims, list) else []
+            ):
+                entry = topics.get(topic_id)
+                if not isinstance(entry, dict):
+                    f.err(
+                        "front-matter",
+                        f"{_rel(path)}: summarizes unknown topic {topic_id!r}",
+                    )
+                    continue
+                registered = [
+                    str(v)
+                    for key in ("task_pages", "allowed_summaries")
+                    for v in (entry.get(key) or [])
+                ]
+                if not any(_page_key(v) == _scanned_page_key(path) for v in registered):
+                    f.err(
+                        "front-matter",
+                        f"{_rel(path)}: claims to summarize {topic_id!r} but is "
+                        f"not listed in that topic's task_pages/allowed_summaries "
+                        "— a page cannot grant itself permission to restate a "
+                        "topic",
+                    )
 
 
 def _check_external_summary_pages_claim_their_topics(
@@ -1193,6 +1247,7 @@ def main() -> int:
         _check_canonical_page_uniqueness(f, topics)
         _check_front_matter_schema(f, topics)
         _check_external_summary_pages_claim_their_topics(f, topics)
+        _check_external_pages_claim_only_registered_topics(f, topics)
         _check_canonical_pages_declare_ownership(f, topics)
     terms = _load_terminology(f)
     if terms is not None:

@@ -1538,6 +1538,37 @@ def test_registered_summary_entry_outside_the_approved_tree_is_rejected(
 
 
 @pytest.mark.parametrize(
+    "claim,expect_error",
+    [
+        ("a-topic", False),
+        ("some-other-topic", True),
+        ("no-such-topic", True),
+    ],
+    ids=["registered", "registered-topic-but-unlisted-page", "unknown-topic"],
+)
+def test_external_page_may_not_claim_a_topic_it_is_not_registered_for(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, claim: str, expect_error: bool
+) -> None:
+    """Page-to-registry, scanned by tree rather than by registry.
+
+    `_check_front_matter_schema` only visits pages the registry already names,
+    so a fragment claiming a topic it was never added to is invisible to it —
+    exactly the violation that round-trip exists to catch.
+    """
+    topics, fragment = _external_registry(tmp_path)
+    topics["some-other-topic"] = {"canonical_page": "learn/owner.md"}
+    fragment.write_text(
+        f"---\ndoc_type: reference\nsummarizes:\n  - {claim}\n---\n\n# F\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(dc, "ROOT", tmp_path)
+    monkeypatch.setattr(dc, "DOCS", tmp_path / "docs")
+    f = dc.Findings()
+    dc._check_external_pages_claim_only_registered_topics(f, topics)
+    assert bool(f.errors) is expect_error
+
+
+@pytest.mark.parametrize(
     "front_matter",
     ["", "---\ndoc_type: reference\n---\n", "---\nsummarizes:\n  - other\n---\n"],
     ids=["no-front-matter", "no-summarizes", "wrong-topic"],

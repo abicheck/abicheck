@@ -371,6 +371,11 @@ CHANGE_KIND_VALUES = {kind.value for kind in ChangeKind}
 #: references despite matching the candidate shape below. Kept explicit and
 #: minimal, the same way FOREIGN_LONG_OPTIONS is: the cost of a wrong entry
 #: here is a real field reference going unchecked.
+#: Extensions that make a dotted token a *filename* rather than a report field
+#: path — `summary.json`, `targets.json`, `.abicheck.yml`. Matched as a suffix
+#: rather than by name so a newly-cited artifact needs no allowlist entry.
+_FILENAME_SUFFIXES = (".json", ".yml", ".yaml", ".md", ".so", ".dylib", ".dll")
+
 NON_REPORT_IDENTIFIERS = frozenset(
     {
         # Mach-O LC_ID_DYLIB load-command fields, discussed by the
@@ -429,6 +434,11 @@ def test_every_cited_report_field_still_exists(path: Path):
         if "_" not in token and "." not in token and "[]" not in token:
             continue
         if token in NON_REPORT_IDENTIFIERS:
+            continue
+        if token.endswith(_FILENAME_SUFFIXES):
+            # A filename, not a dotted field path — `summary.json`,
+            # `targets.json`, `.abicheck.yml`. The dot that makes it look like
+            # a path is a file extension.
             continue
         if "." in token or "[]" in token:
             ok = _resolve_path(token)

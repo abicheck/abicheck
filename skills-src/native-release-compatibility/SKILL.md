@@ -142,10 +142,18 @@ produced per-target reports, fan in by pointing `aggregate` at the directory
 holding them:
 
 ```bash
-abicheck aggregate release-reports/ \
+abicheck aggregate matrix-reports/ \
   --manifest targets.json \
   --format json -o aggregate.json
 ```
+
+**`REPORTS_DIR` must hold per-target reports and nothing else.** `aggregate`
+loads *every* `*.json` in it, so do not point it at the directory-mode
+comparison's `--output-dir`: that directory also holds the release
+`summary.json` the fan-out writes, which `aggregate` would then read as an
+extra, unexpected target — distorting the matrix, or failing outright under
+`--on-unexpected-target fail`. Collect the per-target reports into their own
+directory.
 
 Two things are required, not optional, and omitting either exits 64:
 
@@ -233,11 +241,19 @@ Then check the axes that are not per-finding, reading each report per
 
 Given the matrix, the decision rule:
 
-- Any **`BREAKING`** cell in the shipped surface → **major bump and a new
-  ABI epoch** (SONAME on ELF, install name on Mach-O, DLL name on PE).
+- A **`BREAKING`** cell **backed by a binary-ABI finding** → **major bump and
+  a new ABI epoch** (SONAME on ELF, install name on Mach-O, DLL name on PE).
   Already-compiled consumers cannot survive it, so the loader-facing identity
-  must change. No amount of gate configuration alters this; it alters only
-  whether CI says so.
+  must change.
+
+  Check the findings, not the label. A policy file or pack may map any kind
+  to `break`, and `PolicyFile`'s per-kind override wins — so a source-only
+  change (a changed default argument, a tightened template) can carry a
+  `BREAKING` verdict while every installed binary keeps working. That is a
+  correct gate result for a project that chose it, and still not an ABI
+  epoch. Change the epoch when a finding shows a binary break — a removed or
+  renamed export, a layout or vtable change, an altered signature — not
+  because a configured verdict says `BREAKING`.
 - Any **`API_BREAK`** cell (source-only) → a **major version bump under most
   schemes, but usually no ABI-epoch change**: already-compiled binaries keep
   working, only rebuilds break. Resolve the version level against the scheme
