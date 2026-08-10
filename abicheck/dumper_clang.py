@@ -81,6 +81,7 @@ from .dumper_clang_expr import (  # noqa: F401  (some re-exported for tests)
     _specialization_scope_key,
     _unwrap_expr,
 )
+from .dumper_clang_vtable import build_vtable as _build_clang_vtable
 from .errors import AstContextMissingError, SnapshotError
 from .model import (
     AccessLevel,
@@ -761,6 +762,12 @@ class _ClangAstParser:
         # paying on every dump when nothing in this TU has a referenced-decl
         # initializer to fingerprint.
         self._decl_id_qualified_names: dict[str, str] | None = None
+        # Built lazily (on first vtable reconstruction, via _record_index())
+        # -- "::".join(scope + [name]) -> node for every CXXRecordDecl/
+        # RecordDecl in this TU, keyed the same way RecordType.qualified_name
+        # itself is built in _build_record. Only needed by
+        # dumper_clang_vtable.build_vtable's base-lookup recursion.
+        self._record_by_qualname: dict[str, dict[str, Any]] | None = None
         self._walk(
             root,
             scope=(),
@@ -967,6 +974,25 @@ class _ClangAstParser:
         if self._decl_id_qualified_names is None:
             self._decl_id_qualified_names = _index_decl_id_qualified_names(self._root)
         return self._decl_id_qualified_names
+
+    def _record_index(self) -> dict[str, dict[str, Any]]:
+        """Lazily-built ``qualified name -> node`` index over every parsed
+        record, for ``dumper_clang_vtable.build_vtable``'s base-lookup
+        recursion. First-registration wins on a qualname collision (an ODR
+        duplicate across TUs isn't possible within one TU's own AST; a
+        genuine same-name-different-scope collision can't occur since the
+        key IS the full scope path) -- ``setdefault`` rather than overwrite
+        is just defensive, not load-bearing here.
+        """
+        if self._record_by_qualname is None:
+            idx: dict[str, dict[str, Any]] = {}
+            for entry in self._records:
+                name = str(entry.node.get("name") or "")
+                if not name:
+                    continue
+                idx.setdefault(self._qualified(entry), entry.node)
+            self._record_by_qualname = idx
+        return self._record_by_qualname
 
     # ── parse_* (mirror _CastxmlParser's public surface) ─────────────────────
 
@@ -1183,6 +1209,18 @@ class _ClangAstParser:
         injected = _anonymous_member_names(node)
         own_name = override_name or str(node.get("name", ""))
         is_standard_layout, is_trivially_copyable = _clang_record_type_traits(node)
+        # G31 Phase C: reconstruct the vtable (and, from it, the same
+        # 0-if-polymorphic vptr_offset_bits heuristic castxml already uses)
+        # via dumper_clang_vtable's own signature-matching walk -- see that
+        # module's docstring for why this can't be a simple `node.get
+        # ("virtual")` check the way castxml's real semantic analysis allows.
+        # Keyed by the SAME qualname _base_qualnames'/_record_index's own
+        # lookups use, not `qualified_name` (which is None for a top-level
+        # record) -- an anonymous-record's `override_name` never appears in
+        # a `bases` array, so using it here (rather than the node's own bare
+        # "") is what lets it still resolve if ever referenced as a base.
+        own_qualname = "::".join([*entry.scope, own_name]) if entry.scope else own_name
+        vtable = _build_clang_vtable(own_qualname, self._record_index())
         return RecordType(
             name=own_name,
             kind=kind,
@@ -1204,7 +1242,13 @@ class _ClangAstParser:
             fields=fields,
             bases=bases,
             virtual_bases=virtual_bases,
-            vtable=[],
+            vtable=vtable,
+            # Same convention as dumper_castxml.py: polymorphic (non-empty
+            # vtable) -> vtable pointer at offset 0 (the Itanium ABI's
+            # primary-base-at-offset-0 rule); None (unknown) otherwise. Real
+            # multi-inheritance secondary-vtable placement is still not
+            # tracked by either backend -- see the G31 plan doc.
+            vptr_offset_bits=0 if vtable else None,
             is_union=kind == "union",
             is_opaque=False,
             is_final=_clang_record_is_final(node),

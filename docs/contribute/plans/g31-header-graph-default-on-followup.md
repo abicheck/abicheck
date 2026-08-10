@@ -281,6 +281,10 @@ building a second identity-resolution mechanism from scratch.
   list still marked castxml-only here; closed in a later pass — see the new
   entry below, appended rather than edited in place so this section stays
   an accurate as-of-time record of what each review round actually found.
+  (The "not populated by the clang backend at all" half of this specific
+  claim is also now stale — closed in a still-later pass; see the
+  "closed half of the still-open vptr-placement gap" entry further below,
+  same append-don't-edit convention.)
 
   **A later pass closed the DWARF backend's half of the vptr-placement gap
   — the L2 header-only backends (castxml/clang) remain unstarted.**
@@ -556,6 +560,55 @@ building a second identity-resolution mechanism from scratch.
   identical by construction, so keying on `base_die.cu.cu_offset` instead
   produces the exact same result in every case tested while closing the
   theoretical gap for a producer this investigation didn't cover.
+
+  **A later pass closed half of the still-open vptr-placement gap: the
+  direct-clang header-AST backend went from populating `vtable`/
+  `vptr_offset_bits` NOT AT ALL to matching castxml's own primary-vptr
+  heuristic.** Before this, `dumper_clang.py`'s `_build_record` hardcoded
+  `vtable=[]` unconditionally and never set `vptr_offset_bits` — not an
+  imprecise heuristic the way castxml's `0`-if-polymorphic guess is, a
+  total gap, silently disabling both `vtable`-consuming detectors
+  (`diff_layout._check_vptr_introduced`'s `VPTR_INTRODUCED`,
+  `diff_types`'s `TYPE_VTABLE_CHANGED`) for every direct-clang-only
+  comparison. Closing it turned out to need more than copying castxml's
+  own mechanism, because castxml/GCC-XML tags every effectively-virtual
+  method `virtual="1"` in its own XML (real semantic analysis, verified
+  empirically) while clang's `-ast-dump=json` output does not: a
+  `CXXMethodDecl` gets `"virtual": true` only when the `virtual` keyword
+  is literally written, and an `OverrideAttr` child only when `override`
+  is written — a re-declaration that writes neither (compiles fine, only
+  triggers clang's own `-Winconsistent-missing-override` warning) carries
+  **no signal at all** in the JSON tree, confirmed with a real
+  `clang++ -Xclang -ast-dump=json` run (the equivalent *textual*
+  `-ast-dump` DOES print an `Overrides: [...]` annotation for the same
+  input — a JSON-serializer-specific gap, not a semantic-analysis one).
+  Fixed with a new leaf module, `dumper_clang_vtable.py`
+  (`dumper_clang.py` was already over its own soft line-count limit),
+  reconstructing virtuality via signature matching instead: a method is
+  virtual if explicitly marked, OR if its (name, parameter types,
+  const-qualifier) identity — deliberately excluding the return type, so
+  a covariant override still matches — equals an already-known virtual
+  slot inherited from a base. A destructor needed a separate mechanism
+  (verified empirically both for a user-declared and a compiler-implicit
+  destructor): it's virtual the moment ANY base contributes a virtual
+  destructor, regardless of keywords, and `~Base`/`~Derived` never share a
+  name for signature matching to key on — resolved via a fixed sentinel
+  slot key instead. Verified end-to-end against a real compiled example
+  (an override with neither `virtual` nor `override` written correctly
+  fires `VPTR_INTRODUCED` through the live `dump()`/`compare()` pipeline,
+  not just at the unit level) plus 12 unit-level cases covering multiple
+  inheritance ordering, namespaced/nested base resolution, an
+  unresolvable base's graceful degradation, and the const-qualifier/
+  covariant-return disambiguation. **Deliberately still open, not
+  attempted in this pass**: castxml's own remaining gap (no real
+  multi-inheritance secondary-vtable placement — the class-level
+  refinement this phase's own "still open" note below already scoped as
+  needing a model-schema change, since the current `vptr_offset_bits` is
+  a single scalar tracking only the class's own *primary* vptr slot at
+  offset 0, never a secondary base's own separate vtable pointer at a
+  non-zero offset) applies identically to the now-fixed clang backend —
+  this pass gave clang PARITY with castxml's existing primary-vptr
+  heuristic, not a capability neither backend has.
 
   **A later pass closed the last of this phase's four originally-listed
   facts** (`deprecated`/`is_scoped`/bitfields/default-argument facts were

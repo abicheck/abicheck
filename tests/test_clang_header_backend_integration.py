@@ -344,3 +344,67 @@ def test_clang_backend_field_default_initializer_removed_end_to_end(
     assert ChangeKind.FIELD_DEFAULT_INITIALIZER_REMOVED in {
         c.kind for c in result.changes
     }
+
+
+def test_clang_backend_reconstructs_vtable_and_flags_vptr_introduced(
+    tmp_path: Path,
+) -> None:
+    """G31 Phase C: the clang backend used to hardcode ``vtable=[]``
+    unconditionally, so ``VPTR_INTRODUCED``/``TYPE_VTABLE_CHANGED`` were
+    silently inert for every clang-only comparison. Real end-to-end repro of
+    the specific gap ``dumper_clang_vtable.py``'s docstring documents: a
+    derived-class override that repeats neither `virtual` nor `override`
+    (only `Widget::paint()` re-declared with the same signature as its base)
+    carries no signal in clang's JSON AST distinguishing it from an
+    unrelated new method -- must still be recognized as an override via
+    signature matching, not silently dropped from the vtable.
+    """
+    if not (_have("clang") and _have("g++")):
+        pytest.skip(
+            "clang and g++ are required for the clang L2 backend integration test"
+        )
+    old_dir = tmp_path / "old"
+    old_dir.mkdir()
+    old_header = old_dir / "api.h"
+    old_header.write_text("struct Widget {\n    int value_;\n};\n")
+    old_src = old_dir / "old.cpp"
+    old_src.write_text('#include "api.h"\n')
+    v1_so = tmp_path / "libv1.so"
+    subprocess.run(
+        ["g++", "-shared", "-fPIC", "-o", str(v1_so), str(old_src), f"-I{old_dir}"],
+        check=True,
+        capture_output=True,
+    )
+
+    new_dir = tmp_path / "new"
+    new_dir.mkdir()
+    new_header = new_dir / "api.h"
+    new_header.write_text(
+        "struct Base { virtual void paint(); };\n"
+        # Deliberately repeats NEITHER `virtual` NOR `override` -- pure
+        # implicit-virtual-via-signature-match, the one case clang's own
+        # JSON AST dump gives no direct signal for.
+        "struct Widget : Base {\n    int value_;\n    void paint();\n};\n"
+    )
+    new_src = new_dir / "new.cpp"
+    new_src.write_text(
+        '#include "api.h"\nvoid Base::paint() {}\nvoid Widget::paint() {}\n'
+    )
+    v2_so = tmp_path / "libv2.so"
+    subprocess.run(
+        ["g++", "-shared", "-fPIC", "-o", str(v2_so), str(new_src), f"-I{new_dir}"],
+        check=True,
+        capture_output=True,
+    )
+
+    old_snap = dump(v1_so, [old_header], header_backend="clang")
+    new_snap = dump(v2_so, [new_header], header_backend="clang")
+    old_widget = next(t for t in old_snap.types if t.name == "Widget")
+    new_widget = next(t for t in new_snap.types if t.name == "Widget")
+    assert old_widget.vtable == []
+    assert old_widget.vptr_offset_bits is None
+    assert new_widget.vtable != []
+    assert new_widget.vptr_offset_bits == 0
+
+    result = compare(old_snap, new_snap)
+    assert ChangeKind.VPTR_INTRODUCED in {c.kind for c in result.changes}
