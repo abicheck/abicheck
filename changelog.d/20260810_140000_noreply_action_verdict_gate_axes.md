@@ -16,4 +16,10 @@
   `action.yml` now documents `verdict` and `exit-code` as the two different
   axes they are — what was *detected* versus what was *blocked*. Only a break may escalate — a
   `COMPATIBLE` report never displaces `COVERAGE_INCOMPLETE` or
-  `SEVERITY_ERROR`, which would invert the point.
+  `SEVERITY_ERROR`, which would invert the point. The job summary
+  names the displaced gate too: an escalated verdict describes a break that is
+  not why the step failed, so both the `BREAKING` and `API_BREAK` branches now
+  render which tier actually gated and which severity categories blocked —
+  through one shared note, since the `API_BREAK` branch having its own copy
+  and `BREAKING` having none is exactly how escalation produced a failing
+  summary that mentioned only the ABI break.

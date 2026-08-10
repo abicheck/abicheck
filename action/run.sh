@@ -1080,6 +1080,31 @@ _verdict_rank() {
   esac
 }
 
+# Why the step was blocked, when that is not what the verdict says.
+#
+# Two ways they diverge. A severity category configured as `error` gates at
+# exit 1 and 2 alike, so it can be the real cause behind an API_BREAK or
+# BREAKING verdict and fails the step regardless of the fail-on flags. And
+# since `_escalate_verdict_to_report` publishes the report's (more severe)
+# verdict while GATE_TIER keeps the tier that gated, an escalated verdict
+# names a break that is *not* why the run failed. Both branches emit this,
+# rather than one keeping its own copy -- the API_BREAK branch had the note
+# and BREAKING did not, which is exactly how escalation produced a failing
+# summary that mentioned only the ABI break.
+_blocking_gate_note() {
+  local _cats
+  _cats=$(_severity_gate_categories | tr ',' '\n' \
+    | sed 's/^ *//;s/ *$//' | grep -v '^promoted_crosscheck$' | grep -v '^$' | paste -sd, -)
+  if [[ -n "$_cats" ]]; then
+    echo ">"
+    echo "> ⚠️ Also blocked by severity policy: \`$_cats\` configured as \`error\`. This fails the step independently of \`fail-on-breaking\`/\`fail-on-api-break\`."
+  fi
+  if [[ -n "$GATE_TIER" && "$GATE_TIER" != "$VERDICT" ]]; then
+    echo ">"
+    echo "> ℹ️ Verdict escalated from the report: the severity policy gated this run at \`$GATE_TIER\` (exit ${ABICHECK_EXIT}), so that tier -- not the verdict above -- is what \`fail-on-*\` applies to."
+  fi
+}
+
 # Exit 0 is not the only exit a severity policy can understate, which is what
 # `_resolve_clean_exit_verdict` above fixed for exit 0 alone. A policy that
 # demotes `abi_breaking` below `error` while something else still gates --
@@ -1325,17 +1350,7 @@ if [[ "${INPUT_ADD_JOB_SUMMARY:-true}" == "true" && "$MODE" != "dump" ]]; then
         ;;
       API_BREAK)
         echo "> **Verdict: API_BREAK** — Source-level API break detected. Recompilation required."
-        # Since a severity category configured as `error` gates at exit 2 as
-        # well as 1, an API_BREAK verdict can be what *also* carries a
-        # severity block -- and that block, not the API break, is why the
-        # step failed regardless of `fail-on-api-break`. Say so, or the
-        # summary reads as though the flag had been ignored.
-        _sev_cats_summary=$(_severity_gate_categories | tr ',' '\n' \
-          | sed 's/^ *//;s/ *$//' | grep -v '^promoted_crosscheck$' | grep -v '^$' | paste -sd, -)
-        if [[ -n "$_sev_cats_summary" ]]; then
-          echo ">"
-          echo "> ⚠️ Also blocked by severity policy: \`$_sev_cats_summary\` configured as \`error\`. This fails the step independently of \`fail-on-api-break\`."
-        fi
+        _blocking_gate_note
         if [[ "$ADVISORY_BREAK" == "true" ]]; then
           echo ">"
           echo "> ℹ️ Reported, not gated: the configured severity policy resolved this run to exit 0, so the step is **not** failed. Raise the blocking category to \`error\` to gate on it."
@@ -1343,11 +1358,17 @@ if [[ "${INPUT_ADD_JOB_SUMMARY:-true}" == "true" && "$MODE" != "dump" ]]; then
         ;;
       BREAKING)
         echo "> **Verdict: BREAKING** — Binary ABI break detected. Existing binaries will fail at runtime."
-        # The mirror of the API_BREAK note above, for the opposite direction:
-        # there, a severity category gated a run the fail-on flag would have
-        # let pass; here, the severity policy resolved a real break to exit 0
-        # and the step is green. Both are cases where the step's outcome does
-        # not follow from the verdict alone, and both have to say so.
+        # A BREAKING verdict is reachable by *escalation* now, in which case
+        # the tier that actually blocked the step is not this one -- exit 1's
+        # severity gate or exit 2's API tier. Without this the summary read
+        # "Binary ABI break detected" on a step failed by an addition gate
+        # (Codex review).
+        _blocking_gate_note
+        # The mirror, for the opposite direction: there, a gate failed a run
+        # the fail-on flag would have let pass; here, the severity policy
+        # resolved a real break to exit 0 and the step is green. Both are
+        # cases where the step's outcome does not follow from the verdict
+        # alone, and both have to say so.
         if [[ "$ADVISORY_BREAK" == "true" ]]; then
           echo ">"
           echo "> ℹ️ Reported, not gated: the configured severity policy resolved this run to exit 0, so the step is **not** failed. Raise the blocking category to \`error\` to gate on it."

@@ -233,9 +233,7 @@ class TestScanMapsTheCoverageExit:
         # part and a bare "coverage incomplete" is not.
         assert "old/export_table" in outputs["_summary"], outputs["_summary"]
 
-    def test_the_scan_report_nests_the_ledger_under_diff(
-        self, tmp_path: Path
-    ) -> None:
+    def test_the_scan_report_nests_the_ledger_under_diff(self, tmp_path: Path) -> None:
         """`ScanOutcome.to_dict()` puts the comparison summary under `diff`,
         so the ledger is not where a compare report keeps it.
 
@@ -546,9 +544,7 @@ class TestCompareTellsTheTwoAxesApart:
         assert outputs["verdict"] == "SEVERITY_ERROR", outputs
         assert "`addition` configured as `error`" in outputs["_summary"]
 
-    def test_a_severity_exit_two_says_why_the_step_failed(
-        self, tmp_path: Path
-    ) -> None:
+    def test_a_severity_exit_two_says_why_the_step_failed(self, tmp_path: Path) -> None:
         """`potential_breaking=error` gates at exit 2, which carries the
         API_BREAK label -- so the summary must say the severity policy is what
         failed the step, or it reads as though fail-on-api-break was ignored.
@@ -584,21 +580,15 @@ class TestCompareTellsTheTwoAxesApart:
         assert outputs["verdict"] == "ERROR", outputs
 
     def test_coverage_alone_is_not_a_severity_failure(self, tmp_path: Path) -> None:
-        outputs = self._compare_outputs(
-            tmp_path, _report(coverage=1, severity_exit=0)
-        )
+        outputs = self._compare_outputs(tmp_path, _report(coverage=1, severity_exit=0))
         assert outputs["verdict"] == "COVERAGE_INCOMPLETE", outputs
 
-    def test_a_severity_gate_at_one_keeps_its_own_verdict(
-        self, tmp_path: Path
-    ) -> None:
+    def test_a_severity_gate_at_one_keeps_its_own_verdict(self, tmp_path: Path) -> None:
         """Both axes produced 1 and `max` cannot tell them apart. The severity
         gate is the one that was configured to block, so relabelling the run as
         a coverage problem would hide it -- the coverage contribution is
         reported alongside instead."""
-        outputs = self._compare_outputs(
-            tmp_path, _report(coverage=1, severity_exit=1)
-        )
+        outputs = self._compare_outputs(tmp_path, _report(coverage=1, severity_exit=1))
         assert outputs["verdict"] == "SEVERITY_ERROR", outputs
 
     def test_the_default_legacy_scheme_has_no_severity_block_to_read(
@@ -651,9 +641,7 @@ class TestCompareTellsTheTwoAxesApart:
         )
         assert outputs["verdict"] == "SEVERITY_ERROR", outputs
 
-    def test_the_report_is_found_when_json_goes_to_stdout(
-        self, tmp_path: Path
-    ) -> None:
+    def test_the_report_is_found_when_json_goes_to_stdout(self, tmp_path: Path) -> None:
         """`format: json` with no `output-file` is the documented stdout mode:
         there is no file anywhere, and the JSON renderer deliberately prints no
         stderr notice because its report carries the ledger. Both of the
@@ -965,9 +953,7 @@ class TestAPromotedExitDoesNotUnderstateTheReport:
     def test_an_agreeing_report_is_left_alone(self, tmp_path: Path, mode: str) -> None:
         """No escalation when the report agrees with the exit -- the ordinary
         case, which must keep gating through `fail-on-api-break` unchanged."""
-        bindir = _stub_abicheck(
-            tmp_path, exit_code=2, report=self._report("API_BREAK")
-        )
+        bindir = _stub_abicheck(tmp_path, exit_code=2, report=self._report("API_BREAK"))
         env = {
             "INPUT_MODE": mode,
             "INPUT_NEW_LIBRARY": _lib(tmp_path, "libnew.so"),
@@ -1089,3 +1075,89 @@ class TestExitOneAlsoReconcilesWithTheReport:
         }
         outputs = self._outputs(tmp_path, mode, report)
         assert outputs["verdict"] == "COVERAGE_INCOMPLETE", outputs
+
+
+class TestTheDisplacedGateIsNamedInTheSummary:
+    """An escalated verdict names a break that is *not* why the step failed.
+
+    ``GATE_TIER`` keeps the tier that actually gated, but the job summary's
+    ``BREAKING`` branch never rendered it — so a demoted ABI break plus
+    ``addition: error`` produced a failing summary mentioning only the ABI
+    break, with no sign that the addition gate caused it (Codex review). The
+    ``API_BREAK`` branch already carried such a note; that asymmetry is what
+    escalation turned into a reporting gap.
+    """
+
+    @staticmethod
+    def _report(exit_code: int, category: str) -> dict:
+        return {
+            "verdict": "BREAKING",
+            "exit_code": exit_code,
+            "diff": {"verdict": "BREAKING"},
+            "severity": {
+                "exit_code": exit_code,
+                "blocking": True,
+                "blocking_categories": [category],
+            },
+        }
+
+    def _summary(self, tmp_path: Path, exit_code: int, category: str) -> str:
+        bindir = _stub_abicheck(
+            tmp_path, exit_code=exit_code, report=self._report(exit_code, category)
+        )
+        return _run_action(
+            tmp_path,
+            {
+                "INPUT_MODE": "compare",
+                "INPUT_OLD_LIBRARY": _lib(tmp_path, "libold.so"),
+                "INPUT_NEW_LIBRARY": _lib(tmp_path, "libnew.so"),
+                "INPUT_FORMAT": "json",
+                "INPUT_OUTPUT_FILE": str(tmp_path / "report.json"),
+            },
+            bindir,
+        )["_summary"]
+
+    def test_a_severity_gate_behind_an_escalated_breaking_is_named(
+        self, tmp_path: Path
+    ) -> None:
+        summary = self._summary(tmp_path, 1, "addition")
+        assert "Verdict: BREAKING" in summary, summary
+        assert "addition" in summary, summary
+        assert "severity policy" in summary, summary
+
+    def test_the_displaced_tier_itself_is_named(self, tmp_path: Path) -> None:
+        """Not just the category — which tier `fail-on-*` actually applies to,
+        since the verdict above it is no longer that tier."""
+        summary = self._summary(tmp_path, 1, "addition")
+        assert "Verdict escalated from the report" in summary, summary
+        assert "SEVERITY_ERROR" in summary, summary
+
+    def test_an_unescalated_breaking_says_nothing_about_escalation(
+        self, tmp_path: Path
+    ) -> None:
+        """The ordinary exit-4 ABI break must not grow a spurious note."""
+        bindir = _stub_abicheck(
+            tmp_path,
+            exit_code=4,
+            report={
+                "verdict": "BREAKING",
+                "exit_code": 4,
+                "diff": {"verdict": "BREAKING"},
+            },
+        )
+        summary = _run_action(
+            tmp_path,
+            {
+                "INPUT_MODE": "compare",
+                "INPUT_OLD_LIBRARY": _lib(tmp_path, "libold.so"),
+                "INPUT_NEW_LIBRARY": _lib(tmp_path, "libnew.so"),
+                "INPUT_FORMAT": "json",
+                "INPUT_OUTPUT_FILE": str(tmp_path / "report.json"),
+            },
+            bindir,
+        )["_summary"]
+        assert "Verdict: BREAKING" in summary, summary
+        # Match the note text, not a bare "escalated": pytest's own tmp_path
+        # embeds this test's name ("...un-escalated...") into the summary via
+        # the library paths, so a substring check matched the path instead.
+        assert "Verdict escalated from the report" not in summary, summary
