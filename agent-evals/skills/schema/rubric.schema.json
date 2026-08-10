@@ -56,7 +56,7 @@
               "baseline",
               "publication_baseline"
             ],
-            "description": "zero_tolerance is pass^k — every repetition must pass, and it may never be baselined from a first run, since a first run containing a false green would enshrine it as the floor. baseline gates merge evidence against a per-(skill, agent, model) floor. publication_baseline gates only at publication, because --no-judge is the everyday posture."
+            "description": "zero_tolerance is pass^k \u2014 every repetition must pass, and it may never be baselined from a first run, since a first run containing a false green would enshrine it as the floor. baseline gates merge evidence against a per-(skill, agent, model) floor. publication_baseline gates only at publication, because --no-judge is the everyday posture."
           },
           "uncertainty_rules": {
             "type": "object",
@@ -98,7 +98,156 @@
             "type": "string"
           }
         }
-      }
+      },
+      "uniqueItems": true,
+      "allOf": [
+        {
+          "contains": {
+            "properties": {
+              "id": {
+                "const": 1
+              }
+            },
+            "required": [
+              "id"
+            ]
+          },
+          "minContains": 1,
+          "maxContains": 1,
+          "description": "Dimension 1 appears exactly once."
+        },
+        {
+          "contains": {
+            "properties": {
+              "id": {
+                "const": 2
+              }
+            },
+            "required": [
+              "id"
+            ]
+          },
+          "minContains": 1,
+          "maxContains": 1,
+          "description": "Dimension 2 appears exactly once."
+        },
+        {
+          "contains": {
+            "properties": {
+              "id": {
+                "const": 3
+              }
+            },
+            "required": [
+              "id"
+            ]
+          },
+          "minContains": 1,
+          "maxContains": 1,
+          "description": "Dimension 3 appears exactly once."
+        },
+        {
+          "contains": {
+            "properties": {
+              "id": {
+                "const": 4
+              }
+            },
+            "required": [
+              "id"
+            ]
+          },
+          "minContains": 1,
+          "maxContains": 1,
+          "description": "Dimension 4 appears exactly once."
+        },
+        {
+          "contains": {
+            "properties": {
+              "id": {
+                "const": 5
+              }
+            },
+            "required": [
+              "id"
+            ]
+          },
+          "minContains": 1,
+          "maxContains": 1,
+          "description": "Dimension 5 appears exactly once."
+        },
+        {
+          "contains": {
+            "properties": {
+              "id": {
+                "const": 6
+              }
+            },
+            "required": [
+              "id"
+            ]
+          },
+          "minContains": 1,
+          "maxContains": 1,
+          "description": "Dimension 6 appears exactly once."
+        },
+        {
+          "contains": {
+            "properties": {
+              "id": {
+                "const": 2
+              },
+              "gating": {
+                "const": "zero_tolerance"
+              }
+            },
+            "required": [
+              "id",
+              "gating"
+            ]
+          },
+          "description": "Dimension 2 must gate at zero tolerance. A rubric edit that relaxed it to a baseline would disable a safety gate while staying schema-valid \u2014 and a first run containing a false green would then become the floor."
+        },
+        {
+          "contains": {
+            "properties": {
+              "id": {
+                "const": 6
+              },
+              "gating": {
+                "const": "zero_tolerance"
+              }
+            },
+            "required": [
+              "id",
+              "gating"
+            ]
+          },
+          "description": "Dimension 6 must gate at zero tolerance. A rubric edit that relaxed it to a baseline would disable a safety gate while staying schema-valid \u2014 and a first run containing a false green would then become the floor."
+        },
+        {
+          "contains": {
+            "properties": {
+              "id": {
+                "const": 2
+              },
+              "uncertainty_rules": {
+                "required": [
+                  "not_comparable",
+                  "evidence_too_shallow",
+                  "matrix_target_unrun",
+                  "contract_coverage_incomplete"
+                ]
+              }
+            },
+            "required": [
+              "id",
+              "uncertainty_rules"
+            ]
+          },
+          "description": "Dimension 2 states a rule for each of the four uncertainty kinds; a missing or misspelled key would leave that kind gating on nothing."
+        }
+      ]
     }
   }
 }

@@ -89,6 +89,9 @@
       },
       "inputs": "examples/case32_param_defaults",
       "invocation": {},
+      "platforms": [
+        "linux"
+      ],
       "prompt": "We changed some default argument values in our public C++ header. Do programs already built against this library keep working, and does anything need to happen before we ship it?",
       "roots": [
         "agent-evals/skills/scenarios.yaml",
@@ -114,6 +117,9 @@
       },
       "inputs": "examples/case02_param_type_change",
       "invocation": {},
+      "platforms": [
+        "linux"
+      ],
       "prompt": "Does this change break existing consumers of the library, or only require a recompile?",
       "roots": [
         "agent-evals/skills/scenarios.yaml",
@@ -139,6 +145,11 @@
       },
       "inputs": "examples/case03_compat_addition",
       "invocation": {},
+      "platforms": [
+        "linux",
+        "macos",
+        "windows"
+      ],
       "prompt": "We only added a new function this release. Confirm nothing else changed for existing consumers.",
       "roots": [
         "agent-evals/skills/scenarios.yaml",
@@ -164,6 +175,7 @@
           "analytics-daemon"
         ]
       },
+      "platforms": [],
       "prompt": "We upgraded the shared library under our analytics daemon without rebuilding it. Is that safe?",
       "roots": [
         "agent-evals/skills/fixtures/consumer-actually-affected",
@@ -189,6 +201,7 @@
           "renderer"
         ]
       },
+      "platforms": [],
       "prompt": "The library team says this release has a breaking change. Does our renderer actually need rebuilding, or can we ship it as-is?",
       "roots": [
         "agent-evals/skills/fixtures/consumer-unaffected-despite-break",
@@ -213,6 +226,7 @@
         "contract": "exports",
         "contract_evaluation": true
       },
+      "platforms": [],
       "prompt": "Check this release against the last one and tell me whether anything we actually export to customers changed.",
       "roots": [
         "agent-evals/skills/fixtures/contract-coverage-incomplete",
@@ -238,6 +252,9 @@
       },
       "inputs": "examples/case08_enum_value_change",
       "invocation": {},
+      "platforms": [
+        "linux"
+      ],
       "prompt": "Someone reordered an enum in a public header. What does that do to programs already linked against this library?",
       "roots": [
         "agent-evals/skills/scenarios.yaml",
@@ -261,6 +278,7 @@
       "invocation": {
         "depth": "symbols"
       },
+      "platforms": [],
       "prompt": "Only the stripped release binaries survived for the old version. Can you still tell me whether the struct layouts our plugins depend on changed?",
       "roots": [
         "agent-evals/skills/fixtures/evidence-too-shallow",
@@ -288,6 +306,7 @@
           "windows-x86_64"
         ]
       },
+      "platforms": [],
       "prompt": "We ship this library on Linux, macOS and Windows. The Windows build agent was down this cycle. Can we release 2.4 as a minor version?",
       "roots": [
         "agent-evals/skills/fixtures/matrix-target-unrun",
@@ -311,6 +330,7 @@
       "invocation": {
         "break_comparability": true
       },
+      "platforms": [],
       "prompt": "Here are the previous and current builds of our shared library. Did this change break anything for programs already linked against it?",
       "roots": [
         "agent-evals/skills/fixtures/not-comparable-pair",
@@ -337,6 +357,7 @@
           "plugin_teardown"
         ]
       },
+      "platforms": [],
       "prompt": "Will our existing plugins still load into the new host build?",
       "roots": [
         "agent-evals/skills/fixtures/plugin-required-symbol-loss",
@@ -362,6 +383,11 @@
       },
       "inputs": "examples/case01_symbol_removal",
       "invocation": {},
+      "platforms": [
+        "linux",
+        "macos",
+        "windows"
+      ],
       "prompt": "Review this change to our shared library for binary compatibility with applications already built against it.",
       "roots": [
         "agent-evals/skills/scenarios.yaml",
@@ -387,6 +413,9 @@
       },
       "inputs": "examples/case05_soname",
       "invocation": {},
+      "platforms": [
+        "linux"
+      ],
       "prompt": "Can this go out as a minor version, or does it need a SONAME bump?",
       "roots": [
         "agent-evals/skills/scenarios.yaml",
@@ -412,6 +441,9 @@
       },
       "inputs": "examples/case07_struct_layout",
       "invocation": {},
+      "platforms": [
+        "linux"
+      ],
       "prompt": "We changed a struct that appears in our public headers. Is that safe for already-compiled callers?",
       "roots": [
         "agent-evals/skills/scenarios.yaml",
@@ -437,6 +469,9 @@
       },
       "inputs": "examples/case09_cpp_vtable",
       "invocation": {},
+      "platforms": [
+        "linux"
+      ],
       "prompt": "A virtual function was added to a class our users derive from. Review this for compatibility.",
       "roots": [
         "agent-evals/skills/scenarios.yaml",
@@ -455,7 +490,7 @@
         "native-consumer-compatibility",
         "native-release-compatibility"
       ],
-      "digest": "sha256:b9608b36471fe790409bef5bfc6825b789d349e690bbdd04b9ffd5f6b16e7424",
+      "digest": "sha256:c740977f5e5c7fd2ab375480e9de52406200ea87f4b2c0817c27c8dd9969f84d",
       "roots": [
         "agent-evals/skills/grade_bundle.py",
         "agent-evals/skills/graders",

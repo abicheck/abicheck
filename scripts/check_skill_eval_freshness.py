@@ -70,7 +70,11 @@ from typing import Any
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from findings_report import Findings as _SharedFindings  # noqa: E402
-from skill_eval_surface import surface_digest, surface_roots  # noqa: E402
+from skill_eval_surface import (  # noqa: E402
+    normalize_newlines,
+    surface_digest,
+    surface_roots,
+)
 
 ROOT = Path(__file__).resolve().parent.parent
 PACK = ROOT / "agent-evals" / "skills" / "skill-eval-pack.json"
@@ -80,6 +84,11 @@ EVIDENCE = ROOT / "agent-evals" / "skills" / "evidence"
 #: generator fails loudly rather than being read field-by-field against
 #: assumptions that may no longer hold.
 SUPPORTED_PACK_VERSION = 1
+
+#: The bundle shape this checker understands, for the same fail-closed reason:
+#: a bundle written by a newer runner would otherwise be read field-by-field
+#: against assumptions that may no longer hold.
+SUPPORTED_BUNDLE_VERSION = 1
 
 REGENERATE = "python scripts/gen_skill_eval_pack.py"
 
@@ -106,7 +115,10 @@ def _content_digest(path: Path) -> str | None:
     and the shim records exactly this.
     """
     try:
-        return "sha256:" + hashlib.sha256(path.read_bytes()).hexdigest()
+        return (
+            "sha256:"
+            + hashlib.sha256(normalize_newlines(path.read_bytes())).hexdigest()
+        )
     except OSError:
         return None
 
@@ -240,6 +252,14 @@ def check_bundle_completeness(rel: str, bundle: dict[str, Any], out: Findings) -
             out.err(
                 "completeness", f"{rel}: no {field!r} — this is not a gradeable bundle"
             )
+    version = bundle.get("schema_version")
+    if version is not None and version != SUPPORTED_BUNDLE_VERSION:
+        out.err(
+            "bundle",
+            f"{rel}: schema_version {version!r} is not the supported "
+            f"{SUPPORTED_BUNDLE_VERSION} — this checker would read a shape it "
+            f"does not understand",
+        )
     kind = bundle.get("kind")
     if kind is not None and kind not in KNOWN_BUNDLE_KINDS:
         out.err(
@@ -248,7 +268,8 @@ def check_bundle_completeness(rel: str, bundle: dict[str, Any], out: Findings) -
             f"{', '.join(sorted(KNOWN_BUNDLE_KINDS))}; a bundle whose kind does not "
             f"resolve cannot be graded by either contract",
         )
-    hashes = bundle.get("hashes") or {}
+    hashes = bundle.get("hashes")
+    hashes = hashes if isinstance(hashes, dict) else {}
     required = REQUIRED_BUNDLE_HASHES
     if kind == "behavioral":
         required = (*required, *BEHAVIORAL_ONLY_HASHES)
@@ -270,10 +291,14 @@ def check_bundle_completeness(rel: str, bundle: dict[str, Any], out: Findings) -
 def _bundle_hash_ids(bundle: dict[str, Any]) -> dict[str, str]:
     """The recorded hashes, keyed the same way `hash_entries` keys the pack."""
     hashes = bundle.get("hashes", {})
+    if not isinstance(hashes, dict):
+        return {}
     recorded: dict[str, str] = {}
     for key, value in hashes.items():
         if key == "scenarios":
-            for scenario_id, digest in (value or {}).items():
+            if not isinstance(value, dict):
+                continue
+            for scenario_id, digest in value.items():
                 recorded[f"scenario:{scenario_id}"] = digest
         elif key == "skill_tree":
             # The bundle names one skill's tree; which skill is the bundle's
@@ -295,6 +320,13 @@ def check_bundle(
         bundle = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError) as exc:
         out.err("bundle", f"{rel}: unreadable ({exc})")
+        return set()
+    if not isinstance(bundle, dict):
+        out.err(
+            "bundle",
+            f"{rel}: top level is {type(bundle).__name__}, not a JSON object — "
+            f"this is not a gradeable bundle",
+        )
         return set()
 
     # evidence/<skill>/<...>/meta.json — the skill a `skill_tree` hash belongs
@@ -365,6 +397,15 @@ def check_bundle(
     # skill-tree hash, so editing the evolution skill leaves it "fresh". The
     # question is whether *this* evidence can be invalidated by *this* input.
     for observed in bundle.get("observed_inputs", []):
+        # Hand-rolled validation (stdlib-only) has to survive shapes JSON
+        # permits but the schema forbids: a crash here means out.report() never
+        # runs and the malformed bundle produces no finding at all.
+        if not isinstance(observed, dict):
+            out.err(
+                "completeness",
+                f"{rel}: observed input {observed!r} is not a record with a path and digest",
+            )
+            continue
         observed_path = observed.get("path", "")
 
         # Routing alone is not freshness. Roots are deliberately coarser than

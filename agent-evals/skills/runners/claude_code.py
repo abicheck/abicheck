@@ -33,6 +33,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import platform
 import shutil
 import subprocess
 import sys
@@ -53,6 +54,25 @@ ARMS = ("skill", "baseline")
 #: nothing and keeps the two invocations byte-identical apart from the
 #: workspace contents.
 ALLOWED_TOOLS = ("Bash", "Read", "Glob", "Grep", "Skill")
+
+#: `platform.system()` -> the spelling `examples/ground_truth.json` uses.
+_HOST_PLATFORM = {"Linux": "linux", "Darwin": "macos", "Windows": "windows"}
+
+
+def host_platform() -> str:
+    return _HOST_PLATFORM.get(platform.system(), platform.system().lower())
+
+
+def supported_here(scenario: dict) -> bool:
+    """Whether this host can produce the evidence the scenario expects.
+
+    Several catalog cases are Linux-only. Running one elsewhere grades correct
+    platform-specific behaviour against a Linux expectation, which is a wrong
+    number rather than a missing one. An empty list is "no declared
+    restriction" — Category B fixtures, built for this evaluation.
+    """
+    platforms = scenario.get("platforms") or []
+    return not platforms or host_platform() in platforms
 
 
 def _prepare_workspace(work: Path, scenario: dict, arm: str) -> None:
@@ -80,11 +100,13 @@ def _run_once(
     (bin_dir / "abicheck").chmod(0o755)
 
     real = shutil.which("abicheck")
+    if real is None:  # checked again in main() before any model call
+        raise RuntimeError("abicheck is not on PATH")
     env = {
         **os.environ,
         "PATH": f"{bin_dir}{os.pathsep}{os.environ['PATH']}",
         "SKILL_EVAL_CALLS": str(out_dir / "calls.jsonl"),
-        "SKILL_EVAL_REAL_ABICHECK": real or "",
+        "SKILL_EVAL_REAL_ABICHECK": real,
     }
 
     started = time.monotonic()
@@ -129,12 +151,35 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     parser.add_argument("--out", required=True, help="Directory to write runs into")
     parser.add_argument("--repetitions", type=int, default=3)
-    parser.add_argument("--arms", default=",".join(ARMS))
+    parser.add_argument(
+        "--arms",
+        default=",".join(ARMS),
+        help=f"Comma-separated subset of {','.join(ARMS)}",
+    )
     parser.add_argument(
         "--scenarios", default="", help="Comma-separated ids; default: every ready one"
     )
     parser.add_argument("--timeout", type=int, default=900)
     args = parser.parse_args(argv)
+
+    # Both checks run before the first model call: a run that discovers either
+    # problem afterwards has spent real money producing output that *looks*
+    # like a completed evaluation. An absent abicheck makes the shim answer 70
+    # to every call — indistinguishable at grading time from a tool failure —
+    # and a mistyped arm silently produces a baseline workspace under its name,
+    # so the comparison loses its treatment arm without saying so.
+    if shutil.which("abicheck") is None:
+        print(
+            "abicheck is not on PATH; every recorded call would be a shim "
+            "misconfiguration. Install it with `pip install -e .`.",
+            file=sys.stderr,
+        )
+        return 1
+    arms = [a for a in args.arms.split(",") if a]
+    unknown = sorted(set(arms) - set(ARMS))
+    if unknown:
+        print(f"unknown arm(s): {', '.join(unknown)}", file=sys.stderr)
+        return 1
 
     pack = json.loads(PACK.read_text(encoding="utf-8"))
     wanted = [s for s in args.scenarios.split(",") if s]
@@ -149,13 +194,28 @@ def main(argv: list[str] | None = None) -> int:
 
     out_root = Path(args.out)
     out_root.mkdir(parents=True, exist_ok=True)
-    index: list[dict] = []
+
+    # Resuming must not lose what earlier invocations recorded: starting from
+    # an empty list and rewriting on the first new run drops every completed
+    # repetition from the index while its directory still sits on disk.
+    index_path = out_root / "index.json"
+    index: list[dict] = (
+        json.loads(index_path.read_text(encoding="utf-8"))
+        if index_path.is_file()
+        else []
+    )
+    done = {(r["scenario_id"], r["arm"], r["repetition"]) for r in index}
 
     for sid, scenario in scenarios.items():
-        for arm in args.arms.split(","):
+        if not supported_here(scenario):
+            print(
+                f"skip {sid}: not supported on {host_platform()} ({scenario['platforms']})"
+            )
+            continue
+        for arm in arms:
             for rep in range(args.repetitions):
                 out_dir = out_root / sid / arm / str(rep)
-                if (out_dir / "final.md").exists():
+                if (sid, arm, rep) in done or (out_dir / "final.md").exists():
                     print(f"skip {sid}/{arm}/{rep} (already run)")
                     continue
                 out_dir.mkdir(parents=True, exist_ok=True)

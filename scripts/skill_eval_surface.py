@@ -70,14 +70,38 @@ SURFACE_ROOTS: tuple[Path, ...] = (
 )
 
 
+def normalize_newlines(data: bytes) -> bytes:
+    """Content, independent of how a checkout wrote the line endings.
+
+    Git converts LF to CRLF on Windows by default, so the same commit yields
+    different bytes on different hosts — and a committed digest over those
+    bytes then fails its own `--check` on one platform, which is what the
+    Windows unit lane reported. Normalizing here keeps the digest a property
+    of the repository rather than of the checkout. Two files differing only in
+    line endings hash alike, which is exactly the intent.
+    """
+    return data.replace(b"\r\n", b"\n")
+
+
 def surface_digest(root: Path) -> str:
     """Digest the consumed surface as it stands in `root` right now."""
+    missing = [rel.as_posix() for rel in SURFACE_SOURCES if not (root / rel).is_file()]
+    if missing:
+        # Substituting b"" would make a *renamed* source freeze the digest: it
+        # would keep returning a stable value that no longer tracks the artifact,
+        # so every bundle would read as fresh across CLI changes — the exact
+        # invalidation this module exists to preserve. These are committed,
+        # drift-gated files; absence is a repository error, not a state to hash.
+        raise FileNotFoundError(
+            "consumed-surface source(s) absent, so the digest would stop tracking "
+            f"them: {', '.join(sorted(missing))}"
+        )
     h = hashlib.sha256()
     for rel in sorted(SURFACE_SOURCES, key=lambda p: p.as_posix()):
         path = root / rel
         h.update(rel.as_posix().encode())
         h.update(b"\0")
-        h.update(path.read_bytes() if path.is_file() else b"")
+        h.update(normalize_newlines(path.read_bytes()))
         h.update(b"\0")
     return "sha256:" + h.hexdigest()
 

@@ -9,11 +9,13 @@ Sibling of `agent-evals/`'s existing task harness, not a replacement: that one
 scores an agent **modifying abicheck**, this one scores an agent **equipped
 with a skill**. Same mechanism, different subject.
 
-## What exists today (G37 Phase 0)
+## What exists today (Phase 0, plus the first slice of Phases 1–2)
 
-Phase 0 ships **contracts and deterministic checks only**. There is no runner,
-no shim, no grader and no evidence yet — those are Phases 1–2. What is here is
-what makes the later phases checkable rather than self-reported.
+Phase 0's contracts and deterministic checks are complete. On top of them sit a
+recording shim and a headless runner — enough to *produce* a transcript, not
+yet to grade one. **Still missing: the graders, the golden bad-bundle corpus,
+and any committed evidence.** Until the graders exist, a run yields transcripts
+a human reads, not a score.
 
 | Path | Role |
 |------|------|
@@ -24,6 +26,8 @@ what makes the later phases checkable rather than self-reported.
 | `schema/claim.schema.json` | The final-answer envelope: a typed ordinal verdict (or `null`), the calls it rests on, and a closed-vocabulary uncertainty reason. |
 | `schema/transcript-bundle.schema.json` | The bundle shape every runner must emit — `behavioral` or `trigger`, both carrying the hashes they ran against and the inputs the run was observed reading. |
 | `skill-eval-pack.json` | **Generated** (`scripts/gen_skill_eval_pack.py`). The hashes freshness is computed from, and the interface `agent-benchmark` consumes. |
+| `shim/abicheck` | Recording shim: every `abicheck` call the agent makes, with argv, exit status, persisted stdout and an immutable snapshot of the files it wrote. |
+| `runners/claude_code.py` | Headless runner. Two arms — `skill` installs the published skill into the workspace, `baseline` installs none — identical in every other respect, so a difference is attributable to the skill. |
 
 ## The two things that are easy to get wrong here
 

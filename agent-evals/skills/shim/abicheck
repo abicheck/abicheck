@@ -18,34 +18,140 @@
 
 Placed first on PATH for an evaluated run, so every `abicheck ...` the agent
 issues lands here. It spawns the real executable, **waits**, tees both streams,
-and only then finalizes the record — deliberately not `exec`, which would
-replace this process and lose the exit status and stdout the graders need.
+snapshots whatever files the call wrote, and only then finalizes the record —
+deliberately not `exec`, which would replace this process and lose the exit
+status, the output and the artifacts the graders need.
 
-One record per call, appended to `$SKILL_EVAL_CALLS` as JSON lines:
+One record per call, appended to `$SKILL_EVAL_CALLS` as JSON lines.
 
-    seq, argv, cwd, exit_code, stdout_path, stdout_digest, stderr_digest
+Three things this does that a naive wrapper does not:
 
-The stdout is persisted, not only digested: a skill may legitimately run
+**Persists stdout, not only its digest.** A skill may legitimately run
 `compare --format json` with no `-o`, in which case the report exists nowhere
 else and a digest alone cannot be re-read at grading time.
 
-A provisional record is written *before* the child runs and rewritten after it
-exits, so a crash between the two leaves evidence that the call happened rather
-than no evidence at all.
+**Snapshots the call's file outputs immediately.** An agent that reuses one
+`-o` path across iterations would otherwise leave a claim citing call 2
+pointing at call 5's report. Copying at the moment the child exits makes each
+call's artifacts immutable without redirecting the agent's own argument, so
+what the agent sees and what the transcript holds stay the same paths.
+
+**Allocates its sequence number under a lock.** The agent can run two Bash
+calls concurrently; two shims counting the same file would pick the same `seq`,
+overwrite each other's capture, and rewrite each other's record.
 """
 
 from __future__ import annotations
 
+import fcntl
 import hashlib
 import json
 import os
+import shutil
 import subprocess
 import sys
+import uuid
 from pathlib import Path
+
+#: Options whose value names a path the call writes. `--output-dir` is a
+#: directory; the rest are files. Kept explicit rather than "any path-looking
+#: argument" so an input path is never mistaken for an output.
+OUTPUT_OPTIONS = ("-o", "--output", "--secondary-output", "--output-dir")
 
 
 def _digest(data: bytes) -> str:
     return "sha256:" + hashlib.sha256(data).hexdigest()
+
+
+def _declared_outputs(argv: list[str]) -> list[str]:
+    """Paths this invocation asked abicheck to write."""
+    found: list[str] = []
+    for i, token in enumerate(argv):
+        if token in OUTPUT_OPTIONS and i + 1 < len(argv):
+            found.append(argv[i + 1])
+        else:
+            for opt in OUTPUT_OPTIONS:
+                if token.startswith(f"{opt}="):
+                    found.append(token.split("=", 1)[1])
+    return found
+
+
+def _append_locked(calls: Path, record: dict) -> int:
+    """Append one record and return its sequence number, atomically.
+
+    The lock covers count-then-append together: two concurrent shims must not
+    read the same length and then both write it as their own `seq`.
+    """
+    with calls.open("a+", encoding="utf-8") as fh:
+        fcntl.flock(fh.fileno(), fcntl.LOCK_EX)
+        try:
+            fh.seek(0)
+            seq = sum(1 for line in fh if line.strip())
+            record["seq"] = seq
+            fh.seek(0, os.SEEK_END)
+            fh.write(json.dumps(record) + "\n")
+            fh.flush()
+            return seq
+        finally:
+            fcntl.flock(fh.fileno(), fcntl.LOCK_UN)
+
+
+def _rewrite_locked(calls: Path, record: dict) -> None:
+    """Replace this call's provisional record, matched by its own id.
+
+    Matched by `call_id`, never by position: with concurrent calls the record
+    written last is not necessarily this one's.
+    """
+    with calls.open("r+", encoding="utf-8") as fh:
+        fcntl.flock(fh.fileno(), fcntl.LOCK_EX)
+        try:
+            lines = [ln for ln in fh.read().splitlines() if ln.strip()]
+            for i, line in enumerate(lines):
+                if json.loads(line).get("call_id") == record["call_id"]:
+                    lines[i] = json.dumps(record)
+                    break
+            else:
+                lines.append(json.dumps(record))
+            fh.seek(0)
+            fh.truncate()
+            fh.write("\n".join(lines) + "\n")
+        finally:
+            fcntl.flock(fh.fileno(), fcntl.LOCK_UN)
+
+
+def _snapshot_outputs(argv: list[str], cwd: Path, dest: Path) -> list[dict]:
+    """Copy every file the call wrote into a per-call immutable location."""
+    snapshots: list[dict] = []
+    for declared in _declared_outputs(argv):
+        src = (cwd / declared).resolve()
+        if not src.exists():
+            snapshots.append({"requested": declared, "status": "absent"})
+            continue
+        target = dest / Path(declared).name
+        if src.is_dir():
+            shutil.copytree(src, target, dirs_exist_ok=True)
+            files = sorted(p for p in target.rglob("*") if p.is_file())
+            snapshots.append(
+                {
+                    "requested": declared,
+                    "status": "captured",
+                    "kind": "directory",
+                    "path": str(target.relative_to(dest.parent)),
+                    "files": [str(p.relative_to(target)) for p in files],
+                }
+            )
+        else:
+            shutil.copy2(src, target)
+            snapshots.append(
+                {
+                    "requested": declared,
+                    "status": "captured",
+                    "kind": "file",
+                    "path": str(target.relative_to(dest.parent)),
+                    "digest": _digest(target.read_bytes()),
+                }
+            )
+    return snapshots
 
 
 def main() -> int:
@@ -62,29 +168,34 @@ def main() -> int:
     calls.parent.mkdir(parents=True, exist_ok=True)
     captured = calls.parent / "captured"
     captured.mkdir(exist_ok=True)
-    seq = sum(1 for _ in calls.open()) if calls.exists() else 0
 
     argv = sys.argv[1:]
-    record = {"seq": seq, "argv": argv, "cwd": os.getcwd(), "exit_code": None}
-    with calls.open("a", encoding="utf-8") as fh:  # provisional
-        fh.write(json.dumps(record) + "\n")
+    cwd = Path.cwd()
+    # A provisional record, written before the child runs: a crash between the
+    # two leaves evidence that the call happened rather than no evidence.
+    record = {
+        "call_id": uuid.uuid4().hex,
+        "argv": argv,
+        "cwd": str(cwd),
+        "exit_code": None,
+    }
+    seq = _append_locked(calls, record)
 
-    proc = subprocess.run(  # noqa: S603 - argv is the agent's, executed verbatim by design
-        [real, *argv], capture_output=True
-    )
+    proc = subprocess.run([real, *argv], capture_output=True)  # noqa: S603
 
     out_path = captured / f"{seq}.out"
     out_path.write_bytes(proc.stdout)
+    outputs_dir = captured / f"{seq}.outputs"
+    outputs_dir.mkdir(exist_ok=True)
+
     record.update(
         exit_code=proc.returncode,
         stdout_path=str(out_path.relative_to(calls.parent)),
         stdout_digest=_digest(proc.stdout),
         stderr_digest=_digest(proc.stderr),
+        outputs=_snapshot_outputs(argv, cwd, outputs_dir),
     )
-
-    lines = [ln for ln in calls.read_text(encoding="utf-8").splitlines() if ln.strip()]
-    lines[-1] = json.dumps(record)
-    calls.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    _rewrite_locked(calls, record)
 
     sys.stdout.buffer.write(proc.stdout)
     sys.stderr.buffer.write(proc.stderr)

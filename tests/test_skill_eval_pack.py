@@ -234,6 +234,27 @@ def test_the_surface_digest_still_invalidates_bundles(
     assert _check_bundle(monkeypatch, tmp_path, bundle) == 1
 
 
+def test_digests_survive_a_crlf_checkout(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Git converts LF to CRLF on Windows by default, so the same commit yields
+    different bytes per host — and a committed digest over those bytes fails its
+    own `--check` on one platform, which the Windows unit lane reported. The
+    digest is a property of the repository, not of the checkout."""
+    source = tmp_path / "surface.md"
+    monkeypatch.setattr(surface, "SURFACE_SOURCES", (Path("surface.md"),))
+
+    source.write_bytes(b"one\ntwo\n")
+    lf = surface.surface_digest(tmp_path)
+    source.write_bytes(b"one\r\ntwo\r\n")
+    assert surface.surface_digest(tmp_path) == lf
+
+    source.write_bytes(b"one\ntwo\nthree\n")
+    assert surface.surface_digest(tmp_path) != lf, (
+        "real content change must still move it"
+    )
+
+
 def test_surface_sources_are_the_generated_projections() -> None:
     """Each is drift-gated against the live objects elsewhere in `pr`, which is
     what lets this digest be file-based without going blind to a real surface
@@ -550,7 +571,16 @@ def test_a_trigger_bundle_is_not_held_to_the_scenario_rules(
 
 @pytest.mark.parametrize(
     "dropped",
-    ["schema_version", "kind", "scenario_id", "agent", "model", "observed_inputs"],
+    [
+        "schema_version",
+        "kind",
+        "scenario_id",
+        "repetition",
+        "agent",
+        "model",
+        "hashes",
+        "observed_inputs",
+    ],
 )
 def test_a_bundle_missing_provenance_fails(
     pack: dict[str, Any], monkeypatch: pytest.MonkeyPatch, tmp_path: Path, dropped: str
@@ -672,6 +702,17 @@ def test_an_unknown_bundle_kind_fails(
     bundle["kind"] = kind
     del bundle["hashes"]["scenarios"]
     assert _check_bundle(monkeypatch, tmp_path, bundle) == 1
+
+
+def test_a_missing_surface_source_is_an_error(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Hashing b"" for an absent source would freeze the digest: a source another
+    PR renames would keep producing a stable value that no longer tracks it, and
+    every bundle would read as fresh across CLI changes."""
+    monkeypatch.setattr(surface, "SURFACE_SOURCES", (Path("not-there.md"),))
+    with pytest.raises(FileNotFoundError):
+        surface.surface_digest(tmp_path)
 
 
 def test_a_near_empty_bundle_fails(

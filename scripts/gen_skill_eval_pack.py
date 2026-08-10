@@ -89,6 +89,8 @@ import yaml
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
+from skill_eval_surface import normalize_newlines  # noqa: E402
+
 ROOT = Path(__file__).resolve().parent.parent
 # The *generated* tree, deliberately not `skills-src/` — see `_skill_tree_digest`.
 PUBLISHED_SKILLS = ROOT / ".agents" / "skills"
@@ -127,7 +129,7 @@ HARNESS_SOURCES = (
 
 
 def _digest(data: bytes) -> str:
-    return "sha256:" + hashlib.sha256(data).hexdigest()
+    return "sha256:" + hashlib.sha256(normalize_newlines(data)).hexdigest()
 
 
 def _digest_paths(paths: list[Path]) -> str:
@@ -136,7 +138,7 @@ def _digest_paths(paths: list[Path]) -> str:
     for path in sorted(paths, key=lambda p: p.relative_to(ROOT).as_posix()):
         h.update(path.relative_to(ROOT).as_posix().encode())
         h.update(b"\0")
-        h.update(path.read_bytes())
+        h.update(normalize_newlines(path.read_bytes()))
         h.update(b"\0")
     return "sha256:" + h.hexdigest()
 
@@ -161,7 +163,9 @@ def _tree_files(root: Path) -> list[Path]:
         if p.is_file()
         and not (UNTRACKED_DIR_NAMES & set(p.parts))
         and p.suffix not in UNTRACKED_SUFFIXES
-        and not p.name.endswith(".egg-info")
+        # `.egg-info` is a *directory*; its files are PKG-INFO, SOURCES.txt…,
+        # so a name-suffix test matched nothing and hashed all of it.
+        and not any(part.endswith(".egg-info") for part in p.parts)
     ]
 
 
@@ -212,7 +216,7 @@ def _scenario_digest(scenario: dict[str, Any], ground_truth: dict[str, Any]) -> 
     ):
         h.update(path.relative_to(ROOT).as_posix().encode())
         h.update(b"\0")
-        h.update(path.read_bytes())
+        h.update(normalize_newlines(path.read_bytes()))
         h.update(b"\0")
     if scenario["category"] == "A":
         entry = ground_truth.get("verdicts", {}).get(scenario["case"], {})
@@ -266,9 +270,13 @@ def publication_build_digest() -> str:
 
     resolved: dict[str, str] = {}
     for requirement in requires:
-        if ";" in requirement:  # an extra/marker-gated dependency is not runtime
+        spec, _, marker = requirement.partition(";")
+        # Only `extra ==` is out of scope — that one is installed on demand.
+        # An environment marker (`python_version`, `sys_platform`) still gates a
+        # real runtime dependency, whose resolved version must move the digest.
+        if "extra" in marker:
             continue
-        name = re.split(r"[\s<>=!~\[(]", requirement, maxsplit=1)[0].strip()
+        name = re.split(r"[\s<>=!~\[(]", spec, maxsplit=1)[0].strip()
         if not name:
             continue
         try:
@@ -343,6 +351,10 @@ def build_pack() -> dict[str, Any]:
         # the catalog stays the one fact owner, and the pack carries its
         # answer.
         expected = dict(scenario.get("expected") or {})
+        # Category B fixtures are built by this repository for the evaluation,
+        # so they carry no catalog platform constraint; an empty list means
+        # "no declared restriction" rather than "runs nowhere".
+        platforms: list[str] = []
         if scenario["category"] == "A":
             entry = ground_truth.get("verdicts", {}).get(scenario["case"], {})
             expected = {
@@ -351,11 +363,17 @@ def build_pack() -> dict[str, Any]:
                 "min_evidence": entry.get("min_evidence"),
                 "resolved_from": "examples/ground_truth.json",
             }
+            # The catalog limits several cases to specific hosts. Dropping that
+            # here would let a macOS or Windows runner execute a Linux-only
+            # fixture and grade the (correct) platform-specific behaviour
+            # against a Linux expectation.
+            platforms = entry.get("platforms", [])
 
         scenarios[scenario["id"]] = {
             "skill": scenario["skill"],
             "category": scenario["category"],
             "status": scenario["status"],
+            "platforms": platforms,
             "prompt": scenario["prompt"],
             "inputs": fixture_root,
             "invocation": scenario.get("invocation", {}),
@@ -431,9 +449,19 @@ def describe_drift(committed_text: str, rendered_text: str) -> list[str]:
     except json.JSONDecodeError:
         return ["(committed pack is not valid JSON — regenerate it)"]
 
+    def _fingerprint(entry: Any) -> Any:
+        # This runs on a possibly hand-edited pack — one of the two failures it
+        # exists to explain — so it must not raise on a non-object entry.
+        if isinstance(entry, dict):
+            return entry.get("digest") or entry.get("tree")
+        return f"(not an object: {type(entry).__name__})"
+
     drift: list[str] = []
     for section in ("skills", "scenarios", "shared"):
         old, new = committed.get(section, {}), rendered.get(section, {})
+        if not isinstance(old, dict) or not isinstance(new, dict):
+            drift.append(f"{section}: not an object")
+            continue
         for key in sorted(set(old) | set(new)):
             if key not in old:
                 drift.append(f"{section}.{key}: added")
@@ -441,8 +469,8 @@ def describe_drift(committed_text: str, rendered_text: str) -> list[str]:
                 drift.append(f"{section}.{key}: removed")
             elif old[key] != new[key]:
                 drift.append(
-                    f"{section}.{key}: committed {old[key].get('digest') or old[key].get('tree')}"
-                    f" -> generated {new[key].get('digest') or new[key].get('tree')}"
+                    f"{section}.{key}: committed {_fingerprint(old[key])}"
+                    f" -> generated {_fingerprint(new[key])}"
                 )
     for key in ("pack_version", "rubric"):
         if committed.get(key) != rendered.get(key):

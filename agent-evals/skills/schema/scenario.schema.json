@@ -102,7 +102,11 @@
       "allOf": [
         {
           "if": {"properties": {"category": {"const": "A"}}, "required": ["category"]},
-          "then": {"required": ["case"], "not": {"required": ["invocation"]}}
+          "then": {
+            "required": ["case"],
+            "comment": "Category B-only fields. A Category A scenario restating a catalog-owned outcome is exactly the second copy the catalog exists to prevent.",
+            "not": {"anyOf": [{"required": ["invocation"]}, {"required": ["expected"]}, {"required": ["fixture"]}]}
+          }
         },
         {
           "if": {"properties": {"category": {"const": "B"}}, "required": ["category"]},
