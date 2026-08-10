@@ -94,3 +94,84 @@ def test_function_templates_differing_only_in_template_parameter_list_stay_disti
     # Each instantiation's edge must land on a *different* declaration node.
     targets = {dst for _src, dst in instantiates_edges}
     assert len(targets) == 2
+
+
+def test_partial_specialization_instantiation_gets_a_distinct_template_decl() -> None:
+    """``C<int>`` (selects the primary pattern) and ``C<int*>`` (selects the
+    partial specialization ``template <typename T> struct C<T*> {...}``)
+    both resolve their ``ClassTemplateSpecializationDecl`` stub's
+    ``template_qname`` to the same bare ``"C"`` -- clang nests both directly
+    under the primary ``ClassTemplateDecl`` regardless of which pattern was
+    actually selected, and the ``ClassTemplatePartialSpecializationDecl``
+    itself is a *detached* top-level sibling, never a child of it (Codex
+    review, verified against Clang 17/18 real AST output). An earlier
+    revision therefore mapped both to the identical ``template_decl://C``
+    node even though ``C<int*>`` genuinely instantiates a distinct declared
+    pattern, merging the two patterns' provenance. Fixture mirrors the exact
+    shape confirmed via a real ``clang -ast-dump=json`` dump of
+    ``template <typename T> struct C { void primary(); }; template
+    <typename T> struct C<T*> { void ptr_spec(); }; C<int> a; C<int*> b;``:
+    the implicit specialization for ``C<int*>`` shares its own
+    ``loc.offset`` with the detached partial spec's declaration, while
+    ``C<int>``'s specialization does not."""
+    primary_pattern = {"kind": "CXXRecordDecl", "name": "C", "inner": []}
+    spec_int = {
+        "kind": "ClassTemplateSpecializationDecl",
+        "name": "C",
+        "id": "spec_int",
+        "completeDefinition": True,
+        "loc": {"offset": 29},
+        "inner": [{"kind": "TemplateArgument", "type": {"qualType": "int"}}],
+    }
+    spec_ptr = {
+        "kind": "ClassTemplateSpecializationDecl",
+        "name": "C",
+        "id": "spec_ptr",
+        "completeDefinition": True,
+        # Shares the partial spec's own loc.offset -- the signal this
+        # module uses to detect which pattern generated it.
+        "loc": {"offset": 87},
+        "inner": [{"kind": "TemplateArgument", "type": {"qualType": "int *"}}],
+    }
+    class_template = {
+        "kind": "ClassTemplateDecl",
+        "name": "C",
+        "inner": [
+            {"kind": "TemplateTypeParmDecl", "name": "T"},
+            primary_pattern,
+            spec_int,
+            spec_ptr,
+        ],
+    }
+    # Detached top-level sibling, per the confirmed AST shape -- NOT nested
+    # under class_template.
+    partial_spec = {
+        "kind": "ClassTemplatePartialSpecializationDecl",
+        "name": "C",
+        "id": "partial1",
+        "loc": {"offset": 87},
+        "inner": [
+            {"kind": "TemplateArgument", "type": {"qualType": "type-parameter-0-0 *"}}
+        ],
+    }
+    ast = {"kind": "TranslationUnitDecl", "inner": [class_template, partial_spec]}
+
+    out = parse_clang_ast_templates(ast)
+    record_insts = {i.label: i for i in out if i.kind == "record"}
+    assert set(record_insts) == {"C<int>", "C<int *>"}
+    # Only the partial-specialization-selected instantiation gets a
+    # discriminating signature -- the primary-pattern one stays empty.
+    assert record_insts["C<int>"].template_signature == ""
+    assert record_insts["C<int *>"].template_signature != ""
+
+    graph = SourceGraphSummary()
+    augment_graph_with_templates(graph, out)
+    decl_nodes = {n.id for n in graph.nodes if n.kind == NODE_TEMPLATE_DECL}
+    # Distinct template_decl nodes -- the primary and the partial spec are
+    # genuinely different declared patterns, not one merged identity.
+    assert len(decl_nodes) == 2
+    instantiates_edges = {
+        (e.src, e.dst) for e in graph.edges if e.kind == EDGE_DECL_INSTANTIATES_TEMPLATE
+    }
+    targets = {dst for _src, dst in instantiates_edges}
+    assert len(targets) == 2

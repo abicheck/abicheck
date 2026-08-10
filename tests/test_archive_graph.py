@@ -490,6 +490,22 @@ def test_archive_member_node_id_does_not_collide_across_discriminators() -> None
     assert len(ids) == len(colliding_pairs)  # every pair gets its own id
 
 
+def test_archive_member_node_id_does_not_collide_across_archive_paths() -> None:
+    """Leaving ``archive_path`` unprefixed still let a crafted ``(archive_path,
+    member)`` pair collide with a distinct pair once *member* itself
+    contained a substring that looks like this format's own
+    ``archive::LEN:member`` encoding (Codex review, fourth round, fresh
+    evidence): ``archive_member_node_id("x", "a::1:b")`` and
+    ``archive_member_node_id("x::6:a", "b")`` both produced the identical
+    id, merging two members of two genuinely distinct archives onto one
+    graph node. ``archive_path`` is now length-prefixed the same way
+    ``member`` already is, so neither can smuggle a fake boundary into the
+    other."""
+    a = archive_member_node_id("x", "a::1:b")
+    b = archive_member_node_id("x::6:a", "b")
+    assert a != b
+
+
 def test_bsd_symdef_offset_into_middle_of_another_name_is_rejected() -> None:
     """A real ranlib-written ``str_off`` always names the *start* of a
     string-table entry -- either offset 0 or immediately after a preceding

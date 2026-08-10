@@ -939,8 +939,24 @@ def archive_member_node_id(
     keeping a separate unprefixed "common case" format that the same
     ambiguity could reach from the other direction (an unusual literal
     member name that happens to *look like* a length-prefixed entry).
+
+    *archive_path* is length-prefixed too (Codex review, fourth round,
+    fresh evidence), for the identical reason one level up: leaving it
+    plain still let a crafted ``(archive_path, member)`` pair collide with
+    a distinct pair once *member* itself contained a substring that looks
+    like this format's own ``archive::LEN:member`` encoding — confirmed
+    empirically: ``archive_member_node_id("x", "a::1:b")`` and
+    ``archive_member_node_id("x::6:a", "b")`` both returned the identical
+    ``"archive_member://x::6:a::1:b#0"``, merging two members of two
+    distinct archives onto one graph node. Length-prefixing *archive_path*
+    the same way closes it: an id match now requires *archive_path*'s own
+    length digits to match first (fixing where it ends), independently of
+    where *member*'s own length-prefix starts.
     """
-    return f"archive_member://{archive_path}::{len(member)}:{member}#{discriminator}"
+    return (
+        f"archive_member://{len(archive_path)}:{archive_path}::"
+        f"{len(member)}:{member}#{discriminator}"
+    )
 
 
 def _symbol_node_ids(graph: SourceGraphSummary) -> frozenset[str]:
