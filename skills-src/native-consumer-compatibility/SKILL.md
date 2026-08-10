@@ -62,6 +62,9 @@ older than the project's own last release.
 ```bash
 abicheck compare OLD NEW \
   --used-by path/to/consumer-binary \
+  --header old=../old-side/include/foo.h \
+  --header new=include/foo.h \
+  --include old=../old-side/include/ --include new=include/ \
   --depth headers \
   --report-mode root-cause \
   --format json \
@@ -83,6 +86,17 @@ Run the comparison once per consumer, into its own report, whenever you must
 name the findings that reach each one. Use a single multi-app run only for the
 coarser question "which of these consumers is affected at all", and report
 only the per-app summary from it.
+
+**Supply the library's headers here too, and confirm the tier.** `--used-by`
+scopes the comparison to what the consumer *imports* — symbol names, and
+nothing about their shape. An imported function can keep its exact linker
+symbol while its parameters, or a struct passed through it, change
+incompatibly. That is invisible at `elf_only`, and `compare` warns and
+proceeds on weaker evidence rather than failing, so a headerless run can
+return exit `0` for a consumer that will in fact break. Require
+`evidence_tier: header_aware` before accepting a pass; at `dwarf_aware` the
+signature and layout answer is real but rests on debug info rather than the
+declared API, so say which you have.
 
 Go to `--depth source` (with `--sources`/`--build-info`) when the question is
 "does the changed field actually reach this consumer" rather than "does this

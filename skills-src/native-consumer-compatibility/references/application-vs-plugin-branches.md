@@ -33,11 +33,15 @@ a different user job.
 # one run per consumer, into its own report
 abicheck compare OLD NEW \
   --used-by build/bin/myapp \
+  --header old=../old-side/include/foo.h --header new=include/foo.h \
+  --include old=../old-side/include/ --include new=include/ \
   --depth headers --report-mode root-cause --format json \
   -o myapp.json
 
 abicheck compare OLD NEW \
   --used-by build/lib/libplugin_host.so \
+  --header old=../old-side/include/foo.h --header new=include/foo.h \
+  --include old=../old-side/include/ --include new=include/ \
   --depth headers --report-mode root-cause --format json \
   -o plugin-host.json
 ```
@@ -47,6 +51,11 @@ abicheck compare OLD NEW \
   findings are one deduplicated union with no app-to-finding association.
   Reading that merged list as one app's would misattribute another's break —
   see the parent skill's step 2A, which owns this rule.
+- **Headers matter on this branch too.** `--used-by` establishes *which*
+  imported symbols matter, not what they look like — an import can keep its
+  linker symbol while its signature changes. Require `evidence_tier:
+  header_aware` before accepting a pass; the parent skill's step 2A owns
+  this rule.
 - Answer **per consumer**. A merged verdict hides the divergence this
   workflow exists to surface.
 - Deepen to `--depth source` when reachability, not just import presence, is

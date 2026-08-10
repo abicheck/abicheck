@@ -1712,6 +1712,30 @@ def test_external_page_may_not_claim_a_topic_it_is_not_registered_for(
 
 
 @pytest.mark.parametrize(
+    "malformed", [1, "learn/owner.md", {"a": 1}], ids=["int", "str", "mapping"]
+)
+def test_a_malformed_page_list_is_reported_not_raised(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, malformed: object
+) -> None:
+    """A non-list `task_pages`/`allowed_summaries` is a schema error the
+    registry check already reports. Iterating it here would raise `TypeError`
+    first and take the whole gate down with a traceback — losing that finding
+    and every other one alongside it, so the run reports nothing actionable at
+    all rather than one bad topic."""
+    topics, fragment = _external_registry(tmp_path)
+    topics["a-topic"]["task_pages"] = malformed
+    fragment.write_text(
+        "---\ndoc_type: reference\nsummarizes:\n  - a-topic\n---\n\n# F\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(dc, "ROOT", tmp_path)
+    monkeypatch.setattr(dc, "DOCS", tmp_path / "docs")
+    f = dc.Findings()
+    dc._check_external_pages_claim_only_registered_topics(f, topics)  # must not raise
+    assert f is not None
+
+
+@pytest.mark.parametrize(
     "front_matter",
     ["", "---\ndoc_type: reference\n---\n", "---\nsummarizes:\n  - other\n---\n"],
     ids=["no-front-matter", "no-summarizes", "wrong-topic"],

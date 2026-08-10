@@ -672,10 +672,19 @@ def _check_external_pages_claim_only_registered_topics(
                         f"{_rel(path)}: summarizes unknown topic {topic_id!r}",
                     )
                     continue
+                # `isinstance` rather than `or []`, matching every other
+                # iteration of these two keys in this file. A malformed
+                # non-list value (`task_pages: 1`) is already reported as a
+                # schema error by `_check_registry_integrity`; iterating it
+                # here would raise `TypeError` first and take the whole gate
+                # down with a traceback, losing that finding and every other
+                # one alongside it.
                 registered = [
                     str(v)
                     for key in ("task_pages", "allowed_summaries")
-                    for v in (entry.get(key) or [])
+                    for v in (
+                        entry.get(key) if isinstance(entry.get(key), list) else []
+                    )
                 ]
                 if not any(_page_key(v) == _scanned_page_key(path) for v in registered):
                     f.err(
