@@ -796,6 +796,7 @@ def _collect_source_graph(
     if surface is not None:
         from .buildsource.inline_graph_fold import (
             fold_call_graph,
+            fold_callback_graph,
             fold_include_graph,
             fold_macro_graph,
             fold_override_graph,
@@ -830,6 +831,12 @@ def _collect_source_graph(
         fold_override_graph(graph, merged, clang_bin, extractors, changed_paths)
         fold_virtual_dispatch_graph(graph)
         fold_macro_graph(graph, merged, clang_bin, extractors, changed_paths)
+        # G29 Phase 5 item 4: mirrors the same recurring gap this collect
+        # path's own comments above already document (this out-of-band path
+        # falling behind `inline_graph_fold.fold_semantic_graphs`'s own call
+        # list) -- fold this in the same commit that adds
+        # `fold_callback_graph` rather than a fourth follow-up fix.
+        fold_callback_graph(graph, merged, clang_bin, extractors, changed_paths)
     # fold_archive_graph needs no clang/L4 surface (unlike the three passes
     # above) -- it runs unconditionally whenever the graph carries a
     # static_library node, mirroring inline._build_inline_graph's identical

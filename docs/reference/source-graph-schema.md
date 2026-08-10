@@ -382,6 +382,74 @@ whether "zero edges" from this pass means anything should check those three
 passes' coverage, not a fourth clang-availability signal a pass that never
 touches a compiler cannot produce.
 
+## The callback/function-pointer half of the graph (G29 Phase 5 item 4)
+
+`abicheck/buildsource/callback_graph.py` closes the plugin/event-loop/C-API
+callback blind spot: a public registration function stashing a private
+handler's address into a slot that is later invoked indirectly. Split like
+item 3, by whether new compiler evidence is needed — but unlike item 3, this
+family's Part A depends on Part B's own edges already being folded, so both
+run inside one `inline_graph_fold.fold_callback_graph` call rather than two
+separate `fold_*` functions.
+
+| Kind | Status | Meaning |
+|---|---|---|
+| `DECL_REGISTERS_CALLBACK` *(edge)* | populated | The address-taking function → the slot. A function's address is a direct argument of a plain `CallExpr`, at a position whose callee parameter is itself function-pointer-typed (`signal(SIGINT, handler)`). `CONF_HIGH` — an exact structural match. |
+| `DECL_TAKES_ADDRESS_OF` *(edge)* | populated | The address-taking function → the slot. A broader catch-all: an address-of/decay flows into a function-pointer-typed variable/field via a plain assignment or its own initializer, not necessarily a direct call argument. `CONF_REDUCED` — telling a real callback wire-up from an incidental address-of (printing/comparing it) is out of scope. |
+| `CALLBACK_MAY_INVOKE` *(edge)* | populated | The original calling `source_decl` → a registered function `source_decl`. A pure join, no new clang pass: joins `call_graph.py`'s already-folded function-pointer-kind `DECL_CALLS_DECL` edge (caller → slot) against every `DECL_REGISTERS_CALLBACK`/`DECL_TAKES_ADDRESS_OF` edge naming that same slot. `attrs.resolution` is always `"overapprox"`, never `"exact"`; `attrs.slot` names the joined slot; `attrs.registration_kind` records which of the two edge kinds contributed the candidate. `CONF_REDUCED`. A slot with no function registered anywhere this pass examined contributes no edge — not a spurious self-edge and not a "definitely unused" claim: the fact is genuinely unknown, not empty. |
+| `FUNCTION_POINTER_HAS_SIGNATURE` *(edge)* | **registered, no edge producer — populated as a node-level fact instead** | Investigated and found genuinely unmet by any pre-existing edge (unlike `DECL_OVERRIDES_DECL` in the virtual-dispatch family, which was already covered) — but a function pointer's signature is a property of exactly one declaration, not a relation between two entities, so it doesn't fit this schema's edge shape. `callback_graph.py` instead stamps a `function_pointer_signature` **node-level** fact (the slot's own desugared-preferred `qualType` spelling) on the slot's `source_decl` node whenever a `DECL_REGISTERS_CALLBACK`/`DECL_TAKES_ADDRESS_OF` join succeeds. Registered as edge vocabulary only so a hand-built or future graph naming it directly is never rejected. |
+
+No new **node** kind — every edge above joins onto pre-existing `source_decl`
+nodes only (the address-taking function and the slot are both already
+seeded by `call_graph.py`/`type_graph.py`), the same join-only-onto-an-
+existing-node discipline every sibling family in this phase reapplies.
+
+**Identity design — the single load-bearing correctness property.** Part A's
+join only connects when Part B's edges land on *exactly* the same `dst`
+identity `call_graph.py` itself already used for the same slot. Investigated
+by reading `call_graph._classify_call`/`_resolve_ref_callee_identity`: a call
+through a variable/parameter/field resolves its callee identity via an
+`id_index` populated **only** for `FunctionDecl`-kind nodes — never for a
+`VarDecl`/`ParmVarDecl`/`FieldDecl` — so the lookup always misses and falls
+back to the reference stub's own bare, unqualified `mangledName or name` (a
+parameter named `h` in two unrelated functions both resolve to the identical
+bare identity `"h"`). `callback_graph.py`'s Part B deliberately computes the
+same slot identity the same way, rather than a stronger scope-qualified one
+that would simply never match anything `call_graph.py` produces — mirroring
+an existing, already-shipped limitation of the graph it joins onto, not
+inventing a new one.
+
+**A load-bearing negative empirical finding: a struct-field-typed callback
+slot invoked through member-call syntax (`w->cb(x)`) never actually joins in
+Part A today.** Confirmed by compiling real code through
+`call_graph.parse_clang_ast_calls`: clang emits a `MemberExpr`'s own callee
+reference as `"referencedMemberDecl": "<node-id-string>"` — a bare string,
+not a nested dict — which `call_graph._find_referenced_decl`'s
+`isinstance(..., dict)` check does not recognize, so the DFS falls through
+to the *base object's* own reference instead (`w`, not `cb`). Part B still
+records a real, individually correct `DECL_REGISTERS_CALLBACK`/
+`DECL_TAKES_ADDRESS_OF` edge naming the field itself, but Part A's join
+against it only fires when some other code path calls through the field in a
+form `call_graph.py` resolves to the field directly — an inherited
+limitation of the upstream pass this module builds on, not a bug introduced
+here.
+
+Scoped to a **plain, free-function** `CallExpr` for the registration case —
+not `CXXMemberCallExpr`/`CXXOperatorCallExpr` — mirroring
+`override_graph.py`'s own "constructors/destructors deliberately out of
+scope for this first slice" precedent. See `callback_graph.py`'s own module
+docstring for the full empirical AST-shape findings (an explicit `&func`
+`UnaryOperator`, an implicit `FunctionToPointerDecay` cast, a typedef'd
+function-pointer type's `desugaredQualType`) and what's deliberately
+deferred (extending `call_graph.py`'s own identity/reference resolution,
+`CXXMemberCallExpr` registration detection).
+
+Coverage is tracked at `extractor_passes["callback_graph"]`/
+`degraded_passes["callback_graph"]`, the same family-level coverage-honesty
+contract the other Clang-backed passes use — driven by
+`inline_graph_fold.fold_callback_graph`, run after `fold_macro_graph` (its
+own Part A needs `fold_call_graph`'s edges already folded).
+
 ## `primary_path` / `alternative_paths` / `discarded_path_count`
 
 `select_preferred_graph_path`'s caller (`buildsource.graph_impact.attach_impact_metadata`)

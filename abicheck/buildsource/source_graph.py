@@ -49,6 +49,7 @@ from .entity_resolver import EntityResolver
 # .source_graph import GraphNode``/``CONF_HIGH`` etc.) — the ``as``-aliases
 # make the re-export explicit for mypy's strict ``--no-implicit-reexport``.
 from .graph_facts import (
+    CALLBACK_EDGE_KINDS,  # G29 Phase 5 item 4
     CONF_HIGH as CONF_HIGH,
     CONF_REDUCED as CONF_REDUCED,
     CONF_UNKNOWN as CONF_UNKNOWN,
@@ -156,15 +157,14 @@ EDGE_KINDS: frozenset[str] = frozenset(
     | LINK_PROVENANCE_EDGE_KINDS
     | MACRO_DEP_EDGE_KINDS
     | VIRTUAL_DISPATCH_EDGE_KINDS
+    | CALLBACK_EDGE_KINDS
 )
 
 #: L5 edge kinds that express a decl/type dependency (ADR-041 P0): a call, a
 #: non-call reference to a global/constant, a parameter/field type, or a base
 #: class. ``crosscheck.py``'s intra-version ``public_to_internal_dependency``
 #: check and this module's version-over-version internal-dependency diff both
-#: read exactly this set, so the two stay in lockstep on what "a public entity
-#: reaches an internal one" means — a struct's private field type or base
-#: class is exactly the "not a call at all" risk ADR-041 opens with.
+#: read exactly this set, so the two stay in lockstep on what "a public entity reaches an internal one" means — a struct's private field type or base class is exactly the "not a call at all" risk ADR-041 opens with.
 DEPENDENCY_EDGE_KINDS: frozenset[str] = frozenset(
     {
         "DECL_CALLS_DECL",

@@ -285,6 +285,52 @@ VIRTUAL_DISPATCH_EDGE_KINDS: frozenset[str] = frozenset(
 #: introspection pass, not build-evidence alone. ``linker_script``/
 #: ``export_map``/``comdat_group`` remain reserved (no normalized data
 #: source yet) for a future linker-artifact extractor.
+#: The callback/function-pointer half of the graph vocabulary (G29 Phase 5
+#: item 4, G29.6's fourth open graph family) — ``source_graph.EDGE_KINDS``
+#: unions this in the same way ``MACRO_DEP_EDGE_KINDS``/
+#: ``VIRTUAL_DISPATCH_EDGE_KINDS`` above are, and ``abicheck.buildsource.
+#: callback_graph`` (which populates the three live members below)
+#: re-exports it. Same two reasons for living in this leaf module:
+#: ``source_graph.py`` is at its 2000-line hard cap, and the producer would
+#: need to import ``source_graph`` back. **No new node kind**: a callback
+#: slot and the function whose address flows into it are both already
+#: ``source_decl`` nodes seeded by ``call_graph.py``/``type_graph.py`` — same
+#: "no new node kind needed" shape as ``MACRO_DEP_EDGE_KINDS``'s deliberate
+#: absence of one.
+#:
+#: ``CALLBACK_MAY_INVOKE`` (a pure join, no new clang pass — reuses
+#: ``call_graph.py``'s existing function-pointer-kind ``DECL_CALLS_DECL``
+#: edges), ``DECL_REGISTERS_CALLBACK`` (a function's address taken as a
+#: direct argument to a call whose matching parameter is function-pointer
+#: typed — the plugin/event-loop/C-API registration shape), and
+#: ``DECL_TAKES_ADDRESS_OF`` (the broader case: an address-of flowing into a
+#: function-pointer-typed variable/field via assignment or initializer, not
+#: necessarily a direct call argument) are all populated — see
+#: ``callback_graph.py``'s own module docstring for the full reasoning,
+#: including the identity design Part A's join depends on and two empirical
+#: AST-shape findings (an explicit ``&func``/an implicit function-to-pointer
+#: decay, and a documented, inherited join gap for a struct-field-typed slot
+#: invoked through member-call syntax).
+#:
+#: ``FUNCTION_POINTER_HAS_SIGNATURE`` is registered but has **no edge
+#: producer** — investigated and found genuinely unmet by any pre-existing
+#: edge (unlike ``DECL_OVERRIDES_DECL`` above, which was already covered), but
+#: a function pointer's signature is a property of exactly one declaration,
+#: not a relation between two entities, so it doesn't fit this schema's edge
+#: shape at all. ``callback_graph.py`` instead populates the real data as a
+#: ``function_pointer_signature`` **node-level** fact (via
+#: :func:`register_fact`) on the callback slot's own ``source_decl`` node.
+#: Stays registered as edge vocabulary only so a hand-built or future graph
+#: naming it directly is never rejected.
+CALLBACK_EDGE_KINDS: frozenset[str] = frozenset(
+    {
+        "DECL_TAKES_ADDRESS_OF",
+        "DECL_REGISTERS_CALLBACK",
+        "CALLBACK_MAY_INVOKE",
+        "FUNCTION_POINTER_HAS_SIGNATURE",
+    }
+)
+
 LINK_PROVENANCE_NODE_KINDS: frozenset[str] = frozenset(
     {
         "object_file",

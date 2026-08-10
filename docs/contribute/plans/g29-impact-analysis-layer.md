@@ -208,9 +208,18 @@ model:
   `DECL_OVERRIDES_DECL` needed no producer (already satisfied by
   `override_graph.py`'s existing confirmed-override edges) and
   `VTABLE_SLOT_MAPS_TO_DECL` remains reserved (needs a real per-slot Itanium
-  layout model, deliberately not attempted). Callback/function-pointer
-  remains fully open — it needs its own Clang AST pass this phase has not
-  added.
+  layout model, deliberately not attempted). **Callback/function-pointer is
+  done, for three of the four vocabulary members** (`callback_graph.py`,
+  `extractor_passes["callback_graph"]` — see Phase 5 item 4 above):
+  `DECL_REGISTERS_CALLBACK`/`DECL_TAKES_ADDRESS_OF` are populated via a new
+  Clang AST pass, and `CALLBACK_MAY_INVOKE` is populated via a pure join
+  (needing no new clang invocation) over `call_graph.py`'s already-folded
+  function-pointer-kind `DECL_CALLS_DECL` edges;
+  `FUNCTION_POINTER_HAS_SIGNATURE` is registered vocabulary with no edge
+  producer — a real, investigated gap (unlike `DECL_OVERRIDES_DECL` above),
+  but populated instead as a `function_pointer_signature` node-level fact on
+  the slot's own `source_decl` node, since a signature is a property of one
+  declaration, not a relation between two.
 - **G29.7** — The minimal new user-facing detector set from the review
   (8 detector surfaces: 6 `ChangeKind`s and 2 report-level overlays — see
   Phase 6) plus `case194`-`case205` positive/negative example pairs and the
@@ -791,10 +800,75 @@ which all depend on a Clang AST pass.
      possible runtime dispatch target set changed". `diff_elf_layout.py`
      itself is unrelated infrastructure (binary-only, no per-slot identity)
      and is not unified with this family.
-4. **Callback/function-pointer**: `DECL_TAKES_ADDRESS_OF`,
-   `DECL_REGISTERS_CALLBACK`, `CALLBACK_MAY_INVOKE`,
-   `FUNCTION_POINTER_HAS_SIGNATURE` — closes the plugin/event-loop/C-API
-   callback blind spot the review calls out.
+4. **Callback/function-pointer — done, for three of the four vocabulary
+   members.** `abicheck/buildsource/callback_graph.py` closes the
+   plugin/event-loop/C-API callback blind spot the review calls out, split
+   the same way item 3 is: a pure join (Part A, no new clang pass) plus a
+   genuinely new Clang AST pass (Part B) — but unlike item 3's two
+   independent `fold_*` functions, this family's Part A depends on Part B's
+   own edges already being in the graph, so both run inside one
+   `inline_graph_fold.fold_callback_graph` call.
+   - `DECL_REGISTERS_CALLBACK` (`CONF_HIGH`) — a function's address is a
+     direct argument of a plain `CallExpr` at a position whose callee
+     parameter is itself function-pointer-typed (`signal(SIGINT, handler)`).
+     `DECL_TAKES_ADDRESS_OF` (`CONF_REDUCED`) — the broader case: an
+     address-of/decay flows into a function-pointer-typed variable/field via
+     assignment or its own initializer, not necessarily a direct call
+     argument. Both are a new Clang AST pass
+     (`callback_graph.parse_clang_ast_callbacks`), empirically verified
+     against real Clang 18 output for an explicit `&func`
+     (`UnaryOperator`/`"&"`), an implicit function-to-pointer decay
+     (`ImplicitCastExpr`/`"FunctionToPointerDecay"`), and a typedef'd
+     function-pointer type's `desugaredQualType` spelling.
+   - `CALLBACK_MAY_INVOKE` (`CONF_REDUCED`, `resolution: "overapprox"`,
+     never `"exact"` — the same instruction this whole graph family follows)
+     joins `call_graph.py`'s already-folded function-pointer-kind
+     `DECL_CALLS_DECL` edge (caller → slot) against every
+     `DECL_REGISTERS_CALLBACK`/`DECL_TAKES_ADDRESS_OF` edge naming that same
+     slot — no new clang pass. A slot with no function registered anywhere
+     this pass examined contributes no edge (the fact is genuinely unknown,
+     not empty, the same reasoning item 3 uses for a leaf virtual method
+     with no override candidates).
+   - **Identity design — the single load-bearing correctness property.**
+     Investigated (not assumed) by reading
+     `call_graph._classify_call`/`_resolve_ref_callee_identity`: a call
+     through a variable/parameter/field resolves its callee identity via an
+     `id_index` populated only for `FunctionDecl`-kind nodes, so it always
+     falls back to the reference stub's own bare, unqualified name (a
+     parameter named `h` in two unrelated functions both resolve to the
+     identical bare identity). Part B deliberately computes the same slot
+     identity the same (weak) way, rather than a stronger one that would
+     simply never match anything `call_graph.py` produces — mirroring an
+     existing, already-shipped limitation of the graph it joins onto.
+   - **A load-bearing negative empirical finding, not a defect introduced
+     here:** a struct-field-typed callback slot invoked through member-call
+     syntax (`w->cb(x)`) never actually joins in Part A today, because
+     `call_graph._find_referenced_decl` cannot recognize a `MemberExpr`'s
+     own `referencedMemberDecl` (a bare node-id *string* in real clang
+     output, not a nested dict) and falls through to the base object's own
+     reference instead — a documented, inherited limitation of the upstream
+     pass this module builds on.
+   - **`FUNCTION_POINTER_HAS_SIGNATURE` — investigated, found genuinely
+     unmet, implemented as a node-level fact instead of an edge.** Checked
+     (not assumed) whether `type_graph.py`'s existing `DECL_HAS_TYPE`/
+     `TYPE_HAS_FIELD_TYPE` edges already carry a callback slot's signature
+     anywhere: they don't — a callback's own parameter/return types are
+     folded under the *enclosing* declaration's role, losing the ordered
+     signature shape, and no edge attribute anywhere records the slot's raw
+     type string. A real, unmet gap. But once populated, a signature is a
+     property of exactly one declaration, not a relation between two graph
+     entities, so it doesn't fit an edge shape — stays registered in
+     `graph_facts.CALLBACK_EDGE_KINDS` for vocabulary compatibility, with the
+     real data populated as a `function_pointer_signature` **node-level**
+     fact on the slot's own `source_decl` node.
+   - Deliberately scoped to a **plain, free-function** `CallExpr` for the
+     registration case (not `CXXMemberCallExpr`/`CXXOperatorCallExpr`),
+     mirroring `override_graph.py`'s own first-slice AST-node-kind
+     narrowing. Deferred, each needing its own scoped follow-up: extending
+     `call_graph.py`'s own `id_index`/`_find_referenced_decl` (would
+     strengthen every function-pointer `DECL_CALLS_DECL` edge, not just this
+     module's own — shared infrastructure, not a same-slice fix);
+     `CXXMemberCallExpr`/`CXXOperatorCallExpr` registration detection.
 5. **Full type-role coverage** to parity: variable type, typedef target,
    alias-template target, enum underlying type, non-type template argument,
    default template argument, concept/constraint dependency, function-pointer
@@ -878,6 +952,7 @@ abicheck/buildsource/archive_graph.py  # ar-index introspection (Phase 5 item 6,
 abicheck/buildsource/template_graph.py  # Clang template-instantiation pass (Phase 5 item 1, DONE — template_decl/template_instantiation, DECL_INSTANTIATES_TEMPLATE/TEMPLATE_USES_TYPE/INSTANTIATION_EMITS_SYMBOL)
 abicheck/buildsource/macro_graph.py  # Clang + raw-text macro/config-dependency pass (Phase 5 item 2, DONE — MACRO_CONTROLS_DECL/DECL_USES_MACRO)
 abicheck/buildsource/virtual_dispatch_graph.py  # pure graph transform, no clang (Phase 5 item 3, PARTIAL — VIRTUAL_CALL_MAY_DISPATCH_TO/TYPE_HAS_VTABLE; DECL_OVERRIDES_DECL already satisfied by override_graph.py, VTABLE_SLOT_MAPS_TO_DECL reserved)
+abicheck/buildsource/callback_graph.py  # Clang callback/function-pointer pass + pure join (Phase 5 item 4, PARTIAL — DECL_REGISTERS_CALLBACK/DECL_TAKES_ADDRESS_OF/CALLBACK_MAY_INVOKE; FUNCTION_POINTER_HAS_SIGNATURE populated as a node-level fact instead of an edge)
 abicheck/internal_leak.py   # TraversalPolicy + effect_transitions (Phase 2 D5, DONE — landed here, not a separate impact/traversal.py)
 abicheck/impact/
     model.py           # ImpactAssessment, GraphProofPath, FindingDecision (Phase 3 slices 1/7, DONE — ADR-052)

@@ -616,6 +616,91 @@ def fold_macro_graph(
     )
 
 
+def fold_callback_graph(
+    graph: SourceGraphSummary,
+    merged: BuildEvidence,
+    clang_bin: str,
+    extractors: list[ExtractorRecord] | None,
+    changed_paths: tuple[str, ...] = (),
+    scoped_units: list[Any] | None = None,
+) -> None:
+    """Best-effort Clang callback/function-pointer augmentation of *graph*
+    (G29 Phase 5 item 4).
+
+    Mirrors :func:`fold_macro_graph`'s scoping precedence and graceful
+    degradation, but folds ``DECL_REGISTERS_CALLBACK``/``DECL_TAKES_ADDRESS_OF``
+    (Part B — a new Clang AST pass, :mod:`callback_graph`) then
+    ``CALLBACK_MAY_INVOKE`` (Part A — a pure join over the edges Part B just
+    folded plus ``call_graph.py``'s already-folded function-pointer-kind
+    ``DECL_CALLS_DECL`` edges) in the same call, unlike
+    :func:`fold_virtual_dispatch_graph`'s split shape: this family's Part A
+    needs Part B's edges to have *already* landed in *graph* before it can
+    join against them, and both parts share one clang-availability/scoping
+    story, so there is no benefit to a separate function the way
+    ``fold_virtual_dispatch_graph`` (which needs no clang/scoping arguments
+    at all) earned one. Run only when the caller also runs the call graph
+    (``with_call_graph``), sharing the same scoping decision and
+    clang-availability diagnostic story as every other Clang-backed pass —
+    see ``callback_graph.py``'s own module docstring for the full reasoning
+    (including the identity design Part A's join depends on, and the
+    empirical AST-shape findings this is grounded in).
+    """
+    from .call_graph import extractor_pass_fully_covered, narrowed_pass_confirmed
+    from .callback_graph import (
+        ClangCallbackGraphExtractor,
+        augment_graph_with_callback_invocations,
+        augment_graph_with_callback_registrations,
+    )
+
+    rows = extractors if extractors is not None else []
+    extractor = ClangCallbackGraphExtractor(
+        clang_bin=clang_bin if clang_bin != "clang" else "clang++"
+    )
+    if not extractor.available():
+        rows.append(
+            ExtractorRecord(
+                name="callback_graph:clang",
+                status="failed",
+                detail=f"{extractor.clang_bin} not found; graph has no callback edges",
+            )
+        )
+        return
+    target, scoped_note, narrowed, scope_key = _scope_narrowed_target(
+        merged, changed_paths, scoped_units
+    )
+    callback_edges = extractor.extract_from_build(target)
+    registration_result = augment_graph_with_callback_registrations(
+        graph, callback_edges
+    )
+    dispatch_result = augment_graph_with_callback_invocations(graph)
+    added = registration_result.edges_joined + dispatch_result.dispatch_edges_added
+    if extractor_pass_fully_covered(target, extractor, narrowed):
+        graph.extractor_passes["callback_graph"] = True
+    elif narrowed and narrowed_pass_confirmed(target, extractor):
+        graph.narrowed_passes["callback_graph"] = True
+        graph.narrowed_scope["callback_graph"] = scope_key
+    elif extractor.diagnostics:
+        graph.degraded_passes["callback_graph"] = True
+    for diag in extractor.diagnostics:
+        merged.diagnostics.append(f"callback_graph: {diag}")
+    timing = (
+        f", {extractor.last_elapsed_s:.2f}s, jobs={extractor.last_jobs}"
+        if getattr(extractor, "last_jobs", 0)
+        else ""
+    )
+    rows.append(
+        ExtractorRecord(
+            name="callback_graph:clang",
+            status="ok" if added else "partial",
+            detail=(
+                f"{registration_result.edges_joined} registration/address-of edge(s), "
+                f"{dispatch_result.dispatch_edges_added} CALLBACK_MAY_INVOKE edge(s) "
+                f"from {len(target.compile_units)} compile unit(s){scoped_note}{timing}"
+            ),
+        )
+    )
+
+
 def fold_include_graph(
     graph: SourceGraphSummary,
     merged: BuildEvidence,
@@ -707,7 +792,8 @@ def fold_semantic_graphs(
     :func:`fold_override_graph` (ADR-041 P2 item 1),
     :func:`fold_virtual_dispatch_graph` (G29 Phase 5 item 3),
     :func:`fold_template_graph` (G29 Phase 5 item 1),
-    :func:`fold_macro_graph` (G29 Phase 5 item 2), then
+    :func:`fold_macro_graph` (G29 Phase 5 item 2),
+    :func:`fold_callback_graph` (G29 Phase 5 item 4), then
     :func:`fold_include_graph` — the exact sequence ``inline._build_inline_graph``
     ran inline before this wrapper existed, kept together here (rather than
     six separate call sites in ``inline.py``, which sits at its own
@@ -719,7 +805,13 @@ def fold_semantic_graphs(
     ``fold_override_graph`` and takes no clang/scoping arguments of its own
     (see its own docstring) — it is a pure transformation over the call/type/
     override graph state the three preceding passes just folded, so it must
-    run after all three, not merely "somewhere in this sequence". Each
+    run after all three, not merely "somewhere in this sequence".
+    ``fold_callback_graph`` sits after ``fold_macro_graph`` for the identical
+    reason ``fold_virtual_dispatch_graph`` sits after ``fold_override_graph``:
+    its own internal Part A join reads ``call_graph.py``'s already-folded
+    function-pointer-kind ``DECL_CALLS_DECL`` edges, so ``fold_call_graph``
+    must have already run — any position after it works, and grouping it with
+    the other G29 Phase 5 passes keeps this family together. Each
     clang-backed pass shares the same *changed_paths*/*scoped_units* scoping
     precedence and clang-binary resolution, and each degrades independently
     (a missing ``clang++`` or a per-TU parse failure never aborts a later
@@ -739,6 +831,9 @@ def fold_semantic_graphs(
         graph, merged, clang_bin, extractors, changed_paths, scoped_units=scoped_units
     )
     fold_macro_graph(
+        graph, merged, clang_bin, extractors, changed_paths, scoped_units=scoped_units
+    )
+    fold_callback_graph(
         graph, merged, clang_bin, extractors, changed_paths, scoped_units=scoped_units
     )
     fold_include_graph(
