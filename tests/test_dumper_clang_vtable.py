@@ -1353,3 +1353,99 @@ def test_partially_dependent_default_is_conservatively_not_substituted() -> None
     # Wrapper<double>>", which never matches the base reference's own
     # "A<double>" -- correctly conservative rather than guessing.
     assert types["D"].vtable == []
+
+
+def test_fully_defaulted_specialization_still_indexes_as_empty_angle_brackets() -> (
+    None
+):
+    """Codex review, fresh evidence (P1): when EVERY template argument
+    equals its own default, popping them all left ``args`` empty and the
+    whole specialization returned ``None`` (unresolvable) -- but clang
+    still prints an explicit, empty angle-bracket pair (``"A<>"``) on the
+    base reference, never a bare ``"A"`` (confirmed with a real clang
+    build: ``template<class T=int> struct A {...}; struct D : A<> {...};``
+    gives ``bases[0].type.qualType == "A<>"``). Unlike a genuine
+    no-arguments case (a template-template argument, pack expansion, or
+    zero-parameter template), every argument here IS safely known -- only
+    the resulting joined spelling happens to be empty.
+    """
+    root = _tu(
+        {
+            "kind": "ClassTemplateDecl",
+            "name": "A",
+            "inner": [
+                {
+                    "kind": "TemplateTypeParmDecl",
+                    "name": "T",
+                    "defaultArg": {
+                        "kind": "TemplateArgument",
+                        "type": {"qualType": "int"},
+                    },
+                },
+                _record("A"),
+                _specialization(
+                    "A",
+                    {
+                        "kind": "CXXMethodDecl",
+                        "name": "f",
+                        "mangledName": "_ZN1AIiE1fEv",
+                        "type": {"qualType": "void ()"},
+                        "virtual": True,
+                    },
+                    type_args=["int"],
+                ),
+            ],
+        },
+        _record("D", bases=[_base("A<>")]),
+    )
+    types = _types(root)
+    assert types["D"].vtable == ["_ZN1AIiE1fEv"]
+    assert types["D"].vptr_offset_bits == 0
+
+
+def test_nested_specialization_indexes_under_outer_specialization_qualname() -> None:
+    """Codex review, fresh evidence (P2): a specialization containing its
+    own NESTED specialization (``struct D : Outer<int>::A<double>``) must
+    descend under the OUTER specialization's own SPELLED qualname
+    (``"Outer<int>"``), not its bare ``name`` (``"Outer"``) --
+    ``ClassTemplateSpecializationDecl`` is deliberately not in
+    ``_SCOPE_NODE_KINDS`` (it isn't an ordinary namespace/class/
+    linkage-spec scope), so falling through to that generic branch would
+    silently drop the outer specialization's own template arguments from
+    the nested one's qualname, indexing it as bare ``"A<double>"`` instead
+    of ``"Outer<int>::A<double>"`` and leaving the base unresolvable.
+    """
+    inner_spec = _specialization(
+        "A",
+        {
+            "kind": "CXXMethodDecl",
+            "name": "f",
+            "mangledName": "_ZN5OuterIiE1AIdE1fEv",
+            "type": {"qualType": "void ()"},
+            "virtual": True,
+        },
+        type_args=["double"],
+    )
+    root = _tu(
+        {
+            "kind": "ClassTemplateDecl",
+            "name": "Outer",
+            "inner": [
+                {"kind": "TemplateTypeParmDecl", "name": "T"},
+                _record("Outer"),
+                {
+                    "kind": "ClassTemplateSpecializationDecl",
+                    "name": "Outer",
+                    "completeDefinition": True,
+                    "inner": [
+                        {"kind": "TemplateArgument", "type": {"qualType": "int"}},
+                        inner_spec,
+                    ],
+                },
+            ],
+        },
+        _record("D", bases=[_base("Outer<int>::A<double>")]),
+    )
+    types = _types(root)
+    assert types["D"].vtable == ["_ZN5OuterIiE1AIdE1fEv"]
+    assert types["D"].vptr_offset_bits == 0

@@ -1294,6 +1294,37 @@ building a second identity-resolution mechanism from scratch.
   only ever walks member kinds when building the set this check consults,
   so a bare `FunctionDecl` can never legitimately appear in it.
 
+  **A tenth review round (post-merge, on the follow-up branch) found two
+  more real gaps in `build_specialization_index()`'s own indexing, both
+  confirmed with real Clang 17 output.** (1) When EVERY template argument
+  of a specialization equals its own default, the trailing-default-pop
+  loop in `_specialization_spelling` emptied `args` entirely and returned
+  `None` (unresolvable) — but clang always prints an explicit, empty
+  angle-bracket pair (`"A<>"`) on the base reference, never a bare `"A"`
+  (confirmed: `template<class T=int> struct A {...}; struct D : A<>
+  {...};` gives `bases[0].type.qualType == "A<>"`). Unlike a genuine
+  no-arguments case (a template-template argument, pack expansion, or a
+  zero-parameter template — where returning `None` is correct), every
+  argument here IS safely known; only the resulting joined spelling
+  happens to be empty. Fixed by returning `f"{name}<>"` specifically for
+  the popped-to-empty case, leaving the earlier, genuinely-no-arguments
+  check untouched. (2) `build_specialization_index()`'s own whole-AST walk
+  descended into a specialization's children using its bare `name`, not
+  its reconstructed spelling — since `ClassTemplateSpecializationDecl` is
+  deliberately not in `_SCOPE_NODE_KINDS` (it isn't an ordinary namespace/
+  class/linkage-spec scope), a NESTED specialization inside it
+  (`struct D : Outer<int>::A<double>`) indexed as bare `"A<double>"`
+  instead of `"Outer<int>::A<double>"`, leaving the base's vtable
+  completely invisible. This is the exact same shape `dumper_clang.py`'s
+  own `_walk` already fixed for scoping a specialization's OWN MEMBERS
+  (see the earlier P1 finding on this file) — that fix never reached this
+  sibling walk, which builds the base-lookup index rather than member
+  scopes. Fixed identically: `child_scope = (*scope, spelling) if
+  spelling else scope` for a `ClassTemplateSpecializationDecl` node, ahead
+  of the generic `_SCOPE_NODE_KINDS` branch. Both verified end-to-end
+  through `dump()`/`compare()` against real compiled GCC binaries, plus
+  hand-built unit fixtures.
+
 - ~~Single-AST reuse for the direct-clang backend~~ **Done** (see above) —
   via in-process memoization of `_clang_header_dump`'s result, not by
   threading the parser's already-consumed AST object through

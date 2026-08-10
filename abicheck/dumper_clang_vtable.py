@@ -910,8 +910,21 @@ def _specialization_spelling(
             if default != args[-1]:
                 break
             args.pop()
-    if not args:
-        return None
+        if not args:
+            # EVERY argument was popped as matching its own default --
+            # clang still prints an explicit, empty angle-bracket pair
+            # (`"A<>"`), never a bare `"A"` (Codex review, fresh evidence;
+            # confirmed with a real clang build:
+            # `template<class T=int> struct A {...}; struct D : A<> {...};`
+            # gives `bases[0].type.qualType == "A<>"` on the base
+            # reference). Returning `None` here (as the earlier
+            # no-arguments-at-all case above correctly does, for a
+            # template-template argument/pack-expansion/zero-parameter
+            # shape) would degrade this to an unresolvable base even
+            # though every argument is safely known -- unlike that case,
+            # this one has real, fully-resolved argument data; it's only
+            # the resulting spelling that happens to be the empty list.
+            return f"{name}<>"
     return f"{name}<{', '.join(args)}>"
 
 
@@ -1020,7 +1033,26 @@ def build_specialization_index(
                     not _is_record_definition(existing) and _is_record_definition(node)
                 ):
                     idx[qualname] = node
-        child_scope = (*scope, name) if kind in _SCOPE_NODE_KINDS and name else scope
+            # A specialization containing its own NESTED specialization
+            # (`struct D : Outer<int>::A<double>`) must descend under the
+            # OUTER specialization's own spelled qualname (`"Outer<int>"`),
+            # not its bare `name` (`"Outer"`) -- `ClassTemplateSpecialization
+            # Decl` is deliberately not in `_SCOPE_NODE_KINDS` (it isn't an
+            # ordinary namespace/class/linkage-spec scope), so falling
+            # through to the generic branch below would silently drop the
+            # outer specialization's template arguments from the nested
+            # one's qualname, indexing it as bare `"A<double>"` instead of
+            # `"Outer<int>::A<double>"` (Codex review, fresh evidence;
+            # mirrors `dumper_clang.py`'s own `_walk` handling of the
+            # identical shape for scoping a specialization's own members).
+            # Falls back to the unscoped behavior (bare `name`) when the
+            # spelling can't be reconstructed, same as every other
+            # unresolvable-specialization degradation in this module.
+            child_scope = (*scope, spelling) if spelling else scope
+        elif kind in _SCOPE_NODE_KINDS and name:
+            child_scope = (*scope, name)
+        else:
+            child_scope = scope
         for child in node.get("inner", []) or []:
             walk(child, child_scope)
 
