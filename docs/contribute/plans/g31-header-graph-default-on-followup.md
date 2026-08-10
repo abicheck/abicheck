@@ -815,6 +815,47 @@ building a second identity-resolution mechanism from scratch.
   the first top-level `(`, then walk forward counting paren depth until it
   closes) instead of searching from the end of the string.
 
+  **A sixth review round found two more real gaps in the same
+  `build_specialization_index()`, both in what makes a specialization
+  reliably indexable, not in the base-resolution mechanism itself.** (1) An
+  explicit specialization can be forward-declared
+  (`template<> struct A<int>;`) before its complete definition
+  (`template<> struct A<int> { ... };`) — both emit their own
+  `ClassTemplateSpecializationDecl` node sharing the IDENTICAL `"A<int>"`
+  spelling, confirmed with a real clang build. The index's
+  first-registration-wins insertion permanently kept the empty
+  forward-decl stub whenever it was walked first — the same
+  forward-decl-shadows-definition shape `_record_index()` already guards
+  for an ordinary record, reproduced one level up for a specialization.
+  Fixed by applying the identical "a complete definition always wins"
+  tie-break, via the shared `_is_record_definition` (moved into
+  `dumper_clang_vtable.py` so both indexes can use it). (2) A non-type
+  template argument's raw JSON `value` does not always print the same way
+  a base reference spells it: `template <bool B> struct A; ... A<true>`
+  reports `value: -1` (confirmed empirically — not even `1`), while the
+  base reference still spells it `"A<true>"`, so the previous
+  reconstruction fabricated an `"A<-1>"` key that could never match — an
+  old `D : A<true>` stayed unresolvable while a new side adding a
+  no-keyword override made it appear to gain its first vptr, the exact
+  false `VPTR_INTRODUCED`/`TYPE_VTABLE_CHANGED` shape this whole index was
+  built to prevent. Fixed conservatively rather than attempting a general
+  non-type-argument printer: a new whole-AST pass
+  (`_index_template_param_kinds`) records, per `ClassTemplateDecl`, which
+  positional non-type parameters are declared with one of a small,
+  CONFIRMED-safe set of plain builtin integer types (`int`, `unsigned
+  int`, `long`, ... — verified these DO round-trip: `A<3>`'s `value: 3`
+  matches the base reference's `"A<3>"` exactly); `_specialization_spelling`
+  now consults this by position and returns `None` for the WHOLE
+  specialization the moment any non-type argument's parameter isn't
+  confirmed safe (`bool`, an enum, a pointer, floating-point, structural
+  C++20 arguments — none of these have any reason to share the plain-int
+  round-trip property, and none were verified to). Both fixes verified
+  end-to-end through the live `dump()`/`compare()` pipeline in addition to
+  unit fixtures: the forward-decl case now correctly resolves and reports
+  no findings; the `bool` case now correctly degrades to `D.vtable == []`
+  on both sides (unresolvable, matching every other unresolvable-base
+  shape) rather than fabricating a false break.
+
   **A later pass closed the last of this phase's four originally-listed
   facts** (`deprecated`/`is_scoped`/bitfields/default-argument facts were
   the other three, already covered above): direct-clang now populates

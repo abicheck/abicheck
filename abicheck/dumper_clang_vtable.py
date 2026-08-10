@@ -181,6 +181,26 @@ from typing import Any
 
 from .dumper_clang_expr import _SCOPE_NODE_KINDS
 
+
+def _is_record_definition(node: dict[str, Any]) -> bool:
+    """Whether a record node is a definition (has a body) vs. a forward decl.
+
+    Shared by ``dumper_clang.py``'s own ``_record_index()`` (an ordinary
+    ``CXXRecordDecl``/``RecordDecl``) and :func:`build_specialization_index`
+    below (a ``ClassTemplateSpecializationDecl``) -- both need the identical
+    "prefer a complete definition over a forward-decl stub sharing the same
+    qualname" tie-break, and both node kinds carry the same
+    ``completeDefinition``/member-child shape.
+    """
+    if node.get("completeDefinition"):
+        return True
+    return any(
+        isinstance(c, dict)
+        and c.get("kind") in ("FieldDecl", "AccessSpecDecl", "CXXMethodDecl")
+        for c in node.get("inner", []) or []
+    )
+
+
 #: Sentinel signature key for a destructor slot -- unifies a base's own
 #: `~Base` and a derived class's own `~Derived` under one signature-index
 #: entry, since their literal names never match but they occupy the SAME
@@ -541,7 +561,99 @@ def build_vtable(
     return list(slots.values())
 
 
-def _specialization_spelling(node: dict[str, Any], name: str) -> str | None:
+#: Non-type template parameter types whose Clang JSON ``value`` (an
+#: evaluated integer, e.g. ``3``) is CONFIRMED to print identically to how a
+#: base reference spells the same argument (``"A<3>"``) -- verified against
+#: a real clang build. Deliberately narrow: ``bool``'s own encoding does
+#: NOT round-trip this way (``template <bool B> struct A; ... A<true>``
+#: reports ``value: -1``, not ``1``, and the base reference still spells it
+#: ``"A<true>"`` -- confirmed empirically, Codex review, fresh evidence), and
+#: neither an enum (spelled by its enumerator name, e.g. ``"A<Color::Red>"``,
+#: never its integer value) nor a pointer/floating-point/structural
+#: (C++20) non-type argument has any reason to share this property. Only a
+#: parameter whose declared type is exactly one of these plain builtin
+#: integer spellings is trusted; every other non-type parameter makes the
+#: whole specialization unindexable (see :func:`_specialization_spelling`).
+_SAFE_NONTYPE_INT_TYPES = frozenset(
+    {
+        "int",
+        "unsigned int",
+        "long",
+        "unsigned long",
+        "long long",
+        "unsigned long long",
+        "short",
+        "unsigned short",
+    }
+)
+
+
+def _template_param_kinds(class_template_decl: dict[str, Any]) -> list[str | None]:
+    """Per-position "trusted plain-integer non-type parameter" marker for a
+    ``ClassTemplateDecl``'s own parameter list, in declaration order --
+    matching the order ``TemplateArgument`` children of one of its
+    specializations are emitted in (confirmed with a real clang build).
+
+    Each entry is the parameter's own type spelling when it's a
+    non-type parameter declared with one of :data:`_SAFE_NONTYPE_INT_TYPES`,
+    or ``None`` for a type parameter (a type argument carries its own
+    ``type.qualType`` directly -- this list is never consulted for it) or an
+    untrusted non-type parameter (``bool``, an enum, a pointer, ...). Stops
+    at the first non-parameter child: the parameter list always precedes
+    the pattern's own body/specializations in ``inner`` order.
+    """
+    kinds: list[str | None] = []
+    for child in class_template_decl.get("inner", []) or []:
+        if not isinstance(child, dict):
+            continue
+        kind = child.get("kind")
+        if kind == "NonTypeTemplateParmDecl":
+            type_obj = child.get("type")
+            spelling = (
+                str(type_obj.get("qualType", "")) if isinstance(type_obj, dict) else ""
+            )
+            kinds.append(spelling if spelling in _SAFE_NONTYPE_INT_TYPES else None)
+        elif kind in ("TemplateTypeParmDecl", "TemplateTemplateParmDecl"):
+            kinds.append(None)
+        else:
+            break
+    return kinds
+
+
+def _index_template_param_kinds(root: dict[str, Any]) -> dict[str, list[str | None]]:
+    """``qualified template name -> per-position param-kind list`` (see
+    :func:`_template_param_kinds`) over every ``ClassTemplateDecl`` in the
+    AST, scope-tracked the identical way :func:`build_specialization_index`
+    tracks it for a specialization -- so a specialization found under a
+    given scope+name looks its owning template's parameter list up under
+    that SAME scope+name (a specialization is always either nested inside
+    its own ``ClassTemplateDecl`` or a sibling of it at the same scope
+    depth, confirmed with a real clang build for both an implicit and an
+    explicit specialization). A redeclaration of the same template (e.g.
+    seen again through a second ``#include``) shares an identical parameter
+    list, so first-registration-wins is safe.
+    """
+    idx: dict[str, list[str | None]] = {}
+
+    def walk(node: Any, scope: tuple[str, ...]) -> None:
+        if not isinstance(node, dict):
+            return
+        kind = node.get("kind")
+        name = str(node.get("name") or "")
+        if kind == "ClassTemplateDecl" and name:
+            qualname = "::".join((*scope, name)) if scope else name
+            idx.setdefault(qualname, _template_param_kinds(node))
+        child_scope = (*scope, name) if kind in _SCOPE_NODE_KINDS and name else scope
+        for child in node.get("inner", []) or []:
+            walk(child, child_scope)
+
+    walk(root, ())
+    return idx
+
+
+def _specialization_spelling(
+    node: dict[str, Any], name: str, param_kinds: list[str | None] | None
+) -> str | None:
     """A ``ClassTemplateSpecializationDecl``'s own ``Name<Arg1, Arg2>``
     spelling, reconstructed from its direct ``TemplateArgument`` children --
     matching what clang's own type printer produces on a base-reference
@@ -549,22 +661,37 @@ def _specialization_spelling(node: dict[str, Any], name: str) -> str | None:
     clang builds, see :func:`build_specialization_index`'s docstring for the
     exact repros this reproduces).
 
-    ``None`` when any argument isn't a plain type or non-type literal (no
-    ``type`` or ``value`` field at all -- a template-template argument or a
-    pack expansion, neither reproducible this way) or when there are no
-    arguments at all -- the caller skips indexing entirely rather than
-    guessing at a spelling that might not match the referring site's own.
+    ``None`` when any argument isn't reproducible with confidence: a type
+    argument's own ``type.qualType`` is always trusted, but a non-type
+    argument's raw ``value`` is trusted ONLY when *param_kinds* confirms
+    (by position) that the corresponding template parameter is one of
+    :data:`_SAFE_NONTYPE_INT_TYPES` -- a ``bool``/enum/pointer/other
+    non-type argument's ``value`` does not reliably print the same way the
+    referring site spells it (see that set's own docstring), so the whole
+    specialization is left unindexed rather than guessed at. Also ``None``
+    for a template-template argument or a pack expansion (no ``type`` or
+    ``value`` field on that argument at all) or when there are no arguments
+    at all. The caller skips indexing entirely in every ``None`` case,
+    degrading to the same already-accepted "unresolvable base"
+    false-negative every other unresolvable-base shape in this module
+    already degrades to -- never a false positive.
     """
     args: list[str] = []
+    idx = 0
     for child in node.get("inner", []) or []:
         if not isinstance(child, dict) or child.get("kind") != "TemplateArgument":
             continue
         type_obj = child.get("type")
         if isinstance(type_obj, dict) and type_obj.get("qualType"):
             args.append(str(type_obj["qualType"]))
+            idx += 1
             continue
         if "value" in child:
+            safe = param_kinds[idx] if param_kinds and idx < len(param_kinds) else None
+            if safe is None:
+                return None
             args.append(str(child["value"]))
+            idx += 1
             continue
         return None
     if not args:
@@ -623,7 +750,20 @@ def build_specialization_index(root: dict[str, Any]) -> dict[str, dict[str, Any]
     (independent of ``dumper_clang.py``'s own categorizing walk, the same
     shape as ``dumper_clang_expr._index_decl_id_qualified_names``) since a
     specialization is never collected by that walk at all.
+
+    A forward-declared explicit specialization (``template<> struct
+    A<int>;``) followed later by its complete definition (``template<>
+    struct A<int> { ... };``) emits TWO ``ClassTemplateSpecializationDecl``
+    nodes sharing the identical spelling -- confirmed with a real clang
+    build, the same forward-decl-shadows-definition shape
+    ``dumper_clang._ClangAstParser._record_index`` already guards against
+    for an ordinary record. A first-registration-wins policy here would
+    permanently keep the empty forward-decl stub whenever it's walked
+    first (Codex review, fresh evidence), so a complete definition always
+    wins over a forward-declaration stub for the same spelling, regardless
+    of walk order, via the shared :func:`_is_record_definition`.
     """
+    param_kinds_by_qualname = _index_template_param_kinds(root)
     idx: dict[str, dict[str, Any]] = {}
 
     def walk(node: Any, scope: tuple[str, ...]) -> None:
@@ -632,10 +772,17 @@ def build_specialization_index(root: dict[str, Any]) -> dict[str, dict[str, Any]
         kind = node.get("kind")
         name = str(node.get("name") or "")
         if kind == "ClassTemplateSpecializationDecl" and name:
-            spelling = _specialization_spelling(node, name)
+            template_qualname = "::".join((*scope, name)) if scope else name
+            spelling = _specialization_spelling(
+                node, name, param_kinds_by_qualname.get(template_qualname)
+            )
             if spelling is not None:
                 qualname = "::".join((*scope, spelling)) if scope else spelling
-                idx.setdefault(qualname, node)
+                existing = idx.get(qualname)
+                if existing is None or (
+                    not _is_record_definition(existing) and _is_record_definition(node)
+                ):
+                    idx[qualname] = node
         child_scope = (*scope, name) if kind in _SCOPE_NODE_KINDS and name else scope
         for child in node.get("inner", []) or []:
             walk(child, child_scope)

@@ -901,3 +901,141 @@ def test_specialization_base_override_with_no_keyword_replaces_slot_in_place() -
     # matches D.bases == ["A<int>"] and produces a false
     # TYPE_VTABLE_CHANGED once the base above is resolved at all.
     assert funcs["_ZN1AIiE1fEi"].name == "A<int>::f"
+
+
+def _forward_specialization(name: str, *, type_args: list[str]) -> dict:
+    """A forward-declared explicit specialization node -- no
+    ``completeDefinition``, no member children -- sharing the same spelling
+    a later complete definition would."""
+    args = [{"kind": "TemplateArgument", "type": {"qualType": t}} for t in type_args]
+    return {
+        "kind": "ClassTemplateSpecializationDecl",
+        "name": name,
+        "inner": args,
+    }
+
+
+def test_specialization_forward_declaration_does_not_shadow_complete_definition() -> (
+    None
+):
+    """Codex review, fresh evidence (P1): an explicit specialization can be
+    forward-declared (`template<> struct A<int>;`) before its complete
+    definition (`template<> struct A<int> { ... };`) -- both share the
+    identical spelling `"A<int>"`. A first-registration-wins policy would
+    permanently keep the empty forward-decl stub whenever it's walked
+    first, the same shape `_record_index()` already guards for an ordinary
+    record."""
+    root = _tu(
+        {
+            "kind": "ClassTemplateDecl",
+            "name": "A",
+            "inner": [
+                {"kind": "TemplateTypeParmDecl", "name": "T"},
+                _record("A"),
+            ],
+        },
+        _forward_specialization("A", type_args=["int"]),  # forward decl, walked FIRST
+        _specialization(
+            "A",
+            {
+                "kind": "CXXMethodDecl",
+                "name": "f",
+                "mangledName": "_ZN1AIiE1fEi",
+                "type": {"qualType": "void ()"},
+                "virtual": True,
+            },
+            type_args=["int"],
+        ),
+        _record("D", bases=[_base("A<int>")]),
+    )
+    types = _types(root)
+    assert types["D"].vtable == ["_ZN1AIiE1fEi"]
+    assert types["D"].vptr_offset_bits == 0
+
+
+def test_bool_nontype_specialization_argument_is_not_indexed() -> None:
+    """Codex review, fresh evidence (P1): a non-type template argument's
+    JSON ``value`` does not reliably print the same way a base reference
+    spells it -- `template <bool B> struct A; ... A<true>` reports
+    `value: -1` (confirmed empirically), never `"true"`, so a naively
+    reconstructed `"A<-1>"` spelling never matches the real base reference
+    `"A<true>"`. Must degrade to the same "unresolvable base" false
+    negative every other unresolvable-base shape in this module already
+    degrades to -- NOT fabricate a mismatched key that could actively
+    collide with, or fail to find, the right specialization."""
+    root = _tu(
+        {
+            "kind": "ClassTemplateDecl",
+            "name": "A",
+            "inner": [
+                {
+                    "kind": "NonTypeTemplateParmDecl",
+                    "name": "B",
+                    "type": {"qualType": "bool"},
+                },
+                _record("A"),
+                _specialization(
+                    "A",
+                    {
+                        "kind": "CXXMethodDecl",
+                        "name": "f",
+                        "mangledName": "_ZN1AILb1EE1fEv",
+                        "type": {"qualType": "void ()"},
+                        "virtual": True,
+                    },
+                    type_args=[],  # overridden below via a raw value arg
+                ),
+            ],
+        },
+        _record("D", bases=[_base("A<true>")]),
+    )
+    # Patch the specialization's TemplateArgument to the real clang shape
+    # for a bool argument (`value`, no `type`) -- the `_specialization`
+    # helper only builds type arguments.
+    spec = root["inner"][0]["inner"][2]
+    spec["inner"].insert(0, {"kind": "TemplateArgument", "value": -1})
+
+    types = _types(root)
+    # Unresolvable: D's base "A<true>" can't be matched against anything
+    # this module would index it under, so D stays non-polymorphic rather
+    # than risking a wrong match.
+    assert types["D"].vtable == []
+    assert types["D"].vptr_offset_bits is None
+
+
+def test_int_nontype_specialization_argument_still_resolves() -> None:
+    """The safe counterpart to the bool case above: a plain `int` non-type
+    argument's `value` DOES reliably print the same way a base reference
+    spells it (`A<3>`), confirmed empirically -- must still resolve."""
+    root = _tu(
+        {
+            "kind": "ClassTemplateDecl",
+            "name": "A",
+            "inner": [
+                {
+                    "kind": "NonTypeTemplateParmDecl",
+                    "name": "N",
+                    "type": {"qualType": "int"},
+                },
+                _record("A"),
+                _specialization(
+                    "A",
+                    {
+                        "kind": "CXXMethodDecl",
+                        "name": "f",
+                        "mangledName": "_ZN1AILi3EE1fEv",
+                        "type": {"qualType": "void ()"},
+                        "virtual": True,
+                    },
+                    type_args=[],
+                ),
+            ],
+        },
+        _record("D", bases=[_base("A<3>")]),
+    )
+    spec = root["inner"][0]["inner"][2]
+    spec["inner"].insert(0, {"kind": "TemplateArgument", "value": 3})
+
+    types = _types(root)
+    assert types["D"].vtable == ["_ZN1AILi3EE1fEv"]
+    assert types["D"].vptr_offset_bits == 0

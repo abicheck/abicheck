@@ -82,6 +82,7 @@ from .dumper_clang_expr import (  # noqa: F401  (some re-exported for tests)
     _unwrap_expr,
 )
 from .dumper_clang_vtable import (
+    _is_record_definition,
     _specialization_spelling,
     build_specialization_index as _build_specialization_index,
     build_vtable as _build_clang_vtable,
@@ -857,8 +858,11 @@ class _ClangAstParser:
             # index) so both consumers agree on the exact same spelling;
             # falls back to the unscoped behavior (bare `name`, degrading
             # the SAME way an unresolvable base already degrades elsewhere
-            # in this module) when the spelling can't be reconstructed.
-            spelling = _specialization_spelling(node, name)
+            # in this module) when the spelling can't be reconstructed. No
+            # `param_kinds` here (unlike `_base_lookup_index()`'s own use of
+            # this same function) -- a non-type-templated specialization's
+            # members simply stay unqualified, the same safe degradation.
+            spelling = _specialization_spelling(node, name, None)
             child_scope = (*scope, spelling) if spelling else scope
         else:
             child_scope = scope
@@ -1747,17 +1751,6 @@ def _is_builtin_file(file: str) -> bool:
 def _default_record_access(node: dict[str, Any]) -> str:
     """Default member access before any ``AccessSpecDecl`` (``class`` → private)."""
     return "private" if node.get("tagUsed") == "class" else "public"
-
-
-def _is_record_definition(node: dict[str, Any]) -> bool:
-    """Whether a record node is a definition (has a body) vs. a forward decl."""
-    if node.get("completeDefinition"):
-        return True
-    return any(
-        isinstance(c, dict)
-        and c.get("kind") in ("FieldDecl", "AccessSpecDecl", "CXXMethodDecl")
-        for c in node.get("inner", []) or []
-    )
 
 
 def _param_has_default(param: dict[str, Any]) -> bool:
