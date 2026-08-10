@@ -1,0 +1,209 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://abicheck.dev/schemas/skill-eval-bundle.schema.json",
+  "title": "Transcript bundle meta.json (G37 D3)",
+  "description": "One recorded run. `kind` selects the grading contract: a behavioral bundle is graded on all six rubric dimensions, a trigger bundle on activation alone \u2014 a correct trigger run for a negative prompt activates nothing, calls nothing and claims nothing, which the behavioral rules would fail three ways.",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "kind",
+    "scenario_id",
+    "repetition",
+    "agent",
+    "model",
+    "hashes",
+    "observed_inputs"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "kind": {
+      "enum": [
+        "behavioral",
+        "trigger"
+      ]
+    },
+    "scenario_id": {
+      "type": "string",
+      "description": "A scenarios.yaml id for a behavioral bundle, or a trigger_corpus.yaml prompt id for a trigger bundle."
+    },
+    "repetition": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "agent": {
+      "type": "string",
+      "minLength": 1
+    },
+    "model": {
+      "type": "string",
+      "minLength": 1
+    },
+    "seed": {
+      "type": [
+        "integer",
+        "null"
+      ]
+    },
+    "temperature": {
+      "type": [
+        "number",
+        "null"
+      ]
+    },
+    "hashes": {
+      "type": "object",
+      "description": "Every hash the freshness check reads. Each maps back to a set of skills (D6), so a moved hash always nominates something to re-run.",
+      "required": [
+        "skill_tree",
+        "abicheck_surface",
+        "harness",
+        "trigger_corpus"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "skill_tree": {
+          "$ref": "#/$defs/digest"
+        },
+        "abicheck_surface": {
+          "$ref": "#/$defs/digest"
+        },
+        "harness": {
+          "$ref": "#/$defs/digest"
+        },
+        "trigger_corpus": {
+          "$ref": "#/$defs/digest"
+        },
+        "scenarios": {
+          "type": "object",
+          "description": "Per scenario exercised: manifest record + fixture closure + ground-truth entry. Required (and non-empty) for a behavioral bundle; absent for a trigger bundle, which replays a corpus prompt and exercises no scenario — attaching an arbitrary one would let a scenario edit invalidate activation evidence that never touched it.",
+          "minProperties": 1,
+          "additionalProperties": {
+            "$ref": "#/$defs/digest"
+          }
+        },
+        "build": {
+          "allOf": [
+            {
+              "$ref": "#/$defs/digest"
+            }
+          ],
+          "description": "Publication-grade bundles only: digest over every input that determines the installed checker \u2014 abicheck/ plus pyproject.toml plus resolved runtime dependency versions. Defined by inclusion, so the committed evidence tree is outside it by construction and cannot self-invalidate the gate."
+        }
+      }
+    },
+    "observed_inputs": {
+      "type": "array",
+      "minItems": 1,
+      "description": "What the centralized accessor recorded this run reading \u2014 observed, never self-declared. Completeness is checked against this, so a runner that starts reading a new file cannot leave a fully-hashed declared set behind.",
+      "items": {
+        "type": "object",
+        "required": [
+          "path",
+          "digest"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "path": {
+            "type": "string"
+          },
+          "digest": {
+            "allOf": [
+              {
+                "$ref": "#/$defs/digest"
+              }
+            ],
+            "description": "sha256 of that one file's content as the run read it, over LF-normalized bytes. The freshness check compares it against the file's current content, which is what catches an input whose routed hash is coarser than the file itself — `scenarios.yaml` routes to every scenario, but each scenario's hash covers only its own record. Normalized rather than raw because git writes CRLF on Windows: a raw digest would make every bundle produced there read as permanently stale everywhere else, which is a property of the checkout rather than of the evidence."
+          }
+        }
+      }
+    },
+    "path_mapping": {
+      "type": "array",
+      "description": "Output-isolation substitutions applied to the teed streams, if any. Empty for the filesystem-view mechanism, which needs none. The streams are byte-identical modulo these entries \u2014 recorded so the difference is auditable rather than invisible.",
+      "items": {
+        "type": "object",
+        "required": [
+          "requested",
+          "effective",
+          "substitutions"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "requested": {
+            "type": "string"
+          },
+          "effective": {
+            "type": "string"
+          },
+          "substitutions": {
+            "type": "integer",
+            "minimum": 0
+          }
+        }
+      }
+    },
+    "usage": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "turns": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "tool_calls": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "tokens_in": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "tokens_out": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "wall_clock_seconds": {
+          "type": "number",
+          "minimum": 0
+        },
+        "retries": {
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "kind": {
+            "const": "behavioral"
+          }
+        },
+        "required": [
+          "kind"
+        ]
+      },
+      "then": {
+        "properties": {
+          "hashes": {
+            "required": [
+              "scenarios"
+            ]
+          }
+        }
+      }
+    }
+  ],
+  "$defs": {
+    "digest": {
+      "type": "string",
+      "pattern": "^sha256:[0-9a-f]{64}$"
+    }
+  }
+}

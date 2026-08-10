@@ -111,9 +111,7 @@ def find_triggers(changed: list[str]) -> dict[str, list[str]]:
         depends_on = _depends_on_for_page(path)
         if not depends_on:
             continue
-        hits = sorted(
-            {c for c in changed for dep in depends_on if _matches(dep, c)}
-        )
+        hits = sorted({c for c in changed for dep in depends_on if _matches(dep, c)})
         if hits:
             triggers[_rel(path)] = hits
     return triggers

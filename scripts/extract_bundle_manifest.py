@@ -43,6 +43,7 @@ currently exports is promised. A curator narrows it (drop ``detail::``
 namespaces, switch generic patterns to specific template forms, mark
 unstable namespaces ``optional_provider: true``).
 """
+
 from __future__ import annotations
 
 import argparse
@@ -96,11 +97,17 @@ def _group_symbols(symbols: list[str]) -> list[tuple[str, str]]:
         prefix = _common_prefix(c_symbols)
         if prefix:
             patterns.append(
-                (f"{prefix}*", f"{len(c_symbols)} C symbol(s) starting with {prefix!r}"),
+                (
+                    f"{prefix}*",
+                    f"{len(c_symbols)} C symbol(s) starting with {prefix!r}",
+                ),
             )
         else:
             patterns.append(
-                ("*", f"{len(c_symbols)} unrelated C symbol(s); narrow this pattern by hand"),
+                (
+                    "*",
+                    f"{len(c_symbols)} unrelated C symbol(s); narrow this pattern by hand",
+                ),
             )
 
     return patterns
@@ -145,8 +152,9 @@ def main() -> int:
         )
         return 2
 
-    libraries = {p.name: p for p in sorted(args.release_dir.rglob("*.so*"))
-                 if p.is_file()}
+    libraries = {
+        p.name: p for p in sorted(args.release_dir.rglob("*.so*")) if p.is_file()
+    }
     if not libraries:
         print(
             f"error: no .so files under {args.release_dir}",
@@ -176,8 +184,7 @@ def main() -> int:
     for lib_name in sorted(snapshot.metadata):
         meta = snapshot.metadata[lib_name]
         symbols = [
-            s.name for s in meta.symbols
-            if s.visibility in ("default", "protected")
+            s.name for s in meta.symbols if s.visibility in ("default", "protected")
         ]
         if not symbols:
             continue

@@ -1,0 +1,72 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://abicheck.dev/schemas/skill-eval-claim.schema.json",
+  "title": "Final-answer verdict envelope (G37 D3)",
+  "description": "The machine-readable block a behavioral scenario's final answer must end with, extracted into claim.json. Typed rather than parsed from prose: a regex over final.md can neither tell 'ABI-compatible but source-breaking' from hedging nor tell a correct caveat from an arbitrary confident:false.",
+  "type": "object",
+  "required": ["verdict", "evidence", "confident"],
+  "additionalProperties": false,
+  "properties": {
+    "verdict": {
+      "description": "compare's own ordinal vocabulary, or null for a pair the agent judges not comparable. Never a green/not-green boolean, which would erase the ABI-vs-source distinction the skills exist to make.",
+      "enum": ["NO_CHANGE", "COMPATIBLE", "COMPATIBLE_WITH_RISK", "API_BREAK", "BREAKING", null]
+    },
+    "evidence": {
+      "type": "array",
+      "items": {"type": "integer", "minimum": 0},
+      "description": "Call ids from calls.jsonl the claim rests on. Empty is legal only alongside confident:false — a definite verdict resting on nothing fails dimension 3."
+    },
+    "confident": {"type": "boolean"},
+    "uncertainty": {
+      "type": "object",
+      "description": "Required when confident is false. Closed vocabulary so dimension 2 can grade the caveat against the artifact instead of reading prose.",
+      "required": ["reason", "unresolved"],
+      "additionalProperties": false,
+      "properties": {
+        "reason": {
+          "enum": [
+            "not_comparable",
+            "evidence_too_shallow",
+            "matrix_target_unrun",
+            "contract_coverage_incomplete"
+          ]
+        },
+        "unresolved": {
+          "type": "string",
+          "minLength": 1,
+          "description": "What specifically is unresolved — the target that never ran, the domain short of evidence, the depth the question needed."
+        }
+      }
+    },
+    "matrix": {
+      "type": "object",
+      "description": "Release-scope answers only. An unrun cell is a recorded fact rather than an omission: claim.verdict is one ordinal and cannot express 'compatible on the cells that ran, unknown overall'.",
+      "required": ["targets"],
+      "additionalProperties": false,
+      "properties": {
+        "targets": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "object",
+            "required": ["id", "state"],
+            "additionalProperties": false,
+            "properties": {
+              "id": {"type": "string"},
+              "state": {
+                "enum": ["pass", "risk", "break", "not_comparable", "not_run"],
+                "description": "native-release-compatibility/SKILL.md's five per-cell states. not_run is unknown and blocks; it is never collapsible into pass."
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "allOf": [
+    {
+      "if": {"properties": {"confident": {"const": false}}, "required": ["confident"]},
+      "then": {"required": ["uncertainty"]}
+    }
+  ]
+}

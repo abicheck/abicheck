@@ -1,0 +1,118 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://abicheck.dev/schemas/skill-eval-scenario.schema.json",
+  "title": "Skill evaluation scenario manifest (G37 Phase 0)",
+  "description": "agent-evals/skills/scenarios.yaml. Category A scenarios reference an examples/ case and derive their expected outcome from examples/ground_truth.json; Category B scenarios carry invocation parameters that catalog cannot express.",
+  "type": "object",
+  "required": ["schema_version", "scenarios"],
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": {"type": "integer", "minimum": 1},
+    "scenarios": {
+      "type": "array",
+      "minItems": 1,
+      "items": {"$ref": "#/$defs/scenario"}
+    }
+  },
+  "$defs": {
+    "scenario": {
+      "type": "object",
+      "required": ["id", "category", "skill", "status", "prompt"],
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^[a-z0-9]+(-[a-z0-9]+)*$",
+          "description": "Stable identifier. Appears in evidence bundle paths and in the expected-evidence set."
+        },
+        "category": {
+          "enum": ["A", "B"],
+          "description": "A = expected outcome resolvable from examples/ground_truth.json. B = needs invocation parameters that catalog cannot express."
+        },
+        "skill": {
+          "enum": [
+            "native-binary-compatibility-review",
+            "native-api-evolution",
+            "native-release-compatibility",
+            "native-consumer-compatibility"
+          ]
+        },
+        "status": {
+          "enum": ["ready", "planned"],
+          "description": "ready = fixture resolves and the scenario contributes to the expected-evidence set. planned = declared but not yet runnable; excluded from expectations, and may not claim a resolvable fixture."
+        },
+        "prompt": {
+          "type": "string",
+          "minLength": 20,
+          "description": "The verbatim request the agent sees. Never names abicheck (ADR-058 design principle 1)."
+        },
+        "case": {
+          "type": "string",
+          "pattern": "^case[0-9]+_[a-z0-9_]+$",
+          "description": "Category A only: the examples/ case directory. Expected outcome is read from ground_truth.json, never restated here."
+        },
+        "coverage_note": {
+          "type": "string",
+          "description": "Which named D5 category this scenario covers, for the corpus-coverage test."
+        },
+        "fixture": {
+          "type": "string",
+          "description": "Category B only: repo-relative fixture directory."
+        },
+        "invocation": {
+          "type": "object",
+          "description": "Category B only: the parameters the catalog cannot express.",
+          "additionalProperties": false,
+          "properties": {
+            "used_by": {"type": "array", "items": {"type": "string"}},
+            "required_symbols": {"type": "array", "items": {"type": "string"}},
+            "contract": {"enum": ["public", "exports", "all"]},
+            "contract_evaluation": {"type": "boolean"},
+            "depth": {"type": "string"},
+            "matrix_targets": {"type": "array", "items": {"type": "string"}},
+            "break_comparability": {"type": "boolean"}
+          }
+        },
+        "expected": {
+          "type": "object",
+          "description": "Category B only: the outcome, stated here because no catalog owns it.",
+          "additionalProperties": false,
+          "required": ["verdict"],
+          "properties": {
+            "verdict": {
+              "description": "compare's ordinal verdict, or null for a pair that cannot be compared. For a consumer-scoped scenario (--used-by / --required-symbol) this is the *scoped* answer, matching where the CLI promotes it and what the skill instructs the agent to report — never the library-wide result.",
+              "enum": ["NO_CHANGE", "COMPATIBLE", "COMPATIBLE_WITH_RISK", "API_BREAK", "BREAKING", null]
+            },
+            "full_verdict": {
+              "description": "Consumer-scoped scenarios only: the library-wide result the report preserves in `full_verdict`. Recorded because the interesting scenarios are exactly the ones where it diverges from `verdict`, and a grader that cannot see the distractor value cannot tell a correct scoped answer from an agent reading the report the wrong way round.",
+              "enum": ["NO_CHANGE", "COMPATIBLE", "COMPATIBLE_WITH_RISK", "API_BREAK", "BREAKING", null]
+            },
+            "uncertainty": {
+              "enum": [
+                "not_comparable",
+                "evidence_too_shallow",
+                "matrix_target_unrun",
+                "contract_coverage_incomplete"
+              ],
+              "description": "The D4 dimension-2 uncertainty kind this scenario exercises, if any. A scenario carrying one is what makes that zero-tolerance rule gated rather than notional."
+            }
+          }
+        }
+      },
+      "allOf": [
+        {
+          "if": {"properties": {"category": {"const": "A"}}, "required": ["category"]},
+          "then": {
+            "required": ["case"],
+            "comment": "Category B-only fields. A Category A scenario restating a catalog-owned outcome is exactly the second copy the catalog exists to prevent.",
+            "not": {"anyOf": [{"required": ["invocation"]}, {"required": ["expected"]}, {"required": ["fixture"]}]}
+          }
+        },
+        {
+          "if": {"properties": {"category": {"const": "B"}}, "required": ["category"]},
+          "then": {"required": ["fixture", "invocation", "expected"], "not": {"required": ["case"]}}
+        }
+      ]
+    }
+  }
+}

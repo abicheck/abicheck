@@ -1,0 +1,365 @@
+#!/usr/bin/env python3
+# Copyright 2026 Nikolay Petrov
+# SPDX-License-Identifier: Apache-2.0
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+"""Recording shim: what makes grading a function of a stored transcript (G37 D3).
+
+Placed first on PATH for an evaluated run, so every `abicheck ...` the agent
+issues lands here. It spawns the real executable, **waits**, tees both streams,
+snapshots whatever files the call wrote, and only then finalizes the record —
+deliberately not `exec`, which would replace this process and lose the exit
+status, the output and the artifacts the graders need.
+
+One record per call, appended to `$SKILL_EVAL_CALLS` as JSON lines.
+
+Three things this does that a naive wrapper does not:
+
+**Persists stdout, not only its digest.** A skill may legitimately run
+`compare --format json` with no `-o`, in which case the report exists nowhere
+else and a digest alone cannot be re-read at grading time.
+
+**Snapshots the call's file outputs immediately.** An agent that reuses one
+`-o` path across iterations would otherwise leave a claim citing call 2
+pointing at call 5's report. Copying at the moment the child exits fixes each
+call's artifacts against *later calls* without redirecting the agent's own
+argument, so what the agent sees and what the transcript holds stay the same
+paths.
+
+That is the whole of the guarantee, and it is worth stating precisely rather
+than as "immutable": the evaluated agent is given shell access and the record
+file sits one directory above its working directory, so nothing here prevents
+a run from rewriting its own transcript. The harness does not sandbox the
+agent, and no placement of the file would close that — shell access reaches
+any path the process can. The property this buys is protection against the
+*accidental* case (one call overwriting another's evidence), which is the one
+that actually occurs when the subject is a cooperating agent rather than an
+attacker. Closing the deliberate case needs a filesystem sandbox or an
+out-of-process record channel; until then, evidence from a run is trustworthy
+exactly to the degree the agent under test is.
+
+**Allocates its sequence number under a lock.** The agent can run two Bash
+calls concurrently; two shims counting the same file would pick the same `seq`,
+overwrite each other's capture, and rewrite each other's record.
+
+The lock lives on a sibling file rather than on the record file itself. Both
+`fcntl.flock` and Windows' `msvcrt.locking` are available that way, and the
+Windows call locks a byte *range from the current file position* — locking the
+record file directly would entangle the lock with the seeks the append and the
+rewrite already do. `import fcntl` at module scope would also have made this
+shim unimportable on Windows, where the runner has ready scenarios
+(`compatible-addition`, `removed-export`), so every call there would have
+failed before reaching the real executable.
+"""
+
+from __future__ import annotations
+
+import contextlib
+import hashlib
+import json
+import os
+import shutil
+import subprocess
+import sys
+import uuid
+from collections.abc import Iterator
+from pathlib import Path
+
+#: Options whose value names a path the call writes. `--output-dir` is a
+#: directory; the rest are files. Kept explicit rather than "any path-looking
+#: argument" so an input path is never mistaken for an output.
+OUTPUT_OPTIONS = ("-o", "--output", "--secondary-output", "--output-dir")
+
+
+#: How many times to re-attempt a contended Windows lock. Each `LK_LOCK` call
+#: already spends ~10s retrying internally, so this bounds the wait at minutes
+#: rather than forever — a hung lock should fail loudly, not stall the run.
+_WINDOWS_LOCK_ATTEMPTS = 3
+
+#: Seconds before the shim gives up on the real executable. The runner's own
+#: timeout kills `claude`, not this grandchild, so without one a hung call
+#: leaves an orphaned process and a record stuck at `exit_code: null` forever.
+_CALL_TIMEOUT_SECONDS = float(os.environ.get("SKILL_EVAL_CALL_TIMEOUT", "600"))
+
+
+@contextlib.contextmanager
+def _exclusive(lock_path: Path) -> Iterator[None]:
+    """Hold an exclusive lock on `lock_path` for the duration of the block."""
+    with lock_path.open("a+", encoding="utf-8") as handle:
+        if os.name == "nt":
+            import msvcrt
+
+            handle.seek(0)
+            # `LK_LOCK` is not a blocking wait: it retries ten times at one
+            # second and then raises. Two shims contending for the record —
+            # which is exactly what the lock is here for, since the agent can
+            # run Bash calls concurrently — would make one of them fail before
+            # ever spawning the real executable, losing the call entirely.
+            for attempt in range(_WINDOWS_LOCK_ATTEMPTS):
+                try:
+                    msvcrt.locking(handle.fileno(), msvcrt.LK_LOCK, 1)
+                    break
+                except OSError:
+                    if attempt == _WINDOWS_LOCK_ATTEMPTS - 1:
+                        raise
+                    handle.seek(0)
+            try:
+                yield
+            finally:
+                handle.seek(0)
+                msvcrt.locking(handle.fileno(), msvcrt.LK_UNLCK, 1)
+        else:
+            import fcntl
+
+            fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
+            try:
+                yield
+            finally:
+                fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+
+
+def _digest(data: bytes) -> str:
+    return "sha256:" + hashlib.sha256(data).hexdigest()
+
+
+def _is_short(option: str) -> bool:
+    return len(option) == 2 and not option.startswith("--")
+
+
+#: Short options this CLI declares that take a value. Needed to read a cluster:
+#: Click packs short options, so `-voreport.json` is `-v -o report.json`, and
+#: the letters *before* `o` have to be known valueless for the remainder to be
+#: `-o`'s value. A literal rather than an import — this file runs as a PATH
+#: executable and must not depend on abicheck being importable by whatever
+#: interpreter its shebang resolves to — and pinned against the real Click tree
+#: by `tests/test_skill_eval_harness.py`, so a new short option fails loudly
+#: instead of silently going unrecognized here.
+SHORT_VALUE_OPTIONS = ("-H", "-I", "-j", "-o")
+
+
+def _cluster_output(token: str) -> str | None:
+    """The output path packed into a short-option cluster, if there is one.
+
+    `-voreport.json` writes `report.json` — verified against the real CLI, and
+    missed entirely before, since the token starts with neither `-o` nor `-o=`.
+    An unrecognized output is never snapshotted, so a later call reusing the
+    path silently overwrites the evidence a claim cites, which is the exact
+    failure per-call snapshotting exists to prevent.
+
+    Answers None when a letter before the output option takes a value of its
+    own (`-Ho` is `-H` with the value `o`), because then no output was declared
+    here at all.
+    """
+    for position, letter in enumerate(token[1:], start=2):
+        option = f"-{letter}"
+        if option in OUTPUT_OPTIONS:
+            return token[position:] or None
+        if option in SHORT_VALUE_OPTIONS:
+            return None  # this letter consumes the rest as its own value
+    return None
+
+
+def _declared_outputs(argv: list[str]) -> list[str]:
+    """Paths this invocation asked abicheck to write.
+
+    Four spellings, because Click accepts four and the shim has to recognize
+    every one the real command does: `-o path`, `-o=path`, the attached short
+    form `-opath`, and the same attached form inside a cluster (`-voreport.json`).
+    """
+    found: list[str] = []
+    for i, token in enumerate(argv):
+        if token in OUTPUT_OPTIONS:
+            # A following option is not a path. `compare a b -o --format json`
+            # otherwise recorded `--format` as a declared output, which shows
+            # up in the transcript as a phantom `"status": "absent"` entry.
+            if i + 1 < len(argv) and not argv[i + 1].startswith("-"):
+                found.append(argv[i + 1])
+            continue
+        matched = False
+        for opt in OUTPUT_OPTIONS:
+            if token.startswith(f"{opt}="):
+                found.append(token.split("=", 1)[1])
+                matched = True
+                break
+            if _is_short(opt) and token.startswith(opt) and len(token) > len(opt):
+                found.append(token[len(opt) :])
+                matched = True
+                break
+        if matched or not (
+            len(token) > 2 and token.startswith("-") and not token.startswith("--")
+        ):
+            continue
+        clustered = _cluster_output(token)
+        if clustered is not None:
+            found.append(clustered)
+    return found
+
+
+def _lock_path(calls: Path) -> Path:
+    return calls.with_name(calls.name + ".lock")
+
+
+def _append_locked(calls: Path, record: dict) -> int:
+    """Append one record and return its sequence number, atomically.
+
+    The lock covers count-then-append together: two concurrent shims must not
+    read the same length and then both write it as their own `seq`.
+    """
+    with _exclusive(_lock_path(calls)):
+        with calls.open("a+", encoding="utf-8") as fh:
+            fh.seek(0)
+            seq = sum(1 for line in fh if line.strip())
+            record["seq"] = seq
+            fh.seek(0, os.SEEK_END)
+            fh.write(json.dumps(record) + "\n")
+            fh.flush()
+    return seq
+
+
+def _rewrite_locked(calls: Path, record: dict) -> None:
+    """Replace this call's provisional record, matched by its own id.
+
+    Matched by `call_id`, never by position: with concurrent calls the record
+    written last is not necessarily this one's.
+    """
+    with _exclusive(_lock_path(calls)):
+        with calls.open("r+", encoding="utf-8") as fh:
+            lines = [ln for ln in fh.read().splitlines() if ln.strip()]
+            for i, line in enumerate(lines):
+                if json.loads(line).get("call_id") == record["call_id"]:
+                    lines[i] = json.dumps(record)
+                    break
+            else:
+                lines.append(json.dumps(record))
+            fh.seek(0)
+            fh.truncate()
+            fh.write("\n".join(lines) + "\n")
+
+
+def _snapshot_outputs(argv: list[str], cwd: Path, dest: Path, root: Path) -> list[dict]:
+    """Copy every file the call wrote into a per-call immutable location.
+
+    Each declared output gets its own slot, prefixed by the position it was
+    declared at. Keying on the basename alone collided whenever one call wrote
+    two outputs sharing a name in different directories (`-o human/report.json
+    --secondary-output machine/report.json`): the second copy overwrote the
+    first and both records then cited one artifact, so the primary output was
+    unrecoverable at grading time.
+
+    Recorded paths are relative to `root`, the run directory — the same base
+    `stdout_path` uses, so a grader resolves every artifact a call produced the
+    one way.
+    """
+    snapshots: list[dict] = []
+    for index, declared in enumerate(_declared_outputs(argv)):
+        src = (cwd / declared).resolve()
+        if not src.exists():
+            snapshots.append({"requested": declared, "status": "absent"})
+            continue
+        target = dest / f"{index}-{Path(declared).name}"
+        if src.is_dir():
+            shutil.copytree(src, target, dirs_exist_ok=True)
+            files = sorted(p for p in target.rglob("*") if p.is_file())
+            snapshots.append(
+                {
+                    "requested": declared,
+                    "status": "captured",
+                    "kind": "directory",
+                    "path": str(target.relative_to(root)),
+                    "files": [str(p.relative_to(target)) for p in files],
+                }
+            )
+        else:
+            shutil.copy2(src, target)
+            snapshots.append(
+                {
+                    "requested": declared,
+                    "status": "captured",
+                    "kind": "file",
+                    "path": str(target.relative_to(root)),
+                    "digest": _digest(target.read_bytes()),
+                }
+            )
+    return snapshots
+
+
+def main() -> int:
+    calls_path = os.environ.get("SKILL_EVAL_CALLS")
+    real = os.environ.get("SKILL_EVAL_REAL_ABICHECK")
+    if not calls_path or not real:
+        print(
+            "shim misconfigured: SKILL_EVAL_CALLS/SKILL_EVAL_REAL_ABICHECK unset",
+            file=sys.stderr,
+        )
+        return 70
+
+    calls = Path(calls_path)
+    calls.parent.mkdir(parents=True, exist_ok=True)
+    captured = calls.parent / "captured"
+    captured.mkdir(exist_ok=True)
+
+    argv = sys.argv[1:]
+    cwd = Path.cwd()
+    # A provisional record, written before the child runs: a crash between the
+    # two leaves evidence that the call happened rather than no evidence.
+    record = {
+        "call_id": uuid.uuid4().hex,
+        "argv": argv,
+        "cwd": str(cwd),
+        "exit_code": None,
+    }
+    seq = _append_locked(calls, record)
+
+    try:
+        proc = subprocess.run(  # noqa: S603
+            [real, *argv], capture_output=True, timeout=_CALL_TIMEOUT_SECONDS
+        )
+    except subprocess.TimeoutExpired:
+        # Recorded rather than swallowed: a call that never returned is a fact
+        # about the run, and leaving the provisional record at `exit_code:
+        # null` would read as "the shim crashed" instead.
+        record.update(exit_code=None, timed_out=True)
+        _rewrite_locked(calls, record)
+        sys.stderr.write(f"shim: the call exceeded {_CALL_TIMEOUT_SECONDS}s\n")
+        return 70
+
+    out_path = captured / f"{seq}.out"
+    out_path.write_bytes(proc.stdout)
+    outputs_dir = captured / f"{seq}.outputs"
+    outputs_dir.mkdir(exist_ok=True)
+
+    record.update(
+        exit_code=proc.returncode,
+        stdout_path=str(out_path.relative_to(calls.parent)),
+        stdout_digest=_digest(proc.stdout),
+        stderr_digest=_digest(proc.stderr),
+        outputs=_snapshot_outputs(argv, cwd, outputs_dir, calls.parent),
+    )
+    _rewrite_locked(calls, record)
+
+    sys.stdout.buffer.write(proc.stdout)
+    sys.stderr.buffer.write(proc.stderr)
+    # The number this call is recorded under, so the answer envelope can *cite*
+    # it rather than guess. The agent otherwise has to reconstruct the sequence
+    # from its own side, where a `Read` or a compile step shifts the count and
+    # a correct run then cites an id that resolves to nothing — a false failure
+    # of the strictest dimension, which is the one outcome that gets a gate
+    # switched off. On stderr, so it never contaminates a `--format json`
+    # report the agent may pipe or re-read.
+    sys.stderr.write(f"[recorded as call {seq}]\n")
+    return proc.returncode
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

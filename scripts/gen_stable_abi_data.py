@@ -100,8 +100,7 @@ def render(symbols: dict[str, tuple[int, int]], version: str) -> str:
     for name in symbols:
         _validate_symbol_name(name)
     rows = "\n".join(
-        f"    {name!r}: ({v[0]}, {v[1]}),"
-        for name, v in sorted(symbols.items())
+        f"    {name!r}: ({v[0]}, {v[1]})," for name, v in sorted(symbols.items())
     )
     doc = (
         "Vendored CPython Stable-ABI (Limited API) symbol floors — "
@@ -126,8 +125,7 @@ def render(symbols: dict[str, tuple[int, int]], version: str) -> str:
         "``stable_abi.toml``\n(functions + data sections, ``added`` → floor).\n"
     )
     return (
-        _LICENSE
-        + f"\n{doc!r}\n\n"
+        _LICENSE + f"\n{doc!r}\n\n"
         "from __future__ import annotations\n\n"
         "#: Stable-ABI symbol -> (major, minor) release it entered the "
         "Limited API.\n"
@@ -139,9 +137,7 @@ def render(symbols: dict[str, tuple[int, int]], version: str) -> str:
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument(
-        "toml", nargs="?", help="path to a local Misc/stable_abi.toml"
-    )
+    parser.add_argument("toml", nargs="?", help="path to a local Misc/stable_abi.toml")
     parser.add_argument(
         "--url", help="fetch stable_abi.toml from this URL instead of a local path"
     )

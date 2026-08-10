@@ -82,7 +82,14 @@ def _dataclass_section(name: str, cls: type) -> list[str]:
 
 def _function_section(name: str, fn: object) -> list[str]:
     sig = inspect.signature(fn)  # type: ignore[arg-type]
-    lines = [f"## `{name}`", "", _summary(fn), "", "| Parameter | Type | Default |", "|---|---|---|"]
+    lines = [
+        f"## `{name}`",
+        "",
+        _summary(fn),
+        "",
+        "| Parameter | Type | Default |",
+        "|---|---|---|",
+    ]
     seen_keyword_only = False
     for param_name, param in sig.parameters.items():
         if param.kind in (
@@ -105,8 +112,14 @@ def _function_section(name: str, fn: object) -> list[str]:
         if param.kind is inspect.Parameter.KEYWORD_ONLY and not seen_keyword_only:
             lines.append("| *(keyword-only below)* | | |")
             seen_keyword_only = True
-        default = "*(required)*" if param.default is inspect.Parameter.empty else f"`{param.default!r}`"
-        lines.append(f"| `{param_name}` | `{_type_str(param.annotation)}` | {default} |")
+        default = (
+            "*(required)*"
+            if param.default is inspect.Parameter.empty
+            else f"`{param.default!r}`"
+        )
+        lines.append(
+            f"| `{param_name}` | `{_type_str(param.annotation)}` | {default} |"
+        )
     return_type = _type_str(sig.return_annotation)
     if return_type:
         lines += ["", f"**Returns:** `{return_type}`"]

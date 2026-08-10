@@ -98,7 +98,9 @@ def diff_surfaces(base: dict[str, Any], head: dict[str, Any]) -> list[str]:
                 f"~ `{path}` hidden: {old_node.get('hidden')!r} -> "
                 f"{new_node.get('hidden')!r}"
             )
-        param_lines = _diff_params(old_node.get("params", []), new_node.get("params", []))
+        param_lines = _diff_params(
+            old_node.get("params", []), new_node.get("params", [])
+        )
         if param_lines:
             lines.append(f"~ `{path}` options changed:")
             lines.extend(param_lines)

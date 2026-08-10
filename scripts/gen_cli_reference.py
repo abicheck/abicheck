@@ -75,7 +75,9 @@ def _help_with_choices(param: Any) -> str:
     choices = getattr(getattr(param, "type", None), "choices", None)
     help_text = _escape(getattr(param, "help", None) or "")
     if choices:
-        help_text = f"{help_text} Choices: {', '.join(f'`{c}`' for c in choices)}.".strip()
+        help_text = (
+            f"{help_text} Choices: {', '.join(f'`{c}`' for c in choices)}.".strip()
+        )
     return help_text
 
 
@@ -140,18 +142,32 @@ def _render_command(name: str, cmd: Any, heading_level: int) -> list[str]:
     # can't even discover via --help. click.Argument has no `hidden`
     # attribute at all (only click.Option does), hence getattr(..., False).
     arguments = [
-        p for p in cmd.params if isinstance(p, click.Argument) and not getattr(p, "hidden", False)
+        p
+        for p in cmd.params
+        if isinstance(p, click.Argument) and not getattr(p, "hidden", False)
     ]
     options = [
-        p for p in cmd.params if isinstance(p, click.Option) and not getattr(p, "hidden", False)
+        p
+        for p in cmd.params
+        if isinstance(p, click.Option) and not getattr(p, "hidden", False)
     ]
 
     if arguments:
-        lines += ["**Arguments**", "", "| Name | Required | Description |", "|---|:--:|---|"]
+        lines += [
+            "**Arguments**",
+            "",
+            "| Name | Required | Description |",
+            "|---|:--:|---|",
+        ]
         lines += [_argument_row(p) for p in arguments]
         lines.append("")
     if options:
-        lines += ["**Options**", "", "| Option | Required | Default | Description |", "|---|:--:|---|---|"]
+        lines += [
+            "**Options**",
+            "",
+            "| Option | Required | Default | Description |",
+            "|---|:--:|---|---|",
+        ]
         lines += [_option_row(p) for p in options]
         lines.append("")
 
@@ -185,7 +201,9 @@ def render() -> str:
         "",
     ]
     root_options = [
-        p for p in main.params if isinstance(p, click.Option) and not getattr(p, "hidden", False)
+        p
+        for p in main.params
+        if isinstance(p, click.Option) and not getattr(p, "hidden", False)
     ]
     if root_options:
         lines += [

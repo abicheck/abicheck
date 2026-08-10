@@ -33,6 +33,7 @@ Run: ``python scripts/evidence_benchmark.py`` (text) or ``--json`` (machine).
 This is a reporting tool, not a gate: it never fails the build on timing. The
 FP deltas it prints are *gated separately* by ``scripts/check_fp_rate.py``.
 """
+
 from __future__ import annotations
 
 import argparse
@@ -62,11 +63,13 @@ def _synthetic_tree(root: Path, n_units: int) -> Path:
     for i in range(n_units):
         src = tree / f"f{i}.cpp"
         src.write_text(f"int f{i}(int x){{return x+{i};}}\n", encoding="utf-8")
-        cdb.append({
-            "directory": str(tree),
-            "file": f"f{i}.cpp",
-            "arguments": ["c++", "-std=c++17", "-c", f"f{i}.cpp"],
-        })
+        cdb.append(
+            {
+                "directory": str(tree),
+                "file": f"f{i}.cpp",
+                "arguments": ["c++", "-std=c++17", "-c", f"f{i}.cpp"],
+            }
+        )
     (tree / "compile_commands.json").write_text(json.dumps(cdb), encoding="utf-8")
     return tree
 
@@ -82,7 +85,10 @@ def collection_timings(n_units: int = 25) -> list[dict[str, object]]:
             # clang is intentionally absent here so 'build' stays pure-Python and
             # the source modes degrade to a partial L4 surface (never abort).
             pack = collect_inline_pack(
-                sources=tree, build_info=None, scope=scope, layers=layers,
+                sources=tree,
+                build_info=None,
+                scope=scope,
+                layers=layers,
                 clang_bin="definitely-not-a-real-clang",
             )
             elapsed = time.perf_counter() - start
@@ -94,12 +100,14 @@ def collection_timings(n_units: int = 25) -> list[dict[str, object]]:
                     collected.append("L4")
                 if pack.source_graph is not None:
                     collected.append("L5")
-            rows.append({
-                "mode": mode,
-                "duration_seconds": round(elapsed, 4),
-                "layers_collected": collected,
-                "compile_units": n_units,
-            })
+            rows.append(
+                {
+                    "mode": mode,
+                    "duration_seconds": round(elapsed, 4),
+                    "layers_collected": collected,
+                    "compile_units": n_units,
+                }
+            )
     return rows
 
 
@@ -131,8 +139,12 @@ def _print_text(report: dict[str, object]) -> None:
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="ADR-033 evidence benchmark report.")
     parser.add_argument("--json", action="store_true", help="Emit the report as JSON.")
-    parser.add_argument("--units", type=int, default=25,
-                        help="Synthetic compile units to time (default: 25).")
+    parser.add_argument(
+        "--units",
+        type=int,
+        default=25,
+        help="Synthetic compile units to time (default: 25).",
+    )
     args = parser.parse_args(argv)
     report = build_report(args.units)
     if args.json:

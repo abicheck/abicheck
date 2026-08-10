@@ -1306,12 +1306,37 @@ describes what actually exists.
 
 ## P1 — Reliability and distribution
 
-### P1.1 — Behavioral/e2e evaluation against the examples corpus — **not started**
+### P1.1 — Behavioral/e2e evaluation against the examples corpus — **not started; superseded in implementation detail by [G37](g37-agent-skill-quality-evaluation.md)**
+
+> **Superseded (implementation detail only).**
+> [G37](g37-agent-skill-quality-evaluation.md) designs this item and is the
+> plan to build from. It keeps this item's substance — the two scenario
+> categories, the six-dimension rubric, and the split gating model (baseline/
+> non-regression for four dimensions, zero tolerance from the first run for
+> the two safety ones) — and changes four things: the harness lives in
+> `agent-evals/skills/` rather than `validation/` (G37 D8), grading runs off a
+> recorded transcript bundle produced through a recording shim rather than off
+> a live session (G37 D3), the safety dimensions are graded pass^k across
+> repeated runs rather than per run (G37 D4), and the live evaluation runs
+> off-CI with CI re-grading its committed evidence rather than as a CI lane
+> (G37 D2). The file names this item states below — `validation/scripts/
+> run_skill_evals.py`, `validation/data/skill_eval_scenarios.yaml` — are
+> therefore **not** the paths to build; see G37's "Files & surfaces".
 
 **Problem:** Structural and trigger tests confirm a skill is well-formed
-and discoverable; they don't confirm it reaches the right *answer*.
+and discoverable; they don't confirm it reaches the right *answer*. This
+statement of the problem still stands and is why G37 exists.
 
-**Change:** Select a representative subset of the `examples/` cases
+> **Everything from "Change:" to the end of this item is HISTORICAL.** It
+> records the shape of the idea before it was designed, and its file paths,
+> execution model, and grading details have all been superseded — see the
+> note above. **Do not implement from it**; build from
+> [G37](g37-agent-skill-quality-evaluation.md), which is the sole
+> implementation source of truth for this work. Kept rather than deleted so
+> the reasoning that produced G37's two scenario categories and six-dimension
+> rubric stays visible.
+
+**Change (historical):** Select a representative subset of the `examples/` cases
 covering the categories `examples/ground_truth.json` can actually resolve
 against real per-case fixtures — removed export, changed function
 signature, struct layout drift, enum value change, vtable change,
@@ -1444,15 +1469,37 @@ need. Record here, scope after P1.1.
 
 ---
 
-### P1.4 — Public publication channels — **not started**
+### P1.4 — Public publication channels — **not started; publication gate specified by [G37](g37-agent-skill-quality-evaluation.md)**
+
+> **Amended.** This item's two publication preconditions are made executable in
+> [G37](g37-agent-skill-quality-evaluation.md). The freshness requirement
+> restated throughout this plan — that a publication-relied-on run must
+> postdate every content-changing commit — becomes a mechanical check (G37 D6):
+> the evidence records the content hash of the generated skill trees, and a
+> results artifact whose hash no longer matches is rejected, so staleness fails
+> a check rather than needing to be caught in review. The "acceptable baseline
+> rate" this item asks for becomes G37 Phase 6's four-part gate: fresh hash,
+> zero failures on the two safety dimensions, the other four at or above
+> baseline, and a comparative scorecard. Note the comparator: G37 D7 gates on
+> `skill-agent:` vs. an unaided baseline — progressive disclosure being how
+> these skills actually deploy — and reports the documentation comparison
+> rather than gating on it.
 
 **Problem:** ADR-058's publication stages 2–4 (portable `.agents/skills/`
 already done by P0; `skills.sh`/GitHub discovery; Claude/Codex/Gemini/Cursor
 validation) are distribution steps, not architecture — they follow once
 P0/P1.1 establish the skills are actually correct.
 
-**Change:** Submit the four P0 skills to `skills.sh`'s directory once P1.1's
-baseline pass rate is acceptable; verify GitHub's own skill-discovery
+**Change:** Submit the four P0 skills to `skills.sh`'s directory once the
+publication gate passes. **That gate is
+[G37](g37-agent-skill-quality-evaluation.md) Phase 6 in full — not the "P1.1
+baseline pass rate is acceptable" wording this item originally carried**,
+which named no threshold and no artifact to check it against. Its conditions
+are deliberately *not* restated here: they have already grown once (a build
+digest and an evidence-completeness requirement were added after this pointer
+was written), and a second copy that lags the first is how someone publishes
+against a gate G37 would reject. Read them there. Then verify GitHub's own
+skill-discovery
 surfaces (Copilot reads `.agents/skills` directly, per ADR-058's ecosystem
 research, so no separate submission step should be needed there beyond the
 repo being public). Record actual submission steps taken and any
@@ -1517,7 +1564,15 @@ one turns out to be needed) land as their own small PR.
 
 ---
 
-### P1.5 — Cross-agent validation log — **not started**
+### P1.5 — Cross-agent validation log — **not started; partially automated by [G37](g37-agent-skill-quality-evaluation.md)**
+
+> **Amended.** [G37](g37-agent-skill-quality-evaluation.md) Phase 4 generates
+> this log's rows from real recorded results for the targets whose runners are
+> scriptable (Claude Code, then Codex and Gemini CLI), rather than leaving all
+> five to hand-maintenance. The manual log remains authoritative for the rest
+> (Copilot, Cursor), and G37 D3's tier-2 rule keeps the distinction visible:
+> where a vendor exposes no usable activation events, the activation result is
+> recorded as manual rather than presented as a measured number.
 
 **Problem:** ADR-058 commits to validating on Claude Code, Codex, Copilot,
 and Gemini CLI at minimum, Cursor if current.
