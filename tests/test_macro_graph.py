@@ -423,6 +423,89 @@ def test_parse_decl_ranges_macro_generated_decl_uses_expansion_loc() -> None:
     assert DeclRange("_Z5afterv", "t.h", 12, 12) in ranges
 
 
+def test_parse_decl_ranges_first_node_expansion_loc_omits_file() -> None:
+    """A follow-up finding on the same nested-location fix (Codex review, PR
+    #708, fresh evidence): for the *first* AST node in a TU that names a
+    file at all, real clang can print ``spellingLoc.file`` while
+    ``expansionLoc`` carries only ``line``/``col``/``offset`` — its own
+    ``file`` is sticky-omitted against the whole-document cursor, which at
+    that point hasn't been set to anything yet (confirmed against a real
+    ``clang -ast-dump=json`` run of a macro-argument expansion as the very
+    first declaration in a header). Choosing ``expansionLoc`` wholesale
+    (an earlier fix) left the cursor's file empty here, discarding this
+    declaration and every later sibling relying on the same sticky file.
+    Advancing through ``spellingLoc`` first supplies the file;
+    ``expansionLoc`` then still wins on ``line`` (the real invocation site,
+    not the macro's own definition line)."""
+    generated = {
+        "kind": "FunctionDecl",
+        "name": "foo",
+        "mangledName": "_Z3foov",
+        "loc": {
+            "spellingLoc": {"file": "t.h", "line": 2, "offset": 0},
+            "expansionLoc": {"line": 2, "col": 1, "offset": 0},  # no file
+        },
+        "range": {
+            "begin": {
+                "spellingLoc": {"file": "t.h", "line": 1, "offset": 0},
+                "expansionLoc": {"line": 2, "offset": 0},
+            },
+            "end": {
+                "spellingLoc": {"file": "t.h", "line": 1, "offset": 0},
+                "expansionLoc": {"line": 2, "offset": 0},
+            },
+        },
+        "type": {"qualType": "void ()"},
+    }
+    after = {
+        "kind": "FunctionDecl",
+        "name": "after",
+        "mangledName": "_Z5afterv",
+        "loc": {"line": 3, "col": 6, "offset": 40},  # no file: sticky from `foo`
+        "range": {"begin": {"col": 1, "offset": 35}, "end": {"col": 10, "offset": 44}},
+        "type": {"qualType": "void ()"},
+    }
+    ast = _tu(generated, after)
+    ranges = parse_clang_ast_decl_ranges(ast)
+    assert DeclRange("_Z3foov", "t.h", 2, 2) in ranges
+    assert DeclRange("_Z5afterv", "t.h", 3, 3) in ranges
+
+
+def test_parse_decl_ranges_expansion_loc_overrides_different_spelling_file() -> None:
+    """The companion real-clang shape: a macro *body* (not argument)
+    expansion from a genuinely different file (the macro's own definition
+    site) — ``expansionLoc`` explicitly restates ``file`` back to the real
+    invocation file precisely because it differs from what ``spellingLoc``
+    just made sticky, so advancing through ``spellingLoc`` then
+    ``expansionLoc`` must still resolve to the invocation file, never the
+    macro-definition one (confirmed against a real cross-header
+    ``clang -ast-dump=json`` run)."""
+    generated = {
+        "kind": "FunctionDecl",
+        "name": "generated",
+        "mangledName": "_Z9generatedv",
+        "loc": {
+            "spellingLoc": {"file": "macrodefs.h", "line": 1, "offset": 0},
+            "expansionLoc": {"file": "user.h", "line": 2, "offset": 0},
+        },
+        "range": {
+            "begin": {
+                "spellingLoc": {"file": "macrodefs.h", "line": 1, "offset": 0},
+                "expansionLoc": {"file": "user.h", "line": 2, "offset": 0},
+            },
+            "end": {
+                "spellingLoc": {"file": "macrodefs.h", "line": 1, "offset": 0},
+                "expansionLoc": {"file": "user.h", "line": 2, "offset": 0},
+            },
+        },
+        "type": {"qualType": "void ()"},
+    }
+    ast = _tu(generated)
+    ranges = parse_clang_ast_decl_ranges(ast)
+    assert DeclRange("_Z9generatedv", "user.h", 2, 2) in ranges
+    assert not any(r.file == "macrodefs.h" for r in ranges)
+
+
 # ── find_decl_macro_uses ──────────────────────────────────────────────────
 
 

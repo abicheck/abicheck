@@ -201,27 +201,54 @@ class _LocationCursor:
     def advance(self, loc: dict[str, Any]) -> tuple[str, int]:
         # A location produced by macro expansion nests as
         # ``{"spellingLoc": {...}, "expansionLoc": {...}}`` instead of the
-        # flat ``file``/``line`` keys handled below — confirmed against real
-        # clang output for a macro-generated declaration (Codex review, PR
-        # #708). Prefer ``expansionLoc`` (the point in the *real* source
-        # text a caller's Pass-B raw-text scan actually indexes — where the
-        # macro was invoked) over ``spellingLoc`` (where the macro's own
-        # replacement text is defined, which can be a different file
-        # entirely, e.g. a function-like macro from another header).
-        # Unwrapping here — rather than adding a special case at each call
-        # site — keeps the cursor in sync for every later sibling too,
-        # exactly like the flat-key sticky tracking below.
-        exp = loc.get("expansionLoc")
-        if isinstance(exp, dict):
-            loc = exp
-        else:
-            spell = loc.get("spellingLoc")
-            if isinstance(spell, dict):
-                loc = spell
-        if "file" in loc:
-            self.file = str(loc["file"])
-        if "line" in loc:
-            self.line = int(loc["line"])
+        # flat ``file``/``line`` keys this method otherwise applies directly
+        # (Codex review, PR #708).
+        #
+        # An *earlier* fix here chose one of the two nested dicts wholesale
+        # (preferring ``expansionLoc``) — a follow-up review round, backed by
+        # fresh real-``clang`` evidence, found this loses the file entirely
+        # in a real (and common) shape: for the *first* AST node in a TU that
+        # names a file at all, clang can print ``spellingLoc.file`` (the
+        # macro-argument/definition site) while ``expansionLoc`` carries only
+        # ``line``/``col``/``offset`` — its own ``file`` is sticky-omitted
+        # against the whole-document cursor, which at that point hasn't been
+        # set to anything yet. Choosing ``expansionLoc`` wholesale then left
+        # ``cursor.file`` empty, discarding that declaration and, since the
+        # cursor never recovered, every later sibling relying on the same
+        # sticky file too.
+        #
+        # Empirically confirmed (three real ``clang -ast-dump=json`` cases,
+        # this fix's own verification): the two nested dicts are NOT
+        # alternatives to pick between — they are two more updates to the
+        # *same* single sticky cursor this method already threads through
+        # the flat case, applied in sequence. Advancing through
+        # ``spellingLoc`` first, then ``expansionLoc``, reproduces clang's
+        # real behavior in all three shapes tested: (1) a macro-argument
+        # expansion, where ``spellingLoc`` alone carries the correct
+        # same-file location and ``expansionLoc`` omits ``file`` (sticky —
+        # unchanged); (2) a macro *body* expansion from a genuinely
+        # different file (the macro's own definition site), where
+        # ``expansionLoc`` explicitly restates ``file`` back to the real
+        # invocation file precisely because it differs from what
+        # ``spellingLoc`` just made sticky — so the second ``advance`` call
+        # correctly overrides the first; (3) the plain non-macro flat case,
+        # where neither nested key is present and this loop is a no-op,
+        # unchanged from before. Sequencing them through the same mutating
+        # ``if "file"/"line" in loc`` logic below — rather than a special
+        # "pick one" branch — is what makes case (2)'s override and case
+        # (1)'s carry-through both fall out for free.
+        for nested_key in ("spellingLoc", "expansionLoc"):
+            nested = loc.get(nested_key)
+            if isinstance(nested, dict):
+                if "file" in nested:
+                    self.file = str(nested["file"])
+                if "line" in nested:
+                    self.line = int(nested["line"])
+        if "spellingLoc" not in loc and "expansionLoc" not in loc:
+            if "file" in loc:
+                self.file = str(loc["file"])
+            if "line" in loc:
+                self.line = int(loc["line"])
         return (self.file, self.line)
 
 
