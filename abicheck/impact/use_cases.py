@@ -773,11 +773,23 @@ def explain_use_case_impact(
     )
 
     entry_index = _public_entry_index(library_graph)
+    # Merge (not overwrite) across repeated `use_case` entries (Codex
+    # review, fresh evidence): a manifest is not required to give each
+    # use case exactly one list entry -- `parse_use_case_manifest` never
+    # rejects a repeated `use_case` name (the duplicate-key check is per
+    # *mapping*, and each entry is a separate list item, not a mapping
+    # key), and `build_use_case_graph` already merges every entry sharing
+    # a name onto the *same* `use_case` graph node, registering a
+    # `USE_CASE_USES_ENTRY` edge for each entry's own entrypoints. A plain
+    # `use_case_entries[name] = ids` assignment here disagreed with that
+    # graph it claims to mirror: the later entry's entrypoint set would
+    # silently replace the earlier one's, so a change reachable only
+    # through an earlier entry's entrypoints would never be attributed.
     use_case_entries: dict[str, set[str]] = {}
     for definition in definitions:
         ids = {entry_index[e] for e in definition.entrypoints if e in entry_index}
         if ids:
-            use_case_entries[definition.use_case] = ids
+            use_case_entries.setdefault(definition.use_case, set()).update(ids)
     if not use_case_entries:
         return {}
 

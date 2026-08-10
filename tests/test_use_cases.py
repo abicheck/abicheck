@@ -863,6 +863,28 @@ def test_explain_use_case_impact_two_use_cases_pin_different_versions() -> None:
     }
 
 
+def test_explain_use_case_impact_merges_repeated_use_case_entries() -> None:
+    # Codex review, fresh evidence: a manifest may repeat the same
+    # `use_case` name across separate list entries -- `parse_use_case_manifest`
+    # never rejects it, and `build_use_case_graph` merges every entry sharing
+    # a name onto one `use_case` graph node with a USE_CASE_USES_ENTRY edge
+    # per entry. Attribution must mirror that merge, not keep only the last
+    # entry's entrypoint set.
+    library = _walkable_library_graph()
+    definitions = [
+        UseCaseDefinition(use_case="shared", entrypoints=("train",)),
+        UseCaseDefinition(use_case="shared", entrypoints=("evaluate",)),
+    ]
+    result = explain_use_case_impact(
+        definitions, library, symbols=["train", "_ZN6detail6helperEv", "evaluate"]
+    )
+    assert result == {
+        "train": ("shared",),
+        "_ZN6detail6helperEv": ("shared",),
+        "evaluate": ("shared",),
+    }
+
+
 # ── join_use_case_graph ───────────────────────────────────────────────────
 
 
