@@ -32,3 +32,9 @@
   reads as "not an ELF file" and leaves the scan unresolvable rather than
   claiming the build has nothing vague. Mach-O and PE express the same idea
   through different structures and would need their own extractor.
+
+  Collected but not yet consumed by any detector. A demotion built on it was
+  attempted and reverted: COMDAT membership proves the *library* used vague
+  linkage, not that its *consumers* emitted their own copies — `extern
+  template` makes those two facts come apart, verified against g++. See
+  `AGENTS.md`.

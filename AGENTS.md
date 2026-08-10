@@ -21,7 +21,7 @@ they are.
 ## What is abicheck?
 
 ABI compatibility checker for C/C++ shared libraries. Pure Python (3.10+).
-Detects 397 ABI/API change types across ELF, PE/COFF, and Mach-O binaries,
+Detects 396 ABI/API change types across ELF, PE/COFF, and Mach-O binaries,
 categorized into `BREAKING_KINDS`, `API_BREAK_KINDS`, `COMPATIBLE_KINDS`, and `RISK_KINDS` (see `ChangeKind`).
 Drop-in replacement for abi-compliance-checker (ABICC).
 
@@ -490,7 +490,7 @@ cover the surrounding first-party trees this file doesn't detail.
 
 - `AbiSnapshot` (`model.py`) — serializable snapshot of a library's ABI surface
 - `DiffResult` (`checker_types.py`) — single detected change with kind, severity, details
-- `ChangeKind` (`checker_policy.py`) — enum of 397 change types; categorized into `BREAKING_KINDS`, `API_BREAK_KINDS`, `RISK_KINDS`, and `COMPATIBLE_KINDS` (further split into `ADDITION_KINDS` and `QUALITY_KINDS`)
+- `ChangeKind` (`checker_policy.py`) — enum of 396 change types; categorized into `BREAKING_KINDS`, `API_BREAK_KINDS`, `RISK_KINDS`, and `COMPATIBLE_KINDS` (further split into `ADDITION_KINDS` and `QUALITY_KINDS`)
 - `Verdict` (`checker.py`) — overall comparison result (compatible/source_break/breaking)
 - `LibraryMetadata` (`checker.py`) — parsed library info
 
@@ -730,77 +730,51 @@ Once a root command genuinely clears the bar above, pick the right home:
 
 ## Known gaps — acknowledged remaining work
 
-- **Linkage-blind removal — evidence source built and wired; blocked on the
-  L3 collection path not carrying object paths.** `func_vague_export_dropped`
-  (`COMPATIBLE_WITH_RISK`) demotes a dropped export that the *old* build proved
-  was vague-linkage, while the new headers still declare the entity. The proof
-  is COMDAT-group membership read from L3 object files
-  (`buildsource/comdat_groups.py`): a vague-linkage definition is emitted into
-  a COMDAT group precisely because the language requires every using
-  translation unit to define it, so an already-linked consumer carries its own
-  copy. Verified end to end — a `__attribute__((weak))` out-of-line function
-  (also `WEAK` in `.dynsym`, and the case that made the earlier `is_inline`
-  attempt wrong) stays `BREAKING`, and so does a vague symbol when no L3
-  evidence exists.
+- **Linkage-blind removal — attempted twice, reverted twice. The evidence
+  keeps proving something adjacent to the invariant.** A symbol vanishing from
+  the export table is reported as `func_removed` (and, on the same symbol,
+  `func_deleted_elf_fallback`) regardless of its *linkage*, so a weak
+  vague-linkage export reads as a hard break. The demotion's invariant is
+  *"every consumer already emitted its own copy"*, and both attempts
+  established something else:
 
-  **What still blocks it from firing in practice** (Codex review, both
-  confirmed against the code): `CompileDbAdapter` never assigns
-  `CompileUnit.output`, discarding both the compile database's own `output`
-  field and the `-o` argument — so on the primary auto-discovered
-  `compile_commands.json` path the scan sees no objects and the evidence is
-  never collected. And `CompileUnit.output`, where an adapter does set it, is
-  normalized for *persistence* rather than guaranteed usable: home-rooted
-  paths are redacted to `~/...`, and Ninja/Make/Bazel outputs are relative to
-  `CompileUnit.directory`. Closing this needs the scan to run against raw,
-  resolved paths before redaction — inside the adapters or on a raw-path
-  channel — which is its own change rather than a patch to the scan call.
-  Until then the demotion is correct but inert on the common path, which is
-  the safe direction (no demotion without proof).
+  1. **`Function.is_inline`** proves the `inline` *specifier*, not that a
+     definition exists. Verified against real clang: `inline int f();` yields
+     `inline=True, has_body=False`, and both AST parsers assign the field
+     straight from the specifier attribute with no body check.
+  2. **COMDAT-group membership** proves the *library* used vague linkage, not
+     that its *consumers* did. `extern template` is the counterexample, and it
+     is ordinary code: a public header carrying `extern template struct
+     Box<int>;` tells every consumer TU **not** to instantiate, while the
+     library's own explicit instantiation still emits a weak COMDAT
+     definition. Verified against g++ — the library object has
+     `_ZNK3BoxIiE3getEv` inside a COMDAT group while the consumer object has
+     it as `NOTYPE GLOBAL UND` with an empty COMDAT set. Dropping that export
+     breaks the consumer, and the predicate demoted it (Codex review).
 
-  The earlier attempt and why it was reverted, kept because the reasoning
-  still governs what is allowed here: A symbol vanishing
-  from the export table is reported as `func_removed` (and, on the same
-  symbol, `func_deleted_elf_fallback`) regardless of its *linkage*, so a weak
-  vague-linkage/COMDAT export — an inline function, a template instantiation,
-  an implicit special member — reads as a hard break even when the new headers
-  still define the entity inline. A consumer of such an entity carries its own
-  COMDAT copy, so that is materially not the same event as a strong definition
-  disappearing.
+  The shared shape is worth naming, because it is what a third attempt will
+  hit too: a fact about the **library's own build** was read as a fact about
+  **its consumers**. Nothing in two library snapshots, and nothing in one
+  library's object files, distinguishes "the consumer emitted a copy" from
+  "the consumer holds an undefined reference". Only consumer-side evidence, or
+  a header fact recording `extern template` (which castxml does not expose —
+  checked through 0.7.0), can separate them.
 
-  A fix was built (capture `elf_binding` from `.dynsym`, demote that one shape
-  to a `COMPATIBLE_WITH_RISK` kind) and **reverted**. The reason is the useful
-  part. The demotion's invariant is "the consumer already emitted its own
-  copy", and the only evidence available for it was `Function.is_inline` —
-  which proves the `inline` *specifier*, not that a definition is present.
-  Verified against real clang: `inline int f();` (no body) yields
-  `inline=True, has_body=False`, and both AST parsers assign the field
-  straight from the specifier attribute (`dumper_castxml.py`,
-  `dumper_clang.py`) with no body check. So a header that declares a function
-  `inline` while defining it elsewhere — or one whose defining header was not
-  passed to `--public-header` — would have had a genuine load-time break
-  demoted to a risk (Codex review). This is the same failure as the
-  reverted vtable `vptr_offset_bits` witness above: a field that looks like
-  evidence for X while only establishing Y.
+  **Kept, because it is sound and answers a real question:**
+  `buildsource/comdat_groups.py` — an ELF `SHT_GROUP`/`GRP_COMDAT` parser
+  (byte-order correct, ELF-only, degrading to diagnostics on unreadable
+  objects) and its `BuildEvidence.comdat` collection. It answers "did *this
+  build* emit this symbol vaguely", which is genuinely useful and was already
+  reserved vocabulary in `graph_facts.py` (`comdat_group`) for a future
+  linker-artifact extractor. It is simply not sufficient for the demotion.
 
-  **What closing it actually needs**, and why it is its own project rather
-  than a retry: a per-declaration definition-availability fact
-  (`has_inline_definition`, tri-state). It is cheap on the direct-clang
-  backend (a `CompoundStmt` child) and derivable from DWARF (a definition DIE
-  rather than a `DW_AT_declaration` stub), but **castxml — the default L2
-  header backend — exposes only declaration attributes and cannot supply it
-  at all**. So the fact must be added first and the demotion gated on it,
-  accepting that it stays inert on the default backend; shipping the gate
-  without the fact is what was just reverted, and shipping the fact without a
-  consumer is a schema bump for nothing. Three further constraints the
-  attempt established, all of which a retry must keep: the old side's
-  evidence is load-bearing (`WEAK` does not imply vague linkage — an
-  out-of-line `__attribute__((weak))` function is `WEAK` too, and the consumer
-  was built against the *old* headers); the predicate must be a leaf both
-  `diff_symbols` and `diff_platform` consume, since both independently report
-  this same event and a fix to one alone leaves the verdict wrong; and the
-  demotion may replace only the *removal* finding, never the signature
-  comparison, since the declaration that justifies demoting can itself have
-  changed.
+  **Separately open, and independent of the above:** the L3 collection path
+  does not deliver usable object paths. `CompileDbAdapter` never assigns
+  `CompileUnit.output` (discarding the compile database's `output` field and
+  `-o` alike), and where an adapter does set it the value is normalized for
+  persistence — home paths redacted to `~/...`, Ninja/Make/Bazel outputs
+  relative to `CompileUnit.directory`. Scanning needs raw resolved paths
+  before redaction, inside the adapters.
 
 - **Default dependency scoping (PR #649) vs. contextual reachability
   (`type_reachability.py`) — the direct-reference conflict is fixed; the

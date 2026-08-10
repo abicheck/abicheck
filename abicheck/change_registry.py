@@ -32,7 +32,6 @@ from .change_registry_buildsource import BUILDSOURCE_EXTENSION_ENTRIES
 from .change_registry_castxml import CASTXML_EXTENSION_ENTRIES
 from .change_registry_composition import COMPOSITION_EXTENSION_ENTRIES
 from .change_registry_coverage import COVERAGE_EXTENSION_ENTRIES
-from .change_registry_linkage import LINKAGE_EXTENSION_ENTRIES
 from .change_registry_numpy import NUMPY_EXTENSION_ENTRIES
 from .change_registry_suppression import SUPPRESSION_EXTENSION_ENTRIES
 from .change_registry_types import (  # noqa: F401
@@ -1990,7 +1989,6 @@ REGISTRY = ChangeKindRegistry([
     # completeness, and suppression reachability (ADR-044) kinds each live in
     # their own change_registry_*.py file to keep this file under the cap.
     *COVERAGE_EXTENSION_ENTRIES,
-    *LINKAGE_EXTENSION_ENTRIES,
     *COMPOSITION_EXTENSION_ENTRIES,
     *BUILDSOURCE_EXTENSION_ENTRIES,
     *NUMPY_EXTENSION_ENTRIES,
