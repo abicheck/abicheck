@@ -4,8 +4,11 @@ A new changelog fragment. See changelog.d/README.md for the workflow.
 
 ### Changed
 
-- **Five CLI entry points were restructured to cut cyclomatic complexity**, with
+- **Six CLI entry points were restructured to cut cyclomatic complexity**, with
   no behaviour, output, or exit-code changes:
+  - `cli_scan.scan_cmd` — the operand/flag mutual-exclusion checks, the project
+    config discovery (with the digest that parsed it), and the ADR-049
+    evaluation-config resolution each became their own helper.
   - `cli_compare_helpers.run_compare` — the heaviest function on the board — is
     now an explicit three-phase pipeline (resolve → compare → report). The
     post-comparison half moved wholesale into `_report_compare_result`, and
