@@ -19,33 +19,42 @@ name: 'Test check-project.yml: deferred operational failure survives to aggregat
 # path through the real check-project.yml file, short of reimplementing its
 # steps by hand (which would stop testing the actual reusable workflow).
 #
-# **`push: branches: [main]` only, deliberately NOT `pull_request`.** A
-# called reusable workflow's own jobs get separate check-runs attached to
-# the SAME commit SHA as the calling workflow -- "not required" doesn't
-# make them invisible, they still show up red in a PR's checks list, and a
-# human reviewing that list has no way to tell "expected, by design" apart
-# from a real failure without reading this comment. Running this only on
-# `push` to `main` (i.e. only after a PR has already merged) means the
-# fixture still catches a real regression before it reaches users, without
-# ever posting a red check against an open PR. The cost: a PR that itself
-# changes check-project.yml (like the one that introduced this file) is
-# not re-validated against this exact fixture before merging -- mitigated
-# by hand-verifying the mechanism locally/via manual runs before merging
-# such a PR, as this file's own G30 plan-doc history documents.
+# **Deliberately NOT `pull_request`, NOT `push`, and NOT `schedule` on this
+# file's own default-branch ref.** A called reusable workflow's own jobs get
+# separate check-runs attached to the SAME commit SHA as the calling
+# workflow -- "not required" doesn't make them invisible, they still show up
+# red in a checks list, and a human (or an automated health signal) has no
+# way to tell "expected, by design" apart from a real failure without
+# reading this comment. Any trigger whose run gets attributed to a commit
+# SHA that is actually part of `main`'s own history -- `push`, `pull_request`,
+# or even `schedule`/`workflow_dispatch` invoked with no `ref` (both default
+# to running the workflow file as it exists on the repository's default
+# branch, against that branch's own tip commit) -- reproduces the exact
+# problem this file exists to avoid: every such commit permanently carries a
+# red check-run, which is why "main is green" can't be used as a health
+# signal and why this workflow can never become a required check.
+#
+# This file therefore only declares `workflow_dispatch:` (no `schedule:`
+# here), and is never dispatched with no `ref` against the default branch.
+# The actual automated trigger lives in the sibling
+# `schedule-check-project-failure-path.yml`, which runs on its own schedule
+# on `main` (a run that must and does stay green -- it does no assertions of
+# its own) and dispatches THIS workflow against a dedicated, disposable
+# fixture ref that carries its own commit SHA, never reachable from `main`'s
+# branch history. That is what actually decouples "this fixture's expected
+# failure" from "any commit that is part of main" -- see that file for the
+# mechanism. A maintainer can still run this workflow directly (accepting a
+# red run against whatever ref they pick) via `workflow_dispatch` for manual
+# verification, e.g. before merging a PR that itself changes
+# check-project.yml.
 permissions:
   contents: read
 
 on:
-  push:
-    branches: [main]
-    paths:
-      - '.github/workflows/check-project.yml'
-      - '.github/workflows/test-check-project-failure-path.yml'
-      - 'abicheck/**'
-      - 'tests/fixtures/action/**'
+  workflow_dispatch: {}
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.run_id }}
+  group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
