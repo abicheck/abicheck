@@ -503,6 +503,74 @@ class TestCompareTellsTheTwoAxesApart:
         )
         assert outputs["verdict"] == "SEVERITY_ERROR", outputs
 
+    def _text_report_stub(self, tmp_path: Path, text: str, exit_code: int) -> Path:
+        """A stub whose text report has *real* newlines and em-dash.
+
+        Written to a file and `cat`-ed rather than `printf`-ed: an earlier
+        harness emitted the escapes literally, which silently exercised a
+        one-line report and would have hidden a line-anchored grep.
+        """
+        bindir = tmp_path / "bin"
+        bindir.mkdir()
+        report = tmp_path / "report.txt"
+        report.write_text(text, encoding="utf-8")
+        stub = bindir / "abicheck"
+        stub.write_text(
+            f"#!/usr/bin/env bash\ncat {report}\nexit {exit_code}\n", encoding="utf-8"
+        )
+        stub.chmod(0o755)
+        return bindir
+
+    def test_a_text_summary_names_the_blocking_category(self, tmp_path: Path) -> None:
+        """The job summary's category lookup was JSON-only, so a scan on the
+        default text format printed the bare "severity-level issue" message
+        that lookup exists to avoid.
+        """
+        bindir = self._text_report_stub(
+            tmp_path,
+            "Baseline comparison\n"
+            "  severity gate: exit 1 \u2014 blocking: addition\n\n"
+            "Verdict: COMPATIBLE\n",
+            1,
+        )
+        outputs = _run_action(
+            tmp_path,
+            {
+                "INPUT_MODE": "scan",
+                "INPUT_NEW_LIBRARY": _lib(tmp_path, "libnew.so"),
+                "INPUT_FORMAT": "text",
+            },
+            bindir,
+        )
+        assert outputs["verdict"] == "SEVERITY_ERROR", outputs
+        assert "`addition` configured as `error`" in outputs["_summary"]
+
+    def test_a_severity_exit_two_says_why_the_step_failed(
+        self, tmp_path: Path
+    ) -> None:
+        """`potential_breaking=error` gates at exit 2, which carries the
+        API_BREAK label -- so the summary must say the severity policy is what
+        failed the step, or it reads as though fail-on-api-break was ignored.
+        """
+        bindir = self._text_report_stub(
+            tmp_path,
+            "Baseline comparison\n"
+            "  severity gate: exit 2 \u2014 blocking: potential_breaking\n\n"
+            "Verdict: COMPATIBLE_WITH_RISK\n",
+            2,
+        )
+        outputs = _run_action(
+            tmp_path,
+            {
+                "INPUT_MODE": "scan",
+                "INPUT_NEW_LIBRARY": _lib(tmp_path, "libnew.so"),
+                "INPUT_FORMAT": "text",
+            },
+            bindir,
+        )
+        assert outputs["verdict"] == "API_BREAK", outputs
+        assert "Also blocked by severity policy" in outputs["_summary"]
+
     def test_a_scan_exit_one_with_neither_signal_stays_an_error(
         self, tmp_path: Path
     ) -> None:

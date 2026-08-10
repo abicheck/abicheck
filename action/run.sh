@@ -993,7 +993,11 @@ _severity_gate_categories() {
     echo "$_answer"
     return
   fi
-  sed -n 's/.*severity gate: exit [0-9][0-9]* — blocking: \(.*\)$/\1/p' \
+  # Not anchored on the em-dash the renderer happens to use: the exit-code
+  # reader above does not require it either, and a separator that only one of
+  # the two greps depends on is a difference waiting to bite under a
+  # different locale or renderer tweak.
+  sed -n 's/.*severity gate: exit [0-9][0-9]*[^:]*blocking: *\(.*\)$/\1/p' \
     <<<"$(_text_report_content)" | head -1
 }
 
@@ -1186,9 +1190,13 @@ if [[ "${INPUT_ADD_JOB_SUMMARY:-true}" == "true" && "$MODE" != "dump" ]]; then
         # --secondary-format/--secondary-output, so it's already populated
         # by this point without a second run (Codex review). Falls back to
         # the generic message when no report is readable.
-        _blocking_categories=""
-        _json_src=$(_json_report_src)
-        _blocking_categories=$(_report_query "$_json_src" blocking_categories)
+        # Through `_severity_gate_categories`, which falls back to the text
+        # report's own gate line. A scan on the default `format: text` has no
+        # JSON at all, so a JSON-only lookup printed the bare "severity-level
+        # issue" message the comment above says this exists to avoid -- the
+        # same JSON-only assumption that had to be fixed in the verdict
+        # mapping and then again in its text fallback.
+        _blocking_categories=$(_severity_gate_categories)
         if [[ -n "$_blocking_categories" ]]; then
           echo "> **Verdict: SEVERITY_ERROR** ⚠️ — Blocked by severity policy: \`$_blocking_categories\` configured as \`error\`. This is a policy gate, not necessarily an ABI/API break — see the report below for each finding's actual compatibility."
         else
@@ -1197,6 +1205,17 @@ if [[ "${INPUT_ADD_JOB_SUMMARY:-true}" == "true" && "$MODE" != "dump" ]]; then
         ;;
       API_BREAK)
         echo "> **Verdict: API_BREAK** — Source-level API break detected. Recompilation required."
+        # Since a severity category configured as `error` gates at exit 2 as
+        # well as 1, an API_BREAK verdict can be what *also* carries a
+        # severity block -- and that block, not the API break, is why the
+        # step failed regardless of `fail-on-api-break`. Say so, or the
+        # summary reads as though the flag had been ignored.
+        _sev_cats_summary=$(_severity_gate_categories | tr ',' '\n' \
+          | sed 's/^ *//;s/ *$//' | grep -v '^promoted_crosscheck$' | grep -v '^$' | paste -sd, -)
+        if [[ -n "$_sev_cats_summary" ]]; then
+          echo ">"
+          echo "> ⚠️ Also blocked by severity policy: \`$_sev_cats_summary\` configured as \`error\`. This fails the step independently of \`fail-on-api-break\`."
+        fi
         ;;
       BREAKING)
         echo "> **Verdict: BREAKING** — Binary ABI break detected. Existing binaries will fail at runtime."
