@@ -1735,6 +1735,43 @@ def test_a_malformed_page_list_is_reported_not_raised(
     assert f is not None
 
 
+def test_an_external_fragment_may_not_declare_itself_generated(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """`_check_front_matter_schema` skips a `generated: true` page wholesale —
+    backlink requirement included — so the claim would switch off the very
+    enforcement that makes registering an out-of-docs summary safe. It is also
+    false: these trees are hand-authored sources generators read, never write.
+    """
+    topics, fragment = _external_registry(tmp_path)
+    fragment.write_text(
+        "---\ndoc_type: reference\ngenerated: true\nsummarizes:\n  - a-topic\n---\n\n"
+        "# F\n",  # no backlink — the schema check would have caught this
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(dc, "ROOT", tmp_path)
+    monkeypatch.setattr(dc, "DOCS", tmp_path / "docs")
+    f = dc.Findings()
+    dc._check_external_summary_pages_claim_their_topics(f, topics)
+    assert any("generated: true" in str(e) for e in f.errors)
+
+
+def test_a_malformed_topic_id_is_reported_not_raised(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """A numeric topic id alongside the normal string ones makes a bare
+    `sorted(topics.items())` raise `TypeError` comparing `int` to `str`,
+    aborting the gate before it can report the registry errors it already
+    collected."""
+    topics, _ = _external_registry(tmp_path)
+    topics[123] = {"canonical_page": "learn/owner.md"}  # type: ignore[index]
+    monkeypatch.setattr(dc, "ROOT", tmp_path)
+    monkeypatch.setattr(dc, "DOCS", tmp_path / "docs")
+    f = dc.Findings()
+    dc._check_external_summary_pages_claim_their_topics(f, topics)  # must not raise
+    assert f is not None
+
+
 @pytest.mark.parametrize(
     "front_matter",
     ["", "---\ndoc_type: reference\n---\n", "---\nsummarizes:\n  - other\n---\n"],

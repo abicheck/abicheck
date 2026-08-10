@@ -711,7 +711,11 @@ def _check_external_summary_pages_claim_their_topics(
     ADR-058's exception is opting in by construction and must claim what it
     was registered for.
     """
-    for topic_id, entry in sorted(topics.items()):
+    # Sorted through `str`, not on the raw key: a malformed numeric topic id
+    # alongside the normal string ones makes a bare `sorted` raise `TypeError`
+    # comparing `int` to `str`, which would abort the gate before it could
+    # report the registry errors it has already collected.
+    for topic_id, entry in sorted(topics.items(), key=lambda item: str(item[0])):
         if not isinstance(entry, dict):
             continue
         for key in ("task_pages", "allowed_summaries"):
@@ -729,6 +733,22 @@ def _check_external_summary_pages_claim_their_topics(
                     fm = load_front_matter(path)
                 except (yaml.YAMLError, ValueError):
                     continue  # reported by the front-matter scan
+                if isinstance(fm, dict) and fm.get("generated") is True:
+                    # `_check_front_matter_schema` skips a generated page
+                    # wholesale, backlink requirement included — so this claim
+                    # would otherwise switch off the very enforcement that
+                    # makes registering an out-of-docs summary safe. It is
+                    # also simply false: every `EXTERNAL_PAGE_ROOTS` tree is
+                    # hand-authored source that generators read, never write.
+                    f.err(
+                        "front-matter",
+                        f"{_rel(path)}: registered as topic {str(topic_id)!r}'s "
+                        f"{key} entry but declares `generated: true` — these "
+                        "trees are hand-authored sources, and the claim skips "
+                        "the schema check that requires a canonical-page "
+                        "backlink",
+                    )
+                    continue
                 claimed = fm.get("summarizes") if isinstance(fm, dict) else None
                 claimed = claimed if isinstance(claimed, list) else []
                 if topic_id not in [str(c) for c in claimed]:
