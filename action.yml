@@ -641,6 +641,7 @@ runs:
         INPUT_VERIFY_RUNTIME: ${{ inputs.verify-runtime }}
         INPUT_REQUIRED_SYMBOL: ${{ inputs.required-symbol }}
         INPUT_REQUIRED_SYMBOLS: ${{ inputs.required-symbols }}
+        INPUT_SNAPSHOT_COMPRESSION: ${{ inputs.snapshot-compression }}
       run: bash "${{ github.action_path }}/action/validate-inputs.sh"
 
     # ── 1. Python ─────────────────────────────────────────────────────────────

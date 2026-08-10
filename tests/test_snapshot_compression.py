@@ -333,6 +333,31 @@ def test_concatenated_multi_frame_zstd_not_rejected_as_corrupt(tmp_path):
     assert read_snapshot_bytes(p) == payload
 
 
+def test_truncated_second_frame_of_multi_frame_zstd_detected(tmp_path):
+    """Codex review, PR #699 (second round on the same multi-frame fix): the
+    first round's fix only compared the aggregate decoded output against
+    the *first* frame's own declared size -- a truncated *later* frame
+    still passed, since a fully-intact first frame's contribution alone
+    could already exceed that first frame's own declared size (the
+    signal the first-round fix relied on), with the truncated remainder
+    hidden inside the aggregate. Confirm a genuinely truncated second
+    frame is now caught."""
+    zstandard = pytest.importorskip("zstandard")
+
+    payload = json.dumps({"library": "x", "version": "1", "extra": "y" * 50}).encode()
+    half = len(payload) // 2
+    cctx1 = zstandard.ZstdCompressor(write_content_size=True)
+    frame1 = cctx1.compress(payload[:half])
+    cctx2 = zstandard.ZstdCompressor(write_content_size=True)
+    frame2 = cctx2.compress(payload[half:])
+    truncated_frame2 = frame2[: len(frame2) - 2]
+    p = tmp_path / "multiframe_truncated.abicheck.json.zst"
+    p.write_bytes(frame1 + truncated_frame2)
+
+    with pytest.raises(SnapshotError, match="corrupt or truncated"):
+        read_snapshot_bytes(p)
+
+
 # ── Decompression limits ────────────────────────────────────────────────
 
 
@@ -926,6 +951,7 @@ def test_replace_fsyncs_the_parent_directory(tmp_path, monkeypatch):
     assert calls[1] == ("fsync", dir_fds[0])  # directory fd, strictly after
 
 
+@pytest.mark.skipif(os.name == "nt", reason="no O_DIRECTORY on Windows")
 def test_directory_fsync_real_failure_propagates_but_content_is_already_live(
     tmp_path, monkeypatch
 ):
