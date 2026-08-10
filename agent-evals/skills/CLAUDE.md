@@ -12,10 +12,11 @@ with a skill**. Same mechanism, different subject.
 ## What exists today (Phase 0, plus the first slice of Phases 1–2)
 
 Phase 0's contracts and deterministic checks are complete. On top of them sit a
-recording shim and a headless runner — enough to *produce* a transcript, not
-yet to grade one. **Still missing: the graders, the golden bad-bundle corpus,
-and any committed evidence.** Until the graders exist, a run yields transcripts
-a human reads, not a score.
+recording shim, a headless two-arm runner, and the four deterministic graders
+with the bad-run corpus that exercises them — enough to produce a transcript
+*and* score it. **Still missing: the judged dimensions (4 and 5), the trigger
+corpus runner, and any committed evidence.** Nothing here has been run at scale
+yet, so there are no numbers to cite.
 
 | Path | Role |
 |------|------|
@@ -27,7 +28,27 @@ a human reads, not a score.
 | `schema/transcript-bundle.schema.json` | The bundle shape every runner must emit — `behavioral` or `trigger`, both carrying the hashes they ran against and the inputs the run was observed reading. |
 | `skill-eval-pack.json` | **Generated** (`scripts/gen_skill_eval_pack.py`). The hashes freshness is computed from, and the interface `agent-benchmark` consumes. |
 | `shim/abicheck` | Recording shim: every `abicheck` call the agent makes, with argv, exit status, persisted stdout and an immutable snapshot of the files it wrote. |
-| `runners/claude_code.py` | Headless runner. Two arms — `skill` installs the published skill into the workspace, `baseline` installs none — identical in every other respect, so a difference is attributable to the skill. |
+| `runners/claude_code.py` | Headless runner. Two arms — `skill` installs the published skill into the workspace, `baseline` installs none — identical in every other respect, so a difference is attributable to the skill. Refuses an in-repo `--out`, and records what the CLI said it could see. |
+| `graders/` | The four deterministic dimensions (1, 2, 3, 6) as pure functions of one recorded run: `claim.py` extracts and validates the envelope, `evidence.py` reads what the calls actually did, `dimensions.py` applies the rules. No grader here calls a model. |
+| `grade_bundle.py` | Grade one run directory against its scenario. Exit 2 when a zero-tolerance dimension failed. |
+| `run_skill_eval.py` | Grade a whole batch and print the two arms side by side. Reports; does not gate. |
+
+## Running an A/B
+
+```bash
+# 1. produce transcripts — the output root MUST be outside this checkout
+python agent-evals/skills/runners/claude_code.py --out /tmp/skill-eval --repetitions 3
+# 2. grade them
+python agent-evals/skills/run_skill_eval.py --runs /tmp/skill-eval --json /tmp/grades.json
+```
+
+The `--out` restriction is not tidiness. Claude Code discovers skills from the
+project the working directory belongs to, and this repo's root carries all four
+published trees — so a workspace under it hands the *baseline* arm everything it
+is defined by not having, and the comparison comes back "the skill changes
+nothing" for a reason that has nothing to do with the skill. Verified against
+the real CLI, which is also why each run records the skill list the CLI reported
+and the runner aborts when the arms are not what they claim.
 
 ## The two things that are easy to get wrong here
 

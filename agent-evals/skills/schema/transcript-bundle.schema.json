@@ -116,7 +116,7 @@
                 "$ref": "#/$defs/digest"
               }
             ],
-            "description": "sha256 of that one file's bytes as the run read it. The freshness check compares it against the file's current content, which is what catches an input whose routed hash is coarser than the file itself — `scenarios.yaml` routes to every scenario, but each scenario's hash covers only its own record."
+            "description": "sha256 of that one file's content as the run read it, over LF-normalized bytes. The freshness check compares it against the file's current content, which is what catches an input whose routed hash is coarser than the file itself — `scenarios.yaml` routes to every scenario, but each scenario's hash covers only its own record. Normalized rather than raw because git writes CRLF on Windows: a raw digest would make every bundle produced there read as permanently stale everywhere else, which is a property of the checkout rather than of the evidence."
           }
         }
       }

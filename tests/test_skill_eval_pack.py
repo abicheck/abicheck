@@ -255,6 +255,23 @@ def test_digests_survive_a_crlf_checkout(
     )
 
 
+def test_an_observed_input_digest_survives_a_crlf_checkout(tmp_path: Path) -> None:
+    """The same invariance, one level down, on the digest a *bundle* records.
+
+    Missing it here is what failed the Windows unit lane after the committed
+    pack digest was already fixed: the observed-input comparison had its own
+    digest path, and a bundle whose inputs were digested raw would have read as
+    stale on every host but the one that produced it."""
+    source = tmp_path / "read.md"
+    source.write_bytes(b"alpha\nbeta\n")
+    lf = freshness._content_digest(source)
+    source.write_bytes(b"alpha\r\nbeta\r\n")
+    assert freshness._content_digest(source) == lf
+
+    source.write_bytes(b"alpha\nbeta\ngamma\n")
+    assert freshness._content_digest(source) != lf
+
+
 def test_surface_sources_are_the_generated_projections() -> None:
     """Each is drift-gated against the live objects elsewhere in `pr`, which is
     what lets this digest be file-based without going blind to a real surface
@@ -376,10 +393,18 @@ SKILL_READ = ".agents/skills/native-binary-compatibility-review/SKILL.md"
 
 
 def _observed(rel_path: str) -> dict[str, str]:
-    """An observed-input record carrying the file's real current digest."""
+    """An observed-input record carrying the file's real current digest.
+
+    Over *newline-normalized* content, which is what an observed digest means
+    (see the bundle schema) and what the checker compares against. Digesting
+    the raw bytes instead passed on Linux and failed the whole Windows unit
+    lane, because git writes CRLF there — and it would have been worse than a
+    test bug: a runner recording raw bytes on Windows would produce bundles
+    that read as permanently stale on every other host.
+    """
     import hashlib
 
-    data = (REPO / rel_path).read_bytes()
+    data = surface.normalize_newlines((REPO / rel_path).read_bytes())
     return {"path": rel_path, "digest": "sha256:" + hashlib.sha256(data).hexdigest()}
 
 

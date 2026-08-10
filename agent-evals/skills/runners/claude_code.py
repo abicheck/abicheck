@@ -17,15 +17,31 @@
 """Headless Claude Code runner — one recorded run per (scenario, arm, repetition).
 
 The two arms differ in exactly one thing, which is the whole point of running
-them: the `skill` arm gets the published skill trees installed into the
-workspace's own `.claude/skills/`, the `baseline` arm gets none. Everything
-else — prompt, fixture, tool access, model, turn budget — is identical, so a
-difference in outcome is attributable to the skill rather than to the setup.
+them: the `skill` arm gets the one published skill the scenario names installed
+into the workspace's own `.claude/skills/`, the `baseline` arm gets none.
+Everything else — prompt, fixture, tool access, model, turn budget — is
+identical, so a difference in outcome is attributable to the skill rather than
+to the setup.
 
 Each run happens in a disposable workspace holding a copy of the fixture, with
 the recording shim first on PATH. The agent is never told abicheck exists; a
 skill that has to be *found* is the thing being measured (ADR-058), and naming
 the tool in the prompt would hand the baseline arm the same answer.
+
+**The workspace must live outside this repository, and that is enforced rather
+than documented.** Claude Code discovers skills from the project the working
+directory belongs to, and this repository's own root carries all four published
+trees in `.claude/skills/`. A workspace anywhere beneath it therefore hands the
+*baseline* arm every skill it is defined by not having — verified against the
+real CLI, which reported all four visible from an in-repo directory and exactly
+the one installed from a workspace outside it. That is not a degraded
+measurement, it is the absence of one: both arms would be skill arms and the
+comparison would read as "the skill changes nothing".
+
+Because that confound is silent in the output, each run also *records* what the
+CLI said it could see (`system/init`'s skill list) and refuses to continue when
+the arms are not what they claim. Evidence that the treatment was applied
+belongs in the transcript, next to the outcome it explains.
 """
 
 from __future__ import annotations
@@ -39,6 +55,7 @@ import subprocess
 import sys
 import time
 from pathlib import Path
+from typing import Any
 
 ROOT = Path(__file__).resolve().parents[3]
 EVAL_DIR = ROOT / "agent-evals" / "skills"
@@ -54,6 +71,34 @@ ARMS = ("skill", "baseline")
 #: nothing and keeps the two invocations byte-identical apart from the
 #: workspace contents.
 ALLOWED_TOOLS = ("Bash", "Read", "Glob", "Grep", "Skill")
+
+#: Appended verbatim to every scenario prompt, in both arms.
+#:
+#: G37 D3: the zero-tolerance dimensions grade the *claim*, and a regex over
+#: prose cannot tell "ABI-compatible but source-breaking" — which is exactly
+#: `API_BREAK` — from hedging. So the answer carries its own typed envelope
+#: instead of being parsed for one.
+#:
+#: The cost is stated in the plan and worth repeating here: naming the ordinal
+#: vocabulary tells *both* arms which distinctions exist, which makes the
+#: interaction less natural than an unprompted one and, if anything, helps the
+#: baseline. It buys a safety gate that does not rest on reading free text, and
+#: since both arms get the identical text it cannot manufacture a difference
+#: between them.
+ANSWER_CONTRACT = """
+
+When you have finished, end your reply with a fenced ```json block — nothing
+after it — in exactly this shape:
+
+{"verdict": "<one of NO_CHANGE, COMPATIBLE, COMPATIBLE_WITH_RISK, API_BREAK, BREAKING, or null if the two sides cannot be compared at all>",
+ "evidence": [<the numeric ids of the tool calls this rests on, from the order you ran them, starting at 0>],
+ "confident": true or false}
+
+If `confident` is false, add an `"uncertainty"` object with `"reason"` (one of
+`not_comparable`, `evidence_too_shallow`, `matrix_target_unrun`,
+`contract_coverage_incomplete`) and `"unresolved"` naming what specifically is
+unresolved. Give exactly one such block.
+"""
 
 #: `platform.system()` -> the spelling `examples/ground_truth.json` uses.
 _HOST_PLATFORM = {"Linux": "linux", "Darwin": "macos", "Windows": "windows"}
@@ -75,6 +120,12 @@ def supported_here(scenario: dict) -> bool:
     return not platforms or host_platform() in platforms
 
 
+def is_inside_repo(path: Path) -> bool:
+    """Whether `path` would place a workspace inside this checkout."""
+    resolved = path.resolve()
+    return resolved == ROOT or ROOT in resolved.parents
+
+
 def _prepare_workspace(work: Path, scenario: dict, arm: str) -> None:
     """A disposable copy of the fixture, plus the arm's skill configuration."""
     fixture = ROOT / scenario["inputs"]
@@ -85,6 +136,61 @@ def _prepare_workspace(work: Path, scenario: dict, arm: str) -> None:
         shutil.copytree(
             PUBLISHED_SKILLS / scenario["skill"], skills / scenario["skill"]
         )
+
+
+def visible_native_skills(events: list[dict]) -> list[str] | None:
+    """The published skills the CLI reported seeing, or None if it never said.
+
+    `None` and `[]` are different answers and must not collapse: an absent
+    `init` event means the treatment is unverified, while an empty list is
+    positive evidence that the baseline arm saw nothing.
+    """
+    for event in events:
+        if event.get("type") == "system" and event.get("subtype") == "init":
+            return sorted(s for s in event.get("skills", []) if s.startswith("native-"))
+    return None
+
+
+def check_treatment(arm: str, scenario: dict, visible: list[str] | None) -> str | None:
+    """The reason this run is not evidence about its arm, if it is not."""
+    if visible is None:
+        return "the CLI never reported which skills it could see"
+    if arm == "baseline" and visible:
+        return f"baseline arm could see published skill(s): {', '.join(visible)}"
+    if arm == "skill" and visible != [scenario["skill"]]:
+        return (
+            f"skill arm should see exactly ['{scenario['skill']}'], saw: "
+            f"{visible or '[]'}"
+        )
+    return None
+
+
+def _final_text(events: list[dict]) -> str:
+    for event in reversed(events):
+        if event.get("type") == "result":
+            return str(event.get("result") or "")
+    return ""
+
+
+def _usage(events: list[dict], elapsed: float) -> dict[str, Any]:
+    usage: dict[str, Any] = {"wall_clock_seconds": round(elapsed, 1)}
+    for event in reversed(events):
+        if event.get("type") != "result":
+            continue
+        counts = event.get("usage") or {}
+        usage["turns"] = event.get("num_turns")
+        usage["tokens_in"] = counts.get("input_tokens")
+        usage["tokens_out"] = counts.get("output_tokens")
+        usage["cost_usd"] = event.get("total_cost_usd")
+        break
+    usage["tool_calls"] = sum(
+        1
+        for event in events
+        if event.get("type") == "assistant"
+        for block in (event.get("message") or {}).get("content") or []
+        if isinstance(block, dict) and block.get("type") == "tool_use"
+    )
+    return usage
 
 
 def _run_once(
@@ -109,14 +215,23 @@ def _run_once(
         "SKILL_EVAL_REAL_ABICHECK": real,
     }
 
+    prompt = scenario["prompt"] + ANSWER_CONTRACT
+    (out_dir / "prompt.txt").write_text(prompt, encoding="utf-8")
+
     started = time.monotonic()
     proc = subprocess.run(  # noqa: S603
         [
             "claude",
             "-p",
-            scenario["prompt"],
+            prompt,
             "--max-turns",
             "12",
+            # stream-json, not text: the event stream is what carries which
+            # skill activated and which tools ran, so dimension 1 grades an
+            # observation rather than an inference from the final prose.
+            "--output-format",
+            "stream-json",
+            "--verbose",
             # Named tools rather than `--permission-mode bypassPermissions`:
             # that maps to --dangerously-skip-permissions, which the CLI
             # refuses under root, so an evaluation running as root would
@@ -133,9 +248,31 @@ def _run_once(
     )
     elapsed = time.monotonic() - started
 
-    (out_dir / "final.md").write_text(proc.stdout, encoding="utf-8")
+    (out_dir / "events.jsonl").write_text(proc.stdout, encoding="utf-8")
     if proc.stderr:
         (out_dir / "runner.err").write_text(proc.stderr, encoding="utf-8")
+
+    events: list[dict] = []
+    for line in proc.stdout.splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            events.append(json.loads(line))
+        except json.JSONDecodeError:
+            continue
+
+    (out_dir / "final.md").write_text(_final_text(events), encoding="utf-8")
+    usage = _usage(events, elapsed)
+    (out_dir / "usage.json").write_text(json.dumps(usage, indent=2), encoding="utf-8")
+
+    visible = visible_native_skills(events)
+    problem = check_treatment(arm, scenario, visible)
+    if problem is not None:
+        raise RuntimeError(
+            f"{scenario_id}/{arm}/{rep}: {problem}. The arms are not what they "
+            f"claim, so no run in this batch is evidence about the skill."
+        )
 
     return {
         "scenario_id": scenario_id,
@@ -143,8 +280,43 @@ def _run_once(
         "repetition": rep,
         "skill": scenario["skill"],
         "exit_code": proc.returncode,
-        "wall_clock_seconds": round(elapsed, 1),
+        "visible_skills": visible,
+        "wall_clock_seconds": usage["wall_clock_seconds"],
     }
+
+
+def _recovered_record(out_dir: Path, sid: str, arm: str, rep: int, skill: str) -> dict:
+    """An index row for a run whose directory exists but whose row does not.
+
+    A crash between writing `final.md` and rewriting `index.json` used to make
+    that repetition permanently invisible: every later resume skipped the
+    directory as done and never added the row, so the aggregate silently
+    counted one run fewer than was actually paid for.
+    """
+    record = {
+        "scenario_id": sid,
+        "arm": arm,
+        "repetition": rep,
+        "skill": skill,
+        "recovered": True,
+    }
+    usage_path = out_dir / "usage.json"
+    if usage_path.is_file():
+        try:
+            record["wall_clock_seconds"] = json.loads(
+                usage_path.read_text(encoding="utf-8")
+            ).get("wall_clock_seconds")
+        except json.JSONDecodeError:
+            pass
+    events_path = out_dir / "events.jsonl"
+    if events_path.is_file():
+        events = [
+            json.loads(line)
+            for line in events_path.read_text(encoding="utf-8").splitlines()
+            if line.strip()
+        ]
+        record["visible_skills"] = visible_native_skills(events)
+    return record
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -162,12 +334,12 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--timeout", type=int, default=900)
     args = parser.parse_args(argv)
 
-    # Both checks run before the first model call: a run that discovers either
-    # problem afterwards has spent real money producing output that *looks*
-    # like a completed evaluation. An absent abicheck makes the shim answer 70
-    # to every call — indistinguishable at grading time from a tool failure —
-    # and a mistyped arm silently produces a baseline workspace under its name,
-    # so the comparison loses its treatment arm without saying so.
+    # These checks run before the first model call: a run that discovers any of
+    # them afterwards has spent real money producing output that *looks* like a
+    # completed evaluation. An absent abicheck makes the shim answer 70 to every
+    # call — indistinguishable at grading time from a tool failure; a mistyped
+    # arm silently produces a baseline workspace under its name; and an in-repo
+    # output root gives the baseline arm the skills that define it.
     if shutil.which("abicheck") is None:
         print(
             "abicheck is not on PATH; every recorded call would be a shim "
@@ -181,6 +353,16 @@ def main(argv: list[str] | None = None) -> int:
         print(f"unknown arm(s): {', '.join(unknown)}", file=sys.stderr)
         return 1
 
+    out_root = Path(args.out)
+    if is_inside_repo(out_root):
+        print(
+            f"--out {out_root} is inside {ROOT}, so every workspace would belong "
+            f"to this project and the baseline arm would discover the published "
+            f"skills in .claude/skills/. Choose a path outside the checkout.",
+            file=sys.stderr,
+        )
+        return 1
+
     pack = json.loads(PACK.read_text(encoding="utf-8"))
     wanted = [s for s in args.scenarios.split(",") if s]
     scenarios = {
@@ -192,7 +374,6 @@ def main(argv: list[str] | None = None) -> int:
         print("no ready scenarios selected", file=sys.stderr)
         return 1
 
-    out_root = Path(args.out)
     out_root.mkdir(parents=True, exist_ok=True)
 
     # Resuming must not lose what earlier invocations recorded: starting from
@@ -206,6 +387,9 @@ def main(argv: list[str] | None = None) -> int:
     )
     done = {(r["scenario_id"], r["arm"], r["repetition"]) for r in index}
 
+    def flush() -> None:
+        index_path.write_text(json.dumps(index, indent=2), encoding="utf-8")
+
     for sid, scenario in scenarios.items():
         if not supported_here(scenario):
             print(
@@ -215,8 +399,15 @@ def main(argv: list[str] | None = None) -> int:
         for arm in arms:
             for rep in range(args.repetitions):
                 out_dir = out_root / sid / arm / str(rep)
-                if (sid, arm, rep) in done or (out_dir / "final.md").exists():
+                if (sid, arm, rep) in done:
                     print(f"skip {sid}/{arm}/{rep} (already run)")
+                    continue
+                if (out_dir / "final.md").exists():
+                    print(f"recover {sid}/{arm}/{rep} (ran, was not indexed)")
+                    index.append(
+                        _recovered_record(out_dir, sid, arm, rep, scenario["skill"])
+                    )
+                    flush()
                     continue
                 out_dir.mkdir(parents=True, exist_ok=True)
                 print(f"run  {sid}/{arm}/{rep}", flush=True)
@@ -233,9 +424,7 @@ def main(argv: list[str] | None = None) -> int:
                     }
                     (out_dir / "final.md").write_text("", encoding="utf-8")
                 index.append(record)
-                (out_root / "index.json").write_text(
-                    json.dumps(index, indent=2), encoding="utf-8"
-                )
+                flush()
 
     print(f"\n{len(index)} runs written to {out_root}")
     return 0

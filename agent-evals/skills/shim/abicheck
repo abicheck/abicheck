@@ -39,11 +39,20 @@ what the agent sees and what the transcript holds stay the same paths.
 **Allocates its sequence number under a lock.** The agent can run two Bash
 calls concurrently; two shims counting the same file would pick the same `seq`,
 overwrite each other's capture, and rewrite each other's record.
+
+The lock lives on a sibling file rather than on the record file itself. Both
+`fcntl.flock` and Windows' `msvcrt.locking` are available that way, and the
+Windows call locks a byte *range from the current file position* — locking the
+record file directly would entangle the lock with the seeks the append and the
+rewrite already do. `import fcntl` at module scope would also have made this
+shim unimportable on Windows, where the runner has ready scenarios
+(`compatible-addition`, `removed-export`), so every call there would have
+failed before reaching the real executable.
 """
 
 from __future__ import annotations
 
-import fcntl
+import contextlib
 import hashlib
 import json
 import os
@@ -51,12 +60,37 @@ import shutil
 import subprocess
 import sys
 import uuid
+from collections.abc import Iterator
 from pathlib import Path
 
 #: Options whose value names a path the call writes. `--output-dir` is a
 #: directory; the rest are files. Kept explicit rather than "any path-looking
 #: argument" so an input path is never mistaken for an output.
 OUTPUT_OPTIONS = ("-o", "--output", "--secondary-output", "--output-dir")
+
+
+@contextlib.contextmanager
+def _exclusive(lock_path: Path) -> Iterator[None]:
+    """Hold an exclusive lock on `lock_path` for the duration of the block."""
+    with lock_path.open("a+", encoding="utf-8") as handle:
+        if os.name == "nt":
+            import msvcrt
+
+            handle.seek(0)
+            msvcrt.locking(handle.fileno(), msvcrt.LK_LOCK, 1)
+            try:
+                yield
+            finally:
+                handle.seek(0)
+                msvcrt.locking(handle.fileno(), msvcrt.LK_UNLCK, 1)
+        else:
+            import fcntl
+
+            fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
+            try:
+                yield
+            finally:
+                fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
 
 
 def _digest(data: bytes) -> str:
@@ -76,24 +110,25 @@ def _declared_outputs(argv: list[str]) -> list[str]:
     return found
 
 
+def _lock_path(calls: Path) -> Path:
+    return calls.with_name(calls.name + ".lock")
+
+
 def _append_locked(calls: Path, record: dict) -> int:
     """Append one record and return its sequence number, atomically.
 
     The lock covers count-then-append together: two concurrent shims must not
     read the same length and then both write it as their own `seq`.
     """
-    with calls.open("a+", encoding="utf-8") as fh:
-        fcntl.flock(fh.fileno(), fcntl.LOCK_EX)
-        try:
+    with _exclusive(_lock_path(calls)):
+        with calls.open("a+", encoding="utf-8") as fh:
             fh.seek(0)
             seq = sum(1 for line in fh if line.strip())
             record["seq"] = seq
             fh.seek(0, os.SEEK_END)
             fh.write(json.dumps(record) + "\n")
             fh.flush()
-            return seq
-        finally:
-            fcntl.flock(fh.fileno(), fcntl.LOCK_UN)
+    return seq
 
 
 def _rewrite_locked(calls: Path, record: dict) -> None:
@@ -102,9 +137,8 @@ def _rewrite_locked(calls: Path, record: dict) -> None:
     Matched by `call_id`, never by position: with concurrent calls the record
     written last is not necessarily this one's.
     """
-    with calls.open("r+", encoding="utf-8") as fh:
-        fcntl.flock(fh.fileno(), fcntl.LOCK_EX)
-        try:
+    with _exclusive(_lock_path(calls)):
+        with calls.open("r+", encoding="utf-8") as fh:
             lines = [ln for ln in fh.read().splitlines() if ln.strip()]
             for i, line in enumerate(lines):
                 if json.loads(line).get("call_id") == record["call_id"]:
@@ -115,19 +149,29 @@ def _rewrite_locked(calls: Path, record: dict) -> None:
             fh.seek(0)
             fh.truncate()
             fh.write("\n".join(lines) + "\n")
-        finally:
-            fcntl.flock(fh.fileno(), fcntl.LOCK_UN)
 
 
-def _snapshot_outputs(argv: list[str], cwd: Path, dest: Path) -> list[dict]:
-    """Copy every file the call wrote into a per-call immutable location."""
+def _snapshot_outputs(argv: list[str], cwd: Path, dest: Path, root: Path) -> list[dict]:
+    """Copy every file the call wrote into a per-call immutable location.
+
+    Each declared output gets its own slot, prefixed by the position it was
+    declared at. Keying on the basename alone collided whenever one call wrote
+    two outputs sharing a name in different directories (`-o human/report.json
+    --secondary-output machine/report.json`): the second copy overwrote the
+    first and both records then cited one artifact, so the primary output was
+    unrecoverable at grading time.
+
+    Recorded paths are relative to `root`, the run directory — the same base
+    `stdout_path` uses, so a grader resolves every artifact a call produced the
+    one way.
+    """
     snapshots: list[dict] = []
-    for declared in _declared_outputs(argv):
+    for index, declared in enumerate(_declared_outputs(argv)):
         src = (cwd / declared).resolve()
         if not src.exists():
             snapshots.append({"requested": declared, "status": "absent"})
             continue
-        target = dest / Path(declared).name
+        target = dest / f"{index}-{Path(declared).name}"
         if src.is_dir():
             shutil.copytree(src, target, dirs_exist_ok=True)
             files = sorted(p for p in target.rglob("*") if p.is_file())
@@ -136,7 +180,7 @@ def _snapshot_outputs(argv: list[str], cwd: Path, dest: Path) -> list[dict]:
                     "requested": declared,
                     "status": "captured",
                     "kind": "directory",
-                    "path": str(target.relative_to(dest.parent)),
+                    "path": str(target.relative_to(root)),
                     "files": [str(p.relative_to(target)) for p in files],
                 }
             )
@@ -147,7 +191,7 @@ def _snapshot_outputs(argv: list[str], cwd: Path, dest: Path) -> list[dict]:
                     "requested": declared,
                     "status": "captured",
                     "kind": "file",
-                    "path": str(target.relative_to(dest.parent)),
+                    "path": str(target.relative_to(root)),
                     "digest": _digest(target.read_bytes()),
                 }
             )
@@ -193,7 +237,7 @@ def main() -> int:
         stdout_path=str(out_path.relative_to(calls.parent)),
         stdout_digest=_digest(proc.stdout),
         stderr_digest=_digest(proc.stderr),
-        outputs=_snapshot_outputs(argv, cwd, outputs_dir),
+        outputs=_snapshot_outputs(argv, cwd, outputs_dir, calls.parent),
     )
     _rewrite_locked(calls, record)
 
