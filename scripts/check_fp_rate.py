@@ -918,6 +918,25 @@ def _overaligned_first_vptr_stays_breaking() -> tuple[AbiSnapshot, AbiSnapshot]:
     )
 
 
+def _namespaced_leaf_vtable_removal_stays_breaking() -> tuple[AbiSnapshot, AbiSnapshot]:
+    # CastXML records a namespaced class under its bare leaf (`A`) while the
+    # method's mangled name is fully qualified (`ns::A::foo`), so an *exact*
+    # owner comparison never matched and the class's virtuals read as empty on
+    # both sides -- which let the size backstop suppress a class losing its
+    # last virtual. No other detector reports that, so the run went NO_CHANGE.
+    def cls(vtable: list[str]) -> RecordType:
+        return RecordType(name="A", kind="class", size_bits=64, vtable=vtable)
+
+    virt = Function(
+        name="foo", mangled="_ZN2ns1A3fooEv", return_type="void",
+        visibility=Visibility.PUBLIC, is_virtual=True,
+    )
+    return (
+        _snap("1", functions=[_fn("api", ret="A *"), virt], types=[cls(["A::foo()"])]),
+        _snap("2", functions=[_fn("api", ret="A *")], types=[cls([])]),
+    )
+
+
 def _vtable_reorder_stays_breaking() -> tuple[AbiSnapshot, AbiSnapshot]:
     # The other FN sentinel: when *both* sides captured a vtable, there is no
     # missing evidence to reason about and a reorder is a real break. The guard
@@ -1005,6 +1024,11 @@ CORPUS: list[Case] = [
         _vtable_became_polymorphic_stays_breaking,
     ),
     Case("vtable_reorder_stays_breaking", False, _vtable_reorder_stays_breaking),
+    Case(
+        "namespaced_leaf_vtable_removal_stays_breaking",
+        False,
+        _namespaced_leaf_vtable_removal_stays_breaking,
+    ),
     Case(
         "overaligned_first_vptr_stays_breaking",
         False,
@@ -1504,6 +1528,7 @@ CASE_CATEGORY: dict[str, str] = {
     "vtable_capture_asymmetry_stays_filtered": "evidence-absence",
     "vtable_became_polymorphic_stays_breaking": "evidence-absence",
     "vtable_reorder_stays_breaking": "evidence-absence",
+    "namespaced_leaf_vtable_removal_stays_breaking": "evidence-absence",
     "overaligned_first_vptr_stays_breaking": "evidence-absence",
     "empty_base_added_stays_breaking": "evidence-absence",
     "nonempty_base_added_stays_breaking": "evidence-absence",

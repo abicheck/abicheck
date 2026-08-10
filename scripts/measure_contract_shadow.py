@@ -151,10 +151,12 @@ FACT_LOSS_BASELINE = 0
 #: check reports a drop as well as a rise.
 UNRESOLVED_LOSS_BASELINE: dict[str, int] = {
     "public": 1,
-    "exports": 27,
+    "exports": 29,
     "all": 0,
 }
-#: `exports` moved 20 -> 23 -> 26 -> 27 as the `evidence-absence` corpus cases
+#: `exports` moved 20 -> 23 -> 26 -> 27 -> 29 (the last +2 is
+#: `namespaced_leaf_vtable_removal_stays_breaking`, another FN sentinel --
+#: a real vtable removal an exact owner comparison had been suppressing) as the `evidence-absence` corpus cases
 #: landed (vtable first, then bases). Attribution for the second step, same
 #: method as the first:
 #:

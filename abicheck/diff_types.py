@@ -1173,11 +1173,36 @@ def _owned_virtual_signatures(name: str, funcs: Mapping[str, Function]) -> set[s
     other with it.
     """
     from .diff_cxx_rules import owner_class_of
+    from .type_reachability_spelling import _namespace_suffix_spellings
+
+    # An *exact* comparison was wrong, and wrong in the direction that
+    # silences findings (Codex review). CastXML records a namespaced class
+    # under its bare leaf (`A`) while `owner_class_of` reconstructs the
+    # qualified `ns::A` from the mangled method, so the two never met, both
+    # signature sets came back empty, and the guard fell through to the size
+    # check it is meant to backstop -- suppressing, for instance, a class
+    # losing its last private virtual with no size change, which no other
+    # detector reports.
+    #
+    # Matched through `_namespace_suffix_spellings`, the same
+    # bare-vs-qualified machinery the rest of the codebase resolves type
+    # identities with (it is depth-aware, so a template argument's own `::`
+    # is not mistaken for a namespace boundary). Suffix matching is
+    # deliberately *eager* here: a spurious match makes the two sides' sets
+    # differ, which reads as evidenced and keeps the finding. For a
+    # suppression, erring toward keeping is the only safe direction.
+    wanted = {name, *_namespace_suffix_spellings(name)}
+
+    def _owns(fn: Function) -> bool:
+        owner = owner_class_of(fn)
+        if not owner:
+            return False
+        return bool(wanted & {owner, *_namespace_suffix_spellings(owner)})
 
     return {
         mangled
         for mangled, fn in funcs.items()
-        if getattr(fn, "is_virtual", False) and owner_class_of(fn) == name
+        if getattr(fn, "is_virtual", False) and _owns(fn)
     }
 
 
