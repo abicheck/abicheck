@@ -46,26 +46,43 @@ def vague_linkage_export_dropped(f_old: Function, f_new: Function | None) -> boo
     distinguish: both detectors above previously called it BREAKING.
 
     What the demotion rests on is deliberately *not* "nobody uses it" — that
-    is unprovable from two snapshots. It is "the header still defines it, so
-    a user emits its own copy", and the new side's own declaration is direct
-    evidence for that. Both halves are required:
+    is unprovable from two snapshots. It is "the consumer already emitted its
+    own copy", and it needs evidence on **both** sides:
 
     * ``elf_binding is WEAK`` on the old side. Tri-state: ``None`` means the
       binding was not captured (non-ELF platform, header-only declaration,
       pre-v21 snapshot) and must never be read as WEAK, so this stays inert
       wherever the evidence is absent rather than demoting a real removal on
       a guess.
-    * The new side still declares it *and* that declaration is inline. A
-      declaration alone is not enough: an entity demoted from inline to an
-      out-of-line definition elsewhere is a genuine removal.
+    * ``is_inline`` on the **old** side. This is the load-bearing half and a
+      first revision omitted it, which made the predicate wrong (Codex
+      review): WEAK does not imply vague linkage. An ordinary out-of-line
+      function marked ``__attribute__((weak))`` is also WEAK, and a consumer
+      compiled against *that* declaration carries no definition of its own —
+      only an undefined dynamic reference. If the new headers then make it
+      inline and drop the export, that already-compiled consumer fails to
+      load: a real ABI break the missing check demoted to a risk. The
+      consumer was built against the **old** headers, so only the old side
+      can establish that it emitted its own copy.
+    * ``is_inline`` on the new side too, which protects the other population:
+      a consumer compiled *against the new headers* needs a definition there
+      to emit. An entity demoted from inline to an out-of-line definition
+      elsewhere is a genuine removal.
 
-    The finding is demoted to a risk, not dropped, because the argument has
-    a real edge: a consumer built against a header that only *declared* the
-    entity, or one comparing its address across the library boundary
-    expecting a single shared instance, can still be affected. The event is
-    real either way — this decides its severity, not its existence.
+    Requiring old-side inline narrows the demotion — a template instantiation
+    or implicit special member whose producer did not set ``is_inline`` falls
+    back to being reported as a removal. That is the safe direction, and the
+    same absence-of-evidence discipline the binding check above uses.
+
+    The finding is demoted to a risk, not dropped, because the argument still
+    has an edge: a consumer comparing the entity's address across the library
+    boundary expecting a single shared instance can be affected even when
+    both sides are inline. The event is real either way — this decides its
+    severity, not its existence.
     """
     if f_old.elf_binding is not ElfBinding.WEAK:
+        return False
+    if not f_old.is_inline:
         return False
     return f_new is not None and f_new.is_inline
 

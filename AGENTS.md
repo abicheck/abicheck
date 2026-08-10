@@ -741,10 +741,16 @@ Once a root command genuinely clears the bar above, pick the right home:
   same `.dynsym` entry as the existing `elf_visibility`) and demoting that one
   shape to `func_export_dropped_inline_available`
   (`COMPATIBLE_WITH_RISK`) in `abicheck/symbol_linkage.py`. Three things
-  about it are worth not rediscovering. (1) The demotion rests on "the header
-  still defines it, so a user emits its own copy" — for which the new side's
-  inline declaration is direct evidence — and deliberately **not** on "nobody
-  uses it", which two snapshots cannot show. (2) `elf_binding` is tri-state and
+  about it are worth not rediscovering. (1) The demotion rests on "the consumer
+  already emitted its own copy" — needing `is_inline` on **both** sides, not
+  just the new one — and deliberately **not** on "nobody uses it", which two
+  snapshots cannot show. The old-side half is load-bearing and a first
+  revision omitted it: `WEAK` does not imply vague linkage, since an ordinary
+  out-of-line `__attribute__((weak))` function is `WEAK` too, and a consumer
+  compiled against *that* holds only an undefined dynamic reference — so
+  making it inline on the new side and dropping the export is a real load-time
+  break the missing check demoted. The consumer was built against the old
+  headers, so only the old side can establish it. (2) `elf_binding` is tri-state and
   `None` (non-ELF, header-only, pre-v21) is never read as a binding, so the
   demotion stays inert wherever the evidence is absent; `STB_GNU_UNIQUE` is
   kept distinct from `WEAK` rather than folded in, since it is a strong,

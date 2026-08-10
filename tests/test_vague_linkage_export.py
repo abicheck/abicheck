@@ -72,9 +72,20 @@ def _new_side() -> AbiSnapshot:
 
 
 class TestThePredicate:
-    def test_weak_and_still_inline_is_a_carried_copy(self) -> None:
+    def test_weak_and_inline_on_both_sides_is_a_carried_copy(self) -> None:
         assert vague_linkage_export_dropped(
-            _fn(binding=ElfBinding.WEAK), _fn(inline=True)
+            _fn(binding=ElfBinding.WEAK, inline=True), _fn(inline=True)
+        )
+
+    def test_an_out_of_line_weak_symbol_is_a_real_break(self) -> None:
+        """WEAK does not imply vague linkage. An ordinary out-of-line function
+        marked ``__attribute__((weak))`` is WEAK too, and a consumer compiled
+        against *that* declaration holds only an undefined dynamic reference --
+        no copy of its own. Making it inline on the new side and dropping the
+        export breaks that already-compiled consumer at load time, so only the
+        old side can establish the demotion (Codex review)."""
+        assert not vague_linkage_export_dropped(
+            _fn(binding=ElfBinding.WEAK, inline=False), _fn(inline=True)
         )
 
     def test_a_strong_definition_is_a_real_removal(self) -> None:
@@ -107,7 +118,9 @@ class TestThePredicate:
 
 class TestThroughCompare:
     def test_the_demoted_event_is_reported_once_as_a_risk(self) -> None:
-        result = compare(_snap([_fn(binding=ElfBinding.WEAK)], [MANGLED]), _new_side())
+        result = compare(
+            _snap([_fn(binding=ElfBinding.WEAK, inline=True)], [MANGLED]), _new_side()
+        )
         kinds = sorted(c.kind.value for c in result.changes)
         assert kinds == ["func_export_dropped_inline_available"], kinds
         assert result.verdict is Verdict.COMPATIBLE_WITH_RISK
@@ -116,7 +129,9 @@ class TestThroughCompare:
         """The regression that a predicate-only test could not see: the ELF
         fallback fired BREAKING on the same symbol, both double-reporting it
         and dominating the verdict, undoing the demotion entirely."""
-        result = compare(_snap([_fn(binding=ElfBinding.WEAK)], [MANGLED]), _new_side())
+        result = compare(
+            _snap([_fn(binding=ElfBinding.WEAK, inline=True)], [MANGLED]), _new_side()
+        )
         assert not [
             c for c in result.changes if c.kind.value == "func_deleted_elf_fallback"
         ]
@@ -135,7 +150,8 @@ class TestThroughCompare:
         """No declaration left on the new side at all — nothing says a
         consumer has its own copy."""
         result = compare(
-            _snap([_fn(binding=ElfBinding.WEAK)], [MANGLED]), _snap([], ["_Z5otherv"])
+            _snap([_fn(binding=ElfBinding.WEAK, inline=True)], [MANGLED]),
+            _snap([], ["_Z5otherv"]),
         )
         assert result.verdict is Verdict.BREAKING
 
@@ -144,7 +160,7 @@ class TestTheEvidenceRoundTrips:
     def test_the_binding_survives_serialization(self) -> None:
         from abicheck.serialization import snapshot_from_dict, snapshot_to_dict
 
-        snap = _snap([_fn(binding=ElfBinding.WEAK)], [MANGLED])
+        snap = _snap([_fn(binding=ElfBinding.WEAK, inline=True)], [MANGLED])
         loaded = snapshot_from_dict(snapshot_to_dict(snap))
         assert loaded.functions[0].elf_binding is ElfBinding.WEAK
 

@@ -202,11 +202,6 @@ class Function:
     access: AccessLevel = AccessLevel.PUBLIC  # public/protected/private
     return_pointer_depth: int = 0  # T=0, T*=1, T**=2
     elf_visibility: ElfVisibility | None = None  # ELF st_other (populated from .dynsym)
-    # ELF st_info binding (populated from .dynsym). Tri-state: None = not
-    # captured (non-ELF platforms, header-only declarations, older
-    # snapshots), so a detector must treat it as "unknown" and never as
-    # "strong" -- see ElfBinding for why WEAK is the load-bearing value.
-    elf_binding: ElfBinding | None = None
     ref_qualifier: str = ""  # "" (none), "&" (lvalue), "&&" (rvalue)
     # explicit specifier on constructors / conversion operators (DW_AT_explicit /
     # castxml @explicit). Tri-state to keep "unknown" distinct from "implicit":
@@ -278,6 +273,15 @@ class Function:
     # silently rebind existing positional-constructor arguments instead of
     # failing).
     hidden_friend_owner: str | None = None
+    # ELF st_info binding (populated from .dynsym, same entry as
+    # elf_visibility above). Tri-state: None = not captured (non-ELF
+    # platforms, header-only declarations, older snapshots), so a detector
+    # must treat it as "unknown" and never as "strong" -- see ElfBinding
+    # for why WEAK is the load-bearing value. Appended after all
+    # pre-existing fields for the same reason hidden_friend_owner above is
+    # (Codex review): inserting it next to elf_visibility would silently
+    # rebind every positional-constructor argument from that slot onward.
+    elf_binding: ElfBinding | None = None
 
 
 @dataclass
@@ -291,11 +295,6 @@ class Variable:
     value: str | None = None  # initial value (compile-time constant, if known)
     access: AccessLevel = AccessLevel.PUBLIC  # public/protected/private
     elf_visibility: ElfVisibility | None = None  # ELF st_other (populated from .dynsym)
-    # ELF st_info binding (populated from .dynsym). Tri-state: None = not
-    # captured (non-ELF platforms, header-only declarations, older
-    # snapshots), so a detector must treat it as "unknown" and never as
-    # "strong" -- see ElfBinding for why WEAK is the load-bearing value.
-    elf_binding: ElfBinding | None = None
     # Provenance (ADR-015, schema v6) — see Function.source_header.
     source_header: str | None = None
     origin: ScopeOrigin = ScopeOrigin.UNKNOWN
@@ -306,6 +305,9 @@ class Variable:
     alignment_bits: int | None = None
     # See Function.deprecated for the message-string convention.
     deprecated: str | None = None
+    # ELF st_info binding -- see Function.elf_binding. Appended last for
+    # the same positional-argument reason (Codex review).
+    elf_binding: ElfBinding | None = None
 
 
 @dataclass

@@ -6,16 +6,21 @@
   `WEAK` binding on a C++ entity is what the compiler emits for something the
   language requires *every* using translation unit to define for itself — an
   inline function, a template instantiation, an implicit special member — so
-  when such an export disappears while the new headers still define the entity
-  inline, a consumer built against those headers keeps resolving against its
-  own copy. That case is now `func_export_dropped_inline_available`
+  when such an export disappears while **both** sides' headers define the
+  entity inline, a consumer keeps resolving against its own copy. That case is
+  now `func_export_dropped_inline_available`
   (`COMPATIBLE_WITH_RISK`) instead of `func_removed`/`func_deleted_elf_fallback`
   (both `BREAKING`, on the same symbol).
 
   The demotion deliberately does not rest on "nobody uses it", which two
-  snapshots cannot show; it rests on "the header still defines it, so a user
-  emits its own copy", for which the new side's own inline declaration is
-  direct evidence. It stays a *risk* rather than silence because a consumer
+  snapshots cannot show; it rests on "the consumer already emitted its own
+  copy", which needs evidence on both sides. The **old** side's `inline` is
+  the load-bearing half: `WEAK` does not imply vague linkage — an ordinary
+  out-of-line function marked `__attribute__((weak))` is `WEAK` too, and a
+  consumer compiled against that declaration holds only an undefined dynamic
+  reference, so making it inline on the new side and dropping the export
+  breaks it at load time. The new side's `inline` covers the other
+  population: consumers compiled against the new headers. It stays a *risk* rather than silence because a consumer
   built against a header that only declared the entity, or one comparing its
   address across the library boundary expecting a single shared instance, can
   still be affected.
