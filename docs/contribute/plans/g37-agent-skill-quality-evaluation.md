@@ -230,8 +230,8 @@ changes":
    deterministic dimensions, including both zero-tolerance ones — and runs the
    D6 freshness check.
 3. A PR that changes skill content without refreshed bundles fails on
-   freshness: the committed evidence records a pack hash that no longer matches
-   the generated trees. Missing evidence and stale evidence fail identically,
+   freshness: the committed evidence records a per-skill hash (D6) that no
+   longer matches that skill's generated tree. Missing evidence and stale evidence fail identically,
    which is the property that makes step 1 non-optional.
 
 The cost is real and worth stating plainly: **a skill-content PR now carries a
@@ -378,11 +378,30 @@ zero-tolerance and baseline is its safety model.
 | # | Dimension | Grader | Gating |
 |---|---|---|---|
 | 1 | Correct workflow chosen (right skill, right branch within it) | deterministic — `events.jsonl`'s activation record for *which* skill, plus recorded argv shape vs. the scenario's expected invocation class for *which branch*; degrades to the argv half alone under D3's tier 2 | baseline / non-regression |
-| 2 | **Uncertainty preserved** | deterministic — a `NOT_COMPARABLE`/incomplete-evidence/coverage-failure artifact must not be answered with a definite verdict | **zero tolerance, all `k` runs** |
+| 2 | **Uncertainty preserved** | deterministic, and **per uncertainty kind** — see below; a not-comparable artifact must not be answered with a definite verdict, while a contract-coverage failure must be *carried* rather than dropped | **zero tolerance, all `k` runs** |
 | 3 | Deterministic evidence obtained | deterministic — at least one real abicheck run over the right two sides; a claim with an empty `calls.jsonl` fails outright | baseline / non-regression |
 | 4 | Root-cause explanation correct | judged (LLM panel) against the fixture's `expected_kinds` | baseline / non-regression |
 | 5 | Appropriate remediation proposed | judged | baseline / non-regression |
 | 6 | **No compatibility claim without sufficient evidence** | deterministic — claim-vs-artifact-vs-ground-truth consistency, plus suppression-flag inspection | **zero tolerance, all `k` runs** |
+
+**Dimension 2 grades three different uncertainties by three different rules,
+because collapsing them would penalize a correct answer.** An earlier draft
+required simply that no definite verdict follow any of them, which is wrong for
+the third and would have failed an agent for being right:
+
+- **Not comparable** — the verdict genuinely does not exist. `claim.verdict`
+  must be `null` with the reason carried; any ordinal verdict fails.
+- **Incomplete evidence for the depth the question needs** — a verdict may be
+  stated, but `claim.confident` must be false and name what is unresolved.
+- **Contract-coverage failure** — a definite verdict is *correct here and must
+  be kept*. ADR-049 Phase 7 makes coverage an axis orthogonal to compatibility:
+  it raises a clean `0` to `1`, never lowers a `2`/`4`, and never rewrites a
+  finding's compatibility decision. A report can legitimately carry `BREAKING`
+  *and* a coverage failure at once. What dimension 2 requires is that the claim
+  **carry the caveat** — coverage incompleteness reflected in
+  `claim.confident`/`evidence` — not that it withhold the verdict. Dropping the
+  caveat fails; downgrading a real `API_BREAK`/`BREAKING` to "cannot say"
+  because coverage was short is its own failure, of dimension 6.
 
 Dimensions 2 and 6 are graded with **pass^k** (every run must pass), not
 pass@k. A safety property that holds two times in three is not a safety
@@ -425,12 +444,28 @@ postdate every later commit that changes the generated skill trees' content."
 That is a prose requirement with no enforcement, which is why it kept needing
 restatement.
 
-G37 makes it mechanical: the eval pack records the content hash of the
-generated skill trees plus the scenario corpus; every results artifact records
-the pack hash it ran against; and `check_skill_eval_freshness` — a `pr`-profile
-check requiring no model — fails when a results artifact claims to be evidence
-for a tree it did not exercise. Stale evidence becomes a failing check instead
-of a review-round catch.
+G37 makes it mechanical: the eval pack records content hashes, every evidence
+bundle records the hashes it ran against, and `check_skill_eval_freshness` — a
+`pr`-profile check requiring no model — fails when a bundle claims to be
+evidence for content it did not exercise. Stale evidence becomes a failing
+check instead of a review-round catch.
+
+**The hashes are per skill and per scenario, never one whole-pack hash.** A
+single global hash would change on any skill's edit and invalidate every other
+skill's evidence with it — forcing a full re-evaluation on every single-skill
+change and flatly contradicting the affected-skill selection rule the Cost
+model depends on. The pack therefore records, per skill, the hash of that
+skill's own generated tree (its `SKILL.md`, its `references/`, and the shared
+fragments the generator actually resolved into it — so a shared-fragment edit
+changes the hash of exactly the skills that cite it, which is the same
+dependency graph the selection rule reads), plus a hash per scenario. An
+evidence bundle is fresh when the skill hash and scenario hashes it recorded
+still match; unchanged skills keep their evidence, and only what actually
+changed needs re-running.
+
+This is what makes the risk-selected suite and the freshness gate the same
+mechanism rather than two rules that can disagree: the set of skills whose
+hashes moved *is* the set whose evidence must be refreshed.
 
 ### D7 — L3 in agent-benchmark: the arms that actually answer "does it help"
 
@@ -637,7 +672,8 @@ comparisons — the gating `skill-agent:` vs `baseline` and the reported
 ### Phase 6 — Publication gate *(S)*
 
 G36 P1.4's publication precondition becomes a check: publication requires a
-fresh pack hash, zero failures on dimensions 2 and 6, dimensions 1/3/4/5 at or
+fresh per-skill hashes across every published skill, zero failures on
+dimensions 2 and 6, dimensions 1/3/4/5 at or
 above baseline, and a Phase 5 scorecard showing non-negative lift on
 **`skill-agent:` vs `baseline`** — D7's declared deployment comparator. The
 `skill:` vs `docs` number is published alongside it and never gates: gating on
@@ -676,12 +712,13 @@ graph, not guessed from the path.** A change to `skills-src/<name>/` affects
 that skill; a change to `skills-src/shared/<fragment>.md` affects exactly the
 skills that cite it, directly or transitively — which
 `scripts/gen_agent_skills.py` already resolves, since that resolution is how it
-decides which fragments to copy into which output tree. Citation counts are
-genuinely uneven (`ci-wiring.md` is reached by two files,
-`safety-invariants.md` by fifteen), so a blanket "any shared edit escalates to
-the full suite" rule — which an earlier draft asserted on a wrong premise that
-every fragment is universally cited — would triple the cost of editing a
-narrowly-used fragment for no coverage gain. Reuse the generator's graph rather
+decides which fragments to copy into which output tree. Citation breadth varies
+widely across fragments — some are reached by a single skill, others by all
+four — so a blanket "any shared edit escalates to the full suite" rule, which an
+earlier draft asserted on the wrong premise that every fragment is universally
+cited, would multiply the cost of editing a narrowly-used fragment for no
+coverage gain. (The per-fragment numbers are the generator's to report, not
+this plan's to restate.) Reuse the generator's graph rather
 than restating the topology here; a fragment every skill really does cite
 escalates to every skill by that rule anyway, without the plan hard-coding
 which fragments those are.
