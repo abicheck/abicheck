@@ -716,17 +716,23 @@ silently.** A compile-probe layer (actually compiling a synthetic consumer
 against old/new headers to observe real compiler diagnostics as
 corroborating evidence, distinct from the existing runtime `app.c`/`app.cpp`
 fixtures in `examples/`, from `probe_harness.py`'s header-only-library
-snapshot-extraction probe, and from `contrib/abicheck-clang-plugin`'s
-compile-time facts extraction) turned out to be out of scope for this
-initiative — no driving false-positive/false-negative case in the FP-rate
-or per-tier-accuracy corpora motivates it today, and a real implementation
-needs its own scoped design (synthesis strategy, evidence-model placement,
-verdict mapping, trust/sandboxing — see the ADR for detail), not a drive-by
-addition to Phase D. Recorded as
+snapshot-extraction probe, from `contrib/abicheck-clang-plugin`'s
+compile-time facts extraction, and — closest of the four —
+`abicheck/source_smoke.py`'s hand-authored two-sided consumer compile/link
+oracle) turned out to be out of scope for this initiative as a *general*
+mechanism. A driving case already exists —
+`case111_enumerable_thread_specific_lambda_ambiguity`'s `source_smoke` spec
+proves a real `API_BREAK` no L0–L5 evidence tier reaches
+(`known_detector_gap: "constructor_overload_ambiguity"`) — but that case is
+one hand-authored probe, not a procedure for synthesizing the right consumer
+automatically per finding; the open blocker is that synthesis-strategy
+design (plus evidence-model placement, verdict mapping, trust/sandboxing —
+see the ADR for detail), not the absence of a motivating case. Recorded as
 [ADR-059](../adr/059-synthetic-consumer-compile-probe-deferral.md), the
 same discipline G28 Phase 5 used when deferring concepts/`requires`
 handling to [G4](g4-header-ast-extractor.md) instead of quietly not doing
-it. Revisit only per the ADR's own "Revisiting this decision" criteria.
+it. Revisit once a scoped synthesis-strategy design exists, per the ADR's
+own "Revisiting this decision" criteria.
 
 **Files likely to change.** `abicheck/change_registry.py` (or a sibling
 `change_registry_<topic>.py`), the relevant `diff_*.py` detector module(s),

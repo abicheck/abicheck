@@ -2,8 +2,9 @@
 
 **Date:** 2026-08-10
 **Status:** Accepted (decision to defer) — not implemented; no future phase is
-currently scheduled to pick this up. Revisit only once a concrete gap in
-existing evidence tiers motivates it (see "Revisiting this decision" below).
+currently scheduled to pick this up. A concrete driving case already exists
+(`case111`, see below); revisit once a scoped synthesis-strategy design also
+exists (see "Revisiting this decision" below).
 **Decision maker:** pending
 
 ## Context
@@ -27,8 +28,11 @@ once against the new one, and read the compiler's own diagnostics
 (succeeds / fails-to-compile / emits-a-new-warning) as a second, independent
 signal alongside abicheck's own AST-derived detection.
 
-**What it is deliberately not.** Three existing mechanisms sit close enough
-to this idea that it's worth stating why none of them already is it:
+**What it is deliberately not.** Four existing mechanisms sit close enough to
+this idea that it's worth stating precisely why none of them already is it —
+including one, `source_smoke.py`, that a review round on this ADR correctly
+flagged as missing from an earlier draft's inventory and close enough to
+change the framing below:
 
 1. **`examples/*/app.c` / `app.cpp` runtime fixtures.** Every example case
    already carries a small consumer program, but it is compiled once, against
@@ -49,36 +53,70 @@ to this idea that it's worth stating why none of them already is it:
    (an alternative L2 fact source), not a diagnostic-corroboration mechanism
    — it augments what abicheck knows about a declaration, it doesn't compile
    a consumer against it.
+4. **`abicheck/source_smoke.py`'s two-sided consumer compile/link check.**
+   This is the closest existing relative — `run_source_smoke()` genuinely
+   does compile the same consumer TU against a v1 and a v2 header/lib pair
+   and reads the compiler's real success/failure as the check's own oracle.
+   `case111_enumerable_thread_specific_lambda_ambiguity`
+   (`examples/ground_truth.json`) is exactly this ADR's proposed mechanism
+   working end to end for one hand-built case: v1's `ets({})` compiles, v2's
+   equivalent is genuinely ambiguous under real overload resolution, and the
+   case is recorded with `detectability: none` — every snapshot-level
+   evidence tier (L0–L5) reaches `COMPATIBLE`, only the compile-time probe
+   proves the true `API_BREAK`. What `source_smoke` does **not** do is what
+   distinguishes it from the layer this ADR is about: every `SourceSmokeSpec`
+   is **hand-authored** — a human writes the exact `v1`/`v2` consumer source,
+   the exact `replace` edits, and the exact expected outcome, one spec per
+   example case. Nothing derives a probe automatically from a diff or a
+   `Change`, and `run_source_smoke` is wired only into the examples
+   ground-truth harness (`tests/validate_examples.py`,
+   `scripts/evidence_tiers.py`) — never into `checker.compare()` or any
+   report a real user's `compare`/`scan` invocation produces. It is a
+   fixture-level *oracle* used to pin what the canonical verdict for a
+   curated case should be, not a corroboration signal the tool computes for
+   an arbitrary comparison. Section "Decision" below revises its reasoning
+   in light of this case.
 
-None of the three can be trivially extended into the compile-probe layer
-without a real design of its own.
+None of the four can be trivially extended into the general, per-comparison
+compile-probe layer without a real design of its own — see the "Synthesis
+strategy" item below for exactly what `source_smoke`'s hand-authoring leaves
+unsolved.
 
 ## Decision
 
 **Defer.** Do not build the synthetic-consumer compile-probe layer as part
 of G31, and do not schedule it into a numbered follow-up phase speculatively.
-Revisit only when a concrete driving case exists (see below).
+Revisit once a scoped synthesis-strategy design exists (see "Revisiting this
+decision" below) — a driving case is not the open question, see below.
 
 ### Why
 
-- **No driving gap today.** Nothing in the FP-rate corpus
-  (`scripts/check_fp_rate.py`) or the per-tier accuracy gate
-  (`scripts/check_tier_accuracy.py`) currently shows a false positive or
-  false negative that a real compile — as opposed to a deeper AST/DWARF
-  fact — would have caught. The class of case where a compiler's own
-  overload-resolution/template-instantiation diagnostic is the *only*
-  reliable signal (a public template whose ill-formedness depends on a
-  caller's own argument types, SFINAE-driven API surface, or macro-gated
-  declarations that only resolve one way per translation unit) is real but
-  narrow, and abicheck has no example case today demonstrating a specific
-  finding this layer would have caught and the existing L0–L5 evidence
-  tiers would have missed. Building speculative infrastructure ahead of a
-  concrete failure case is exactly the trap `docs/contribute/plans/`'s
-  existing "deferred entirely" sections (see the root `AGENTS.md`'s "Known
-  gaps" trend-database and devcontainer entries) already warn against for
-  this codebase.
+- **A driving case exists, but it doesn't resolve the design question.**
+  An earlier draft of this ADR claimed no concrete case motivates this
+  layer; that was wrong, and a review round caught it directly against
+  `examples/ground_truth.json`. `case111` is a real, already-recorded proof
+  that a compile-time probe catches an `API_BREAK` (constructor-overload
+  ambiguity) every current evidence tier (L0–L5) misses —
+  `known_detector_gap: "constructor_overload_ambiguity"` says so explicitly.
+  What case111 does *not* supply is a *general* mechanism: its `source_smoke`
+  spec is one human-authored consumer program, hand-crafted to reproduce one
+  specific ambiguity, checked once as a fixture oracle — not a procedure for
+  deriving the right consumer TU automatically from an arbitrary `Change` or
+  public declaration the way a real compile-probe *layer* would need to.
+  Restated precisely: this ADR's own first revisit criterion below
+  ("a concrete case … where a compiler diagnostic is the only evidence
+  source that would have produced the correct verdict") is **already
+  satisfied**, today, by case111. The deferral does not rest on that
+  criterion being unmet — it rests on the second one: nobody has designed
+  *how* to generalize what case111's author did by hand into something the
+  tool does automatically, for an arbitrary comparison, without either
+  missing the exact call shape that would fail or probing every public
+  declaration on every run. The "Synthesis strategy" item below is exactly
+  that unsolved question, restated with case111 as its concrete existence
+  proof rather than a hypothetical. This section is corrected accordingly;
+  see "Revisiting this decision" for the updated criteria.
 - **Non-trivial design surface, not a mechanical extension.** A real
-  implementation needs answers to at least four questions none of the three
+  implementation needs answers to at least four questions none of the four
   adjacent mechanisms above answer for free:
   1. **Synthesis strategy** — how a synthetic consumer TU is derived per
      finding (or per public entry) robustly across both C and C++ (template
@@ -89,7 +127,16 @@ Revisit only when a concrete driving case exists (see below).
      own perf-gate work exists precisely because the *existing* always-on
      header graph's marginal cost was worth a dedicated regression gate;
      an unconditional compile-probe pass per comparison would be a much
-     larger cost of the same shape).
+     larger cost of the same shape). `case111`'s own `source_smoke` spec is
+     the concrete illustration of how hard this specific sub-problem is: its
+     author had to know, in advance, that `ets({})` (brace-init against the
+     new factory-typed overload) was the one call shape that would turn
+     ambiguous — a generic synthesizer would need to either enumerate
+     representative call shapes per changed/added overload automatically
+     (expensive, and still not guaranteed to hit the one shape that breaks)
+     or accept that it only catches what a human already anticipated,
+     which is a materially weaker claim than "corroborating evidence for an
+     arbitrary finding."
   2. **Evidence-model placement** — whether this is a new evidence tier
      (alongside L0–L5, see `docs/learn/evidence-and-detectability.md`) or a
      corroboration-only signal folded into an existing tier's confidence,
@@ -128,19 +175,29 @@ Revisit only when a concrete driving case exists (see below).
 
 ## Revisiting this decision
 
-Reopen only when **both** of the following exist:
+Reopen when **both** of the following hold — criterion 1 is already
+satisfied (see below); criterion 2 is the actual blocker:
 
-1. A concrete case — added to the FP-rate or per-tier-accuracy corpus, or a
-   real example under `examples/` — where a compiler diagnostic is the only
-   evidence source that would have produced the correct verdict, and every
-   existing evidence tier (L0–L5) genuinely cannot be extended to close the
-   same gap more cheaply (e.g. by improving `type_reachability.py`'s or
-   `diff_cxx_rules.py`'s own structural analysis, which is usually cheaper
-   than invoking a compiler).
-2. A scoped design answering the four questions above (synthesis strategy,
-   evidence-model placement, verdict mapping, trust boundary) — written as
-   its own plan doc or ADR, not folded into a future G31 phase as a
-   drive-by addition. The naming precedent from G31 Phase D
+1. ~~A concrete case…~~ **Already satisfied**, by `case111` and its recorded
+   `known_detector_gap: "constructor_overload_ambiguity"` — every existing
+   evidence tier (L0–L5) genuinely cannot reach the correct `API_BREAK`
+   verdict for it today (`detectability: none`), and no cheaper structural
+   fix (extending `type_reachability.py`/`diff_cxx_rules.py`) is known to
+   close it, since the failure mode is about downstream call-site overload
+   resolution, not anything a snapshot alone encodes. A future proposal does
+   not need to go looking for a first example — it already exists and should
+   be the proposal's worked case. If additional cases accumulate in the
+   FP-rate/per-tier-accuracy corpora or `examples/` with the same
+   `known_detector_gap` shape, cite them too, but one is enough to satisfy
+   this criterion.
+2. **Not yet satisfied.** A scoped design answering the four questions above
+   (synthesis strategy, evidence-model placement, verdict mapping, trust
+   boundary) — written as its own plan doc or ADR, not folded into a future
+   G31 phase as a drive-by addition. The synthesis-strategy question in
+   particular must explain how to go from `case111`'s one hand-authored
+   probe to something generated automatically for an arbitrary comparison,
+   without simply enumerating every public declaration's call shapes on
+   every run. The naming precedent from G31 Phase D
    (`PUBLIC_API_IMPACT_PROOF_PATH_CHANGED` and its siblings) already shows
    this needs Phase B's canonical-identity work in place first if the
    compile-probe result is to be linked to a specific graph proof path — so
@@ -155,9 +212,12 @@ Reopen only when **both** of the following exist:
   here, rather than left as an open, unscoped bullet.
 - No code, schema, or `ChangeKind` changes ship with this ADR — it is a
   scope decision only.
-- `probe_harness.py`, the `examples/*/app.c`/`app.cpp` fixtures, and
-  `contrib/abicheck-clang-plugin` are unaffected and continue serving their
-  existing, distinct purposes described above.
+- `probe_harness.py`, the `examples/*/app.c`/`app.cpp` fixtures,
+  `contrib/abicheck-clang-plugin`, and `source_smoke.py` are all unaffected
+  and continue serving their existing, distinct purposes described above —
+  in particular, `case111`'s `known_detector_gap` stays recorded as an open,
+  tracked gap; this ADR does not resolve it, it only declines to build a
+  general mechanism for it right now.
 
 ## Cross-references
 
