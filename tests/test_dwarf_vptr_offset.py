@@ -5,6 +5,7 @@ see that file's own C++ integration section for the sibling fixtures this
 mirrors. Self-contained: defines its own g++ availability check rather than
 importing across test modules.
 """
+
 from __future__ import annotations
 
 import subprocess
@@ -25,7 +26,9 @@ def _has_gpp() -> bool:
         return False
     try:
         result = subprocess.run(
-            [_GPP, "--version"], capture_output=True, timeout=5,
+            [_GPP, "--version"],
+            capture_output=True,
+            timeout=5,
         )
         return result.returncode == 0
     except (OSError, subprocess.TimeoutExpired):
@@ -97,7 +100,9 @@ extern "C" Y* get_y() { return &g_y; }
         so_path = tmp_path / "libvptr.so"
         result = subprocess.run(
             [_GPP, "-shared", "-fPIC", "-g", "-O0", "-o", str(so_path), str(cpp_src)],
-            capture_output=True, text=True, timeout=30,
+            capture_output=True,
+            text=True,
+            timeout=30,
         )
         assert result.returncode == 0, f"Compilation failed: {result.stderr}"
         return so_path
@@ -129,7 +134,7 @@ extern "C" Y* get_y() { return &g_y; }
         primary vptr, not B's own secondary one at a non-zero offset."""
         types = self._types_by_name(vptr_lib)
         assert types["C"].vptr_offset_bits == 0
-        assert types["C"].base_offsets.get("B") != 0  # B is the secondary base
+        assert types["C"].base_offsets["B"] > 0  # B is the secondary base
 
     def test_virtual_base_gets_own_local_vptr(self, vptr_lib: Path) -> None:
         """D has a real data member of its own (forcing a non-degenerate
@@ -150,7 +155,9 @@ extern "C" Y* get_y() { return &g_y; }
         (its own DWARF-visible vtable list is empty here)."""
         types = self._types_by_name(vptr_lib)
         assert types["N"].vptr_offset_bits == 0
-        assert not types["N"].vtable  # confirms this exercises the empty-own-vtable path
+        assert not types[
+            "N"
+        ].vtable  # confirms this exercises the empty-own-vtable path
 
     def test_two_level_inheritance_chain_resolves(self, vptr_lib: Path) -> None:
         """A derived-of-derived chain (M : N : A) resolves regardless of
@@ -163,7 +170,7 @@ extern "C" Y* get_y() { return &g_y; }
         polymorphic one; the primary-base lookup follows the real (ABI)
         offset, not declaration order."""
         types = self._types_by_name(vptr_lib)
-        assert types["Y"].base_offsets.get("X") != 0
+        assert types["Y"].base_offsets["X"] > 0
         assert types["Y"].vptr_offset_bits == 0
 
     @pytest.fixture()
@@ -199,7 +206,9 @@ extern "C" other::A* get_other_a() { return &g_other_a; }
         so_path = tmp_path / "libnsvptr.so"
         result = subprocess.run(
             [_GPP, "-shared", "-fPIC", "-g", "-O0", "-o", str(so_path), str(cpp_src)],
-            capture_output=True, text=True, timeout=30,
+            capture_output=True,
+            text=True,
+            timeout=30,
         )
         assert result.returncode == 0, f"Compilation failed: {result.stderr}"
         return so_path
@@ -235,33 +244,36 @@ extern "C" other::A* get_other_a() { return &g_other_a; }
         registered anywhere, unless that DIE is itself resolved back to the
         real type's qualified name."""
         (tmp_path / "a.h").write_text(
-            "#pragma once\n"
-            "namespace ns { struct A { virtual void a(); int ai; }; }\n"
+            "#pragma once\nnamespace ns { struct A { virtual void a(); int ai; }; }\n"
         )
         (tmp_path / "u1.cpp").write_text(
             '#include "a.h"\n'
             "void ns::A::a() {}\n"
             "static ns::A g_a;\n"
-            "extern \"C\" ns::A* get_a() { return &g_a; }\n"
+            'extern "C" ns::A* get_a() { return &g_a; }\n'
         )
         (tmp_path / "u2.cpp").write_text(
             '#include "a.h"\n'
             "namespace ns { struct D : A { int di; }; }\n"
             "static ns::D g_d;\n"
-            "extern \"C\" ns::D* get_d() { return &g_d; }\n"
+            'extern "C" ns::D* get_d() { return &g_d; }\n'
         )
         o1 = tmp_path / "u1.o"
         o2 = tmp_path / "u2.o"
         for src, obj in ((tmp_path / "u1.cpp", o1), (tmp_path / "u2.cpp", o2)):
             result = subprocess.run(
                 [_GPP, "-g", "-O0", "-fPIC", "-c", str(src), "-o", str(obj)],
-                capture_output=True, text=True, timeout=30,
+                capture_output=True,
+                text=True,
+                timeout=30,
             )
             assert result.returncode == 0, f"Compilation failed: {result.stderr}"
         so_path = tmp_path / "libcrosscu.so"
         result = subprocess.run(
             [_GPP, "-shared", "-o", str(so_path), str(o1), str(o2)],
-            capture_output=True, text=True, timeout=30,
+            capture_output=True,
+            text=True,
+            timeout=30,
         )
         assert result.returncode == 0, f"Link failed: {result.stderr}"
         return so_path
@@ -300,7 +312,9 @@ extern "C" D* get_d() { return &g_d; }
         so_path = tmp_path / "libcollide.so"
         result = subprocess.run(
             [_GPP, "-shared", "-fPIC", "-g", "-O0", "-o", str(so_path), str(cpp_src)],
-            capture_output=True, text=True, timeout=30,
+            capture_output=True,
+            text=True,
+            timeout=30,
         )
         assert result.returncode == 0, f"Compilation failed: {result.stderr}"
         return so_path
@@ -342,7 +356,9 @@ extern "C" E* get_e() { return &g_e; }
         so_path = tmp_path / "libnearlyempty.so"
         result = subprocess.run(
             [_GPP, "-shared", "-fPIC", "-g", "-O0", "-o", str(so_path), str(cpp_src)],
-            capture_output=True, text=True, timeout=30,
+            capture_output=True,
+            text=True,
+            timeout=30,
         )
         assert result.returncode == 0, f"Compilation failed: {result.stderr}"
         return so_path
@@ -381,7 +397,9 @@ extern "C" E* get_e() { return &g_e; }
         so_path = tmp_path / "libinheritedonlyvirtual.so"
         result = subprocess.run(
             [_GPP, "-shared", "-fPIC", "-g", "-O0", "-o", str(so_path), str(cpp_src)],
-            capture_output=True, text=True, timeout=30,
+            capture_output=True,
+            text=True,
+            timeout=30,
         )
         assert result.returncode == 0, f"Compilation failed: {result.stderr}"
         return so_path
@@ -422,7 +440,9 @@ extern "C" ns::E* get_e() { return &g_e; }
         so_path = tmp_path / "libnsinheritedonlyvirtual.so"
         result = subprocess.run(
             [_GPP, "-shared", "-fPIC", "-g", "-O0", "-o", str(so_path), str(cpp_src)],
-            capture_output=True, text=True, timeout=30,
+            capture_output=True,
+            text=True,
+            timeout=30,
         )
         assert result.returncode == 0, f"Compilation failed: {result.stderr}"
         return so_path
@@ -463,7 +483,9 @@ extern "C" F* get_f() { return &g_f; }
         so_path = tmp_path / "libmultilevelvirtualchain.so"
         result = subprocess.run(
             [_GPP, "-shared", "-fPIC", "-g", "-O0", "-o", str(so_path), str(cpp_src)],
-            capture_output=True, text=True, timeout=30,
+            capture_output=True,
+            text=True,
+            timeout=30,
         )
         assert result.returncode == 0, f"Compilation failed: {result.stderr}"
         return so_path

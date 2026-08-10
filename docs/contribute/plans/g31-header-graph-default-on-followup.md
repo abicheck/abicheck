@@ -856,6 +856,51 @@ building a second identity-resolution mechanism from scratch.
   on both sides (unresolvable, matching every other unresolvable-base
   shape) rather than fabricating a false break.
 
+  **A seventh review round found two more real gaps, plus a memoization
+  fix, all confirmed against real clang output.** (1) A dynamic exception
+  specification (`throw(int)`, `throw()`) participated in the override
+  qualifier tail unstripped — only `noexcept` was — so a base `virtual
+  void f() throw(int);` overridden by a derived `void f() throw()
+  override;` (a legal C++14-and-earlier narrowing, confirmed compiling
+  with real clang) compared as a different signature and appended a
+  spurious second slot instead of replacing the inherited one. Fixed by
+  cutting the qualifier tail at whichever of `noexcept`/`throw` appears
+  first, alongside the pre-existing `noexcept` handling. (2) A
+  specialization always carries a `TemplateArgument` for EVERY parameter,
+  including one a base reference omitted because it equals its own
+  default — `template <class T, class U = int> struct A; struct D :
+  A<double> {...};` reports arguments for BOTH `T` and `U`, confirmed with
+  a real clang build — so joining all of them unconditionally produced
+  `"A<double, int>"`, which never matches the referring site's own
+  `"A<double>"`. Fixed with a new whole-AST pass
+  (`_index_template_param_defaults`, mirroring `_index_template_param_kinds`'s
+  own shape) recording each TYPE parameter's own default spelling
+  (`defaultArg.type.qualType`); `_specialization_spelling` now pops
+  trailing arguments that exactly equal their own parameter's default
+  before building the key. Verified this reproduces clang's own canonical
+  spelling for BOTH an omitted default and one explicitly repeated with
+  the identical value: `struct D : A<double, int> {...}` reports
+  `type.qualType == "A<double, int>"` (as literally written) but
+  `type.desugaredQualType == "A<double>"` (defaults collapsed) —
+  `_base_qualnames` already prefers `desugaredQualType`, so both shapes
+  resolve to the identical trimmed spelling this collapses to. Fixing (2)
+  surfaced a THIRD, narrower gap in the specialization-owner-qualification
+  fix from the fifth review round: `dumper_clang.py`'s own `_walk` call
+  site passed no `param_kinds`/`param_defaults` context to
+  `_specialization_spelling` at all (only the base-lookup index's own call
+  did), so a confirmed-safe non-type specialization (`A<3>`) or a
+  defaulted-argument one still left `Function.name` bare — reintroducing
+  the exact owner-mismatch false `TYPE_VTABLE_CHANGED` that fix was built
+  to prevent, just via a different argument shape. Fixed by computing both
+  indices once, eagerly, in `_ClangAstParser.__init__` (before `_walk`
+  runs, since `_walk` itself is what needs them) and threading them into
+  both call sites; `build_specialization_index()` now accepts these as
+  optional parameters so the eager computation isn't paid for twice.
+  Separately, `_base_lookup_index()` was rebuilding its merged dict on
+  every call — `_build_record` calls it once per record in the TU, so this
+  was an O(records × index size) cost; now memoized the same way the other
+  per-parse indices already are.
+
   **A later pass closed the last of this phase's four originally-listed
   facts** (`deprecated`/`is_scoped`/bitfields/default-argument facts were
   the other three, already covered above): direct-clang now populates

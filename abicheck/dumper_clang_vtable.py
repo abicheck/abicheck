@@ -366,13 +366,29 @@ def _method_signature_key(node: dict[str, Any]) -> _Signature | None:
     qual_type = str(type_obj.get("qualType", "")) if isinstance(type_obj, dict) else ""
     paren_end = _top_level_param_list_close(qual_type)
     # Everything after the parameter list's OWN matching close paren is the
-    # cv/ref/exception-spec suffix; splitting off a trailing `noexcept(...)`
-    # defensively before keeping the rest avoids folding noexcept's own
-    # operand into the qualifier identity (not observed in this clang
-    # version's output, but cheap to guard). Whitespace-collapsed so
+    # cv/ref/exception-spec suffix. An exception specification -- either a
+    # `noexcept(...)` or a C++14-and-earlier DYNAMIC one (`throw(int)`,
+    # `throw()`) -- is not part of override identity: a C++14+ override may
+    # legally NARROW a base's dynamic spec (confirmed with a real clang
+    # build: `virtual void f() throw(int);` overridden by `void f()
+    # throw() override;` compiles fine), so a mismatched exception spec
+    # must not make an otherwise-identical override compare as a different
+    # signature (Codex review, fresh evidence: the previous version only
+    # stripped `noexcept`, so `throw(int)` vs `throw()` produced two
+    # different qualifier tails and the override appended as a spurious
+    # second slot instead of replacing the inherited one). Cuts at
+    # whichever of the two markers appears first, so this is safe
+    # regardless of which one is textually present -- a function's own
+    # exception spec is always exactly one of them, never both, but
+    # nothing here assumes it is that in advance. Whitespace-collapsed so
     # "const  &" and "const &" (if either ever occurs) compare equal.
     tail = qual_type[paren_end + 1 :] if paren_end != -1 else ""
-    qualifier_tail = " ".join(tail.split("noexcept", 1)[0].split())
+    cut = len(tail)
+    for marker in ("noexcept", "throw"):
+        marker_idx = tail.find(marker)
+        if marker_idx != -1:
+            cut = min(cut, marker_idx)
+    qualifier_tail = " ".join(tail[:cut].split())
     # The ellipsis, when present, is always the last token inside the
     # parameter-list parens (C++ forbids a fixed parameter after `...`), so
     # checking the text immediately before the matched closing paren is
@@ -651,8 +667,71 @@ def _index_template_param_kinds(root: dict[str, Any]) -> dict[str, list[str | No
     return idx
 
 
+def _template_param_defaults(class_template_decl: dict[str, Any]) -> list[str | None]:
+    """Per-position default-argument spelling for a ``ClassTemplateDecl``'s
+    own parameter list, in the SAME order and indexing as
+    :func:`_template_param_kinds` -- consulted by :func:`_specialization_spelling`
+    to know which trailing arguments to drop.
+
+    Only a TYPE parameter's default is captured (its own
+    ``defaultArg.type.qualType``, the identical representation
+    :func:`_specialization_spelling` builds for a type argument, so the two
+    compare directly) -- ``None`` for a parameter with no default, or a
+    non-type/template-template parameter's default (conservatively
+    excluded: this module already only trusts a non-type ARGUMENT's own
+    value for a narrow, confirmed-safe set of types via
+    :data:`_SAFE_NONTYPE_INT_TYPES`, and a non-type DEFAULT carries the
+    identical unreliable-printing risk this doesn't attempt to solve here).
+    """
+    defaults: list[str | None] = []
+    for child in class_template_decl.get("inner", []) or []:
+        if not isinstance(child, dict):
+            continue
+        kind = child.get("kind")
+        if kind == "TemplateTypeParmDecl":
+            default = child.get("defaultArg")
+            spelling = None
+            if isinstance(default, dict):
+                type_obj = default.get("type")
+                if isinstance(type_obj, dict) and type_obj.get("qualType"):
+                    spelling = str(type_obj["qualType"])
+            defaults.append(spelling)
+        elif kind in ("NonTypeTemplateParmDecl", "TemplateTemplateParmDecl"):
+            defaults.append(None)
+        else:
+            break
+    return defaults
+
+
+def _index_template_param_defaults(root: dict[str, Any]) -> dict[str, list[str | None]]:
+    """``qualified template name -> per-position default-spelling list``
+    (see :func:`_template_param_defaults`), scope-tracked identically to
+    :func:`_index_template_param_kinds` (same reasoning applies here for
+    why a specialization's scope+name always matches its owning template's).
+    """
+    idx: dict[str, list[str | None]] = {}
+
+    def walk(node: Any, scope: tuple[str, ...]) -> None:
+        if not isinstance(node, dict):
+            return
+        kind = node.get("kind")
+        name = str(node.get("name") or "")
+        if kind == "ClassTemplateDecl" and name:
+            qualname = "::".join((*scope, name)) if scope else name
+            idx.setdefault(qualname, _template_param_defaults(node))
+        child_scope = (*scope, name) if kind in _SCOPE_NODE_KINDS and name else scope
+        for child in node.get("inner", []) or []:
+            walk(child, child_scope)
+
+    walk(root, ())
+    return idx
+
+
 def _specialization_spelling(
-    node: dict[str, Any], name: str, param_kinds: list[str | None] | None
+    node: dict[str, Any],
+    name: str,
+    param_kinds: list[str | None] | None,
+    param_defaults: list[str | None] | None = None,
 ) -> str | None:
     """A ``ClassTemplateSpecializationDecl``'s own ``Name<Arg1, Arg2>``
     spelling, reconstructed from its direct ``TemplateArgument`` children --
@@ -675,6 +754,24 @@ def _specialization_spelling(
     degrading to the same already-accepted "unresolvable base"
     false-negative every other unresolvable-base shape in this module
     already degrades to -- never a false positive.
+
+    A specialization ALWAYS carries a ``TemplateArgument`` for every
+    parameter, including one a base reference omitted because it equals
+    its own default (``template <class T, class U = int> struct A; struct
+    D : A<double> {...};`` reports arguments for BOTH ``T`` and ``U``) --
+    confirmed with a real clang build that joining all of them
+    unconditionally produces ``"A<double, int>"``, which never matches the
+    referring site's own ``"A<double>"`` (Codex review, fresh evidence). So
+    once *args* is fully built, trailing entries that exactly equal their
+    own parameter's default spelling (*param_defaults*, by position) are
+    popped -- confirmed this reproduces the referring site's spelling
+    EXACTLY, for both an omitted default AND one written out explicitly
+    with the identical value: ``struct D : A<double, int> {...};`` reports
+    ``type.qualType == "A<double, int>"`` (as literally written) but
+    ``type.desugaredQualType == "A<double>"`` (defaults collapsed) --
+    ``_base_qualnames`` already prefers ``desugaredQualType`` whenever
+    present, so both the omitted-default and the explicit-matching-value
+    spellings resolve to the identical `"A<double>"` this collapses to.
     """
     args: list[str] = []
     idx = 0
@@ -696,10 +793,22 @@ def _specialization_spelling(
         return None
     if not args:
         return None
+    if param_defaults:
+        while args:
+            pos = len(args) - 1
+            if pos >= len(param_defaults) or param_defaults[pos] != args[-1]:
+                break
+            args.pop()
+    if not args:
+        return None
     return f"{name}<{', '.join(args)}>"
 
 
-def build_specialization_index(root: dict[str, Any]) -> dict[str, dict[str, Any]]:
+def build_specialization_index(
+    root: dict[str, Any],
+    param_kinds_by_qualname: dict[str, list[str | None]] | None = None,
+    param_defaults_by_qualname: dict[str, list[str | None]] | None = None,
+) -> dict[str, dict[str, Any]]:
     """``qualified spelling -> node`` index over every concrete
     ``ClassTemplateSpecializationDecl`` reachable from the parsed AST, for
     :func:`build_vtable`'s base-lookup recursion (via
@@ -762,8 +871,18 @@ def build_specialization_index(root: dict[str, Any]) -> dict[str, dict[str, Any]
     first (Codex review, fresh evidence), so a complete definition always
     wins over a forward-declaration stub for the same spelling, regardless
     of walk order, via the shared :func:`_is_record_definition`.
+
+    *param_kinds_by_qualname*/*param_defaults_by_qualname* let a caller that
+    already computed these (``dumper_clang.py``'s own ``_ClangAstParser``,
+    which needs the identical indices for its ``_walk``'s specialization
+    scoping too) pass them in rather than paying for a second whole-AST
+    pass -- computed internally when omitted, so this function stays
+    independently callable/testable.
     """
-    param_kinds_by_qualname = _index_template_param_kinds(root)
+    if param_kinds_by_qualname is None:
+        param_kinds_by_qualname = _index_template_param_kinds(root)
+    if param_defaults_by_qualname is None:
+        param_defaults_by_qualname = _index_template_param_defaults(root)
     idx: dict[str, dict[str, Any]] = {}
 
     def walk(node: Any, scope: tuple[str, ...]) -> None:
@@ -774,7 +893,10 @@ def build_specialization_index(root: dict[str, Any]) -> dict[str, dict[str, Any]
         if kind == "ClassTemplateSpecializationDecl" and name:
             template_qualname = "::".join((*scope, name)) if scope else name
             spelling = _specialization_spelling(
-                node, name, param_kinds_by_qualname.get(template_qualname)
+                node,
+                name,
+                param_kinds_by_qualname.get(template_qualname),
+                param_defaults_by_qualname.get(template_qualname),
             )
             if spelling is not None:
                 qualname = "::".join((*scope, spelling)) if scope else spelling

@@ -1039,3 +1039,153 @@ def test_int_nontype_specialization_argument_still_resolves() -> None:
     types = _types(root)
     assert types["D"].vtable == ["_ZN1AILi3EE1fEv"]
     assert types["D"].vptr_offset_bits == 0
+
+    # CodeRabbit review, fresh evidence: the `_walk` call site that scopes a
+    # specialization's own members for Function.name qualification must
+    # ALSO resolve a confirmed-safe non-type argument like this one -- an
+    # earlier version passed no param_kinds context there at all, so this
+    # member stayed bare ("f") regardless of the base-lookup index's own
+    # (correctly resolved) spelling, leaving owner_class_of's mangled
+    # fallback to recover the raw "AILi3EE" encoding instead, which never
+    # matches D.bases == ["A<3>"].
+    funcs = {
+        f.mangled: f for f in _ClangAstParser(root, set(), set()).parse_functions()
+    }
+    assert funcs["_ZN1AILi3EE1fEv"].name == "A<3>::f"
+
+
+# ── sixth review round: dynamic exception specs and omitted default ───────
+# ── template arguments ─────────────────────────────────────────────────
+
+
+def test_dynamic_exception_spec_narrowing_is_not_an_override_mismatch() -> None:
+    """Codex review, fresh evidence: a C++14-and-earlier dynamic exception
+    specification (`throw(int)`) participated in the qualifier tail
+    unstripped (only `noexcept` was), so a base `virtual void f()
+    throw(int);` and a derived, explicitly-overriding `void f() throw()
+    override;` -- a legal narrowing, confirmed compiling with real clang --
+    compared as different signatures and appended as a second slot instead
+    of replacing the inherited one."""
+    root = _tu(
+        _record(
+            "A",
+            {
+                "kind": "CXXMethodDecl",
+                "name": "f",
+                "mangledName": "_ZN1A1fEv",
+                "type": {"qualType": "void () throw(int)"},
+                "virtual": True,
+            },
+        ),
+        _record(
+            "D",
+            {
+                "kind": "CXXMethodDecl",
+                "name": "f",
+                "mangledName": "_ZN1D1fEv",
+                "type": {"qualType": "void () throw()"},
+                "inner": [{"kind": "OverrideAttr"}],
+            },
+            bases=[_base("A")],
+        ),
+    )
+    types = _types(root)
+    assert types["D"].vtable == ["_ZN1D1fEv"]  # replaced, not appended
+
+
+def test_default_template_argument_omitted_from_base_reference_resolves() -> None:
+    """Codex review, fresh evidence (P1): a specialization always carries a
+    `TemplateArgument` for EVERY parameter, including one a base reference
+    omitted because it equals its own default (`template <class T, class U
+    = int> struct A; struct D : A<double> {...};` reports arguments for
+    BOTH `T` and `U`, confirmed with a real clang build) -- joining all of
+    them unconditionally produced `"A<double, int>"`, which never matches
+    the referring site's own `"A<double>"`, leaving the base unresolvable.
+    """
+    root = _tu(
+        {
+            "kind": "ClassTemplateDecl",
+            "name": "A",
+            "inner": [
+                {"kind": "TemplateTypeParmDecl", "name": "T"},
+                {
+                    "kind": "TemplateTypeParmDecl",
+                    "name": "U",
+                    "defaultArg": {
+                        "kind": "TemplateArgument",
+                        "type": {"qualType": "int"},
+                    },
+                },
+                _record("A"),
+                _specialization(
+                    "A",
+                    {
+                        "kind": "CXXMethodDecl",
+                        "name": "f",
+                        "mangledName": "_ZN1AIdiE1fEv",
+                        "type": {"qualType": "void ()"},
+                        "virtual": True,
+                    },
+                    type_args=["double", "int"],
+                ),
+            ],
+        },
+        _record("D", bases=[_base("A<double>")]),
+    )
+    types = _types(root)
+    assert types["D"].vtable == ["_ZN1AIdiE1fEv"]
+    assert types["D"].vptr_offset_bits == 0
+
+
+def test_default_template_argument_explicitly_repeated_still_resolves() -> None:
+    """The same collapse must apply when a base explicitly repeats the
+    default value: `struct D : A<double, int> {...};` reports
+    `type.qualType == "A<double, int>"` (as literally written) but
+    `type.desugaredQualType == "A<double>"` (defaults collapsed), confirmed
+    with a real clang build -- `_base_qualnames` already prefers
+    `desugaredQualType`, so this must resolve to the SAME trimmed spelling
+    the omitted-default case does."""
+    root = _tu(
+        {
+            "kind": "ClassTemplateDecl",
+            "name": "A",
+            "inner": [
+                {"kind": "TemplateTypeParmDecl", "name": "T"},
+                {
+                    "kind": "TemplateTypeParmDecl",
+                    "name": "U",
+                    "defaultArg": {
+                        "kind": "TemplateArgument",
+                        "type": {"qualType": "int"},
+                    },
+                },
+                _record("A"),
+                _specialization(
+                    "A",
+                    {
+                        "kind": "CXXMethodDecl",
+                        "name": "f",
+                        "mangledName": "_ZN1AIdiE1fEv",
+                        "type": {"qualType": "void ()"},
+                        "virtual": True,
+                    },
+                    type_args=["double", "int"],
+                ),
+            ],
+        },
+        _record(
+            "D",
+            bases=[
+                {
+                    "type": {
+                        "qualType": "A<double, int>",
+                        "desugaredQualType": "A<double>",
+                    },
+                    "access": "public",
+                    "isVirtual": False,
+                }
+            ],
+        ),
+    )
+    types = _types(root)
+    assert types["D"].vtable == ["_ZN1AIdiE1fEv"]

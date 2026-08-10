@@ -16,7 +16,8 @@ A new changelog fragment. See changelog.d/README.md for the workflow.
   `override` (a common real-world style) as virtual at all. The new
   `dumper_clang_vtable.py` reconstructs virtuality via signature matching —
   a method is virtual if explicitly marked, or if its (name, parameter
-  types, const-qualifier) identity matches an inherited virtual slot — with
+  types, variadic flag, cv/ref-qualifier tail) identity matches an
+  inherited virtual slot — with
   a destructor handled separately (implicitly virtual whenever any base has
   a virtual destructor, regardless of keyword). Matches castxml's existing
   `0`-if-polymorphic `vptr_offset_bits` heuristic; real multi-inheritance

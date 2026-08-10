@@ -1,11 +1,11 @@
 # ADR-060: Synthetic-Consumer Compile-Probe Layer — Deferred
 
 **Date:** 2026-08-10
-**Status:** Accepted (decision to defer) — not implemented; no future phase is
+**Status:** Accepted — not implemented (decision to defer); no future phase is
 currently scheduled to pick this up. A concrete driving case already exists
 (`case111`, see below); revisit once a scoped synthesis-strategy design also
 exists (see "Revisiting this decision" below).
-**Decision maker:** pending
+**Decision maker:** Nikolay Petrov
 
 ## Context
 

@@ -1188,7 +1188,8 @@ def _vtable_transition_is_evidenced(
     # function used it as exactly that -- wrongly. At the time, both
     # producers assigned it as ``0 if vtable else None``
     # (``dwarf_snapshot.py``, ``dumper_castxml.py``), so on those two
-    # backends ``(old.vptr is None) != (new.vptr is None)`` was *identical*
+    # backends ``(old.vptr_offset_bits is None) != (new.vptr_offset_bits is
+    # None)`` was *identical*
     # to the empty-vs-non-empty vtable transition being guarded: it was true
     # by construction for every input reaching this point, which silently
     # made the whole guard a no-op and let the original capture-gap false

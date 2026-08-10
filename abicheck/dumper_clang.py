@@ -82,6 +82,8 @@ from .dumper_clang_expr import (  # noqa: F401  (some re-exported for tests)
     _unwrap_expr,
 )
 from .dumper_clang_vtable import (
+    _index_template_param_defaults,
+    _index_template_param_kinds,
     _is_record_definition,
     _specialization_spelling,
     build_specialization_index as _build_specialization_index,
@@ -780,6 +782,12 @@ class _ClangAstParser:
         # a different clang node kind self._records never collects at all.
         # See _specialization_record_index()'s own docstring.
         self._specialization_by_qualname: dict[str, dict[str, Any]] | None = None
+        # Built lazily (on first vtable reconstruction, via
+        # _base_lookup_index()) -- the merged _record_index() +
+        # _specialization_record_index() dict (CodeRabbit review: previously
+        # rebuilt on every _base_lookup_index() call, an O(records) cost
+        # since _build_record calls it once per record).
+        self._base_lookup: dict[str, dict[str, Any]] | None = None
         # Built lazily (on first parse_functions() call, via
         # _virtual_mangled_names()) -- every mangled name appearing in ANY
         # record's reconstructed vtable, across the whole TU. Lets
@@ -787,6 +795,15 @@ class _ClangAstParser:
         # JSON gives it no direct signal at all (no `virtual` keyword, no
         # `OverrideAttr`) -- see _virtual_mangled_names()'s own docstring.
         self._virtual_mangled: frozenset[str] | None = None
+        # Computed eagerly (not lazily like the caches above) because
+        # `_walk` itself -- run immediately below, during __init__ -- needs
+        # these to correctly scope a specialization's own members (see the
+        # `ClassTemplateSpecializationDecl` branch below); a per-call lazy
+        # build wouldn't help since the first call IS during this walk.
+        # Cheap: one extra whole-AST pass each, the same shape
+        # `_id_index()` already pays lazily for a different purpose.
+        self._template_param_kinds_by_qualname = _index_template_param_kinds(root)
+        self._template_param_defaults_by_qualname = _index_template_param_defaults(root)
         self._walk(
             root,
             scope=(),
@@ -855,14 +872,32 @@ class _ClangAstParser:
             # fallback still couldn't match it against `RecordType.bases`
             # -- see `parse_functions`'s own comment on this). Reuses
             # `_specialization_spelling` (already built for that base-lookup
-            # index) so both consumers agree on the exact same spelling;
-            # falls back to the unscoped behavior (bare `name`, degrading
-            # the SAME way an unresolvable base already degrades elsewhere
-            # in this module) when the spelling can't be reconstructed. No
-            # `param_kinds` here (unlike `_base_lookup_index()`'s own use of
-            # this same function) -- a non-type-templated specialization's
-            # members simply stay unqualified, the same safe degradation.
-            spelling = _specialization_spelling(node, name, None)
+            # index) so both consumers agree on the exact same spelling --
+            # INCLUDING the same `param_kinds`/`param_defaults` context, not
+            # just the bare function call: an earlier version of this branch
+            # passed `None` for both, which produced the UNTRIMMED
+            # `"A<double, int>"` form for a specialization using a defaulted
+            # template argument while `_base_lookup_index()`'s own call
+            # (through `D.bases`) correctly trimmed it to `"A<double>"` --
+            # the same qualname mismatch the specialization-owner fix
+            # itself was built to prevent, just for a different reason
+            # (Codex review, fresh evidence: confirmed end-to-end that this
+            # reintroduced a false `TYPE_VTABLE_CHANGED` for exactly the
+            # no-keyword-override-through-a-defaulted-specialization-base
+            # scenario the base-lookup fix was meant to make work). Falls
+            # back to the unscoped behavior (bare `name`, degrading the SAME
+            # way an unresolvable base already degrades elsewhere in this
+            # module) when the spelling can't be reconstructed.
+            spelling = _specialization_spelling(
+                node,
+                name,
+                self._template_param_kinds_by_qualname.get(
+                    "::".join((*scope, name)) if scope else name
+                ),
+                self._template_param_defaults_by_qualname.get(
+                    "::".join((*scope, name)) if scope else name
+                ),
+            )
             child_scope = (*scope, spelling) if spelling else scope
         else:
             child_scope = scope
@@ -1059,25 +1094,42 @@ class _ClangAstParser:
     def _specialization_record_index(self) -> dict[str, dict[str, Any]]:
         """Lazily-built, memoized :func:`build_specialization_index` over
         this parser's own AST root -- see that function's docstring
-        (``dumper_clang_vtable.py``) for the full "why".
+        (``dumper_clang_vtable.py``) for the full "why". Passes through the
+        param-kinds/param-defaults indices already computed eagerly in
+        ``__init__`` (for ``_walk``'s own specialization-scoping use)
+        instead of paying for a second whole-AST pass over each.
         """
         if self._specialization_by_qualname is None:
-            self._specialization_by_qualname = _build_specialization_index(self._root)
+            self._specialization_by_qualname = _build_specialization_index(
+                self._root,
+                self._template_param_kinds_by_qualname,
+                self._template_param_defaults_by_qualname,
+            )
         return self._specialization_by_qualname
 
     def _base_lookup_index(self) -> dict[str, dict[str, Any]]:
-        """Merged ``_record_index()`` + ``_specialization_record_index()``,
-        for ``dumper_clang_vtable.build_vtable``'s base-lookup recursion.
+        """Lazily-built, memoized merge of ``_record_index()`` +
+        ``_specialization_record_index()``, for
+        ``dumper_clang_vtable.build_vtable``'s base-lookup recursion.
 
         Safe to merge into one dict: an ordinary record's qualname never
         contains ``"<"``, so the two key spaces never collide. An ordinary
         record wins on the rare case both indexes somehow produced the same
         key (shouldn't occur given the above, but a plain record is always
         the more trustworthy of the two if it ever did).
+
+        Memoized (CodeRabbit review, fresh evidence): ``_build_record`` calls
+        this once per record, so leaving it unmemoized meant ``parse_types()``
+        rebuilt the whole merged dict -- and ``_virtual_mangled_names()``
+        separately re-ran ``build_vtable`` over every qualname in it -- once
+        per record in the TU, an O(records × index size) cost for what
+        should be a one-time merge.
         """
-        merged = dict(self._specialization_record_index())
-        merged.update(self._record_index())
-        return merged
+        if self._base_lookup is None:
+            merged = dict(self._specialization_record_index())
+            merged.update(self._record_index())
+            self._base_lookup = merged
+        return self._base_lookup
 
     def _virtual_mangled_names(self) -> frozenset[str]:
         """Every mangled name occupying a slot in ANY record's reconstructed
