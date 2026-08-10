@@ -642,22 +642,19 @@ def _primary_pattern_member_locs(
     shared members recognized, this module's usual conservative default).
 
     Keyed by ``(name, signature)``, not name alone (Codex review, third
-    round, fresh evidence, confirmed against real clang AST output): when
-    the primary pattern itself *overloads* a member-template name (``template
-    <typename U> U f(U);`` alongside ``template <typename U> U f(U, U);``,
+    round): when the primary pattern itself *overloads* a member-template
+    name (``template <typename U> U f(U);`` alongside ``... U f(U, U);``,
     both named ``f``), a name-only dict keeps only the last-registered
     overload's offset, so every earlier overload's own instantiated member
-    then fails the shared-member check and gets wrongly disambiguated --
+    fails the shared-member check and gets wrongly disambiguated --
     confirmed empirically: two overloads of ``f`` on ``Holder``'s primary
-    pattern, each instantiated through both ``Holder<int>`` and
-    ``Holder<double>``, split the *first* overload into separate
-    ``Holder<int>::f``/``Holder<double>::f`` template-declaration nodes for
-    what both AST dumps show is the identical syntactic overload, while the
-    second overload (whose offset survived the overwrite) stayed correctly
-    merged. :func:`_function_template_pattern_signature` (clang's printed,
-    unspecialized function type, e.g. ``"T (T)"`` vs. ``"T (T, T)"``) is the
-    same discriminator :func:`template_decl_node_id` already uses to keep
-    two such overloads' own declaration nodes distinct."""
+    pattern, instantiated through both ``Holder<int>``/``Holder<double>``,
+    split the *first* overload into separate template-declaration nodes
+    for what's the identical syntactic overload, while the second (whose
+    offset survived the overwrite) stayed correctly merged.
+    :func:`_function_template_pattern_signature` is the same discriminator
+    :func:`template_decl_node_id` already uses to keep two such overloads'
+    own declaration nodes distinct."""
     pattern: dict[str, Any] | None = None
     for child in class_template_node.get("inner", []) or []:
         if str(child.get("kind", "")) in ("CXXRecordDecl", "RecordDecl"):
@@ -697,20 +694,14 @@ def _class_template_has_auto_nttp(class_template_node: dict[str, Any]) -> bool:
     shape (that would needlessly discard the common, unambiguous case too).
 
     **Class instantiations only** -- a ``FunctionTemplateDecl`` with its own
-    ``auto`` NTTP parameter (``template <auto V> void f();``) has the
-    identical ambiguity, and this helper is not applied there (CodeRabbit
-    nitpick, confirmed real but low-impact): unlike a class instantiation, a
-    function instantiation's own graph-node identity
-    (:func:`template_instantiation_node_id`) already keys on its unique
-    mangled name when available, not the label, so two ambiguous NTTP
-    arguments still mint distinct, correctly-joined instantiation nodes --
-    only the cosmetic ``label``/``args`` spelling collides, and (when both
-    instantiate the same underlying template, which an ambiguous same-
-    valued ``auto`` NTTP always does) the shared ``template_decl`` node is
-    the semantically correct outcome anyway, not a merge bug. A
-    ``FunctionTemplateDecl`` equivalent of this helper would need its own
-    verification pass before being wired in, deferred rather than added
-    as a drive-by extension of the class-only fix above."""
+    ``auto`` NTTP has the identical ambiguity, and this helper isn't applied
+    there (CodeRabbit nitpick, confirmed real but low-impact): a function
+    instantiation's own node identity already keys on its unique mangled
+    name, not the label, so two ambiguous NTTP arguments still mint
+    distinct, correctly-joined nodes -- only the cosmetic label collides,
+    and the shared ``template_decl`` node is semantically correct anyway. A
+    ``FunctionTemplateDecl`` equivalent needs its own verification pass,
+    deferred rather than added as a drive-by extension here."""
     for child in class_template_node.get("inner", []) or []:
         if str(child.get("kind", "")) != "NonTypeTemplateParmDecl":
             continue
@@ -822,14 +813,13 @@ def _flatten_template_args(
 
     A variadic template's pack argument is *itself* one ``TemplateArgument``
     node (``isPack: true``, no ``type``/``value`` of its own) whose real
-    per-element arguments nest one level deeper in its own ``inner`` —
-    confirmed against real clang AST output: ``Pack<int>``/``Pack<double>``
-    both produce a pack-wrapper with no ``type``/``value``, the actual
-    argument nested inside. :func:`_template_arg_use` alone treats that
-    wrapper as unspellable and drops it, so a direct-children-only caller
-    loses the whole pack -- both instantiations reduce to the identical,
-    argument-less label ``"Pack"`` and collide. Recurses in case a pack
-    itself nests another pack, though not empirically observed.
+    per-element arguments nest one level deeper in its own ``inner`` --
+    confirmed against real clang output: ``Pack<int>``/``Pack<double>`` both
+    produce a pack-wrapper with the actual argument nested inside.
+    :func:`_template_arg_use` alone treats that wrapper as unspellable and
+    drops it, so a direct-children-only caller loses the whole pack -- both
+    reduce to the identical, argument-less label ``"Pack"`` and collide.
+    Recurses in case a pack nests another pack, though not observed.
 
     Returns ``None`` -- instead of the args collected so far -- when any
     argument is :func:`_is_opaque_template_argument` (a template-template
@@ -1129,33 +1119,21 @@ def _function_template_pattern_signature(node: dict[str, Any]) -> str:
        without depending on any particular instantiation's argument
        substitution).
     2. The ordered kinds of *this* ``FunctionTemplateDecl``'s own leading
-       template-parameter children (Codex review, fresh evidence beyond
-       the overload fix above): ``template <class T> void f()`` and
-       ``template <class T, class U> void f()`` both print the *identical*
-       function-type spelling ``"void ()"`` -- the function parameter list
-       is genuinely empty for both, and clang's printer never reflects the
-       *template* parameter list in that spelling at all -- so (1) alone
-       still collapsed both onto one shared ``template_decl`` node despite
-       their concrete instantiations correctly staying separate (distinct
-       mangled names), falsely making every ``DECL_INSTANTIATES_TEMPLATE``
-       edge from either one point at a declaration the other didn't
-       actually come from. Confirmed via a real compiled/dumped
-       `template<class T> void f()` / `template<class T,class U> void f()`
-       pair reducing to the identical `"void ()"` printed type. A
+       template-parameter children (Codex review): ``template <class T>
+       void f()`` and ``template <class T, class U> void f()`` both print
+       the *identical* function-type spelling ``"void ()"`` -- the
+       template parameter list never shows up there -- so (1) alone
+       collapsed both onto one shared ``template_decl`` node despite their
+       instantiations correctly staying separate. A
        ``NonTypeTemplateParmDecl``'s own *kind* alone still wasn't enough
-       (Codex review, second round, fresh evidence): ``template <E1 N>
-       void f()`` and ``template <E2 N> void f()`` (two distinct enum
-       types) both counted as one bare ``"NonTypeTemplateParmDecl"``,
-       colliding the identical way -- confirmed via a real compiled/dumped
-       pair (`f<E1::A>`/`f<E2::A>`) reducing to the identical
-       ``"NonTypeTemplateParmDecl|void ()"`` signature. Each NTTP
-       parameter's own descriptor now also folds in its declared
-       ``type.qualType`` (always present, reliably differs), as
-       ``"NonTypeTemplateParmDecl:E1"`` vs. ``"...:E2"``.
-       ``TemplateTypeParmDecl``/``TemplateTemplateParmDecl`` stay
-       kind-only -- no confirmed real-world collision source for either
-       found yet, so no unverified extension of this discriminator was
-       added for them.
+       (second round): ``template <E1 N> void f()``/``template <E2 N> void
+       f()`` (two distinct enum types) both counted as one bare
+       ``"NonTypeTemplateParmDecl"``, colliding the same way -- confirmed
+       via a real compiled pair reducing to the identical
+       ``"NonTypeTemplateParmDecl|void ()"``. Each NTTP's own descriptor
+       now folds in its declared ``type.qualType`` too (``"...:E1"`` vs.
+       ``"...:E2"``). ``TemplateTypeParmDecl``/``TemplateTemplateParmDecl``
+       stay kind-only -- no confirmed collision source for either.
 
     Returns ``"<param-kinds>|<pattern-type>"`` (the param-kind half always
     present even when no pattern spelling is found, so two templates
@@ -1702,23 +1680,30 @@ def _resolve_emitted_symbol(
     known_symbols: frozenset[str],
     symbol_node_id: Callable[[str], str],
 ) -> str | None:
-    """The ``binary_symbol`` node id *symbol* should join onto, or ``None``
-    (self-review round: collapses two near-identical ``compute id -> check
-    known_symbols -> add_edge`` branches that could otherwise drift apart).
-    Tries *symbol* exactly first; only when unmatched does it retry
-    :func:`_normalize_mangled`'s Mach-O-stripped form -- an asm-labeled
-    ``__Z``-prefixed symbol is indistinguishable from the Mach-O artifact
-    by spelling alone. **Narrower than** :mod:`archive_graph`'s own
+    """The resolved *spelling* -- ``symbol`` itself, or its
+    :func:`_normalize_mangled` form -- that has a matching ``binary_symbol``
+    node, or ``None`` if neither does. Returns the **spelling**, not the
+    node id: a caller needing the node id derives it with
+    ``symbol_node_id(result)``, and a caller needing a stable per-
+    instantiation identity (:func:`augment_graph_with_templates`'s
+    ``function_mangled``) shares this same resolution rather than computing
+    it twice and risking disagreement (Codex review, second round: an
+    earlier revision separately, unconditionally normalized
+    ``function_mangled``, merging two genuinely distinct instantiations --
+    each with its own real, independently exported asm-labeled symbol,
+    ``__Zfake``/``_Zfake`` -- onto one node, since normalizing both
+    collapsed them to the identical spelling).
+
+    Tries *symbol* exactly first; only when unmatched does it retry the
+    Mach-O-stripped form. **Narrower than** :mod:`archive_graph`'s own
     fallback (gates on real object-magic evidence); this one falls back
     unconditionally, though still safer than the pre-fix strip."""
-    sid = symbol_node_id(symbol)
-    if sid in known_symbols:
-        return sid
+    if symbol_node_id(symbol) in known_symbols:
+        return symbol
     normalized = _normalize_mangled(symbol)
     if normalized == symbol:
         return None
-    nid = symbol_node_id(normalized)
-    return nid if nid in known_symbols else None
+    return normalized if symbol_node_id(normalized) in known_symbols else None
 
 
 def augment_graph_with_templates(
@@ -1792,15 +1777,23 @@ def augment_graph_with_templates(
         )
         ensure_node(template_id, NODE_TEMPLATE_DECL, inst.template_qname)
 
-        # Normalized here even though emitted_symbols stays raw (self-review
-        # round): a stable node *identity*, not a join key, so leaving it
-        # raw would have churned a Mach-O instantiation's own node id
-        # (single- vs double-underscore) purely from this fix.
-        function_mangled = (
-            _normalize_mangled(inst.emitted_symbols[0])
-            if inst.kind == _FUNCTION_KIND and inst.emitted_symbols
-            else None
-        )
+        # The instantiation's own *resolved* symbol identity (self-review
+        # round, second pass) -- NOT an independent, unconditional
+        # normalization, which merged two distinct instantiations each
+        # with their own real, independently exported asm-labeled symbol
+        # (__Zfake/_Zfake) onto one node (Codex review). Sharing
+        # _resolve_emitted_symbol with the join loop below keeps the
+        # node's identity matching whichever spelling actually has a real
+        # export -- stable across Mach-O builds, without merging two
+        # instantiations that each resolve to their own export. Falls back
+        # to the raw spelling only when nothing resolves (never exported).
+        function_mangled = None
+        if inst.kind == _FUNCTION_KIND and inst.emitted_symbols:
+            primary_symbol = inst.emitted_symbols[0]
+            function_mangled = (
+                _resolve_emitted_symbol(primary_symbol, known_symbols, _symbol_node_id)
+                or primary_symbol
+            )
         inst_id = template_instantiation_node_id(inst.label, function_mangled)
         dst_in_project = bool(
             project_files and inst.file and _file_in_project(inst.file, project_files)
@@ -1834,9 +1827,14 @@ def augment_graph_with_templates(
             add_edge(inst_id, type_id, EDGE_TEMPLATE_USES_TYPE, CONF_HIGH)
 
         for symbol in inst.emitted_symbols:
-            sid = _resolve_emitted_symbol(symbol, known_symbols, _symbol_node_id)
-            if sid is not None:
-                add_edge(inst_id, sid, EDGE_INSTANTIATION_EMITS_SYMBOL, CONF_REDUCED)
+            resolved = _resolve_emitted_symbol(symbol, known_symbols, _symbol_node_id)
+            if resolved is not None:
+                add_edge(
+                    inst_id,
+                    _symbol_node_id(resolved),
+                    EDGE_INSTANTIATION_EMITS_SYMBOL,
+                    CONF_REDUCED,
+                )
 
     return added
 

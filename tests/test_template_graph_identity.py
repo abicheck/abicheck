@@ -313,16 +313,23 @@ def test_literal_asm_label_mangled_name_is_not_mach_o_stripped_at_collection() -
     assert targets == {"binary_symbol://__Zfake"}
 
 
-def test_function_instantiation_node_id_stays_normalized_on_mach_o() -> None:
+def test_function_instantiation_node_id_matches_its_own_resolved_export() -> None:
     """The node *identity* (:func:`template_instantiation_node_id`) for a
-    function-kind instantiation must stay the platform-independent,
-    normalized spelling even though :attr:`TemplateInstantiation.
-    emitted_symbols` itself now keeps clang's raw spelling (self-review
-    round, fresh evidence): the identity is a stable key, not a symbol-join
-    target, so leaving it raw would silently change a Mach-O function
-    instantiation's own graph node id (single- vs double-underscore) purely
-    as a side effect of moving the join's own stripping to a guarded
-    fallback -- an undocumented identity churn with no reason to accept."""
+    function-kind instantiation must match whichever spelling actually
+    resolved to a real export -- **not** an independent, unconditional
+    normalization (self-review round, second pass, fresh evidence): an
+    earlier revision of this fix normalized ``function_mangled``
+    unconditionally, which merged two genuinely distinct instantiations,
+    each with its own real, independently exported asm-labeled symbol
+    (``__Zfake``/``_Zfake``), onto the identical ``template_instantiation://
+    _Zfake`` node -- see ``test_two_asm_labeled_instantiations_never_merge_
+    onto_one_node``. When only the Mach-O-*stripped* form has a matching
+    ``binary_symbol`` node (the real Mach-O scenario -- clang's raw
+    ``mangledName`` carries the platform's extra underscore, but
+    ``macho_metadata.py`` already stripped it before minting the node), the
+    resolved, stripped spelling is correctly used for the node id too --
+    platform-stable, matching what a Linux/Windows build of the identical
+    source would produce."""
     pattern = {"kind": "FunctionDecl", "name": "identity", "inner": []}
     instantiation = {
         "kind": "FunctionDecl",
@@ -348,9 +355,78 @@ def test_function_instantiation_node_id_stays_normalized_on_mach_o() -> None:
     # emitted_symbols itself stays raw...
     assert out[0].emitted_symbols == ("__Z8identityIiET_S0_",)
 
+    # Only the normalized (single-underscore) form has a real export node --
+    # the actual Mach-O shape.
     graph = SourceGraphSummary()
+    graph.add_node(
+        GraphNode(id="binary_symbol://_Z8identityIiET_S0_", kind="binary_symbol")
+    )
     augment_graph_with_templates(graph, out)
     inst_nodes = [n for n in graph.nodes if n.kind == NODE_TEMPLATE_INSTANTIATION]
     assert len(inst_nodes) == 1
-    # ...but the node's own id is the normalized, single-underscore form.
     assert inst_nodes[0].id == "template_instantiation://_Z8identityIiET_S0_"
+
+
+def test_two_asm_labeled_instantiations_never_merge_onto_one_node() -> None:
+    """Two genuinely distinct function-template instantiations, each with
+    its own real, independently exported asm-labeled symbol (``__Zfake``
+    and ``_Zfake`` -- confirmed reachable via ``f(T) asm("__Zfake")``/
+    ``f(T) asm("_Zfake")`` on two overloads or two distinct templates) must
+    never collapse onto one ``template_instantiation`` node (Codex review,
+    fresh evidence, second round on this same fix): an earlier revision
+    unconditionally normalized both instantiations' own ``function_mangled``
+    for node-identity purposes, and normalizing ``__Zfake``/``_Zfake`` both
+    reduces to the identical ``_Zfake`` spelling -- merging two genuinely
+    distinct instantiations (and their independent
+    ``EDGE_INSTANTIATION_EMITS_SYMBOL`` edges) onto one node, exactly the
+    provenance-merging failure mode the original asm-label fix was meant to
+    close, just relocated to node-identity construction instead of the
+    symbol join."""
+
+    def f(mangled: str, argtype: str) -> dict:
+        pattern = {"kind": "FunctionDecl", "name": "f", "inner": []}
+        instantiation = {
+            "kind": "FunctionDecl",
+            "name": "f",
+            "mangledName": mangled,
+            "inner": [
+                {"kind": "TemplateArgument", "type": {"qualType": argtype}, "inner": []}
+            ],
+        }
+        return {
+            "kind": "FunctionTemplateDecl",
+            "name": "f",
+            "inner": [
+                {"kind": "TemplateTypeParmDecl", "name": "T"},
+                pattern,
+                instantiation,
+            ],
+        }
+
+    ast = {
+        "kind": "TranslationUnitDecl",
+        "inner": [f("__Zfake", "int"), f("_Zfake", "double")],
+    }
+    out = parse_clang_ast_templates(ast)
+    assert len(out) == 2
+
+    # Both real exports genuinely exist -- each instantiation's own.
+    graph = SourceGraphSummary()
+    graph.add_node(GraphNode(id="binary_symbol://__Zfake", kind="binary_symbol"))
+    graph.add_node(GraphNode(id="binary_symbol://_Zfake", kind="binary_symbol"))
+    augment_graph_with_templates(graph, out)
+
+    inst_nodes = [n for n in graph.nodes if n.kind == NODE_TEMPLATE_INSTANTIATION]
+    assert {n.id for n in inst_nodes} == {
+        "template_instantiation://__Zfake",
+        "template_instantiation://_Zfake",
+    }
+    emits_edges = {
+        (e.src, e.dst) for e in graph.edges if e.kind == EDGE_INSTANTIATION_EMITS_SYMBOL
+    }
+    # Each instantiation's own edge must land on its OWN real export --
+    # never the other one's.
+    assert emits_edges == {
+        ("template_instantiation://__Zfake", "binary_symbol://__Zfake"),
+        ("template_instantiation://_Zfake", "binary_symbol://_Zfake"),
+    }

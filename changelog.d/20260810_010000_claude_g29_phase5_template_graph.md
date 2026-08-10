@@ -907,3 +907,44 @@
   module, not a drive-by extension of this round. Documented directly on
   each module's own `_normalize_mangled` docstring rather than silently
   left unaddressed.
+
+  A follow-up Codex review round on the self-review round's own diff found
+  a real regression in fix 1 above, confirmed empirically. Normalizing
+  `function_mangled` unconditionally for node-identity purposes reintroduced
+  exactly the provenance-merging bug the original asm-label fix closed --
+  just relocated from the symbol join to node-identity construction: two
+  genuinely distinct instantiations, each with its own real, independently
+  exported asm-labeled symbol (`__Zfake`/`_Zfake`), both normalize to the
+  identical `_Zfake` spelling, so both collapsed onto one
+  `template_instantiation` node regardless of which one actually resolved
+  to which real export (confirmed via a real repro: two `f<T>`
+  instantiations with distinct asm labels merged onto
+  `template_instantiation://_Zfake`, with the merged node's own
+  `EDGE_INSTANTIATION_EMITS_SYMBOL` edges wrongly attributing both exports
+  to it). Fixed by sharing one resolution between the symbol join and the
+  node-identity computation: `_resolve_emitted_symbol` now returns the
+  resolved *spelling* (not a node id), so a caller building the
+  instantiation's own identity uses whichever spelling (exact or Mach-O-
+  stripped) actually resolved to a real export, falling back to the raw
+  spelling only when nothing resolves at all (safe either way, since
+  nothing joins onto it regardless of spelling). This keeps all three
+  properties simultaneously: two distinct real exports never merge, a
+  genuine Mach-O double-underscore instantiation still gets the stable,
+  platform-independent identity, and an unexported/inlined instantiation is
+  never at risk of colliding since nothing joins onto it.
+
+  The same round found and fixed a real gap in `archive_graph.py`'s own
+  search-root derivation for a pre-captured Bazel `--build-info`, confirmed
+  by inspection: `_default_archive_search_roots` (`inline_graph_fold.py`)
+  only reads `CompileUnit`/`LinkUnit.directory`, and `BazelAdapter` leaves
+  both empty when constructed with no `workspace` -- which
+  `inline._maybe_collect_bazel_build_info` (the pre-captured `--build-info`
+  aquery/cquery route) did unconditionally, unlike
+  `run_inferred_build_query`'s own Bazel path, which already threads
+  `workspace=sources`. Without a workspace, a captured aquery's own relative
+  exec paths (`bazel-out/.../libfoo.a`) leave `_default_archive_search_roots`
+  with nothing to try, so `archive_graph`'s pass reported every such static
+  library as missing. Fixed by threading the caller's own `--sources` tree
+  root through as the adapter's `workspace`, mirroring the inferred-query
+  path's existing precedent -- a no-op when no `--sources` tree is given
+  (an out-of-tree `--build-info` with no source tree), same as before.

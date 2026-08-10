@@ -111,12 +111,55 @@ def test_bazel_aquery_routed_to_adapter(tmp_path: Path) -> None:
     assert any(e.name == "bazel" for e in extractors)
 
 
+def test_bazel_aquery_without_sources_leaves_directory_unanchored(
+    tmp_path: Path,
+) -> None:
+    """Without a ``--sources`` tree root, a pre-captured aquery's own relative
+    exec paths leave ``CompileUnit.directory`` empty -- ``_default_archive_
+    search_roots`` (``inline_graph_fold.py``) then has no root to try a
+    relative archive link-input path against, so ``archive_graph``'s pass
+    reports every such static library as missing (Codex review, fresh
+    evidence). Documents the pre-fix behavior this repo already accepted for
+    a genuinely workspace-less capture -- see the paired
+    ``..._with_sources_anchors_directory`` test for the fix."""
+    merged = BuildEvidence()
+    routed = _maybe_collect_bazel_build_info(
+        _w(tmp_path, "aquery.json", _AQUERY), merged, []
+    )
+    assert routed is True
+    assert merged.compile_units
+    assert merged.compile_units[0].directory == ""
+
+
+def test_bazel_aquery_with_sources_anchors_directory(tmp_path: Path) -> None:
+    """Passing the caller's own ``--sources`` tree root as *sources* anchors
+    the adapter's ``workspace`` -- the same anchor
+    ``run_inferred_build_query``'s own Bazel path already supplies for a
+    live query -- so ``CompileUnit.directory`` is populated and
+    ``_default_archive_search_roots`` has a real root to try a relative
+    archive link-input path against (Codex review, fresh evidence: this was
+    previously threaded only through the inferred-query path, never through
+    a pre-captured ``--build-info`` aquery/cquery)."""
+    merged = BuildEvidence()
+    workspace = tmp_path / "ws"
+    workspace.mkdir()
+    routed = _maybe_collect_bazel_build_info(
+        _w(tmp_path, "aquery.json", _AQUERY), merged, [], workspace
+    )
+    assert routed is True
+    assert merged.compile_units
+    assert merged.compile_units[0].directory == str(workspace.resolve())
+
+
 def test_bazel_cquery_routed_to_adapter(tmp_path: Path) -> None:
     merged = BuildEvidence()
     extractors: list = []
-    assert _maybe_collect_bazel_build_info(
-        _w(tmp_path, "cquery.json", _CQUERY), merged, extractors
-    ) is True
+    assert (
+        _maybe_collect_bazel_build_info(
+            _w(tmp_path, "cquery.json", _CQUERY), merged, extractors
+        )
+        is True
+    )
     assert any(e.name == "bazel" for e in extractors)
 
 
@@ -124,9 +167,12 @@ def test_compile_db_not_routed_to_bazel(tmp_path: Path) -> None:
     """A compile_commands.json must NOT be claimed by the Bazel router — it falls
     through to compile-DB resolution."""
     merged = BuildEvidence()
-    assert _maybe_collect_bazel_build_info(
-        _w(tmp_path, "compile_commands.json", _COMPILE_DB), merged, []
-    ) is False
+    assert (
+        _maybe_collect_bazel_build_info(
+            _w(tmp_path, "compile_commands.json", _COMPILE_DB), merged, []
+        )
+        is False
+    )
     assert not merged.compile_units
 
 
@@ -182,9 +228,7 @@ def test_sniff_unreadable_or_missing_path_is_unknown(tmp_path: Path) -> None:
         ('{"foo": [1, 2, 3', "unknown"),  # truncated, no discriminating key
     ],
 )
-def test_sniff_non_object_and_truncated_objects(
-    tmp_path: Path, text, expected
-) -> None:
+def test_sniff_non_object_and_truncated_objects(tmp_path: Path, text, expected) -> None:
     # Heads that aren't a parseable object exercise the non-`{` branch and the
     # truncated-JSON prefix fallback (json.load fails → scan the bounded head).
     assert sniff_build_info_format(_w(tmp_path, "x.json", text)) == expected
