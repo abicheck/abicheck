@@ -163,7 +163,7 @@ from dataclasses import dataclass, field, replace
 from functools import partial
 from typing import TYPE_CHECKING, Any
 
-from .. import deadline
+from .. import deadline, diff_cxx_rules
 from .clang_ast_run import run_clang_ast_dump
 from .graph_facts import CONF_HIGH, CONF_REDUCED, GraphEdge, GraphNode
 
@@ -716,8 +716,8 @@ def _instantiation_label(template_qname: str, args: Iterable[TemplateArgUse]) ->
 #: only ever reports ``C1``/``D1``).  ``C3`` (the allocating constructor) is
 #: omitted -- not observed emitted by clang/GCC in practice, unlike ``C1``/
 #: ``C2`` which are always both present for any non-trivial constructor.
-_CTOR_SIBLING_MARKERS = ("C2E",)
-_DTOR_SIBLING_MARKERS = ("D0E", "D2E")
+_CTOR_SIBLING_CODES = ("C2",)
+_DTOR_SIBLING_CODES = ("D0", "D2")
 
 
 def _ctor_dtor_symbol_variants(mangled: str, *, is_ctor: bool) -> tuple[str, ...]:
@@ -731,26 +731,33 @@ def _ctor_dtor_symbol_variants(mangled: str, *, is_ctor: bool) -> tuple[str, ...
     that legitimately emits (say) a ``C2`` export previously had no way to
     join that export's ``binary_symbol`` node at all.
 
-    Locates the ``C1E``/``D1E`` marker (the ctor/dtor code is always
-    immediately followed by the ``E`` closing the nested-name it lives in --
-    confirmed with and without constructor parameters, and with a virtual
-    destructor) and substitutes each sibling code in its place. This is a
-    textual substitution, not a full Itanium parse -- a class/argument name
-    that happened to embed a literal ``C1E``/``D1E`` substring earlier in
-    the mangled string could in principle mismatch, but this is harmless
-    even then: the caller's own join (:func:`augment_graph_with_templates`)
-    only ever creates an edge onto a ``binary_symbol`` node the graph
-    already carries (ADR-057 D1), so a garbled derived string simply fails
-    to match anything, the same as not deriving it at all -- it can never
-    produce a *wrong* edge to an unrelated symbol, since Itanium manglings
-    are unique by construction. Returns ``()`` when no such marker is found
-    (an unmangled or non-Itanium name)."""
-    marker = "C1E" if is_ctor else "D1E"
-    idx = mangled.find(marker)
-    if idx == -1:
+    Locates the real ctor/dtor code via :func:`~abicheck.diff_cxx_rules.
+    itanium_ctor_dtor_marker_span`'s structural (length-prefix-aware) walk
+    and substitutes each sibling code in its place -- **not** a naive
+    substring search (Codex review, second round, fresh evidence, a real
+    correctness bug in an earlier revision of this function): a class named
+    ``C1Evil<int>`` mangles to ``_ZN6C1EvilIiEC1Ev``, and a bare
+    ``"C1E"`` text search finds the *class name*'s own embedded ``"C1E"``
+    first, not the real ctor code that follows it -- deriving
+    ``_ZN6C2EvilIiEC1Ev``, which is the genuinely different class
+    ``C2Evil<int>``'s own *real* constructor mangling if that class also
+    exists and is exported, a false positive rather than merely a missed
+    one (the join-only-onto-an-existing-node safety net this module relies
+    on elsewhere does not save this case, since the corrupted string can
+    coincidentally *be* a real, different symbol). ``mangled`` must already
+    be Mach-O-normalized (:func:`_normalize_mangled`) before calling this --
+    see ``itanium_ctor_dtor_marker_span``'s own docstring for why an
+    unnormalized ``__Z...`` input would misalign the located span.
+
+    Returns ``()`` when the marker parser doesn't recognize *mangled* as a
+    ctor/dtor mangling at all (an unmangled or non-Itanium name, or a form
+    outside what that structural parser models)."""
+    span = diff_cxx_rules.itanium_ctor_dtor_marker_span(mangled)
+    if span is None:
         return ()
-    siblings = _CTOR_SIBLING_MARKERS if is_ctor else _DTOR_SIBLING_MARKERS
-    return tuple(mangled[:idx] + sib + mangled[idx + len(marker) :] for sib in siblings)
+    start, end = span
+    codes = _CTOR_SIBLING_CODES if is_ctor else _DTOR_SIBLING_CODES
+    return tuple(mangled[:start] + code + mangled[end:] for code in codes)
 
 
 def _member_symbols(node: dict[str, Any]) -> tuple[str, ...]:
@@ -779,12 +786,16 @@ def _member_symbols(node: dict[str, Any]) -> tuple[str, ...]:
         if kind in _MEMBER_FUNCTION_KINDS | {"VarDecl"}:
             mangled = child.get("mangledName")
             if isinstance(mangled, str) and mangled:
-                symbols.append(_normalize_mangled(mangled))
+                # Normalize (strip a Mach-O double-underscore) once, before
+                # deriving sibling ctor/dtor manglings: the derivation's own
+                # offset arithmetic requires an already-normalized "_Z..."
+                # input (see _ctor_dtor_symbol_variants's docstring).
+                normalized = _normalize_mangled(mangled)
+                symbols.append(normalized)
                 if kind in ("CXXConstructorDecl", "CXXDestructorDecl"):
                     symbols.extend(
-                        _normalize_mangled(v)
-                        for v in _ctor_dtor_symbol_variants(
-                            mangled, is_ctor=kind == "CXXConstructorDecl"
+                        _ctor_dtor_symbol_variants(
+                            normalized, is_ctor=kind == "CXXConstructorDecl"
                         )
                     )
     return tuple(symbols)

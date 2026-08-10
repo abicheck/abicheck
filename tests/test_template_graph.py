@@ -198,6 +198,25 @@ def test_ctor_dtor_symbol_variants_match_real_compiled_binary_exports() -> None:
     assert _ctor_dtor_symbol_variants("_ZN3BoxIiE5valueE", is_ctor=True) == ()
 
 
+def test_ctor_dtor_symbol_variants_does_not_mistake_class_name_for_the_marker() -> None:
+    """A real correctness bug in an earlier revision (Codex review, second
+    round, fresh evidence), confirmed against real clang output: a class
+    literally named ``C1Evil<int>`` mangles to ``_ZN6C1EvilIiEC1Ev``, and a
+    naive ``"C1E"`` substring search finds the *class name*'s own embedded
+    ``"C1E"`` first (inside ``6C1Evil``), not the real ctor code that
+    follows it -- deriving ``_ZN6C2EvilIiEC1Ev``, which happens to be the
+    real constructor mangling of the genuinely different class
+    ``C2Evil<int>`` if that class also exists and is exported. The
+    structural (length-prefix-aware) locator must skip the whole
+    ``6C1Evil`` identifier as one unit and correctly derive this class's
+    own ``C2`` sibling instead."""
+    from abicheck.buildsource.template_graph import _ctor_dtor_symbol_variants
+
+    assert _ctor_dtor_symbol_variants("_ZN6C1EvilIiEC1Ev", is_ctor=True) == (
+        "_ZN6C1EvilIiEC2Ev",
+    )
+
+
 def test_class_template_instantiation_includes_constructor_sibling_symbol() -> None:
     """End to end through :func:`parse_clang_ast_templates`: an
     instantiated constructor's ``emitted_symbols`` includes both the

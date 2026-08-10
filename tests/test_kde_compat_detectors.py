@@ -34,6 +34,7 @@ import pytest
 
 from abicheck.checker import ChangeKind, Verdict, compare
 from abicheck.diff_cxx_rules import (
+    itanium_ctor_dtor_marker_span,
     itanium_qualified_name,
     itanium_scope_components,
     msvc_qualified_name,
@@ -231,13 +232,17 @@ class TestVirtualMethodAdded:
         ``View``. Pre-existence is decided by the qualified owner of sibling
         symbols, so adding ``kde::View::hide`` here stays a compatible addition."""
         old = _snap(
-            functions=[_method("bar", "_ZN3foo4View3barEv", is_virtual=True)],  # foo::View
+            functions=[
+                _method("bar", "_ZN3foo4View3barEv", is_virtual=True)
+            ],  # foo::View
             types=[_cls("View")],
         )
         new = _snap(
             functions=[
                 _method("bar", "_ZN3foo4View3barEv", is_virtual=True),
-                _method("hide", "_ZN3kde4View4hideEv", is_virtual=True),  # kde::View (new)
+                _method(
+                    "hide", "_ZN3kde4View4hideEv", is_virtual=True
+                ),  # kde::View (new)
             ],
             types=[_cls("View")],
         )
@@ -267,11 +272,15 @@ class TestVirtualMethodAdded:
         """Overriding a virtual inherited from a base reuses the base's vtable
         slot — ABI-compatible, not a new slot. Must not fire."""
         base = _cls("Base")
-        derived = RecordType(name="Derived", kind="class", size_bits=64, vtable=[], bases=["Base"])
+        derived = RecordType(
+            name="Derived", kind="class", size_bits=64, vtable=[], bases=["Base"]
+        )
         old = _snap(
             functions=[
                 _method("Base::paint", "_ZN4Base5paintEv", is_virtual=True),
-                _method("Derived::help", "_ZN7Derived4helpEv"),  # keeps Derived in surface
+                _method(
+                    "Derived::help", "_ZN7Derived4helpEv"
+                ),  # keeps Derived in surface
             ],
             types=[base, derived],
         )
@@ -279,7 +288,9 @@ class TestVirtualMethodAdded:
             functions=[
                 _method("Base::paint", "_ZN4Base5paintEv", is_virtual=True),
                 _method("Derived::help", "_ZN7Derived4helpEv"),
-                _method("Derived::paint", "_ZN7Derived5paintEv", is_virtual=True),  # override
+                _method(
+                    "Derived::paint", "_ZN7Derived5paintEv", is_virtual=True
+                ),  # override
             ],
             types=[base, derived],
         )
@@ -290,22 +301,36 @@ class TestVirtualMethodAdded:
         """A same-named virtual with a *different* signature is a new vtable slot,
         not an override — must still fire."""
         base = _cls("Base")
-        derived = RecordType(name="Derived", kind="class", size_bits=64, vtable=[], bases=["Base"])
+        derived = RecordType(
+            name="Derived", kind="class", size_bits=64, vtable=[], bases=["Base"]
+        )
         old = _snap(
             functions=[
-                _method("Base::paint", "_ZN4Base5paintEi", is_virtual=True,
-                        params=[Param(name="x", type="int")]),
+                _method(
+                    "Base::paint",
+                    "_ZN4Base5paintEi",
+                    is_virtual=True,
+                    params=[Param(name="x", type="int")],
+                ),
                 _method("Derived::help", "_ZN7Derived4helpEv"),
             ],
             types=[base, derived],
         )
         new = _snap(
             functions=[
-                _method("Base::paint", "_ZN4Base5paintEi", is_virtual=True,
-                        params=[Param(name="x", type="int")]),
+                _method(
+                    "Base::paint",
+                    "_ZN4Base5paintEi",
+                    is_virtual=True,
+                    params=[Param(name="x", type="int")],
+                ),
                 _method("Derived::help", "_ZN7Derived4helpEv"),
-                _method("Derived::paint", "_ZN7Derived5paintEd", is_virtual=True,
-                        params=[Param(name="x", type="double")]),  # different signature
+                _method(
+                    "Derived::paint",
+                    "_ZN7Derived5paintEd",
+                    is_virtual=True,
+                    params=[Param(name="x", type="double")],
+                ),  # different signature
             ],
             types=[base, derived],
         )
@@ -316,11 +341,15 @@ class TestVirtualMethodAdded:
         """Override of an inherited virtual in a namespaced class (CastXML
         leaf-only records) must resolve bases and stay compatible."""
         base = _cls("Base")  # CastXML stores ns::Base as leaf "Base"
-        derived = RecordType(name="Derived", kind="class", size_bits=64, vtable=[], bases=["Base"])
+        derived = RecordType(
+            name="Derived", kind="class", size_bits=64, vtable=[], bases=["Base"]
+        )
         old = _snap(
             functions=[
-                _method("paint", "_ZN2ns4Base5paintEv", is_virtual=True),   # ns::Base::paint
-                _method("help", "_ZN2ns7Derived4helpEv"),                   # ns::Derived::help
+                _method(
+                    "paint", "_ZN2ns4Base5paintEv", is_virtual=True
+                ),  # ns::Base::paint
+                _method("help", "_ZN2ns7Derived4helpEv"),  # ns::Derived::help
             ],
             types=[base, derived],
         )
@@ -328,7 +357,9 @@ class TestVirtualMethodAdded:
             functions=[
                 _method("paint", "_ZN2ns4Base5paintEv", is_virtual=True),
                 _method("help", "_ZN2ns7Derived4helpEv"),
-                _method("paint", "_ZN2ns7Derived5paintEv", is_virtual=True),  # ns::Derived::paint override
+                _method(
+                    "paint", "_ZN2ns7Derived5paintEv", is_virtual=True
+                ),  # ns::Derived::paint override
             ],
             types=[base, derived],
         )
@@ -478,13 +509,23 @@ class TestOverloadAdded:
         """Operators are encoded as fixed Itanium codes, not length-prefixed
         names; an operator overload (`operator[](int)` → also `(long)`) must
         still group and fire OVERLOAD_ADDED — `&C::operator[]` becomes ambiguous."""
-        old = _snap(functions=[
-            _method("C::operator[]", "_ZN1CixEi", params=[Param(name="i", type="int")]),
-        ])
-        new = _snap(functions=[
-            _method("C::operator[]", "_ZN1CixEi", params=[Param(name="i", type="int")]),
-            _method("C::operator[]", "_ZN1CixEl", params=[Param(name="i", type="long")]),
-        ])
+        old = _snap(
+            functions=[
+                _method(
+                    "C::operator[]", "_ZN1CixEi", params=[Param(name="i", type="int")]
+                ),
+            ]
+        )
+        new = _snap(
+            functions=[
+                _method(
+                    "C::operator[]", "_ZN1CixEi", params=[Param(name="i", type="int")]
+                ),
+                _method(
+                    "C::operator[]", "_ZN1CixEl", params=[Param(name="i", type="long")]
+                ),
+            ]
+        )
         result = compare(old, new)
         assert ChangeKind.OVERLOAD_ADDED in _kinds(result)
 
@@ -492,10 +533,14 @@ class TestOverloadAdded:
         """GNU ABI tags (`B5cxx11`, e.g. libstdc++ cxx11 std::string returns) are
         part of the unqualified name; a tagged overload must still group."""
         old = _snap(functions=[_method("C::get", "_ZN1C3getB5cxx11Ev")])
-        new = _snap(functions=[
-            _method("C::get", "_ZN1C3getB5cxx11Ev"),
-            _method("C::get", "_ZN1C3getB5cxx11Ei", params=[Param(name="i", type="int")]),
-        ])
+        new = _snap(
+            functions=[
+                _method("C::get", "_ZN1C3getB5cxx11Ev"),
+                _method(
+                    "C::get", "_ZN1C3getB5cxx11Ei", params=[Param(name="i", type="int")]
+                ),
+            ]
+        )
         result = compare(old, new)
         assert ChangeKind.OVERLOAD_ADDED in _kinds(result)
 
@@ -504,10 +549,14 @@ class TestOverloadAdded:
         adding a constructor overload is a compatible FUNC_ADDED, not the
         address-of-ambiguity OVERLOAD_ADDED."""
         old = _snap(functions=[_method("C", "_ZN1CC1Ev")])  # C::C()
-        new = _snap(functions=[
-            _method("C", "_ZN1CC1Ev"),
-            _method("C", "_ZN1CC1Ei", params=[Param(name="x", type="int")]),  # C::C(int)
-        ])
+        new = _snap(
+            functions=[
+                _method("C", "_ZN1CC1Ev"),
+                _method(
+                    "C", "_ZN1CC1Ei", params=[Param(name="x", type="int")]
+                ),  # C::C(int)
+            ]
+        )
         result = compare(old, new)
         assert ChangeKind.OVERLOAD_ADDED not in _kinds(result)
         assert ChangeKind.FUNC_ADDED in _kinds(result)
@@ -547,15 +596,19 @@ class TestOverloadAdded:
         ``A::size`` overload must still fire — the uniqueness test is per
         scope-qualified name, not the bare leaf (CastXML records both as
         ``size``)."""
-        old = _snap(functions=[
-            _method("size", "_ZN1A4sizeEv"),  # A::size (unique in its scope)
-            _method("size", "_ZN1B4sizeEv"),  # unrelated B::size, same leaf
-        ])
-        new = _snap(functions=[
-            _method("size", "_ZN1A4sizeEv"),
-            _method("size", "_ZN1B4sizeEv"),
-            _method("size", "_ZN1A4sizeEi"),  # A::size(int) overload added
-        ])
+        old = _snap(
+            functions=[
+                _method("size", "_ZN1A4sizeEv"),  # A::size (unique in its scope)
+                _method("size", "_ZN1B4sizeEv"),  # unrelated B::size, same leaf
+            ]
+        )
+        new = _snap(
+            functions=[
+                _method("size", "_ZN1A4sizeEv"),
+                _method("size", "_ZN1B4sizeEv"),
+                _method("size", "_ZN1A4sizeEi"),  # A::size(int) overload added
+            ]
+        )
         result = compare(old, new)
         assert ChangeKind.OVERLOAD_ADDED in _kinds(result)
 
@@ -563,35 +616,44 @@ class TestOverloadAdded:
 class TestItaniumScopeParser:
     """The structural Itanium parser must work with no external demangler."""
 
-    @pytest.mark.parametrize("mangled,expected", [
-        ("_Z4drawi", ["draw"]),                              # free function
-        ("_ZN1C3barEv", ["C", "bar"]),                       # member
-        ("_ZNK1C3barEv", ["C", "bar"]),                      # const member (NK)
-        ("_ZNV1C3barEv", ["C", "bar"]),                      # volatile member (NV)
-        ("_ZN3lib12experimental4sortEv", ["lib", "experimental", "sort"]),
-        ("_ZN3BoxIiE4sizeEv", ["BoxIiE", "size"]),           # Box<int>::size
-        ("_ZN3BoxIfE4sizeEv", ["BoxIfE", "size"]),           # Box<float>::size (distinct)
-        ("_ZNR1C1fEv", ["C", "f"]),                          # C::f() & (lvalue ref-qual)
-        ("_ZNO1C1fEv", ["C", "f"]),                          # C::f() && (rvalue ref-qual)
-        ("_ZN1CC1Ev", ["C", "{ctor}"]),                      # C::C() constructor
-        ("_ZN1CD1Ev", ["C", "{dtor}"]),                      # C::~C() destructor
-        ("_ZN5ArrayILi4EE4sizeEv", ["ArrayILi4EE", "size"]),  # Array<4>::size (non-type arg)
-        ("_ZN1C3getB5cxx11Ev", ["C", "getBcxx11"]),          # C::get[abi:cxx11]()
-        ("_ZSt5touchv", ["std", "touch"]),                   # std::touch(), no N...E wrapper
-        ("_ZNSt6detail3fooEv", ["std", "detail", "foo"]),    # std::detail::foo()
-        # Mach-O direct-clang mangled names carry an extra platform leading
-        # underscore (Codex review, fresh evidence: dumper_clang.py's own
-        # _visibility() docstring documents "__ZN3lib3addEii" on macOS).
-        ("__ZN1C3barEv", ["C", "bar"]),                      # Mach-O member
-        ("__ZSt5touchv", ["std", "touch"]),                  # Mach-O std::touch()
-        # Conversion operator (Codex review, fresh evidence): the "cv" code
-        # is followed by the target type's own encoding, which is not
-        # parsed -- only the scope prefix before "cv" is needed for owner
-        # recovery -- but the leaf label embeds the raw remainder verbatim
-        # (not a fixed placeholder) so distinct conversion targets still
-        # produce distinct overload-grouping keys elsewhere.
-        ("_ZNK3FoocvN2ns3BarEEv", ["Foo", "{op:cv:N2ns3BarEEv}"]),  # Foo::operator ns::Bar() const
-    ])
+    @pytest.mark.parametrize(
+        "mangled,expected",
+        [
+            ("_Z4drawi", ["draw"]),  # free function
+            ("_ZN1C3barEv", ["C", "bar"]),  # member
+            ("_ZNK1C3barEv", ["C", "bar"]),  # const member (NK)
+            ("_ZNV1C3barEv", ["C", "bar"]),  # volatile member (NV)
+            ("_ZN3lib12experimental4sortEv", ["lib", "experimental", "sort"]),
+            ("_ZN3BoxIiE4sizeEv", ["BoxIiE", "size"]),  # Box<int>::size
+            ("_ZN3BoxIfE4sizeEv", ["BoxIfE", "size"]),  # Box<float>::size (distinct)
+            ("_ZNR1C1fEv", ["C", "f"]),  # C::f() & (lvalue ref-qual)
+            ("_ZNO1C1fEv", ["C", "f"]),  # C::f() && (rvalue ref-qual)
+            ("_ZN1CC1Ev", ["C", "{ctor}"]),  # C::C() constructor
+            ("_ZN1CD1Ev", ["C", "{dtor}"]),  # C::~C() destructor
+            (
+                "_ZN5ArrayILi4EE4sizeEv",
+                ["ArrayILi4EE", "size"],
+            ),  # Array<4>::size (non-type arg)
+            ("_ZN1C3getB5cxx11Ev", ["C", "getBcxx11"]),  # C::get[abi:cxx11]()
+            ("_ZSt5touchv", ["std", "touch"]),  # std::touch(), no N...E wrapper
+            ("_ZNSt6detail3fooEv", ["std", "detail", "foo"]),  # std::detail::foo()
+            # Mach-O direct-clang mangled names carry an extra platform leading
+            # underscore (Codex review, fresh evidence: dumper_clang.py's own
+            # _visibility() docstring documents "__ZN3lib3addEii" on macOS).
+            ("__ZN1C3barEv", ["C", "bar"]),  # Mach-O member
+            ("__ZSt5touchv", ["std", "touch"]),  # Mach-O std::touch()
+            # Conversion operator (Codex review, fresh evidence): the "cv" code
+            # is followed by the target type's own encoding, which is not
+            # parsed -- only the scope prefix before "cv" is needed for owner
+            # recovery -- but the leaf label embeds the raw remainder verbatim
+            # (not a fixed placeholder) so distinct conversion targets still
+            # produce distinct overload-grouping keys elsewhere.
+            (
+                "_ZNK3FoocvN2ns3BarEEv",
+                ["Foo", "{op:cv:N2ns3BarEEv}"],
+            ),  # Foo::operator ns::Bar() const
+        ],
+    )
     def test_components(self, mangled, expected):
         assert itanium_scope_components(mangled) == expected
 
@@ -600,9 +662,9 @@ class TestItaniumScopeParser:
             "_ZN3BoxIfE4sizeEv"
         )
         # Non-type (integer) template args must also stay distinct per value.
-        assert itanium_qualified_name("_ZN5ArrayILi4EE4sizeEv") != itanium_qualified_name(
-            "_ZN5ArrayILi8EE4sizeEv"
-        )
+        assert itanium_qualified_name(
+            "_ZN5ArrayILi4EE4sizeEv"
+        ) != itanium_qualified_name("_ZN5ArrayILi8EE4sizeEv")
 
     def test_ref_qualified_overloads_share_a_key(self):
         # C::f() & and C::f() && are genuine overloads → same scope key.
@@ -616,8 +678,12 @@ class TestItaniumScopeParser:
         )
 
     def test_destructor_owner_resolves_from_mangled(self):
-        f = Function(name="~C", mangled="_ZN1CD1Ev",
-                     return_type="void", visibility=Visibility.PUBLIC)
+        f = Function(
+            name="~C",
+            mangled="_ZN1CD1Ev",
+            return_type="void",
+            visibility=Visibility.PUBLIC,
+        )
         assert owner_class_of(f) == "C"
 
     def test_conversion_operator_owner_resolves_from_mangled(self):
@@ -626,13 +692,21 @@ class TestItaniumScopeParser:
         # clang -ast-dump) -- owner_class_of must fall back to the mangled
         # name, whose "cv" code was previously unmodelled entirely (Codex
         # review, fresh evidence).
-        f = Function(name="operator Bar", mangled="_ZNK3FoocvN2ns3BarEEv",
-                     return_type="ns::Bar", visibility=Visibility.PUBLIC)
+        f = Function(
+            name="operator Bar",
+            mangled="_ZNK3FoocvN2ns3BarEEv",
+            return_type="ns::Bar",
+            visibility=Visibility.PUBLIC,
+        )
         assert owner_class_of(f) == "Foo"
 
     def test_conversion_operator_owner_resolves_with_namespaced_class(self):
-        f = Function(name="operator Bar", mangled="_ZNK2ns3FoocvN2ns3BarEEv",
-                     return_type="ns::Bar", visibility=Visibility.PUBLIC)
+        f = Function(
+            name="operator Bar",
+            mangled="_ZNK2ns3FoocvN2ns3BarEEv",
+            return_type="ns::Bar",
+            visibility=Visibility.PUBLIC,
+        )
         assert owner_class_of(f) == "ns::Foo"
 
     def test_bare_conversion_operator_with_qualified_target_falls_through(self):
@@ -643,19 +717,26 @@ class TestItaniumScopeParser:
         # the last "::" would wrongly treat the target's own qualification
         # as the owner/member boundary, returning junk like "operator ns"
         # instead of falling through to the mangled-name recovery.
-        f = Function(name="operator ns::Bar", mangled="_ZNK3FoocvN2ns3BarEEv",
-                     return_type="ns::Bar", visibility=Visibility.PUBLIC)
+        f = Function(
+            name="operator ns::Bar",
+            mangled="_ZNK3FoocvN2ns3BarEEv",
+            return_type="ns::Bar",
+            visibility=Visibility.PUBLIC,
+        )
         assert owner_class_of(f) == "Foo"
 
-    @pytest.mark.parametrize("mangled", [
-        "foo",            # not Itanium-mangled (C symbol)
-        "_ZN1C99barEv",   # length runs past the string (malformed)
-        "_Z1²0",     # fuzzed: Unicode digit must not reach int()
-        "_ZN1CplEv",      # operator+ — not modelled
-        "_ZN3BoxIiE",     # unterminated nested name after template args
-        "_ZN3BoxIi4sizeEv",  # template-arg list with no closing E (unbalanced)
-        "_ZN1C",          # truncated nested name
-    ])
+    @pytest.mark.parametrize(
+        "mangled",
+        [
+            "foo",  # not Itanium-mangled (C symbol)
+            "_ZN1C99barEv",  # length runs past the string (malformed)
+            "_Z1²0",  # fuzzed: Unicode digit must not reach int()
+            "_ZN1CplEv",  # operator+ — not modelled
+            "_ZN3BoxIiE",  # unterminated nested name after template args
+            "_ZN3BoxIi4sizeEv",  # template-arg list with no closing E (unbalanced)
+            "_ZN1C",  # truncated nested name
+        ],
+    )
     def test_unmodelled_or_degenerate_does_not_crash(self, mangled):
         # Must never raise; either parses to something or returns None.
         result = itanium_scope_components(mangled)
@@ -666,19 +747,64 @@ class TestItaniumScopeParser:
         assert itanium_qualified_name("_Z4drawi") == "draw"
 
     def test_owner_prefers_display_name(self):
-        f = Function(name="ns::C::bar", mangled="_ZN2ns1C3barEv",
-                     return_type="void", visibility=Visibility.PUBLIC)
+        f = Function(
+            name="ns::C::bar",
+            mangled="_ZN2ns1C3barEv",
+            return_type="void",
+            visibility=Visibility.PUBLIC,
+        )
         assert owner_class_of(f) == "ns::C"
 
     def test_owner_falls_back_to_mangled(self):
-        f = Function(name="bar", mangled="_ZN1C3barEv",
-                     return_type="void", visibility=Visibility.PUBLIC)
+        f = Function(
+            name="bar",
+            mangled="_ZN1C3barEv",
+            return_type="void",
+            visibility=Visibility.PUBLIC,
+        )
         assert owner_class_of(f) == "C"
 
     def test_owner_none_for_free_function(self):
-        f = Function(name="draw", mangled="_Z4drawi",
-                     return_type="void", visibility=Visibility.PUBLIC)
+        f = Function(
+            name="draw",
+            mangled="_Z4drawi",
+            return_type="void",
+            visibility=Visibility.PUBLIC,
+        )
         assert owner_class_of(f) is None
+
+    @pytest.mark.parametrize(
+        "mangled,expected",
+        [
+            ("_ZN1CC1Ev", "C1"),  # C::C()
+            ("_ZN1CD1Ev", "D1"),  # C::~C()
+            ("_ZN3BoxIiEC1Eii", "C1"),  # ctor with parameters
+            # buildsource.template_graph._ctor_dtor_symbol_variants's own
+            # motivating case (Codex review, fresh evidence): a class literally
+            # named C1Evil<int> embeds the literal substring "C1E" inside its
+            # own length-prefixed name ("6C1Evil"), *before* the real ctor
+            # code -- the structural walk must skip that whole identifier as
+            # one unit rather than pattern-matching into the middle of it.
+            ("_ZN6C1EvilIiEC1Ev", "C1"),
+        ],
+    )
+    def test_ctor_dtor_marker_span_locates_the_real_code(self, mangled, expected):
+        span = itanium_ctor_dtor_marker_span(mangled)
+        assert span is not None
+        start, end = span
+        assert mangled[start:end] == expected
+
+    @pytest.mark.parametrize(
+        "mangled",
+        [
+            "_Z4drawi",  # free function -- never a ctor/dtor
+            "_ZN1C3barEv",  # ordinary member function
+            "_ZN3BoxIiE5valueE",  # a variable, not a ctor/dtor
+            "foo",  # not Itanium-mangled at all
+        ],
+    )
+    def test_ctor_dtor_marker_span_none_when_not_a_ctor_dtor(self, mangled):
+        assert itanium_ctor_dtor_marker_span(mangled) is None
 
 
 class TestMsvcScopeParser:
@@ -686,29 +812,37 @@ class TestMsvcScopeParser:
     fresh evidence: confirmed against real ``clang --target=x86_64-pc-
     windows-msvc -Xclang -ast-dump=json`` output for every case below)."""
 
-    @pytest.mark.parametrize("mangled,expected", [
-        ("?run@Foo@@QEAAXXZ", ["Foo", "run"]),                    # Foo::run()
-        ("?freefunc@ns@@YAXXZ", ["ns", "freefunc"]),              # ns::freefunc()
-        ("?method@Box@inner@outer@@QEAAXXZ",
-         ["outer", "inner", "Box", "method"]),                    # outer::inner::Box::method()
-        ("?instantiate@@YAXXZ", ["instantiate"]),                 # global free function
-        ("?vf@Base@@UEAAXXZ", ["Base", "vf"]),                    # virtual member
-        ("?f@A@@QEAAXXZ", ["A", "f"]),                            # single-letter class name
-        ("?g@A@N@@QEAAXXZ", ["N", "A", "g"]),                     # N::A::g()
-    ])
+    @pytest.mark.parametrize(
+        "mangled,expected",
+        [
+            ("?run@Foo@@QEAAXXZ", ["Foo", "run"]),  # Foo::run()
+            ("?freefunc@ns@@YAXXZ", ["ns", "freefunc"]),  # ns::freefunc()
+            (
+                "?method@Box@inner@outer@@QEAAXXZ",
+                ["outer", "inner", "Box", "method"],
+            ),  # outer::inner::Box::method()
+            ("?instantiate@@YAXXZ", ["instantiate"]),  # global free function
+            ("?vf@Base@@UEAAXXZ", ["Base", "vf"]),  # virtual member
+            ("?f@A@@QEAAXXZ", ["A", "f"]),  # single-letter class name
+            ("?g@A@N@@QEAAXXZ", ["N", "A", "g"]),  # N::A::g()
+        ],
+    )
     def test_components(self, mangled, expected):
         assert msvc_scope_components(mangled) == expected
 
-    @pytest.mark.parametrize("mangled", [
-        "foo",                             # not MSVC-mangled (no leading ?)
-        "??0Box@inner@outer@@QEAA@XZ",      # constructor -- not modelled
-        "??_DBox@inner@outer@@QEAAXXZ",     # destructor -- not modelled
-        "??4Base@@QEAAAEAU0@AEBU0@@Z",      # operator= -- not modelled
-        "?go@?$Wrapper@H@@QEAAXXZ",         # template class -- not modelled
-        "??0?$Wrapper@H@@QEAA@XZ",          # template ctor -- not modelled
-        "?run@Foo@",                        # missing "@@" terminator
-        "?@@YAXXZ",                         # empty leaf name
-    ])
+    @pytest.mark.parametrize(
+        "mangled",
+        [
+            "foo",  # not MSVC-mangled (no leading ?)
+            "??0Box@inner@outer@@QEAA@XZ",  # constructor -- not modelled
+            "??_DBox@inner@outer@@QEAAXXZ",  # destructor -- not modelled
+            "??4Base@@QEAAAEAU0@AEBU0@@Z",  # operator= -- not modelled
+            "?go@?$Wrapper@H@@QEAAXXZ",  # template class -- not modelled
+            "??0?$Wrapper@H@@QEAA@XZ",  # template ctor -- not modelled
+            "?run@Foo@",  # missing "@@" terminator
+            "?@@YAXXZ",  # empty leaf name
+        ],
+    )
     def test_unmodelled_or_degenerate_does_not_crash(self, mangled):
         result = msvc_scope_components(mangled)
         assert result is None or isinstance(result, list)
@@ -720,13 +854,21 @@ class TestMsvcScopeParser:
     def test_owner_falls_back_to_msvc_mangled(self):
         # clang-cl records a bare AST name (like CastXML) but MSVC mangling
         # (unlike CastXML's Itanium mangling) -- owner_class_of must try both.
-        f = Function(name="run", mangled="?run@Foo@@QEAAXXZ",
-                     return_type="void", visibility=Visibility.PUBLIC)
+        f = Function(
+            name="run",
+            mangled="?run@Foo@@QEAAXXZ",
+            return_type="void",
+            visibility=Visibility.PUBLIC,
+        )
         assert owner_class_of(f) == "Foo"
 
     def test_owner_none_for_unscoped_msvc_free_function(self):
-        f = Function(name="instantiate", mangled="?instantiate@@YAXXZ",
-                     return_type="void", visibility=Visibility.PUBLIC)
+        f = Function(
+            name="instantiate",
+            mangled="?instantiate@@YAXXZ",
+            return_type="void",
+            visibility=Visibility.PUBLIC,
+        )
         assert owner_class_of(f) is None
 
     def test_owner_treats_namespaced_msvc_free_function_scope_as_owner(self):
@@ -735,11 +877,19 @@ class TestMsvcScopeParser:
         # syntactically tell a namespace from a class): a namespaced free
         # function's enclosing scope resolves the same way a method's owning
         # class would, for both mangling schemes alike.
-        f = Function(name="freefunc", mangled="?freefunc@ns@@YAXXZ",
-                     return_type="void", visibility=Visibility.PUBLIC)
+        f = Function(
+            name="freefunc",
+            mangled="?freefunc@ns@@YAXXZ",
+            return_type="void",
+            visibility=Visibility.PUBLIC,
+        )
         assert owner_class_of(f) == "ns"
 
     def test_owner_none_for_msvc_constructor(self):
-        f = Function(name="Box", mangled="??0Box@inner@outer@@QEAA@XZ",
-                     return_type="void", visibility=Visibility.PUBLIC)
+        f = Function(
+            name="Box",
+            mangled="??0Box@inner@outer@@QEAA@XZ",
+            return_type="void",
+            visibility=Visibility.PUBLIC,
+        )
         assert owner_class_of(f) is None
