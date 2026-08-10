@@ -1199,7 +1199,7 @@ Implements ADR-050 D1 and D2.
   failure mode than the previous six, and it needs its own fix.**
   `stack_checker.py:32` imports `compare` from `checker` (not through
   `service.compare_snapshots`), driving `abicheck deps compare`.
-  `_run_abi_diff` (`:396-410`) wraps its whole body — both the `dump()`
+  `_run_abi_diff` (`:397-410`) wraps its whole body — both the `dump()`
   calls and the `compare()` call — in one broad `except Exception as exc:
   log.warning(...); return None`. Verified against the actual code: a
   `ProfileMismatchError`/`ScopeMismatchError` from a changed dependency DSO

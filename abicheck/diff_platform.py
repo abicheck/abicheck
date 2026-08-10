@@ -71,6 +71,7 @@ from .model import (
     stdlib_namespaces_excluded,
 )
 from .name_classification import RTTI_DATA_PREFIXES
+from .symbol_linkage import vague_linkage_export_dropped
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
     from collections.abc import Set as AbstractSet
@@ -1900,6 +1901,18 @@ def _diff_elf_deleted_fallback(old: AbiSnapshot, new: AbiSnapshot) -> list[Chang
         # FUNC_BECAME_INLINE detector (API_BREAK) fires separately for the
         # source-level concern; this detector adds FUNC_DELETED_ELF_FALLBACK
         # (BREAKING) for the binary-level concern.
+        #
+        # The one exception is the case that reasoning does not hold for: a
+        # *weak* (vague-linkage/COMDAT) old symbol whose entity the new
+        # headers still define inline. A pre-compiled consumer of such an
+        # entity carries its own definition -- the language required it to --
+        # so the disappearing export does not break it.
+        # `_check_removed_function` reports that event once, at risk
+        # severity, as FUNC_EXPORT_DROPPED_INLINE_AVAILABLE; emitting a
+        # BREAKING finding for the same symbol here would both double-report
+        # it and dominate the verdict, undoing the demotion.
+        if vague_linkage_export_dropped(f_old, f_new):
+            continue
 
         # Skip if function moved to hidden visibility — FUNC_VISIBILITY_CHANGED handles it
         if getattr(f_new, "visibility", None) == Visibility.HIDDEN:

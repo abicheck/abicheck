@@ -30,7 +30,7 @@ from typing import TYPE_CHECKING, Any
 
 from .elf_symbol_filter import is_abi_relevant_elf_symbol
 from .errors import SnapshotError
-from .model import AbiSnapshot, ElfVisibility, is_cxx_runtime_library
+from .model import AbiSnapshot, ElfBinding, ElfVisibility, is_cxx_runtime_library
 
 if TYPE_CHECKING:
     from .elf_metadata import ElfMetadata
@@ -42,9 +42,25 @@ _ELF_VIS_MAP: dict[str, ElfVisibility] = {
     "internal": ElfVisibility.INTERNAL,
 }
 
+#: `SymbolBinding` -> the model's own enum. Deliberately partial: LOCAL and
+#: OTHER have no entry, so they map to None ("not a binding this diff reasons
+#: about") rather than being silently coerced to a strong one. A `.get()` miss
+#: must stay indistinguishable from "not captured".
+_ELF_BINDING_MAP: dict[str, ElfBinding] = {
+    "global": ElfBinding.GLOBAL,
+    "weak": ElfBinding.WEAK,
+    "unique": ElfBinding.UNIQUE,
+}
+
 
 def _populate_elf_visibility(snap: AbiSnapshot) -> None:
-    """Populate elf_visibility on Function/Variable from ELF metadata symbols."""
+    """Populate elf_visibility/elf_binding on Function/Variable from ELF symbols.
+
+    Both come off the same ``.dynsym`` entry, so they are read in one pass. A
+    declaration with no matching symbol keeps ``None`` on both: header-only
+    declarations and non-ELF platforms must stay "not captured" rather than
+    defaulting to a value a detector would read as positive evidence.
+    """
     if snap.elf is None:
         return
     sym_map = snap.elf.symbol_map
@@ -52,10 +68,12 @@ def _populate_elf_visibility(snap: AbiSnapshot) -> None:
         elf_sym = sym_map.get(func.mangled)
         if elf_sym is not None:
             func.elf_visibility = _ELF_VIS_MAP.get(elf_sym.visibility)
+            func.elf_binding = _ELF_BINDING_MAP.get(elf_sym.binding.value)
     for var in snap.variables:
         elf_sym = sym_map.get(var.mangled)
         if elf_sym is not None:
             var.elf_visibility = _ELF_VIS_MAP.get(elf_sym.visibility)
+            var.elf_binding = _ELF_BINDING_MAP.get(elf_sym.binding.value)
 
 
 def _elf_classify_symbols(

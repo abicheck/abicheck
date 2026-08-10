@@ -76,6 +76,10 @@ EVIDENCE_TIER_BY_KIND: dict[str, str] = {
     # ── L0: visible in the exported symbol table / linker metadata alone ──
     "func_removed": "L0",
     "func_removed_elf_only": "L0",
+    # L2, not L0: the export table alone shows the symbol gone. What makes
+    # this kind *this* kind rather than func_removed is the new side's header
+    # still declaring the entity inline, which only header evidence carries.
+    "func_export_dropped_inline_available": "L2",
     "func_added": "L0",
     "var_added": "L0",
     "var_removed": "L0",

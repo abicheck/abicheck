@@ -115,6 +115,28 @@ class ElfVisibility(str, Enum):
     INTERNAL = "internal"  # STV_INTERNAL
 
 
+class ElfBinding(str, Enum):
+    """ELF st_info binding from .dynsym — separate from visibility above.
+
+    The distinction that matters to the diff is strong vs. *vague* linkage. A
+    ``WEAK`` definition of a C++ entity is what the compiler emits for
+    something the language requires every using translation unit to define
+    for itself — an inline function, a template instantiation, an implicit
+    special member — placed in a COMDAT group so the linker keeps one copy.
+    A consumer of such an entity therefore carries its own definition, which
+    is why that export disappearing is not the same event as a strong
+    definition disappearing.
+
+    ``UNIQUE`` (STB_GNU_UNIQUE) is deliberately *not* folded into WEAK: it is
+    a strong, process-wide-unique definition, and the GNU extension exists
+    precisely to stop each consumer using its own copy.
+    """
+
+    GLOBAL = "global"  # STB_GLOBAL — strong definition
+    WEAK = "weak"  # STB_WEAK — vague/COMDAT linkage
+    UNIQUE = "unique"  # STB_GNU_UNIQUE — strong, process-wide unique
+
+
 class AccessLevel(str, Enum):
     PUBLIC = "public"
     PROTECTED = "protected"
@@ -180,6 +202,11 @@ class Function:
     access: AccessLevel = AccessLevel.PUBLIC  # public/protected/private
     return_pointer_depth: int = 0  # T=0, T*=1, T**=2
     elf_visibility: ElfVisibility | None = None  # ELF st_other (populated from .dynsym)
+    # ELF st_info binding (populated from .dynsym). Tri-state: None = not
+    # captured (non-ELF platforms, header-only declarations, older
+    # snapshots), so a detector must treat it as "unknown" and never as
+    # "strong" -- see ElfBinding for why WEAK is the load-bearing value.
+    elf_binding: ElfBinding | None = None
     ref_qualifier: str = ""  # "" (none), "&" (lvalue), "&&" (rvalue)
     # explicit specifier on constructors / conversion operators (DW_AT_explicit /
     # castxml @explicit). Tri-state to keep "unknown" distinct from "implicit":
@@ -264,6 +291,11 @@ class Variable:
     value: str | None = None  # initial value (compile-time constant, if known)
     access: AccessLevel = AccessLevel.PUBLIC  # public/protected/private
     elf_visibility: ElfVisibility | None = None  # ELF st_other (populated from .dynsym)
+    # ELF st_info binding (populated from .dynsym). Tri-state: None = not
+    # captured (non-ELF platforms, header-only declarations, older
+    # snapshots), so a detector must treat it as "unknown" and never as
+    # "strong" -- see ElfBinding for why WEAK is the load-bearing value.
+    elf_binding: ElfBinding | None = None
     # Provenance (ADR-015, schema v6) — see Function.source_header.
     source_header: str | None = None
     origin: ScopeOrigin = ScopeOrigin.UNKNOWN

@@ -90,6 +90,8 @@ ASSERTED_CHANGE_KINDS: set[ChangeKind] = {
     ChangeKind.FUNC_PURE_VIRTUAL_ADDED,
     ChangeKind.FUNC_REMOVED,
     ChangeKind.FUNC_REMOVED_ELF_ONLY,
+    # Covered by tests/test_vague_linkage_export.py (predicate + compare-level)
+    ChangeKind.FUNC_EXPORT_DROPPED_INLINE_AVAILABLE,
     ChangeKind.FUNC_RETURN_CHANGED,
     ChangeKind.FUNC_STATIC_CHANGED,
     ChangeKind.FUNC_VIRTUAL_ADDED,

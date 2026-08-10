@@ -21,7 +21,7 @@ they are.
 ## What is abicheck?
 
 ABI compatibility checker for C/C++ shared libraries. Pure Python (3.10+).
-Detects 396 ABI/API change types across ELF, PE/COFF, and Mach-O binaries,
+Detects 397 ABI/API change types across ELF, PE/COFF, and Mach-O binaries,
 categorized into `BREAKING_KINDS`, `API_BREAK_KINDS`, `COMPATIBLE_KINDS`, and `RISK_KINDS` (see `ChangeKind`).
 Drop-in replacement for abi-compliance-checker (ABICC).
 
@@ -490,7 +490,7 @@ cover the surrounding first-party trees this file doesn't detail.
 
 - `AbiSnapshot` (`model.py`) — serializable snapshot of a library's ABI surface
 - `DiffResult` (`checker_types.py`) — single detected change with kind, severity, details
-- `ChangeKind` (`checker_policy.py`) — enum of 396 change types; categorized into `BREAKING_KINDS`, `API_BREAK_KINDS`, `RISK_KINDS`, and `COMPATIBLE_KINDS` (further split into `ADDITION_KINDS` and `QUALITY_KINDS`)
+- `ChangeKind` (`checker_policy.py`) — enum of 397 change types; categorized into `BREAKING_KINDS`, `API_BREAK_KINDS`, `RISK_KINDS`, and `COMPATIBLE_KINDS` (further split into `ADDITION_KINDS` and `QUALITY_KINDS`)
 - `Verdict` (`checker.py`) — overall comparison result (compatible/source_break/breaking)
 - `LibraryMetadata` (`checker.py`) — parsed library info
 
@@ -729,6 +729,42 @@ Once a root command genuinely clears the bar above, pick the right home:
 - Full per-command matrix: `docs/reference/exit-codes.md`
 
 ## Known gaps — acknowledged remaining work
+
+- **Linkage-blind removal — closed for ELF functions; variables and the
+  non-ELF platforms are not.** A symbol vanishing from the export table was
+  reported as `func_removed` (and, on the same symbol,
+  `func_deleted_elf_fallback`) regardless of its *linkage*, so a weak
+  vague-linkage/COMDAT export — an inline function, a template instantiation,
+  an implicit special member — read as a hard break even when the new headers
+  still defined the entity inline. Fixed by capturing the ELF binding
+  (`Function.elf_binding`/`Variable.elf_binding`, schema v21, read from the
+  same `.dynsym` entry as the existing `elf_visibility`) and demoting that one
+  shape to `func_export_dropped_inline_available`
+  (`COMPATIBLE_WITH_RISK`) in `abicheck/symbol_linkage.py`. Three things
+  about it are worth not rediscovering. (1) The demotion rests on "the header
+  still defines it, so a user emits its own copy" — for which the new side's
+  inline declaration is direct evidence — and deliberately **not** on "nobody
+  uses it", which two snapshots cannot show. (2) `elf_binding` is tri-state and
+  `None` (non-ELF, header-only, pre-v21) is never read as a binding, so the
+  demotion stays inert wherever the evidence is absent; `STB_GNU_UNIQUE` is
+  kept distinct from `WEAK` rather than folded in, since it is a strong,
+  process-wide-unique definition whose whole purpose is to stop each consumer
+  using its own copy. (3) The predicate lives in a leaf module rather than in
+  `diff_symbols`, because **two** detectors in two files observe this same
+  event and must agree: `diff_platform`'s ELF-fallback detector independently
+  re-reported the same symbol at `BREAKING` and dominated the verdict, so a
+  first attempt that fixed only `diff_symbols` changed the finding list and
+  left the verdict wrong. A predicate-level unit test could not see that; the
+  regression coverage is a `compare()`-level test plus three FP-corpus cases
+  (one FP guard, two FN sentinels) under the `evidence-absence` axis.
+  **Still open, deliberately not attempted in the same change:** the same
+  demotion for *variables* (`Variable.elf_binding` is captured, but no
+  variable-removal detector consults it — a weak exported variable is a
+  different judgement call, since a consumer's own copy of a mutable object is
+  a behaviour change rather than a resolution one, and that needs its own
+  design); and the non-ELF platforms (PE has no equivalent of a weak dynamic
+  export, and Mach-O's `N_WEAK_DEF` is captured nowhere in the model yet), so
+  a PE/Mach-O snapshot keeps the pre-existing behaviour in full.
 
 - **Default dependency scoping (PR #649) vs. contextual reachability
   (`type_reachability.py`) — the direct-reference conflict is fixed; the

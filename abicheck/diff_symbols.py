@@ -109,6 +109,7 @@ from .model import (
     stdlib_namespaces_excluded,
 )
 from .name_classification import is_local_rtti_symbol
+from .symbol_linkage import check_removed_function
 
 # Visibility levels that constitute the public ABI surface.
 _PUBLIC_VIS = (Visibility.PUBLIC, Visibility.ELF_ONLY)
@@ -262,39 +263,6 @@ def _format_params(params: list[Param]) -> str:
     """
     parts = [p.type for p in params]
     return ", ".join(parts) if parts else "(none)"
-
-
-def _check_removed_function(
-    mangled: str,
-    f_old: Function,
-    new_all: dict[str, Function],
-    elf_only_mode: bool,
-) -> Change:
-    """Create a Change for a function that was removed or hidden."""
-    f_hidden = new_all.get(mangled)
-    if (
-        f_hidden is not None
-        and f_hidden.visibility == Visibility.HIDDEN
-        and not (elf_only_mode and f_old.visibility == Visibility.ELF_ONLY)
-    ):
-        return make_change(
-            ChangeKind.FUNC_VISIBILITY_CHANGED,
-            symbol=mangled,
-            name=f_old.name,
-            old_value=f_old.visibility.value,
-            new_value=f_hidden.visibility.value,
-        )
-    removed_kind = (
-        ChangeKind.FUNC_REMOVED_ELF_ONLY
-        if (elf_only_mode and f_old.visibility == Visibility.ELF_ONLY)
-        else ChangeKind.FUNC_REMOVED
-    )
-    return make_change(
-        removed_kind,
-        symbol=mangled,
-        description=f"{f_old.visibility.value.capitalize()} function removed: {f_old.name}",
-        old_value=f_old.name,
-    )
 
 
 def _check_return_type_change(
@@ -820,7 +788,7 @@ def _match_old_function(
         matched_by_name.add(f_old.name)
         return result
 
-    return [_check_removed_function(mangled, f_old, new_all, elf_only_mode)]
+    return [check_removed_function(mangled, f_old, new_all, elf_only_mode)]
 
 
 def _detect_newly_deleted_functions(

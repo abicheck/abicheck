@@ -49,7 +49,7 @@ def _load(name: str):
     return module
 
 
-_load("check_fp_rate")  # measure_contract_shadow imports the corpus from it
+fp_corpus = _load("check_fp_rate")  # measure_contract_shadow imports the corpus from it
 platform_corpus = _load("contract_platform_corpus")
 shadow = _load("measure_contract_shadow")
 
@@ -391,7 +391,27 @@ class TestPhase6CorpusCoverage:
             # appearing means the fixture invented a spelling no real
             # snapshot can hold (Codex review found exactly that on macho).
             assert counts["unresolved"] == 0, f"{lane} left findings unresolved"
-        assert lanes["fp_corpus"]["resolved"] == 0
+        # The FP-rate corpus resolved nothing here for most of its life --
+        # it carries no export tables, and that contrast against the platform
+        # lanes is the honest signal. The vague-linkage cases are a deliberate
+        # exception: the demotion they guard is only reachable once an export
+        # table narrows the public function map, so they must carry one.
+        # Derived rather than pinned to a count, so a new case cannot quietly
+        # move the number and keep passing.
+        export_carrying = {
+            case.name
+            for case in fp_corpus.CORPUS
+            if any(
+                getattr(side, "elf", None) is not None
+                and getattr(side.elf, "symbols", None)
+                for side in case.build()
+            )
+        }
+        assert export_carrying, (
+            "the vague-linkage cases must carry an export table to reach the "
+            "detector they guard -- if they stopped, they are now vacuous"
+        )
+        assert lanes["fp_corpus"]["resolved"] > 0
 
     def test_the_exports_domain_proves_something_out_of_contract(self) -> None:
         """Without this the `exports` domain could pass every gate while

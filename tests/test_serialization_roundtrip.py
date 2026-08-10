@@ -224,7 +224,7 @@ class TestHeaderCvFactsReliableRoundTrip:
 
         snap = _make_snap()
         j = json.loads(snapshot_to_json(snap))
-        assert j["schema_version"] == SCHEMA_VERSION == 20
+        assert j["schema_version"] == SCHEMA_VERSION == 21
 
     def test_legacy_castxml_header_snapshot_loads_as_unreliable(self) -> None:
         d = _minimal_dict(schema_version=8, from_headers=True, ast_producer="castxml")
@@ -293,7 +293,7 @@ class TestHeaderCvFactsReliableRoundTrip:
         assert legacy.header_cv_facts_reliable is False
 
         reserialized = snapshot_to_dict(legacy)
-        assert reserialized["schema_version"] == 20
+        assert reserialized["schema_version"] == 21
         assert reserialized["header_cv_facts_reliable"] is False
 
         reloaded = snapshot_from_dict(reserialized)
@@ -383,7 +383,7 @@ class TestClangDeprecationFactsReliableRoundTrip:
         assert legacy.clang_deprecation_facts_reliable is False
 
         reserialized = snapshot_to_dict(legacy)
-        assert reserialized["schema_version"] == 20
+        assert reserialized["schema_version"] == 21
         assert reserialized["clang_deprecation_facts_reliable"] is False
 
         reloaded = snapshot_from_dict(reserialized)
@@ -510,7 +510,7 @@ class TestClangFieldInitializerFactsReliableRoundTrip:
         assert legacy.clang_field_initializer_facts_reliable is False
 
         reserialized = snapshot_to_dict(legacy)
-        assert reserialized["schema_version"] == 20
+        assert reserialized["schema_version"] == 21
         assert reserialized["clang_field_initializer_facts_reliable"] is False
 
         reloaded = snapshot_from_dict(reserialized)
