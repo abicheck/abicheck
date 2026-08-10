@@ -140,6 +140,9 @@ envelope, and the runner extracts it into `claim.json`:
   expresses that (`shared/compatibility-contracts.md`). Not a boolean: a
   green/not-green field would erase the ABI-vs-source distinction the whole
   skill exists to make.
+- `matrix`, for a release-scope answer: the targets enumerated and the state
+  of each, so an unrun cell is a recorded fact rather than an omission. Absent
+  for a single-pair question, which has no matrix.
 - `evidence`, the call IDs from `calls.jsonl` the claim rests on.
 - `confident`, and when false, what is unresolved — this is what dimension 2
   grades against, so an agent that correctly declines to answer has a way to
@@ -327,8 +330,8 @@ agent-evals/skills/runs/<run-id>/<scenario>/<k>/
 ```
 
 Grading over dimensions 1, 2, 3 and 6 is a **pure function of the bundle** —
-those four graders read `calls.jsonl`, `reports/`, and `final.md` and call no
-model. Dimensions 4 and 5 are judged, so their *first* evaluation is not
+those four graders read `calls.jsonl`, the per-call artifacts under
+`captured/`, `claim.json`, and `final.md`, and call no model. Dimensions 4 and 5 are judged, so their *first* evaluation is not
 reproducible from the bundle alone; what the bundle carries is their **recorded
 verdict**, stamped with the judge model and rubric version that produced it.
 
@@ -472,6 +475,19 @@ the third and would have failed an agent for being right:
   must be `null` with the reason carried; any ordinal verdict fails.
 - **Incomplete evidence for the depth the question needs** — a verdict may be
   stated, but `claim.confident` must be false and name what is unresolved.
+- **An unrun matrix target** — the release skill's own outcome shape
+  (`native-release-compatibility/SKILL.md`) records five per-cell states, and
+  **"not run" is *unknown*, and it blocks** — explicitly not collapsible into
+  pass. This is not expressible as an ordinal `claim.verdict` at all: the
+  executed cells can legitimately all be `COMPATIBLE` while the release
+  verdict is still unknown, and `aggregate.py` keeps the gap in its own
+  `missing_required_targets` field rather than in any verdict. So the claim
+  envelope carries a separate `matrix` block — enumerated targets and any
+  unrun ones — and dimension 2 requires that an unrun required target be
+  reported and that the executed cells' verdict **not** be presented as the
+  release's. Without this, an agent reporting "compatible" across the cells it
+  ran, silently dropping the one that never ran, passes all three rules below
+  — a false green none of them was shaped to catch.
 - **Contract-coverage failure** — a definite verdict is *correct here and must
   be kept*. ADR-049 Phase 7 makes coverage an axis orthogonal to compatibility:
   it raises a clean `0` to `1`, never lowers a `2`/`4`, and never rewrites a
@@ -515,13 +531,17 @@ requires L2 evidence, or a `--contract-evaluation` run whose selected
 `--contract` domain cannot be closed. They get explicit records in
 `agent-evals/skills/scenarios.yaml` with their own fixtures.
 
-**Each of dimension 2's three uncertainty kinds (D4) needs its own scenario,
-or a zero-tolerance rule gates on nothing.** The first three entries above are
-exactly those three, and the third was missing until this review round: an
+**Each of dimension 2's four uncertainty kinds (D4) needs its own scenario,
+or a zero-tolerance rule gates on nothing.** The first three entries above and
+the last (`missing matrix target`) are exactly those four. The third was
+missing until this review round: an
 earlier draft claimed "missing matrix target" covered the contract-coverage
 kind, which it does not — that scenario exercises *release-matrix assurance*
 (an unrun target in a multi-platform release), a different mechanism entirely.
-Contract coverage is `contract_coverage_ledger.py`'s unsuppressible ledger:
+(The matrix case is the fourth kind, not the third — an unrun cell is
+`aggregate.py`'s `missing_required_targets`, release-matrix assurance;
+contract coverage is a different mechanism, below.) Contract coverage is
+`contract_coverage_ledger.py`'s unsuppressible ledger:
 it exists only under `--contract-evaluation`, is answered per selected
 `--contract` domain, and surfaces as `contract_coverage_failures` plus the
 orthogonal exit contribution. A scenario for it must therefore *run*
