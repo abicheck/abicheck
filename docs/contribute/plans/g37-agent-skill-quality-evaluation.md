@@ -110,7 +110,7 @@ happens in a sandbox where `abicheck` is a *recording shim*, the harness gets
 the exact argv, exit code, and produced report of every call — and the ground
 truth for the fixture is already in `examples/ground_truth.json`, whose per-case
 records carry `expected`, `expected_kinds`, `min_evidence` and `platforms`
-(the case count is that file's to state, not this plan's). Most of the
+(the number of cases is owned by that file, not restated here). Most of the
 rubric is then a deterministic assertion, not a judge call. Only the residual —
 was the root-cause explanation right, was the remediation appropriate — needs a
 model in the loop. Maximizing the deterministic fraction is what makes this
@@ -333,10 +333,13 @@ shape:
 
 ```text
 agent-evals/skills/runs/<run-id>/<scenario>/<k>/
-  meta.json          agent, model, seed/temperature, and every hash D6's freshness
-                     check reads: this skill's tree hash, the abicheck build hash, and
-                     one entry per scenario exercised (scenario record + fixture
-                     closure), and the live-trigger corpus hash for L1l evidence
+  meta.json          agent, model, seed/temperature; **every** hash D6's freshness
+                     check reads — this skill's tree hash, one entry per scenario
+                     exercised (scenario record + fixture closure), the live-trigger
+                     corpus hash, the abicheck build-surface hash, and the harness
+                     hash (runner instructions, launch configuration, agent/model
+                     identifiers, recording shim); plus the runner-declared input
+                     set D6's completeness and mapping checks run against
   prompt.txt         the verbatim user request
   events.jsonl       normalized agent events: which skill activated, which skill files
                      were read, tool calls in order — the L1l evidence (see below)
@@ -479,8 +482,13 @@ current comparison, clearing nothing. Capturing everything present would
 attribute an earlier call's per-library report to this one, and replay would
 accept it as this call's evidence — the same misattribution the per-call
 snapshot exists to prevent, reintroduced one level up. So the shim records the
-directory's entries and mtimes *before* spawning and captures only what is new
-or modified when the child exits. Redirecting each call to a private directory
+directory's entries and their content digests *before* spawning and captures
+what is new or whose digest changed when the child exits. **Digests, not
+mtimes**: a report overwritten within the filesystem's timestamp granularity —
+plausible for exactly the rapid iterative calls this addresses, and more so on
+coarse-resolution or network filesystems — keeps its mtime while its contents
+differ, so an mtime comparison would silently omit that call's own report from
+the snapshot and leave replay short of the evidence it is meant to preserve. Redirecting each call to a private directory
 was rejected: the agent reads that path back in later steps, so relocating it
 would change the workflow being measured. **Requiring `-o` instead was
 rejected**: that would make the harness measure a command shape the skills do
@@ -497,8 +505,8 @@ zero-tolerance and baseline is its safety model.
 | 1 | Correct workflow chosen (right skill, right branch within it) | deterministic — `events.jsonl`'s activation record for *which* skill, plus recorded argv shape vs. the scenario's expected invocation class for *which branch*; degrades to the argv half alone under D3's tier 2 | baseline / non-regression |
 | 2 | **Uncertainty preserved** | deterministic, and **per uncertainty kind** — see below; a not-comparable artifact must not be answered with a definite verdict, while a contract-coverage failure must be *carried* rather than dropped | **zero tolerance, all `k` runs** |
 | 3 | Deterministic evidence obtained | deterministic — at least one real abicheck run over the right two sides; a claim with an empty `calls.jsonl` fails outright | baseline / non-regression |
-| 4 | Root-cause explanation correct | judged (LLM panel) against the fixture's `expected_kinds` | baseline / non-regression |
-| 5 | Appropriate remediation proposed | judged | baseline / non-regression |
+| 4 | Root-cause explanation correct | judged (LLM panel) against the fixture's `expected_kinds` | baseline / non-regression, **at publication only** |
+| 5 | Appropriate remediation proposed | judged | baseline / non-regression, **at publication only** |
 | 6 | **No compatibility claim without sufficient evidence** | deterministic — claim-vs-artifact-vs-ground-truth consistency, plus suppression-flag inspection | **zero tolerance, all `k` runs** |
 
 **Dimension 2 grades three different uncertainties by three different rules,
@@ -544,6 +552,23 @@ The other four use the established baseline/non-regression model (the same
 shape as `SURVIVOR_BASELINE` and the FP-rate gate), with the baseline recorded
 per (skill, agent, model) triple — a model change re-baselines dimensions 1,
 3, 4, 5 and never relaxes 2 or 6.
+
+**Where each dimension gates differs, and dimensions 4 and 5 gate at
+publication only.** `--no-judge` is the intended everyday posture (Cost
+model), so an ordinary refreshed bundle carries no current judgments — which
+would leave CI either silently bypassing two gates or rejecting every bundle
+produced the normal way. Neither is acceptable, so the split is explicit:
+
+- **Merge evidence** is gated on dimensions 1, 2, 3 and 6 — the four
+  deterministic ones, including both zero-tolerance ones. A bundle without
+  judgments is complete evidence for that gate, not a deficient one.
+- **Publication (Phase 6)** additionally requires dimensions 4 and 5 at or
+  above baseline, which is why the pre-publication full pass runs *with*
+  judges and records `judgments.json`.
+
+This is the same principle the cost model states from the other side — what
+blocks a merge costs nothing to check — made explicit in the rubric so a
+reader cannot infer a merge gate that no lane runs.
 
 ### D5 — Scenario corpus: two categories, as G36 P1.1 correctly identified
 
@@ -751,7 +776,11 @@ agent-evals/
       transcript-bundle.schema.json  the bundle shape every runner must emit
       claim.schema.json              the final-answer verdict envelope (D3)
       rubric.schema.json             six dimensions, grader kind, gating mode
-    shim/abicheck                    recording shim (argv + exit + report digest)
+    shim/abicheck                    recording shim: argv/cwd, exit status, teed
+                                     stdout+stderr with digests, persisted stdout,
+                                     per-call immutable snapshots of `-o` and
+                                     `--output-dir` output, provisional record kept
+                                     on shim failure after spawn (all per D3)
     runners/
       claude_code.py                 headless Claude Code runner
       codex.py                       (Phase 4)
@@ -761,7 +790,12 @@ agent-evals/
       judged.py                      dimensions 4, 5 (model in the loop)
     run_skill_eval.py                live runner entry point (off-CI, maintainer-run)
     grade_bundle.py                  replay grader entry point (no model for 1,2,3,6)
-    baselines/<agent>-<model>.json   per-triple baselines for dimensions 1,3,4,5
+    baselines/<skill>-<agent>-<model>.json
+                                     per-triple baselines for dimensions 1,3,4,5 —
+                                     the skill is in the path because D4 defines the
+                                     baseline per (skill, agent, model); a file keyed
+                                     on two of the three lets one skill consume or
+                                     overwrite another's
     evidence/<skill>/                committed transcript bundles — the merge evidence
     golden/                          curated transcript bundles, good and bad (L4)
 scripts/

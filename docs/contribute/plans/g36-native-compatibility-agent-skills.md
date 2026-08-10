@@ -1324,9 +1324,19 @@ describes what actually exists.
 > therefore **not** the paths to build; see G37's "Files & surfaces".
 
 **Problem:** Structural and trigger tests confirm a skill is well-formed
-and discoverable; they don't confirm it reaches the right *answer*.
+and discoverable; they don't confirm it reaches the right *answer*. This
+statement of the problem still stands and is why G37 exists.
 
-**Change:** Select a representative subset of the `examples/` cases
+> **Everything from "Change:" to the end of this item is HISTORICAL.** It
+> records the shape of the idea before it was designed, and its file paths,
+> execution model, and grading details have all been superseded — see the
+> note above. **Do not implement from it**; build from
+> [G37](g37-agent-skill-quality-evaluation.md), which is the sole
+> implementation source of truth for this work. Kept rather than deleted so
+> the reasoning that produced G37's two scenario categories and six-dimension
+> rubric stays visible.
+
+**Change (historical):** Select a representative subset of the `examples/` cases
 covering the categories `examples/ground_truth.json` can actually resolve
 against real per-case fixtures — removed export, changed function
 signature, struct layout drift, enum value change, vtable change,
@@ -1480,8 +1490,15 @@ already done by P0; `skills.sh`/GitHub discovery; Claude/Codex/Gemini/Cursor
 validation) are distribution steps, not architecture — they follow once
 P0/P1.1 establish the skills are actually correct.
 
-**Change:** Submit the four P0 skills to `skills.sh`'s directory once P1.1's
-baseline pass rate is acceptable; verify GitHub's own skill-discovery
+**Change:** Submit the four P0 skills to `skills.sh`'s directory once the
+publication gate passes. **That gate is
+[G37](g37-agent-skill-quality-evaluation.md) Phase 6 — four explicit
+conditions (fresh per-skill hashes, zero failures on the two safety
+dimensions, the other four at or above baseline, and a scorecard showing
+non-negative lift on the gating comparator) — not the "P1.1 baseline pass
+rate is acceptable" wording this item originally carried**, which named no
+threshold and no artifact to check it against. Then verify GitHub's own
+skill-discovery
 surfaces (Copilot reads `.agents/skills` directly, per ADR-058's ecosystem
 research, so no separate submission step should be needed there beyond the
 repo being public). Record actual submission steps taken and any
