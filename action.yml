@@ -581,8 +581,12 @@ outputs:
       potential_breaking: error -- can publish BREAKING with exit code 2.
       In both cases the verdict stays truthful and the step still gates at
       the tier the exit code names, so fail-on-breaking does not re-gate a
-      break the policy demoted. Branch on verdict for what was found, on
-      exit-code for whether the run was blocked.
+      break the policy demoted. Branch on verdict for what was found, and on
+      exit-code for the tier abicheck itself gated at. Note that neither is
+      the same as whether this step failed: the fail-on-* inputs decide that,
+      so an ordinary API break with the default fail-on-api-break: false
+      publishes exit-code 2 from a step that succeeded. Use the step's own
+      outcome/conclusion for that.
     value: ${{ steps.run-abicheck.outputs.verdict }}
   exit-code:
     description: >
