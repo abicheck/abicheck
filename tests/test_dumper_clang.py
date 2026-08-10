@@ -1305,6 +1305,172 @@ def test_specialization_scope_key_documents_msvc_gap() -> None:
     assert index["0x2"] == "A::VALUE"
 
 
+def test_index_disambiguates_function_template_specializations() -> None:
+    """Codex review, PR #687, fourth round, fresh evidence: ``f<int>()``/
+    ``f<long>()`` both report a ``FunctionDecl`` named ``"f"`` -- no
+    template-argument spelling on the node itself, verified against real
+    Clang 17 output -- so both used to resolve to the identical index entry
+    ``"f"``. Each specialization DOES carry its own build-stable
+    ``mangledName`` directly (unlike a class specialization), so it's used
+    outright instead of the bare name."""
+    from abicheck.dumper_clang import _index_decl_id_qualified_names
+
+    root = _tu(
+        {
+            "kind": "FunctionDecl",
+            "id": "0x1",
+            "name": "f",
+            "mangledName": "_Z1fIiEiv",
+            "type": {"qualType": "int ()"},
+            "inner": [{"kind": "TemplateArgument", "type": {"qualType": "int"}}],
+        },
+        {
+            "kind": "FunctionDecl",
+            "id": "0x2",
+            "name": "f",
+            "mangledName": "_Z1fIlEiv",
+            "type": {"qualType": "int ()"},
+            "inner": [{"kind": "TemplateArgument", "type": {"qualType": "long"}}],
+        },
+    )
+    index = _index_decl_id_qualified_names(root)
+
+    assert index["0x1"] == "_Z1fIiEiv"
+    assert index["0x2"] == "_Z1fIlEiv"
+    assert index["0x1"] != index["0x2"]
+
+
+def test_index_does_not_use_mangled_name_for_a_plain_function() -> None:
+    """The disambiguation above must stay scoped to an actual template
+    specialization (a ``FunctionDecl`` with a ``TemplateArgument`` child) --
+    an ordinary, non-template ``FunctionDecl`` has no such child and keeps
+    the existing scope+name index value."""
+    from abicheck.dumper_clang import _index_decl_id_qualified_names
+
+    root = _tu(
+        {
+            "kind": "FunctionDecl",
+            "id": "0x1",
+            "name": "plain",
+            "mangledName": "_Z5plainv",
+            "type": {"qualType": "void ()"},
+            "inner": [],
+        },
+    )
+    index = _index_decl_id_qualified_names(root)
+
+    assert index["0x1"] == "plain"
+
+
+def test_index_disambiguates_variable_template_specializations() -> None:
+    """Same collision, one level down, for a VARIABLE template
+    specialization: ``V<int>``/``V<long>`` both report a
+    ``VarTemplateSpecializationDecl`` named ``"V"``, verified against real
+    Clang 17 output."""
+    from abicheck.dumper_clang import _index_decl_id_qualified_names
+
+    root = _tu(
+        {
+            "kind": "VarTemplateSpecializationDecl",
+            "id": "0x1",
+            "name": "V",
+            "mangledName": "_Z1VIiE",
+            "type": {"qualType": "const int"},
+        },
+        {
+            "kind": "VarTemplateSpecializationDecl",
+            "id": "0x2",
+            "name": "V",
+            "mangledName": "_Z1VIlE",
+            "type": {"qualType": "const int"},
+        },
+    )
+    index = _index_decl_id_qualified_names(root)
+
+    assert index["0x1"] == "_Z1VIiE"
+    assert index["0x2"] == "_Z1VIlE"
+    assert index["0x1"] != index["0x2"]
+
+
+def test_field_default_changes_across_function_template_specializations() -> None:
+    """End-to-end: a field default referencing distinct specializations of
+    the same function template must fingerprint distinctly (Codex review,
+    PR #687, fourth round, fresh evidence)."""
+    from abicheck.dumper_clang_expr import (
+        _field_initializer_value,
+        _index_decl_id_qualified_names,
+    )
+
+    def _cfg(mangled: str) -> dict:
+        return {
+            "kind": "CXXRecordDecl",
+            "name": "Cfg",
+            "tagUsed": "struct",
+            "completeDefinition": True,
+            "inner": [
+                {
+                    "kind": "FieldDecl",
+                    "name": "x",
+                    "type": {"qualType": "int"},
+                    "hasInClassInitializer": True,
+                    "inner": [
+                        {
+                            "kind": "CallExpr",
+                            "inner": [
+                                {
+                                    "kind": "ImplicitCastExpr",
+                                    "inner": [
+                                        {
+                                            "kind": "DeclRefExpr",
+                                            "referencedDecl": {
+                                                "kind": "FunctionDecl",
+                                                "name": "f",
+                                                "id": "0x1",
+                                            },
+                                        }
+                                    ],
+                                }
+                            ],
+                        }
+                    ],
+                }
+            ],
+        }
+
+    root_int = _tu(
+        {
+            "kind": "FunctionDecl",
+            "id": "0x1",
+            "name": "f",
+            "mangledName": "_Z1fIiEiv",
+            "type": {"qualType": "int ()"},
+            "inner": [{"kind": "TemplateArgument", "type": {"qualType": "int"}}],
+        },
+        _cfg("_Z1fIiEiv"),
+    )
+    root_long = _tu(
+        {
+            "kind": "FunctionDecl",
+            "id": "0x1",
+            "name": "f",
+            "mangledName": "_Z1fIlEiv",
+            "type": {"qualType": "int ()"},
+            "inner": [{"kind": "TemplateArgument", "type": {"qualType": "long"}}],
+        },
+        _cfg("_Z1fIlEiv"),
+    )
+    field_int = root_int["inner"][1]["inner"][0]
+    field_long = root_long["inner"][1]["inner"][0]
+    idx_int = _index_decl_id_qualified_names(root_int)
+    idx_long = _index_decl_id_qualified_names(root_long)
+
+    value_int = _field_initializer_value(field_int, lambda: idx_int)
+    value_long = _field_initializer_value(field_long, lambda: idx_long)
+    assert value_int is not None
+    assert value_long is not None
+    assert value_int != value_long
+
+
 def test_parse_enums_is_scoped_false_for_plain_enum() -> None:
     root = _tu(
         {

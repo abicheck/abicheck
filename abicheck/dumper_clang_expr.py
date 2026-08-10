@@ -190,6 +190,29 @@ def _expr_fingerprint(
     return "expr:" + hashlib.sha256(blob).hexdigest()[:16]
 
 
+def _is_func_or_var_template_specialization(node: dict[str, Any]) -> bool:
+    """Whether *node* is a function or variable TEMPLATE SPECIALIZATION —
+    ``f<int>()``/``f<long>()`` (a ``FunctionDecl`` named ``"f"`` with a
+    direct ``TemplateArgument`` child) or ``V<int>``/``V<long>`` (clang's
+    own distinct ``VarTemplateSpecializationDecl`` kind) — as opposed to an
+    ordinary, non-template ``FunctionDecl``/``VarDecl``, verified against
+    real Clang 17 output (Codex review, fresh evidence). Both real shapes
+    report only the bare, template-argument-free primary-template name in
+    their own ``name`` field, so :func:`_index_decl_id_qualified_names`
+    needs this to know when to fall back to the node's OWN ``mangledName``
+    (which DOES encode the arguments) instead.
+    """
+    kind = node.get("kind")
+    if kind == "VarTemplateSpecializationDecl":
+        return True
+    if kind == "FunctionDecl":
+        return any(
+            isinstance(c, dict) and c.get("kind") == "TemplateArgument"
+            for c in node.get("inner", []) or []
+        )
+    return False
+
+
 def _index_decl_id_qualified_names(root: dict[str, Any]) -> dict[str, str]:
     """Map every named declaration's clang ``id`` to its scope-qualified name.
 
@@ -216,6 +239,16 @@ def _index_decl_id_qualified_names(root: dict[str, Any]) -> dict[str, str]:
     larger blast radius); this function special-cases the kind locally via
     :func:`_specialization_scope_key`.
 
+    A FUNCTION or VARIABLE template specialization has the identical bare-
+    name collision one level down (Codex review, fourth round, fresh
+    evidence): ``f<int>()``/``f<long>()`` both report a ``FunctionDecl``
+    named ``"f"``, and ``V<int>``/``V<long>`` both report a
+    ``VarTemplateSpecializationDecl`` named ``"V"`` — see
+    :func:`_is_func_or_var_template_specialization`. Unlike the class case,
+    each specialization carries its OWN build-stable ``mangledName``
+    directly, so no representative-member trick is needed — it's used as
+    the index value outright.
+
     A redeclaration (e.g. a function declared then defined) shares its real
     entity's name, so the first sighting of a given ``id`` is kept rather
     than overwritten.
@@ -228,8 +261,28 @@ def _index_decl_id_qualified_names(root: dict[str, Any]) -> dict[str, str]:
         kind = node.get("kind")
         name = node.get("name") or ""
         node_id = node.get("id")
+        mangled = node.get("mangledName") or ""
         if isinstance(node_id, str) and name:
-            index.setdefault(node_id, "::".join((*scope, name)) if scope else name)
+            if (
+                mangled
+                and mangled != name
+                and _is_func_or_var_template_specialization(node)
+            ):
+                # A function/variable TEMPLATE SPECIALIZATION's own name is
+                # just the bare primary-template name (`f<int>()`/`f<long>()`
+                # both report a `FunctionDecl` named "f"; `V<int>`/`V<long>`
+                # both report a `VarTemplateSpecializationDecl` named "V") --
+                # verified against real Clang 17 output that both instances
+                # otherwise resolve to the SAME index entry, so a field/param
+                # default referencing one specialization vs. the other
+                # fingerprinted identically (Codex review, fresh evidence).
+                # Unlike a class specialization (a TYPE, never itself
+                # mangled), a function/variable specialization carries its
+                # OWN build-stable mangled name directly -- no representative-
+                # member trick needed, just use it as the full index value.
+                index.setdefault(node_id, mangled)
+            else:
+                index.setdefault(node_id, "::".join((*scope, name)) if scope else name)
         is_specialization = kind == "ClassTemplateSpecializationDecl"
         if is_specialization and name:
             # A representative member's own MANGLED name encodes the

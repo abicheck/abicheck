@@ -223,3 +223,17 @@ it should read in CHANGELOG.md. Delete the other sections.
   (and the functions from `param_default_*` to `default_value_*`), since
   both are now shared verbatim between `Param.default` and
   `TypeField.default`'s own value comparison instead of being Param-only.
+- **Fixed a missed `FIELD_DEFAULT_INITIALIZER_CHANGED`/
+  `PARAM_DEFAULT_VALUE_CHANGED` when a default references distinct
+  specializations of the same function/variable template** (Codex review,
+  fresh evidence, fourth round): `f<int>()`/`f<long>()` both report a
+  `FunctionDecl` named `"f"`, and `V<int>`/`V<long>` both report a
+  `VarTemplateSpecializationDecl` named `"V"` — no template-argument
+  spelling on the node itself, verified against real Clang 17 output — so
+  the referenced-declaration index resolved both to the same qualified
+  name, and a default changing from one specialization to the other
+  fingerprinted identically. Each specialization DOES carry its own
+  build-stable `mangledName` directly (unlike a class-template
+  specialization, which has none of its own), so it's now used as the
+  index value outright whenever the node is a function/variable template
+  specialization.
