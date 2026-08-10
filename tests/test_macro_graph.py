@@ -399,6 +399,35 @@ def test_backslash_spliced_line_comment_containing_endif_is_a_known_false_positi
     assert regions == [ConditionalRegion("OUTER", False, 2, 2)]
 
 
+def test_scan_elifdef_and_elifndef_mark_the_chain_unmodeled() -> None:
+    """Codex review, fresh evidence: C++23's `#elifdef`/`#elifndef` share the
+    identical `\\b`-after-"elif" gap the `_IF_RE` fix already closed for
+    `#ifdef`/`#ifndef` ("d"/"n" are word characters too). Unrecognized,
+    `#elifdef B` matched no pattern at all, so the ORIGINAL `#if`'s frame
+    stayed open across it -- reproduced empirically: `#if defined(A) ...
+    #elifdef B ... #endif` incorrectly attributed the `#elifdef B` branch's
+    declarations to `A` with `negated=False`, a WRONG high-confidence
+    `MACRO_CONTROLS_DECL` edge, not merely a missing one."""
+    text = "#if defined(A)\nvoid a_decl();\n#elifdef B\nvoid b_decl();\n#endif\n"
+    assert scan_conditional_regions(text) == []
+    text2 = "#if defined(A)\nvoid a_decl();\n#elifndef B\nvoid b_decl();\n#endif\n"
+    assert scan_conditional_regions(text2) == []
+
+
+def test_mid_directive_block_comment_is_a_known_false_negative() -> None:
+    """Codex review, fresh evidence: a real preprocessor treats `/* */` as
+    whitespace anywhere, including mid-directive (`#/**/ifdef X`,
+    `#if/**/defined(X)`) -- but every directive regex here only tolerates
+    plain whitespace at those positions, and `_strip_leading_inline_comment`
+    only strips a comment BEFORE the leading `#`, not one embedded after it.
+    Documented, deliberately-unfixed limitation (module docstring's "fourth
+    accepted limitation") -- pinned here rather than silently regressed."""
+    text = "#/**/ifdef FEATURE_X\nvoid f();\n#endif\n"
+    assert scan_conditional_regions(text) == []
+    text2 = "#if/**/defined(FEATURE_X)\nvoid f();\n#endif\n"
+    assert scan_conditional_regions(text2) == []
+
+
 def test_macro_definition_lines_ignores_define_inside_block_comment() -> None:
     text = "/* #define FEATURE_X 1 */\nvoid f() { return FEATURE_X; }\n"
     assert _macro_definition_lines(text) == {}

@@ -1409,6 +1409,36 @@ which all depend on a Clang AST pass.
      mismatched operand like `defined(X` or `defined X)` as if it were
      valid) — a malformed, unbalanced operand still falls through to the
      unmodeled fallback rather than being guessed at.
+   - **A twenty-fourth finding, confirmed real and fixed: C++23's
+     `#elifdef`/`#elifndef` desynced the enclosing guard, wrongly, not just
+     silently.** `_ELIF_RE` shared the identical `\b`-after-"elif" word-
+     boundary gap the `_IF_RE` fix already closed for `#ifdef`/`#ifndef` —
+     unrecognized, `#elifdef B` matched no pattern at all, leaving the
+     ORIGINAL `#if`'s frame open across it. Reproduced empirically:
+     `#if defined(A) ... #elifdef B ... #endif` attributed the `#elifdef
+     B` branch's own declarations to `A` with `negated=False` — a wrong,
+     high-confidence `MACRO_CONTROLS_DECL` edge, worse than the "silently
+     missing" shape most of this family's other gaps produce. Fixed by
+     widening `_ELIF_RE` to also match `#elifdef`/`#elifndef`, correctly
+     marking the whole chain unmodeled (this module's existing, deliberate
+     "don't guess at `#elif`'s branch semantics" contract).
+   - **A twenty-fifth finding, investigated and deliberately NOT fixed: a
+     block comment appearing mid-directive** (`#/**/ifdef X`,
+     `#if/**/defined(X)`). A real preprocessor treats `/* */` as whitespace
+     anywhere, but every directive-family regex here only tolerates plain
+     whitespace at those positions, and the leading-comment fix only
+     strips a comment BEFORE the `#`, not one embedded after it.
+     Reproduced empirically: neither shape matches any pattern at all, not
+     even the unmodeled fallback — the directive is invisible to this
+     scanner entirely. Deliberately not attempted: closing it needs a
+     systematic rewrite replacing every `\s*`/`\s+` gap across the whole
+     directive-regex pattern set, not a narrow addition, and mid-token
+     block comments inside a preprocessor directive are exceedingly rare,
+     deliberately obfuscated styling in practice — unlike the leading/
+     multi-line comment placements already fixed in this plan, which are
+     realistic, commonly-seen shapes. Documented in the module's own
+     docstring ("a fourth accepted, documented limitation") and pinned by
+     a dedicated regression test.
 5. **Full type-role coverage** to parity: variable type, typedef target,
    alias-template target, enum underlying type, non-type template argument,
    default template argument, concept/constraint dependency, function-pointer

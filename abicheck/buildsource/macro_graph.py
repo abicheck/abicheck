@@ -166,6 +166,28 @@ same-slice fix risks getting that line-number fidelity subtly wrong in a
 way worse than the current, honest gap. Pinned by a dedicated regression
 test documenting the current, known-incomplete behavior rather than
 silently accepted.
+
+**A fourth accepted, documented limitation, investigated and deliberately
+NOT closed this pass (Codex review, fresh evidence): a block comment
+appearing MID-directive (``#/**/ifdef X``, ``#if/**/defined(X)``).** A real
+preprocessor treats ``/* */`` as whitespace anywhere it appears, including
+between ``#`` and the directive keyword or between the keyword and its
+operand — but every directive-family regex here only tolerates plain
+whitespace (``\\s*``/``\\s+``) at those positions, and
+:func:`_strip_leading_inline_comment` only strips a comment BEFORE the
+leading ``#``, not one embedded after it. Reproduced empirically: neither
+shape above matches any pattern, including the unmodeled ``_IF_RE``
+fallback, so the directive is invisible to this scanner entirely (worse
+than "unmodeled" — its own ``#endif`` can also desync an enclosing guard's
+nesting the same way an unrecognized directive already does elsewhere in
+this module). Deliberately not attempted here: correctly handling it needs
+replacing every ``\\s*``/``\\s+`` gap in every directive-family regex with a
+comment-or-whitespace equivalent — a systematic rewrite across this whole
+pattern set, not a narrow addition — and mid-token block comments inside a
+preprocessor directive are exceedingly rare, deliberately obfuscated
+styling in practice (unlike the leading/multi-line comment placements
+already fixed above, which are realistic, commonly-seen shapes). Pinned by
+a dedicated regression test rather than silently accepted.
 """
 
 from __future__ import annotations
@@ -439,7 +461,17 @@ _IF_NOT_DEFINED_RE = re.compile(
 #: correctly matches plain `#if`/`#ifdef`/`#ifndef` alike as an unmodeled
 #: frame push when the four simple patterns didn't already claim the line.
 _IF_RE = re.compile(r"^\s*#\s*if(?:def|ndef)?\b")
-_ELIF_RE = re.compile(r"^\s*#\s*elif\b")
+#: Also matches C++23's `#elifdef`/`#elifndef` (Codex review, fresh
+#: evidence), not just bare/compound `#elif` -- the identical `\b`-after-
+#: "elif" gap the `_IF_RE` fix above already closed for `#ifdef`/`#ifndef`
+#: ("d"/"n" are word characters too, so `\b` fails right after "elif").
+#: Unrecognized, `#elifdef`/`#elifndef` matched no pattern at all (not even
+#: this fallback), so the ORIGINAL `#if`'s frame stayed open across it --
+#: reproduced empirically: `#if defined(A) ... #elifdef B ... #endif`
+#: incorrectly attributed the `#elifdef B` branch's declarations to `A`
+#: with `negated=False`, a wrong high-confidence `MACRO_CONTROLS_DECL` edge,
+#: not merely a missing one.
+_ELIF_RE = re.compile(r"^\s*#\s*elif(?:def|ndef)?\b")
 _ELSE_RE = re.compile(r"^\s*#\s*else\b")
 _ENDIF_RE = re.compile(r"^\s*#\s*endif\b")
 
