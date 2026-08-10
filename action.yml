@@ -584,11 +584,26 @@ outputs:
       BUDGET_OVERFLOW, or ERROR.
       For deps-compare: PASS, WARN, FAIL, or ERROR.
       For deps-tree: PASS, FAIL, or ERROR.
-      On compare and scan alike, BREAKING/API_BREAK follows the report's
-      compatibility verdict and can therefore accompany exit code 0 when a
-      demoting severity policy (e.g. --severity-preset info-only) asked for
-      the break to be reported and not gated -- the verdict stays truthful
-      and fail-on-breaking/fail-on-api-break do not fail the step for it.
+      On compare and scan alike, verdict and exit-code are different axes and
+      may disagree: BREAKING/API_BREAK follows the report's compatibility
+      verdict (what was *detected*) while the exit code follows what the
+      severity policy chose to *gate* on. So a demoting policy (e.g.
+      --severity-preset info-only) can publish BREAKING with exit code 0
+      (nothing gated), and a policy that demotes abi_breaking while some
+      other gate still fires -- an error-level --crosscheck, or
+      potential_breaking: error -- can publish BREAKING with exit code 2.
+      The same holds at exit code 1: a demoted abi_breaking alongside an
+      error-level addition/quality finding publishes BREAKING or API_BREAK
+      while the exit code names the severity tier that gated, so exit 1 is
+      not always SEVERITY_ERROR or COVERAGE_INCOMPLETE.
+      In both cases the verdict stays truthful and the step still gates at
+      the tier the exit code names, so fail-on-breaking does not re-gate a
+      break the policy demoted. Branch on verdict for what was found, and on
+      exit-code for the tier abicheck itself gated at. Note that neither is
+      the same as whether this step failed: the fail-on-* inputs decide that,
+      so an ordinary API break with the default fail-on-api-break: false
+      publishes exit-code 2 from a step that succeeded. Use the step's own
+      outcome/conclusion for that.
     value: ${{ steps.run-abicheck.outputs.verdict }}
   exit-code:
     description: >

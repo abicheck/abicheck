@@ -1044,7 +1044,18 @@ _report_compat_verdict() {
   # CI covers) has no alternation in BRE at all, so the pattern silently
   # matched nothing there and every demoted break read as COMPATIBLE on
   # macOS while passing on Linux. `-E` is accepted by both.
-  sed -nE 's/.*Verdict:[^A-Z]*(API_BREAK|BREAKING).*/\1/p' \
+  #
+  # `Verdict(:|**)` covers both spellings, because the per-library release
+  # fan-out has no third option: `--secondary-format` is rejected for a
+  # directory/package operand, so a markdown release compare reaches this
+  # fallback with no JSON at all -- and its renderer writes the verdict as a
+  # table row, `| **Verdict** | 💥 \`BREAKING\` |`, with no colon. Matching
+  # only the colon form left every release compare unescalated: an exit-2
+  # release whose own report said BREAKING still published API_BREAK, which is
+  # the whole thing this reconciliation exists to prevent (Codex review). The
+  # delimiter is still required rather than dropped -- a bare `Verdict`
+  # followed by uppercase-free filler would match prose.
+  sed -nE 's/.*Verdict(:|\*\*)[^A-Z]*(API_BREAK|BREAKING).*/\2/p' \
     <<<"$(_text_report_content)" | head -1
 }
 
@@ -1065,6 +1076,9 @@ _report_compat_verdict() {
 # two possible causes, it just had no severity-aware scan beside it to make
 # the asymmetry visible.
 ADVISORY_BREAK=false
+# The compatibility tier the *gate* follows. Empty means "same as VERDICT" —
+# only an escalation (see `_escalate_verdict_to_report`) makes the two differ.
+GATE_TIER=""
 _resolve_clean_exit_verdict() {
   local _v
   VERDICT="COMPATIBLE"
@@ -1073,6 +1087,122 @@ _resolve_clean_exit_verdict() {
     VERDICT="$_v"
     ADVISORY_BREAK=true
     echo "::notice::abicheck reports $_v, but the configured severity policy resolved this run to exit 0 — the step is not failed. Raise the category to \`error\` to gate on it."
+  fi
+}
+
+# Compatibility tiers, most severe last. Only these three are ranked: every
+# other verdict (ERROR, BUDGET_OVERFLOW, SEVERITY_ERROR, ...) is a different
+# axis and must never be escalated away by this comparison.
+_verdict_rank() {
+  case "$1" in
+    BREAKING) echo 3 ;;
+    API_BREAK) echo 2 ;;
+    COMPATIBLE) echo 1 ;;
+    *) echo 0 ;;
+  esac
+}
+
+# Why the step was blocked, when that is not what the verdict says.
+#
+# Two ways they diverge. A severity category configured as `error` gates at
+# exit 1 and 2 alike, so it can be the real cause behind an API_BREAK or
+# BREAKING verdict and fails the step regardless of the fail-on flags. And
+# since `_escalate_verdict_to_report` publishes the report's (more severe)
+# verdict while GATE_TIER keeps the tier that gated, an escalated verdict
+# names a break that is *not* why the run failed. Both branches emit this,
+# rather than one keeping its own copy -- the API_BREAK branch had the note
+# and BREAKING did not, which is exactly how escalation produced a failing
+# summary that mentioned only the ABI break.
+_blocking_gate_note() {
+  local _cats
+  _cats=$(_severity_gate_categories | tr ',' '\n' \
+    | sed 's/^ *//;s/ *$//' | grep -v '^promoted_crosscheck$' | grep -v '^$' | paste -sd, -)
+  if [[ -n "$_cats" ]]; then
+    echo ">"
+    if [[ "${GATE_TIER:-$VERDICT}" == "SEVERITY_ERROR" || "$MODE" == "scan" ]]; then
+      # `scan` is the second case that bypasses the flags at *every* tier: its
+      # final branch detects the real severity category and sets FINAL_EXIT=1
+      # unconditionally, so claiming the flags still decide would be the exact
+      # opposite of what happened (Codex review).
+      echo "> ⚠️ Also blocked by severity policy: \`$_cats\` configured as \`error\`. This fails the step independently of \`fail-on-breaking\`/\`fail-on-api-break\`."
+    else
+      # Only the SEVERITY_ERROR tier bypasses the fail-on flags. At the
+      # API_BREAK/BREAKING tiers the severity policy is what produced the
+      # exit, but whether the *step* fails still follows those flags -- the
+      # unconditional claim was wrong for two of the three tiers (CodeRabbit).
+      echo "> ⚠️ Also blocked by severity policy: \`$_cats\` configured as \`error\`, which is what produced exit ${ABICHECK_EXIT}. Whether this step fails still follows \`fail-on-breaking\`/\`fail-on-api-break\` for the \`${GATE_TIER:-$VERDICT}\` tier."
+    fi
+  fi
+  # The coverage axis is orthogonal, so it is reported on its own terms rather
+  # than only when it happens to own GATE_TIER: with both axes firing at exit 1
+  # the severity tier wins the slot and the missing provider went unmentioned
+  # entirely (Codex).
+  if _coverage_gated && [[ "$GATE_TIER" != "COVERAGE_INCOMPLETE" ]]; then
+    echo ">"
+    echo "> ⚠️ Contract coverage also contributed to this run's exit$(_coverage_where_suffix). Orthogonal to the compatibility verdict and to the severity policy — see \`contract_coverage_failures\` in the JSON report."
+  fi
+  [[ -n "$GATE_TIER" && "$GATE_TIER" != "$VERDICT" ]] || return 0
+  echo ">"
+  if [[ "$GATE_TIER" == "COVERAGE_INCOMPLETE" ]]; then
+    # ADR-049's coverage axis is *orthogonal*: it never rewrites a
+    # compatibility verdict or a gate contribution, and calling it a severity
+    # failure is exactly the confusion the axis exists to avoid. Escalation
+    # also displaces the COVERAGE_INCOMPLETE summary branch, taking its
+    # missing-provider explanation with it -- so render that here rather than
+    # leave the reader with a bare tier name (Codex review).
+    echo "> ℹ️ Verdict escalated from the report: the compatibility finding above was demoted by the severity policy, and what actually produced this run's exit ${ABICHECK_EXIT} is the orthogonal contract-coverage axis$(_coverage_where_suffix). That is **not** an ABI/API break and **not** a severity-policy failure -- the compatibility verdict is unchanged. Supply the missing evidence, or accept incomplete assurance with \`contract.unresolved: warn\`."
+  elif [[ -z "$_cats" ]] && _severity_gate_categories | grep -q 'promoted_crosscheck'; then
+    # A promoted `--crosscheck KEY=error` raises the published gate the same
+    # way a severity category does, but it is not one: `_severity_gate_
+    # categories` filters the pseudo-category out of `$_cats` above, and the
+    # final gate deliberately leaves it subject to `fail-on-api-break` rather
+    # than blocking unconditionally. Naming the severity policy here pointed
+    # the reader at a mechanism that did not fire, and at a knob that would
+    # not change the outcome (Codex review).
+    echo "> ℹ️ Verdict escalated from the report: a promoted \`--crosscheck\` gated this run at \`$GATE_TIER\` (exit ${ABICHECK_EXIT}), so that tier -- not the verdict above -- is what \`fail-on-*\` applies to. This is a cross-check promotion, not a severity category: it follows \`fail-on-api-break\`."
+  else
+    echo "> ℹ️ Verdict escalated from the report: the severity policy gated this run at \`$GATE_TIER\` (exit ${ABICHECK_EXIT}), so that tier -- not the verdict above -- is what \`fail-on-*\` applies to."
+  fi
+}
+
+# `: \`old/export_table\`` when the report names which provider fell short,
+# empty otherwise. Shared so the COVERAGE_INCOMPLETE verdict branch and the
+# escalated-verdict note above cannot drift into describing the same axis
+# differently -- the escalated path silently lost this detail entirely.
+_coverage_where_suffix() {
+  local _where
+  _where=$(_report_query "$(_json_report_src)" coverage_where)
+  [[ -n "$_where" ]] && printf ': `%s`' "$_where"
+}
+
+# Exit 0 is not the only exit a severity policy can understate, which is what
+# `_resolve_clean_exit_verdict` above fixed for exit 0 alone. A policy that
+# demotes `abi_breaking` below `error` while something else still gates --
+# an error-level `--crosscheck KEY=error`, or `potential_breaking: error` --
+# exits 2 with a report that still says BREAKING. Mapping exit 2 straight to
+# API_BREAK then published a source-level break for a binary ABI break
+# (Codex review).
+#
+# So the published verdict follows the report whenever the report is the more
+# severe of the two. The *gate* deliberately does not move with it: GATE_TIER
+# keeps the tier the exit code actually gated at, because the severity policy
+# switching a break's gate off is precisely what the user asked for -- letting
+# an escalated BREAKING verdict reach `fail-on-breaking` (default true) would
+# re-gate the very finding the policy demoted. Truth in the output, the user's
+# policy in the gate.
+_escalate_verdict_to_report() {
+  local _v
+  _v=$(_report_compat_verdict)
+  # Only a *break* may escalate. This exists to stop the published verdict
+  # understating what was detected, so a COMPATIBLE report is never an
+  # escalation over anything -- without this guard it outranked the
+  # non-compatibility verdicts (COVERAGE_INCOMPLETE, SEVERITY_ERROR) and
+  # overwrote them with COMPATIBLE, which is the opposite of the point.
+  [[ "$_v" == "BREAKING" || "$_v" == "API_BREAK" ]] || return 0
+  if (( $(_verdict_rank "$_v") > $(_verdict_rank "$VERDICT") )); then
+    echo "::notice::abicheck's report records $_v while the severity policy resolved this run to exit ${ABICHECK_EXIT} (gated as ${VERDICT}); publishing the report's verdict. The step still gates at ${VERDICT}."
+    GATE_TIER="$VERDICT"
+    VERDICT="$_v"
   fi
 }
 
@@ -1157,8 +1287,17 @@ elif [[ "$MODE" == "scan" ]]; then
         else
           VERDICT="ERROR"
         fi
+        # Exit 1 carries a demoted break just as exit 2 does: a policy that
+        # puts `abi_breaking` below `error` while an addition/quality finding
+        # stays at `error` gates at 1 with a report that still says BREAKING
+        # (Codex review). ERROR is left alone -- that is an operational
+        # failure, not a gated compatibility result, and `_verdict_rank`
+        # ranks it 0 only because it must never be escalated *from* here.
+        if [[ "$VERDICT" != "ERROR" ]]; then
+          _escalate_verdict_to_report
+        fi
         ;;
-      2) VERDICT="API_BREAK" ;;
+      2) VERDICT="API_BREAK"; _escalate_verdict_to_report ;;
       4) VERDICT="BREAKING" ;;
       5) VERDICT="BUDGET_OVERFLOW" ;;
       *)
@@ -1206,8 +1345,11 @@ else
         else
           VERDICT="SEVERITY_ERROR"
         fi
+        if [[ "$VERDICT" != "ERROR" ]]; then
+          _escalate_verdict_to_report
+        fi
         ;;
-      2) VERDICT="API_BREAK" ;;
+      2) VERDICT="API_BREAK"; _escalate_verdict_to_report ;;
       4) VERDICT="BREAKING" ;;
       8) VERDICT="REMOVED_LIBRARY" ;;
       *) VERDICT="ERROR" ;;
@@ -1278,17 +1420,7 @@ if [[ "${INPUT_ADD_JOB_SUMMARY:-true}" == "true" && "$MODE" != "dump" ]]; then
         ;;
       API_BREAK)
         echo "> **Verdict: API_BREAK** — Source-level API break detected. Recompilation required."
-        # Since a severity category configured as `error` gates at exit 2 as
-        # well as 1, an API_BREAK verdict can be what *also* carries a
-        # severity block -- and that block, not the API break, is why the
-        # step failed regardless of `fail-on-api-break`. Say so, or the
-        # summary reads as though the flag had been ignored.
-        _sev_cats_summary=$(_severity_gate_categories | tr ',' '\n' \
-          | sed 's/^ *//;s/ *$//' | grep -v '^promoted_crosscheck$' | grep -v '^$' | paste -sd, -)
-        if [[ -n "$_sev_cats_summary" ]]; then
-          echo ">"
-          echo "> ⚠️ Also blocked by severity policy: \`$_sev_cats_summary\` configured as \`error\`. This fails the step independently of \`fail-on-api-break\`."
-        fi
+        _blocking_gate_note
         if [[ "$ADVISORY_BREAK" == "true" ]]; then
           echo ">"
           echo "> ℹ️ Reported, not gated: the configured severity policy resolved this run to exit 0, so the step is **not** failed. Raise the blocking category to \`error\` to gate on it."
@@ -1296,11 +1428,17 @@ if [[ "${INPUT_ADD_JOB_SUMMARY:-true}" == "true" && "$MODE" != "dump" ]]; then
         ;;
       BREAKING)
         echo "> **Verdict: BREAKING** — Binary ABI break detected. Existing binaries will fail at runtime."
-        # The mirror of the API_BREAK note above, for the opposite direction:
-        # there, a severity category gated a run the fail-on flag would have
-        # let pass; here, the severity policy resolved a real break to exit 0
-        # and the step is green. Both are cases where the step's outcome does
-        # not follow from the verdict alone, and both have to say so.
+        # A BREAKING verdict is reachable by *escalation* now, in which case
+        # the tier that actually blocked the step is not this one -- exit 1's
+        # severity gate or exit 2's API tier. Without this the summary read
+        # "Binary ABI break detected" on a step failed by an addition gate
+        # (Codex review).
+        _blocking_gate_note
+        # The mirror, for the opposite direction: there, a gate failed a run
+        # the fail-on flag would have let pass; here, the severity policy
+        # resolved a real break to exit 0 and the step is green. Both are
+        # cases where the step's outcome does not follow from the verdict
+        # alone, and both have to say so.
         if [[ "$ADVISORY_BREAK" == "true" ]]; then
           echo ">"
           echo "> ℹ️ Reported, not gated: the configured severity policy resolved this run to exit 0, so the step is **not** failed. Raise the blocking category to \`error\` to gate on it."
@@ -1653,7 +1791,7 @@ elif [[ "$MODE" == "dump" ]]; then
 elif [[ "$MODE" == "scan" ]]; then
   # scan: BREAKING/API_BREAK follow the fail-on flags; a budget overflow always
   # fails the step (the budget is a guard that must not be silently swallowed).
-  if [[ "$VERDICT" == "BREAKING" && "${INPUT_FAIL_ON_BREAKING:-true}" == "true" \
+  if [[ "${GATE_TIER:-$VERDICT}" == "BREAKING" && "${INPUT_FAIL_ON_BREAKING:-true}" == "true" \
         && "$ADVISORY_BREAK" != "true" ]]; then
     echo "::error::ABI break detected by scan. Set fail-on-breaking: false to continue despite breaks."
     FINAL_EXIT=1
@@ -1665,7 +1803,7 @@ elif [[ "$MODE" == "scan" ]]; then
   # cannot tell from the exit code alone whether a promoted check fired, so
   # keying off the crosscheck flag would wrongly fail an unrelated API break
   # when fail-on-api-break is false (Codex review).
-  if [[ "$VERDICT" == "API_BREAK" && "${INPUT_FAIL_ON_API_BREAK:-false}" == "true" \
+  if [[ "${GATE_TIER:-$VERDICT}" == "API_BREAK" && "${INPUT_FAIL_ON_API_BREAK:-false}" == "true" \
         && "$ADVISORY_BREAK" != "true" ]]; then
     echo "::error::API/source break detected by scan (includes promoted --crosscheck=error gates). Set fail-on-api-break: false to ignore."
     FINAL_EXIT=1
@@ -1688,7 +1826,7 @@ elif [[ "$MODE" == "scan" ]]; then
   # "this category is an error". Routing it through a compatibility flag
   # would let fail-on-api-break: false switch off an addition gate that has
   # nothing to do with API breaks.
-  if [[ "$VERDICT" == "SEVERITY_ERROR" ]]; then
+  if [[ "${GATE_TIER:-$VERDICT}" == "SEVERITY_ERROR" ]]; then
     echo "::error::Severity-level error detected by abicheck scan."
     FINAL_EXIT=1
   fi
@@ -1716,13 +1854,13 @@ else
   # compare mode: BREAKING/API_BREAK follow fail-on flags; REMOVED_LIBRARY
   # only appears when --fail-on-removed-library was passed to the CLI
   # (directory/package operands only).
-  if [[ "$VERDICT" == "BREAKING" && "${INPUT_FAIL_ON_BREAKING:-true}" == "true" \
+  if [[ "${GATE_TIER:-$VERDICT}" == "BREAKING" && "${INPUT_FAIL_ON_BREAKING:-true}" == "true" \
         && "$ADVISORY_BREAK" != "true" ]]; then
     echo "::error::ABI break detected. Set fail-on-breaking: false to continue despite breaks."
     FINAL_EXIT=1
   fi
 
-  if [[ "$VERDICT" == "API_BREAK" && "${INPUT_FAIL_ON_API_BREAK:-false}" == "true" \
+  if [[ "${GATE_TIER:-$VERDICT}" == "API_BREAK" && "${INPUT_FAIL_ON_API_BREAK:-false}" == "true" \
         && "$ADVISORY_BREAK" != "true" ]]; then
     echo "::error::API break detected. Set fail-on-api-break: false to ignore API-level breaks."
     FINAL_EXIT=1
@@ -1734,7 +1872,7 @@ else
   fi
 
   # Severity-driven exit code 1 (from --severity-* flags)
-  if [[ "$VERDICT" == "SEVERITY_ERROR" ]]; then
+  if [[ "${GATE_TIER:-$VERDICT}" == "SEVERITY_ERROR" ]]; then
     echo "::error::Severity-level error detected by abicheck."
     FINAL_EXIT=1
   fi

@@ -23,11 +23,15 @@ inside an evidence pack.
 
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass, field
 from enum import Enum
+from pathlib import Path
 from typing import Any
 
 #: Build-evidence schema version, independent of the pack/snapshot versions.
+from .comdat_groups import ComdatScan, collect_vague_linkage_symbols
+
 BUILD_EVIDENCE_VERSION: int = 1
 
 
@@ -307,6 +311,49 @@ class BuildOption:
         )
 
 
+def comdat_scan_requested() -> bool:
+    """Whether a collection run should sweep object files for COMDAT groups.
+
+    Off by default. Parsing every object file's symbol table is real I/O on a
+    large build, and no detector consumes the result yet — the demotion built
+    on it was attempted and reverted (see AGENTS.md), so scanning by default
+    would be an unbounded cost with no user-visible outcome (CodeRabbit
+    review). Lives here rather than at the call site so ``inline.py``, which
+    sits on its line-count cap, spends one line on the gate.
+    """
+    return os.environ.get("ABICHECK_COLLECT_COMDAT", "").strip().lower() in {
+        "1",
+        "true",
+        "yes",
+    }
+
+
+def _resolved_object(cu: CompileUnit) -> Path | None:
+    """The object file *cu* emitted, as a path that can actually be opened.
+
+    ``CompileUnit.output`` is normalized *for persistence*, not for reading
+    back: a home-rooted path is redacted to ``~/...`` (ADR-032 D7), and the
+    Ninja/Make/Bazel adapters record an output relative to ``directory``. So a
+    consumer that opens the field verbatim marks real objects unreadable
+    whenever collection runs outside the build directory or under the user's
+    home — silently turning "this build has objects" into "nothing scanned"
+    (Codex/CodeRabbit review).
+
+    ``None`` when the label names no file that exists, which is also what
+    keeps the scan free on the common path: nothing is opened, and no ELF is
+    parsed, for a build whose objects are gone or were never recorded.
+    """
+    if not cu.output:
+        return None
+    path = Path(cu.output).expanduser()
+    if not path.is_absolute() and cu.directory:
+        path = Path(cu.directory).expanduser() / path
+    try:
+        return path if path.is_file() else None
+    except OSError:
+        return None
+
+
 @dataclass
 class BuildEvidence:
     """Top-level normalized build evidence (ADR-029 D1)."""
@@ -323,6 +370,13 @@ class BuildEvidence:
     build_options: list[BuildOption] = field(default_factory=list)
     diagnostics: list[str] = field(default_factory=list)
     raw_artifacts: list[str] = field(default_factory=list)
+    #: COMDAT-group scan over this build's object files -- the only evidence
+    #: that proves *vague linkage* (see ``comdat_groups``). ``None`` means no
+    #: scan ran, which a consumer must never read as "nothing is vague".
+    #: Additive field: defensive .get() parsing keeps this forward/backward
+    #: compatible without a BUILD_EVIDENCE_VERSION bump, the same convention
+    #: ``CompileUnit.directory`` above already documents.
+    comdat: ComdatScan | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -338,6 +392,9 @@ class BuildEvidence:
             "build_options": [o.to_dict() for o in self.build_options],
             "diagnostics": list(self.diagnostics),
             "raw_artifacts": list(self.raw_artifacts),
+            # Omitted entirely when no scan ran, so an older reader and a
+            # newer one agree that absence means "not established".
+            **({"comdat": self.comdat.to_dict()} if self.comdat is not None else {}),
         }
 
     @classmethod
@@ -359,7 +416,44 @@ class BuildEvidence:
             ],
             diagnostics=list(d.get("diagnostics", [])),
             raw_artifacts=list(d.get("raw_artifacts", [])),
+            comdat=(
+                ComdatScan.from_dict(d["comdat"])
+                if isinstance(d.get("comdat"), dict)
+                else None
+            ),
         )
+
+    def scan_comdat(self) -> None:
+        """Populate ``comdat`` from the objects this build's compile units emit.
+
+        Lives here rather than in ``comdat_groups`` so that module stays a
+        leaf: it is a pure ELF parser and must not know about build evidence,
+        or the two form an import cycle (CLAUDE.md "M1-3").
+
+        Reads ``CompileUnit.output`` — already the normalized "this TU produced
+        this object" fact, and the same field ``source_graph``'s link
+        provenance mints its ``object_file`` nodes from — so no new discovery
+        step is introduced. That field is a *persisted label*, though, not a
+        usable path (see ``_resolved_object``), so it is resolved back to a
+        real file before anything is opened.
+
+        A no-op when no output resolves to a file on disk — a cleaned build
+        tree, a compile DB describing a build never run, or a pack collected
+        on another machine. Leaving ``comdat`` untouched there keeps "no scan
+        ran" distinct from "scanned, found nothing vague" (only the latter may
+        license a demotion) and, on the ``base_build`` path, keeps a scan
+        loaded from an existing pack rather than replacing it with an empty
+        one. For the same reason a fresh scan that established nothing never
+        displaces one that did.
+        """
+        objects = [
+            p for cu in self.compile_units if (p := _resolved_object(cu)) is not None
+        ]
+        if not objects:
+            return
+        scan = collect_vague_linkage_symbols(list(objects))
+        if scan.resolvable or self.comdat is None:
+            self.comdat = scan
 
     def merge(self, other: BuildEvidence) -> None:
         """Fold another adapter's output into this one (in place).
@@ -386,6 +480,22 @@ class BuildEvidence:
                 seen_opts.add((opt.key, opt.value))
         self.diagnostics.extend(other.diagnostics)
         self.raw_artifacts = sorted(set(self.raw_artifacts) | set(other.raw_artifacts))
+        # Union, for the same reason the scan unions across object files: an
+        # entity emitted vaguely by any translation unit is vague for the
+        # library, so two adapters over one tree must not lose one's findings.
+        if other.comdat is not None:
+            self.comdat = (
+                other.comdat
+                if self.comdat is None
+                else ComdatScan(
+                    symbols=self.comdat.symbols | other.comdat.symbols,
+                    objects_scanned=self.comdat.objects_scanned
+                    + other.comdat.objects_scanned,
+                    objects_failed=self.comdat.objects_failed
+                    + other.comdat.objects_failed,
+                    diagnostics=[*self.comdat.diagnostics, *other.comdat.diagnostics],
+                )
+            )
 
 
 def _merge_by_id(dst: list[Any], src: list[Any]) -> None:
