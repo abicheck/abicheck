@@ -153,6 +153,18 @@ as the `docs-contract` step) enforces, as **hard errors**:
   registry entry pointing it at a generated page is a misconfiguration
   (register the generated page as `reference_page` instead).
 
+**Registration is no longer pilot-only for new work.** The registry started
+as a pilot covering a handful of topics that already had an explicit
+ownership split documented before this file existed; it has since grown to
+20+ registered topics covering most major product surfaces. Every **new**
+public-facing feature or surface (a new CLI command/flag family, a new
+report field, a new config namespace, a new Action input) must register a
+topic in `docs/_meta/topics.yaml` — `canonical_page`, a `reference_page`/
+`task_pages` if applicable, and `fact_sources` pointing at its code — in the
+same PR that adds the feature, not deferred to a later cleanup. Registering
+an *existing*, already-documented page that predates this file remains
+incremental and opportunistic, same as the front-matter rollout below.
+
 As **warnings** (non-blocking; the check that flags likely accidental
 duplication, not a structural ownership conflict):
 
@@ -171,7 +183,14 @@ duplication, not a structural ownership conflict):
   in-progress status phrase such as "being updated in parallel", "currently
   being implemented", "work in progress", or `TBD`/`TODO:` — this class of
   claim is true only until the described work ships, then goes stale with
-  nothing else to catch it; a hit needs a human read, not an automatic fix.
+  nothing else to catch it; a hit needs a human read, not an automatic fix;
+- the same class of page naming a retired CLI flag/command/file by its exact
+  dead spelling (`scripts/check_docs_contract.py`'s `_RETIRED_SURFACES`
+  registry — e.g. `abicheck-mcp`, `mcp_server.py`, `--source-abi-cache`) with
+  no allowlist entry for that page — a real-world instance of this was found
+  in a documentation review: ADR-058/G36 still described the just-removed
+  MCP server as a live, optional execution adapter. Add a registry entry
+  whenever a PR deletes a flag/command/file another doc might still name.
 
 ## Terminology registry
 

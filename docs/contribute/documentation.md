@@ -111,7 +111,7 @@ into `docs/reference/examples/*.md` by `scripts/gen_examples_docs.py` — edit t
 Three real examples from this repo, so "don't duplicate" has concrete shape
 instead of being an abstract rule:
 
-**Exact table, two pages, no reason for both.** `user-guide/severity.md` used
+**Exact table, two pages, no reason for both.** `use/severity.md` used
 to carry its own copy of the severity-aware exit-code table and the presets
 table — both already owned by `reference/exit-codes.md` (registered as the
 `verdicts` topic's `reference_page`). The fix wasn't to explain severity
@@ -127,18 +127,18 @@ one table that exists:
 +for the exact code-to-condition table; the highest applicable code wins.
 ```
 
-**Same fact, two different framings.** `concepts/architecture.md` and
-`concepts/limitations.md` both carried the platform-support matrix table —
+**Same fact, two different framings.** `learn/architecture.md` and
+`learn/limitations.md` both carried the platform-support matrix table —
 one as a quick "here's what's supported" aside, one as the dedicated
 "Platform support matrix" section with the fuller explanatory prose.
 Rather than pick one to delete outright, the fuller version stayed as the
 registered `canonical_page` for a new `platform-support-matrix` topic, and
 the aside became a one-line summary + link.
 
-**A concept explained a fourth time.** `user-guide/tool-modes.md` carried its
+**A concept explained a fourth time.** `use/tool-modes.md` carried its
 own full copy of the L0–L4 evidence-layer table — the same model already
-explained by the deliberate three-page trio (`concepts/evidence-and-detectability.md`,
-`concepts/what-each-level-sees.md`, `user-guide/scan-levels.md`). The fix was
+explained by the deliberate three-page trio (`learn/evidence-and-detectability.md`,
+`learn/what-each-level-sees.md`, `use/scan-levels.md`). The fix was
 a "Quick decision" one-liner plus links back to the trio, and registering the
 page as an `allowed_summaries` entry so the next person who touches it can
 see, from `topics.yaml` alone, that a full table doesn't belong there.

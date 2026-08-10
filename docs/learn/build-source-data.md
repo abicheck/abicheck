@@ -47,17 +47,18 @@ summary**. Folded from the L3 build evidence it carries `target`,
 `compile_unit`, `source`, `header`, `generated_file`, and `build_option` nodes
 linked by `TARGET_HAS_SOURCE` / `TARGET_HAS_PUBLIC_HEADER` / `TARGET_DEPENDS_ON`
 / `COMPILE_UNIT_BUILDS_SOURCE` / `COMPILE_UNIT_USES_OPTION` edges. When an L4
-source surface was also collected (`--source-abi`), it additionally folds in
+source surface was also collected (L4 source-ABI replay, e.g. `dump --sources <tree>`), it additionally folds in
 `source_decl` / `record_type` / `enum_type` / `typedef` / `macro` nodes linked
 to their declaring public header (`SOURCE_DECLARES`) and to their exported
 binary symbol / debug type (`SOURCE_DECL_MAPS_TO_SYMBOL`,
 `SOURCE_TYPE_MAPS_TO_DEBUG_TYPE`, `BINARY_EXPORTS_SYMBOL`) — giving the full
 `target → public header → declaration → exported symbol` reachability closure.
-Every node and edge carries provenance and a confidence label. Collect it with
-`--source-graph summary` and compare two summaries with `graph compare` (below).
-When `--source-abi` (L4) is also given, two further edge kinds fold in
-**automatically** — no separate flag for either, mirroring `dump --sources`'s
-own behavior: approximate Clang call edges (`DECL_CALLS_DECL`) and
+Every node and edge carries provenance and a confidence label. `dump --sources <tree>` always builds and embeds it (it is compact by
+design, so there is no separate opt-in flag), and two summaries are
+compared with `graph compare` (below).
+When L4 source-ABI replay is also active, two further edge kinds fold in
+**automatically** — no separate flag for either: approximate Clang call
+edges (`DECL_CALLS_DECL`) and
 compile-unit include edges (`COMPILE_UNIT_INCLUDES_FILE`, preferring
 already-recorded build-tool inputs over a fresh `clang -M` invocation). A
 further, independent layer folds pre-captured Kythe/CodeQL backends
@@ -69,7 +70,8 @@ localizes a single finding through the graph.
 alone misses a real class of risk — a public struct with a private base class
 or private field type, or a public inline function reading an internal
 constant, none of which are *calls*. `type_graph.py`'s Clang-AST pass folds
-in automatically alongside the call graph (same `--source-abi` trigger, no
+in automatically alongside the call graph (same L4 source-ABI replay
+trigger, no
 extra flag) and populates three further edge kinds the L5 schema had reserved
 since ADR-031 but nothing produced before ADR-041: `TYPE_INHERITS` (a private
 base class), `TYPE_HAS_FIELD_TYPE` (a private field/member type), and
@@ -266,10 +268,10 @@ flowchart TD
     end
 
     subgraph evidence["Evidence pipeline — corroborating, post-build"]
-      BT["build tree (no rebuild)"] --> CE["collect"]
+      BT["build tree (no rebuild)"] --> CE["inline collection<br/>(dump/compare --sources)"]
       CE --> L3["L3 build facts<br/>compile DB / CMake / Ninja / Bazel / Make"]
-      CE --> L4["L4 source ABI replay<br/>clang (--source-abi)"]
-      CE --> L5["L5 graph summary<br/>(--source-graph)"]
+      CE --> L4["L4 source ABI replay<br/>clang"]
+      CE --> L5["L5 graph summary"]
       L3 --> PACK["build/source pack<br/>(content-addressed, out-of-band)"]
       L4 --> PACK
       L5 --> PACK
@@ -312,8 +314,8 @@ build outputs and build-system query interfaces only.
 The common case is a **shipped binary** (e.g. a prebuilt package) plus a
 **source checkout at the tag it was built from**. Point `dump` straight at the
 source tree — `--sources <tree>` runs L4 source ABI replay **and** the L5 graph
-internally and embeds them; there are no separate `--source-abi`/`--source-graph`
-toggles, and the graph is always built (it is compact by design):
+internally and embeds them; there is no separate L4/L5 toggle flag,
+and the graph is always built (it is compact by design):
 
 ```bash
 # Source ABI replay (L4) + graph (L5) inline from a checkout, plus L3 from a
@@ -559,8 +561,8 @@ graph-derived **risk** findings (ADR-031 D6):
 | `public_reachability_changed` | risk | A declaration entered or left the public-API reachability closure (target → public header → declaration → exported symbol) |
 | `source_to_binary_mapping_changed` | risk | A declaration present in both versions now maps to a different exported binary symbol |
 | `generated_header_reaches_public_api` | risk | A generated file newly participates in the public declaration closure (it is a public header) |
-| `call_graph_public_entry_reachability_changed` | compatible (quality) | The implementation statically reachable from an exported entry point changed (approximate Clang call graph; needs `--source-abi` + `--source-graph summary`, folded automatically) |
-| `include_graph_public_header_drift` | risk | A public header entered/left the compiled include graph (needs `--source-abi` + `--source-graph summary`, folded automatically) |
+| `call_graph_public_entry_reachability_changed` | compatible (quality) | The implementation statically reachable from an exported entry point changed (approximate Clang call graph; needs `--sources` for L4 source-ABI replay, folded automatically) |
+| `include_graph_public_header_drift` | risk | A public header entered/left the compiled include graph (needs `--sources` for L4 source-ABI replay, folded automatically) |
 | `build_option_reaches_public_symbol` | risk | A changed ABI-relevant build option feeds a compile unit producing an exported symbol |
 | `public_api_internal_dependency_added` | risk | A public entry newly reaches an internal (non-public) declaration/type via a call, a non-call reference, or a field/base/parameter type ([case160](../reference/examples/case160_public_api_internal_dep_added.md): call edge; [case187](../reference/examples/case187_public_struct_private_field_type.md): field type; [case188](../reference/examples/case188_public_class_private_base_class.md): base class; [case189](../reference/examples/case189_public_function_private_parameter_type.md): parameter type; [case190](../reference/examples/case190_public_inline_function_references_internal_constant.md): non-call reference; [case191](../reference/examples/case191_header_only_graph_field_type.md): same finding via the header-only graph, no build integration) |
 | `target_dependency_added` | risk | The library gained an inter-target build/link dependency (new `DT_NEEDED` risk) ([case161](../reference/examples/case161_target_dependency_added.md)) |
@@ -687,7 +689,7 @@ Checks enabled for this scan (and why others are not):
 
 Each category is gated on exactly one evidence layer, so a `[off]` line tells you
 exactly which input (or tool) to add to enable it — e.g. installing clang and
-passing `--source-abi` turns on the macro / default-argument / inline-body /
+passing `--sources` (L4 source-ABI replay) turns on the macro / default-argument / inline-body /
 template-body / constexpr checks.
 
 ### Header parse context

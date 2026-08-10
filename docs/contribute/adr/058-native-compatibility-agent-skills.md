@@ -5,6 +5,36 @@
 for the phased implementation plan.
 **Decision maker:** (pending — recorded per repository convention)
 
+> **Amendment (2026-08-09, same date — MCP retired hours after this ADR was
+> accepted).** #684 removed the MCP server (`abicheck-mcp`,
+> `abicheck/mcp_server.py` and its sibling modules) from the shipped
+> product entirely — see
+> [ADR-021b](021-mcp-security-model.md) (retired the same date) and
+> [ADR-055's retirement note](055-typed-request-result-completeness-and-schema-registry.md).
+> Every "MCP is an optional adapter" / "CLI is normative, MCP is optional"
+> claim below is now stale in the specific sense that there is no MCP
+> adapter left to be optional — read every such statement as "CLI (and the
+> typed Python API) is the sole execution backend; no MCP adapter exists or
+> is planned." This does not change this ADR's actual decision, which never
+> depended on MCP existing (Design principle 4 and the Execution-backend
+> section below already concluded no P0 skill workflow needs MCP) — it only
+> retires the "optional adapter" framing as a live possibility. G36 (the
+> companion implementation plan) carries the same amendment and drops the
+> MCP-specific file-level work items this ADR's Required product
+> capabilities section implied (the `abi_compare` `reason_codes` sibling
+> field, `mcp_server.py` edits) since there is no MCP surface left to
+> extend. Three mechanical references to the now-deleted
+> `docs/reference/mcp-tools-reference.md`/`scripts/gen_mcp_reference.py`
+> (in the source-of-truth model, the Skill content model, and the
+> Versioning and drift model) have been corrected in place, since they
+> named concrete generation inputs that no longer exist rather than a
+> judgment call to preserve as written. Everything else in this ADR — the
+> four-skill taxonomy, the admission criteria, the Layer A/B/C model, the
+> safety invariants, and the substance of the source-of-truth/generation
+> model (skills generated from `docs/reference/` canonical sources with a
+> CI drift gate) — is unaffected and remains this decision's current
+> guidance.
+
 ---
 
 ## Context
@@ -479,8 +509,8 @@ scripts/gen_agent_skills.py              # the sole generator (Layer C
   in this model requires a second repository; `skills-src/` and
   `.agents/skills/` are ordinary tracked directories in this repo, gated by
   the same CI (drift tests below) as every other generated-doc pattern this
-  repository already has (`docs/reference/cli-reference.md`,
-  `docs/reference/mcp-tools-reference.md`, etc. — `docs/AGENTS.md`'s
+  repository already has (`docs/reference/cli-reference.md`, etc. —
+  `docs/AGENTS.md`'s
   "regenerating generated docs" contract, applied to a new generated
   artifact family the same way).
 
@@ -499,7 +529,7 @@ ABI design pattern catalogs, the full CLI recipe list, comparability-failure
 reason codes, the remediation catalog, report-schema field meanings — lives
 under `references/`, most of it in the shared Layer-B fragments referenced
 above rather than duplicated per skill. **Do not hand-copy** the CLI
-reference, the MCP tools reference, or the `ChangeKind` catalog
+reference or the `ChangeKind` catalog
 into a skill's `references/` — link/generate from the canonical
 `docs/reference/` sources the same generator step already touches, so a
 CLI flag rename or a new `ChangeKind` cannot silently leave a skill
@@ -602,9 +632,8 @@ dependencies/surface without strong justification":
   range is exceeded.
 - **Generated reference material can never go stale silently** the way a
   hand-copied CLI cheat-sheet would: because Layer A/B reference content is
-  generated from the same canonical sources `docs/reference/cli-reference.md`
-  and `docs/reference/mcp-tools-reference.md` already regenerate from
-  (`scripts/gen_cli_reference.py`, `scripts/gen_mcp_reference.py`), a
+  generated from the same canonical source `docs/reference/cli-reference.md`,
+  which already regenerates from `scripts/gen_cli_reference.py`, a
   renamed or removed CLI flag a skill's workflow depends on is caught by
   the identical CI gate (`scripts/verify.py --profile pr`'s doc-drift
   checks) already enforced for every other generated doc — see the

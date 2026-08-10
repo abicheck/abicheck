@@ -72,7 +72,6 @@ nav:
       - Applications & Consumers:
         - Application Compatibility: use/appcompat.md
         - API Surface Intelligence: use/api-surface-intelligence.md
-        - Use-Case Impact: use/use-case-impact.md
       - Plugins & Dynamic Loading:
         - Plugin Systems: use/plugin-systems.md
       - Python Extensions:
@@ -198,6 +197,7 @@ nav:
       - Writing Documentation: contribute/documentation.md
       - Testing: contribute/testing.md
       - Detector Impact Contract: contribute/detector-impact-contract.md
+      - Use-Case Impact: contribute/use-case-impact.md
       - Performance: contribute/performance.md
     - Roadmap & Status:
       - Goals: contribute/goals.md
@@ -226,6 +226,7 @@ plugins:
       redirect_maps:
         concepts/scan-and-evidence-levels.md: learn/evidence-and-detectability.md
         concepts/verdicts-and-exit-codes.md: learn/verdicts.md
+        use/use-case-impact.md: contribute/use-case-impact.md
         concepts/api-surface-intelligence.md: use/api-surface-intelligence.md
         concepts/abi-api-handling.md: learn/abi-api-handling.md
         concepts/abi-cheat-sheet.md: learn/abi-cheat-sheet.md
