@@ -144,6 +144,12 @@ class TestClangParamIsRestrict:
             # real qualifier (Codex review, round 4).
             ("decltype(*gp + 0) *__restrict", True),
             ("decltype(*gp + 0) *", False),
+            # ...and clang prints `typeof` SPACED, whatever the source
+            # wrote, so "directly follows an identifier character" never
+            # recognized it — it caught `decltype(` only by luck of
+            # spacing (Codex review, round 5).
+            ("typeof (*gp) *restrict", True),
+            ("typeof (*gp) *", False),
             ("typeof(*gp) *__restrict", True),
         ],
     )
@@ -190,6 +196,13 @@ class TestDeclaratorGroup:
             # though its span begins with `*`.
             ("decltype(*gp + 0) *__restrict", None),
             ("typeof(*gp) *__restrict", None),
+            # The spaced form clang actually prints. A whitespace-skipping
+            # "follows an identifier" rule would classify this correctly
+            # but break the declarator rows above, which read as
+            # `<identifier><space>(` too — the keyword itself is the only
+            # discriminator (Codex review, round 5).
+            ("typeof (*gp) *restrict", None),
+            ("__typeof__ (*gp) *restrict", None),
         ],
     )
     def test_group(self, spelling: str, expected: str | None) -> None:
@@ -370,6 +383,60 @@ class TestClangParamIsRestrictAgainstRealClang:
             assert _clang_param_is_restrict(nodes[0]) is want, f"{fn}: {spelling!r}"
             checked += 1
         assert checked == 15, f"corpus shrank to {checked} parameters"
+
+    def test_type_operator_operands_are_not_declarators(self, tmp_path: Path) -> None:
+        """`typeof (E)`/`decltype(E)` wrap an EXPRESSION, not a declarator.
+
+        The point of doing this against the compiler rather than a fixture:
+        clang prints `typeof` **spaced** no matter which spelling the source
+        used — `typeof(*gp)` comes back as `typeof (*gp)` — so a rule keyed
+        on the character immediately before `(` sees a space, calls `(*gp)`
+        the declarator group, searches `*gp`, and misses the parameter's own
+        qualifier entirely (Codex review, round 5). `decltype(` is printed
+        unspaced, which is the only reason the earlier rule passed for it.
+
+        The obvious repair — skip whitespace, then require an identifier —
+        is wrong in the other direction: `int (*restrict)[3]` and `void
+        (*)(int *restrict)` also read as `<identifier><space>(`, so both
+        would be dismissed as expression operands. Only the specific
+        keyword separates the two families, which is what makes the closed
+        keyword set load-bearing rather than incidental.
+        """
+        c_root = self._parse(
+            tmp_path,
+            """
+            extern int *gp;
+            void spaced(typeof (*gp) *restrict p);
+            void unspaced(typeof(*gp) *restrict p);
+            void gnu_spelling(__typeof__ (*gp) *restrict p);
+            void no_qualifier(typeof (*gp) *p);
+            """,
+            cpp=False,
+        )
+        c_params = self._params_by_function(c_root)
+        c_expected = {
+            "spaced": True,
+            "unspaced": True,
+            "gnu_spelling": True,
+            "no_qualifier": False,
+        }
+        for fn, want in c_expected.items():
+            assert fn in c_params, f"clang emitted no ParmVarDecl for {fn}"
+            assert _clang_param_is_restrict(c_params[fn][0]) is want, fn
+
+        cpp_root = self._parse(
+            tmp_path,
+            """
+            extern int *gp;
+            void decl(decltype(*gp + 0) *__restrict p);
+            void decl_plain(decltype(*gp + 0) *p);
+            """,
+            cpp=True,
+        )
+        cpp_params = self._params_by_function(cpp_root)
+        for fn, want in (("decl", True), ("decl_plain", False)):
+            assert fn in cpp_params, f"clang++ emitted no ParmVarDecl for {fn}"
+            assert _clang_param_is_restrict(cpp_params[fn][0]) is want, fn
 
     def test_reference_wrappers_match_castxml(self, tmp_path: Path) -> None:
         """castxml's `_resolve_cv_restrict` stops at the outer ReferenceType,

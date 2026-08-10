@@ -1501,6 +1501,26 @@ building a second identity-resolution mechanism from scratch.
   call-like operand (`decltype(`, `typeof(`) from a declarator exactly. The
   corpus itself is now a live-clang test, so a future shape has to be added
   with its expected answer rather than argued about.
+
+  A fifth round found that second fix half-right, and the reason it was
+  half-right is the useful part. `typeof (*gp) *__restrict` answered False:
+  clang prints `typeof` **spaced** whatever the source wrote — even
+  `typeof(*gp)` comes back as `typeof (*gp)`, confirmed against clang 18 —
+  so "directly follows an identifier character" sees a space and calls
+  `(*gp)` the declarator group, searching `*gp` and missing the parameter's
+  own qualifier. `decltype(` passed only because clang happens to print it
+  unspaced. The obvious repair — skip whitespace, then require an
+  identifier — was checked before being applied and is wrong in the other
+  direction: `int (*restrict)[3]` and `void (*)(int *restrict)` also read
+  as `<identifier><space>(`, so it would dismiss both as expression
+  operands and regress rounds 1 and 2. What actually separates the two
+  families is the *specific keyword*, so the rule is now a closed set
+  (`decltype`, `typeof`, `__typeof`, `__typeof__`, `typeof_unqual`) in
+  `_follows_type_operator_keyword` — these being the only constructs clang
+  prints in a type spelling whose parenthesized operand is an expression.
+  Re-verified against real clang: all three source spellings plus the
+  unqualified control, the `decltype` pair, the fifteen-parameter corpus,
+  and the reference wrappers, 25 cases, no regressions.
   (2) *Detector registration order is user-visible, and a split must not
   change it.* `registry.detector()` stamps an incrementing counter and
   `run_all()` executes in that order, so registration order fixes the order

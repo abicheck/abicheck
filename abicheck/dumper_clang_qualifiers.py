@@ -27,7 +27,7 @@ offers:
   qualifier belonging to a pointee is not read as the declaration's own;
 - :func:`_field_own_cv_source` is the substring those two produce together,
   and is what the const/volatile *field* question uses;
-- :func:`_declarator_group` (with :func:`_follows_identifier`) finds the
+- :func:`_declarator_group` (with :func:`_follows_type_operator_keyword`) finds the
   parenthesized declarator when C's precedence rules put the declared
   entity's own pointer inside parentheses, where depth 0 describes
   something else entirely;
@@ -109,18 +109,41 @@ def _field_own_cv_source(desugared: str) -> str:
     return desugared[end:] if end >= 0 else desugared
 
 
-def _follows_identifier(type_str: str, paren_index: int) -> bool:
-    """Whether the ``(`` at *paren_index* directly follows an identifier.
+#: Type operators whose parenthesized operand is an *expression*, not a
+#: declarator. Clang prints these inside a type spelling, and their operand
+#: routinely begins with ``*`` (a dereference), which is exactly what makes
+#: them indistinguishable from a pointer declarator by shape alone.
+_TYPE_OPERATOR_KEYWORDS = frozenset(
+    {"decltype", "typeof", "__typeof", "__typeof__", "typeof_unqual"}
+)
 
-    That is what separates a call-like *expression* operand — ``decltype(``,
-    ``typeof(`` — from a parenthesized *declarator*. A declarator's ``(`` is
-    always preceded by whitespace, another opener, a ``*``, or the start of
-    the string; never by a name character.
+
+def _follows_type_operator_keyword(type_str: str, paren_index: int) -> bool:
+    """Whether the ``(`` at *paren_index* is a type operator's operand.
+
+    Matching the *specific keyword* is load-bearing; two cheaper rules both
+    fail, each on a case a previous review round established (Codex review):
+
+    - "directly follows an identifier character" misses ``typeof (*gp)``,
+      because clang normalizes the spelling with a space — even when the
+      source wrote ``typeof(*gp)``, confirmed against clang 18. It caught
+      ``decltype(``, which clang prints unspaced, purely by luck of spacing.
+    - "follows an identifier, skipping whitespace" over-corrects and breaks
+      the declarator cases: ``int (*restrict)[3]`` and ``void (*)(int
+      *restrict)`` also read as ``<identifier><space>(``, so both would be
+      dismissed as expression operands and answer False.
+
+    The keyword set is what actually separates them, and it is closed: these
+    are the only constructs clang prints in a type spelling whose
+    parenthesized operand is an expression.
     """
     k = paren_index - 1
-    if k < 0:
-        return False
-    return type_str[k].isalnum() or type_str[k] == "_"
+    while k >= 0 and type_str[k].isspace():
+        k -= 1
+    end = k + 1
+    while k >= 0 and (type_str[k].isalnum() or type_str[k] == "_"):
+        k -= 1
+    return type_str[k + 1 : end] in _TYPE_OPERATOR_KEYWORDS
 
 
 def _declarator_group(type_str: str) -> str | None:
@@ -168,7 +191,11 @@ def _declarator_group(type_str: str) -> str | None:
     while i < len(type_str):
         ch = type_str[i]
         if ch in "<([":
-            if ch == "(" and depth == 0 and not _follows_identifier(type_str, i):
+            if (
+                ch == "("
+                and depth == 0
+                and not _follows_type_operator_keyword(type_str, i)
+            ):
                 j = i + 1
                 while j < len(type_str) and type_str[j] == " ":
                     j += 1
