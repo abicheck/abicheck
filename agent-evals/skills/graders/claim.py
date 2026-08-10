@@ -110,6 +110,18 @@ def validate(claim: dict) -> str | None:
         for item in evidence
     ):
         return "evidence is not a list of non-negative call ids"
+    matrix = claim.get("matrix")
+    if matrix is not None:
+        # Validated here so a malformed shape becomes an invalid *claim* rather
+        # than an AttributeError inside a grader — `{"targets": [1]}` aborted
+        # the whole batch instead of failing the one run that produced it.
+        if not isinstance(matrix, dict) or not isinstance(matrix.get("targets"), list):
+            return "matrix does not carry a list of targets"
+        if any(
+            not isinstance(target, dict) or not isinstance(target.get("state"), str)
+            for target in matrix["targets"]
+        ):
+            return "a matrix target is not a record with a state"
     if claim["confident"]:
         return None
     uncertainty = claim.get("uncertainty")

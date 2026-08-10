@@ -58,7 +58,23 @@ _VERDICT_EXITS = {
 #: "The two sides cannot be compared" — a real, deterministic outcome, but not
 #: a verdict. Kept distinct so dimension 3 can credit the run for obtaining it
 #: while dimension 6 still refuses to let a confident verdict rest on it.
-_NOT_COMPARABLE_EXITS = {"scan": frozenset({6})}
+#:
+#: One code per command, because each maintains an independent scheme
+#: (`docs/reference/exit-codes.md`): native `compare` answers 16, `scan
+#: --against` 6, `compat check` 9. Recognizing only `scan`'s made a correct
+#: not-comparable run on either other command read as "no comparison
+#: completed" — a false dimension-3 failure.
+_NOT_COMPARABLE_EXITS = {
+    "scan": frozenset({6}),
+    "compare": frozenset({16}),
+    "compat": frozenset({9}),
+}
+
+#: Modes that resolve an invocation without running it. `--dry-run` is explicit
+#: about this ("never returns a verdict code", exits 0/1/64) and `--help` exits
+#: 0, so both looked like clean comparisons to an exit-code check alone — a
+#: guessed verdict could cite one and satisfy every evidence rule.
+NON_EXECUTING_FLAGS = ("--help", "-h", "--dry-run")
 
 #: Flags that can make a report greener than the findings warrant. `--suppress`
 #: and `--policy-file` do it directly; the severity knobs do it by re-scoring
@@ -156,6 +172,8 @@ def comparison_command(call: dict) -> str | None:
     """
     verb = subcommand(call)
     if verb not in COMPARISON_SUBCOMMANDS:
+        return None
+    if any(token in NON_EXECUTING_FLAGS for token in call.get("argv", [])):
         return None
     if verb == "scan":
         argv = call.get("argv", [])

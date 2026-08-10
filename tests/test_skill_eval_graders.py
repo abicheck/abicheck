@@ -181,6 +181,43 @@ class TestClaimExtraction:
         assert parsed is None
         assert "evidence is missing" in status
 
+    @pytest.mark.parametrize(
+        "matrix",
+        [
+            {"targets": [1]},
+            {"targets": "all"},
+            {"targets": [{"id": "x"}]},
+            "everything",
+        ],
+    )
+    def test_a_malformed_matrix_is_an_invalid_claim_not_a_crash(self, matrix):
+        """It used to raise inside a grader and abort the whole batch instead of
+        failing the one run that produced it."""
+        parsed, status = claim_mod.extract(
+            envelope(
+                verdict="COMPATIBLE",
+                evidence=[0],
+                confident=False,
+                uncertainty={"reason": "matrix_target_unrun", "unresolved": "linux"},
+                matrix=matrix,
+            )
+        )
+        assert parsed is None
+        assert status.startswith("invalid")
+
+    def test_a_well_formed_matrix_is_accepted(self):
+        parsed, status = claim_mod.extract(
+            envelope(
+                verdict="COMPATIBLE",
+                evidence=[0],
+                confident=False,
+                uncertainty={"reason": "matrix_target_unrun", "unresolved": "linux"},
+                matrix={"targets": [{"id": "linux", "state": "not_run"}]},
+            )
+        )
+        assert status == "ok"
+        assert parsed["matrix"]["targets"][0]["state"] == "not_run"
+
     def test_the_severity_ordinal_is_least_to_most_severe(self):
         ranks = [claim_mod.rank(v) for v in claim_mod.VERDICT_ORDER]
         assert ranks == sorted(ranks)
@@ -253,6 +290,30 @@ class TestEvidenceReading:
         ):
             call = {"argv": ["compare", "a", "b", flag, "error"]}
             assert ev.suppression_flags(call) == [flag], flag
+
+    @pytest.mark.parametrize("flag", ["--help", "-h", "--dry-run"])
+    def test_a_non_executing_mode_is_not_a_comparison(self, flag):
+        """`compare --help` exits 0 and `--dry-run` "never returns a verdict
+        code" — both looked clean to an exit-code check, so a guessed verdict
+        could cite one and satisfy every evidence rule."""
+        call = {"argv": ["compare", "a", "b", flag], "exit_code": 0}
+        assert not ev.is_comparison(call)
+        assert not ev.ran_to_a_verdict(call)
+
+    @pytest.mark.parametrize(
+        ("argv", "code"),
+        [
+            (["compare", "a", "b"], 16),
+            (["scan", "a.so", "--against", "b.json"], 6),
+            (["compat", "check", "-lib", "foo"], 9),
+        ],
+    )
+    def test_each_command_has_its_own_not_comparable_exit(self, argv, code):
+        """Each maintains an independent scheme; recognizing only `scan`'s made
+        a correct not-comparable run on the others read as no comparison."""
+        call = {"argv": argv, "exit_code": code}
+        assert ev.determined_not_comparable(call)
+        assert not ev.ran_to_a_verdict(call)
 
     def test_comparing_one_operand_against_itself_is_detected(self):
         assert ev.compares_one_side_against_itself(
