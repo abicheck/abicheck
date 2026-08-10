@@ -1185,17 +1185,32 @@ def _vtable_transition_is_evidenced(
         return True
     # NOT consulted here: ``vptr_offset_bits``. It reads like the one
     # independent layout witness available, and a previous revision of this
-    # function used it as exactly that -- wrongly. Both producers assign it
-    # as ``0 if vtable else None`` (``dwarf_snapshot.py``,
-    # ``dumper_castxml.py``), so on those two backends
-    # ``(old.vptr is None) != (new.vptr is None)`` is *identical* to the
-    # empty-vs-non-empty vtable transition being guarded: it was true by
-    # construction for every input reaching this point, which silently made
-    # the whole guard a no-op and let the original capture-gap false positive
-    # straight back through (Codex review). Only the optional
-    # ``ABICHECK_CLANG_LAYOUT_TOOL`` path computes it from a real layout
-    # query, and nothing in the model distinguishes that value from the
-    # derived one -- so it cannot be trusted as evidence here at all.
+    # function used it as exactly that -- wrongly. At the time, both
+    # producers assigned it as ``0 if vtable else None``
+    # (``dwarf_snapshot.py``, ``dumper_castxml.py``), so on those two
+    # backends ``(old.vptr is None) != (new.vptr is None)`` was *identical*
+    # to the empty-vs-non-empty vtable transition being guarded: it was true
+    # by construction for every input reaching this point, which silently
+    # made the whole guard a no-op and let the original capture-gap false
+    # positive straight back through (Codex review). ``dumper_castxml.py``
+    # still assigns it exactly that way. ``dwarf_snapshot.py`` no longer
+    # does (G31 Phase C): it now reads a real ``_vptr.<Class>``/base-chain
+    # offset from DWARF in the common case, falling back to the same
+    # ``0 if vtable`` heuristic only for the residual unresolved set -- so
+    # for DWARF specifically the field is no longer purely circular. This
+    # function still doesn't consult it, on purpose: declining to use an
+    # available signal is always safe (the failure mode this guard exists to
+    # avoid only ever ran the other way -- trusting a circular signal AS IF
+    # independent), and using it as a genuine witness for the now-partially-
+    # real DWARF case while still excluding it for castxml's own
+    # still-fully-circular case is its own careful design + FP-verification
+    # effort, not a drive-by extension here — see
+    # ``tests/test_vtable_evidence_guard.py``'s own note on why
+    # ``abicheck.dwarf_snapshot`` was dropped from its premise-pin test.
+    # Only the optional ``ABICHECK_CLANG_LAYOUT_TOOL`` path computes it from
+    # a real layout query on the castxml/clang side, and nothing in the
+    # model distinguishes that value from the derived one -- so it still
+    # cannot be trusted as evidence here at all on that side.
     if t_old.size_bits is None or t_new.size_bits is None:
         return True
     if t_old.size_bits != t_new.size_bits:

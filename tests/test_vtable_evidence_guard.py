@@ -35,11 +35,13 @@ def _cls(
 ) -> RecordType:
     """A record shaped the way a real dump produces one.
 
-    ``vptr_offset_bits`` defaults to the producers' own derivation rather
-    than to ``None``: both ``dwarf_snapshot`` and ``dumper_castxml`` assign
-    it as ``0 if vtable else None``. Leaving it ``None`` on both sides built
-    a record no backend can emit, and that is precisely how a guard that had
-    become inert on every real snapshot still passed its own tests.
+    ``vptr_offset_bits`` defaults to a producer's own derivation rather
+    than to ``None``: ``dumper_castxml`` still assigns it as
+    ``0 if vtable else None`` (``dwarf_snapshot`` no longer does, since G31
+    Phase C -- see ``TestVptrIsNotEvidence``'s own docstring). Leaving it
+    ``None`` on both sides built a record no backend can emit, and that is
+    precisely how a guard that had become inert on every real snapshot
+    still passed its own tests.
     """
     return RecordType(
         name=NAME,
@@ -67,34 +69,50 @@ def _virtual() -> dict[str, Function]:
 class TestVptrIsNotEvidence:
     """``vptr_offset_bits`` must never gate this guard — it is circular.
 
-    Both producers assign it ``0 if vtable else None``, so on a real DWARF or
+    ``dumper_castxml.py`` assigns it ``0 if vtable else None``, so on a real
     CastXML snapshot the descriptor's None↔set transition *is* the vtable
     transition being guarded, not a second witness of it. A revision that
     read it here was true by construction for every input reaching that
     branch, which made the whole guard inert and let the capture-gap false
     positive back through (Codex review).
+
+    ``dwarf_snapshot.py`` is deliberately NOT pinned here (it was, until G31
+    Phase C): it no longer derives ``vptr_offset_bits`` purely from the
+    vtable list -- it now reads a real ``_vptr.<Class>``/base-chain offset
+    from DWARF in the common case, only falling back to the same
+    ``0 if vtable`` heuristic for the residual set DWARF can't resolve. This
+    guard still doesn't consult the field on that backend either (see
+    ``diff_types._vtable_transition_is_evidenced``'s own updated comment) --
+    declining to use an available signal is always safe, so nothing here
+    needed to change behaviorally. But the field is no longer *provably*
+    circular on DWARF the way it still is on castxml, so pinning it to the
+    same premise would be testing something no longer true. Whether it's
+    now trustworthy enough to become a genuine independent witness for the
+    DWARF-derived case is its own careful design + FP-verification effort
+    (see this guard's own docstring caution against "a cleverer reading of
+    the fields already here"), not something this pin test should assume
+    either way.
     """
 
-    @pytest.mark.parametrize(
-        "module", ["abicheck.dwarf_snapshot", "abicheck.dumper_castxml"]
-    )
-    def test_the_producer_derivation_this_rests_on(self, module: str) -> None:
+    def test_the_producer_derivation_this_rests_on(self) -> None:
         """Pin the premise, not just the conclusion.
 
-        The argument above is only sound while both producers derive the
-        field from the vtable list. If one ever computes a real vptr, this
+        The argument above is only sound while castxml derives the field
+        from the vtable list. If it ever computes a real vptr too, this
         fails and the reasoning must be revisited before the field is
         trusted as evidence again.
         """
         import importlib
         from pathlib import Path
 
-        src = Path(importlib.import_module(module).__file__ or "").read_text(
-            encoding="utf-8"
-        )
+        src = Path(
+            importlib.import_module("abicheck.dumper_castxml").__file__ or ""
+        ).read_text(encoding="utf-8")
         assert "vptr_offset_bits=0 if vtable else None" in src or (
             "vptr_offset_bits = 0 if vtable else None" in src
-        ), f"{module} no longer derives vptr_offset_bits from the vtable list"
+        ), (
+            "abicheck.dumper_castxml no longer derives vptr_offset_bits from the vtable list"
+        )
 
     def test_capture_gap_is_suppressed_on_producer_shaped_records(self) -> None:
         """The regression: identical layout, no owned virtuals either side,
