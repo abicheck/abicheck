@@ -1136,6 +1136,97 @@ Once a root command genuinely clears the bar above, pick the right home:
   above, and three Hypothesis properties in
   `tests/test_detector_properties.py`.
 
+  **A named follow-on, found by a user rather than by any gate in this
+  repo, and worth being explicit about why: two detectors reading the
+  identical evidence gap and reaching two different severities is its own
+  bug class, distinct from either detector being individually wrong.**
+  `LAYOUT_UNVERIFIABLE` (`diff_layout.py`) answers "was there real layout
+  evidence for this type" from the exact same asymmetric-evidence condition
+  `_vtable_transition_is_evidenced` above declines to suppress on. Both
+  answers are individually correct and individually documented (this entry
+  is the vtable side's own justification) — but a type carrying both at
+  once reads as a hard BREAKING verdict sitting next to a finding that
+  already says the evidence for that type couldn't be verified either way,
+  reproducible with zero real ABI change (scanning a binary against a dump
+  of itself; reported against real oneDAL binaries, three types, two
+  libraries). None of this repo's existing quality gates were positioned to
+  catch it: the FP-rate/tier-accuracy gates are verdict-level (the overall
+  verdict was already correctly `BREAKING`, dominated by the vtable
+  finding, so nothing there looked wrong), and every existing test —
+  including the Hypothesis properties this entry already describes — is
+  scoped to one detector's own correctness in isolation, never to whether
+  two detectors' outputs are mutually *legible* when they land on the same
+  subject. Fixed by `post_processing.
+  SuppressLayoutUnverifiableCoveredByVtableChanged`
+  (`checker_types.VTABLE_COVERS_UNVERIFIABLE_LAYOUT_GAP_PREFIX`,
+  `Change.vtable_covers_unverifiable_layout_gap`): never demotes the
+  BREAKING finding (the reasoning above is exactly why that direction is
+  unsafe — a real last-virtual-method removal with a new-side capture gap
+  is indistinguishable from this same evidence gap, so softening it risks
+  a false negative), and instead folds the now-redundant
+  `LAYOUT_UNVERIFIABLE` advisory into `redundant_changes` once a
+  `TYPE_VTABLE_CHANGED` already reports the identical gap for the identical
+  type. The shape worth reusing for a *future* pair of detectors that key
+  off the same evidence gap: (1) correlate by the type's real qualified
+  identity, never the bare `Change.symbol` two distinct same-named records
+  in different namespaces can share; (2) gate the correlation on a
+  dedicated internal marker recording *why* the stronger finding was kept,
+  not on its mere co-occurrence — an independently-evidenced instance of
+  the stronger kind (a real reorder, a real size delta, a real
+  virtual-base change) must never trigger the fold; (3) never reuse
+  `Change.modulation_reason`/`modulation_rule` for internal correlation —
+  those are a public, report-facing audit trail for an actual verdict
+  override, and tagging an unmodulated finding with them is a false audit
+  entry a downstream consumer (a reporter, `impact.engine.assess_change()`)
+  would read as real; (4) run the fold *after* `FilterNonPublicSurface`/
+  `DemoteOffPythonSurface`/`ApplySuppression` have independently settled
+  both findings, not before — folding earlier both hides the redundant
+  finding from a suppression rule that targets it directly and lets it
+  outlive its covering finding's later exclusion as out-of-public-surface,
+  since `ctx.redundant` (unlike `ctx.out_of_surface`) still contributes to
+  `verdict_redundant` by default; (5) tag the folded finding's
+  `caused_by_type` with a dedicated prefix and extend `checker.compare`'s
+  `verdict_redundant` exclusion to match it, mirroring the existing
+  `"rename:"` exclusion `SuppressRenamedPairs` relies on for the identical
+  reason — otherwise the folded advisory keeps contributing to the verdict
+  even after a policy override or suppression on the covering finding has
+  resolved it, silently resurrecting the exact contradiction this fix
+  exists to remove. Every one of these five was its own review-caught
+  regression on the fix's own PR (five rounds, in order: an unconditional
+  demotion of the BREAKING finding; the same demotion applied even when the
+  vtable change was independently evidenced; the same demotion applied even
+  when a virtual-base change was independently evidenced; the wrong
+  pipeline ordering; the `modulation_reason` misuse; the verdict-inclusion
+  gap) — worth recording together rather than only as scattered commit
+  messages, since a future detector pair hitting the identical evidence-gap
+  shape should be able to read this list once instead of rediscovering each
+  point independently. Regression coverage: `tests/test_vtable_severity.py`
+  (six hand-picked example cases covering each of the five points above)
+  and a generalized Hypothesis property,
+  `test_layout_unverifiable_always_folded_when_vtable_change_shares_its_gap`
+  in `tests/test_detector_properties.py`, checking the fold holds over
+  arbitrarily generated classes and evidence-descriptor shapes rather than
+  only the hand-picked examples.
+
+  **A structural, not point, fix for the field-ordering half of the above**
+  (found twice now in this codebase's history under review — first on
+  `AbiSnapshot` in PR #582, again on `Change.
+  vtable_covers_unverifiable_layout_gap` in the same PR that introduced
+  it): `Change` (`checker_types.py`) is now keyword-only from `old_value`
+  onward via the `dataclasses.KW_ONLY` sentinel, rather than the per-field
+  `field(kw_only=True)` PR #582 used for `AbiSnapshot`. Every production
+  and test call site across the codebase already passes `Change`'s ~50
+  optional fields by keyword (confirmed by AST-parsing every `Change(...)`
+  call site in the repo: every positional call anywhere passes exactly the
+  three required leading fields, `kind`/`symbol`/`description`, and never
+  more), so this changes nothing for any existing caller — but it makes a
+  field inserted anywhere in the class body permanently safe for every
+  contributor from here on, including one who forgets to mark their own
+  new field `kw_only=True` by hand (the sentinel covers every field
+  textually after it automatically, which the per-field approach cannot
+  guarantee). Prefer the sentinel form over repeating `field(kw_only=True)`
+  on a new field in a class already past this marker.
+
 - **Evidence-provider model — investigated, found not to reproduce as
   described; no fix applied.** A status-review follow-up asked whether
   `evidence_status_for_result`'s report-level downgrade (kind-level

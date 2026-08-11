@@ -41,8 +41,6 @@ if TYPE_CHECKING:
     from .suppression import Suppression, SuppressionList
 
 
-
-
 class PipelineStep(Protocol):
     """Protocol for a single post-processing step."""
 
@@ -548,10 +546,6 @@ class DemoteOffPythonSurface:
         return kept
 
 
-
-
-
-
 class ApplySuppression:
     """Apply user-provided suppression rules.
 
@@ -634,7 +628,9 @@ def _build_suppression_overreach_change(change: Change, rule: Suppression) -> Ch
     )
 
 
-def _build_suppression_unknown_reachability_change(change: Change, rule: Suppression) -> Change:
+def _build_suppression_unknown_reachability_change(
+    change: Change, rule: Suppression
+) -> Change:
     """Build the ``SUPPRESSION_REACHABILITY_UNKNOWN`` diagnostic for *change*.
 
     impact-analysis-layer P0 slice. *rule* is the suppression whose selectors
@@ -998,7 +994,9 @@ class DetectTemplatePatterns:
             detect_template_patterns,
         )
 
-        namespaces = self._namespaces or ctx.internal_namespaces or _INTERNAL_TEMPLATE_NAMESPACES
+        namespaces = (
+            self._namespaces or ctx.internal_namespaces or _INTERNAL_TEMPLATE_NAMESPACES
+        )
         new_findings = detect_template_patterns(ctx.old, ctx.new, namespaces)
         if not new_findings:
             return changes
@@ -1062,7 +1060,9 @@ class DetectInternalLeaks:
             detect_internal_leaks,
         )
 
-        namespaces = self._namespaces or ctx.internal_namespaces or DEFAULT_INTERNAL_NAMESPACES
+        namespaces = (
+            self._namespaces or ctx.internal_namespaces or DEFAULT_INTERNAL_NAMESPACES
+        )
         extra = detect_internal_leaks(changes, ctx.old, ctx.new, namespaces)
         # ADR-044 P1 items 1-2: the call-graph analogue, for a triggering
         # change with no layout/type-graph evidence at all (see
@@ -1119,7 +1119,9 @@ class DemoteUnreachableInternalChurn:
         )
         from .surface import REASON_PRIVATE_INTERNAL_UNREACHABLE
 
-        namespaces = self._namespaces or ctx.internal_namespaces or DEFAULT_INTERNAL_NAMESPACES
+        namespaces = (
+            self._namespaces or ctx.internal_namespaces or DEFAULT_INTERNAL_NAMESPACES
+        )
         frozen = list(ctx.frozen_namespaces)
 
         def _is_frozen(type_name: str) -> bool:

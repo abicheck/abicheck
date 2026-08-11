@@ -6,6 +6,7 @@ Tests the relationship between vtable changes and BREAKING verdict.
 This supplements the existing TestVtableReorderingSeverity in test_issues_e1_e4.py
 with more granular severity-focused tests.
 """
+
 from __future__ import annotations
 
 from abicheck.checker import ChangeKind, Verdict, compare
@@ -30,28 +31,48 @@ class TestVtableSeverity:
 
     def test_vtable_reorder_verdict_breaking(self) -> None:
         """Reordering vtable entries → BREAKING verdict."""
-        old = _snap(types=[RecordType(
-            name="Base", kind="class",
-            vtable=["_ZN4Base4drawEv", "_ZN4Base6resizeEv"],
-        )])
-        new = _snap(types=[RecordType(
-            name="Base", kind="class",
-            vtable=["_ZN4Base6resizeEv", "_ZN4Base4drawEv"],
-        )])
+        old = _snap(
+            types=[
+                RecordType(
+                    name="Base",
+                    kind="class",
+                    vtable=["_ZN4Base4drawEv", "_ZN4Base6resizeEv"],
+                )
+            ]
+        )
+        new = _snap(
+            types=[
+                RecordType(
+                    name="Base",
+                    kind="class",
+                    vtable=["_ZN4Base6resizeEv", "_ZN4Base4drawEv"],
+                )
+            ]
+        )
         result = compare(old, new)
         assert ChangeKind.TYPE_VTABLE_CHANGED in {c.kind for c in result.changes}
         assert result.verdict == Verdict.BREAKING
 
     def test_vtable_entry_removed_is_breaking(self) -> None:
         """Removing a vtable entry → BREAKING."""
-        old = _snap(types=[RecordType(
-            name="Widget", kind="class",
-            vtable=["_ZN6Widget4drawEv", "_ZN6Widget5paintEv"],
-        )])
-        new = _snap(types=[RecordType(
-            name="Widget", kind="class",
-            vtable=["_ZN6Widget4drawEv"],
-        )])
+        old = _snap(
+            types=[
+                RecordType(
+                    name="Widget",
+                    kind="class",
+                    vtable=["_ZN6Widget4drawEv", "_ZN6Widget5paintEv"],
+                )
+            ]
+        )
+        new = _snap(
+            types=[
+                RecordType(
+                    name="Widget",
+                    kind="class",
+                    vtable=["_ZN6Widget4drawEv"],
+                )
+            ]
+        )
         result = compare(old, new)
         kinds = {c.kind for c in result.changes}
         assert ChangeKind.TYPE_VTABLE_CHANGED in kinds
@@ -59,14 +80,24 @@ class TestVtableSeverity:
 
     def test_vtable_entry_added_is_breaking(self) -> None:
         """Adding a vtable entry shifts indices of subsequent entries → BREAKING."""
-        old = _snap(types=[RecordType(
-            name="Widget", kind="class",
-            vtable=["_ZN6Widget4drawEv"],
-        )])
-        new = _snap(types=[RecordType(
-            name="Widget", kind="class",
-            vtable=["_ZN6Widget4drawEv", "_ZN6Widget5paintEv"],
-        )])
+        old = _snap(
+            types=[
+                RecordType(
+                    name="Widget",
+                    kind="class",
+                    vtable=["_ZN6Widget4drawEv"],
+                )
+            ]
+        )
+        new = _snap(
+            types=[
+                RecordType(
+                    name="Widget",
+                    kind="class",
+                    vtable=["_ZN6Widget4drawEv", "_ZN6Widget5paintEv"],
+                )
+            ]
+        )
         result = compare(old, new)
         kinds = {c.kind for c in result.changes}
         assert ChangeKind.TYPE_VTABLE_CHANGED in kinds
@@ -74,14 +105,24 @@ class TestVtableSeverity:
 
     def test_vtable_unchanged_no_change(self) -> None:
         """Identical vtable → no TYPE_VTABLE_CHANGED emitted."""
-        old = _snap(types=[RecordType(
-            name="Engine", kind="class",
-            vtable=["_ZN6Engine4initEv", "_ZN6Engine3runEv"],
-        )])
-        new = _snap(types=[RecordType(
-            name="Engine", kind="class",
-            vtable=["_ZN6Engine4initEv", "_ZN6Engine3runEv"],
-        )])
+        old = _snap(
+            types=[
+                RecordType(
+                    name="Engine",
+                    kind="class",
+                    vtable=["_ZN6Engine4initEv", "_ZN6Engine3runEv"],
+                )
+            ]
+        )
+        new = _snap(
+            types=[
+                RecordType(
+                    name="Engine",
+                    kind="class",
+                    vtable=["_ZN6Engine4initEv", "_ZN6Engine3runEv"],
+                )
+            ]
+        )
         result = compare(old, new)
         assert not result.changes
 
@@ -99,26 +140,42 @@ class TestVtableOverrideSlotReuse:
 
     def test_same_signature_override_reusing_slot_is_not_vtable_changed(self) -> None:
         old = _snap(
-            types=[RecordType(
-                name="Derived", kind="class", bases=["Base"],
-                vtable=["_ZN4Base5paintEi"],
-            )],
-            functions=[Function(
-                name="Base::paint", mangled="_ZN4Base5paintEi",
-                return_type="int", params=[Param(name="x", type="int")],
-                is_virtual=True,
-            )],
+            types=[
+                RecordType(
+                    name="Derived",
+                    kind="class",
+                    bases=["Base"],
+                    vtable=["_ZN4Base5paintEi"],
+                )
+            ],
+            functions=[
+                Function(
+                    name="Base::paint",
+                    mangled="_ZN4Base5paintEi",
+                    return_type="int",
+                    params=[Param(name="x", type="int")],
+                    is_virtual=True,
+                )
+            ],
         )
         new = _snap(
-            types=[RecordType(
-                name="Derived", kind="class", bases=["Base"],
-                vtable=["_ZN7Derived5paintEi"],
-            )],
-            functions=[Function(
-                name="Derived::paint", mangled="_ZN7Derived5paintEi",
-                return_type="int", params=[Param(name="x", type="int")],
-                is_virtual=True,
-            )],
+            types=[
+                RecordType(
+                    name="Derived",
+                    kind="class",
+                    bases=["Base"],
+                    vtable=["_ZN7Derived5paintEi"],
+                )
+            ],
+            functions=[
+                Function(
+                    name="Derived::paint",
+                    mangled="_ZN7Derived5paintEi",
+                    return_type="int",
+                    params=[Param(name="x", type="int")],
+                    is_virtual=True,
+                )
+            ],
         )
         result = compare(old, new)
         kinds = {c.kind for c in result.changes}
@@ -129,30 +186,46 @@ class TestVtableOverrideSlotReuse:
         list has no matching virtual_signature_key, so it's a genuine new
         slot, not a reuse -- must still be reported."""
         old = _snap(
-            types=[RecordType(
-                name="Derived", kind="class", bases=["Base"],
-                vtable=["_ZN4Base5paintEi"],
-            )],
-            functions=[Function(
-                name="Base::paint", mangled="_ZN4Base5paintEi",
-                return_type="int", params=[Param(name="x", type="int")],
-                is_virtual=True,
-            )],
-        )
-        new = _snap(
-            types=[RecordType(
-                name="Derived", kind="class", bases=["Base"],
-                vtable=["_ZN4Base5paintEi", "_ZN7Derived5paintEd"],
-            )],
+            types=[
+                RecordType(
+                    name="Derived",
+                    kind="class",
+                    bases=["Base"],
+                    vtable=["_ZN4Base5paintEi"],
+                )
+            ],
             functions=[
                 Function(
-                    name="Base::paint", mangled="_ZN4Base5paintEi",
-                    return_type="int", params=[Param(name="x", type="int")],
+                    name="Base::paint",
+                    mangled="_ZN4Base5paintEi",
+                    return_type="int",
+                    params=[Param(name="x", type="int")],
+                    is_virtual=True,
+                )
+            ],
+        )
+        new = _snap(
+            types=[
+                RecordType(
+                    name="Derived",
+                    kind="class",
+                    bases=["Base"],
+                    vtable=["_ZN4Base5paintEi", "_ZN7Derived5paintEd"],
+                )
+            ],
+            functions=[
+                Function(
+                    name="Base::paint",
+                    mangled="_ZN4Base5paintEi",
+                    return_type="int",
+                    params=[Param(name="x", type="int")],
                     is_virtual=True,
                 ),
                 Function(
-                    name="Derived::paint", mangled="_ZN7Derived5paintEd",
-                    return_type="int", params=[Param(name="x", type="double")],
+                    name="Derived::paint",
+                    mangled="_ZN7Derived5paintEd",
+                    return_type="int",
+                    params=[Param(name="x", type="double")],
                     is_virtual=True,
                 ),
             ],
@@ -175,16 +248,31 @@ class TestVtableOverrideSlotReuse:
         TYPE_VTABLE_CHANGED would be observable either way, so a
         compare()-level assertion wouldn't isolate this specific guard.
         """
-        old_funcs = {"_ZN4Base5paintEi": Function(
-            name="Base::paint", mangled="_ZN4Base5paintEi",
-            return_type="int", params=[Param(name="x", type="int")], is_virtual=True,
-        )}
-        new_funcs = {"_ZN6Other5paintEi": Function(
-            name="Other::paint", mangled="_ZN6Other5paintEi",
-            return_type="int", params=[Param(name="x", type="int")], is_virtual=True,
-        )}
+        old_funcs = {
+            "_ZN4Base5paintEi": Function(
+                name="Base::paint",
+                mangled="_ZN4Base5paintEi",
+                return_type="int",
+                params=[Param(name="x", type="int")],
+                is_virtual=True,
+            )
+        }
+        new_funcs = {
+            "_ZN6Other5paintEi": Function(
+                name="Other::paint",
+                mangled="_ZN6Other5paintEi",
+                return_type="int",
+                params=[Param(name="x", type="int")],
+                is_virtual=True,
+            )
+        }
         assert not vtable_slot_is_override_reuse(
-            "_ZN4Base5paintEi", "_ZN6Other5paintEi", old_funcs, new_funcs, {}, {},
+            "_ZN4Base5paintEi",
+            "_ZN6Other5paintEi",
+            old_funcs,
+            new_funcs,
+            {},
+            {},
         )
 
     def test_sibling_base_same_signature_not_treated_as_reuse(self) -> None:
@@ -196,29 +284,57 @@ class TestVtableOverrideSlotReuse:
         without either being an override of the other. Base2 does not
         descend from Base1, so this must not be treated as a reuse.
         """
-        old_funcs = {"_ZN5Base14fooEv": Function(
-            name="Base1::foo", mangled="_ZN5Base14fooEv",
-            return_type="void", is_virtual=True,
-        )}
-        new_funcs = {"_ZN5Base24fooEv": Function(
-            name="Base2::foo", mangled="_ZN5Base24fooEv",
-            return_type="void", is_virtual=True,
-        )}
-        old_types = {"Derived": RecordType(
-            name="Derived", kind="class", bases=["Base1"], vtable=["_ZN5Base14fooEv"],
-        )}
-        new_types = {"Derived": RecordType(
-            name="Derived", kind="class", bases=["Base2"], vtable=["_ZN5Base24fooEv"],
-        )}
+        old_funcs = {
+            "_ZN5Base14fooEv": Function(
+                name="Base1::foo",
+                mangled="_ZN5Base14fooEv",
+                return_type="void",
+                is_virtual=True,
+            )
+        }
+        new_funcs = {
+            "_ZN5Base24fooEv": Function(
+                name="Base2::foo",
+                mangled="_ZN5Base24fooEv",
+                return_type="void",
+                is_virtual=True,
+            )
+        }
+        old_types = {
+            "Derived": RecordType(
+                name="Derived",
+                kind="class",
+                bases=["Base1"],
+                vtable=["_ZN5Base14fooEv"],
+            )
+        }
+        new_types = {
+            "Derived": RecordType(
+                name="Derived",
+                kind="class",
+                bases=["Base2"],
+                vtable=["_ZN5Base24fooEv"],
+            )
+        }
         assert not vtable_slot_is_override_reuse(
-            "_ZN5Base14fooEv", "_ZN5Base24fooEv", old_funcs, new_funcs, old_types, new_types,
+            "_ZN5Base14fooEv",
+            "_ZN5Base24fooEv",
+            old_funcs,
+            new_funcs,
+            old_types,
+            new_types,
         )
 
     def test_identical_slot_entry_is_trivially_a_reuse(self) -> None:
         """The old_entry == new_entry fast path: an unchanged slot is
         trivially a 'reuse' (nothing to suppress a real change for)."""
         assert vtable_slot_is_override_reuse(
-            "_ZN4Base5paintEi", "_ZN4Base5paintEi", {}, {}, {}, {},
+            "_ZN4Base5paintEi",
+            "_ZN4Base5paintEi",
+            {},
+            {},
+            {},
+            {},
         )
 
     def test_different_signature_returns_false_directly(self) -> None:
@@ -227,32 +343,62 @@ class TestVtableOverrideSlotReuse:
         length (as in the compare()-level negative-twin test) never reaches
         this helper at all (_diff_type_vtable only calls it when both
         vtables are the same length)."""
-        old_funcs = {"_ZN4Base5paintEi": Function(
-            name="Base::paint", mangled="_ZN4Base5paintEi",
-            return_type="int", params=[Param(name="x", type="int")], is_virtual=True,
-        )}
-        new_funcs = {"_ZN7Derived5paintEd": Function(
-            name="Derived::paint", mangled="_ZN7Derived5paintEd",
-            return_type="int", params=[Param(name="x", type="double")], is_virtual=True,
-        )}
+        old_funcs = {
+            "_ZN4Base5paintEi": Function(
+                name="Base::paint",
+                mangled="_ZN4Base5paintEi",
+                return_type="int",
+                params=[Param(name="x", type="int")],
+                is_virtual=True,
+            )
+        }
+        new_funcs = {
+            "_ZN7Derived5paintEd": Function(
+                name="Derived::paint",
+                mangled="_ZN7Derived5paintEd",
+                return_type="int",
+                params=[Param(name="x", type="double")],
+                is_virtual=True,
+            )
+        }
         assert not vtable_slot_is_override_reuse(
-            "_ZN4Base5paintEi", "_ZN7Derived5paintEd", old_funcs, new_funcs, {}, {},
+            "_ZN4Base5paintEi",
+            "_ZN7Derived5paintEd",
+            old_funcs,
+            new_funcs,
+            {},
+            {},
         )
 
     def test_unresolvable_owner_returns_false(self) -> None:
         """A Function whose owner can't be determined (no '::' in its name
         and an unparseable mangled symbol) must not be treated as a reuse --
         there is nothing to verify an override edge against."""
-        old_funcs = {"paint": Function(
-            name="paint", mangled="not_a_mangled_name",
-            return_type="int", params=[Param(name="x", type="int")], is_virtual=True,
-        )}
-        new_funcs = {"paint2": Function(
-            name="paint", mangled="also_not_mangled",
-            return_type="int", params=[Param(name="x", type="int")], is_virtual=True,
-        )}
+        old_funcs = {
+            "paint": Function(
+                name="paint",
+                mangled="not_a_mangled_name",
+                return_type="int",
+                params=[Param(name="x", type="int")],
+                is_virtual=True,
+            )
+        }
+        new_funcs = {
+            "paint2": Function(
+                name="paint",
+                mangled="also_not_mangled",
+                return_type="int",
+                params=[Param(name="x", type="int")],
+                is_virtual=True,
+            )
+        }
         assert not vtable_slot_is_override_reuse(
-            "paint", "paint2", old_funcs, new_funcs, {}, {},
+            "paint",
+            "paint2",
+            old_funcs,
+            new_funcs,
+            {},
+            {},
         )
 
 
@@ -315,7 +461,9 @@ class TestOwnerDescendsFrom:
         }
         assert not _owner_descends_from("ns::Base", "Base", types)
 
-    def test_leaf_only_base_list_not_trusted_against_disambiguated_ancestor(self) -> None:
+    def test_leaf_only_base_list_not_trusted_against_disambiguated_ancestor(
+        self,
+    ) -> None:
         """owner (``ns2::Derived``) declares a bare leaf-only base (``Base``,
         as CastXML would record it) -- but if BOTH ``ns1::Base`` and
         ``ns2::Base`` have their own resolvable qualified records elsewhere
@@ -324,7 +472,9 @@ class TestOwnerDescendsFrom:
         the unrelated ``ns1::Base`` must not succeed just because its leaf
         happens to match."""
         types = {
-            "ns2::Derived": RecordType(name="ns2::Derived", kind="class", bases=["Base"]),
+            "ns2::Derived": RecordType(
+                name="ns2::Derived", kind="class", bases=["Base"]
+            ),
             "ns1::Base": RecordType(name="ns1::Base", kind="class"),
             "ns2::Base": RecordType(name="ns2::Base", kind="class"),
         }
@@ -344,7 +494,10 @@ class TestOwnerDescendsFrom:
         leaf is ambiguous in this snapshot."""
         types = {
             "Derived": RecordType(
-                name="Derived", qualified_name="ns::Derived", kind="class", bases=["Base"]
+                name="Derived",
+                qualified_name="ns::Derived",
+                kind="class",
+                bases=["Base"],
             ),
             "Base": RecordType(name="Base", qualified_name="ns::Base", kind="class"),
         }
@@ -613,14 +766,24 @@ class TestLayoutUnverifiableSuppressedByVtableChanged:
         """No matching LAYOUT_UNVERIFIABLE for the type → TYPE_VTABLE_CHANGED
         keeps its ordinary BREAKING severity and no tagging happens
         (regression guard: the correlation must not fire universally)."""
-        old = _snap(types=[RecordType(
-            name="Widget", kind="class",
-            vtable=["_ZN6Widget4drawEv", "_ZN6Widget5paintEv"],
-        )])
-        new = _snap(types=[RecordType(
-            name="Widget", kind="class",
-            vtable=["_ZN6Widget4drawEv"],
-        )])
+        old = _snap(
+            types=[
+                RecordType(
+                    name="Widget",
+                    kind="class",
+                    vtable=["_ZN6Widget4drawEv", "_ZN6Widget5paintEv"],
+                )
+            ]
+        )
+        new = _snap(
+            types=[
+                RecordType(
+                    name="Widget",
+                    kind="class",
+                    vtable=["_ZN6Widget4drawEv"],
+                )
+            ]
+        )
         result = compare(old, new)
         changes_by_kind = {c.kind: c for c in result.changes}
         assert ChangeKind.LAYOUT_UNVERIFIABLE not in changes_by_kind
@@ -637,21 +800,31 @@ class TestLayoutUnverifiableSuppressedByVtableChanged:
         — real evidence never triggers this correlation just because the
         same type also has an unresolved-size gap elsewhere (Codex review,
         P1)."""
-        old = _snap(types=[RecordType(
-            name="Foo", kind="class",
-            vtable=["_ZN3Foo1fEv", "_ZN3Foo1gEv"],
-            size_bits=None,
-        )])
-        new = _snap(types=[RecordType(
-            name="Foo", kind="class",
-            vtable=["_ZN3Foo1gEv", "_ZN3Foo1fEv"],  # reordered
-            size_bits=None,
-            # Populates the layout descriptor on the new side only, so
-            # LAYOUT_UNVERIFIABLE fires for this same type too — but the
-            # vtable reorder itself rests on real (both-populated) evidence,
-            # not the unresolved-size gap, so it must not be tagged/folded.
-            base_offsets={"Base": 0},
-        )])
+        old = _snap(
+            types=[
+                RecordType(
+                    name="Foo",
+                    kind="class",
+                    vtable=["_ZN3Foo1fEv", "_ZN3Foo1gEv"],
+                    size_bits=None,
+                )
+            ]
+        )
+        new = _snap(
+            types=[
+                RecordType(
+                    name="Foo",
+                    kind="class",
+                    vtable=["_ZN3Foo1gEv", "_ZN3Foo1fEv"],  # reordered
+                    size_bits=None,
+                    # Populates the layout descriptor on the new side only, so
+                    # LAYOUT_UNVERIFIABLE fires for this same type too — but the
+                    # vtable reorder itself rests on real (both-populated) evidence,
+                    # not the unresolved-size gap, so it must not be tagged/folded.
+                    base_offsets={"Base": 0},
+                )
+            ]
+        )
         result = compare(old, new)
         changes_by_kind = {c.kind: c for c in result.changes}
         assert ChangeKind.LAYOUT_UNVERIFIABLE in changes_by_kind
@@ -666,19 +839,31 @@ class TestLayoutUnverifiableSuppressedByVtableChanged:
         the co-occurring LAYOUT_UNVERIFIABLE for the same type must not be
         suppressed just because size_bits also happens to be unknown
         (Codex review, P2 follow-up)."""
-        old = _snap(types=[RecordType(
-            name="Foo", kind="class",
-            vtable=[],
-            virtual_bases=[],
-            size_bits=None,
-        )])
-        new = _snap(types=[RecordType(
-            name="Foo", kind="class",
-            vtable=["_ZN3Foo1fEv"],
-            virtual_bases=["Base"],
-            size_bits=None,
-            base_offsets={"Base": 0},  # asymmetric evidence -> LAYOUT_UNVERIFIABLE
-        )])
+        old = _snap(
+            types=[
+                RecordType(
+                    name="Foo",
+                    kind="class",
+                    vtable=[],
+                    virtual_bases=[],
+                    size_bits=None,
+                )
+            ]
+        )
+        new = _snap(
+            types=[
+                RecordType(
+                    name="Foo",
+                    kind="class",
+                    vtable=["_ZN3Foo1fEv"],
+                    virtual_bases=["Base"],
+                    size_bits=None,
+                    base_offsets={
+                        "Base": 0
+                    },  # asymmetric evidence -> LAYOUT_UNVERIFIABLE
+                )
+            ]
+        )
         result = compare(old, new)
         changes_by_kind = {c.kind: c for c in result.changes}
         assert ChangeKind.LAYOUT_UNVERIFIABLE in changes_by_kind
@@ -693,34 +878,47 @@ class TestLayoutUnverifiableSuppressedByVtableChanged:
         namespaces must not correlate: ``ns2::Foo``'s ambiguous vtable gap
         must not suppress ``ns1::Foo``'s unrelated, real LAYOUT_UNVERIFIABLE
         finding (Codex review, P2)."""
-        old = _snap(types=[
-            RecordType(
-                name="Foo", qualified_name="ns1::Foo", kind="class",
-                vtable=["_ZN3ns13Foo1fEv"],
-                size_bits=None,
-            ),
-            RecordType(
-                name="Foo", qualified_name="ns2::Foo", kind="class",
-                vtable=[], size_bits=None,
-            ),
-        ])
-        new = _snap(types=[
-            RecordType(
-                name="Foo", qualified_name="ns1::Foo", kind="class",
-                vtable=["_ZN3ns13Foo1fEv"],
-                size_bits=None,
-                # ns1::Foo's own unrelated asymmetric-evidence gap — must
-                # stay reported, not be suppressed by ns2::Foo's ambiguous
-                # vtable transition below.
-                base_offsets={"Base": 0},
-            ),
-            RecordType(
-                name="Foo", qualified_name="ns2::Foo", kind="class",
-                vtable=["_ZN3ns23Foo1hEv"],
-                size_bits=None,
-                base_offsets={"Base": 0},  # ns2::Foo's own ambiguous gap
-            ),
-        ])
+        old = _snap(
+            types=[
+                RecordType(
+                    name="Foo",
+                    qualified_name="ns1::Foo",
+                    kind="class",
+                    vtable=["_ZN3ns13Foo1fEv"],
+                    size_bits=None,
+                ),
+                RecordType(
+                    name="Foo",
+                    qualified_name="ns2::Foo",
+                    kind="class",
+                    vtable=[],
+                    size_bits=None,
+                ),
+            ]
+        )
+        new = _snap(
+            types=[
+                RecordType(
+                    name="Foo",
+                    qualified_name="ns1::Foo",
+                    kind="class",
+                    vtable=["_ZN3ns13Foo1fEv"],
+                    size_bits=None,
+                    # ns1::Foo's own unrelated asymmetric-evidence gap — must
+                    # stay reported, not be suppressed by ns2::Foo's ambiguous
+                    # vtable transition below.
+                    base_offsets={"Base": 0},
+                ),
+                RecordType(
+                    name="Foo",
+                    qualified_name="ns2::Foo",
+                    kind="class",
+                    vtable=["_ZN3ns23Foo1hEv"],
+                    size_bits=None,
+                    base_offsets={"Base": 0},  # ns2::Foo's own ambiguous gap
+                ),
+            ]
+        )
         result = compare(old, new)
         layout_findings = [
             c for c in result.changes if c.kind == ChangeKind.LAYOUT_UNVERIFIABLE
@@ -737,17 +935,27 @@ class TestLayoutUnverifiableSuppressedByVtableChanged:
         from the default report but still present in ``ctx.redundant``, would
         silently keep the overall verdict at COMPATIBLE_WITH_RISK even though
         the report shows nothing driving it."""
-        old = _snap(types=[RecordType(
-            name="Foo", kind="class",
-            vtable=[],
-            size_bits=None,
-        )])
-        new = _snap(types=[RecordType(
-            name="Foo", kind="class",
-            vtable=["_ZN3Foo1fEv"],
-            size_bits=None,
-            base_offsets={"Base": 0},
-        )])
+        old = _snap(
+            types=[
+                RecordType(
+                    name="Foo",
+                    kind="class",
+                    vtable=[],
+                    size_bits=None,
+                )
+            ]
+        )
+        new = _snap(
+            types=[
+                RecordType(
+                    name="Foo",
+                    kind="class",
+                    vtable=["_ZN3Foo1fEv"],
+                    size_bits=None,
+                    base_offsets={"Base": 0},
+                )
+            ]
+        )
         pf = PolicyFile(
             base_policy="strict_abi",
             overrides={ChangeKind.TYPE_VTABLE_CHANGED: Verdict.COMPATIBLE},

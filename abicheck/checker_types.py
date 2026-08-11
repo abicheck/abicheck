@@ -22,7 +22,7 @@ from __future__ import annotations
 
 import re
 from collections.abc import Callable
-from dataclasses import dataclass, field
+from dataclasses import KW_ONLY, dataclass, field
 from typing import Literal
 
 from .checker_policy import (
@@ -126,6 +126,27 @@ class Change:
     kind: ChangeKind
     symbol: str  # mangled name or type name
     description: str  # human-readable
+    # Keyword-only from here on (Python 3.10+ ``dataclasses.KW_ONLY`` sentinel;
+    # PR #582's ``AbiSnapshot`` precedent used per-field ``field(kw_only=True)``
+    # instead — the sentinel form is preferred for a field-heavy, frequently
+    # extended dataclass like this one, since it protects every future field
+    # automatically rather than relying on each contributor remembering to add
+    # ``kw_only=True`` to their own new field). ``kind``/``symbol``/
+    # ``description`` stay positional since every real call site in the
+    # codebase already passes them positionally (``Change(kind, symbol,
+    # description)``, ~400+ call sites) — this changes nothing for them.
+    #
+    # This closes, permanently and for every field below, the exact bug class
+    # Codex review caught twice in this codebase's history: a new optional
+    # field inserted ahead of existing ones silently shifts every later
+    # positional constructor argument for any existing positional caller (PR
+    # #582 on ``AbiSnapshot``; ``vtable_covers_unverifiable_layout_gap``
+    # below, added and then reviewed on this same PR). Since every field
+    # after this marker requires an explicit keyword, a shifted argument is
+    # now a ``TypeError`` at the call site instead of a silent, type-checker-
+    # invisible value substitution (worse when, as in both incidents, the
+    # shifted-into field happens to share the same type as its neighbor).
+    _: KW_ONLY
     old_value: str | None = None
     new_value: str | None = None
     source_location: str | None = None  # "header.h:42" if available
@@ -181,6 +202,23 @@ class Change:
     # it out of ``description`` prose. ``None`` when there is no correlated
     # change, or for every finding kind that does not compute one.
     correlated_change_kind: str | None = None
+    # Set by diff_types._diff_type_vtable on a TYPE_VTABLE_CHANGED finding
+    # when it rests on the identical asymmetric-layout-evidence gap
+    # LAYOUT_UNVERIFIABLE (diff_layout.py) reports for the same type. Purely
+    # an internal cross-detector correlation key for
+    # post_processing.SuppressLayoutUnverifiableCoveredByVtableChanged to
+    # fold the now-redundant LAYOUT_UNVERIFIABLE advisory into
+    # ``redundant_changes`` — deliberately NOT ``modulation_reason``/
+    # ``modulation_rule`` (Codex review): this finding's own severity is
+    # never touched, so tagging it as a "modulation" would be a false audit
+    # entry (a public field reporters and ``impact.engine.assess_change()``
+    # expose as a real verdict-modulation reason code) for a finding whose
+    # verdict never changed. ``None`` for every ordinary TYPE_VTABLE_CHANGED
+    # and every other finding kind. Free to sit next to its topical neighbor
+    # ``correlated_change_kind`` rather than at the end of the dataclass —
+    # the ``KW_ONLY`` marker above makes field *order* irrelevant to
+    # constructor safety now, which is the whole point of that marker.
+    vtable_covers_unverifiable_layout_gap: bool = False
     # ADR-044 D1 — set by the MarkReachability pipeline step, which runs before
     # ApplySuppression so a broad namespace/source_location suppression rule can
     # tell a truly-unreachable internal change apart from one that is part of the
@@ -328,23 +366,6 @@ class Change:
     # `checker.compare`, *before* the verdict is computed.
     compatibility_evaluation_status: CompatibilityEvaluationStatus | None = None
     compatibility_decision: Verdict | None = None
-    # Set by diff_types._diff_type_vtable on a TYPE_VTABLE_CHANGED finding
-    # when it rests on the identical asymmetric-layout-evidence gap
-    # LAYOUT_UNVERIFIABLE (diff_layout.py) reports for the same type. Purely
-    # an internal cross-detector correlation key for
-    # post_processing.SuppressLayoutUnverifiableCoveredByVtableChanged to
-    # fold the now-redundant LAYOUT_UNVERIFIABLE advisory into
-    # ``redundant_changes`` — deliberately NOT ``modulation_reason``/
-    # ``modulation_rule`` (Codex review): this finding's own severity is
-    # never touched, so tagging it as a "modulation" would be a false audit
-    # entry (a public field reporters and ``impact.engine.assess_change()``
-    # expose as a real verdict-modulation reason code) for a finding whose
-    # verdict never changed. ``None`` for every ordinary TYPE_VTABLE_CHANGED
-    # and every other finding kind. Appended at the very end of the
-    # dataclass, not inserted mid-list (Codex review): ``Change`` is a plain
-    # positional dataclass, so a field inserted in the middle silently shifts
-    # every later constructor parameter for any existing positional caller.
-    vtable_covers_unverifiable_layout_gap: bool = False
 
 
 @dataclass
