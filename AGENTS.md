@@ -601,6 +601,37 @@ Several mechanisms guard test quality so coverage can't be "filled" without veri
   Hypothesis-generated snapshot pairs checked against invariants that hold for *any*
   input (idempotence, determinism, direction-symmetry of touched symbols, emitted-kind
   partition, additive monotonicity) — generalization guards, not example-shaped tests.
+- **Primitive-level property tests** — a narrower sibling of the metamorphic suite
+  above, for a *reusable, general-purpose helper* rather than a whole detector.
+  `test_diff_namespaces.py::TestPairedStableIndicesProperties` tests
+  `_paired_stable_indices` (the evidence-gated connected-components merge behind
+  `EXPERIMENTAL_REMOVED_WITHOUT_REPLACEMENT`'s versioned-inline-namespace alias
+  handling) directly, not only through its highest-level caller. It exists because
+  fixing that one double-report bug took six independent review rounds against the
+  same ~150-line function, and five of the six findings were bugs in the *generic
+  merge primitive itself* (order-dependence, side-membership asymmetry, an empty
+  string silently accepted as identity, parameter-signature text leaking into the
+  grouping key, a merged key's string representation coincidentally colliding with
+  an unrelated singleton's own key) — none of which any hand-written example test
+  caught, because every one of those tests was written to confirm the fix just made,
+  which by construction only encodes the bug the fix's author already thought of. A
+  hand-written test only forecloses the *specific* input it names; only property
+  tests stating the primitive's actual contract — "no merge without shared identity
+  evidence," "the result never depends on input order," "a real alias merges
+  regardless of which side holds which spelling" — search the input space the way an
+  adversarial reviewer does. When adding a new reusable merge/dedupe/grouping
+  primitive anywhere in this codebase, give it this same treatment: a small,
+  standalone property-test class stating its contract as invariants, decoupled from
+  any one caller's domain logic, before or alongside the domain-level example tests.
+  Two of the two-round-falsified *identity sources* the same incident produced
+  (constants' value-equality, types' structural-fingerprint-then-`source_location`)
+  are the companion lesson: once a proposed identity heuristic has been individually
+  falsified by a concrete counterexample twice, the correct response is to stop
+  proposing a third and accept the double-report as a documented limitation (see
+  `_type_index_items`'s and `_diff_constants`'s docstrings) — the same
+  "attempted twice, reverted twice" discipline the linkage-blind-removal and
+  `type_base_changed` entries above already establish, not a heuristic that keeps
+  finding one more counterexample.
 - **Silent-skip guard** — `tests/conftest.py`. A marker lane can export
   `ABICHECK_MIN_EXECUTED=<n>`; the session fails unless at least `<n>` tests actually ran,
   so a missing external tool can't turn a lane green with zero work done. Wired into the

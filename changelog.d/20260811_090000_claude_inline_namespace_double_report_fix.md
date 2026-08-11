@@ -55,3 +55,17 @@
   name, never a namespace. A constant or type literally named `v1`/`v2`
   could have its own name stripped, or collide with an unrelated
   same-scope declaration also named like a version tag.
+
+- **Test infrastructure**: added `tests/test_diff_namespaces.py::TestPairedStableIndicesProperties`,
+  a Hypothesis property-test suite testing the merge primitive
+  (`_paired_stable_indices`) directly, stating its contract as invariants
+  (no merge without shared identity evidence, order-independence, a real
+  alias always merges regardless of which side holds which spelling,
+  parameter-signature text never leaks into the grouping key) rather than
+  pinning individual examples. Added because five of the six review-round
+  findings behind this fix were bugs in that reusable primitive itself, not
+  in the domain-specific identity logic layered on top, and none were
+  caught by any hand-written example test. See `AGENTS.md`'s "Test-quality
+  gates" section (new "Primitive-level property tests" entry) for the full
+  retrospective and the general practice this establishes for future
+  merge/dedupe primitives.

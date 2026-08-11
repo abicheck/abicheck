@@ -158,82 +158,145 @@ class _IndexItem(NamedTuple):
     identity: object | None
 
 
+# A singleton's key is (its own raw ``stripped``, ``leaf``); a genuinely
+# merged component's key is (a ``frozenset`` of its members' (stripped,
+# identity) pairs, ``leaf``) -- deliberately a different key *shape* so the
+# two can never collide (see the frozenset-construction comment below).
+# Opaque to every consumer (``_findings_for`` only uses it as a dict key),
+# so the exact type is not load-bearing outside this module.
+_IndexKey = tuple[object, str]
+
+
 def _paired_stable_indices(
     old_items: list[_IndexItem],
     new_items: list[_IndexItem],
-) -> tuple[dict[tuple[str, str], list[str]], dict[tuple[str, str], list[str]]]:
-    """Build the OLD and NEW ``(stripped_name, leaf) -> [qname, ...]``
-    indices *jointly*, so a genuine alias pair resolves to the SAME output
-    key on both sides -- merging two spellings that differ only by a
-    versioned inline-namespace segment (``v1``, ``_V2``, ``__1``, ...) but
-    ONLY when *identity* proves they name the same declaration.
+) -> tuple[dict[_IndexKey, list[str]], dict[_IndexKey, list[str]]]:
+    """Build the OLD and NEW ``(key -> [qname, ...])`` indices *jointly*,
+    in two layers, so a genuine alias pair resolves to the SAME output key
+    on both sides -- merging two spellings that differ only by a versioned
+    inline-namespace segment (``v1``, ``_V2``, ``__1``, ...) but ONLY when
+    *identity* proves they name the same declaration.
 
-    A versioned *inline* namespace makes one declaration reachable under
-    two qualified spellings: the full path (``ns::v1::x``) and the
-    version-elided path (``ns::x``) that unqualified lookup from the
-    enclosing scope also resolves to. But a version-shaped segment name is
-    not proof of an *inline* namespace -- ``v1`` is a legal name for an
-    ordinary namespace too, in which case ``ns::v1::x`` and ``ns::x`` are
-    two unrelated declarations that happen to share a leaf name (Codex
-    review, P1: collapsing them on name shape alone can both hide a
-    genuine value/removal on one spelling and misreport the other). Each
-    item's ``identity`` is a value from the snapshot's own extraction data
-    that is invariant across an inline-namespace's two spellings but not
-    expected to coincide for two unrelated declarations (currently only a
-    function's mangled name qualifies -- see ``_type_index_items`` for two
-    candidate type identities that were tried and falsified) -- ``None``
-    when no identity evidence is available. Two items are only unioned into the
-    same component when their identity values are both non-``None`` and
-    equal; an item with no evidence, or with evidence that never coincides
-    with anything else's, stays its own singleton component -- the
-    pre-existing double-report is the accepted fallback rather than a
-    newly-introduced false suppression.
+    **Layer 1 -- raw ``(stripped, leaf)`` buckets, unconditional.** This is
+    the pre-existing behaviour the experimental/stable-namespace detector
+    (``_findings_for``/``_split_experimental``) has always relied on: two
+    qnames whose experimental-stripped spelling is byte-identical (most
+    commonly ``ns::experimental::sort`` and an unrelated pre-existing
+    ``ns::sort``, or two qnames the caller already spelled identically)
+    share a bucket regardless of any identity evidence -- that's a
+    trivial, exact-string dict-key collision, not an "alias merge" claim
+    about anything, and it predates this module's version-segment
+    handling entirely. Layer 2 must never bypass or interfere with it.
 
-    Deciding this *jointly* over the pooled OLD+NEW items (not building
-    each snapshot's index independently, as an earlier version of this
-    function did) closes two distinct false positives Codex review found
-    in the independent version: (1) key instability -- a merged
-    component's chosen output key depended on encounter order, so the same
-    alias pair listed in a different declaration order between old and new
-    could resolve to two different keys and read as a spurious removal;
-    (2) membership asymmetry -- when only ONE side actually has both
-    spellings coexisting (an extractor starting or stopping the duplicate
-    emission), the singleton side kept its raw, un-canonicalized key while
-    the multi-spelling side's key was canonicalized, so the two sides
-    disagreed on the key for what is still the very same entity. Pooling
-    both sides' items before computing connected components and choosing
-    ``min(component)`` as every member's output key (deterministic given
-    the component's *membership*, itself already order-independent since
-    every pair is checked via identity equality regardless of encounter
-    order) fixes both: the same component, and therefore the same key, is
-    computed once and reused for whichever side(s) actually contain each
-    member.
+    **Layer 2 -- version-segment alias merge, evidence-gated.** Groups
+    layer-1 *raw keys* (not individual items) by their version-stripped
+    canon + leaf, then only unions two raw keys within a canon group when
+    *identity* proves it: a versioned *inline* namespace makes one
+    declaration reachable under two qualified spellings -- the full path
+    (``ns::v1::x``) and the version-elided path (``ns::x``) that
+    unqualified lookup from the enclosing scope also resolves to -- but a
+    version-shaped segment name is not proof of an *inline* namespace on
+    its own (``v1`` is a legal name for an ordinary namespace too, in
+    which case ``ns::v1::x`` and ``ns::x`` are two unrelated declarations
+    that happen to share a leaf name -- Codex review, P1: collapsing them
+    on name shape alone can both hide a genuine value/removal on one
+    spelling and misreport the other). Each item's ``identity`` is a value
+    from the snapshot's own extraction data that is invariant across an
+    inline-namespace's two spellings but not expected to coincide for two
+    unrelated declarations (currently only a function's mangled name
+    qualifies -- see ``_type_index_items`` for two candidate type
+    identities that were tried and falsified) -- ``None`` when no identity
+    evidence is available. Two raw keys are only unioned when they share a
+    non-``None`` identity value somewhere among their items; a raw key
+    with no evidence, or evidence that never coincides with anything
+    else's, stays its own singleton -- the pre-existing double-report is
+    the accepted fallback rather than a newly-introduced false
+    suppression.
+
+    Splitting the merge decision onto raw *keys* rather than individual
+    *items* is what keeps layer 1 and layer 2 from interfering (Codex
+    review, fresh finding surfaced by a Hypothesis property test): an
+    earlier, single-layer version of this function grouped items directly
+    by version-stripped canon, which silently also changed which items
+    the *unversioned* experimental/stable-graduation mechanism could see
+    co-existing under one key, breaking ``EXPERIMENTAL_GRADUATED``
+    detection for the ordinary (no version segment involved at all) case.
+
+    Deciding this *jointly* over the pooled OLD+NEW raw keys (not building
+    each snapshot's index independently) closes two distinct false
+    positives Codex review found in an independent-per-snapshot version:
+    (1) key instability -- a merged component's chosen output key depended
+    on encounter order, so the same alias pair listed in a different
+    declaration order between old and new could resolve to two different
+    keys and read as a spurious removal; (2) membership asymmetry -- when
+    only ONE side actually has both spellings coexisting (an extractor
+    starting or stopping the duplicate emission), the singleton side kept
+    its raw key while the multi-spelling side's key was canonicalized, so
+    the two sides disagreed on the key for what is still the very same
+    entity. Pooling both sides' raw keys before computing connected
+    components fixes both: the same component, and therefore the same
+    key, is computed once and reused for whichever side(s) actually
+    contain each member.
+
+    A merged (>1 raw key) component's output key is a ``frozenset`` of its
+    member raw keys, not a plain string -- deliberately a different key
+    *shape* than any singleton's own raw ``(str, str)`` key, so the two
+    can never collide (a Hypothesis property test found that an earlier
+    ``min(member)``-based choice, while itself order-independent, could
+    coincidentally equal a completely unrelated singleton raw key
+    elsewhere in the same canon group, silently merging an unrelated
+    declaration with no identity evidence into a real alias pair's
+    bucket).
+
+    The canon-group key is derived from ``_strip_param_signature(stripped)``,
+    not ``stripped`` directly (Codex review, P2): for a function,
+    ``stripped`` deliberately keeps its full parameter-list signature
+    (needed so two overloads sharing a leaf stay distinct raw keys in
+    layer 1 -- see ``_func_index_items``), but ``_segments()`` doesn't
+    track ``(``/``)`` depth, so scanning the *signature* for a
+    version-shaped segment can strip one out of a parameter's own type
+    (``foo(ns::v2::T)``) instead of only the declaration's own scope path.
+    Stripping the signature first (only for the layer-2 canon computation,
+    never for the layer-1 raw key) removes that surface entirely; it's a
+    no-op for a type's signature-free ``stripped``.
     """
-    pooled: list[tuple[str, _IndexItem]] = [
-        *(("old", it) for it in old_items),
-        *(("new", it) for it in new_items),
-    ]
-    canon_groups: dict[tuple[str, str], list[tuple[str, _IndexItem]]] = {}
-    for side, item in pooled:
-        canon_segs, _ = _version_strip_segments(_segments(item.stripped))
-        canon_groups.setdefault(("::".join(canon_segs), item.leaf), []).append(
-            (side, item)
-        )
+    # Layer 1: raw buckets, unconditional, exactly as this module always
+    # built them before any version-segment handling existed.
+    raw_old: dict[tuple[str, str], list[str]] = {}
+    raw_new: dict[tuple[str, str], list[str]] = {}
+    raw_identities: dict[tuple[str, str], set[object]] = {}
+    for side, items in (("old", old_items), ("new", new_items)):
+        target = raw_old if side == "old" else raw_new
+        for item in items:
+            raw_key = (item.stripped, item.leaf)
+            target.setdefault(raw_key, []).append(item.qname)
+            if item.identity is not None:
+                raw_identities.setdefault(raw_key, set()).add(item.identity)
 
-    old_out: dict[tuple[str, str], list[str]] = {}
-    new_out: dict[tuple[str, str], list[str]] = {}
+    # Layer 2: group raw KEYS (not items) by version-stripped canon + leaf.
+    canon_groups: dict[tuple[str, str], list[tuple[str, str]]] = {}
+    for raw_key in {*raw_old, *raw_new}:
+        stripped, leaf = raw_key
+        scope_path = _strip_param_signature(stripped)
+        canon_segs, _ = _version_strip_segments(_segments(scope_path))
+        canon_groups.setdefault(("::".join(canon_segs), leaf), []).append(raw_key)
 
-    def _emit(side: str, key: tuple[str, str], qname: str) -> None:
-        (old_out if side == "old" else new_out).setdefault(key, []).append(qname)
+    old_out: dict[_IndexKey, list[str]] = {}
+    new_out: dict[_IndexKey, list[str]] = {}
 
-    for entries in canon_groups.values():
-        if len(entries) == 1:
-            side, item = entries[0]
-            _emit(side, (item.stripped, item.leaf), item.qname)
+    def _passthrough(raw_key: tuple[str, str]) -> None:
+        if raw_key in raw_old:
+            old_out[raw_key] = raw_old[raw_key]
+        if raw_key in raw_new:
+            new_out[raw_key] = raw_new[raw_key]
+
+    for raw_keys in canon_groups.values():
+        if len(raw_keys) == 1:
+            _passthrough(raw_keys[0])
             continue
-        # Union-find over this (typically 2-4 entry) pooled group, unioning
-        # any two entries whose identity values are equal and non-None.
-        parent = list(range(len(entries)))
+        # Union-find over this (typically 2-4 entry) group of raw keys,
+        # unioning any two whose identity sets intersect.
+        parent = list(range(len(raw_keys)))
 
         def _find(x: int) -> int:
             while parent[x] != x:
@@ -241,27 +304,30 @@ def _paired_stable_indices(
                 x = parent[x]
             return x
 
-        for i in range(len(entries)):
-            ident_i = entries[i][1].identity
-            if ident_i is None:
+        for i in range(len(raw_keys)):
+            idents_i = raw_identities.get(raw_keys[i])
+            if not idents_i:
                 continue
-            for j in range(i + 1, len(entries)):
-                ident_j = entries[j][1].identity
-                if ident_j is not None and ident_i == ident_j:
+            for j in range(i + 1, len(raw_keys)):
+                idents_j = raw_identities.get(raw_keys[j])
+                if idents_j and idents_i & idents_j:
                     ri, rj = _find(i), _find(j)
                     if ri != rj:
                         parent[rj] = ri
         components: dict[int, list[int]] = {}
-        for i in range(len(entries)):
+        for i in range(len(raw_keys)):
             components.setdefault(_find(i), []).append(i)
         for members in components.values():
-            key = (
-                min(entries[i][1].stripped for i in members),
-                entries[members[0]][1].leaf,
-            )
-            for i in members:
-                side, item = entries[i]
-                _emit(side, key, item.qname)
+            if len(members) == 1:
+                _passthrough(raw_keys[members[0]])
+                continue
+            merged_keys = [raw_keys[i] for i in members]
+            key: _IndexKey = (frozenset(merged_keys), merged_keys[0][1])
+            for rk in merged_keys:
+                if rk in raw_old:
+                    old_out.setdefault(key, []).extend(raw_old[rk])
+                if rk in raw_new:
+                    new_out.setdefault(key, []).extend(raw_new[rk])
     return old_out, new_out
 
 
@@ -471,8 +537,8 @@ def _emit_experimental_change(
 
 
 def _findings_for(
-    old_index: dict[tuple[str, str], list[str]],
-    new_index: dict[tuple[str, str], list[str]],
+    old_index: dict[_IndexKey, list[str]],
+    new_index: dict[_IndexKey, list[str]],
     experimental_namespaces: tuple[str, ...],
     kind_label: str,
     *,

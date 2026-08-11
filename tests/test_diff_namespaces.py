@@ -15,12 +15,15 @@ the default fast test suite.
 from __future__ import annotations
 
 import pytest
+from hypothesis import given, strategies as st
 
 from abicheck.checker_policy import ChangeKind
 from abicheck.diff_namespaces import (
     DEFAULT_EXPERIMENTAL_NAMESPACES,
+    _IndexItem,
     _looks_like_std_reexport,
     _origin_by_name,
+    _paired_stable_indices,
     _segments,
     _strip_experimental,
     _version_strip_segments,
@@ -413,6 +416,32 @@ class TestExperimentalRemovedWithoutReplacement:
             c.kind == ChangeKind.EXPERIMENTAL_REMOVED_WITHOUT_REPLACEMENT
             for c in changes
         )
+
+    def test_version_stripping_ignores_parameter_type_segments(self) -> None:
+        """Codex review, P2: a function's ``stripped`` deliberately keeps
+        its full parameter-list signature (to keep overloads distinct), so
+        naively scanning it for a version-shaped segment can strip one out
+        of a *parameter's own type* (``ns::v2::T``) instead of only the
+        declaration's own scope path -- corrupting the grouping key
+        differently for each spelling of a genuine alias pair (one
+        correctly loses its real scope-level ``v1``, the other incorrectly
+        loses the parameter's unrelated ``v2``) so they land in different
+        canon groups and never merge, even though they share a mangled
+        name. Both spellings here carry the identical parameter type
+        (``ns::v2::T``, itself version-shaped) and the same mangled name;
+        removing the function must read as ONE finding.
+        """
+        old = _snap(funcs=[
+            _fn("preview::v1::foo(ns::v2::T)", mangled="_ZSame"),
+            _fn("preview::foo(ns::v2::T)", mangled="_ZSame"),
+        ])
+        new = _snap(funcs=[])
+        changes = detect_experimental_namespace_changes(old, new)
+        removed = [
+            c for c in changes
+            if c.kind == ChangeKind.EXPERIMENTAL_REMOVED_WITHOUT_REPLACEMENT
+        ]
+        assert len(removed) == 1
 
     def test_versioned_inline_namespace_type_spellings_double_report_is_accepted(
         self,
@@ -873,3 +902,214 @@ class TestInlineNamespaceVersionBump:
         old = _snap(funcs=[_fn("ns::_V1::only_one")])
         new = _snap(funcs=[_fn("ns::_V2::only_one")])
         assert len(detect_inline_namespace_version_bump(old, new)) == 1
+
+
+# ---------------------------------------------------------------------------
+# _paired_stable_indices — generalized property tests
+# ---------------------------------------------------------------------------
+#
+# Retrospective (see docs/contribute/adr/060-alias-merge-identity-evidence.md
+# for the full assessment): every hand-written example test above pins one
+# SPECIFIC counterexample a reviewer happened to find by inspection. Across
+# this detector's review history, five rounds each found a genuine bug in
+# the merge primitive itself (not in a caller's domain logic) that no
+# hand-written example test caught, because each new example test was
+# written to confirm the fix just made, not to adversarially search the
+# input space the way a reviewer with fresh eyes did. These property tests
+# instead state the primitive's actual CONTRACT as invariants and let
+# Hypothesis search for a counterexample the way a reviewer would -- each
+# property below is annotated with which review-round bug class it
+# generalizes, so a regression in any of them fails a fast, deterministic
+# test instead of waiting for another review round.
+#
+# The strategy below generates items sharing a `leaf` (and, once a version
+# segment is stripped, a `canon`) purely by chance -- `_ENTITY_NAMES` has
+# only two values, so collisions (both genuine-alias and coincidental)
+# happen often across the default 100 Hypothesis examples without needing
+# to force them.
+
+_ENTITY_NAMES = st.sampled_from(["alpha", "beta"])
+_IDENTITIES = st.sampled_from([None, "id-alpha", "id-beta", "id-other"])
+_SIDES = st.sampled_from(["old", "new"])
+
+
+@st.composite
+def _alias_item_placements(draw):
+    """A random list of ``(side, stripped, leaf, identity)`` placements.
+
+    Every item's `leaf` is its entity name; `stripped` is either the bare
+    `"ns::{entity}"` or the version-elided-from `"ns::v1::{entity}"` --
+    both strip to the same canon, modeling the real experimental-stripped
+    shape ``_func_index_items``/``_type_index_items`` produce. `identity`
+    is drawn independently per item, so two items sharing a leaf may have
+    equal identity (a genuine alias pair), unequal identity (coincidental
+    name collision, the P1 counterexample class), or one/both `None` (no
+    evidence, the "falsified identity mechanism" class).
+    """
+    n = draw(st.integers(min_value=1, max_value=6))
+    placements = []
+    for _ in range(n):
+        entity = draw(_ENTITY_NAMES)
+        versioned = draw(st.booleans())
+        stripped = f"ns::v1::{entity}" if versioned else f"ns::{entity}"
+        identity = draw(_IDENTITIES)
+        side = draw(_SIDES)
+        placements.append((side, stripped, entity, identity))
+    return placements
+
+
+def _build_paired_items(
+    placements: list[tuple[str, str, str, object | None]],
+) -> tuple[list[_IndexItem], list[_IndexItem]]:
+    old_items: list[_IndexItem] = []
+    new_items: list[_IndexItem] = []
+    for i, (side, stripped, leaf, identity) in enumerate(placements):
+        item = _IndexItem(qname=f"q{i}", stripped=stripped, leaf=leaf, identity=identity)
+        (old_items if side == "old" else new_items).append(item)
+    return old_items, new_items
+
+
+class TestPairedStableIndicesProperties:
+    @given(placements=_alias_item_placements())
+    def test_every_item_appears_exactly_once(self, placements) -> None:
+        """No item is lost or duplicated by the merge -- the most basic
+        wiring invariant, but exactly what silently breaks first if a
+        future edit changes the pooling/component-splitting logic."""
+        old_items, new_items = _build_paired_items(placements)
+        old_out, new_out = _paired_stable_indices(old_items, new_items)
+        assert sorted(q for qs in old_out.values() for q in qs) == sorted(
+            it.qname for it in old_items
+        )
+        assert sorted(q for qs in new_out.values() for q in qs) == sorted(
+            it.qname for it in new_items
+        )
+
+    @given(placements=_alias_item_placements())
+    def test_never_merges_across_raw_keys_without_shared_identity(
+        self, placements
+    ) -> None:
+        """Generalizes the original P1 finding (blind version-stripping
+        merged unrelated declarations sharing a leaf name) and its later
+        variants (empty-string identity, value-equality-only identity):
+        whenever a single output key's qnames span two or more DISTINCT
+        raw spellings (``stripped``), every pair of those distinct
+        spellings must be connected by at least one shared, non-``None``
+        identity value somewhere among their own items. No amount of
+        coincidental name shape is ever enough on its own.
+
+        Items sharing the exact same ``stripped`` (a literal, byte-
+        identical raw-key collision -- e.g. the existing, unconditional
+        experimental/stable-graduation bucketing this module has always
+        done, unrelated to version-segment aliasing) are grouped by raw
+        key first and exempted from needing identity evidence *among
+        themselves* -- that bucketing predates and is orthogonal to the
+        alias-merge feature this property is about (a Hypothesis-found
+        regression: an earlier version of this property demanded evidence
+        even within one raw key, which is stricter than the primitive's
+        actual, correct contract and broke on legitimate same-spelling
+        collisions).
+        """
+        old_items, new_items = _build_paired_items(placements)
+        by_qname = {it.qname: it for it in old_items + new_items}
+        old_out, new_out = _paired_stable_indices(old_items, new_items)
+        key_to_qnames: dict[tuple[str, str], list[str]] = {}
+        for out in (old_out, new_out):
+            for key, qnames in out.items():
+                key_to_qnames.setdefault(key, []).extend(qnames)
+        for key, qnames in key_to_qnames.items():
+            items = [by_qname[q] for q in qnames]
+            idents_by_raw: dict[str, set[object]] = {}
+            for it in items:
+                if it.identity is not None:
+                    idents_by_raw.setdefault(it.stripped, set()).add(it.identity)
+            raw_keys = sorted({it.stripped for it in items})
+            for i, raw_a in enumerate(raw_keys):
+                for raw_b in raw_keys[i + 1 :]:
+                    a, b = idents_by_raw.get(raw_a), idents_by_raw.get(raw_b)
+                    assert a and b and (a & b), (key, raw_a, raw_b, a, b)
+
+    @given(placements=_alias_item_placements())
+    def test_shared_identity_within_a_leaf_always_merges(self, placements) -> None:
+        """Generalizes the "canonicalize keys across unequal alias
+        membership" finding: two items that DO share real identity
+        evidence must end up under the SAME key regardless of which
+        side(s) they were placed on -- a singleton on one side and a pair
+        on the other must not silently disagree on the key for what is
+        the same entity.
+        """
+        old_items, new_items = _build_paired_items(placements)
+        old_out, new_out = _paired_stable_indices(old_items, new_items)
+        qname_to_key: dict[str, tuple[str, str]] = {}
+        for out in (old_out, new_out):
+            for key, qnames in out.items():
+                for q in qnames:
+                    qname_to_key[q] = key
+        by_leaf: dict[str, list[_IndexItem]] = {}
+        for it in old_items + new_items:
+            by_leaf.setdefault(it.leaf, []).append(it)
+        for group in by_leaf.values():
+            by_identity: dict[object, set[tuple[str, str]]] = {}
+            for it in group:
+                if it.identity is None:
+                    continue
+                by_identity.setdefault(it.identity, set()).add(qname_to_key[it.qname])
+            for identity, keys in by_identity.items():
+                assert len(keys) == 1, (identity, keys)
+
+    @given(placements=_alias_item_placements(), shuffle_seed=st.integers())
+    def test_output_independent_of_encounter_order(
+        self, placements, shuffle_seed
+    ) -> None:
+        """Generalizes the "keep merged keys stable across declaration
+        order" finding directly: shuffling the SAME items (same content,
+        different list order -- modeling two independent extractor runs
+        listing declarations differently) must never change the resulting
+        keys or groupings.
+        """
+        import random
+
+        old_items, new_items = _build_paired_items(placements)
+        old_out1, new_out1 = _paired_stable_indices(old_items, new_items)
+
+        rng = random.Random(shuffle_seed)
+        shuffled_old = list(old_items)
+        shuffled_new = list(new_items)
+        rng.shuffle(shuffled_old)
+        rng.shuffle(shuffled_new)
+        old_out2, new_out2 = _paired_stable_indices(shuffled_old, shuffled_new)
+
+        def _normalize(d: dict[tuple[str, str], list[str]]) -> set[tuple[tuple[str, str], frozenset]]:
+            return {(k, frozenset(v)) for k, v in d.items()}
+
+        assert _normalize(old_out1) == _normalize(old_out2)
+        assert _normalize(new_out1) == _normalize(new_out2)
+
+    @given(placements=_alias_item_placements())
+    def test_identity_ignores_parameter_signature_noise(self, placements) -> None:
+        """Generalizes the P2 "canonicalize only the function's
+        declaration scope" finding: appending an arbitrary, version-shaped
+        parenthesized suffix (modeling a function's parameter-list
+        signature) to every item's `stripped` must never change which
+        items get merged -- the canon computation must be blind to
+        anything after the top-level `(`.
+        """
+        old_items, new_items = _build_paired_items(placements)
+        old_out1, new_out1 = _paired_stable_indices(old_items, new_items)
+
+        def _with_signature_noise(items: list[_IndexItem]) -> list[_IndexItem]:
+            return [
+                it._replace(stripped=f"{it.stripped}(ns::v2::T, ns::v3::U)")
+                for it in items
+            ]
+
+        old_out2, new_out2 = _paired_stable_indices(
+            _with_signature_noise(old_items), _with_signature_noise(new_items)
+        )
+
+        def _grouping(
+            d: dict[tuple[str, str], list[str]],
+        ) -> set[frozenset[str]]:
+            return {frozenset(v) for v in d.values()}
+
+        assert _grouping(old_out1) == _grouping(old_out2)
+        assert _grouping(new_out1) == _grouping(new_out2)
