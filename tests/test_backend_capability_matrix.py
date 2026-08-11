@@ -142,16 +142,23 @@ def test_matrix_claims_match_parser_source(caps) -> None:
 def test_scanner_distinguishes_a_placeholder_from_an_extraction(caps) -> None:
     """Guards the check above from silently degrading into "keyword present".
 
-    ``dumper_clang.py`` passes ``size_bits=None`` and ``is_opaque=False`` —
-    keywords that are present but extract nothing. If the scanner ever counted
-    those as extraction, `test_matrix_claims_match_parser_source` would pass
-    against a matrix claiming clang computes record layout.
+    ``dumper_clang.py`` passes ``size_bits=None`` — a keyword that is present
+    but extracts nothing. If the scanner ever counted that as extraction,
+    `test_matrix_claims_match_parser_source` would pass against a matrix
+    claiming clang computes record layout.
+
+    ``is_opaque`` used to be this test's second placeholder example (a
+    hardcoded ``False`` literal, since `parse_types` skipped every
+    non-definition record entirely) before PR #719's opaque-handle fix made
+    it a genuine `is_opaque=is_opaque` variable reference in both of
+    `_build_record`'s branches — it now belongs in the EXTRACTED assertion
+    below instead.
     """
     clang = caps.clang_evidence()
     assert clang["RecordType"]["size_bits"] is caps.Evidence.LITERAL
-    assert clang["RecordType"]["is_opaque"] is caps.Evidence.LITERAL
-    # ...and a genuinely computed one on the same class is not mistaken for it.
+    # ...and genuinely computed facts on the same class are not mistaken for it.
     assert clang["RecordType"]["is_union"] is caps.Evidence.EXTRACTED
+    assert clang["RecordType"]["is_opaque"] is caps.Evidence.EXTRACTED
 
 
 def test_scanner_reads_multiline_values(caps) -> None:

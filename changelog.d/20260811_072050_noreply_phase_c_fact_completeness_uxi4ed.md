@@ -50,3 +50,16 @@ A new changelog fragment. See changelog.d/README.md for the workflow.
   is genuinely live — a real all-anonymous-union record's flag was
   previously silently dropped in hybrid mode even though castxml's own
   layout already corroborated it.
+- **An opaque handle type (`struct Handle;` with no definition anywhere in
+  the header set) is no longer silently absent from a direct-clang header
+  snapshot.** `parse_types()` previously skipped every non-definition
+  record entirely; it now emits an opaque `RecordType` stub
+  (`is_opaque=True`, empty fields/bases/vtable) for a forward-declaration-
+  only identity, matching the castxml backend's existing behavior. Also
+  closes an adjacent gap: a type both forward-declared and defined in the
+  same translation unit — confirmed against real clang 18 output that both
+  land as separate AST nodes sharing one identity — now deterministically
+  collapses to the definition regardless of declaration order, instead of
+  relying on incidental per-node iteration order.
+  `snapshot_cache._SNAPSHOT_CACHE_VERSION` bumped (an opaque handle type
+  used to be missing from the snapshot entirely, not just wrong-valued).

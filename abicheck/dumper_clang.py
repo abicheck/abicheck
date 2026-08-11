@@ -1447,7 +1447,13 @@ class _ClangAstParser:
         # ``Foo`` with its fields intact rather than dropped (mirrors castxml's
         # ``typedef_name_for`` alias handling).
         anon_names = self._anon_typedef_names()
-        types: list[RecordType] = []
+        # Opaque handle types (PR #719): a forward decl and its later
+        # definition share an identity but are two separate nodes in clang's
+        # JSON AST. Group by identity so a forward-decl-only record still
+        # emits an opaque stub (below), while a forward-decl/definition pair
+        # collapses to the definition -- same tie-break as _record_index().
+        best: dict[str, tuple[_Decl, str]] = {}
+        order: list[str] = []
         for entry in self._records:
             node = entry.node
             if _is_builtin_file(entry.file):
@@ -1459,12 +1465,22 @@ class _ClangAstParser:
                     continue  # a truly anonymous record (e.g. an inline union member)
             if name.startswith("__"):
                 continue
-            # Only definitions carry meaningful members; a forward declaration
-            # (no body) would emit an empty record and create a false ODR/empty
-            # signal, so skip it (matches the castxml `incomplete`/no-members guard).
-            if not _is_record_definition(node):
-                continue
-            types.append(self._build_record(entry, override_name=name))
+            identity = "::".join([*entry.scope, name]) if entry.scope else name
+            existing = best.get(identity)
+            if existing is None:
+                best[identity] = (entry, name)
+                order.append(identity)
+            elif not _is_record_definition(existing[0].node) and _is_record_definition(
+                node
+            ):
+                best[identity] = (entry, name)
+        types: list[RecordType] = []
+        for identity in order:
+            entry, name = best[identity]
+            is_opaque = not _is_record_definition(entry.node)
+            types.append(
+                self._build_record(entry, override_name=name, is_opaque=is_opaque)
+            )
         return types
 
     def _anon_typedef_names(self) -> dict[str, str]:
@@ -1479,17 +1495,46 @@ class _ClangAstParser:
                 out.setdefault(rid, tname)
         return out
 
-    def _build_record(self, entry: _Decl, override_name: str = "") -> RecordType:
+    def _build_record(
+        self, entry: _Decl, override_name: str = "", is_opaque: bool = False
+    ) -> RecordType:
         node = entry.node
         kind = (
             "union"
             if node.get("tagUsed") == "union"
             else ("struct" if node.get("tagUsed") == "struct" else "class")
         )
+        own_name = override_name or str(node.get("name", ""))
+        if is_opaque:
+            # Mirrors dumper_castxml.py's `incomplete="1"` branch: no member/
+            # base/vtable data to have judged any derived fact from, so each
+            # stays at its neutral/unknown default.
+            return RecordType(
+                name=own_name,
+                kind=kind,
+                qualified_name=(
+                    "::".join([*entry.scope, own_name]) if entry.scope else None
+                ),
+                size_bits=None,
+                alignment_bits=None,
+                fields=[],
+                bases=[],
+                virtual_bases=[],
+                vtable=[],
+                vptr_offset_bits=None,
+                is_union=kind == "union",
+                is_opaque=is_opaque,
+                is_final=_clang_record_is_final(node),
+                is_standard_layout=None,
+                is_trivially_copyable=None,
+                is_template_pattern=entry.in_template,
+                has_anonymous_aggregate_fields=False,
+                source_location=self._source_location(entry),
+                deprecated=_clang_deprecated_message(node),
+            )
         fields = self._parse_fields(node)
         bases, virtual_bases, _base_access = _parse_bases(node)
         injected = _anonymous_member_names(node)
-        own_name = override_name or str(node.get("name", ""))
         is_standard_layout, is_trivially_copyable = _clang_record_type_traits(node)
         # G31 Phase C: reconstruct the vtable (and, from it, the same
         # 0-if-polymorphic vptr_offset_bits heuristic castxml already uses)
@@ -1532,7 +1577,7 @@ class _ClangAstParser:
             # tracked by either backend -- see the G31 plan doc.
             vptr_offset_bits=0 if vtable else None,
             is_union=kind == "union",
-            is_opaque=False,
+            is_opaque=is_opaque,
             is_final=_clang_record_is_final(node),
             # G31 Phase C: unlike layout (size/align/offsets), these are
             # semantic type traits clang's AST computes independent of any

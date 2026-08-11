@@ -1712,6 +1712,44 @@ phase held to):
 - An opaque handle type is **absent** from a clang snapshot rather than
   opaque: `parse_types` skips every non-definition, so `is_opaque=False` is
   correct by construction while the type itself never appears.
+
+  **Closed in a still-later pass** (PR #719 follow-up), verified against a
+  real compiled `struct Handle;` (forward-declared, never defined) header.
+  `parse_types` now groups `self._records` by identity (scope + resolved
+  name) before building `RecordType`s: an identity with a definition
+  anywhere among its candidates collapses to that definition (never
+  opaque, same as before); an identity with ONLY forward-declaration
+  candidates now emits one opaque stub instead of nothing at all. Confirmed
+  end to end (`abicheck dump --ast-frontend clang`) that `Handle` now reads
+  `is_opaque=True` with empty fields, matching castxml's own
+  `incomplete="1"` handling. `_build_record` grew an `is_opaque` parameter
+  and an early-return branch mirroring `dumper_castxml.py`'s exact
+  opaque-record shape — every derived fact (fields/bases/vtable/
+  is_standard_layout/is_trivially_copyable/has_anonymous_aggregate_fields)
+  stays at its neutral/unknown default rather than a computed value, since
+  a forward-decl-only node has no member list to have judged any of them
+  from. The dedup logic also closed a second, adjacent gap along the way: a
+  type BOTH forward-declared and defined in the same TU (`struct Foo;
+  struct Foo { ... };`) — confirmed with real clang output that both land
+  as separate `CXXRecordDecl` nodes sharing one identity — previously
+  relied on `parse_types`' per-entry loop processing each node
+  independently (the definition entry building a correct `RecordType`, the
+  forward-decl entry being skipped outright by the old guard); the new
+  identity-grouped pass makes that collapse explicit and order-independent
+  (a definition wins regardless of which declaration came first in source
+  order), the same tie-break `_record_index()` already documents for its
+  own, unrelated vtable-base-lookup purpose. `scripts/backend_capabilities.py`'s
+  `RecordType.is_opaque` row moved from clang `NONE` to `FULL`
+  (`gen_backend_capability_matrix.py` regenerated); its own AST-evidence
+  scanner needed `_build_record`'s two `is_opaque=True`/`is_opaque=False`
+  literals rewritten to `is_opaque=is_opaque` (a variable reference to the
+  new parameter) to be correctly read as a real extraction rather than a
+  hardcoded placeholder — `tests/test_backend_capability_matrix.py`'s own
+  placeholder-vs-extraction regression test moved `is_opaque` to the
+  EXTRACTED side accordingly. `snapshot_cache._SNAPSHOT_CACHE_VERSION`
+  bumped (v15): a clang-only opaque handle type used to be silently absent
+  from the snapshot entirely, not just wrong-valued, so a warm cache from
+  before this fix is invalidated rather than replayed.
 - `Variable.value`, `Variable.access` and `Param.is_va_list` have no
   producer on any layer, which makes `param_became_va_list`/
   `param_lost_va_list` unreachable on real input. Recorded in

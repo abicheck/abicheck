@@ -428,13 +428,21 @@ FACT_ROWS: tuple[FactRow, ...] = (
         "RecordType",
         "is_opaque",
         _FULL,
-        _NONE,
+        _FULL,
         note=(
-            "Correct by construction rather than a gap: clang's `parse_types` "
-            "skips every non-definition, so `_build_record` never sees an "
-            "incomplete record and hardcodes `False`. The consequence is still "
-            "real — an opaque handle type (`struct A;` alone) is *absent* from "
-            "a clang snapshot where castxml emits it with `is_opaque=True`."
+            "Closed in PR #719: `parse_types` previously skipped every "
+            "non-definition record entirely (so an opaque handle type "
+            "`struct A;` alone was *absent* from a clang snapshot rather than "
+            "present with `is_opaque=True`, unlike castxml). Now emits an "
+            "opaque stub for a forward-declaration-only identity, collapsing "
+            "to the definition (never opaque) when both a forward decl and a "
+            "definition share one identity in the same TU — verified against "
+            "real clang 18 output that both land as separate "
+            "`CXXRecordDecl`/`RecordDecl` nodes. No explicit hybrid backfill "
+            "needed: castxml sees the identical header text, so its own real "
+            "`is_opaque` already answers correctly for a type present on "
+            "both backends; a clang-only opaque entity reaches a hybrid "
+            "snapshot correctly via the ordinary clang-only-append path."
         ),
     ),
     FactRow("RecordType", "is_final", _FULL, _FULL),

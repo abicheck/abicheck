@@ -355,7 +355,10 @@ def test_parse_types_fields_bases_and_forward_decl_skipped() -> None:
                 },
             ],
         },
-        # A forward declaration of the same kind must NOT emit a (false) record.
+        # A forward declaration with no definition anywhere in this TU emits
+        # an opaque stub (G31 Phase C fact-completeness, PR #719 follow-up)
+        # -- mirrors castxml's own `incomplete="1"` handling instead of the
+        # previous emit-nothing behavior.
         {
             "kind": "CXXRecordDecl",
             "name": "Opaque",
@@ -364,8 +367,13 @@ def test_parse_types_fields_bases_and_forward_decl_skipped() -> None:
         },
     )
     types = {t.name: t for t in _ClangAstParser(root, set(), set()).parse_types()}
-    assert "Opaque" not in types
+    opaque = types["Opaque"]
+    assert opaque.is_opaque is True
+    assert opaque.fields == []
+    assert opaque.bases == []
+    assert opaque.size_bits is None
     derived = types["Derived"]
+    assert derived.is_opaque is False
     assert derived.kind == "struct"
     assert [f.name for f in derived.fields] == ["a", "flags"]
     assert derived.fields[1].is_bitfield is True
@@ -376,6 +384,66 @@ def test_parse_types_fields_bases_and_forward_decl_skipped() -> None:
     assert derived.size_bits is None
     assert derived.fields[0].offset_bits is None
     assert derived.has_anonymous_aggregate_fields is False
+
+
+def test_parse_types_forward_decl_and_definition_collapse_to_one_complete_record() -> (
+    None
+):
+    """A forward declaration followed by its own complete definition in the
+    SAME TU (`struct Foo; struct Foo { int x; };`) -- confirmed with a real
+    clang build that both land in self._records as separate CXXRecordDecl
+    nodes sharing one identity -- must collapse to ONE record (the
+    definition), not two, and must not be flagged opaque."""
+    root = _tu(
+        {
+            "kind": "CXXRecordDecl",
+            "name": "Foo",
+            "tagUsed": "struct",
+            "loc": {"file": "include/foo.h", "line": 1},
+        },
+        {
+            "kind": "CXXRecordDecl",
+            "name": "Foo",
+            "tagUsed": "struct",
+            "loc": {"file": "include/foo.h", "line": 2},
+            "completeDefinition": True,
+            "inner": [{"kind": "FieldDecl", "name": "x", "type": {"qualType": "int"}}],
+        },
+    )
+    types = [
+        t for t in _ClangAstParser(root, set(), set()).parse_types() if t.name == "Foo"
+    ]
+    assert len(types) == 1
+    assert types[0].is_opaque is False
+    assert [f.name for f in types[0].fields] == ["x"]
+
+
+def test_parse_types_definition_before_forward_decl_still_wins() -> None:
+    """Order independence: the definition appearing FIRST in source order
+    must still win over a later forward-decl stub sharing the same
+    identity."""
+    root = _tu(
+        {
+            "kind": "CXXRecordDecl",
+            "name": "Foo",
+            "tagUsed": "struct",
+            "loc": {"file": "include/foo.h", "line": 1},
+            "completeDefinition": True,
+            "inner": [{"kind": "FieldDecl", "name": "x", "type": {"qualType": "int"}}],
+        },
+        {
+            "kind": "CXXRecordDecl",
+            "name": "Foo",
+            "tagUsed": "struct",
+            "loc": {"file": "include/foo.h", "line": 5},
+        },
+    )
+    types = [
+        t for t in _ClangAstParser(root, set(), set()).parse_types() if t.name == "Foo"
+    ]
+    assert len(types) == 1
+    assert types[0].is_opaque is False
+    assert [f.name for f in types[0].fields] == ["x"]
 
 
 def test_parse_types_sets_qualified_name_for_namespaced_record() -> None:

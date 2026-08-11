@@ -45,7 +45,7 @@ MAX_ENTRIES: int = 100
 #: key invalidates all previously-cached entries on upgrade rather than risk
 #: serving a stale snapshot computed by an older, behaviorally-different
 #: abicheck version.
-_SNAPSHOT_CACHE_VERSION: str = "14"
+_SNAPSHOT_CACHE_VERSION: str = "15"
 # v2: castxml's CvQualifiedType type-name spelling changed for a
 # volatile-qualified pointer/reference VALUE (now a suffix, "T * volatile",
 # matching clang's own convention, rather than always a prefix) -- an
@@ -189,6 +189,17 @@ _SNAPSHOT_CACHE_VERSION: str = "14"
 # whose castxml-side ``fields`` happen to be empty (an opaque/incomplete
 # castxml record) until the entry happened to expire or was manually
 # cleared. Bumped so the upgrade forces re-extraction instead.
+#
+# v15 (G31 Phase C fact-completeness continuation): the direct-clang backend
+# started emitting an opaque stub (``RecordType.is_opaque=True``, empty
+# fields/bases/vtable) for a forward-declaration-only record identity
+# (``struct Handle;`` with no definition anywhere in the TU), until now
+# silently ABSENT from a clang snapshot entirely (``parse_types`` skipped
+# every non-definition record). An upgrading user's warm clang cache entry
+# would keep replaying a snapshot missing every opaque handle type until the
+# entry happened to expire or was manually cleared -- not just a wrong
+# value, an entity that used to not exist in the snapshot at all. Bumped so
+# the upgrade forces re-extraction instead.
 
 
 def _get_cache_dir() -> Path:
