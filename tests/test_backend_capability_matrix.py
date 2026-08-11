@@ -222,11 +222,19 @@ def test_every_merge_backfilled_attr_is_declared(caps) -> None:
 def test_hybrid_is_castxml_for_a_fact_the_merge_does_not_backfill(caps) -> None:
     """The consequence the doc's Known gaps section spells out: a hybrid
     snapshot is castxml-based, so a clang-only fact nothing backfills does NOT
-    reach a declaration both backends saw."""
+    reach a declaration both backends saw.
+
+    ``EnumType.underlying_type`` used to be this test's fixture, before
+    castxml itself started extracting a real value (Phase C fact-completeness
+    pass) — it is no longer a fact only clang populates, so it can't
+    demonstrate a dropped-on-merge clang-only fact any more.
+    ``RecordType.is_template_pattern`` has the same castxml-NONE/clang-FULL/
+    not-backfilled shape today.
+    """
     row = next(
         r
         for r in caps.FACT_ROWS
-        if (r.owner, r.field) == ("EnumType", "underlying_type")
+        if (r.owner, r.field) == ("RecordType", "is_template_pattern")
     )
     assert not row.hybrid_backfilled
     assert row.clang is caps.Capability.FULL

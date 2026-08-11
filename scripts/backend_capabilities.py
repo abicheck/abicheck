@@ -544,14 +544,21 @@ FACT_ROWS: tuple[FactRow, ...] = (
     FactRow(
         "EnumType",
         "underlying_type",
-        _NONE,
+        _FULL,
         _FULL,
         note=(
-            "clang reads `fixedUnderlyingType`; castxml never populates it, so "
-            "a castxml (and therefore hybrid) enum keeps the model default "
-            "`int` whatever the header declared. No diff detector reads this "
-            "field — `enum_underlying_size_changed` is computed from DWARF — "
-            "but `tu_merge.py`'s ODR conflict check does."
+            'clang reads `fixedUnderlyingType` (`"int"` for an unfixed '
+            "enum, since clang's AST JSON only exposes an explicit `enum E : "
+            "T`). castxml reads the `<Enumeration type=...>` id, which "
+            "resolves to the real compiler-picked underlying integer type "
+            "either way — fixed or implementation-chosen from the member "
+            "value range (verified against real castxml 0.6.3 output). Not "
+            "hybrid-backfilled (see `hybrid_backfilled` above), but since "
+            "castxml itself is now a real producer, hybrid inherits a real "
+            "answer instead of the previous silent `int` default. No diff "
+            "detector reads this field — `enum_underlying_size_changed` is "
+            "computed from DWARF — but `tu_merge.py`'s ODR conflict check "
+            "does."
         ),
     ),
     FactRow("EnumType", "source_location", _FULL, _FULL),

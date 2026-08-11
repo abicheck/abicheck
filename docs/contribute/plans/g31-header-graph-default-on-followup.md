@@ -1664,6 +1664,9 @@ phase held to):
   hybrid) enum keeps the model default `int` whatever the header declared.
   No diff detector reads it — `enum_underlying_size_changed` comes from
   DWARF — but `tu_merge.py`'s ODR-conflict check does.
+
+  **Closed in a still-later pass** — see the matching entry under
+  "Gaps the matrix surfaced" below for the fix and its verification.
 - A hybrid merge is castxml-based, so a clang-only fact it does not
   explicitly backfill (`is_template_pattern`,
   `has_anonymous_aggregate_fields`, `underlying_type`) is dropped for any
@@ -1736,6 +1739,32 @@ phase held to):
   from the Codex finding immediately above — `"hybrid"` excluded from
   `diff_symbols._diff_var_access`'s producer gate from the start, not
   added as a second review round's correction.
+
+  **Closed for `EnumType.underlying_type` in a still-later pass**, once a
+  pinned castxml build was available to verify against. castxml's
+  `<Enumeration type=...>` attribute names the compiler-resolved underlying
+  integer type — fixed (`enum E : short`) or implementation-chosen from the
+  member value range for an unfixed enum — verified against real castxml
+  0.6.3 output for both cases (`enum class Color : short` reading `short
+  int`, a plain `enum Status { OK, FAIL }` reading `unsigned int`). No
+  reliability flag was needed: unlike `is_va_list`/`Variable.access`, this
+  is a straightforward "was it read at all" gap, not a "reads a real value
+  that happens to be systematically wrong" one, so there is no legacy
+  baseline to distinguish from a genuine absence. `dumper_castxml.py`'s
+  `parse_enums` now resolves the `type` id through the same
+  `_underlying_type_name` helper `parse_typedefs` already used (following a
+  typedef chain to its concrete base type, for the rare `enum E : my_int_t`
+  spelling). `dumper_hybrid.py`'s `_merge_enum_type` still does not
+  explicitly backfill this field (unchanged, and still recorded as an open
+  gap immediately below), but since castxml is now a real producer rather
+  than a placeholder default, a hybrid snapshot inherits a genuine answer
+  either way — the backfill gap stopped mattering for this specific field
+  without needing to be closed itself. `scripts/backend_capabilities.py`'s
+  `EnumType.underlying_type` row moved from castxml `NONE` to `FULL`
+  accordingly (`gen_backend_capability_matrix.py` regenerated), and
+  `tests/test_backend_capability_matrix.py`'s "hybrid drops an
+  unbackfilled clang-only fact" fixture moved to
+  `RecordType.is_template_pattern`, which still has that shape.
 
 **Performance benchmarks + regression gate — done.** Now that the
 header-only graph is always-on rather than opt-in, its per-dump cost is paid
