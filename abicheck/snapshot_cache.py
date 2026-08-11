@@ -45,7 +45,7 @@ MAX_ENTRIES: int = 100
 #: key invalidates all previously-cached entries on upgrade rather than risk
 #: serving a stale snapshot computed by an older, behaviorally-different
 #: abicheck version.
-_SNAPSHOT_CACHE_VERSION: str = "12"
+_SNAPSHOT_CACHE_VERSION: str = "13"
 # v2: castxml's CvQualifiedType type-name spelling changed for a
 # volatile-qualified pointer/reference VALUE (now a suffix, "T * volatile",
 # matching clang's own convention, rather than always a prefix) -- an
@@ -165,6 +165,18 @@ _SNAPSHOT_CACHE_VERSION: str = "12"
 # preserving the false ``VAR_ACCESS_WIDENED`` a fresh dump vs. a legacy
 # cache entry would otherwise produce. Bumped so the upgrade forces
 # re-extraction instead.
+#
+# v13 (G31 Phase C fact-completeness, Codex review): the castxml backend
+# started extracting ``EnumType.underlying_type``
+# (``dumper_castxml.parse_enums``' new ``<Enumeration type=...>`` read),
+# until now unconditionally the dataclass default ``"int"`` for EVERY
+# castxml-backed (and therefore hybrid) enum. Identical reasoning to v10/
+# v11/v12 -- an upgrading user's warm castxml/hybrid cache entry would keep
+# replaying a snapshot whose every enum reads ``underlying_type="int"``
+# regardless of its real declared/compiler-chosen underlying type, silently
+# preserving the exact false ODR-agreement ``tu_merge.py``'s conflict check
+# this extraction closes. Bumped so the upgrade forces re-extraction
+# instead.
 
 
 def _get_cache_dir() -> Path:

@@ -50,8 +50,18 @@ from ._argv import (
 from ._deadline_bound import run_bounded_for_extraction
 from .base import SourceExtractionError, assemble_source_tu
 
-#: castxml extractor schema/behaviour version, recorded in the dump provenance.
-CASTXML_EXTRACTOR_VERSION = "0.1"
+#: castxml extractor schema/behaviour version, recorded in the dump provenance
+#: and folded into ``source_replay.compute_tu_cache_key``'s per-TU cache key
+#: (ADR-033 D8) -- bump whenever this extractor's output can change for the
+#: same inputs, so a warm ``SourceAbiCache`` entry from before the change is
+#: invalidated rather than replayed. 0.2 (Codex review, PR #719): this
+#: extractor's ``enums = parser.parse_enums()`` reuses the shared
+#: ``_CastxmlParser`` that ``dumper_castxml.py`` also uses for the L2 header
+#: snapshot -- the same parser started extracting ``EnumType.underlying_type``
+#: for real (previously always the dataclass default ``"int"``), so an
+#: upgrading user's warm per-TU cache would keep replaying the old default
+#: without this bump.
+CASTXML_EXTRACTOR_VERSION = "0.2"
 
 #: Backwards-compatible aliases — the compile-context → argv helpers now live in
 #: the shared ``_argv`` module (reused by the clang backend, phase 5) but are
