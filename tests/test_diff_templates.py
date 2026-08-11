@@ -243,6 +243,24 @@ class TestStripParamSignature:
         assert _strip_param_signature("int (*ns::sort(int))()") == "ns::sort"
         assert _strip_param_signature("int (ns::C::*ns::sort(int))()") == "ns::sort"
 
+    def test_pointer_wrapper_with_pointer_template_argument(self) -> None:
+        # Codex review, fresh evidence: the previous fix recovered the clean
+        # name via prefix.rindex("*") over the *whole* prefix once a wrapper
+        # was skipped -- wrong whenever the wrapped call's own name also
+        # carries a pointer template argument ("bar<int*>"), since that
+        # argument's "*" sits to the right of (and so wins rindex over) the
+        # wrapper's own "*". "int (*ns::experimental::bar<int*>(int*))()"
+        # collapsed to a bare ">" before this was fixed to track the
+        # wrapper's own star position directly instead of re-deriving it.
+        assert (
+            _strip_param_signature("int (*ns::experimental::bar<int*>(int*))()")
+            == "ns::experimental::bar<int*>"
+        )
+        assert (
+            _strip_param_signature("int (ns::C::*ns::bar<int*>(int*))()")
+            == "ns::bar<int*>"
+        )
+
     def test_cpo_kind_changed_matches_across_pointer_to_member_wrapper(self) -> None:
         # End-to-end: a function template returning a pointer to member
         # function must still be recognized as the same qualified name as
@@ -261,6 +279,35 @@ class TestStripParamSignature:
         try:
             old = _snap(funcs=[_fn("", mangled="_Zfn")])
             new = _snap(vars_=[_var("sort", type_="ns::__sort_fn", mangled="_ZN2ns4sortE")])
+            changes = detect_cpo_kind_changed(old, new)
+        finally:
+            dm.demangle_batch = orig  # type: ignore[assignment]
+
+        assert len(changes) == 1
+        assert changes[0].kind == ChangeKind.CPO_KIND_CHANGED
+
+    def test_cpo_kind_changed_matches_across_pointer_template_argument(self) -> None:
+        # End-to-end for the pointer-template-argument regression: a
+        # pointer-returning function template whose own name carries a
+        # pointer template argument must still be recognized as the same
+        # qualified name as a same-named CPO variable, not corrupted down
+        # to a bare ">" by a stale rindex("*") over the whole prefix.
+        import abicheck.demangle as dm
+
+        def fake_demangle(mangled_list: list[str]) -> dict[str, str]:
+            sigs = {
+                "_Zfn": "int (*ns::experimental::bar<int*>(int*))()",
+                "_ZN2ns12experimental3barE": "ns::experimental::bar",
+            }
+            return {m: sigs[m] for m in mangled_list if m in sigs}
+
+        orig = dm.demangle_batch
+        dm.demangle_batch = fake_demangle  # type: ignore[assignment]
+        try:
+            old = _snap(funcs=[_fn("", mangled="_Zfn")])
+            new = _snap(vars_=[
+                _var("bar", type_="ns::experimental::__bar_fn", mangled="_ZN2ns12experimental3barE"),
+            ])
             changes = detect_cpo_kind_changed(old, new)
         finally:
             dm.demangle_batch = orig  # type: ignore[assignment]

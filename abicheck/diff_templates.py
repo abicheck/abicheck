@@ -126,27 +126,39 @@ def _qualified_function_name(name: str, mangled: str) -> str:
     return name
 
 
-def _opens_pointer_declarator(qualified: str, paren_index: int) -> bool:
-    """Return True if the ``(`` at *paren_index* opens a function-pointer or
-    member-function-pointer declarator — the real call is *nested inside*
-    this group, immediately after the ``*``/``&`` (optionally preceded by a
-    scope like ``Class::`` for a member-pointer wrapper).
+def _pointer_declarator_star_index(qualified: str, paren_index: int) -> int:
+    """Return the index of the ``*``/``&`` that opens a function-pointer or
+    member-function-pointer declarator at the ``(`` found at *paren_index*
+    — the real call is *nested inside* this group, immediately after that
+    ``*``/``&`` (optionally preceded by a scope like ``Class::`` for a
+    member-pointer wrapper) — or -1 if this ``(`` does not open one.
 
     Distinguishing signal: the group reaches a ``*``/``&`` and *then* a
     further ``(`` before the next ``,``/``)`` at this nesting level. An
     ordinary parameter list can also contain a bare ``*``/``&`` (a
     pointer/reference parameter type, e.g. ``lib::sort(int*, int*)``), but
     never followed by another ``(`` before that parameter ends.
+
+    Returns the *first* such ``*``/``&``'s index rather than merely a bool
+    so a caller can later recover the wrapper's own scope prefix without
+    re-searching — a plain boolean plus a later whole-prefix ``rindex("*")``
+    picks the *last* ``*`` in the prefix instead, which is wrong whenever
+    the wrapped call's own name carries a pointer template argument (e.g.
+    ``int (*ns::bar<int*>(int*))()`` — the trailing ``int*>`` template
+    argument's ``*`` sits after the wrapper's own, and is the rightmost one
+    in the eventual prefix) (Codex review).
     """
-    saw_star = False
-    for ch in qualified[paren_index + 1:]:
+    star_index = -1
+    for offset, ch in enumerate(qualified[paren_index + 1:]):
+        idx = paren_index + 1 + offset
         if ch in "*&":
-            saw_star = True
-        elif ch == "(" and saw_star:
-            return True
+            if star_index == -1:
+                star_index = idx
+        elif ch == "(" and star_index != -1:
+            return star_index
         elif ch in ",)":
-            return False
-    return False
+            return -1
+    return -1
 
 
 def _matching_close_paren(qualified: str, open_index: int) -> int:
@@ -195,7 +207,7 @@ def _strip_param_signature(qualified: str) -> str:
       return-type shape found so far has at least one space before its
       first ``(`` — so a whitespace-preceded ``(`` is never the real
       parameter list. What to do next differs by shape, distinguished by
-      :func:`_opens_pointer_declarator`:
+      :func:`_pointer_declarator_star_index`:
 
       - A function-pointer/member-function-pointer declarator
         (``int (*ns::f<int>(int))()`` / ``int (ns::C::*ns::f<int>(int))()``)
@@ -224,13 +236,20 @@ def _strip_param_signature(qualified: str) -> str:
     the whole result as a qualified-name *identity*
     (:func:`detect_cpo_kind_changed`, which failed to match a
     pointer-to-member-function CPO transition against this corrupted
-    prefix — Codex review). A real qualified name never itself contains
-    ``*`` (only a return-type spelling does), so once a wrapper was
-    skipped, the clean name is recovered by taking the text after that
-    wrapper's own last ``*``.
+    prefix — Codex review). The clean name is recovered by taking the text
+    after the wrapper's own ``*``/``&`` — but its *position*, found while
+    recognizing the declarator via :func:`_pointer_declarator_star_index`,
+    must be tracked and reused rather than re-derived from the final prefix
+    with ``rindex("*")``: when the wrapped call's own name carries a
+    pointer template argument (``int (*ns::bar<int*>(int*))()``), that
+    argument's own ``*`` sits later in the prefix than the wrapper's, so a
+    whole-prefix ``rindex`` picks the wrong one and corrupts the name down
+    to a lone ``">"`` (Codex review, fresh evidence after this function's
+    own prior fix for the pointer-wrapper case).
     """
     i = qualified.find("(")
     saw_pointer_wrapper = False
+    wrapper_star_index = -1
     while i != -1:
         prefix = qualified[:i]
         m = _OPERATOR_TOKEN_RE.search(prefix)
@@ -241,8 +260,10 @@ def _strip_param_signature(qualified: str) -> str:
             i = qualified.find("(", i + 2)
             continue
         if i == 0 or qualified[i - 1].isspace():
-            if _opens_pointer_declarator(qualified, i):
+            star_index = _pointer_declarator_star_index(qualified, i)
+            if star_index != -1:
                 saw_pointer_wrapper = True
+                wrapper_star_index = star_index
                 i = qualified.find("(", i + 1)
             else:
                 close = _matching_close_paren(qualified, i)
@@ -250,8 +271,8 @@ def _strip_param_signature(qualified: str) -> str:
                     return qualified
                 i = qualified.find("(", close + 1)
             continue
-        if saw_pointer_wrapper and "*" in prefix:
-            return prefix[prefix.rindex("*") + 1:]
+        if saw_pointer_wrapper and wrapper_star_index != -1:
+            return qualified[wrapper_star_index + 1:i]
         return prefix
     return qualified
 
