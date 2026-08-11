@@ -390,6 +390,44 @@ def _compute_freshness(
     return {"refresh_required": bool(reasons), "reasons": reasons}
 
 
+def compute_content_digest(manifest: dict[str, Any]) -> str:
+    """The normalized "did anything really change" digest -- only library
+    name + snapshot sha256, sorted by library, matches action.yml's
+    documented contract ("library names + per-file digests").
+
+    Deliberately excludes every other manifest field, most importantly
+    ``created_at``: ``dumper.py`` auto-stamps a fresh one on every dump
+    call, so hashing the full artifact list (as an earlier version did)
+    made the digest change on every run even when every snapshot's actual
+    content was identical, defeating its purpose as a change signal
+    (CodeRabbit review). Sorted by library so the digest is independent of
+    entry/matrix order too.
+
+    A standalone function (not inlined in ``main()``) so a caller outside
+    this script's own CLI invocation -- e.g. ``publish-baseline.yml``'s
+    release-asset upload step, comparing a freshly-dumped baseline-set's
+    digest against an already-published one's -- computes the identical
+    normalized digest from a manifest dict, rather than re-deriving the
+    formula and risking drift from this one (Codex review: a byte-for-byte
+    comparison of the packaged archive would almost always report
+    "different content" for a logically-identical retry, since both the
+    stamped timestamps and the tar archive's own filesystem metadata vary
+    run to run).
+    """
+    return hashlib.sha256(
+        json.dumps(
+            sorted(
+                (
+                    {"library": a["library"], "sha256": a["sha256"]}
+                    for a in manifest["artifacts"]
+                ),
+                key=lambda a: a["library"],
+            ),
+            sort_keys=True,
+        ).encode("utf-8")
+    ).hexdigest()
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--output-dir", required=True, type=Path)
@@ -412,26 +450,7 @@ def main(argv: list[str] | None = None) -> int:
         json.dumps(manifest, indent=2) + "\n", encoding="utf-8"
     )
 
-    # Only library name + snapshot sha256, sorted by library -- matches
-    # action.yml's documented contract ("library names + per-file digests").
-    # Hashing the full artifact list (as before) pulled in created_at, which
-    # dumper.py auto-stamps fresh on every dump call, so the digest changed
-    # on every run even when every snapshot's actual content was identical,
-    # defeating its purpose as a "did anything really change" signal
-    # (CodeRabbit review). Sorted by library so digest is independent of
-    # entry/matrix order too.
-    content_digest = hashlib.sha256(
-        json.dumps(
-            sorted(
-                (
-                    {"library": a["library"], "sha256": a["sha256"]}
-                    for a in manifest["artifacts"]
-                ),
-                key=lambda a: a["library"],
-            ),
-            sort_keys=True,
-        ).encode("utf-8")
-    ).hexdigest()
+    content_digest = compute_content_digest(manifest)
 
     # key=value lines on stdout -- the caller (run.sh) forwards these to
     # GITHUB_OUTPUT rather than this script writing there directly, so it

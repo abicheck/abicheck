@@ -306,20 +306,26 @@ jobs:
       # This step therefore uploads plainly (no --clobber) when no asset of
       # this name exists yet -- the ordinary first-publish and same-content-
       # retry-after-a-transient-failure cases. When an asset of this name
-      # DOES already exist, it is fetched and compared byte-for-byte against
-      # what this run just built: identical content is a safe no-op (the
-      # exact "retry after infra flakiness" case --clobber existed for,
-      # without ever actually replacing a differing artifact), and differing
-      # content is a hard failure -- overwriting a published release-contract
-      # asset with different bytes needs a human decision (a new release tag,
-      # or explicit `gh release delete-asset` + re-run), not a silent
-      # workflow-level clobber.
+      # DOES already exist, it is fetched and compared against what this run
+      # just built by NORMALIZED content digest (library + snapshot sha256
+      # pairs), not raw archive bytes -- every dump stamps a fresh
+      # created_at and the tar archive itself carries filesystem metadata,
+      # so a byte-for-byte comparison would almost always report "different
+      # content" even for a logically-identical retry. Identical normalized
+      # content is a safe no-op (the exact "retry after infra flakiness"
+      # case --clobber existed for, without ever actually replacing a
+      # differing artifact), and differing content is a hard failure --
+      # overwriting a published release-contract asset with a different
+      # baseline needs a human decision (a new release tag, or explicit
+      # `gh release delete-asset` + re-run), not a silent workflow-level
+      # clobber.
       - name: Upload release asset (fails closed on an immutability violation)
         env:
           GH_TOKEN: ${{ secrets.github-token != '' && secrets.github-token || secrets.GITHUB_TOKEN }}
           RELEASE_TAG: ${{ inputs.release-tag != '' && inputs.release-tag || github.ref_name }}
           ASSET_NAME: ${{ steps.package.outputs.asset-name }}
           REPO: ${{ github.repository }}
+          NEW_CONTENT_DIGEST: ${{ steps.baseline.outputs.content-digest }}
         run: |
           set -euo pipefail
 
@@ -342,16 +348,61 @@ jobs:
           fi
 
           echo "::group::Asset $ASSET_NAME already exists on $RELEASE_TAG -- verifying content before deciding whether this is a safe retry"
-          new_sha256=$(sha256sum "$ASSET_NAME" | awk '{print $1}')
-          existing_sha256=$(gh api "$existing_url" -H 'Accept: application/octet-stream' | sha256sum | awk '{print $1}')
-          echo "new:      $new_sha256"
-          echo "existing: $existing_sha256"
+          # Compare NORMALIZED content digests (library name + snapshot
+          # sha256 pairs -- actions/baseline/build_manifest.py's own
+          # compute_content_digest(), the same formula behind this job's
+          # `steps.baseline.outputs.content-digest`), not raw archive bytes:
+          # dumper.py stamps a fresh created_at into every manifest/snapshot
+          # on every run, and the tar archive itself carries filesystem
+          # metadata, so a byte-for-byte comparison would almost always
+          # report "different content" even for a genuine, logically-
+          # identical retry -- permanently defeating the safe-retry path and
+          # directing every rerun at the destructive delete-asset recovery
+          # instead (Codex review).
+          mkdir -p .existing-asset/extracted
+          gh api "$existing_url" -H 'Accept: application/octet-stream' > .existing-asset/existing.tar.zst
+          python3 -c '
+          import sys
+          from pathlib import Path
+          from abicheck.package import TarExtractor
+
+          TarExtractor._safe_extract_zst_tar(Path(sys.argv[1]), Path(sys.argv[2]))
+          ' .existing-asset/existing.tar.zst .existing-asset/extracted
+
+          existing_content_digest=$(python3 -c '
+          import importlib.util
+          import json
+          import sys
+          from pathlib import Path
+
+          spec = importlib.util.spec_from_file_location(
+              "baseline_build_manifest",
+              Path(".publish-baseline-src/actions/baseline/build_manifest.py"),
+          )
+          module = importlib.util.module_from_spec(spec)
+          spec.loader.exec_module(module)
+
+          manifest_path = Path(sys.argv[1]) / "manifest.json"
+          if not manifest_path.is_file():
+              print(
+                  "::error::existing release asset has no manifest.json at "
+                  "its root after extraction -- cannot verify its content, "
+                  "refusing to treat this as a safe retry.",
+                  file=sys.stderr,
+              )
+              sys.exit(1)
+          manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+          print(module.compute_content_digest(manifest))
+          ' .existing-asset/extracted)
+
+          echo "new:      $NEW_CONTENT_DIGEST"
+          echo "existing: $existing_content_digest"
           echo "::endgroup::"
 
-          if [[ "$new_sha256" == "$existing_sha256" ]]; then
-            echo "::notice::$ASSET_NAME already published on $RELEASE_TAG with identical content -- treating this as a safe re-run, not re-uploading."
+          if [[ "$NEW_CONTENT_DIGEST" == "$existing_content_digest" ]]; then
+            echo "::notice::$ASSET_NAME already published on $RELEASE_TAG with identical (normalized) content -- treating this as a safe re-run, not re-uploading."
             exit 0
           fi
 
-          echo "::error::$ASSET_NAME already exists on release $RELEASE_TAG with DIFFERENT content (sha256 $existing_sha256, this run built $new_sha256). release-contract assets are documented as immutable once published -- refusing to silently overwrite it. If this release-contract baseline-set genuinely needs to change, delete the existing asset explicitly first ('gh release delete-asset $RELEASE_TAG $ASSET_NAME --repo $REPO --yes') and re-run, or publish under a new release tag." >&2
+          echo "::error::$ASSET_NAME already exists on release $RELEASE_TAG with DIFFERENT content (normalized content-digest $existing_content_digest, this run built $NEW_CONTENT_DIGEST). release-contract assets are documented as immutable once published -- refusing to silently overwrite it. If this release-contract baseline-set genuinely needs to change, delete the existing asset explicitly first ('gh release delete-asset $RELEASE_TAG $ASSET_NAME --repo $REPO --yes') and re-run, or publish under a new release tag." >&2
           exit 1

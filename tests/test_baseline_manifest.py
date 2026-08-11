@@ -1085,6 +1085,37 @@ class TestMainCli:
         digest2 = self._run_main_and_get_content_digest(tmp_path, libraries, capsys)
         assert digest1 != digest2
 
+    def test_compute_content_digest_is_stable_across_differing_created_at(
+        self,
+    ) -> None:
+        # Direct unit test of the extracted compute_content_digest()
+        # function (Codex review, PR #726): a consumer comparing a freshly
+        # dumped baseline-set's digest against an already-published one's
+        # own manifest.json (publish-baseline.yml's release-asset upload
+        # step) must see the SAME digest for the same artifacts[] content
+        # even though every dump stamps a fresh created_at -- otherwise the
+        # "safe identical-content retry" path could never actually trigger.
+        manifest_a = {
+            "manifest_version": 1,
+            "created_at": "2026-08-11T00:00:00Z",
+            "artifacts": [{"library": "libfoo", "sha256": "aaa"}],
+        }
+        manifest_b = {
+            "manifest_version": 1,
+            "created_at": "2026-08-11T23:59:59Z",
+            "artifacts": [{"library": "libfoo", "sha256": "aaa"}],
+        }
+        assert build_manifest_module.compute_content_digest(
+            manifest_a
+        ) == build_manifest_module.compute_content_digest(manifest_b)
+
+    def test_compute_content_digest_changes_with_a_different_sha256(self) -> None:
+        manifest_a = {"artifacts": [{"library": "libfoo", "sha256": "aaa"}]}
+        manifest_b = {"artifacts": [{"library": "libfoo", "sha256": "bbb"}]}
+        assert build_manifest_module.compute_content_digest(
+            manifest_a
+        ) != build_manifest_module.compute_content_digest(manifest_b)
+
 
 class TestStageBinary:
     """G30 P1.6 (ADR-047 §6/§8 S14 correction): a ``stage_binary: true``
