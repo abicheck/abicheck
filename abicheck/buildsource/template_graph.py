@@ -798,20 +798,32 @@ def _template_arg_use(arg_node: dict[str, Any]) -> TemplateArgUse | None:
 
 def _is_opaque_template_argument(node: dict[str, Any]) -> bool:
     """Whether a ``TemplateArgument`` node carries none of the fields this
-    module can spell anything from — no ``type``, no ``value``, no ``decl``,
-    not a pack wrapper (``isPack``). A **template-template argument** (e.g.
-    ``Use<A>``/``Use<B>`` for ``template <template <typename> class C>
-    struct Use;``) produces exactly this shape (Codex review, confirmed
-    against real clang AST output): the node is entirely bare (``{"kind":
-    "TemplateArgument"}``), nothing distinguishing ``A`` from ``B`` -- unlike
-    a decl-referencing (TEMPLATE_USES_DECL) argument, which always carries a
-    top-level ``decl`` dict and so isn't opaque despite also lacking
-    ``type``/``value``."""
+    module can spell anything from — no ``type``, no ``value``, no *named*
+    ``decl``, not a pack wrapper (``isPack``). A **template-template
+    argument** (e.g. ``Use<A>``/``Use<B>`` for ``template <template
+    <typename> class C> struct Use;``) produces exactly this shape (Codex
+    review, confirmed against real clang AST output): the node is entirely
+    bare (``{"kind": "TemplateArgument"}``), nothing distinguishing ``A``
+    from ``B`` -- unlike a decl-referencing (TEMPLATE_USES_DECL) argument,
+    which always carries a top-level ``decl`` dict and so isn't opaque
+    despite also lacking ``type``/``value``.
+
+    A ``decl`` dict with no ``name`` (CodeRabbit review) is itself
+    unspellable -- :func:`_template_arg_use` already returns ``None`` for
+    exactly this shape rather than fabricate an empty-string spelling -- so
+    it counts as opaque here too: an argument this loop can't spell
+    anything from must abort the whole instantiation's own identity (the
+    same discipline the template-template case above already gets),
+    not silently record the instantiation with one fewer argument than it
+    actually has.
+    """
+    decl = node.get("decl")
+    decl_named = isinstance(decl, dict) and bool(decl.get("name"))
     return (
         not node.get("isPack")
         and node.get("type") is None
         and "value" not in node
-        and not isinstance(node.get("decl"), dict)
+        and not decl_named
     )
 
 
@@ -979,6 +991,11 @@ def _resolve_specialization_qname(
         full_by_id,
         seen | {spec_id},
     )
+    if _has_unresolved_decl_argument(args, resolved_args):
+        # See _has_unresolved_decl_argument's own docstring -- same
+        # unresolved-target-collision risk as the opaque-argument case
+        # just above, reached through a different gap in the evidence.
+        return None
     return _instantiation_label(template_qname, resolved_args)
 
 
@@ -1020,6 +1037,38 @@ def _resolve_arg_targets(
 def _instantiation_label(template_qname: str, args: Iterable[TemplateArgUse]) -> str:
     spellings = ", ".join(arg_label_spelling(a, _VALUE_DECL_KINDS) for a in args)
     return f"{template_qname}<{spellings}>" if spellings else template_qname
+
+
+def _has_unresolved_decl_argument(
+    original_args: Iterable[TemplateArgUse], resolved_args: Iterable[TemplateArgUse]
+) -> bool:
+    """Whether resolving ``original_args`` (raw, still carrying
+    :func:`_template_arg_use`'s *original* ``target_decl_kind`` straight off
+    each argument's own ``decl`` node) into ``resolved_args`` (the
+    :func:`_resolve_arg_targets` output) dropped a decl-referencing
+    (TEMPLATE_USES_DECL) argument's target entirely -- id names no
+    declaration :func:`index_value_decls` indexed anywhere in this TU (e.g.
+    a local ``static`` used as a C++17 address-of-local-static NTTP, which
+    ``index_value_decls`` deliberately never descends into).
+
+    Checked against the *original*, pre-resolution kind, not the resolved
+    one (Codex review, fresh evidence): once resolution fails,
+    :func:`_resolve_arg_targets` sets *both* ``target_qname`` and
+    ``target_decl_kind`` to ``None`` on the returned copy, so only the
+    original still says "this was meant to be a decl reference." An
+    instantiation with an argument like this can't be trusted the same way
+    an opaque (template-template) argument can't: :func:`arg_label_spelling`
+    falls back to the bare, unqualified ``spelling`` when ``target_qname``
+    is unresolved, and two distinct unresolved targets sharing a bare name
+    (e.g. two same-named local statics in different functions) would then
+    collide onto one label, falsely merging two instantiations onto one
+    graph node -- the same failure mode the opaque-argument guard already
+    exists to prevent, reached through a different gap in the evidence.
+    """
+    return any(
+        orig.target_decl_kind in _VALUE_DECL_KINDS and resolved.target_qname is None
+        for orig, resolved in zip(original_args, resolved_args)
+    )
 
 
 #: Additional Itanium ctor/dtor manglings implied by the one clang's AST
@@ -1281,6 +1330,10 @@ def _walk_function_templates(
                 resolved_args = _resolve_arg_targets(
                     args, id_to_qname, id_to_decl_kind, id_to_template_qname, full_by_id
                 )
+                if _has_unresolved_decl_argument(args, resolved_args):
+                    # See _has_unresolved_decl_argument's own docstring --
+                    # same reasoning as the opaque-argument skip above.
+                    continue
                 out.append(
                     TemplateInstantiation(
                         kind=_FUNCTION_KIND,
@@ -1621,6 +1674,10 @@ def parse_clang_ast_templates(ast: dict[str, Any]) -> list[TemplateInstantiation
         resolved_args = _resolve_arg_targets(
             args, id_to_qname, id_to_decl_kind, id_to_template_qname, full_by_id
         )
+        if _has_unresolved_decl_argument(args, resolved_args):
+            # See _has_unresolved_decl_argument's own docstring -- same
+            # reasoning as the opaque-argument skip above.
+            continue
         out.append(
             TemplateInstantiation(
                 kind=_RECORD_KIND,
@@ -1934,8 +1991,6 @@ def __getattr__(name: str) -> Any:
     if name == "ClangTemplateGraphExtractor":
         import importlib
 
-        return getattr(
-            importlib.import_module(".template_graph_extractor", __package__),
-            "ClangTemplateGraphExtractor",
-        )
+        module = importlib.import_module(".template_graph_extractor", __package__)
+        return module.ClangTemplateGraphExtractor
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

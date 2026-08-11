@@ -18,8 +18,12 @@
   `Holder<&ns1::f>` vs. `Holder<&ns2::f>` — no longer collide onto one
   graph node). Deliberately scoped to free functions and namespace-scope
   variables only; a class-member NTTP target is a known, left-open gap.
-  No new `ChangeKind`, no report schema change, no verdict/exit-code
-  effect — this is graph vocabulary only.
+  A second, independent collision risk (an argument whose decl target
+  resolves to nothing this TU's AST indexes, e.g. a C++17 address-of-
+  local-static NTTP) is guarded the same way — the whole instantiation is
+  dropped rather than falling back to a bare, potentially-colliding
+  spelling. No new `ChangeKind`, no report schema change, no verdict/exit-
+  code effect — this is graph vocabulary only.
 
 ### Changed
 

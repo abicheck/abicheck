@@ -173,10 +173,74 @@ def test_pointer_to_variable_nttp_resolves_to_the_target_variables_identity() ->
     assert out[0].args == (TemplateArgUse("global", "_ZN2ns6globalE", "VarDecl"),)
 
 
-def test_function_pointer_nttp_unresolved_when_target_never_declared_in_tu() -> None:
+def test_reference_nttp_resolves_to_the_target_variables_identity() -> None:
+    """``template <int& R> struct Holder;`` instantiated ``Holder<ns::global>``
+    -- a *reference*, not pointer, NTTP -- produces the identical bare
+    ``{"kind": "TemplateArgument", "decl": {...VarDecl...}}`` shape as the
+    pointer-to-variable case above (verified empirically against Clang 18:
+    no ``refersToEnclosingVariableOrCapture``/pointer-specific marker
+    distinguishes the two at this node), so the same resolution path
+    applies unchanged."""
+    global_decl = {
+        "id": "0xGLOBAL",
+        "kind": "VarDecl",
+        "name": "global",
+        "mangledName": "_ZN2ns6globalE",
+        "type": {"qualType": "int"},
+    }
+    ns = {"kind": "NamespaceDecl", "name": "ns", "inner": [global_decl]}
+    holder_pattern = {
+        "kind": "CXXRecordDecl",
+        "name": "Holder",
+        "completeDefinition": True,
+        "inner": [],
+    }
+    holder_instantiation = {
+        "id": "0xSPEC_HOLDER",
+        "kind": "ClassTemplateSpecializationDecl",
+        "name": "Holder",
+        "completeDefinition": True,
+        "inner": [
+            {
+                "kind": "TemplateArgument",
+                "decl": {
+                    "id": "0xGLOBAL",
+                    "kind": "VarDecl",
+                    "name": "global",
+                    "type": {"qualType": "int"},
+                },
+            },
+        ],
+    }
+    class_template = {
+        "kind": "ClassTemplateDecl",
+        "name": "Holder",
+        "inner": [
+            {"kind": "NonTypeTemplateParmDecl", "name": "R"},
+            holder_pattern,
+            holder_instantiation,
+        ],
+    }
+    ast = {"kind": "TranslationUnitDecl", "inner": [ns, class_template]}
+    out = parse_clang_ast_templates(ast)
+    assert len(out) == 1
+    assert out[0].args == (TemplateArgUse("global", "_ZN2ns6globalE", "VarDecl"),)
+    assert out[0].label == "Holder<_ZN2ns6globalE>"
+
+
+def test_function_pointer_nttp_unresolved_target_drops_the_whole_instantiation() -> (
+    None
+):
     """The decl stub's id names a declaration this TU's AST never actually
-    walks (e.g. only forward-declared, or genuinely absent) -- degrades to
-    unresolved (None), never a guessed identity."""
+    walks (e.g. a C++17 address-of-local-static NTTP, which
+    ``index_value_decls`` deliberately never descends into, or a genuinely
+    absent target) -- ``_has_unresolved_decl_argument`` (Codex review, see
+    its own docstring) drops the *whole* instantiation rather than record it
+    with an unresolved ``TemplateArgUse(..., None, None)``: falling back to
+    the bare ``spelling`` for the instantiation's own label would let two
+    genuinely distinct unresolved decl targets sharing a bare name collide
+    onto one node, the same failure mode the opaque-argument guard already
+    exists to prevent."""
     handler_stub_only = {
         "kind": "TemplateArgument",
         "decl": {
@@ -210,17 +274,19 @@ def test_function_pointer_nttp_unresolved_when_target_never_declared_in_tu() -> 
     }
     ast = {"kind": "TranslationUnitDecl", "inner": [class_template]}
     out = parse_clang_ast_templates(ast)
-    assert len(out) == 1
-    assert out[0].args == (TemplateArgUse("handler", None, None),)
+    assert out == []
 
 
-def test_decl_argument_with_no_name_is_skipped_not_guessed() -> None:
+def test_decl_argument_with_no_name_drops_the_whole_instantiation() -> None:
     """A ``decl`` stub carrying no ``name`` at all (not observed in real
     clang output, but the AST-shape space this module doesn't fully
-    enumerate) drops the whole argument -- see
-    ``_is_opaque_template_argument``'s docstring, whose ``decl``-presence
-    check alone doesn't exclude this shape, so ``_template_arg_use``'s own
-    guard is what actually skips it."""
+    enumerate) is unspellable -- ``_is_opaque_template_argument`` treats a
+    nameless ``decl`` the same as no ``decl`` at all (CodeRabbit review), so
+    the whole instantiation is skipped rather than recorded with one fewer
+    argument than reality (the same discipline the opaque template-template-
+    argument case already gets -- an instantiation record this module can't
+    fully spell shouldn't exist at all, since a silently-shorter ``args``
+    tuple would misrepresent the real instantiation's arity)."""
     nameless_stub = {
         "kind": "TemplateArgument",
         "decl": {"id": "0xANON", "kind": "FunctionDecl", "name": ""},
@@ -249,8 +315,7 @@ def test_decl_argument_with_no_name_is_skipped_not_guessed() -> None:
     }
     ast = {"kind": "TranslationUnitDecl", "inner": [class_template]}
     out = parse_clang_ast_templates(ast)
-    assert len(out) == 1
-    assert out[0].args == ()
+    assert out == []
 
 
 def test_two_instantiations_sharing_only_a_bare_callee_name_stay_distinct() -> None:
@@ -263,7 +328,7 @@ def test_two_instantiations_sharing_only_a_bare_callee_name_stay_distinct() -> N
     label would merge both instantiations' own args/emitted_symbols onto
     one shared node)."""
 
-    def _holder_ast(ns_name: str, mangled: str) -> dict:
+    def _holder_ast(ns_name: str, mangled: str) -> tuple[dict, dict]:
         f_decl = {
             "id": f"0xF_{ns_name}",
             "kind": "FunctionDecl",
@@ -369,8 +434,8 @@ def test_real_clang_function_pointer_nttp_resolves_and_joins_source_decl(
     tmp_path,
 ) -> None:
     """Re-verifies TEMPLATE_USES_DECL end to end against a real compiler,
-    for both a pointer-to-function and a pointer-to-variable NTTP, rather
-    than only the hand-crafted fixtures above."""
+    for a pointer-to-function, a pointer-to-variable, *and* a reference-to-
+    variable NTTP, rather than only the hand-crafted fixtures above."""
     clang_bin = shutil.which("clang++") or shutil.which("clang")
     if clang_bin is None:
         pytest.skip("clang++ not found in PATH")
@@ -381,6 +446,8 @@ def test_real_clang_function_pointer_nttp_resolves_and_joins_source_decl(
         "Callback<&ns::handler> cb;\n"
         "template <int* Ptr> struct Holder {};\n"
         "Holder<&ns::global> h;\n"
+        "template <int& Ref> struct RefHolder { int get() { return Ref; } };\n"
+        "RefHolder<ns::global> rh;\n"
     )
     result = subprocess.run(
         [
@@ -409,6 +476,8 @@ def test_real_clang_function_pointer_nttp_resolves_and_joins_source_decl(
     )
     holder_inst = labels["Holder<_ZN2ns6globalE>"]
     assert holder_inst.args == (TemplateArgUse("global", "_ZN2ns6globalE", "VarDecl"),)
+    refholder_inst = labels["RefHolder<_ZN2ns6globalE>"]
+    assert refholder_inst.args == (TemplateArgUse("global", "_ZN2ns6globalE", "VarDecl"),)
 
     graph = SourceGraphSummary()
     augment_graph_with_templates(graph, out)
@@ -416,6 +485,11 @@ def test_real_clang_function_pointer_nttp_resolves_and_joins_source_decl(
     assert (
         template_instantiation_node_id("Callback<_ZN2ns7handlerEi>"),
         "decl://_ZN2ns7handlerEi",
+        EDGE_TEMPLATE_USES_DECL,
+    ) in edge_kinds
+    assert (
+        template_instantiation_node_id("RefHolder<_ZN2ns6globalE>"),
+        "decl://_ZN2ns6globalE",
         EDGE_TEMPLATE_USES_DECL,
     ) in edge_kinds
     assert (

@@ -35,6 +35,8 @@ from __future__ import annotations
 from collections.abc import Callable, Collection
 from typing import Any
 
+from .source_graph import function_decl_identity
+
 
 def index_value_decls(
     node: Any,
@@ -101,8 +103,6 @@ def index_value_decls(
     if kind in value_decl_kinds and name and not enclosing_func:
         node_id = str(node.get("id") or "")
         if node_id:
-            from .source_graph import function_decl_identity
-
             type_obj = node.get("type")
             type_qual = (
                 str(type_obj.get("qualType", "")) if isinstance(type_obj, dict) else ""

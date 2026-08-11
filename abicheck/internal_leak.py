@@ -1484,7 +1484,13 @@ def _build_call_graph_leak_change(
     if proof_path is None:
         path_strs: list[str] = []
     else:
-        rest = [p for p in proof_paths if p != proof_path]
+        # .remove() drops only the one selected occurrence -- a filtered
+        # comprehension (``p != proof_path``) would drop every occurrence,
+        # silently losing a genuinely distinct duplicate path if
+        # proof_paths happens to contain proof_path more than once
+        # (CodeRabbit review).
+        rest = list(proof_paths)
+        rest.remove(proof_path)
         path_strs = [proof_path, *rest[:2]]
     more = "" if len(proof_paths) <= 3 else f" (+{len(proof_paths) - 3} more paths)"
     change = Change(

@@ -767,7 +767,9 @@ the existing `type_graph.py` walk.
    against both real shapes). The resolution blocker — `id_to_qname`
    (built by `_index_type_decls` for `_RECORD_DECL_KINDS` only) never
    indexed a `FunctionDecl`/`VarDecl` id — is closed by a **second,
-   independent** whole-TU pass, `_index_value_decls`, scoped to free
+   independent** whole-TU pass, `index_value_decls` (`template_graph_
+   value_decls.py`, split out to keep `template_graph.py` under its own
+   2000-line hard cap), scoped to free
    functions and namespace-scope variables only (deliberately not
    widening `_index_type_decls` itself, since its nested-specialization
    scoping logic is written specifically for record-shaped children).
@@ -779,17 +781,28 @@ the existing `type_graph.py` walk.
    independent label-collision risk the prior round also flagged (a bare,
    unqualified `f"&{name}"` spelling letting `Holder<&ns1::f>` and
    `Holder<&ns2::f>` collide onto one `template_instantiation` node) is
-   closed the same way: `_arg_label_spelling` uses the *resolved*
+   closed the same way: `arg_label_spelling` uses the *resolved*
    `target_qname` (the unique identity string) for a decl-referencing
    argument's contribution to the instantiation label, not the bare
    `spelling`, falling back to the bare spelling only when unresolved (the
    same degrade-gracefully behavior an unresolved type argument already
    has). A member-function/static-data-member NTTP target is a known,
-   left-open gap — `_index_value_decls` deliberately skips class-scope
+   left-open gap — `index_value_decls` deliberately skips class-scope
    descent entirely rather than risk misattributing a member's identity to
    its enclosing namespace. See `template_graph.py`'s own docstring and
-   `tests/test_template_graph.py`'s dedicated collision regression test
+   `tests/test_template_graph_value_decls.py`'s dedicated collision
+   regression test
    (`test_two_instantiations_sharing_only_a_bare_callee_name_stay_distinct`).
+   A separate gap the same investigation round originally flagged and this
+   pass closed too: an argument whose target *is* a decl-referencing NTTP
+   but resolves to no declaration this TU's AST indexes anywhere (e.g. a
+   C++17 address-of-local-static NTTP, which `index_value_decls`
+   deliberately never descends into) used to fall back to the same bare,
+   collidable `spelling` `arg_label_spelling` uses for an unresolved *type*
+   argument — `_has_unresolved_decl_argument` now detects this case (by
+   comparing the pre-resolution argument's own `target_decl_kind` against
+   the post-resolution `target_qname`) and skips the whole instantiation,
+   the same discipline the opaque-argument guard above already applies.
 2. **Macro/config dependency — done.** `abicheck/buildsource/macro_graph.py`
    is a two-pass extractor (a Clang AST pass indexing every declaration's
    own `(file, begin_line, end_line)` span, plus a pure raw-text scan for
