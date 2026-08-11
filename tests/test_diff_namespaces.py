@@ -371,6 +371,39 @@ class TestExperimentalRemovedWithoutReplacement:
         assert changes[0].kind == ChangeKind.EXPERIMENTAL_REMOVED_WITHOUT_REPLACEMENT
         assert changes[0].symbol == "api::experimental::sort"
 
+    def test_bare_name_demangled_signature_does_not_defeat_suppression(
+        self,
+    ) -> None:
+        # Codex review, on the stable-key compatibility check above: a
+        # bare-named OLD declaration demangles to a *full signature*
+        # ("ns::experimental::check_ranges()"), while an already-qualified
+        # NEW declared name never carries one ("experimental::check_ranges"
+        # -- header-derived names are never signatures). Comparing those
+        # two stable-keys without stripping the trailing "()" first would
+        # mismatch on that alone and wrongly re-fire the original reported
+        # false positive through a different door.
+        import abicheck.demangle as dm
+
+        def fake_demangle(mangled_list: list[str]) -> dict[str, str]:
+            sigs = {"_Zex1": "ns::experimental::check_ranges()"}
+            return {m: sigs[m] for m in mangled_list if m in sigs}
+
+        orig = dm.demangle_batch
+        dm.demangle_batch = fake_demangle  # type: ignore[assignment]
+        try:
+            old = _snap(funcs=[_fn("check_ranges", mangled="_Zex1")])
+            new = _snap(funcs=[
+                _fn("experimental::check_ranges", mangled="_Zex1"),
+            ])
+            changes = detect_experimental_namespace_changes(old, new)
+        finally:
+            dm.demangle_batch = orig  # type: ignore[assignment]
+
+        assert not any(
+            c.kind == ChangeKind.EXPERIMENTAL_REMOVED_WITHOUT_REPLACEMENT
+            for c in changes
+        )
+
     def test_silent_function_removal(self) -> None:
         old = _snap(funcs=[_fn("ns::experimental::bar")])
         new = _snap(funcs=[])

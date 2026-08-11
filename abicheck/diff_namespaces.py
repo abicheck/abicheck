@@ -272,12 +272,28 @@ def _mangled_stable_keys(
     path -- not just its leaf -- is plausibly a differently-qualified
     spelling of the one being evaluated (see
     :func:`_stable_keys_compatible`).
+
+    Each ``stable_key`` is signature-stripped before being recorded (Codex
+    review, fresh evidence): ``_index_funcs_by_stable_key``'s own
+    ``stripped`` deliberately keeps a demangled entry's parameter list --
+    that's what lets two overloads at the same key legitimately map to
+    *different* bucket entries there. But a bare-named declaration
+    demangles to a full signature (``"ns::check_ranges()"``) while an
+    already-qualified declared name on the other snapshot side never
+    carries one (``"check_ranges"``), so comparing those two raw
+    stable-keys directly always mismatches on the trailing ``"()"`` alone
+    -- the exact false-negative this suppression check exists to close,
+    reappearing through a different door. Stripped here rather than at the
+    source in ``_index_funcs_by_stable_key``, so the *primary* bucket key
+    (and therefore per-overload matching) is untouched; only this
+    secondary compatibility signal needs the params gone.
     """
     out: dict[str, set[str]] = {}
     for (stable_key, _leaf), entries in index.items():
+        stripped_key = _strip_param_signature(stable_key)
         for _, mangled in entries:
             if mangled:
-                out.setdefault(mangled, set()).add(stable_key)
+                out.setdefault(mangled, set()).add(stripped_key)
     return out
 
 
@@ -510,9 +526,17 @@ def _findings_for(
         new_exp, new_stable = _split_experimental(
             new_entries, experimental_namespaces,
         )
+        # `stable_key` here is the primary bucket key and may carry a
+        # demangled entry's parameter list (see `_index_funcs_by_stable_key`);
+        # strip it before comparing against `_mangled_stable_keys`'s own
+        # already-signature-stripped values, or a bare-vs-qualified pair
+        # that demangles to a full signature on one side alone never
+        # compares equal on its trailing "()" alone (Codex review, fresh
+        # evidence).
+        old_stable_key_for_compat = _strip_param_signature(stable_key)
         still_linked = any(
             mangled and any(
-                _stable_keys_compatible(stable_key, new_stable_key)
+                _stable_keys_compatible(old_stable_key_for_compat, new_stable_key)
                 for new_stable_key in new_mangled_stable_keys.get(mangled, ())
             )
             for _, mangled in old_exp
