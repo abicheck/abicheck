@@ -1005,3 +1005,54 @@ class TestLayoutUnverifiableSuppressedByVtableChanged:
         assert result.verdict == Verdict.COMPATIBLE_WITH_RISK
         redundant_kinds = {c.kind for c in result.redundant_changes}
         assert ChangeKind.LAYOUT_UNVERIFIABLE in redundant_kinds
+
+    def test_folded_finding_excluded_when_covering_demoted_as_unreachable_internal(
+        self,
+    ) -> None:
+        """When the covering TYPE_VTABLE_CHANGED is itself later demoted to
+        out-of-surface by DemoteUnreachableInternalChurn (a confirmed-private
+        internal-namespace type with no public leak path), the folded
+        LAYOUT_UNVERIFIABLE must not resurrect a RISK verdict for a type
+        already proven outside the public surface (Codex review): the fold
+        step runs before DetectInternalLeaks/DemoteUnreachableInternalChurn,
+        so by the time the covering finding is demoted, LAYOUT_UNVERIFIABLE
+        has already left `changes` and never gets a chance to be
+        independently demoted alongside it."""
+        old = _snap(
+            types=[
+                RecordType(
+                    name="ns::detail::Foo",
+                    kind="class",
+                    vtable=[],
+                    size_bits=None,
+                )
+            ]
+        )
+        new = _snap(
+            types=[
+                RecordType(
+                    name="ns::detail::Foo",
+                    kind="class",
+                    vtable=["_ZN3ns6detail3Foo1fEv"],
+                    size_bits=None,
+                    base_offsets={"Base": 0},
+                )
+            ]
+        )
+        # No public function/type references ns::detail::Foo anywhere, so
+        # DetectInternalLeaks finds no leak path and
+        # DemoteUnreachableInternalChurn demotes the covering
+        # TYPE_VTABLE_CHANGED to out_of_surface.
+        result = compare(old, new)
+        assert result.verdict != Verdict.BREAKING
+        assert result.verdict != Verdict.COMPATIBLE_WITH_RISK
+        assert result.verdict == Verdict.NO_CHANGE
+        assert not result.changes
+        vtable_out_of_surface = [
+            c
+            for c in result.out_of_surface_changes
+            if c.kind == ChangeKind.TYPE_VTABLE_CHANGED
+        ]
+        assert vtable_out_of_surface, (
+            "covering finding must be demoted for this test to be meaningful"
+        )

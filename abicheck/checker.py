@@ -167,6 +167,7 @@ _DetectorSpec = DetectorSpec
 def _vtable_gap_finding_is_verdict_subsumed(
     redundant_change: Change,
     kept: list[Change],
+    out_of_surface: list[Change],
     policy: str,
     policy_file: PolicyFile | None,
 ) -> bool:
@@ -193,28 +194,42 @@ def _vtable_gap_finding_is_verdict_subsumed(
     ``_compute_verdict_for`` path the real verdict computation uses (for
     both the named-``policy`` and ``policy_file`` cases), so this can never
     drift from how the verdict is actually scored.
+
+    The covering finding is looked up in *two* buckets, not just ``kept``
+    (Codex review, fresh evidence): ``SuppressLayoutUnverifiableCoveredByVtableChanged``
+    runs before ``DetectInternalLeaks``/``DemoteUnreachableInternalChurn``, so
+    a covering ``TYPE_VTABLE_CHANGED`` on a confirmed-unreachable internal
+    type can itself be demoted to ``out_of_surface`` *after* the fold already
+    happened. An out-of-surface finding contributes nothing to the verdict by
+    design (that demotion's whole point) -- so the paired
+    ``LAYOUT_UNVERIFIABLE`` about the exact same type must be excluded too,
+    unconditionally, rather than falling through to the "covering vanished,
+    stay conservative" branch and silently resurrecting a verdict
+    contribution for a type already proven outside the public surface.
     """
     from .policy_file import _VERDICT_ORDER
 
     tag = (redundant_change.caused_by_type or "")[
         len(VTABLE_COVERS_UNVERIFIABLE_LAYOUT_GAP_PREFIX) :
     ]
-    covering = next(
-        (
-            k
-            for k in kept
-            if k.kind is ChangeKind.TYPE_VTABLE_CHANGED and k.qualified_name == tag
-        ),
-        None,
-    )
-    if covering is None:
-        # The covering finding is missing from `kept` for some other reason
-        # (e.g. a future step removes it) -- stay conservative and count the
-        # redundant finding rather than silently dropping real signal.
-        return False
-    redundant_v = _compute_verdict_for([redundant_change], policy, policy_file)
-    covering_v = _compute_verdict_for([covering], policy, policy_file)
-    return _VERDICT_ORDER.index(covering_v) >= _VERDICT_ORDER.index(redundant_v)
+
+    def _is_covering(c: Change) -> bool:
+        return c.kind is ChangeKind.TYPE_VTABLE_CHANGED and c.qualified_name == tag
+
+    covering = next((k for k in kept if _is_covering(k)), None)
+    if covering is not None:
+        redundant_v = _compute_verdict_for([redundant_change], policy, policy_file)
+        covering_v = _compute_verdict_for([covering], policy, policy_file)
+        return _VERDICT_ORDER.index(covering_v) >= _VERDICT_ORDER.index(redundant_v)
+    if any(_is_covering(c) for c in out_of_surface):
+        # The covering finding was proven out-of-surface after the fold ran
+        # -- it contributes nothing to the verdict, and neither should this
+        # finding about the identical (now confirmed-private) type.
+        return True
+    # The covering finding is missing from both buckets for some other,
+    # genuinely unexpected reason -- stay conservative and count the
+    # redundant finding rather than silently dropping real signal.
+    return False
 
 
 def _compute_verdict_for(
@@ -1005,7 +1020,9 @@ def compare(
             (c.caused_by_type or "").startswith(
                 VTABLE_COVERS_UNVERIFIABLE_LAYOUT_GAP_PREFIX
             )
-            and _vtable_gap_finding_is_verdict_subsumed(c, kept, policy, policy_file)
+            and _vtable_gap_finding_is_verdict_subsumed(
+                c, kept, out_of_surface, policy, policy_file
+            )
         )
     ]
 
