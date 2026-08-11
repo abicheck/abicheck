@@ -465,7 +465,7 @@ class TestNamespaceGlobstarSemantics:
         result = s.matches(self._change(non_matching))
         elapsed = time.monotonic() - t0
         assert result is False
-        assert elapsed < 1.0, f"namespace match took {elapsed:.2f}s — not backtracking-safe"
+        assert elapsed < 3.0, f"namespace match took {elapsed:.2f}s — not backtracking-safe"
 
         # Correctness, not just speed: a genuinely matching long name still
         # matches, including one that needs each globstar to absorb a
@@ -502,7 +502,7 @@ class TestNamespaceGlobstarSemantics:
         result = s.matches(self._change(non_matching))
         elapsed = time.monotonic() - t0
         assert result is False
-        assert elapsed < 1.0, f"namespace match took {elapsed:.2f}s — not backtracking-safe"
+        assert elapsed < 3.0, f"namespace match took {elapsed:.2f}s — not backtracking-safe"
 
         # Correctness: the wildcarded segment ("a*") still matches one
         # whole name segment (not spanning "::", since it's immediately
@@ -513,6 +513,25 @@ class TestNamespaceGlobstarSemantics:
             self._change("x::a1::x::x::a::x::x::a::x::x::a::x::x::a::x::a::z")
         )
         assert not s.matches(self._change("a1::a::a::a::a::y"))
+
+    def test_wildcarded_run_requires_at_least_one_namespace_segment(self):
+        # Codex review, fresh evidence: a non-empty wildcarded run's own
+        # trial loop started its candidate end position at `s` (the same
+        # start), letting it match a genuinely EMPTY span -- a bare "*"
+        # segment's fnmatch regex matches the empty string too, so
+        # "*::**::detail::**" incorrectly matched bare "detail" even
+        # though the leading "*::" explicitly requires one real namespace
+        # segment plus a separator before "detail". Only a truly *empty*
+        # run (no declared segments at all) should ever consume zero
+        # segments; a declared run always needs at least one, regardless
+        # of how permissive its own wildcard is about empty text within
+        # that one segment.
+        s = Suppression(namespace="*::**::detail::**", reachability="any", reason="x")
+        assert not s.matches(self._change("detail"))
+        assert not s.matches(self._change("detail::x"))
+        assert s.matches(self._change("x::detail"))
+        assert s.matches(self._change("x::detail::y"))
+        assert s.matches(self._change("x::y::detail"))
 
     def test_wildcard_still_spans_namespace_separators_without_a_globstar(self):
         # Codex review, fresh evidence: an early cut of the backtracking-

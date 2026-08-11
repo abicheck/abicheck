@@ -326,7 +326,7 @@ class _SegmentGlobMatcher:
     def __init__(self, pattern: str, segments: list[str]) -> None:
         if segments.count("**") <= 1:
             self._simple: re.Pattern[str] | None = re.compile(_translate_namespace_glob(pattern))
-            self._runs: list[str | None | re.Pattern[str]] = []
+            self._runs: list[tuple[str, ...] | None | re.Pattern[str]] = []
             self._tail: re.Pattern[str] | None = None
             return
         self._simple = None
@@ -348,7 +348,7 @@ class _SegmentGlobMatcher:
                 # whatever comes before them.
                 segments = segments[: j + 1]
         self._tail = tail
-        runs: list[str | None | re.Pattern[str]] = []
+        runs: list[tuple[str, ...] | None | re.Pattern[str]] = []
         current: list[str] = []
         for seg in segments:
             if seg == "**":
@@ -457,15 +457,19 @@ class _SegmentGlobMatcher:
         return reachable
 
 
-def _compile_run(run: list[str]) -> str | None | re.Pattern[str]:
+def _compile_run(run: list[str]) -> tuple[str, ...] | None | re.Pattern[str]:
     """Compile one :class:`_SegmentGlobMatcher` run (a maximal sequence of
     consecutive non-globstar segments) to a matcher:
 
     - ``None`` for an empty run (only possible at the very start/end of the
       pattern) — matches zero segments, always.
-    - The run's own single literal segment (``str``) when it is exactly one
-      segment with no fnmatch wildcard — the overwhelmingly common case,
-      worth a cheap ``==`` fast path.
+    - A ``tuple`` of the run's own literal segments when *none* of them has
+      an fnmatch wildcard — the overwhelmingly common case (CodeRabbit
+      review: a multi-segment all-literal run, e.g. ``["a", "b"]`` between
+      two globstars, previously fell through to the regex path below even
+      though it has a fixed, known length and needs no backtracking-aware
+      matching at all; a direct positional ``==`` comparison per segment is
+      cheaper and needs no compiled pattern).
     - A compiled regex otherwise, built from ``"::".join(run)`` — one
       combined fnmatch translation so a wildcard anywhere in the run can
       still span the run's own internal ``::`` joiners exactly like plain
@@ -473,13 +477,13 @@ def _compile_run(run: list[str]) -> str | None | re.Pattern[str]:
     """
     if not run:
         return None
-    if len(run) == 1 and not _has_wildcard_char(run[0]):
-        return run[0]
+    if not any(_has_wildcard_char(seg) for seg in run):
+        return tuple(run)
     return re.compile("(?s:" + _fnmatch_segment_regex("::".join(run)) + ")\\Z")
 
 
 def _match_run(
-    run: str | None | re.Pattern[str],
+    run: tuple[str, ...] | None | re.Pattern[str],
     name_segments: list[str],
     n: int,
     reachable: set[int],
@@ -488,12 +492,27 @@ def _match_run(
     *run* starting from each index in *reachable*."""
     if run is None:
         return reachable
-    if isinstance(run, str):
-        # Fixed-length (one segment) literal run: O(1) shift per start.
-        return {s + 1 for s in reachable if s < n and name_segments[s] == run}
+    if isinstance(run, tuple):
+        # Fixed-length literal run: O(len(run)) positional comparison per
+        # start, no regex compile/match involved.
+        length = len(run)
+        return {
+            s + length
+            for s in reachable
+            if s + length <= n and tuple(name_segments[s : s + length]) == run
+        }
     result: set[int] = set()
     for s in reachable:
-        for e in range(s, n + 1):
+        # A non-empty run (>= 1 declared segment) always consumes at
+        # least one whole name segment — start at s + 1, never s. A bare
+        # "*" segment's own fnmatch regex also matches the empty string
+        # (Codex review, real reproduction: "*::**::detail::**" matched
+        # bare "detail", since fullmatch("") against a run of just "*"
+        # succeeds) — only a genuinely *empty* run (``run is None``,
+        # handled above) represents "zero segments"; that emptiness is a
+        # property of the run's own declared segment list, never
+        # something its regex's own leniency should decide.
+        for e in range(s + 1, n + 1):
             if run.fullmatch("::".join(name_segments[s:e])):
                 result.add(e)
     return result
