@@ -18,4 +18,7 @@ A new changelog fragment. See changelog.d/README.md for the workflow.
   got degraded, so a stale committed baseline's reduced detection coverage
   is visible instead of discovered later. Stays silent for a version gap
   that doesn't actually degrade anything, so an ordinary one-version-behind
-  baseline isn't warned about for no reason.
+  baseline isn't warned about for no reason — including for
+  `clang_va_list_facts_reliable`/`castxml_var_access_facts_reliable` on a
+  `"hybrid"`-producer snapshot, where the flag's own value is conservatively
+  `False` but no detector actually consults it for that producer.

@@ -1478,27 +1478,56 @@ def snapshot_from_dict(d: dict[str, Any]) -> AbiSnapshot:
     # whether it affects anything would be exactly the noise CI baselines
     # (which are *always* somewhat behind) don't need.
     if _schema_version < SCHEMA_VERSION:
+        # Each entry pairs a flag with whether it is even CONSULTED by the
+        # one detector that reads it, given THIS side's own AST producer.
+        # Most flags' value computation already collapses to "reliable" for
+        # every producer their consumer doesn't gate on (see each flag's own
+        # computation above) -- but two don't: clang_va_list_facts_reliable's
+        # value treats "hybrid" the same as "clang" (correct for the fact's
+        # own provenance), yet diff_symbols._diff_param_va_list only ever
+        # consults it when BOTH sides are exactly "clang" (never "hybrid").
+        # castxml_var_access_facts_reliable is the mirror case for "castxml"
+        # vs. diff_symbols._diff_var_access. Listing either one for a hybrid
+        # snapshot would claim reduced detection coverage that regenerating
+        # the snapshot could never restore, since no detector consults it
+        # for that producer regardless of schema version (Codex review,
+        # PR #720).
         _degraded_facts = sorted(
             name
-            for name, reliable in (
-                ("header_cv_facts_reliable", header_cv_facts_reliable_value),
+            for name, reliable, consulted in (
+                ("header_cv_facts_reliable", header_cv_facts_reliable_value, True),
                 (
                     "clang_deprecation_facts_reliable",
                     clang_deprecation_facts_reliable_value,
+                    True,
                 ),
                 (
                     "clang_field_initializer_facts_reliable",
                     clang_field_initializer_facts_reliable_value,
+                    True,
                 ),
-                ("clang_vtable_facts_reliable", clang_vtable_facts_reliable_value),
-                ("clang_restrict_facts_reliable", clang_restrict_facts_reliable_value),
-                ("clang_va_list_facts_reliable", clang_va_list_facts_reliable_value),
+                (
+                    "clang_vtable_facts_reliable",
+                    clang_vtable_facts_reliable_value,
+                    True,
+                ),
+                (
+                    "clang_restrict_facts_reliable",
+                    clang_restrict_facts_reliable_value,
+                    True,
+                ),
+                (
+                    "clang_va_list_facts_reliable",
+                    clang_va_list_facts_reliable_value,
+                    ast_producer_value == "clang",
+                ),
                 (
                     "castxml_var_access_facts_reliable",
                     castxml_var_access_facts_reliable_value,
+                    ast_producer_value == "castxml",
                 ),
             )
-            if not reliable
+            if not reliable and consulted
         )
         if _degraded_facts:
             import warnings

@@ -278,6 +278,40 @@ class TestReserialization:
             warnings.simplefilter("error")
             snapshot_from_dict(d)
 
+    def test_older_version_silent_for_hybrid_producer_flags_no_detector_reads(self):
+        """clang_va_list_facts_reliable / castxml_var_access_facts_reliable
+        each have exactly one consumer, and each gates strictly on an EXACT
+        producer match ("clang"-only, "castxml"-only respectively -- neither
+        includes "hybrid", unlike most of the other flags). Their own value
+        computation still marks both False for a "hybrid" producer (correct
+        for the underlying fact's provenance), so naively listing every
+        False flag would warn about "reduced coverage" a hybrid snapshot's
+        regeneration could never actually restore, since no detector reads
+        either flag for that producer regardless of schema version (Codex
+        review, PR #720)."""
+        d = _load_fixture("v4.json")
+        d["schema_version"] = 22  # < both _MIN_SCHEMA_VERSION_FOR_CLANG_VA_LIST_FACTS
+        # and _MIN_SCHEMA_VERSION_FOR_CASTXML_VAR_ACCESS_FACTS thresholds
+        d["from_headers"] = True
+        d["ast_producer"] = "hybrid"
+        with warnings.catch_warnings():
+            warnings.simplefilter("error")
+            snap = snapshot_from_dict(d)
+        assert snap.clang_va_list_facts_reliable is False
+        assert snap.castxml_var_access_facts_reliable is False
+
+    def test_older_version_warns_for_clang_producer_va_list_flag(self):
+        """The producer filter above must not over-filter: a genuine
+        "clang" producer (not "hybrid") still gets the warning, since
+        diff_symbols._diff_param_va_list DOES consult the flag for that
+        producer."""
+        d = _load_fixture("v4.json")
+        d["schema_version"] = 22
+        d["from_headers"] = True
+        d["ast_producer"] = "clang"
+        with pytest.warns(UserWarning, match="clang_va_list_facts_reliable"):
+            snapshot_from_dict(d)
+
 
 # ---------------------------------------------------------------------------
 # Documentation/constant sync — a stale docs number silently misleads readers
