@@ -199,6 +199,40 @@ def test_bounded_decoded_prefix_escalates_for_low_compression_content(tmp_path):
     assert prefix.startswith(b'{"library"')
 
 
+def test_bounded_decoded_prefix_zstd_with_realistic_window(tmp_path):
+    """zstd counterpart to the gzip test above -- also the direct regression
+    test for the KiB/bytes unit bug in `_try_decode_prefix`'s own
+    ``max_window_size=`` call (the sniffing path `sniff_text_format`/
+    `service.resolve_input` uses to classify a `.json.zst` baseline before
+    ever reaching `_decompress_zstd`'s full-read path). Mirrors a real
+    written baseline: highly-compressible JSON content large enough that its
+    *frame* records the full 8 MiB window (content exceeding the window
+    keeps zstd out of the single-segment mode that otherwise collapses
+    `window_size` down to the content size -- see
+    `test_zstd_decoder_rejects_realistic_writer_window` below for that
+    mechanism spelled out) while the *stored* bytes stay tiny, same as real
+    ABI snapshot JSON."""
+    zstandard = pytest.importorskip("zstandard")
+
+    from abicheck.snapshot_io import bounded_decoded_prefix
+
+    blob = "a" * (9 * 1024 * 1024)
+    text = json.dumps({"library": "x", "version": "1", "blob": blob})
+
+    params = zstandard.ZstdCompressionParameters.from_level(19, window_log=23)
+    cctx = zstandard.ZstdCompressor(compression_params=params)
+    compressed = cctx.compress(text.encode())
+    frame = zstandard.get_frame_parameters(compressed)
+    assert frame.window_size == 8 * 1024 * 1024
+
+    zst_path = tmp_path / "realistic_window.abicheck.json.zst"
+    zst_path.write_bytes(compressed)
+
+    prefix = bounded_decoded_prefix(zst_path, n=100)
+    assert prefix is not None
+    assert prefix.startswith(b'{"library"')
+
+
 def test_detect_compression_from_bytes_plain():
     assert detect_compression_from_bytes(b"{not compressed") == SnapshotCompression.NONE
 
