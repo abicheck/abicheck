@@ -139,22 +139,48 @@ def _translate_namespace_glob(pattern: str) -> str:
     ``*``/``?`` (never a full ``**`` segment on its own) keeps its original
     fnmatch behavior unchanged, via :func:`_fnmatch_segment_regex`.
 
-    A ``**`` segment immediately adjacent (via a literal ``::``) to a
-    segment that itself contains its *own* wildcard is a special case the
-    hand-rolled optional-``::`` absorption above cannot express correctly:
-    that neighboring segment's own unconstrained wildcard can silently
-    swallow what should be a mandatory ``::`` boundary, since the whole
-    absorbing group is optional and a greedy ``.*`` never needs it —
-    ``foo**::**`` compiled (before this fix) to ``foo.*(?:::.*)?``, which
-    matches bare ``foobar`` even though no ``::`` appears anywhere in it
-    (Codex review, fresh evidence: the original, pre-rewrite fnmatch-style
-    pattern required that literal ``::`` to be present — verified against
-    real ``fnmatch.translate("foo**::**")``, which already handles this
-    exact adjacency correctly via an atomic group). Rather than re-derive
-    that same guarantee by hand, :func:`_fnmatch_segment_regex` is asked to
-    translate the adjacent wildcard segment *together with* its bordering
-    ``**`` (and the ``::`` between them) as one combined fnmatch string,
-    reusing CPython's own correct handling instead of reinventing it.
+    A **trailing** ``**`` segment (the last segment, not the whole-pattern
+    standalone case above) immediately preceded by a segment that itself
+    contains its *own* wildcard is a special case the hand-rolled
+    optional-``::`` absorption above cannot express correctly: that
+    preceding segment's own unconstrained wildcard sits directly next to a
+    *fully optional* group with nothing after it to anchor the match, so a
+    greedy ``.*`` never needs to try the ``::``-requiring alternative at
+    all — ``foo**::**`` compiled (before this fix) to ``foo.*(?:::.*)?``,
+    which matches bare ``foobar`` even though no ``::`` appears anywhere in
+    it (Codex review, fresh evidence: the original, pre-rewrite fnmatch-
+    style pattern required that literal ``::`` to be present — verified
+    against real ``fnmatch.translate("foo**::**")``, which already handles
+    this exact adjacency correctly via an atomic group). Rather than
+    re-derive that same guarantee by hand, :func:`_fnmatch_segment_regex`
+    is asked to translate the preceding wildcard segment *together with*
+    its bordering trailing ``**`` (and the ``::`` between them) as one
+    combined fnmatch string, reusing CPython's own correct handling instead
+    of reinventing it.
+
+    This delegation is deliberately scoped to *only* the trailing-globstar
+    shape. A **leading** globstar followed by a wildcarded segment
+    (``**::detail*``) has no such ambiguity — the globstar's own leading
+    form (``(?:.*::)?``) is evaluated *first* and its own internal
+    constraint ("must end in a literal ``::``" if non-empty) already fully
+    resolves the choice before the unconstrained segment is ever reached,
+    so the hand-rolled form already correctly matches the zero-segment case
+    (``detail_private``) without needing delegation. Delegating there
+    anyway was tried and reverted: native ``fnmatch.translate`` applies the
+    *same* atomic-group optimization to a leading globstar too, which
+    turned out to drop the zero-segment match entirely (Codex review, fresh
+    evidence: ``fnmatch.translate("**::detail*")`` requires a literal
+    ``::`` unconditionally, rejecting bare ``detail_private``). A **middle**
+    globstar with a wildcarded neighbor on either side is likewise left
+    hand-rolled: the segment *after* it always contributes its own mandatory
+    ``::`` joiner (this function's existing logic below), which anchors the
+    match regardless of what precedes — verified this hand-rolled form is
+    not merely "close enough" but strictly more correct than delegating:
+    native's atomic-group translation of ``a::foo*::**::b`` additionally
+    (and incorrectly, per this module's own "zero or more segments"
+    contract) rejects the legitimate zero-segment match ``a::foo::b``, a
+    quirk of the same CPython glob-run optimization tuned for shell-style
+    path matching, not this module's namespace semantics.
     """
     # A run of adjacent "**" segments means the same thing as one — collapse
     # "a::**::**::b" to "a::**::b". Done on the already-split segment list,
@@ -185,16 +211,9 @@ def _translate_namespace_glob(pattern: str) -> str:
                 parts.append(".*")
                 i += 1
                 continue
+            is_trailing = i == n - 1
             prev_has_wildcard = i > 0 and _has_wildcard_char(segments[i - 1])
-            next_has_wildcard = i + 1 < n and _has_wildcard_char(segments[i + 1])
-            if prev_has_wildcard and next_has_wildcard:
-                combined = _fnmatch_segment_regex(
-                    segments[i - 1] + "::**::" + segments[i + 1]
-                )
-                parts[-1] = combined
-                i += 2
-                continue
-            if prev_has_wildcard:
+            if is_trailing and prev_has_wildcard:
                 # `parts[-1]` is still exactly the previous segment's own
                 # regex fragment (appended on the prior loop iteration) —
                 # replace it in place with the combined translation; any
@@ -203,13 +222,6 @@ def _translate_namespace_glob(pattern: str) -> str:
                 combined = _fnmatch_segment_regex(segments[i - 1] + "::**")
                 parts[-1] = combined
                 i += 1
-                continue
-            if next_has_wildcard:
-                combined = _fnmatch_segment_regex("**::" + segments[i + 1])
-                if i > 0:
-                    parts.append("::")
-                parts.append(combined)
-                i += 2
                 continue
             parts.append("(?:.*::)?" if i == 0 else "(?:::.*)?")
             i += 1

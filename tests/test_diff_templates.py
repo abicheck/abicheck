@@ -15,6 +15,7 @@ from abicheck.checker_policy import ChangeKind
 from abicheck.diff_templates import (
     _count_top_level_template_args,
     _return_is_unspecified,
+    _strip_leading_return_type,
     _strip_param_signature,
     _strip_template_args,
     detect_cpo_kind_changed,
@@ -242,6 +243,27 @@ class TestStripParamSignature:
         assert result != ""
         from abicheck.diff_namespaces import _segments
         assert _segments(result)[-1] == "sort"
+
+    def test_decltype_auto_return_type_has_no_space_before_its_paren(self) -> None:
+        # Codex review, fresh evidence: real GCC/Clang output for
+        # "decltype(auto) ns::sort<int>(int)" glues "decltype"'s own "("
+        # directly to the keyword, with no space -- unlike every other
+        # decltype/return-type shape this function handles, all of which
+        # have at least one space before their first "(". That means it
+        # bypasses the whitespace-gated branch entirely and was mistaken
+        # for the real parameter list, truncating the identity down to
+        # just "decltype". Fixed by recognizing the specific glued
+        # "decltype(auto)" spelling and skipping it explicitly, the same
+        # way every other decltype shape is skipped.
+        sig = "decltype(auto) ns::sort<int>(int)"
+        result = _strip_param_signature(sig)
+        from abicheck.diff_namespaces import _segments
+        assert _segments(result)[-1] == "sort"
+        # The leaked "decltype(auto) " prefix is stripped downstream by
+        # _strip_leading_return_type, same as every other function-template
+        # return-type leak -- verify that composition resolves to the bare
+        # qualified name, matching the variable side of a CPO transition.
+        assert _strip_leading_return_type(result) == "ns::sort<int>"
 
     def test_unbalanced_expression_paren_falls_back_safely(self) -> None:
         # No matching close paren for the leading (whitespace-preceded)

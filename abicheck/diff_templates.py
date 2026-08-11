@@ -110,6 +110,13 @@ _TEMPLATE_ARGS_RE = re.compile(r"<[^<>]")
 # string) on both sides, so `operator` must stand as its own token.
 _OPERATOR_TOKEN_RE = re.compile(r"(?<![A-Za-z0-9_])operator(?![A-Za-z0-9_])")
 
+# Matches a `decltype` token immediately at the end of a prefix, with no
+# separating whitespace before the "(" that follows it -- the one dependent-
+# expression shape that reaches `decltype`'s own "(" glued directly to the
+# keyword (`decltype(auto)`) rather than with a space (`decltype (expr)`,
+# every other shape `_strip_param_signature` handles).
+_DECLTYPE_TOKEN_RE = re.compile(r"(?<![A-Za-z0-9_])decltype$")
+
 
 def _looks_like_template_instantiation(name: str) -> bool:
     """A declared C++ name is a template instantiation iff it contains a
@@ -292,6 +299,16 @@ def _strip_param_signature(qualified: str) -> str:
             # identifier — skip exactly that pair and keep searching for
             # the real parameter-list opener.
             i = qualified.find("(", i + 2)
+            continue
+        if _DECLTYPE_TOKEN_RE.search(prefix) and qualified[i:i + 6] == "(auto)":
+            # decltype(auto) is the one dependent-return-type spelling with
+            # no space before its own "(" (real GCC/Clang output), so it
+            # bypasses the whitespace-gated branch below entirely and would
+            # otherwise be mistaken for the real parameter list, truncating
+            # the identity down to just "decltype" (Codex review, fresh
+            # evidence). Skip the whole fixed "(auto)" group and keep
+            # searching, same as every other decltype shape.
+            i = qualified.find("(", i + 6)
             continue
         if i == 0 or qualified[i - 1].isspace():
             star_index = _pointer_declarator_star_index(qualified, i)

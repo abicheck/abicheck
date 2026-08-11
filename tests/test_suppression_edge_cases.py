@@ -373,6 +373,36 @@ class TestNamespaceGlobstarSemantics:
         assert s.matches(self._change("foo::bar"))
         assert s.matches(self._change("foo::bar::baz"))
 
+    def test_leading_globstar_beside_wildcard_segment_keeps_zero_segment_match(self):
+        # Codex review, fresh evidence: an early attempt at the previous
+        # fix's "delegate to fnmatch.translate" approach applied it to
+        # *every* wildcard-adjacent globstar, including a leading one
+        # ("**::detail*") -- but native fnmatch.translate applies the same
+        # atomic-group optimization there too, which drops the documented
+        # "zero or more segments" match entirely (bare "detail_private" no
+        # longer matched "**::detail*" at all). Unlike the trailing case
+        # this module does delegate, a leading globstar's own regex is
+        # evaluated *before* the wildcarded segment and already carries its
+        # own correct constraint, so the hand-rolled form needs no
+        # delegation here -- verified it still rejects an unrelated name.
+        s = Suppression(namespace="**::detail*", reachability="any", reason="x")
+        assert s.matches(self._change("detail_private"))
+        assert s.matches(self._change("a::detail_private"))
+        assert s.matches(self._change("a::b::detail_private"))
+        assert not s.matches(self._change("notdetail"))
+
+    def test_middle_globstar_beside_wildcard_segment_keeps_zero_segment_match(self):
+        # Same principle as the leading-globstar case above, for a globstar
+        # in the middle of the pattern with a wildcarded neighbor: the
+        # following segment's own mandatory "::" joiner already anchors the
+        # match regardless of what precedes the globstar, so no delegation
+        # is needed (or wanted -- native fnmatch's atomic-group translation
+        # of this same shape incorrectly rejects the legitimate
+        # zero-segment match here too).
+        s = Suppression(namespace="a::**::detail*::x", reachability="any", reason="x")
+        assert s.matches(self._change("a::detail_private::x"))
+        assert s.matches(self._change("a::y::detail_private::x"))
+
     def test_python314_fnmatch_end_anchor_variant_is_accepted(self):
         # Codex review, verified against Python 3.14.4: fnmatch.translate()
         # ends its result with "\z" there instead of "\Z". The wrapper that
