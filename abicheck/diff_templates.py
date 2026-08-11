@@ -290,7 +290,7 @@ def _strip_param_signature(qualified: str) -> str:
     ``*``/``Class::*`` text sitting in the returned prefix (e.g.
     ``"int (ns::C::*ns::sort"`` for ``int (ns::C::*ns::sort<int>(int))()``)
     — harmless for a caller that only takes the *last* ``::``-segment
-    (``_index_funcs_by_stable_key``'s leaf), but wrong for a caller using
+    (``_func_index_items``'s leaf), but wrong for a caller using
     the whole result as a qualified-name *identity*
     (:func:`detect_cpo_kind_changed`, which failed to match a
     pointer-to-member-function CPO transition against this corrupted

@@ -66,13 +66,16 @@ def _rec(name: str) -> RecordType:
     return RecordType(name=name, kind="class")
 
 
-def _rec_nontrivial(name: str, size_bits: int = 64) -> RecordType:
-    """A type with real structural content (a known size), unlike the
-    empty/trivial ``_rec()`` -- needed to exercise the type-alias identity
-    fingerprint, which deliberately returns no evidence for an empty
-    record (Codex review, P1: every empty class of the same kind shares
-    the same trivial fingerprint, so it isn't distinguishing evidence)."""
-    return RecordType(name=name, kind="class", size_bits=size_bits)
+def _rec_at(name: str, source_location: str = "communicator.h:10") -> RecordType:
+    """A type with a declaring source location, the type-alias identity
+    evidence -- unlike the location-less ``_rec()``. Two spellings of the
+    same physical declaration (a true inline-namespace alias pair) share
+    the exact same location by construction; two genuinely unrelated
+    declarations essentially never do, unlike a structural fingerprint
+    (Codex review, P1: structural coincidence between unrelated types is
+    routine, both for empty records sharing a kind and for non-trivial
+    records that merely happen to share a field layout)."""
+    return RecordType(name=name, kind="class", source_location=source_location)
 
 
 def _rec_public(name: str) -> RecordType:
@@ -281,7 +284,7 @@ class TestExperimentalRemovedWithoutReplacement:
         c = changes[0]
         assert c.kind == ChangeKind.EXPERIMENTAL_REMOVED_WITHOUT_REPLACEMENT
         assert c.symbol == "ns::experimental::bar"
-        # ADR-044 D1 (Codex review): _index_funcs_by_stable_key only ever
+        # ADR-044 D1 (Codex review): _func_index_items only ever
         # indexes Visibility.PUBLIC functions, so this finding's mere
         # existence already proves its subject is public — tagged directly
         # so a broad namespace: "ns::experimental::*" suppression rule
@@ -414,11 +417,12 @@ class TestExperimentalRemovedWithoutReplacement:
         )
 
     def test_versioned_inline_namespace_type_spellings_report_once(self) -> None:
-        # Non-trivial (known-size) records: a genuine structural match is
-        # real identity evidence for a true inline-namespace alias pair.
+        # Two spellings of the SAME physical declaration share one
+        # source_location -- the type-alias identity evidence -- since a
+        # true inline-namespace alias pair resolves to the same AST node.
         old = _snap(types=[
-            _rec_nontrivial("detail::v1::cpu_feature_map"),
-            _rec_nontrivial("detail::cpu_feature_map"),
+            _rec_at("detail::v1::cpu_feature_map", "spmd.h:10"),
+            _rec_at("detail::cpu_feature_map", "spmd.h:10"),
         ])
         new = _snap(types=[])
         changes = detect_experimental_namespace_changes(
@@ -430,21 +434,41 @@ class TestExperimentalRemovedWithoutReplacement:
         ]
         assert len(removed) == 1
 
-    def test_unrelated_empty_types_sharing_version_shaped_segment_not_merged(
+    def test_unrelated_types_sharing_version_shaped_segment_not_merged(
         self,
     ) -> None:
-        """Codex review, P1: an empty/trivial record carries no
-        distinguishing structure -- every empty class of the same kind
-        shares the identical fingerprint, so two genuinely unrelated empty
-        types (``preview::v1::bar`` and ``preview::bar``) must NOT be
-        treated as an alias pair. Removing one while the other survives
-        must still report the removal.
+        """Codex review, P1 (two rounds): a structural (kind/size/fields/
+        bases) fingerprint coincides routinely between genuinely unrelated
+        declarations -- for two empty records sharing a kind, and even for
+        two non-trivial records that merely happen to share a field
+        layout -- so it was replaced with `source_location` identity.
+        Two different declarations at different locations (or with no
+        location evidence at all, as here) must NOT be treated as an alias
+        pair. Removing one while the other survives must still report the
+        removal.
         """
         old = _snap(types=[
             _rec("preview::v1::bar"),
             _rec("preview::bar"),
         ])
         new = _snap(types=[_rec("preview::bar")])
+        changes = detect_experimental_namespace_changes(old, new)
+        removed = [
+            c for c in changes
+            if c.kind == ChangeKind.EXPERIMENTAL_REMOVED_WITHOUT_REPLACEMENT
+        ]
+        assert len(removed) == 1
+        assert removed[0].symbol == "preview::v1::bar"
+
+    def test_unrelated_types_with_different_locations_not_merged(self) -> None:
+        """Two types that DO carry source-location evidence, but at
+        different locations, must not be merged just because they share a
+        leaf name via a version-shaped segment."""
+        old = _snap(types=[
+            _rec_at("preview::v1::bar", "a.h:1"),
+            _rec_at("preview::bar", "b.h:2"),
+        ])
+        new = _snap(types=[_rec_at("preview::bar", "b.h:2")])
         changes = detect_experimental_namespace_changes(old, new)
         removed = [
             c for c in changes
@@ -488,7 +512,7 @@ class TestExperimentalRemovedWithoutReplacement:
         # parameter-type fragment split out of the unstripped signature —
         # unlike the leaf, the '{old}' declaration text legitimately still
         # carries the full signature (Codex review: needed to distinguish
-        # one overload from another; see _index_funcs_by_stable_key).
+        # one overload from another; see _func_index_items).
         assert "leaf 'get_alloc_kind'" in c.description
         assert "leaf 'data_type" not in c.description
 

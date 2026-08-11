@@ -669,12 +669,22 @@ class TestHeaderConstants:
                     _snap_with_constants({}, from_headers=False))
         assert not _has_kind(r, ChangeKind.CONSTANT_REMOVED)
 
-    def test_versioned_inline_namespace_spellings_report_once(self):
-        # A versioned inline namespace makes the same constant reachable
-        # under two qualified spellings -- the full path and the
-        # version-elided path unqualified lookup also resolves to. Both
-        # spellings changing together must read as ONE CONSTANT_CHANGED,
-        # not one per spelling.
+    def test_versioned_inline_namespace_spellings_double_report_is_accepted(self):
+        # Known, documented limitation (see _diff_constants's docstring): a
+        # versioned inline namespace can make the same constant reachable
+        # under two qualified spellings (the full path and the
+        # version-elided path unqualified lookup also resolves to), and
+        # both changing together is reported once PER spelling rather than
+        # merged into one finding. A value-equality-based merge was tried
+        # and reverted -- Codex review found it fundamentally unsound
+        # without real per-constant identity evidence (no mangled symbol
+        # or source location is threaded through `AbiSnapshot.constants`
+        # today): it can both merge two constants that never even coexist
+        # on the same side, and hide a real, isolated removal behind an
+        # unrelated constant that coincidentally started with the same
+        # value. This test pins the current, honest (if noisier) behavior
+        # rather than a heuristic merge that traded a display annoyance for
+        # a correctness risk.
         r = compare(
             _snap_with_constants({
                 "detail::v1::cpu_feature_map": "1",
@@ -685,41 +695,21 @@ class TestHeaderConstants:
                 "detail::cpu_feature_map": "2",
             }),
         )
-        assert len(_changes_of_kind(r, ChangeKind.CONSTANT_CHANGED)) == 1
+        assert len(_changes_of_kind(r, ChangeKind.CONSTANT_CHANGED)) == 2
 
-    def test_unrelated_constant_sharing_version_shaped_segment_not_merged(self):
-        # Codex review, P1: `v1` is a legal name for an ordinary (non-inline)
-        # namespace too -- `api::v1::limit` and `api::limit` can be two
-        # unrelated constants that merely share a leaf name. Only
-        # `api::v1::limit` changes; `api::limit` must still be independently
-        # tracked (and reported unchanged), not silently discarded by being
-        # merged into `api::v1::limit`'s spelling group.
-        r = compare(
-            _snap_with_constants({"api::v1::limit": "10", "api::limit": "20"}),
-            _snap_with_constants({"api::v1::limit": "11", "api::limit": "20"}),
-        )
-        changed = _changes_of_kind(r, ChangeKind.CONSTANT_CHANGED)
-        assert len(changed) == 1
-        assert changed[0].symbol == "api::v1::limit"
-
-    def test_equal_before_diverging_after_not_merged(self):
-        # Codex review, P1, fresh finding: two unrelated constants can
-        # coincidentally agree in the OLD snapshot (`v1::limit=10,
-        # limit=10`) and only diverge in NEW (`v1::limit=11, limit=10`).
-        # Deduping each side independently would collapse the OLD pair
-        # (values agree there) while leaving NEW unmerged (values
-        # disagree), so comparing the merged OLD key against NEW's
-        # unmerged keys would misreport the real v1::limit change as a
-        # compatible CONSTANT_ADDED instead of CONSTANT_CHANGED. The merge
-        # decision must be joint across both sides.
+    def test_unrelated_constant_removal_not_masked_by_coincidental_survivor(self):
+        # Codex review, P1: two unrelated constants that happen to share a
+        # value must not have one's removal absorbed by the other's
+        # survival, however the comparison is implemented -- with no merge
+        # at all (current behavior), this is automatic: each spelling is
+        # its own independent key.
         r = compare(
             _snap_with_constants({"api::v1::limit": "10", "api::limit": "10"}),
-            _snap_with_constants({"api::v1::limit": "11", "api::limit": "10"}),
+            _snap_with_constants({"api::limit": "10"}),
         )
-        assert not _has_kind(r, ChangeKind.CONSTANT_ADDED)
-        changed = _changes_of_kind(r, ChangeKind.CONSTANT_CHANGED)
-        assert len(changed) == 1
-        assert changed[0].symbol == "api::v1::limit"
+        assert _has_kind(r, ChangeKind.CONSTANT_REMOVED)
+        removed = _changes_of_kind(r, ChangeKind.CONSTANT_REMOVED)
+        assert removed[0].symbol == "api::v1::limit"
 
 
 def _snap_with_constants(constants, from_headers=True):

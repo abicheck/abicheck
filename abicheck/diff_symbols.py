@@ -114,7 +114,6 @@ from .model import (
     stdlib_namespaces_excluded,
 )
 from .name_classification import is_local_rtti_symbol
-from .qualified_name_segments import dedupe_versioned_spellings_pair
 
 # Visibility levels that constitute the public ABI surface.
 _PUBLIC_VIS = (Visibility.PUBLIC, Visibility.ELF_ONLY)
@@ -1914,19 +1913,25 @@ def _diff_constants(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
     removed (or added, depending on direction). Skip unless both sides are
     header-aware.
 
-    ``old.constants``/``new.constants`` are deduped jointly through
-    ``dedupe_versioned_spellings_pair`` first: a versioned inline namespace
-    (``detail::v1::x``) makes the same constant reachable under two
+    Known limitation, not attempted here: a versioned inline namespace
+    (``detail::v1::x``) can make the same constant reachable under two
     qualified spellings, and when the header-AST producer surfaces both as
-    separate top-level declarations, comparing raw keys would report one
-    ``CONSTANT_CHANGED`` per spelling for what is really a single change.
+    separate top-level declarations, this reports one ``CONSTANT_CHANGED``
+    per spelling for what is really a single change. A value-equality-based
+    merge was tried and reverted -- see
+    ``qualified_name_segments``'s module docstring for why it cannot be made
+    sound without identity evidence this snapshot format doesn't carry
+    (unlike a function's mangled name or a type's source location, a header
+    constant has no such identity beyond its own value, and Codex review
+    found concrete cases in both directions: merging two unrelated
+    same-valued constants, and failing to merge two spellings that
+    coincidentally started with different values).
     """
     if not _both_header_aware(old, new):
         return []
     changes: list[Change] = []
-    old_consts, new_consts = dedupe_versioned_spellings_pair(
-        old.constants, new.constants
-    )
+    old_consts = old.constants
+    new_consts = new.constants
 
     for name, old_val in old_consts.items():
         new_val = new_consts.get(name)

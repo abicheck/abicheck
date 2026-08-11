@@ -40,7 +40,7 @@ break is at compile time.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, NamedTuple
 
 from .checker_policy import ChangeKind, ReachabilityState
 from .checker_types import Change
@@ -114,7 +114,7 @@ def _qualified_function_name(
     const&, long) const``) — not merely a qualified name. This is
     deliberately returned as-is, signature included: it is what
     distinguishes one overload from another for callers that index
-    functions by qualified name (:func:`_index_funcs_by_stable_key`) — a
+    functions by qualified name (:func:`_func_index_items`) — a
     caller that needs only the *leaf* member name must strip the signature
     itself (via :func:`diff_templates._strip_param_signature`) before
     segmenting, rather than have it stripped here, or two overloads
@@ -148,14 +148,25 @@ def _split_experimental(
     return exp, stable
 
 
-def _merge_versioned_key_aliases(
-    raw_index: dict[tuple[str, str], list[str]],
-    identity: dict[str, object],
-) -> dict[tuple[str, str], list[str]]:
-    """Merge raw ``(stripped_name, leaf)`` keys that differ only by a
-    versioned inline-namespace segment (``v1``, ``_V2``, ``__1``, ...) --
-    but ONLY when *identity* proves the two spellings name the same
-    declaration.
+class _IndexItem(NamedTuple):
+    """One indexable declaration: its qualified name, experimental-stripped
+    path, reported leaf, and alias-identity evidence (``None`` if none)."""
+
+    qname: str
+    stripped: str
+    leaf: str
+    identity: object | None
+
+
+def _paired_stable_indices(
+    old_items: list[_IndexItem],
+    new_items: list[_IndexItem],
+) -> tuple[dict[tuple[str, str], list[str]], dict[tuple[str, str], list[str]]]:
+    """Build the OLD and NEW ``(stripped_name, leaf) -> [qname, ...]``
+    indices *jointly*, so a genuine alias pair resolves to the SAME output
+    key on both sides -- merging two spellings that differ only by a
+    versioned inline-namespace segment (``v1``, ``_V2``, ``__1``, ...) but
+    ONLY when *identity* proves they name the same declaration.
 
     A versioned *inline* namespace makes one declaration reachable under
     two qualified spellings: the full path (``ns::v1::x``) and the
@@ -165,79 +176,99 @@ def _merge_versioned_key_aliases(
     ordinary namespace too, in which case ``ns::v1::x`` and ``ns::x`` are
     two unrelated declarations that happen to share a leaf name (Codex
     review, P1: collapsing them on name shape alone can both hide a
-    genuine value/removal on one spelling and misreport the other).
-    *identity* maps each qualified name to a value from the snapshot's own
-    extraction data that is invariant across an inline-namespace's two
-    spellings but not expected to coincide for two unrelated declarations
-    (a function's mangled name; a structural fingerprint for a type) --
-    ``None`` when no identity evidence is available for that qname. Two
-    raw keys are only merged when their identity sets (excluding
-    ``None``) actually intersect; otherwise each raw key is kept
-    separate, exactly as if this stripping had never been attempted, so
-    the pre-existing double-report is the accepted fallback rather than a
+    genuine value/removal on one spelling and misreport the other). Each
+    item's ``identity`` is a value from the snapshot's own extraction data
+    that is invariant across an inline-namespace's two spellings but not
+    expected to coincide for two unrelated declarations (a function's
+    mangled name; a type's declaring source location) -- ``None`` when no
+    identity evidence is available. Two items are only unioned into the
+    same component when their identity values are both non-``None`` and
+    equal; an item with no evidence, or with evidence that never coincides
+    with anything else's, stays its own singleton component -- the
+    pre-existing double-report is the accepted fallback rather than a
     newly-introduced false suppression.
 
-    The output key for a merged component is its ``min()`` raw key --
-    deterministic given the component's *membership* alone, not the order
-    raw keys were encountered in. Membership itself is already
-    order-independent (every pair is checked via identity-set
-    intersection regardless of iteration order); only the *representative*
-    a naive union-find root or "first key seen" pick would previously have
-    varied with encounter order, and old vs. new snapshots have no
-    guaranteed-matching declaration order. A key that differs between the
-    old and new index for the *same* underlying entity makes ``_findings_for``
-    look the entity up under the wrong key on the other side and misreport
-    a plain reordering as a removal (Codex review, P1).
+    Deciding this *jointly* over the pooled OLD+NEW items (not building
+    each snapshot's index independently, as an earlier version of this
+    function did) closes two distinct false positives Codex review found
+    in the independent version: (1) key instability -- a merged
+    component's chosen output key depended on encounter order, so the same
+    alias pair listed in a different declaration order between old and new
+    could resolve to two different keys and read as a spurious removal;
+    (2) membership asymmetry -- when only ONE side actually has both
+    spellings coexisting (an extractor starting or stopping the duplicate
+    emission), the singleton side kept its raw, un-canonicalized key while
+    the multi-spelling side's key was canonicalized, so the two sides
+    disagreed on the key for what is still the very same entity. Pooling
+    both sides' items before computing connected components and choosing
+    ``min(component)`` as every member's output key (deterministic given
+    the component's *membership*, itself already order-independent since
+    every pair is checked via identity equality regardless of encounter
+    order) fixes both: the same component, and therefore the same key, is
+    computed once and reused for whichever side(s) actually contain each
+    member.
     """
-    canon_groups: dict[tuple[str, str], list[tuple[str, str]]] = {}
-    for raw_key in raw_index:
-        stripped, leaf = raw_key
-        canon_segs, _ = _version_strip_segments(_segments(stripped))
-        canon_groups.setdefault(("::".join(canon_segs), leaf), []).append(raw_key)
+    pooled: list[tuple[str, _IndexItem]] = [
+        *(("old", it) for it in old_items),
+        *(("new", it) for it in new_items),
+    ]
+    canon_groups: dict[tuple[str, str], list[tuple[str, _IndexItem]]] = {}
+    for side, item in pooled:
+        canon_segs, _ = _version_strip_segments(_segments(item.stripped))
+        canon_groups.setdefault(("::".join(canon_segs), item.leaf), []).append(
+            (side, item)
+        )
 
-    out: dict[tuple[str, str], list[str]] = {}
-    for raw_keys in canon_groups.values():
-        if len(raw_keys) == 1:
-            k = raw_keys[0]
-            out[k] = raw_index[k]
+    old_out: dict[tuple[str, str], list[str]] = {}
+    new_out: dict[tuple[str, str], list[str]] = {}
+
+    def _emit(side: str, key: tuple[str, str], qname: str) -> None:
+        (old_out if side == "old" else new_out).setdefault(key, []).append(qname)
+
+    for entries in canon_groups.values():
+        if len(entries) == 1:
+            side, item = entries[0]
+            _emit(side, (item.stripped, item.leaf), item.qname)
             continue
-        # Union-find over this (typically 2-entry) group, unioning any two
-        # raw keys whose qnames share a non-None identity value.
-        parent = {k: k for k in raw_keys}
+        # Union-find over this (typically 2-4 entry) pooled group, unioning
+        # any two entries whose identity values are equal and non-None.
+        parent = list(range(len(entries)))
 
-        def _find(x: tuple[str, str]) -> tuple[str, str]:
+        def _find(x: int) -> int:
             while parent[x] != x:
                 parent[x] = parent[parent[x]]
                 x = parent[x]
             return x
 
-        ident_sets = {
-            k: {identity[q] for q in raw_index[k] if identity.get(q) is not None}
-            for k in raw_keys
-        }
-        for i, a in enumerate(raw_keys):
-            for b in raw_keys[i + 1 :]:
-                if ident_sets[a] & ident_sets[b]:
-                    ra, rb = _find(a), _find(b)
-                    if ra != rb:
-                        parent[rb] = ra
-        components: dict[tuple[str, str], list[tuple[str, str]]] = {}
-        for k in raw_keys:
-            components.setdefault(_find(k), []).append(k)
+        for i in range(len(entries)):
+            ident_i = entries[i][1].identity
+            if ident_i is None:
+                continue
+            for j in range(i + 1, len(entries)):
+                ident_j = entries[j][1].identity
+                if ident_j is not None and ident_i == ident_j:
+                    ri, rj = _find(i), _find(j)
+                    if ri != rj:
+                        parent[rj] = ri
+        components: dict[int, list[int]] = {}
+        for i in range(len(entries)):
+            components.setdefault(_find(i), []).append(i)
         for members in components.values():
-            canonical_key = min(members)
-            qnames: list[str] = []
-            for k in members:
-                qnames.extend(raw_index[k])
-            out[canonical_key] = qnames
-    return out
+            key = (
+                min(entries[i][1].stripped for i in members),
+                entries[members[0]][1].leaf,
+            )
+            for i in members:
+                side, item = entries[i]
+                _emit(side, key, item.qname)
+    return old_out, new_out
 
 
-def _index_funcs_by_stable_key(
+def _func_index_items(
     snap: AbiSnapshot,
     experimental_namespaces: tuple[str, ...],
-) -> dict[tuple[str, str], list[str]]:
-    """Index public functions by ``(stripped_qualified_name, leaf)``.
+) -> list[_IndexItem]:
+    """Collect public functions as ``_IndexItem``\\ s for the paired index.
 
     Only public functions are indexed so internal helpers in
     ``experimental::`` don't get reported.
@@ -245,8 +276,7 @@ def _index_funcs_by_stable_key(
     from .model import Visibility
 
     demangled = _batch_demangle_public(snap)
-    raw_index: dict[tuple[str, str], list[str]] = {}
-    identity: dict[str, object] = {}
+    out: list[_IndexItem] = []
     for f in snap.functions:
         if f.visibility != Visibility.PUBLIC:
             continue
@@ -265,55 +295,43 @@ def _index_funcs_by_stable_key(
             continue
         leaf = leaf_segs[-1]
         stripped, _ = _strip_experimental(qname, experimental_namespaces)
-        raw_index.setdefault((stripped, leaf), []).append(qname)
         # A function's mangled name is real extraction-data identity (the
         # Itanium/MSVC ABI mangles an inline namespace's segment either
         # way, so a true alias's two declared spellings still share one
-        # mangled symbol) -- unlike guessing aliasing from name shape.
-        identity[qname] = f.mangled
-    return _merge_versioned_key_aliases(raw_index, identity)
+        # mangled symbol) -- unlike guessing aliasing from name shape. An
+        # empty mangled name is not identity evidence -- two declarations
+        # both missing a mangled name would otherwise spuriously "match"
+        # each other (CodeRabbit review).
+        out.append(_IndexItem(qname, stripped, leaf, f.mangled or None))
+    return out
 
 
-def _type_identity_fingerprint(t: RecordType) -> object | None:
-    """Structural fingerprint used as alias-identity evidence for a type, or
-    ``None`` when the type carries no distinguishing structure.
-
-    ``RecordType`` carries no mangled/symbol identity, so this is the best
-    available extraction-data signal that two differently-spelled type
-    declarations are really the same one: same kind, layout, and field/base
-    shape. An *empty* record (no fields, no bases, no known size) is
-    explicitly excluded -- every trivial empty class/struct of the same
-    kind shares this exact fingerprint, so it is routine coincidence
-    between two genuinely unrelated declarations (an empty tag/marker type
-    is common), not distinguishing evidence (Codex review, P1: "layout
-    coincidence is routine rather than reliable inline-namespace identity
-    evidence"). Returning ``None`` here means such a type is never merged
-    by :func:`_merge_versioned_key_aliases` -- the pre-existing
-    double-report is the accepted fallback for this case, same as when no
-    identity evidence exists at all. A non-trivial match (matching fields,
-    bases, or a known non-zero size) remains real, narrower evidence; a
-    coincidental match between two unrelated *non-trivial* types is the
-    accepted residual risk.
-    """
-    if not t.fields and not t.bases and not t.virtual_bases and not t.size_bits:
-        return None
-    return (
-        t.kind,
-        t.size_bits,
-        t.alignment_bits,
-        tuple((fld.name, fld.type, fld.offset_bits) for fld in t.fields),
-        tuple(t.bases),
-        tuple(t.virtual_bases),
-    )
-
-
-def _index_types_by_stable_key(
+def _type_index_items(
     snap: AbiSnapshot,
     experimental_namespaces: tuple[str, ...],
-) -> dict[tuple[str, str], list[str]]:
-    """Index types by ``(stripped_qualified_name, leaf)``."""
-    raw_index: dict[tuple[str, str], list[str]] = {}
-    identity: dict[str, object] = {}
+) -> list[_IndexItem]:
+    """Collect types as ``_IndexItem``\\ s for the paired index.
+
+    Identity evidence is the type's declaring ``source_location``
+    (``"header.h:42"``), not a structural (kind/size/fields/bases)
+    fingerprint: Codex review demonstrated, across two separate rounds,
+    that structural coincidence between genuinely unrelated declarations
+    is routine, not rare -- true for two empty tag/marker types sharing a
+    kind, and *also* true for two non-trivial types that merely happen to
+    share the same field layout (a common shape for simple POD-like
+    types), in which case an unrelated survivor can silently absorb a real
+    removal on the versioned spelling. Two *different* declarations
+    essentially never share an exact source location, though -- unlike a
+    structural fingerprint, `source_location` is not derived from the
+    type's own shape at all, so two distinct types cannot coincide on it
+    the way two independently-designed layouts can. A true alias pair (one
+    physical AST declaration reachable under two spellings) resolves to
+    the *same* underlying node and therefore shares this location by
+    construction, mirroring how a function's mangled name is trustworthy
+    identity. ``None`` (unavailable in DWARF-only/symbols-only mode, or an
+    empty string) means no identity evidence, same fallback as elsewhere.
+    """
+    out: list[_IndexItem] = []
     for t in snap.types:
         qname = t.name
         segs = _segments(qname)
@@ -321,9 +339,8 @@ def _index_types_by_stable_key(
             continue
         leaf = segs[-1]
         stripped, _ = _strip_experimental(qname, experimental_namespaces)
-        raw_index.setdefault((stripped, leaf), []).append(qname)
-        identity[qname] = _type_identity_fingerprint(t)
-    return _merge_versioned_key_aliases(raw_index, identity)
+        out.append(_IndexItem(qname, stripped, leaf, t.source_location or None))
+    return out
 
 
 def _origin_by_name(types: list[RecordType]) -> dict[str, ScopeOrigin]:
@@ -379,7 +396,7 @@ def _emit_experimental_change(
 
     ADR-044 D1 (Codex review): the function-sourced path (``kind_label ==
     "declaration"``, ``old_origins``/``new_origins`` both ``None``) is only
-    ever built from ``_index_funcs_by_stable_key``, which indexes public
+    ever built from ``_func_index_items``, which indexes public
     functions only — so unlike the reverted "any non-internal-namespaced
     subject" heuristic (which had to guess at a raw symbol's visibility with
     no reliable signal), a function finding's mere existence already proves
@@ -513,18 +530,26 @@ def detect_experimental_namespace_changes(
     graduation event.
     """
     out: list[Change] = []
+    old_func_index, new_func_index = _paired_stable_indices(
+        _func_index_items(old, experimental_namespaces),
+        _func_index_items(new, experimental_namespaces),
+    )
     out.extend(
         _findings_for(
-            _index_funcs_by_stable_key(old, experimental_namespaces),
-            _index_funcs_by_stable_key(new, experimental_namespaces),
+            old_func_index,
+            new_func_index,
             experimental_namespaces,
             "declaration",
         )
     )
+    old_type_index, new_type_index = _paired_stable_indices(
+        _type_index_items(old, experimental_namespaces),
+        _type_index_items(new, experimental_namespaces),
+    )
     out.extend(
         _findings_for(
-            _index_types_by_stable_key(old, experimental_namespaces),
-            _index_types_by_stable_key(new, experimental_namespaces),
+            old_type_index,
+            new_type_index,
             experimental_namespaces,
             "type",
             old_origins=_origin_by_name(old.types),
