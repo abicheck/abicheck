@@ -29,4 +29,24 @@ A new changelog fragment. See changelog.d/README.md for the workflow.
   never participated in this protocol at all, so this also newly reports its
   `macros`/`templates`/`inline_bodies`/`source_edges` coverage as
   `unsupported` (families it has never collected) rather than leaving them
-  silently unreported.
+  silently unreported. An asymmetric `fact_set` absence (only one side
+  stamped one at all — the shape every already-persisted pre-castxml-0.2
+  baseline hits) is now also treated as content-non-comparable, not silently
+  forgiven the way a genuinely symmetric pre-C.8 pair is. The castxml
+  extractor also now stamps a real `compiler_version` (its own resolved
+  `castxml --version`, cached), and the `SOURCE_FACT_COVERAGE_INCOMPLETE`
+  finding's description names which structured-content findings it
+  suppresses instead of the previous (now-inaccurate) claim that
+  content-change findings are unaffected by a fact-set mismatch.
+- **The hybrid header-backend merge now backfills
+  `RecordType.is_template_pattern`/`has_anonymous_aggregate_fields` from
+  clang** onto a castxml-matched record — previously silently dropped for
+  any declaration both backends saw. Both are plain booleans rather than an
+  Optional tri-state, so the merge OR-merges them instead of using the
+  existing null-check backfill pattern. Verified against a real compiled
+  header that `is_template_pattern`'s backfill is empirically inert for the
+  current producer pair (a clang template pattern never shares an identity
+  with a castxml-matched concrete type) while `has_anonymous_aggregate_fields`
+  is genuinely live — a real all-anonymous-union record's flag was
+  previously silently dropped in hybrid mode even though castxml's own
+  layout already corroborated it.

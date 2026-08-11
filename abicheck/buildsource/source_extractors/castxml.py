@@ -28,7 +28,10 @@ context→argv builder is pure and unit-testable; only :meth:`extract` shells ou
 
 from __future__ import annotations
 
+import functools
+import re
 import shutil
+import subprocess
 import tempfile
 from pathlib import Path
 from typing import cast
@@ -70,6 +73,38 @@ CASTXML_EXTRACTOR_VERSION = "0.2"
 _unredact_home = unredact_home
 _compiler_binary = pick_compiler_binary
 _replay_extra_flags = replay_extra_flags
+
+_CASTXML_VERSION_RE = re.compile(r"castxml version (\S+)")
+
+
+@functools.lru_cache(maxsize=8)
+def _castxml_tool_version(castxml_bin: str) -> str:
+    """``castxml --version``'s own version number for *castxml_bin*, cached
+    (ADR-038 C.8 fact_set -- mirrors ``clang.py``'s ``_clang_compiler_version``).
+
+    Cached per binary path so a many-TU build pays this subprocess once, not
+    once per compile unit. Best-effort: any failure yields ``""`` rather than
+    aborting extraction (compiler_version is provenance, not required input).
+    Deliberately a local, standalone probe rather than reusing
+    ``dumper_toolchain._tool_identity_metadata`` -- that module imports FROM
+    ``buildsource.redaction``, so importing it here (the opposite direction)
+    would form a real import cycle the AI-readiness `import-cycle-growth`
+    gate rejects (CLAUDE.md "M1-3").
+    """
+    try:
+        r = subprocess.run(
+            [castxml_bin, "--version"],
+            capture_output=True,
+            text=True,
+            timeout=5,
+            check=False,
+        )
+        if r.returncode != 0:
+            return ""
+        m = _CASTXML_VERSION_RE.search(r.stdout)
+        return m.group(1) if m else ""
+    except (OSError, subprocess.TimeoutExpired):
+        return ""
 
 
 def _std_flag(standard: str, cc_id: str) -> list[str]:
@@ -418,4 +453,11 @@ class CastxmlSourceExtractor:
             producer=self.name,
             producer_version=CASTXML_EXTRACTOR_VERSION,
             compiler_family=compiler_family,
+            # Codex review, PR #719: this extractor's own recipe -- what
+            # underlying integer type an unfixed enum resolves to, in
+            # particular -- is castxml's OWN compiler build, not just this
+            # producer's abicheck-side version; two runs on the same
+            # abicheck release but different castxml/bundled-Clang builds
+            # can legitimately disagree on it.
+            compiler_version=_castxml_tool_version(self.castxml_bin),
         )

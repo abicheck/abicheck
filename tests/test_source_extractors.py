@@ -1031,6 +1031,32 @@ def test_parse_root_stamps_fact_set_and_coverage() -> None:
         assert tu.coverage[family] == "unsupported"
 
 
+def test_parse_root_stamps_compiler_version_from_castxml_probe(monkeypatch) -> None:
+    """Codex review, PR #719: an unstamped compiler_version means two runs on
+    the same abicheck release but different castxml/bundled-Clang builds
+    would be silently treated as recipe-agreeing -- deterministic coverage
+    for the probe wiring, independent of whether a real castxml happens to
+    be on this host's PATH."""
+    from abicheck.buildsource.source_extractors import castxml as castxml_mod
+
+    castxml_mod._castxml_tool_version.cache_clear()
+    monkeypatch.setattr(
+        castxml_mod, "_castxml_tool_version", lambda _bin: "0.6.20260105"
+    )
+    extractor = CastxmlSourceExtractor()
+    tu = extractor._parse_root(
+        _root_with_one_type(), _cu(), public_header_roots=["foo.h"], target_id=""
+    )
+    assert tu.fact_set["compiler_version"] == "0.6.20260105"
+
+
+def test_castxml_tool_version_degrades_to_empty_on_missing_binary() -> None:
+    from abicheck.buildsource.source_extractors.castxml import _castxml_tool_version
+
+    _castxml_tool_version.cache_clear()
+    assert _castxml_tool_version("definitely-not-a-real-binary-xyz") == ""
+
+
 def test_parse_root_stamps_msvc_compiler_family_for_msvc_compiler_binary() -> None:
     from xml.etree.ElementTree import Element, SubElement
 
@@ -1140,6 +1166,9 @@ def test_castxml_extractor_end_to_end(tmp_path: Path) -> None:
     # The public const is captured with its value (enables constexpr_value_changed).
     consts = {e.qualified_name: e.value for e in tu.constexpr_values}
     assert any("kAnswer" in k for k in consts)
+    # Codex review, PR #719: a real castxml install resolves a non-empty
+    # compiler_version, not the "" default a probe failure would leave.
+    assert tu.fact_set["compiler_version"] != ""
 
 
 def test_entity_from_typedef_carries_provenance() -> None:

@@ -222,8 +222,22 @@ def _diff_fact_coverage(
         )
 
     suppression = ""
+    if has_signal and not compat.structured_content_comparable:
+        suppression += (
+            " Structured content-change findings for entities present on "
+            "BOTH sides (generated_header_changed, "
+            "public_typedef_target_changed, public_macro_value_changed) are "
+            "suppressed for this comparison because a differing "
+            "producer/producer_version/compiler_version pair (or an "
+            "asymmetric fact_set -- only one side stamped one at all) means "
+            "a type_hash/value comparison cannot be trusted to reflect a "
+            "real content change rather than an extraction-recipe change "
+            "(Codex review, PR #719: EnumType.underlying_type going from an "
+            'always-"int" placeholder to a real extracted value on a '
+            "producer-version bump alone is exactly this shape)."
+        )
     if has_signal and not compat.opaque_hashes_comparable:
-        suppression = (
+        suppression += (
             " Opaque body/template hash findings (inline_body_changed, "
             "template_body_changed) are suppressed for this comparison because "
             "the fact-set compatibility verdict does not establish "
@@ -244,8 +258,7 @@ def _diff_fact_coverage(
             "detection is suppressed for this comparison because the fact_set "
             "name/version mismatch means an entity's absence may only reflect "
             "the old contract never collecting its family, not an actual "
-            "removal; content-change findings for entities present on both "
-            "sides are unaffected."
+            "removal."
         )
 
     return [

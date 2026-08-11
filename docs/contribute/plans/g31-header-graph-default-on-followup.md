@@ -1674,6 +1674,41 @@ phase held to):
   inspection (castxml never emits an uninstantiated pattern, and supplies
   the real offsets the anonymous-aggregate flag exists to help find), but
   "looks benign" is the claim that needs a castxml host to check.
+
+  **Closed for `is_template_pattern`/`has_anonymous_aggregate_fields` in a
+  still-later pass** (PR #719 follow-up), once a real castxml+clang host was
+  available to check "looks benign" against for real. Both are plain `bool =
+  False` — not an Optional tri-state like every other backfilled fact in
+  `dumper_hybrid.py` — so castxml's own `False` is never itself a "castxml
+  doesn't know" placeholder the way `None` is elsewhere; `_merge_record_type`
+  therefore OR-merges these two instead of using the existing
+  `_backfill_fact` null-check helper. Verified end to end against a real
+  compiled class template + anonymous-union header (`clang++`/`g++` +
+  castxml 0.6.3 + direct-clang 18): `is_template_pattern`'s backfill is
+  empirically **inert** for the current producer pair — a clang-recognized
+  template *pattern* (e.g. bare `Box`) never shares a `type_map_key` with
+  any castxml-visible *concrete instantiation* (`Box<int>`), so `clang_t` is
+  never itself the pattern for a castxml-matched `t`; the pattern already
+  reaches a hybrid snapshot correctly via the pre-existing clang-only-append
+  path. Kept anyway (not asserted unreachable) as a defense-in-depth/honesty
+  measure, the same precedent this module already sets for
+  `RecordType.is_abstract`. `has_anonymous_aggregate_fields` is genuinely
+  live, not inert: dumping a real all-anonymous-union record
+  (`struct AllAnon { union { int i; float f; }; };`) confirmed castxml
+  itself reports `False` (it already has real per-field offsets and doesn't
+  need the structural signal) while clang reports `True` for the *same*
+  matched type — and, before this fix, the hybrid-merged result silently
+  kept castxml's `False`, discarding a real, accurate fact. New coverage:
+  `tests/test_dumper_hybrid.py`'s `TestTypeAndFieldFactBackfill` OR-merge
+  tests, plus `scripts/backend_capabilities.py`'s two rows moving to
+  `hybrid_backfilled=True` (`gen_backend_capability_matrix.py` regenerated).
+  `tests/test_backend_capability_matrix.py`'s "hybrid drops an unbackfilled
+  clang-only fact" fixture moved again, to `Param.is_va_list` (see that
+  fact's own entry below — deliberately excluded from hybrid's backfill even
+  at the diff-detector level, so it keeps this shape for the foreseeable
+  future). `snapshot_cache._SNAPSHOT_CACHE_VERSION` bumped (v14) so an
+  upgrading user's warm hybrid cache entry is re-extracted instead of
+  replaying the pre-fix merge indefinitely.
 - An opaque handle type is **absent** from a clang snapshot rather than
   opaque: `parse_types` skips every non-definition, so `is_opaque=False` is
   correct by construction while the type itself never appears.

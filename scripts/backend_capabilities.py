@@ -443,11 +443,18 @@ FACT_ROWS: tuple[FactRow, ...] = (
         "is_template_pattern",
         _NONE,
         _FULL,
+        hybrid_backfilled=True,
         note=(
             "castxml emits template *instantiations*, never the uninstantiated "
-            "pattern, so it has nothing to mark. Not backfilled by the hybrid "
-            "merge — but a pattern reaches a hybrid snapshot only through the "
-            "clang-only append path, which preserves the flag."
+            "pattern, so it has nothing to mark. OR-merged by the hybrid merge "
+            "since PR #719 (a plain bool, not an Optional tri-state -- castxml's "
+            "own `False` is never itself the backfill trigger the way a `None` "
+            "is elsewhere in this table) -- verified against real castxml 0.6.3 "
+            "+ clang 18 output that this is empirically inert for the current "
+            "producer pair, since a clang template pattern never shares a "
+            "type_map_key with any castxml-matched concrete type; a pattern "
+            "reaches a hybrid snapshot only through the clang-only append path, "
+            "which already preserves the flag on its own."
         ),
     ),
     FactRow(
@@ -455,12 +462,17 @@ FACT_ROWS: tuple[FactRow, ...] = (
         "has_anonymous_aggregate_fields",
         _NONE,
         _FULL,
+        hybrid_backfilled=True,
         note=(
             "clang flattens an anonymous struct/union into its parent and "
             "records that it did, which `dumper_layout_backfill.py` uses when "
-            "matching DWARF fields. Not backfilled: a record both backends saw "
-            "keeps castxml's `False` (harmless in practice, since castxml also "
-            "supplies the real offsets that backfill would otherwise seek)."
+            "matching DWARF fields. OR-merged by the hybrid merge since PR "
+            "#719 (same plain-bool OR-merge as `is_template_pattern` above, "
+            "not the `None`-check pattern) -- unlike that field this one is "
+            "not provably inert: an opaque/incomplete castxml record could "
+            "legitimately reach the merge with an empty `fields` list for a "
+            "genuinely anonymous-aggregate-only record, where clang's `True` "
+            "is the only signal available."
         ),
     ),
     FactRow("RecordType", "source_header", _OTHER, _OTHER, note=_PROVENANCE_PASS),

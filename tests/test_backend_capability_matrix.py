@@ -224,20 +224,20 @@ def test_hybrid_is_castxml_for_a_fact_the_merge_does_not_backfill(caps) -> None:
     snapshot is castxml-based, so a clang-only fact nothing backfills does NOT
     reach a declaration both backends saw.
 
-    ``EnumType.underlying_type`` used to be this test's fixture, before
-    castxml itself started extracting a real value (Phase C fact-completeness
-    pass) — it is no longer a fact only clang populates, so it can't
-    demonstrate a dropped-on-merge clang-only fact any more.
-    ``RecordType.is_template_pattern`` has the same castxml-NONE/clang-FULL/
-    not-backfilled shape today.
+    Two prior fixtures for this test stopped fitting the shape as the fields
+    they named got backfilled for real: ``EnumType.underlying_type`` (castxml
+    itself started extracting a real value) and ``RecordType.
+    is_template_pattern``/``has_anonymous_aggregate_fields`` (PR #719's OR-merge
+    fix). ``Param.is_va_list`` has the same castxml-NONE/clang-populated/
+    not-backfilled shape today, and is deliberately excluded from hybrid's
+    backfill list even at the diff-detector level (see its own note in
+    ``FACT_ROWS`` and ``diff_symbols._diff_param_va_list``'s producer gate).
     """
     row = next(
-        r
-        for r in caps.FACT_ROWS
-        if (r.owner, r.field) == ("RecordType", "is_template_pattern")
+        r for r in caps.FACT_ROWS if (r.owner, r.field) == ("Param", "is_va_list")
     )
     assert not row.hybrid_backfilled
-    assert row.clang is caps.Capability.FULL
+    assert row.clang is caps.Capability.PARTIAL
     assert caps.hybrid_capability(row) is caps.Capability.NONE
 
 

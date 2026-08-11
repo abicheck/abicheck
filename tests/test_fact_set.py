@@ -463,6 +463,28 @@ def test_diff_fires_on_fact_set_version_mismatch() -> None:
     assert "fact_set_version_mismatch" in matches[0].description
 
 
+def test_diff_coverage_finding_describes_structured_content_suppression() -> None:
+    """Codex review, PR #719: the coverage finding must name the structured
+    content-change findings it suppresses -- an earlier revision described
+    only opaque-hash/source-edges suppression and, for a fact_set mismatch,
+    explicitly (and by then incorrectly) claimed content-change findings
+    were unaffected."""
+    old_fs = default_fact_set(producer="p", producer_version="1")
+    new_fs = default_fact_set(producer="p", producer_version="2")
+    old = _surface(coverage={"fact_set": old_fs, "fact_family_states": {}})
+    new = _surface(coverage={"fact_set": new_fs, "fact_family_states": {}})
+    changes = diff_source_abi(old, new)
+    matches = [
+        c for c in changes if c.kind == ChangeKind.SOURCE_FACT_COVERAGE_INCOMPLETE
+    ]
+    assert len(matches) == 1
+    description = matches[0].description
+    assert "generated_header_changed" in description
+    assert "public_typedef_target_changed" in description
+    assert "public_macro_value_changed" in description
+    assert "unaffected" not in description
+
+
 def test_diff_fires_on_incomplete_mandatory_family() -> None:
     fs = default_fact_set(producer="p", producer_version="1")
     old = _surface(

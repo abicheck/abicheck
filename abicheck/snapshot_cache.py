@@ -45,7 +45,7 @@ MAX_ENTRIES: int = 100
 #: key invalidates all previously-cached entries on upgrade rather than risk
 #: serving a stale snapshot computed by an older, behaviorally-different
 #: abicheck version.
-_SNAPSHOT_CACHE_VERSION: str = "13"
+_SNAPSHOT_CACHE_VERSION: str = "14"
 # v2: castxml's CvQualifiedType type-name spelling changed for a
 # volatile-qualified pointer/reference VALUE (now a suffix, "T * volatile",
 # matching clang's own convention, rather than always a prefix) -- an
@@ -177,6 +177,18 @@ _SNAPSHOT_CACHE_VERSION: str = "13"
 # preserving the exact false ODR-agreement ``tu_merge.py``'s conflict check
 # this extraction closes. Bumped so the upgrade forces re-extraction
 # instead.
+#
+# v14 (G31 Phase C fact-completeness continuation): the hybrid merge
+# (``dumper_hybrid._merge_record_type``) started OR-merging
+# ``RecordType.is_template_pattern``/``has_anonymous_aggregate_fields`` from
+# clang onto a castxml-matched type, until now silently dropped for a type
+# both backends saw (castxml's own always-``False`` for these two plain
+# bools was never itself the trigger for the existing None-check backfill
+# pattern). An upgrading user's warm hybrid cache entry would keep replaying
+# a snapshot missing this backfill for an anonymous-aggregate-only record
+# whose castxml-side ``fields`` happen to be empty (an opaque/incomplete
+# castxml record) until the entry happened to expire or was manually
+# cleared. Bumped so the upgrade forces re-extraction instead.
 
 
 def _get_cache_dir() -> Path:
