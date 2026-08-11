@@ -547,6 +547,50 @@ class TestInternalTemplateLeaks:
         changes = detect_internal_template_leaks(old, new)
         assert len(changes) == 1
 
+    def test_bare_vs_qualified_name_same_mangled_symbol_no_false_positive(
+        self,
+    ) -> None:
+        # Reported regression: a header/AST dumper backend can populate
+        # ``Function.name`` with inconsistent qualification for the
+        # *identical* linked symbol across two snapshots (a bare leaf on
+        # one side, a fully namespace/template-qualified spelling with its
+        # own formatting on the other -- verified in the field with real
+        # oneAPI/oneDAL headers: a still-exported instantiation, confirmed
+        # unchanged via `nm`, read as removed-and-re-added purely because
+        # the dumper changed how much of its own name it qualified between
+        # two library versions). Keying stem/instantiation identity on the
+        # declared name alone made every such declaration a false leak.
+        # Both sides share the *same* mangled symbol, so once identity
+        # prefers the demangled form, they must resolve to one identical
+        # stem regardless of what each side's own ``name`` field spelled.
+        import abicheck.demangle as dm
+
+        def fake_demangle(mangled_list: list[str]) -> dict[str, str]:
+            sigs = {
+                "_Zcr1": "oneapi::dal::detail::train_parameters<int>::check_ranges",
+            }
+            return {m: sigs[m] for m in mangled_list if m in sigs}
+
+        orig = dm.demangle_batch
+        dm.demangle_batch = fake_demangle  # type: ignore[assignment]
+        try:
+            old = _snap(funcs=[_fn("check_ranges", mangled="_Zcr1")])
+            # NEW's own declared name drops the enclosing "oneapi::dal::"
+            # namespace (a real, documented dumper-backend quirk) even
+            # though the mangled symbol -- and hence the demangled
+            # canonical form above -- is unchanged.
+            new = _snap(funcs=[
+                _fn(
+                    "detail::train_parameters<int>::check_ranges",
+                    mangled="_Zcr1",
+                ),
+            ])
+            changes = detect_internal_template_leaks(old, new)
+        finally:
+            dm.demangle_batch = orig  # type: ignore[assignment]
+
+        assert changes == []
+
 
 # ---------------------------------------------------------------------------
 # CPO_KIND_CHANGED

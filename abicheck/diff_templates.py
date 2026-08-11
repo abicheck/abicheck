@@ -440,14 +440,65 @@ def _public_functions(snap: AbiSnapshot) -> list[Function]:
     return [f for f in snap.functions if f.visibility == Visibility.PUBLIC]
 
 
+def _batch_demangle_for_identity(funcs: list[Function]) -> dict[str, str]:
+    """Demangle every real mangled name in *funcs* in one batch call, for
+    :func:`_canonical_identity_name`'s mangled-preferred lookup below."""
+    from .demangle import demangle_batch
+    mangled = [f.mangled for f in funcs if f.mangled.startswith("_Z")]
+    return demangle_batch(mangled) if mangled else {}
+
+
+def _canonical_identity_name(
+    name: str, mangled: str, demangled: dict[str, str],
+) -> str:
+    """Return the most stable available qualified identity for a function,
+    for use where "is this the same declaration on both sides" must be
+    judged by *linked-symbol* identity rather than the dumper's own
+    qualification of ``Function.name``.
+
+    Prefers a successfully demangled ``mangled`` over trusting ``name``'s
+    own qualification whenever a real mangled name is available: two
+    dumper backends -- or the same backend across different inputs/
+    versions -- can populate ``Function.name`` with inconsistent
+    qualification for the *identical* linked symbol (a bare leaf on one
+    snapshot side, a fully namespace/template-qualified spelling with its
+    own formatting quirks on the other). ``mangled`` is the ground truth
+    the linker actually resolves against, so demangling it consistently on
+    both snapshot sides yields matching identities even when ``name``
+    doesn't -- a confirmed real-world false positive: a still-exported
+    template method (verified present on both sides via ``nm``) read as
+    "removed and re-added" purely because the header dumper changed how
+    much of its own name it qualified between two library versions, not
+    because the symbol itself changed.
+
+    Deliberately used only for :func:`detect_internal_template_leaks`'s
+    stem/instantiation-set grouping, which exists to decide whether a
+    specific instantiation is still linkable -- a binary-identity
+    question. Every other detector in this module keys off
+    :func:`_qualified_function_name`'s declared-name-first precedence
+    instead, because they care about the *source-level* spelling
+    (``CPO_KIND_CHANGED`` and friends); switching that precedence there
+    too would silently defeat detectors that depend on a declared name
+    genuinely diverging from its demangled/underlying name (e.g.
+    ``diff_namespaces.detect_std_reexport_removed``'s whole premise is
+    that split).
+    """
+    if mangled.startswith("_Z"):
+        resolved = demangled.get(mangled)
+        if resolved:
+            return resolved
+    return _qualified_function_name(name, mangled)
+
+
 def _internal_template_stems(
     funcs: list[Function],
     internal_namespaces: tuple[str, ...],
+    demangled: dict[str, str],
 ) -> set[str]:
     """Return template stems that live in one of *internal_namespaces*."""
     out: set[str] = set()
     for f in funcs:
-        qname = _qualified_function_name(f.name, f.mangled)
+        qname = _canonical_identity_name(f.name, f.mangled, demangled)
         if not _looks_like_template_instantiation(qname):
             continue
         stem = _strip_template_args(qname)
@@ -456,11 +507,13 @@ def _internal_template_stems(
     return out
 
 
-def _functions_by_stem(funcs: list[Function]) -> dict[str, list[Function]]:
+def _functions_by_stem(
+    funcs: list[Function], demangled: dict[str, str],
+) -> dict[str, list[Function]]:
     """Group *funcs* by template-args-stripped stem."""
     out: dict[str, list[Function]] = defaultdict(list)
     for f in funcs:
-        qname = _qualified_function_name(f.name, f.mangled)
+        qname = _canonical_identity_name(f.name, f.mangled, demangled)
         out[_strip_template_args(qname)].append(f)
     return out
 
@@ -474,9 +527,11 @@ def _function_signature(f: Function) -> tuple[str, int, str]:
     )
 
 
-def _instantiation_set(funcs: list[Function]) -> set[tuple[str, tuple[str, int, str]]]:
+def _instantiation_set(
+    funcs: list[Function], demangled: dict[str, str],
+) -> set[tuple[str, tuple[str, int, str]]]:
     return {
-        (_qualified_function_name(f.name, f.mangled), _function_signature(f))
+        (_canonical_identity_name(f.name, f.mangled, demangled), _function_signature(f))
         for f in funcs
     }
 
@@ -536,20 +591,24 @@ def detect_internal_template_leaks(
     """
     old_funcs = _public_functions(old)
     new_funcs = _public_functions(new)
+    # One batched demangle call across both sides -- not two -- so a symbol
+    # unchanged between old and new resolves to byte-identical canonical
+    # text on both sides regardless of demangle_batch's own dict-ordering.
+    demangled = _batch_demangle_for_identity(old_funcs + new_funcs)
     internal_stems = (
-        _internal_template_stems(old_funcs, internal_namespaces)
-        | _internal_template_stems(new_funcs, internal_namespaces)
+        _internal_template_stems(old_funcs, internal_namespaces, demangled)
+        | _internal_template_stems(new_funcs, internal_namespaces, demangled)
     )
     if not internal_stems:
         return []
 
-    old_by_stem = _functions_by_stem(old_funcs)
-    new_by_stem = _functions_by_stem(new_funcs)
+    old_by_stem = _functions_by_stem(old_funcs, demangled)
+    new_by_stem = _functions_by_stem(new_funcs, demangled)
 
     changes: list[Change] = []
     for stem in sorted(internal_stems):
-        old_sigs = _instantiation_set(old_by_stem.get(stem, []))
-        new_sigs = _instantiation_set(new_by_stem.get(stem, []))
+        old_sigs = _instantiation_set(old_by_stem.get(stem, []), demangled)
+        new_sigs = _instantiation_set(new_by_stem.get(stem, []), demangled)
         if old_sigs == new_sigs:
             continue
         # Direction matters: a (name, signature) pair that existed in OLD but

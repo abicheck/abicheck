@@ -335,6 +335,46 @@ class TestExperimentalRemovedWithoutReplacement:
         changes = detect_experimental_namespace_changes(old, new)
         assert changes == []
 
+    def test_bare_vs_qualified_name_same_mangled_symbol_no_false_positive(
+        self,
+    ) -> None:
+        # Reported regression (shared with diff_templates.py's
+        # INTERNAL_TEMPLATE_LEAKS_VIA_PUBLIC_API): a header/AST dumper
+        # backend can populate ``Function.name`` with inconsistent
+        # qualification for the *identical* linked symbol across two
+        # snapshots -- a bare leaf on one side, a namespace-qualified
+        # spelling with its own formatting on the other. Keying the
+        # (stable_key, leaf) index on the declared name alone made a
+        # still-exported symbol (confirmed unchanged via `nm` in the field)
+        # read as removed-without-replacement purely because the dumper
+        # changed how much of its own name it qualified between two
+        # versions, not because the symbol moved out of `experimental::`.
+        import abicheck.demangle as dm
+
+        def fake_demangle(mangled_list: list[str]) -> dict[str, str]:
+            sigs = {"_Zex1": "ns::experimental::check_ranges"}
+            return {m: sigs[m] for m in mangled_list if m in sigs}
+
+        orig = dm.demangle_batch
+        dm.demangle_batch = fake_demangle  # type: ignore[assignment]
+        try:
+            old = _snap(funcs=[_fn("check_ranges", mangled="_Zex1")])
+            # A real, documented quirk (AGENTS.md): a header AST backend can
+            # drop the enclosing namespace from a declared name. The mangled
+            # symbol -- what a consumer actually links against -- is
+            # unchanged.
+            new = _snap(funcs=[
+                _fn("experimental::check_ranges", mangled="_Zex1"),
+            ])
+            changes = detect_experimental_namespace_changes(old, new)
+        finally:
+            dm.demangle_batch = orig  # type: ignore[assignment]
+
+        assert not any(
+            c.kind == ChangeKind.EXPERIMENTAL_REMOVED_WITHOUT_REPLACEMENT
+            for c in changes
+        )
+
     def test_leaf_survives_namespace_qualified_param_type(self) -> None:
         """Reported bug: a demangled ELF-only symbol carries its full
         signature (``Class::method(ns::Type const&, long) const``), not just

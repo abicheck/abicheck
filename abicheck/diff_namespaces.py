@@ -46,7 +46,7 @@ from typing import TYPE_CHECKING
 from .checker_policy import ChangeKind, ReachabilityState
 from .checker_types import Change
 from .diff_helpers import make_change
-from .diff_templates import _strip_param_signature
+from .diff_templates import _canonical_identity_name, _strip_param_signature
 
 if TYPE_CHECKING:
     from .model import AbiSnapshot, RecordType, ScopeOrigin
@@ -222,7 +222,21 @@ def _index_funcs_by_stable_key(
         # signature stripped, since `_segments()` doesn't track `(`/`)`
         # depth and would otherwise split inside a namespace-qualified
         # parameter type.
-        qname = _qualified_function_name(f.name, f.mangled, demangled)
+        #
+        # Uses `_canonical_identity_name`, not the declared-name-first
+        # `_qualified_function_name`: this index groups declarations by
+        # qualified-name *identity* to decide whether an experimental
+        # declaration was genuinely removed, and a dumper backend can
+        # populate `Function.name` with different qualification for the
+        # identical linked symbol across snapshot sides (a real regression
+        # -- a still-exported symbol read as "removed without replacement"
+        # purely because the header dumper changed how much of its own
+        # name it qualified between versions). Demangling `mangled`
+        # consistently on both sides closes that gap; a real name/mangled
+        # divergence (a genuine namespace graduation) still shows up
+        # because graduation mints a *different* mangled symbol, not just
+        # different declared-name text (Codex review finding).
+        qname = _canonical_identity_name(f.name, f.mangled, demangled)
         leaf_segs = _segments(_strip_param_signature(qname))
         if not leaf_segs:
             continue
