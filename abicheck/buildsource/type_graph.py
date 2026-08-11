@@ -1083,6 +1083,7 @@ def _walk_children(
             tag_id = str((pending_anon_enum or {}).get("id") or "")
             name = str(child.get("name") or "")
             kind = child.get("kind")
+            matched = False
             if (
                 tag_id
                 and name
@@ -1091,6 +1092,7 @@ def _walk_children(
             ):
                 assert pending_anon_enum is not None
                 _emit_enum_underlying_edge(pending_anon_enum, scope, name, edges, idx)
+                matched = True
             elif (
                 pending_anon_enum is not None
                 and kind == "FieldDecl"
@@ -1105,6 +1107,7 @@ def _walk_children(
                     edges,
                     idx,
                 )
+                matched = True
             elif (
                 pending_anon_enum is not None
                 and kind == "VarDecl"
@@ -1120,9 +1123,22 @@ def _walk_children(
                     edges,
                     idx,
                 )
-            pending_anon_enum = (
-                child if kind == "EnumDecl" and not child.get("name") else None
-            )
+                matched = True
+
+            if kind == "EnumDecl" and not child.get("name"):
+                pending_anon_enum = child
+            elif not matched:
+                # A sibling that neither starts a new anonymous tag nor
+                # continues the current one ends the group -- but a
+                # *matching* declarator does NOT (Codex review, fresh
+                # evidence): one anonymous-enum declaration can introduce
+                # more than one declarator (`enum : U { A } first, second;`
+                # / `typedef enum : U { A } NameA, NameB;`, both verified
+                # against real Clang 18 to emit the tag once followed by
+                # ALL of its declarators as siblings, each independently
+                # carrying the same id/marker linkage) -- clearing on the
+                # first match silently dropped every declarator after it.
+                pending_anon_enum = None
         _walk_types(child, scope, enclosing_func, edges, idx)
 
 

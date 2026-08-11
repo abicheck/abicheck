@@ -385,6 +385,69 @@ def test_anonymous_enum_unrelated_following_field_emits_nothing() -> None:
     assert _find(ast, "enum_underlying") == []
 
 
+def test_anonymous_enum_multiple_var_declarators_all_emit_edges() -> None:
+    """Codex review, fresh evidence: one anonymous-enum declaration can
+    introduce more than one declarator (`enum : U { A } first, second;`,
+    verified against real Clang 18 to emit the tag once followed by BOTH
+    VarDecl siblings). Clearing the pending anonymous enum after the first
+    match silently dropped every declarator after it."""
+    ast = _tu(
+        _detail_ns(),
+        _namespace(
+            "api",
+            _anonymous_enum(),
+            {
+                "kind": "VarDecl",
+                "name": "first",
+                "mangledName": "_ZN3api5firstE",
+                "type": {
+                    "qualType": "enum (unnamed enum at t.hpp:3:1)",
+                    "desugaredQualType": "api::(unnamed enum at t.hpp:3:1)",
+                },
+            },
+            {
+                "kind": "VarDecl",
+                "name": "second",
+                "mangledName": "_ZN3api6secondE",
+                "type": {
+                    "qualType": "enum (unnamed enum at t.hpp:3:1)",
+                    "desugaredQualType": "api::(unnamed enum at t.hpp:3:1)",
+                },
+            },
+        ),
+    )
+    assert _find(ast, "enum_underlying") == [
+        (EDGE_DECL_HAS_TYPE, "_ZN3api5firstE", "detail::Handle", CONF_HIGH),
+        (EDGE_DECL_HAS_TYPE, "_ZN3api6secondE", "detail::Handle", CONF_HIGH),
+    ]
+
+
+def test_anonymous_enum_multiple_typedef_declarators_all_emit_edges() -> None:
+    """The typedef-declarator counterpart of the same multi-declarator gap
+    -- ``typedef enum : U { A } NameA, NameB;`` -- verified against real
+    Clang 18 to emit two TypedefDecl siblings, each independently carrying
+    the SAME ``ownedTagDecl.id`` back to the one anonymous enum."""
+    enum_decl, name_a = _anonymous_enum_typedef("0x9")
+    name_b = {
+        "id": "0xbeef",
+        "kind": "TypedefDecl",
+        "name": "NameB",
+        "type": {"qualType": "enum NameB", "desugaredQualType": "api::NameB"},
+        "inner": [
+            {
+                "kind": "ElaboratedType",
+                "type": {"qualType": "enum NameB"},
+                "ownedTagDecl": {"id": "0x9", "kind": "EnumDecl", "name": ""},
+            }
+        ],
+    }
+    ast = _tu(_detail_ns(), _namespace("api", enum_decl, name_a, name_b))
+    assert _find(ast, "enum_underlying") == [
+        (EDGE_TYPE_HAS_FIELD_TYPE, "api::Public", "detail::Handle", CONF_HIGH),
+        (EDGE_TYPE_HAS_FIELD_TYPE, "api::NameB", "detail::Handle", CONF_HIGH),
+    ]
+
+
 # ── template_param (non-type template parameter type) ──────────────────────
 
 
@@ -988,6 +1051,8 @@ using Public = Holder<&detail::f>;
 typedef enum : detail::Handle { AnonA } AnonPublic;
 struct AnonField { enum : detail::Handle { AnonFieldA } anon_field; };
 enum : detail::Handle { AnonVarA } anon_global_var;
+enum : detail::Handle { AnonMultiA } anon_first, anon_second;
+typedef enum : detail::Handle { AnonMultiB } AnonNameA, AnonNameB;
 }
 """
 
@@ -1052,6 +1117,24 @@ def test_real_clang_emits_every_new_role_end_to_end(tmp_path) -> None:
     ), (
         "a namespace-scope-variable-declared anonymous enum attributes to "
         "the variable's own decl identity"
+    )
+    assert (
+        sum(
+            1
+            for role, src, dst in edges
+            if role == "enum_underlying"
+            and dst == "detail::Handle"
+            and ("anon_first" in src or "anon_second" in src)
+        )
+        == 2
+    ), (
+        "one anonymous-enum declaration with multiple VarDecl declarators "
+        "must emit an edge for EVERY declarator, not just the first"
+    )
+    assert ("enum_underlying", "api::AnonNameA", "detail::Handle") in edges
+    assert ("enum_underlying", "api::AnonNameB", "detail::Handle") in edges, (
+        "one anonymous-enum declaration with multiple TypedefDecl "
+        "declarators must emit an edge for EVERY declarator too"
     )
 
 
