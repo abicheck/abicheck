@@ -335,6 +335,40 @@ class TestExperimentalRemovedWithoutReplacement:
         changes = detect_experimental_namespace_changes(old, new)
         assert changes == []
 
+    def test_versioned_inline_namespace_spellings_report_once(self) -> None:
+        # A versioned inline namespace makes the same declaration reachable
+        # under two qualified spellings -- the full path and the
+        # version-elided path unqualified lookup from the enclosing scope
+        # also resolves to. When a header-AST producer surfaces both as
+        # separate declarations, removing the entity must read as ONE
+        # EXPERIMENTAL_REMOVED_WITHOUT_REPLACEMENT, not one per spelling.
+        old = _snap(funcs=[
+            _fn("preview::spmd::v1::communicator"),
+            _fn("preview::spmd::communicator", mangled="_Zdifferent"),
+        ])
+        new = _snap(funcs=[])
+        changes = detect_experimental_namespace_changes(old, new)
+        removed = [
+            c for c in changes
+            if c.kind == ChangeKind.EXPERIMENTAL_REMOVED_WITHOUT_REPLACEMENT
+        ]
+        assert len(removed) == 1
+
+    def test_versioned_inline_namespace_type_spellings_report_once(self) -> None:
+        old = _snap(types=[
+            _rec("detail::v1::cpu_feature_map"),
+            _rec("detail::cpu_feature_map"),
+        ])
+        new = _snap(types=[])
+        changes = detect_experimental_namespace_changes(
+            old, new, experimental_namespaces=("detail",),
+        )
+        removed = [
+            c for c in changes
+            if c.kind == ChangeKind.EXPERIMENTAL_REMOVED_WITHOUT_REPLACEMENT
+        ]
+        assert len(removed) == 1
+
     def test_leaf_survives_namespace_qualified_param_type(self) -> None:
         """Reported bug: a demangled ELF-only symbol carries its full
         signature (``Class::method(ns::Type const&, long) const``), not just

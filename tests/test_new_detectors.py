@@ -669,6 +669,24 @@ class TestHeaderConstants:
                     _snap_with_constants({}, from_headers=False))
         assert not _has_kind(r, ChangeKind.CONSTANT_REMOVED)
 
+    def test_versioned_inline_namespace_spellings_report_once(self):
+        # A versioned inline namespace makes the same constant reachable
+        # under two qualified spellings -- the full path and the
+        # version-elided path unqualified lookup also resolves to. Both
+        # spellings changing together must read as ONE CONSTANT_CHANGED,
+        # not one per spelling.
+        r = compare(
+            _snap_with_constants({
+                "detail::v1::cpu_feature_map": "1",
+                "detail::cpu_feature_map": "1",
+            }),
+            _snap_with_constants({
+                "detail::v1::cpu_feature_map": "2",
+                "detail::cpu_feature_map": "2",
+            }),
+        )
+        assert len(_changes_of_kind(r, ChangeKind.CONSTANT_CHANGED)) == 1
+
 
 def _snap_with_constants(constants, from_headers=True):
     s = _snap(from_headers=from_headers)

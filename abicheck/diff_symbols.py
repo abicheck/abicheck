@@ -114,6 +114,7 @@ from .model import (
     stdlib_namespaces_excluded,
 )
 from .name_classification import is_local_rtti_symbol
+from .qualified_name_segments import dedupe_versioned_spellings
 
 # Visibility levels that constitute the public ABI surface.
 _PUBLIC_VIS = (Visibility.PUBLIC, Visibility.ELF_ONLY)
@@ -1912,12 +1913,19 @@ def _diff_constants(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
     because the data is *unavailable* — comparing would report every constant as
     removed (or added, depending on direction). Skip unless both sides are
     header-aware.
+
+    ``old.constants``/``new.constants`` are deduped through
+    ``dedupe_versioned_spellings`` first: a versioned inline namespace
+    (``detail::v1::x``) makes the same constant reachable under two
+    qualified spellings, and when the header-AST producer surfaces both as
+    separate top-level declarations, comparing raw keys would report one
+    ``CONSTANT_CHANGED`` per spelling for what is really a single change.
     """
     if not _both_header_aware(old, new):
         return []
     changes: list[Change] = []
-    old_consts = old.constants
-    new_consts = new.constants
+    old_consts = dedupe_versioned_spellings(old.constants)
+    new_consts = dedupe_versioned_spellings(new.constants)
 
     for name, old_val in old_consts.items():
         new_val = new_consts.get(name)
@@ -1970,8 +1978,7 @@ def _diff_var_access(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
     if old.ast_producer != "castxml" or new.ast_producer != "castxml":
         return []
     if not (
-        old.castxml_var_access_facts_reliable
-        and new.castxml_var_access_facts_reliable
+        old.castxml_var_access_facts_reliable and new.castxml_var_access_facts_reliable
     ):
         return []
     return var_access_changes(_public_variables(old), _public_variables(new))

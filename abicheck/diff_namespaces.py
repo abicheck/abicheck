@@ -40,13 +40,17 @@ break is at compile time.
 
 from __future__ import annotations
 
-import re as _re
 from typing import TYPE_CHECKING
 
 from .checker_policy import ChangeKind, ReachabilityState
 from .checker_types import Change
 from .diff_helpers import make_change
 from .diff_templates import _strip_param_signature
+from .qualified_name_segments import (
+    segments as _segments,
+    version_strip_segments as _version_strip_segments,
+    version_suffix as _version_suffix,  # noqa: F401  (public-surface re-export)
+)
 
 if TYPE_CHECKING:
     from .model import AbiSnapshot, RecordType, ScopeOrigin
@@ -63,58 +67,6 @@ DEFAULT_EXPERIMENTAL_NAMESPACES: tuple[str, ...] = (
     "preview",
     "v0",
 )
-
-
-def _segments(qualified: str) -> list[str]:
-    """Split a qualified C++ name into namespace segments.
-
-    Template arguments are stripped before splitting so that
-    ``ns::experimental::sort<int>`` → ``["ns", "experimental", "sort"]``.
-    Operator names containing ``::`` (extremely rare in declared form)
-    are not handled specially; this is acceptable because the detectors
-    care only about the segment ordering for namespace identification.
-    """
-    if not qualified:
-        return []
-    # Fast path: a name with neither a ``::`` separator nor a template ``<`` is
-    # its own single segment — the overwhelmingly common case (every plain C
-    # symbol, and most C++ leaf names). Skipping the char-scan matters because
-    # the post-processing namespace detectors call this once per finding on both
-    # sides, so a versioned-symbol library (ICU/OpenSSL — thousands of plain
-    # ``u_strlen_75``-style churn findings) would otherwise pay the full scan
-    # tens of thousands of times for no segmentation. Template stripping and
-    # ``::`` splitting still go through the scan below, so semantics are
-    # unchanged for any name that actually needs them.
-    if "::" not in qualified and "<" not in qualified:
-        return [qualified]
-    out: list[str] = []
-    depth = 0
-    buf: list[str] = []
-    i = 0
-    n = len(qualified)
-    while i < n:
-        ch = qualified[i]
-        if ch == "<":
-            depth += 1
-            i += 1
-            continue
-        if ch == ">":
-            if depth > 0:
-                depth -= 1
-            i += 1
-            continue
-        if depth == 0 and ch == ":" and i + 1 < n and qualified[i + 1] == ":":
-            if buf:
-                out.append("".join(buf).strip())
-                buf = []
-            i += 2
-            continue
-        if depth == 0:
-            buf.append(ch)
-        i += 1
-    if buf:
-        out.append("".join(buf).strip())
-    return [s for s in out if s]
 
 
 def _strip_experimental(
@@ -136,7 +88,7 @@ def _strip_experimental(
     segs = _segments(qualified)
     for i, s in enumerate(segs):
         if s in experimental_namespaces:
-            return "::".join(segs[:i] + segs[i + 1:]), s
+            return "::".join(segs[:i] + segs[i + 1 :]), s
     return qualified, None
 
 
@@ -176,6 +128,7 @@ def _qualified_function_name(
         if demangled is not None:
             return demangled.get(mangled, name)
         from .demangle import demangle_batch
+
         return demangle_batch([mangled]).get(mangled, name)
     return name
 
@@ -190,12 +143,30 @@ def _split_experimental(
     experimental_namespaces: tuple[str, ...],
 ) -> tuple[list[str], list[str]]:
     """Split *qnames* into ``(experimental, stable)`` by namespace match."""
-    exp = [
-        q for q in qnames
-        if any(s in experimental_namespaces for s in _segments(q))
-    ]
+    exp = [q for q in qnames if any(s in experimental_namespaces for s in _segments(q))]
     stable = [q for q in qnames if q not in exp]
     return exp, stable
+
+
+def _canonical_stable_key(
+    qname: str,
+    experimental_namespaces: tuple[str, ...],
+) -> str:
+    """Strip both an experimental-namespace segment and a versioned
+    inline-namespace segment (``v1``, ``_V2``, ``__1``, ...) from *qname*.
+
+    A versioned inline namespace makes the same declaration reachable
+    under two qualified spellings (``ns::v1::x`` and the version-elided
+    ``ns::x`` unqualified lookup also resolves to); when a header-AST
+    producer surfaces both as separate declarations, indexing by the
+    experimental-stripped name alone still leaves the two spellings under
+    two different keys, so each is walked as its own "removed" event and
+    the same real change is reported twice. Stripping the version segment
+    too collapses both spellings onto one key.
+    """
+    stripped, _ = _strip_experimental(qname, experimental_namespaces)
+    canon_segs, _ = _version_strip_segments(_segments(stripped))
+    return "::".join(canon_segs)
 
 
 def _index_funcs_by_stable_key(
@@ -208,6 +179,7 @@ def _index_funcs_by_stable_key(
     ``experimental::`` don't get reported.
     """
     from .model import Visibility
+
     demangled = _batch_demangle_public(snap)
     out: dict[tuple[str, str], list[str]] = {}
     for f in snap.functions:
@@ -227,7 +199,7 @@ def _index_funcs_by_stable_key(
         if not leaf_segs:
             continue
         leaf = leaf_segs[-1]
-        stripped, _ = _strip_experimental(qname, experimental_namespaces)
+        stripped = _canonical_stable_key(qname, experimental_namespaces)
         out.setdefault((stripped, leaf), []).append(qname)
     return out
 
@@ -244,7 +216,7 @@ def _index_types_by_stable_key(
         if not segs:
             continue
         leaf = segs[-1]
-        stripped, _ = _strip_experimental(qname, experimental_namespaces)
+        stripped = _canonical_stable_key(qname, experimental_namespaces)
         out.setdefault((stripped, leaf), []).append(qname)
     return out
 
@@ -385,17 +357,28 @@ def _findings_for(
             continue
         new_qnames = new_index.get((stable_key, leaf), [])
         new_exp, new_stable = _split_experimental(
-            new_qnames, experimental_namespaces,
+            new_qnames,
+            experimental_namespaces,
         )
         event = _classify_experimental_event(
-            old_exp, old_stable, new_exp, new_stable,
+            old_exp,
+            old_stable,
+            new_exp,
+            new_stable,
         )
         if event is None:
             continue
-        out.append(_emit_experimental_change(
-            event, leaf, old_exp, new_stable, kind_label,
-            old_origins=old_origins, new_origins=new_origins,
-        ))
+        out.append(
+            _emit_experimental_change(
+                event,
+                leaf,
+                old_exp,
+                new_stable,
+                kind_label,
+                old_origins=old_origins,
+                new_origins=new_origins,
+            )
+        )
     return out
 
 
@@ -425,20 +408,24 @@ def detect_experimental_namespace_changes(
     graduation event.
     """
     out: list[Change] = []
-    out.extend(_findings_for(
-        _index_funcs_by_stable_key(old, experimental_namespaces),
-        _index_funcs_by_stable_key(new, experimental_namespaces),
-        experimental_namespaces,
-        "declaration",
-    ))
-    out.extend(_findings_for(
-        _index_types_by_stable_key(old, experimental_namespaces),
-        _index_types_by_stable_key(new, experimental_namespaces),
-        experimental_namespaces,
-        "type",
-        old_origins=_origin_by_name(old.types),
-        new_origins=_origin_by_name(new.types),
-    ))
+    out.extend(
+        _findings_for(
+            _index_funcs_by_stable_key(old, experimental_namespaces),
+            _index_funcs_by_stable_key(new, experimental_namespaces),
+            experimental_namespaces,
+            "declaration",
+        )
+    )
+    out.extend(
+        _findings_for(
+            _index_types_by_stable_key(old, experimental_namespaces),
+            _index_types_by_stable_key(new, experimental_namespaces),
+            experimental_namespaces,
+            "type",
+            old_origins=_origin_by_name(old.types),
+            new_origins=_origin_by_name(new.types),
+        )
+    )
     return out
 
 
@@ -492,6 +479,7 @@ def _looks_like_std_reexport(
 def _collect_public_declared_names(snap: AbiSnapshot) -> set[str]:
     """Return the set of qualified declared names of public functions in *snap*."""
     from .model import Visibility
+
     demangled = _batch_demangle_public(snap)
     out: set[str] = set()
     for f in snap.functions:
@@ -507,8 +495,10 @@ def _batch_demangle_public(snap: AbiSnapshot) -> dict[str, str]:
     """Demangle every public mangled name in *snap* in one batch call."""
     from .demangle import demangle_batch
     from .model import Visibility
+
     mangled = [
-        f.mangled for f in snap.functions
+        f.mangled
+        for f in snap.functions
         if f.mangled.startswith("_Z") and f.visibility == Visibility.PUBLIC
     ]
     return demangle_batch(mangled) if mangled else {}
@@ -578,41 +568,6 @@ def detect_std_reexport_removed(
 # Detector: versioned inline namespace bumped (header-declared)
 # ---------------------------------------------------------------------------
 
-# Matches segment-name shapes commonly used as a versioned inline
-# namespace: ``_V1``, ``__v2``, ``v3``, ``__1``. Anchored to whole
-# segment match (caller passes a single segment string). Captures the
-# integer suffix for ordering checks.
-_VERSION_NS_RE = _re.compile(r"^_{0,2}[Vv]?(\d+)$")
-
-
-def _version_suffix(segment: str) -> int | None:
-    """Return the integer suffix if ``segment`` looks like a versioned
-    inline namespace tag (``_V1``, ``__1``, ``v2``, …); else ``None``.
-    """
-    m = _VERSION_NS_RE.match(segment)
-    if not m:
-        return None
-    try:
-        return int(m.group(1))
-    except ValueError:
-        return None
-
-
-def _version_strip_segments(segs: list[str]) -> tuple[tuple[str, ...], int | None]:
-    """Strip any one versioned-namespace segment and return
-    ``(stripped_segments, version_int)``.
-
-    Returns ``(tuple(segs), None)`` unchanged when no versioned segment
-    is present. Only the first matching segment is stripped — nested
-    versioned namespaces are vanishingly rare in practice and the simple
-    rule keeps the matching key stable.
-    """
-    for i, s in enumerate(segs):
-        v = _version_suffix(s)
-        if v is not None:
-            return tuple(segs[:i] + segs[i + 1:]), v
-    return tuple(segs), None
-
 
 def detect_inline_namespace_version_bump(
     old: AbiSnapshot,
@@ -662,6 +617,7 @@ def _collect_versioned_entries(snap: AbiSnapshot) -> list[tuple[str, bool]]:
     untagged behavior automatically, not a regression for the common case.
     """
     from .model import ScopeOrigin, Visibility
+
     demangled = _batch_demangle_public(snap)
     items: list[tuple[str, bool]] = []
     for f in snap.functions:
@@ -706,20 +662,22 @@ def _emit_version_bumps(
         # only covers one side), so requiring both sides publicly-tagged
         # let a genuine old-consumer break stay untagged and suppressible.
         subject_is_public = old_list[0][2] or new_list[0][2]
-        changes.append(make_change(
-            ChangeKind.INLINE_NAMESPACE_VERSION_BUMPED,
-            symbol=new_q,
-            old=old_q,
-            new=new_q,
-            detail=f"{sorted(old_versions)} to {sorted(new_versions)}",
-            public_reachable=subject_is_public,
-            reachability_state=(
-                ReachabilityState.PROVEN_REACHABLE
-                if subject_is_public
-                else ReachabilityState.UNKNOWN
-            ),
-            reachability_kind="direct_public_symbol" if subject_is_public else None,
-        ))
+        changes.append(
+            make_change(
+                ChangeKind.INLINE_NAMESPACE_VERSION_BUMPED,
+                symbol=new_q,
+                old=old_q,
+                new=new_q,
+                detail=f"{sorted(old_versions)} to {sorted(new_versions)}",
+                public_reachable=subject_is_public,
+                reachability_state=(
+                    ReachabilityState.PROVEN_REACHABLE
+                    if subject_is_public
+                    else ReachabilityState.UNKNOWN
+                ),
+                reachability_kind="direct_public_symbol" if subject_is_public else None,
+            )
+        )
     return changes
 
 
@@ -735,9 +693,13 @@ def detect_namespace_patterns(
 ) -> list[Change]:
     """Run all namespace-shape detectors and return their concatenated findings."""
     out: list[Change] = []
-    out.extend(detect_experimental_namespace_changes(
-        old, new, experimental_namespaces=experimental_namespaces,
-    ))
+    out.extend(
+        detect_experimental_namespace_changes(
+            old,
+            new,
+            experimental_namespaces=experimental_namespaces,
+        )
+    )
     out.extend(detect_std_reexport_removed(old, new))
     out.extend(detect_inline_namespace_version_bump(old, new))
     return out
