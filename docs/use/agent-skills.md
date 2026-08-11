@@ -29,9 +29,10 @@ alone. `native-binary-compatibility-review` is the sole flagship subject of
 behavioral evaluation; the other three are published but frozen at
 **prototype** status — working, reviewed content, but not validated and not
 receiving new scope — until the flagship experiment demonstrates a
-measurable lift. See ADR-058's 2026-08-11 amendment and
-[`skills-src/CLAUDE.md`](https://github.com/abicheck/abicheck/blob/main/skills-src/CLAUDE.md#portfolio-status-g37-scope-freeze-2026-08-11)
-for the full rationale.
+measurable lift. See
+[ADR-058](../contribute/adr/058-native-compatibility-agent-skills.md)'s
+2026-08-11 amendment for the full rationale (the same table is also kept in
+`skills-src/CLAUDE.md`, the skills' own source tree).
 
 ## The catalogue
 

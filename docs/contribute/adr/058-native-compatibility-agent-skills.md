@@ -53,9 +53,9 @@ measurable lift over an unequipped agent.
 > skill, per G37's arm design) shows a measurable, reproducible lift that
 > justifies the same investment for a second skill. See
 > [G37](../plans/g37-agent-skill-quality-evaluation.md)'s scope note for the
-> phase-by-phase detail and
-> [`skills-src/CLAUDE.md`](https://github.com/abicheck/abicheck/blob/main/skills-src/CLAUDE.md#portfolio-status-g37-scope-freeze-2026-08-11)
-> for the portfolio-status table. This does not reopen ADR-058's admission
+> phase-by-phase detail; the same portfolio-status table is kept in
+> `skills-src/CLAUDE.md`, the skills' own source tree. This does not reopen
+> ADR-058's admission
 > bar or four-skill taxonomy — it only sequences *validation* of what
 > already shipped, and a skill promoted back to active status after a
 > passing experiment needs no re-decision here.

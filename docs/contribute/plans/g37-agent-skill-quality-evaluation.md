@@ -1033,11 +1033,13 @@ real baseline for dimensions 1, 3, 4, 5. Dimensions 2 and 6 gate at zero from
 the first run — including if that first run fails, which blocks rather than
 baselines.
 
-**Done when:** a maintainer's local run produces committed bundles per skill
-that CI re-grades and accepts; a deliberately regressed `SKILL.md` fails the
-re-grade; and a skill edit committed *without* refreshed bundles fails the
-freshness check. The third is the one that matters — it is what makes running
-the evaluation non-optional rather than merely available.
+**Done when:** a maintainer's local run produces committed bundles — for the
+flagship skill while the 2026-08-11 scope note holds, per skill again once a
+prototype skill re-enters scope — that CI re-grades and accepts; a
+deliberately regressed `SKILL.md` fails the re-grade; and a skill edit
+committed *without* refreshed bundles fails the freshness check. The third is
+the one that matters — it is what makes running the evaluation non-optional
+rather than merely available.
 
 ### Phase 3 — Scenario corpus buildout *(M)*
 
@@ -1098,17 +1100,31 @@ content-change publication event.
 
 ## Cost model
 
+**The mechanism below is general — sized for the eventual four-skill,
+~24-scenario corpus — not a claim about what runs today.** The 2026-08-11
+scope note caps "the skills the diff actually touches" and "the
+affected-skill set" at one, the flagship, for as long as the freeze holds:
+`--suite full` today means the ~12–16 flagship scenarios Phase 3 builds, not
+24, and `--suite risk`'s per-change numbers below shrink the same way. The
+selection *rule* (risk-selected by moved hash, not a fixed sample) is what
+this section documents, and it is unchanged by the freeze — only its inputs
+are narrower until a prototype skill re-enters scope and the corpus grows
+back toward the sizing below.
+
 Per live run: ~4–8 agent turns over a small fixture repository. At 24 scenarios
-× `k=3` that is ~72 agent sessions per full pass. Two knobs shrink a
-per-change run, and **`k` is deliberately not one of them**:
+× `k=3` that is ~72 agent sessions per full pass (steady state, all four
+skills in scope). Two knobs shrink a per-change run, and **`k` is
+deliberately not one of them**:
 
 - `--suite risk` — the per-change evidence suite, at `k=3`: every Category B
   scenario, **plus every Category A scenario whose ground truth is not a
   compatible verdict, plus a standing floor of compatible-ground-truth
   scenarios** (see below), restricted to the skills the diff actually touches.
-  Typically ~10–14 scenarios (30–42 sessions).
-- `--suite full` — all 24 scenarios at `k=3` (72 sessions), before publication
-  and whenever the affected-skill set is wide.
+  Typically ~10–14 scenarios (30–42 sessions) at steady state; while the
+  freeze holds, bounded by the flagship's own corpus instead.
+- `--suite full` — every ready scenario for the skills in scope at `k=3`
+  (~72 sessions at steady state; ~36–48 while the freeze holds), before
+  publication and whenever the affected-skill set is wide.
 
 **The evidence suite is risk-selected, not a fixed sample, and that is what
 makes acceptance criterion 1 true.** An earlier draft evaluated only Category B
