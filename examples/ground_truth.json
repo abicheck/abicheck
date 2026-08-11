@@ -3222,9 +3222,14 @@
    "api_break": true,
    "bad_practice": false,
    "category": "breaking",
-   "description": "Internal-namespace leak through a templated detail:: base: mylib::detail::descriptor_base<Task> gains a field, growing every knn_descriptor<Task> instantiation. The leak is templated, so the sibling mangled-name-based detect_internal_template_leaks (diff_templates.py) \u2014 not the plain non-template internal_type_leaks_via_public_api \u2014 is the kind that actually fires and correctly captures this: it works from fully-qualified mangled names rather than castxml's bare RecordType.name (RecordType.qualified_name, added for case74/75/76, does not cover template instantiations \u2014 castxml's context-chain walk only reaches the enclosing namespace/class path, not per-instantiation template args).",
+   "description": "Internal-namespace leak through a templated detail:: base: mylib::detail::descriptor_base<Task> gains a field (max_iter_) and a purely-additive accessor (get_max_iter()), growing every knn_descriptor<Task> instantiation's layout. The field addition is caught directly by the plain type-layout detectors (type_field_added/type_field_offset_changed/type_size_changed) on descriptor_base<Task> itself \u2014 a nominal base-class edge, not a per-instantiation template walk \u2014 alongside internal_type_leaks_via_public_api. detect_internal_template_leaks (diff_templates.py) deliberately does NOT fire here: it only reports an internal function template's *removed* instantiations (an added-instantiation signal was a real false positive against Intel oneDAL \u2014 a purely additive instantiation-set change, e.g. gaining a new specialization or overload, must not itself be flagged breaking), and get_max_iter() is a pure addition on both sides' instantiation sets.",
    "expected": "BREAKING",
    "expected_kinds": [
+    "type_field_added",
+    "type_field_offset_changed",
+    "type_size_changed"
+   ],
+   "expected_absent_kinds": [
     "internal_template_leaks_via_public_api"
    ],
    "min_evidence": "L2",

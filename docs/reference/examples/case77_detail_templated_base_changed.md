@@ -7,7 +7,7 @@
 | **Category** | Breaking |
 | **Platforms** | Linux, macOS, Windows |
 | **Flags** | ABI break, API break |
-| **Detected `ChangeKind`s** | `internal_template_leaks_via_public_api` |
+| **Detected `ChangeKind`s** | `type_field_added`, `type_field_offset_changed`, `type_size_changed` |
 | **Source files** | `examples/case77_detail_templated_base_changed/` |
 
 **Category:** Internal Leak | **Verdict:** 🔴 BREAKING
@@ -47,13 +47,23 @@ Verdict: BREAKING (exit 4)
 - type_field_added: Field added: descriptor_base::max_iter_
   > New field shifts subsequent fields; old code reads wrong offsets for
     all fields after insertion point.
-- internal_template_leaks_via_public_api: Internal-namespace function
-  template 'mylib::detail::descriptor_base::get_max_iter() const' has
-  changed instantiations: added=[
-    'mylib::detail::descriptor_base<mylib::task::classification>::get_max_iter() const',
-    'mylib::detail::descriptor_base<mylib::task::regression>::get_max_iter() const']
-  > These mangled names participate in consumer symbol tables; every
-    consumer must rebuild.
+- type_field_offset_changed / type_size_changed: descriptor_base<Task>'s
+  layout grows for every Task the library instantiates
+  (task::classification, task::regression), shifting neighbor_count_'s
+  offset in every knn_descriptor<Task>.
+- internal_type_leaks_via_public_api: descriptor_base<Task> is an
+  internal-namespace type reachable from the public knn_descriptor<Task>
+  via a nominal base-class edge, so its own layout change counts as part
+  of the effective public ABI.
+
+Note: internal_template_leaks_via_public_api does *not* fire here.
+get_max_iter() (the public knn_descriptor<Task> accessor added alongside
+the field) only *adds* to descriptor_base's own instantiation set — it
+never removes one — and detect_internal_template_leaks only reports a
+removed instantiation. A purely-additive instantiation-set change (a new
+specialization, a new overload) was a real false positive against Intel
+oneDAL and must not itself be flagged breaking; the field addition's real
+break is caught by the type-layout kinds above instead.
 ```
 
 ## Minimum evidence

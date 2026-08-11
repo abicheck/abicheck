@@ -147,16 +147,29 @@ def _pointer_declarator_star_index(qualified: str, paren_index: int) -> int:
     ``int (*ns::bar<int*>(int*))()`` — the trailing ``int*>`` template
     argument's ``*`` sits after the wrapper's own, and is the rightmost one
     in the eventual prefix) (Codex review).
+
+    Tracks ``<``/``>`` nesting depth so a comma *inside* a template argument
+    list is never mistaken for the parameter-list comma that would end the
+    scan — a member-pointer wrapper's owning class can itself be a template
+    with multiple arguments (``int (ns::C<int, double>::*ns::bar<int>(int))()``),
+    and that comma appears before the wrapper's own ``*`` is ever reached
+    (Codex review, fresh evidence: the un-tracked version bailed out on it
+    and corrupted the eventual leaf).
     """
     star_index = -1
+    depth = 0
     for offset, ch in enumerate(qualified[paren_index + 1:]):
         idx = paren_index + 1 + offset
-        if ch in "*&":
+        if ch == "<":
+            depth += 1
+        elif ch == ">":
+            depth = max(0, depth - 1)
+        elif ch in "*&":
             if star_index == -1:
                 star_index = idx
         elif ch == "(" and star_index != -1:
             return star_index
-        elif ch in ",)":
+        elif ch in ",)" and depth == 0:
             return -1
     return -1
 

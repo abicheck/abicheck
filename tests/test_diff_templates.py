@@ -261,6 +261,23 @@ class TestStripParamSignature:
             == "ns::bar<int*>"
         )
 
+    def test_member_pointer_wrapper_with_multi_arg_template_owner(self) -> None:
+        # Codex review, fresh evidence: a member-function-pointer wrapper's
+        # owning class can itself be a template with more than one argument
+        # ("ns::C<int, double>::*..."), and that comma inside the owner's
+        # own template-argument list sits *before* the wrapper's own "*" is
+        # ever reached while scanning forward. The un-tracked version
+        # (no "<"/">" depth) mistook that comma for the parameter-list
+        # terminator, rejected the wrapper entirely, and corrupted the
+        # eventual leaf. Tracking angle-bracket depth so only a *top-level*
+        # comma/close-paren ends the scan fixes it.
+        assert (
+            _strip_param_signature(
+                "int (ns::C<int, double>::*ns::experimental::bar<int>(int))()"
+            )
+            == "ns::experimental::bar<int>"
+        )
+
     def test_cpo_kind_changed_matches_across_pointer_to_member_wrapper(self) -> None:
         # End-to-end: a function template returning a pointer to member
         # function must still be recognized as the same qualified name as
