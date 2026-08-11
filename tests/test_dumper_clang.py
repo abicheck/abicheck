@@ -514,6 +514,35 @@ def test_parse_types_opaque_redecl_merges_deprecated_from_a_later_decl() -> None
     assert types[0].deprecated == "old"
 
 
+def test_parse_types_opaque_redecl_merges_bare_deprecated_marker() -> None:
+    """`struct Handle; struct [[deprecated]] Handle;` (no message) -- the
+    merge must preserve the intentionally meaningful empty-string marker
+    from the discarded later node, not just a truthy message string, or
+    ``deprecated`` wrongly reads as ``None`` (Codex review, PR #719)."""
+    root = _tu(
+        {
+            "kind": "CXXRecordDecl",
+            "name": "Handle",
+            "tagUsed": "struct",
+            "loc": {"file": "include/foo.h", "line": 1},
+        },
+        {
+            "kind": "CXXRecordDecl",
+            "name": "Handle",
+            "tagUsed": "struct",
+            "loc": {"file": "include/foo.h", "line": 2},
+            "inner": [{"kind": "DeprecatedAttr"}],
+        },
+    )
+    types = [
+        t
+        for t in _ClangAstParser(root, set(), set()).parse_types()
+        if t.name == "Handle"
+    ]
+    assert len(types) == 1
+    assert types[0].deprecated == ""
+
+
 def test_parse_types_sets_qualified_name_for_namespaced_record() -> None:
     # Codex review (G28 Phase 4): RecordType.qualified_name must be populated
     # for a namespaced/nested type -- the layout tool's own JSON output

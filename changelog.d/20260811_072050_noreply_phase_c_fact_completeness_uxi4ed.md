@@ -83,7 +83,11 @@ A new changelog fragment. See changelog.d/README.md for the workflow.
   `SOURCE_LEVEL_KIND_CHANGED`; and a `[[deprecated]]` attribute attached
   to *any* redeclaration of an identity is now merged onto the emitted
   `RecordType`, instead of silently vanishing when an earlier,
-  unattributed forward decl happens to win the kind tie-break.
+  unattributed forward decl happens to win the kind tie-break. The
+  merge preserves a *bare* `[[deprecated]]` (no message) too — its
+  intentionally meaningful `""` marker is distinguished from "no
+  attribute at all" rather than being treated as falsy and discarded
+  (Codex review, second round).
 - **The castxml L4 source-ABI extractor now folds its probed castxml/
   bundled-Clang identity into the D8 per-TU cache key**
   (`CastxmlSourceExtractor.cache_identity_extra()`, Codex review) —
@@ -92,4 +96,9 @@ A new changelog fragment. See changelog.d/README.md for the workflow.
   binary at the cached path was upgraded or swapped, since
   `CASTXML_EXTRACTOR_VERSION` alone doesn't change on a toolchain
   upgrade. Mirrors `ClangSourceExtractor.cache_identity_extra()`'s
-  existing `--gcc-path` identity fold.
+  existing `--gcc-path` identity fold. The bundled-compiler banner regex
+  now also recognizes an `LLVM version ...`-spelled banner, not just
+  `clang version ...` (matching `dumper_castxml_probe`'s existing
+  handling of the same spelling variance), so two installs differing
+  only in that banner spelling no longer read as the same
+  `compiler_version`/cache identity (Codex review, second round).

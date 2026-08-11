@@ -1091,6 +1091,38 @@ def test_castxml_tool_version_includes_bundled_clang_identity(monkeypatch) -> No
     castxml_mod._castxml_tool_version.cache_clear()
 
 
+def test_castxml_tool_version_recognizes_llvm_spelled_banner(monkeypatch) -> None:
+    """Codex review, PR #719, third round: some castxml/frontend builds spell
+    the bundled-compiler banner line "LLVM version ..." rather than "clang
+    version ..." (the same variance `dumper_castxml_probe._CLANG_VERSION_RE`
+    already documents/handles) -- two installs differing only in that
+    spelling must not collapse to the identical compiler_version."""
+    import subprocess as subprocess_mod
+
+    from abicheck.buildsource.source_extractors import castxml as castxml_mod
+
+    castxml_mod._castxml_tool_version.cache_clear()
+
+    def fake_run(*_args, **_kwargs):
+        return subprocess_mod.CompletedProcess(
+            args=["castxml", "--version"],
+            returncode=0,
+            stdout=(
+                "castxml version 0.6.3\n\n"
+                "CastXML project maintained and supported by Kitware "
+                "(kitware.com).\n\n"
+                "LLVM version 18.1.8\n"
+                "Target: x86_64-pc-linux-gnu\n"
+            ),
+            stderr="",
+        )
+
+    monkeypatch.setattr(castxml_mod.subprocess, "run", fake_run)
+    version = castxml_mod._castxml_tool_version("castxml")
+    assert "LLVM version 18.1.8" in version
+    castxml_mod._castxml_tool_version.cache_clear()
+
+
 def test_castxml_extractor_cache_identity_extra_folds_probed_tool_version(
     monkeypatch,
 ) -> None:

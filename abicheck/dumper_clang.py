@@ -1465,7 +1465,7 @@ class _ClangAstParser:
             if name.startswith("__"):
                 continue
             identity = "::".join([*entry.scope, name]) if entry.scope else name
-            if msg := _clang_deprecated_message(node):
+            if (msg := _clang_deprecated_message(node)) is not None:  # "" == bare
                 deprecated.setdefault(identity, msg)
             if (existing := best.get(identity)) is None:
                 best[identity] = (entry, name)
@@ -1508,9 +1508,9 @@ class _ClangAstParser:
         node = entry.node
         kind = _record_kind(node)
         own_name = override_name or str(node.get("name", ""))
+        deprecated = dep_msg if dep_msg is not None else _clang_deprecated_message(node)
         if is_opaque:
-            # Mirrors dumper_castxml.py's `incomplete="1"` branch: neutral/
-            # unknown defaults, no member/base/vtable data.
+            # Mirrors dumper_castxml.py's `incomplete="1"` branch.
             return RecordType(
                 name=own_name,
                 kind=kind,
@@ -1532,7 +1532,7 @@ class _ClangAstParser:
                 is_template_pattern=entry.in_template,
                 has_anonymous_aggregate_fields=False,
                 source_location=self._source_location(entry),
-                deprecated=dep_msg or _clang_deprecated_message(node),
+                deprecated=deprecated,
             )
         fields = self._parse_fields(node)
         bases, virtual_bases, _base_access = _parse_bases(node)
@@ -1600,7 +1600,7 @@ class _ClangAstParser:
             has_anonymous_aggregate_fields=bool(injected)
             and all(f.name in injected for f in fields),
             source_location=self._source_location(entry),
-            deprecated=dep_msg or _clang_deprecated_message(node),
+            deprecated=deprecated,
         )
 
     def _parse_fields(self, node: dict[str, Any]) -> list[TypeField]:

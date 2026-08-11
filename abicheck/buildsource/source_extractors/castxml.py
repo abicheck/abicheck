@@ -80,9 +80,13 @@ _CASTXML_VERSION_RE = re.compile(r"castxml version (\S+)")
 #: literal execution path -- see AGENTS.md's toolchain-profile note), so
 #: real `--version` output always names it on its own banner line (e.g.
 #: "Ubuntu clang version 17.0.6 (9ubuntu1)"), distinct from the leading
-#: "castxml version X.Y.Z" line this module already parses.
+#: "castxml version X.Y.Z" line this module already parses. The banner
+#: spelling itself varies ("clang version ..." vs "LLVM version ..." --
+#: same reasoning `dumper_castxml_probe._CLANG_VERSION_RE` already
+#: documents for the identical bundled frontend), so both are matched
+#: (Codex review, PR #719).
 _CASTXML_BUNDLED_COMPILER_RE = re.compile(
-    r"^.*\bclang version\b.*$", re.MULTILINE | re.IGNORECASE
+    r"^.*\b(?:clang|LLVM) version\b.*$", re.MULTILINE | re.IGNORECASE
 )
 
 
