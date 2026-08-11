@@ -67,14 +67,12 @@ def _rec(name: str) -> RecordType:
 
 
 def _rec_at(name: str, source_location: str = "communicator.h:10") -> RecordType:
-    """A type with a declaring source location, the type-alias identity
-    evidence -- unlike the location-less ``_rec()``. Two spellings of the
-    same physical declaration (a true inline-namespace alias pair) share
-    the exact same location by construction; two genuinely unrelated
-    declarations essentially never do, unlike a structural fingerprint
-    (Codex review, P1: structural coincidence between unrelated types is
-    routine, both for empty records sharing a kind and for non-trivial
-    records that merely happen to share a field layout)."""
+    """A type with a declaring source location set. NOT identity evidence
+    for the type-alias merge (``_type_index_items`` always uses ``None``
+    for types -- see its docstring for why `source_location` was tried
+    and falsified as type identity, same as an earlier structural
+    fingerprint attempt); this helper exists only to build the specific
+    location shapes those falsifying test cases need."""
     return RecordType(name=name, kind="class", source_location=source_location)
 
 
@@ -416,10 +414,20 @@ class TestExperimentalRemovedWithoutReplacement:
             for c in changes
         )
 
-    def test_versioned_inline_namespace_type_spellings_report_once(self) -> None:
-        # Two spellings of the SAME physical declaration share one
-        # source_location -- the type-alias identity evidence -- since a
-        # true inline-namespace alias pair resolves to the same AST node.
+    def test_versioned_inline_namespace_type_spellings_double_report_is_accepted(
+        self,
+    ) -> None:
+        """Known, documented limitation (see `_type_index_items`'s
+        docstring): unlike a function's mangled name, no `RecordType`
+        field has survived adversarial review as reliable alias-identity
+        evidence -- a structural fingerprint and `source_location` were
+        both tried and falsified by concrete Codex review
+        counterexamples. Two spellings of the same type via a versioned
+        inline namespace are therefore reported as two separate
+        `EXPERIMENTAL_REMOVED_WITHOUT_REPLACEMENT` findings rather than
+        merged into one, even though (unlike the unrelated-declaration
+        tests below) they really are the same entity here.
+        """
         old = _snap(types=[
             _rec_at("detail::v1::cpu_feature_map", "spmd.h:10"),
             _rec_at("detail::cpu_feature_map", "spmd.h:10"),
@@ -432,20 +440,15 @@ class TestExperimentalRemovedWithoutReplacement:
             c for c in changes
             if c.kind == ChangeKind.EXPERIMENTAL_REMOVED_WITHOUT_REPLACEMENT
         ]
-        assert len(removed) == 1
+        assert len(removed) == 2
 
     def test_unrelated_types_sharing_version_shaped_segment_not_merged(
         self,
     ) -> None:
-        """Codex review, P1 (two rounds): a structural (kind/size/fields/
-        bases) fingerprint coincides routinely between genuinely unrelated
-        declarations -- for two empty records sharing a kind, and even for
-        two non-trivial records that merely happen to share a field
-        layout -- so it was replaced with `source_location` identity.
-        Two different declarations at different locations (or with no
-        location evidence at all, as here) must NOT be treated as an alias
-        pair. Removing one while the other survives must still report the
-        removal.
+        """With no type-alias merging at all, two unrelated types that
+        happen to share a leaf name via a version-shaped segment are
+        naturally never merged -- removing one while the other survives
+        must still report the removal.
         """
         old = _snap(types=[
             _rec("preview::v1::bar"),
@@ -460,15 +463,22 @@ class TestExperimentalRemovedWithoutReplacement:
         assert len(removed) == 1
         assert removed[0].symbol == "preview::v1::bar"
 
-    def test_unrelated_types_with_different_locations_not_merged(self) -> None:
-        """Two types that DO carry source-location evidence, but at
-        different locations, must not be merged just because they share a
-        leaf name via a version-shaped segment."""
+    def test_unrelated_types_sharing_a_bare_filename_location_not_merged(
+        self,
+    ) -> None:
+        """Codex review, P1, fresh finding: a `source_location` can
+        legitimately be a bare filename with no line (clang/DWARF both
+        omit the line when it's unavailable), so two unrelated types in
+        the same file both missing line info would collide on an
+        identical location under location-based identity. With type
+        identity always `None` now, this can't happen -- included as a
+        regression pin for the specific counterexample.
+        """
         old = _snap(types=[
-            _rec_at("preview::v1::bar", "a.h:1"),
-            _rec_at("preview::bar", "b.h:2"),
+            _rec_at("preview::v1::bar", "shared.h"),
+            _rec_at("preview::bar", "shared.h"),
         ])
-        new = _snap(types=[_rec_at("preview::bar", "b.h:2")])
+        new = _snap(types=[_rec_at("preview::bar", "shared.h")])
         changes = detect_experimental_namespace_changes(old, new)
         removed = [
             c for c in changes

@@ -179,9 +179,10 @@ def _paired_stable_indices(
     genuine value/removal on one spelling and misreport the other). Each
     item's ``identity`` is a value from the snapshot's own extraction data
     that is invariant across an inline-namespace's two spellings but not
-    expected to coincide for two unrelated declarations (a function's
-    mangled name; a type's declaring source location) -- ``None`` when no
-    identity evidence is available. Two items are only unioned into the
+    expected to coincide for two unrelated declarations (currently only a
+    function's mangled name qualifies -- see ``_type_index_items`` for two
+    candidate type identities that were tried and falsified) -- ``None``
+    when no identity evidence is available. Two items are only unioned into the
     same component when their identity values are both non-``None`` and
     equal; an item with no evidence, or with evidence that never coincides
     with anything else's, stays its own singleton component -- the
@@ -312,24 +313,36 @@ def _type_index_items(
 ) -> list[_IndexItem]:
     """Collect types as ``_IndexItem``\\ s for the paired index.
 
-    Identity evidence is the type's declaring ``source_location``
-    (``"header.h:42"``), not a structural (kind/size/fields/bases)
-    fingerprint: Codex review demonstrated, across two separate rounds,
-    that structural coincidence between genuinely unrelated declarations
-    is routine, not rare -- true for two empty tag/marker types sharing a
-    kind, and *also* true for two non-trivial types that merely happen to
-    share the same field layout (a common shape for simple POD-like
-    types), in which case an unrelated survivor can silently absorb a real
-    removal on the versioned spelling. Two *different* declarations
-    essentially never share an exact source location, though -- unlike a
-    structural fingerprint, `source_location` is not derived from the
-    type's own shape at all, so two distinct types cannot coincide on it
-    the way two independently-designed layouts can. A true alias pair (one
-    physical AST declaration reachable under two spellings) resolves to
-    the *same* underlying node and therefore shares this location by
-    construction, mirroring how a function's mangled name is trustworthy
-    identity. ``None`` (unavailable in DWARF-only/symbols-only mode, or an
-    empty string) means no identity evidence, same fallback as elsewhere.
+    Identity is always ``None`` here -- unlike a function's mangled name,
+    no field on ``RecordType`` has survived adversarial review as reliable
+    alias-identity evidence, so two spellings of a type are never merged;
+    the pre-existing double-report is the accepted, documented limitation
+    for types (mirrored below for constants). Two attempts were tried and
+    falsified, both by concrete Codex review counterexamples:
+
+    1. A structural (kind/size/alignment/fields/bases) fingerprint --
+       shown to coincide routinely between genuinely unrelated
+       declarations: trivially for two empty tag/marker types sharing a
+       kind, and non-trivially for two types that merely happen to share
+       a field layout (a common shape for simple POD-like types) --
+       either way letting an unrelated survivor silently absorb a real
+       removal on the versioned spelling.
+    2. The type's declaring ``source_location`` (``"header.h:42"``) --
+       plausible since two spellings of one physical AST declaration
+       resolve to the same node and would share it by construction, the
+       way a function's mangled name does. Falsified: `dumper_clang.py`'s
+       and `dwarf_snapshot.py`'s own `_source_location`/`_resolve_decl_file`
+       docstrings both state a location can legitimately be a *bare
+       filename*, with no line, when the line is unavailable (clang: a
+       declaration on the same source line as its parent; DWARF: no
+       `DW_AT_decl_line`) -- so two unrelated types in the same file both
+       missing line info collide on an identical bare-filename location.
+       `file:line` itself isn't even guaranteed unique across declarations
+       written or macro-expanded on one physical line.
+
+    Closing this for real needs identity ``RecordType`` doesn't carry
+    today (a stable per-declaration id from the AST/DWARF backend) -- out
+    of scope here, same as the analogous gap for constants.
     """
     out: list[_IndexItem] = []
     for t in snap.types:
@@ -339,7 +352,7 @@ def _type_index_items(
             continue
         leaf = segs[-1]
         stripped, _ = _strip_experimental(qname, experimental_namespaces)
-        out.append(_IndexItem(qname, stripped, leaf, t.source_location or None))
+        out.append(_IndexItem(qname, stripped, leaf, None))
     return out
 
 
