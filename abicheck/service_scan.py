@@ -1193,12 +1193,11 @@ def run_scan(req: ScanRequest) -> ScanResult:
         raise ValueError("run_scan accepts exactly one binary")
     binary = req.binaries[0]
 
-    # ADR-049 Phase 5 review (Codex, PR #657): these fields only mean
-    # anything for a baseline comparison (`run_scan_core` only calls
-    # `_run_baseline_compare` when `baseline is not None` AND `scan_mode is
-    # not ScanMode.AUDIT`) -- without one they'd be silently accepted and
-    # discarded, which could hide a `policy_file` requiring evidence the
-    # caller actually needed. Mirrors the CLI's identical `scan_cmd` guard.
+    if req.max_findings is not None and req.max_findings < 1:
+        # Up front, not after a wasted full scan (Codex review).
+        raise ValidationError(f"ScanRequest.max_findings must be positive, got {req.max_findings}")
+    # ADR-049 Phase 5 review (Codex, PR #657): these fields only mean anything for a baseline comparison (`run_scan_core` only calls
+    # `_run_baseline_compare` when `baseline is not None` AND `scan_mode is not ScanMode.AUDIT`) -- without one they'd be silently accepted and discarded, which could hide a `policy_file` requiring evidence the caller actually needed. Mirrors the CLI's identical `scan_cmd` guard.
     if req.baseline is None or ScanMode(req.mode) is ScanMode.AUDIT:
         _reject_comparison_only_fields(req)
     else:

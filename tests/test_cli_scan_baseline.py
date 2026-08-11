@@ -170,7 +170,11 @@ class TestResolveMaxBaselineFindings:
         assert csb._resolve_max_baseline_findings(50) == 50
 
     def test_explicit_zero_or_negative_is_a_usage_error(self) -> None:
-        with pytest.raises(click.ClickException):
+        # Plain ValueError, not click.ClickException: this shared helper is
+        # also reached from the Python API, whose callers never import click
+        # (Codex review). The CLI's own --max-findings IntRange(min=1) means
+        # this branch is unreachable from cli_scan.scan_cmd.
+        with pytest.raises(ValueError, match="positive integer"):
             csb._resolve_max_baseline_findings(0)
 
     def test_env_var_override(self, monkeypatch: pytest.MonkeyPatch) -> None:

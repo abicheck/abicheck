@@ -222,8 +222,19 @@ def _resolve_max_baseline_findings(max_findings: int | None) -> int:
     """
     if max_findings is not None:
         if max_findings < 1:
-            raise click.ClickException(
-                f"--max-findings must be a positive integer, got {max_findings}"
+            # A plain ValueError, not click.ClickException: this shared helper
+            # is also reached from the Python API (service_scan.run_scan ->
+            # scan_engine.run_scan_core -> _run_baseline_compare), whose
+            # callers never import click. The CLI path itself never reaches
+            # this branch -- `scan --max-findings` is a `click.IntRange(min=1)`
+            # option, so click already rejects a non-positive value before
+            # cli_scan.scan_cmd ever calls in this deep (Codex review: a
+            # click.ClickException leaking through the typed API is also the
+            # wrong exception type for that boundary -- run_scan's own
+            # upfront check raises errors.ValidationError instead, and this
+            # is only a defensive fallback for a caller that bypasses it).
+            raise ValueError(
+                f"max_findings must be a positive integer, got {max_findings}"
             )
         return max_findings
     import os
