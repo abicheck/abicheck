@@ -597,6 +597,57 @@ def test_parse_types_opaque_redecl_uses_most_recent_deprecated_reason() -> None:
     assert types2[0].deprecated == ""
 
 
+def test_parse_types_opaque_redecl_keeps_public_location_over_private() -> None:
+    """A public `struct Handle;` compatibly redeclared with a different class
+    key in a private header (`class Handle;`) must keep its PUBLIC
+    source_location -- kind canonicalization (min(kind) -> "class") must not
+    also drag the private redecl's location along with it, or a genuinely
+    public handle would silently read as PRIVATE_HEADER downstream (Codex
+    review, PR #719)."""
+    root = _tu(
+        {
+            "kind": "CXXRecordDecl",
+            "name": "Handle",
+            "tagUsed": "struct",
+            "loc": {"file": "include/foo.h", "line": 1},
+        },
+        {
+            "kind": "CXXRecordDecl",
+            "name": "Handle",
+            "tagUsed": "class",
+            "loc": {"file": "src/internal.h", "line": 2},
+        },
+    )
+    parser = _ClangAstParser(root, set(), set(), public_header_paths=["include/foo.h"])
+    types = [t for t in parser.parse_types() if t.name == "Handle"]
+    assert len(types) == 1
+    assert types[0].kind == "class"  # still canonicalized via min(kind)
+    assert types[0].source_location == "include/foo.h:1"
+
+    # Reversed declaration order: the public one still wins the location.
+    root2 = _tu(
+        {
+            "kind": "CXXRecordDecl",
+            "name": "Handle",
+            "tagUsed": "class",
+            "loc": {"file": "src/internal.h", "line": 1},
+        },
+        {
+            "kind": "CXXRecordDecl",
+            "name": "Handle",
+            "tagUsed": "struct",
+            "loc": {"file": "include/foo.h", "line": 2},
+        },
+    )
+    parser2 = _ClangAstParser(
+        root2, set(), set(), public_header_paths=["include/foo.h"]
+    )
+    types2 = [t for t in parser2.parse_types() if t.name == "Handle"]
+    assert len(types2) == 1
+    assert types2[0].kind == "class"
+    assert types2[0].source_location == "include/foo.h:2"
+
+
 def test_parse_types_sets_qualified_name_for_namespaced_record() -> None:
     # Codex review (G28 Phase 4): RecordType.qualified_name must be populated
     # for a namespaced/nested type -- the layout tool's own JSON output

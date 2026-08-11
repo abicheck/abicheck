@@ -130,3 +130,17 @@ A new changelog fragment. See changelog.d/README.md for the workflow.
   own normalization), since a wrapper/build combination that writes its
   `--version` banner to stderr or capitalizes `CastXML` previously
   probed as an empty identity.
+- **A public opaque-handle forward decl compatibly redeclared with a
+  different class key in a private/transitive header no longer inherits
+  that private redecl's `source_location`.** The `class Handle; struct
+  Handle;` kind-canonicalization fix above picked one `_Decl` to supply
+  BOTH the canonical kind and the emitted location together — but when
+  the public and private declarations disagree on class key, the
+  lexicographically-smaller one isn't necessarily the public one, so a
+  genuinely public handle could silently read as `PRIVATE_HEADER`
+  downstream and drop out of public-contract analysis. `parse_types()`
+  now decides kind (`min(kind)` over every non-definition redeclaration)
+  and location (the most-public declaration, ties keeping whichever was
+  already kept) independently, mirroring the same location-preservation
+  principle `tu_merge.py`'s own cross-TU merge already applies (Codex
+  review, PR #719).
