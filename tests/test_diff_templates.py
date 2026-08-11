@@ -199,6 +199,17 @@ class TestStripParamSignature:
         # never a further "(".
         assert _strip_param_signature("lib::sort(int*, int*)") == "lib::sort"
 
+    def test_decltype_return_type_does_not_truncate(self) -> None:
+        # Codex review, fresh evidence: a dependent decltype expression in
+        # the return type also has its own "(" preceded by whitespace
+        # ("decltype (...)") and no "*"/"&" at all — the current rule
+        # (whitespace-preceded "(" is never a real parameter list) covers
+        # this the same way it covers the two pointer-wrapper shapes.
+        sig = "decltype ({parm#1}+{parm#1}) ns::sort<int>(int)"
+        result = _strip_param_signature(sig)
+        from abicheck.diff_namespaces import _segments
+        assert _segments(result)[-1] == "sort"
+
 
 # ---------------------------------------------------------------------------
 # INTERNAL_TEMPLATE_LEAKS_VIA_PUBLIC_API
