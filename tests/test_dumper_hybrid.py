@@ -794,6 +794,48 @@ class TestTypeAndFieldFactBackfill:
         assert is_castxml_backed_fact(merged, type_fact_key("Shape", "is_abstract"))
         assert is_castxml_backed_fact(merged, type_fact_key("Shape", "deprecated"))
 
+    def test_has_anonymous_aggregate_fields_or_merged_from_clang(self):
+        """G31 Phase C follow-up (PR #719): unlike is_abstract/deprecated
+        above, this is a plain bool, not an Optional tri-state -- castxml's
+        own False (real, populated fields) is never itself the trigger; the
+        merge OR-merges instead of null-checking."""
+        t_castxml = RecordType(name="AllAnon", kind="struct", size_bits=32)
+        t_clang = RecordType(
+            name="AllAnon",
+            kind="struct",
+            size_bits=32,
+            has_anonymous_aggregate_fields=True,
+        )
+        castxml = _snap(types=[t_castxml], ast_producer="castxml")
+        clang = _snap(types=[t_clang], ast_producer="clang")
+        merged = merge_snapshots(castxml, clang)
+        assert merged.type_by_name("AllAnon").has_anonymous_aggregate_fields is True
+
+    def test_has_anonymous_aggregate_fields_stays_false_when_neither_side_sets_it(self):
+        t_castxml = RecordType(name="Plain", kind="struct", size_bits=32)
+        t_clang = RecordType(name="Plain", kind="struct", size_bits=32)
+        castxml = _snap(types=[t_castxml], ast_producer="castxml")
+        clang = _snap(types=[t_clang], ast_producer="clang")
+        merged = merge_snapshots(castxml, clang)
+        assert merged.type_by_name("Plain").has_anonymous_aggregate_fields is False
+
+    def test_is_template_pattern_or_merged_from_clang_for_a_matched_type(self):
+        """Empirically inert for the current producer pair (a clang template
+        PATTERN never shares a type_map_key with any castxml-matched
+        concrete type -- verified against real castxml 0.6.3 + clang 18
+        output, see dumper_hybrid.py's own docstring) -- this synthetic
+        matched-type case cannot occur on real input, but the merge logic
+        itself must still be correct defense-in-depth, same reasoning as
+        the pre-existing is_abstract backfill."""
+        t_castxml = RecordType(name="Box", kind="struct", size_bits=32)
+        t_clang = RecordType(
+            name="Box", kind="struct", size_bits=32, is_template_pattern=True
+        )
+        castxml = _snap(types=[t_castxml], ast_producer="castxml")
+        clang = _snap(types=[t_clang], ast_producer="clang")
+        merged = merge_snapshots(castxml, clang)
+        assert merged.type_by_name("Box").is_template_pattern is True
+
     def test_field_default_and_deprecated_backfill(self):
         old_field = TypeField(
             name="x", type="int", offset_bits=0, default=None, deprecated=None

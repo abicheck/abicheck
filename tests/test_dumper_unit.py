@@ -1928,6 +1928,11 @@ class TestCastxmlParserEnums:
         assert len(enums[0].members) == 3
         assert enums[0].members[0].name == "RED"
         assert enums[0].members[0].value == 0
+        # No `type` attribute on this synthetic element -- falls back to the
+        # model's own default, same as before underlying_type was read at
+        # all. See test_castxml_enum_underlying_type.py for the populated
+        # case.
+        assert enums[0].underlying_type == "int"
 
     def test_skip_unnamed_enum(self):
         e = Element("Enumeration", id="e1", name="")

@@ -142,16 +142,23 @@ def test_matrix_claims_match_parser_source(caps) -> None:
 def test_scanner_distinguishes_a_placeholder_from_an_extraction(caps) -> None:
     """Guards the check above from silently degrading into "keyword present".
 
-    ``dumper_clang.py`` passes ``size_bits=None`` and ``is_opaque=False`` —
-    keywords that are present but extract nothing. If the scanner ever counted
-    those as extraction, `test_matrix_claims_match_parser_source` would pass
-    against a matrix claiming clang computes record layout.
+    ``dumper_clang.py`` passes ``size_bits=None`` — a keyword that is present
+    but extracts nothing. If the scanner ever counted that as extraction,
+    `test_matrix_claims_match_parser_source` would pass against a matrix
+    claiming clang computes record layout.
+
+    ``is_opaque`` used to be this test's second placeholder example (a
+    hardcoded ``False`` literal, since `parse_types` skipped every
+    non-definition record entirely) before PR #719's opaque-handle fix made
+    it a genuine `is_opaque=is_opaque` variable reference in both of
+    `_build_record`'s branches — it now belongs in the EXTRACTED assertion
+    below instead.
     """
     clang = caps.clang_evidence()
     assert clang["RecordType"]["size_bits"] is caps.Evidence.LITERAL
-    assert clang["RecordType"]["is_opaque"] is caps.Evidence.LITERAL
-    # ...and a genuinely computed one on the same class is not mistaken for it.
+    # ...and genuinely computed facts on the same class are not mistaken for it.
     assert clang["RecordType"]["is_union"] is caps.Evidence.EXTRACTED
+    assert clang["RecordType"]["is_opaque"] is caps.Evidence.EXTRACTED
 
 
 def test_scanner_reads_multiline_values(caps) -> None:
@@ -222,14 +229,22 @@ def test_every_merge_backfilled_attr_is_declared(caps) -> None:
 def test_hybrid_is_castxml_for_a_fact_the_merge_does_not_backfill(caps) -> None:
     """The consequence the doc's Known gaps section spells out: a hybrid
     snapshot is castxml-based, so a clang-only fact nothing backfills does NOT
-    reach a declaration both backends saw."""
+    reach a declaration both backends saw.
+
+    Two prior fixtures for this test stopped fitting the shape as the fields
+    they named got backfilled for real: ``EnumType.underlying_type`` (castxml
+    itself started extracting a real value) and ``RecordType.
+    is_template_pattern``/``has_anonymous_aggregate_fields`` (PR #719's OR-merge
+    fix). ``Param.is_va_list`` has the same castxml-NONE/clang-populated/
+    not-backfilled shape today, and is deliberately excluded from hybrid's
+    backfill list even at the diff-detector level (see its own note in
+    ``FACT_ROWS`` and ``diff_symbols._diff_param_va_list``'s producer gate).
+    """
     row = next(
-        r
-        for r in caps.FACT_ROWS
-        if (r.owner, r.field) == ("EnumType", "underlying_type")
+        r for r in caps.FACT_ROWS if (r.owner, r.field) == ("Param", "is_va_list")
     )
     assert not row.hybrid_backfilled
-    assert row.clang is caps.Capability.FULL
+    assert row.clang is caps.Capability.PARTIAL
     assert caps.hybrid_capability(row) is caps.Capability.NONE
 
 

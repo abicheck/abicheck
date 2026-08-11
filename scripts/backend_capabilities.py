@@ -428,13 +428,21 @@ FACT_ROWS: tuple[FactRow, ...] = (
         "RecordType",
         "is_opaque",
         _FULL,
-        _NONE,
+        _FULL,
         note=(
-            "Correct by construction rather than a gap: clang's `parse_types` "
-            "skips every non-definition, so `_build_record` never sees an "
-            "incomplete record and hardcodes `False`. The consequence is still "
-            "real — an opaque handle type (`struct A;` alone) is *absent* from "
-            "a clang snapshot where castxml emits it with `is_opaque=True`."
+            "Closed in PR #719: `parse_types` previously skipped every "
+            "non-definition record entirely (so an opaque handle type "
+            "`struct A;` alone was *absent* from a clang snapshot rather than "
+            "present with `is_opaque=True`, unlike castxml). Now emits an "
+            "opaque stub for a forward-declaration-only identity, collapsing "
+            "to the definition (never opaque) when both a forward decl and a "
+            "definition share one identity in the same TU — verified against "
+            "real clang 18 output that both land as separate "
+            "`CXXRecordDecl`/`RecordDecl` nodes. No explicit hybrid backfill "
+            "needed: castxml sees the identical header text, so its own real "
+            "`is_opaque` already answers correctly for a type present on "
+            "both backends; a clang-only opaque entity reaches a hybrid "
+            "snapshot correctly via the ordinary clang-only-append path."
         ),
     ),
     FactRow("RecordType", "is_final", _FULL, _FULL),
@@ -443,11 +451,18 @@ FACT_ROWS: tuple[FactRow, ...] = (
         "is_template_pattern",
         _NONE,
         _FULL,
+        hybrid_backfilled=True,
         note=(
             "castxml emits template *instantiations*, never the uninstantiated "
-            "pattern, so it has nothing to mark. Not backfilled by the hybrid "
-            "merge — but a pattern reaches a hybrid snapshot only through the "
-            "clang-only append path, which preserves the flag."
+            "pattern, so it has nothing to mark. OR-merged by the hybrid merge "
+            "since PR #719 (a plain bool, not an Optional tri-state -- castxml's "
+            "own `False` is never itself the backfill trigger the way a `None` "
+            "is elsewhere in this table) -- verified against real castxml 0.6.3 "
+            "+ clang 18 output that this is empirically inert for the current "
+            "producer pair, since a clang template pattern never shares a "
+            "type_map_key with any castxml-matched concrete type; a pattern "
+            "reaches a hybrid snapshot only through the clang-only append path, "
+            "which already preserves the flag on its own."
         ),
     ),
     FactRow(
@@ -455,12 +470,17 @@ FACT_ROWS: tuple[FactRow, ...] = (
         "has_anonymous_aggregate_fields",
         _NONE,
         _FULL,
+        hybrid_backfilled=True,
         note=(
             "clang flattens an anonymous struct/union into its parent and "
             "records that it did, which `dumper_layout_backfill.py` uses when "
-            "matching DWARF fields. Not backfilled: a record both backends saw "
-            "keeps castxml's `False` (harmless in practice, since castxml also "
-            "supplies the real offsets that backfill would otherwise seek)."
+            "matching DWARF fields. OR-merged by the hybrid merge since PR "
+            "#719 (same plain-bool OR-merge as `is_template_pattern` above, "
+            "not the `None`-check pattern) -- unlike that field this one is "
+            "not provably inert: an opaque/incomplete castxml record could "
+            "legitimately reach the merge with an empty `fields` list for a "
+            "genuinely anonymous-aggregate-only record, where clang's `True` "
+            "is the only signal available."
         ),
     ),
     FactRow("RecordType", "source_header", _OTHER, _OTHER, note=_PROVENANCE_PASS),
@@ -544,14 +564,25 @@ FACT_ROWS: tuple[FactRow, ...] = (
     FactRow(
         "EnumType",
         "underlying_type",
-        _NONE,
         _FULL,
+        _PARTIAL,
         note=(
-            "clang reads `fixedUnderlyingType`; castxml never populates it, so "
-            "a castxml (and therefore hybrid) enum keeps the model default "
-            "`int` whatever the header declared. No diff detector reads this "
-            "field — `enum_underlying_size_changed` is computed from DWARF — "
-            "but `tu_merge.py`'s ODR conflict check does."
+            "clang reads `fixedUnderlyingType` — the REAL, correct value "
+            'for a fixed enum (`enum E : short`) — but hard-codes `"int"` '
+            "for an unfixed enum (Codex review, PR #719, follow-up), since "
+            "clang's AST JSON exposes no compiler-selected-underlying-type "
+            "fact for the unfixed case at all; the true value can differ "
+            "(e.g. `unsigned int`, chosen from the member value range). "
+            "castxml reads the `<Enumeration type=...>` id, which resolves "
+            "to the real compiler-picked underlying integer type either way "
+            "— fixed or implementation-chosen (verified against real "
+            "castxml 0.6.3 output) — so it stays `_FULL`. Not "
+            "hybrid-backfilled (see `hybrid_backfilled` above), but since "
+            "castxml itself is now a real producer, hybrid inherits a real "
+            "answer instead of the previous silent `int` default. No diff "
+            "detector reads this field — `enum_underlying_size_changed` is "
+            "computed from DWARF — but `tu_merge.py`'s ODR conflict check "
+            "does."
         ),
     ),
     FactRow("EnumType", "source_location", _FULL, _FULL),

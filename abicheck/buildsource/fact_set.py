@@ -92,14 +92,37 @@ class FactCompatibility:
       promises. This specifically gates *existence/removal* claims (an
       identity present old, absent new): under a contract mismatch, absence
       may only mean the old contract never mandated collecting that family,
-      not that the entity disappeared. It does **not** gate a *content*
-      comparison for an identity present on **both** sides — a signature/type
+      not that the entity disappeared. `source_diff.py`'s removal-detection
+      loops in `_diff_generated`/`_diff_typedefs`/`_diff_macros` are what this
+      gates.
+    - ``structured_content_comparable``: whether a structured fact's hash
+      (``type_hash``/``value``) means the same thing for a *content*
+      comparison on an identity present on **both** sides. An earlier design
+      here argued this never needs producer-recipe gating — "a signature/type
       hash means the same thing regardless of which mandatory-family contract
-      collected it, so those comparisons remain valid even under this flag
-      (a review found the previous wording implied otherwise while nothing
-      consumed it that way; `source_diff.py`'s removal-detection loops in
-      `_diff_generated`/`_diff_typedefs`/`_diff_macros` are what this
-      actually gates).
+      collected it" — on the premise that a structured fact's extraction
+      recipe cannot change independently of ``fact_set.version`` the way an
+      opaque hash's canonicalization recipe can. G31 Phase C fact-completeness
+      broke that premise for real: `EnumType.underlying_type` went from an
+      always-``"int"`` placeholder to a genuinely extracted value on a
+      castxml-producer version bump alone, with no `fact_set.version` change
+      — so a persisted old-producer baseline's enum `type_hash` and a
+      fresh new-producer extraction's `type_hash` can now differ for an
+      UNCHANGED header, purely from the extractor upgrade (Codex review, PR
+      #719). Gated on the same producer/producer_version/compiler_version
+      identity rules as ``opaque_hashes_comparable`` — but, unlike that
+      flag, NEVER overridden by a matching :func:`hash_recipe_id`: that id
+      is a declared statement about the OPAQUE-hash canonicalization recipe
+      specifically, and proves nothing about whether structured fact
+      extraction also stayed identical (a second Codex review round on the
+      same PR — a producer could keep one stable opaque-hash recipe id
+      release over release while still changing what a structured fact
+      extracts, exactly the `EnumType.underlying_type` shape above).
+      Trusted unconditionally would mean accepting that a genuine content
+      change spanning a real producer/compiler upgrade may go unreported
+      until both sides are re-collected with the same producer — the same
+      trade-off ``opaque_hashes_comparable`` already accepts for body/
+      template hashes, just without the recipe-id escape hatch.
     - ``opaque_hashes_comparable``: producer-specific body/template hashes
       (``inline_body_changed``, ``template_body_changed``) — false on a
       producer/producer_version/compiler_version mismatch too, since the
@@ -114,6 +137,7 @@ class FactCompatibility:
     """
 
     structured_facts_comparable: bool
+    structured_content_comparable: bool
     opaque_hashes_comparable: bool
     source_edges_comparable: bool
     issues: tuple[FactSetIssue, ...]
@@ -177,6 +201,21 @@ def rollup_fact_set(tus: list[SourceAbiTu]) -> dict[str, Any]:
     if all(s == first for s in non_empty[1:]):
         return first
     return {}
+
+
+def fact_set_rollup_is_inconsistent(tus: list[SourceAbiTu]) -> bool:
+    """Whether *tus* disagreed on ``fact_set`` -- as opposed to
+    :func:`rollup_fact_set` returning ``{}`` because no TU ever populated one
+    at all. Both collapse to the identical ``{}``, but they are not the same
+    claim: "TUs disagree" must not receive the same forgiveness
+    :func:`check_fact_compatibility` grants a genuinely symmetric pair of
+    pre-C.8 (never-populated) fact sets (Codex review, PR #719).
+    """
+    non_empty = [dict(tu.fact_set) for tu in tus if tu.fact_set]
+    if not non_empty or len(non_empty) != len(tus):
+        return bool(non_empty)  # some reported, some silent -- a real mismatch
+    first = non_empty[0]
+    return not all(s == first for s in non_empty[1:])
 
 
 def incomplete_families(coverage: dict[str, str]) -> list[str]:
@@ -320,15 +359,16 @@ _HARD_BLOCKING_RULES = frozenset(
     {"fact_set_name_mismatch", "fact_set_version_mismatch"}
 )
 
-#: FactSetIssue rules whose presence means opaque body/template hashes may
-#: not be byte-comparable across the old/new pair (rule 3: producer/
-#: producer_version/compiler_version/compiler_family identify the
-#: canonicalization recipe that produced the opaque hashes -- a different
-#: compiler family mangles/canonicalizes differently even when the abicheck
-#: producer identity matches, same reasoning as a compiler_version drift).
-#: These *are* overridable by a matching hash_recipe_id -- a differential
-#: conformance run can prove two different producer/compiler identities emit
-#: byte-comparable hashes.
+#: FactSetIssue rules whose presence means opaque body/template hashes (and,
+#: since G31 Phase C's enum-underlying-type finding, a structured fact's own
+#: content hash too) may not be byte-/meaning-comparable across the old/new
+#: pair (rule 3: producer/producer_version/compiler_version/compiler_family
+#: identify the extraction/canonicalization recipe -- a different compiler
+#: family mangles/canonicalizes differently even when the abicheck producer
+#: identity matches, same reasoning as a compiler_version drift). These *are*
+#: overridable by a matching hash_recipe_id -- a differential conformance run
+#: can prove two different producer/compiler identities emit
+#: byte-/meaning-comparable hashes.
 _RECIPE_OVERRIDABLE_RULES = frozenset(
     {
         "producer_mismatch",
@@ -382,7 +422,11 @@ def hash_recipe_id(fact_set: dict[str, Any]) -> str:
 
 
 def check_fact_compatibility(
-    old_fact_set: dict[str, Any], new_fact_set: dict[str, Any]
+    old_fact_set: dict[str, Any],
+    new_fact_set: dict[str, Any],
+    *,
+    old_inconsistent: bool = False,
+    new_inconsistent: bool = False,
 ) -> FactCompatibility:
     """Structured, actionable comparability verdict (ADR-038 C.8 / PR2 gating).
 
@@ -391,27 +435,127 @@ def check_fact_compatibility(
     downstream reads. A matching :func:`hash_recipe_id` on both sides
     overrides an otherwise-invalidating producer/producer_version/
     compiler_version mismatch for ``opaque_hashes_comparable`` and
-    ``source_edges_comparable`` specifically — those two sides have declared
+    ``source_edges_comparable`` specifically — those sides have declared
     they use the same canonicalization recipe despite differing producer
-    identity strings.
+    identity strings. Deliberately NOT ``structured_content_comparable``
+    (Codex review, PR #719): ``hash_recipe_id`` is a declared statement
+    about the OPAQUE body/template hash canonicalization recipe
+    specifically — a differential conformance run (ADR-038 C.6) proves two
+    producers emit byte-comparable opaque hashes, it says nothing about
+    whether their STRUCTURED fact extraction (what a `type_hash` is built
+    from) stayed identical. A producer could legitimately keep the same
+    opaque-hash recipe id release over release while still changing what a
+    structured fact like `EnumType.underlying_type` extracts, so honoring
+    the override here would silently reopen the exact false-negative this
+    flag exists to prevent for a producer pair that happens to declare
+    conformant opaque hashes.
 
-    When one or both sides carry no ``fact_set`` at all (a pre-C.8 producer),
-    :func:`check_fact_set_compatibility` reports only the informational
-    ``fact_set_unknown`` warning — not one of the invalidating rules — so
-    every category stays comparable here too, preserving the existing
-    forward-compat behavior of never gating a pre-C.8 baseline's findings.
+    When **both** sides carry no ``fact_set`` at all (a genuinely pre-C.8
+    producer, or two hand-edited packs), :func:`check_fact_set_compatibility`
+    reports only the informational ``fact_set_unknown`` warning — not one of
+    the invalidating rules — so every category stays comparable here too,
+    preserving the existing forward-compat behavior of never gating a
+    symmetric pre-C.8 baseline pair's findings.
+
+    An **asymmetric** absence (exactly one side stamped a ``fact_set``, the
+    other didn't) is a different, riskier case and is NOT given that same
+    forgiveness for the recipe-overridable categories
+    (``structured_content_comparable``/``opaque_hashes_comparable``/
+    ``source_edges_comparable``): the unstamped side may be a baseline
+    persisted by literally the OLD producer version this PR's own gating was
+    built to guard against (Codex review, PR #719 — the castxml extractor
+    only started stamping ``fact_set`` in this same change, so every
+    already-persisted castxml L4 baseline predating it hits exactly this
+    one-sided shape when compared against a freshly re-collected new side).
+    Content comparability there defaults to "unknown, don't trust it" rather
+    than the symmetric case's "nothing to check, so nothing is gated".
+    Existence/removal detection (``structured_facts_comparable``) is
+    untouched by this distinction — that pre-C.8 forward-compat contract
+    predates this PR and is not the gap being closed here.
+
+    ``old_inconsistent``/``new_inconsistent`` (from
+    :func:`fact_set_rollup_is_inconsistent`) name a THIRD shape that also
+    collapses to an empty ``{}`` fact_set but must not receive the
+    symmetric-absence forgiveness either: a mixed-producer pack whose own
+    TUs disagreed on `fact_set`. That side's ``{}`` means "TUs disagree",
+    not "no evidence either way", so it is exactly as untrustworthy as the
+    asymmetric case above (Codex review, PR #719) -- and unlike that
+    asymmetric case, it also gates ``structured_facts_comparable``
+    (existence/removal detection): a genuinely inconsistent side cannot
+    establish absence either (a family missing because a mixed-in producer
+    variant never collects it looks identical to a real removal), whereas
+    the pre-C.8 asymmetric-absence exemption above predates this PR and is
+    intentionally left as-is.
     """
     issues = check_fact_set_compatibility(old_fact_set, new_fact_set)
     rules = {issue.rule for issue in issues}
-    same_recipe = bool(old_fact_set) and bool(new_fact_set)
-    if same_recipe:
-        same_recipe = hash_recipe_id(old_fact_set) == hash_recipe_id(new_fact_set)
+    both_present = bool(old_fact_set) and bool(new_fact_set)
+    one_sided = bool(old_fact_set) != bool(new_fact_set)
+    inconsistent = old_inconsistent or new_inconsistent
+    if inconsistent:
+        # check_fact_set_compatibility() above only ever compares the two
+        # ROLLED-UP fact_set dicts it was given -- it has no visibility into
+        # old_inconsistent/new_inconsistent at all, so it reports nothing
+        # when those dicts happen to be identical (Codex review, PR #719,
+        # follow-up): a serialized/forward-produced surface can carry
+        # fact_set_inconsistent=True while still stamping matching,
+        # non-empty representative fact_set content on both sides (the
+        # inconsistency is a fact about the surface's own constituent TUs,
+        # not about the rolled-up dict this comparison sees). Without an
+        # explicit issue here, that shape left `issues` empty even though
+        # every category below is gated off by `inconsistent` -- a caller
+        # like `_diff_fact_coverage()` that only reports when `issues` is
+        # non-empty would then silently suppress findings with no
+        # SOURCE_FACT_COVERAGE_INCOMPLETE to explain why.
+        sides = [
+            label
+            for label, flag in (("old", old_inconsistent), ("new", new_inconsistent))
+            if flag
+        ]
+        issues.append(
+            FactSetIssue(
+                "warning",
+                "fact_set_inconsistent",
+                f"{' and '.join(sides)} side's own TUs disagreed on fact_set "
+                "(a mixed-producer pack); structured content, opaque "
+                "body/template hashes, source_edges, and removal detection "
+                "are all treated as not comparable for this comparison.",
+            )
+        )
+    # Gated on `not inconsistent` (Codex review, PR #719): `rollup_fact_set()`
+    # itself always collapses an inconsistent side to `{}`, so this couldn't
+    # fire for that caller -- but `old_fact_set`/`new_fact_set` and
+    # `old_inconsistent`/`new_inconsistent` are independent parameters, and a
+    # hand-authored or forward-produced `source_abi.json` can legally set
+    # `fact_set_inconsistent: true` in `coverage` while its `coverage.fact_set`
+    # block still carries non-empty, matching representative content on both
+    # sides. Without this guard a matching `hash_recipe_id` there would
+    # override the inconsistency the same way it overrides an ordinary
+    # producer/version mismatch, silently re-enabling opaque-hash and
+    # source-edge comparisons for a pack whose own TUs disagreed on fact_set
+    # -- exactly the untrustworthy shape `old_inconsistent`/`new_inconsistent`
+    # exist to flag, not something a declared recipe id can vouch for.
+    same_recipe = (
+        both_present
+        and not inconsistent
+        and hash_recipe_id(old_fact_set) == hash_recipe_id(new_fact_set)
+    )
     hard_blocked = bool(rules & _HARD_BLOCKING_RULES)
+    # No hash_recipe_id override here -- see this function's own docstring
+    # for why a declared opaque-hash recipe match must not also vouch for
+    # structured-fact extraction staying identical.
+    agrees_base = not one_sided and not inconsistent
+    structured_content_agrees = agrees_base and not (rules & _RECIPE_OVERRIDABLE_RULES)
+    recipe_agrees = same_recipe or (
+        agrees_base and not (rules & _RECIPE_OVERRIDABLE_RULES)
+    )
+    source_edge_recipe_agrees = same_recipe or (
+        agrees_base and not (rules & _SOURCE_EDGE_OVERRIDABLE_RULES)
+    )
     return FactCompatibility(
-        structured_facts_comparable=not hard_blocked,
-        opaque_hashes_comparable=not hard_blocked
-        and (same_recipe or not (rules & _RECIPE_OVERRIDABLE_RULES)),
-        source_edges_comparable=not hard_blocked
-        and (same_recipe or not (rules & _SOURCE_EDGE_OVERRIDABLE_RULES)),
+        structured_facts_comparable=not hard_blocked and not inconsistent,
+        structured_content_comparable=not hard_blocked and structured_content_agrees,
+        opaque_hashes_comparable=not hard_blocked and recipe_agrees,
+        source_edges_comparable=not hard_blocked and source_edge_recipe_agrees,
         issues=tuple(issues),
     )

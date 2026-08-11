@@ -124,15 +124,31 @@ def coverage_state_for_family(
 
 
 def default_fact_set(
-    *, producer: str, producer_version: str, compiler_version: str = ""
+    *,
+    producer: str,
+    producer_version: str,
+    compiler_version: str = "",
+    compiler_family: str = "clang",
 ) -> dict[str, Any]:
-    """Build a canonical ``fact_set`` block (ADR-038 C.8) for a clang-family producer."""
+    """Build a canonical ``fact_set`` block (ADR-038 C.8).
+
+    ``compiler_family`` defaults to ``"clang"`` for this function's original
+    callers (the reference ``clang.py`` extractor, the Clang facts plugin —
+    both literally invoke ``clang -ast-dump=json``). A producer with a
+    different extraction recipe (e.g. the castxml extractor, whose bundled
+    internal Clang is invoked in either a gcc- or msvc-emulation mode via
+    ``--castxml-cc-<id>``, not the direct-clang AST-dump path) passes its own
+    real family so ``check_fact_set_compatibility``'s rule 2/3 comparisons
+    (``compiler_family_mismatch``, and the recipe-overridable rule set) see
+    an accurate signal instead of a borrowed ``"clang"`` label two genuinely
+    different recipes would then wrongly agree on.
+    """
     return {
         "name": SOURCE_ABI_FACT_SET_NAME,
         "version": SOURCE_ABI_FACT_SET_VERSION,
         "producer": producer,
         "producer_version": producer_version,
-        "compiler_family": "clang",
+        "compiler_family": compiler_family,
         "compiler_version": compiler_version,
     }
 

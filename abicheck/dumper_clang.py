@@ -91,6 +91,8 @@ from .dumper_clang_qualifiers import (  # noqa: F401  (compatibility re-exports)
     _desugared_qualtype,
     _field_own_cv_source,
     _last_top_level_ptr_end,
+    _record_kind,
+    _reduce_opaque_kind_set,
 )
 from .dumper_clang_vtable import (
     _index_template_param_defaults,
@@ -1442,12 +1444,11 @@ class _ClangAstParser:
         )
 
     def parse_types(self) -> list[RecordType]:
-        # Map each anonymous record's clang id → the typedef name that aliases it
-        # (``typedef struct {…} Foo;``), so the unnamed record is emitted as
-        # ``Foo`` with its fields intact rather than dropped (mirrors castxml's
-        # ``typedef_name_for`` alias handling).
         anon_names = self._anon_typedef_names()
-        types: list[RecordType] = []
+        best: dict[str, tuple[_Decl, str]] = {}
+        order: list[str] = []
+        deprecated: dict[str, str] = {}
+        opaque_kind_sets: dict[str, set[str]] = {}  # raw kinds of non-def redecls
         for entry in self._records:
             node = entry.node
             if _is_builtin_file(entry.file):
@@ -1459,13 +1460,30 @@ class _ClangAstParser:
                     continue  # a truly anonymous record (e.g. an inline union member)
             if name.startswith("__"):
                 continue
-            # Only definitions carry meaningful members; a forward declaration
-            # (no body) would emit an empty record and create a false ODR/empty
-            # signal, so skip it (matches the castxml `incomplete`/no-members guard).
-            if not _is_record_definition(node):
+            identity = "::".join([*entry.scope, name]) if entry.scope else name
+            if (msg := _clang_deprecated_message(node)) is not None:  # most recent wins
+                deprecated[identity] = msg
+            if not (node_is_def := _is_record_definition(node)):
+                opaque_kind_sets.setdefault(identity, set()).add(_record_kind(node))
+            if (existing := best.get(identity)) is None:
+                best[identity] = (entry, name)
+                order.append(identity)
                 continue
-            types.append(self._build_record(entry, override_name=name))
-        return types
+            if _is_record_definition(existing[0].node):
+                continue
+            node_pub = self._decl_is_public(entry)
+            if node_is_def or (node_pub and not self._decl_is_public(existing[0])):
+                best[identity] = (entry, name)
+        return [
+            self._build_record(
+                (rec := best[identity])[0],
+                override_name=rec[1],
+                is_opaque=not _is_record_definition(rec[0].node),
+                dep_msg=deprecated.get(identity),
+                override_kind=_reduce_opaque_kind_set(opaque_kind_sets.get(identity)),
+            )
+            for identity in order
+        ]
 
     def _anon_typedef_names(self) -> dict[str, str]:
         """``{anonymous-record-id: typedef-name}`` from the collected typedefs."""
@@ -1479,17 +1497,46 @@ class _ClangAstParser:
                 out.setdefault(rid, tname)
         return out
 
-    def _build_record(self, entry: _Decl, override_name: str = "") -> RecordType:
+    def _build_record(
+        self,
+        entry: _Decl,
+        override_name: str = "",
+        is_opaque: bool = False,
+        dep_msg: str | None = None,
+        override_kind: str | None = None,
+    ) -> RecordType:
         node = entry.node
-        kind = (
-            "union"
-            if node.get("tagUsed") == "union"
-            else ("struct" if node.get("tagUsed") == "struct" else "class")
-        )
+        kind = override_kind if is_opaque and override_kind else _record_kind(node)
+        own_name = override_name or str(node.get("name", ""))
+        deprecated = dep_msg if dep_msg is not None else _clang_deprecated_message(node)
+        if is_opaque:
+            # Mirrors dumper_castxml.py's `incomplete="1"` branch.
+            return RecordType(
+                name=own_name,
+                kind=kind,
+                qualified_name=(
+                    "::".join([*entry.scope, own_name]) if entry.scope else None
+                ),
+                size_bits=None,
+                alignment_bits=None,
+                fields=[],
+                bases=[],
+                virtual_bases=[],
+                vtable=[],
+                vptr_offset_bits=None,
+                is_union=kind == "union",
+                is_opaque=is_opaque,
+                is_final=_clang_record_is_final(node),
+                is_standard_layout=None,
+                is_trivially_copyable=None,
+                is_template_pattern=entry.in_template,
+                has_anonymous_aggregate_fields=False,
+                source_location=self._source_location(entry),
+                deprecated=deprecated,
+            )
         fields = self._parse_fields(node)
         bases, virtual_bases, _base_access = _parse_bases(node)
         injected = _anonymous_member_names(node)
-        own_name = override_name or str(node.get("name", ""))
         is_standard_layout, is_trivially_copyable = _clang_record_type_traits(node)
         # G31 Phase C: reconstruct the vtable (and, from it, the same
         # 0-if-polymorphic vptr_offset_bits heuristic castxml already uses)
@@ -1532,7 +1579,7 @@ class _ClangAstParser:
             # tracked by either backend -- see the G31 plan doc.
             vptr_offset_bits=0 if vtable else None,
             is_union=kind == "union",
-            is_opaque=False,
+            is_opaque=is_opaque,
             is_final=_clang_record_is_final(node),
             # G31 Phase C: unlike layout (size/align/offsets), these are
             # semantic type traits clang's AST computes independent of any
@@ -1553,7 +1600,7 @@ class _ClangAstParser:
             has_anonymous_aggregate_fields=bool(injected)
             and all(f.name in injected for f in fields),
             source_location=self._source_location(entry),
-            deprecated=_clang_deprecated_message(node),
+            deprecated=deprecated,
         )
 
     def _parse_fields(self, node: dict[str, Any]) -> list[TypeField]:

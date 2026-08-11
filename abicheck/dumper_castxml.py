@@ -1912,15 +1912,17 @@ class _CastxmlParser:
                     except ValueError:
                         m_val = 0
                     members.append(EnumMember(name=m_name, value=m_val))
+            enum_type_id = el.get("type", "")
+            underlying_type = (
+                self._underlying_type_name(enum_type_id) if enum_type_id else "int"
+            )
             enums.append(
                 EnumType(
                     name=name,
                     members=members,
+                    underlying_type=underlying_type,
                     source_location=self._source_location(el),
-                    # castxml's `scoped="1"` marks a C++11 `enum class`/`enum
-                    # struct` (as opposed to a plain C-style enum). Header
-                    # mode always knows the answer, so this is a concrete
-                    # bool (never None on the castxml path).
+                    # castxml's `scoped="1"` marks `enum class`/`enum struct`.
                     is_scoped=el.get("scoped") == "1",
                     # See RecordType.deprecated for the message-text convention.
                     deprecated=_deprecation_marker(el),

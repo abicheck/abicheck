@@ -70,6 +70,21 @@ own docstring), so this backfill genuinely fires for those two even without
 ``alignment_bits``/``vptr_offset_bits`` still require the companion tool;
 ``dumper_clang.py``'s plain parse leaves those empty either way.
 
+**``is_template_pattern``/``has_anonymous_aggregate_fields``** (G31 Phase C
+fact-completeness, PR #719 follow-up): unlike every other backfilled fact
+above, both are plain ``bool = False`` rather than an Optional tri-state, so
+:func:`_merge_record_type` OR-merges them (never a null-check backfill) —
+castxml's own ``False`` is always structurally correct by construction, not
+a placeholder for "unknown". Verified against real castxml 0.6.3 + clang 18
+output that ``is_template_pattern``'s backfill is empirically inert for the
+current producer pair (a clang-recognized template pattern never shares a
+type_map_key with any castxml-matched concrete type — it reaches the merged
+snapshot via the clang-only-append path instead, already carrying the flag
+correctly); kept anyway as a defense-in-depth/honesty measure, the same
+precedent this module already sets for ``RecordType.is_abstract``.
+``has_anonymous_aggregate_fields`` is not provably inert the same way — see
+:func:`_merge_record_type`'s own comment.
+
 Everything not explicitly merged below (typedefs, constants, ELF/PE/Mach-O
 metadata, DWARF metadata, ...) is taken verbatim from the castxml snapshot,
 which is used as the base via ``dataclasses.replace``.
@@ -524,6 +539,47 @@ def _merge_record_type(
                 updates[attr] = getattr(clang_t, attr)
         if not t.base_offsets and clang_t.base_offsets:
             updates["base_offsets"] = clang_t.base_offsets
+        # G31 Phase C fact-completeness (verified against real castxml 0.6.3 +
+        # clang 18 output, PR #719 follow-up): unlike every other backfilled
+        # fact above, these two are plain `bool = False` -- not an Optional
+        # tri-state -- so there is no null "castxml doesn't know" state to key
+        # a _backfill_fact()-style None-check off. castxml's own `False` is
+        # ALWAYS structurally correct by construction rather than a
+        # placeholder (castxml never emits an uninstantiated template
+        # pattern as a declaration at all, and it always computes real
+        # per-field offsets for an anonymous-aggregate flatten it can see),
+        # so this is a plain OR-merge, not a None-guarded backfill.
+        #
+        # is_template_pattern is empirically INERT here, verified with a real
+        # class-template dump: a clang-recognized template PATTERN never
+        # shares a type_map_key with any castxml-visible concrete type (it's
+        # a structurally distinct entity -- castxml only ever emits concrete
+        # instantiations under their own instantiated name, e.g. "Box<int>",
+        # never a bare "Box" pattern declaration), so `clang_t` for a
+        # castxml-matched `t` is never itself the pattern; the True-carrying
+        # clang entry instead reaches the merged snapshot verbatim via the
+        # clang-only-append path below. Kept here anyway (not asserted
+        # unreachable) both for defense in depth against a future clang
+        # AST-shape change and because it is honest about the invariant this
+        # merge is supposed to preserve, matching this module's own
+        # documented precedent for RecordType.is_abstract (a backfill kept
+        # even though the current producer pair makes it a no-op).
+        #
+        # has_anonymous_aggregate_fields is NOT provably inert the same way:
+        # a castxml record with real, populated fields already carries
+        # corroborating field-name-overlap evidence dumper_layout_backfill.py
+        # prefers over this flag's own fallback path, but an opaque/
+        # incomplete castxml record (or a future producer shape) could
+        # legitimately reach this merge with an EMPTY `fields` list for a
+        # genuinely anonymous-aggregate-only record, where clang's `True`
+        # is the only signal available.
+        if clang_t.is_template_pattern and not t.is_template_pattern:
+            updates["is_template_pattern"] = True
+        if (
+            clang_t.has_anonymous_aggregate_fields
+            and not t.has_anonymous_aggregate_fields
+        ):
+            updates["has_anonymous_aggregate_fields"] = True
 
     clang_fields_by_name = {cf.name: cf for cf in clang_t.fields} if clang_t else {}
     merged_fields = [

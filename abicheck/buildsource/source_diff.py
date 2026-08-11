@@ -154,6 +154,18 @@ def _surface_fact_set(surface: SourceAbiSurface) -> dict[str, object]:
     return dict(raw) if isinstance(raw, dict) else {}
 
 
+def _surface_fact_set_inconsistent(surface: SourceAbiSurface) -> bool:
+    """Whether this surface's own TUs disagreed on ``fact_set`` -- see
+    ``fact_set.fact_set_rollup_is_inconsistent``'s docstring.
+
+    ``bool(...)`` alone would misread a hand-edited/forward-produced
+    ``source_abi.json`` storing this flag as the string ``"false"`` as
+    truthy (Codex review) -- require the actual JSON boolean ``True``.
+    """
+    cov = surface.coverage if isinstance(surface.coverage, dict) else {}
+    return cov.get("fact_set_inconsistent") is True
+
+
 def _diff_fact_coverage(
     old: SourceAbiSurface, new: SourceAbiSurface, compat: FactCompatibility
 ) -> list[Change]:
@@ -192,8 +204,26 @@ def _diff_fact_coverage(
     new_fact_set = new_fact_set_raw if isinstance(new_fact_set_raw, dict) else {}
     old_families = old_families_raw if isinstance(old_families_raw, dict) else {}
     new_families = new_families_raw if isinstance(new_families_raw, dict) else {}
-
-    has_signal = bool(old_fact_set or new_fact_set or old_families or new_families)
+    # A surface can legitimately carry `fact_set_inconsistent: true` while its
+    # own rolled-up `fact_set`/`fact_family_states` are both empty -- exactly
+    # the shape `rollup_fact_set()` produces for a mixed-producer pack (Codex
+    # review, PR #719): the marker itself IS the signal there, not a
+    # supplement to one. Without including it, `has_signal` reads False, this
+    # function returns `[]` with no explanation, and `compat`'s
+    # inconsistency-driven suppression of structured/opaque/source-edge
+    # comparisons (from `check_fact_compatibility`'s own `old_inconsistent`/
+    # `new_inconsistent` gating) proceeds silently -- findings vanish with no
+    # SOURCE_FACT_COVERAGE_INCOMPLETE to say why.
+    old_inconsistent = _surface_fact_set_inconsistent(old)
+    new_inconsistent = _surface_fact_set_inconsistent(new)
+    has_signal = bool(
+        old_fact_set
+        or new_fact_set
+        or old_families
+        or new_families
+        or old_inconsistent
+        or new_inconsistent
+    )
     issues = list(compat.issues) if has_signal else []
     # A serialized surface's fact_family_states can come from a hand-written
     # or forward-versioned source_abi.json, not just rollup_coverage()'s own
@@ -222,8 +252,23 @@ def _diff_fact_coverage(
         )
 
     suppression = ""
+    if has_signal and not compat.structured_content_comparable:
+        suppression += (
+            " Structured content-change findings for entities present on "
+            "BOTH sides (generated_header_changed, "
+            "public_typedef_target_changed, public_macro_value_changed) are "
+            "suppressed for this comparison because a differing "
+            "producer/producer_version/compiler_version pair (or an "
+            "asymmetric fact_set -- only one side stamped one at all, or a "
+            "mixed-producer pack whose own TUs disagreed on fact_set) means "
+            "a type_hash/value comparison cannot be trusted to reflect a "
+            "real content change rather than an extraction-recipe change "
+            "(Codex review, PR #719: EnumType.underlying_type going from an "
+            'always-"int" placeholder to a real extracted value on a '
+            "producer-version bump alone is exactly this shape)."
+        )
     if has_signal and not compat.opaque_hashes_comparable:
-        suppression = (
+        suppression += (
             " Opaque body/template hash findings (inline_body_changed, "
             "template_body_changed) are suppressed for this comparison because "
             "the fact-set compatibility verdict does not establish "
@@ -242,10 +287,10 @@ def _diff_fact_coverage(
             " generated_header_changed/public_typedef_removed/public_macro_removed/"
             "inline_function_removed/uninstantiated_template_removed removal "
             "detection is suppressed for this comparison because the fact_set "
-            "name/version mismatch means an entity's absence may only reflect "
+            "name/version mismatch (or a mixed-producer pack whose own TUs "
+            "disagreed on fact_set) means an entity's absence may only reflect "
             "the old contract never collecting its family, not an actual "
-            "removal; content-change findings for entities present on both "
-            "sides are unaffected."
+            "removal."
         )
 
     return [
@@ -273,7 +318,12 @@ def diff_source_abi(old: SourceAbiSurface, new: SourceAbiSurface) -> list[Change
     The result is an ordinary list of :class:`Change` objects ready to fold into
     a ``DiffResult`` and run through the existing verdict/policy pipeline.
     """
-    compat = check_fact_compatibility(_surface_fact_set(old), _surface_fact_set(new))
+    compat = check_fact_compatibility(
+        _surface_fact_set(old),
+        _surface_fact_set(new),
+        old_inconsistent=_surface_fact_set_inconsistent(old),
+        new_inconsistent=_surface_fact_set_inconsistent(new),
+    )
     changes: list[Change] = []
     changes.extend(_diff_fact_coverage(old, new, compat))
     changes.extend(_diff_generated(old, new, compat))
@@ -413,12 +463,19 @@ def _diff_generated(
     the normal declaration diff intentionally skips generated entities and there
     is no removal diff for ``reachable_types``, so without the removal pass a
     generated config header dropping a public record/enum/typedef/decl would
-    produce no L4 finding at all. The removal loop is additionally skipped when
+    produce no L4 finding at all. The removal loop is skipped when
     ``compat.structured_facts_comparable`` is false (a fact_set name/version
     mismatch): an entity's absence there may only mean the old contract never
     mandated collecting its family, not that it was actually removed (Codex
-    review). Content-change detection is not gated -- an identity present on
-    both sides means the same thing regardless of contract version.
+    review). The content-change loop is skipped when
+    ``compat.structured_content_comparable`` is false: a structured fact's
+    ``type_hash``/``value`` is producer-recipe-dependent the same way an
+    opaque body/template hash already is (an extractor upgrade can start
+    extracting a real value for a field it previously only defaulted, e.g.
+    ``EnumType.underlying_type`` on the castxml producer -- G31 Phase C,
+    Codex review, PR #719), so a differing producer/producer_version/
+    compiler_version pair cannot be trusted to mean the entity's own content
+    actually changed.
     """
     changes: list[Change] = []
     for old_bucket, new_bucket in (
@@ -427,7 +484,11 @@ def _diff_generated(
     ):
         old_b = _by_identity(old_bucket)
         new_b = _by_identity(new_bucket)
-        for key in sorted(set(old_b) & set(new_b)):
+        for key in (
+            sorted(set(old_b) & set(new_b))
+            if compat.structured_content_comparable
+            else ()
+        ):
             ov, nv = old_b[key], new_b[key]
             # A generated constexpr value change is still a baked-in public
             # constant change, so keep the stronger constexpr_value_changed
@@ -488,11 +549,17 @@ def _diff_typedefs(
     artifact comparison. Generated typedefs are reported as
     ``generated_header_changed`` by ``_diff_generated`` and skipped here so they
     are not double-counted.
+
+    The content-change loop is skipped when ``compat.structured_content_comparable``
+    is false, the same producer-recipe-dependence reasoning ``_diff_generated``
+    documents for its own content loop.
     """
     old_t = {e.identity(): e for e in old.reachable_types if e.kind == "typedef"}
     new_t = {e.identity(): e for e in new.reachable_types if e.kind == "typedef"}
     changes: list[Change] = []
-    for key in sorted(set(old_t) & set(new_t)):
+    for key in (
+        sorted(set(old_t) & set(new_t)) if compat.structured_content_comparable else ()
+    ):
         ov, nv = old_t[key], new_t[key]
         if _is_generated(nv):
             continue
@@ -553,10 +620,18 @@ def _diff_typedefs(
 def _diff_macros(
     old: SourceAbiSurface, new: SourceAbiSurface, compat: FactCompatibility
 ) -> list[Change]:
+    """Flag a public macro whose value changed (ADR-030 D6).
+
+    The content-change loop is skipped when ``compat.structured_content_comparable``
+    is false, the same producer-recipe-dependence reasoning ``_diff_generated``
+    documents for its own content loop.
+    """
     old_m = _by_identity(old.reachable_macros)
     new_m = _by_identity(new.reachable_macros)
     changes: list[Change] = []
-    for key in sorted(set(old_m) & set(new_m)):
+    for key in (
+        sorted(set(old_m) & set(new_m)) if compat.structured_content_comparable else ()
+    ):
         ov, nv = old_m[key], new_m[key]
         name = nv.qualified_name
         if ov.value != nv.value:

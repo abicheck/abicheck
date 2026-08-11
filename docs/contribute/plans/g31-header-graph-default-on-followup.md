@@ -1664,6 +1664,9 @@ phase held to):
   hybrid) enum keeps the model default `int` whatever the header declared.
   No diff detector reads it — `enum_underlying_size_changed` comes from
   DWARF — but `tu_merge.py`'s ODR-conflict check does.
+
+  **Closed in a still-later pass** — see the matching entry under
+  "Gaps the matrix surfaced" below for the fix and its verification.
 - A hybrid merge is castxml-based, so a clang-only fact it does not
   explicitly backfill (`is_template_pattern`,
   `has_anonymous_aggregate_fields`, `underlying_type`) is dropped for any
@@ -1671,9 +1674,82 @@ phase held to):
   inspection (castxml never emits an uninstantiated pattern, and supplies
   the real offsets the anonymous-aggregate flag exists to help find), but
   "looks benign" is the claim that needs a castxml host to check.
+
+  **Closed for `is_template_pattern`/`has_anonymous_aggregate_fields` in a
+  still-later pass** (PR #719 follow-up), once a real castxml+clang host was
+  available to check "looks benign" against for real. Both are plain `bool =
+  False` — not an Optional tri-state like every other backfilled fact in
+  `dumper_hybrid.py` — so castxml's own `False` is never itself a "castxml
+  doesn't know" placeholder the way `None` is elsewhere; `_merge_record_type`
+  therefore OR-merges these two instead of using the existing
+  `_backfill_fact` null-check helper. Verified end to end against a real
+  compiled class template + anonymous-union header (`clang++`/`g++` +
+  castxml 0.6.3 + direct-clang 18): `is_template_pattern`'s backfill is
+  empirically **inert** for the current producer pair — a clang-recognized
+  template *pattern* (e.g. bare `Box`) never shares a `type_map_key` with
+  any castxml-visible *concrete instantiation* (`Box<int>`), so `clang_t` is
+  never itself the pattern for a castxml-matched `t`; the pattern already
+  reaches a hybrid snapshot correctly via the pre-existing clang-only-append
+  path. Kept anyway (not asserted unreachable) as a defense-in-depth/honesty
+  measure, the same precedent this module already sets for
+  `RecordType.is_abstract`. `has_anonymous_aggregate_fields` is genuinely
+  live, not inert: dumping a real all-anonymous-union record
+  (`struct AllAnon { union { int i; float f; }; };`) confirmed castxml
+  itself reports `False` (it already has real per-field offsets and doesn't
+  need the structural signal) while clang reports `True` for the *same*
+  matched type — and, before this fix, the hybrid-merged result silently
+  kept castxml's `False`, discarding a real, accurate fact. New coverage:
+  `tests/test_dumper_hybrid.py`'s `TestTypeAndFieldFactBackfill` OR-merge
+  tests, plus `scripts/backend_capabilities.py`'s two rows moving to
+  `hybrid_backfilled=True` (`gen_backend_capability_matrix.py` regenerated).
+  `tests/test_backend_capability_matrix.py`'s "hybrid drops an unbackfilled
+  clang-only fact" fixture moved again, to `Param.is_va_list` (see that
+  fact's own entry below — deliberately excluded from hybrid's backfill even
+  at the diff-detector level, so it keeps this shape for the foreseeable
+  future). `snapshot_cache._SNAPSHOT_CACHE_VERSION` bumped (v14) so an
+  upgrading user's warm hybrid cache entry is re-extracted instead of
+  replaying the pre-fix merge indefinitely.
 - An opaque handle type is **absent** from a clang snapshot rather than
   opaque: `parse_types` skips every non-definition, so `is_opaque=False` is
   correct by construction while the type itself never appears.
+
+  **Closed in a still-later pass** (PR #719 follow-up), verified against a
+  real compiled `struct Handle;` (forward-declared, never defined) header.
+  `parse_types` now groups `self._records` by identity (scope + resolved
+  name) before building `RecordType`s: an identity with a definition
+  anywhere among its candidates collapses to that definition (never
+  opaque, same as before); an identity with ONLY forward-declaration
+  candidates now emits one opaque stub instead of nothing at all. Confirmed
+  end to end (`abicheck dump --ast-frontend clang`) that `Handle` now reads
+  `is_opaque=True` with empty fields, matching castxml's own
+  `incomplete="1"` handling. `_build_record` grew an `is_opaque` parameter
+  and an early-return branch mirroring `dumper_castxml.py`'s exact
+  opaque-record shape — every derived fact (fields/bases/vtable/
+  is_standard_layout/is_trivially_copyable/has_anonymous_aggregate_fields)
+  stays at its neutral/unknown default rather than a computed value, since
+  a forward-decl-only node has no member list to have judged any of them
+  from. The dedup logic also closed a second, adjacent gap along the way: a
+  type BOTH forward-declared and defined in the same TU (`struct Foo;
+  struct Foo { ... };`) — confirmed with real clang output that both land
+  as separate `CXXRecordDecl` nodes sharing one identity — previously
+  relied on `parse_types`' per-entry loop processing each node
+  independently (the definition entry building a correct `RecordType`, the
+  forward-decl entry being skipped outright by the old guard); the new
+  identity-grouped pass makes that collapse explicit and order-independent
+  (a definition wins regardless of which declaration came first in source
+  order), the same tie-break `_record_index()` already documents for its
+  own, unrelated vtable-base-lookup purpose. `scripts/backend_capabilities.py`'s
+  `RecordType.is_opaque` row moved from clang `NONE` to `FULL`
+  (`gen_backend_capability_matrix.py` regenerated); its own AST-evidence
+  scanner needed `_build_record`'s two `is_opaque=True`/`is_opaque=False`
+  literals rewritten to `is_opaque=is_opaque` (a variable reference to the
+  new parameter) to be correctly read as a real extraction rather than a
+  hardcoded placeholder — `tests/test_backend_capability_matrix.py`'s own
+  placeholder-vs-extraction regression test moved `is_opaque` to the
+  EXTRACTED side accordingly. `snapshot_cache._SNAPSHOT_CACHE_VERSION`
+  bumped (v15): a clang-only opaque handle type used to be silently absent
+  from the snapshot entirely, not just wrong-valued, so a warm cache from
+  before this fix is invalidated rather than replayed.
 - `Variable.value`, `Variable.access` and `Param.is_va_list` have no
   producer on any layer, which makes `param_became_va_list`/
   `param_lost_va_list` unreachable on real input. Recorded in
@@ -1736,6 +1812,32 @@ phase held to):
   from the Codex finding immediately above — `"hybrid"` excluded from
   `diff_symbols._diff_var_access`'s producer gate from the start, not
   added as a second review round's correction.
+
+  **Closed for `EnumType.underlying_type` in a still-later pass**, once a
+  pinned castxml build was available to verify against. castxml's
+  `<Enumeration type=...>` attribute names the compiler-resolved underlying
+  integer type — fixed (`enum E : short`) or implementation-chosen from the
+  member value range for an unfixed enum — verified against real castxml
+  0.6.3 output for both cases (`enum class Color : short` reading `short
+  int`, a plain `enum Status { OK, FAIL }` reading `unsigned int`). No
+  reliability flag was needed: unlike `is_va_list`/`Variable.access`, this
+  is a straightforward "was it read at all" gap, not a "reads a real value
+  that happens to be systematically wrong" one, so there is no legacy
+  baseline to distinguish from a genuine absence. `dumper_castxml.py`'s
+  `parse_enums` now resolves the `type` id through the same
+  `_underlying_type_name` helper `parse_typedefs` already used (following a
+  typedef chain to its concrete base type, for the rare `enum E : my_int_t`
+  spelling). `dumper_hybrid.py`'s `_merge_enum_type` still does not
+  explicitly backfill this field (unchanged, and still recorded as an open
+  gap immediately below), but since castxml is now a real producer rather
+  than a placeholder default, a hybrid snapshot inherits a genuine answer
+  either way — the backfill gap stopped mattering for this specific field
+  without needing to be closed itself. `scripts/backend_capabilities.py`'s
+  `EnumType.underlying_type` row moved from castxml `NONE` to `FULL`
+  accordingly (`gen_backend_capability_matrix.py` regenerated), and
+  `tests/test_backend_capability_matrix.py`'s "hybrid drops an
+  unbackfilled clang-only fact" fixture moved to
+  `RecordType.is_template_pattern`, which still has that shape.
 
 **Performance benchmarks + regression gate — done.** Now that the
 header-only graph is always-on rather than opt-in, its per-dump cost is paid
