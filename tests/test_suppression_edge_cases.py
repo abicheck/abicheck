@@ -438,6 +438,44 @@ class TestNamespaceGlobstarSemantics:
         assert s.matches(self._change("ns::foo"))
         assert not s.matches(self._change("ns::"))
 
+    def test_many_repeated_globstars_reject_quickly(self):
+        # Codex review (P2): several non-adjacent standalone "**" segments,
+        # each translated as its own independently-backtracking ".*"-based
+        # regex group, are combinatorial for the `re` engine when matched
+        # against a long, repetitive-content, non-matching candidate name —
+        # real reproduction: this exact pattern against a 121-segment name
+        # took over 8 seconds to reject a single `fullmatch`. A suppression
+        # config runs across every finding, so one such rule can stall a
+        # whole comparison. `_compile_namespace_glob` now detects a pattern
+        # built only from literal segments and "**" globstars (no
+        # per-segment "*"/"?"/"[...]") and matches it via a linear
+        # segment-by-segment dynamic-programming matcher instead of a
+        # single backtracking regex — verified both for speed and for
+        # producing the same match/no-match verdict a correct backtracking
+        # match would.
+        import time
+
+        s = Suppression(
+            namespace="**::a::**::a::**::a::**::a::**::a::z",
+            reachability="any",
+            reason="x",
+        )
+        non_matching = "::".join(["a"] * 120 + ["y"])
+        t0 = time.monotonic()
+        result = s.matches(self._change(non_matching))
+        elapsed = time.monotonic() - t0
+        assert result is False
+        assert elapsed < 1.0, f"namespace match took {elapsed:.2f}s — not backtracking-safe"
+
+        # Correctness, not just speed: a genuinely matching long name still
+        # matches, including one that needs each globstar to absorb a
+        # different, non-trivial number of segments.
+        assert s.matches(self._change("a::a::a::a::a::z"))
+        assert s.matches(
+            self._change("x::a::x::x::a::x::x::a::x::x::a::x::x::a::x::a::z")
+        )
+        assert not s.matches(self._change("a::a::a::a::a::y"))
+
     def test_python314_fnmatch_end_anchor_variant_is_accepted(self):
         # Codex review, verified against Python 3.14.4: fnmatch.translate()
         # ends its result with "\z" there instead of "\Z". The wrapper that

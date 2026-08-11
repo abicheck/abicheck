@@ -197,6 +197,85 @@ def _split_namespace_segments(pattern: str) -> list[str]:
     return segments
 
 
+def _collapsed_namespace_segments(pattern: str) -> list[str]:
+    """Split *pattern* into ``::``-separated segments (:func:`_split_namespace_segments`)
+    and collapse any run of adjacent standalone ``"**"`` segments into one —
+    ``"a::**::**::b"`` becomes ``["a", "**", "b"]``. Shared by
+    :func:`_translate_namespace_glob` and :func:`_compile_namespace_glob`'s
+    fast-path detection so both operate on an identical segment list."""
+    segments: list[str] = []
+    for seg in _split_namespace_segments(pattern):
+        if seg == "**" and segments and segments[-1] == "**":
+            continue
+        segments.append(seg)
+    return segments
+
+
+class _SegmentGlobMatcher:
+    """Non-backtracking namespace-glob matcher for a pattern built only from
+    literal segments and ``"**"`` globstars — no per-segment ``*``/``?``/
+    ``[...]`` wildcard.
+
+    :func:`_translate_namespace_glob` compiles a namespace glob into one
+    regex where each standalone ``"**"`` becomes an unconstrained,
+    independently-backtracking ``.*``-based group. A pattern chaining
+    several non-adjacent globstars against a repetitive-content candidate
+    name (a real, if unusual, worst case for a deeply-templated/generated
+    C++ symbol) is combinatorial for the ``re`` backtracking engine: e.g.
+    ``"**::a::**::a::**::a::**::a::**::a::z"`` against a 121-segment
+    non-matching name took over 8 seconds to reject (Codex review, real
+    reproduction — the P2 "backtracking-safe" finding this class fixes).
+
+    When every non-globstar segment is a plain literal (verified by the
+    caller before constructing this), the *only* ambiguity is how many
+    whole segments each ``"**"`` absorbs — a classic bounded wildcard-
+    matching problem solvable in O(pattern_segments × name_segments) via
+    dynamic programming, with no backtracking at all. This class is
+    deliberately not used for a pattern with an embedded per-segment
+    wildcard (``"foo*::**"`` and friends): those segments are matched by
+    :func:`_fnmatch_segment_regex` against the *raw* candidate string, not
+    a pre-split segment list, and — per this module's existing, carefully
+    tested trailing-globstar delegation — a bare ``*``/``?``/bracket class
+    is not itself constrained to stay within one ``::``-delimited segment
+    the way a DP-over-splits model would assume; changing that here would
+    be a real behavior change, not just a performance fix.
+    """
+
+    __slots__ = ("_segments",)
+
+    def __init__(self, segments: list[str]) -> None:
+        self._segments = segments
+
+    def match(self, name: str) -> bool:
+        """Return True if *name* matches this matcher's pattern.
+
+        Mirrors ``re.Pattern.match`` against a pattern anchored at both
+        ends (the compiled-regex path always anchors with ``\\Z``) — the
+        whole *name* must match, not just a prefix.
+        """
+        name_segments = name.split("::")
+        n = len(name_segments)
+        # dp[j]: can the pattern segments processed so far match name[:j]?
+        dp = [False] * (n + 1)
+        dp[0] = True
+        for seg in self._segments:
+            new_dp = [False] * (n + 1)
+            if seg == "**":
+                # Absorbs zero or more whole segments: new_dp[j] is True as
+                # soon as any dp[0..j] was — a running prefix-OR, computed
+                # in one linear pass rather than re-scanning per j.
+                running = False
+                for j in range(n + 1):
+                    running = running or dp[j]
+                    new_dp[j] = running
+            else:
+                for j in range(1, n + 1):
+                    if dp[j - 1] and name_segments[j - 1] == seg:
+                        new_dp[j] = True
+            dp = new_dp
+        return dp[n]
+
+
 def _translate_namespace_glob(pattern: str) -> str:
     """Translate a ``namespace``/``entity_namespace``/``cause_namespace``
     glob to a regex pattern string, with pathspec/gitignore-style semantics
@@ -269,11 +348,7 @@ def _translate_namespace_glob(pattern: str) -> str:
     # "foo**::**" contains the literal substring "**::**" starting mid-
     # segment), silently rewriting it to "foo**" and dropping the "::"
     # boundary the fnmatch-style pattern still required.
-    segments: list[str] = []
-    for seg in _split_namespace_segments(pattern):
-        if seg == "**" and segments and segments[-1] == "**":
-            continue
-        segments.append(seg)
+    segments = _collapsed_namespace_segments(pattern)
     parts: list[str] = []
     i = 0
     n = len(segments)
@@ -317,14 +392,31 @@ def _translate_namespace_glob(pattern: str) -> str:
     return "(?s:" + "".join(parts) + ")\\Z"
 
 
-def _compile_namespace_glob(glob: str | None, field_name: str) -> re.Pattern[str] | None:
+def _compile_namespace_glob(
+    glob: str | None, field_name: str
+) -> re.Pattern[str] | _SegmentGlobMatcher | None:
     """Compile a namespace-selector glob (``namespace``/``entity_namespace``/
-    ``cause_namespace``) to a regex, using :func:`_translate_namespace_glob`'s
+    ``cause_namespace``) to a matcher, using :func:`_translate_namespace_glob`'s
     globstar semantics rather than plain ``fnmatch``. Raises
-    :class:`ValueError` on a malformed pattern."""
+    :class:`ValueError` on a malformed pattern.
+
+    When *glob* is built only from literal segments and ``"**"`` globstars
+    (no per-segment ``*``/``?``/``[...]``), returns a :class:`_SegmentGlobMatcher`
+    instead of a compiled regex — provably equivalent for this pattern shape
+    (see that class's docstring) and immune to the catastrophic backtracking
+    a chain of several standalone globstars can otherwise trigger against a
+    long, repetitive-content candidate name (Codex review, P2 finding: a
+    real ~8s single-match stall). A pattern with an embedded per-segment
+    wildcard keeps the existing regex path unchanged — that shape's
+    behavior (a bare ``*`` is not itself confined to one ``::``-segment) is
+    not something a DP-over-splits matcher can reproduce.
+    """
     if glob is None:
         return None
     try:
+        segments = _collapsed_namespace_segments(glob)
+        if all(seg == "**" or not _has_wildcard_char(seg) for seg in segments):
+            return _SegmentGlobMatcher(segments)
         return re.compile(_translate_namespace_glob(glob))
     except re.error as e:
         raise ValueError(f"Invalid {field_name} {glob!r}: {e}") from e
@@ -359,7 +451,7 @@ def _validate_selectors(
         )
 
 
-def _ns_match(pat: re.Pattern[str], name: str | None) -> bool:
+def _ns_match(pat: re.Pattern[str] | _SegmentGlobMatcher, name: str | None) -> bool:
     """Return True if *name* (or any of its namespace ancestors) matches *pat*.
 
     Handles Itanium-mangled symbols by also trying the demangled form.
@@ -399,7 +491,7 @@ def _matches_member_name(compiled: re.Pattern[str], change: Change) -> bool:
     return bool(compiled.fullmatch(member))
 
 
-def _matches_entity_namespace(compiled: re.Pattern[str], change: Change) -> bool:
+def _matches_entity_namespace(compiled: re.Pattern[str] | _SegmentGlobMatcher, change: Change) -> bool:
     """Return True if the change's *own* symbol/qualified_name lies in the namespace.
 
     ADR-044 D3: deliberately does **not** consult ``change.caused_by_type`` —
@@ -413,7 +505,7 @@ def _matches_entity_namespace(compiled: re.Pattern[str], change: Change) -> bool
     return _ns_match(compiled, change.symbol) or _ns_match(compiled, change.qualified_name)
 
 
-def _matches_cause_namespace(compiled: re.Pattern[str], change: Change) -> bool:
+def _matches_cause_namespace(compiled: re.Pattern[str] | _SegmentGlobMatcher, change: Change) -> bool:
     """Return True if the change's ``caused_by_type`` lies in the namespace.
 
     ADR-044 D3: the counterpart to :func:`_matches_entity_namespace` — matches
@@ -531,10 +623,10 @@ class Suppression:
     _compiled_type_pattern: re.Pattern[str] | None = field(default=None, init=False, repr=False)
     _compiled_member_pattern: re.Pattern[str] | None = field(default=None, init=False, repr=False)
     _compiled_source_pattern: re.Pattern[str] | None = field(default=None, init=False, repr=False)
-    _compiled_entity_namespace_pattern: re.Pattern[str] | None = field(
+    _compiled_entity_namespace_pattern: re.Pattern[str] | _SegmentGlobMatcher | None = field(
         default=None, init=False, repr=False
     )
-    _compiled_cause_namespace_pattern: re.Pattern[str] | None = field(
+    _compiled_cause_namespace_pattern: re.Pattern[str] | _SegmentGlobMatcher | None = field(
         default=None, init=False, repr=False
     )
     _resolved_reachability: str = field(default="any", init=False, repr=False)
