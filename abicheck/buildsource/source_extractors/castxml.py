@@ -192,6 +192,19 @@ class CastxmlSourceExtractor:
     def available(self) -> bool:
         return shutil.which(self.castxml_bin) is not None
 
+    def cache_identity_extra(self) -> str:
+        """Fold the probed castxml/bundled-Clang identity into the D8 TU
+        cache key (Codex review, PR #719) -- mirrors
+        ``ClangSourceExtractor.cache_identity_extra``. Without this, a
+        warm ``SourceAbiCache`` keyed only on ``version`` (the fixed
+        ``CASTXML_EXTRACTOR_VERSION`` string) replays a stale cached
+        ``SourceAbiTu`` -- stale enum facts and ``compiler_version``
+        included -- after the castxml binary at the same path is upgraded
+        or swapped, since nothing about that upgrade changes the extractor
+        version string itself.
+        """
+        return _castxml_tool_version(self.castxml_bin)
+
     def extract(
         self,
         compile_unit: CompileUnit,

@@ -91,6 +91,7 @@ from .dumper_clang_qualifiers import (  # noqa: F401  (compatibility re-exports)
     _desugared_qualtype,
     _field_own_cv_source,
     _last_top_level_ptr_end,
+    _record_kind,
 )
 from .dumper_clang_vtable import (
     _index_template_param_defaults,
@@ -1447,13 +1448,11 @@ class _ClangAstParser:
         # ``Foo`` with its fields intact rather than dropped (mirrors castxml's
         # ``typedef_name_for`` alias handling).
         anon_names = self._anon_typedef_names()
-        # Opaque handle types (PR #719): a forward decl and its later
-        # definition share an identity but are two separate nodes in clang's
-        # JSON AST. Group by identity so a forward-decl-only record still
-        # emits an opaque stub (below), while a forward-decl/definition pair
-        # collapses to the definition -- same tie-break as _record_index().
+        # Opaque handle types (PR #719): group by identity; a definition
+        # wins over a forward decl. ``deprecated`` merges across redecls.
         best: dict[str, tuple[_Decl, str]] = {}
         order: list[str] = []
+        deprecated: dict[str, str] = {}
         for entry in self._records:
             node = entry.node
             if _is_builtin_file(entry.file):
@@ -1466,22 +1465,26 @@ class _ClangAstParser:
             if name.startswith("__"):
                 continue
             identity = "::".join([*entry.scope, name]) if entry.scope else name
-            existing = best.get(identity)
-            if existing is None:
+            if msg := _clang_deprecated_message(node):
+                deprecated.setdefault(identity, msg)
+            if (existing := best.get(identity)) is None:
                 best[identity] = (entry, name)
                 order.append(identity)
-            elif not _is_record_definition(existing[0].node) and _is_record_definition(
-                node
-            ):
+                continue
+            if _is_record_definition(existing[0].node):
+                continue
+            is_def = _is_record_definition(node)  # forward decls: min(kind) wins
+            if is_def or _record_kind(node) < _record_kind(existing[0].node):
                 best[identity] = (entry, name)
-        types: list[RecordType] = []
-        for identity in order:
-            entry, name = best[identity]
-            is_opaque = not _is_record_definition(entry.node)
-            types.append(
-                self._build_record(entry, override_name=name, is_opaque=is_opaque)
+        return [
+            self._build_record(
+                (rec := best[identity])[0],
+                override_name=rec[1],
+                is_opaque=not _is_record_definition(rec[0].node),
+                dep_msg=deprecated.get(identity),
             )
-        return types
+            for identity in order
+        ]
 
     def _anon_typedef_names(self) -> dict[str, str]:
         """``{anonymous-record-id: typedef-name}`` from the collected typedefs."""
@@ -1496,19 +1499,18 @@ class _ClangAstParser:
         return out
 
     def _build_record(
-        self, entry: _Decl, override_name: str = "", is_opaque: bool = False
+        self,
+        entry: _Decl,
+        override_name: str = "",
+        is_opaque: bool = False,
+        dep_msg: str | None = None,
     ) -> RecordType:
         node = entry.node
-        kind = (
-            "union"
-            if node.get("tagUsed") == "union"
-            else ("struct" if node.get("tagUsed") == "struct" else "class")
-        )
+        kind = _record_kind(node)
         own_name = override_name or str(node.get("name", ""))
         if is_opaque:
-            # Mirrors dumper_castxml.py's `incomplete="1"` branch: no member/
-            # base/vtable data to have judged any derived fact from, so each
-            # stays at its neutral/unknown default.
+            # Mirrors dumper_castxml.py's `incomplete="1"` branch: neutral/
+            # unknown defaults, no member/base/vtable data.
             return RecordType(
                 name=own_name,
                 kind=kind,
@@ -1530,7 +1532,7 @@ class _ClangAstParser:
                 is_template_pattern=entry.in_template,
                 has_anonymous_aggregate_fields=False,
                 source_location=self._source_location(entry),
-                deprecated=_clang_deprecated_message(node),
+                deprecated=dep_msg or _clang_deprecated_message(node),
             )
         fields = self._parse_fields(node)
         bases, virtual_bases, _base_access = _parse_bases(node)
@@ -1598,7 +1600,7 @@ class _ClangAstParser:
             has_anonymous_aggregate_fields=bool(injected)
             and all(f.name in injected for f in fields),
             source_location=self._source_location(entry),
-            deprecated=_clang_deprecated_message(node),
+            deprecated=dep_msg or _clang_deprecated_message(node),
         )
 
     def _parse_fields(self, node: dict[str, Any]) -> list[TypeField]:

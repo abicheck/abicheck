@@ -1091,6 +1091,25 @@ def test_castxml_tool_version_includes_bundled_clang_identity(monkeypatch) -> No
     castxml_mod._castxml_tool_version.cache_clear()
 
 
+def test_castxml_extractor_cache_identity_extra_folds_probed_tool_version(
+    monkeypatch,
+) -> None:
+    """Codex review, PR #719: without this hook a warm SourceAbiCache replays
+    a stale SourceAbiTu after the castxml binary at the same path is
+    upgraded/swapped, since CASTXML_EXTRACTOR_VERSION alone doesn't change.
+    ``source_replay._extractor_version()`` folds ``cache_identity_extra()``
+    into the D8 TU cache key when an extractor exposes one -- verify this
+    extractor exposes exactly the probed castxml/bundled-Clang identity."""
+    from abicheck.buildsource.source_extractors import castxml as castxml_mod
+
+    castxml_mod._castxml_tool_version.cache_clear()
+    monkeypatch.setattr(
+        castxml_mod, "_castxml_tool_version", lambda _bin: "0.6.3; clang 17.0.6"
+    )
+    extractor = CastxmlSourceExtractor(castxml_bin="my-castxml")
+    assert extractor.cache_identity_extra() == "0.6.3; clang 17.0.6"
+
+
 def test_parse_root_stamps_msvc_compiler_family_for_msvc_compiler_binary() -> None:
     from xml.etree.ElementTree import Element, SubElement
 

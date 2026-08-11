@@ -367,3 +367,9 @@ def _clang_param_is_va_list(node: dict[str, Any]) -> bool:
     """
     desugared = _desugared_qualtype(node)
     return bool(_VA_LIST_TAG_PTR_RE.match(desugared.strip()))
+
+
+def _record_kind(node: dict[str, Any]) -> str:
+    """``"union"``/``"struct"``/``"class"`` from a record's ``tagUsed``."""
+    tag = node.get("tagUsed")
+    return tag if tag in ("union", "struct") else "class"

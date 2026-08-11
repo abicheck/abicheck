@@ -74,3 +74,22 @@ A new changelog fragment. See changelog.d/README.md for the workflow.
   relying on incidental per-node iteration order.
   `snapshot_cache._SNAPSHOT_CACHE_VERSION` bumped (an opaque handle type
   used to be missing from the snapshot entirely, not just wrong-valued).
+  Two follow-up fixes on the same identity-grouping logic (Codex review):
+  a `class Handle; struct Handle;` opaque redeclaration pair now
+  canonicalizes `RecordType.kind` via `min(kind)` (mirroring
+  `tu_merge._record_kinds_compatible`) instead of keeping whichever
+  spelling appeared first, so reordering two equivalent, compiler-accepted
+  forward decls can no longer flip the emitted kind and produce a false
+  `SOURCE_LEVEL_KIND_CHANGED`; and a `[[deprecated]]` attribute attached
+  to *any* redeclaration of an identity is now merged onto the emitted
+  `RecordType`, instead of silently vanishing when an earlier,
+  unattributed forward decl happens to win the kind tie-break.
+- **The castxml L4 source-ABI extractor now folds its probed castxml/
+  bundled-Clang identity into the D8 per-TU cache key**
+  (`CastxmlSourceExtractor.cache_identity_extra()`, Codex review) —
+  without this, a warm `SourceAbiCache` replayed a stale `SourceAbiTu`
+  (stale enum facts and `compiler_version` included) after the castxml
+  binary at the cached path was upgraded or swapped, since
+  `CASTXML_EXTRACTOR_VERSION` alone doesn't change on a toolchain
+  upgrade. Mirrors `ClangSourceExtractor.cache_identity_extra()`'s
+  existing `--gcc-path` identity fold.

@@ -446,6 +446,74 @@ def test_parse_types_definition_before_forward_decl_still_wins() -> None:
     assert [f.name for f in types[0].fields] == ["x"]
 
 
+@pytest.mark.parametrize(
+    "first_kind, second_kind", [("class", "struct"), ("struct", "class")]
+)
+def test_parse_types_opaque_redecl_kind_canonicalizes_regardless_of_order(
+    first_kind: str, second_kind: str
+) -> None:
+    """`class Handle; struct Handle;` (either order) is legal, compiler-
+    accepted C++ redeclaring one opaque type with different-but-compatible
+    class keys. RecordType.kind must canonicalize to the same value
+    ("class", tu_merge's own min(kind)) regardless of which spelling
+    happened to come first, or reordering the two forward decls alone would
+    flip the emitted kind and produce a false SOURCE_LEVEL_KIND_CHANGED
+    (Codex review, PR #719)."""
+    root = _tu(
+        {
+            "kind": "CXXRecordDecl",
+            "name": "Handle",
+            "tagUsed": first_kind,
+            "loc": {"file": "include/foo.h", "line": 1},
+        },
+        {
+            "kind": "CXXRecordDecl",
+            "name": "Handle",
+            "tagUsed": second_kind,
+            "loc": {"file": "include/foo.h", "line": 2},
+        },
+    )
+    types = [
+        t
+        for t in _ClangAstParser(root, set(), set()).parse_types()
+        if t.name == "Handle"
+    ]
+    assert len(types) == 1
+    assert types[0].is_opaque is True
+    assert types[0].kind == "class"
+
+
+def test_parse_types_opaque_redecl_merges_deprecated_from_a_later_decl() -> None:
+    """`struct Handle; struct [[deprecated("old")]] Handle;` -- both nodes
+    are non-definitions, so the kind tie-break keeps the FIRST one, which
+    carries no DeprecatedAttr of its own (real clang attaches the attribute
+    per-node). The message must still surface on the merged RecordType
+    instead of vanishing with the discarded node (Codex review, PR #719)."""
+    root = _tu(
+        {
+            "kind": "CXXRecordDecl",
+            "name": "Handle",
+            "tagUsed": "struct",
+            "loc": {"file": "include/foo.h", "line": 1},
+        },
+        {
+            "kind": "CXXRecordDecl",
+            "name": "Handle",
+            "tagUsed": "struct",
+            "loc": {"file": "include/foo.h", "line": 2},
+            "inner": [{"kind": "DeprecatedAttr", "message": "old"}],
+        },
+    )
+    types = [
+        t
+        for t in _ClangAstParser(root, set(), set()).parse_types()
+        if t.name == "Handle"
+    ]
+    assert len(types) == 1
+    assert types[0].is_opaque is True
+    assert types[0].deprecated == "old"
+
+
 def test_parse_types_sets_qualified_name_for_namespaced_record() -> None:
     # Codex review (G28 Phase 4): RecordType.qualified_name must be populated
     # for a namespaced/nested type -- the layout tool's own JSON output
