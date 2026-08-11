@@ -264,6 +264,44 @@ class TestExperimentalGraduated:
 
 
 class TestExperimentalRemovedWithoutReplacement:
+    def test_declared_experimental_alias_removal_survives_demangled_divergence(
+        self,
+    ) -> None:
+        # Codex review, on the mangled-preference fix above: a using-
+        # declaration/re-export can legitimately declare a name in
+        # `experimental::` whose *mangled symbol* demangles to the
+        # underlying stable declaration it aliases (no "experimental"
+        # segment at all) -- the same declared-vs-underlying divergence
+        # `detect_std_reexport_removed` is built on. Namespace
+        # classification must come from the *declared* name only, or this
+        # would silently defeat EXPERIMENTAL_REMOVED_WITHOUT_REPLACEMENT
+        # for every alias-shaped experimental declaration.
+        import abicheck.demangle as dm
+
+        def fake_demangle(mangled_list: list[str]) -> dict[str, str]:
+            # The alias's own mangled symbol demangles to the *stable*
+            # underlying name -- no "experimental" segment survives a
+            # demangle-preferred reading.
+            sigs = {"_ZN2ns4sortE": "ns::sort"}
+            return {m: sigs[m] for m in mangled_list if m in sigs}
+
+        orig = dm.demangle_batch
+        dm.demangle_batch = fake_demangle  # type: ignore[assignment]
+        try:
+            old = _snap(funcs=[
+                _fn("ns::experimental::sort", mangled="_ZN2ns4sortE"),
+            ])
+            # Genuine removal: the alias is dropped and its mangled symbol
+            # is gone from `new` entirely (no stable twin either).
+            new = _snap(funcs=[])
+            changes = detect_experimental_namespace_changes(old, new)
+        finally:
+            dm.demangle_batch = orig  # type: ignore[assignment]
+
+        assert len(changes) == 1
+        assert changes[0].kind == ChangeKind.EXPERIMENTAL_REMOVED_WITHOUT_REPLACEMENT
+        assert changes[0].symbol == "ns::experimental::sort"
+
     def test_silent_function_removal(self) -> None:
         old = _snap(funcs=[_fn("ns::experimental::bar")])
         new = _snap(funcs=[])

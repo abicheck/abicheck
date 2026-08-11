@@ -46,7 +46,7 @@ from typing import TYPE_CHECKING
 from .checker_policy import ChangeKind, ReachabilityState
 from .checker_types import Change
 from .diff_helpers import make_change
-from .diff_templates import _canonical_identity_name, _strip_param_signature
+from .diff_templates import _strip_param_signature
 
 if TYPE_CHECKING:
     from .model import AbiSnapshot, RecordType, ScopeOrigin
@@ -186,30 +186,32 @@ def _qualified_function_name(
 
 
 def _split_experimental(
-    qnames: list[str],
+    entries: list[tuple[str, str]],
     experimental_namespaces: tuple[str, ...],
-) -> tuple[list[str], list[str]]:
-    """Split *qnames* into ``(experimental, stable)`` by namespace match."""
+) -> tuple[list[tuple[str, str]], list[tuple[str, str]]]:
+    """Split ``(qname, mangled)`` *entries* into ``(experimental, stable)``
+    by namespace match on the qname half."""
     exp = [
-        q for q in qnames
-        if any(s in experimental_namespaces for s in _segments(q))
+        e for e in entries
+        if any(s in experimental_namespaces for s in _segments(e[0]))
     ]
-    stable = [q for q in qnames if q not in exp]
+    stable = [e for e in entries if e not in exp]
     return exp, stable
 
 
 def _index_funcs_by_stable_key(
     snap: AbiSnapshot,
     experimental_namespaces: tuple[str, ...],
-) -> dict[tuple[str, str], list[str]]:
-    """Index public functions by ``(stripped_qualified_name, leaf)``.
+) -> dict[tuple[str, str], list[tuple[str, str]]]:
+    """Index public functions by ``(stripped_qualified_name, leaf)`` ->
+    ``[(qname, mangled), ...]``.
 
     Only public functions are indexed so internal helpers in
     ``experimental::`` don't get reported.
     """
     from .model import Visibility
     demangled = _batch_demangle_public(snap)
-    out: dict[tuple[str, str], list[str]] = {}
+    out: dict[tuple[str, str], list[tuple[str, str]]] = {}
     for f in snap.functions:
         if f.visibility != Visibility.PUBLIC:
             continue
@@ -223,35 +225,61 @@ def _index_funcs_by_stable_key(
         # depth and would otherwise split inside a namespace-qualified
         # parameter type.
         #
-        # Uses `_canonical_identity_name`, not the declared-name-first
-        # `_qualified_function_name`: this index groups declarations by
-        # qualified-name *identity* to decide whether an experimental
-        # declaration was genuinely removed, and a dumper backend can
-        # populate `Function.name` with different qualification for the
-        # identical linked symbol across snapshot sides (a real regression
-        # -- a still-exported symbol read as "removed without replacement"
-        # purely because the header dumper changed how much of its own
-        # name it qualified between versions). Demangling `mangled`
-        # consistently on both sides closes that gap; a real name/mangled
-        # divergence (a genuine namespace graduation) still shows up
-        # because graduation mints a *different* mangled symbol, not just
-        # different declared-name text (Codex review finding).
-        qname = _canonical_identity_name(f.name, f.mangled, demangled)
+        # Deliberately uses the declared-name-first `_qualified_function_name`
+        # here, NOT `_canonical_identity_name`: this index's bucket key
+        # decides whether a declaration counts as "experimental" at all, and
+        # that classification must come from the *declared* name -- a using-
+        # declaration/re-export can legitimately alias a symbol whose
+        # demangled name never mentions the experimental namespace at all
+        # (the same declared-vs-underlying divergence
+        # `detect_std_reexport_removed` is built on), so overriding here
+        # would silently defeat both EXPERIMENTAL_GRADUATED and
+        # EXPERIMENTAL_REMOVED_WITHOUT_REPLACEMENT for that shape (Codex
+        # review finding). `f.mangled` is carried alongside qname instead, so
+        # `_findings_for` can independently confirm a would-be "removed"
+        # symbol didn't merely get re-bucketed by dumper-qualification drift
+        # (the original reported false positive) without touching namespace
+        # classification.
+        qname = _qualified_function_name(f.name, f.mangled, demangled)
         leaf_segs = _segments(_strip_param_signature(qname))
         if not leaf_segs:
             continue
         leaf = leaf_segs[-1]
         stripped, _ = _strip_experimental(qname, experimental_namespaces)
-        out.setdefault((stripped, leaf), []).append(qname)
+        out.setdefault((stripped, leaf), []).append((qname, f.mangled))
     return out
+
+
+def _public_mangled_set(snap: AbiSnapshot) -> set[str]:
+    """Return every non-empty ``Function.mangled`` value among *snap*'s
+    public functions, for :func:`_findings_for`'s removal-suppression
+    check.
+
+    Exact raw-string equality, not a "is this a real Itanium/MSVC
+    mangling" validity check: the question this answers is "does an
+    identical exported-symbol string still appear in *new*", which holds
+    regardless of whether the mangled field happens to encode a verifiable
+    mangling (a C-linkage export where ``mangled == name`` still answers
+    it correctly).
+    """
+    from .model import Visibility
+    return {
+        f.mangled for f in snap.functions
+        if f.visibility == Visibility.PUBLIC and f.mangled
+    }
 
 
 def _index_types_by_stable_key(
     snap: AbiSnapshot,
     experimental_namespaces: tuple[str, ...],
-) -> dict[tuple[str, str], list[str]]:
-    """Index types by ``(stripped_qualified_name, leaf)``."""
-    out: dict[tuple[str, str], list[str]] = {}
+) -> dict[tuple[str, str], list[tuple[str, str]]]:
+    """Index types by ``(stripped_qualified_name, leaf)`` -> ``[(qname, ""), ...]``.
+
+    ``RecordType`` has no mangled symbol, so the second element of each pair
+    is always ``""`` — kept only so this shares :func:`_split_experimental`'s
+    pair-based shape with :func:`_index_funcs_by_stable_key`.
+    """
+    out: dict[tuple[str, str], list[tuple[str, str]]] = {}
     for t in snap.types:
         qname = t.name
         segs = _segments(qname)
@@ -259,7 +287,7 @@ def _index_types_by_stable_key(
             continue
         leaf = segs[-1]
         stripped, _ = _strip_experimental(qname, experimental_namespaces)
-        out.setdefault((stripped, leaf), []).append(qname)
+        out.setdefault((stripped, leaf), []).append((qname, ""))
     return out
 
 
@@ -282,31 +310,42 @@ def _origin_by_name(types: list[RecordType]) -> dict[str, ScopeOrigin]:
 
 
 def _classify_experimental_event(
-    old_exp: list[str],
-    old_stable: list[str],
-    new_exp: list[str],
-    new_stable: list[str],
+    old_exp: list[tuple[str, str]],
+    old_stable: list[tuple[str, str]],
+    new_exp: list[tuple[str, str]],
+    new_stable: list[tuple[str, str]],
+    *,
+    still_linked: bool = False,
 ) -> str | None:
     """Return ``"graduated"``, ``"removed"``, or ``None`` for a key pair.
 
     Graduation requires an experimental presence in old AND a new stable
     twin that did not exist before. Removal requires no replacement on
     either side. Everything else is silent.
+
+    *still_linked* — resolved by the caller via mangled-symbol lookup,
+    ``False`` for the type-sourced path (``RecordType`` has no mangled
+    symbol) — suppresses a would-be "removed" classification: dumper
+    backends can populate ``Function.name`` with different qualification
+    for the identical linked symbol across snapshot sides, which can
+    change this key's bucket without the symbol actually disappearing. A
+    real removal is never linked in ``new`` at all, so this never masks a
+    genuine break (Codex review finding).
     """
     if not old_exp:
         return None
     if new_exp and new_stable and not old_stable:
         return "graduated"
     if not new_exp and not new_stable and not old_stable:
-        return "removed"
+        return None if still_linked else "removed"
     return None
 
 
 def _emit_experimental_change(
     event: str,
     leaf: str,
-    old_exp: list[str],
-    new_stable: list[str],
+    old_exp: list[tuple[str, str]],
+    new_stable: list[tuple[str, str]],
     kind_label: str,
     *,
     old_origins: dict[str, ScopeOrigin] | None,
@@ -337,9 +376,9 @@ def _emit_experimental_change(
     """
     from .model import ScopeOrigin
 
-    old_q = old_exp[0]
+    old_q = old_exp[0][0]
     if event == "graduated":
-        new_q = new_stable[0]
+        new_q = new_stable[0][0]
         subject_is_public = (
             new_origins is None or new_origins.get(new_q) == ScopeOrigin.PUBLIC_HEADER
         )
@@ -378,31 +417,42 @@ def _emit_experimental_change(
 
 
 def _findings_for(
-    old_index: dict[tuple[str, str], list[str]],
-    new_index: dict[tuple[str, str], list[str]],
+    old_index: dict[tuple[str, str], list[tuple[str, str]]],
+    new_index: dict[tuple[str, str], list[tuple[str, str]]],
     experimental_namespaces: tuple[str, ...],
     kind_label: str,
     *,
     old_origins: dict[str, ScopeOrigin] | None = None,
     new_origins: dict[str, ScopeOrigin] | None = None,
+    new_mangled_set: set[str] | None = None,
 ) -> list[Change]:
     """Walk old/new indices, emitting one finding per classified event.
 
     *old_origins*/*new_origins* are ``None`` for the function-sourced path
     (always reliably public) or a ``{qualified_name: ScopeOrigin}`` map for
     the type-sourced path (public only when ``ScopeOrigin.PUBLIC_HEADER``).
+
+    *new_mangled_set* — every real mangled symbol still publicly exported in
+    ``new`` (function-sourced path only; ``None`` for the type-sourced path,
+    which has no mangled symbols at all). Used to confirm a would-be
+    "removed" declaration's underlying symbol is genuinely gone rather than
+    merely re-bucketed by a declared-name qualification change between
+    snapshot sides (see :func:`_classify_experimental_event`).
     """
     out: list[Change] = []
-    for (stable_key, leaf), qnames in old_index.items():
-        old_exp, old_stable = _split_experimental(qnames, experimental_namespaces)
+    for (stable_key, leaf), entries in old_index.items():
+        old_exp, old_stable = _split_experimental(entries, experimental_namespaces)
         if not old_exp:
             continue
-        new_qnames = new_index.get((stable_key, leaf), [])
+        new_entries = new_index.get((stable_key, leaf), [])
         new_exp, new_stable = _split_experimental(
-            new_qnames, experimental_namespaces,
+            new_entries, experimental_namespaces,
+        )
+        still_linked = new_mangled_set is not None and any(
+            mangled and mangled in new_mangled_set for _, mangled in old_exp
         )
         event = _classify_experimental_event(
-            old_exp, old_stable, new_exp, new_stable,
+            old_exp, old_stable, new_exp, new_stable, still_linked=still_linked,
         )
         if event is None:
             continue
@@ -444,6 +494,7 @@ def detect_experimental_namespace_changes(
         _index_funcs_by_stable_key(new, experimental_namespaces),
         experimental_namespaces,
         "declaration",
+        new_mangled_set=_public_mangled_set(new),
     ))
     out.extend(_findings_for(
         _index_types_by_stable_key(old, experimental_namespaces),
