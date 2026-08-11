@@ -206,12 +206,36 @@ def _paired_stable_indices(
     unrelated declarations (currently only a function's mangled name
     qualifies -- see ``_type_index_items`` for two candidate type
     identities that were tried and falsified) -- ``None`` when no identity
-    evidence is available. Two raw keys are only unioned when they share a
-    non-``None`` identity value somewhere among their items; a raw key
-    with no evidence, or evidence that never coincides with anything
-    else's, stays its own singleton -- the pre-existing double-report is
-    the accepted fallback rather than a newly-introduced false
-    suppression.
+    evidence is available. Two raw keys are only unioned when EACH has
+    exactly one distinct identity value among its items and those two
+    values are equal -- not merely a non-empty intersection of however
+    many identities each raw key's items happen to carry. A raw key with
+    no evidence, evidence that never coincides with anything else's, or
+    (Codex review, P1, fresh evidence) an *ambiguous* identity set
+    spanning more than one distinct value stays its own singleton -- the
+    pre-existing double-report is the accepted fallback rather than a
+    newly-introduced false suppression.
+
+    The ambiguous-set case matters because a raw key's items are not
+    always one declaration: a header-derived qualified name can omit a
+    function's parameter-list signature (see ``_func_index_items``), so
+    two distinct overloads land in the very same layer-1 bucket, and that
+    bucket's identity set then aggregates both overloads' mangled names.
+    Treating that contaminated set as reliable evidence is unsound in
+    either direction -- concretely, if OLD has overload A and B sharing
+    one raw key (identity set ``{A, B}``) plus a version-elided alias raw
+    key that only ever named A (identity set ``{A}``), and NEW keeps only
+    B at the unversioned spelling, the two raw keys' identity sets DO
+    intersect on A, but that intersection doesn't prove A's alias means
+    the same thing as B's raw key -- it would merge all three entries into
+    one component, and since NEW still has a (B-only) entry under the
+    merged key, ``_findings_for`` would see the merged entity as "still
+    present" and silently drop A's removal entirely, alias included.
+    Requiring each side of a union to be an unambiguous singleton closes
+    this: the contaminated ``{A, B}`` raw key is never eligible to merge
+    with anything, so A's alias and A's full spelling both correctly fall
+    through to layer 1's raw double-report instead of being absorbed by
+    B's survival.
 
     Splitting the merge decision onto raw *keys* rather than individual
     *items* is what keeps layer 1 and layer 2 from interfering (Codex
@@ -317,11 +341,28 @@ def _paired_stable_indices(
 
         for i in range(len(raw_keys)):
             idents_i = raw_identities.get(raw_keys[i])
-            if not idents_i:
+            # A raw key's identity set spanning more than one distinct value
+            # proves the OPPOSITE of what layer 2 needs: it means this raw
+            # key already bundles multiple, distinct declarations (an
+            # overloaded function whose header-derived name lacks a
+            # parameter-list signature, so two overloads share one layer-1
+            # bucket -- see `_func_index_items`), not one declaration
+            # reachable under one identity. Using that set for a merge
+            # decision is unsound either way it points: it can merge an
+            # unrelated raw key on an identity that isn't uniquely this raw
+            # key's own (Codex review, P1 -- a surviving overload's bucket
+            # absorbing a removed sibling overload's alias, hiding the
+            # removal), or it can just as easily NOT merge a genuine alias
+            # whose shared identity happens to collide with the
+            # contamination. Only a raw key with EXACTLY one distinct
+            # identity value is unambiguous evidence -- require that on
+            # both sides of the comparison, not just a non-empty
+            # intersection.
+            if not idents_i or len(idents_i) != 1:
                 continue
             for j in range(i + 1, len(raw_keys)):
                 idents_j = raw_identities.get(raw_keys[j])
-                if idents_j and idents_i & idents_j:
+                if idents_j and len(idents_j) == 1 and idents_i & idents_j:
                     ri, rj = _find(i), _find(j)
                     if ri != rj:
                         parent[rj] = ri

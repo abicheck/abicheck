@@ -443,6 +443,43 @@ class TestExperimentalRemovedWithoutReplacement:
         ]
         assert len(removed) == 1
 
+    def test_overloaded_raw_key_never_used_as_merge_evidence(self) -> None:
+        """Codex review, P1, fresh evidence: a header-derived qualified name
+        can omit a function's parameter-list signature
+        (``_qualified_function_name`` returns ``name`` as-is whenever it
+        already contains ``"::"``), so two genuinely distinct overloads can
+        share one layer-1 raw key -- and that raw key's aggregated identity
+        set then spans BOTH overloads' mangled names.
+
+        Reviewer's exact scenario: OLD has overloads A and B both spelled
+        ``preview::v1::foo`` (raw key identity ``{A, B}``) plus a
+        version-elided alias spelling ``preview::foo`` that only ever named
+        A (raw key identity ``{A}``). The two sets DO intersect on A, but
+        that intersection isn't proof the alias raw key means the same
+        thing as the *whole* overloaded raw key -- treating it as evidence
+        would merge all three qnames into one component. NEW keeps only B
+        (still spelled ``preview::v1::foo``); if the merge fired, the
+        merged entity would read as "still present" (B's survival) and A's
+        removal -- alias included -- would vanish entirely, unreported.
+
+        A raw key with an ambiguous (>1 value) identity set must never
+        qualify as layer-2 merge evidence, so A's alias spelling must still
+        surface its own removal.
+        """
+        old = _snap(funcs=[
+            _fn("preview::v1::foo", mangled="_ZFooA"),
+            _fn("preview::v1::foo", mangled="_ZFooB"),
+            _fn("preview::foo", mangled="_ZFooA"),
+        ])
+        new = _snap(funcs=[_fn("preview::v1::foo", mangled="_ZFooB")])
+        changes = detect_experimental_namespace_changes(old, new)
+        removed = [
+            c for c in changes
+            if c.kind == ChangeKind.EXPERIMENTAL_REMOVED_WITHOUT_REPLACEMENT
+        ]
+        assert len(removed) == 1
+        assert removed[0].symbol == "preview::foo"
+
     def test_versioned_inline_namespace_type_spellings_double_report_is_accepted(
         self,
     ) -> None:
@@ -1036,6 +1073,16 @@ class TestPairedStableIndicesProperties:
         side(s) they were placed on -- a singleton on one side and a pair
         on the other must not silently disagree on the key for what is
         the same entity.
+
+        This guarantee only holds when each side's raw key is itself
+        UNAMBIGUOUS evidence -- exactly one distinct identity value among
+        its own items (Codex review, P1, fresh evidence: a raw key
+        aggregating more than one identity, the overloaded-function-name
+        shape, is not reliable evidence and must not be required to merge
+        with anything; see ``_paired_stable_indices``'s docstring). Two
+        raw keys whose *own* identity sets are each a singleton, and those
+        singletons are equal, must still resolve to one key regardless of
+        side placement -- that part of the original finding is unchanged.
         """
         old_items, new_items = _build_paired_items(placements)
         old_out, new_out = _paired_stable_indices(old_items, new_items)
@@ -1048,9 +1095,20 @@ class TestPairedStableIndicesProperties:
         for it in old_items + new_items:
             by_leaf.setdefault(it.leaf, []).append(it)
         for group in by_leaf.values():
+            # Per-raw-key identity sets, aggregated across old+new (mirrors
+            # `_paired_stable_indices`'s own `raw_identities`) -- only a
+            # raw key whose set is an unambiguous singleton is eligible to
+            # participate in the merge guarantee below.
+            idents_by_raw: dict[str, set[object]] = {}
+            for it in group:
+                if it.identity is not None:
+                    idents_by_raw.setdefault(it.stripped, set()).add(it.identity)
+            unambiguous_raw = {
+                raw for raw, idents in idents_by_raw.items() if len(idents) == 1
+            }
             by_identity: dict[object, set[tuple[str, str]]] = {}
             for it in group:
-                if it.identity is None:
+                if it.identity is None or it.stripped not in unambiguous_raw:
                     continue
                 by_identity.setdefault(it.identity, set()).add(qname_to_key[it.qname])
             for identity, keys in by_identity.items():

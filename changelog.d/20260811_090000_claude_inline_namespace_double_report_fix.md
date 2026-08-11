@@ -56,6 +56,19 @@
   could have its own name stripped, or collide with an unrelated
   same-scope declaration also named like a version tag.
 
+- Fixed a further bug in the same merge primitive: a raw key whose
+  aggregated identity set spanned more than one distinct value (an
+  overloaded function whose header-derived qualified name omits the
+  parameter-list signature, so two distinct overloads land in the same
+  layer-1 bucket) could still be used as version-segment alias-merge
+  evidence via a non-empty intersection with another raw key's identity
+  set. That's unsound: it could merge an unrelated raw key on an identity
+  that isn't uniquely this raw key's own, silently absorbing a removed
+  overload's alias into a surviving sibling overload's bucket and
+  dropping the removal entirely. `_paired_stable_indices` now requires
+  each side of a merge to be an *unambiguous* singleton identity set, not
+  merely a non-empty intersection.
+
 - **Test infrastructure**: added `tests/test_diff_namespaces.py::TestPairedStableIndicesProperties`,
   a Hypothesis property-test suite testing the merge primitive
   (`_paired_stable_indices`) directly, stating its contract as invariants
