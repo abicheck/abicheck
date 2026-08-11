@@ -127,6 +127,16 @@ topics:
       - contrib/abicheck-clang-plugin
     reference_page: use/build-evidence-setup.md
 
+  baseline-storage-backends:
+    canonical_page: reference/resolve-baseline.md
+    fact_sources:
+      - abicheck/buildsource/baseline_set.py
+      - actions/resolve-baseline/action.yml
+      - .github/workflows/publish-baseline.yml
+      - .github/workflows/update-main-baseline.yml
+    task_pages:
+      - reference/publish-baseline.md
+
   cli-surface:
     canonical_page: use/cli-usage.md
     fact_sources:

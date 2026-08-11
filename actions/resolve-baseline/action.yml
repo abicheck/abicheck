@@ -150,5 +150,6 @@ runs:
         INPUT_PROFILE: ${{ inputs.profile }}
         INPUT_REQUIRED: ${{ inputs.required }}
         INPUT_CANDIDATE_BUILD_OUTPUT: ${{ inputs.candidate-build-output }}
+        INPUT_EXPECTED_PROJECT_REF: ${{ inputs.expected-project-ref }}
         ACTION_PATH: ${{ github.action_path }}
       run: bash "${{ github.action_path }}/run.sh"

@@ -323,10 +323,17 @@ jobs:
         run: |
           set -euo pipefail
 
-          existing_url=$(gh release view "$RELEASE_TAG" --repo "$REPO" \
-            --json assets \
-            --jq --arg name "$ASSET_NAME" '.assets[] | select(.name == $name) | .url' \
-            2>/dev/null || true)
+          # NOTE: `gh`'s own `--jq` flag takes exactly one expression argument
+          # -- it is not `jq` itself, so `--jq --arg name ... 'EXPR'` fails
+          # with "accepts at most 1 arg(s)" (Codex review, verified against
+          # gh 2.96.0). Piping the raw --json output into a real `jq`
+          # invocation (which does support --arg) avoids that entirely.
+          assets_json=$(gh release view "$RELEASE_TAG" --repo "$REPO" --json assets 2>/dev/null) || assets_json=""
+          existing_url=""
+          if [[ -n "$assets_json" ]]; then
+            existing_url=$(printf '%s' "$assets_json" \
+              | jq -r --arg name "$ASSET_NAME" '.assets[] | select(.name == $name) | .url')
+          fi
 
           if [[ -z "$existing_url" ]]; then
             gh release upload "$RELEASE_TAG" "$ASSET_NAME" --repo "$REPO"
