@@ -40,14 +40,30 @@ that's not a mapping, a missing/blank ``use_case`` name) raises
 **Not implemented in this slice** (see ADR-057's "Deliberately not
 implemented this slice", G29 Phase 4): runtime-trace ingestion
 (``TRACE_OBSERVED_ENTRY``/``TRACE_OBSERVED_EDGE`` stay reserved vocabulary,
-same as :mod:`abicheck.impact.consumer_graph`'s reserved consumer kinds) and
-any report-level ``affected_use_cases``/``USE_CASE_IMPACT_CONFIRMED``
-surface (G29 Phase 6). This module only builds and joins the graph facts.
+same as :mod:`abicheck.impact.consumer_graph`'s reserved consumer kinds), and
+any *report-schema* ``Change.affected_use_cases`` field or
+``USE_CASE_IMPACT_CONFIRMED`` finding kind wired into ``compare`` itself
+(G29 Phase 6 — that needs its own schema bump and FP-gate examples, not a
+drive-by extension here).
+
+:func:`explain_use_case_impact` (G29 Phase 4, added alongside the
+``project validate-use-cases --against-new`` CLI mode) is a narrower, real
+step past graph-building alone: given a real two-snapshot diff's changed
+symbols, it answers *which declared use case(s)' own entrypoints reach
+each one* — but it is a **read-only report view**, not a `Change`
+mutation. It constructs no new node/edge, sets no field on any `Change`
+object, and is invisible to `compare`'s own report schema/exit code; a
+caller renders its answer directly (today, only the CLI command above
+does). This is the same "enrichment lives outside the object being
+enriched" shape :mod:`abicheck.impact.engine`'s `assess_change` already
+uses for `ImpactAssessment` — just without even a cached field on `Change`,
+since nothing in this slice re-reads the answer more than once per run.
 """
 
 from __future__ import annotations
 
 import copy
+from collections.abc import Iterable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -412,6 +428,61 @@ def _public_entry_index(library_graph: SourceGraphSummary) -> dict[str, str]:
     return index
 
 
+@dataclass(frozen=True)
+class UseCaseResolution:
+    """Per-use-case entrypoint resolution against a real library graph —
+    the read view :func:`resolve_use_case_entrypoints` returns.
+
+    Deliberately a *report*, not a graph: ``build_use_case_graph`` already
+    silently skips an unresolvable ``entrypoints`` value by design (this
+    module's own "absence, never a wrong answer" discipline — see its
+    docstring), which is correct for graph construction but leaves a
+    manifest author with zero visibility into *which* of their declared
+    entrypoints actually matched anything. This dataclass is that missing
+    visibility, for a caller (``project validate-use-cases``) that wants to
+    report it without changing what the graph itself records.
+    """
+
+    use_case: str
+    resolved_entrypoints: tuple[str, ...] = ()
+    unresolved_entrypoints: tuple[str, ...] = ()
+    tests: tuple[str, ...] = ()
+
+
+def resolve_use_case_entrypoints(
+    definitions: list[UseCaseDefinition], library_graph: SourceGraphSummary
+) -> list[UseCaseResolution]:
+    """Resolve every definition's ``entrypoints`` against *library_graph*,
+    reporting which matched and which didn't — a read-only companion to
+    :func:`build_use_case_graph`, not a replacement for it.
+
+    Reuses :func:`_public_entry_index` (the exact same resolution
+    :func:`build_use_case_graph` performs) so this can never disagree with
+    what the graph actually ends up recording — a manifest entrypoint this
+    function reports as resolved is guaranteed to be exactly the set
+    :func:`build_use_case_graph` would silently keep, and one reported
+    unresolved is exactly the set it would silently skip. Order preserved
+    from *definitions*; a use case's own ``resolved_entrypoints``/
+    ``unresolved_entrypoints`` preserve the manifest's declared order too
+    (not sorted), so a report reads in the same order the manifest author
+    wrote it.
+    """
+    entries = _public_entry_index(library_graph)
+    resolutions: list[UseCaseResolution] = []
+    for definition in definitions:
+        resolved = tuple(e for e in definition.entrypoints if e in entries)
+        unresolved = tuple(e for e in definition.entrypoints if e not in entries)
+        resolutions.append(
+            UseCaseResolution(
+                use_case=definition.use_case,
+                resolved_entrypoints=resolved,
+                unresolved_entrypoints=unresolved,
+                tests=definition.tests,
+            )
+        )
+    return resolutions
+
+
 def build_use_case_graph(
     definitions: list[UseCaseDefinition], library_graph: SourceGraphSummary
 ) -> SourceGraphSummary:
@@ -646,3 +717,170 @@ def join_use_case_graph(
             node.provenance, node.confidence = restore
     joined.graph_id = ""
     return joined
+
+
+def explain_use_case_impact(
+    definitions: list[UseCaseDefinition],
+    library_graph: SourceGraphSummary,
+    symbols: Iterable[str],
+) -> dict[str, tuple[str, ...]]:
+    """For each of *symbols* (an ordinary two-snapshot diff's own
+    ``Change.symbol`` values), which declared use case(s)' own resolved
+    entrypoints reach it via *library_graph*'s call/reference edges (G29
+    Phase 4, the use-case counterpart of
+    :func:`abicheck.impact.consumer_graph.explain_required_symbols`).
+
+    The key difference from that function: its root set is *every*
+    consumer-compiled public entry in the library, because a real
+    consumer's requirement is proven by the export table alone, independent
+    of which declared use case (if any) covers it. Here the roots are
+    restricted to exactly the entrypoints *this manifest itself declares* —
+    "every public entry reaches it" says nothing about whether a
+    *specific* use case's own surface does, and attributing a change to
+    every use case whenever *any* public entry reaches it would make the
+    field meaningless (every use case would show every public-reachable
+    change). No :func:`join_use_case_graph` fold is needed for this walk:
+    entrypoint resolution reads only :func:`_public_entry_index` against the
+    plain library graph, the identical resolution :func:`build_use_case_graph`
+    and :func:`resolve_use_case_entrypoints` already perform.
+
+    Returns ``{symbol: (use_case_name, ...)}`` for exactly the symbols this
+    manifest's own entrypoints can be shown to reach — a symbol absent from
+    the mapping is not evidence no use case touches it, only that this
+    function found no proof, mirroring
+    :func:`~abicheck.impact.consumer_graph.explain_required_symbols`'s own
+    "absent, never speculative" contract. Two structural limitations, both
+    inherited from that same sibling function rather than introduced here:
+    a *type*-shaped change (no ``SOURCE_DECL_MAPS_TO_SYMBOL`` edge — no
+    declaration ever backs a `record_type`/`enum_type` node) can never be
+    named, only a function/variable-shaped one; and only a
+    *consumer-compiled* entrypoint (:func:`~abicheck.buildsource.
+    source_graph.is_consumer_compiled_public_entry` — inline/template
+    bodies, not an ordinary out-of-line exported function's own internal
+    calls) can walk past its own declaration, so a use case naming only
+    ordinary exported functions as entrypoints still gets direct-hit
+    attribution (the symbol's own declaration is one of the resolved
+    entrypoints) but never transitive attribution through it.
+    """
+    wanted = set(symbols)
+    if not wanted or not definitions:
+        return {}
+
+    from ..buildsource.source_graph import is_consumer_compiled_public_entry
+    from ..internal_leak import (
+        CALL_GRAPH_TRAVERSAL_POLICY,
+        _consumer_compiled_reachability,
+    )
+
+    entry_index = _public_entry_index(library_graph)
+    # Merge (not overwrite) across repeated `use_case` entries (Codex
+    # review, fresh evidence): a manifest is not required to give each
+    # use case exactly one list entry -- `parse_use_case_manifest` never
+    # rejects a repeated `use_case` name (the duplicate-key check is per
+    # *mapping*, and each entry is a separate list item, not a mapping
+    # key), and `build_use_case_graph` already merges every entry sharing
+    # a name onto the *same* `use_case` graph node, registering a
+    # `USE_CASE_USES_ENTRY` edge for each entry's own entrypoints. A plain
+    # `use_case_entries[name] = ids` assignment here disagreed with that
+    # graph it claims to mirror: the later entry's entrypoint set would
+    # silently replace the earlier one's, so a change reachable only
+    # through an earlier entry's entrypoints would never be attributed.
+    use_case_entries: dict[str, set[str]] = {}
+    for definition in definitions:
+        ids = {entry_index[e] for e in definition.entrypoints if e in entry_index}
+        if ids:
+            use_case_entries.setdefault(definition.use_case, set()).update(ids)
+    if not use_case_entries:
+        return {}
+
+    # decl node id -> every *wanted* symbol name it maps to (plural -- Codex
+    # review, fresh evidence: a single declaration can map to more than one
+    # exported symbol, e.g. two versioned exports foo@V1/foo@V2 of the same
+    # definition; a plain dict[str, str] here silently kept only the last
+    # one seen, so a change to foo@V2 could be mis-attributed through
+    # decl://foo to a use case that named foo@V1 specifically, or a genuine
+    # foo@V1 change could vanish if foo@V2's edge happened to be visited
+    # later), and the reverse symbol id -> decl id(s) -- the latter to
+    # resolve a coalesced ``binary_symbol://`` entry (`_public_entry_index`
+    # prefers the mapped symbol id over the declaring decl id, see its own
+    # docstring) back to the decl node(s) the call-graph's own edges are
+    # keyed on: a ``DECL_CALLS_DECL``/``DECL_REFERENCES_DECL`` edge's
+    # src/dst is always a decl (or type) node id, never a bare
+    # exported-symbol one, so walking from the coalesced binary_symbol id
+    # directly would find no outgoing edges at all and silently explain
+    # nothing.
+    decl_to_symbols: dict[str, set[str]] = {}
+    # Every decl that maps onto a given symbol, not just one (Codex review,
+    # fresh evidence): the same export can legitimately be reached by more
+    # than one SOURCE_DECL_MAPS_TO_SYMBOL edge -- e.g. an inline/weak
+    # definition captured once per TU, all mangling to the identical symbol
+    # name. A plain dict[str, str] here kept only the first decl seen
+    # (edge-iteration-order dependent), and a manifest entry naming that
+    # exact binary_symbol could then walk from a declaration with no
+    # captured call edges (a forward declaration, an extern with no body in
+    # *this* TU's evidence) while the sibling decl carrying the real body --
+    # and its transitive calls -- was silently never walked at all.
+    symbol_to_decls: dict[str, set[str]] = {}
+    for edge in library_graph.edges:
+        if edge.kind != "SOURCE_DECL_MAPS_TO_SYMBOL":
+            continue
+        symbol_to_decls.setdefault(edge.dst, set()).add(edge.src)
+        name = edge.dst.removeprefix("binary_symbol://")
+        if name in wanted:
+            decl_to_symbols.setdefault(edge.src, set()).add(name)
+
+    def walk_roots_for(entry: str) -> set[str]:
+        return symbol_to_decls.get(entry, {entry})
+
+    node_by_id = {n.id: n for n in library_graph.nodes}
+    exported_decls = {
+        e.src for e in library_graph.edges if e.kind == "SOURCE_DECL_MAPS_TO_SYMBOL"
+    }
+    all_entries = sorted({eid for ids in use_case_entries.values() for eid in ids})
+    walk_roots = sorted(
+        {
+            root
+            for eid in all_entries
+            for root in walk_roots_for(eid)
+            if is_consumer_compiled_public_entry(root, node_by_id, exported_decls)
+        }
+    )
+    reachability = (
+        _consumer_compiled_reachability(
+            library_graph, CALL_GRAPH_TRAVERSAL_POLICY, walk_roots, node_by_id
+        )
+        if walk_roots
+        else {}
+    )
+
+    result: dict[str, set[str]] = {}
+    for use_case, entry_ids in use_case_entries.items():
+        for entry in entry_ids:
+            # An entry that names one *exact* binary_symbol id directly
+            # (the manifest wrote the versioned symbol itself, or
+            # _public_entry_index left it uncoalesced because the owning
+            # decl maps to more than one symbol -- see that function's own
+            # ambiguity rule) is attributed to exactly that symbol alone,
+            # never the decl's whole symbol set (Codex review, fresh
+            # evidence): a use case that named foo@V1 specifically must not
+            # also pick up a foo@V2-only change just because they share one
+            # declaration.
+            if entry.startswith("binary_symbol://"):
+                exact_symbol = entry.removeprefix("binary_symbol://")
+                if exact_symbol in wanted:
+                    result.setdefault(exact_symbol, set()).add(use_case)
+            else:
+                # A decl-shaped entry (or a label that coalesced onto one)
+                # didn't disambiguate a specific version at all, so every
+                # wanted symbol that decl maps to counts.
+                for direct_symbol in decl_to_symbols.get(entry, ()):
+                    result.setdefault(direct_symbol, set()).add(use_case)
+            for root in walk_roots_for(entry):
+                seen, _came_from, _degraded = reachability.get(
+                    root, (frozenset(), {}, frozenset())
+                )
+                for decl in seen:
+                    for sym in decl_to_symbols.get(decl, ()):
+                        result.setdefault(sym, set()).add(use_case)
+
+    return {symbol: tuple(sorted(names)) for symbol, names in result.items()}

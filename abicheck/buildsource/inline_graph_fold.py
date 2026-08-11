@@ -48,8 +48,20 @@ if TYPE_CHECKING:
 #: role-level claims.
 ROLE_COVERAGE_MATRIX: dict[str, tuple[str, ...]] = {
     "TYPE_INHERITS": ("base",),
-    "TYPE_HAS_FIELD_TYPE": ("field", "alias"),
-    "DECL_HAS_TYPE": ("var", "return", "param"),
+    "TYPE_HAS_FIELD_TYPE": (
+        "field",
+        "alias",
+        "enum_underlying",
+        "template_param",
+        "default_template_arg",
+    ),
+    "DECL_HAS_TYPE": (
+        "var",
+        "return",
+        "param",
+        "template_param",
+        "default_template_arg",
+    ),
     "DECL_REFERENCES_DECL": ("ref",),
 }
 

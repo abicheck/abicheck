@@ -1,7 +1,7 @@
-# ADR-052: Unified Impact Assessment Model (G29 Phase 3, slices 1-10)
+# ADR-052: Unified Impact Assessment Model (G29 Phase 3, slices 1-11)
 
 **Date:** 2026-07-22
-**Status:** Accepted — slices 1-10 implemented. Slice 6 (G29 Phase 3
+**Status:** Accepted — slices 1-11 implemented. Slice 6 (G29 Phase 3
 follow-up) closed two items this ADR originally left open: `--format junit`
 now renders `--report-mode root-cause` (additive `rootCauseId`/`rootCause`
 attributes on each `<failure>`, not a restructured `<testcase>` tree — see
@@ -37,13 +37,16 @@ pipeline), so `MarkReachability` still runs downstream of them and would
 make an eagerly-cached assessment stale. They are not left uncovered,
 though: `MarkReachability`'s own new caching (above) reaches every one of
 these findings too, once each is tagged, closing the practical gap without
-needing nine/ten independent construction-site edits. `suppression.py` — D2's
-original decision text also named it, but it turns out to construct no
-`Change` of its own — still has an unresolved role that needs a
-documentation clarification pass rather than a migration (see "Deliberately
-not implemented this slice") — see "Slice 8"/"Slice 9"/"Slice 10" below for
-the full scoping rationale.
-**Verified:** main@2e43d53 on 2026-08-04
+needing nine/ten independent construction-site edits. Slice 11 (G29 Phase 3
+follow-up) then closed the one remaining question the D2 decision text left
+open: `suppression.py`, its third named module, turns out to construct no
+`Change` of its own — the actual mutation site is `checker.py`'s
+`_filter_suppressed_changes`/`post_processing.ApplySuppression` (already
+migrated, Slice 2), so there was never a fourth producer to migrate, only an
+imprecise module name in the original decision text — see "Slice 11" below.
+See "Slice 8"/"Slice 9"/"Slice 10"/"Slice 11" below for the full scoping
+rationale.
+**Verified:** main@7c59880 on 2026-08-10
 **Decision maker:** (pending — recorded per repository convention;
 implemented under [G29](../plans/g29-impact-analysis-layer.md) Phase 3's own
 "needs its own ADR" gate — [ADR-046](046-source-graph-identity-v2-and-evidence-merge.md)'s
@@ -835,8 +838,8 @@ implemented this slice" below for why that one stays open).
   `assess_change(overlay) == overlay.impact_assessment`.
 - **Two producer sites now remain unmigrated**: `source_graph_findings.py`
   and `post_processing.MarkReachability` — down from three after Slice 8.
-  `suppression.py`'s still-unclear D2 role (see below) is a separate,
-  unresolved documentation question, not a third producer to migrate.
+  `suppression.py`'s D2 role (see below, resolved in Slice 11) is a
+  separate documentation question, not a third producer to migrate.
 
 ## Slice 10 — `MarkReachability` measurement + caching, and the `source_graph_findings.py` audit (G29 Phase 3 follow-up, 2026-08-09)
 
@@ -955,9 +958,70 @@ evidence, unchanged from before this slice).
   `post_processing.MarkReachability` is migrated;
   `source_graph_findings.py`'s ten sites are covered transitively through
   it, each with a recorded reason for not caching directly.
-  `suppression.py`'s still-unclear D2 role (Slice 9's note, unchanged) is
-  the one remaining open item, and it was never a producer to migrate in
-  the first place — see "Deliberately not implemented this slice" below.
+  `suppression.py`'s D2 role (Slice 9's note) was the one remaining open
+  item — Slice 11 (below) resolves it: never a producer to migrate in the
+  first place.
+
+## Slice 11 — the `suppression.py` D2 role, resolved by inspection (G29 Phase 3 follow-up, 2026-08-10)
+
+Closes the one item Slices 8-10 left as "a separate, unresolved
+documentation question" rather than a fourth producer: what D2's original
+decision text meant by naming `suppression.py` alongside
+`post_processing.MarkReachability`, `source_graph_findings.py`,
+`internal_leak.py`, and `appcompat.py`. Resolved by re-reading the module
+itself, not by guessing at authorial intent.
+
+**Finding**: `abicheck/suppression.py` constructs no `Change` and mutates no
+`Change` field, anywhere in the module — confirmed by grepping every
+assignment target in the file. `Suppression.matches`/`would_withhold`/
+`would_withhold_unknown_reachability` and `SuppressionList.evaluate` only
+*read* `change.reachability_state`/`change.public_reachable`/etc. for rule
+matching, returning a `SuppressionOutcome` (`suppressed`, `withheld_rule`,
+`withheld_unknown_rule`, `matched_rule`) that carries no evidence of its
+own. `SuppressionAudit` (the `--audit-suppressions` surface) is the same
+shape one level up: it only reads already-suppressed `Change` objects to
+group them into `stale_rules`/`high_risk_matches`/etc.
+
+The actual mutation the D2 text was reaching for happens one layer out, at
+the two call sites that consume a `SuppressionOutcome`:
+`checker._filter_suppressed_changes` (for the top-level `compare` path) and
+`post_processing.ApplySuppression`/`_merge_findings_respecting_suppression`
+(for the post-processing pipeline and its late-detector followers) — both
+already do exactly what D2 describes: `c.suppression_rule =
+outcome.rule_label()`, migrated in **Slice 2**, long before this question
+was ever raised. And by the time either call site runs,
+`c.impact_assessment` is already populated for every reachability-tagged
+`Change` — `MarkReachability` runs *before* `ApplySuppression` in
+`DEFAULT_PIPELINE` (ADR-044 D1's ordering requirement, unrelated to this
+ADR but load-bearing here too), and `_filter_suppressed_changes`'s own call
+sites in `checker.py` only ever run after `_run_post_processing` has
+already tagged everything `MarkReachability` covers. So Slice 10's
+`MarkReachability` caching already reaches every `Change` the suppression
+subsystem evaluates, by construction of the pipeline order — there was no
+gap for a suppression-adjacent caching step to close, once `checker.py`/
+`post_processing.py` (not `suppression.py`) are recognized as the real
+producers.
+
+**Conclusion**: D2's original text conflated "the suppression *subsystem*"
+(the `checker.py`/`post_processing.py` call sites that apply a
+`SuppressionOutcome` to a `Change`) with "the `suppression.py` *module*"
+(the pure rule-matching engine that decision text happened to name). Read
+as the former, D2's suppression-related scope was already fully delivered
+by Slice 2 (`suppression_rule`) and Slice 10 (`impact_assessment` caching,
+transitively, via pipeline ordering) — nothing here needed a Slice 11 code
+change, only the recognition that there was never a fifth producer to
+migrate. `suppression.py` itself stays exactly what it already is: a pure,
+`Change`-mutating-nothing predicate engine, which is the correct shape for
+it to have — `checker.py`/`post_processing.py` deciding *what to do* with
+an evaluation outcome, and `suppression.py` deciding only *whether*, is
+the separation of concerns this module was written with from the start,
+not a gap to close.
+
+No test changes: this slice asserts nothing new, since nothing behavioral
+changed — the existing `tests/test_reachability_state.py::
+TestMarkReachabilityImpactAssessmentCache` and `test_suppression.py`'s own
+suite already cover the two real halves (the cache write, and the pure
+evaluation) this finding connects.
 
 ## Deliberately not implemented this slice
 
@@ -980,17 +1044,13 @@ remaining four tiers):
 - **The full D2 direction flip** (every flat `Change` field becoming a
   derived view over `ImpactAssessment`, across all five producer modules
   D2's decision text names) — still not attempted in the *literal* sense of
-  five independent construction-site migrations; Slices 8-10 instead deliver
-  a verifiably safe subset chosen by real pipeline-ordering audits rather
-  than forcing the whole flip through in one pass — see "Slice 10" above for
-  why `MarkReachability` caching (rather than nine/ten independent
-  `source_graph_findings.py` edits) turned out to be the correct shape for
-  the remaining scope. Status below, refined by direct code inspection
-  rather than carried forward from the original decision text unchanged:
-  `suppression.py`, the third module the original decision text named,
-  turns out not to be a producer at all (no `Change(...)` construction site
-  exists in it) — its own D2 role is a separate, unresolved documentation
-  question, not a fourth migration:
+  five independent construction-site migrations; Slices 8-11 instead
+  deliver a verifiably safe subset chosen by real pipeline-ordering/module
+  audits rather than forcing the whole flip through in one pass — see
+  "Slice 10"/"Slice 11" above for why `MarkReachability` caching (rather
+  than nine/ten independent `source_graph_findings.py` edits) turned out to
+  be the correct shape for the remaining scope, and why `suppression.py`
+  needed no migration at all:
   - **`source_graph_findings.py`** and **`post_processing.MarkReachability`**
     — both closed by Slice 10 (above): the former is not individually
     cacheable at construction time (audited, ten sites, all found unsafe for
@@ -998,22 +1058,24 @@ remaining four tiers):
     ends up correctly cached once `MarkReachability` tags it, which Slice 10
     also implemented after measuring (not assuming) that doing so is worth
     it.
-  - **`suppression.py`** — direct inspection found **no** `Change(...)`
-    construction inside this module at all; it only *reads*
-    `public_reachable`/`reachability_state` for rule matching. The one
-    diagnostic `Change` construction near this area
-    (`SUPPRESSION_WOULD_HIDE_PUBLIC_BREAK`, `_build_suppression_overreach_change`)
-    actually lives in `post_processing.py`, not `suppression.py`, and sets
-    no reachability fields to cache in the first place (see Slice 9 above).
-    **This ADR's own D2 decision text naming `suppression.py` as a producer
-    still needs a follow-up clarification pass** — either it meant this
-    `post_processing.py` diagnostic function, or it meant the Slice 2 audit-
-    trail (`FindingDecision`/`SuppressionAudit`) surface instead of
-    `impact_assessment` caching at all, or the original text was simply
-    imprecise about which module owns the construction site. Resolve this
-    with a documentation-only pass through the original decision text before
-    scheduling any code change here — this is the one item from D2's
-    original five-producer scope still genuinely open after Slice 10.
+  - **`suppression.py`** — closed by Slice 11 (above): direct inspection
+    found **no** `Change(...)` construction or mutation inside this module
+    at all; it only *reads* `public_reachable`/`reachability_state` for
+    rule matching and returns a `SuppressionOutcome` the caller acts on. The
+    real mutation D2's text was naming happens at the caller —
+    `checker._filter_suppressed_changes`/`post_processing.ApplySuppression`
+    — already migrated in Slice 2, and already covered by Slice 10's
+    `MarkReachability` caching (which runs earlier in the pipeline, so
+    every `Change` those callers touch already carries a cached
+    `impact_assessment`). There was never a fifth producer to migrate —
+    D2's text conflated the suppression *subsystem* (the callers) with the
+    `suppression.py` *module* (a pure predicate engine with nothing to
+    migrate) — see Slice 11 for the full resolution.
+
+  This closes every item in D2's original five-producer scope: two
+  migrated directly (Slices 8-9), two covered transitively through
+  `MarkReachability` caching (Slice 10), and one resolved as never having
+  been a producer at all (Slice 11).
 - **The full `RootCauseCorrelator` correlation across consumer-overlay
   findings that don't share a `caused_by_type` today** — Slices 3-5 shipped
   the `caused_by_type`-based first cut (JSON, markdown/text, and SARIF

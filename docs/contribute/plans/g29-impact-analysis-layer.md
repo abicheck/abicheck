@@ -118,15 +118,23 @@ model:
     tagged. See the Phase 3 section below ("Slice 10") for the exact
     per-function site count and breakdown.
 
-  A third entry D2's original decision text named, `suppression.py`, still
+  A third entry D2's original decision text named, `suppression.py`,
   contains **no** `Change(...)` construction at all (confirmed by direct
   search, unchanged from Slice 8/9's finding) — the diagnostic construction
   near it (`SUPPRESSION_WOULD_HIDE_PUBLIC_BREAK`) actually lives in
-  `post_processing.py` and carries no reachability evidence to cache. This
-  is the one item from D2's original scope still genuinely open after
-  Slice 10 — a separate, unresolved documentation question (what
-  `suppression.py`'s named D2 role was actually meant to be), not a
-  producer to migrate.
+  `post_processing.py` and carries no reachability evidence to cache. **G29
+  Phase 3 Slice 11 resolved this**, the one item from D2's original scope
+  still open after Slice 10: `suppression.py` mutates no `Change` field
+  anywhere in the module (confirmed by grepping every assignment target),
+  so it was never a producer to migrate — the mutation D2's text was
+  naming is `checker._filter_suppressed_changes`/
+  `post_processing.ApplySuppression`, already migrated in Slice 2, and
+  already covered by Slice 10's `MarkReachability` caching (which runs
+  earlier in `DEFAULT_PIPELINE`, ADR-044 D1's ordering, so every `Change`
+  those callers see already carries a cached `impact_assessment`). D2's
+  text conflated "the suppression subsystem" (the caller sites) with "the
+  `suppression.py` module" (a pure predicate engine with nothing to
+  migrate, by design — see ADR-052 Slice 11 for the full resolution).
 - **G29.3** (Phase 2, **D1-D6 all done, ADR-046**) — Graph core v2:
   relation/occurrence identity split (**done**), an evidence-preserving
   (order-independent) node/edge merge (**done**), a per-kind/per-role
@@ -308,11 +316,21 @@ generation itself across every graph producer plus a v1/v2
 *identity-level* compatibility matrix (not just the pack-loading
 compatibility this implementation already provides) — categorically larger
 and riskier than any slice landed in this phase, still deserving its own
-scoped design pass if ever attempted. Two narrower items D5/D6 explicitly
-still leave open too (adopting `TraversalPolicy` on the layout walk's
-non-graph data model; a "consumer-proven" tier and a genuinely finer
-"reduced-confidence name resolution" axis, both needing evidence that
-doesn't exist yet) — open follow-up work under the same accepted ADR.
+scoped design pass if ever attempted. Two narrower items D5/D6 named as
+open have since resolved differently: D6's "consumer-proven" tier is
+**done** for `select_preferred_graph_path` (G29 Phase 4, ADR-057, reads the
+consumer graph straight off the structured-path selector's own `graph`
+argument) — it remains out of scope only for `select_preferred_path`'s
+plain `list[str]` layout-walk paths, for a structural reason (no per-hop
+node identity to test), not an evidence gap. D5's `TraversalPolicy`
+adoption on the layout walk and D6's genuinely finer
+"reduced-confidence name resolution" axis (tier 5, beyond the residual
+case) were both re-investigated (2026-08) and confirmed to need more than
+evidence to close: the layout walk has no `allowed_edges`/`stop_conditions`
+analogue at all (it walks every base/field/typedef target unconditionally,
+by design), and the six-tier order is fixed by this accepted ADR with no
+slot to insert a finer axis into without an amendment — see ADR-046's D5/D6
+implementation sections for the full evidence.
 See [Source Graph Schema Reference](../../reference/source-graph-schema.md)
 for the exhaustive schema this phase produced.
 
@@ -377,15 +395,21 @@ for the exhaustive schema this phase produced.
   layout walk's plain `list[str]` paths) covers 2 tiers (exact,
   virtual/indirect); `buildsource.graph_impact.select_preferred_graph_path`
   (a structured `list[GraphEdge]` path — real per-edge confidence, fact-
-  producer count, node visibility) covers 4 tiers (exact, public-header
-  structural, multi-producer-confirmed, and a reduced-confidence residual),
-  wired into `source_graph_findings.py`'s `PUBLIC_API_INTERNAL_DEPENDENCY_ADDED`
+  producer count, node visibility) covered 4 tiers at the time this was
+  written (exact, public-header structural, multi-producer-confirmed, and a
+  reduced-confidence residual); **now covers 5** — G29 Phase 4 (ADR-057)
+  wired the consumer-proven tier into the same selector once the consumer
+  graph existed to read (see G29.5 below), reading the required-node set
+  straight off its own `graph` argument, inert for every run without
+  `--used-by`. Wired into
+  `source_graph_findings.py`'s `PUBLIC_API_INTERNAL_DEPENDENCY_ADDED`
   producer in place of its own `min(..., key=len)`. The
   `primary_path`/`alternative_paths`/`discarded_path_count` finding shape is
   on `impact.model.GraphProofPath`, populated by
-  `graph_impact.attach_impact_metadata`. Still open: the consumer-proven
-  tier (needs Phase 4's consumer graph) and a genuinely finer
-  reduced-confidence-name-resolution axis beyond the residual case.
+  `graph_impact.attach_impact_metadata`. Still open: only a genuinely finer
+  reduced-confidence-name-resolution axis beyond the residual case
+  (investigated, needs an ADR amendment to insert a new tier — see
+  ADR-046's D6 implementation section).
 
 **ADR-046 accepted and implemented** — see the Phase 2 heading above for the
 current per-decision status (D1-D6 all implemented, D4 as a deliberately
@@ -496,14 +520,22 @@ sites, each resolved by a real audit rather than an assumption:
   instead of a construction-time cache write; `MarkReachability`'s own new
   caching reaches every one of these findings anyway, once tagged.
 
-A third entry the original decision text named, `suppression.py`, is still a
-separate, unresolved documentation question rather than a producer site:
-direct search found no `Change(...)` construction in this module at all; the
-nearby diagnostic (`SUPPRESSION_WOULD_HIDE_PUBLIC_BREAK`) actually lives in
-`post_processing.py` and carries no reachability evidence. What D2's
-original text meant by naming `suppression.py` needs a documentation-only
-clarification pass before any code work is scheduled against it — this is
-the one item from D2's original scope still genuinely open after Slice 10.
+A third entry the original decision text named, `suppression.py`, is
+**resolved (G29 Phase 3 Slice 11)** rather than a producer site: direct
+search found no `Change(...)` construction *or mutation* anywhere in this
+module — it only reads `Change` fields for rule matching, returning a
+`SuppressionOutcome` the caller acts on. The nearby diagnostic
+(`SUPPRESSION_WOULD_HIDE_PUBLIC_BREAK`) actually lives in
+`post_processing.py`. The mutation D2's original text was naming happens at
+the caller — `checker._filter_suppressed_changes`/
+`post_processing.ApplySuppression` — already migrated in Slice 2, and
+already covered by Slice 10's `MarkReachability` caching (which runs
+earlier in the pipeline, so every `Change` those callers see already
+carries a cached `impact_assessment`). D2's text conflated the suppression
+*subsystem* (the callers) with the `suppression.py` *module* (a pure
+predicate engine, correctly untouched) — see ADR-052 Slice 11 for the full
+resolution. This closes the last item from D2's original five-producer
+scope.
 
 Also still open: the full `RootCauseCorrelator`-based correlation across
 consumer-overlay findings with no `caused_by_type` link (Phase 6) — which is
@@ -541,9 +573,10 @@ section describes, most of it still open:
   see above). The flat fields stay as real fields (not converted to derived
   properties) rather than the originally-described full flip, since that
   conversion touches every existing `Change(...)` construction site
-  repo-wide and was judged out of scope for a verifiably-safe slice. **Still
-  open**: `suppression.py` (its D2 role needs a documentation clarification
-  pass — see above) — the one remaining item from D2's original scope.
+  repo-wide and was judged out of scope for a verifiably-safe slice.
+  `suppression.py`'s D2 role — the one remaining item from D2's original
+  scope — **is resolved (Slice 11, above)**: the module has no `Change`
+  construction/mutation site to migrate.
 - `reporter.py`/`sarif.py`: structured `impact` object in JSON (**done**,
   `impact_assessment`), `codeFlows`/`threadFlows` in SARIF (**not done** —
   SARIF's root-cause mode is additive `properties.rootCauseId`/`rootCause`
@@ -626,9 +659,56 @@ decisions.
   (deep-copy join, mirroring `consumer_graph`'s slice 1 API/discipline
   exactly). Only `USE_CASE_USES_ENTRY`/`TEST_COVERS_USE_CASE` are populated;
   `TRACE_OBSERVED_ENTRY`/`TRACE_OBSERVED_EDGE` stay reserved — **runtime-trace
-  ingestion itself is still not implemented**, and neither is any CLI flag
-  reading the manifest or report-level field/finding consuming the joined
-  graph (that's G29 Phase 6's `USE_CASE_IMPACT_CONFIRMED`).
+  ingestion itself is still not implemented**. **Done** (this pass): the
+  manifest's first CLI front door, `abicheck project validate-use-cases
+  <manifest> [--against <snapshot>]` (`cli_project.py`) — without `--against`
+  it only validates the manifest's own structure (malformed document, exit
+  64); with it, it resolves each declared use case's entrypoints against a
+  real embedded L5 graph and reports resolved vs. unresolved per use case
+  (text or `--format json`), reusing the new
+  `resolve_use_case_entrypoints()` wrapper around
+  `build_use_case_graph`'s own internal join so the CLI can never disagree
+  with what the graph actually records. An unresolved entrypoint is never a
+  command failure (only a malformed manifest or a graph-less/unreadable
+  `--against` snapshot is), matching the manifest format's own
+  absence-is-not-evidence discipline. **Done** (this pass, closing the
+  "manifest folded into a real diff" gap `use-case-impact.md` named): a new
+  `impact.use_cases.explain_use_case_impact(definitions, library_graph,
+  symbols)` — for each of a real diff's own changed symbols, which declared
+  use case(s)' own resolved entrypoints reach it, via the identical
+  restricted call-graph walk (`internal_leak._consumer_compiled_reachability`
+  under `CALL_GRAPH_TRAVERSAL_POLICY`) `consumer_graph.
+  explain_required_symbols` already uses for `--used-by`, just rooted at the
+  manifest's own entrypoints instead of every public entry in the library —
+  attributing a change to *every* use case whenever *any* public entry
+  reaches it would make the field meaningless. `project
+  validate-use-cases`'s new `--against-new <snapshot>` option (requires
+  `--against`) is its CLI front door: diffs OLD against NEW via the Tier-2
+  `service.compare_snapshots` (same routing every other front end uses,
+  `cli-contract` AI-readiness check), then reports which use case each
+  resulting change reaches, per use case, text or JSON. Explains against
+  **both** sides' own graphs and unions the per-symbol result (Codex
+  review, fresh evidence: a symbol added on NEW never existed in OLD's own
+  graph at all — e.g. a use case's own entrypoint just introduced — so
+  resolving only against OLD's graph silently read every added change as
+  unattributed regardless of what NEW's graph could prove; mirrors
+  `post_processing_reachability.MarkReachability`'s own `old_paths +
+  new_paths` merge for the identical old/new asymmetry). Deliberately a
+  **read-only report view**, not a `Change` mutation or a `compare`-native
+  surface — no new node/edge, no field set on any `Change` object, no
+  schema bump, no effect on any exit code — the same scope boundary D9's
+  contract-relevance work drew between "answer the question" and "gate on
+  the answer." Two structural limitations carried over unmodified from
+  `explain_required_symbols` rather than introduced here: only a
+  function/variable-shaped change (backed by a `SOURCE_DECL_MAPS_TO_SYMBOL`
+  edge) can be named, never a type layout change; and only a
+  consumer-compiled entrypoint can walk transitively past its own
+  declaration. Still not done: a `compare --use-cases <manifest>` flag on
+  the native `compare` command itself (today only reachable via `project
+  validate-use-cases --against-new`, a separate invocation over the same
+  two snapshots), any `Change.affected_use_cases` field, any
+  `USE_CASE_IMPACT_CONFIRMED` finding (both G29 Phase 6, needing their own
+  schema bump and FP-gate examples), and runtime-trace ingestion.
 - `docs/contribute/use-case-impact.md` (new, **done**): manifest format, entrypoint
   mapping, test association, declared-vs-observed use (**trace ingestion
   itself remains unimplemented** — documented honestly as not-yet-built, not
@@ -637,9 +717,13 @@ decisions.
 
 ### Phase 5 — New semantic graph families
 
-In review-stated priority order. Items 1 and 6 are **done**; item 6 shipped
-out of order first since it needed no compiler frontend, unlike the rest,
-which all depend on a Clang AST pass.
+In review-stated priority order. Items 1, 2, 5 and 6 are **done**, items 3
+and 4 partially (each with named, reserved vocabulary members and a recorded
+reason per member); item 6 shipped out of order first since it needed no
+compiler frontend, unlike the rest, which all depend on a Clang AST pass —
+and items 3 and 5 turned out to need no *new* pass either, item 3 being a
+pure transform over already-folded graph state and item 5 an extension of
+the existing `type_graph.py` walk.
 
 1. **Template instantiation — done.** `abicheck/buildsource/template_graph.py`
    is a third, independent `clang -ast-dump=json` pass (alongside the call
@@ -663,6 +747,54 @@ which all depend on a Clang AST pass.
    `docs/reference/source-graph-schema.md` for the field-level detail,
    including the two load-bearing empirical AST findings (the explicit-
    instantiation detachment quirk, and typedef-alias argument resolution).
+   **`TEMPLATE_USES_DECL` — re-investigated (2026-08, G29 Phase 5
+   follow-up), the "own AST verification" this needed now done, and a
+   second, deeper blocker found in the process; still deliberately not
+   implemented.** Confirmed against real Clang 18: the canonical
+   `ClassTemplateSpecializationDecl`'s own `TemplateArgument` child for a
+   declaration-valued NTTP (`template <auto Fn> struct Holder;` /
+   `Holder<&detail::f>`) is exactly `{"kind": "TemplateArgument", "decl":
+   {"id": "...", "kind": "FunctionDecl", "name": "f", "type": {"qualType":
+   "void ()"}}}` — no `type`/`value` key at the `TemplateArgument`'s own
+   top level, so `_template_arg_use` (which requires one or the other)
+   currently returns `None` for it: the argument is silently dropped, not
+   mis-typed. `_first_decl_id` (used for the type-argument case) already
+   finds this shape correctly, since it checks `node.get("decl")` first,
+   pre-order — resolving *that* half is not the blocker. The real blocker
+   is downstream: `_resolve_arg_targets`/`_resolve_specialization_qname`
+   answer "what is this id's *qualified name*" by reading `id_to_qname`,
+   populated by `_index_type_decls` for `_RECORD_DECL_KINDS` only — a
+   `FunctionDecl`/`VarDecl` id is never indexed there at all, so even a
+   correctly-extracted `target_qname` would resolve to `None` downstream
+   today. Closing this needs a **second**, function/variable-scoped index
+   built the same way (own scope-qualified name, from the same whole-TU
+   walk) — not a trivial widen of `_RECORD_DECL_KINDS`, since
+   `_index_type_decls`'s own nested-specialization scoping logic (the
+   "Wrapper<int>::Nested vs Wrapper<double>::Nested" disambiguation
+   immediately below in the same function) is written specifically for
+   record-shaped children and would need its own audit for a
+   function/variable child before trusting it. A second, independent risk
+   found while investigating the fix rather than the gap itself: unlike a
+   type argument (whose `spelling` is clang's own pre-qualified `qualType`
+   printer output, e.g. `"internal::Detail"`), a decl reference's `name` is
+   **bare** (`"f"`, never `"detail::f"`) — `_template_arg_use` itself has
+   no access to the whole-TU scope index needed to qualify it at the point
+   it runs, so a naive `f"&{name}"` spelling would let two distinct
+   decl-valued instantiations that merely *share* an unqualified callee
+   name (`Holder<&ns1::f>` vs. `Holder<&ns2::f>`, or any two same-named
+   functions in different namespaces) collide onto one `template_instantiation`
+   node — silently merging two distinct instantiations' edges, exactly the
+   failure class `_flatten_template_args`'s own opaque-argument guard
+   exists to prevent for a different shape. Fixing the spelling right needs
+   the same new index the target-resolution half needs, threaded back into
+   the label-construction step, not a separate patch. Left unimplemented
+   rather than shipped with a known collision risk on this project's own
+   standard (contrast `type_graph.py`'s equally-investigated
+   `template_param`/`default_template_arg` roles, which had no such risk
+   once implemented) — this is real, scoped follow-up work (a new
+   function/variable qname index, threaded through both target resolution
+   and label construction, verified against an overload/namespace-collision
+   test case before landing), not a drive-by extension of this item.
 2. **Macro/config dependency — done.** `abicheck/buildsource/macro_graph.py`
    is a two-pass extractor (a Clang AST pass indexing every declaration's
    own `(file, begin_line, end_line)` span, plus a pure raw-text scan for
@@ -1439,11 +1571,204 @@ which all depend on a Clang AST pass.
      realistic, commonly-seen shapes. Documented in the module's own
      docstring ("a fourth accepted, documented limitation") and pinned by
      a dedicated regression test.
-5. **Full type-role coverage** to parity: variable type, typedef target,
+5. **Full type-role coverage — done for seven of the nine roles as
+   originally worded; one (non-type template argument) turned out to name a
+   narrower role than implemented, corrected below; the ninth
+   (concept/constraint) is investigated and deliberately deferred with its
+   evidence recorded.** The item's list was: variable type, typedef target,
    alias-template target, enum underlying type, non-type template argument,
    default template argument, concept/constraint dependency, function-pointer
-   signature, member-pointer type — feeds the Phase 2 per-role coverage
-   matrix.
+   signature, member-pointer type — feeding the Phase 2 per-role coverage
+   matrix (`inline_graph_fold.ROLE_COVERAGE_MATRIX`, ADR-046 D3). Every claim
+   below was checked against **real Clang 18 AST output** before being
+   written, not inferred from the role names: the audit found the nine split
+   three ways rather than nine-missing.
+   **Scope-boundary correction (Codex review, fresh evidence, second
+   round):** the original wording "non-type template argument" was
+   implemented as `template_param` (below) — the non-type *parameter*'s own
+   declared type (`template <detail::Handle H>` depends on
+   `detail::Handle`). That is real and correct for what it is, but it is
+   not the same claim as resolving a non-type template **argument**'s own
+   value: what a `Holder<&detail::f>`-shaped specialization's
+   `TemplateArgument.decl` cross-reference points at (confirmed against
+   real Clang 18: `ClassTemplateSpecializationDecl`'s own child
+   `TemplateArgument` node carries `{"decl": {"kind": "FunctionDecl",
+   "name": "f", ...}}`, a clean, non-heuristic reference — but `_walk_types`
+   deliberately skips edge emission for `ClassTemplateSpecializationDecl`
+   nodes entirely, for an unrelated, already-documented reason: attributing
+   one specific instantiation's dependency to the shared generic template
+   node would misattribute it). That is exactly item 1's already-reserved
+   `TEMPLATE_USES_DECL` (`template_graph.py`, "a non-type template argument
+   ... that names a declaration rather than a literal value ... needs its
+   own empirical AST verification") — this item's `template_param` role
+   does not close it, and the original bullet's ambiguous wording should
+   not have been read as claiming it did.
+   - **Five were already covered**, by an existing role, and needed no
+     producer — the same "closed a gap by discovering pre-existing coverage"
+     pattern this plan used for ADR-057 D6's tier 1 and item 3's
+     `DECL_OVERRIDES_DECL`. *Variable type* is `_emit_var_decl_edge`'s `var`
+     role and *typedef target* is `_emit_alias_edge`'s `alias` role, both
+     pre-existing. *Alias-template target* turned out to reach that same
+     `alias` role for a structural reason worth recording: clang nests the
+     real `TypeAliasDecl` inside the `TypeAliasTemplateDecl`, and
+     `_walk_types` recurses into a template wrapper's children with the
+     unchanged scope, so `template <class T> using Ptr = detail::Impl *;`
+     arrives as an ordinary `TypeAliasDecl` and emits `api::Ptr ->
+     detail::Impl` with no new code at all. *Member-pointer type* (`int
+     Owner::*`, `void (Owner::*)(int)`) and *function-pointer signature*
+     (`void (*)(detail::Impl *)`) are both reached by
+     `_resolve_nested_type_names`'s existing pointer-to-member/declarator
+     handling, so they surface under whichever role the enclosing
+     declaration carries rather than needing one of their own. All five are
+     now pinned by `tests/test_type_graph_roles.py` so a later refactor of
+     the walk can't silently drop what was never explicitly claimed.
+   - **Three were genuinely missing and are now implemented**, each with a
+     real AST source and each landing on the node the entity's own edges
+     already use. `enum_underlying` (`TYPE_HAS_FIELD_TYPE`): an `EnumDecl`
+     carries **no `type` key at all** — the underlying type lives in its own
+     `fixedUnderlyingType` object — so the shared typedef path this kind
+     already took read an empty spelling and emitted nothing, and `enum class
+     Color : detail::Handle` produced no dependency on the private alias it
+     is laid out as. `qualType` (as written, `"detail::Handle"`) is read
+     rather than the sibling `desugaredQualType` (`"int"`), which has already
+     lost the identity the edge exists to name; an unscoped enum carries no
+     `fixedUnderlyingType` at all and a scoped one with no written type gets
+     an implicit `"int"` the pre-existing fundamental-type filter drops, so
+     neither shape produces a noise edge. `template_param` and
+     `default_template_arg` (both on `TYPE_HAS_FIELD_TYPE` *or*
+     `DECL_HAS_TYPE`) cover a non-type template parameter's own type
+     (`template <detail::Handle H> struct Slot`) and a parameter's default
+     *type* argument (`template <class T = detail::Impl> struct Box`). The
+     load-bearing correctness property is the **src identity**: a template
+     wrapper (`ClassTemplateDecl`/`FunctionTemplateDecl`/`VarTemplateDecl`/
+     `TypeAliasTemplateDecl`) is not a node in this graph, and its parameters
+     are direct children of the *wrapper* while the templated entity is a
+     sibling child — so `_templated_entity_src` re-derives the templated
+     child's identity exactly the way the walk does for that child's own kind
+     (a record/alias → `record_type` node, hence `TYPE_HAS_FIELD_TYPE`; a
+     function/variable → `source_decl`, hence `DECL_HAS_TYPE`). That matters
+     concretely for a function template, whose pattern `FunctionDecl` carries
+     **no `mangledName`**: both sides must fall through the same
+     qualified-name+signature-hash identity or the constraint would sit on an
+     orphan node nothing else reaches. Verified end to end against real
+     clang, not just at the unit level. Two default-argument shapes are
+     deliberately **not** emitted because clang's JSON carries no dependency
+     to emit: a *non-type* parameter's default **value** (`template
+     <detail::Handle H = detail::K>` dumps as `{"kind": "TemplateArgument",
+     "isExpr": true}` with no `type` — the referenced constant is a nested
+     `DeclRefExpr`, a `DECL_REFERENCES_DECL` question rather than a type
+     role), and a *template template* parameter's default (`template
+     <template <class> class C = detail::Def>` dumps as a bare `{"kind":
+     "TemplateArgument"}` — neither a type nor a name to resolve), so both
+     degrade to no fact rather than a guessed one (ADR-028 D3). Both
+     non-emissions are pinned by integration tests against the compiler
+     itself, so a future clang that *does* carry them fails a test instead of
+     leaving a silent gap.
+   - **A real collector-upgrade false positive was found and fixed as a
+     direct consequence of adding these three roles (Codex P1 review on PR
+     #712, confirmed by direct reproduction).** `ROLE_COVERAGE_MATRIX`/
+     `role_pass_covered()` (ADR-046 D3, Phase 2) was built for exactly this
+     situation but had **zero production consumers** — only ever stamped by
+     `inline_graph_fold._mark_role_coverage`, never read by
+     `source_graph_findings._common_dependency_edge_kinds()`, the function
+     that actually decides which dependency-edge kinds are safe to
+     version-diff. That function trusts a whole `TYPE_HAS_FIELD_TYPE`/
+     `DECL_HAS_TYPE` family once both sides confirm the coarse
+     `extractor_passes["type_graph"]` flag — so a persisted graph collected
+     *before* this item's three new roles existed (flag set, no role key,
+     since that producer version never emitted or tracked them) compared
+     against one collected *after* (flag set, role key set, first-ever edge
+     riding the new role) reported a false `PUBLIC_API_INTERNAL_DEPENDENCY_
+     ADDED` purely from re-running a newer abicheck version over unchanged
+     source. Fixed with `_role_coverage_disagrees()`, a final, isolated,
+     monotonic (subtraction-only) filter over
+     `_common_dependency_edge_kinds()`'s existing result: a kind stays
+     trusted only when both sides' `extractor_passes`/`narrowed_passes`
+     agree, role key by role key, on which `ROLE_COVERAGE_MATRIX` roles were
+     actually examined — read directly with no family-flag fallback, since
+     that fallback is exactly what let an absent role key silently read as
+     "covered." Verified: the version-skew repro now produces zero findings;
+     a same-version repro (both sides confirm the same role key) still
+     correctly produces one; the full relevant existing test suite (every
+     module the fix or its call sites touch) shows zero regressions; three
+     new dedicated regression tests pin both directions plus a control case
+     (a kind outside `ROLE_COVERAGE_MATRIX`, e.g. `DECL_CALLS_DECL`, is
+     unaffected) in `tests/test_l3l4l5_new_kinds.py`. A companion gap in the
+     same fix, found by a later review round: the header-only pass
+     (`header_graph.py`, ADR-041 header-only-graph addendum) reuses the
+     identical `type_graph.parse_clang_ast_types()` walker but never stamped
+     a `ROLE_COVERAGE_MATRIX` key at all, so two header-only-collected graphs
+     compared before/after this same abicheck upgrade would read as vacuous
+     agreement (both sides absent, forever) rather than "coverage unknown" —
+     `build_header_only_graph` now stamps role coverage under its own
+     `header_type_graph` pass alias the same way the build-integrated pass
+     does, and `_role_coverage_disagrees()` checks both the build-integrated
+     and header-only key for each side.
+   - **Concept/constraint dependency — investigated, deliberately NOT
+     implemented, evidence recorded so the follow-up doesn't re-derive it.**
+     A public template constrained by an internal concept (`template
+     <detail::Storable T> struct Keeper`, or a `requires detail::Storable<T>`
+     clause) is a real dependency, but clang's JSON AST **does not name the
+     concept at the use site**: a `ConceptSpecializationExpr`'s key set is
+     exactly `{id, inner, kind, range, type, valueCategory}` — no name, no
+     `conceptId`, no `referencedDecl` — and grepping a whole real dump for
+     the concept's own spelling finds it exactly *once*, on the `ConceptDecl`
+     itself. There **is** a usable join, verified across three use sites and
+     two distinct concepts in one TU: the nested
+     `ImplicitConceptSpecializationDecl`'s `loc.offset` is byte-for-byte the
+     declaring `ConceptDecl`'s own `loc.offset`, so `(file, offset)` resolves
+     the constraint deterministically — but consuming it needs the sticky
+     whole-document file cursor (clang omits `loc.file` when unchanged, the
+     same quirk `macro_graph.py` documents), which this module tracks only
+     file-coarsely today. The larger blocker is the **node model**, not the
+     resolution: a concept is a named declaration that is not a type, and
+     there is no `concept` node kind in `source_graph.NODE_KINDS` — routing
+     it through `DECL_REFERENCES_DECL` (`source_decl` → `source_decl`) would
+     put a *class* template's constraint on a `decl://` node while every
+     other edge that class has lives on its `record_type` one, fragmenting
+     the identity this item's other two roles were careful to keep single.
+     Registering a new node kind is exactly the step item 3 treated as
+     notable when it introduced `vtable`, so this gets its own scoped
+     decision rather than a drive-by addition here.
+   - **Wrapper-to-entity bridge — a real, pre-existing gap, found by Codex
+     review on PR #712 during this item, recorded as follow-up work rather
+     than attempted as a side effect of a role-coverage change.** When the
+     build-integrated graph has L4 source evidence but no pre-attached L2
+     header graph, `source_extractors/clang.py`'s `_emit_template`
+     represents a class/function template *wrapper* itself
+     (`ClassTemplateDecl`/`FunctionTemplateDecl`) as an L4 `template`-kind
+     `SourceEntity`, joined onto the L5 graph as `decl://<qualified-name>`
+     — but `type_graph.py`'s own field/base/role edges for the identical
+     templated entity (including this item's three new roles) all land on
+     `type://<qualified-name>` (for a class template) or a
+     signature-hashed child declaration (for a function template), via the
+     *ordinary* record/function walk `_walk_types` already does regardless
+     of the entity being templated. The two never join: a standalone
+     build-source-collection or directory/package `compare` that only has
+     the L4-attached wrapper node public, with no L2 header graph also
+     attached, cannot reach the L5 field/role edges from it —
+     `public_to_internal_dependency` (`crosscheck.py`) misses exactly the
+     template-parameterized private-type dependency this item's new roles
+     exist to detect, for that one collection shape. **Confirmed
+     pre-existing, not introduced by this item**: checked against real
+     Clang 18 for the item's own headline case (`template <detail::Handle
+     H> struct Slot { detail::Impl member; };`) — both the new
+     `template_param` role and the pre-existing `field` role emit their
+     edges from the identical `type://api::Slot` node (`_walk_types`
+     reaches a class template's inner `CXXRecordDecl` through the ordinary
+     record branch regardless of whether it's templated), so a public
+     class template's plain, non-template-parameterized private field is
+     equally unreachable from the L4 wrapper today, with or without this
+     item's new roles. A fix is worth having — `_templated_entity_src`
+     (this item's own machinery) already proves the *identity derivation*
+     for "which node does a templated entity's own edges land on" is
+     already correct and shared; what's missing is a bridge edge from the
+     L4 `template`-kind entity's `decl://` node to that same
+     `type://`/`decl://` identity — but it changes how *every* L4
+     `template`-kind `SourceEntity` joins the L5 graph, not just the three
+     roles this item added, so it needs verification against the
+     pre-existing class-template field/base edges and the FP-rate gate
+     before landing, not a drive-by addition to a role-coverage change.
 6. **Object/link provenance — done.** `abicheck/buildsource/archive_graph.py`
    is the real `ar`-index introspection pass: a pure parser over the
    archive's own linker-written symbol index (GNU `/`/`/SYM64/` and
@@ -1589,6 +1914,16 @@ Modified (recurring across phases): `abicheck/buildsource/source_graph.py`,
   (asserted on object identity and fact membership, mirroring
   `test_consumer_graph.py`'s own pattern), and an end-to-end scenario joining
   a `use_case` node onto a library graph's public entry node.
+- `tests/test_type_graph_roles.py` — Phase 5 item 5, done (a sibling split of
+  `test_type_graph.py`, which sits at its own line-count cap): the three new
+  roles' emission and node-identity properties, the five roles found already
+  covered (pinned so a walk refactor can't drop them), the two deliberately
+  unemitted default-argument shapes, an executable
+  `ROLE_COVERAGE_MATRIX`-vs-parser agreement check in **both** directions (a
+  role the parser emits but the matrix omits is an unclaimed capability; one
+  the matrix claims with no producer is a false coverage claim), and
+  `integration`-marked tests re-deriving every AST shape the fixtures encode
+  from a real compiler.
 - New per remaining phase: one `test_diff_<family>.py` per Phase 5 graph
   family, `tests/test_root_cause_correlator.py` (Phase 6).
 - `tests/test_abi_examples.py` picks up `case194`-`case205` automatically once

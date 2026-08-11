@@ -110,6 +110,34 @@ _FUNCTION_DECL_KINDS = frozenset(
 )
 #: clang AST decl kinds that open a named scope contributing to a qualified name.
 _SCOPE_DECL_KINDS = frozenset({"NamespaceDecl", *_RECORD_DECL_KINDS})
+#: clang AST decl kinds that wrap a templated entity, carrying that entity's
+#: own template *parameter* declarations as their direct children alongside
+#: the templated declaration itself (G29 Phase 5 item 5). Each maps its
+#: parameters' type dependencies onto the templated entity's own node, so a
+#: public template constrained by a private type is a real dependency edge.
+#: A (partial or explicit) *specialization* is deliberately absent: its
+#: injected-class-name resolves to the same qualified name as the generic
+#: template, so attributing one specialization's parameters to that shared
+#: node is the exact misattribution ``_walk_types`` already refuses to make
+#: for ``ClassTemplateSpecializationDecl``'s own base/field edges.
+_TEMPLATE_DECL_KINDS = frozenset(
+    {
+        "ClassTemplateDecl",
+        "FunctionTemplateDecl",
+        "VarTemplateDecl",
+        "TypeAliasTemplateDecl",
+    }
+)
+#: Template *parameter* decl kinds. A ``NonTypeTemplateParmDecl`` additionally
+#: carries its own ``type`` (the ``template <detail::Handle H>`` case); all
+#: three may carry a ``defaultArg``.
+_TEMPLATE_PARM_DECL_KINDS = frozenset(
+    {
+        "TemplateTypeParmDecl",
+        "NonTypeTemplateParmDecl",
+        "TemplateTemplateParmDecl",
+    }
+)
 #: referencedDecl kinds that make a DeclRefExpr a non-call reference worth
 #: recording — a call target (FunctionDecl/CXXMethodDecl/...) is already
 #: covered by ``call_graph.py``'s ``DECL_CALLS_DECL`` edges.
@@ -967,6 +995,45 @@ def _resolve_ref_identity(
     return ident, file, resolution
 
 
+def _anonymous_tag_id_referenced(node: Any, tag_id: str) -> bool:
+    """Whether *node* (or something nested under it) names *tag_id* as its
+    own tag declaration -- ``ownedTagDecl.id`` (an ``ElaboratedType``) or
+    ``decl.id`` (the sibling ``EnumType``), searched recursively since the
+    two can nest either directly or one inside the other depending on
+    clang's own version (verified against real Clang 18 for both shapes).
+    """
+    if not isinstance(node, dict):
+        return False
+    owned = node.get("ownedTagDecl")
+    if isinstance(owned, dict) and owned.get("id") == tag_id:
+        return True
+    decl = node.get("decl")
+    if isinstance(decl, dict) and decl.get("id") == tag_id:
+        return True
+    return any(
+        _anonymous_tag_id_referenced(child, tag_id)
+        for child in node.get("inner", []) or []
+    )
+
+
+_ANONYMOUS_ENUM_MARKER = "(unnamed enum"
+
+
+def _declares_anonymous_enum_type(node: Any) -> bool:
+    """Whether *node* (a ``FieldDecl``/``VarDecl``) is declared with the type
+    of an anonymous enum -- clang spells this ``"enum (unnamed enum at
+    <file>:<line>:<col>)"`` in both ``type.qualType`` and
+    ``desugaredQualType`` (verified against real Clang 18), with **no** id
+    linkage back to the ``EnumDecl`` at all (unlike the typedef/alias case
+    :func:`_anonymous_tag_id_referenced` handles) -- so a substring check is
+    the only join signal clang's JSON AST actually provides for this shape.
+    """
+    node_type = node.get("type")
+    if not isinstance(node_type, dict):
+        return False
+    return _ANONYMOUS_ENUM_MARKER in str(node_type.get("qualType", ""))
+
+
 def _walk_children(
     node: Any,
     scope: list[str],
@@ -974,8 +1041,104 @@ def _walk_children(
     edges: list[TypeEdge],
     idx: _AstIndexes,
 ) -> None:
-    """Recurse into every child of *node* with the given scope/function."""
+    """Recurse into every child of *node* with the given scope/function.
+
+    Also closes a real gap in the ``enum_underlying`` role (Codex review,
+    fresh evidence): the C-style ``typedef enum : U { ... } Name;`` /
+    ``using Name = enum : U { ... };`` idiom gives the enum itself **no**
+    name at all -- clang emits it as an anonymous ``EnumDecl`` (``"name":
+    ""``), a *sibling* of the following ``TypedefDecl``/``TypeAliasDecl``,
+    never nested inside it (verified against real Clang 18). ``_walk_types``'s
+    own ``kind == "EnumDecl" and name`` guard on :func:`_emit_enum_underlying_edge`
+    is correct for every *named* enum, but an anonymous one has no ``name``
+    to satisfy it, so its ``fixedUnderlyingType`` dependency (``detail::Handle``
+    in the example above) was silently dropped -- the enclosing alias edge the
+    typedef itself produces names only the enum's own (anonymous) spelling,
+    never the underlying type. Fixed by remembering the immediately preceding
+    anonymous ``EnumDecl`` sibling and, when the next sibling is a named
+    ``TypedefDecl``/``TypeAliasDecl`` that resolves back to that exact tag
+    (via :func:`_anonymous_tag_id_referenced`, an ``id`` match, not a name
+    heuristic), emitting the ``enum_underlying`` edge under the typedef's own
+    name -- the only public identity this anonymous enum ever gets.
+
+    A second, differently-shaped instance of the identical gap (Codex
+    review, fresh evidence): ``struct Public { enum : U { A } value; };`` --
+    an anonymous enum introduced through a field or (namespace/class-scope)
+    variable declarator rather than a typedef/alias. clang gives this shape
+    **no** id-based linkage whatsoever (confirmed empirically: the
+    ``FieldDecl``/``VarDecl``'s own ``type`` carries only the location-
+    encoded spelling, no ``ownedTagDecl``/``decl`` id at all), so sibling
+    adjacency plus :func:`_declares_anonymous_enum_type`'s marker-string
+    check is the only join signal available -- safe because C++ requires an
+    anonymous tag's own declarator(s) to be the *same* declaration, always
+    the immediately following sibling, never separated by an unrelated one.
+    Attributed to the *owning* identity a field/variable's own type edge
+    would already use (the record's own qualified name for a field,
+    :func:`_var_decl_ident` for a variable) rather than inventing a name for
+    the enum itself, since it has no public identity of its own to name.
+    """
+    pending_anon_enum: dict[str, Any] | None = None
     for child in node.get("inner", []) or []:
+        if isinstance(child, dict):
+            tag_id = str((pending_anon_enum or {}).get("id") or "")
+            name = str(child.get("name") or "")
+            kind = child.get("kind")
+            matched = False
+            if (
+                tag_id
+                and name
+                and kind in ("TypedefDecl", "TypeAliasDecl")
+                and _anonymous_tag_id_referenced(child, tag_id)
+            ):
+                assert pending_anon_enum is not None
+                _emit_enum_underlying_edge(pending_anon_enum, scope, name, edges, idx)
+                matched = True
+            elif (
+                pending_anon_enum is not None
+                and kind == "FieldDecl"
+                and name
+                and _declares_anonymous_enum_type(child)
+            ):
+                _emit_enum_underlying_edge_from(
+                    "::".join(scope),
+                    pending_anon_enum,
+                    EDGE_TYPE_HAS_FIELD_TYPE,
+                    scope,
+                    edges,
+                    idx,
+                )
+                matched = True
+            elif (
+                pending_anon_enum is not None
+                and kind == "VarDecl"
+                and name
+                and not enclosing_func
+                and _declares_anonymous_enum_type(child)
+            ):
+                _emit_enum_underlying_edge_from(
+                    _var_decl_ident(child, scope, name),
+                    pending_anon_enum,
+                    EDGE_DECL_HAS_TYPE,
+                    scope,
+                    edges,
+                    idx,
+                )
+                matched = True
+
+            if kind == "EnumDecl" and not child.get("name"):
+                pending_anon_enum = child
+            elif not matched:
+                # A sibling that neither starts a new anonymous tag nor
+                # continues the current one ends the group -- but a
+                # *matching* declarator does NOT (Codex review, fresh
+                # evidence): one anonymous-enum declaration can introduce
+                # more than one declarator (`enum : U { A } first, second;`
+                # / `typedef enum : U { A } NameA, NameB;`, both verified
+                # against real Clang 18 to emit the tag once followed by
+                # ALL of its declarators as siblings, each independently
+                # carrying the same id/marker linkage) -- clearing on the
+                # first match silently dropped every declarator after it.
+                pending_anon_enum = None
         _walk_types(child, scope, enclosing_func, edges, idx)
 
 
@@ -1039,6 +1202,15 @@ def _emit_alias_edge(
     ``Handle`` to the private ``detail::Impl`` it wraps, so
     ``public_to_internal_dependency`` had nothing to report for APIs that only
     ever spell the public alias name).
+
+    Also covers an **alias template**'s target (G29 Phase 5 item 5): clang
+    nests the real ``TypeAliasDecl`` inside a ``TypeAliasTemplateDecl``, and
+    :func:`_walk_types` recurses into the template node's children with the
+    unchanged scope — so ``template <class T> using Ptr = detail::Impl *;``
+    reaches this function as an ordinary ``TypeAliasDecl`` named ``Ptr`` and
+    emits ``api::Ptr -> detail::Impl`` under the same ``"alias"`` role.
+    Verified empirically against real Clang 18 output rather than assumed;
+    pinned by ``tests/test_type_graph_roles.py``.
     """
     _emit_type_edges(
         edges,
@@ -1049,6 +1221,87 @@ def _emit_alias_edge(
         scope,
         idx.name_index,
         idx.decl_file,
+    )
+
+
+def _emit_enum_underlying_edge_from(
+    src: str,
+    node: Any,
+    edge_kind: str,
+    scope: list[str],
+    edges: list[TypeEdge],
+    idx: _AstIndexes,
+) -> None:
+    """Core of the ``enum_underlying`` role: emit *node* (an ``EnumDecl``)'s
+    ``fixedUnderlyingType`` dependency from an already-computed *src*
+    identity, under *edge_kind* (``TYPE_HAS_FIELD_TYPE`` for a type-shaped
+    src -- a named enum, or a typedef/alias/record standing in for an
+    anonymous one; ``DECL_HAS_TYPE`` for a decl-shaped src -- a variable).
+    Split out so every caller that can name *some* public identity for an
+    otherwise-anonymous enum (see :func:`_emit_enum_underlying_edge` and
+    :func:`_walk_children`'s field/variable declarator handling) shares one
+    implementation rather than re-deriving the ``fixedUnderlyingType`` read.
+
+    An ``EnumDecl`` carries **no** ``type`` key at all — the underlying type
+    lives in its own ``fixedUnderlyingType`` object (verified against real
+    Clang 18 output). So the shared :func:`_emit_alias_edge` path this kind
+    used to take read an empty spelling and emitted nothing: ``enum class
+    Color : detail::Handle`` produced no dependency on the private
+    ``detail::Handle`` it is laid out as.
+
+    ``qualType`` (the spelling *as written*, ``"detail::Handle"``) is read
+    rather than the sibling ``desugaredQualType`` (``"int"``), matching what
+    :func:`_resolve_type_name` expects everywhere else in this module — the
+    desugared form has already lost the very identity this edge exists to
+    name.
+
+    An enum with no *written* underlying type still gets a
+    ``fixedUnderlyingType`` from clang when it is scoped (``enum class Plain
+    { A };`` → ``"int"``) and none at all when it is unscoped — the former
+    is filtered by :func:`_is_excluded_type` like any other fundamental type,
+    so neither shape produces a spurious edge.
+    """
+    fixed = node.get("fixedUnderlyingType")
+    raw = str(fixed.get("qualType", "")) if isinstance(fixed, dict) else ""
+    if not raw:
+        return
+    _emit_type_edges(
+        edges,
+        src,
+        raw,
+        edge_kind,
+        "enum_underlying",
+        scope,
+        idx.name_index,
+        idx.decl_file,
+    )
+
+
+def _emit_enum_underlying_edge(
+    node: Any, scope: list[str], name: str, edges: list[TypeEdge], idx: _AstIndexes
+) -> None:
+    """Emit the edge from a *named* enum to its fixed underlying type (G29
+    Phase 5 item 5's ``enum_underlying`` role) -- see
+    :func:`_emit_enum_underlying_edge_from` for the shared implementation.
+    """
+    _emit_enum_underlying_edge_from(
+        "::".join([*scope, name]), node, EDGE_TYPE_HAS_FIELD_TYPE, scope, edges, idx
+    )
+
+
+def _var_decl_ident(node: Any, scope: list[str], name: str) -> str:
+    """The identity a namespace/class-scope variable contributes as an edge src.
+
+    Factored out of :func:`_emit_var_decl_edge` so a variable *template*'s own
+    template-parameter edges (G29 Phase 5 item 5) land on the exact same
+    ``decl://`` node the templated ``VarDecl``'s own type edge does — see that
+    function's docstring for why the qualified-name fallback is load-bearing.
+    """
+    return function_decl_identity(
+        _normalize_mangled(str(node.get("mangledName") or "")),
+        name,
+        "::".join([*scope, name]) if scope else name,
+        "",
     )
 
 
@@ -1075,12 +1328,7 @@ def _emit_var_decl_edge(
     variable's ``SourceEntity`` never sets ``signature_hash``, unlike a
     function's), so it doubles as the right fallback here.
     """
-    ident = function_decl_identity(
-        _normalize_mangled(str(node.get("mangledName") or "")),
-        name,
-        "::".join([*scope, name]) if scope else name,
-        "",
-    )
+    ident = _var_decl_ident(node, scope, name)
     if not ident:
         return
     _emit_type_edges(
@@ -1136,6 +1384,154 @@ def _function_decl_ident(node: Any, scope: list[str], name: str) -> str:
         "::".join([*scope, name]) if scope else name,
         str(type_obj.get("qualType", "")) if isinstance(type_obj, dict) else "",
     )
+
+
+def _templated_entity_src(node: Any, scope: list[str]) -> tuple[str, str]:
+    """The ``(identity, edge_kind)`` a template declaration's *own* node uses.
+
+    A ``ClassTemplateDecl``/``FunctionTemplateDecl``/``VarTemplateDecl``/
+    ``TypeAliasTemplateDecl`` carries its template parameters as direct
+    children of the *wrapper*, while the templated entity itself is a sibling
+    child (verified against real Clang 18 output). The wrapper is not a node
+    in this graph — so a parameter's type dependency must be attributed to the
+    templated entity, and it must land on the **same** node that entity's own
+    edges already use, or a public template's constraint would sit on an
+    orphan node nothing else reaches.
+
+    That means re-deriving the identity exactly the way this module's walk
+    does for the templated child's own kind — a record/alias becomes a
+    ``record_type`` node (so ``TYPE_HAS_FIELD_TYPE``), a function/variable a
+    ``source_decl`` one (so ``DECL_HAS_TYPE``); see
+    :func:`augment_graph_with_types` for that edge-kind→node-kind mapping.
+    Returns ``("", "")`` when no templated child is recognized (e.g. a
+    template whose entity kind this module doesn't model), so the caller
+    emits nothing rather than guessing at a node id.
+    """
+    for child in node.get("inner", []) or []:
+        if not isinstance(child, dict):
+            continue
+        kind = str(child.get("kind", ""))
+        name = str(child.get("name") or "")
+        if not name:
+            continue
+        if kind in _RECORD_DECL_KINDS or kind in _OTHER_TYPE_DECL_KINDS:
+            return "::".join([*scope, name]), EDGE_TYPE_HAS_FIELD_TYPE
+        if kind in _FUNCTION_DECL_KINDS:
+            return _function_decl_ident(child, scope, name), EDGE_DECL_HAS_TYPE
+        if kind == "VarDecl":
+            return _var_decl_ident(child, scope, name), EDGE_DECL_HAS_TYPE
+    return "", ""
+
+
+def _emit_template_parameter_edges(
+    node: Any, scope: list[str], edges: list[TypeEdge], idx: _AstIndexes
+) -> None:
+    """Emit a template's own ``template_param``/``default_template_arg`` edges
+    (G29 Phase 5 item 5).
+
+    Two of the nine type roles that item lists had **no** producer at all
+    before this — a public template constrained by, or defaulted to, a private
+    type carried a real dependency the graph never recorded:
+
+    - ``template <detail::Handle H> struct Slot`` — the non-type parameter's
+      own type (``NonTypeTemplateParmDecl.type.qualType``), role
+      ``template_param``. A *type* parameter (``TemplateTypeParmDecl``) names
+      no type of its own, so only the non-type kind contributes here.
+    - ``template <class T = detail::Impl> struct Box`` — the default argument
+      (``defaultArg.type.qualType``), role ``default_template_arg``.
+
+    **Scope note (Codex review, fresh evidence):** ``template_param`` answers
+    "what type does this *parameter* require", not "what does a specific
+    *instantiation's argument* reference" — a declaration-valued non-type
+    argument at a use site (``Holder<&detail::f>``) is a different question
+    this function does not answer, resolved instead (when it is resolved at
+    all) via a ``ClassTemplateSpecializationDecl``'s own ``TemplateArgument.
+    decl`` cross-reference — exactly ``template_graph.py``'s reserved,
+    unpopulated ``TEMPLATE_USES_DECL``, not this role. ``_walk_types``
+    deliberately never emits edges for a ``ClassTemplateSpecializationDecl``
+    node at all (see its own comment), so no code path here could reach that
+    case even incidentally.
+
+    Two default-argument shapes are deliberately **not** emitted, because
+    clang's JSON simply does not carry the dependency (both verified against
+    real Clang 18 output, not assumed):
+
+    - a *non-type* parameter's default **value** (``template <detail::Handle
+      H = detail::K>``) dumps as ``{"kind": "TemplateArgument", "isExpr":
+      true}`` with no ``type`` — the referenced constant is a nested
+      ``DeclRefExpr``, a ``DECL_REFERENCES_DECL`` question rather than a type
+      role, and out of scope for this item;
+    - a *template template* parameter's default (``template <template <class>
+      class C = detail::Def>``) dumps as a bare ``{"kind":
+      "TemplateArgument"}`` — neither a type nor a name — so there is nothing
+      to resolve and this degrades to no fact rather than a guessed one
+      (ADR-028 D3).
+    """
+    src, edge_kind = _templated_entity_src(node, scope)
+    if not src:
+        return
+    _emit_template_parm_list_edges(node, src, edge_kind, scope, edges, idx)
+
+
+def _emit_template_parm_list_edges(
+    node: Any,
+    src: str,
+    edge_kind: str,
+    scope: list[str],
+    edges: list[TypeEdge],
+    idx: _AstIndexes,
+) -> None:
+    """Emit ``template_param``/``default_template_arg`` edges for every
+    parameter in *node*'s own ``inner`` children, recursing into a
+    ``TemplateTemplateParmDecl`` child's *own* parameter list too.
+
+    ``template <template <detail::Handle H> class C> struct Outer`` nests
+    the non-type parameter ``H`` — typed by the private ``detail::Handle`` —
+    directly inside the outer ``TemplateTemplateParmDecl`` node, verified
+    against real Clang 18 output (Codex review, fresh evidence): the
+    original single-level loop checked each direct child's own kind against
+    ``NonTypeTemplateParmDecl`` but never descended into a
+    ``TemplateTemplateParmDecl`` child's ``inner``, so this dependency was
+    invisible. C++ permits an arbitrarily deep chain of template-template
+    parameters (``template <template <template <class> class> class> ...``),
+    so this recurses rather than unrolling one extra level — every nested
+    parameter still attributes its edge to the *same* ``src``/``edge_kind``
+    the outermost templated entity uses (:func:`_templated_entity_src`),
+    since a nested parameter's own type dependency is exactly as much a
+    dependency of the outer entity as a top-level one.
+    """
+    for child in node.get("inner", []) or []:
+        if not isinstance(child, dict):
+            continue
+        kind = str(child.get("kind", ""))
+        if kind not in _TEMPLATE_PARM_DECL_KINDS:
+            continue
+        if kind == "NonTypeTemplateParmDecl":
+            _emit_type_edges(
+                edges,
+                src,
+                _decl_type_name(child),
+                edge_kind,
+                "template_param",
+                scope,
+                idx.name_index,
+                idx.decl_file,
+            )
+        elif kind == "TemplateTemplateParmDecl":
+            _emit_template_parm_list_edges(child, src, edge_kind, scope, edges, idx)
+        default = child.get("defaultArg")
+        default_type = default.get("type") if isinstance(default, dict) else None
+        if isinstance(default_type, dict):
+            _emit_type_edges(
+                edges,
+                src,
+                str(default_type.get("qualType", "")),
+                edge_kind,
+                "default_template_arg",
+                scope,
+                idx.name_index,
+                idx.decl_file,
+            )
 
 
 def _emit_decl_ref_edge(
@@ -1197,7 +1593,15 @@ def _walk_types(
         _walk_children(node, [*scope, name], enclosing_func, edges, idx)
         return
 
-    if kind in _OTHER_TYPE_DECL_KINDS and name:
+    if kind in _TEMPLATE_DECL_KINDS:
+        # Not a `return` — the templated entity itself is a child of this
+        # wrapper node, and it still needs the ordinary walk (a class
+        # template's record body, a function template's signature/body).
+        _emit_template_parameter_edges(node, scope, edges, idx)
+
+    if kind == "EnumDecl" and name:
+        _emit_enum_underlying_edge(node, scope, name, edges, idx)
+    elif kind in _OTHER_TYPE_DECL_KINDS and name:
         _emit_alias_edge(node, scope, name, edges, idx)
 
     if kind == "VarDecl" and name and not enclosing_func:
@@ -1240,6 +1644,8 @@ def _walk_types(
         _emit_decl_ref_edge(node, enclosing_func, edges, idx)
 
     _walk_children(node, scope, enclosing_func, edges, idx)
+
+
 def _dedupe_edges(edges: list[TypeEdge]) -> list[TypeEdge]:
     """Dedup on ``(src, dst, kind, role)``, not just ``(src, dst, kind)``
     (Codex review, fresh evidence): a function that both returns and takes

@@ -35,10 +35,13 @@ from abicheck.impact.use_cases import (
     USE_CASE_NODE_KINDS,
     USE_CASE_PROVENANCE,
     UseCaseDefinition,
+    UseCaseResolution,
     build_use_case_graph,
+    explain_use_case_impact,
     join_use_case_graph,
     load_use_case_manifest,
     parse_use_case_manifest,
+    resolve_use_case_entrypoints,
     test_case_node_id as make_test_case_node_id,
     use_case_node_id,
 )
@@ -553,6 +556,424 @@ def test_build_use_case_graph_handles_several_use_cases_independently() -> None:
     assert [e.src for e in edges] == [use_case_node_id("uc1")]
 
 
+# ── resolve_use_case_entrypoints ────────────────────────────────────────────
+
+
+def test_resolve_use_case_entrypoints_splits_resolved_and_unresolved() -> None:
+    library = _library_graph()
+    resolutions = resolve_use_case_entrypoints(
+        [
+            UseCaseDefinition(
+                use_case="uc1",
+                entrypoints=("train", "does_not_exist"),
+                tests=("test_train",),
+            )
+        ],
+        library,
+    )
+    assert len(resolutions) == 1
+    r = resolutions[0]
+    assert r.use_case == "uc1"
+    assert r.resolved_entrypoints == ("train",)
+    assert r.unresolved_entrypoints == ("does_not_exist",)
+    assert r.tests == ("test_train",)
+
+
+def test_resolve_use_case_entrypoints_agrees_with_build_use_case_graph() -> None:
+    """The load-bearing property: this function can never disagree with what
+    :func:`build_use_case_graph` actually records — same resolution
+    mechanism (:func:`_public_entry_index`), just surfaced instead of
+    silently applied."""
+    library = _library_graph()
+    definitions = [
+        UseCaseDefinition(use_case="uc1", entrypoints=("train", "does_not_exist")),
+    ]
+    resolution = resolve_use_case_entrypoints(definitions, library)[0]
+    graph = build_use_case_graph(definitions, library)
+    graph_resolved = {
+        e.dst
+        for e in graph.edges
+        if e.kind == "USE_CASE_USES_ENTRY" and e.src == use_case_node_id("uc1")
+    }
+    # Every entrypoint this function reports resolved must be an id the
+    # graph actually joined onto (label vs. id doesn't matter here since
+    # "train" resolves to its own id, `decl://train`).
+    assert graph_resolved == {"decl://train"}
+    assert resolution.resolved_entrypoints == ("train",)
+
+
+def test_resolve_use_case_entrypoints_empty_definitions_list_returns_empty() -> None:
+    assert resolve_use_case_entrypoints([], _library_graph()) == []
+
+
+def test_resolve_use_case_entrypoints_no_entrypoints_declared() -> None:
+    library = _library_graph()
+    resolutions = resolve_use_case_entrypoints(
+        [UseCaseDefinition(use_case="uc1")], library
+    )
+    assert resolutions == [UseCaseResolution(use_case="uc1")]
+
+
+def test_resolve_use_case_entrypoints_preserves_manifest_declared_order() -> None:
+    # A local graph with two public entries (`_library_graph()` only has
+    # one) so both resolved_entrypoints and unresolved_entrypoints can pin
+    # order, not just the latter — CodeRabbit review.
+    library = SourceGraphSummary()
+    library.add_node(
+        GraphNode(
+            id="decl://evaluate",
+            kind="source_decl",
+            label="evaluate",
+            attrs={"visibility": "public_header"},
+        )
+    )
+    library.add_node(
+        GraphNode(
+            id="decl://train",
+            kind="source_decl",
+            label="train",
+            attrs={"visibility": "public_header"},
+        )
+    )
+    resolution = resolve_use_case_entrypoints(
+        [
+            UseCaseDefinition(
+                use_case="uc1",
+                # Declared out of alphabetical order and interleaved with
+                # unresolvable names, on both sides of the split.
+                entrypoints=(
+                    "does_not_exist_a",
+                    "evaluate",
+                    "train",
+                    "does_not_exist_b",
+                ),
+            )
+        ],
+        library,
+    )[0]
+    assert resolution.resolved_entrypoints == ("evaluate", "train")
+    assert resolution.unresolved_entrypoints == (
+        "does_not_exist_a",
+        "does_not_exist_b",
+    )
+
+
+# ── explain_use_case_impact ──────────────────────────────────────────────
+
+
+def _walkable_library_graph() -> SourceGraphSummary:
+    """Two independent public entries, one of which calls an internal
+    helper — the minimal shape needed to distinguish direct vs. transitive
+    use-case attribution. `train` -> (calls) -> `detail::helper`; `evaluate`
+    stands alone."""
+    g = SourceGraphSummary()
+    g.add_node(
+        GraphNode(
+            id="decl://train",
+            kind="source_decl",
+            label="train",
+            attrs={"visibility": "public_header"},
+        )
+    )
+    g.add_node(
+        GraphNode(id="binary_symbol://train", kind="binary_symbol", label="train")
+    )
+    g.add_edge(
+        GraphEdge(
+            src="decl://train",
+            dst="binary_symbol://train",
+            kind="SOURCE_DECL_MAPS_TO_SYMBOL",
+        )
+    )
+    g.add_node(
+        GraphNode(
+            id="decl://_ZN6detail6helperEv",
+            kind="source_decl",
+            label="detail::helper",
+            attrs={"visibility": "source"},
+        )
+    )
+    g.add_node(
+        GraphNode(
+            id="binary_symbol://_ZN6detail6helperEv",
+            kind="binary_symbol",
+            label="_ZN6detail6helperEv",
+        )
+    )
+    g.add_edge(
+        GraphEdge(
+            src="decl://_ZN6detail6helperEv",
+            dst="binary_symbol://_ZN6detail6helperEv",
+            kind="SOURCE_DECL_MAPS_TO_SYMBOL",
+        )
+    )
+    g.add_edge(
+        GraphEdge(
+            src="decl://train", dst="decl://_ZN6detail6helperEv", kind="DECL_CALLS_DECL"
+        )
+    )
+    g.add_node(
+        GraphNode(
+            id="decl://evaluate",
+            kind="source_decl",
+            label="evaluate",
+            attrs={"visibility": "public_header"},
+        )
+    )
+    g.add_node(
+        GraphNode(id="binary_symbol://evaluate", kind="binary_symbol", label="evaluate")
+    )
+    g.add_edge(
+        GraphEdge(
+            src="decl://evaluate",
+            dst="binary_symbol://evaluate",
+            kind="SOURCE_DECL_MAPS_TO_SYMBOL",
+        )
+    )
+    return g
+
+
+def test_explain_use_case_impact_direct_and_transitive_attribution() -> None:
+    library = _walkable_library_graph()
+    definitions = [
+        UseCaseDefinition(use_case="training workflow", entrypoints=("train",)),
+        UseCaseDefinition(use_case="evaluation workflow", entrypoints=("evaluate",)),
+    ]
+    result = explain_use_case_impact(
+        definitions,
+        library,
+        symbols=["train", "_ZN6detail6helperEv", "evaluate", "does_not_exist"],
+    )
+    assert result == {
+        "train": ("training workflow",),
+        "_ZN6detail6helperEv": ("training workflow",),
+        "evaluate": ("evaluation workflow",),
+    }
+
+
+def test_explain_use_case_impact_overlapping_use_cases_both_attributed() -> None:
+    library = _walkable_library_graph()
+    definitions = [
+        UseCaseDefinition(use_case="uc_a", entrypoints=("train",)),
+        UseCaseDefinition(use_case="uc_b", entrypoints=("train",)),
+    ]
+    result = explain_use_case_impact(
+        definitions, library, symbols=["_ZN6detail6helperEv"]
+    )
+    assert result == {"_ZN6detail6helperEv": ("uc_a", "uc_b")}
+
+
+def test_explain_use_case_impact_unresolvable_entrypoint_yields_no_attribution() -> (
+    None
+):
+    library = _walkable_library_graph()
+    definitions = [
+        UseCaseDefinition(use_case="ghost", entrypoints=("does_not_exist_entry",))
+    ]
+    result = explain_use_case_impact(definitions, library, symbols=["train"])
+    assert result == {}
+
+
+def test_explain_use_case_impact_empty_symbols_or_definitions() -> None:
+    library = _walkable_library_graph()
+    definitions = [UseCaseDefinition(use_case="uc1", entrypoints=("train",))]
+    assert explain_use_case_impact(definitions, library, symbols=[]) == {}
+    assert explain_use_case_impact([], library, symbols=["train"]) == {}
+
+
+def test_explain_use_case_impact_type_shaped_symbol_never_attributed() -> None:
+    # No SOURCE_DECL_MAPS_TO_SYMBOL edge backs a bare type name -- the same
+    # structural limitation explain_required_symbols has, documented rather
+    # than silently different.
+    library = _walkable_library_graph()
+    definitions = [UseCaseDefinition(use_case="uc1", entrypoints=("train",))]
+    result = explain_use_case_impact(definitions, library, symbols=["SomeInternalType"])
+    assert result == {}
+
+
+def _versioned_symbol_library_graph() -> SourceGraphSummary:
+    """One declaration mapping to two versioned exports (`foo@V1`/`foo@V2`)
+    -- the shape a single ``foo`` definition symbol-versioned across two
+    releases produces."""
+    g = SourceGraphSummary()
+    g.add_node(
+        GraphNode(
+            id="decl://foo",
+            kind="source_decl",
+            label="foo",
+            attrs={"visibility": "public_header"},
+        )
+    )
+    g.add_node(
+        GraphNode(id="binary_symbol://foo@V1", kind="binary_symbol", label="foo@V1")
+    )
+    g.add_node(
+        GraphNode(id="binary_symbol://foo@V2", kind="binary_symbol", label="foo@V2")
+    )
+    g.add_edge(
+        GraphEdge(
+            src="decl://foo",
+            dst="binary_symbol://foo@V1",
+            kind="SOURCE_DECL_MAPS_TO_SYMBOL",
+        )
+    )
+    g.add_edge(
+        GraphEdge(
+            src="decl://foo",
+            dst="binary_symbol://foo@V2",
+            kind="SOURCE_DECL_MAPS_TO_SYMBOL",
+        )
+    )
+    return g
+
+
+def test_explain_use_case_impact_exact_versioned_entrypoint_stays_pinned() -> None:
+    # Codex review, fresh evidence: a use case naming one exact versioned
+    # export must be attributed to that version alone -- not the other
+    # version merely because they share a declaration.
+    library = _versioned_symbol_library_graph()
+    definitions = [UseCaseDefinition(use_case="v1 caller", entrypoints=("foo@V1",))]
+    result = explain_use_case_impact(definitions, library, symbols=["foo@V1", "foo@V2"])
+    assert result == {"foo@V1": ("v1 caller",)}
+
+
+def test_explain_use_case_impact_bare_decl_entrypoint_covers_every_version() -> None:
+    # The undisambiguated counterpart: a use case naming the shared
+    # declaration itself (no specific version) legitimately covers every
+    # version it maps to.
+    library = _versioned_symbol_library_graph()
+    definitions = [UseCaseDefinition(use_case="either version", entrypoints=("foo",))]
+    result = explain_use_case_impact(definitions, library, symbols=["foo@V1", "foo@V2"])
+    assert result == {
+        "foo@V1": ("either version",),
+        "foo@V2": ("either version",),
+    }
+
+
+def test_explain_use_case_impact_two_use_cases_pin_different_versions() -> None:
+    library = _versioned_symbol_library_graph()
+    definitions = [
+        UseCaseDefinition(use_case="v1 caller", entrypoints=("foo@V1",)),
+        UseCaseDefinition(use_case="v2 caller", entrypoints=("foo@V2",)),
+    ]
+    result = explain_use_case_impact(definitions, library, symbols=["foo@V1", "foo@V2"])
+    assert result == {
+        "foo@V1": ("v1 caller",),
+        "foo@V2": ("v2 caller",),
+    }
+
+
+def _multi_decl_one_symbol_library_graph() -> SourceGraphSummary:
+    """Two *distinct* declarations both mapping onto the **same** exported
+    symbol (`binary_symbol://foo`) -- the shape an inline/weak definition
+    captured once per TU produces, all mangling to the identical symbol
+    name. `decl://foo_declaration_only` has no outgoing call edges (a
+    forward declaration / extern with no captured body in this TU's
+    evidence); `decl://foo_with_body` is the sibling declaration that
+    actually carries the definition, calling `detail::helper`."""
+    g = SourceGraphSummary()
+    g.add_node(GraphNode(id="binary_symbol://foo", kind="binary_symbol", label="foo"))
+    g.add_node(
+        GraphNode(
+            id="decl://foo_declaration_only",
+            kind="source_decl",
+            label="foo",
+            attrs={"visibility": "public_header"},
+        )
+    )
+    g.add_edge(
+        GraphEdge(
+            src="decl://foo_declaration_only",
+            dst="binary_symbol://foo",
+            kind="SOURCE_DECL_MAPS_TO_SYMBOL",
+        )
+    )
+    g.add_node(
+        GraphNode(
+            id="decl://foo_with_body",
+            kind="source_decl",
+            label="foo",
+            attrs={"visibility": "public_header"},
+        )
+    )
+    g.add_edge(
+        GraphEdge(
+            src="decl://foo_with_body",
+            dst="binary_symbol://foo",
+            kind="SOURCE_DECL_MAPS_TO_SYMBOL",
+        )
+    )
+    g.add_node(
+        GraphNode(
+            id="decl://_ZN6detail6helperEv",
+            kind="source_decl",
+            label="detail::helper",
+            attrs={"visibility": "source"},
+        )
+    )
+    g.add_node(
+        GraphNode(
+            id="binary_symbol://_ZN6detail6helperEv",
+            kind="binary_symbol",
+            label="_ZN6detail6helperEv",
+        )
+    )
+    g.add_edge(
+        GraphEdge(
+            src="decl://_ZN6detail6helperEv",
+            dst="binary_symbol://_ZN6detail6helperEv",
+            kind="SOURCE_DECL_MAPS_TO_SYMBOL",
+        )
+    )
+    g.add_edge(
+        GraphEdge(
+            src="decl://foo_with_body",
+            dst="decl://_ZN6detail6helperEv",
+            kind="DECL_CALLS_DECL",
+        )
+    )
+    return g
+
+
+def test_explain_use_case_impact_walks_every_decl_mapped_to_the_same_symbol() -> None:
+    # Codex review, fresh evidence: when more than one declaration maps to
+    # the same exported symbol, a manifest entry naming that symbol must
+    # walk from EVERY mapped declaration, not just whichever one an
+    # arbitrary edge-iteration order retained -- otherwise transitive
+    # attribution silently depends on which sibling decl "won".
+    library = _multi_decl_one_symbol_library_graph()
+    definitions = [UseCaseDefinition(use_case="caller", entrypoints=("foo",))]
+    result = explain_use_case_impact(
+        definitions, library, symbols=["foo", "_ZN6detail6helperEv"]
+    )
+    assert result == {
+        "foo": ("caller",),
+        "_ZN6detail6helperEv": ("caller",),
+    }
+
+
+def test_explain_use_case_impact_merges_repeated_use_case_entries() -> None:
+    # Codex review, fresh evidence: a manifest may repeat the same
+    # `use_case` name across separate list entries -- `parse_use_case_manifest`
+    # never rejects it, and `build_use_case_graph` merges every entry sharing
+    # a name onto one `use_case` graph node with a USE_CASE_USES_ENTRY edge
+    # per entry. Attribution must mirror that merge, not keep only the last
+    # entry's entrypoint set.
+    library = _walkable_library_graph()
+    definitions = [
+        UseCaseDefinition(use_case="shared", entrypoints=("train",)),
+        UseCaseDefinition(use_case="shared", entrypoints=("evaluate",)),
+    ]
+    result = explain_use_case_impact(
+        definitions, library, symbols=["train", "_ZN6detail6helperEv", "evaluate"]
+    )
+    assert result == {
+        "train": ("shared",),
+        "_ZN6detail6helperEv": ("shared",),
+        "evaluate": ("shared",),
+    }
+
+
 # ── join_use_case_graph ───────────────────────────────────────────────────
 
 
@@ -604,9 +1025,9 @@ def test_join_never_flips_an_unproven_node_to_consumer_compiled() -> None:
     joined_node_by_id = {n.id: n for n in joined.nodes}
     entry = joined_node_by_id["decl://dispatch"]
     assert {f.producer for f in entry.facts} >= {USE_CASE_PROVENANCE, "call_graph"}
-    assert (
-        is_consumer_compiled_node("decl://dispatch", joined_node_by_id) is False
-    ), "a use-case reference must never make an unproven node look consumer-compiled"
+    assert is_consumer_compiled_node("decl://dispatch", joined_node_by_id) is False, (
+        "a use-case reference must never make an unproven node look consumer-compiled"
+    )
 
 
 def test_join_never_flips_a_tied_unknown_confidence_node_either() -> None:
@@ -644,9 +1065,9 @@ def test_join_never_flips_a_tied_unknown_confidence_node_either() -> None:
     entry = joined_node_by_id["decl://dispatch"]
     assert {f.producer for f in entry.facts} >= {USE_CASE_PROVENANCE, "kythe"}
     assert entry.provenance == "kythe"
-    assert (
-        is_consumer_compiled_node("decl://dispatch", joined_node_by_id) is False
-    ), "a tied-confidence use-case placeholder must never win the provenance tiebreak"
+    assert is_consumer_compiled_node("decl://dispatch", joined_node_by_id) is False, (
+        "a tied-confidence use-case placeholder must never win the provenance tiebreak"
+    )
 
 
 def test_join_does_not_mutate_the_library_graph() -> None:

@@ -11,13 +11,17 @@ generated: false
 
 # Use-Case Impact
 
-> **Library-only preview, no CLI/report surface yet.** This page describes a
-> graph-building capability reachable only through the Python API
-> (`abicheck.impact.use_cases`) — there is no CLI flag that reads the
-> manifest, no report field, and no finding kind. It moved here from the
-> User Guide because it isn't yet a supported end-user workflow (see "What
-> this does not cover yet" below); it will move back once at least one of
-> those surfaces exists.
+> **Preview: no `compare`-native report field or finding kind yet.**
+> `abicheck project validate-use-cases` (below) checks a manifest's
+> structure, resolves it against a real snapshot's graph, and — with
+> `--against-new` — folds it into a real two-snapshot diff to report which
+> declared use cases each change reaches. That last step genuinely answers
+> "was this use case affected", but only as a `project`-command report; it
+> is not wired into `compare`'s own report schema, exit code, or as a
+> `Change` field, and there is still no `USE_CASE_IMPACT_CONFIRMED` finding
+> kind. It stays here rather than moving to the User Guide because it isn't
+> yet a `compare`-native workflow (see "What this does not cover yet"
+> below); it will move back once that surface exists.
 
 An optional `impact-use-cases.yaml` manifest lets you declare a project's own
 business/runtime use cases — "the training workflow", "the batch export
@@ -28,11 +32,80 @@ promotes the manifest to graph facts and joins them onto the library's own
 
 This is [G29 Phase 4 slice 2](../contribute/plans/g29-impact-analysis-layer.md),
 amending [ADR-057](../contribute/adr/057-consumer-graph-and-impact-join.md).
-It is a **graph-building** feature only: `abicheck.impact.use_cases` parses
-the manifest and builds/joins the graph facts. There is no CLI flag reading
-this manifest yet, no `affected_use_cases` report field, and no
-`USE_CASE_IMPACT_CONFIRMED` finding — see "What this does not cover yet"
+`abicheck.impact.use_cases` parses the manifest, builds/joins the graph
+facts, and (`explain_use_case_impact`) answers which declared use case(s)
+reach a given changed symbol. `abicheck project validate-use-cases
+<manifest> [--against <snapshot> [--against-new <snapshot>]]` is its CLI
+surface: with `--against` alone it validates the manifest and reports which
+declared entrypoints resolve against a real snapshot's source graph; with
+`--against-new` too, it diffs the two snapshots (via the same Tier-2
+`service.compare_snapshots` every other front end routes through) and
+reports, per declared use case, which of the diff's changes its own
+resolved entrypoints can be shown to reach. There is still no
+`affected_use_cases` report field and no `USE_CASE_IMPACT_CONFIRMED`
+finding wired into `compare` itself — see "What this does not cover yet"
 below.
+
+## Checking a manifest with the CLI
+
+```console
+$ abicheck project validate-use-cases impact-use-cases.yaml
+use-case manifest validation: impact-use-cases.yaml
+OK — 2 use case(s), structurally well-formed.
+
+$ abicheck project validate-use-cases impact-use-cases.yaml --against libtraining.abi.json
+use-case manifest validation: impact-use-cases.yaml
+OK — 2 use case(s), structurally well-formed.
+Resolved against: libtraining.abi.json
+  training workflow:
+    resolved: train, evaluate
+    unresolved (not evidence they don't exist): legacy_train_v1
+    tests: test_train_e2e
+
+$ abicheck project validate-use-cases impact-use-cases.yaml \
+    --against libtraining-1.0.abi.json --against-new libtraining-1.1.abi.json
+use-case manifest validation: impact-use-cases.yaml
+OK — 2 use case(s), structurally well-formed.
+Resolved against: libtraining-1.0.abi.json
+  training workflow:
+    resolved: train, evaluate
+Diff impact (libtraining-1.0.abi.json -> libtraining-1.1.abi.json): 3 change(s), 1 attributed to a declared use case.
+  training workflow:
+    func_removed: legacy_helper
+```
+
+Without `--against`, only the manifest's own structure is checked (a
+non-mapping entry, an unrecognized field, or a missing `use_case` name is a
+usage error, exit 64). With `--against <snapshot>` — a `dump --sources`/
+`--build-info` snapshot, or any snapshot carrying the always-on header-only
+graph — each use case's `entrypoints` are resolved against that snapshot's
+own source graph, reusing the exact same join `build_use_case_graph`
+performs internally, so the report can never disagree with what a real
+comparison would see. An unresolved entrypoint is reported, never treated
+as a command failure — the same "absence is not evidence of a wrong answer"
+discipline the rest of this page documents (see "Declared vs. observed
+use" below); only a malformed manifest or a graph-less/unreadable
+`--against` snapshot exits non-zero. `--format json` emits the same report
+as structured JSON.
+
+With `--against-new <new-snapshot>` too (requires `--against`), the command
+also diffs the OLD snapshot against the NEW one and reports which of the
+resulting changes each declared use case's own resolved entrypoints reach —
+a change whose symbol none of a use case's entrypoints can be shown to
+reach (directly, or transitively through a consumer-compiled inline/template
+body) is simply absent from that use case's list, the same
+absence-is-not-evidence discipline as everywhere else on this page. This is
+never a command failure either: a `--against-new` diff producing zero
+attributed changes just means none of the changes touch a declared use
+case's own surface, reported as `0 attributed` rather than silently omitted.
+Two structural limitations carry over from
+[`--used-by`'s own consumer-impact walk](../use/appcompat.md), since both
+reuse the identical graph primitives: only a function/variable-shaped
+change (one a `SOURCE_DECL_MAPS_TO_SYMBOL` edge backs) can ever be named —
+a type layout change has no such edge to resolve through — and only a
+*consumer-compiled* entrypoint (an inline/template body, not an ordinary
+out-of-line exported function's own internal calls) can walk transitively
+past its own declaration.
 
 ## Why a separate manifest from `usecase-registry.yaml`
 
@@ -187,16 +260,23 @@ governs everything").
 
 ## What this does not cover yet
 
-- **No CLI wiring.** There is no `dump`/`compare` flag that reads
-  `impact-use-cases.yaml` today. The Python API above is the only way to
-  build and join a use-case graph in this slice.
+- **No `compare`-native wiring.** `abicheck project validate-use-cases
+  --against-new` (above) folds the manifest into a real two-snapshot diff and
+  reports which use case each change reaches — but that diff runs through
+  `service.compare_snapshots` from inside the `project` command, not through
+  `compare` itself; there is still no `compare --use-cases <manifest>` flag,
+  so a user running the native `compare` command directly gets no use-case
+  attribution unless they separately run `project validate-use-cases
+  --against-new` on the same two snapshots.
 - **No report field.** `impact_assessment` (see
   [Unified Impact Assessment](../learn/impact-analysis.md)) has no
-  `affected_use_cases` field yet — the use-case graph exists as evidence a
-  future finding could be enriched from, the same position the consumer
-  graph was in before ADR-057's D5/D8 wiring enriched
-  `CONSUMER_REQUIRED_SYMBOL_REMOVED` and shared `FUNC_REMOVED`/`SYMBOL_REMOVED`
-  findings with it.
+  `affected_use_cases` field yet — `explain_use_case_impact`'s answer is
+  rendered directly by the CLI command above, never attached to a `Change`
+  object or a `compare` JSON/SARIF/JUnit report. The use-case graph (and now
+  this read-only explain step) exist as evidence a future `Change`-level
+  field could be built from, the same position the consumer graph was in
+  before ADR-057's D5/D8 wiring enriched `CONSUMER_REQUIRED_SYMBOL_REMOVED`
+  and shared `FUNC_REMOVED`/`SYMBOL_REMOVED` findings with it.
 - **No new `ChangeKind` or verdict.** `USE_CASE_IMPACT_CONFIRMED` (G29 Phase
   6) is a planned report-level overlay, not a raw break — matching how
   `CONSUMER_IMPACT_PATH_CONFIRMED` is scoped for the consumer side.
