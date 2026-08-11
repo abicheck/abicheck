@@ -1190,14 +1190,29 @@ def main(argv: list[str] | None = None) -> int:
                     # early system/init event carries a real resolved model,
                     # and discarding that would force a fallback identity
                     # comparison (below) where a direct one was available.
-                    events = _parse_events(exc.stdout)
+                    #
+                    # Despite text=True on the subprocess.run() call above,
+                    # CPython's own POSIX _communicate() builds this
+                    # exception's stdout/stderr from the raw byte buffers
+                    # collected so far — bypassing the text-mode decode step
+                    # that normally only runs once communicate() completes
+                    # normally — so these two attributes are bytes here, not
+                    # str, and Path.write_text() would raise TypeError on
+                    # them unconverted (verified against a real timeout).
+                    timeout_stdout = exc.stdout
+                    if isinstance(timeout_stdout, bytes):
+                        timeout_stdout = timeout_stdout.decode("utf-8", errors="replace")
+                    timeout_stderr = exc.stderr
+                    if isinstance(timeout_stderr, bytes):
+                        timeout_stderr = timeout_stderr.decode("utf-8", errors="replace")
+                    events = _parse_events(timeout_stdout)
                     if events:
                         (out_dir / "events.jsonl").write_text(
-                            exc.stdout or "", encoding="utf-8"
+                            timeout_stdout or "", encoding="utf-8"
                         )
-                    if exc.stderr:
+                    if timeout_stderr:
                         (out_dir / "runner.err").write_text(
-                            exc.stderr, encoding="utf-8"
+                            timeout_stderr, encoding="utf-8"
                         )
                     record = {
                         "scenario_id": sid,
