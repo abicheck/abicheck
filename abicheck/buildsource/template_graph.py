@@ -219,9 +219,8 @@ NODE_TEMPLATE_INSTANTIATION = "template_instantiation"
 #: A resolved TEMPLATE_USES_DECL target's node kind (call_graph.py/
 #: type_graph.py's own function/variable declaration node kind).
 NODE_SOURCE_DECL = "source_decl"
-#: Raw clang decl kinds routed onto TEMPLATE_USES_DECL (a source_decl node)
-#: rather than TEMPLATE_USES_TYPE. ``VarTemplateSpecializationDecl``
-#: (Codex review) carries its own distinct ``mangledName`` like ``VarDecl``.
+#: Raw clang decl kinds routed onto TEMPLATE_USES_DECL, not TEMPLATE_USES_TYPE.
+#: ``VarTemplateSpecializationDecl`` carries its own ``mangledName`` like ``VarDecl``.
 _VALUE_DECL_KINDS = frozenset(
     {"FunctionDecl", "VarDecl", "VarTemplateSpecializationDecl"}
 )
@@ -1283,12 +1282,15 @@ def _walk_function_templates(
         # argument's `decl` cross-reference already is -- preferred
         # unconditionally when present.
         owner_id = str(node.get("parentDeclContextId") or "")
+        owner_kind = id_to_decl_kind.get(owner_id)
         owner_qname = disambiguated_specialization_qname(
             owner_id,
             id_to_qname.get(owner_id),
-            id_to_decl_kind.get(owner_id) == _CLASS_SPECIALIZATION_KIND,
+            owner_kind == _CLASS_SPECIALIZATION_KIND,
             resolve_spec_qname,
         )
+        if owner_kind == _CLASS_SPECIALIZATION_KIND and owner_qname is None:
+            return  # unresolvable owner -- skip rather than guess (Codex review)
         qname = (
             f"{owner_qname}::{name}"
             if owner_qname and name
@@ -1427,6 +1429,7 @@ def _walk_function_templates(
             class_parent_scope = scope
         member_locs = qname_to_member_locs.get(class_qname, {})
         disambiguated_name: str | None = None
+        disambiguation_failed = False
         for child in node.get("inner", []) or []:
             if str(child.get("kind", "")) == _FUNCTION_TEMPLATE_KIND:
                 member_name = str(child.get("name") or "")
@@ -1445,17 +1448,14 @@ def _walk_function_templates(
                 if shared:
                     name = bare_name
                 else:
-                    if disambiguated_name is None:  # resolved-over-raw, see owner_qname
-                        disambiguated_name = (
-                            disambiguated_specialization_qname(
-                                node_id,
-                                _specialization_scope_name(node, bare_name),
-                                True,
-                                resolve_spec_qname,
-                            )
-                            or bare_name
+                    if disambiguated_name is None and not disambiguation_failed:
+                        disambiguated_name = disambiguated_specialization_qname(
+                            node_id, None, True, resolve_spec_qname
                         )
-                    name = disambiguated_name
+                        disambiguation_failed = disambiguated_name is None
+                    if disambiguation_failed:
+                        continue  # unresolvable -- skip rather than guess (Codex review)
+                    name = disambiguated_name or bare_name
             else:
                 name = bare_name
             # The scope prefix for this child comes from class_parent_scope

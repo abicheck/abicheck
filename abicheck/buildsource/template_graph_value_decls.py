@@ -190,19 +190,22 @@ def disambiguated_specialization_qname(
 ) -> str | None:
     """*resolve_specialization_qname(spec_id)* (``template_graph.
     _resolve_specialization_qname``, passed in rather than imported --
-    this module stays a leaf), or -- when that fails because of an
-    unresolvable decl-kind NTTP argument (a known gap, e.g. a class-member
-    target) -- *fallback* suffixed with *spec_id* itself, unique by
-    construction though not a meaningful identity. Shared by
-    ``template_graph._walk_function_templates``'s two member-scope-naming
-    call sites (Codex review): two specializations differing only in such
-    an argument previously both fell back to one bare/raw-spelling name,
-    merging their distinct member template instantiations onto one graph
-    node.
+    this module stays a leaf) when *is_specialization*, else *fallback*
+    unchanged. Shared by ``template_graph._walk_function_templates``'s two
+    member-scope-naming call sites (Codex review): two specializations
+    differing only in an unresolvable decl-kind NTTP argument (a known
+    gap, e.g. a class-member target) previously both fell back to one
+    bare/raw-spelling name, merging their distinct member template
+    instantiations onto one graph node.
+
+    Returns ``None`` (never a fabricated fallback) when *is_specialization*
+    and resolution genuinely fails -- an earlier revision suffixed
+    *fallback* with *spec_id* itself as a "unique by construction"
+    disambiguator, but clang's own node ``id`` is a process-local address,
+    not stable across separate compiler invocations of the identical TU
+    (Codex review, fresh evidence, verified empirically: two ``clang++``
+    runs over the same source report different ids for the same
+    specialization) -- callers must skip rather than use a ``None`` here,
+    the same "degrade, never guess" discipline this whole module follows.
     """
-    if not is_specialization:
-        return fallback
-    resolved = resolve_specialization_qname(spec_id)
-    if resolved is not None:
-        return resolved
-    return f"{fallback}#{spec_id}" if fallback else fallback
+    return resolve_specialization_qname(spec_id) if is_specialization else fallback

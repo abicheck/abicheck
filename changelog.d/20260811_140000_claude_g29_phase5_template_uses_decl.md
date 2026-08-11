@@ -40,10 +40,13 @@
   `H<&B::f>::g<int>`) previously named both `template_decl` scopes
   identically, merging their distinct emitted symbols even though the
   class-level instantiations themselves already correctly stayed
-  unmerged — now falls back to a disambiguator unique by construction
-  (the specialization's own AST node id) when the specialization's own
-  identity can't be resolved. No new `ChangeKind`, no report schema
-  change, no verdict/exit-code effect — this is graph vocabulary only.
+  unmerged — the member instantiation is now dropped the same way (a
+  first attempt at this fix suffixed the ambiguous name with the
+  specialization's own clang node id, but that id is a process-local
+  address, not stable across separate compiler invocations of the
+  identical TU — degrading to "drop" instead). No new `ChangeKind`, no
+  report schema change, no verdict/exit-code effect — this is graph
+  vocabulary only.
 
 ### Changed
 

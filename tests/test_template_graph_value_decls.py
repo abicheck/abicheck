@@ -291,21 +291,24 @@ def test_block_scope_extern_function_nttp_target_resolves() -> None:
     assert out[0].label == "Holder<_Z6targetv>"
 
 
-def test_member_function_templates_of_unresolvable_specializations_stay_distinct() -> (
+def test_member_function_templates_of_unresolvable_specializations_are_dropped() -> (
     None
 ):
     """A member function template (``g``) instantiated once per
     specialization of ``H<&A::f>``/``H<&B::f>`` -- two specializations
     that differ only in an unresolvable class-member NTTP argument (both
-    spelled bare ``"f"``) -- must not collide onto one shared
-    ``H::g`` ``template_decl`` node, merging their distinct emitted
-    symbols (Codex review, fresh evidence: verified against real clang
-    output that an out-of-line member-template definition on two such
-    specializations both resolved to the identical bare "H", since
-    neither the specialization's own decl-kind NTTP argument nor its
-    owning class is otherwise resolvable). Falls back to a disambiguator
-    unique by construction (the specialization's own clang node id) when
-    the specialization's own identity can't be resolved."""
+    spelled bare ``"f"``) -- must not collide onto one shared ``H::g``
+    ``template_decl`` node, merging their distinct emitted symbols (Codex
+    review, fresh evidence: verified against real clang output that an
+    out-of-line member-template definition on two such specializations
+    both resolved to the identical bare "H"). An earlier revision of this
+    fix suffixed the bare name with the specialization's own clang node
+    id as a disambiguator, but that id is a process-local address, not
+    stable across separate compiler invocations of the identical TU
+    (Codex review, fresh evidence, verified empirically) -- so both
+    member instantiations are dropped entirely instead, the same
+    "degrade, never guess" discipline the class-level instantiation
+    itself already gets."""
 
     def _spec(spec_id: str, decl_id: str) -> dict:
         return {
@@ -366,11 +369,7 @@ def test_member_function_templates_of_unresolvable_specializations_stay_distinct
     g_b = _g("0xSPEC_B", "_ZN1H1gIiEET_S1_b")
     ast = {"kind": "TranslationUnitDecl", "inner": [class_template, g_a, g_b]}
     out = parse_clang_ast_templates(ast)
-    qnames = {i.template_qname for i in out}
-    assert len(qnames) == 2
-    assert "H::g" not in qnames
-    symbols = {s for i in out for s in i.emitted_symbols}
-    assert symbols == {"_ZN1H1gIiEET_S1_a", "_ZN1H1gIiEET_S1_b"}
+    assert out == []
 
 
 def test_two_class_member_nttp_targets_drop_rather_than_collide() -> None:
