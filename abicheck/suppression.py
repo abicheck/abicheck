@@ -112,9 +112,89 @@ def _fnmatch_segment_regex(segment: str) -> str:
     return m.group(1) if m else translated
 
 
+def _bracket_class_end(text: str, open_index: int) -> int:
+    """If *text* has a genuine fnmatch bracket character class opening at
+    *open_index* (a ``[``), return the index of its closing ``]``;
+    otherwise -1 — an unmatched ``[`` is a literal character in fnmatch's
+    own grammar, not a class opener (mirrors ``fnmatch.translate``'s own
+    fallback for an unclosed bracket).
+
+    Mirrors fnmatch's bracket rules: an optional leading ``!`` negates the
+    class, and a ``]`` immediately after ``[``/``[!`` is a literal class
+    member rather than the closer (so ``[]]`` is a one-character class
+    matching a literal ``]``, not an empty, immediately-closed class).
+    """
+    j = open_index + 1
+    n = len(text)
+    if j < n and text[j] == "!":
+        j += 1
+    if j < n and text[j] == "]":
+        j += 1
+    while j < n and text[j] != "]":
+        j += 1
+    return j if j < n else -1
+
+
 def _has_wildcard_char(segment: str) -> bool:
-    """Whether *segment* itself contains an fnmatch wildcard character."""
-    return "*" in segment or "?" in segment
+    """Whether *segment* itself contains an fnmatch wildcard construct —
+    ``*``, ``?``, or a genuine ``[...]`` bracket character class.
+
+    A bracket class is just as unconstrained-vs-literal a distinction as
+    ``*``/``?`` for the trailing-globstar delegation this feeds: a segment
+    like ``foo[0-9]`` is a *bounded* fnmatch construct (matches exactly
+    ``foo`` plus one digit), yet real ``fnmatch.translate("foo[0-9]::**")``
+    still requires the literal ``::`` unconditionally when it borders a
+    trailing globstar — there is no atomic-group "zero or more segments"
+    absorption for this shape either, so treating a bracket class as
+    "no wildcard here" would leave the same over-matching gap open (Codex
+    review, fresh evidence: ``"foo[0-9]::**"`` matched bare ``"foo1"`` with
+    no ``::`` anywhere before this fix).
+    """
+    if "*" in segment or "?" in segment:
+        return True
+    i = segment.find("[")
+    while i != -1:
+        if _bracket_class_end(segment, i) != -1:
+            return True
+        i = segment.find("[", i + 1)
+    return False
+
+
+def _split_namespace_segments(pattern: str) -> list[str]:
+    """Split *pattern* on ``::`` namespace separators, treating a ``::``
+    that appears *inside* a genuine fnmatch bracket class (``[...]``) as
+    literal class content rather than a segment boundary.
+
+    A plain ``pattern.split("::")`` corrupts a pre-existing, valid
+    fnmatch-style selector whose character class happens to contain a
+    literal ``::`` — ``"ns::[!::]*"`` (exclude a literal ``:`` or the
+    segment separator character) split into ``["ns", "[!", "]*"]``,
+    scattering the bracket class across two "segments" and translating
+    each half as escaped literal text instead of one character class
+    (Codex review, fresh evidence: this previously-matching selector
+    stopped matching ``"ns::foo"`` entirely).
+    """
+    segments: list[str] = []
+    buf: list[str] = []
+    i = 0
+    n = len(pattern)
+    while i < n:
+        ch = pattern[i]
+        if ch == "[":
+            end = _bracket_class_end(pattern, i)
+            if end != -1:
+                buf.append(pattern[i:end + 1])
+                i = end + 1
+                continue
+        if pattern[i:i + 2] == "::":
+            segments.append("".join(buf))
+            buf = []
+            i += 2
+            continue
+        buf.append(ch)
+        i += 1
+    segments.append("".join(buf))
+    return segments
 
 
 def _translate_namespace_glob(pattern: str) -> str:
@@ -190,7 +270,7 @@ def _translate_namespace_glob(pattern: str) -> str:
     # segment), silently rewriting it to "foo**" and dropping the "::"
     # boundary the fnmatch-style pattern still required.
     segments: list[str] = []
-    for seg in pattern.split("::"):
+    for seg in _split_namespace_segments(pattern):
         if seg == "**" and segments and segments[-1] == "**":
             continue
         segments.append(seg)

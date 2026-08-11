@@ -403,6 +403,36 @@ class TestNamespaceGlobstarSemantics:
         assert s.matches(self._change("a::detail_private::x"))
         assert s.matches(self._change("a::y::detail_private::x"))
 
+    def test_bracket_class_beside_trailing_globstar_still_requires_separator(self):
+        # Codex review, fresh evidence: the trailing-globstar delegation
+        # only checked for "*"/"?" wildcards, missing fnmatch bracket
+        # character classes ("[...]") entirely -- "foo[0-9]::**" took the
+        # un-delegated, hand-rolled optional-"::" path and matched bare
+        # "foo1" with no "::" anywhere, even though real
+        # fnmatch.translate("foo[0-9]::**") requires the literal "::"
+        # unconditionally for this shape too (there is no atomic-group
+        # "zero or more segments" absorption for a bracket class bordering
+        # "**" any more than there is for a "*"/"?"). A real-world rule
+        # like "internal[0-9]::**" would then over-suppress an unrelated
+        # "internal1" finding that never descends into any namespace.
+        s = Suppression(namespace="foo[0-9]::**", reachability="any", reason="x")
+        assert not s.matches(self._change("foo1"))
+        assert s.matches(self._change("foo1::x"))
+        assert not s.matches(self._change("fooX"))
+
+    def test_bracket_class_containing_namespace_separator_is_not_split(self):
+        # Codex review, fresh evidence: a plain pattern.split("::") on the
+        # raw string corrupts a pre-existing, valid fnmatch-style selector
+        # whose character class happens to contain a literal "::" --
+        # "ns::[!::]*" (exclude a literal ":" or the separator character)
+        # split into ["ns", "[!", "]*"], scattering the bracket class
+        # across two "segments" and escaping each half as literal text
+        # instead of translating one real character class. This
+        # previously-matching selector stopped matching "ns::foo" entirely.
+        s = Suppression(namespace="ns::[!::]*", reachability="any", reason="x")
+        assert s.matches(self._change("ns::foo"))
+        assert not s.matches(self._change("ns::"))
+
     def test_python314_fnmatch_end_anchor_variant_is_accepted(self):
         # Codex review, verified against Python 3.14.4: fnmatch.translate()
         # ends its result with "\z" there instead of "\Z". The wrapper that
