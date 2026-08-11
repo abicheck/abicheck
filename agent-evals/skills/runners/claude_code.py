@@ -1071,6 +1071,32 @@ def main(argv: list[str] | None = None) -> int:
         tmp.write_text(json.dumps(index, indent=2), encoding="utf-8")
         os.replace(tmp, index_path)
 
+    def _in_scope_index() -> list[dict]:
+        # Scoped by *skill inclusion policy* (flagship-only, unless
+        # --include-prototype-skills), not by this invocation's own
+        # `scenarios` subset. The subset changes across invocations that
+        # pass different explicit --scenarios ids — e.g. one run of
+        # scenario A under model X followed by another run of scenario B
+        # under model Y, both flagship scenarios — and filtering to only
+        # the current invocation's ids would compare each run against an
+        # empty or unrelated index, missing a real model difference
+        # `run_skill_eval.py` will later aggregate together (it groups by
+        # skill/arm, not by which invocation produced a row). Rows for a
+        # scenario the pack no longer lists are excluded the same way
+        # `run_skill_eval.py` treats them as orphaned — never graded, so a
+        # model difference there never reaches an aggregate either. A
+        # function, not a value computed once, so both the newly-produced
+        # and the recovered-record paths below see `index` as it stood
+        # immediately before their own append.
+        if args.include_prototype_skills:
+            return index
+        return [
+            row
+            for row in index
+            if pack["scenarios"].get(row.get("scenario_id"), {}).get("skill")
+            == FLAGSHIP_SKILL
+        ]
+
     for sid, scenario in scenarios.items():
         if not supported_here(scenario):
             print(
@@ -1084,8 +1110,19 @@ def main(argv: list[str] | None = None) -> int:
                     print(f"skip {sid}/{arm}/{rep} (already run)")
                     continue
                 if (out_dir / "final.md").exists():
+                    recovered = _recovered_record(out_dir, sid, arm, rep, scenario)
+                    # A record `_run_once` itself rejected for a model
+                    # mismatch has already written final.md by the time the
+                    # rejection is raised (see check_one_model below and
+                    # _recovered_record's own docstring for the parallel
+                    # case this mirrors) — so without this check, a later
+                    # resume would recover and index exactly the record the
+                    # first invocation refused to accept.
+                    mixed = check_one_model(_in_scope_index(), recovered)
+                    if mixed:
+                        raise RuntimeError(f"{sid}/{arm}/{rep} (recovered): {mixed}")
                     print(f"recover {sid}/{arm}/{rep} (ran, was not indexed)")
-                    index.append(_recovered_record(out_dir, sid, arm, rep, scenario))
+                    index.append(recovered)
                     flush()
                     continue
                 if out_dir.exists():
@@ -1129,30 +1166,7 @@ def main(argv: list[str] | None = None) -> int:
                         "requested_model": args.model,
                     }
                     (out_dir / "final.md").write_text("", encoding="utf-8")
-                # Scoped by *skill inclusion policy* (flagship-only, unless
-                # --include-prototype-skills), not by this invocation's own
-                # `scenarios` subset. The subset changes across invocations
-                # that pass different explicit --scenarios ids — e.g. one run
-                # of scenario A under model X followed by another run of
-                # scenario B under model Y, both flagship scenarios — and
-                # filtering to only the current invocation's ids would compare
-                # each run against an empty or unrelated index, missing a real
-                # model difference `run_skill_eval.py` will later aggregate
-                # together (it groups by skill/arm, not by which invocation
-                # produced a row). Rows for a scenario the pack no longer
-                # lists are excluded the same way `run_skill_eval.py` treats
-                # them as orphaned — never graded, so a model difference there
-                # never reaches an aggregate either.
-                if args.include_prototype_skills:
-                    in_scope_index = index
-                else:
-                    in_scope_index = [
-                        row
-                        for row in index
-                        if pack["scenarios"].get(row.get("scenario_id"), {}).get("skill")
-                        == FLAGSHIP_SKILL
-                    ]
-                mixed = check_one_model(in_scope_index, record)
+                mixed = check_one_model(_in_scope_index(), record)
                 if mixed:
                     raise RuntimeError(f"{sid}/{arm}/{rep}: {mixed}")
                 index.append(record)
