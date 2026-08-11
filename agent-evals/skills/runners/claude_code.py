@@ -466,6 +466,28 @@ def visible_native_skills(events: list[dict]) -> list[str] | None:
     return None
 
 
+def _parse_events(text: str | None) -> list[dict]:
+    """Parse a `stream-json` transcript into events, one JSON object per line.
+
+    Shared by every reader of this format: a completed run's own stdout, a
+    recovered run's persisted `events.jsonl`, and — since `subprocess.run`
+    still populates `TimeoutExpired.stdout` with whatever was captured
+    before the kill — a timed-out run's partial transcript too. A blank or
+    malformed line is skipped rather than failing the whole parse, since a
+    timeout can cut a transcript off mid-line.
+    """
+    events: list[dict] = []
+    for line in (text or "").splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            events.append(json.loads(line))
+        except json.JSONDecodeError:
+            continue
+    return events
+
+
 def resolved_model(events: list[dict]) -> str | None:
     """The model the CLI actually used, or None if it never said.
 
@@ -690,15 +712,7 @@ def _run_once(
     if proc.stderr:
         (out_dir / "runner.err").write_text(proc.stderr, encoding="utf-8")
 
-    events: list[dict] = []
-    for line in proc.stdout.splitlines():
-        line = line.strip()
-        if not line:
-            continue
-        try:
-            events.append(json.loads(line))
-        except json.JSONDecodeError:
-            continue
+    events = _parse_events(proc.stdout)
 
     (out_dir / "final.md").write_text(_final_text(events), encoding="utf-8")
     usage = _usage(events, elapsed)
@@ -879,14 +893,11 @@ def _recovered_record(
         except json.JSONDecodeError:
             pass
     events_path = out_dir / "events.jsonl"
-    events: list[dict] = []
-    if events_path.is_file():
-        for line in events_path.read_text(encoding="utf-8").splitlines():
-            if line.strip():
-                try:
-                    events.append(json.loads(line))
-                except json.JSONDecodeError:
-                    continue
+    events = (
+        _parse_events(events_path.read_text(encoding="utf-8"))
+        if events_path.is_file()
+        else []
+    )
     visible = visible_native_skills(events)
     record["visible_skills"] = visible
     # The resume path is exactly what `check_one_model` was written for, and a
@@ -1172,7 +1183,22 @@ def main(argv: list[str] | None = None) -> int:
                     record = _run_once(
                         sid, scenario, arm, rep, out_dir, args.timeout, args.model
                     )
-                except subprocess.TimeoutExpired:
+                except subprocess.TimeoutExpired as exc:
+                    # subprocess.run() kills the process and still populates
+                    # TimeoutExpired.stdout/.stderr with whatever had already
+                    # been captured — a timeout after the CLI emitted its
+                    # early system/init event carries a real resolved model,
+                    # and discarding that would force a fallback identity
+                    # comparison (below) where a direct one was available.
+                    events = _parse_events(exc.stdout)
+                    if events:
+                        (out_dir / "events.jsonl").write_text(
+                            exc.stdout or "", encoding="utf-8"
+                        )
+                    if exc.stderr:
+                        (out_dir / "runner.err").write_text(
+                            exc.stderr, encoding="utf-8"
+                        )
                     record = {
                         "scenario_id": sid,
                         "arm": arm,
@@ -1180,28 +1206,29 @@ def main(argv: list[str] | None = None) -> int:
                         "skill": scenario["skill"],
                         "exit_code": None,
                         "timed_out": True,
-                        # The process died before it could emit (or the events
-                        # stream could be read for) a system/init event, so
-                        # resolved_model() has nothing to resolve — "model"
-                        # stays genuinely absent. "requested_model" is set
-                        # whenever --model pinned one, so this row still
-                        # carries a fallback identity: _models_compatible()
-                        # only falls back to the requested alias when a
-                        # resolved name is missing on at least one side, so
-                        # a pinned-model timeout compares equal to another
-                        # row that ALSO has no resolved name (another
-                        # timeout under the same pin) without masking a real
+                        "model": resolved_model(events),
+                        # "requested_model" is set whenever --model pinned
+                        # one, so this row still carries a fallback identity
+                        # even when the process died before an init event
+                        # (or before that event survived capture at all):
+                        # _models_compatible() only falls back to the
+                        # requested alias when a resolved name is missing on
+                        # at least one side, so a pinned-model timeout with
+                        # no resolved model compares equal to another row
+                        # that ALSO has no resolved name (another timeout
+                        # under the same pin) without masking a real
                         # resolved-model difference against a completed
-                        # sibling — that comparison uses both sides'
-                        # resolved names instead. Left absent (None) when
-                        # --model was not passed — genuinely unknown, and
-                        # both this run's own check_one_model call below and
-                        # run_skill_eval.py's later grading-time check
-                        # correctly treat an unknown identity as never
-                        # provably consistent with a known one.
+                        # sibling — that comparison uses both sides' resolved
+                        # names instead, this run's included. Left absent
+                        # (None) when --model was not passed — genuinely
+                        # unknown, and both this run's own check_one_model
+                        # call below and run_skill_eval.py's later
+                        # grading-time check correctly treat an unknown
+                        # identity as never provably consistent with a known
+                        # one.
                         "requested_model": args.model,
                     }
-                    (out_dir / "final.md").write_text("", encoding="utf-8")
+                    (out_dir / "final.md").write_text(_final_text(events), encoding="utf-8")
                 mixed = check_one_model(_in_scope_index(), record)
                 if mixed:
                     raise RuntimeError(f"{sid}/{arm}/{rep}: {mixed}")
