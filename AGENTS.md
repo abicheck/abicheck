@@ -1208,24 +1208,37 @@ Once a root command genuinely clears the bar above, pick the right home:
   arbitrarily generated classes and evidence-descriptor shapes rather than
   only the hand-picked examples.
 
-  **A structural, not point, fix for the field-ordering half of the above**
-  (found twice now in this codebase's history under review — first on
+  **A whole-class structural fix for the field-ordering half of the
+  above was attempted and reverted — the in-repo audit that justified it
+  was the wrong audit.** The field-ordering bug (found twice now: first on
   `AbiSnapshot` in PR #582, again on `Change.
   vtable_covers_unverifiable_layout_gap` in the same PR that introduced
-  it): `Change` (`checker_types.py`) is now keyword-only from `old_value`
-  onward via the `dataclasses.KW_ONLY` sentinel, rather than the per-field
-  `field(kw_only=True)` PR #582 used for `AbiSnapshot`. Every production
-  and test call site across the codebase already passes `Change`'s ~50
-  optional fields by keyword (confirmed by AST-parsing every `Change(...)`
-  call site in the repo: every positional call anywhere passes exactly the
-  three required leading fields, `kind`/`symbol`/`description`, and never
-  more), so this changes nothing for any existing caller — but it makes a
-  field inserted anywhere in the class body permanently safe for every
-  contributor from here on, including one who forgets to mark their own
-  new field `kw_only=True` by hand (the sentinel covers every field
-  textually after it automatically, which the per-field approach cannot
-  guarantee). Prefer the sentinel form over repeating `field(kw_only=True)`
-  on a new field in a class already past this marker.
+  it) was first "fixed" by making `Change` keyword-only from `old_value`
+  onward via the `dataclasses.KW_ONLY` sentinel, on the strength of an
+  AST-parse of every `Change(...)` call site in this repo confirming every
+  positional call anywhere passes exactly the three required leading
+  fields and never more. That audit answers the wrong question for a type
+  this codebase itself documents as public API
+  (`checker_types.py`'s own module docstring; CLAUDE.md: "changing their
+  public surface is a breaking change to the Python API — coordinate it"):
+  it proves this repo's own call sites are safe, and says nothing about an
+  external consumer who previously called `Change(kind, symbol,
+  description, old_value, new_value, ...)` positionally — for whom the
+  whole-class sentinel is exactly the same breaking shift the fix exists
+  to prevent, just moved to a boundary this repo cannot see or test
+  (Codex review, fresh evidence). Reverted in favor of the same per-field
+  `field(kw_only=True)` PR #582 already used for `AbiSnapshot`, applied
+  only to the one new field and appended at the true end of the dataclass
+  (not mid-list) so every pre-existing field's position — and therefore
+  every pre-existing positional caller's behavior, in or out of this repo
+  — is completely unchanged. The lesson generalizes beyond this one field:
+  for a type documented as public API, "no in-repo caller breaks" is not
+  the bar: prefer the narrowest change that cannot break a caller this
+  repo cannot see, even when a broader structural fix looks more
+  complete. The `KW_ONLY` sentinel is still the right tool for a
+  genuinely *internal* dataclass with no external-construction contract
+  (nothing here argues against it in general) — the mistake was applying
+  it to one that has such a contract without checking for one first.
 
 - **Evidence-provider model — investigated, found not to reproduce as
   described; no fix applied.** A status-review follow-up asked whether

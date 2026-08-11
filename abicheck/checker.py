@@ -164,6 +164,59 @@ _SOURCE_BREAK_KINDS = _API_BREAK_KINDS
 _DetectorSpec = DetectorSpec
 
 
+def _vtable_gap_finding_is_verdict_subsumed(
+    redundant_change: Change,
+    kept: list[Change],
+    policy: str,
+    policy_file: PolicyFile | None,
+) -> bool:
+    """True iff *redundant_change* (a ``LAYOUT_UNVERIFIABLE`` folded by
+    ``SuppressLayoutUnverifiableCoveredByVtableChanged``) may safely be
+    excluded from ``verdict_redundant``.
+
+    The fold's premise -- this finding adds no new information because a
+    stronger, already-counted ``TYPE_VTABLE_CHANGED`` covers the identical
+    evidence gap -- only holds when the covering finding's own
+    *policy-resolved* verdict is at least as severe as this finding's own
+    policy-resolved verdict would be (Codex review). Under the unconfigured
+    default policy it always holds (BREAKING already dominates RISK), which
+    is why this was missed initially: the exclusion was added, and tested,
+    against exactly the case where it happens to be a no-op. It stops
+    holding the moment a policy overrides either kind independently -- e.g.
+    ``type_vtable_changed: ignore`` while ``layout_unverifiable`` keeps its
+    RISK default, or a policy that explicitly raises
+    ``layout_unverifiable``'s own severity -- at which point blindly
+    excluding the redundant finding would silently defeat that override
+    instead of reflecting it.
+
+    Resolves both findings' verdicts through the exact same
+    ``_compute_verdict_for`` path the real verdict computation uses (for
+    both the named-``policy`` and ``policy_file`` cases), so this can never
+    drift from how the verdict is actually scored.
+    """
+    from .policy_file import _VERDICT_ORDER
+
+    tag = (redundant_change.caused_by_type or "")[
+        len(VTABLE_COVERS_UNVERIFIABLE_LAYOUT_GAP_PREFIX) :
+    ]
+    covering = next(
+        (
+            k
+            for k in kept
+            if k.kind is ChangeKind.TYPE_VTABLE_CHANGED and k.qualified_name == tag
+        ),
+        None,
+    )
+    if covering is None:
+        # The covering finding is missing from `kept` for some other reason
+        # (e.g. a future step removes it) -- stay conservative and count the
+        # redundant finding rather than silently dropping real signal.
+        return False
+    redundant_v = _compute_verdict_for([redundant_change], policy, policy_file)
+    covering_v = _compute_verdict_for([covering], policy, policy_file)
+    return _VERDICT_ORDER.index(covering_v) >= _VERDICT_ORDER.index(redundant_v)
+
+
 def _compute_verdict_for(
     all_unsuppressed: list[Change],
     policy: str,
@@ -934,21 +987,25 @@ def compare(
     # the downgraded rename back to BREAKING. They stay in redundant_changes
     # for audit (--show-redundant); they just don't drive the verdict.
     #
-    # vtable_covers_unverifiable_layout_gap: the identical exclusion, for the
-    # identical reason, for a LAYOUT_UNVERIFIABLE finding
-    # SuppressLayoutUnverifiableCoveredByVtableChanged folded away as fully
-    # subsumed by a co-located BREAKING TYPE_VTABLE_CHANGED (Codex review):
-    # without this exclusion, the folded RISK finding would still count via
-    # `verdict_redundant` even after a policy override/suppression on the
-    # covering finding resolved it, silently resurrecting the exact
-    # "two detectors disagreeing about one piece of evidence" confusion this
-    # mechanism exists to remove.
+    # vtable_covers_unverifiable_layout_gap: a *conditional* exclusion, for a
+    # LAYOUT_UNVERIFIABLE finding SuppressLayoutUnverifiableCoveredByVtableChanged
+    # folded away as subsumed by a co-located TYPE_VTABLE_CHANGED. Unlike the
+    # unconditional "rename:" exclusion above, this one is NOT a blanket
+    # prefix check (Codex review): whether the fold is still safe to exclude
+    # from the verdict depends on each finding's own *policy-resolved*
+    # severity, not their unconfigured defaults -- see
+    # _vtable_gap_finding_is_verdict_subsumed's own docstring for why a
+    # blanket exclusion could silently defeat an explicit policy override on
+    # either kind.
     verdict_redundant = [
         c
         for c in redundant
         if not (c.caused_by_type or "").startswith("rename:")
-        and not (c.caused_by_type or "").startswith(
-            VTABLE_COVERS_UNVERIFIABLE_LAYOUT_GAP_PREFIX
+        and not (
+            (c.caused_by_type or "").startswith(
+                VTABLE_COVERS_UNVERIFIABLE_LAYOUT_GAP_PREFIX
+            )
+            and _vtable_gap_finding_is_verdict_subsumed(c, kept, policy, policy_file)
         )
     ]
 

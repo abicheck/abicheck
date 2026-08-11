@@ -1,11 +1,11 @@
-### Changed
+### Fixed
 
-- **`checker_types.Change` is now keyword-only from `old_value` onward.**
-  Every production and test call site already constructs `Change` with its
-  first three fields (`kind`/`symbol`/`description`) positional and every
-  other field by keyword, so this changes nothing for existing callers, but
-  it permanently closes the bug class where a new field inserted into the
-  class silently shifts a later positional constructor argument for any
-  future caller — the same class of bug fixed for `AbiSnapshot` per-field in
-  PR #582, generalized here via the `dataclasses.KW_ONLY` sentinel so every
-  future field is protected automatically.
+- **A policy override on `type_vtable_changed` or `layout_unverifiable` is
+  now respected correctly when the two findings are folded together.**
+  `layout_unverifiable`'s fold into `redundant_changes` (see above) is now
+  excluded from verdict computation only when the covering
+  `type_vtable_changed` finding's own policy-resolved severity is at least
+  as severe as `layout_unverifiable`'s own — so overriding
+  `type_vtable_changed` to compatible while leaving `layout_unverifiable`
+  at its RISK default still surfaces that RISK in the verdict, instead of
+  silently dropping it.

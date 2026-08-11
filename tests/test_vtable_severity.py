@@ -925,16 +925,57 @@ class TestLayoutUnverifiableSuppressedByVtableChanged:
         ]
         assert any(c.qualified_name == "ns1::Foo" for c in layout_findings)
 
-    def test_folded_finding_excluded_from_verdict_when_vtable_change_overridden(
+    def test_folded_finding_excluded_from_verdict_when_both_kinds_overridden(
         self,
     ) -> None:
         """The folded LAYOUT_UNVERIFIABLE must not resurrect a RISK verdict
-        once a policy override has downgraded the covering TYPE_VTABLE_CHANGED
-        to ignore — it is fully subsumed, not an independent verdict
-        contributor (Codex review): otherwise the redundant advisory, hidden
-        from the default report but still present in ``ctx.redundant``, would
-        silently keep the overall verdict at COMPATIBLE_WITH_RISK even though
-        the report shows nothing driving it."""
+        once a policy override has downgraded BOTH the covering
+        TYPE_VTABLE_CHANGED and LAYOUT_UNVERIFIABLE itself to compatible — the
+        user has explicitly said neither kind should drive the verdict, so
+        the fold's "fully subsumed" premise still holds under this policy."""
+        old = _snap(
+            types=[
+                RecordType(
+                    name="Foo",
+                    kind="class",
+                    vtable=[],
+                    size_bits=None,
+                )
+            ]
+        )
+        new = _snap(
+            types=[
+                RecordType(
+                    name="Foo",
+                    kind="class",
+                    vtable=["_ZN3Foo1fEv"],
+                    size_bits=None,
+                    base_offsets={"Base": 0},
+                )
+            ]
+        )
+        pf = PolicyFile(
+            base_policy="strict_abi",
+            overrides={
+                ChangeKind.TYPE_VTABLE_CHANGED: Verdict.COMPATIBLE,
+                ChangeKind.LAYOUT_UNVERIFIABLE: Verdict.COMPATIBLE,
+            },
+        )
+        result = compare(old, new, policy_file=pf)
+        assert result.verdict == Verdict.COMPATIBLE
+        redundant_kinds = {c.kind for c in result.redundant_changes}
+        assert ChangeKind.LAYOUT_UNVERIFIABLE in redundant_kinds
+
+    def test_folded_finding_still_counts_when_only_vtable_change_overridden(
+        self,
+    ) -> None:
+        """The inverse of the above, and the exact scenario Codex review
+        flagged: overriding ONLY the covering TYPE_VTABLE_CHANGED to
+        compatible, while LAYOUT_UNVERIFIABLE keeps its own RISK default,
+        must NOT silently drop LAYOUT_UNVERIFIABLE's own policy-resolved
+        contribution — the fold's "fully subsumed" premise no longer holds
+        once the covering finding's resolved severity is lower than the
+        redundant finding's own, so the verdict must still reflect it."""
         old = _snap(
             types=[
                 RecordType(
@@ -961,6 +1002,6 @@ class TestLayoutUnverifiableSuppressedByVtableChanged:
             overrides={ChangeKind.TYPE_VTABLE_CHANGED: Verdict.COMPATIBLE},
         )
         result = compare(old, new, policy_file=pf)
-        assert result.verdict == Verdict.COMPATIBLE
+        assert result.verdict == Verdict.COMPATIBLE_WITH_RISK
         redundant_kinds = {c.kind for c in result.redundant_changes}
         assert ChangeKind.LAYOUT_UNVERIFIABLE in redundant_kinds
