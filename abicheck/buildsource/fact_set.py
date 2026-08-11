@@ -109,13 +109,20 @@ class FactCompatibility:
       — so a persisted old-producer baseline's enum `type_hash` and a
       fresh new-producer extraction's `type_hash` can now differ for an
       UNCHANGED header, purely from the extractor upgrade (Codex review, PR
-      #719). Gated identically to ``opaque_hashes_comparable`` (same
-      producer/producer_version/compiler_version/``hash_recipe_id`` override
-      rules) rather than trusted unconditionally, accepting that a genuine
-      content change spanning a real producer/compiler upgrade may go
-      unreported until both sides are re-collected with the same producer —
-      the same trade-off ``opaque_hashes_comparable`` already accepts for
-      body/template hashes.
+      #719). Gated on the same producer/producer_version/compiler_version
+      identity rules as ``opaque_hashes_comparable`` — but, unlike that
+      flag, NEVER overridden by a matching :func:`hash_recipe_id`: that id
+      is a declared statement about the OPAQUE-hash canonicalization recipe
+      specifically, and proves nothing about whether structured fact
+      extraction also stayed identical (a second Codex review round on the
+      same PR — a producer could keep one stable opaque-hash recipe id
+      release over release while still changing what a structured fact
+      extracts, exactly the `EnumType.underlying_type` shape above).
+      Trusted unconditionally would mean accepting that a genuine content
+      change spanning a real producer/compiler upgrade may go unreported
+      until both sides are re-collected with the same producer — the same
+      trade-off ``opaque_hashes_comparable`` already accepts for body/
+      template hashes, just without the recipe-id escape hatch.
     - ``opaque_hashes_comparable``: producer-specific body/template hashes
       (``inline_body_changed``, ``template_body_changed``) — false on a
       producer/producer_version/compiler_version mismatch too, since the
@@ -408,10 +415,21 @@ def check_fact_compatibility(
     specific evidence categories instead of only reporting prose that nothing
     downstream reads. A matching :func:`hash_recipe_id` on both sides
     overrides an otherwise-invalidating producer/producer_version/
-    compiler_version mismatch for ``structured_content_comparable``,
-    ``opaque_hashes_comparable``, and ``source_edges_comparable``
-    specifically — those sides have declared they use the same
-    canonicalization recipe despite differing producer identity strings.
+    compiler_version mismatch for ``opaque_hashes_comparable`` and
+    ``source_edges_comparable`` specifically — those sides have declared
+    they use the same canonicalization recipe despite differing producer
+    identity strings. Deliberately NOT ``structured_content_comparable``
+    (Codex review, PR #719): ``hash_recipe_id`` is a declared statement
+    about the OPAQUE body/template hash canonicalization recipe
+    specifically — a differential conformance run (ADR-038 C.6) proves two
+    producers emit byte-comparable opaque hashes, it says nothing about
+    whether their STRUCTURED fact extraction (what a `type_hash` is built
+    from) stayed identical. A producer could legitimately keep the same
+    opaque-hash recipe id release over release while still changing what a
+    structured fact like `EnumType.underlying_type` extracts, so honoring
+    the override here would silently reopen the exact false-negative this
+    flag exists to prevent for a producer pair that happens to declare
+    conformant opaque hashes.
 
     When **both** sides carry no ``fact_set`` at all (a genuinely pre-C.8
     producer, or two hand-edited packs), :func:`check_fact_set_compatibility`
@@ -444,6 +462,12 @@ def check_fact_compatibility(
         new_fact_set
     )
     hard_blocked = bool(rules & _HARD_BLOCKING_RULES)
+    # No hash_recipe_id override here -- see this function's own docstring
+    # for why a declared opaque-hash recipe match must not also vouch for
+    # structured-fact extraction staying identical.
+    structured_content_agrees = not one_sided and not (
+        rules & _RECIPE_OVERRIDABLE_RULES
+    )
     recipe_agrees = same_recipe or (
         not one_sided and not (rules & _RECIPE_OVERRIDABLE_RULES)
     )
@@ -452,7 +476,7 @@ def check_fact_compatibility(
     )
     return FactCompatibility(
         structured_facts_comparable=not hard_blocked,
-        structured_content_comparable=not hard_blocked and recipe_agrees,
+        structured_content_comparable=not hard_blocked and structured_content_agrees,
         opaque_hashes_comparable=not hard_blocked and recipe_agrees,
         source_edges_comparable=not hard_blocked and source_edge_recipe_agrees,
         issues=tuple(issues),

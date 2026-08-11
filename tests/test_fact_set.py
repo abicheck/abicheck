@@ -651,7 +651,13 @@ def test_check_fact_compatibility_matching_recipe_id_overrides_producer_mismatch
     """A differential conformance run (ADR-038 C.6) can prove two differently
     named producers emit byte-comparable opaque hashes; declaring the same
     hash_recipe_id on both sides should override the producer-mismatch gate
-    rather than forcing every future comparison to suppress unnecessarily."""
+    for the two categories it actually vouches for -- rather than forcing
+    every future comparison to suppress unnecessarily -- but NOT for
+    structured_content_comparable (Codex review, PR #719: hash_recipe_id is
+    a declared statement about the opaque-hash canonicalization recipe
+    specifically; it proves nothing about whether structured fact
+    extraction, e.g. what a type_hash is built from, also stayed identical
+    between the two producer versions)."""
     old = default_fact_set(producer="abicheck-clang-plugin", producer_version="0.4")
     old["hash_recipe_id"] = "clang-json-canonical-v3"
     new = default_fact_set(
@@ -659,7 +665,7 @@ def test_check_fact_compatibility_matching_recipe_id_overrides_producer_mismatch
     )
     new["hash_recipe_id"] = "clang-json-canonical-v3"
     compat = check_fact_compatibility(old, new)
-    assert compat.structured_content_comparable
+    assert not compat.structured_content_comparable
     assert compat.opaque_hashes_comparable
     assert compat.source_edges_comparable
     # The producer_mismatch issue is still reported for visibility even though

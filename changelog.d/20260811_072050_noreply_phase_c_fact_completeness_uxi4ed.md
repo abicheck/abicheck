@@ -38,6 +38,17 @@ A new changelog fragment. See changelog.d/README.md for the workflow.
   finding's description names which structured-content findings it
   suppresses instead of the previous (now-inaccurate) claim that
   content-change findings are unaffected by a fact-set mismatch.
+  `FactCompatibility.structured_content_comparable` deliberately does NOT
+  honor a matching `hash_recipe_id` override the way `opaque_hashes_comparable`
+  does — that id is a declared statement about the opaque body/template
+  hash canonicalization recipe specifically, and proves nothing about
+  whether structured fact extraction (what a `type_hash` is built from)
+  also stayed identical between two producer versions. The castxml
+  `compiler_version` probe also now captures the bundled Clang's own
+  identity line, not just the castxml release number — two castxml
+  installs can share a release but bundle different Clang builds, and it's
+  the bundled Clang that resolves a compiler-selected fact like an unfixed
+  enum's underlying type.
 - **The hybrid header-backend merge now backfills
   `RecordType.is_template_pattern`/`has_anonymous_aggregate_fields` from
   clang** onto a castxml-matched record — previously silently dropped for

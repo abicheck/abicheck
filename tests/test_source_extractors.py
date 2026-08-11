@@ -1057,6 +1057,40 @@ def test_castxml_tool_version_degrades_to_empty_on_missing_binary() -> None:
     assert _castxml_tool_version("definitely-not-a-real-binary-xyz") == ""
 
 
+def test_castxml_tool_version_includes_bundled_clang_identity(monkeypatch) -> None:
+    """Codex review, PR #719, second round: two castxml installs sharing the
+    same castxml release but bundling a different Clang must not read as
+    the same compiler_version -- the bundled Clang is what actually resolves
+    a compiler-selected fact like an unfixed enum's underlying type."""
+    import subprocess as subprocess_mod
+
+    from abicheck.buildsource.source_extractors import castxml as castxml_mod
+
+    castxml_mod._castxml_tool_version.cache_clear()
+
+    def fake_run(*_args, **_kwargs):
+        return subprocess_mod.CompletedProcess(
+            args=["castxml", "--version"],
+            returncode=0,
+            stdout=(
+                "castxml version 0.6.3\n\n"
+                "CastXML project maintained and supported by Kitware "
+                "(kitware.com).\n\n"
+                "Ubuntu clang version 17.0.6 (9ubuntu1)\n"
+                "Target: x86_64-pc-linux-gnu\n"
+                "Thread model: posix\n"
+                "InstalledDir:\n"
+            ),
+            stderr="",
+        )
+
+    monkeypatch.setattr(castxml_mod.subprocess, "run", fake_run)
+    version = castxml_mod._castxml_tool_version("castxml")
+    assert version.startswith("0.6.3")
+    assert "clang version 17.0.6" in version
+    castxml_mod._castxml_tool_version.cache_clear()
+
+
 def test_parse_root_stamps_msvc_compiler_family_for_msvc_compiler_binary() -> None:
     from xml.etree.ElementTree import Element, SubElement
 

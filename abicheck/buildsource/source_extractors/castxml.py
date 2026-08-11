@@ -75,16 +75,33 @@ _compiler_binary = pick_compiler_binary
 _replay_extra_flags = replay_extra_flags
 
 _CASTXML_VERSION_RE = re.compile(r"castxml version (\S+)")
+#: castxml's own internal frontend is ALWAYS its bundled Clang (a
+#: `--castxml-cc-<id>` selects an *emulation* mode, gcc or msvc, never a
+#: literal execution path -- see AGENTS.md's toolchain-profile note), so
+#: real `--version` output always names it on its own banner line (e.g.
+#: "Ubuntu clang version 17.0.6 (9ubuntu1)"), distinct from the leading
+#: "castxml version X.Y.Z" line this module already parses.
+_CASTXML_BUNDLED_COMPILER_RE = re.compile(
+    r"^.*\bclang version\b.*$", re.MULTILINE | re.IGNORECASE
+)
 
 
 @functools.lru_cache(maxsize=8)
 def _castxml_tool_version(castxml_bin: str) -> str:
-    """``castxml --version``'s own version number for *castxml_bin*, cached
-    (ADR-038 C.8 fact_set -- mirrors ``clang.py``'s ``_clang_compiler_version``).
+    """``castxml --version``'s own version *and* bundled-Clang identity for
+    *castxml_bin*, cached (ADR-038 C.8 fact_set -- mirrors ``clang.py``'s
+    ``_clang_compiler_version``).
 
-    Cached per binary path so a many-TU build pays this subprocess once, not
-    once per compile unit. Best-effort: any failure yields ``""`` rather than
-    aborting extraction (compiler_version is provenance, not required input).
+    Both halves matter for provenance, not just the castxml release number:
+    two castxml installations can share the same castxml version while
+    bundling different Clang builds, and it is the bundled Clang that
+    resolves a compiler-selected fact like an unfixed enum's underlying
+    type (Codex review, PR #719 -- confirmed empirically that two same-
+    castxml-version-different-bundled-Clang installs are otherwise
+    indistinguishable to `check_fact_compatibility`). Cached per binary path
+    so a many-TU build pays this subprocess once, not once per compile
+    unit. Best-effort: any failure yields ``""`` rather than aborting
+    extraction (compiler_version is provenance, not required input).
     Deliberately a local, standalone probe rather than reusing
     ``dumper_toolchain._tool_identity_metadata`` -- that module imports FROM
     ``buildsource.redaction``, so importing it here (the opposite direction)
@@ -102,7 +119,13 @@ def _castxml_tool_version(castxml_bin: str) -> str:
         if r.returncode != 0:
             return ""
         m = _CASTXML_VERSION_RE.search(r.stdout)
-        return m.group(1) if m else ""
+        if not m:
+            return ""
+        castxml_ver = m.group(1)
+        bundled = _CASTXML_BUNDLED_COMPILER_RE.search(r.stdout)
+        if bundled:
+            return f"{castxml_ver}; {bundled.group(0).strip()}"
+        return castxml_ver
     except (OSError, subprocess.TimeoutExpired):
         return ""
 
