@@ -780,7 +780,7 @@ def test_inline_graph_folds_macro_edges_when_clang_available(monkeypatch, tmp_pa
         callback_graph,
         macro_graph,
         override_graph,
-        template_graph_extractor,
+        template_graph,
         type_graph,
     )
     from abicheck.buildsource.macro_graph import DeclRange
@@ -823,8 +823,16 @@ def test_inline_graph_folds_macro_edges_when_clang_available(monkeypatch, tmp_pa
     monkeypatch.setattr(
         override_graph, "ClangOverrideGraphExtractor", _FakeNoEdgeExtractor
     )
+    # Patched on `template_graph` itself (not `template_graph_extractor`,
+    # where the class actually lives) -- this is the historical monkeypatch
+    # path `template_graph_extractor.py`'s own module docstring documents,
+    # and `inline_graph_fold.fold_template_graph` reads
+    # `template_graph.ClangTemplateGraphExtractor` (through the module)
+    # specifically so this keeps working (Codex review, fresh evidence: an
+    # earlier revision imported the class directly from the new module in
+    # that function, which silently broke this exact guarantee).
     monkeypatch.setattr(
-        template_graph_extractor, "ClangTemplateGraphExtractor", _FakeNoEdgeExtractor
+        template_graph, "ClangTemplateGraphExtractor", _FakeNoEdgeExtractor
     )
     monkeypatch.setattr(
         callback_graph, "ClangCallbackGraphExtractor", _FakeNoEdgeExtractor
