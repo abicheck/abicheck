@@ -523,6 +523,29 @@ def _canonical_identity_name(
     present, the common case this codebase already assumes throughout
     ``diff_namespaces.py``/``diff_templates.py``'s own batch-demangle
     helpers).
+
+    **MSVC manglings hit the identical fallback, for a different reason**
+    (Codex review, fresh evidence): this codebase has no MSVC demangler at
+    all (``demangle.py``'s ``demangle_batch`` only ever recognizes the
+    Itanium ``_Z`` prefix), so a Windows/``clang-cl`` snapshot's
+    ``?``-prefixed manglings never reach ``demangled`` regardless of
+    normalization, and this falls back to the declared name exactly as
+    above. Unlike the no-demangler-installed case, there IS a structural
+    (no-demangler) MSVC parser in this codebase --
+    ``diff_cxx_rules.msvc_scope_components``/``msvc_qualified_name`` --
+    but it cannot help *this* detector specifically: its own docstring
+    documents that it deliberately rejects any template-shaped component
+    (the ``?$...`` marker), returning ``None`` rather than mis-parsing an
+    MSVC template-argument encoding it doesn't model -- and
+    ``detect_internal_template_leaks`` exists to inspect exactly template
+    instantiations (gated on ``_looks_like_template_instantiation``), so
+    the one MSVC parser available in this codebase is structurally unable
+    to answer the one question this function asks for the input class it
+    was built for. A real fix needs an MSVC template-argument-aware
+    structural parser, which does not exist here and is a much larger,
+    independently-scoped undertaking (matching this codebase's existing,
+    repeatedly-documented position that no MSVC family-specific parser
+    beyond plain scope recovery exists yet).
     """
     normalized = _normalize_mach_o_mangled(mangled)
     if normalized.startswith("_Z"):

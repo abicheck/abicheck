@@ -296,6 +296,31 @@ def _stable_keys_compatible(a: str, b: str) -> bool:
     dumper backend under-qualifies a name it drops a *prefix*, never
     replaces an inner segment, so a genuine mismatch there means these are
     two different declarations, not two spellings of one.
+
+    **Residual, deliberately-accepted gap** (Codex review, fresh evidence):
+    when the shorter key is *bare* (a single segment, identical to the
+    leaf itself -- e.g. an alias declared with no namespace context beyond
+    the experimental marker, ``experimental::sort`` stripping to bare
+    ``"sort"``), this reduces to plain leaf matching, and a genuinely
+    unrelated declaration that happens to share both that leaf and (via
+    some other aliasing) the removed alias's mangled symbol
+    (``experimental::sort`` vs. an unrelated ``detail::sort``) is wrongly
+    treated as compatible, suppressing a real removal. There is no further
+    string-only signal available to break this tie: a dumper backend
+    under-qualifying a name and a coincidental same-leaf collision produce
+    *the exact same bare stable-key*, and the two fixes are in direct
+    tension -- requiring more than one segment before allowing suppression
+    closes this gap but reopens the original reported bug for every alias
+    declared with no namespace context beyond ``experimental::`` itself
+    (also a real, and more common, shape). This function resolves that
+    tension in favor of the originally reported, verified false-positive
+    (the far more common shape in practice: a genuinely-unqualified
+    top-level experimental alias whose target happens to share a leaf
+    *and* be reachable via the identical mangled symbol is a narrow,
+    largely theoretical construction). Closing it for real needs evidence
+    this module does not have access to -- e.g. a per-declaration source
+    location correlated against the target's own definition site -- not a
+    cleverer string comparison.
     """
     segs_a, segs_b = _segments(a), _segments(b)
     if not segs_a or not segs_b:
