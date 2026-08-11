@@ -512,13 +512,22 @@ def _models_compatible(a: dict, b: dict) -> bool:
     revision of this check compared the *requested* alias whenever present
     and could accept exactly that drift, since two rows both pinned to
     `sonnet` always looked identical regardless of what either resolved
-    to). Falls back to the requested identifier only when at least one
-    side has no resolved name — in practice, a timeout, which never
-    reaches the CLI's init event and so never gets one. When neither a
-    resolved nor a requested identity is available on both sides, nothing
-    can be proven either way and this returns True (compatible) — matching
-    check_one_model's own documented "unknown never refuses the batch on
-    its own" policy.
+    to). Falls back to comparing the requested `--model` argument directly
+    only when both rows have one and neither has a resolved name (in
+    practice, two timeouts under the same pin).
+
+    A row with a resolved name and a row with *only* a requested one (a
+    completed, unpinned run alongside a pinned run that timed out, say) are
+    deliberately never compared cross-field, even though `--model` accepts
+    a literal full model ID as well as an alias: there is no reliable way
+    for this harness to tell an alias from a full ID apart, so comparing
+    them could either miss a real difference (alias vs. its own resolved
+    name look unrelated) or manufacture one (two spellings of the same full
+    ID). Whenever *both* rows carry some identity signal but not in a
+    shared field, this returns False (incompatible) rather than guessing —
+    only when *neither* row has any identity signal at all does this
+    return True (compatible), matching check_one_model's own documented
+    "unknown never refuses the batch on its own" policy for that case.
     """
     a_model, b_model = a.get("model"), b.get("model")
     if isinstance(a_model, str) and isinstance(b_model, str):
@@ -526,6 +535,10 @@ def _models_compatible(a: dict, b: dict) -> bool:
     a_requested, b_requested = a.get("requested_model"), b.get("requested_model")
     if isinstance(a_requested, str) and isinstance(b_requested, str):
         return a_requested == b_requested
+    a_has_identity = isinstance(a_model, str) or isinstance(a_requested, str)
+    b_has_identity = isinstance(b_model, str) or isinstance(b_requested, str)
+    if a_has_identity and b_has_identity:
+        return False
     return True
 
 
@@ -1109,13 +1122,13 @@ def main(argv: list[str] | None = None) -> int:
         # function, not a value computed once, so both the newly-produced
         # and the recovered-record paths below see `index` as it stood
         # immediately before their own append.
+        in_pack = [row for row in index if row.get("scenario_id") in pack["scenarios"]]
         if args.include_prototype_skills:
-            return index
+            return in_pack
         return [
             row
-            for row in index
-            if pack["scenarios"].get(row.get("scenario_id"), {}).get("skill")
-            == FLAGSHIP_SKILL
+            for row in in_pack
+            if pack["scenarios"][row["scenario_id"]].get("skill") == FLAGSHIP_SKILL
         ]
 
     for sid, scenario in scenarios.items():
