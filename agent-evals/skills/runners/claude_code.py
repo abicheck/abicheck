@@ -1085,7 +1085,17 @@ def main(argv: list[str] | None = None) -> int:
                         "timed_out": True,
                     }
                     (out_dir / "final.md").write_text("", encoding="utf-8")
-                mixed = check_one_model(index, record)
+                # Scoped to this run's own selected scenarios (`scenarios`,
+                # already filtered above by --scenarios/status/skill), not the
+                # full on-disk index: an --out root resumed after the freeze
+                # can still hold prototype-skill rows recorded under an older
+                # model (pre-freeze history, or --include-prototype-skills),
+                # and those are not part of *this* comparison. Checking against
+                # them would block an otherwise-consistent flagship-only
+                # resume over a model difference in evidence this run never
+                # produced and does not aggregate with.
+                in_scope_index = [row for row in index if row.get("scenario_id") in scenarios]
+                mixed = check_one_model(in_scope_index, record)
                 if mixed:
                     raise RuntimeError(f"{sid}/{arm}/{rep}: {mixed}")
                 index.append(record)
