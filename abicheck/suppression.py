@@ -326,7 +326,7 @@ class _SegmentGlobMatcher:
     def __init__(self, pattern: str, segments: list[str]) -> None:
         if segments.count("**") <= 1:
             self._simple: re.Pattern[str] | None = re.compile(_translate_namespace_glob(pattern))
-            self._runs: list[tuple[str, ...] | None | re.Pattern[str]] = []
+            self._runs: list[tuple[str, ...] | None | _WildcardRunMatcher] = []
             self._tail: re.Pattern[str] | None = None
             return
         self._simple = None
@@ -348,7 +348,7 @@ class _SegmentGlobMatcher:
                 # whatever comes before them.
                 segments = segments[: j + 1]
         self._tail = tail
-        runs: list[tuple[str, ...] | None | re.Pattern[str]] = []
+        runs: list[tuple[str, ...] | None | _WildcardRunMatcher] = []
         current: list[str] = []
         for seg in segments:
             if seg == "**":
@@ -370,12 +370,12 @@ class _SegmentGlobMatcher:
             return self._simple.match(name) is not None
         name_segments = name.split("::")
         n = len(name_segments)
-        reachable = self._run_glob_reachable(name_segments, n)
+        seg_start, seg_end = _segment_offsets(name_segments)
+        reachable = self._run_glob_reachable(name, name_segments, seg_start, seg_end, n)
         if self._tail is None:
             return n in reachable
         return any(
-            self._tail.fullmatch("::".join(name_segments[j0:])) is not None
-            for j0 in reachable
+            self._tail.fullmatch(name, seg_start[j0]) is not None for j0 in reachable
         )
 
     def matches_any_ancestor(self, name: str) -> bool:
@@ -428,15 +428,22 @@ class _SegmentGlobMatcher:
                 candidate = candidate.rsplit("::", 1)[0]
         name_segments = name.split("::")
         n = len(name_segments)
-        reachable = self._run_glob_reachable(name_segments, n)
+        seg_start, seg_end = _segment_offsets(name_segments)
+        reachable = self._run_glob_reachable(name, name_segments, seg_start, seg_end, n)
         if self._tail is None:
             return any(j >= 1 for j in reachable)
         return any(
-            self._tail.fullmatch("::".join(name_segments[j0:])) is not None
-            for j0 in reachable
+            self._tail.fullmatch(name, seg_start[j0]) is not None for j0 in reachable
         )
 
-    def _run_glob_reachable(self, name_segments: list[str], n: int) -> set[int]:
+    def _run_glob_reachable(
+        self,
+        name: str,
+        name_segments: list[str],
+        seg_start: list[int],
+        seg_end: list[int],
+        n: int,
+    ) -> set[int]:
         """Walk this matcher's runs and their bordering globstars once
         against *name_segments*, returning the set of prefix lengths a
         valid match (of everything up to, but not including, any
@@ -444,7 +451,9 @@ class _SegmentGlobMatcher:
         reachable: set[int] = {0}
         last = len(self._runs) - 1
         for i, run in enumerate(self._runs):
-            reachable = _match_run(run, name_segments, n, reachable)
+            reachable = _match_run(
+                run, name, name_segments, seg_start, seg_end, n, reachable
+            )
             if not reachable:
                 return reachable
             if i < last:
@@ -457,7 +466,55 @@ class _SegmentGlobMatcher:
         return reachable
 
 
-def _compile_run(run: list[str]) -> tuple[str, ...] | None | re.Pattern[str]:
+class _WildcardRunMatcher:
+    """A compiled regex for one wildcarded :class:`_SegmentGlobMatcher` run,
+    plus two cheap pre-checks that let :func:`_match_run` avoid most of the
+    O(n) candidate-span regex calls per start a naive exhaustive search
+    would make:
+
+    - ``monotonic``: True when a match at end position E implies a match
+      at every end position > E too — exactly when the run's own source
+      text (its segments rejoined with ``"::"``) ends in a bare,
+      unconstrained ``*`` (fnmatch always translates a trailing ``*`` to
+      an unanchored ``.*``, so appending more text can never turn a match
+      into a non-match). Lets :func:`_match_run` stop at the *first*
+      successful end position per start and record the whole remaining
+      range at once, without further regex calls.
+    - ``last_segment``: when the run's own *last declared segment* has no
+      wildcard, this is that literal string — a necessary condition for
+      *any* candidate span ending there: the span's own last name segment
+      must equal it exactly, checkable with a plain ``==`` instead of a
+      full regex call. For a run like ``["a*", "z"]`` this turns "try
+      every end position with a regex" into "skip every end position
+      whose last name segment isn't literally 'z', which for
+      non-matching input is most of them, at a fraction of the cost."
+
+    Both close the same real regression (Codex review, real reproduction:
+    a chain of several wildcarded runs — e.g.
+    ``"**::a*::**::a*::**::a*::z"`` — took ~4s for 600 segments and ~5s
+    for 1200 even after the join-elimination fix below closed the
+    *allocation* half of the cost, because the pattern's own *trailing*
+    run (``["a*", "z"]``) is not monotonic — it requires an exact literal
+    ``"z"`` at the end — so it fell all the way through to the exhaustive
+    per-span regex search with no non-matching name ever containing a
+    ``"z"`` segment to short-circuit on). Neither optimization changes
+    what matches; both are strictly cheaper ways of reaching the same
+    O(n)-candidate exhaustive search's answer when it cannot be avoided
+    (no wildcard-run shape is provably monotonic *and* literal-anchored
+    at once), and skip most of it when it can be.
+    """
+
+    __slots__ = ("pattern", "monotonic", "last_segment")
+
+    def __init__(
+        self, pattern: re.Pattern[str], monotonic: bool, last_segment: str | None
+    ) -> None:
+        self.pattern = pattern
+        self.monotonic = monotonic
+        self.last_segment = last_segment
+
+
+def _compile_run(run: list[str]) -> tuple[str, ...] | None | _WildcardRunMatcher:
     """Compile one :class:`_SegmentGlobMatcher` run (a maximal sequence of
     consecutive non-globstar segments) to a matcher:
 
@@ -470,21 +527,56 @@ def _compile_run(run: list[str]) -> tuple[str, ...] | None | re.Pattern[str]:
       though it has a fixed, known length and needs no backtracking-aware
       matching at all; a direct positional ``==`` comparison per segment is
       cheaper and needs no compiled pattern).
-    - A compiled regex otherwise, built from ``"::".join(run)`` — one
-      combined fnmatch translation so a wildcard anywhere in the run can
-      still span the run's own internal ``::`` joiners exactly like plain
-      ``fnmatch`` always could.
+    - A :class:`_WildcardRunMatcher` otherwise, built from ``"::".join(run)``
+      — one combined fnmatch translation so a wildcard anywhere in the run
+      can still span the run's own internal ``::`` joiners exactly like
+      plain ``fnmatch`` always could.
     """
     if not run:
         return None
     if not any(_has_wildcard_char(seg) for seg in run):
         return tuple(run)
-    return re.compile("(?s:" + _fnmatch_segment_regex("::".join(run)) + ")\\Z")
+    source = "::".join(run)
+    pattern = re.compile("(?s:" + _fnmatch_segment_regex(source) + ")\\Z")
+    last_segment = run[-1] if not _has_wildcard_char(run[-1]) else None
+    return _WildcardRunMatcher(pattern, monotonic=source.endswith("*"), last_segment=last_segment)
+
+
+def _segment_offsets(name_segments: list[str]) -> tuple[list[int], list[int]]:
+    """Return, for a name already split on ``"::"``, each segment's own
+    ``(start, end)`` character offsets within ``"::".join(name_segments)``
+    (which is always exactly the original, un-split candidate string —
+    ``"::".join(s.split("::")) == s`` for any string ``s``). Computed once
+    per :meth:`_SegmentGlobMatcher.match`/``matches_any_ancestor`` call and
+    reused by every candidate span :func:`_match_run` tries, instead of
+    reconstructing ``"::".join(name_segments[s:e])`` — an O(e - s) string
+    allocation — for each of the O(n) candidate spans a wildcarded run
+    tries per start (Codex review, real reproduction: a chain of several
+    wildcarded runs made this cubic overall, ~4s for 600 segments — the
+    per-candidate string-building cost, not just the O(n²) candidate
+    count, is what these offsets eliminate)."""
+    starts: list[int] = []
+    ends: list[int] = []
+    pos = 0
+    for seg in name_segments:
+        starts.append(pos)
+        pos += len(seg)
+        ends.append(pos)
+        pos += 2  # the "::" separator (unused after the last segment)
+    # One extra trailing entry so `seg_start[n]` (a start position exactly
+    # at the end of the name — reachable, e.g., right after a globstar
+    # collapses to `range(..., n + 1)`) is always valid to index, even
+    # though no run can ever consume anything starting there.
+    starts.append(pos)
+    return starts, ends
 
 
 def _match_run(
-    run: tuple[str, ...] | None | re.Pattern[str],
+    run: tuple[str, ...] | None | _WildcardRunMatcher,
+    name: str,
     name_segments: list[str],
+    seg_start: list[int],
+    seg_end: list[int],
     n: int,
     reachable: set[int],
 ) -> set[int]:
@@ -502,6 +594,8 @@ def _match_run(
             if s + length <= n and tuple(name_segments[s : s + length]) == run
         }
     result: set[int] = set()
+    pattern = run.pattern
+    last_segment = run.last_segment
     for s in reachable:
         # A non-empty run (>= 1 declared segment) always consumes at
         # least one whole name segment — start at s + 1, never s. A bare
@@ -512,8 +606,25 @@ def _match_run(
         # handled above) represents "zero segments"; that emptiness is a
         # property of the run's own declared segment list, never
         # something its regex's own leniency should decide.
+        start = seg_start[s]
         for e in range(s + 1, n + 1):
-            if run.fullmatch("::".join(name_segments[s:e])):
+            if last_segment is not None and name_segments[e - 1] != last_segment:
+                # Cheap necessary-condition pre-filter (see
+                # _WildcardRunMatcher): a run whose own last segment is a
+                # literal can never match unless the candidate span's own
+                # last name segment equals it exactly — skip the full
+                # regex call entirely for every span that fails this.
+                continue
+            # `fullmatch(name, pos, endpos)` matches against name[pos:endpos]
+            # without materializing that substring — the offsets above are
+            # what make this possible instead of re-joining every candidate.
+            if pattern.fullmatch(name, start, seg_end[e - 1]):
+                if run.monotonic:
+                    # Every longer span from the same start also matches
+                    # (see _WildcardRunMatcher) — record the rest in one
+                    # shot instead of re-matching each of them.
+                    result.update(range(e, n + 1))
+                    break
                 result.add(e)
     return result
 

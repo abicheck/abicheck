@@ -514,6 +514,42 @@ class TestNamespaceGlobstarSemantics:
         )
         assert not s.matches(self._change("a1::a::a::a::a::y"))
 
+    def test_chained_wildcarded_runs_reject_quickly(self):
+        # Codex review (P2, follow-up): a chain of several wildcarded runs
+        # (not just one, as in the two tests above) made this cubic
+        # overall -- real reproduction: "**::a*::**::a*::**::a*::z"
+        # against a 600-segment non-matching name took ~4s even after the
+        # join-elimination fix that made a *single* wildcarded run's own
+        # span checks avoid rebuilding "::".join(...) per candidate. The
+        # trailing run (["a*", "z"]) is not monotonic in its own end
+        # position -- it requires an exact literal "z" at the end -- so it
+        # fell through to the exhaustive O(n) per-start search with no
+        # non-matching name ever containing a "z" segment to short-circuit
+        # on. `_WildcardRunMatcher` now also pre-filters every candidate
+        # span by its own last declared segment before attempting the full
+        # regex match, turning "try every span with a regex" into "skip
+        # every span whose last name segment doesn't literally equal 'z'".
+        import time
+
+        s = Suppression(
+            namespace="**::a*::**::a*::**::a*::z",
+            reachability="any",
+            reason="x",
+        )
+        non_matching = "::".join(["a"] * 1200 + ["y"])
+        t0 = time.monotonic()
+        result = s.matches(self._change(non_matching))
+        elapsed = time.monotonic() - t0
+        assert result is False
+        assert elapsed < 3.0, f"namespace match took {elapsed:.2f}s — not backtracking-safe"
+
+        # Correctness: a genuinely matching long name still matches, and
+        # each wildcarded run still only matches within its own run text
+        # (not spanning into a neighboring run's literal).
+        assert s.matches(self._change("a1::a2::a3::z"))
+        assert s.matches(self._change("x::a1::x::a2::x::a3::z"))
+        assert not s.matches(self._change("a1::a2::a3::notz"))
+
     def test_wildcarded_run_requires_at_least_one_namespace_segment(self):
         # Codex review, fresh evidence: a non-empty wildcarded run's own
         # trial loop started its candidate end position at `s` (the same
