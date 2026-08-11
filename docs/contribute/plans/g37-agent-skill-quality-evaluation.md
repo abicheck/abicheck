@@ -1062,27 +1062,39 @@ promoted, not all four.
 ### Phase 5 — agent-benchmark integration, L3 *(M, separate repo)*
 
 Pack consumption, the four arms, the loader `references/` fix, the scorecard
-and its dashboard row.
+and its dashboard row. **Scoped to the flagship skill** (2026-08-11 scope
+note): the pack's other three skills are prototype status and carry no
+Phase 3 corpus for an arm to run against yet, so there is nothing for a
+prototype skill's row to score until it re-enters scope.
 
-**Done when:** each skill has a published quality-per-cost number on both
-comparisons — the gating `skill-agent:` vs `baseline` and the reported
-`skill:` vs `docs` — whichever direction each comes out.
+**Done when:** the flagship skill has a published quality-per-cost number on
+both comparisons — the gating `skill-agent:` vs `baseline` and the reported
+`skill:` vs `docs` — whichever direction each comes out. Extended to a
+prototype skill only after Phase 3's corpus buildout runs for it, the same
+one-skill-at-a-time re-entry the scope note describes for Phases 3–4.
 
 ### Phase 6 — Publication gate *(S)*
 
-G36 P1.4's publication precondition becomes a check: publication requires a
-fresh per-skill hashes across every published skill, a **build digest equal to the one at the published
-commit** (D6 — over `abicheck/` plus `pyproject.toml` and the resolved runtime
-dependency versions, since the narrow surface hash is not sufficient here and
-the package tree alone is not the build; defined by inclusion, so committing
-the evidence itself cannot invalidate it), a complete evidence set for the full suite, zero failures on
-dimensions 2 and 6, dimensions 1/3/4/5 at or
-above baseline, and a Phase 5 scorecard showing non-negative lift on
-**`skill-agent:` vs `baseline`** — D7's declared deployment comparator. The
-`skill:` vs `docs` number is published alongside it and never gates: gating on
-it here would have blocked exactly the skill D7 describes as legitimate — one
-that wins the progressive-disclosure comparison it is deployed under and loses
-the content comparison it is not.
+G36 P1.4's publication precondition becomes a check, and — 2026-08-11 scope
+note — it gates the **flagship skill's own re-publication** (a
+`native-binary-compatibility-review` content change), not a sweep over all
+four: publication requires a fresh hash for that skill, a **build digest
+equal to the one at the published commit** (D6 — over `abicheck/` plus
+`pyproject.toml` and the resolved runtime dependency versions, since the
+narrow surface hash is not sufficient here and the package tree alone is not
+the build; defined by inclusion, so committing the evidence itself cannot
+invalidate it), a complete evidence set for the full suite, zero failures on
+dimensions 2 and 6, dimensions 1/3/4/5 at or above baseline, and a Phase 5
+scorecard showing non-negative lift on **`skill-agent:` vs `baseline`** —
+D7's declared deployment comparator. The `skill:` vs `docs` number is
+published alongside it and never gates: gating on it here would have blocked
+exactly the skill D7 describes as legitimate — one that wins the
+progressive-disclosure comparison it is deployed under and loses the content
+comparison it is not. A prototype skill has no publication gate to satisfy
+while frozen — it is already published and not being re-evaluated, so there
+is no re-publication decision for this phase to gate; the gate applies to it
+only once it is promoted, evaluated through Phases 3–5, and reaches its own
+content-change publication event.
 
 ## Cost model
 

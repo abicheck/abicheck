@@ -71,6 +71,22 @@ PACK = EVAL_DIR / "skill-eval-pack.json"
 
 ARMS = ("skill", "baseline")
 
+#: G37's 2026-08-11 scope note (docs/contribute/plans/
+#: g37-agent-skill-quality-evaluation.md) and ADR-058's same-dated amendment:
+#: `native-binary-compatibility-review` is the sole flagship subject for every
+#: phase, and the other three shipped skills are prototype status — not an
+#: L2/L3 evaluation target until the flagship experiment shows measurable
+#: lift. `scenarios.yaml` still carries `status: ready` entries for
+#: `native-api-evolution` and `native-release-compatibility` (declared before
+#: the freeze; not yet re-scoped to `status: planned` there — see that file's
+#: own status-field contract before repurposing it for this), so the default,
+#: unscoped "every ready scenario" selection below would otherwise run
+#: prototype-skill scenarios and mix their results into a nominally
+#: flagship-only experiment. Filtered here rather than in the pack so a
+#: prototype skill's already-authored scenarios stay intact for when it
+#: re-enters scope, one skill at a time, rather than needing to be re-added.
+FLAGSHIP_SKILL = "native-binary-compatibility-review"
+
 #: Identical for both arms — the treatment must be the skill, nothing else.
 #: `Skill` is included so the skill arm can actually invoke what it finds;
 #: the baseline arm has no skills installed, so offering it the tool changes
@@ -864,7 +880,22 @@ def main(argv: list[str] | None = None) -> int:
         help=f"Comma-separated subset of {','.join(ARMS)}",
     )
     parser.add_argument(
-        "--scenarios", default="", help="Comma-separated ids; default: every ready one"
+        "--scenarios",
+        default="",
+        help=(
+            "Comma-separated ids; default: every ready scenario for the "
+            f"flagship skill ({FLAGSHIP_SKILL})"
+        ),
+    )
+    parser.add_argument(
+        "--include-prototype-skills",
+        action="store_true",
+        help=(
+            "Also select ready scenarios for prototype-status skills (all "
+            f"skills other than {FLAGSHIP_SKILL}). Off by default per G37's "
+            "2026-08-11 scope note — the portfolio is frozen and only the "
+            "flagship skill is a live evaluation target."
+        ),
     )
     parser.add_argument("--timeout", type=int, default=900)
     args = parser.parse_args(argv)
@@ -924,10 +955,33 @@ def main(argv: list[str] | None = None) -> int:
             file=sys.stderr,
         )
         return 1
+    if not args.include_prototype_skills:
+        # Explicitly named ids get the same refusal an unknown id gets, rather
+        # than being silently dropped — the freeze is a policy choice the
+        # caller must be told about, not a filter that quietly shrinks what
+        # they asked for. The default (unnamed) sweep is narrowed below
+        # instead of refused, since "every ready scenario" is documented as
+        # meaning "every ready flagship scenario" while the freeze holds.
+        prototype_wanted = sorted(
+            sid
+            for sid in wanted
+            if pack["scenarios"].get(sid, {}).get("skill") != FLAGSHIP_SKILL
+        )
+        if prototype_wanted:
+            print(
+                f"{', '.join(prototype_wanted)}: not the flagship skill "
+                f"({FLAGSHIP_SKILL}) — G37's 2026-08-11 scope note excludes "
+                f"prototype-status skills from evaluation by default. Pass "
+                f"--include-prototype-skills to run them anyway.",
+                file=sys.stderr,
+            )
+            return 1
     scenarios = {
         sid: entry
         for sid, entry in sorted(pack["scenarios"].items())
-        if entry["status"] == "ready" and (not wanted or sid in wanted)
+        if entry["status"] == "ready"
+        and (not wanted or sid in wanted)
+        and (args.include_prototype_skills or entry.get("skill") == FLAGSHIP_SKILL)
     }
     if not scenarios:
         print("no ready scenarios selected", file=sys.stderr)
