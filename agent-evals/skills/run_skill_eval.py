@@ -42,6 +42,18 @@ from graders.dimensions import grade_run  # noqa: E402
 
 PACK = Path(__file__).resolve().parent / "skill-eval-pack.json"
 
+#: Mirrors runners/claude_code.py's FLAGSHIP_SKILL. The runner already keeps
+#: a fresh --out root from *producing* new prototype-skill rows by default,
+#: but that filter cannot retroactively clean an --out root created before
+#: the 2026-08-11 scope freeze (docs/contribute/plans/
+#: g37-agent-skill-quality-evaluation.md), or one built with
+#: --include-prototype-skills. index.json still indexes every recorded row
+#: regardless of which skill it belongs to, so this grading step is the
+#: second, independent place the freeze must be enforced — without it, an
+#: old or explicitly-opted-in prototype-skill row would silently fold into a
+#: nominally flagship-only aggregate.
+FLAGSHIP_SKILL = "native-binary-compatibility-review"
+
 
 def _pct(part: int, whole: int) -> str:
     return "—" if not whole else f"{100 * part / whole:.0f}%"
@@ -80,6 +92,15 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     parser.add_argument("--runs", required=True, help="The runner's --out root")
     parser.add_argument("--json", help="Write the full grading to this path")
+    parser.add_argument(
+        "--include-prototype-skills",
+        action="store_true",
+        help=(
+            "Also grade recorded rows for prototype-status skills (all "
+            f"skills other than {FLAGSHIP_SKILL}). Off by default per G37's "
+            "2026-08-11 scope note."
+        ),
+    )
     args = parser.parse_args(argv)
 
     root = Path(args.runs)
@@ -93,6 +114,7 @@ def main(argv: list[str] | None = None) -> int:
 
     graded: list[dict] = []
     orphaned: set[str] = set()
+    excluded_prototype: set[str] = set()
     for row in index:
         sid, arm, rep = row["scenario_id"], row["arm"], row["repetition"]
         run_dir = root / sid / arm / str(rep)
@@ -105,6 +127,17 @@ def main(argv: list[str] | None = None) -> int:
             # printed no summary at all, discarding every other gradeable run.
             orphaned.add(sid)
             continue
+        if not args.include_prototype_skills and pack["scenarios"][sid].get(
+            "skill"
+        ) != FLAGSHIP_SKILL:
+            # A prototype-skill row can reach index.json even though the
+            # runner no longer schedules new ones by default — an --out root
+            # created before the freeze, or built with the runner's own
+            # --include-prototype-skills. Excluding it here, not just at
+            # scheduling time, is what keeps a stale or opted-in row from
+            # silently folding into a nominally flagship-only aggregate.
+            excluded_prototype.add(sid)
+            continue
         grade = grade_run(run_dir, pack["scenarios"][sid], arm)
         grade.update(scenario_id=sid, arm=arm, repetition=rep)
         graded.append(grade)
@@ -113,6 +146,13 @@ def main(argv: list[str] | None = None) -> int:
         print(
             "skipped runs for scenario(s) the pack no longer lists: "
             + ", ".join(sorted(orphaned)),
+            file=sys.stderr,
+        )
+    if excluded_prototype:
+        print(
+            "skipped runs for prototype-status skill scenario(s) (pass "
+            "--include-prototype-skills to grade them): "
+            + ", ".join(sorted(excluded_prototype)),
             file=sys.stderr,
         )
 
