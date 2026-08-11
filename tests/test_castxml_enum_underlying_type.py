@@ -28,15 +28,18 @@ Two layers, mirroring ``test_castxml_var_access_value.py``:
 
 1. Synthetic-XML unit tests against ``_CastxmlParser`` directly.
 2. A live, real-``castxml``-invoking ``integration``-marked test, confirming
-   the synthetic shapes above match real castxml 0.6.3 output — both the
-   fixed-underlying-type spelling (``enum E : short``) and the
-   implementation-chosen one for a plain, unfixed enum.
+   the synthetic shapes above match real castxml 0.6.3 output — the
+   fixed-underlying-type spelling (``enum E : short``, target-independent)
+   and the implementation-chosen one for a plain, unfixed enum (target-
+   dependent: Itanium-ABI value-range-derived on Linux/macOS, always ``int``
+   under the MSVC ABI on Windows).
 """
 
 from __future__ import annotations
 
 import shutil
 import subprocess
+import sys
 import textwrap
 from pathlib import Path
 from xml.etree.ElementTree import Element, SubElement, parse as et_parse
@@ -146,6 +149,17 @@ class TestCastxmlEnumUnderlyingTypeAgainstRealCastxml:
             enum class Big : unsigned long long { A };
             """,
         )
+        # A *fixed* underlying type is a literal language feature -- its
+        # spelling never depends on the target ABI.
         assert underlying["Color"] == "short int"
-        assert underlying["Status"] == "unsigned int"
         assert underlying["Big"] == "long long unsigned int"
+        # An *unfixed* enum's underlying type is the one part of this test
+        # that IS target-dependent: castxml's bundled Clang targets the
+        # Itanium ABI on Linux/macOS (value-range-derived -- `unsigned int`
+        # covers {0, 1}) but the MSVC ABI on Windows, where an unfixed enum
+        # is always plain `int` regardless of its value range (Codex review
+        # -- confirmed the CI Windows `integration` leg installs a real
+        # MSVC-targeting castxml).
+        assert underlying["Status"] == (
+            "int" if sys.platform == "win32" else "unsigned int"
+        )
