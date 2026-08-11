@@ -1457,8 +1457,6 @@ def _build_call_graph_leak_change(
     entry, instead of a layout/type-graph reachability path.
     """
     kinds_seen = sorted({c.kind.value for c in triggers})
-    path_strs = proof_paths[:3]
-    more = "" if len(proof_paths) <= 3 else f" (+{len(proof_paths) - 3} more paths)"
     # reachability_proof_path is the *representative* path for this Change,
     # so it must prefer an exact route over an "overapprox: "-prefixed one
     # when both exist among *proof_paths* -- the caller (_diff_call_graph_
@@ -1476,6 +1474,19 @@ def _build_call_graph_leak_change(
         (p for p in proof_paths if not p.startswith("overapprox:")),
         proof_paths[0] if proof_paths else None,
     )
+    # path_strs is what the description text actually displays. It must
+    # lead with the same path just selected as the representative one, not
+    # an independently-taken "first three in discovery order" slice --
+    # otherwise the human-readable description could describe nothing but
+    # "overapprox: "-prefixed paths while reachability_proof_path/the
+    # correlator's evidence level both report an exact proof, an internally
+    # contradictory finding (Codex review, fresh evidence).
+    if proof_path is None:
+        path_strs: list[str] = []
+    else:
+        rest = [p for p in proof_paths if p != proof_path]
+        path_strs = [proof_path, *rest[:2]]
+    more = "" if len(proof_paths) <= 3 else f" (+{len(proof_paths) - 3} more paths)"
     change = Change(
         kind=ChangeKind.INTERNAL_SYMBOL_REQUIRED_BY_PUBLIC_API,
         symbol=dname,

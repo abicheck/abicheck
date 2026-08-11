@@ -17,4 +17,9 @@
   the first path only when every candidate is approximate. This is the
   cross-entry counterpart of the exact-beats-overapprox preference
   `_consumer_compiled_reachability` already guarantees *within* one
-  entry's own BFS.
+  entry's own BFS. The finding's human-readable description now leads with
+  that same selected path too (previously it kept an independent, unranked
+  "first three in discovery order" slice, so it could describe nothing but
+  approximate paths while `reachability_proof_path` and the correlator's
+  evidence level both reported an exact proof — an internally contradictory
+  finding); the total "+N more paths" count is unaffected.

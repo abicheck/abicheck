@@ -90,3 +90,58 @@ class TestBuildCallGraphLeakChangePreferredPath:
             paths,
         )
         assert change.reachability_proof_path == paths[3]
+
+    def test_description_leads_with_the_selected_representative_path(
+        self,
+    ) -> None:
+        # Codex review (fresh evidence): the description text (built from
+        # path_strs) must not describe only "overapprox: "-prefixed paths
+        # while reachability_proof_path/the correlator's evidence level both
+        # report an exact proof -- an internally contradictory finding.
+        paths = [
+            "overapprox: pubA() --[DECL_CALLS_DECL]--> ns::detail::helper()",
+            "overapprox: pubB() --[DECL_CALLS_DECL]--> ns::detail::helper()",
+            "overapprox: pubC() --[DECL_CALLS_DECL]--> ns::detail::helper()",
+            "pubD() --[DECL_CALLS_DECL]--> ns::detail::helper()",
+        ]
+        change = _build_call_graph_leak_change(
+            "ns::detail::helper",
+            [
+                Change(
+                    kind=ChangeKind.FUNC_REMOVED,
+                    symbol="ns::detail::helper",
+                    description="removed",
+                )
+            ],
+            paths,
+        )
+        assert change.reachability_proof_path == paths[3]
+        description = change.description or ""
+        assert paths[3] in description
+        assert not description.split("Call/reference paths: ", 1)[1].startswith(
+            "overapprox:"
+        )
+        # The total-count note still reflects the full collection, unaffected
+        # by which three paths are actually displayed.
+        assert "+1 more paths" in description
+
+    def test_description_is_unaffected_when_the_exact_path_is_already_first(
+        self,
+    ) -> None:
+        exact_first = "pubA() --[DECL_CALLS_DECL]--> ns::detail::helper()"
+        overapprox_second = (
+            "overapprox: pubB() --[DECL_CALLS_DECL]--> ns::detail::helper()"
+        )
+        change = _build_call_graph_leak_change(
+            "ns::detail::helper",
+            [
+                Change(
+                    kind=ChangeKind.FUNC_REMOVED,
+                    symbol="ns::detail::helper",
+                    description="removed",
+                )
+            ],
+            [exact_first, overapprox_second],
+        )
+        description = change.description or ""
+        assert f"{exact_first}; {overapprox_second}" in description
