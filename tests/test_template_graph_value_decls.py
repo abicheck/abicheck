@@ -1,0 +1,425 @@
+# Copyright 2026 Nikolay Petrov
+# SPDX-License-Identifier: Apache-2.0
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+"""Split out of ``test_template_graph.py`` (at its own 2000-line hard cap)
+-- TEMPLATE_USES_DECL (G29 Phase 5 item 1 follow-up): a pointer-to-
+function/variable or reference NTTP argument. Fixture shapes verified
+against real ``clang -ast-dump=json`` output (see
+``template_graph_value_decls.py``'s own docstring); the
+``@pytest.mark.integration`` test at the bottom re-verifies end to end
+against a real compiler.
+"""
+
+from __future__ import annotations
+
+import shutil
+import subprocess
+
+import pytest
+
+from abicheck.buildsource.source_graph import SourceGraphSummary
+from abicheck.buildsource.template_graph import (
+    EDGE_TEMPLATE_USES_DECL,
+    EDGE_TEMPLATE_USES_TYPE,
+    NODE_SOURCE_DECL,
+    TemplateArgUse,
+    TemplateInstantiation,
+    augment_graph_with_templates,
+    parse_clang_ast_templates,
+    template_instantiation_node_id,
+)
+
+# ── TEMPLATE_USES_DECL: pointer-to-function/variable and reference NTTPs ───
+
+
+def _function_pointer_nttp_ast() -> dict:
+    """``template <void (*Fn)(int)> struct Callback;`` instantiated
+    ``Callback<&ns::handler>`` -- shaped exactly like real clang output
+    (verified empirically against Clang 18, see
+    ``template_graph._template_arg_use``'s own docstring): the
+    ``TemplateArgument`` node carries a top-level ``decl`` stub directly (no
+    ``type``/``value`` of its own, no nesting under ``inner``), and
+    ``ns::handler``'s own top-level ``FunctionDecl`` -- reachable elsewhere
+    in the same TU, sharing the identical clang id with the stub -- carries
+    the ``mangledName`` the stub itself omits.
+    """
+    handler_decl = {
+        "id": "0xHANDLER",
+        "kind": "FunctionDecl",
+        "name": "handler",
+        "mangledName": "_ZN2ns7handlerEi",
+        "type": {"qualType": "void (int)"},
+        "inner": [],
+    }
+    ns = {"kind": "NamespaceDecl", "name": "ns", "inner": [handler_decl]}
+    callback_pattern = {
+        "kind": "CXXRecordDecl",
+        "name": "Callback",
+        "completeDefinition": True,
+        "inner": [],
+    }
+    callback_instantiation = {
+        "id": "0xSPEC_CALLBACK",
+        "kind": "ClassTemplateSpecializationDecl",
+        "name": "Callback",
+        "completeDefinition": True,
+        "inner": [
+            {
+                "kind": "TemplateArgument",
+                "decl": {
+                    "id": "0xHANDLER",
+                    "kind": "FunctionDecl",
+                    "name": "handler",
+                    "type": {"qualType": "void (int)"},
+                },
+            },
+            {
+                "kind": "CXXMethodDecl",
+                "name": "call",
+                "mangledName": "_ZN8CallbackIXadL_ZN2ns7handlerEiEEE4callEi",
+            },
+        ],
+    }
+    class_template = {
+        "kind": "ClassTemplateDecl",
+        "name": "Callback",
+        "inner": [
+            {"kind": "NonTypeTemplateParmDecl", "name": "Fn"},
+            callback_pattern,
+            callback_instantiation,
+        ],
+    }
+    return {"kind": "TranslationUnitDecl", "inner": [ns, class_template]}
+
+
+def test_function_pointer_nttp_resolves_to_the_target_functions_identity() -> None:
+    """A pointer-to-function NTTP argument resolves target_qname to the
+    exact identity call_graph.py's own ``decl://`` node for that same
+    function would use (its mangled name), not merely a placeholder id or
+    the bare unqualified name -- and target_decl_kind records FunctionDecl
+    so augment_graph_with_templates routes it onto TEMPLATE_USES_DECL, not
+    TEMPLATE_USES_TYPE."""
+    ast = _function_pointer_nttp_ast()
+    out = parse_clang_ast_templates(ast)
+    assert len(out) == 1
+    inst = out[0]
+    # The label uses the *resolved* identity, not the bare "handler" spelling
+    # -- see _arg_label_spelling's own docstring for why the bare spelling
+    # would let two distinct same-named-callee instantiations collide.
+    assert inst.label == "Callback<_ZN2ns7handlerEi>"
+    assert inst.args == (TemplateArgUse("handler", "_ZN2ns7handlerEi", "FunctionDecl"),)
+
+
+def test_pointer_to_variable_nttp_resolves_to_the_target_variables_identity() -> None:
+    """A pointer-to-variable NTTP is the same bare ``{"kind":
+    "TemplateArgument", "decl": {...VarDecl...}}`` shape as the
+    pointer-to-function case (verified empirically) -- must resolve the
+    same way."""
+    global_decl = {
+        "id": "0xGLOBAL",
+        "kind": "VarDecl",
+        "name": "global",
+        "mangledName": "_ZN2ns6globalE",
+        "type": {"qualType": "int"},
+    }
+    ns = {"kind": "NamespaceDecl", "name": "ns", "inner": [global_decl]}
+    s_pattern = {
+        "kind": "CXXRecordDecl",
+        "name": "S",
+        "completeDefinition": True,
+        "inner": [],
+    }
+    s_instantiation = {
+        "id": "0xSPEC_S",
+        "kind": "ClassTemplateSpecializationDecl",
+        "name": "S",
+        "completeDefinition": True,
+        "inner": [
+            {
+                "kind": "TemplateArgument",
+                "decl": {
+                    "id": "0xGLOBAL",
+                    "kind": "VarDecl",
+                    "name": "global",
+                    "type": {"qualType": "int"},
+                },
+            },
+        ],
+    }
+    class_template = {
+        "kind": "ClassTemplateDecl",
+        "name": "S",
+        "inner": [
+            {"kind": "NonTypeTemplateParmDecl", "name": "Ptr"},
+            s_pattern,
+            s_instantiation,
+        ],
+    }
+    ast = {"kind": "TranslationUnitDecl", "inner": [ns, class_template]}
+    out = parse_clang_ast_templates(ast)
+    assert len(out) == 1
+    assert out[0].args == (TemplateArgUse("global", "_ZN2ns6globalE", "VarDecl"),)
+
+
+def test_function_pointer_nttp_unresolved_when_target_never_declared_in_tu() -> None:
+    """The decl stub's id names a declaration this TU's AST never actually
+    walks (e.g. only forward-declared, or genuinely absent) -- degrades to
+    unresolved (None), never a guessed identity."""
+    handler_stub_only = {
+        "kind": "TemplateArgument",
+        "decl": {
+            "id": "0xNEVER_INDEXED",
+            "kind": "FunctionDecl",
+            "name": "handler",
+            "type": {"qualType": "void (int)"},
+        },
+    }
+    callback_pattern = {
+        "kind": "CXXRecordDecl",
+        "name": "Callback",
+        "completeDefinition": True,
+        "inner": [],
+    }
+    callback_instantiation = {
+        "id": "0xSPEC_CALLBACK",
+        "kind": "ClassTemplateSpecializationDecl",
+        "name": "Callback",
+        "completeDefinition": True,
+        "inner": [handler_stub_only],
+    }
+    class_template = {
+        "kind": "ClassTemplateDecl",
+        "name": "Callback",
+        "inner": [
+            {"kind": "NonTypeTemplateParmDecl", "name": "Fn"},
+            callback_pattern,
+            callback_instantiation,
+        ],
+    }
+    ast = {"kind": "TranslationUnitDecl", "inner": [class_template]}
+    out = parse_clang_ast_templates(ast)
+    assert len(out) == 1
+    assert out[0].args == (TemplateArgUse("handler", None, None),)
+
+
+def test_decl_argument_with_no_name_is_skipped_not_guessed() -> None:
+    """A ``decl`` stub carrying no ``name`` at all (not observed in real
+    clang output, but the AST-shape space this module doesn't fully
+    enumerate) drops the whole argument -- see
+    ``_is_opaque_template_argument``'s docstring, whose ``decl``-presence
+    check alone doesn't exclude this shape, so ``_template_arg_use``'s own
+    guard is what actually skips it."""
+    nameless_stub = {
+        "kind": "TemplateArgument",
+        "decl": {"id": "0xANON", "kind": "FunctionDecl", "name": ""},
+    }
+    callback_pattern = {
+        "kind": "CXXRecordDecl",
+        "name": "Callback",
+        "completeDefinition": True,
+        "inner": [],
+    }
+    callback_instantiation = {
+        "id": "0xSPEC_CALLBACK",
+        "kind": "ClassTemplateSpecializationDecl",
+        "name": "Callback",
+        "completeDefinition": True,
+        "inner": [nameless_stub],
+    }
+    class_template = {
+        "kind": "ClassTemplateDecl",
+        "name": "Callback",
+        "inner": [
+            {"kind": "NonTypeTemplateParmDecl", "name": "Fn"},
+            callback_pattern,
+            callback_instantiation,
+        ],
+    }
+    ast = {"kind": "TranslationUnitDecl", "inner": [class_template]}
+    out = parse_clang_ast_templates(ast)
+    assert len(out) == 1
+    assert out[0].args == ()
+
+
+def test_two_instantiations_sharing_only_a_bare_callee_name_stay_distinct() -> None:
+    """``Holder<&ns1::f>`` and ``Holder<&ns2::f>`` -- two genuinely distinct
+    instantiations whose NTTP targets merely *share* an unqualified callee
+    name across namespaces -- must not collide onto one
+    ``template_instantiation`` node (the exact collision risk the G29
+    Phase 5 plan doc flagged as the reason TEMPLATE_USES_DECL stayed
+    unimplemented for a prior investigation round: a naive bare-spelling
+    label would merge both instantiations' own args/emitted_symbols onto
+    one shared node)."""
+
+    def _holder_ast(ns_name: str, mangled: str) -> dict:
+        f_decl = {
+            "id": f"0xF_{ns_name}",
+            "kind": "FunctionDecl",
+            "name": "f",
+            "mangledName": mangled,
+            "type": {"qualType": "void ()"},
+            "inner": [],
+        }
+        ns = {"kind": "NamespaceDecl", "name": ns_name, "inner": [f_decl]}
+        holder_instantiation = {
+            "id": f"0xSPEC_{ns_name}",
+            "kind": "ClassTemplateSpecializationDecl",
+            "name": "Holder",
+            "completeDefinition": True,
+            "inner": [
+                {
+                    "kind": "TemplateArgument",
+                    "decl": {
+                        "id": f"0xF_{ns_name}",
+                        "kind": "FunctionDecl",
+                        "name": "f",
+                        "type": {"qualType": "void ()"},
+                    },
+                },
+            ],
+        }
+        return ns, holder_instantiation
+
+    ns1, spec1 = _holder_ast("ns1", "_ZN3ns11fEv")
+    ns2, spec2 = _holder_ast("ns2", "_ZN3ns21fEv")
+    holder_pattern = {
+        "kind": "CXXRecordDecl",
+        "name": "Holder",
+        "completeDefinition": True,
+        "inner": [],
+    }
+    class_template = {
+        "kind": "ClassTemplateDecl",
+        "name": "Holder",
+        "inner": [
+            {"kind": "NonTypeTemplateParmDecl", "name": "Fn"},
+            holder_pattern,
+            spec1,
+            spec2,
+        ],
+    }
+    ast = {"kind": "TranslationUnitDecl", "inner": [ns1, ns2, class_template]}
+    out = parse_clang_ast_templates(ast)
+    labels = {i.label for i in out}
+    assert len(out) == 2
+    assert labels == {"Holder<_ZN3ns11fEv>", "Holder<_ZN3ns21fEv>"}
+
+
+def test_augment_graph_decl_argument_mints_source_decl_node_not_type_node() -> None:
+    graph = SourceGraphSummary()
+    inst = TemplateInstantiation(
+        kind="record",
+        template_qname="Callback",
+        label="Callback<handler>",
+        args=(TemplateArgUse("handler", "_ZN2ns7handlerEi", "FunctionDecl"),),
+    )
+    added = augment_graph_with_templates(graph, [inst])
+    assert added == 2  # DECL_INSTANTIATES_TEMPLATE + TEMPLATE_USES_DECL
+
+    node_ids = {n.id: n for n in graph.nodes}
+    decl_id = "decl://_ZN2ns7handlerEi"
+    assert node_ids[decl_id].kind == NODE_SOURCE_DECL
+    # Never a type:// node for a TEMPLATE_USES_DECL target.
+    assert "type://_ZN2ns7handlerEi" not in node_ids
+
+    tinst_id = template_instantiation_node_id("Callback<handler>")
+    edge_kinds = {(e.src, e.dst, e.kind) for e in graph.edges}
+    assert (tinst_id, decl_id, EDGE_TEMPLATE_USES_DECL) in edge_kinds
+    assert not any(e.kind == EDGE_TEMPLATE_USES_TYPE for e in graph.edges)
+
+
+def test_augment_graph_decl_argument_joins_the_same_node_a_type_argument_would_share() -> (
+    None
+):
+    """Two instantiations resolving TEMPLATE_USES_DECL to the identical
+    identity string share one source_decl node, the same shared-node-id
+    join every other producer in this graph uses."""
+    graph = SourceGraphSummary()
+    a = TemplateInstantiation(
+        kind="record",
+        template_qname="Callback",
+        label="Callback<handler>",
+        args=(TemplateArgUse("handler", "_ZN2ns7handlerEi", "FunctionDecl"),),
+    )
+    b = TemplateInstantiation(
+        kind="record",
+        template_qname="OtherCallback",
+        label="OtherCallback<handler>",
+        args=(TemplateArgUse("handler", "_ZN2ns7handlerEi", "FunctionDecl"),),
+    )
+    augment_graph_with_templates(graph, [a, b])
+    decl_nodes = [n for n in graph.nodes if n.kind == NODE_SOURCE_DECL]
+    assert len(decl_nodes) == 1
+
+
+@pytest.mark.integration
+def test_real_clang_function_pointer_nttp_resolves_and_joins_source_decl(
+    tmp_path,
+) -> None:
+    """Re-verifies TEMPLATE_USES_DECL end to end against a real compiler,
+    for both a pointer-to-function and a pointer-to-variable NTTP, rather
+    than only the hand-crafted fixtures above."""
+    clang_bin = shutil.which("clang++") or shutil.which("clang")
+    if clang_bin is None:
+        pytest.skip("clang++ not found in PATH")
+    src = tmp_path / "t.cpp"
+    src.write_text(
+        "namespace ns { void handler(int) {} int global = 0; }\n"
+        "template <void (*Fn)(int)> struct Callback { void call(int x) { Fn(x); } };\n"
+        "Callback<&ns::handler> cb;\n"
+        "template <int* Ptr> struct Holder {};\n"
+        "Holder<&ns::global> h;\n"
+    )
+    result = subprocess.run(
+        [
+            clang_bin,
+            "-std=c++17",
+            "-Xclang",
+            "-ast-dump=json",
+            "-fsyntax-only",
+            str(src),
+        ],
+        capture_output=True,
+        text=True,
+        check=True,
+        timeout=60,
+    )
+    import json
+
+    ast = json.loads(result.stdout)
+    out = parse_clang_ast_templates(ast)
+    labels = {i.label: i for i in out}
+    # The label uses the resolved identity, not the bare callee name -- see
+    # _arg_label_spelling's own docstring.
+    callback_inst = labels["Callback<_ZN2ns7handlerEi>"]
+    assert callback_inst.args == (
+        TemplateArgUse("handler", "_ZN2ns7handlerEi", "FunctionDecl"),
+    )
+    holder_inst = labels["Holder<_ZN2ns6globalE>"]
+    assert holder_inst.args == (TemplateArgUse("global", "_ZN2ns6globalE", "VarDecl"),)
+
+    graph = SourceGraphSummary()
+    augment_graph_with_templates(graph, out)
+    edge_kinds = {(e.src, e.dst, e.kind) for e in graph.edges}
+    assert (
+        template_instantiation_node_id("Callback<_ZN2ns7handlerEi>"),
+        "decl://_ZN2ns7handlerEi",
+        EDGE_TEMPLATE_USES_DECL,
+    ) in edge_kinds
+    assert (
+        template_instantiation_node_id("Holder<_ZN2ns6globalE>"),
+        "decl://_ZN2ns6globalE",
+        EDGE_TEMPLATE_USES_DECL,
+    ) in edge_kinds

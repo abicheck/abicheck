@@ -134,15 +134,16 @@ USE_CASE_EDGE_KINDS: frozenset[str] = frozenset(
 #: linkable symbol — neither of which the pre-existing ``type_graph``/
 #: ``call_graph`` passes capture (they only see the template *pattern*).
 #:
-#: Only ``DECL_INSTANTIATES_TEMPLATE``, ``TEMPLATE_USES_TYPE``, and
-#: ``INSTANTIATION_EMITS_SYMBOL`` are populated this slice — see
-#: ``template_graph.py``'s own module docstring for the full, empirically-
-#: grounded reasoning. The rest are **reserved**, same "registered so a
-#: hand-built or newer graph naming one is never rejected, but no normalized
-#: data source yet" pattern as ``CONSUMER_INSTANTIATES_DECL``/
-#: ``TRACE_OBSERVED_ENTRY`` above: ``TEMPLATE_USES_DECL`` needs its own AST
-#: verification for a non-type (e.g. function-pointer) argument,
-#: ``INSTANTIATION_MAPS_TO_EXPORT`` is redundant with reading
+#: ``DECL_INSTANTIATES_TEMPLATE``, ``TEMPLATE_USES_TYPE``,
+#: ``INSTANTIATION_EMITS_SYMBOL``, and (a G29 Phase 5 item 1 follow-up)
+#: ``TEMPLATE_USES_DECL`` are populated — see ``template_graph.py``'s own
+#: module docstring for the full, empirically-grounded reasoning
+#: (``TEMPLATE_USES_DECL`` is scoped to free-function/namespace-scope-
+#: variable NTTP targets only; a class-member target is a known, left-open
+#: gap). The rest are **reserved**, same "registered so a hand-built or
+#: newer graph naming one is never rejected, but no normalized data source
+#: yet" pattern as ``CONSUMER_INSTANTIATES_DECL``/``TRACE_OBSERVED_ENTRY``
+#: above: ``INSTANTIATION_MAPS_TO_EXPORT`` is redundant with reading
 #: ``BINARY_EXPORTS_SYMBOL`` off the same joined ``binary_symbol`` node (the
 #: identical ADR-057 D1 reasoning), ``DECL_USES_DEFAULT_TEMPLATE_ARG`` needs
 #: to distinguish an explicit argument from a clang-filled default, and

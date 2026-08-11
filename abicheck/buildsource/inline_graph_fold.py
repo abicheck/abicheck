@@ -569,10 +569,8 @@ def fold_template_graph(
         narrowed_pass_confirmed,
         project_source_files,
     )
-    from .template_graph import (
-        ClangTemplateGraphExtractor,
-        augment_graph_with_templates,
-    )
+    from .template_graph import augment_graph_with_templates
+    from .template_graph_extractor import ClangTemplateGraphExtractor
 
     rows = extractors if extractors is not None else []
     extractor = ClangTemplateGraphExtractor(

@@ -780,7 +780,7 @@ def test_inline_graph_folds_macro_edges_when_clang_available(monkeypatch, tmp_pa
         callback_graph,
         macro_graph,
         override_graph,
-        template_graph,
+        template_graph_extractor,
         type_graph,
     )
     from abicheck.buildsource.macro_graph import DeclRange
@@ -824,7 +824,7 @@ def test_inline_graph_folds_macro_edges_when_clang_available(monkeypatch, tmp_pa
         override_graph, "ClangOverrideGraphExtractor", _FakeNoEdgeExtractor
     )
     monkeypatch.setattr(
-        template_graph, "ClangTemplateGraphExtractor", _FakeNoEdgeExtractor
+        template_graph_extractor, "ClangTemplateGraphExtractor", _FakeNoEdgeExtractor
     )
     monkeypatch.setattr(
         callback_graph, "ClangCallbackGraphExtractor", _FakeNoEdgeExtractor
