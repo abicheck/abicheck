@@ -22,8 +22,13 @@
   resolves to nothing this TU's AST indexes, e.g. a C++17 address-of-
   local-static NTTP) is guarded the same way — the whole instantiation is
   dropped rather than falling back to a bare, potentially-colliding
-  spelling. No new `ChangeKind`, no report schema change, no verdict/exit-
-  code effect — this is graph vocabulary only.
+  spelling. A variable-template specialization NTTP target (e.g.
+  `H<&ns::v<1>>` for `template <int N> int v = N;`) is also now recognized
+  (its own distinct `VarTemplateSpecializationDecl` decl kind, previously
+  unindexed the same way an unresolved decl target was) rather than
+  colliding with every other instantiation of the same variable template.
+  No new `ChangeKind`, no report schema change, no verdict/exit-code
+  effect — this is graph vocabulary only.
 
 ### Changed
 

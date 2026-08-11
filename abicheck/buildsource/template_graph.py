@@ -216,8 +216,17 @@ NODE_TEMPLATE_INSTANTIATION = "template_instantiation"
 #: type_graph.py's own function/variable declaration node kind).
 NODE_SOURCE_DECL = "source_decl"
 #: Raw clang decl kinds routed onto TEMPLATE_USES_DECL (a source_decl node)
-#: rather than TEMPLATE_USES_TYPE.
-_VALUE_DECL_KINDS = frozenset({"FunctionDecl", "VarDecl"})
+#: rather than TEMPLATE_USES_TYPE. ``VarTemplateSpecializationDecl`` (Codex
+#: review, verified against real clang output) is a variable-template
+#: specialization's decl kind -- e.g. ``H<&ns::v<1>>``/``H<&ns::v<2>>`` for
+#: ``template <int N> int v = N;`` -- carrying its own distinct
+#: ``mangledName`` just like ``VarDecl``. Omitting it previously left it
+#: both unindexed by `index_value_decls` and unrecognized by
+#: `_has_unresolved_decl_argument`, so two distinct specializations
+#: silently collided onto the identical bare spelling ``"v"``.
+_VALUE_DECL_KINDS = frozenset(
+    {"FunctionDecl", "VarDecl", "VarTemplateSpecializationDecl"}
+)
 
 #: ``provenance`` tag on every node/edge this module creates.
 TEMPLATE_GRAPH_PROVENANCE = "template_graph"
@@ -810,11 +819,9 @@ def _is_opaque_template_argument(node: dict[str, Any]) -> bool:
 
     A ``decl`` dict with no ``name`` (CodeRabbit review) is itself
     unspellable -- :func:`_template_arg_use` already returns ``None`` for
-    exactly this shape rather than fabricate an empty-string spelling -- so
-    it counts as opaque here too: an argument this loop can't spell
-    anything from must abort the whole instantiation's own identity (the
-    same discipline the template-template case above already gets),
-    not silently record the instantiation with one fewer argument than it
+    exactly this shape -- so it counts as opaque here too: an argument this
+    loop can't spell anything from must abort the whole instantiation's own
+    identity, not silently record it with one fewer argument than it
     actually has.
     """
     decl = node.get("decl")
@@ -1052,18 +1059,14 @@ def _has_unresolved_decl_argument(
     ``index_value_decls`` deliberately never descends into).
 
     Checked against the *original*, pre-resolution kind, not the resolved
-    one (Codex review, fresh evidence): once resolution fails,
-    :func:`_resolve_arg_targets` sets *both* ``target_qname`` and
-    ``target_decl_kind`` to ``None`` on the returned copy, so only the
-    original still says "this was meant to be a decl reference." An
-    instantiation with an argument like this can't be trusted the same way
-    an opaque (template-template) argument can't: :func:`arg_label_spelling`
-    falls back to the bare, unqualified ``spelling`` when ``target_qname``
-    is unresolved, and two distinct unresolved targets sharing a bare name
-    (e.g. two same-named local statics in different functions) would then
-    collide onto one label, falsely merging two instantiations onto one
-    graph node -- the same failure mode the opaque-argument guard already
-    exists to prevent, reached through a different gap in the evidence.
+    one (Codex review): once resolution fails, :func:`_resolve_arg_targets`
+    sets *both* ``target_qname`` and ``target_decl_kind`` to ``None`` on the
+    returned copy, so only the original still says "this was meant to be a
+    decl reference." An instantiation with an argument like this can't be
+    trusted the same way an opaque (template-template) argument can't --
+    :func:`arg_label_spelling` falls back to the bare ``spelling`` when
+    unresolved, and two distinct unresolved targets sharing a bare name
+    would collide onto one label, falsely merging two instantiations.
     """
     return any(
         orig.target_decl_kind in _VALUE_DECL_KINDS and resolved.target_qname is None

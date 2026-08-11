@@ -228,6 +228,74 @@ def test_reference_nttp_resolves_to_the_target_variables_identity() -> None:
     assert out[0].label == "Holder<_ZN2ns6globalE>"
 
 
+def test_two_var_template_specializations_stay_distinct() -> None:
+    """``H<&ns::v<1>>`` and ``H<&ns::v<2>>`` -- two distinct instantiations
+    of ``template <int N> int v = N;`` -- must not collide onto one
+    ``H<v>`` label (Codex review, fresh evidence: real clang emits
+    ``VarTemplateSpecializationDecl`` for a variable-template
+    specialization's ``decl`` target, distinct from plain ``VarDecl`` --
+    verified against real clang output that its full occurrences carry a
+    genuinely distinct ``mangledName`` per instantiation, just like
+    ``VarDecl``)."""
+    v1 = {
+        "id": "0xV1",
+        "kind": "VarTemplateSpecializationDecl",
+        "name": "v",
+        "mangledName": "_ZN2ns1vILi1EEE",
+        "type": {"qualType": "int"},
+    }
+    v2 = {
+        "id": "0xV2",
+        "kind": "VarTemplateSpecializationDecl",
+        "name": "v",
+        "mangledName": "_ZN2ns1vILi2EEE",
+        "type": {"qualType": "int"},
+    }
+    var_template = {"kind": "VarTemplateDecl", "name": "v", "inner": [v1, v2]}
+    ns = {"kind": "NamespaceDecl", "name": "ns", "inner": [var_template]}
+    h_pattern = {
+        "kind": "CXXRecordDecl",
+        "name": "H",
+        "completeDefinition": True,
+        "inner": [],
+    }
+
+    def _h_spec(spec_id: str, decl_id: str) -> dict:
+        return {
+            "id": spec_id,
+            "kind": "ClassTemplateSpecializationDecl",
+            "name": "H",
+            "completeDefinition": True,
+            "inner": [
+                {
+                    "kind": "TemplateArgument",
+                    "decl": {
+                        "id": decl_id,
+                        "kind": "VarTemplateSpecializationDecl",
+                        "name": "v",
+                        "type": {"qualType": "int"},
+                    },
+                },
+            ],
+        }
+
+    class_template = {
+        "kind": "ClassTemplateDecl",
+        "name": "H",
+        "inner": [
+            {"kind": "NonTypeTemplateParmDecl", "name": "Ptr"},
+            h_pattern,
+            _h_spec("0xSPEC1", "0xV1"),
+            _h_spec("0xSPEC2", "0xV2"),
+        ],
+    }
+    ast = {"kind": "TranslationUnitDecl", "inner": [ns, class_template]}
+    out = parse_clang_ast_templates(ast)
+    labels = {i.label for i in out}
+    assert len(out) == 2
+    assert labels == {"H<_ZN2ns1vILi1EEE>", "H<_ZN2ns1vILi2EEE>"}
+
+
 def test_function_pointer_nttp_unresolved_target_drops_the_whole_instantiation() -> (
     None
 ):
@@ -477,7 +545,9 @@ def test_real_clang_function_pointer_nttp_resolves_and_joins_source_decl(
     holder_inst = labels["Holder<_ZN2ns6globalE>"]
     assert holder_inst.args == (TemplateArgUse("global", "_ZN2ns6globalE", "VarDecl"),)
     refholder_inst = labels["RefHolder<_ZN2ns6globalE>"]
-    assert refholder_inst.args == (TemplateArgUse("global", "_ZN2ns6globalE", "VarDecl"),)
+    assert refholder_inst.args == (
+        TemplateArgUse("global", "_ZN2ns6globalE", "VarDecl"),
+    )
 
     graph = SourceGraphSummary()
     augment_graph_with_templates(graph, out)
