@@ -126,6 +126,43 @@ def _qualified_function_name(name: str, mangled: str) -> str:
     return name
 
 
+def _opens_pointer_declarator(qualified: str, paren_index: int) -> bool:
+    """Return True if the ``(`` at *paren_index* opens a function-pointer or
+    member-function-pointer declarator — the real call is *nested inside*
+    this group, immediately after the ``*``/``&`` (optionally preceded by a
+    scope like ``Class::`` for a member-pointer wrapper).
+
+    Distinguishing signal: the group reaches a ``*``/``&`` and *then* a
+    further ``(`` before the next ``,``/``)`` at this nesting level. An
+    ordinary parameter list can also contain a bare ``*``/``&`` (a
+    pointer/reference parameter type, e.g. ``lib::sort(int*, int*)``), but
+    never followed by another ``(`` before that parameter ends.
+    """
+    saw_star = False
+    for ch in qualified[paren_index + 1:]:
+        if ch in "*&":
+            saw_star = True
+        elif ch == "(" and saw_star:
+            return True
+        elif ch in ",)":
+            return False
+    return False
+
+
+def _matching_close_paren(qualified: str, open_index: int) -> int:
+    """Return the index of the ``)`` matching the ``(`` at *open_index*
+    (depth-balanced across any nested parens), or -1 if unbalanced."""
+    depth = 0
+    for i in range(open_index, len(qualified)):
+        if qualified[i] == "(":
+            depth += 1
+        elif qualified[i] == ")":
+            depth -= 1
+            if depth == 0:
+                return i
+    return -1
+
+
 def _strip_param_signature(qualified: str) -> str:
     """Strip a function's parameter-list signature (from its own top-level
     ``(``), preserving any ``::`` namespace/class qualification.
@@ -139,7 +176,7 @@ def _strip_param_signature(qualified: str) -> str:
 
     Two shapes make "the first top-level ``(`` in the string" the wrong
     thing to stop at (both Codex review, all verified with real c++filt
-    output shapes — the second subsumes three distinct return-type forms
+    output shapes — the second subsumes several distinct return-type forms
     found across successive review rounds):
 
     * A call operator's own name is spelled ``operator()`` — those
@@ -152,20 +189,32 @@ def _strip_param_signature(qualified: str) -> str:
       function, not a disguised call operator, and stripping its params
       must behave normally.
     * A ``(`` that is any part of the *return type* rather than the real
-      parameter list: a function template returning a function pointer
-      (``int (*ns::f<int>(int))()``), the same wrapped around a pointer to
-      *member* function (``int (ns::C::*ns::f<int>(int))()``), or a
-      dependent ``decltype`` expression
-      (``decltype ({parm#1}+{parm#1}) ns::sort<int>(int)``) all corrupted
-      the leaf/identity down to just the return-type prefix before this
-      fix. The single signal that covers all three: a real call's own
-      ``(`` is always glued directly to the identifier/template-close that
-      names it, with no separating whitespace in demangled output, while
-      every one of these return-type shapes has at least one space before
-      its first ``(``. A ``(`` preceded by whitespace (or string start) is
-      therefore skipped in the search for the real parameter-list opener —
-      this does not misfire on an ordinary pointer/reference *parameter*
-      (``lib::sort(int*, int*)``, whose only ``(`` is glued to ``sort``).
+      parameter list. The general signal: a real call's own ``(`` is
+      always glued directly to the identifier/template-close that names
+      it, with no separating whitespace in demangled output, while every
+      return-type shape found so far has at least one space before its
+      first ``(`` — so a whitespace-preceded ``(`` is never the real
+      parameter list. What to do next differs by shape, distinguished by
+      :func:`_opens_pointer_declarator`:
+
+      - A function-pointer/member-function-pointer declarator
+        (``int (*ns::f<int>(int))()`` / ``int (ns::C::*ns::f<int>(int))()``)
+        nests the real call *inside* this group, right after the
+        ``*``/``&`` — so only this one ``(`` character is skipped, letting
+        the search land on that nested call.
+      - Anything else — a dependent ``decltype``/similar expression
+        (``decltype ({parm#1}+{parm#1}) ns::sort<int>(int)``, or one whose
+        own content has further nested, unrelated parens like a call —
+        ``decltype ((g())?{parm#1}:{parm#1}) f<int>(int)``) has no real
+        call nested inside it at all; the real call, if any, comes *after*
+        this group's own matching close paren. The whole balanced group is
+        skipped via :func:`_matching_close_paren` rather than just its
+        opening character, so an unrelated nested ``(`` inside the
+        expression (``g()`` above) is never mistaken for the real one.
+
+      Neither branch misfires on an ordinary pointer/reference *parameter*
+      (``lib::sort(int*, int*)``, whose only ``(`` is glued to ``sort`` —
+      never reached by this whitespace-gated logic at all).
     """
     i = qualified.find("(")
     while i != -1:
@@ -178,10 +227,13 @@ def _strip_param_signature(qualified: str) -> str:
             i = qualified.find("(", i + 2)
             continue
         if i == 0 or qualified[i - 1].isspace():
-            # Not a parameter list at all — some part of the return type
-            # (a declarator wrapper or a dependent expression). Keep
-            # looking.
-            i = qualified.find("(", i + 1)
+            if _opens_pointer_declarator(qualified, i):
+                i = qualified.find("(", i + 1)
+            else:
+                close = _matching_close_paren(qualified, i)
+                if close == -1:
+                    return qualified
+                i = qualified.find("(", close + 1)
             continue
         return prefix
     return qualified
@@ -311,17 +363,22 @@ def detect_internal_template_leaks(
     new: AbiSnapshot,
     internal_namespaces: tuple[str, ...] = _INTERNAL_TEMPLATE_NAMESPACES,
 ) -> list[Change]:
-    """Report internal-namespace function templates whose instantiations changed.
+    """Report internal-namespace function templates with a removed instantiation.
 
     Strategy:
       1. Index OLD functions by ``(stem_without_template_args,
          param_arity_signature)``. Stem includes the internal namespace
          path so "internal" status is preserved.
       2. Match against NEW functions by the same key.
-      3. For internal-namespace stems whose instantiation set changed
-         (instantiations removed, added, or signature-changed), emit a
-         single ``INTERNAL_TEMPLATE_LEAKS_VIA_PUBLIC_API`` finding per
-         stem.
+      3. For internal-namespace stems where at least one OLD
+         ``(name, signature)`` instantiation pair is absent from NEW
+         (removed outright, or replaced by a signature change — the two are
+         indistinguishable from a consumer's perspective, since either way
+         the old mangled name it linked against is gone), emit a single
+         ``INTERNAL_TEMPLATE_LEAKS_VIA_PUBLIC_API`` finding per stem. A
+         *purely* additive instantiation-set change (every OLD pair still
+         present in NEW, only new ones gained) does not fire — an addition
+         alone cannot break an already-linked consumer (Codex review).
 
     The detector is intentionally per-stem rather than per-instantiation
     so a reviewer sees one finding even when 30 instantiations shift.

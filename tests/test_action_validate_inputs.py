@@ -969,6 +969,23 @@ class TestModeScopedInputWarnings:
         assert result.returncode == 0, result.stdout + result.stderr
         assert "::warning::" not in result.stdout
 
+    @pytest.mark.parametrize("mode", ["compare", "deps-tree", "deps-compare"])
+    def test_public_header_dir_warns_outside_dump_and_scan(self, mode: str) -> None:
+        result = _run_validate(
+            {"INPUT_MODE": mode, "INPUT_PUBLIC_HEADER_DIR": "include/"}
+        )
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert "::warning::" in result.stdout
+        assert "public-header-dir" in result.stdout
+
+    @pytest.mark.parametrize("mode", ["dump", "scan"])
+    def test_public_header_dir_silent_on_dump_and_scan(self, mode: str) -> None:
+        result = _run_validate(
+            {"INPUT_MODE": mode, "INPUT_PUBLIC_HEADER_DIR": "include/"}
+        )
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert "::warning::" not in result.stdout
+
     @pytest.mark.parametrize("env_name", ["INPUT_ESTIMATE", "INPUT_AUDIT"])
     def test_deprecated_scan_alias_warns_outside_scan(self, env_name: str) -> None:
         result = _run_validate({"INPUT_MODE": "compare", env_name: "true"})

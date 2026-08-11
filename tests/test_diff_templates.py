@@ -210,6 +210,25 @@ class TestStripParamSignature:
         from abicheck.diff_namespaces import _segments
         assert _segments(result)[-1] == "sort"
 
+    def test_decltype_with_nested_unrelated_call_does_not_truncate(self) -> None:
+        # Codex review, fresh evidence: a decltype expression whose own
+        # content has a further nested, unrelated call ("g()") defeats a
+        # naive "skip just this one '(' character" rule -- the scan lands
+        # on the nested "(" of "g()" next, which is *not* preceded by
+        # whitespace (glued to "g"), so it would be mistaken for the real
+        # parameter list. The whole balanced decltype group must be
+        # skipped, not just its opening character.
+        sig = "decltype ((g())?{parm#1} : {parm#1}) ns::experimental::f<int>(int)"
+        result = _strip_param_signature(sig)
+        from abicheck.diff_namespaces import _segments
+        assert _segments(result)[-1] == "f"
+
+    def test_unbalanced_expression_paren_falls_back_safely(self) -> None:
+        # No matching close paren for the leading (whitespace-preceded)
+        # "(" -- must not raise or infinite-loop, just give up and return
+        # the input unchanged.
+        assert _strip_param_signature("decltype (unbalanced") == "decltype (unbalanced"
+
 
 # ---------------------------------------------------------------------------
 # INTERNAL_TEMPLATE_LEAKS_VIA_PUBLIC_API
