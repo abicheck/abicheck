@@ -274,8 +274,19 @@ def _paired_stable_indices(
                 raw_identities.setdefault(raw_key, set()).add(item.identity)
 
     # Layer 2: group raw KEYS (not items) by version-stripped canon + leaf.
+    # `sorted(...)`, not a bare set -- Python's str hash (and therefore set
+    # iteration order) is randomized per-process (PYTHONHASHSEED), so
+    # iterating the pooled raw keys unsorted made which spelling ends up
+    # first in a merged bucket -- and therefore which one
+    # `_emit_experimental_change` reports as the finding's `symbol` --
+    # vary run to run for the IDENTICAL input (Codex review, P1, fresh
+    # evidence: an exact-name suppression selector could then match in one
+    # process and not another). Tuple comparison is lexicographic and has
+    # nothing to do with hashing, so this fully determines every
+    # downstream dict's insertion order too (Python dicts preserve
+    # insertion order).
     canon_groups: dict[tuple[str, str], list[tuple[str, str]]] = {}
-    for raw_key in {*raw_old, *raw_new}:
+    for raw_key in sorted({*raw_old, *raw_new}):
         stripped, leaf = raw_key
         scope_path = _strip_param_signature(stripped)
         canon_segs, _ = _version_strip_segments(_segments(scope_path))

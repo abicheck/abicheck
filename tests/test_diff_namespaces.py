@@ -1113,3 +1113,74 @@ class TestPairedStableIndicesProperties:
 
         assert _grouping(old_out1) == _grouping(old_out2)
         assert _grouping(new_out1) == _grouping(new_out2)
+
+    @given(placements=_alias_item_placements())
+    def test_qname_lists_are_content_stable_regardless_of_input_list_identity(
+        self, placements
+    ) -> None:
+        """A narrower companion to `test_output_independent_of_encounter_order`:
+        even the exact *list* of qnames stored per key (not just the set of
+        keys/groupings) must be the same multiset across two independent
+        calls with the same content. This is what a hash-randomized
+        internal ordering step (pooling raw keys through a bare ``set``,
+        rather than a sorted list) would violate even though the coarser
+        grouping-only property above cannot see it -- see the dedicated
+        cross-process test below for the actual `PYTHONHASHSEED` evidence.
+        """
+        old_items, new_items = _build_paired_items(placements)
+        old_out1, new_out1 = _paired_stable_indices(list(old_items), list(new_items))
+        old_out2, new_out2 = _paired_stable_indices(list(old_items), list(new_items))
+
+        def _normalize(d: dict[tuple[str, str], list[str]]) -> set[tuple[tuple[str, str], tuple[str, ...]]]:
+            return {(k, tuple(sorted(v))) for k, v in d.items()}
+
+        assert _normalize(old_out1) == _normalize(old_out2)
+        assert _normalize(new_out1) == _normalize(new_out2)
+
+
+class TestDeterminismAcrossHashSeeds:
+    def test_reported_symbol_independent_of_pythonhashseed(self) -> None:
+        """Codex review, P1, fresh finding: pooling raw keys through a bare
+        ``{*raw_old, *raw_new}`` set iterated them in Python's
+        hash-randomized order (``PYTHONHASHSEED``, randomized per process
+        by default), so which of two alias spellings ended up first in a
+        merged bucket -- and therefore which one
+        ``_emit_experimental_change`` reports as the finding's ``symbol``
+        -- could differ between two runs of the IDENTICAL input. Since a
+        suppression rule can match on the exact reported symbol name, this
+        made the verdict itself depend on an environment variable most
+        users never set. A property test within a single pytest process
+        cannot observe this (the hash seed is fixed for the process's
+        lifetime); this test spawns real subprocesses with different
+        explicit seeds and asserts they agree, the only way to actually
+        exercise the bug this class of fix addresses.
+        """
+        import os
+        import subprocess
+        import sys
+
+        script = (
+            "from abicheck.diff_namespaces import detect_experimental_namespace_changes\n"
+            "from abicheck.model import AbiSnapshot, Function, Visibility\n"
+            "def mk(names):\n"
+            "    funcs = [Function(name=n, mangled='_ZSame', return_type='void',"
+            " visibility=Visibility.PUBLIC) for n in names]\n"
+            "    return AbiSnapshot(library='l', version='1', functions=funcs)\n"
+            "old = mk(['preview::v1::foo', 'preview::foo'])\n"
+            "new = mk([])\n"
+            "changes = detect_experimental_namespace_changes(old, new)\n"
+            "print(changes[0].symbol if changes else None)\n"
+        )
+        symbols = set()
+        for seed in ("0", "1", "2", "3", "4", "5"):
+            env = dict(os.environ, PYTHONHASHSEED=seed)
+            result = subprocess.run(
+                [sys.executable, "-c", script],
+                env=env,
+                capture_output=True,
+                text=True,
+                timeout=30,
+            )
+            assert result.returncode == 0, result.stderr
+            symbols.add(result.stdout.strip())
+        assert len(symbols) == 1, symbols
