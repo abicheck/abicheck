@@ -200,7 +200,11 @@ from typing import TYPE_CHECKING, Any
 
 from .. import diff_cxx_rules
 from .graph_facts import CONF_HIGH, CONF_REDUCED, GraphEdge, GraphNode
-from .template_graph_value_decls import arg_label_spelling, index_value_decls
+from .template_graph_value_decls import (
+    arg_label_spelling,
+    disambiguated_specialization_qname,
+    index_value_decls,
+)
 
 if TYPE_CHECKING:
     from .source_graph import SourceGraphSummary
@@ -216,11 +220,8 @@ NODE_TEMPLATE_INSTANTIATION = "template_instantiation"
 #: type_graph.py's own function/variable declaration node kind).
 NODE_SOURCE_DECL = "source_decl"
 #: Raw clang decl kinds routed onto TEMPLATE_USES_DECL (a source_decl node)
-#: rather than TEMPLATE_USES_TYPE. ``VarTemplateSpecializationDecl`` (Codex
-#: review) is a variable-template specialization's decl kind -- e.g.
-#: ``H<&ns::v<1>>``/``H<&ns::v<2>>`` -- carrying its own distinct
-#: ``mangledName`` just like ``VarDecl``; omitting it left two distinct
-#: specializations silently colliding on the bare spelling ``"v"``.
+#: rather than TEMPLATE_USES_TYPE. ``VarTemplateSpecializationDecl``
+#: (Codex review) carries its own distinct ``mangledName`` like ``VarDecl``.
 _VALUE_DECL_KINDS = frozenset(
     {"FunctionDecl", "VarDecl", "VarTemplateSpecializationDecl"}
 )
@@ -807,17 +808,13 @@ def _is_opaque_template_argument(node: dict[str, Any]) -> bool:
     module can spell anything from — no ``type``, no ``value``, no *named*
     ``decl``, not a pack wrapper (``isPack``). A **template-template
     argument** (e.g. ``Use<A>``/``Use<B>``) produces exactly this shape
-    (Codex review, confirmed against real clang output): entirely bare
-    (``{"kind": "TemplateArgument"}``) -- unlike a decl-referencing
+    (Codex review): entirely bare -- unlike a decl-referencing
     (TEMPLATE_USES_DECL) argument, which always carries a top-level
     ``decl`` dict and so isn't opaque despite also lacking ``type``/
-    ``value``.
-
-    A ``decl`` dict with no ``name`` (CodeRabbit review) is itself
-    unspellable -- :func:`_template_arg_use` already returns ``None`` for
-    exactly this shape -- so it counts as opaque too: an argument this loop
-    can't spell anything from must abort the whole instantiation's own
-    identity, not silently record it with one fewer argument than it has.
+    ``value``. A ``decl`` dict with no ``name`` (CodeRabbit review) is
+    itself unspellable -- :func:`_template_arg_use` already returns
+    ``None`` for it -- so it counts as opaque too, aborting the whole
+    instantiation's identity rather than recording one fewer argument.
     """
     decl = node.get("decl")
     decl_named = isinstance(decl, dict) and bool(decl.get("name"))
@@ -1045,29 +1042,24 @@ def _has_unresolved_decl_argument(
     original_args: Iterable[TemplateArgUse], resolved_args: Iterable[TemplateArgUse]
 ) -> bool:
     """Whether resolving ``original_args`` (raw, still carrying the
-    *original* ``target_decl_kind``) into ``resolved_args`` (the
-    :func:`_resolve_arg_targets` output) dropped a decl-referencing
-    (TEMPLATE_USES_DECL) argument's target entirely -- id names no
-    declaration :func:`index_value_decls` indexed (e.g. a local ``static``,
-    or a class-member NTTP target -- ``H<&A::f>`` produces a real
-    ``CXXMethodDecl``/``FieldDecl`` ``decl`` reference `index_value_decls`
-    never indexes at all, a *kind* this module doesn't support resolving,
-    not merely a target it failed to find; Codex review, verified
-    empirically that a narrower :data:`_VALUE_DECL_KINDS`-only check let
-    this collide two distinct member targets onto one label). Any
+    *original* ``target_decl_kind``) into ``resolved_args`` dropped a
+    decl-referencing (TEMPLATE_USES_DECL) argument's target -- id names no
+    declaration :func:`index_value_decls` indexed (a local ``static``, or a
+    class-member NTTP target -- ``H<&A::f>`` is a ``CXXMethodDecl``/
+    ``FieldDecl`` kind `index_value_decls` never indexes; Codex review,
+    verified empirically that a narrower :data:`_VALUE_DECL_KINDS`-only
+    check let two distinct member targets collide onto one label). Any
     non-``None`` original ``target_decl_kind`` qualifies -- only the
-    ``decl`` branch of :func:`_template_arg_use` ever sets it, so this
-    can't misfire on an ordinary type argument (bare-spelling fallback is
-    intentional there: a type's own spelling is its full name).
+    ``decl`` branch of :func:`_template_arg_use` ever sets it, so an
+    ordinary type argument's intentional bare-spelling fallback can't
+    misfire here.
 
-    Checked against the *original* kind, not the resolved one: once
-    resolution fails, :func:`_resolve_arg_targets` sets *both*
-    ``target_qname``/``target_decl_kind`` to ``None``, so only the original
-    still says "this was meant to be a decl reference." Untrusted the same
-    way an opaque (template-template) argument is: :func:`arg_label_
-    spelling` falls back to the bare ``spelling`` when unresolved, and two
-    distinct unresolved targets sharing a bare name would collide onto one
-    label, falsely merging two instantiations.
+    Checked against the *original* kind: once resolution fails,
+    :func:`_resolve_arg_targets` sets both fields to ``None`` on the
+    returned copy, so only the original still says "this was meant to be a
+    decl reference." Untrusted the same way an opaque (template-template)
+    argument is: two distinct unresolved targets sharing a bare name would
+    collide onto one :func:`arg_label_spelling` fallback.
     """
     return any(
         orig.target_decl_kind is not None and resolved.target_qname is None
@@ -1272,31 +1264,31 @@ def _walk_function_templates(
     if not isinstance(node, dict):
         return
     kind = str(node.get("kind", ""))
+    resolve_spec_qname = lambda sid: _resolve_specialization_qname(  # noqa: E731
+        sid, id_to_qname, id_to_decl_kind, id_to_template_qname, full_by_id
+    )
 
     if kind == _FUNCTION_TEMPLATE_KIND:
         name = str(node.get("name") or "")
         # An out-of-line member-template *definition* (`template <class T>
-        # void C::f(T) {}`, the class's own declaration `template <class T>
-        # void f(T);` staying in-class) detaches as a *separate*, top-level
+        # void C::f(T) {}`) detaches as a separate, top-level
         # FunctionTemplateDecl -- not nested inside CXXRecordDecl:C at all
-        # -- confirmed empirically against real clang AST output (Codex
-        # review, fresh evidence): this node's own structural `scope` is
-        # therefore `[]`, computing the bare "f" instead of "C::f", and its
-        # own children happen to resolve (via full_function_by_id's id
-        # join) to the identical instantiated symbols the correctly-scoped
-        # in-class declaration already captures -- so without this fix the
-        # graph would carry the same instantiation twice, once correctly
-        # under "C::f" and once wrongly under a bare "f" that could
-        # coincidentally merge with an unrelated global template also named
-        # "f". Clang emits `parentDeclContextId` on exactly this node shape
-        # (confirmed absent on the ordinary, correctly-nested in-class
-        # declaration) -- the id of the *real* semantic owner, resolvable
-        # through id_to_qname the same way a template argument's `decl`
-        # cross-reference already is. Preferred unconditionally when
-        # present, since clang only emits it to correct a structural
-        # mismatch in the first place.
+        # (confirmed empirically, Codex review) -- so this node's own
+        # structural `scope` is `[]`, computing a bare "f" that could
+        # coincidentally merge with an unrelated global template also
+        # named "f", duplicating the graph's own correctly-scoped "C::f"
+        # instantiation. `parentDeclContextId` (absent on an ordinary
+        # in-class declaration) names the *real* semantic owner,
+        # resolvable through id_to_qname the same way a template
+        # argument's `decl` cross-reference already is -- preferred
+        # unconditionally when present.
         owner_id = str(node.get("parentDeclContextId") or "")
-        owner_qname = id_to_qname.get(owner_id) if owner_id else None
+        owner_qname = disambiguated_specialization_qname(
+            owner_id,
+            id_to_qname.get(owner_id),
+            id_to_decl_kind.get(owner_id) == _CLASS_SPECIALIZATION_KIND,
+            resolve_spec_qname,
+        )
         qname = (
             f"{owner_qname}::{name}"
             if owner_qname and name
@@ -1453,8 +1445,16 @@ def _walk_function_templates(
                 if shared:
                     name = bare_name
                 else:
-                    if disambiguated_name is None:
-                        disambiguated_name = _specialization_scope_name(node, bare_name)
+                    if disambiguated_name is None:  # resolved-over-raw, see owner_qname
+                        disambiguated_name = (
+                            disambiguated_specialization_qname(
+                                node_id,
+                                _specialization_scope_name(node, bare_name),
+                                True,
+                                resolve_spec_qname,
+                            )
+                            or bare_name
+                        )
                     name = disambiguated_name
             else:
                 name = bare_name

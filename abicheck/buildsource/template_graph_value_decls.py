@@ -180,3 +180,29 @@ def arg_label_spelling(a: Any, value_decl_kinds: Collection[str]) -> str:
     if a.target_decl_kind in value_decl_kinds and a.target_qname:
         return str(a.target_qname)
     return str(a.spelling)
+
+
+def disambiguated_specialization_qname(
+    spec_id: str,
+    fallback: str | None,
+    is_specialization: bool,
+    resolve_specialization_qname: Callable[[str], str | None],
+) -> str | None:
+    """*resolve_specialization_qname(spec_id)* (``template_graph.
+    _resolve_specialization_qname``, passed in rather than imported --
+    this module stays a leaf), or -- when that fails because of an
+    unresolvable decl-kind NTTP argument (a known gap, e.g. a class-member
+    target) -- *fallback* suffixed with *spec_id* itself, unique by
+    construction though not a meaningful identity. Shared by
+    ``template_graph._walk_function_templates``'s two member-scope-naming
+    call sites (Codex review): two specializations differing only in such
+    an argument previously both fell back to one bare/raw-spelling name,
+    merging their distinct member template instantiations onto one graph
+    node.
+    """
+    if not is_specialization:
+        return fallback
+    resolved = resolve_specialization_qname(spec_id)
+    if resolved is not None:
+        return resolved
+    return f"{fallback}#{spec_id}" if fallback else fallback

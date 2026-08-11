@@ -34,9 +34,16 @@
   external linkage. A class-member NTTP target (`H<&A::f>`) still isn't
   resolved (a known, documented gap), but no longer risks colliding two
   distinct member targets sharing a bare name onto one graph node — the
-  whole instantiation is dropped instead. No new `ChangeKind`, no report
-  schema change, no verdict/exit-code effect — this is graph vocabulary
-  only.
+  whole instantiation is dropped instead. A related collision one level
+  up is also closed: a **member function template** instantiated once per
+  such an unresolvable specialization (e.g. `H<&A::f>::g<int>` vs.
+  `H<&B::f>::g<int>`) previously named both `template_decl` scopes
+  identically, merging their distinct emitted symbols even though the
+  class-level instantiations themselves already correctly stayed
+  unmerged — now falls back to a disambiguator unique by construction
+  (the specialization's own AST node id) when the specialization's own
+  identity can't be resolved. No new `ChangeKind`, no report schema
+  change, no verdict/exit-code effect — this is graph vocabulary only.
 
 ### Changed
 

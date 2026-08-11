@@ -291,6 +291,88 @@ def test_block_scope_extern_function_nttp_target_resolves() -> None:
     assert out[0].label == "Holder<_Z6targetv>"
 
 
+def test_member_function_templates_of_unresolvable_specializations_stay_distinct() -> (
+    None
+):
+    """A member function template (``g``) instantiated once per
+    specialization of ``H<&A::f>``/``H<&B::f>`` -- two specializations
+    that differ only in an unresolvable class-member NTTP argument (both
+    spelled bare ``"f"``) -- must not collide onto one shared
+    ``H::g`` ``template_decl`` node, merging their distinct emitted
+    symbols (Codex review, fresh evidence: verified against real clang
+    output that an out-of-line member-template definition on two such
+    specializations both resolved to the identical bare "H", since
+    neither the specialization's own decl-kind NTTP argument nor its
+    owning class is otherwise resolvable). Falls back to a disambiguator
+    unique by construction (the specialization's own clang node id) when
+    the specialization's own identity can't be resolved."""
+
+    def _spec(spec_id: str, decl_id: str) -> dict:
+        return {
+            "id": spec_id,
+            "kind": "ClassTemplateSpecializationDecl",
+            "name": "H",
+            "completeDefinition": True,
+            "inner": [
+                {
+                    "kind": "TemplateArgument",
+                    "decl": {
+                        "id": decl_id,
+                        "kind": "CXXMethodDecl",
+                        "name": "f",
+                        "type": {"qualType": "void ()"},
+                    },
+                },
+            ],
+        }
+
+    spec_a = _spec("0xSPEC_A", "0xA_F")
+    spec_b = _spec("0xSPEC_B", "0xB_F")
+    h_pattern = {
+        "kind": "CXXRecordDecl",
+        "name": "H",
+        "completeDefinition": True,
+        "inner": [],
+    }
+    class_template = {
+        "kind": "ClassTemplateDecl",
+        "name": "H",
+        "inner": [
+            {"kind": "NonTypeTemplateParmDecl", "name": "Ptr"},
+            h_pattern,
+            spec_a,
+            spec_b,
+        ],
+    }
+
+    def _g(parent_id: str, mangled: str) -> dict:
+        return {
+            "kind": "FunctionTemplateDecl",
+            "name": "g",
+            "parentDeclContextId": parent_id,
+            "inner": [
+                {"kind": "TemplateTypeParmDecl", "name": "U"},
+                {
+                    "kind": "FunctionDecl",
+                    "name": "g",
+                    "mangledName": mangled,
+                    "type": {"qualType": "int (int)"},
+                    "inner": [],
+                },
+            ],
+        }
+
+    g_a = _g("0xSPEC_A", "_ZN1H1gIiEET_S1_a")
+    g_b = _g("0xSPEC_B", "_ZN1H1gIiEET_S1_b")
+    ast = {"kind": "TranslationUnitDecl", "inner": [class_template, g_a, g_b]}
+    out = parse_clang_ast_templates(ast)
+    qnames = {i.template_qname for i in out}
+    assert len(qnames) == 2
+    assert "H::g" not in qnames
+    symbols = {s for i in out for s in i.emitted_symbols}
+    assert symbols == {"_ZN1H1gIiEET_S1_a", "_ZN1H1gIiEET_S1_b"}
+
+
 def test_two_class_member_nttp_targets_drop_rather_than_collide() -> None:
     """``H<&A::f>`` and ``H<&B::f>`` -- two distinct class-member NTTP
     targets sharing a bare member name -- must not collide onto one
