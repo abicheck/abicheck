@@ -1085,16 +1085,29 @@ def main(argv: list[str] | None = None) -> int:
                         "timed_out": True,
                     }
                     (out_dir / "final.md").write_text("", encoding="utf-8")
-                # Scoped to this run's own selected scenarios (`scenarios`,
-                # already filtered above by --scenarios/status/skill), not the
-                # full on-disk index: an --out root resumed after the freeze
-                # can still hold prototype-skill rows recorded under an older
-                # model (pre-freeze history, or --include-prototype-skills),
-                # and those are not part of *this* comparison. Checking against
-                # them would block an otherwise-consistent flagship-only
-                # resume over a model difference in evidence this run never
-                # produced and does not aggregate with.
-                in_scope_index = [row for row in index if row.get("scenario_id") in scenarios]
+                # Scoped by *skill inclusion policy* (flagship-only, unless
+                # --include-prototype-skills), not by this invocation's own
+                # `scenarios` subset. The subset changes across invocations
+                # that pass different explicit --scenarios ids — e.g. one run
+                # of scenario A under model X followed by another run of
+                # scenario B under model Y, both flagship scenarios — and
+                # filtering to only the current invocation's ids would compare
+                # each run against an empty or unrelated index, missing a real
+                # model difference `run_skill_eval.py` will later aggregate
+                # together (it groups by skill/arm, not by which invocation
+                # produced a row). Rows for a scenario the pack no longer
+                # lists are excluded the same way `run_skill_eval.py` treats
+                # them as orphaned — never graded, so a model difference there
+                # never reaches an aggregate either.
+                if args.include_prototype_skills:
+                    in_scope_index = index
+                else:
+                    in_scope_index = [
+                        row
+                        for row in index
+                        if pack["scenarios"].get(row.get("scenario_id"), {}).get("skill")
+                        == FLAGSHIP_SKILL
+                    ]
                 mixed = check_one_model(in_scope_index, record)
                 if mixed:
                     raise RuntimeError(f"{sid}/{arm}/{rep}: {mixed}")
