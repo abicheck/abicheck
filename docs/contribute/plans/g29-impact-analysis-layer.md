@@ -1811,7 +1811,17 @@ impact/composition evidence. Minimal new user-facing set:
 Plus a `RootCauseCorrelator` composer (not a detector) that groups
 `FUNC_REMOVED`/`INTERNAL_SYMBOL_REQUIRED_BY_PUBLIC_API`/
 `CONSUMER_REQUIRED_SYMBOL_REMOVED`/`RUNTIME_LOAD_FAILED` into one root cause
-with per-piece evidence levels (feeds Phase 3's `root_cause_id`).
+with per-piece evidence levels (feeds Phase 3's `root_cause_id`). **The
+correlator itself is done**: `abicheck/impact/correlation.py`'s
+`correlate_root_causes`/`RootCauseGroup` group the four kinds above by
+shared symbol identity (`caused_by_type`-else-`symbol`, the same precedence
+`reporter_markdown._root_cause_key_and_display` uses) and rank each
+member's evidence level (`artifact_proven` → `call_graph_proven` →
+`consumer_proven` → `runtime_proven`). **Still open**: wiring its output
+into the JSON/SARIF `root_cause_id`/`impact_group_id` surface (today those
+are still `reporter_markdown`'s independent `caused_by_type`-only grouping,
+per `ImpactAssessment`'s own docstring) and the eight new detector/overlay
+`ChangeKind`s below.
 
 New examples (each needs a negative twin, per the review):
 
@@ -1852,7 +1862,7 @@ abicheck/internal_leak.py   # TraversalPolicy + effect_transitions (Phase 2 D5, 
 abicheck/impact/
     model.py           # ImpactAssessment, GraphProofPath, FindingDecision (Phase 3 slices 1/7, DONE — ADR-052)
     engine.py           # assess_change(...) (Phase 3 slices 1/7, DONE — ADR-052)
-    correlation.py       # RootCauseCorrelator (Phase 6, not started)
+    correlation.py       # RootCauseCorrelator (Phase 6, DONE — correlate_root_causes/RootCauseGroup; report-surface wiring still open)
     root_causes.py
     consumer_graph.py    # Phase 4 slice 1, DONE — ADR-057 (consumer graph + the source join)
     use_cases.py         # Phase 4 slice 2, DONE — ADR-057 amendment (manifest + use_case/test_case graph join; trace ingestion still not started)
@@ -1925,7 +1935,10 @@ Modified (recurring across phases): `abicheck/buildsource/source_graph.py`,
   `integration`-marked tests re-deriving every AST shape the fixtures encode
   from a real compiler.
 - New per remaining phase: one `test_diff_<family>.py` per Phase 5 graph
-  family, `tests/test_root_cause_correlator.py` (Phase 6).
+  family. `tests/test_root_cause_correlator.py` (Phase 6), done: empty/
+  ignored-kind/singleton no-op cases, two- through four-piece correlation
+  and evidence-level ranking, first-seen group ordering, the
+  outside-the-family non-join guard, and `to_dict()` shape.
 - `tests/test_abi_examples.py` picks up `case194`-`case205` automatically once
   `ground_truth.json` is updated (existing harness, no new test file needed).
 
