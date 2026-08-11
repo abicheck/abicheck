@@ -485,40 +485,61 @@ def resolved_model(events: list[dict]) -> str | None:
     return None
 
 
-def _model_identity(row: dict) -> str | None:
-    """The best available proof of which model a row used.
+def _model_label(row: dict) -> str | None:
+    """The best available identifier for reporting which model a row used.
 
-    Prefers the *requested* identifier (`requested_model`, i.e. `--model`
-    exactly as passed — may be an alias like `sonnet`) over the *resolved*
-    one (`model`, read from the CLI's own `system/init` event): two rows
-    pinned to the same `--model` argument always compare equal this way,
-    even when one of them is a timeout that never reached an init event to
-    resolve the alias against, and even if resolving the same alias twice
-    could in principle spell it differently. Falls back to the resolved
-    model only when no pin was recorded (`requested_model` absent, e.g. a
-    caller that let the CLI pick its own default).
+    Resolved name first (the CLI's own account of what it actually ran),
+    falling back to the requested `--model` argument only when no resolved
+    name was captured (a timeout). Reporting-only — `_models_compatible`
+    below is what actually decides consistency, and the two must agree on
+    which field wins or a message could name one identity while the check
+    that produced it used the other.
     """
-    requested = row.get("requested_model")
-    if isinstance(requested, str):
-        return requested
     model = row.get("model")
-    return model if isinstance(model, str) else None
+    if isinstance(model, str):
+        return model
+    requested = row.get("requested_model")
+    return requested if isinstance(requested, str) else None
+
+
+def _models_compatible(a: dict, b: dict) -> bool:
+    """Whether two rows can be shown to have used the same model.
+
+    Compares the *resolved* model name (`model`, read from the CLI's own
+    `system/init` event) first, when both rows have one — that is real
+    evidence, and the only thing that catches an alias like `sonnet`
+    silently resolving to a different version between two runs (an earlier
+    revision of this check compared the *requested* alias whenever present
+    and could accept exactly that drift, since two rows both pinned to
+    `sonnet` always looked identical regardless of what either resolved
+    to). Falls back to the requested identifier only when at least one
+    side has no resolved name — in practice, a timeout, which never
+    reaches the CLI's init event and so never gets one. When neither a
+    resolved nor a requested identity is available on both sides, nothing
+    can be proven either way and this returns True (compatible) — matching
+    check_one_model's own documented "unknown never refuses the batch on
+    its own" policy.
+    """
+    a_model, b_model = a.get("model"), b.get("model")
+    if isinstance(a_model, str) and isinstance(b_model, str):
+        return a_model == b_model
+    a_requested, b_requested = a.get("requested_model"), b.get("requested_model")
+    if isinstance(a_requested, str) and isinstance(b_requested, str):
+        return a_requested == b_requested
+    return True
 
 
 def check_one_model(index: list[dict], record: dict) -> str | None:
     """Why this run is not comparable with the batch so far, if it is not."""
-    models = {
-        identity for row in index if (identity := _model_identity(row)) is not None
-    }
-    model = _model_identity(record)
-    if model is None or not models or model in models:
-        return None
-    return (
-        f"this run used {model} while the batch so far used "
-        f"{', '.join(sorted(models))}; an arm-to-arm difference would not be "
-        f"attributable to the skill. Pass --model to pin one, or start a fresh "
-        f"output root."
-    )
+    for row in index:
+        if not _models_compatible(row, record):
+            return (
+                f"this run used {_model_label(record)} while an earlier run "
+                f"in the batch used {_model_label(row)}; an arm-to-arm "
+                f"difference would not be attributable to the skill. Pass "
+                f"--model to pin one, or start a fresh output root."
+            )
+    return None
 
 
 def check_treatment(arm: str, scenario: dict, visible: list[str] | None) -> str | None:
@@ -695,8 +716,8 @@ def _run_once(
         "visible_skills": visible,
         "model": resolved_model(events),
         # The raw --model argument, alias and all (e.g. "sonnet") — see
-        # _model_identity's own docstring for why comparisons prefer this
-        # over the resolved name above.
+        # _models_compatible's own docstring for when comparisons fall back
+        # to this instead of the resolved name above.
         "requested_model": model,
         "wall_clock_seconds": usage["wall_clock_seconds"],
     }
@@ -1151,18 +1172,20 @@ def main(argv: list[str] | None = None) -> int:
                         # resolved_model() has nothing to resolve — "model"
                         # stays genuinely absent. "requested_model" is set
                         # whenever --model pinned one, so this row still
-                        # carries a comparable identity: _model_identity()
-                        # prefers the requested alias over a resolved name,
-                        # so a pinned-model timeout compares equal to every
-                        # other row pinned to the same --model argument,
-                        # instead of forcing an alias (e.g. "sonnet") against
-                        # another row's already-resolved full name. Left
-                        # absent (None) when --model was not passed —
-                        # genuinely unknown, and both this run's own
-                        # check_one_model call below and run_skill_eval.py's
-                        # later grading-time check correctly treat an unknown
-                        # identity as never provably consistent with a known
-                        # one.
+                        # carries a fallback identity: _models_compatible()
+                        # only falls back to the requested alias when a
+                        # resolved name is missing on at least one side, so
+                        # a pinned-model timeout compares equal to another
+                        # row that ALSO has no resolved name (another
+                        # timeout under the same pin) without masking a real
+                        # resolved-model difference against a completed
+                        # sibling — that comparison uses both sides'
+                        # resolved names instead. Left absent (None) when
+                        # --model was not passed — genuinely unknown, and
+                        # both this run's own check_one_model call below and
+                        # run_skill_eval.py's later grading-time check
+                        # correctly treat an unknown identity as never
+                        # provably consistent with a known one.
                         "requested_model": args.model,
                     }
                     (out_dir / "final.md").write_text("", encoding="utf-8")

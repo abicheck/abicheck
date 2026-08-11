@@ -55,20 +55,21 @@ PACK = Path(__file__).resolve().parent / "skill-eval-pack.json"
 FLAGSHIP_SKILL = "native-binary-compatibility-review"
 
 
-def _model_identity(row: dict) -> str | None:
-    """Mirrors runners/claude_code.py's own `_model_identity`.
+def _model_label(row: dict) -> str | None:
+    """Mirrors runners/claude_code.py's own `_model_label`.
 
-    Prefers the requested `--model` argument (may be an alias like
-    `sonnet`) over the resolved model name, so a timed-out row pinned to
-    the same `--model` as the rest of the batch compares equal to them
-    instead of having no identity at all (`model` is unset for a timeout —
-    see that module's `TimeoutExpired` handler).
+    Resolved name first — real evidence of what the CLI actually ran, and
+    the only thing that would catch an alias like `sonnet` silently
+    resolving to a different version between two runs — falling back to
+    the requested `--model` argument only when no resolved name was
+    captured (a timeout, which never reaches the CLI's init event; see
+    that module's `TimeoutExpired` handler).
     """
-    requested = row.get("requested_model")
-    if isinstance(requested, str):
-        return requested
     model = row.get("model")
-    return model if isinstance(model, str) else None
+    if isinstance(model, str):
+        return model
+    requested = row.get("requested_model")
+    return requested if isinstance(requested, str) else None
 
 
 def _pct(part: int, whole: int) -> str:
@@ -131,7 +132,8 @@ def main(argv: list[str] | None = None) -> int:
     graded: list[dict] = []
     orphaned: set[str] = set()
     excluded_prototype: set[str] = set()
-    graded_models: set[str] = set()
+    resolved_models: set[str] = set()
+    requested_only_models: set[str] = set()
     unknown_model: set[str] = set()
     for row in index:
         sid, arm, rep = row["scenario_id"], row["arm"], row["repetition"]
@@ -159,31 +161,44 @@ def main(argv: list[str] | None = None) -> int:
         grade = grade_run(run_dir, pack["scenarios"][sid], arm)
         grade.update(scenario_id=sid, arm=arm, repetition=rep)
         graded.append(grade)
-        identity = _model_identity(row)
-        if identity is not None:
-            graded_models.add(identity)
-        else:
-            # A timed-out run with no --model pin has a genuinely unknown
-            # model (see runners/claude_code.py's TimeoutExpired handler) —
-            # not a value that happens to be missing. It is graded (a
-            # timeout is a real, meaningful result for dimensions 1/3), but
-            # letting it sail through the mixed-model check below purely
-            # because it contributes no identity to compare against would
-            # accept exactly the batch that check exists to refuse: known
-            # model X on some rows, silently-unproven model on this one.
-            unknown_model.add(f"{sid}/{row.get('arm')}/{row.get('repetition')}")
+        model = row.get("model")
+        if isinstance(model, str):
+            # Real evidence — the CLI's own account of what it ran. Tracked
+            # separately from an alias-only identity below, since only this
+            # set can prove two rows actually used *different* models (an
+            # alias resolving differently across two runs is exactly the
+            # drift a requested-identity-only comparison would hide).
+            resolved_models.add(model)
+            continue
+        requested = row.get("requested_model")
+        if isinstance(requested, str):
+            # A timed-out run pinned with --model has no resolved name (see
+            # runners/claude_code.py's TimeoutExpired handler) but does have
+            # the requested alias — the best available fallback identity,
+            # not proof of a specific resolved model.
+            requested_only_models.add(requested)
+            continue
+        # A timed-out run with no --model pin has a genuinely unknown model
+        # — not a value that happens to be missing. It is graded (a timeout
+        # is a real, meaningful result for dimensions 1/3), but letting it
+        # sail through the mixed-model check below purely because it
+        # contributes no identity to compare against would accept exactly
+        # the batch that check exists to refuse: known model X on some
+        # rows, silently-unproven model on this one.
+        unknown_model.add(f"{sid}/{row.get('arm')}/{row.get('repetition')}")
 
-    if unknown_model and graded_models:
+    if unknown_model and (resolved_models or requested_only_models):
+        known = sorted(resolved_models | requested_only_models)
         print(
             "runs graded here include rows with no recorded model alongside "
-            f"rows recorded under {', '.join(sorted(graded_models))} — not "
+            f"rows recorded under {', '.join(known)} — not "
             "provably the same model, so not provably attributable to the "
             "skill: " + ", ".join(sorted(unknown_model)),
             file=sys.stderr,
         )
         return 1
 
-    if len(graded_models) > 1:
+    if len(resolved_models) > 1 or len(requested_only_models) > 1:
         # The runner's own check_one_model refuses a mixed-model batch at
         # record time, but it is scoped per invocation (in-scope skill set,
         # not the whole on-disk index) — see the 2026-08-11 scope-freeze
@@ -194,9 +209,16 @@ def main(argv: list[str] | None = None) -> int:
         # by arm. Refusing here, not just warning, matches CLAUDE.md's
         # documented invariant: "a batch that mixes two [models] is
         # refused" — an arm-to-arm difference would not be attributable to
-        # the skill if it might instead be a model difference.
+        # the skill if it might instead be a model difference. Checked as
+        # two separate sets, not one merged one: a resolved name and an
+        # unresolved alias existing side by side proves nothing (the alias
+        # could well have resolved to that same name), so only disagreement
+        # *within* a kind is real evidence.
+        mixed = sorted(resolved_models) if len(resolved_models) > 1 else sorted(
+            requested_only_models
+        )
         print(
-            f"runs graded here used more than one model ({', '.join(sorted(graded_models))}); "
+            f"runs graded here used more than one model ({', '.join(mixed)}); "
             f"an apparent skill/baseline difference would not be attributable to the skill. "
             f"Split --runs into separate per-model output roots.",
             file=sys.stderr,

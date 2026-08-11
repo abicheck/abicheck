@@ -490,7 +490,7 @@
         "native-consumer-compatibility",
         "native-release-compatibility"
       ],
-      "digest": "sha256:dc826f6e10dc22167568e2c24ef98c0caac40c2dd6172a028c22c2ddf7fd2f73",
+      "digest": "sha256:ff6635ca3fedc1e06c727d21d3566ade96204d2474e33bda35965c16f833f1ad",
       "roots": [
         "agent-evals/skills/grade_bundle.py",
         "agent-evals/skills/graders",
