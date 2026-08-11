@@ -540,3 +540,75 @@ class TestClangVtableFactsReliabilityGate:
         result = compare(old, new)
         kinds = {c.kind for c in result.changes}
         assert ChangeKind.LAYOUT_UNVERIFIABLE not in kinds
+
+
+class TestVtableChangedDegradedByLayoutUnverifiable:
+    """One evidence gap must not classify BREAKING on one detector and
+    non-escalating RISK on another for the *same* type (post-processing
+    step ``degrade_vtable_changed_for_unverifiable_layout``).
+
+    ``_vtable_transition_is_evidenced`` (diff_types.py) treats an unknown
+    ``size_bits`` on either side as "keep the finding" (BREAKING), while
+    ``_check_layout_unverifiable`` (diff_layout.py) treats the identical
+    asymmetric-evidence condition as calm, non-escalating RISK. When both
+    fire on the same type, TYPE_VTABLE_CHANGED must be demoted to match.
+    """
+
+    def test_vtable_changed_degraded_when_layout_unverifiable_same_type(
+        self,
+    ) -> None:
+        """A type with asymmetric layout evidence and a differing vtable list
+        emits both LAYOUT_UNVERIFIABLE and TYPE_VTABLE_CHANGED, and the
+        latter is degraded to COMPATIBLE_WITH_RISK rather than BREAKING."""
+        old = _snap(
+            types=[
+                RecordType(
+                    name="Foo",
+                    kind="class",
+                    vtable=[],
+                    size_bits=None,
+                )
+            ]
+        )
+        new = _snap(
+            types=[
+                RecordType(
+                    name="Foo",
+                    kind="class",
+                    vtable=["_ZN3Foo1fEv"],
+                    size_bits=None,
+                    # Populates the layout descriptor on the new side only,
+                    # so LAYOUT_UNVERIFIABLE's asymmetric-evidence condition
+                    # fires alongside the vtable-list difference above.
+                    base_offsets={"Base": 0},
+                )
+            ]
+        )
+        result = compare(old, new)
+        changes_by_kind = {c.kind: c for c in result.changes}
+        assert ChangeKind.LAYOUT_UNVERIFIABLE in changes_by_kind
+        assert ChangeKind.TYPE_VTABLE_CHANGED in changes_by_kind
+
+        vtable_change = changes_by_kind[ChangeKind.TYPE_VTABLE_CHANGED]
+        assert vtable_change.effective_verdict == Verdict.COMPATIBLE_WITH_RISK
+        assert vtable_change.modulation_reason == "layout_unverifiable_same_type"
+        assert result.verdict != Verdict.BREAKING
+
+    def test_vtable_changed_stays_breaking_without_layout_unverifiable(self) -> None:
+        """No matching LAYOUT_UNVERIFIABLE for the type → TYPE_VTABLE_CHANGED
+        keeps its ordinary BREAKING severity (regression guard: the demotion
+        must not fire universally)."""
+        old = _snap(types=[RecordType(
+            name="Widget", kind="class",
+            vtable=["_ZN6Widget4drawEv", "_ZN6Widget5paintEv"],
+        )])
+        new = _snap(types=[RecordType(
+            name="Widget", kind="class",
+            vtable=["_ZN6Widget4drawEv"],
+        )])
+        result = compare(old, new)
+        changes_by_kind = {c.kind: c for c in result.changes}
+        assert ChangeKind.LAYOUT_UNVERIFIABLE not in changes_by_kind
+        vtable_change = changes_by_kind[ChangeKind.TYPE_VTABLE_CHANGED]
+        assert vtable_change.effective_verdict is None
+        assert result.verdict == Verdict.BREAKING

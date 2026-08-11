@@ -177,6 +177,62 @@ class DowngradeOpaqueTypeChanges:
         return _downgrade_opaque_type_changes(changes, ctx.old, ctx.new)
 
 
+class DegradeVtableChangedForUnverifiableLayout:
+    """Degrade ``TYPE_VTABLE_CHANGED`` to RISK when the same type's layout
+    evidence is itself flagged ``LAYOUT_UNVERIFIABLE``.
+
+    ``diff_types._vtable_transition_is_evidenced`` and
+    ``diff_layout._check_layout_unverifiable`` both key off the identical
+    condition — one side of a type carries real layout evidence (a known
+    size), the other has none — and reach opposite conclusions from it. The
+    vtable detector treats an unknown size as "corroborates nothing, refutes
+    nothing, keep the finding" and reports BREAKING; the layout detector
+    treats the exact same gap as "we cannot confirm or rule out a change"
+    and reports a calm, explicitly non-escalating RISK. Both are individually
+    documented and defensible in isolation, but when they land on the same
+    type in the same report the reader sees a hard BREAKING verdict sitting
+    right next to a finding that already says the evidence for that type
+    could not be verified either way — reproducible with zero real ABI
+    change (scanning a binary against a dump of itself).
+
+    Since ``LAYOUT_UNVERIFIABLE`` is the one detector that actually answers
+    "was there real evidence for this type", a co-reported
+    ``TYPE_VTABLE_CHANGED`` on the same type rests on that same missing
+    evidence and is degraded to match its severity (``COMPATIBLE_WITH_RISK``)
+    via the standard per-finding ``effective_verdict`` override (ADR-025 A4)
+    rather than a new ChangeKind — the underlying kind is preserved so
+    downstream tooling that already recognizes ``TYPE_VTABLE_CHANGED``
+    continues to work unchanged. Only demotes; never escalates, and never
+    touches a ``TYPE_VTABLE_CHANGED`` whose type has no matching
+    ``LAYOUT_UNVERIFIABLE`` finding. An already-set ``effective_verdict``
+    (e.g. a policy-file override or an earlier pattern-modulation step) is
+    left alone rather than overwritten.
+    """
+
+    name = "degrade_vtable_changed_for_unverifiable_layout"
+
+    def run(self, changes: list[Change], ctx: PipelineContext) -> list[Change]:
+        from .checker_policy import ChangeKind, Verdict
+
+        unverifiable_types = {
+            c.symbol
+            for c in changes
+            if c.kind == ChangeKind.LAYOUT_UNVERIFIABLE and c.symbol
+        }
+        if not unverifiable_types:
+            return changes
+        for c in changes:
+            if (
+                c.kind == ChangeKind.TYPE_VTABLE_CHANGED
+                and c.symbol in unverifiable_types
+                and c.effective_verdict is None
+            ):
+                c.effective_verdict = Verdict.COMPATIBLE_WITH_RISK
+                c.modulation_reason = "layout_unverifiable_same_type"
+                c.modulation_rule = self.name
+        return changes
+
+
 class EnrichSourceLocations:
     """Add source location metadata for suppression matching."""
 
@@ -1374,6 +1430,11 @@ DEFAULT_PIPELINE = PostProcessingPipeline(
         DeduplicateAstDwarf(),
         DeduplicateCrossDetector(),
         DowngradeOpaqueTypeChanges(),
+        # Same-type evidence-gap correlation: must see both LAYOUT_UNVERIFIABLE
+        # and TYPE_VTABLE_CHANGED as originally emitted, so it runs after the
+        # dedup/downgrade steps above (which could otherwise drop one side)
+        # but before suppression/redundancy filtering consumes effective_verdict.
+        DegradeVtableChangedForUnverifiableLayout(),
         EnrichSourceLocations(),
         FilterNonPublicSurface(),
         # Runs immediately after FilterNonPublicSurface so it can read the
