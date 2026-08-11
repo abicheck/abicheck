@@ -41,7 +41,29 @@ non-literal VALUE representation is.
 
 from __future__ import annotations
 
+import re
+
 from .model import AbiSnapshot
+
+#: The exact shape ``dumper_clang_expr._expr_fingerprint`` produces --
+#: ``"expr:" + sha256(...).hexdigest()[:16]`` (16 lowercase hex digits) --
+#: not merely the ``"expr:"`` PREFIX. A plain ``.startswith("expr:")`` check
+#: also matches castxml's raw, verbatim source-text initializer whenever it
+#: happens to spell a qualified name whose next component is literally
+#: ``expr`` (e.g. an expression-template library's ``expr::`` namespace) --
+#: ``dumper_castxml._iter_public_constants``/``_ClangAstParser`` parsers both
+#: pass that XML/AST ``init`` text straight through unmodified, no fingerprint
+#: involved at all. Matching the full shape means a genuine
+#: ``"expr::OLD_VALUE"`` vs. ``"expr::NEW_VALUE"`` castxml comparison is never
+#: mistaken for a clang fingerprint and silently suppressed (Codex review,
+#: fresh evidence, PR #720).
+_EXPR_FINGERPRINT_RE = re.compile(r"^expr:[0-9a-f]{16}$")
+
+
+def _is_expr_fingerprint(value: str) -> bool:
+    """True if *value* is exactly a clang structural-expression fingerprint,
+    not merely ``"expr:"``-prefixed text (see ``_EXPR_FINGERPRINT_RE``)."""
+    return bool(_EXPR_FINGERPRINT_RE.match(value))
 
 
 def default_value_representation_unreliable(
@@ -120,11 +142,11 @@ def default_value_fingerprint_comparison_unreliable(
     flag was unset — even though the old side's own literal value never
     depended on that flag at all.
     """
-    if old_value.startswith("expr:") and default_value_representation_unreliable(
+    if _is_expr_fingerprint(old_value) and default_value_representation_unreliable(
         old, old_producer
     ):
         return True
-    if new_value.startswith("expr:") and default_value_representation_unreliable(
+    if _is_expr_fingerprint(new_value) and default_value_representation_unreliable(
         new, new_producer
     ):
         return True
@@ -170,16 +192,22 @@ def constant_value_fingerprint_comparison_unreliable(
     :func:`default_value_representation_unreliable`'s own third-round
     ``None``-is-clang-family-risk fix for the identical shape of gap). Safe
     for a genuinely castxml-authored ``None``-producer legacy snapshot too:
-    castxml never emits an ``"expr:"``-prefixed value at all (it keeps the
-    verbatim source expression instead), so the ``.startswith("expr:")``
-    guard alone already excludes it regardless of producer precision.
+    ``_is_expr_fingerprint`` matches the full 16-hex-digit shape, not merely
+    the ``"expr:"`` prefix -- castxml keeps the verbatim source expression
+    for a constant's value (``dumper_castxml._iter_public_constants`` passes
+    its raw XML ``init`` text straight through), so a real castxml constant
+    referencing a qualified name whose next component happens to spell
+    ``expr`` (e.g. ``"expr::OLD_VALUE"``, an expression-template library's
+    namespace) would otherwise collide with the ``"expr:"`` PREFIX check and
+    get its genuine ``CONSTANT_CHANGED`` silently suppressed regardless of
+    producer (Codex review, fresh evidence, PR #720).
     """
-    if old_value.startswith("expr:") and (
+    if _is_expr_fingerprint(old_value) and (
         old.ast_producer not in ("castxml", "hybrid")
         and not old.clang_field_initializer_facts_reliable
     ):
         return True
-    if new_value.startswith("expr:") and (
+    if _is_expr_fingerprint(new_value) and (
         new.ast_producer not in ("castxml", "hybrid")
         and not new.clang_field_initializer_facts_reliable
     ):

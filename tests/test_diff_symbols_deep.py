@@ -686,12 +686,12 @@ class TestParamDefaultChanged:
         f_old = _pub_func(
             "connect",
             "_Z7connectv",
-            params=[Param(name="timeout", type="int", default="expr:oldalgo1234")],
+            params=[Param(name="timeout", type="int", default="expr:1111111111111111")],
         )
         f_new = _pub_func(
             "connect",
             "_Z7connectv",
-            params=[Param(name="timeout", type="int", default="expr:newalgo5678")],
+            params=[Param(name="timeout", type="int", default="expr:2222222222222222")],
         )
         old = AbiSnapshot(
             library="libtest.so.1",
@@ -724,12 +724,12 @@ class TestParamDefaultChanged:
         f_old = _pub_func(
             "connect",
             "_Z7connectv",
-            params=[Param(name="timeout", type="int", default="expr:oldalgo1234")],
+            params=[Param(name="timeout", type="int", default="expr:1111111111111111")],
         )
         f_new = _pub_func(
             "connect",
             "_Z7connectv",
-            params=[Param(name="timeout", type="int", default="expr:newalgo5678")],
+            params=[Param(name="timeout", type="int", default="expr:2222222222222222")],
         )
         old = AbiSnapshot(
             library="libtest.so.1",
@@ -769,12 +769,12 @@ class TestParamDefaultChanged:
         f_old = _pub_func(
             "connect",
             "_Z7connectv",
-            params=[Param(name="timeout", type="int", default="expr:oldalgo1234")],
+            params=[Param(name="timeout", type="int", default="expr:1111111111111111")],
         )
         f_new = _pub_func(
             "connect",
             "_Z7connectv",
-            params=[Param(name="timeout", type="int", default="expr:newalgo5678")],
+            params=[Param(name="timeout", type="int", default="expr:2222222222222222")],
         )
         legacy_dict = snapshot_to_dict(
             AbiSnapshot(
@@ -821,7 +821,7 @@ class TestParamDefaultChanged:
         f_new = _pub_func(
             "connect",
             "_Z7connectv",
-            params=[Param(name="timeout", type="int", default="expr:newalgo5678")],
+            params=[Param(name="timeout", type="int", default="expr:2222222222222222")],
         )
         old = AbiSnapshot(
             library="libtest.so.1",
@@ -850,12 +850,12 @@ class TestParamDefaultChanged:
         f_old = _pub_func(
             "connect",
             "_Z7connectv",
-            params=[Param(name="timeout", type="int", default="expr:aaaa")],
+            params=[Param(name="timeout", type="int", default="expr:aaaaaaaaaaaaaaaa")],
         )
         f_new = _pub_func(
             "connect",
             "_Z7connectv",
-            params=[Param(name="timeout", type="int", default="expr:bbbb")],
+            params=[Param(name="timeout", type="int", default="expr:bbbbbbbbbbbbbbbb")],
         )
         old = AbiSnapshot(
             library="libtest.so.1",
@@ -916,7 +916,7 @@ class TestParamDefaultChanged:
         f_old = _pub_func(
             "connect",
             "_Z7connectv",
-            params=[Param(name="timeout", type="int", default="expr:oldalgo1234")],
+            params=[Param(name="timeout", type="int", default="expr:1111111111111111")],
         )
         f_new = _pub_func(
             "connect",
@@ -952,12 +952,12 @@ class TestParamDefaultChanged:
         f_old = _pub_func(
             "connect",
             "_Z7connectv",
-            params=[Param(name="timeout", type="int", default="expr:aaaa")],
+            params=[Param(name="timeout", type="int", default="expr:aaaaaaaaaaaaaaaa")],
         )
         f_new = _pub_func(
             "connect",
             "_Z7connectv",
-            params=[Param(name="timeout", type="int", default="expr:bbbb")],
+            params=[Param(name="timeout", type="int", default="expr:bbbbbbbbbbbbbbbb")],
         )
         old = AbiSnapshot(
             library="libtest.so.1",
@@ -977,6 +977,43 @@ class TestParamDefaultChanged:
         )
         r = compare(old, new)
         assert ChangeKind.PARAM_DEFAULT_VALUE_CHANGED not in _kinds(r)
+
+    def test_genuine_expr_namespace_default_change_still_reported(self):
+        """Mirrors constant_value_fingerprint_comparison_unreliable's own
+        identical fix: the guard matches the FULL clang fingerprint shape
+        (``"expr:"`` plus exactly 16 hex digits), not merely the ``"expr:"``
+        prefix. castxml keeps a default's verbatim source expression, so a
+        real castxml default referencing a qualified name whose next
+        component happens to spell `expr` produces a legitimate value like
+        `"expr::OLD_VALUE"` -- a plain prefix check would misidentify it as
+        a clang fingerprint and silently suppress the real change (Codex
+        review, fresh evidence, PR #720)."""
+        f_old = _pub_func(
+            "connect",
+            "_Z7connectv",
+            params=[Param(name="timeout", type="int", default="expr::OLD_VALUE")],
+        )
+        f_new = _pub_func(
+            "connect",
+            "_Z7connectv",
+            params=[Param(name="timeout", type="int", default="expr::NEW_VALUE")],
+        )
+        old = AbiSnapshot(
+            library="libtest.so.1",
+            version="1.0",
+            functions=[f_old],
+            from_headers=True,
+            ast_producer="castxml",
+        )
+        new = AbiSnapshot(
+            library="libtest.so.1",
+            version="2.0",
+            functions=[f_new],
+            from_headers=True,
+            ast_producer="castxml",
+        )
+        r = compare(old, new)
+        assert ChangeKind.PARAM_DEFAULT_VALUE_CHANGED in _kinds(r)
 
 
 # ── param_renamed ────────────────────────────────────────────────────────
@@ -1325,11 +1362,11 @@ class TestConstantChanges:
         CONSTANT_CHANGED when the OLD side's value is fingerprint-shaped and
         unreliable."""
         old = self._clang_snap(
-            {"K1": "expr:aaaa", "K2": "expr:aaaa"},
+            {"K1": "expr:aaaaaaaaaaaaaaaa", "K2": "expr:aaaaaaaaaaaaaaaa"},
             field_initializer_facts_reliable=False,
         )
         new = self._clang_snap(
-            {"K1": "expr:bbbb", "K2": "expr:cccc"},
+            {"K1": "expr:bbbbbbbbbbbbbbbb", "K2": "expr:cccccccccccccccc"},
             field_initializer_facts_reliable=True,
         )
         r = compare(old, new)
@@ -1341,10 +1378,10 @@ class TestConstantChanges:
         still fire -- the guard must not blanket-suppress every fingerprint
         comparison on a clang-producer snapshot."""
         old = self._clang_snap(
-            {"K": "expr:aaaa"}, field_initializer_facts_reliable=True
+            {"K": "expr:aaaaaaaaaaaaaaaa"}, field_initializer_facts_reliable=True
         )
         new = self._clang_snap(
-            {"K": "expr:bbbb"}, field_initializer_facts_reliable=True
+            {"K": "expr:bbbbbbbbbbbbbbbb"}, field_initializer_facts_reliable=True
         )
         r = compare(old, new)
         assert ChangeKind.CONSTANT_CHANGED in _kinds(r)
@@ -1363,7 +1400,7 @@ class TestConstantChanges:
             functions=[],
             variables=[],
             types=[],
-            constants={"K1": "expr:aaaa", "K2": "expr:aaaa"},
+            constants={"K1": "expr:aaaaaaaaaaaaaaaa", "K2": "expr:aaaaaaaaaaaaaaaa"},
             from_headers=True,
             ast_producer=None,
             clang_field_initializer_facts_reliable=False,
@@ -1374,7 +1411,7 @@ class TestConstantChanges:
             functions=[],
             variables=[],
             types=[],
-            constants={"K1": "expr:bbbb", "K2": "expr:cccc"},
+            constants={"K1": "expr:bbbbbbbbbbbbbbbb", "K2": "expr:cccccccccccccccc"},
             from_headers=True,
             ast_producer=None,
             clang_field_initializer_facts_reliable=True,
@@ -1389,13 +1426,48 @@ class TestConstantChanges:
         constant value must still decline the comparison when the NEW
         side's own fingerprint is the one that can't be trusted."""
         old = self._clang_snap(
-            {"K": "expr:aaaa"}, field_initializer_facts_reliable=True
+            {"K": "expr:aaaaaaaaaaaaaaaa"}, field_initializer_facts_reliable=True
         )
         new = self._clang_snap(
-            {"K": "expr:bbbb"}, field_initializer_facts_reliable=False
+            {"K": "expr:bbbbbbbbbbbbbbbb"}, field_initializer_facts_reliable=False
         )
         r = compare(old, new)
         assert ChangeKind.CONSTANT_CHANGED not in _kinds(r)
+
+    def test_genuine_expr_namespace_constant_change_still_reported(self):
+        """The guard matches the FULL clang fingerprint shape (``"expr:"``
+        plus exactly 16 hex digits), not merely the ``"expr:"`` prefix.
+        `dumper_castxml._iter_public_constants` passes its raw XML `init`
+        text straight through, so a real castxml constant referencing a
+        qualified name whose next component happens to spell `expr` (an
+        expression-template library's namespace, say) produces a legitimate
+        verbatim value like `"expr::OLD_VALUE"` -- which a plain prefix
+        check would misidentify as a clang fingerprint and silently
+        suppress the real change (Codex review, fresh evidence, PR #720)."""
+        old = AbiSnapshot(
+            library="libtest.so.1",
+            version="1.0",
+            functions=[],
+            variables=[],
+            types=[],
+            constants={"K": "expr::OLD_VALUE"},
+            from_headers=True,
+            ast_producer=None,
+            clang_field_initializer_facts_reliable=False,
+        )
+        new = AbiSnapshot(
+            library="libtest.so.1",
+            version="1.0",
+            functions=[],
+            variables=[],
+            types=[],
+            constants={"K": "expr::NEW_VALUE"},
+            from_headers=True,
+            ast_producer=None,
+            clang_field_initializer_facts_reliable=False,
+        )
+        r = compare(old, new)
+        assert ChangeKind.CONSTANT_CHANGED in _kinds(r)
 
     def test_stale_fingerprint_guard_does_not_apply_to_hybrid_producer(self):
         """dumper_hybrid.merge_snapshots keeps `constants` verbatim from its
@@ -1410,7 +1482,7 @@ class TestConstantChanges:
             functions=[],
             variables=[],
             types=[],
-            constants={"K": "expr:aaaa"},
+            constants={"K": "expr:aaaaaaaaaaaaaaaa"},
             from_headers=True,
             ast_producer="hybrid",
             clang_field_initializer_facts_reliable=False,
@@ -1421,7 +1493,7 @@ class TestConstantChanges:
             functions=[],
             variables=[],
             types=[],
-            constants={"K": "expr:bbbb"},
+            constants={"K": "expr:bbbbbbbbbbbbbbbb"},
             from_headers=True,
             ast_producer="hybrid",
             clang_field_initializer_facts_reliable=False,
