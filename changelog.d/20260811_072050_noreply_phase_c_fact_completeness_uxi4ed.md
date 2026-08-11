@@ -87,7 +87,12 @@ A new changelog fragment. See changelog.d/README.md for the workflow.
   merge preserves a *bare* `[[deprecated]]` (no message) too — its
   intentionally meaningful `""` marker is distinguished from "no
   attribute at all" rather than being treated as falsy and discarded
-  (Codex review, second round).
+  (Codex review, second round). The merge now also matches real clang's
+  own diagnostic semantics for *conflicting* markers across
+  redeclarations — verified empirically that `-Wdeprecated-declarations`
+  reports whichever redeclaration's marker came LAST in source order, not
+  the first — so a later marker always overwrites an earlier one instead
+  of the merge's own first-wins default (Codex review, third round).
 - **The castxml L4 source-ABI extractor now folds its probed castxml/
   bundled-Clang identity into the D8 per-TU cache key**
   (`CastxmlSourceExtractor.cache_identity_extra()`, Codex review) —

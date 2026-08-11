@@ -543,6 +543,60 @@ def test_parse_types_opaque_redecl_merges_bare_deprecated_marker() -> None:
     assert types[0].deprecated == ""
 
 
+def test_parse_types_opaque_redecl_uses_most_recent_deprecated_reason() -> None:
+    """`struct [[deprecated]] H; struct [[deprecated("old")]] H;` -- real
+    clang's own diagnostic uses the MOST RECENT redeclaration's marker as
+    the effective reason (verified empirically: `-Wdeprecated-declarations`
+    reports "old", pointing at the second decl, not the bare first one; the
+    reverse order reports the bare form). The merge must overwrite with each
+    later marker, not keep whichever (bare or messaged) came first (Codex
+    review, PR #719)."""
+    root = _tu(
+        {
+            "kind": "CXXRecordDecl",
+            "name": "H",
+            "tagUsed": "struct",
+            "loc": {"file": "include/foo.h", "line": 1},
+            "inner": [{"kind": "DeprecatedAttr"}],
+        },
+        {
+            "kind": "CXXRecordDecl",
+            "name": "H",
+            "tagUsed": "struct",
+            "loc": {"file": "include/foo.h", "line": 2},
+            "inner": [{"kind": "DeprecatedAttr", "message": "old"}],
+        },
+    )
+    types = [
+        t for t in _ClangAstParser(root, set(), set()).parse_types() if t.name == "H"
+    ]
+    assert len(types) == 1
+    assert types[0].deprecated == "old"
+
+    # Reversed order: the later (now bare) marker wins instead.
+    root2 = _tu(
+        {
+            "kind": "CXXRecordDecl",
+            "name": "H",
+            "tagUsed": "struct",
+            "loc": {"file": "include/foo.h", "line": 1},
+            "inner": [{"kind": "DeprecatedAttr", "message": "old"}],
+        },
+        {
+            "kind": "CXXRecordDecl",
+            "name": "H",
+            "tagUsed": "struct",
+            "loc": {"file": "include/foo.h", "line": 2},
+            "inner": [{"kind": "DeprecatedAttr"}],
+        },
+    )
+    types2 = [
+        t for t in _ClangAstParser(root2, set(), set()).parse_types() if t.name == "H"
+    ]
+    assert len(types2) == 1
+    assert types2[0].deprecated == ""
+
+
 def test_parse_types_sets_qualified_name_for_namespaced_record() -> None:
     # Codex review (G28 Phase 4): RecordType.qualified_name must be populated
     # for a namespaced/nested type -- the layout tool's own JSON output

@@ -1443,13 +1443,11 @@ class _ClangAstParser:
         )
 
     def parse_types(self) -> list[RecordType]:
-        # Map each anonymous record's clang id → the typedef name that aliases it
-        # (``typedef struct {…} Foo;``), so the unnamed record is emitted as
-        # ``Foo`` with its fields intact rather than dropped (mirrors castxml's
-        # ``typedef_name_for`` alias handling).
+        # Map each anonymous record's clang id → the typedef name that aliases
+        # it, so the unnamed record is emitted with its fields intact rather
+        # than dropped (mirrors castxml's ``typedef_name_for`` alias handling).
         anon_names = self._anon_typedef_names()
-        # Opaque handle types (PR #719): group by identity; a definition
-        # wins over a forward decl. ``deprecated`` merges across redecls.
+        # Opaque handle types (PR #719): group by identity; a definition wins.
         best: dict[str, tuple[_Decl, str]] = {}
         order: list[str] = []
         deprecated: dict[str, str] = {}
@@ -1465,8 +1463,10 @@ class _ClangAstParser:
             if name.startswith("__"):
                 continue
             identity = "::".join([*entry.scope, name]) if entry.scope else name
+            # Real clang's own diagnostic uses the MOST RECENT redecl's marker
+            # (verified empirically) -- later always overwrites earlier here.
             if (msg := _clang_deprecated_message(node)) is not None:  # "" == bare
-                deprecated.setdefault(identity, msg)
+                deprecated[identity] = msg
             if (existing := best.get(identity)) is None:
                 best[identity] = (entry, name)
                 order.append(identity)
