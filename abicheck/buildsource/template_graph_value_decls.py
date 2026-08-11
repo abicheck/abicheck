@@ -74,11 +74,31 @@ def index_value_decls(
     leaving it unresolved, the "degrade, never fabricate" discipline this
     whole family of modules already follows) -- a member-function/static-
     data-member NTTP target is a known, undocumented-until-now gap, left for
-    its own follow-up. A local variable inside a function body is skipped
+    its own follow-up. A local *variable* inside a function body is skipped
     the same way ``type_graph.py``'s own ``enclosing_func`` tracking does --
-    an NTTP target must have external linkage, so it can never legitimately
-    be one, and descending into a function body risks a same-named local
-    shadowing (and silently corrupting) an outer declaration's own entry.
+    an NTTP target must have external linkage, so a local one (``static`` or
+    not) can never legitimately be one. A block-scope *function*
+    declaration is indexed regardless of ``enclosing_func`` (Codex review,
+    verified against real clang output: ``void outer() { extern void
+    target(); ... }`` gives ``target`` a real top-level ``FunctionDecl``
+    node with a genuine ``mangledName``, nested under ``outer``'s own body
+    purely as a matter of C++ scoping syntax) -- unlike a local variable, a
+    block-scope function declaration always has external linkage (barring
+    an explicit ``static``, a distinction this module doesn't special-case
+    any more than it does for a namespace-scope one), so skipping it would
+    only manufacture a false "unresolved" for a genuinely resolvable
+    target.
+
+    ``normalize_mangled`` is applied unconditionally to every indexed
+    identity here, matching ``call_graph._function_identity``'s own
+    unconditional call (not this module's own guarded, exact-first-then-
+    strip join in ``augment_graph_with_templates``) -- **intentionally**,
+    since diverging from it would break the "lands on the same node"
+    promise above. This carries the identical, already-documented "known
+    gap, not fixed here" ``call_graph._normalize_mangled`` accepts for the
+    same reason (Codex review): a literal GNU ``asm("__Zfake")`` label on
+    ELF/Windows collides with a genuine ``_Zfake`` after stripping. Left as
+    a known, cross-module gap rather than special-cased here alone.
     """
     if not isinstance(node, dict):
         return
@@ -100,7 +120,11 @@ def index_value_decls(
                 enclosing_func=enclosing_func,
             )
         return
-    if kind in value_decl_kinds and name and not enclosing_func:
+    if (
+        kind in value_decl_kinds
+        and name
+        and (kind == "FunctionDecl" or not enclosing_func)
+    ):
         node_id = str(node.get("id") or "")
         if node_id:
             type_obj = node.get("type")

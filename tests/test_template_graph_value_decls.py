@@ -228,6 +228,69 @@ def test_reference_nttp_resolves_to_the_target_variables_identity() -> None:
     assert out[0].label == "Holder<_ZN2ns6globalE>"
 
 
+def test_block_scope_extern_function_nttp_target_resolves() -> None:
+    """``void outer() { extern void target(); } Holder<&target>`` -- clang
+    nests a block-scope function declaration under its enclosing function's
+    own AST subtree purely as a matter of scoping syntax (verified
+    empirically), but ``target`` still has real external linkage (Codex
+    review: unlike a local *variable*, a block-scope *function* declaration
+    is never scoped out just because it's lexically nested) -- must resolve
+    the same way a namespace-scope declaration would, not drop the whole
+    instantiation as unresolved."""
+    target_decl = {
+        "id": "0xTARGET",
+        "kind": "FunctionDecl",
+        "name": "target",
+        "mangledName": "_Z6targetv",
+        "type": {"qualType": "void ()"},
+        "storageClass": "extern",
+        "inner": [],
+    }
+    outer = {
+        "kind": "FunctionDecl",
+        "name": "outer",
+        "type": {"qualType": "void ()"},
+        "inner": [target_decl],
+    }
+    holder_pattern = {
+        "kind": "CXXRecordDecl",
+        "name": "Holder",
+        "completeDefinition": True,
+        "inner": [],
+    }
+    holder_instantiation = {
+        "id": "0xSPEC_HOLDER",
+        "kind": "ClassTemplateSpecializationDecl",
+        "name": "Holder",
+        "completeDefinition": True,
+        "inner": [
+            {
+                "kind": "TemplateArgument",
+                "decl": {
+                    "id": "0xTARGET",
+                    "kind": "FunctionDecl",
+                    "name": "target",
+                    "type": {"qualType": "void ()"},
+                },
+            },
+        ],
+    }
+    class_template = {
+        "kind": "ClassTemplateDecl",
+        "name": "Holder",
+        "inner": [
+            {"kind": "NonTypeTemplateParmDecl", "name": "Fn"},
+            holder_pattern,
+            holder_instantiation,
+        ],
+    }
+    ast = {"kind": "TranslationUnitDecl", "inner": [outer, class_template]}
+    out = parse_clang_ast_templates(ast)
+    assert len(out) == 1
+    assert out[0].args == (TemplateArgUse("target", "_Z6targetv", "FunctionDecl"),)
+    assert out[0].label == "Holder<_Z6targetv>"
+
+
 def test_two_var_template_specializations_stay_distinct() -> None:
     """``H<&ns::v<1>>`` and ``H<&ns::v<2>>`` -- two distinct instantiations
     of ``template <int N> int v = N;`` -- must not collide onto one
