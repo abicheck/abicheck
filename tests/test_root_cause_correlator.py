@@ -289,6 +289,17 @@ class TestCorrelateRootCauses:
         ]
 
 
+class TestRootCauseGroupEmptyMembers:
+    def test_strongest_evidence_level_is_none_for_an_empty_group(self) -> None:
+        # correlate_root_causes never itself produces a group with 0
+        # members, but RootCauseGroup is a plain public dataclass -- pin
+        # its own defensive guard directly rather than only through the
+        # (unreachable-via-correlate_root_causes) caller path.
+        group = RootCauseGroup(root_cause_id="deadbeef", root_display="s", members=())
+        assert group.strongest_evidence_level is None
+        assert group.evidence_levels == ()
+
+
 class TestEvidenceLevelVocabulary:
     def test_every_correlated_kind_has_a_distinct_level(self) -> None:
         levels = list(EVIDENCE_LEVEL_BY_KIND.values())

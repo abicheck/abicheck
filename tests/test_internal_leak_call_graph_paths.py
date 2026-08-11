@@ -145,3 +145,22 @@ class TestBuildCallGraphLeakChangePreferredPath:
         )
         description = change.description or ""
         assert f"{exact_first}; {overapprox_second}" in description
+
+    def test_empty_proof_paths_produces_no_reachability_proof_path(self) -> None:
+        # Not reached by the real caller (_diff_call_graph_leaks skips a
+        # dname with no proof_paths at all), but the function's own None
+        # branch is worth pinning directly rather than only through the
+        # caller's guard.
+        change = _build_call_graph_leak_change(
+            "ns::detail::helper",
+            [
+                Change(
+                    kind=ChangeKind.FUNC_REMOVED,
+                    symbol="ns::detail::helper",
+                    description="removed",
+                )
+            ],
+            [],
+        )
+        assert change.reachability_proof_path is None
+        assert "Call/reference paths: ." in (change.description or "")
