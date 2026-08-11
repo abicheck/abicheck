@@ -266,6 +266,7 @@ class TestPostProcessingPipeline:
             "deduplicate_ast_dwarf",
             "deduplicate_cross_detector",
             "downgrade_opaque_type_changes",
+            "suppress_layout_unverifiable_covered_by_vtable_changed",
             "enrich_source_locations",
             "filter_non_public_surface",
             "demote_off_python_surface",

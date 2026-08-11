@@ -177,6 +177,67 @@ class DowngradeOpaqueTypeChanges:
         return _downgrade_opaque_type_changes(changes, ctx.old, ctx.new)
 
 
+class SuppressLayoutUnverifiableCoveredByVtableChanged:
+    """Fold a ``LAYOUT_UNVERIFIABLE`` finding into ``ctx.redundant`` when a
+    ``TYPE_VTABLE_CHANGED`` on the *exact same type* already reports the
+    identical asymmetric-evidence gap.
+
+    ``diff_types._vtable_transition_is_evidenced`` and
+    ``diff_layout._check_layout_unverifiable`` both key off the same "one
+    side has real layout evidence, the other has none" condition. The
+    vtable detector correctly stays BREAKING for it (an unknown size
+    "corroborates nothing but also refutes nothing", so the finding must be
+    kept — see AGENTS.md's "Findings emitted from absent evidence" entry for
+    why demoting it is unsafe: a real removal of a class's last virtual
+    method, with the new side's debug info happening not to cover it, is
+    indistinguishable from this same gap). The layout detector reports the
+    identical gap as calm, non-escalating ``LAYOUT_UNVERIFIABLE`` RISK. Both
+    are individually correct, but landing on the same type in the same
+    report reads as two detectors disagreeing about one piece of evidence
+    (reproducible with zero real ABI change — scanning a binary against a
+    dump of itself).
+
+    Since the BREAKING finding already reports this exact gap for this
+    exact type, the RISK advisory adds no new information — it is folded
+    away as redundant (``ctx.redundant``, the same bucket
+    ``FilterRedundant`` already uses for a derived finding subsumed by its
+    root), never dropped silently. This never touches ``TYPE_VTABLE_CHANGED``
+    itself, so a genuine break can never be masked by this step — it can
+    only ever remove a duplicate advisory.
+
+    Correlated via ``Change.qualified_name`` (the type's real, namespaced
+    identity — both producers set it for exactly this purpose), not the
+    bare ``Change.symbol`` two distinct same-named records in different
+    namespaces could share.
+    """
+
+    name = "suppress_layout_unverifiable_covered_by_vtable_changed"
+
+    def run(self, changes: list[Change], ctx: PipelineContext) -> list[Change]:
+        from .checker_policy import ChangeKind
+
+        covered_types = {
+            c.qualified_name
+            for c in changes
+            if c.kind == ChangeKind.TYPE_VTABLE_CHANGED
+            and c.modulation_reason == "layout_unverifiable_same_type"
+            and c.qualified_name
+        }
+        if not covered_types:
+            return changes
+        kept: list[Change] = []
+        for c in changes:
+            if (
+                c.kind == ChangeKind.LAYOUT_UNVERIFIABLE
+                and c.qualified_name in covered_types
+            ):
+                c.caused_by_type = c.qualified_name
+                ctx.redundant.append(c)
+                continue
+            kept.append(c)
+        return kept
+
+
 class EnrichSourceLocations:
     """Add source location metadata for suppression matching."""
 
@@ -1374,6 +1435,12 @@ DEFAULT_PIPELINE = PostProcessingPipeline(
         DeduplicateAstDwarf(),
         DeduplicateCrossDetector(),
         DowngradeOpaqueTypeChanges(),
+        # Reads markers TYPE_VTABLE_CHANGED set at emission time (diff_types.py)
+        # to fold a redundant LAYOUT_UNVERIFIABLE finding covering the identical
+        # evidence gap into ctx.redundant. Runs before FilterRedundant engages
+        # the ctx.kept aliasing contract, so returning a new filtered list here
+        # is safe.
+        SuppressLayoutUnverifiableCoveredByVtableChanged(),
         EnrichSourceLocations(),
         FilterNonPublicSurface(),
         # Runs immediately after FilterNonPublicSurface so it can read the

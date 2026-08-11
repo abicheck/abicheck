@@ -20,7 +20,7 @@ import re
 from collections import Counter
 from collections.abc import Collection, Mapping
 
-from .checker_policy import ChangeKind, Verdict
+from .checker_policy import ChangeKind
 from .checker_types import Change
 from .detector_registry import registry
 from .diff_cxx_rules import itanium_qualified_name, vtable_slot_is_override_reuse
@@ -1411,18 +1411,43 @@ def _diff_type_vtable(
         old_value=", ".join(t_old.vtable),
         new_value=", ".join(t_new.vtable),
     )
-    # Degrade to RISK when this finding rests on the identical evidence gap
-    # LAYOUT_UNVERIFIABLE reports for the same (exact, already type-matched)
-    # RecordType pair -- see both helpers' own docstrings for why each half
-    # of this condition is required (Codex review).
+    # Tag (never demote) when this finding rests on the identical evidence
+    # gap LAYOUT_UNVERIFIABLE reports for the same (exact, already
+    # type-matched) RecordType pair.
+    #
+    # An earlier revision of this fix set ``effective_verdict =
+    # COMPATIBLE_WITH_RISK`` here instead -- wrong, and wrong for a reason
+    # this file's own AGENTS.md "Findings emitted from absent evidence"
+    # entry already states for the sibling suppression this mirrors: "an
+    # unknown size on either side corroborates nothing but also refutes
+    # nothing, so the finding is kept... not a fallback for missing
+    # information." The genuinely ambiguous case this branch identifies --
+    # old vtable populated, new vtable empty/differing, new-side evidence
+    # missing -- is indistinguishable from a real removal of the class's
+    # last virtual method whose only definition happens to live in a TU the
+    # new side's debug info doesn't cover (Codex review, fresh evidence: a
+    # pure-virtual method absent from both function maps reaches exactly
+    # this branch). Demoting BREAKING to RISK there risks hiding a real ABI
+    # break behind a capture gap, the opposite of this codebase's documented
+    # default (false-negative-avoidance over false-positive-avoidance).
+    #
+    # So the finding stays BREAKING here, full stop. Instead this only
+    # records ``qualified_name`` + a stable marker so a post-processing step
+    # (``post_processing.SuppressLayoutUnverifiableCoveredByVtableChanged``)
+    # can recognize that THIS type's LAYOUT_UNVERIFIABLE finding is
+    # redundant -- fully subsumed by this stronger, already-BREAKING
+    # finding for the exact same evidence gap -- and fold it away as
+    # redundant rather than reporting the same gap twice at two different
+    # (and, before this fix, contradictory-looking) severities. Removing the
+    # redundant advisory can never turn a real break into a non-break, since
+    # it never touches a BREAKING finding's severity.
     if _vtable_transition_rests_on_unresolved_evidence(
         name, t_old, t_new, old_funcs, new_funcs
     ) and _layout_evidence_is_unverifiable(
         t_old, t_new, vtable_facts_reliable=vtable_facts_reliable
     ):
-        change.effective_verdict = Verdict.COMPATIBLE_WITH_RISK
+        change.qualified_name = t_new.qualified_name or t_new.name
         change.modulation_reason = "layout_unverifiable_same_type"
-        change.modulation_rule = "degrade_vtable_changed_for_unverifiable_layout"
     return [change]
 
 

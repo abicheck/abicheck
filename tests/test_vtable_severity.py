@@ -542,28 +542,33 @@ class TestClangVtableFactsReliabilityGate:
         assert ChangeKind.LAYOUT_UNVERIFIABLE not in kinds
 
 
-class TestVtableChangedDegradedByLayoutUnverifiable:
-    """One evidence gap must not classify BREAKING on one detector and
-    non-escalating RISK on another for the *same* type
+class TestLayoutUnverifiableSuppressedByVtableChanged:
+    """One evidence gap must not be reported at two different (and, before
+    this fix, contradictory-looking) severities for the *same* type
     (``diff_types._vtable_transition_rests_on_unresolved_evidence`` +
-    ``_layout_evidence_is_unverifiable``).
+    ``_layout_evidence_is_unverifiable`` +
+    ``post_processing.SuppressLayoutUnverifiableCoveredByVtableChanged``).
 
     ``_vtable_transition_is_evidenced`` (diff_types.py) treats an unknown
     ``size_bits`` on either side as "keep the finding" (BREAKING), while
     ``_check_layout_unverifiable`` (diff_layout.py) treats the identical
-    asymmetric-evidence condition as calm, non-escalating RISK. When both
-    fire on the same type for the same reason, TYPE_VTABLE_CHANGED must be
-    demoted to match — but only when the vtable finding itself rests on that
-    unresolved-size gap, and only when correlated against the exact
-    type-matched RecordType pair, not a same-named-but-different type.
+    asymmetric-evidence condition as calm, non-escalating RISK. TYPE_VTABLE_
+    CHANGED always stays BREAKING — demoting it would risk hiding a real
+    last-virtual-method removal indistinguishable from this same evidence
+    gap (Codex review) — so instead, when both fire on the same type for
+    the same reason, the redundant LAYOUT_UNVERIFIABLE advisory is folded
+    into ``redundant_changes`` rather than reported twice. Correlation uses
+    the exact type-matched RecordType pair via ``qualified_name``, never a
+    same-named-but-different type.
     """
 
-    def test_vtable_changed_degraded_when_layout_unverifiable_same_type(
+    def test_layout_unverifiable_suppressed_when_vtable_changed_covers_same_gap(
         self,
     ) -> None:
         """A type with asymmetric layout evidence and a differing vtable list
-        emits both LAYOUT_UNVERIFIABLE and TYPE_VTABLE_CHANGED, and the
-        latter is degraded to COMPATIBLE_WITH_RISK rather than BREAKING."""
+        emits TYPE_VTABLE_CHANGED (BREAKING); the co-occurring
+        LAYOUT_UNVERIFIABLE for the same gap is folded into redundant_changes
+        rather than also reported as a top-level finding."""
         old = _snap(
             types=[
                 RecordType(
@@ -590,18 +595,22 @@ class TestVtableChangedDegradedByLayoutUnverifiable:
         )
         result = compare(old, new)
         changes_by_kind = {c.kind: c for c in result.changes}
-        assert ChangeKind.LAYOUT_UNVERIFIABLE in changes_by_kind
+        assert ChangeKind.LAYOUT_UNVERIFIABLE not in changes_by_kind
         assert ChangeKind.TYPE_VTABLE_CHANGED in changes_by_kind
 
         vtable_change = changes_by_kind[ChangeKind.TYPE_VTABLE_CHANGED]
-        assert vtable_change.effective_verdict == Verdict.COMPATIBLE_WITH_RISK
+        assert vtable_change.effective_verdict is None
         assert vtable_change.modulation_reason == "layout_unverifiable_same_type"
-        assert result.verdict != Verdict.BREAKING
+        assert vtable_change.qualified_name == "Foo"
+        assert result.verdict == Verdict.BREAKING
+
+        redundant_kinds = {c.kind for c in result.redundant_changes}
+        assert ChangeKind.LAYOUT_UNVERIFIABLE in redundant_kinds
 
     def test_vtable_changed_stays_breaking_without_layout_unverifiable(self) -> None:
         """No matching LAYOUT_UNVERIFIABLE for the type → TYPE_VTABLE_CHANGED
-        keeps its ordinary BREAKING severity (regression guard: the demotion
-        must not fire universally)."""
+        keeps its ordinary BREAKING severity and no tagging happens
+        (regression guard: the correlation must not fire universally)."""
         old = _snap(types=[RecordType(
             name="Widget", kind="class",
             vtable=["_ZN6Widget4drawEv", "_ZN6Widget5paintEv"],
@@ -615,13 +624,16 @@ class TestVtableChangedDegradedByLayoutUnverifiable:
         assert ChangeKind.LAYOUT_UNVERIFIABLE not in changes_by_kind
         vtable_change = changes_by_kind[ChangeKind.TYPE_VTABLE_CHANGED]
         assert vtable_change.effective_verdict is None
+        assert vtable_change.modulation_reason is None
         assert result.verdict == Verdict.BREAKING
 
-    def test_both_sides_populated_vtable_change_not_demoted(self) -> None:
+    def test_both_sides_populated_vtable_change_not_tagged(self) -> None:
         """A real reorder (both vtable lists populated on the SAME type that
         also carries an unrelated LAYOUT_UNVERIFIABLE finding) must stay
-        BREAKING — real evidence is never demoted just because the same type
-        also has an unresolved-size gap elsewhere (Codex review, P1)."""
+        BREAKING, and the LAYOUT_UNVERIFIABLE finding must NOT be suppressed
+        — real evidence never triggers this correlation just because the
+        same type also has an unresolved-size gap elsewhere (Codex review,
+        P1)."""
         old = _snap(types=[RecordType(
             name="Foo", kind="class",
             vtable=["_ZN3Foo1fEv", "_ZN3Foo1gEv"],
@@ -634,7 +646,7 @@ class TestVtableChangedDegradedByLayoutUnverifiable:
             # Populates the layout descriptor on the new side only, so
             # LAYOUT_UNVERIFIABLE fires for this same type too — but the
             # vtable reorder itself rests on real (both-populated) evidence,
-            # not the unresolved-size gap, so it must not be demoted.
+            # not the unresolved-size gap, so it must not be tagged/folded.
             base_offsets={"Base": 0},
         )])
         result = compare(old, new)
@@ -642,14 +654,14 @@ class TestVtableChangedDegradedByLayoutUnverifiable:
         assert ChangeKind.LAYOUT_UNVERIFIABLE in changes_by_kind
         vtable_change = changes_by_kind[ChangeKind.TYPE_VTABLE_CHANGED]
         assert vtable_change.effective_verdict is None
+        assert vtable_change.modulation_reason is None
         assert result.verdict == Verdict.BREAKING
 
-    def test_virtual_base_change_not_demoted_even_with_unknown_size(self) -> None:
+    def test_virtual_base_change_not_tagged_even_with_unknown_size(self) -> None:
         """A genuine virtual-base addition is real, independent evidence —
-        it must not be demoted just because size_bits also happens to be
-        unknown (and LAYOUT_UNVERIFIABLE also fires for the same type from
-        an unrelated asymmetric layout-descriptor gap) (Codex review, P2
-        follow-up)."""
+        the co-occurring LAYOUT_UNVERIFIABLE for the same type must not be
+        suppressed just because size_bits also happens to be unknown
+        (Codex review, P2 follow-up)."""
         old = _snap(types=[RecordType(
             name="Foo", kind="class",
             vtable=[],
@@ -668,7 +680,47 @@ class TestVtableChangedDegradedByLayoutUnverifiable:
         assert ChangeKind.LAYOUT_UNVERIFIABLE in changes_by_kind
         vtable_change = changes_by_kind[ChangeKind.TYPE_VTABLE_CHANGED]
         assert vtable_change.effective_verdict is None
+        assert vtable_change.modulation_reason is None
         assert result.verdict == Verdict.BREAKING
+
+    def test_bare_name_collision_does_not_cross_suppress(self) -> None:
+        """Two distinct types sharing only a bare leaf name in different
+        namespaces must not correlate: ``ns2::Foo``'s ambiguous vtable gap
+        must not suppress ``ns1::Foo``'s unrelated, real LAYOUT_UNVERIFIABLE
+        finding (Codex review, P2)."""
+        old = _snap(types=[
+            RecordType(
+                name="Foo", qualified_name="ns1::Foo", kind="class",
+                vtable=["_ZN3ns13Foo1fEv"],
+                size_bits=None,
+            ),
+            RecordType(
+                name="Foo", qualified_name="ns2::Foo", kind="class",
+                vtable=[], size_bits=None,
+            ),
+        ])
+        new = _snap(types=[
+            RecordType(
+                name="Foo", qualified_name="ns1::Foo", kind="class",
+                vtable=["_ZN3ns13Foo1fEv"],
+                size_bits=None,
+                # ns1::Foo's own unrelated asymmetric-evidence gap — must
+                # stay reported, not be suppressed by ns2::Foo's ambiguous
+                # vtable transition below.
+                base_offsets={"Base": 0},
+            ),
+            RecordType(
+                name="Foo", qualified_name="ns2::Foo", kind="class",
+                vtable=["_ZN3ns23Foo1hEv"],
+                size_bits=None,
+                base_offsets={"Base": 0},  # ns2::Foo's own ambiguous gap
+            ),
+        ])
+        result = compare(old, new)
+        layout_findings = [
+            c for c in result.changes if c.kind == ChangeKind.LAYOUT_UNVERIFIABLE
+        ]
+        assert any(c.qualified_name == "ns1::Foo" for c in layout_findings)
 
     def test_bare_name_collision_does_not_cross_contaminate(self) -> None:
         """Two distinct types sharing only a bare leaf name in different
