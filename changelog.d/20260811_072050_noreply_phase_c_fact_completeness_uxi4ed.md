@@ -143,4 +143,30 @@ A new changelog fragment. See changelog.d/README.md for the workflow.
   and location (the most-public declaration, ties keeping whichever was
   already kept) independently, mirroring the same location-preservation
   principle `tu_merge.py`'s own cross-TU merge already applies (Codex
-  review, PR #719).
+  review, PR #719). A follow-up round on the same fix (Codex review)
+  fixed a real regression it introduced: the canonicalized opaque kind
+  was applied unconditionally to whichever record won, including a
+  COMPLETE definition sharing an identity with a differently-keyed
+  opaque redecl — silently hiding a real kind change on the definition
+  itself (`class Foo;` unchanged, `class Foo {...};` → `struct Foo
+  {...};`). `override_kind` is now only honored for a surviving opaque
+  (non-definition) record; a definition's own kind always wins.
+- **`check_fact_compatibility()`'s inconsistent-rollup fix (above) now
+  also gates `structured_facts_comparable` (existence/removal
+  detection), not just the recipe-dependent categories** (Codex review)
+  — an inconsistent side's `{}` cannot establish absence either (a
+  family missing only because a mixed-in producer variant never
+  collects it looks identical to a real removal), so
+  `generated_header_changed`/`public_typedef_removed`/
+  `public_macro_removed`/`inline_function_removed`/
+  `uninstantiated_template_removed` removal detection is now suppressed
+  too when either side's fact_set is inconsistent. The pre-existing
+  asymmetric-absence exemption (one side simply never stamped a
+  fact_set) is untouched — that forward-compat contract predates this
+  PR and isn't part of this gap.
+- **The castxml `compiler_version` probe (`_castxml_tool_version()`) is
+  now bound by the active scan `--budget` deadline**, not a bare
+  `subprocess.run(timeout=5)` (Codex review) — it now goes through the
+  same `run_bounded_for_extraction()` path every other subprocess this
+  extractor runs already uses, so a stalled probe under a short
+  remaining budget fails fast instead of silently eating up to 5s of it.

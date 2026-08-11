@@ -269,7 +269,8 @@ def _diff_fact_coverage(
             " generated_header_changed/public_typedef_removed/public_macro_removed/"
             "inline_function_removed/uninstantiated_template_removed removal "
             "detection is suppressed for this comparison because the fact_set "
-            "name/version mismatch means an entity's absence may only reflect "
+            "name/version mismatch (or a mixed-producer pack whose own TUs "
+            "disagreed on fact_set) means an entity's absence may only reflect "
             "the old contract never collecting its family, not an actual "
             "removal."
         )

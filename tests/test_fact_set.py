@@ -209,14 +209,19 @@ def test_check_fact_compatibility_inconsistent_rollup_is_not_forgiven_like_absen
     """Both sides collapse to the SAME ``{}`` fact_set as the genuinely
     both-absent case, but one side's ``{}`` came from an inconsistent
     mixed-producer pack (not "never reported") -- must not receive the
-    same forgiveness (Codex review, PR #719)."""
+    same forgiveness (Codex review, PR #719), including for existence/
+    removal detection: an inconsistent side cannot establish absence
+    either (second round -- unlike the pre-existing asymmetric-absence
+    exemption, which is deliberately untouched)."""
     compat = check_fact_compatibility({}, {}, old_inconsistent=True)
-    assert compat.structured_facts_comparable  # existence/removal untouched
+    assert not compat.structured_facts_comparable
     assert not compat.structured_content_comparable
     assert not compat.opaque_hashes_comparable
     assert not compat.source_edges_comparable
     # Symmetric (both absent, neither inconsistent) case is untouched.
-    assert check_fact_compatibility({}, {}).structured_content_comparable
+    both_absent = check_fact_compatibility({}, {})
+    assert both_absent.structured_facts_comparable
+    assert both_absent.structured_content_comparable
 
 
 def test_rollup_coverage_worst_of_wins() -> None:

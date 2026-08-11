@@ -1447,7 +1447,7 @@ class _ClangAstParser:
         best: dict[str, tuple[_Decl, str]] = {}
         order: list[str] = []
         deprecated: dict[str, str] = {}
-        opaque_kinds: dict[str, str] = {}  # min(kind), non-def redecls (PR #719)
+        opaque_kinds: dict[str, str] = {}  # min(kind) of non-def redecls
         for entry in self._records:
             node = entry.node
             if _is_builtin_file(entry.file):
@@ -1506,7 +1506,7 @@ class _ClangAstParser:
         override_kind: str | None = None,
     ) -> RecordType:
         node = entry.node
-        kind = override_kind or _record_kind(node)
+        kind = override_kind if is_opaque and override_kind else _record_kind(node)
         own_name = override_name or str(node.get("name", ""))
         deprecated = dep_msg if dep_msg is not None else _clang_deprecated_message(node)
         if is_opaque:

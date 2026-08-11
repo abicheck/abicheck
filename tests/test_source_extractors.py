@@ -318,9 +318,12 @@ def test_extract_runs_in_compile_unit_directory(tmp_path: Path, monkeypatch) -> 
 
     class _Result:
         returncode = 0
+        stdout = ""
         stderr = ""
 
     def _fake_run(cmd: list[str], **kw: object) -> _Result:
+        if "-o" not in cmd:  # the --version compiler-identity probe
+            return _Result()
         captured["cwd"] = kw.get("cwd")
         out = cmd[cmd.index("-o") + 1]
         Path(out).write_text('<GCC_XML><File id="f1" name="foo.h"/></GCC_XML>')
@@ -346,9 +349,12 @@ def test_extract_uses_deadline_bounded_not_raw_subprocess(monkeypatch) -> None:
 
     class _Result:
         returncode = 0
+        stdout = ""
         stderr = ""
 
     def _fake_run(cmd, **kw):  # type: ignore[no-untyped-def]
+        if "-o" not in cmd:  # the --version compiler-identity probe
+            return _Result()
         seen.update(kw)
         out = cmd[cmd.index("-o") + 1]
         Path(out).write_text('<GCC_XML><File id="f1" name="foo.h"/></GCC_XML>')
@@ -532,9 +538,12 @@ def test_extract_unredacts_home_for_replay(tmp_path: Path, monkeypatch) -> None:
 
     class _Result:
         returncode = 0
+        stdout = ""
         stderr = ""
 
     def _fake_run(cmd: list[str], **kw: object) -> _Result:
+        if "-o" not in cmd:  # the --version compiler-identity probe
+            return _Result()
         captured["cmd"] = cmd
         captured["cwd"] = kw.get("cwd")
         out = cmd[cmd.index("-o") + 1]
@@ -570,9 +579,12 @@ def test_extract_unredacts_home_in_macro_value(tmp_path: Path, monkeypatch) -> N
 
     class _Result:
         returncode = 0
+        stdout = ""
         stderr = ""
 
     def _fake_run(cmd: list[str], **kw: object) -> _Result:
+        if "-o" not in cmd:  # the --version compiler-identity probe
+            return _Result()
         captured["cmd"] = cmd
         out = cmd[cmd.index("-o") + 1]
         Path(out).write_text('<GCC_XML><File id="f1" name="foo.h"/></GCC_XML>')
@@ -1084,7 +1096,7 @@ def test_castxml_tool_version_includes_bundled_clang_identity(monkeypatch) -> No
             stderr="",
         )
 
-    monkeypatch.setattr(castxml_mod.subprocess, "run", fake_run)
+    monkeypatch.setattr(castxml_mod.deadline, "run_bounded", fake_run)
     version = castxml_mod._castxml_tool_version("castxml")
     assert version.startswith("0.6.3")
     assert "clang version 17.0.6" in version
@@ -1117,7 +1129,7 @@ def test_castxml_tool_version_recognizes_llvm_spelled_banner(monkeypatch) -> Non
             stderr="",
         )
 
-    monkeypatch.setattr(castxml_mod.subprocess, "run", fake_run)
+    monkeypatch.setattr(castxml_mod.deadline, "run_bounded", fake_run)
     version = castxml_mod._castxml_tool_version("castxml")
     assert "LLVM version 18.1.8" in version
     castxml_mod._castxml_tool_version.cache_clear()
@@ -1142,7 +1154,7 @@ def test_castxml_tool_version_reads_stderr_banner(monkeypatch) -> None:
             stderr="castxml version 0.6.3\nUbuntu clang version 17.0.6\n",
         )
 
-    monkeypatch.setattr(castxml_mod.subprocess, "run", fake_run)
+    monkeypatch.setattr(castxml_mod.deadline, "run_bounded", fake_run)
     version = castxml_mod._castxml_tool_version("castxml")
     assert version.startswith("0.6.3")
     assert "clang version 17.0.6" in version
@@ -1167,9 +1179,35 @@ def test_castxml_tool_version_matches_banner_case_insensitively(monkeypatch) -> 
             stderr="",
         )
 
-    monkeypatch.setattr(castxml_mod.subprocess, "run", fake_run)
+    monkeypatch.setattr(castxml_mod.deadline, "run_bounded", fake_run)
     version = castxml_mod._castxml_tool_version("castxml")
     assert version.startswith("0.6.3")
+    castxml_mod._castxml_tool_version.cache_clear()
+
+
+def test_castxml_tool_version_is_bound_by_deadline_run_bounded(monkeypatch) -> None:
+    """Codex review, PR #719, fifth round: the probe previously called plain
+    ``subprocess.run(timeout=5)``, ignoring an active scan ``--budget``
+    deadline shorter than 5s -- it must go through the same
+    deadline-aware bounded path (``deadline.run_bounded``, via
+    ``run_bounded_for_extraction``) as every other subprocess this
+    extractor runs, and degrade to "" (not raise) when that path times
+    out or the scan deadline is exceeded."""
+    from abicheck import deadline
+    from abicheck.buildsource.source_extractors import castxml as castxml_mod
+
+    castxml_mod._castxml_tool_version.cache_clear()
+    seen: dict[str, object] = {}
+
+    def fake_run_bounded(cmd, **kw):  # type: ignore[no-untyped-def]
+        seen["cmd"] = cmd
+        seen["timeout"] = kw.get("timeout")
+        raise deadline.DeadlineExceeded(-1.0)
+
+    monkeypatch.setattr(castxml_mod.deadline, "run_bounded", fake_run_bounded)
+    assert castxml_mod._castxml_tool_version("castxml") == ""
+    assert seen["cmd"] == ["castxml", "--version"]
+    assert seen["timeout"] == 5
     castxml_mod._castxml_tool_version.cache_clear()
 
 

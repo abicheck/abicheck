@@ -648,6 +648,36 @@ def test_parse_types_opaque_redecl_keeps_public_location_over_private() -> None:
     assert types2[0].source_location == "include/foo.h:2"
 
 
+def test_parse_types_definition_kind_not_overridden_by_opaque_redecl() -> None:
+    """`class Foo;` (unchanged) followed by a definition changing from
+    `class Foo { ... };` to `struct Foo { ... };` -- the opaque forward
+    decl's own canonicalized `opaque_kinds` entry ("class") must NOT also
+    apply to the surviving COMPLETE record, or a real kind change on the
+    definition itself would be silently hidden (Codex review, PR #719)."""
+    root = _tu(
+        {
+            "kind": "CXXRecordDecl",
+            "name": "Foo",
+            "tagUsed": "class",
+            "loc": {"file": "include/foo.h", "line": 1},
+        },
+        {
+            "kind": "CXXRecordDecl",
+            "name": "Foo",
+            "tagUsed": "struct",
+            "loc": {"file": "include/foo.h", "line": 2},
+            "completeDefinition": True,
+            "inner": [{"kind": "FieldDecl", "name": "x", "type": {"qualType": "int"}}],
+        },
+    )
+    types = [
+        t for t in _ClangAstParser(root, set(), set()).parse_types() if t.name == "Foo"
+    ]
+    assert len(types) == 1
+    assert types[0].is_opaque is False
+    assert types[0].kind == "struct"  # the definition's own kind, not "class"
+
+
 def test_parse_types_sets_qualified_name_for_namespaced_record() -> None:
     # Codex review (G28 Phase 4): RecordType.qualified_name must be populated
     # for a namespaced/nested type -- the layout tool's own JSON output

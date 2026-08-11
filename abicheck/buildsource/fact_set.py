@@ -479,7 +479,13 @@ def check_fact_compatibility(
     symmetric-absence forgiveness either: a mixed-producer pack whose own
     TUs disagreed on `fact_set`. That side's ``{}`` means "TUs disagree",
     not "no evidence either way", so it is exactly as untrustworthy as the
-    asymmetric case above (Codex review, PR #719).
+    asymmetric case above (Codex review, PR #719) -- and unlike that
+    asymmetric case, it also gates ``structured_facts_comparable``
+    (existence/removal detection): a genuinely inconsistent side cannot
+    establish absence either (a family missing because a mixed-in producer
+    variant never collects it looks identical to a real removal), whereas
+    the pre-C.8 asymmetric-absence exemption above predates this PR and is
+    intentionally left as-is.
     """
     issues = check_fact_set_compatibility(old_fact_set, new_fact_set)
     rules = {issue.rule for issue in issues}
@@ -502,7 +508,7 @@ def check_fact_compatibility(
         agrees_base and not (rules & _SOURCE_EDGE_OVERRIDABLE_RULES)
     )
     return FactCompatibility(
-        structured_facts_comparable=not hard_blocked,
+        structured_facts_comparable=not hard_blocked and not inconsistent,
         structured_content_comparable=not hard_blocked and structured_content_agrees,
         opaque_hashes_comparable=not hard_blocked and recipe_agrees,
         source_edges_comparable=not hard_blocked and source_edge_recipe_agrees,

@@ -31,7 +31,6 @@ from __future__ import annotations
 import functools
 import re
 import shutil
-import subprocess
 import tempfile
 from pathlib import Path
 from typing import cast
@@ -113,12 +112,17 @@ def _castxml_tool_version(castxml_bin: str) -> str:
     gate rejects (CLAUDE.md "M1-3").
     """
     try:
-        r = subprocess.run(
+        # Bounded by the active scan --budget, not just this call's own 5s
+        # cap (Codex review) -- a stalled probe under a short remaining
+        # budget must fail fast, same as every other subprocess this
+        # extractor runs, rather than silently eating up to 5s of it.
+        r = run_bounded_for_extraction(
             [castxml_bin, "--version"],
+            timeout=5,
+            tool_label="castxml --version",
+            unit_label=castxml_bin,
             capture_output=True,
             text=True,
-            timeout=5,
-            check=False,
         )
         if r.returncode != 0:
             return ""
@@ -135,7 +139,7 @@ def _castxml_tool_version(castxml_bin: str) -> str:
         if bundled:
             return f"{castxml_ver}; {bundled.group(0).strip()}"
         return castxml_ver
-    except (OSError, subprocess.TimeoutExpired):
+    except (OSError, SourceExtractionError):
         return ""
 
 
