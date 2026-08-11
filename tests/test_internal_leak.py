@@ -1968,7 +1968,11 @@ class TestTraversalPolicy:
                 _decl_node("decl://pub", "pubFn", "public_header"),
                 _decl_node("decl://int", "ns::detail::helper", "source"),
             ],
-            [GraphEdge(src="decl://pub", dst="decl://int", kind="DECL_REFERENCES_DECL")],
+            [
+                GraphEdge(
+                    src="decl://pub", dst="decl://int", kind="DECL_REFERENCES_DECL"
+                )
+            ],
         )
         paths = compute_call_graph_leak_paths(snap)
         assert "ns::detail::helper" in paths
