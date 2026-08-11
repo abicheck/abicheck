@@ -53,6 +53,24 @@ of its own; its ``symbol`` *is* the shared identity other findings key
 against). This mirrors ``_root_cause_key_and_display``'s
 ``caused_by_type``-else-``symbol`` precedence, applied here to a fixed,
 four-kind family instead of every ``ChangeKind`` in the report.
+
+Evidence level is derived from :data:`EVIDENCE_LEVEL_BY_KIND` (a per-``kind``
+default), then promoted when ``Change.reachability_kind`` states a stronger
+tier the kind alone wouldn't reveal (see :func:`_evidence_level_for`) — this
+covers ``appcompat._attach_consumer_impact``, which enriches an *existing*
+``FUNC_REMOVED`` in place with ``reachability_kind="consumer_proven"``
+instead of emitting a separate ``CONSUMER_REQUIRED_SYMBOL_REMOVED`` overlay
+whenever ``uncovered_missing_symbols`` finds the symbol already covered
+(Codex review, fresh evidence: without this promotion, a shared Change
+carrying real consumer proof read back as the weaker kind-only
+``artifact_proven``, silently understating a group's
+``strongest_evidence_level``). What this promotion does **not** attempt: a
+``FUNC_REMOVED`` from a header-only comparison (no export table ever
+consulted) still reads as ``artifact_proven`` by default, since nothing in
+:class:`~abicheck.checker_types.Change` records *which* evidence tier
+actually produced a given finding — the same per-finding-provenance gap
+``AGENTS.md``'s "Evidence-provider model" entry documents as a deliberately
+deferred, multi-day project of its own, not a drive-by fix here.
 """
 
 from __future__ import annotations
@@ -135,6 +153,25 @@ class RootCauseGroup:
         }
 
 
+def _evidence_level_for(change: Change) -> str:
+    """*change*'s evidence level: its kind's default from
+    :data:`EVIDENCE_LEVEL_BY_KIND`, promoted to ``"consumer_proven"`` when
+    ``reachability_kind`` says so and that outranks the kind default.
+
+    Only ever called for a *change* whose ``kind`` is already a key of
+    :data:`EVIDENCE_LEVEL_BY_KIND` (:func:`correlate_root_causes` filters to
+    that set before this runs), so the base lookup is total, not a
+    ``.get()`` with a ``None`` fallback.
+    """
+    base = EVIDENCE_LEVEL_BY_KIND[change.kind]
+    if (
+        change.reachability_kind == "consumer_proven"
+        and _EVIDENCE_RANK["consumer_proven"] > _EVIDENCE_RANK[base]
+    ):
+        return "consumer_proven"
+    return base
+
+
 def _correlation_key(change: Change) -> str | None:
     """The shared symbol identity *change*'s evidence is actually about, or
     ``None`` when it carries neither — never reachable for the four kinds
@@ -175,7 +212,7 @@ def correlate_root_causes(changes: list[Change]) -> list[RootCauseGroup]:
         if len(members) < 2:
             continue
         root_cause_id = hashlib.sha256(key.encode("utf-8")).hexdigest()[:16]
-        member_pairs = tuple((c, EVIDENCE_LEVEL_BY_KIND[c.kind]) for c in members)
+        member_pairs = tuple((c, _evidence_level_for(c)) for c in members)
         groups.append(
             RootCauseGroup(
                 root_cause_id=root_cause_id, root_display=key, members=member_pairs

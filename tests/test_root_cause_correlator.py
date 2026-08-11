@@ -100,6 +100,52 @@ class TestCorrelateRootCauses:
         assert len(group.members) == 3
         assert group.strongest_evidence_level == "consumer_proven"
 
+    def test_consumer_proven_reachability_kind_promotes_a_shared_func_removed(
+        self,
+    ) -> None:
+        # appcompat._attach_consumer_impact enriches an *existing* FUNC_REMOVED
+        # in place with reachability_kind="consumer_proven" instead of
+        # emitting a separate CONSUMER_REQUIRED_SYMBOL_REMOVED overlay,
+        # whenever uncovered_missing_symbols already finds the symbol
+        # covered. The correlator must read that promotion off the change,
+        # not assume artifact_proven purely from FUNC_REMOVED's kind
+        # (Codex review, fresh evidence).
+        removed = _change(
+            kind=ChangeKind.FUNC_REMOVED,
+            symbol="internal_helper",
+            reachability_kind="consumer_proven",
+        )
+        leaked = _change(
+            kind=ChangeKind.INTERNAL_SYMBOL_REQUIRED_BY_PUBLIC_API,
+            symbol="internal_helper",
+            caused_by_type="internal_helper",
+        )
+        groups = correlate_root_causes([removed, leaked])
+        assert len(groups) == 1
+        group = groups[0]
+        levels_by_kind = {c.kind: level for c, level in group.members}
+        assert levels_by_kind[ChangeKind.FUNC_REMOVED] == "consumer_proven"
+        assert group.strongest_evidence_level == "consumer_proven"
+
+    def test_consumer_proven_reachability_kind_never_demotes_a_stronger_kind(
+        self,
+    ) -> None:
+        # A CONSUMER_RUNTIME_LOAD_FAILED change never carries
+        # reachability_kind="consumer_proven" in practice (it's always
+        # "consumer_proven" too, per cli_helpers_compare.py -- but even if it
+        # did, runtime_proven must not be demoted by the promotion rule).
+        removed = _change(kind=ChangeKind.FUNC_REMOVED, symbol="s")
+        runtime = _change(
+            kind=ChangeKind.CONSUMER_RUNTIME_LOAD_FAILED,
+            symbol="s",
+            reachability_kind="consumer_proven",
+        )
+        groups = correlate_root_causes([removed, runtime])
+        levels_by_kind = {c.kind: level for c, level in groups[0].members}
+        assert (
+            levels_by_kind[ChangeKind.CONSUMER_RUNTIME_LOAD_FAILED] == "runtime_proven"
+        )
+
     def test_all_four_kinds_rank_runtime_proven_strongest(self) -> None:
         pieces = [
             _change(kind=ChangeKind.FUNC_REMOVED, symbol="s"),
