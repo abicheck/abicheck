@@ -291,6 +291,63 @@ def test_block_scope_extern_function_nttp_target_resolves() -> None:
     assert out[0].label == "Holder<_Z6targetv>"
 
 
+def test_two_class_member_nttp_targets_drop_rather_than_collide() -> None:
+    """``H<&A::f>`` and ``H<&B::f>`` -- two distinct class-member NTTP
+    targets sharing a bare member name -- must not collide onto one
+    ``H<f>`` label (Codex review, fresh evidence: real clang emits a
+    ``CXXMethodDecl``/``FieldDecl`` ``decl`` reference for a class-member
+    NTTP target, a *kind* `index_value_decls` never indexes at all --
+    unlike an unindexed free function/variable, which the earlier
+    unresolved-decl-argument fix already caught, a narrower
+    `_VALUE_DECL_KINDS`-only check let this kind through unflagged, since
+    its raw decl kind was never in that set to begin with). Both
+    instantiations should drop entirely rather than fall back to a
+    colliding bare spelling -- a member-function/static-data-member NTTP
+    target is a known, documented gap (`index_value_decls`'s own
+    docstring), not something this module resolves."""
+    a_f = {
+        "id": "0xA_F",
+        "kind": "CXXMethodDecl",
+        "name": "f",
+        "type": {"qualType": "void ()"},
+    }
+    b_f = {
+        "id": "0xB_F",
+        "kind": "CXXMethodDecl",
+        "name": "f",
+        "type": {"qualType": "void ()"},
+    }
+
+    def _h_spec(spec_id: str, decl: dict) -> dict:
+        return {
+            "id": spec_id,
+            "kind": "ClassTemplateSpecializationDecl",
+            "name": "H",
+            "completeDefinition": True,
+            "inner": [{"kind": "TemplateArgument", "decl": decl}],
+        }
+
+    h_pattern = {
+        "kind": "CXXRecordDecl",
+        "name": "H",
+        "completeDefinition": True,
+        "inner": [],
+    }
+    class_template = {
+        "kind": "ClassTemplateDecl",
+        "name": "H",
+        "inner": [
+            {"kind": "NonTypeTemplateParmDecl", "name": "Ptr"},
+            h_pattern,
+            _h_spec("0xSPEC_A", a_f),
+            _h_spec("0xSPEC_B", b_f),
+        ],
+    }
+    ast = {"kind": "TranslationUnitDecl", "inner": [class_template]}
+    out = parse_clang_ast_templates(ast)
+    assert out == []
+
+
 def test_two_var_template_specializations_stay_distinct() -> None:
     """``H<&ns::v<1>>`` and ``H<&ns::v<2>>`` -- two distinct instantiations
     of ``template <int N> int v = N;`` -- must not collide onto one

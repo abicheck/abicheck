@@ -27,8 +27,16 @@
   (its own distinct `VarTemplateSpecializationDecl` decl kind, previously
   unindexed the same way an unresolved decl target was) rather than
   colliding with every other instantiation of the same variable template.
-  No new `ChangeKind`, no report schema change, no verdict/exit-code
-  effect — this is graph vocabulary only.
+  A block-scope `extern` function declaration used as an NTTP target
+  (e.g. `void outer() { extern void target(); Holder<&target> h; }`) now
+  resolves instead of being incorrectly treated as unresolvable — unlike
+  a local variable, a block-scope function declaration always has real
+  external linkage. A class-member NTTP target (`H<&A::f>`) still isn't
+  resolved (a known, documented gap), but no longer risks colliding two
+  distinct member targets sharing a bare name onto one graph node — the
+  whole instantiation is dropped instead. No new `ChangeKind`, no report
+  schema change, no verdict/exit-code effect — this is graph vocabulary
+  only.
 
 ### Changed
 

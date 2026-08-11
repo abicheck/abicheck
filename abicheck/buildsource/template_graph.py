@@ -217,13 +217,10 @@ NODE_TEMPLATE_INSTANTIATION = "template_instantiation"
 NODE_SOURCE_DECL = "source_decl"
 #: Raw clang decl kinds routed onto TEMPLATE_USES_DECL (a source_decl node)
 #: rather than TEMPLATE_USES_TYPE. ``VarTemplateSpecializationDecl`` (Codex
-#: review, verified against real clang output) is a variable-template
-#: specialization's decl kind -- e.g. ``H<&ns::v<1>>``/``H<&ns::v<2>>`` for
-#: ``template <int N> int v = N;`` -- carrying its own distinct
-#: ``mangledName`` just like ``VarDecl``. Omitting it previously left it
-#: both unindexed by `index_value_decls` and unrecognized by
-#: `_has_unresolved_decl_argument`, so two distinct specializations
-#: silently collided onto the identical bare spelling ``"v"``.
+#: review) is a variable-template specialization's decl kind -- e.g.
+#: ``H<&ns::v<1>>``/``H<&ns::v<2>>`` -- carrying its own distinct
+#: ``mangledName`` just like ``VarDecl``; omitting it left two distinct
+#: specializations silently colliding on the bare spelling ``"v"``.
 _VALUE_DECL_KINDS = frozenset(
     {"FunctionDecl", "VarDecl", "VarTemplateSpecializationDecl"}
 )
@@ -809,20 +806,18 @@ def _is_opaque_template_argument(node: dict[str, Any]) -> bool:
     """Whether a ``TemplateArgument`` node carries none of the fields this
     module can spell anything from — no ``type``, no ``value``, no *named*
     ``decl``, not a pack wrapper (``isPack``). A **template-template
-    argument** (e.g. ``Use<A>``/``Use<B>`` for ``template <template
-    <typename> class C> struct Use;``) produces exactly this shape (Codex
-    review, confirmed against real clang AST output): the node is entirely
-    bare (``{"kind": "TemplateArgument"}``), nothing distinguishing ``A``
-    from ``B`` -- unlike a decl-referencing (TEMPLATE_USES_DECL) argument,
-    which always carries a top-level ``decl`` dict and so isn't opaque
-    despite also lacking ``type``/``value``.
+    argument** (e.g. ``Use<A>``/``Use<B>``) produces exactly this shape
+    (Codex review, confirmed against real clang output): entirely bare
+    (``{"kind": "TemplateArgument"}``) -- unlike a decl-referencing
+    (TEMPLATE_USES_DECL) argument, which always carries a top-level
+    ``decl`` dict and so isn't opaque despite also lacking ``type``/
+    ``value``.
 
     A ``decl`` dict with no ``name`` (CodeRabbit review) is itself
     unspellable -- :func:`_template_arg_use` already returns ``None`` for
-    exactly this shape -- so it counts as opaque here too: an argument this
-    loop can't spell anything from must abort the whole instantiation's own
-    identity, not silently record it with one fewer argument than it
-    actually has.
+    exactly this shape -- so it counts as opaque too: an argument this loop
+    can't spell anything from must abort the whole instantiation's own
+    identity, not silently record it with one fewer argument than it has.
     """
     decl = node.get("decl")
     decl_named = isinstance(decl, dict) and bool(decl.get("name"))
@@ -1049,27 +1044,33 @@ def _instantiation_label(template_qname: str, args: Iterable[TemplateArgUse]) ->
 def _has_unresolved_decl_argument(
     original_args: Iterable[TemplateArgUse], resolved_args: Iterable[TemplateArgUse]
 ) -> bool:
-    """Whether resolving ``original_args`` (raw, still carrying
-    :func:`_template_arg_use`'s *original* ``target_decl_kind`` straight off
-    each argument's own ``decl`` node) into ``resolved_args`` (the
+    """Whether resolving ``original_args`` (raw, still carrying the
+    *original* ``target_decl_kind``) into ``resolved_args`` (the
     :func:`_resolve_arg_targets` output) dropped a decl-referencing
     (TEMPLATE_USES_DECL) argument's target entirely -- id names no
-    declaration :func:`index_value_decls` indexed anywhere in this TU (e.g.
-    a local ``static`` used as a C++17 address-of-local-static NTTP, which
-    ``index_value_decls`` deliberately never descends into).
+    declaration :func:`index_value_decls` indexed (e.g. a local ``static``,
+    or a class-member NTTP target -- ``H<&A::f>`` produces a real
+    ``CXXMethodDecl``/``FieldDecl`` ``decl`` reference `index_value_decls`
+    never indexes at all, a *kind* this module doesn't support resolving,
+    not merely a target it failed to find; Codex review, verified
+    empirically that a narrower :data:`_VALUE_DECL_KINDS`-only check let
+    this collide two distinct member targets onto one label). Any
+    non-``None`` original ``target_decl_kind`` qualifies -- only the
+    ``decl`` branch of :func:`_template_arg_use` ever sets it, so this
+    can't misfire on an ordinary type argument (bare-spelling fallback is
+    intentional there: a type's own spelling is its full name).
 
-    Checked against the *original*, pre-resolution kind, not the resolved
-    one (Codex review): once resolution fails, :func:`_resolve_arg_targets`
-    sets *both* ``target_qname`` and ``target_decl_kind`` to ``None`` on the
-    returned copy, so only the original still says "this was meant to be a
-    decl reference." An instantiation with an argument like this can't be
-    trusted the same way an opaque (template-template) argument can't --
-    :func:`arg_label_spelling` falls back to the bare ``spelling`` when
-    unresolved, and two distinct unresolved targets sharing a bare name
-    would collide onto one label, falsely merging two instantiations.
+    Checked against the *original* kind, not the resolved one: once
+    resolution fails, :func:`_resolve_arg_targets` sets *both*
+    ``target_qname``/``target_decl_kind`` to ``None``, so only the original
+    still says "this was meant to be a decl reference." Untrusted the same
+    way an opaque (template-template) argument is: :func:`arg_label_
+    spelling` falls back to the bare ``spelling`` when unresolved, and two
+    distinct unresolved targets sharing a bare name would collide onto one
+    label, falsely merging two instantiations.
     """
     return any(
-        orig.target_decl_kind in _VALUE_DECL_KINDS and resolved.target_qname is None
+        orig.target_decl_kind is not None and resolved.target_qname is None
         for orig, resolved in zip(original_args, resolved_args)
     )
 
