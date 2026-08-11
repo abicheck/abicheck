@@ -478,12 +478,35 @@ def test_zstd_max_window_size_is_bytes_not_kibibytes():
     real multi-megabyte window (e.g. the writer's 8 MiB baseline level)
     undecodable. See ``test_zstd_decoder_rejects_realistic_writer_window``
     below for the end-to-end repro of that failure mode."""
-    from abicheck.snapshot_io import _ZSTD_MAX_WINDOW_LOG, _ZSTD_MAX_WINDOW_SIZE_BYTES
+    import zstandard
 
-    assert _ZSTD_MAX_WINDOW_SIZE_BYTES == 1 << _ZSTD_MAX_WINDOW_LOG
-    assert (
-        _ZSTD_MAX_WINDOW_SIZE_BYTES == 2 * 1024 * 1024 * 1024
-    )  # 2 GiB, per the comment
+    from abicheck.snapshot_io import _ZSTD_MAX_WINDOW_LOG, _zstd_max_window_size_bytes
+
+    result = _zstd_max_window_size_bytes(zstandard)
+    assert result == 1 << min(_ZSTD_MAX_WINDOW_LOG, zstandard.WINDOWLOG_MAX)
+    # On any real (64-bit) build this is the documented 2 GiB ceiling; a
+    # 32-bit build would clamp lower (see _zstd_max_window_size_bytes's own
+    # docstring) rather than asserting this exact value everywhere.
+    if zstandard.WINDOWLOG_MAX >= _ZSTD_MAX_WINDOW_LOG:
+        assert result == 2 * 1024 * 1024 * 1024  # 2 GiB, per the comment
+
+
+def test_zstd_max_window_size_clamps_to_backend_windowlog_max():
+    """Codex review: ``ZSTD_DCtx_setMaxWindowSize()`` bound-checks its
+    argument against the backend's own reported ``windowLogMax`` and
+    *errors* (not just declines the frame) if exceeded -- and a 32-bit
+    libzstd build's ``ZSTD_WINDOWLOG_MAX_32`` is 30, not this module's
+    fixed 31. Passing the fixed value unconditionally would make
+    ``ZstdDecompressor(max_window_size=...)`` itself raise on such a
+    build, rejecting every zstd snapshot outright. Simulate that build
+    with a stand-in exposing a lower ``WINDOWLOG_MAX`` and confirm the
+    computed ceiling clamps down to it rather than using the fixed 31."""
+    from abicheck.snapshot_io import _zstd_max_window_size_bytes
+
+    class _Fake32BitBuild:
+        WINDOWLOG_MAX = 30  # ZSTD_WINDOWLOG_MAX_32
+
+    assert _zstd_max_window_size_bytes(_Fake32BitBuild) == 1 << 30
 
 
 def test_zstd_decoder_rejects_window_above_ceiling(tmp_path):
