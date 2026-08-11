@@ -208,3 +208,17 @@ A new changelog fragment. See changelog.d/README.md for the workflow.
   existing test coverage for the collision case — a systematic,
   cross-cutting rework out of scope for this PR's time budget. See
   `AGENTS.md`'s Known gaps section for the full investigation.
+- **`CastxmlSourceExtractor.cache_identity_extra()` no longer collapses
+  every unparseable/failed `--version` probe to the same uninformative
+  `""`.** When the probed version transcript is empty (the binary ran
+  but its banner didn't parse, or it failed outright), the D8 TU cache
+  key's "extra" identity now falls back to the executable's own stat
+  signature (`dev:ino:mtime_ns:size`) instead — so swapping to a
+  DIFFERENT broken/unparseable castxml install at the same path still
+  changes the cache key, rather than two distinct broken installs both
+  reading as the identical `""` and letting a warm `SourceAbiCache`
+  replay facts produced by the previous one (Codex review). Deliberately
+  scoped to `cache_identity_extra()` only — `compiler_version`'s own
+  provenance value (`_stamp_fact_set_and_coverage`) is left as `""` on
+  the same failure, since a raw stat tuple would read as a nonsensical
+  "compiler version" there.

@@ -276,10 +276,23 @@ class CastxmlSourceExtractor:
         own caller, matching its already-unguarded ``deadline.check()``
         for the same phase, rather than proceeding to a cache lookup keyed
         on an identity that quietly hid an expired deadline.
+
+        Falls back to the executable's own stat signature (Codex review)
+        when ``castxml --version`` fails to run or its banner doesn't
+        parse -- otherwise two DIFFERENT broken/unparseable installs at
+        the same path would both collapse to the identical uninformative
+        ``""``, leaving the TU cache unable to tell them apart. Unlike the
+        version string, this fallback is cache-key-only plumbing, so it is
+        deliberately not also threaded into ``compiler_version``'s own
+        provenance value (`_stamp_fact_set_and_coverage`) -- a raw stat
+        tuple would read as a nonsensical "compiler version" there.
         """
-        return _castxml_tool_version(
-            self.castxml_bin, *_executable_stat_key(self.castxml_bin)
-        )
+        key = _executable_stat_key(self.castxml_bin)
+        version = _castxml_tool_version(self.castxml_bin, *key)
+        if version:
+            return version
+        dev, ino, mtime_ns, size = key
+        return "" if dev == -1 else f"stat:{dev}:{ino}:{mtime_ns}:{size}"
 
     def extract(
         self,

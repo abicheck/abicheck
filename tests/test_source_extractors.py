@@ -1299,6 +1299,47 @@ def test_castxml_extractor_cache_identity_extra_folds_probed_tool_version(
     assert extractor.cache_identity_extra() == "0.6.3; clang 17.0.6"
 
 
+def test_cache_identity_extra_falls_back_to_stat_when_version_unparseable(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """Codex review, PR #719, seventh round: two DIFFERENT broken/unparseable
+    castxml installs at the same path must not both collapse to the same
+    uninformative "" cache identity -- cache_identity_extra() falls back to
+    the executable's own stat signature so a same-path swap between two
+    such installs still changes the D8 TU cache key."""
+    from abicheck.buildsource.source_extractors import castxml as castxml_mod
+
+    castxml_mod._castxml_tool_version.cache_clear()
+    monkeypatch.setattr(castxml_mod, "_castxml_tool_version", lambda *_a: "")
+    exe = tmp_path / "castxml"
+    exe.write_text("broken")
+    monkeypatch.setattr(castxml_mod.shutil, "which", lambda _bin: str(exe))
+    extractor = CastxmlSourceExtractor(castxml_bin=str(exe))
+
+    identity1 = extractor.cache_identity_extra()
+    assert identity1.startswith("stat:")
+    assert identity1 != ""
+
+    # A different broken executable at the SAME path must change identity.
+    exe.write_text("a different broken binary, different size")
+    identity2 = extractor.cache_identity_extra()
+    assert identity2 != identity1
+
+
+def test_cache_identity_extra_stays_empty_when_binary_unresolvable(
+    monkeypatch,
+) -> None:
+    """No executable to stat at all (never found on PATH) -- no stat
+    fallback is possible, so this stays "" rather than fabricating one."""
+    from abicheck.buildsource.source_extractors import castxml as castxml_mod
+
+    castxml_mod._castxml_tool_version.cache_clear()
+    monkeypatch.setattr(castxml_mod, "_castxml_tool_version", lambda *_a: "")
+    monkeypatch.setattr(castxml_mod.shutil, "which", lambda _bin: None)
+    extractor = CastxmlSourceExtractor(castxml_bin="definitely-not-a-real-binary-xyz")
+    assert extractor.cache_identity_extra() == ""
+
+
 def test_parse_root_stamps_msvc_compiler_family_for_msvc_compiler_binary() -> None:
     from xml.etree.ElementTree import Element, SubElement
 
