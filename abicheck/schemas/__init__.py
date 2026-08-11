@@ -344,6 +344,12 @@ REPORT_SCHEMA_VERSION = "2.27"
 #: estimate/report, where ``report`` nests the former). Same additive/breaking
 #: bump policy as :data:`REPORT_SCHEMA_VERSION` above; independent of it (scan
 #: and compare are separate contracts that evolve on their own schedules).
+#: Adding a top-level ``diff``-block key: update this version's history entry
+#: below AND ``cli_scan_baseline.py``'s ``_baseline_summary`` docstring AND
+#: ``tests/test_cli_scan_baseline.py``'s ``TestBaselineSummaryKeysArePinned``
+#: (whose own failure is what makes an unversioned new key discoverable at
+#: all — see PR #724, where the two truncation keys shipped one commit ahead
+#: of this bump).
 #: 1.0 — initial versioned envelope.
 #: 1.1 — added five additive optional top-level keys — ``check_id``,
 #:       ``profile_id``, ``requested_depth``, ``effective_depth``,

@@ -242,6 +242,93 @@ class TestBaselineSummaryTruncationKinds:
         assert "findings_truncated_kinds" not in summary
 
 
+class TestBaselineSummaryKeysArePinned:
+    """Every top-level key `_baseline_summary` can emit is pinned here.
+
+    A generalized forcing function for the review round on PR #724 that
+    found `findings_truncated_kinds`/`suppressed_truncated_kinds` shipped
+    without a `SCAN_SCHEMA_VERSION` bump: this test only tracks key *names*
+    (it can't check whether the version was actually bumped), but a real new
+    key now fails CI here immediately, which is what makes it discoverable
+    at all -- silently adding a key that isn't in `_KNOWN_KEYS` is the thing
+    that let a schema bump go unnoticed the first time. Landing a new key
+    means updating this set *and*, per
+    ``abicheck/schemas/__init__.py``'s ``SCAN_SCHEMA_VERSION`` docstring,
+    bumping the version with a history entry, and documenting it under the
+    ``output-formats`` topic (``docs/use/output-formats.md`` /
+    ``docs/_meta/topics.yaml``).
+    """
+
+    _KNOWN_KEYS = frozenset(
+        {
+            "breaking",
+            "api_break",
+            "risk",
+            "compatible",
+            "not_evaluated",
+            "detectors",
+            "findings",
+            "findings_truncated",
+            "findings_truncated_kinds",
+            "suppressed_count",
+            "suppressed",
+            "suppressed_truncated",
+            "suppressed_truncated_kinds",
+        }
+    )
+
+    def _diff_exercising_every_optional_key(self):
+        from abicheck.checker_policy import ChangeKind
+        from abicheck.checker_types import Change
+
+        breaking = [
+            Change(kind=ChangeKind.FUNC_REMOVED, symbol=f"_Zb{i:02d}v", description="d")
+            for i in range(30)
+        ]
+        suppressed = [
+            Change(
+                kind=ChangeKind.FUNC_REMOVED,
+                symbol=f"_Zs{i:02d}v",
+                description="d",
+                suppression_rule="r",
+            )
+            for i in range(30)
+        ]
+        return types.SimpleNamespace(
+            breaking=breaking,
+            source_breaks=[],
+            risk=[],
+            compatible=[],
+            not_evaluated=[breaking[0]],
+            detector_results=[
+                types.SimpleNamespace(
+                    name="d1", changes_count=1, enabled=True, coverage_gap=None
+                )
+            ],
+            suppressed_changes=suppressed,
+        )
+
+    def test_every_emitted_key_is_pinned(self) -> None:
+        diff = self._diff_exercising_every_optional_key()
+        summary = csb._baseline_summary(diff, max_findings=5)
+        unknown = set(summary) - self._KNOWN_KEYS
+        assert not unknown, (
+            f"_baseline_summary emitted unpinned key(s) {sorted(unknown)} -- "
+            "add them to _KNOWN_KEYS here, and see this class's docstring "
+            "for the schema-version/doc-registration checklist that goes "
+            "with landing a real new report field."
+        )
+
+    def test_pinned_keys_are_all_actually_reachable(self) -> None:
+        # The complementary direction: a key that's pinned here but that
+        # _baseline_summary can no longer produce (renamed, removed) would
+        # otherwise go unnoticed -- this input is constructed specifically
+        # to trigger every optional branch at once.
+        diff = self._diff_exercising_every_optional_key()
+        summary = csb._baseline_summary(diff, max_findings=5)
+        assert self._KNOWN_KEYS <= set(summary)
+
+
 class TestPublicProvenanceSet:
     def test_directory_activates_provenance(self, tmp_path: Path) -> None:
         d = tmp_path / "include"

@@ -1019,37 +1019,39 @@ def _load_risk_rules_for_service(risk_rules_path: Path) -> Any:
         raise ValueError(str(exc.format_message())) from exc
 
 
-def _reject_comparison_only_fields(req: ScanRequest) -> None:
-    """Raise :class:`ValidationError` if a baseline-comparison-only
-    ``ScanRequest`` field is set with no baseline for it to apply to.
+#: Every ``ScanRequest`` field meaningful only for a baseline comparison,
+#: keyed to a predicate that's ``True`` when *req* carries a caller-set,
+#: non-default value. A plain dict (not logic buried in
+#: ``_reject_comparison_only_fields``) so a structural test can cross-check
+#: its keys against ``_run_baseline_compare``'s own signature -- generalizing
+#: the "forwarded but never guarded" gap a P2 review caught twice here (see
+#: `test_every_baseline_only_field_is_guarded`).
+_COMPARISON_ONLY_FIELD_PREDICATES: dict[str, Callable[[ScanRequest], bool]] = {
+    "suppression": lambda r: r.suppression is not None,
+    "policy": lambda r: r.policy != "strict_abi",
+    "policy_file": lambda r: r.policy_file is not None,
+    "scope_to_public_surface": lambda r: r.scope_to_public_surface is not True,
+    "force_public_symbols": lambda r: bool(r.force_public_symbols),
+    "pattern_verdicts": lambda r: r.pattern_verdicts,
+    "env_matrix": lambda r: r.env_matrix is not None,
+    "collapse_versioned_symbols": lambda r: r.collapse_versioned_symbols,
+    "contract_evaluation": lambda r: r.contract_evaluation,
+    "contract_mode": lambda r: r.contract_mode is not None,
+    "max_findings": lambda r: r.max_findings is not None,
+}
 
-    Shared by :func:`run_scan` (called only when ``req.baseline`` is
-    ``None`` or ``req.mode`` is audit) and :func:`run_scan_set` (always
-    audit-only by definition, ADR-056 D2, so this always applies there).
-    Extracted so both entry points enforce the identical contract instead
-    of each hand-rolling its own field list (P2 regression, Codex review:
-    ``run_scan_set()``, once made public/re-exported, only ever validated
-    ``req.baseline`` itself -- a direct Python API caller passing e.g.
-    ``policy_file``/``env_matrix``/``suppression`` to it got them silently
-    accepted and discarded under default audit classification, instead of
-    rejected the way an equivalent ``run_scan()`` call already is).
+
+def _reject_comparison_only_fields(req: ScanRequest) -> None:
+    """Raise :class:`ValidationError` for a set ``_COMPARISON_ONLY_FIELD_PREDICATES`` field with no baseline for it to apply to.
+
+    Shared by :func:`run_scan` (baseline ``None``/audit mode) and
+    :func:`run_scan_set` (always audit-only, ADR-056 D2) so both entry points
+    enforce the identical contract (P2 regression, Codex review:
+    ``run_scan_set()`` used to only validate ``req.baseline`` itself, letting
+    e.g. ``policy_file``/``env_matrix`` through silently discarded).
     """
     _non_default = [
-        name
-        for name, is_set in (
-            ("suppression", req.suppression is not None),
-            ("policy", req.policy != "strict_abi"),
-            ("policy_file", req.policy_file is not None),
-            ("scope_to_public_surface", req.scope_to_public_surface is not True),
-            ("force_public_symbols", bool(req.force_public_symbols)),
-            ("pattern_verdicts", req.pattern_verdicts),
-            ("env_matrix", req.env_matrix is not None),
-            ("collapse_versioned_symbols", req.collapse_versioned_symbols),
-            ("contract_evaluation", req.contract_evaluation),
-            ("contract_mode", req.contract_mode is not None),
-            ("max_findings", req.max_findings is not None),
-        )
-        if is_set
+        name for name, is_set in _COMPARISON_ONLY_FIELD_PREDICATES.items() if is_set(req)
     ]
     if _non_default:
         raise ValidationError(
