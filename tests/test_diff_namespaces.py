@@ -480,6 +480,34 @@ class TestExperimentalRemovedWithoutReplacement:
         assert len(removed) == 1
         assert removed[0].symbol == "preview::foo"
 
+    def test_bare_fallback_mangled_name_never_used_as_merge_evidence(self) -> None:
+        """Codex review, P1, fresh evidence: ``Function.mangled`` is not
+        always a real ABI-mangled name -- both header-AST producers fall
+        back to the bare declaration name when no real linkage name is
+        available (``dwarf_snapshot.py``'s ``mangled = linkage_name or
+        name``, ``dumper_clang.py``'s ``mangled = ... or name``). Two
+        structurally unrelated declarations that both hit this fallback
+        can then coincidentally carry the SAME bare-name "mangled" value
+        even though their scopes genuinely differ -- reproduced here with
+        the reviewer's exact repro shape: an old ``preview::v1::foo`` and
+        an unrelated new ``preview::foo``, both falling back to the bare
+        leaf ``"foo"`` as their `mangled` field (no ``_Z``/``?`` prefix --
+        not a real mangled name). This must NOT read as a genuine alias:
+        removing the versioned spelling must still be reported.
+        """
+        old = _snap(funcs=[
+            _fn("preview::v1::foo", mangled="foo"),
+            _fn("preview::foo", mangled="foo"),
+        ])
+        new = _snap(funcs=[_fn("preview::foo", mangled="foo")])
+        changes = detect_experimental_namespace_changes(old, new)
+        removed = [
+            c for c in changes
+            if c.kind == ChangeKind.EXPERIMENTAL_REMOVED_WITHOUT_REPLACEMENT
+        ]
+        assert len(removed) == 1
+        assert removed[0].symbol == "preview::v1::foo"
+
     def test_versioned_inline_namespace_type_spellings_double_report_is_accepted(
         self,
     ) -> None:

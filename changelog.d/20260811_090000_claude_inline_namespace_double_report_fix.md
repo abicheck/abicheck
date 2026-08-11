@@ -69,6 +69,18 @@
   each side of a merge to be an *unambiguous* singleton identity set, not
   merely a non-empty intersection.
 
+- Fixed a third bug in the same identity check: `Function.mangled` is not
+  always a real ABI-mangled name. Both header-AST producers fall back to
+  the bare, unqualified declaration name when no real linkage name is
+  available (`dwarf_snapshot.py`'s `mangled = linkage_name or name`,
+  `dumper_clang.py`'s `mangled = ... or name`), so two structurally
+  unrelated declarations in different scopes can coincidentally share the
+  same bare-name fallback value and be mistaken for a genuine alias pair.
+  `_func_index_items` now only trusts `f.mangled` as identity evidence
+  when it carries a recognized ABI name-mangling prefix (Itanium `_Z`
+  and its Mach-O `__Z` variant, or MSVC `?`), which a bare-name fallback
+  never does.
+
 - **Test infrastructure**: added `tests/test_diff_namespaces.py::TestPairedStableIndicesProperties`,
   a Hypothesis property-test suite testing the merge primitive
   (`_paired_stable_indices`) directly, stating its contract as invariants

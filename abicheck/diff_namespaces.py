@@ -383,6 +383,22 @@ def _paired_stable_indices(
     return old_out, new_out
 
 
+def _looks_like_real_mangled_name(mangled: str) -> bool:
+    """True when *mangled* carries a recognized ABI name-mangling prefix
+    (Itanium ``_Z``, its Mach-O ``__Z`` variant with the extra platform
+    leading underscore, or MSVC ``?``) -- proof the string came from the
+    compiler's/linker's actual name mangling, not a header-AST producer's
+    fallback to the bare declaration name when no real linkage name was
+    available (see the caller's docstring for the two concrete fallback
+    paths this excludes). Deliberately narrow: a genuine ``extern "C"``
+    symbol's real ABI name also carries neither prefix, so it reads as
+    "no identity evidence" here too rather than risk trusting a string
+    indistinguishable from the fallback -- ``Function`` has no field that
+    tells the two apart today.
+    """
+    return mangled.startswith("_Z") or mangled.startswith("__Z") or mangled.startswith("?")
+
+
 def _func_index_items(
     snap: AbiSnapshot,
     experimental_namespaces: tuple[str, ...],
@@ -421,7 +437,47 @@ def _func_index_items(
         # empty mangled name is not identity evidence -- two declarations
         # both missing a mangled name would otherwise spuriously "match"
         # each other (CodeRabbit review).
-        out.append(_IndexItem(qname, stripped, leaf, f.mangled or None))
+        #
+        # `f.mangled` can ALSO be non-empty and still not be a real
+        # mangled name (Codex review, P1, fresh evidence): both header-AST
+        # producers fall back to the bare, unqualified declaration name
+        # when no real linkage name is available --
+        # `dwarf_snapshot.py`'s `_process_subprogram` (`mangled =
+        # linkage_name or name`, where `name` is the bare `DW_AT_name`,
+        # never the qualified one `Function.name` ends up holding) and
+        # `dumper_clang.py`'s parser (`mangled = ... or name`, confirmed to
+        # fire not just for a plain-C/`extern "C"` declaration but also for
+        # an uninstantiated C++ function/method template with no
+        # `mangledName` in clang's header AST -- see `tu_merge.py`'s own
+        # "second known, accepted limitation" docstring, which documents
+        # the identical fallback causing false ODR-merges there). Two
+        # structurally unrelated declarations that both hit this fallback
+        # then share the same bare leaf as their "mangled" value even
+        # though their *scopes* differ -- e.g. an old `preview::v1::foo`
+        # and an unrelated new `preview::foo` both falling back to
+        # `mangled="foo"` -- exactly the name coincidence this identity
+        # check exists to NOT trust. A simple `mangled == name` comparison
+        # (mirroring `tu_merge.py`'s own check) only catches this for the
+        # direct-clang backend, whose `Function.name` is itself left bare
+        # (equal to the fallback) in the common case -- DWARF's
+        # `Function.name` is already qualified, so it never equals the
+        # bare fallback and that comparison would silently miss the
+        # DWARF-sourced case the reviewer's own example demonstrates.
+        # Requiring a recognized ABI name-mangling prefix instead
+        # (Itanium `_Z`/Mach-O `__Z`, MSVC `?`) proves the string actually
+        # came from the compiler's/linker's real mangling rather than a
+        # bare-name fallback, regardless of which producer built it, and
+        # subsumes the narrower same-string check. Deliberately
+        # conservative: a genuine `extern "C"` symbol's real ABI name is
+        # its own bare identifier and carries neither prefix, so this also
+        # treats that case as "no identity evidence" rather than risk
+        # trusting a fallback that looks identical -- the same
+        # false-negative-over-false-positive default this module uses
+        # throughout, and `Function` carries no field today that
+        # distinguishes the two (`is_extern_c` is itself derived from this
+        # same unreliable prefix check).
+        identity = f.mangled if f.mangled and _looks_like_real_mangled_name(f.mangled) else None
+        out.append(_IndexItem(qname, stripped, leaf, identity))
     return out
 
 
