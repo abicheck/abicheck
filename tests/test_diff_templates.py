@@ -345,6 +345,20 @@ class TestStripParamSignature:
         assert _strip_param_signature("int (*ns::sort(int))()") == "ns::sort"
         assert _strip_param_signature("int (ns::C::*ns::sort(int))()") == "ns::sort"
 
+    def test_rvalue_reference_wrapper_advances_past_both_ampersands(self) -> None:
+        # Codex review, fresh evidence: an rvalue-reference declarator
+        # wrapper is spelled "&&", not a single "&" (real GCC output:
+        # "int (&&ns::sort<int>(int))()" for _ZN2ns4sortIiEEOFivEi). The
+        # un-fixed version recorded only the *first* "&", so the later
+        # slice (starting right after the recorded index) started at the
+        # *second* "&" and left it glued to the front of the recovered
+        # name ("&ns::sort<int>" instead of "ns::sort<int>") -- a
+        # same-named CPO variable would never match this corrupted
+        # prefix. Fixed by recording the second "&"'s index when it
+        # immediately follows the first, so the slice drops the whole
+        # "&&" token.
+        assert _strip_param_signature("int (&&ns::sort<int>(int))()") == "ns::sort<int>"
+
     def test_pointer_wrapper_with_pointer_template_argument(self) -> None:
         # Codex review, fresh evidence: the previous fix recovered the clean
         # name via prefix.rindex("*") over the *whole* prefix once a wrapper

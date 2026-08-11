@@ -196,7 +196,18 @@ def _pointer_declarator_star_index(qualified: str, paren_index: int) -> int:
                 # star, corrupting the eventual leaf (CodeRabbit review).
                 continue
             if ch in "*&":
-                star_index = idx
+                # An rvalue-reference declarator is "&&", not a single
+                # "&" -- when the second "&" immediately follows, record
+                # *its* index instead of the first, so the later slice
+                # (which starts right after the recorded index) drops the
+                # whole token rather than leaving a stray "&" glued to the
+                # front of the recovered name (Codex review, fresh
+                # evidence: "int (&&ns::sort<int>(int))()" left "&ns::sort
+                # <int>" before this fix).
+                if ch == "&" and idx + 1 < len(qualified) and qualified[idx + 1] == "&":
+                    star_index = idx + 1
+                else:
+                    star_index = idx
             elif ch.isalnum() or ch in "_: \t":
                 continue
             else:
