@@ -22,6 +22,7 @@ from abicheck.diff_namespaces import (
     _looks_like_std_reexport,
     _origin_by_name,
     _segments,
+    _stable_keys_compatible,
     _strip_experimental,
     _version_strip_segments,
     _version_suffix,
@@ -163,6 +164,28 @@ class TestOriginByName:
         types = [_rec_public("ns::Widget"), _rec("ns::Widget")]
         origins = _origin_by_name(types)
         assert origins["ns::Widget"] == ScopeOrigin.PUBLIC_HEADER
+
+
+# ---------------------------------------------------------------------------
+# _stable_keys_compatible
+# ---------------------------------------------------------------------------
+
+
+class TestStableKeysCompatible:
+    def test_bare_leaf_is_compatible_with_any_qualified_form(self) -> None:
+        assert _stable_keys_compatible("check_ranges", "oneapi::dal::detail::check_ranges")
+        assert _stable_keys_compatible("ns::check_ranges", "check_ranges")
+
+    def test_identical_keys_are_compatible(self) -> None:
+        assert _stable_keys_compatible("ns::sort", "ns::sort")
+
+    def test_diverging_multi_segment_keys_are_not_compatible(self) -> None:
+        assert not _stable_keys_compatible("api::sort", "detail::sort")
+
+    def test_empty_key_is_never_compatible(self) -> None:
+        assert not _stable_keys_compatible("", "ns::sort")
+        assert not _stable_keys_compatible("ns::sort", "")
+        assert not _stable_keys_compatible("", "")
 
 
 # ---------------------------------------------------------------------------
