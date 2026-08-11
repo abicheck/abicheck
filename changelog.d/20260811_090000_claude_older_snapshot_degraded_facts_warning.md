@@ -21,4 +21,9 @@ A new changelog fragment. See changelog.d/README.md for the workflow.
   baseline isn't warned about for no reason — including for
   `clang_va_list_facts_reliable`/`castxml_var_access_facts_reliable` on a
   `"hybrid"`-producer snapshot, where the flag's own value is conservatively
-  `False` but no detector actually consults it for that producer.
+  `False` but no detector actually consults it for that producer. The
+  warning also survives a re-save: `snapshot_to_dict` always re-stamps
+  `schema_version` to the current value, so a degraded flag preserved
+  through an explicit marker on a reserialized legacy snapshot now still
+  triggers the warning instead of silently disappearing once the version
+  number itself reads as current.

@@ -312,6 +312,31 @@ class TestReserialization:
         with pytest.warns(UserWarning, match="clang_va_list_facts_reliable"):
             snapshot_from_dict(d)
 
+    def test_degraded_flag_still_warns_after_reserialization_to_current_schema(self):
+        """snapshot_to_dict always re-stamps schema_version to the CURRENT
+        SCHEMA_VERSION on save -- so a legacy snapshot that's loaded (which
+        degrades a flag) and then simply re-saved reads as current-schema on
+        its NEXT load, even though the underlying facts were never
+        regenerated. Gating the warning purely on schema_version would make
+        it silently disappear across exactly this round-trip (Codex review,
+        PR #720) -- it must still fire, driven by the preserved explicit
+        False marker rather than the version number."""
+        d = _load_fixture("v4.json")
+        d["schema_version"] = 9
+        d["from_headers"] = True
+        d["ast_producer"] = "clang"
+        with warnings.catch_warnings(record=True) as first_load_warnings:
+            warnings.simplefilter("always")
+            snap = snapshot_from_dict(d)
+        assert len(first_load_warnings) == 1
+
+        resaved = snapshot_to_dict(snap)
+        assert resaved["schema_version"] == SCHEMA_VERSION
+
+        with pytest.warns(UserWarning, match="clang_deprecation_facts_reliable"):
+            snap2 = snapshot_from_dict(resaved)
+        assert snap2.clang_deprecation_facts_reliable is False
+
 
 # ---------------------------------------------------------------------------
 # Documentation/constant sync — a stale docs number silently misleads readers

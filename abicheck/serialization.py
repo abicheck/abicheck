@@ -1462,88 +1462,107 @@ def snapshot_from_dict(d: dict[str, Any]) -> AbiSnapshot:
 
             snap.python_ext = detect_python_extension(snap)
 
-    # An older snapshot (schema_version < SCHEMA_VERSION) is the direction
-    # every CI baseline actually hits -- a baseline is committed once and
-    # then outlives however many abicheck pin bumps happen before it's next
-    # regenerated, unlike a fresh dump which is always current-schema. Reads
-    # normally (older schema versions are backward compatible by design; see
-    # the version-history comments above SCHEMA_VERSION), but until now that
-    # was entirely silent: the *_facts_reliable flags computed above already
-    # degrade individual detectors' trust in specific stale-but-real-looking
-    # facts, yet nothing ever told the person running the comparison that any
-    # of that degradation happened. Unlike the "reader older than snapshot"
-    # branch above (which always warns, any single version behind), this
-    # only fires when the version gap actually degraded a known fact --
-    # warning on every trivial one-version-behind snapshot regardless of
-    # whether it affects anything would be exactly the noise CI baselines
-    # (which are *always* somewhat behind) don't need.
-    if _schema_version < SCHEMA_VERSION:
-        # Each entry pairs a flag with whether it is even CONSULTED by the
-        # one detector that reads it, given THIS side's own AST producer.
-        # Most flags' value computation already collapses to "reliable" for
-        # every producer their consumer doesn't gate on (see each flag's own
-        # computation above) -- but two don't: clang_va_list_facts_reliable's
-        # value treats "hybrid" the same as "clang" (correct for the fact's
-        # own provenance), yet diff_symbols._diff_param_va_list only ever
-        # consults it when BOTH sides are exactly "clang" (never "hybrid").
-        # castxml_var_access_facts_reliable is the mirror case for "castxml"
-        # vs. diff_symbols._diff_var_access. Listing either one for a hybrid
-        # snapshot would claim reduced detection coverage that regenerating
-        # the snapshot could never restore, since no detector consults it
-        # for that producer regardless of schema version (Codex review,
-        # PR #720).
-        _degraded_facts = sorted(
-            name
-            for name, reliable, consulted in (
-                ("header_cv_facts_reliable", header_cv_facts_reliable_value, True),
-                (
-                    "clang_deprecation_facts_reliable",
-                    clang_deprecation_facts_reliable_value,
-                    True,
-                ),
-                (
-                    "clang_field_initializer_facts_reliable",
-                    clang_field_initializer_facts_reliable_value,
-                    True,
-                ),
-                (
-                    "clang_vtable_facts_reliable",
-                    clang_vtable_facts_reliable_value,
-                    True,
-                ),
-                (
-                    "clang_restrict_facts_reliable",
-                    clang_restrict_facts_reliable_value,
-                    True,
-                ),
-                (
-                    "clang_va_list_facts_reliable",
-                    clang_va_list_facts_reliable_value,
-                    ast_producer_value == "clang",
-                ),
-                (
-                    "castxml_var_access_facts_reliable",
-                    castxml_var_access_facts_reliable_value,
-                    ast_producer_value == "castxml",
-                ),
-            )
-            if not reliable and consulted
+    # A degraded *_facts_reliable flag used to load with no signal at all --
+    # the flag itself was computed correctly, but nothing ever told the
+    # person running the comparison that any detector would decline to
+    # trust a stale-but-real-looking fact on this snapshot. Two separate
+    # situations both leave a flag False, and both need the same visible
+    # signal rather than silence:
+    #   (1) THIS snapshot's own schema_version predates SCHEMA_VERSION, and
+    #       the gap crossed one of the per-flag thresholds above -- the
+    #       direction every CI baseline actually hits, since a baseline is
+    #       committed once and outlives however many abicheck pin bumps
+    #       happen before it's next regenerated.
+    #   (2) schema_version reads as CURRENT, but an explicit False marker in
+    #       `d` carried a degraded flag forward from an earlier, genuinely
+    #       older extraction -- the "explicit-marker-wins" round-trip-
+    #       stability path every flag's own computation above already
+    #       implements. `snapshot_to_dict` always re-stamps schema_version
+    #       to the CURRENT SCHEMA_VERSION on save (it describes the writing
+    #       tool's format capability, not the snapshot's true field-fact
+    #       origin -- see e.g. header_cv_facts_reliable_value's own comment),
+    #       so a legacy snapshot that was loaded and simply re-saved reads
+    #       as current-schema on its next load even though the underlying
+    #       facts were never regenerated. Gating this warning on
+    #       schema_version alone would make it disappear across exactly that
+    #       round-trip (Codex review, PR #720) -- the flags themselves, not
+    #       the version number, are the ground truth here.
+    # Each entry pairs a flag with whether it is even CONSULTED by the one
+    # detector that reads it, given THIS side's own AST producer. Most
+    # flags' value computation already collapses to "reliable" for every
+    # producer their consumer doesn't gate on (see each flag's own
+    # computation above) -- but two don't: clang_va_list_facts_reliable's
+    # value treats "hybrid" the same as "clang" (correct for the fact's own
+    # provenance), yet diff_symbols._diff_param_va_list only ever consults
+    # it when BOTH sides are exactly "clang" (never "hybrid").
+    # castxml_var_access_facts_reliable is the mirror case for "castxml" vs.
+    # diff_symbols._diff_var_access. Listing either one for a hybrid
+    # snapshot would claim reduced detection coverage that regenerating the
+    # snapshot could never restore, since no detector consults it for that
+    # producer regardless of schema version (Codex review, PR #720).
+    _degraded_facts = sorted(
+        name
+        for name, reliable, consulted in (
+            ("header_cv_facts_reliable", header_cv_facts_reliable_value, True),
+            (
+                "clang_deprecation_facts_reliable",
+                clang_deprecation_facts_reliable_value,
+                True,
+            ),
+            (
+                "clang_field_initializer_facts_reliable",
+                clang_field_initializer_facts_reliable_value,
+                True,
+            ),
+            (
+                "clang_vtable_facts_reliable",
+                clang_vtable_facts_reliable_value,
+                True,
+            ),
+            (
+                "clang_restrict_facts_reliable",
+                clang_restrict_facts_reliable_value,
+                True,
+            ),
+            (
+                "clang_va_list_facts_reliable",
+                clang_va_list_facts_reliable_value,
+                ast_producer_value == "clang",
+            ),
+            (
+                "castxml_var_access_facts_reliable",
+                castxml_var_access_facts_reliable_value,
+                ast_producer_value == "castxml",
+            ),
         )
-        if _degraded_facts:
-            import warnings
+        if not reliable and consulted
+    )
+    if _degraded_facts:
+        import warnings
 
-            warnings.warn(
-                f"Snapshot schema_version {_schema_version} predates this abicheck's "
-                f"schema_version {SCHEMA_VERSION}: "
-                f"{', '.join(_degraded_facts)} "
-                f"{'is' if len(_degraded_facts) == 1 else 'are'} marked unreliable on "
-                "this snapshot, so the affected detectors will decline to trust these "
-                "stale facts rather than risk a false positive purely from this tool "
-                "upgrade. Detection coverage for these fields is reduced until this "
-                "snapshot is regenerated with the current abicheck.",
-                UserWarning,
-                stacklevel=2,
+        if _schema_version < SCHEMA_VERSION:
+            _reason = (
+                f"Snapshot schema_version {_schema_version} predates this "
+                f"abicheck's schema_version {SCHEMA_VERSION}"
             )
+        else:
+            _reason = (
+                "This snapshot carries facts preserved from an earlier, "
+                f"older extraction (its schema_version reads as the current "
+                f"{SCHEMA_VERSION} because it was re-saved since, but the "
+                "underlying facts below were never regenerated)"
+            )
+        warnings.warn(
+            f"{_reason}: "
+            f"{', '.join(_degraded_facts)} "
+            f"{'is' if len(_degraded_facts) == 1 else 'are'} marked unreliable on "
+            "this snapshot, so the affected detectors will decline to trust these "
+            "stale facts rather than risk a false positive purely from this tool "
+            "upgrade. Detection coverage for these fields is reduced until this "
+            "snapshot is regenerated with the current abicheck.",
+            UserWarning,
+            stacklevel=2,
+        )
 
     return snap
 
