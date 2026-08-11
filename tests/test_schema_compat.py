@@ -10,6 +10,7 @@ identical logical content. Tests verify:
 
 import json
 import re
+import warnings
 from pathlib import Path
 
 import pytest
@@ -246,6 +247,35 @@ class TestReserialization:
         d = _load_fixture("v4.json")
         d["schema_version"] = 999
         with pytest.raises(IncompatibleSnapshotSchemaError):
+            snapshot_from_dict(d)
+
+    def test_older_version_warns_when_a_fact_is_degraded(self):
+        """A snapshot older than SCHEMA_VERSION used to load with no signal
+        at all -- the *_facts_reliable flags degraded silently, and CI
+        (which reads a committed, once-generated baseline against whatever
+        abicheck version its pin currently resolves to -- the "reader newer
+        than snapshot" direction it always hits) never saw anything. Loading
+        a legacy header-derived, clang-producer snapshot should now raise a
+        loud UserWarning naming exactly which facts got degraded."""
+        d = _load_fixture("v4.json")
+        d["schema_version"] = 9
+        d["from_headers"] = True
+        d["ast_producer"] = "clang"
+        with pytest.warns(UserWarning, match="clang_deprecation_facts_reliable"):
+            snap = snapshot_from_dict(d)
+        assert snap.clang_deprecation_facts_reliable is False
+
+    def test_older_version_silent_when_nothing_is_degraded(self):
+        """The opposite of the case above: an older snapshot whose producer
+        isn't affected by any of the reliability flags shouldn't warn at all
+        -- every CI baseline is *always* some number of versions behind, and
+        warning regardless of whether that gap ever mattered would be
+        exactly the noise this fix is not meant to introduce."""
+        d = _load_fixture("v4.json")
+        d["schema_version"] = SCHEMA_VERSION - 1
+        d["from_headers"] = False
+        with warnings.catch_warnings():
+            warnings.simplefilter("error")
             snapshot_from_dict(d)
 
 

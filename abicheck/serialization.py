@@ -265,6 +265,18 @@ from .model import (
 #     False so `diff_symbols._diff_var_access` declines to trust it, instead
 #     of reporting a false `VAR_ACCESS_WIDENED` for every private/protected
 #     static member purely from a tool upgrade.
+#
+# Reading an OLDER snapshot (the direction every CI baseline actually hits —
+# a baseline is committed once and outlives however many abicheck pin bumps
+# happen before it's next regenerated) used to be entirely silent whenever it
+# degraded one of the `*_facts_reliable` flags above: the flag itself was set
+# correctly, but nothing surfaced that fact to whoever was reading the
+# comparison. `snapshot_from_dict` now emits a `UserWarning` naming exactly
+# which flags got degraded, once, at load time — but only when the version
+# gap actually degraded something; a trivial one-version-behind snapshot that
+# doesn't hit any producer-specific threshold above stays silent, since every
+# CI baseline is *always* some number of versions behind and warning
+# regardless of relevance would just be noise.
 SCHEMA_VERSION: int = 24
 
 # Schema version at which CastXML field CV facts became reliable (see v9 above).
@@ -1449,6 +1461,60 @@ def snapshot_from_dict(d: dict[str, Any]) -> AbiSnapshot:
             from .python_ext import detect_python_extension
 
             snap.python_ext = detect_python_extension(snap)
+
+    # An older snapshot (schema_version < SCHEMA_VERSION) is the direction
+    # every CI baseline actually hits -- a baseline is committed once and
+    # then outlives however many abicheck pin bumps happen before it's next
+    # regenerated, unlike a fresh dump which is always current-schema. Reads
+    # normally (older schema versions are backward compatible by design; see
+    # the version-history comments above SCHEMA_VERSION), but until now that
+    # was entirely silent: the *_facts_reliable flags computed above already
+    # degrade individual detectors' trust in specific stale-but-real-looking
+    # facts, yet nothing ever told the person running the comparison that any
+    # of that degradation happened. Unlike the "reader older than snapshot"
+    # branch above (which always warns, any single version behind), this
+    # only fires when the version gap actually degraded a known fact --
+    # warning on every trivial one-version-behind snapshot regardless of
+    # whether it affects anything would be exactly the noise CI baselines
+    # (which are *always* somewhat behind) don't need.
+    if _schema_version < SCHEMA_VERSION:
+        _degraded_facts = sorted(
+            name
+            for name, reliable in (
+                ("header_cv_facts_reliable", header_cv_facts_reliable_value),
+                (
+                    "clang_deprecation_facts_reliable",
+                    clang_deprecation_facts_reliable_value,
+                ),
+                (
+                    "clang_field_initializer_facts_reliable",
+                    clang_field_initializer_facts_reliable_value,
+                ),
+                ("clang_vtable_facts_reliable", clang_vtable_facts_reliable_value),
+                ("clang_restrict_facts_reliable", clang_restrict_facts_reliable_value),
+                ("clang_va_list_facts_reliable", clang_va_list_facts_reliable_value),
+                (
+                    "castxml_var_access_facts_reliable",
+                    castxml_var_access_facts_reliable_value,
+                ),
+            )
+            if not reliable
+        )
+        if _degraded_facts:
+            import warnings
+
+            warnings.warn(
+                f"Snapshot schema_version {_schema_version} predates this abicheck's "
+                f"schema_version {SCHEMA_VERSION}: "
+                f"{', '.join(_degraded_facts)} "
+                f"{'is' if len(_degraded_facts) == 1 else 'are'} marked unreliable on "
+                "this snapshot, so the affected detectors will decline to trust these "
+                "stale facts rather than risk a false positive purely from this tool "
+                "upgrade. Detection coverage for these fields is reduced until this "
+                "snapshot is regenerated with the current abicheck.",
+                UserWarning,
+                stacklevel=2,
+            )
 
     return snap
 
