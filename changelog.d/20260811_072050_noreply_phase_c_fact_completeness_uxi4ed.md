@@ -298,6 +298,16 @@ A new changelog fragment. See changelog.d/README.md for the workflow.
   probed identity — both call sites now share one
   `_castxml_identity_with_stat_fallback()` helper instead of the earlier
   version stamping only the cache key.
+- **The castxml L4 source-ABI extractor's persisted `fact_set.
+  compiler_version` now also folds in a stat signature of the resolved
+  EMULATED compiler** (`cc_bin`, via `--castxml-cc-<id>`) — castxml shells
+  out to it purely to discover built-in defines/include paths, so a header
+  conditional on `__GNUC__`/`_MSC_VER` can extract differently once that
+  compiler is upgraded at the same path, even though castxml itself and
+  its own `--version` probe are unchanged. The equivalent D8 TU cache-key
+  half (`cache_identity_extra()`) is a known gap — see `AGENTS.md` — since
+  the resolved compiler varies per compile unit while that hook is a
+  zero-arg, once-per-extractor-instance call.
 
 ### Known gaps (see `AGENTS.md`)
 
@@ -315,3 +325,16 @@ A new changelog fragment. See changelog.d/README.md for the workflow.
   existing test coverage for the collision case — a systematic,
   cross-cutting rework out of scope for this PR's time budget. See
   `AGENTS.md`'s Known gaps section for the full investigation.
+- Recorded, not fixed: `dumper_clang.py`'s `parse_types()` identity key
+  conflates a C/C++ tag-namespace name with an unrelated ordinary-namespace
+  typedef name that happens to share the same spelling (e.g. `struct Foo;`
+  plus a separate `typedef struct { int x; } Foo;`), silently dropping the
+  unrelated opaque tag from the snapshot. Reproduced directly against the
+  parser; not fixed here — see `AGENTS.md`'s Known gaps section.
+- Recorded, not fixed: the castxml D8 TU cache key (`cache_identity_
+  extra()`) does not fold in the resolved emulated compiler's identity
+  (unlike the now-fixed persisted `fact_set.compiler_version` above),
+  since that hook is a zero-arg, once-per-extractor-instance call while
+  the resolved compiler varies per compile unit — needs a wider,
+  per-instance-hook-signature change to `source_replay.py`'s shared
+  cache-key infra. See `AGENTS.md`'s Known gaps section.

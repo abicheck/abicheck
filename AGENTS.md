@@ -763,6 +763,69 @@ Once a root command genuinely clears the bar above, pick the right home:
   systematic, cross-cutting rework, not a scoped fix reactive to one review
   comment. Filed here rather than attempted under this PR's time budget,
   per this file's own "known gaps over risky reactive patches" convention.
+- **`dumper_clang.py`'s `parse_types()` conflates a C/C++ tag-namespace
+  identity with an ordinary-namespace typedef identity that happens to
+  share the same spelling — pre-existing, not introduced by PR #719's own
+  changes, but investigated and confirmed reachable in this pass (Codex
+  review, investigated, not fixed).** For a legal (if unusual) header like
+  `struct Foo; typedef struct { int x; } Foo;` — an unrelated forward-only
+  tag `Foo` and a SEPARATE anonymous struct given the ordinary-namespace
+  name `Foo` via typedef, which C's two-namespace rule keeps genuinely
+  distinct — `parse_types()`'s `identity = "::".join([*entry.scope, name])`
+  computation uses the same bare `name` for both (the tag's own `name`,
+  and the anonymous record's `anon_names`-derived typedef fallback name),
+  so the two collide into one `identity` key. Reproduced directly against
+  `_ClangAstParser`: only ONE `RecordType` named `Foo` is emitted (the
+  typedef-backed definition), and the unrelated opaque tag `struct Foo;`
+  is silently absent from the snapshot entirely — the exact regression
+  PR #719's own opaque-handle-type fix was written to prevent, just
+  reached through a different, adjacent mechanism (a spelling collision
+  across namespaces rather than declaration-order/redecl-set instability).
+  **Not fixed here**: closing it correctly needs the tag-namespace vs.
+  ordinary-namespace distinction threaded through the `identity` key
+  itself (and every downstream consumer that currently assumes `identity`
+  uniquely names one type — `_build_record`, the opaque/deprecated/kind
+  merge maps this same function already builds), which is a real, if
+  narrow, data-model change to a function this same PR already revised
+  three times this session (the opaque-stub fix, the kind-canonicalization
+  fix, and that fix's own regression fix) — each of which independently
+  needed careful re-verification against `dumper_clang.py`'s exact
+  2000-line hard cap. A fourth, differently-shaped change to the same
+  function under continued review pressure is exactly the risk profile
+  this file's own "known gaps over risky reactive patches" convention
+  exists to avoid; a correct fix needs its own dedicated pass with fresh
+  test coverage for the namespace-collision case specifically, not a
+  same-session extension.
+- **The castxml L4 source-ABI extractor's persisted `compiler_version` now
+  includes the resolved EMULATED compiler's stat identity (Codex review,
+  PR #719, follow-up round two — fixed), but the equivalent D8 TU CACHE
+  KEY (`cache_identity_extra()`) does not (investigated, not fixed).**
+  castxml shells out to the emulated compiler (`cc_bin`, resolved per
+  compile unit by `pick_compiler_binary` — the real build's own recorded
+  `argv[0]`, absent an explicit `--gcc-path` override) purely to discover
+  its built-in defines/include paths (`docs/learn/architecture.md`), so a
+  header conditional on `__GNUC__`/`_MSC_VER` can extract differently once
+  that compiler is upgraded at the same path, even though castxml itself
+  and its own `--version` probe stay identical. The *persisted* half is
+  fixed: `_stamp_fact_set_and_coverage()` already has the per-TU
+  `compile_unit` in scope (it already calls `pick_compiler_binary` for
+  `compiler_family`), so folding a stat signature of the resolved `cc_bin`
+  into `fact_set.compiler_version` there was a scoped, well-tested change.
+  The *cache-key* half is a different shape of problem: `cache_identity_
+  extra()` is a zero-arg hook, called once per extractor INSTANCE by
+  `source_replay._extractor_version()` — not per compile unit — while the
+  resolved `cc_bin` genuinely varies per compile unit in the common case
+  (no explicit override). Closing this needs a wider, per-instance-hook-
+  signature change to `source_replay.py`'s shared cache-key infra (also
+  used by `ClangSourceExtractor`, which has the analogous `--gcc-path`
+  case but resolves it once per extractor construction, not per TU — so
+  its existing hook shape doesn't transfer directly), plus a decision on
+  probing cost (a stat check per distinct resolved `cc_bin` across a build
+  with mixed toolchains, cached the same way `_castxml_tool_version`'s
+  `lru_cache` already is for castxml itself). A same-PR reactive extension
+  of the zero-arg hook contract risked getting that shared-infra shape
+  wrong under the exact kind of time pressure this file's own convention
+  warns against; left for a dedicated follow-up.
 - **Linkage-blind removal — attempted twice, reverted twice. The evidence
   keeps proving something adjacent to the invariant.** A symbol vanishing from
   the export table is reported as `func_removed` (and, on the same symbol,

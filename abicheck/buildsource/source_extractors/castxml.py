@@ -616,5 +616,28 @@ class CastxmlSourceExtractor:
             # follow-up) -- persisting a bare "" here on a failed/unparseable
             # probe would let two differently-broken installs' persisted
             # baselines compare as recipe-comparable.
-            compiler_version=_castxml_identity_with_stat_fallback(self.castxml_bin),
+            #
+            # Also folds in a stat signature of the resolved EMULATED
+            # compiler (`cc_bin`, above) -- Codex review, PR #719, follow-up
+            # round two: castxml shells out to `cc_bin` (via `--castxml-cc-
+            # <id> cc_bin`) purely to discover its built-in defines/include
+            # paths (`docs/learn/architecture.md`), so a header conditional
+            # on e.g. `__GNUC__`/`_MSC_VER` can extract differently after
+            # THAT compiler is upgraded at the same path, even though
+            # castxml itself never changed and the probe above stays
+            # identical. Persisted here (per-TU `compile_unit` is already in
+            # scope) rather than in `cache_identity_extra()` -- that hook is
+            # a zero-arg, once-per-extractor-instance call
+            # (`source_replay._extractor_version()`), while the resolved
+            # `cc_bin` is genuinely per-COMPILE-UNIT (`pick_compiler_binary`
+            # reads `compile_unit.argv[0]` absent an explicit override), so
+            # threading it into the D8 TU cache key needs a wider,
+            # per-instance-hook-signature change to shared `source_replay.py`
+            # infra (also used by `ClangSourceExtractor`) -- tracked as a
+            # known gap (see AGENTS.md) rather than attempted as a reactive
+            # extension here.
+            compiler_version=(
+                f"{_castxml_identity_with_stat_fallback(self.castxml_bin)}"
+                f"; cc:{':'.join(str(f) for f in _executable_stat_key(cc_bin))}"
+            ),
         )
