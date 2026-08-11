@@ -538,21 +538,29 @@ def test_zstd_decoder_rejects_realistic_writer_window(tmp_path):
     highly-compressible fixture in `test_zstd_decoder_rejects_window_above_
     ceiling` above, whose real required window collapses to far less than
     its window_log) is a realistic multi-megabyte size, matching what the
-    writer picks at its baseline compression level. Low-entropy data lets
-    the *frame's own recorded window_size* stay large despite compressing
-    well, so this exercises the real ceiling instead of coincidentally
-    fitting under the pre-fix (1/1024th) ceiling too. Confirmed the old,
+    writer picks at its baseline compression level. Confirmed the old,
     KiB-denominated ceiling (2097152, interpreted as raw bytes by
     python-zstandard) rejects this frame with "Frame requires too much
-    memory for decoding", while the fixed byte ceiling decodes it."""
-    zstandard = pytest.importorskip("zstandard")
-    import random
+    memory for decoding", while the fixed byte ceiling decodes it.
 
-    random.seed(2026)
-    # An 8 MiB window (window_log=23), with enough genuinely incompressible
-    # payload that the frame's recorded window_size stays at the full 8 MiB
-    # rather than collapsing to the (smaller) content size.
-    payload = bytes(random.randrange(256) for _ in range(9 * 1024 * 1024))
+    Codex review: an earlier revision of this test compressed 9 MiB of
+    genuinely incompressible (`random.randrange(256)`) data to force the
+    window -- correct, but real zstd level-19 compression of incompressible
+    input is slow (~5-8s by itself), leaving this in the *default fast*
+    lane despite costing about as much as the dedicated `slow`-marked test
+    two below it. Content only needs to *exceed* the 8 MiB window for zstd
+    to stop collapsing the frame's recorded `window_size` down to
+    `content_size` (confirmed empirically, and exercised the same way by
+    `test_zstd_round_trip_at_production_scale_and_level`'s real snapshot
+    fixture below) -- highly-compressible content works identically for
+    that purpose and compresses in milliseconds, so no `slow` marker is
+    needed at all."""
+    zstandard = pytest.importorskip("zstandard")
+
+    # An 8 MiB window (window_log=23); content merely needs to exceed the
+    # window for the frame to record the full 8 MiB rather than collapsing
+    # to its own (smaller) content size -- compressibility doesn't matter.
+    payload = b"a" * (9 * 1024 * 1024)
     params = zstandard.ZstdCompressionParameters.from_level(19, window_log=23)
     cctx = zstandard.ZstdCompressor(compression_params=params)
     compressed = cctx.compress(payload)
