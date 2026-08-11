@@ -116,6 +116,7 @@ def main(argv: list[str] | None = None) -> int:
     orphaned: set[str] = set()
     excluded_prototype: set[str] = set()
     graded_models: set[str] = set()
+    unknown_model: set[str] = set()
     for row in index:
         sid, arm, rep = row["scenario_id"], row["arm"], row["repetition"]
         run_dir = root / sid / arm / str(rep)
@@ -144,6 +145,26 @@ def main(argv: list[str] | None = None) -> int:
         graded.append(grade)
         if isinstance(row.get("model"), str):
             graded_models.add(row["model"])
+        else:
+            # A timed-out run with no --model pin has a genuinely unknown
+            # model (see runners/claude_code.py's TimeoutExpired handler) —
+            # not a value that happens to be missing. It is graded (a
+            # timeout is a real, meaningful result for dimensions 1/3), but
+            # letting it sail through the mixed-model check below purely
+            # because it contributes no *string* to compare against would
+            # accept exactly the batch that check exists to refuse: known
+            # model X on some rows, silently-unproven model on this one.
+            unknown_model.add(f"{sid}/{row.get('arm')}/{row.get('repetition')}")
+
+    if unknown_model and graded_models:
+        print(
+            "runs graded here include rows with no recorded model alongside "
+            f"rows recorded under {', '.join(sorted(graded_models))} — not "
+            "provably the same model, so not provably attributable to the "
+            "skill: " + ", ".join(sorted(unknown_model)),
+            file=sys.stderr,
+        )
+        return 1
 
     if len(graded_models) > 1:
         # The runner's own check_one_model refuses a mixed-model batch at

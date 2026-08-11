@@ -1083,6 +1083,20 @@ def main(argv: list[str] | None = None) -> int:
                         "skill": scenario["skill"],
                         "exit_code": None,
                         "timed_out": True,
+                        # The process died before it could emit (or the events
+                        # stream could be read for) a system/init event, so
+                        # resolved_model() has nothing to resolve — but the
+                        # *requested* model is already known whenever --model
+                        # pinned one, and persisting it here is what lets both
+                        # this run's own check_one_model call below and
+                        # run_skill_eval.py's later grading-time check treat a
+                        # pinned-model timeout as consistent evidence rather
+                        # than as an automatic, avoidable mixed-model refusal.
+                        # Left absent (None) when --model was not passed —
+                        # genuinely unknown, and both checks correctly treat
+                        # an unknown model as never provably consistent with
+                        # anything.
+                        "model": args.model,
                     }
                     (out_dir / "final.md").write_text("", encoding="utf-8")
                 # Scoped by *skill inclusion policy* (flagship-only, unless
