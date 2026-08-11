@@ -337,6 +337,40 @@ class TestReserialization:
             snap2 = snapshot_from_dict(resaved)
         assert snap2.clang_deprecation_facts_reliable is False
 
+    def test_older_version_silent_for_inferred_header_flags_no_detector_reads(self):
+        """Five of the seven flags' one real consumer requires CONFIRMED
+        (non-inferred) header awareness before it ever reads the flag:
+        clang_restrict/clang_va_list/castxml_var_access's detectors each
+        exit through diff_symbols._both_header_aware, and clang_deprecation/
+        clang_field_initializer's shared consumer
+        (fact_provenance.fact_producer) opens with the identical
+        ``from_headers and not from_headers_inferred`` check. A schema-v1
+        snapshot with no explicit ``from_headers`` key gets it GUESSED true
+        from a populated surface -- real, but not "confirmed" -- so none of
+        these five detectors will ever consult their flag for it (Codex
+        review, PR #720). header_cv_facts_reliable is the one exception
+        exercised here: its consumers (variable/field cv checks) apply
+        regardless of header confirmation, so it still warns."""
+        d = _load_fixture("v1.json")
+        d.pop("from_headers", None)
+        d.pop("ast_producer", None)
+        d["schema_version"] = 1
+        with pytest.warns(UserWarning) as record:
+            snap = snapshot_from_dict(d)
+        assert snap.from_headers is True
+        assert snap.from_headers_inferred is True
+        assert len(record) == 1
+        message = str(record[0].message)
+        assert "header_cv_facts_reliable" in message
+        for degraded_but_unconsulted in (
+            "clang_deprecation_facts_reliable",
+            "clang_field_initializer_facts_reliable",
+            "clang_restrict_facts_reliable",
+            "clang_va_list_facts_reliable",
+            "castxml_var_access_facts_reliable",
+        ):
+            assert degraded_but_unconsulted not in message
+
 
 # ---------------------------------------------------------------------------
 # Documentation/constant sync — a stale docs number silently misleads readers

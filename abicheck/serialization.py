@@ -1488,18 +1488,36 @@ def snapshot_from_dict(d: dict[str, Any]) -> AbiSnapshot:
     #       round-trip (Codex review, PR #720) -- the flags themselves, not
     #       the version number, are the ground truth here.
     # Each entry pairs a flag with whether it is even CONSULTED by the one
-    # detector that reads it, given THIS side's own AST producer. Most
-    # flags' value computation already collapses to "reliable" for every
-    # producer their consumer doesn't gate on (see each flag's own
-    # computation above) -- but two don't: clang_va_list_facts_reliable's
-    # value treats "hybrid" the same as "clang" (correct for the fact's own
-    # provenance), yet diff_symbols._diff_param_va_list only ever consults
-    # it when BOTH sides are exactly "clang" (never "hybrid").
+    # detector that reads it, given THIS side's own AST producer and header
+    # confirmation. Most flags' value computation already collapses to
+    # "reliable" for every producer their consumer doesn't gate on (see each
+    # flag's own computation above) -- but two don't: clang_va_list_facts_
+    # reliable's value treats "hybrid" the same as "clang" (correct for the
+    # fact's own provenance), yet diff_symbols._diff_param_va_list only ever
+    # consults it when BOTH sides are exactly "clang" (never "hybrid").
     # castxml_var_access_facts_reliable is the mirror case for "castxml" vs.
     # diff_symbols._diff_var_access. Listing either one for a hybrid
     # snapshot would claim reduced detection coverage that regenerating the
     # snapshot could never restore, since no detector consults it for that
     # producer regardless of schema version (Codex review, PR #720).
+    #
+    # Separately, five of the seven flags' one real consumer requires
+    # CONFIRMED (non-inferred) header awareness on this side before it ever
+    # reads the flag at all: clang_restrict/clang_va_list/
+    # castxml_var_access's detectors each exit through
+    # diff_symbols._both_header_aware before consulting their flag, and
+    # clang_deprecation/clang_field_initializer's shared consumer
+    # (fact_provenance.fact_producer) opens with the identical
+    # ``from_headers and not from_headers_inferred`` check. A schema-v1..v5
+    # snapshot that predates the explicit ``from_headers`` key gets
+    # ``from_headers`` GUESSED true from a populated surface -- real, but
+    # not "confirmed" -- so none of these five detectors will ever consult
+    # their flag for it regardless of whether a fresh dump would restore it
+    # (Codex review, PR #720). header_cv_facts_reliable and
+    # clang_vtable_facts_reliable are the two exceptions: their consumers
+    # (variable/field cv checks, layout/vtable diffing) apply to any
+    # snapshot carrying the underlying fact, header-confirmed or not.
+    _header_confirmed = from_headers and not from_headers_inferred
     _degraded_facts = sorted(
         name
         for name, reliable, consulted in (
@@ -1507,12 +1525,12 @@ def snapshot_from_dict(d: dict[str, Any]) -> AbiSnapshot:
             (
                 "clang_deprecation_facts_reliable",
                 clang_deprecation_facts_reliable_value,
-                True,
+                _header_confirmed,
             ),
             (
                 "clang_field_initializer_facts_reliable",
                 clang_field_initializer_facts_reliable_value,
-                True,
+                _header_confirmed,
             ),
             (
                 "clang_vtable_facts_reliable",
@@ -1522,17 +1540,17 @@ def snapshot_from_dict(d: dict[str, Any]) -> AbiSnapshot:
             (
                 "clang_restrict_facts_reliable",
                 clang_restrict_facts_reliable_value,
-                True,
+                _header_confirmed,
             ),
             (
                 "clang_va_list_facts_reliable",
                 clang_va_list_facts_reliable_value,
-                ast_producer_value == "clang",
+                _header_confirmed and ast_producer_value == "clang",
             ),
             (
                 "castxml_var_access_facts_reliable",
                 castxml_var_access_facts_reliable_value,
-                ast_producer_value == "castxml",
+                _header_confirmed and ast_producer_value == "castxml",
             ),
         )
         if not reliable and consulted

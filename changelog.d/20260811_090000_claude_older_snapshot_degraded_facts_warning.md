@@ -26,4 +26,12 @@ A new changelog fragment. See changelog.d/README.md for the workflow.
   `schema_version` to the current value, so a degraded flag preserved
   through an explicit marker on a reserialized legacy snapshot now still
   triggers the warning instead of silently disappearing once the version
-  number itself reads as current.
+  number itself reads as current. Five of the seven flags are further
+  gated on this side's own confirmed (non-inferred) header awareness,
+  matching each flag's one real consumer: a schema-v1–v5 snapshot with no
+  explicit `from_headers` key gets it *guessed* true from a populated
+  surface, and none of `diff_symbols._diff_param_restrict`/
+  `_diff_param_va_list`/`_diff_var_access`/`fact_provenance.fact_producer`
+  ever consult their flag without confirmed header evidence — so listing
+  them would have claimed reduced coverage a fresh dump could never
+  actually restore.
