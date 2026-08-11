@@ -485,11 +485,33 @@ def resolved_model(events: list[dict]) -> str | None:
     return None
 
 
+def _model_identity(row: dict) -> str | None:
+    """The best available proof of which model a row used.
+
+    Prefers the *requested* identifier (`requested_model`, i.e. `--model`
+    exactly as passed — may be an alias like `sonnet`) over the *resolved*
+    one (`model`, read from the CLI's own `system/init` event): two rows
+    pinned to the same `--model` argument always compare equal this way,
+    even when one of them is a timeout that never reached an init event to
+    resolve the alias against, and even if resolving the same alias twice
+    could in principle spell it differently. Falls back to the resolved
+    model only when no pin was recorded (`requested_model` absent, e.g. a
+    caller that let the CLI pick its own default).
+    """
+    requested = row.get("requested_model")
+    if isinstance(requested, str):
+        return requested
+    model = row.get("model")
+    return model if isinstance(model, str) else None
+
+
 def check_one_model(index: list[dict], record: dict) -> str | None:
     """Why this run is not comparable with the batch so far, if it is not."""
-    models = {row["model"] for row in index if isinstance(row.get("model"), str)}
-    model = record.get("model")
-    if not isinstance(model, str) or not models or model in models:
+    models = {
+        identity for row in index if (identity := _model_identity(row)) is not None
+    }
+    model = _model_identity(record)
+    if model is None or not models or model in models:
         return None
     return (
         f"this run used {model} while the batch so far used "
@@ -672,6 +694,10 @@ def _run_once(
         "exit_code": proc.returncode,
         "visible_skills": visible,
         "model": resolved_model(events),
+        # The raw --model argument, alias and all (e.g. "sonnet") — see
+        # _model_identity's own docstring for why comparisons prefer this
+        # over the resolved name above.
+        "requested_model": model,
         "wall_clock_seconds": usage["wall_clock_seconds"],
     }
 
@@ -1085,18 +1111,22 @@ def main(argv: list[str] | None = None) -> int:
                         "timed_out": True,
                         # The process died before it could emit (or the events
                         # stream could be read for) a system/init event, so
-                        # resolved_model() has nothing to resolve — but the
-                        # *requested* model is already known whenever --model
-                        # pinned one, and persisting it here is what lets both
-                        # this run's own check_one_model call below and
-                        # run_skill_eval.py's later grading-time check treat a
-                        # pinned-model timeout as consistent evidence rather
-                        # than as an automatic, avoidable mixed-model refusal.
-                        # Left absent (None) when --model was not passed —
-                        # genuinely unknown, and both checks correctly treat
-                        # an unknown model as never provably consistent with
-                        # anything.
-                        "model": args.model,
+                        # resolved_model() has nothing to resolve — "model"
+                        # stays genuinely absent. "requested_model" is set
+                        # whenever --model pinned one, so this row still
+                        # carries a comparable identity: _model_identity()
+                        # prefers the requested alias over a resolved name,
+                        # so a pinned-model timeout compares equal to every
+                        # other row pinned to the same --model argument,
+                        # instead of forcing an alias (e.g. "sonnet") against
+                        # another row's already-resolved full name. Left
+                        # absent (None) when --model was not passed —
+                        # genuinely unknown, and both this run's own
+                        # check_one_model call below and run_skill_eval.py's
+                        # later grading-time check correctly treat an unknown
+                        # identity as never provably consistent with a known
+                        # one.
+                        "requested_model": args.model,
                     }
                     (out_dir / "final.md").write_text("", encoding="utf-8")
                 # Scoped by *skill inclusion policy* (flagship-only, unless

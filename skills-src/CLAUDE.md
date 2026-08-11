@@ -84,10 +84,10 @@ Generated output, per skill, per target tree:
 
 None of the four shipped skills has measured evidence yet that it improves
 agent behavior over a well-documented CLI/`AGENTS.md` alone — every gate
-that exists today (`test_gen_agent_skills.py`, `test_agent_skills_
-structural.py`, `test_agent_skills_drift.py`, `test_agent_skills_triggers.py`)
-proves the *artifact* is well-formed, never that the *behavior* it produces
-beats the unequipped baseline. Per
+that exists today (`test_gen_agent_skills.py`,
+`test_agent_skills_structural.py`, `test_agent_skills_drift.py`,
+`test_agent_skills_triggers.py`) proves the *artifact* is well-formed, never
+that the *behavior* it produces beats the unequipped baseline. Per
 [ADR-058's 2026-08-11 amendment](../docs/contribute/adr/058-native-compatibility-agent-skills.md),
 the portfolio is frozen at the four skills already shipped, and each carries
 one of two statuses until G37 says otherwise:
@@ -108,9 +108,10 @@ one of two statuses until G37 says otherwise:
   a prototype skill. G37's Phase 1 corpus targets
   `native-binary-compatibility-review` only — see that plan's scope note.
 - A prototype skill is promoted back to active/candidate-for-second-flagship
-  status only after the flagship experiment (bare agent vs. a minimal
-  checklist vs. the full skill) shows a measurable, reproducible lift — not
-  on a schedule and not by removing this table row.
+  status only after the flagship experiment shows a measurable, reproducible
+  lift on G37 D7's gating comparator — `skill-agent:` (offered via
+  progressive disclosure) vs. `baseline` (bare agent, no skill) — not on a
+  schedule and not by removing this table row.
 - This freeze does not reopen ADR-058's five-criteria admission bar for a
   *new* (fifth) skill — see "Adding a public skill" below, unchanged.
 

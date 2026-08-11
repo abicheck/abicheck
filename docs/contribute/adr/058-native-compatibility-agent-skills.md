@@ -37,7 +37,6 @@ measurable lift over an unequipped agent.
 > costly a wrong skill-interpretation layer can be, and four unvalidated
 > skills multiply that surface by four before a single one has justified
 > its existence.
->
 > **Decision:** freeze the published portfolio at the four skills already
 > shipped (no fifth skill, no further scope added to the existing three
 > non-flagship skills) and designate `native-binary-compatibility-review` —
@@ -49,9 +48,10 @@ measurable lift over an unequipped agent.
 > published (removing working, reviewed content is not the goal) but move
 > to **prototype status**: not extended, not an L2/L3 evaluation target, and
 > not to be treated as validated in any user-facing claim, until the
-> flagship experiment (bare agent vs. a minimal checklist vs. the full
-> skill, per G37's arm design) shows a measurable, reproducible lift that
-> justifies the same investment for a second skill. See
+> flagship experiment shows a measurable, reproducible lift on G37 D7's
+> gating comparator — `skill-agent:` (offered via progressive disclosure)
+> vs. `baseline` (bare agent, no skill) — that justifies the same
+> investment for a second skill. See
 > [G37](../plans/g37-agent-skill-quality-evaluation.md)'s scope note for the
 > phase-by-phase detail; the same portfolio-status table is kept in
 > `skills-src/CLAUDE.md`, the skills' own source tree. This does not reopen

@@ -55,6 +55,22 @@ PACK = Path(__file__).resolve().parent / "skill-eval-pack.json"
 FLAGSHIP_SKILL = "native-binary-compatibility-review"
 
 
+def _model_identity(row: dict) -> str | None:
+    """Mirrors runners/claude_code.py's own `_model_identity`.
+
+    Prefers the requested `--model` argument (may be an alias like
+    `sonnet`) over the resolved model name, so a timed-out row pinned to
+    the same `--model` as the rest of the batch compares equal to them
+    instead of having no identity at all (`model` is unset for a timeout —
+    see that module's `TimeoutExpired` handler).
+    """
+    requested = row.get("requested_model")
+    if isinstance(requested, str):
+        return requested
+    model = row.get("model")
+    return model if isinstance(model, str) else None
+
+
 def _pct(part: int, whole: int) -> str:
     return "—" if not whole else f"{100 * part / whole:.0f}%"
 
@@ -143,15 +159,16 @@ def main(argv: list[str] | None = None) -> int:
         grade = grade_run(run_dir, pack["scenarios"][sid], arm)
         grade.update(scenario_id=sid, arm=arm, repetition=rep)
         graded.append(grade)
-        if isinstance(row.get("model"), str):
-            graded_models.add(row["model"])
+        identity = _model_identity(row)
+        if identity is not None:
+            graded_models.add(identity)
         else:
             # A timed-out run with no --model pin has a genuinely unknown
             # model (see runners/claude_code.py's TimeoutExpired handler) —
             # not a value that happens to be missing. It is graded (a
             # timeout is a real, meaningful result for dimensions 1/3), but
             # letting it sail through the mixed-model check below purely
-            # because it contributes no *string* to compare against would
+            # because it contributes no identity to compare against would
             # accept exactly the batch that check exists to refuse: known
             # model X on some rows, silently-unproven model on this one.
             unknown_model.add(f"{sid}/{row.get('arm')}/{row.get('repetition')}")
