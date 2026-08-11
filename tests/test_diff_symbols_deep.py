@@ -942,6 +942,42 @@ class TestParamDefaultChanged:
         r = compare(old, new)
         assert ChangeKind.PARAM_DEFAULT_VALUE_REMOVED in _kinds(r)
 
+    def test_change_suppressed_when_only_new_side_is_unreliable(self):
+        """The mirror of test_real_change_from_literal_to_fingerprint_still_
+        detected above: every existing scenario made the OLD side the
+        unreliable one. Checked per side (this function's own docstring),
+        so a RELIABLE old side with a fingerprint-shaped value must still
+        decline the comparison when the NEW side's own fingerprint is the
+        one that can't be trusted."""
+        f_old = _pub_func(
+            "connect",
+            "_Z7connectv",
+            params=[Param(name="timeout", type="int", default="expr:aaaa")],
+        )
+        f_new = _pub_func(
+            "connect",
+            "_Z7connectv",
+            params=[Param(name="timeout", type="int", default="expr:bbbb")],
+        )
+        old = AbiSnapshot(
+            library="libtest.so.1",
+            version="1.0",
+            functions=[f_old],
+            from_headers=True,
+            ast_producer="clang",
+            clang_field_initializer_facts_reliable=True,
+        )
+        new = AbiSnapshot(
+            library="libtest.so.1",
+            version="2.0",
+            functions=[f_new],
+            from_headers=True,
+            ast_producer="clang",
+            clang_field_initializer_facts_reliable=False,
+        )
+        r = compare(old, new)
+        assert ChangeKind.PARAM_DEFAULT_VALUE_CHANGED not in _kinds(r)
+
 
 # ── param_renamed ────────────────────────────────────────────────────────
 
@@ -1342,6 +1378,21 @@ class TestConstantChanges:
             from_headers=True,
             ast_producer=None,
             clang_field_initializer_facts_reliable=True,
+        )
+        r = compare(old, new)
+        assert ChangeKind.CONSTANT_CHANGED not in _kinds(r)
+
+    def test_stale_fingerprint_collision_suppressed_when_new_side_unreliable(self):
+        """Checked per side (constant_value_fingerprint_comparison_
+        unreliable's own docstring): every scenario above made the OLD side
+        the unreliable one. A RELIABLE old side with a fingerprint-shaped
+        constant value must still decline the comparison when the NEW
+        side's own fingerprint is the one that can't be trusted."""
+        old = self._clang_snap(
+            {"K": "expr:aaaa"}, field_initializer_facts_reliable=True
+        )
+        new = self._clang_snap(
+            {"K": "expr:bbbb"}, field_initializer_facts_reliable=False
         )
         r = compare(old, new)
         assert ChangeKind.CONSTANT_CHANGED not in _kinds(r)
