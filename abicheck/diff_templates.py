@@ -293,6 +293,20 @@ def _strip_param_signature(qualified: str) -> str:
     whole-prefix ``rindex`` picks the wrong one and corrupts the name down
     to a lone ``">"`` (Codex review, fresh evidence after this function's
     own prior fix for the pointer-wrapper case).
+
+    **Known, deliberately-unfixed limitation**: a return type that is
+    itself a template instantiation whose *own* non-type template argument
+    contains a comparison operator (``std::enable_if<(sizeof(int)>1),
+    T>::type ns::sort<int>(int)`` — real GCC output) still truncates the
+    identity at that argument's own ``(``, since the ``>`` in ``>1)`` is
+    lexically indistinguishable from a genuine template-close ``>`` (as in
+    the overwhelmingly common ``f<int>(args)`` shape) without actually
+    parsing the expression grammar — the same "angle bracket problem" real
+    C++ parsers resolve with lookahead/backtracking or semantic analysis,
+    out of scope for this lexical scanner (Codex review; verified this
+    degrades safely — no crash/hang, just a wrong-but-inert leaf, and that
+    no simple heuristic here can distinguish the two ``>`` uses without
+    also breaking the ordinary template-function-call case).
     """
     i = qualified.find("(")
     saw_pointer_wrapper = False

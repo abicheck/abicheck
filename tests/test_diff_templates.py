@@ -312,6 +312,25 @@ class TestStripParamSignature:
         # the input unchanged.
         assert _strip_param_signature("decltype (unbalanced") == "decltype (unbalanced"
 
+    def test_return_type_comparison_operator_degrades_safely(self) -> None:
+        # Codex review: a return type that is itself a template
+        # instantiation whose own non-type template argument contains a
+        # comparison operator ("std::enable_if<(sizeof(int)>1), T>::type
+        # ns::sort<int>(int)" -- real GCC output) still truncates the
+        # identity at that argument's own "(", since the ">" in ">1)" is
+        # lexically indistinguishable from a genuine template-close ">"
+        # without actually parsing the expression grammar -- a known,
+        # deliberately-unfixed limitation (see this function's own
+        # docstring). This test only pins the *safety* contract: no
+        # exception, no hang, and the leaf ends up as *some* fixed string
+        # rather than corrupting into something callers can't handle.
+        sig = (
+            "std::enable_if<((sizeof (int))>(1)), int>::type "
+            "ns::experimental::sort<int>(int)"
+        )
+        result = _strip_param_signature(sig)
+        assert isinstance(result, str) and result
+
     def test_pointer_wrapper_leaves_a_clean_qualified_name(self) -> None:
         # Codex review, fresh evidence: skipping a pointer-declarator
         # wrapper left its own "(" and "*"/"Class::*" text sitting in the
