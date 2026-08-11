@@ -645,15 +645,41 @@ def test_check_fact_compatibility_matching_recipe_id_overrides_producer_mismatch
     assert any(i.rule == "producer_mismatch" for i in compat.issues)
 
 
-def test_check_fact_compatibility_one_side_empty_stays_comparable() -> None:
-    """A pre-C.8 producer (no fact_set at all) must not gate anything -- only
-    the informational fact_set_unknown warning fires (forward-compat)."""
-    fs = default_fact_set(producer="p", producer_version="1")
-    compat = check_fact_compatibility(fs, {})
+def test_check_fact_compatibility_both_sides_empty_stays_comparable() -> None:
+    """Two genuinely pre-C.8 producers (neither stamps a fact_set at all) must
+    not gate anything -- only the informational fact_set_unknown warning
+    fires (forward-compat, the ORIGINAL C.8 design)."""
+    compat = check_fact_compatibility({}, {})
     assert compat.structured_facts_comparable
     assert compat.structured_content_comparable
     assert compat.opaque_hashes_comparable
     assert compat.source_edges_comparable
+
+
+def test_check_fact_compatibility_one_side_empty_suppresses_content_only() -> None:
+    """The concrete motivating case (Codex review, PR #719): exactly ONE side
+    stamps a fact_set (e.g. a fresh dump from an extractor that just started
+    participating in this protocol) while the other has none at all (e.g. an
+    already-persisted baseline from before that extractor stamped anything).
+    Unlike the symmetric both-empty case, this asymmetry must NOT be read as
+    "nothing to check" -- the unstamped side could be exactly the legacy
+    producer version the newly-stamped side's own recipe-drift gating exists
+    to guard against, so content comparability defaults to unknown/untrusted.
+    Existence/removal detection is untouched -- that's a separate,
+    pre-existing forward-compat contract this asymmetry doesn't change."""
+    fs = default_fact_set(producer="p", producer_version="1")
+    compat = check_fact_compatibility(fs, {})
+    assert compat.structured_facts_comparable
+    assert not compat.structured_content_comparable
+    assert not compat.opaque_hashes_comparable
+    assert not compat.source_edges_comparable
+    # The reverse direction (new side unstamped, old side stamped) must be
+    # symmetric.
+    compat_reversed = check_fact_compatibility({}, fs)
+    assert compat_reversed.structured_facts_comparable
+    assert not compat_reversed.structured_content_comparable
+    assert not compat_reversed.opaque_hashes_comparable
+    assert not compat_reversed.source_edges_comparable
 
 
 def test_fact_compatibility_is_frozen() -> None:

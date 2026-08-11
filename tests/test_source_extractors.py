@@ -1067,6 +1067,28 @@ def test_two_castxml_producer_versions_suppress_content_comparison() -> None:
     assert compat.structured_facts_comparable
 
 
+def test_legacy_unstamped_castxml_baseline_suppresses_content_comparison() -> None:
+    """The literal transition case (Codex review, PR #719, second round): an
+    already-persisted L4 baseline predates this PR entirely, so it carries NO
+    fact_set at all (``{}``) -- not merely an older CASTXML_EXTRACTOR_VERSION
+    stamp. Compared against a freshly re-collected new side that DOES stamp
+    one, content comparison must still be suppressed; the asymmetric-absence
+    case is not the same as the "neither side ever stamped one" forward-compat
+    case."""
+    from abicheck.buildsource.fact_set import check_fact_compatibility
+
+    new_fs = dict(
+        CastxmlSourceExtractor()
+        ._parse_root(
+            _root_with_one_type(), _cu(), public_header_roots=["foo.h"], target_id=""
+        )
+        .fact_set
+    )
+    compat = check_fact_compatibility({}, new_fs)
+    assert not compat.structured_content_comparable
+    assert compat.structured_facts_comparable
+
+
 def _root_with_one_type() -> object:
     from xml.etree.ElementTree import Element, SubElement
 

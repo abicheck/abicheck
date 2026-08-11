@@ -413,24 +413,47 @@ def check_fact_compatibility(
     specifically — those sides have declared they use the same
     canonicalization recipe despite differing producer identity strings.
 
-    When one or both sides carry no ``fact_set`` at all (a pre-C.8 producer),
-    :func:`check_fact_set_compatibility` reports only the informational
-    ``fact_set_unknown`` warning — not one of the invalidating rules — so
-    every category stays comparable here too, preserving the existing
-    forward-compat behavior of never gating a pre-C.8 baseline's findings.
+    When **both** sides carry no ``fact_set`` at all (a genuinely pre-C.8
+    producer, or two hand-edited packs), :func:`check_fact_set_compatibility`
+    reports only the informational ``fact_set_unknown`` warning — not one of
+    the invalidating rules — so every category stays comparable here too,
+    preserving the existing forward-compat behavior of never gating a
+    symmetric pre-C.8 baseline pair's findings.
+
+    An **asymmetric** absence (exactly one side stamped a ``fact_set``, the
+    other didn't) is a different, riskier case and is NOT given that same
+    forgiveness for the recipe-overridable categories
+    (``structured_content_comparable``/``opaque_hashes_comparable``/
+    ``source_edges_comparable``): the unstamped side may be a baseline
+    persisted by literally the OLD producer version this PR's own gating was
+    built to guard against (Codex review, PR #719 — the castxml extractor
+    only started stamping ``fact_set`` in this same change, so every
+    already-persisted castxml L4 baseline predating it hits exactly this
+    one-sided shape when compared against a freshly re-collected new side).
+    Content comparability there defaults to "unknown, don't trust it" rather
+    than the symmetric case's "nothing to check, so nothing is gated".
+    Existence/removal detection (``structured_facts_comparable``) is
+    untouched by this distinction — that pre-C.8 forward-compat contract
+    predates this PR and is not the gap being closed here.
     """
     issues = check_fact_set_compatibility(old_fact_set, new_fact_set)
     rules = {issue.rule for issue in issues}
-    same_recipe = bool(old_fact_set) and bool(new_fact_set)
-    if same_recipe:
-        same_recipe = hash_recipe_id(old_fact_set) == hash_recipe_id(new_fact_set)
+    both_present = bool(old_fact_set) and bool(new_fact_set)
+    one_sided = bool(old_fact_set) != bool(new_fact_set)
+    same_recipe = both_present and hash_recipe_id(old_fact_set) == hash_recipe_id(
+        new_fact_set
+    )
     hard_blocked = bool(rules & _HARD_BLOCKING_RULES)
-    recipe_agrees = same_recipe or not (rules & _RECIPE_OVERRIDABLE_RULES)
+    recipe_agrees = same_recipe or (
+        not one_sided and not (rules & _RECIPE_OVERRIDABLE_RULES)
+    )
+    source_edge_recipe_agrees = same_recipe or (
+        not one_sided and not (rules & _SOURCE_EDGE_OVERRIDABLE_RULES)
+    )
     return FactCompatibility(
         structured_facts_comparable=not hard_blocked,
         structured_content_comparable=not hard_blocked and recipe_agrees,
         opaque_hashes_comparable=not hard_blocked and recipe_agrees,
-        source_edges_comparable=not hard_blocked
-        and (same_recipe or not (rules & _SOURCE_EDGE_OVERRIDABLE_RULES)),
+        source_edges_comparable=not hard_blocked and source_edge_recipe_agrees,
         issues=tuple(issues),
     )
