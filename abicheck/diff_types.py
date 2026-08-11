@@ -1432,7 +1432,11 @@ def _diff_type_vtable(
     # default (false-negative-avoidance over false-positive-avoidance).
     #
     # So the finding stays BREAKING here, full stop. Instead this only
-    # records ``qualified_name`` + a stable marker so a post-processing step
+    # records ``qualified_name`` + a dedicated internal correlation marker
+    # (``vtable_covers_unverifiable_layout_gap`` -- deliberately NOT
+    # ``modulation_reason``/``modulation_rule``, which are a public,
+    # report-facing audit trail for an actual verdict override that did not
+    # happen here; Codex review) so a post-processing step
     # (``post_processing.SuppressLayoutUnverifiableCoveredByVtableChanged``)
     # can recognize that THIS type's LAYOUT_UNVERIFIABLE finding is
     # redundant -- fully subsumed by this stronger, already-BREAKING
@@ -1447,7 +1451,7 @@ def _diff_type_vtable(
         t_old, t_new, vtable_facts_reliable=vtable_facts_reliable
     ):
         change.qualified_name = t_new.qualified_name or t_new.name
-        change.modulation_reason = "layout_unverifiable_same_type"
+        change.vtable_covers_unverifiable_layout_gap = True
     return [change]
 
 

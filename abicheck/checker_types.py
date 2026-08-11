@@ -167,6 +167,20 @@ class Change:
     # it out of ``description`` prose. ``None`` when there is no correlated
     # change, or for every finding kind that does not compute one.
     correlated_change_kind: str | None = None
+    # Set by diff_types._diff_type_vtable on a TYPE_VTABLE_CHANGED finding
+    # when it rests on the identical asymmetric-layout-evidence gap
+    # LAYOUT_UNVERIFIABLE (diff_layout.py) reports for the same type. Purely
+    # an internal cross-detector correlation key for
+    # post_processing.SuppressLayoutUnverifiableCoveredByVtableChanged to
+    # fold the now-redundant LAYOUT_UNVERIFIABLE advisory into
+    # ``redundant_changes`` — deliberately NOT ``modulation_reason``/
+    # ``modulation_rule`` (Codex review): this finding's own severity is
+    # never touched, so tagging it as a "modulation" would be a false audit
+    # entry (a public field reporters and ``impact.engine.assess_change()``
+    # expose as a real verdict-modulation reason code) for a finding whose
+    # verdict never changed. ``None`` for every ordinary TYPE_VTABLE_CHANGED
+    # and every other finding kind.
+    vtable_covers_unverifiable_layout_gap: bool = False
     # ADR-044 D1 — set by the MarkReachability pipeline step, which runs before
     # ApplySuppression so a broad namespace/source_location suppression rule can
     # tell a truly-unreachable internal change apart from one that is part of the

@@ -600,7 +600,8 @@ class TestLayoutUnverifiableSuppressedByVtableChanged:
 
         vtable_change = changes_by_kind[ChangeKind.TYPE_VTABLE_CHANGED]
         assert vtable_change.effective_verdict is None
-        assert vtable_change.modulation_reason == "layout_unverifiable_same_type"
+        assert vtable_change.modulation_reason is None  # never a modulation audit entry
+        assert vtable_change.vtable_covers_unverifiable_layout_gap is True
         assert vtable_change.qualified_name == "Foo"
         assert result.verdict == Verdict.BREAKING
 
@@ -625,6 +626,7 @@ class TestLayoutUnverifiableSuppressedByVtableChanged:
         vtable_change = changes_by_kind[ChangeKind.TYPE_VTABLE_CHANGED]
         assert vtable_change.effective_verdict is None
         assert vtable_change.modulation_reason is None
+        assert vtable_change.vtable_covers_unverifiable_layout_gap is False
         assert result.verdict == Verdict.BREAKING
 
     def test_both_sides_populated_vtable_change_not_tagged(self) -> None:
@@ -655,6 +657,7 @@ class TestLayoutUnverifiableSuppressedByVtableChanged:
         vtable_change = changes_by_kind[ChangeKind.TYPE_VTABLE_CHANGED]
         assert vtable_change.effective_verdict is None
         assert vtable_change.modulation_reason is None
+        assert vtable_change.vtable_covers_unverifiable_layout_gap is False
         assert result.verdict == Verdict.BREAKING
 
     def test_virtual_base_change_not_tagged_even_with_unknown_size(self) -> None:
@@ -681,6 +684,7 @@ class TestLayoutUnverifiableSuppressedByVtableChanged:
         vtable_change = changes_by_kind[ChangeKind.TYPE_VTABLE_CHANGED]
         assert vtable_change.effective_verdict is None
         assert vtable_change.modulation_reason is None
+        assert vtable_change.vtable_covers_unverifiable_layout_gap is False
         assert result.verdict == Verdict.BREAKING
 
     def test_bare_name_collision_does_not_cross_suppress(self) -> None:
@@ -721,40 +725,3 @@ class TestLayoutUnverifiableSuppressedByVtableChanged:
             c for c in result.changes if c.kind == ChangeKind.LAYOUT_UNVERIFIABLE
         ]
         assert any(c.qualified_name == "ns1::Foo" for c in layout_findings)
-
-    def test_bare_name_collision_does_not_cross_contaminate(self) -> None:
-        """Two distinct types sharing only a bare leaf name in different
-        namespaces must not correlate: ``ns2::Foo``'s unresolved layout
-        evidence must not demote ``ns1::Foo``'s real, independently-evidenced
-        vtable reorder (Codex review, P2)."""
-        old = _snap(types=[
-            RecordType(
-                name="Foo", qualified_name="ns1::Foo", kind="class",
-                vtable=["_ZN3ns13Foo1fEv", "_ZN3ns13Foo1gEv"],
-            ),
-            RecordType(
-                name="Foo", qualified_name="ns2::Foo", kind="class",
-                vtable=[], size_bits=None,
-            ),
-        ])
-        new = _snap(types=[
-            RecordType(
-                name="Foo", qualified_name="ns1::Foo", kind="class",
-                # Real reorder — both sides populated, no evidence gap of
-                # its own.
-                vtable=["_ZN3ns13Foo1gEv", "_ZN3ns13Foo1fEv"],
-            ),
-            RecordType(
-                name="Foo", qualified_name="ns2::Foo", kind="class",
-                vtable=["_ZN3ns23Foo1hEv"],
-                size_bits=None,
-                base_offsets={"Base": 0},  # asymmetric evidence -> LAYOUT_UNVERIFIABLE
-            ),
-        ])
-        result = compare(old, new)
-        vtable_changes = [
-            c for c in result.changes if c.kind == ChangeKind.TYPE_VTABLE_CHANGED
-        ]
-        ns1_change = next(c for c in vtable_changes if c.old_value.startswith("_ZN3ns13Foo"))
-        assert ns1_change.effective_verdict is None
-        assert result.verdict == Verdict.BREAKING

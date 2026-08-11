@@ -208,7 +208,25 @@ class SuppressLayoutUnverifiableCoveredByVtableChanged:
     Correlated via ``Change.qualified_name`` (the type's real, namespaced
     identity — both producers set it for exactly this purpose), not the
     bare ``Change.symbol`` two distinct same-named records in different
-    namespaces could share.
+    namespaces could share; and gated on the dedicated
+    ``Change.vtable_covers_unverifiable_layout_gap`` marker (not
+    ``modulation_reason`` — see that field's own docstring for why
+    overloading the modulation audit trail here would be wrong, Codex
+    review), so a co-occurring but independently-evidenced
+    ``TYPE_VTABLE_CHANGED`` (a real reorder, a real size delta, a real
+    virtual-base change) never triggers this fold.
+
+    Runs immediately before ``FilterRedundant``, *after* surface scoping
+    (``FilterNonPublicSurface``/``DemoteOffPythonSurface``) and
+    ``ApplySuppression`` have both already settled independently for each
+    finding (Codex review): running earlier would let this step remove a
+    ``LAYOUT_UNVERIFIABLE`` finding from ``changes`` before those steps ever
+    see it, which (a) hides it from a suppression rule that targets
+    ``layout_unverifiable`` directly — it would never be evaluated at all —
+    and (b) means a ``TYPE_VTABLE_CHANGED`` later excluded as
+    out-of-public-surface no longer prevents its now-orphaned
+    ``LAYOUT_UNVERIFIABLE`` from still contributing to the verdict via
+    ``ctx.redundant`` (unlike ``ctx.out_of_surface``, which does not).
     """
 
     name = "suppress_layout_unverifiable_covered_by_vtable_changed"
@@ -220,7 +238,7 @@ class SuppressLayoutUnverifiableCoveredByVtableChanged:
             c.qualified_name
             for c in changes
             if c.kind == ChangeKind.TYPE_VTABLE_CHANGED
-            and c.modulation_reason == "layout_unverifiable_same_type"
+            and c.vtable_covers_unverifiable_layout_gap
             and c.qualified_name
         }
         if not covered_types:
@@ -1435,12 +1453,6 @@ DEFAULT_PIPELINE = PostProcessingPipeline(
         DeduplicateAstDwarf(),
         DeduplicateCrossDetector(),
         DowngradeOpaqueTypeChanges(),
-        # Reads markers TYPE_VTABLE_CHANGED set at emission time (diff_types.py)
-        # to fold a redundant LAYOUT_UNVERIFIABLE finding covering the identical
-        # evidence gap into ctx.redundant. Runs before FilterRedundant engages
-        # the ctx.kept aliasing contract, so returning a new filtered list here
-        # is safe.
-        SuppressLayoutUnverifiableCoveredByVtableChanged(),
         EnrichSourceLocations(),
         FilterNonPublicSurface(),
         # Runs immediately after FilterNonPublicSurface so it can read the
@@ -1453,6 +1465,14 @@ DEFAULT_PIPELINE = PostProcessingPipeline(
         MarkReachability(),
         ApplySuppression(),
         SuppressRenamedPairs(),
+        # Reads markers TYPE_VTABLE_CHANGED set at emission time (diff_types.py)
+        # to fold a redundant LAYOUT_UNVERIFIABLE finding covering the identical
+        # evidence gap into ctx.redundant. Deliberately runs here -- after surface
+        # scoping and suppression have already independently settled both
+        # findings (Codex review; see the step's own docstring) -- and still
+        # before FilterRedundant engages the ctx.kept aliasing contract, so
+        # returning a new filtered list here is safe.
+        SuppressLayoutUnverifiableCoveredByVtableChanged(),
         FilterRedundant(),
         EnrichAffectedSymbols(),
         AttributeStdlibEmbedding(),
