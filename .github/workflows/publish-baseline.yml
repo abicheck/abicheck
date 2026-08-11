@@ -337,8 +337,16 @@ jobs:
           assets_json=$(gh release view "$RELEASE_TAG" --repo "$REPO" --json assets 2>/dev/null) || assets_json=""
           existing_url=""
           if [[ -n "$assets_json" ]]; then
+            # .apiUrl (the authenticated REST API asset endpoint,
+            # api.github.com/repos/.../releases/assets/<id>), not .url (the
+            # unauthenticated browser-download URL) -- the download below
+            # goes through `gh api ... -H 'Accept: application/octet-stream'`,
+            # which needs the API endpoint to authenticate; the browser URL
+            # doesn't reliably work there, especially for a private caller
+            # repository (Codex review, verified against gh 2.96.0's `gh api`
+            # contract).
             existing_url=$(printf '%s' "$assets_json" \
-              | jq -r --arg name "$ASSET_NAME" '.assets[] | select(.name == $name) | .url')
+              | jq -r --arg name "$ASSET_NAME" '.assets[] | select(.name == $name) | .apiUrl')
           fi
 
           if [[ -z "$existing_url" ]]; then
