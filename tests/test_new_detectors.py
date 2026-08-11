@@ -687,6 +687,21 @@ class TestHeaderConstants:
         )
         assert len(_changes_of_kind(r, ChangeKind.CONSTANT_CHANGED)) == 1
 
+    def test_unrelated_constant_sharing_version_shaped_segment_not_merged(self):
+        # Codex review, P1: `v1` is a legal name for an ordinary (non-inline)
+        # namespace too -- `api::v1::limit` and `api::limit` can be two
+        # unrelated constants that merely share a leaf name. Only
+        # `api::v1::limit` changes; `api::limit` must still be independently
+        # tracked (and reported unchanged), not silently discarded by being
+        # merged into `api::v1::limit`'s spelling group.
+        r = compare(
+            _snap_with_constants({"api::v1::limit": "10", "api::limit": "20"}),
+            _snap_with_constants({"api::v1::limit": "11", "api::limit": "20"}),
+        )
+        changed = _changes_of_kind(r, ChangeKind.CONSTANT_CHANGED)
+        assert len(changed) == 1
+        assert changed[0].symbol == "api::v1::limit"
+
 
 def _snap_with_constants(constants, from_headers=True):
     s = _snap(from_headers=from_headers)

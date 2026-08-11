@@ -148,25 +148,72 @@ def _split_experimental(
     return exp, stable
 
 
-def _canonical_stable_key(
-    qname: str,
-    experimental_namespaces: tuple[str, ...],
-) -> str:
-    """Strip both an experimental-namespace segment and a versioned
-    inline-namespace segment (``v1``, ``_V2``, ``__1``, ...) from *qname*.
+def _merge_versioned_key_aliases(
+    raw_index: dict[tuple[str, str], list[str]],
+    identity: dict[str, object],
+) -> dict[tuple[str, str], list[str]]:
+    """Merge raw ``(stripped_name, leaf)`` keys that differ only by a
+    versioned inline-namespace segment (``v1``, ``_V2``, ``__1``, ...) --
+    but ONLY when *identity* proves the two spellings name the same
+    declaration.
 
-    A versioned inline namespace makes the same declaration reachable
-    under two qualified spellings (``ns::v1::x`` and the version-elided
-    ``ns::x`` unqualified lookup also resolves to); when a header-AST
-    producer surfaces both as separate declarations, indexing by the
-    experimental-stripped name alone still leaves the two spellings under
-    two different keys, so each is walked as its own "removed" event and
-    the same real change is reported twice. Stripping the version segment
-    too collapses both spellings onto one key.
+    A versioned *inline* namespace makes one declaration reachable under
+    two qualified spellings: the full path (``ns::v1::x``) and the
+    version-elided path (``ns::x``) that unqualified lookup from the
+    enclosing scope also resolves to. But a version-shaped segment name is
+    not proof of an *inline* namespace -- ``v1`` is a legal name for an
+    ordinary namespace too, in which case ``ns::v1::x`` and ``ns::x`` are
+    two unrelated declarations that happen to share a leaf name (Codex
+    review, P1: collapsing them on name shape alone can both hide a
+    genuine value/removal on one spelling and misreport the other).
+    *identity* maps each qualified name to a value from the snapshot's own
+    extraction data that is invariant across an inline-namespace's two
+    spellings but not expected to coincide for two unrelated declarations
+    (a function's mangled name; a structural fingerprint for a type) --
+    ``None`` when no identity evidence is available for that qname. Two
+    raw keys are only merged when their identity sets (excluding
+    ``None``) actually intersect; otherwise each raw key is kept
+    separate, exactly as if this stripping had never been attempted, so
+    the pre-existing double-report is the accepted fallback rather than a
+    newly-introduced false suppression.
     """
-    stripped, _ = _strip_experimental(qname, experimental_namespaces)
-    canon_segs, _ = _version_strip_segments(_segments(stripped))
-    return "::".join(canon_segs)
+    canon_groups: dict[tuple[str, str], list[tuple[str, str]]] = {}
+    for raw_key in raw_index:
+        stripped, leaf = raw_key
+        canon_segs, _ = _version_strip_segments(_segments(stripped))
+        canon_groups.setdefault(("::".join(canon_segs), leaf), []).append(raw_key)
+
+    out: dict[tuple[str, str], list[str]] = {}
+    for raw_keys in canon_groups.values():
+        if len(raw_keys) == 1:
+            k = raw_keys[0]
+            out[k] = raw_index[k]
+            continue
+        # Union-find over this (typically 2-entry) group, unioning any two
+        # raw keys whose qnames share a non-None identity value.
+        parent = {k: k for k in raw_keys}
+
+        def _find(x: tuple[str, str]) -> tuple[str, str]:
+            while parent[x] != x:
+                parent[x] = parent[parent[x]]
+                x = parent[x]
+            return x
+
+        ident_sets = {
+            k: {identity[q] for q in raw_index[k] if identity.get(q) is not None}
+            for k in raw_keys
+        }
+        for i, a in enumerate(raw_keys):
+            for b in raw_keys[i + 1 :]:
+                if ident_sets[a] & ident_sets[b]:
+                    ra, rb = _find(a), _find(b)
+                    if ra != rb:
+                        parent[rb] = ra
+        merged: dict[tuple[str, str], list[str]] = {}
+        for k in raw_keys:
+            merged.setdefault(_find(k), []).extend(raw_index[k])
+        out.update(merged)
+    return out
 
 
 def _index_funcs_by_stable_key(
@@ -181,7 +228,8 @@ def _index_funcs_by_stable_key(
     from .model import Visibility
 
     demangled = _batch_demangle_public(snap)
-    out: dict[tuple[str, str], list[str]] = {}
+    raw_index: dict[tuple[str, str], list[str]] = {}
+    identity: dict[str, object] = {}
     for f in snap.functions:
         if f.visibility != Visibility.PUBLIC:
             continue
@@ -199,9 +247,34 @@ def _index_funcs_by_stable_key(
         if not leaf_segs:
             continue
         leaf = leaf_segs[-1]
-        stripped = _canonical_stable_key(qname, experimental_namespaces)
-        out.setdefault((stripped, leaf), []).append(qname)
-    return out
+        stripped, _ = _strip_experimental(qname, experimental_namespaces)
+        raw_index.setdefault((stripped, leaf), []).append(qname)
+        # A function's mangled name is real extraction-data identity (the
+        # Itanium/MSVC ABI mangles an inline namespace's segment either
+        # way, so a true alias's two declared spellings still share one
+        # mangled symbol) -- unlike guessing aliasing from name shape.
+        identity[qname] = f.mangled
+    return _merge_versioned_key_aliases(raw_index, identity)
+
+
+def _type_identity_fingerprint(t: RecordType) -> object:
+    """Structural fingerprint used as alias-identity evidence for a type.
+
+    ``RecordType`` carries no mangled/symbol identity, so this is the best
+    available extraction-data signal that two differently-spelled type
+    declarations are really the same one: same kind, layout, and field/base
+    shape. Coincidentally-identical layout between two genuinely unrelated
+    types sharing a leaf name is the accepted residual risk -- far narrower
+    than merging on name shape alone (Codex review, P1).
+    """
+    return (
+        t.kind,
+        t.size_bits,
+        t.alignment_bits,
+        tuple((fld.name, fld.type, fld.offset_bits) for fld in t.fields),
+        tuple(t.bases),
+        tuple(t.virtual_bases),
+    )
 
 
 def _index_types_by_stable_key(
@@ -209,16 +282,18 @@ def _index_types_by_stable_key(
     experimental_namespaces: tuple[str, ...],
 ) -> dict[tuple[str, str], list[str]]:
     """Index types by ``(stripped_qualified_name, leaf)``."""
-    out: dict[tuple[str, str], list[str]] = {}
+    raw_index: dict[tuple[str, str], list[str]] = {}
+    identity: dict[str, object] = {}
     for t in snap.types:
         qname = t.name
         segs = _segments(qname)
         if not segs:
             continue
         leaf = segs[-1]
-        stripped = _canonical_stable_key(qname, experimental_namespaces)
-        out.setdefault((stripped, leaf), []).append(qname)
-    return out
+        stripped, _ = _strip_experimental(qname, experimental_namespaces)
+        raw_index.setdefault((stripped, leaf), []).append(qname)
+        identity[qname] = _type_identity_fingerprint(t)
+    return _merge_versioned_key_aliases(raw_index, identity)
 
 
 def _origin_by_name(types: list[RecordType]) -> dict[str, ScopeOrigin]:

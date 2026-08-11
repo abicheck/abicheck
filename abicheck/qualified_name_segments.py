@@ -126,13 +126,20 @@ def dedupe_versioned_spellings(names: dict[str, str]) -> dict[str, str]:
     declaration spelled two ways via an elided versioned inline-namespace
     segment (``detail::v1::x`` and ``detail::x``).
 
-    Groups the input's keys by their version-stripped path and keeps one
-    representative entry per group -- preferring the spelling that is
-    *already* the version-stripped form (the one users actually reference
-    from outside the versioned namespace) when both spellings are present,
-    otherwise the first spelling encountered (input order). Values are not
-    inspected: both spellings name the same declaration, so they carry the
-    same value by construction.
+    A version-shaped segment name is not proof of an *inline* namespace --
+    ``v1`` is a legal name for an ordinary namespace too, in which case
+    ``detail::v1::x`` and ``detail::x`` are two unrelated declarations that
+    happen to share a leaf name (Codex review, P1: collapsing purely on
+    name shape can hide a real value change on one spelling while
+    discarding the other). There is no symbol/mangled identity available
+    for a name-keyed mapping like this to check instead, so the one piece
+    of corroborating evidence within reach is used: a group is only merged
+    when *every* spelling in it already carries the identical value -- the
+    invariant a true alias must satisfy (they're the same declaration) and
+    one two unrelated declarations satisfy only by coincidence. A group
+    whose values disagree is left unmerged, each spelling kept as its own
+    entry, so the pre-existing double-report is the accepted fallback
+    rather than a newly-introduced false suppression.
     """
     groups: dict[str, list[str]] = {}
     for name in names:
@@ -141,6 +148,10 @@ def dedupe_versioned_spellings(names: dict[str, str]) -> dict[str, str]:
         groups.setdefault(canon, []).append(name)
     out: dict[str, str] = {}
     for canon, group_names in groups.items():
+        if len(group_names) > 1 and len({names[n] for n in group_names}) != 1:
+            for n in group_names:
+                out[n] = names[n]
+            continue
         rep = canon if canon in group_names else group_names[0]
         out[rep] = names[rep]
     return out
