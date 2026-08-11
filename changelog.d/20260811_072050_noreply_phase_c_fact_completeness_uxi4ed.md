@@ -170,3 +170,12 @@ A new changelog fragment. See changelog.d/README.md for the workflow.
   same `run_bounded_for_extraction()` path every other subprocess this
   extractor runs already uses, so a stalled probe under a short
   remaining budget fails fast instead of silently eating up to 5s of it.
+  A follow-up round (Codex review) closed a second gap in the same
+  function: its `lru_cache` was keyed only on the binary *path*, so a
+  long-lived process kept serving the old identity forever if the
+  executable at that path was replaced in place (an in-place upgrade,
+  or a swapped `PATH` entry) without the process restarting. A new
+  `_executable_stat_key()` (mirroring `dumper_toolchain._executable_sha256`'s
+  own stat-based cache key) is now folded into the `lru_cache` key by
+  both real call sites, so a same-path executable swap gets a fresh
+  probe instead of the stale memoized one.

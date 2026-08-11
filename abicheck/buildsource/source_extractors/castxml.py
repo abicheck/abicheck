@@ -89,8 +89,33 @@ _CASTXML_BUNDLED_COMPILER_RE = re.compile(
 )
 
 
+def _executable_stat_key(path: str) -> tuple[int, int, int, int]:
+    """``(dev, ino, mtime_ns, size)`` for *path*, or all ``-1`` if unreadable.
+
+    Mirrors ``dumper_toolchain._executable_sha256``'s own cache-key stat
+    fields: a long-lived process caching :func:`_castxml_tool_version` only
+    by binary *path* would keep serving the OLD identity forever if the
+    file at that path is replaced in place (an in-place upgrade, or a
+    swapped `PATH` entry) without the process restarting -- these fields
+    change identity, so passing them as extra cache-key args invalidates a
+    warm entry the moment the executable itself changes (Codex review,
+    PR #719).
+    """
+    try:
+        st = Path(shutil.which(path) or path).stat()
+    except OSError:
+        return (-1, -1, -1, -1)
+    return (st.st_dev, st.st_ino, st.st_mtime_ns, st.st_size)
+
+
 @functools.lru_cache(maxsize=8)
-def _castxml_tool_version(castxml_bin: str) -> str:
+def _castxml_tool_version(
+    castxml_bin: str,
+    _dev: int = -1,
+    _ino: int = -1,
+    _mtime_ns: int = -1,
+    _size: int = -1,
+) -> str:
     """``castxml --version``'s own version *and* bundled-Clang identity for
     *castxml_bin*, cached (ADR-038 C.8 fact_set -- mirrors ``clang.py``'s
     ``_clang_compiler_version``).
@@ -110,7 +135,17 @@ def _castxml_tool_version(castxml_bin: str) -> str:
     ``buildsource.redaction``, so importing it here (the opposite direction)
     would form a real import cycle the AI-readiness `import-cycle-growth`
     gate rejects (CLAUDE.md "M1-3").
+
+    The ``_dev``/``_ino``/``_mtime_ns``/``_size`` params (see
+    :func:`_executable_stat_key`) are cache-key-only -- unused by the probe
+    itself, only by ``lru_cache``, so a same-path executable swap within
+    one process still gets a fresh probe instead of the stale memoized one.
+    A caller that omits them (as every existing test does) always keys on
+    the same ``-1`` sentinel quadruple, which is a distinct, harmless entry
+    from a real call passing the actual stat -- both correct, just cached
+    separately.
     """
+    del _dev, _ino, _mtime_ns, _size  # cache-key only, see docstring
     try:
         # Bounded by the active scan --budget, not just this call's own 5s
         # cap (Codex review) -- a stalled probe under a short remaining
@@ -216,7 +251,9 @@ class CastxmlSourceExtractor:
         or swapped, since nothing about that upgrade changes the extractor
         version string itself.
         """
-        return _castxml_tool_version(self.castxml_bin)
+        return _castxml_tool_version(
+            self.castxml_bin, *_executable_stat_key(self.castxml_bin)
+        )
 
     def extract(
         self,
@@ -508,5 +545,7 @@ class CastxmlSourceExtractor:
             # producer's abicheck-side version; two runs on the same
             # abicheck release but different castxml/bundled-Clang builds
             # can legitimately disagree on it.
-            compiler_version=_castxml_tool_version(self.castxml_bin),
+            compiler_version=_castxml_tool_version(
+                self.castxml_bin, *_executable_stat_key(self.castxml_bin)
+            ),
         )

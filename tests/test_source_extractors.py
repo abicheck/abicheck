@@ -1053,7 +1053,7 @@ def test_parse_root_stamps_compiler_version_from_castxml_probe(monkeypatch) -> N
 
     castxml_mod._castxml_tool_version.cache_clear()
     monkeypatch.setattr(
-        castxml_mod, "_castxml_tool_version", lambda _bin: "0.6.20260105"
+        castxml_mod, "_castxml_tool_version", lambda _bin, *_args: "0.6.20260105"
     )
     extractor = CastxmlSourceExtractor()
     tu = extractor._parse_root(
@@ -1211,6 +1211,48 @@ def test_castxml_tool_version_is_bound_by_deadline_run_bounded(monkeypatch) -> N
     castxml_mod._castxml_tool_version.cache_clear()
 
 
+def test_castxml_tool_version_refreshes_when_executable_is_swapped(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """Codex review, PR #719, sixth round: caching the probe by binary PATH
+    alone means a long-lived process keeps serving the OLD identity forever
+    if the executable AT THAT SAME PATH is replaced in place (an in-place
+    upgrade, or a swapped PATH entry) without the process restarting.
+    ``_executable_stat_key()``'s dev/ino/mtime/size, folded into the
+    lru_cache key by real callers, must make a same-path swap re-probe."""
+    import os
+    import subprocess as subprocess_mod
+
+    from abicheck.buildsource.source_extractors import castxml as castxml_mod
+
+    castxml_mod._castxml_tool_version.cache_clear()
+    exe = tmp_path / "castxml"
+    exe.write_text("v1")
+    responses = iter(["castxml version 1.0.0\n", "castxml version 2.0.0\n"])
+
+    def fake_run(*_args, **_kwargs):
+        return subprocess_mod.CompletedProcess(
+            args=["castxml", "--version"],
+            returncode=0,
+            stdout=next(responses),
+            stderr="",
+        )
+
+    monkeypatch.setattr(castxml_mod.deadline, "run_bounded", fake_run)
+    monkeypatch.setattr(castxml_mod.shutil, "which", lambda _bin: str(exe))
+
+    key1 = castxml_mod._executable_stat_key(str(exe))
+    assert castxml_mod._castxml_tool_version(str(exe), *key1) == "1.0.0"
+
+    # "Swap" the executable at the same path -- content and mtime change.
+    exe.write_text("v2, a different length")
+    os.utime(exe, ns=(exe.stat().st_atime_ns + 10**9, exe.stat().st_mtime_ns + 10**9))
+    key2 = castxml_mod._executable_stat_key(str(exe))
+    assert key2 != key1  # the stat signature actually changed
+    assert castxml_mod._castxml_tool_version(str(exe), *key2) == "2.0.0"
+    castxml_mod._castxml_tool_version.cache_clear()
+
+
 def test_castxml_extractor_cache_identity_extra_folds_probed_tool_version(
     monkeypatch,
 ) -> None:
@@ -1224,7 +1266,7 @@ def test_castxml_extractor_cache_identity_extra_folds_probed_tool_version(
 
     castxml_mod._castxml_tool_version.cache_clear()
     monkeypatch.setattr(
-        castxml_mod, "_castxml_tool_version", lambda _bin: "0.6.3; clang 17.0.6"
+        castxml_mod, "_castxml_tool_version", lambda _bin, *_args: "0.6.3; clang 17.0.6"
     )
     extractor = CastxmlSourceExtractor(castxml_bin="my-castxml")
     assert extractor.cache_identity_extra() == "0.6.3; clang 17.0.6"
