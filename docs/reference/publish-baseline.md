@@ -125,10 +125,15 @@ build-output artifact, derives `libraries` from it, dumps the baseline-set
 via `actions/baseline`, packages it as `<asset-name>` (`tar --zstd`), and
 uploads it to `release-tag`'s release. **This upload step fails closed on an
 immutability violation, it does not `--clobber`:** if no asset of this name
-exists yet, it uploads plainly; if one already exists with byte-identical
-content, the run is treated as a safe retry (e.g. after a transient
-failure) and no re-upload happens; if one already exists with *different*
-content, the step hard-fails rather than silently replacing a published
+exists yet, it uploads plainly; if one already exists, its manifest.json is
+downloaded and compared against this run's own baseline-set by *normalized*
+content digest (`actions/baseline/build_manifest.py`'s `compute_content_digest()`
+— library names + per-snapshot and per-staged-binary digests, deliberately
+excluding volatile fields like `created_at` and the archive's own filesystem
+metadata, both of which differ on every run even when the underlying
+baseline-set is logically identical). Matching digests are treated as a safe
+retry (e.g. after a transient failure) and no re-upload happens; a differing
+digest hard-fails rather than silently replacing a published
 `release-contract` asset — `release-contract` is documented (ADR-047 §10)
 as immutable once published, and a re-run silently overwriting it would
 mean an already-resolved consumer's "compatible with v1.0.0" comparison
