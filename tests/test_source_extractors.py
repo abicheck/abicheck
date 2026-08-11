@@ -1340,6 +1340,44 @@ def test_cache_identity_extra_stays_empty_when_binary_unresolvable(
     assert extractor.cache_identity_extra() == ""
 
 
+def test_parse_root_stamps_stat_fallback_compiler_version_when_probe_fails(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """Codex review, PR #719, eighth round: a failed/unparseable version probe
+    must not persist a bare "" compiler_version into the fact_set -- two
+    DIFFERENT broken castxml installs at the same path would then compare as
+    recipe-agreeing (check_fact_compatibility sees identical producer/
+    producer_version/compiler_version), letting an unchanged enum's
+    underlying-type disagreement slip through as GENERATED_HEADER_CHANGED
+    with no compiler_version_mismatch warning to explain it. Verify
+    fact_set["compiler_version"] gets the SAME stat-based fallback identity
+    cache_identity_extra() already uses, not the probe's bare ""."""
+    from abicheck.buildsource.source_extractors import castxml as castxml_mod
+
+    castxml_mod._castxml_tool_version.cache_clear()
+    monkeypatch.setattr(castxml_mod, "_castxml_tool_version", lambda *_a: "")
+    exe = tmp_path / "castxml"
+    exe.write_text("broken")
+    monkeypatch.setattr(castxml_mod.shutil, "which", lambda _bin: str(exe))
+
+    extractor = CastxmlSourceExtractor(castxml_bin=str(exe))
+    tu = extractor._parse_root(
+        _root_with_one_type(), _cu(), public_header_roots=["foo.h"], target_id=""
+    )
+    assert tu.fact_set["compiler_version"].startswith("stat:")
+    assert tu.fact_set["compiler_version"] == extractor.cache_identity_extra()
+
+    # A different broken executable at the SAME path must persist a
+    # different compiler_version, so two independently-collected baselines
+    # against different bundled frontends aren't silently treated as
+    # recipe-comparable.
+    exe.write_text("a different broken binary, different size")
+    tu2 = extractor._parse_root(
+        _root_with_one_type(), _cu(), public_header_roots=["foo.h"], target_id=""
+    )
+    assert tu2.fact_set["compiler_version"] != tu.fact_set["compiler_version"]
+
+
 def test_parse_root_stamps_msvc_compiler_family_for_msvc_compiler_binary() -> None:
     from xml.etree.ElementTree import Element, SubElement
 

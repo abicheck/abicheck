@@ -89,6 +89,36 @@ _CASTXML_BUNDLED_COMPILER_RE = re.compile(
 )
 
 
+def _castxml_identity_with_stat_fallback(castxml_bin: str) -> str:
+    """The probed castxml/bundled-Clang identity, falling back to the
+    executable's own stat signature when the version probe fails or its
+    banner doesn't parse (Codex review, PR #719).
+
+    Shared by :meth:`CastxmlSourceExtractor.cache_identity_extra` (the D8 TU
+    cache key) and :meth:`CastxmlSourceExtractor._stamp_fact_set_and_coverage`
+    (the persisted ``fact_set.compiler_version``) so both read the SAME
+    fallback identity. Stamping only the cache key and leaving
+    ``compiler_version`` at the version probe's bare ``""`` would still let
+    two DIFFERENT broken/unparseable castxml installs at the same path
+    collapse to an identical ``compiler_version=""`` in two independently
+    persisted baselines -- ``check_fact_compatibility`` would then treat them
+    as recipe-comparable even though their (unprobeable) bundled Clang
+    builds may disagree on a compiler-selected fact like an unfixed enum's
+    underlying type. ``compiler_version`` is used only for opaque
+    string-equality comparison and diagnostic display (`fact_set.py`'s
+    ``compiler_version_mismatch`` issue), never parsed as a real version, so
+    a ``stat:...`` fallback string there is exactly as valid a value as the
+    real probed identity -- the same reasoning ``cache_identity_extra``'s own
+    docstring already gives for using it as a cache key.
+    """
+    key = _executable_stat_key(castxml_bin)
+    version = _castxml_tool_version(castxml_bin, *key)
+    if version:
+        return version
+    dev, ino, mtime_ns, size = key
+    return "" if dev == -1 else f"stat:{dev}:{ino}:{mtime_ns}:{size}"
+
+
 def _executable_stat_key(path: str) -> tuple[int, int, int, int]:
     """``(dev, ino, mtime_ns, size)`` for *path*, or all ``-1`` if unreadable.
 
@@ -281,18 +311,16 @@ class CastxmlSourceExtractor:
         when ``castxml --version`` fails to run or its banner doesn't
         parse -- otherwise two DIFFERENT broken/unparseable installs at
         the same path would both collapse to the identical uninformative
-        ``""``, leaving the TU cache unable to tell them apart. Unlike the
-        version string, this fallback is cache-key-only plumbing, so it is
-        deliberately not also threaded into ``compiler_version``'s own
-        provenance value (`_stamp_fact_set_and_coverage`) -- a raw stat
-        tuple would read as a nonsensical "compiler version" there.
+        ``""``, leaving the TU cache unable to tell them apart. The SAME
+        fallback identity is also persisted into ``fact_set.compiler_version``
+        by ``_stamp_fact_set_and_coverage`` (via the shared
+        ``_castxml_identity_with_stat_fallback`` helper, Codex review,
+        PR #719) -- restricting it to the cache key alone would still leave
+        two differently-broken installs' *persisted baselines*
+        indistinguishable, even though this in-process cache key already
+        tells them apart.
         """
-        key = _executable_stat_key(self.castxml_bin)
-        version = _castxml_tool_version(self.castxml_bin, *key)
-        if version:
-            return version
-        dev, ino, mtime_ns, size = key
-        return "" if dev == -1 else f"stat:{dev}:{ino}:{mtime_ns}:{size}"
+        return _castxml_identity_with_stat_fallback(self.castxml_bin)
 
     def extract(
         self,
@@ -583,8 +611,10 @@ class CastxmlSourceExtractor:
             # particular -- is castxml's OWN compiler build, not just this
             # producer's abicheck-side version; two runs on the same
             # abicheck release but different castxml/bundled-Clang builds
-            # can legitimately disagree on it.
-            compiler_version=_castxml_tool_version(
-                self.castxml_bin, *_executable_stat_key(self.castxml_bin)
-            ),
+            # can legitimately disagree on it. Uses the same stat-fallback
+            # identity as cache_identity_extra() (Codex review, PR #719,
+            # follow-up) -- persisting a bare "" here on a failed/unparseable
+            # probe would let two differently-broken installs' persisted
+            # baselines compare as recipe-comparable.
+            compiler_version=_castxml_identity_with_stat_fallback(self.castxml_bin),
         )
