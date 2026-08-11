@@ -52,6 +52,20 @@ from .policy_file import PolicyFile
 # old alias IS retained the alias-change is compatible and must survive.
 SYMBOL_VERSION_ALIAS_NOT_RETAINED_MARKER = "old version NOT retained as alias"
 
+# Change.caused_by_type prefix marking a redundant finding that must NOT
+# contribute to verdict computation via ``checker.compare``'s
+# ``verdict_redundant`` — the same exclusion the "rename:" prefix already
+# gets there, for the identical reason: a stronger, already-scored finding
+# (here, TYPE_VTABLE_CHANGED BREAKING) fully subsumes this one, so counting
+# both would let the redundant advisory's RISK contribution survive even
+# when a policy override/suppression targeting the covering finding has
+# already resolved it — silently resurrecting the exact "two detectors
+# disagreeing about one piece of evidence" confusion this whole mechanism
+# exists to remove. Shared between the producer
+# (``post_processing.SuppressLayoutUnverifiableCoveredByVtableChanged``) and
+# the consumer (``checker.compare``'s ``verdict_redundant`` filter).
+VTABLE_COVERS_UNVERIFIABLE_LAYOUT_GAP_PREFIX = "vtable_covers_unverifiable_layout_gap:"
+
 # The public evidence-depth ladder (ADR-043 D2/ADR-047 §7): exactly the four
 # user-facing rungs, matching the public CLI's ``--depth`` and
 # ``abicheck/mcp_server.py``'s own ``_PUBLIC_DEPTHS`` (kept as a separate,
@@ -167,20 +181,6 @@ class Change:
     # it out of ``description`` prose. ``None`` when there is no correlated
     # change, or for every finding kind that does not compute one.
     correlated_change_kind: str | None = None
-    # Set by diff_types._diff_type_vtable on a TYPE_VTABLE_CHANGED finding
-    # when it rests on the identical asymmetric-layout-evidence gap
-    # LAYOUT_UNVERIFIABLE (diff_layout.py) reports for the same type. Purely
-    # an internal cross-detector correlation key for
-    # post_processing.SuppressLayoutUnverifiableCoveredByVtableChanged to
-    # fold the now-redundant LAYOUT_UNVERIFIABLE advisory into
-    # ``redundant_changes`` — deliberately NOT ``modulation_reason``/
-    # ``modulation_rule`` (Codex review): this finding's own severity is
-    # never touched, so tagging it as a "modulation" would be a false audit
-    # entry (a public field reporters and ``impact.engine.assess_change()``
-    # expose as a real verdict-modulation reason code) for a finding whose
-    # verdict never changed. ``None`` for every ordinary TYPE_VTABLE_CHANGED
-    # and every other finding kind.
-    vtable_covers_unverifiable_layout_gap: bool = False
     # ADR-044 D1 — set by the MarkReachability pipeline step, which runs before
     # ApplySuppression so a broad namespace/source_location suppression rule can
     # tell a truly-unreachable internal change apart from one that is part of the
@@ -328,6 +328,23 @@ class Change:
     # `checker.compare`, *before* the verdict is computed.
     compatibility_evaluation_status: CompatibilityEvaluationStatus | None = None
     compatibility_decision: Verdict | None = None
+    # Set by diff_types._diff_type_vtable on a TYPE_VTABLE_CHANGED finding
+    # when it rests on the identical asymmetric-layout-evidence gap
+    # LAYOUT_UNVERIFIABLE (diff_layout.py) reports for the same type. Purely
+    # an internal cross-detector correlation key for
+    # post_processing.SuppressLayoutUnverifiableCoveredByVtableChanged to
+    # fold the now-redundant LAYOUT_UNVERIFIABLE advisory into
+    # ``redundant_changes`` — deliberately NOT ``modulation_reason``/
+    # ``modulation_rule`` (Codex review): this finding's own severity is
+    # never touched, so tagging it as a "modulation" would be a false audit
+    # entry (a public field reporters and ``impact.engine.assess_change()``
+    # expose as a real verdict-modulation reason code) for a finding whose
+    # verdict never changed. ``None`` for every ordinary TYPE_VTABLE_CHANGED
+    # and every other finding kind. Appended at the very end of the
+    # dataclass, not inserted mid-list (Codex review): ``Change`` is a plain
+    # positional dataclass, so a field inserted in the middle silently shifts
+    # every later constructor parameter for any existing positional caller.
+    vtable_covers_unverifiable_layout_gap: bool = False
 
 
 @dataclass

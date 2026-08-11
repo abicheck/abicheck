@@ -12,6 +12,7 @@ from abicheck.checker import ChangeKind, Verdict, compare
 from abicheck.checker_policy import BREAKING_KINDS
 from abicheck.diff_cxx_rules import _owner_descends_from, vtable_slot_is_override_reuse
 from abicheck.model import AbiSnapshot, Function, Param, RecordType
+from abicheck.policy_file import PolicyFile
 
 
 def _snap(**kwargs: object) -> AbiSnapshot:
@@ -725,3 +726,33 @@ class TestLayoutUnverifiableSuppressedByVtableChanged:
             c for c in result.changes if c.kind == ChangeKind.LAYOUT_UNVERIFIABLE
         ]
         assert any(c.qualified_name == "ns1::Foo" for c in layout_findings)
+
+    def test_folded_finding_excluded_from_verdict_when_vtable_change_overridden(
+        self,
+    ) -> None:
+        """The folded LAYOUT_UNVERIFIABLE must not resurrect a RISK verdict
+        once a policy override has downgraded the covering TYPE_VTABLE_CHANGED
+        to ignore — it is fully subsumed, not an independent verdict
+        contributor (Codex review): otherwise the redundant advisory, hidden
+        from the default report but still present in ``ctx.redundant``, would
+        silently keep the overall verdict at COMPATIBLE_WITH_RISK even though
+        the report shows nothing driving it."""
+        old = _snap(types=[RecordType(
+            name="Foo", kind="class",
+            vtable=[],
+            size_bits=None,
+        )])
+        new = _snap(types=[RecordType(
+            name="Foo", kind="class",
+            vtable=["_ZN3Foo1fEv"],
+            size_bits=None,
+            base_offsets={"Base": 0},
+        )])
+        pf = PolicyFile(
+            base_policy="strict_abi",
+            overrides={ChangeKind.TYPE_VTABLE_CHANGED: Verdict.COMPATIBLE},
+        )
+        result = compare(old, new, policy_file=pf)
+        assert result.verdict == Verdict.COMPATIBLE
+        redundant_kinds = {c.kind for c in result.redundant_changes}
+        assert ChangeKind.LAYOUT_UNVERIFIABLE in redundant_kinds

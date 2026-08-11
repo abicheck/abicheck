@@ -227,12 +227,23 @@ class SuppressLayoutUnverifiableCoveredByVtableChanged:
     out-of-public-surface no longer prevents its now-orphaned
     ``LAYOUT_UNVERIFIABLE`` from still contributing to the verdict via
     ``ctx.redundant`` (unlike ``ctx.out_of_surface``, which does not).
+
+    ``caused_by_type`` is tagged with the
+    ``VTABLE_COVERS_UNVERIFIABLE_LAYOUT_GAP_PREFIX`` marker (not just the
+    bare qualified name) so ``checker.compare``'s ``verdict_redundant``
+    filter excludes it from verdict computation entirely — mirroring the
+    ``"rename:"`` exclusion ``SuppressRenamedPairs`` already relies on for
+    the identical reason (Codex review): without it, this finding would
+    still count toward the verdict via ``ctx.redundant`` even after a
+    policy override or suppression rule targeting the covering
+    ``TYPE_VTABLE_CHANGED`` had already resolved it.
     """
 
     name = "suppress_layout_unverifiable_covered_by_vtable_changed"
 
     def run(self, changes: list[Change], ctx: PipelineContext) -> list[Change]:
         from .checker_policy import ChangeKind
+        from .checker_types import VTABLE_COVERS_UNVERIFIABLE_LAYOUT_GAP_PREFIX
 
         covered_types = {
             c.qualified_name
@@ -249,7 +260,9 @@ class SuppressLayoutUnverifiableCoveredByVtableChanged:
                 c.kind == ChangeKind.LAYOUT_UNVERIFIABLE
                 and c.qualified_name in covered_types
             ):
-                c.caused_by_type = c.qualified_name
+                c.caused_by_type = (
+                    f"{VTABLE_COVERS_UNVERIFIABLE_LAYOUT_GAP_PREFIX}{c.qualified_name}"
+                )
                 ctx.redundant.append(c)
                 continue
             kept.append(c)

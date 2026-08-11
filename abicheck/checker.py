@@ -36,6 +36,7 @@ from .checker_policy import (
     compute_verdict,
 )
 from .checker_types import (  # noqa: F401
+    VTABLE_COVERS_UNVERIFIABLE_LAYOUT_GAP_PREFIX,
     Change,
     DetectorSpec,
     DiffResult,
@@ -932,8 +933,23 @@ def compare(
     # drive the verdict; counting the redundant FUNC_REMOVED would re-escalate
     # the downgraded rename back to BREAKING. They stay in redundant_changes
     # for audit (--show-redundant); they just don't drive the verdict.
+    #
+    # vtable_covers_unverifiable_layout_gap: the identical exclusion, for the
+    # identical reason, for a LAYOUT_UNVERIFIABLE finding
+    # SuppressLayoutUnverifiableCoveredByVtableChanged folded away as fully
+    # subsumed by a co-located BREAKING TYPE_VTABLE_CHANGED (Codex review):
+    # without this exclusion, the folded RISK finding would still count via
+    # `verdict_redundant` even after a policy override/suppression on the
+    # covering finding resolved it, silently resurrecting the exact
+    # "two detectors disagreeing about one piece of evidence" confusion this
+    # mechanism exists to remove.
     verdict_redundant = [
-        c for c in redundant if not (c.caused_by_type or "").startswith("rename:")
+        c
+        for c in redundant
+        if not (c.caused_by_type or "").startswith("rename:")
+        and not (c.caused_by_type or "").startswith(
+            VTABLE_COVERS_UNVERIFIABLE_LAYOUT_GAP_PREFIX
+        )
     ]
 
     # ADR-039 — build-context reconciliation. Opt-in: when enabled and the
