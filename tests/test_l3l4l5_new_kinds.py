@@ -862,12 +862,26 @@ def test_l5_internal_dep_still_flags_an_unrelated_role_under_the_same_kind() -> 
     new = SourceGraphSummary(
         # A first-ever `var`-role edge (unrelated to template_param) alongside
         # the disagreeing new role's own coverage key -- only template_param
-        # is untrusted, var is unaffected.
+        # is untrusted, var is unaffected. A real producer's
+        # _mark_role_coverage() stamps the WHOLE current matrix in one
+        # unconditional pass (never a subset), so realistically representing
+        # "new" here means every DECL_HAS_TYPE role key, not template_param
+        # alone -- otherwise `var`'s own absent key reads as a second,
+        # unintended disagreement.
         nodes=nodes,
         edges=base + [_E("pub", "priv_type", "DECL_HAS_TYPE", role="var")],
         extractor_passes={
             "type_graph": True,
-            _role_coverage_key("type_graph", "DECL_HAS_TYPE", "template_param"): True,
+            **{
+                _role_coverage_key("type_graph", "DECL_HAS_TYPE", role): True
+                for role in (
+                    "var",
+                    "return",
+                    "param",
+                    "template_param",
+                    "default_template_arg",
+                )
+            },
         },
     )
     kinds = _graph_kinds(old, new)
@@ -2083,6 +2097,116 @@ def test_l5_internal_dep_flags_new_edge_when_header_only_role_coverage_agrees() 
     )
     kinds = _graph_kinds(old, new)
     assert ChangeKind.PUBLIC_API_INTERNAL_DEPENDENCY_ADDED.value in kinds
+
+
+def test_l5_internal_dep_preserves_established_role_coverage_for_pre_stamping_legacy_side() -> (
+    None
+):
+    # Codex review, fresh evidence, third round: OLD here is a real,
+    # already-released snapshot collected before ADR-046 D3's role-key-
+    # stamping mechanism existed at all -- family flag only, ZERO role keys
+    # (the only real-world shape a pre-D3 producer can have, since
+    # _mark_role_coverage() stamps its whole matrix unconditionally in one
+    # pass; a producer can never confirm SOME role keys while genuinely
+    # missing others). Its own walker still fully examined every
+    # long-standing role (field/alias/var/return/param/base/ref) -- the
+    # gap is only in the metadata recording it, not the actual coverage.
+    # NEW is a modern producer stamping the full matrix, including the
+    # three genuinely new roles this PR adds. A first-ever `field`-role
+    # edge -- an established role both producers' walkers have always
+    # covered -- must be flagged as a real new dependency, not silently
+    # dropped as a coverage artifact of the metadata gap.
+    nodes = [
+        _N("hdr", "header", "api.h"),
+        _N("pub", "source_decl", "pub()"),
+        _N("sym", "binary_symbol", "pub"),
+        _N(
+            "priv_type",
+            "record_type",
+            "detail::PrivateType",
+            visibility="private_header",
+        ),
+    ]
+    base = [
+        _E("pub", "sym", "SOURCE_DECL_MAPS_TO_SYMBOL"),
+        _E("hdr", "pub", "SOURCE_DECLARES"),
+    ]
+    old = SourceGraphSummary(
+        # Pre-ADR-046-D3 producer: family flag only, no role keys anywhere.
+        nodes=nodes,
+        edges=base,
+        extractor_passes={"type_graph": True},
+    )
+    new = SourceGraphSummary(
+        # Modern producer: full TYPE_HAS_FIELD_TYPE role-key set, plus a
+        # first-ever `field`-role edge to a private type.
+        nodes=nodes,
+        edges=base + [_E("pub", "priv_type", "TYPE_HAS_FIELD_TYPE", role="field")],
+        extractor_passes={
+            "type_graph": True,
+            **{
+                _role_coverage_key("type_graph", "TYPE_HAS_FIELD_TYPE", role): True
+                for role in (
+                    "field",
+                    "alias",
+                    "enum_underlying",
+                    "template_param",
+                    "default_template_arg",
+                )
+            },
+        },
+    )
+    kinds = _graph_kinds(old, new)
+    assert ChangeKind.PUBLIC_API_INTERNAL_DEPENDENCY_ADDED.value in kinds
+
+
+def test_l5_internal_dep_skipped_for_genuinely_new_role_against_pre_stamping_legacy_side() -> (
+    None
+):
+    # The counterpart within the same fixture shape: a first-ever edge under
+    # one of the THREE genuinely new roles (enum_underlying here) must still
+    # be treated as an unproven coverage artifact against a pre-stamping
+    # legacy OLD side -- the legacy-inference above only ever extends to
+    # _ROLES_PREDATING_ROLE_COVERAGE_STAMPING, never to a role that didn't
+    # exist for ANY producer version to have examined yet.
+    nodes = [
+        _N("hdr", "header", "api.h"),
+        _N("pub", "source_decl", "pub()"),
+        _N("sym", "binary_symbol", "pub"),
+        _N(
+            "priv_type",
+            "record_type",
+            "detail::PrivateType",
+            visibility="private_header",
+        ),
+    ]
+    base = [
+        _E("pub", "sym", "SOURCE_DECL_MAPS_TO_SYMBOL"),
+        _E("hdr", "pub", "SOURCE_DECLARES"),
+    ]
+    old = SourceGraphSummary(
+        nodes=nodes, edges=base, extractor_passes={"type_graph": True}
+    )
+    new = SourceGraphSummary(
+        nodes=nodes,
+        edges=base
+        + [_E("pub", "priv_type", "TYPE_HAS_FIELD_TYPE", role="enum_underlying")],
+        extractor_passes={
+            "type_graph": True,
+            **{
+                _role_coverage_key("type_graph", "TYPE_HAS_FIELD_TYPE", role): True
+                for role in (
+                    "field",
+                    "alias",
+                    "enum_underlying",
+                    "template_param",
+                    "default_template_arg",
+                )
+            },
+        },
+    )
+    kinds = _graph_kinds(old, new)
+    assert ChangeKind.PUBLIC_API_INTERNAL_DEPENDENCY_ADDED.value not in kinds
 
 
 def test_common_dependency_edge_kinds_header_and_build_pass_names_not_double_counted() -> (

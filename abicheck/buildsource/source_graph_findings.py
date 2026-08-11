@@ -460,6 +460,25 @@ def _dependency_kinds_covered(
     )
 
 
+#: Every :data:`~abicheck.buildsource.inline_graph_fold.ROLE_COVERAGE_MATRIX`
+#: role that existed and was fully examined by ``type_graph.py``'s walker
+#: *before* ADR-046 D3's role-key-stamping mechanism itself was added (G29
+#: Phase 5 item 5 introduced exactly three genuinely new roles on top of it —
+#: ``enum_underlying``/``template_param``/``default_template_arg``, see
+#: ``type_graph.py``'s own module docstring for the "five further roles ...
+#: needed no producer at all" list, which is this set). Read only by
+#: :func:`_disagreeing_roles`'s pre-stamping-legacy inference.
+#:
+#: Maintenance note: a *future* role added to ``ROLE_COVERAGE_MATRIX`` must
+#: NOT be added here — this set is deliberately frozen to what already
+#: existed at ADR-046 D3, not "every role considered established as of the
+#: reader's own time." Adding a new role here by mistake would silently
+#: exempt it from the version-skew guard it needs.
+_ROLES_PREDATING_ROLE_COVERAGE_STAMPING: frozenset[str] = frozenset(
+    {"field", "alias", "base", "var", "return", "param", "ref"}
+)
+
+
 def _disagreeing_roles(
     old: SourceGraphSummary, new: SourceGraphSummary, pass_name: str, kind: str
 ) -> frozenset[str]:
@@ -516,10 +535,40 @@ def _disagreeing_roles(
     whether one exists) is what lets :func:`_untrusted_dependency_roles`
     exclude only the disputed roles' own edges from the closure, leaving
     every role both sides agree on fully trusted.
+
+    Infers coverage of :data:`_ROLES_PREDATING_ROLE_COVERAGE_STAMPING` for a
+    side that confirms *kind*'s family-level pass but stamps **no** role key
+    for it at all (Codex review, fresh evidence, third round): unlike the
+    partial-disagreement case the strict per-key read above exists for,
+    :func:`~abicheck.buildsource.inline_graph_fold._mark_role_coverage`
+    stamps its *entire* current matrix in one unconditional pass, so a real
+    producer can never confirm some of a kind's role keys while omitting
+    others -- "zero role keys despite a confirmed family flag" can only mean
+    one thing: this side predates the role-stamping mechanism entirely (a
+    real released snapshot from before it existed, not a version that
+    "checked and found some roles unsupported"). Such a producer's walker
+    still fully examined every long-standing role -- the ADR-046 D3 role
+    matrix's own comment names ``type_graph.py``'s full walk as having "no
+    known per-role gap" for any of them, role-stamping or not -- so treating
+    every one of those established roles as "not confirmed" the same way a
+    genuinely unsupported new role is treated silently missed a real new
+    ``field``/``alias``/``var``/``return``/``param``/``base``/``ref``
+    dependency across every future release, the identical false-negative
+    shape the whole-kind-discard bug above had, just one layer deeper.
     """
     from .inline_graph_fold import ROLE_COVERAGE_MATRIX, _role_coverage_key
 
     header_name = _HEADER_PASS_ALIAS.get(pass_name, "")
+
+    def _family_confirmed(graph: SourceGraphSummary) -> bool:
+        if graph.extractor_passes.get(pass_name, False) or graph.narrowed_passes.get(
+            pass_name, False
+        ):
+            return True
+        return bool(header_name) and (
+            graph.extractor_passes.get(header_name, False)
+            or graph.narrowed_passes.get(header_name, False)
+        )
 
     def _covered(graph: SourceGraphSummary, role: str) -> bool:
         key = _role_coverage_key(pass_name, kind, role)
@@ -534,10 +583,26 @@ def _disagreeing_roles(
             header_key, False
         ) or graph.narrowed_passes.get(header_key, False)
 
+    def _is_pre_stamping_legacy(graph: SourceGraphSummary) -> bool:
+        return _family_confirmed(graph) and not any(
+            _covered(graph, role) for role in ROLE_COVERAGE_MATRIX.get(kind, ())
+        )
+
+    old_legacy = _is_pre_stamping_legacy(old)
+    new_legacy = _is_pre_stamping_legacy(new)
+
+    def _effectively_covered(
+        graph: SourceGraphSummary, is_legacy: bool, role: str
+    ) -> bool:
+        if _covered(graph, role):
+            return True
+        return is_legacy and role in _ROLES_PREDATING_ROLE_COVERAGE_STAMPING
+
     return frozenset(
         role
         for role in ROLE_COVERAGE_MATRIX.get(kind, ())
-        if _covered(old, role) != _covered(new, role)
+        if _effectively_covered(old, old_legacy, role)
+        != _effectively_covered(new, new_legacy, role)
     )
 
 
