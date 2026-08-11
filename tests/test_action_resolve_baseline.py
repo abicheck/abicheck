@@ -301,6 +301,44 @@ class TestFailureTaxonomy:
         assert result.returncode == 1
         assert outputs.get("outcome") == "wrong_profile"
 
+    def test_wrong_project_ref(self, tmp_path: Path) -> None:
+        # _write_manifest stamps project_ref="v1.0.0" -- an expected-project-ref
+        # naming a different commit/tag must not silently resolve (P0: the
+        # accepted-main restore-keys-prefix-lands-on-the-wrong-commit gap).
+        baseline_dir = tmp_path / "baseline"
+        _write_manifest(baseline_dir, artifacts=[_target_artifact("libpvxs")])
+        (baseline_dir / "libpvxs.abicheck.json").write_text("{}", encoding="utf-8")
+        result, outputs = _run_action(
+            {
+                "INPUT_BASELINE_PATH": str(baseline_dir),
+                "INPUT_CHANNEL": "accepted-main",
+                "INPUT_TARGET": "libpvxs",
+                "INPUT_PROFILE": PROFILE,
+                "INPUT_EXPECTED_PROJECT_REF": "deadbeef",
+            },
+            tmp_path,
+        )
+        assert result.returncode == 1
+        assert outputs.get("outcome") == "wrong_project_ref"
+        assert "deadbeef" in outputs.get("message", "")
+
+    def test_matching_project_ref_resolves(self, tmp_path: Path) -> None:
+        baseline_dir = tmp_path / "baseline"
+        _write_manifest(baseline_dir, artifacts=[_target_artifact("libpvxs")])
+        (baseline_dir / "libpvxs.abicheck.json").write_text("{}", encoding="utf-8")
+        result, outputs = _run_action(
+            {
+                "INPUT_BASELINE_PATH": str(baseline_dir),
+                "INPUT_CHANNEL": "accepted-main",
+                "INPUT_TARGET": "libpvxs",
+                "INPUT_PROFILE": PROFILE,
+                "INPUT_EXPECTED_PROJECT_REF": "v1.0.0",
+            },
+            tmp_path,
+        )
+        assert result.returncode == 0
+        assert outputs.get("outcome") == "resolved"
+
     def test_stale_schema(self, tmp_path: Path) -> None:
         baseline_dir = tmp_path / "baseline"
         _write_manifest(

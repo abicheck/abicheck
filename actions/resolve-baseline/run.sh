@@ -45,6 +45,7 @@ BUNDLE_MEMBERS="${INPUT_BUNDLE_MEMBERS:-[]}"
 PROFILE="${INPUT_PROFILE:?profile input is required}"
 REQUIRED="${INPUT_REQUIRED:-true}"
 CANDIDATE_BUILD_OUTPUT="${INPUT_CANDIDATE_BUILD_OUTPUT:-}"
+EXPECTED_PROJECT_REF="${INPUT_EXPECTED_PROJECT_REF:-}"
 ACTION_PATH="${ACTION_PATH:-$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)}"
 
 # A newline in channel (or baseline-path, which _fail_ambiguous may embed
@@ -249,6 +250,9 @@ else
 fi
 if [[ -n "$CANDIDATE_EVIDENCE_PRODUCER" ]]; then
   RESOLVE_ARGS+=(--candidate-evidence-producer "$CANDIDATE_EVIDENCE_PRODUCER")
+fi
+if [[ -n "$EXPECTED_PROJECT_REF" ]]; then
+  RESOLVE_ARGS+=(--expected-project-ref "$EXPECTED_PROJECT_REF")
 fi
 
 echo "::group::Resolve baseline ($CHANNEL / $KIND / $PROFILE)"

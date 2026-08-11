@@ -123,9 +123,19 @@ Secret: `github-token` (optional) — falls back to the job's own
 For every discovered contract profile: downloads that profile's
 build-output artifact, derives `libraries` from it, dumps the baseline-set
 via `actions/baseline`, packages it as `<asset-name>` (`tar --zstd`), and
-uploads it to `release-tag`'s release via `gh release upload --clobber` — a
-re-run may overwrite this profile's own previously uploaded asset, scoped to
-this one release, not a rewrite of history.
+uploads it to `release-tag`'s release. **This upload step fails closed on an
+immutability violation, it does not `--clobber`:** if no asset of this name
+exists yet, it uploads plainly; if one already exists with byte-identical
+content, the run is treated as a safe retry (e.g. after a transient
+failure) and no re-upload happens; if one already exists with *different*
+content, the step hard-fails rather than silently replacing a published
+`release-contract` asset — `release-contract` is documented (ADR-047 §10)
+as immutable once published, and a re-run silently overwriting it would
+mean an already-resolved consumer's "compatible with v1.0.0" comparison
+quietly stopped meaning what it said. To genuinely change a
+release-contract baseline-set, delete the existing asset explicitly
+(`gh release delete-asset <tag> <asset-name>`) and re-run, or publish under
+a new release tag.
 
 ## `update-main-baseline.yml`
 
@@ -173,6 +183,22 @@ can hit an entry that commit already wrote, falling through to
 correctly either way (a hit on this run's own previously written entry is
 still the newest matching entry), so this doesn't affect correctness, only
 the "always a miss" framing above.
+
+**`restore-keys` prefix matching is for freshness comparison, not for a PR
+gate.** The prefix restore above resolves to whichever entry is *newest*
+under the profile's prefix, regardless of which commit wrote it — correct
+for `update-main-baseline.yml`'s own "what changed since the last
+`accepted-main` snapshot" freshness diff, but wrong for a PR asking "did
+this PR introduce a break relative to *its own base commit*": if `main` has
+advanced past the PR's base SHA since the PR branched, a prefix restore
+silently compares the PR against a baseline built from a commit its branch
+history never contained. A PR gate must restore the **exact** key for
+`github.event.pull_request.base.sha` (no `restore-keys` fallback), and pass
+that same SHA as `resolve-baseline`'s `expected-project-ref` input so a
+restore that somehow still lands on the wrong commit is caught as
+`wrong_project_ref` rather than silently resolving — see
+[resolve-baseline's own "Known gap" section](resolve-baseline.md#known-gap-accepted-main-restore-by-prefix-can-resolve-the-wrong-commit)
+for the full recipe.
 
 ### Known gap: nothing restores `accepted-main` from cache yet
 

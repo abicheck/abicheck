@@ -293,15 +293,58 @@ jobs:
           tar --zstd -cf "$asset_name" -C "$BASELINE_PATH" .
           echo "asset-name=$asset_name" >> "$GITHUB_OUTPUT"
 
-      # --clobber lets a re-run overwrite this profile's own previously
-      # uploaded asset (e.g. retrying after a transient failure) without
-      # first deleting it by hand -- scoped to this one release's own
-      # assets, not a rewrite of a published archive's history.
-      - name: Upload release asset
+      # `release-contract` is documented (ADR-047 §10, publish-baseline.md)
+      # as an IMMUTABLE channel -- "compatible with what we actually shipped
+      # as v1.0.0" only holds if that asset can never quietly change out
+      # from under a consumer. A bare `--clobber` contradicts that: any
+      # re-run of this workflow against an already-published release (a
+      # manual workflow_dispatch retry, a re-tagged/re-triggered release
+      # event) would silently replace the asset with whatever this run just
+      # built, with no record that a "same-tag" baseline-set is no longer
+      # the one earlier consumers resolved against.
+      #
+      # This step therefore uploads plainly (no --clobber) when no asset of
+      # this name exists yet -- the ordinary first-publish and same-content-
+      # retry-after-a-transient-failure cases. When an asset of this name
+      # DOES already exist, it is fetched and compared byte-for-byte against
+      # what this run just built: identical content is a safe no-op (the
+      # exact "retry after infra flakiness" case --clobber existed for,
+      # without ever actually replacing a differing artifact), and differing
+      # content is a hard failure -- overwriting a published release-contract
+      # asset with different bytes needs a human decision (a new release tag,
+      # or explicit `gh release delete-asset` + re-run), not a silent
+      # workflow-level clobber.
+      - name: Upload release asset (fails closed on an immutability violation)
         env:
           GH_TOKEN: ${{ secrets.github-token != '' && secrets.github-token || secrets.GITHUB_TOKEN }}
           RELEASE_TAG: ${{ inputs.release-tag != '' && inputs.release-tag || github.ref_name }}
           ASSET_NAME: ${{ steps.package.outputs.asset-name }}
+          REPO: ${{ github.repository }}
         run: |
           set -euo pipefail
-          gh release upload "$RELEASE_TAG" "$ASSET_NAME" --clobber --repo "${{ github.repository }}"
+
+          existing_url=$(gh release view "$RELEASE_TAG" --repo "$REPO" \
+            --json assets \
+            --jq --arg name "$ASSET_NAME" '.assets[] | select(.name == $name) | .url' \
+            2>/dev/null || true)
+
+          if [[ -z "$existing_url" ]]; then
+            gh release upload "$RELEASE_TAG" "$ASSET_NAME" --repo "$REPO"
+            echo "::notice::published new release-contract asset $ASSET_NAME on $RELEASE_TAG."
+            exit 0
+          fi
+
+          echo "::group::Asset $ASSET_NAME already exists on $RELEASE_TAG -- verifying content before deciding whether this is a safe retry"
+          new_sha256=$(sha256sum "$ASSET_NAME" | awk '{print $1}')
+          existing_sha256=$(gh api "$existing_url" -H 'Accept: application/octet-stream' | sha256sum | awk '{print $1}')
+          echo "new:      $new_sha256"
+          echo "existing: $existing_sha256"
+          echo "::endgroup::"
+
+          if [[ "$new_sha256" == "$existing_sha256" ]]; then
+            echo "::notice::$ASSET_NAME already published on $RELEASE_TAG with identical content -- treating this as a safe re-run, not re-uploading."
+            exit 0
+          fi
+
+          echo "::error::$ASSET_NAME already exists on release $RELEASE_TAG with DIFFERENT content (sha256 $existing_sha256, this run built $new_sha256). release-contract assets are documented as immutable once published -- refusing to silently overwrite it. If this release-contract baseline-set genuinely needs to change, delete the existing asset explicitly first ('gh release delete-asset $RELEASE_TAG $ASSET_NAME --repo $REPO --yes') and re-run, or publish under a new release tag." >&2
+          exit 1

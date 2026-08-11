@@ -49,12 +49,13 @@ storage-backend table) — `actions/cache`, `actions/download-artifact`, or
 | `profile` | yes | — | The build `profile.id` this check expects the baseline to have been built for. |
 | `required` | no | `true` | `true` — no baseline set yet is a hard failure. `false` — explicit bootstrap opt-in (e.g. the very first `release-contract` publish); no baseline set yet resolves as an advisory `not_found`/bootstrap pass. |
 | `candidate-build-output` | no | `''` | Path to the candidate build's `build-output.json`, read only for its `evidence_producer` block, feeding the `incompatible_evidence` check. Omit to skip that check. |
+| `expected-project-ref` | no | `''` | Require the resolved baseline-set's `manifest.json` `project_ref` to match this value exactly, or `wrong_project_ref` is returned instead of `resolved`. Pass e.g. `github.event.pull_request.base.sha` when staging `accepted-main` for a PR gate — see [Known gap: `accepted-main` restore-by-prefix](#known-gap-accepted-main-restore-by-prefix-can-resolve-the-wrong-commit) below. Omit to skip this check (appropriate for `release-contract`, resolved by tag/asset selection rather than a Git ref). |
 
 ## Outputs
 
 | Output | Meaning |
 |--------|---------|
-| `outcome` | `resolved` \| `not_found` \| `ambiguous` \| `wrong_profile` \| `stale_schema` \| `incompatible_evidence`. |
+| `outcome` | `resolved` \| `not_found` \| `ambiguous` \| `wrong_profile` \| `stale_schema` \| `incompatible_evidence` \| `wrong_project_ref`. |
 | `bootstrap` | `'true'` only when `outcome: not_found` and `required: 'false'`. |
 | `channel` | Echoes the `channel` input. |
 | `manifest-path` | Path to the resolved baseline-set's `manifest.json`, when one was found. |
@@ -77,6 +78,7 @@ caller explicitly opts in with `required: false`:
 | `wrong_profile` | `1` | The baseline set was built for a different `profile.id`. |
 | `stale_schema` | `1` | `manifest.json`'s `manifest_version` is newer/older than this resolver understands. |
 | `incompatible_evidence` | `1` | The baseline's recorded evidence producer (`wrapper`/`clang-plugin`/`replay`) disagrees with the candidate's, per `candidate-build-output`'s `evidence_producer` block — an infrastructure mismatch, not an ABI finding. |
+| `wrong_project_ref` | `1` | `expected-project-ref` was given and the baseline-set's `manifest.json` `project_ref` doesn't match it exactly — the staged `baseline-path` resolved to a baseline-set built from the wrong commit/tag. |
 | `resolved` | `0` | Success. |
 
 ## Bundle-scoped resolution (S14)
@@ -104,6 +106,53 @@ different fidelity characteristics. Only a genuinely different tool (e.g.
 the Clang facts plugin vs. either of the above) is caught. Tightening this
 would need a distinct producer string per path, which is deferred rather
 than done in this PR.
+
+## Known gap: `accepted-main` restore-by-prefix can resolve the wrong commit
+
+`update-main-baseline.yml` writes one Actions-cache entry per default-branch
+commit (`<key-prefix>-<profile-id>-<head-sha>`, immutable once written) —
+see the [publish-baseline reference](publish-baseline.md)'s cache-key
+contract. A caller staging `accepted-main` for its own freshness comparison
+(or for a PR gate) that restores by **prefix** rather than an exact key
+(`restore-keys: <key-prefix>-<profile-id>-`) gets whatever entry is
+*newest* under that prefix, regardless of which commit wrote it — GitHub's
+own cache-restore semantics, not a bug in this Action. For a PR gate that is
+the wrong question: a PR should compare against the baseline for its own
+**base commit**, not whatever `main` has most recently advanced to (a
+default-branch commit that landed *after* the PR branched can otherwise
+silently become the baseline, comparing the PR against code its own history
+never actually contained).
+
+`resolve-baseline` cannot detect this by itself — a wrong-commit baseline-set
+still has a well-formed manifest, the right profile, and valid digests. Use
+`expected-project-ref` to make it detectable: pass the PR's exact base SHA,
+and a restore-keys prefix match that landed on any other commit reports
+`wrong_project_ref` instead of silently resolving.
+
+```yaml
+- name: Restore accepted-main baseline (exact key only — no restore-keys)
+  id: restore
+  uses: actions/cache/restore@v4
+  with:
+    path: .baseline-staged
+    key: abicheck-baseline-main-${{ inputs.profile }}-${{ github.event.pull_request.base.sha }}
+
+- name: Resolve accepted-main baseline for libpvxs
+  id: baseline
+  uses: abicheck/abicheck/actions/resolve-baseline@c9e135a3233b6d45e9571533f71293fde458a469  # not yet in a tagged release; pin main or newer
+  with:
+    baseline-path: .baseline-staged
+    channel: accepted-main
+    target: libpvxs
+    profile: ${{ inputs.profile }}
+    expected-project-ref: ${{ github.event.pull_request.base.sha }}
+```
+
+If the exact-key restore misses (no `accepted-main` baseline was ever
+published for that exact base SHA), the safer failure mode for a PR gate is
+to fail closed or fall back to a different channel entirely (e.g. a
+committed baseline read via `git show base_sha:path`, or `release-contract`)
+— not to fall back to a prefix-matched, possibly-wrong-commit cache entry.
 
 ## Example
 
