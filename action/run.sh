@@ -711,9 +711,20 @@ elif [[ "$MODE" == "scan" ]]; then
   # --suppress) the same as compare, but this branch never forwarded them —
   # the only way to apply a policy or suppression file to a scan step was
   # the generic extra-args passthrough (Codex review / reported gap).
-  add_single_flag "--policy" "${INPUT_POLICY:-}"
-  add_single_flag "--policy-file" "${INPUT_POLICY_FILE:-}"
-  add_single_flag "--suppress" "${INPUT_SUPPRESS:-}"
+  #
+  # Only forwarded when a baseline is actually present (same condition as
+  # the --against forwarding above): cli_scan.py's
+  # _reject_comparison_only_flags() hard-rejects any of these three when
+  # --against was not given, and `policy` has a non-empty action.yml
+  # default (`strict_abi`) -- forwarding it unconditionally would turn
+  # --policy strict_abi into an always-present explicit flag and break
+  # every existing audit-only (no baseline) scan step with a usage error
+  # (Codex review, P1).
+  if [[ "$FORCE_AUDIT_ONLY" != "true" && -z "$SCAN_ARTIFACT_SET" && -n "${INPUT_AGAINST:-}" ]]; then
+    add_single_flag "--policy" "${INPUT_POLICY:-}"
+    add_single_flag "--policy-file" "${INPUT_POLICY_FILE:-}"
+    add_single_flag "--suppress" "${INPUT_SUPPRESS:-}"
+  fi
 
   if [[ "${INPUT_ALLOW_BUILD_QUERY:-false}" == "true" ]]; then
     CMD+=(--allow-build-query)
