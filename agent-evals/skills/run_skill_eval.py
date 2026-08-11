@@ -115,6 +115,7 @@ def main(argv: list[str] | None = None) -> int:
     graded: list[dict] = []
     orphaned: set[str] = set()
     excluded_prototype: set[str] = set()
+    graded_models: set[str] = set()
     for row in index:
         sid, arm, rep = row["scenario_id"], row["arm"], row["repetition"]
         run_dir = root / sid / arm / str(rep)
@@ -141,6 +142,28 @@ def main(argv: list[str] | None = None) -> int:
         grade = grade_run(run_dir, pack["scenarios"][sid], arm)
         grade.update(scenario_id=sid, arm=arm, repetition=rep)
         graded.append(grade)
+        if isinstance(row.get("model"), str):
+            graded_models.add(row["model"])
+
+    if len(graded_models) > 1:
+        # The runner's own check_one_model refuses a mixed-model batch at
+        # record time, but it is scoped per invocation (in-scope skill set,
+        # not the whole on-disk index) — see the 2026-08-11 scope-freeze
+        # commits. Two separately-consistent invocations (e.g. a flagship
+        # run under one model, a prototype run under another, later combined
+        # here via --include-prototype-skills) can still reach this grading
+        # step with two models across what it is about to aggregate solely
+        # by arm. Refusing here, not just warning, matches CLAUDE.md's
+        # documented invariant: "a batch that mixes two [models] is
+        # refused" — an arm-to-arm difference would not be attributable to
+        # the skill if it might instead be a model difference.
+        print(
+            f"runs graded here used more than one model ({', '.join(sorted(graded_models))}); "
+            f"an apparent skill/baseline difference would not be attributable to the skill. "
+            f"Split --runs into separate per-model output roots.",
+            file=sys.stderr,
+        )
+        return 1
 
     if orphaned:
         print(
