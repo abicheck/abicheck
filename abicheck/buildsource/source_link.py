@@ -30,7 +30,7 @@ from collections.abc import Callable, Iterable
 from dataclasses import dataclass, field
 from typing import Any
 
-from .fact_set import rollup_coverage, rollup_fact_set
+from .fact_set import fact_set_rollup_is_inconsistent, rollup_coverage, rollup_fact_set
 from .source_abi import SourceAbiSurface, SourceAbiTu, SourceEntity
 
 
@@ -1359,6 +1359,10 @@ def link_source_abi(
     # to the surface, so a downstream comparison (source_diff.py) can apply the
     # fact-set compatibility rules without re-reading every TU record.
     surface.coverage["fact_set"] = rollup_fact_set(tus)
+    # Distinguishes an inconsistent-TUs {} from a genuinely-absent-everywhere
+    # {} -- both roll up identically, but only the latter is forgiven by
+    # check_fact_compatibility's symmetric-absence exception (Codex review).
+    surface.coverage["fact_set_inconsistent"] = fact_set_rollup_is_inconsistent(tus)
     surface.coverage["fact_family_states"] = rollup_coverage(tus)
     return surface
 

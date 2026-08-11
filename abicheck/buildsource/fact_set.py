@@ -203,6 +203,21 @@ def rollup_fact_set(tus: list[SourceAbiTu]) -> dict[str, Any]:
     return {}
 
 
+def fact_set_rollup_is_inconsistent(tus: list[SourceAbiTu]) -> bool:
+    """Whether *tus* disagreed on ``fact_set`` -- as opposed to
+    :func:`rollup_fact_set` returning ``{}`` because no TU ever populated one
+    at all. Both collapse to the identical ``{}``, but they are not the same
+    claim: "TUs disagree" must not receive the same forgiveness
+    :func:`check_fact_compatibility` grants a genuinely symmetric pair of
+    pre-C.8 (never-populated) fact sets (Codex review, PR #719).
+    """
+    non_empty = [dict(tu.fact_set) for tu in tus if tu.fact_set]
+    if not non_empty or len(non_empty) != len(tus):
+        return bool(non_empty)  # some reported, some silent -- a real mismatch
+    first = non_empty[0]
+    return not all(s == first for s in non_empty[1:])
+
+
 def incomplete_families(coverage: dict[str, str]) -> list[str]:
     """Mandatory families whose rolled-up coverage means "do not trust absence"."""
     return sorted(
@@ -407,7 +422,11 @@ def hash_recipe_id(fact_set: dict[str, Any]) -> str:
 
 
 def check_fact_compatibility(
-    old_fact_set: dict[str, Any], new_fact_set: dict[str, Any]
+    old_fact_set: dict[str, Any],
+    new_fact_set: dict[str, Any],
+    *,
+    old_inconsistent: bool = False,
+    new_inconsistent: bool = False,
 ) -> FactCompatibility:
     """Structured, actionable comparability verdict (ADR-038 C.8 / PR2 gating).
 
@@ -453,11 +472,20 @@ def check_fact_compatibility(
     Existence/removal detection (``structured_facts_comparable``) is
     untouched by this distinction — that pre-C.8 forward-compat contract
     predates this PR and is not the gap being closed here.
+
+    ``old_inconsistent``/``new_inconsistent`` (from
+    :func:`fact_set_rollup_is_inconsistent`) name a THIRD shape that also
+    collapses to an empty ``{}`` fact_set but must not receive the
+    symmetric-absence forgiveness either: a mixed-producer pack whose own
+    TUs disagreed on `fact_set`. That side's ``{}`` means "TUs disagree",
+    not "no evidence either way", so it is exactly as untrustworthy as the
+    asymmetric case above (Codex review, PR #719).
     """
     issues = check_fact_set_compatibility(old_fact_set, new_fact_set)
     rules = {issue.rule for issue in issues}
     both_present = bool(old_fact_set) and bool(new_fact_set)
     one_sided = bool(old_fact_set) != bool(new_fact_set)
+    inconsistent = old_inconsistent or new_inconsistent
     same_recipe = both_present and hash_recipe_id(old_fact_set) == hash_recipe_id(
         new_fact_set
     )
@@ -465,14 +493,13 @@ def check_fact_compatibility(
     # No hash_recipe_id override here -- see this function's own docstring
     # for why a declared opaque-hash recipe match must not also vouch for
     # structured-fact extraction staying identical.
-    structured_content_agrees = not one_sided and not (
-        rules & _RECIPE_OVERRIDABLE_RULES
-    )
+    agrees_base = not one_sided and not inconsistent
+    structured_content_agrees = agrees_base and not (rules & _RECIPE_OVERRIDABLE_RULES)
     recipe_agrees = same_recipe or (
-        not one_sided and not (rules & _RECIPE_OVERRIDABLE_RULES)
+        agrees_base and not (rules & _RECIPE_OVERRIDABLE_RULES)
     )
     source_edge_recipe_agrees = same_recipe or (
-        not one_sided and not (rules & _SOURCE_EDGE_OVERRIDABLE_RULES)
+        agrees_base and not (rules & _SOURCE_EDGE_OVERRIDABLE_RULES)
     )
     return FactCompatibility(
         structured_facts_comparable=not hard_blocked,

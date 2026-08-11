@@ -154,6 +154,13 @@ def _surface_fact_set(surface: SourceAbiSurface) -> dict[str, object]:
     return dict(raw) if isinstance(raw, dict) else {}
 
 
+def _surface_fact_set_inconsistent(surface: SourceAbiSurface) -> bool:
+    """Whether this surface's own TUs disagreed on ``fact_set`` -- see
+    ``fact_set.fact_set_rollup_is_inconsistent``'s docstring."""
+    cov = surface.coverage if isinstance(surface.coverage, dict) else {}
+    return bool(cov.get("fact_set_inconsistent"))
+
+
 def _diff_fact_coverage(
     old: SourceAbiSurface, new: SourceAbiSurface, compat: FactCompatibility
 ) -> list[Change]:
@@ -229,7 +236,8 @@ def _diff_fact_coverage(
             "public_typedef_target_changed, public_macro_value_changed) are "
             "suppressed for this comparison because a differing "
             "producer/producer_version/compiler_version pair (or an "
-            "asymmetric fact_set -- only one side stamped one at all) means "
+            "asymmetric fact_set -- only one side stamped one at all, or a "
+            "mixed-producer pack whose own TUs disagreed on fact_set) means "
             "a type_hash/value comparison cannot be trusted to reflect a "
             "real content change rather than an extraction-recipe change "
             "(Codex review, PR #719: EnumType.underlying_type going from an "
@@ -286,7 +294,12 @@ def diff_source_abi(old: SourceAbiSurface, new: SourceAbiSurface) -> list[Change
     The result is an ordinary list of :class:`Change` objects ready to fold into
     a ``DiffResult`` and run through the existing verdict/policy pipeline.
     """
-    compat = check_fact_compatibility(_surface_fact_set(old), _surface_fact_set(new))
+    compat = check_fact_compatibility(
+        _surface_fact_set(old),
+        _surface_fact_set(new),
+        old_inconsistent=_surface_fact_set_inconsistent(old),
+        new_inconsistent=_surface_fact_set_inconsistent(new),
+    )
     changes: list[Change] = []
     changes.extend(_diff_fact_coverage(old, new, compat))
     changes.extend(_diff_generated(old, new, compat))

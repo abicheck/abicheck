@@ -861,6 +861,18 @@ an honest `unsupported` coverage state for the three families it never
 attempts (`macros`, `templates`, `inline_bodies`, plus `source_edges`,
 which only the clang-family extractors currently populate).
 
+**Further amendment (Codex review, PR #719):** `rollup_fact_set()`
+collapses a mixed-producer pack whose own TUs *disagree* on `fact_set` to
+the identical `{}` a pack where *no* TU ever populated one produces —
+those are not the same claim, but `check_fact_compatibility`'s symmetric-
+`{}`-pair forgiveness (the very first paragraph of this section) could not
+tell them apart. `fact_set_rollup_is_inconsistent()` computes the
+distinguishing bit alongside the rollup; `link_source_abi()` stamps it onto
+`surface.coverage["fact_set_inconsistent"]`, and `check_fact_compatibility()`
+gained `old_inconsistent`/`new_inconsistent` keyword parameters so an
+inconsistent side's `{}` is treated the same as an asymmetric absence (not
+forgiven) rather than a genuine symmetric pre-C.8 pair.
+
 ### C.12 — Target/pack isolation
 
 The plugin's per-TU fact filename was keyed on source path + compile-context

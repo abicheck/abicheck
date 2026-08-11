@@ -31,6 +31,7 @@ from abicheck.buildsource.fact_set import (
     FactSetIssue,
     check_fact_compatibility,
     check_fact_set_compatibility,
+    fact_set_rollup_is_inconsistent,
     hash_recipe_id,
     incomplete_families,
     rollup_coverage,
@@ -169,6 +170,53 @@ def test_rollup_fact_set_mixed_present_and_missing_returns_empty() -> None:
     fs = default_fact_set(producer="p", producer_version="1")
     tus = [_tu(fact_set=fs), _tu(fact_set=dict(fs)), _tu()]
     assert rollup_fact_set(tus) == {}
+
+
+def test_fact_set_rollup_is_inconsistent_false_for_agreeing_tus() -> None:
+    fs = default_fact_set(producer="p", producer_version="1")
+    tus = [_tu(fact_set=fs), _tu(fact_set=dict(fs))]
+    assert rollup_fact_set(tus) == fs
+    assert fact_set_rollup_is_inconsistent(tus) is False
+
+
+def test_fact_set_rollup_is_inconsistent_false_when_everyone_is_silent() -> None:
+    """Both roll up to ``{}``, but "no TU ever reported one" is absence, not
+    disagreement -- must not be flagged inconsistent."""
+    tus = [_tu(), _tu()]
+    assert rollup_fact_set(tus) == {}
+    assert fact_set_rollup_is_inconsistent(tus) is False
+
+
+def test_fact_set_rollup_is_inconsistent_true_for_disagreeing_tus() -> None:
+    tus = [
+        _tu(fact_set=default_fact_set(producer="a", producer_version="1")),
+        _tu(fact_set=default_fact_set(producer="b", producer_version="1")),
+    ]
+    assert rollup_fact_set(tus) == {}
+    assert fact_set_rollup_is_inconsistent(tus) is True
+
+
+def test_fact_set_rollup_is_inconsistent_true_for_mixed_presence() -> None:
+    fs = default_fact_set(producer="p", producer_version="1")
+    tus = [_tu(fact_set=fs), _tu(fact_set=dict(fs)), _tu()]
+    assert rollup_fact_set(tus) == {}
+    assert fact_set_rollup_is_inconsistent(tus) is True
+
+
+def test_check_fact_compatibility_inconsistent_rollup_is_not_forgiven_like_absence() -> (
+    None
+):
+    """Both sides collapse to the SAME ``{}`` fact_set as the genuinely
+    both-absent case, but one side's ``{}`` came from an inconsistent
+    mixed-producer pack (not "never reported") -- must not receive the
+    same forgiveness (Codex review, PR #719)."""
+    compat = check_fact_compatibility({}, {}, old_inconsistent=True)
+    assert compat.structured_facts_comparable  # existence/removal untouched
+    assert not compat.structured_content_comparable
+    assert not compat.opaque_hashes_comparable
+    assert not compat.source_edges_comparable
+    # Symmetric (both absent, neither inconsistent) case is untouched.
+    assert check_fact_compatibility({}, {}).structured_content_comparable
 
 
 def test_rollup_coverage_worst_of_wins() -> None:
@@ -409,6 +457,28 @@ def test_link_source_abi_no_fact_set_stays_empty() -> None:
     surface = link_source_abi([SourceAbiTu(tu_id="cu://a.cpp")])
     assert surface.coverage["fact_set"] == {}
     assert surface.coverage["fact_family_states"] == {}
+    assert surface.coverage["fact_set_inconsistent"] is False
+
+
+def test_link_source_abi_stamps_fact_set_inconsistent_flag() -> None:
+    """A mixed-producer pack's ``fact_set`` rolls up to ``{}`` (existing
+    behavior), but the surface must also carry a distinct signal that this
+    was an inconsistency, not an absence -- link_source_abi's own rollup
+    call site is what feeds diff_source_abi's fact-compatibility gate
+    (Codex review, PR #719)."""
+    tus = [
+        SourceAbiTu(
+            tu_id="cu://a.cpp",
+            fact_set=default_fact_set(producer="a", producer_version="1"),
+        ),
+        SourceAbiTu(
+            tu_id="cu://b.cpp",
+            fact_set=default_fact_set(producer="b", producer_version="1"),
+        ),
+    ]
+    surface = link_source_abi(tus)
+    assert surface.coverage["fact_set"] == {}
+    assert surface.coverage["fact_set_inconsistent"] is True
 
 
 # -- diff_source_abi: SOURCE_FACT_COVERAGE_INCOMPLETE ------------------------
@@ -997,6 +1067,35 @@ def test_diff_suppresses_content_changes_on_producer_version_mismatch() -> None:
     )
     new = _surface(
         coverage={"fact_set": new_fs, "fact_family_states": {}},
+        reachable_macros=[_macro_entity("FOO", "2")],
+        reachable_types=[_typedef_entity("Widget_t", "h2")],
+    )
+    changes = diff_source_abi(old, new)
+    kinds = {c.kind for c in changes}
+    assert ChangeKind.PUBLIC_MACRO_VALUE_CHANGED not in kinds
+    assert ChangeKind.PUBLIC_TYPEDEF_TARGET_CHANGED not in kinds
+
+
+def test_diff_suppresses_content_changes_when_fact_set_empty_from_inconsistency() -> (
+    None
+):
+    """The concrete motivating case (Codex review, PR #719): one side's
+    `fact_set` is `{}` because its own TUs disagreed on it (a mixed-producer
+    pack), not because nothing was ever reported. That is NOT the same claim
+    as the genuinely-both-absent forgiven case, and must suppress structured
+    content-change findings the same way an asymmetric absence does."""
+    fs = default_fact_set(producer="p", producer_version="1")
+    old = _surface(
+        coverage={
+            "fact_set": {},
+            "fact_set_inconsistent": True,
+            "fact_family_states": {},
+        },
+        reachable_macros=[_macro_entity("FOO", "1")],
+        reachable_types=[_typedef_entity("Widget_t", "h1")],
+    )
+    new = _surface(
+        coverage={"fact_set": fs, "fact_family_states": {}},
         reachable_macros=[_macro_entity("FOO", "2")],
         reachable_types=[_typedef_entity("Widget_t", "h2")],
     )

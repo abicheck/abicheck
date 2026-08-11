@@ -107,3 +107,17 @@ A new changelog fragment. See changelog.d/README.md for the workflow.
   handling of the same spelling variance), so two installs differing
   only in that banner spelling no longer read as the same
   `compiler_version`/cache identity (Codex review, second round).
+- **`check_fact_compatibility()` no longer forgives a fact-set-inconsistent
+  mixed-producer pack the same way it forgives a genuinely pre-C.8 pair.**
+  `rollup_fact_set()` collapses BOTH "every TU is silent" (a real pre-C.8
+  absence) and "TUs disagree on fact_set" (a mixed-producer pack) to the
+  identical `{}` — but only the former is the symmetric-absence case this
+  gate's forward-compat forgiveness was designed for. A new
+  `fact_set_rollup_is_inconsistent()` computes the distinguishing bit
+  alongside the rollup; `link_source_abi()` stamps it onto
+  `surface.coverage["fact_set_inconsistent"]`, and `check_fact_compatibility()`
+  gained `old_inconsistent`/`new_inconsistent` keyword parameters so an
+  inconsistent side's `{}` suppresses `structured_content_comparable`/
+  `opaque_hashes_comparable`/`source_edges_comparable` the same way an
+  asymmetric absence already does, instead of silently passing structured
+  content changes through as trusted (Codex review, PR #719).
