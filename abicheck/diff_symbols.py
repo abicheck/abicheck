@@ -75,7 +75,12 @@ from .diff_symbols_scalar import (  # noqa: F401  (public-surface re-exports)
     _canonical_int_spelling as _canonical_int_spelling,
     _scalar_repr as _scalar_repr,
 )
-from .diff_symbols_variables import _check_variable_alignment, _without_top_level_const
+from .diff_symbols_variables import (
+    _check_variable_alignment,
+    _is_access_narrowing,
+    _without_top_level_const,
+    var_access_changes,
+)
 from .dumper_castxml import (
     SYNTHETIC_CTOR_KEY_PREFIX,
     is_synthetic_ctor_key,
@@ -1431,18 +1436,6 @@ def _diff_pointer_levels(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
     return changes
 
 
-def _is_access_narrowing(old_access: Any, new_access: Any) -> bool:
-    """Return True if the access level transition is narrowing (breaking).
-
-    Narrowing = less accessible: public→protected, public→private, protected→private.
-    Widening (e.g., private→public) is backward-compatible and should NOT be flagged.
-    """
-    from .model import AccessLevel
-
-    _RANK = {AccessLevel.PUBLIC: 0, AccessLevel.PROTECTED: 1, AccessLevel.PRIVATE: 2}  # pylint: disable=invalid-name
-    return _RANK.get(new_access, 0) > _RANK.get(old_access, 0)
-
-
 def _check_method_access_changes(
     old_map: dict[str, Function],
     new_map: dict[str, Function],
@@ -1889,11 +1882,22 @@ def _diff_var_deprecated(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
 def _diff_param_va_list(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
     """Detect va_list parameter changes (ABICC: Parameter_Became_VaList/Non_VaList).
 
-    Loop body in ``diff_param_qualifiers``; registered here to keep its
-    original registry position (see ``param_restrict`` above).
+    Header-tier, "clang"-producer-ONLY (deliberately NOT "hybrid" -- unlike
+    ``param_restrict``'s gate just above), and reliability-gated -- see
+    ``diff_param_qualifiers.param_va_list_changes`` for the full reasoning
+    (G31 Phase C continued, Codex review).
+
+    The loop lives in ``diff_param_qualifiers`` (this file is at the
+    2000-line hard cap); registration stays HERE for registry ordering.
     """
     from .diff_param_qualifiers import param_va_list_changes
 
+    if not _both_header_aware(old, new):
+        return []
+    if old.ast_producer != "clang" or new.ast_producer != "clang":
+        return []
+    if not (old.clang_va_list_facts_reliable and new.clang_va_list_facts_reliable):
+        return []
     return param_va_list_changes(_public_functions(old), _public_functions(new))
 
 
@@ -1954,34 +1958,20 @@ def _diff_constants(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
 
 @registry.detector("var_access")
 def _diff_var_access(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
-    """Detect global data access level changes (ABICC: Global_Data_Became_Private/Protected/Public)."""
-    changes: list[Change] = []
-    old_map = _public_variables(old)
-    new_map = _public_variables(new)
+    """Detect global data access level changes (ABICC: Global_Data_Became_Private/Protected/Public).
 
-    for mangled, v_old in old_map.items():
-        v_new = new_map.get(mangled)
-        if v_new is None:
-            continue
-        if v_old.access != v_new.access:
-            if _is_access_narrowing(v_old.access, v_new.access):
-                changes.append(
-                    make_change(
-                        ChangeKind.VAR_ACCESS_CHANGED,
-                        symbol=mangled,
-                        name=v_old.name,
-                        old=v_old.access.value,
-                        new=v_new.access.value,
-                    )
-                )
-            else:
-                changes.append(
-                    make_change(
-                        ChangeKind.VAR_ACCESS_WIDENED,
-                        symbol=mangled,
-                        name=v_old.name,
-                        old=v_old.access.value,
-                        new=v_new.access.value,
-                    )
-                )
-    return changes
+    Header-tier, "castxml"-producer-ONLY (not "hybrid" either -- same
+    coverage-shift risk as ``param_va_list`` above), reliability-gated --
+    see ``AbiSnapshot.castxml_var_access_facts_reliable`` (G31 Phase C
+    continued) for the full reasoning.
+    """
+    if not _both_header_aware(old, new):
+        return []
+    if old.ast_producer != "castxml" or new.ast_producer != "castxml":
+        return []
+    if not (
+        old.castxml_var_access_facts_reliable
+        and new.castxml_var_access_facts_reliable
+    ):
+        return []
+    return var_access_changes(_public_variables(old), _public_variables(new))

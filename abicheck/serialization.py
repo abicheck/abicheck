@@ -237,7 +237,35 @@ from .model import (
 #     `diff_symbols._diff_param_restrict` declines to trust it, instead of
 #     reporting a false `PARAM_RESTRICT_CHANGED` for every restrict-qualified
 #     parameter purely from a tool upgrade.
-SCHEMA_VERSION: int = 22
+#   23 — G31 Phase C continued (`dumper_clang_qualifiers._clang_param_is_va_list`):
+#     the direct-clang backend's `Param.is_va_list` became a real extracted
+#     fact (x86-64 System V spelling only) instead of the model default
+#     `False` for EVERY parameter. No backend had ever populated this fact
+#     before (unlike `is_restrict`, castxml never did either — see
+#     `diff_param_qualifiers.param_va_list_changes`'s pre-v23 docstring),
+#     so this is purely a producer *gaining* the fact, not a cross-backend
+#     disagreement, but the schema-version risk is identical: a pre-v23
+#     clang-producer parameter's blanket False cannot be told from a
+#     genuine non-`va_list` parameter by value alone. `snapshot_from_dict`
+#     marks such a snapshot's `AbiSnapshot.clang_va_list_facts_reliable`
+#     False so `diff_symbols._diff_param_va_list` declines to trust it,
+#     instead of reporting a false `PARAM_BECAME_VA_LIST` for every
+#     `va_list` parameter purely from a tool upgrade.
+#   24 — G31 Phase C continued (`dumper_castxml._CastxmlParser._access_level`
+#     applied to `Variable`, and `el.get("init")` applied to `Variable.value`):
+#     the castxml backend's `Variable.access`/`Variable.value` became real
+#     extracted facts instead of the model defaults (`AccessLevel.PUBLIC`,
+#     `None`) for EVERY variable. `Variable.value` needs no reliability flag
+#     — `diff_types_abicc_parity._diff_var_values` already declines per-pair
+#     unless BOTH sides are non-`None`, so a legacy blanket-`None` side is
+#     silently skipped, never misread. `Variable.access` has no such
+#     "unknown" state (a plain enum, PUBLIC by construction), so the same
+#     real-but-WRONG shape as v19-v23 applies: `snapshot_from_dict` marks
+#     such a snapshot's `AbiSnapshot.castxml_var_access_facts_reliable`
+#     False so `diff_symbols._diff_var_access` declines to trust it, instead
+#     of reporting a false `VAR_ACCESS_WIDENED` for every private/protected
+#     static member purely from a tool upgrade.
+SCHEMA_VERSION: int = 24
 
 # Schema version at which CastXML field CV facts became reliable (see v9 above).
 _MIN_SCHEMA_VERSION_FOR_CV_FACTS = 9
@@ -257,6 +285,14 @@ _MIN_SCHEMA_VERSION_FOR_CLANG_VTABLE_FACTS = 21
 # Schema version at which the direct-clang backend's Param.is_restrict facts
 # became reliable (see v22 above).
 _MIN_SCHEMA_VERSION_FOR_CLANG_RESTRICT_FACTS = 22
+
+# Schema version at which the direct-clang backend's Param.is_va_list facts
+# became reliable (see v23 above).
+_MIN_SCHEMA_VERSION_FOR_CLANG_VA_LIST_FACTS = 23
+
+# Schema version at which the castxml backend's Variable.access facts
+# became reliable (see v24 above).
+_MIN_SCHEMA_VERSION_FOR_CASTXML_VAR_ACCESS_FACTS = 24
 
 # ADR-050 D1 — the schema version at which a verdict-blocking field
 # (``AbiSnapshot.contract``) was first introduced. This constant only takes
@@ -1197,6 +1233,44 @@ def snapshot_from_dict(d: dict[str, Any]) -> AbiSnapshot:
             or _schema_version >= _MIN_SCHEMA_VERSION_FOR_CLANG_RESTRICT_FACTS
         )
 
+    if "clang_va_list_facts_reliable" in d:
+        # Same explicit-marker-wins reasoning as the flags above.
+        clang_va_list_facts_reliable_value = bool(d["clang_va_list_facts_reliable"])
+    else:
+        # Unlike clang_restrict_facts_reliable, this does NOT special-case
+        # "hybrid" as trusted — `diff_symbols._diff_param_va_list` excludes
+        # "hybrid" from its producer gate entirely (Codex review; see
+        # AbiSnapshot.clang_va_list_facts_reliable's own docstring for why),
+        # so this flag's value is consulted only for a "clang" snapshot. The
+        # `== "castxml"` spelling still matters for treating an untracked
+        # pre-`ast_producer` snapshot (None here) as possibly clang-family
+        # rather than silently trusted.
+        clang_va_list_facts_reliable_value = (
+            not from_headers
+            or ast_producer_value == "castxml"
+            or _schema_version >= _MIN_SCHEMA_VERSION_FOR_CLANG_VA_LIST_FACTS
+        )
+
+    if "castxml_var_access_facts_reliable" in d:
+        # Same explicit-marker-wins reasoning as the flags above.
+        castxml_var_access_facts_reliable_value = bool(
+            d["castxml_var_access_facts_reliable"]
+        )
+    else:
+        # Inverted producer spelling from the clang-side flags above: this
+        # fact is castxml-only, so it's `== "clang"` (rather than
+        # `== "castxml"`) that means "not this producer, therefore
+        # trusted-by-irrelevance" — an untracked pre-`ast_producer` snapshot
+        # (None here) is treated as possibly castxml rather than silently
+        # trusted, same principle as the others. See
+        # AbiSnapshot.castxml_var_access_facts_reliable's own docstring for
+        # why "hybrid" is NOT treated as trusted-by-irrelevance either.
+        castxml_var_access_facts_reliable_value = (
+            not from_headers
+            or ast_producer_value == "clang"
+            or _schema_version >= _MIN_SCHEMA_VERSION_FOR_CASTXML_VAR_ACCESS_FACTS
+        )
+
     # ADR-050 D1 (schema v12) — profile/scope fingerprints. Missing key (every
     # snapshot predating this field) loads as None, same as every other
     # additive optional field.
@@ -1305,6 +1379,15 @@ def snapshot_from_dict(d: dict[str, Any]) -> AbiSnapshot:
         # an explicit dict key, falling back to a schema_version + producer
         # derivation covering the clang and hybrid paths alike.
         clang_restrict_facts_reliable=clang_restrict_facts_reliable_value,
+        # See clang_va_list_facts_reliable_value's computation above: prefers
+        # an explicit dict key, falling back to a schema_version + producer
+        # derivation scoped to the "clang" producer specifically (NOT
+        # "hybrid" — see the field's own docstring).
+        clang_va_list_facts_reliable=clang_va_list_facts_reliable_value,
+        # See castxml_var_access_facts_reliable_value's computation above:
+        # prefers an explicit dict key, falling back to a schema_version +
+        # producer derivation scoped to the "castxml" producer specifically.
+        castxml_var_access_facts_reliable=castxml_var_access_facts_reliable_value,
         # G28 Phase 3 — per-fact provenance map for a hybrid (castxml+clang
         # merged) snapshot. Absent on every non-hybrid / pre-Phase-3 snapshot,
         # loads as the empty dict (same "unknown" default as a fresh snapshot).

@@ -632,13 +632,24 @@ class TestSymbolBindingStrengthened:
 
 
 class TestVarAccessWidened:
+    """``Variable.access`` is populated only by the castxml header-AST
+    backend (G31 Phase C continued, schema v24) — see
+    ``diff_symbols._diff_var_access``'s own docstring — so both sides here
+    need ``ast_producer="castxml"``, unlike this module's other ``_snap()``
+    calls.
+    """
+
     def test_private_to_public_detected(self) -> None:
         """private→public variable access change should emit VAR_ACCESS_WIDENED."""
         old = _snap(
-            variables=[_var("g_val", "_g_val", "int", access=AccessLevel.PRIVATE)]
+            ast_producer="castxml",
+            from_headers=True,
+            variables=[_var("g_val", "_g_val", "int", access=AccessLevel.PRIVATE)],
         )
         new = _snap(
-            variables=[_var("g_val", "_g_val", "int", access=AccessLevel.PUBLIC)]
+            ast_producer="castxml",
+            from_headers=True,
+            variables=[_var("g_val", "_g_val", "int", access=AccessLevel.PUBLIC)],
         )
         result = compare(old, new)
         assert ChangeKind.VAR_ACCESS_WIDENED in _kinds(result)
@@ -646,10 +657,14 @@ class TestVarAccessWidened:
     def test_protected_to_public_detected(self) -> None:
         """protected→public should also emit VAR_ACCESS_WIDENED."""
         old = _snap(
-            variables=[_var("g_val", "_g_val", "int", access=AccessLevel.PROTECTED)]
+            ast_producer="castxml",
+            from_headers=True,
+            variables=[_var("g_val", "_g_val", "int", access=AccessLevel.PROTECTED)],
         )
         new = _snap(
-            variables=[_var("g_val", "_g_val", "int", access=AccessLevel.PUBLIC)]
+            ast_producer="castxml",
+            from_headers=True,
+            variables=[_var("g_val", "_g_val", "int", access=AccessLevel.PUBLIC)],
         )
         result = compare(old, new)
         assert ChangeKind.VAR_ACCESS_WIDENED in _kinds(result)
@@ -657,10 +672,14 @@ class TestVarAccessWidened:
     def test_widened_is_compatible(self) -> None:
         """Widening access should be COMPATIBLE, not BREAKING."""
         old = _snap(
-            variables=[_var("g_val", "_g_val", "int", access=AccessLevel.PRIVATE)]
+            ast_producer="castxml",
+            from_headers=True,
+            variables=[_var("g_val", "_g_val", "int", access=AccessLevel.PRIVATE)],
         )
         new = _snap(
-            variables=[_var("g_val", "_g_val", "int", access=AccessLevel.PUBLIC)]
+            ast_producer="castxml",
+            from_headers=True,
+            variables=[_var("g_val", "_g_val", "int", access=AccessLevel.PUBLIC)],
         )
         result = compare(old, new)
         assert ChangeKind.VAR_ACCESS_WIDENED in _kinds(result)
@@ -669,10 +688,14 @@ class TestVarAccessWidened:
     def test_narrowing_is_not_widened(self) -> None:
         """public→private should emit VAR_ACCESS_CHANGED, not VAR_ACCESS_WIDENED."""
         old = _snap(
-            variables=[_var("g_val", "_g_val", "int", access=AccessLevel.PUBLIC)]
+            ast_producer="castxml",
+            from_headers=True,
+            variables=[_var("g_val", "_g_val", "int", access=AccessLevel.PUBLIC)],
         )
         new = _snap(
-            variables=[_var("g_val", "_g_val", "int", access=AccessLevel.PRIVATE)]
+            ast_producer="castxml",
+            from_headers=True,
+            variables=[_var("g_val", "_g_val", "int", access=AccessLevel.PRIVATE)],
         )
         result = compare(old, new)
         assert ChangeKind.VAR_ACCESS_WIDENED not in _kinds(result)

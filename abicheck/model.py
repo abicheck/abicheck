@@ -784,6 +784,73 @@ class AbiSnapshot:
     # necessarily produced by the current, fixed parser.
     clang_restrict_facts_reliable: bool = field(default=True, kw_only=True)
 
+    # True when this snapshot's Param.is_va_list facts are known-reliable
+    # when its own ``ast_producer`` is ``"clang"`` -- G31 Phase C continued
+    # (schema v23) wired real extraction into the direct-clang backend
+    # (``dumper_clang._clang_param_is_va_list``, x86-64 System V spelling
+    # only), previously unconditionally False for EVERY parameter on every
+    # backend. Identical "real but WRONG data" shape as
+    # ``clang_restrict_facts_reliable`` immediately above, for the identical
+    # reason: ``Param.is_va_list`` is a plain bool with no "not collected"
+    # state, so a pre-v23 clang-producer parameter's blanket False is
+    # indistinguishable by value alone from a genuine non-``va_list``
+    # parameter, and comparing a fresh clang dump of UNCHANGED headers
+    # against a persisted pre-v23 clang baseline would read as every
+    # ``va_list`` parameter having just been added.
+    #
+    # Deliberately does NOT cover "hybrid" the way
+    # ``clang_restrict_facts_reliable`` does (Codex review, fresh evidence):
+    # a hybrid merge keeps castxml's own ``params`` verbatim for every
+    # MATCHED function, and unlike ``is_restrict`` -- where castxml IS a
+    # real producer -- castxml has NEVER populated ``is_va_list`` at all, so
+    # a matched function's param reads a permanent, version-independent
+    # False regardless of schema version, not a legacy-baseline artifact
+    # this flag could describe. ``diff_symbols._diff_param_va_list``
+    # excludes "hybrid" from its producer gate entirely rather than
+    # consulting this flag for it; see that detector's and
+    # ``diff_param_qualifiers.param_va_list_changes``'s docstrings for the
+    # full reasoning. Not needed for "castxml" either, for the ordinary
+    # reason: it has never populated this fact at all (still true after
+    # this change — see ``dumper_castxml.py``), so a castxml snapshot's
+    # blanket False is unconditionally correct-as-"not collected" the same
+    # way it always was, on any schema version. False only for a snapshot
+    # rehydrated from a persisted pre-v23, clang-producer schema (see
+    # serialization.SCHEMA_VERSION); a freshly-built in-memory snapshot
+    # defaults True, since it was necessarily produced by the current,
+    # fixed parser.
+    clang_va_list_facts_reliable: bool = field(default=True, kw_only=True)
+
+    # True when this snapshot's Variable.access facts are known-reliable
+    # when its own ``ast_producer`` is ``"castxml"`` -- G31 Phase C continued
+    # (schema v24) wired real extraction into the castxml backend
+    # (``dumper_castxml._CastxmlParser._access_level``, already used for
+    # ``Function``/``TypeField.access`` -- verified against real castxml
+    # output that a static class member's ``<Variable>`` element carries the
+    # identical structured ``access`` attribute), previously unconditionally
+    # ``AccessLevel.PUBLIC`` for EVERY variable on every backend.
+    # ``Variable.access`` is a plain enum with no "not collected" state, so
+    # a pre-v24 castxml-producer variable's blanket PUBLIC is
+    # indistinguishable by value alone from a genuine public variable, and
+    # comparing a fresh castxml dump of UNCHANGED headers against a
+    # persisted pre-v24 castxml baseline would read every real
+    # private/protected static member as newly WIDENED to public.
+    #
+    # Deliberately does NOT cover "clang" (it has never populated this fact
+    # at all, so its blanket PUBLIC is unconditionally correct-as-"not
+    # collected" the same way it always was) or "hybrid" (mirroring
+    # ``clang_va_list_facts_reliable``'s own reasoning: a hybrid merge keeps
+    # castxml's own ``Variable`` verbatim for a matched declaration -- so
+    # THAT part is genuinely reliable once castxml itself is fixed -- but a
+    # clang-only-appended variable carries no access signal at all, and
+    # nothing distinguishes the two per-declaration today).
+    # ``diff_symbols._diff_var_access`` requires ``ast_producer == "castxml"``
+    # on both sides rather than consulting this flag for any other producer.
+    # False only for a snapshot rehydrated from a persisted pre-v24,
+    # castxml-producer schema (see serialization.SCHEMA_VERSION); a
+    # freshly-built in-memory snapshot defaults True, since it was
+    # necessarily produced by the current, fixed parser.
+    castxml_var_access_facts_reliable: bool = field(default=True, kw_only=True)
+
     # Phase 3: binary format platform — detected from ELF/PE/MachO metadata.
     # None = unknown / not yet detected.
     # Populated by detect_platform() in pipeline or by the dumper.
