@@ -291,6 +291,21 @@ class TestStripParamSignature:
         )
         assert result != other
 
+    def test_conversion_operator_to_decltype_target(self) -> None:
+        # Codex review, fresh evidence beyond the function-pointer target
+        # case above: a conversion operator can target *any*
+        # "decltype(...)" spelling, not just "decltype(auto)"
+        # ("operator decltype(nullptr)() const" for a conversion to
+        # std::nullptr_t). The earlier fix special-cased the literal
+        # "(auto)" content, so this shape still truncated the identity
+        # down to just "...operator decltype". Generalized to skip the
+        # whole balanced group after a glued "decltype(", whatever it
+        # contains -- same as the "(auto)" case, just no longer limited to
+        # that one spelling.
+        sig = "ns::experimental::C::operator decltype(nullptr)() const"
+        result = _strip_param_signature(sig)
+        assert result == "ns::experimental::C::operator decltype(nullptr)"
+
     def test_unbalanced_expression_paren_falls_back_safely(self) -> None:
         # No matching close paren for the leading (whitespace-preceded)
         # "(" -- must not raise or infinite-loop, just give up and return
@@ -342,6 +357,25 @@ class TestStripParamSignature:
         assert (
             _strip_param_signature(
                 "int (ns::C<int, double>::*ns::experimental::bar<int>(int))()"
+            )
+            == "ns::experimental::bar<int>"
+        )
+
+    def test_member_pointer_wrapper_owner_with_pointer_template_argument(self) -> None:
+        # CodeRabbit review, fresh evidence: the owning class's own
+        # template-argument list can itself contain a pointer type
+        # ("ns::C<int*, double>::*..."), and that "*" sits *before* the
+        # wrapper's own "*" is ever reached while scanning forward. The
+        # un-gated version recorded that template-argument "*" as the
+        # declarator star (since only "," was special-cased at depth > 0,
+        # not "*"/"&"), corrupting the eventual leaf down to a fragment of
+        # the owner's own template-argument text. Fixed by skipping *every*
+        # character while inside the template-argument list (depth > 0),
+        # not just commas — a "*"/"&" there can never be the wrapper's own
+        # declarator.
+        assert (
+            _strip_param_signature(
+                "int (ns::C<int*, double>::*ns::experimental::bar<int>(int))()"
             )
             == "ns::experimental::bar<int>"
         )

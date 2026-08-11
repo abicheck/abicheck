@@ -187,10 +187,16 @@ def _pointer_declarator_star_index(qualified: str, paren_index: int) -> int:
             depth = max(0, depth - 1)
             continue
         if star_index == -1:
+            if depth > 0:
+                # Inside the owning class's own template-argument list --
+                # every character here (including "*"/"&"/",") belongs to
+                # those arguments, never to the wrapper's own declarator.
+                # A pointer template argument (``ns::C<int*, double>::*...``)
+                # would otherwise have its "*" recorded as the declarator
+                # star, corrupting the eventual leaf (CodeRabbit review).
+                continue
             if ch in "*&":
                 star_index = idx
-            elif ch == "," and depth > 0:
-                continue
             elif ch.isalnum() or ch in "_: \t":
                 continue
             else:
@@ -300,15 +306,21 @@ def _strip_param_signature(qualified: str) -> str:
             # the real parameter-list opener.
             i = qualified.find("(", i + 2)
             continue
-        if _DECLTYPE_TOKEN_RE.search(prefix) and qualified[i:i + 6] == "(auto)":
-            # decltype(auto) is the one dependent-return-type spelling with
-            # no space before its own "(" (real GCC/Clang output), so it
-            # bypasses the whitespace-gated branch below entirely and would
+        if _DECLTYPE_TOKEN_RE.search(prefix):
+            # A "decltype(...)" return type with no space before its own
+            # "(" (real GCC/Clang output for e.g. "decltype(auto)" or a
+            # conversion operator's "decltype(nullptr)" target) bypasses
+            # the whitespace-gated branch below entirely and would
             # otherwise be mistaken for the real parameter list, truncating
             # the identity down to just "decltype" (Codex review, fresh
-            # evidence). Skip the whole fixed "(auto)" group and keep
-            # searching, same as every other decltype shape.
-            i = qualified.find("(", i + 6)
+            # evidence — the fixed-"(auto)"-only check missed every other
+            # decltype(...) content, e.g. decltype(nullptr)). Skip the
+            # whole balanced group, whatever it contains, same as every
+            # other decltype shape.
+            close = _matching_close_paren(qualified, i)
+            if close == -1:
+                return qualified
+            i = qualified.find("(", close + 1)
             continue
         if i == 0 or qualified[i - 1].isspace():
             star_index = _pointer_declarator_star_index(qualified, i)

@@ -402,6 +402,11 @@ class TestNamespaceGlobstarSemantics:
         s = Suppression(namespace="a::**::detail*::x", reachability="any", reason="x")
         assert s.matches(self._change("a::detail_private::x"))
         assert s.matches(self._change("a::y::detail_private::x"))
+        # CodeRabbit review: pin the anchoring claim above with a rejection
+        # case too, not just positive matches -- a regression that dropped
+        # the trailing "::x" requirement would otherwise go uncaught.
+        assert not s.matches(self._change("a::detail_private"))
+        assert not s.matches(self._change("a::other::x"))
 
     def test_bracket_class_beside_trailing_globstar_still_requires_separator(self):
         # Codex review, fresh evidence: the trailing-globstar delegation
