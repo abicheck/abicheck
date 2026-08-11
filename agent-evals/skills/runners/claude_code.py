@@ -534,28 +534,39 @@ def _models_compatible(a: dict, b: dict) -> bool:
     revision of this check compared the *requested* alias whenever present
     and could accept exactly that drift, since two rows both pinned to
     `sonnet` always looked identical regardless of what either resolved
-    to). Falls back to comparing the requested `--model` argument directly
-    only when both rows have one and neither has a resolved name (in
-    practice, two timeouts under the same pin).
+    to).
 
-    A row with a resolved name and a row with *only* a requested one (a
-    completed, unpinned run alongside a pinned run that timed out, say) are
-    deliberately never compared cross-field, even though `--model` accepts
-    a literal full model ID as well as an alias: there is no reliable way
-    for this harness to tell an alias from a full ID apart, so comparing
-    them could either miss a real difference (alias vs. its own resolved
-    name look unrelated) or manufacture one (two spellings of the same full
-    ID). Whenever *both* rows carry some identity signal but not in a
-    shared field, this returns False (incompatible) rather than guessing —
-    only when *neither* row has any identity signal at all does this
-    return True (compatible), matching check_one_model's own documented
-    "unknown never refuses the batch on its own" policy for that case.
+    Falls back to comparing the requested `--model` argument directly only
+    when *neither* row has a resolved name — Claude Code documents an alias
+    like `sonnet` as pointing at "the latest" model, a moving target, so a
+    shared alias is trusted only when it is the single best evidence
+    available on *both* sides, never when one side could instead be checked
+    against a real resolved name. Concretely: a row with a resolved name
+    and a row with *only* a requested one (a completed, pinned run
+    alongside a *different* pinned run that timed out before capturing its
+    own resolved name, say) are never treated as compatible by matching
+    aliases — an earlier revision of this function did exactly that, and it
+    is the same unprovable-drift shape as comparing two resolved names
+    cross-field.
+
+    So: whenever *both* rows carry some identity signal (resolved or
+    requested) but the comparison above didn't resolve them as equal or
+    unequal — because the signal isn't in a shared, trustworthy field —
+    this returns False (incompatible) rather than guessing. Only when
+    *neither* row has any identity signal at all does this return True
+    (compatible), matching check_one_model's own documented "unknown never
+    refuses the batch on its own" policy for that case.
     """
     a_model, b_model = a.get("model"), b.get("model")
     if isinstance(a_model, str) and isinstance(b_model, str):
         return a_model == b_model
     a_requested, b_requested = a.get("requested_model"), b.get("requested_model")
-    if isinstance(a_requested, str) and isinstance(b_requested, str):
+    if (
+        not isinstance(a_model, str)
+        and not isinstance(b_model, str)
+        and isinstance(a_requested, str)
+        and isinstance(b_requested, str)
+    ):
         return a_requested == b_requested
     a_has_identity = isinstance(a_model, str) or isinstance(a_requested, str)
     b_has_identity = isinstance(b_model, str) or isinstance(b_requested, str)
@@ -905,6 +916,17 @@ def _recovered_record(
     # accept the next run on whatever the default has moved to, and the arm
     # comparison would carry the model difference the guard exists to catch.
     record["model"] = resolved_model(events)
+    # A crashed-and-recovered timeout has no init event to resolve a model
+    # from at all (see the sidecar's own write site in main()) — this is
+    # the only other place its `--model` pin survives, and without it the
+    # recovered row has no identity whatsoever, either wrongly reading as
+    # compatible with anything or forcing run_skill_eval.py to refuse the
+    # whole batch as an unknown-vs-known mix.
+    requested_path = out_dir / "requested_model.txt"
+    if requested_path.is_file():
+        requested = requested_path.read_text(encoding="utf-8").strip()
+        if requested:
+            record["requested_model"] = requested
     problem = check_treatment(arm, scenario, visible)
     if problem is None:
         # The third rejection `_run_once` can raise. It fires *before* the model
@@ -1244,6 +1266,26 @@ def main(argv: list[str] | None = None) -> int:
                         "requested_model": args.model,
                     }
                     (out_dir / "final.md").write_text(_final_text(events), encoding="utf-8")
+                    if args.model:
+                        # A crash between this write and the index.append a
+                        # few lines down leaves this directory with a
+                        # final.md but no index row — exactly what
+                        # _recovered_record() below treats as recoverable on
+                        # a later resume. That function has no other way to
+                        # learn what --model this run was pinned to (no
+                        # init event was ever captured, so events.jsonl is
+                        # absent or empty), and a recovered row with no
+                        # identity at all would then either be silently
+                        # treated as compatible with everything (if nothing
+                        # else in the batch has an identity either) or force
+                        # run_skill_eval.py to refuse the whole batch as an
+                        # unknown-vs-known mix — for a run that really was
+                        # pinned consistently with the rest. Persisting the
+                        # pin here, unconditionally rather than only on a
+                        # detected crash, is what makes it recoverable.
+                        (out_dir / "requested_model.txt").write_text(
+                            args.model, encoding="utf-8"
+                        )
                 mixed = check_one_model(_in_scope_index(), record)
                 if mixed:
                     raise RuntimeError(f"{sid}/{arm}/{rep}: {mixed}")

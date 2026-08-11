@@ -78,17 +78,24 @@ def _models_compatible(a: dict, b: dict) -> bool:
     Kept as an incremental pairwise check here too, not folded into flat
     per-field sets: a row can carry *both* a resolved name and a requested
     identity (a completed, pinned run), and a set keyed by "resolved if
-    present, else requested" would silently drop that row's requested
-    identity — the one field a sibling timeout under the same pin actually
-    needs to compare against. See that module's docstring for the full
-    reasoning, including why a resolved-only row and a requested-only row
-    are never compared cross-field.
+    present, else requested" would silently drop that row's resolved
+    identity from consideration in a comparison that should have used it.
+    See that module's docstring for the full reasoning, including why a
+    requested alias is compared only when *neither* row has a resolved
+    name — Claude Code documents an alias like `sonnet` as pointing at
+    "the latest" model, a moving target, so it is trusted only when it is
+    the single best evidence available on both sides.
     """
     a_model, b_model = a.get("model"), b.get("model")
     if isinstance(a_model, str) and isinstance(b_model, str):
         return a_model == b_model
     a_requested, b_requested = a.get("requested_model"), b.get("requested_model")
-    if isinstance(a_requested, str) and isinstance(b_requested, str):
+    if (
+        not isinstance(a_model, str)
+        and not isinstance(b_model, str)
+        and isinstance(a_requested, str)
+        and isinstance(b_requested, str)
+    ):
         return a_requested == b_requested
     a_has_identity = isinstance(a_model, str) or isinstance(a_requested, str)
     b_has_identity = isinstance(b_model, str) or isinstance(b_requested, str)
