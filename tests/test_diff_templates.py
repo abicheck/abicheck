@@ -229,6 +229,45 @@ class TestStripParamSignature:
         # the input unchanged.
         assert _strip_param_signature("decltype (unbalanced") == "decltype (unbalanced"
 
+    def test_pointer_wrapper_leaves_a_clean_qualified_name(self) -> None:
+        # Codex review, fresh evidence: skipping a pointer-declarator
+        # wrapper left its own "(" and "*"/"Class::*" text sitting in the
+        # returned prefix -- harmless for a leaf-only consumer (_segments()
+        # takes only the last "::"-segment) but wrong for a caller using
+        # the whole result as a qualified-name *identity*
+        # (detect_cpo_kind_changed), which never matched a
+        # pointer-to-member-function CPO transition against the corrupted
+        # prefix. This is exactly the shape detect_cpo_kind_changed feeds
+        # in (template args already stripped by _strip_template_args
+        # before this function ever sees it).
+        assert _strip_param_signature("int (*ns::sort(int))()") == "ns::sort"
+        assert _strip_param_signature("int (ns::C::*ns::sort(int))()") == "ns::sort"
+
+    def test_cpo_kind_changed_matches_across_pointer_to_member_wrapper(self) -> None:
+        # End-to-end: a function template returning a pointer to member
+        # function must still be recognized as the same qualified name as
+        # a same-named CPO variable.
+        import abicheck.demangle as dm
+
+        def fake_demangle(mangled_list: list[str]) -> dict[str, str]:
+            sigs = {
+                "_Zfn": "int (ns::C::*ns::sort<int>(int))()",
+                "_ZN2ns4sortE": "ns::sort",
+            }
+            return {m: sigs[m] for m in mangled_list if m in sigs}
+
+        orig = dm.demangle_batch
+        dm.demangle_batch = fake_demangle  # type: ignore[assignment]
+        try:
+            old = _snap(funcs=[_fn("", mangled="_Zfn")])
+            new = _snap(vars_=[_var("sort", type_="ns::__sort_fn", mangled="_ZN2ns4sortE")])
+            changes = detect_cpo_kind_changed(old, new)
+        finally:
+            dm.demangle_batch = orig  # type: ignore[assignment]
+
+        assert len(changes) == 1
+        assert changes[0].kind == ChangeKind.CPO_KIND_CHANGED
+
 
 # ---------------------------------------------------------------------------
 # INTERNAL_TEMPLATE_LEAKS_VIA_PUBLIC_API

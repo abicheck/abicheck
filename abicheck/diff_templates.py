@@ -215,8 +215,22 @@ def _strip_param_signature(qualified: str) -> str:
       Neither branch misfires on an ordinary pointer/reference *parameter*
       (``lib::sort(int*, int*)``, whose only ``(`` is glued to ``sort`` —
       never reached by this whitespace-gated logic at all).
+
+    Skipping a pointer-declarator wrapper leaves its own opening ``(`` and
+    ``*``/``Class::*`` text sitting in the returned prefix (e.g.
+    ``"int (ns::C::*ns::sort"`` for ``int (ns::C::*ns::sort<int>(int))()``)
+    — harmless for a caller that only takes the *last* ``::``-segment
+    (``_index_funcs_by_stable_key``'s leaf), but wrong for a caller using
+    the whole result as a qualified-name *identity*
+    (:func:`detect_cpo_kind_changed`, which failed to match a
+    pointer-to-member-function CPO transition against this corrupted
+    prefix — Codex review). A real qualified name never itself contains
+    ``*`` (only a return-type spelling does), so once a wrapper was
+    skipped, the clean name is recovered by taking the text after that
+    wrapper's own last ``*``.
     """
     i = qualified.find("(")
+    saw_pointer_wrapper = False
     while i != -1:
         prefix = qualified[:i]
         m = _OPERATOR_TOKEN_RE.search(prefix)
@@ -228,6 +242,7 @@ def _strip_param_signature(qualified: str) -> str:
             continue
         if i == 0 or qualified[i - 1].isspace():
             if _opens_pointer_declarator(qualified, i):
+                saw_pointer_wrapper = True
                 i = qualified.find("(", i + 1)
             else:
                 close = _matching_close_paren(qualified, i)
@@ -235,6 +250,8 @@ def _strip_param_signature(qualified: str) -> str:
                     return qualified
                 i = qualified.find("(", close + 1)
             continue
+        if saw_pointer_wrapper and "*" in prefix:
+            return prefix[prefix.rindex("*") + 1:]
         return prefix
     return qualified
 
