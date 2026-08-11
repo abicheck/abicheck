@@ -176,6 +176,18 @@ def _merge_versioned_key_aliases(
     separate, exactly as if this stripping had never been attempted, so
     the pre-existing double-report is the accepted fallback rather than a
     newly-introduced false suppression.
+
+    The output key for a merged component is its ``min()`` raw key --
+    deterministic given the component's *membership* alone, not the order
+    raw keys were encountered in. Membership itself is already
+    order-independent (every pair is checked via identity-set
+    intersection regardless of iteration order); only the *representative*
+    a naive union-find root or "first key seen" pick would previously have
+    varied with encounter order, and old vs. new snapshots have no
+    guaranteed-matching declaration order. A key that differs between the
+    old and new index for the *same* underlying entity makes ``_findings_for``
+    look the entity up under the wrong key on the other side and misreport
+    a plain reordering as a removal (Codex review, P1).
     """
     canon_groups: dict[tuple[str, str], list[tuple[str, str]]] = {}
     for raw_key in raw_index:
@@ -209,10 +221,15 @@ def _merge_versioned_key_aliases(
                     ra, rb = _find(a), _find(b)
                     if ra != rb:
                         parent[rb] = ra
-        merged: dict[tuple[str, str], list[str]] = {}
+        components: dict[tuple[str, str], list[tuple[str, str]]] = {}
         for k in raw_keys:
-            merged.setdefault(_find(k), []).extend(raw_index[k])
-        out.update(merged)
+            components.setdefault(_find(k), []).append(k)
+        for members in components.values():
+            canonical_key = min(members)
+            qnames: list[str] = []
+            for k in members:
+                qnames.extend(raw_index[k])
+            out[canonical_key] = qnames
     return out
 
 
@@ -257,16 +274,29 @@ def _index_funcs_by_stable_key(
     return _merge_versioned_key_aliases(raw_index, identity)
 
 
-def _type_identity_fingerprint(t: RecordType) -> object:
-    """Structural fingerprint used as alias-identity evidence for a type.
+def _type_identity_fingerprint(t: RecordType) -> object | None:
+    """Structural fingerprint used as alias-identity evidence for a type, or
+    ``None`` when the type carries no distinguishing structure.
 
     ``RecordType`` carries no mangled/symbol identity, so this is the best
     available extraction-data signal that two differently-spelled type
     declarations are really the same one: same kind, layout, and field/base
-    shape. Coincidentally-identical layout between two genuinely unrelated
-    types sharing a leaf name is the accepted residual risk -- far narrower
-    than merging on name shape alone (Codex review, P1).
+    shape. An *empty* record (no fields, no bases, no known size) is
+    explicitly excluded -- every trivial empty class/struct of the same
+    kind shares this exact fingerprint, so it is routine coincidence
+    between two genuinely unrelated declarations (an empty tag/marker type
+    is common), not distinguishing evidence (Codex review, P1: "layout
+    coincidence is routine rather than reliable inline-namespace identity
+    evidence"). Returning ``None`` here means such a type is never merged
+    by :func:`_merge_versioned_key_aliases` -- the pre-existing
+    double-report is the accepted fallback for this case, same as when no
+    identity evidence exists at all. A non-trivial match (matching fields,
+    bases, or a known non-zero size) remains real, narrower evidence; a
+    coincidental match between two unrelated *non-trivial* types is the
+    accepted residual risk.
     """
+    if not t.fields and not t.bases and not t.virtual_bases and not t.size_bits:
+        return None
     return (
         t.kind,
         t.size_bits,

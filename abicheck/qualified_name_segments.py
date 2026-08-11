@@ -27,9 +27,10 @@ enclosing scope also resolves to. When a header-AST producer surfaces both
 spellings as separate top-level declarations (observed for both function/
 type declarations and header constants), a name-keyed detector that doesn't
 canonicalize away the version segment double-reports the identical change
-once per spelling. :func:`dedupe_versioned_spellings` is the shared fix for
-name-keyed collections (currently used by ``diff_symbols._diff_constants``);
-``diff_namespaces.py``'s own namespace-shape detectors canonicalize inline,
+once per spelling. :func:`dedupe_versioned_spellings_pair` is the shared
+fix for name-keyed collections (currently used by
+``diff_symbols._diff_constants``); ``diff_namespaces.py``'s own
+namespace-shape detectors canonicalize inline,
 using :func:`segments`/:func:`version_strip_segments` directly, since they
 need the split list itself, not just a deduped mapping.
 """
@@ -121,10 +122,13 @@ def version_strip_segments(segs: list[str]) -> tuple[tuple[str, ...], int | None
     return tuple(segs), None
 
 
-def dedupe_versioned_spellings(names: dict[str, str]) -> dict[str, str]:
-    """Collapse entries keyed by a qualified name that are the same
-    declaration spelled two ways via an elided versioned inline-namespace
-    segment (``detail::v1::x`` and ``detail::x``).
+def dedupe_versioned_spellings_pair(
+    old: dict[str, str],
+    new: dict[str, str],
+) -> tuple[dict[str, str], dict[str, str]]:
+    """Collapse *old* and *new* name-keyed mappings jointly, merging entries
+    that are the same declaration spelled two ways via an elided versioned
+    inline-namespace segment (``detail::v1::x`` and ``detail::x``).
 
     A version-shaped segment name is not proof of an *inline* namespace --
     ``v1`` is a legal name for an ordinary namespace too, in which case
@@ -133,25 +137,50 @@ def dedupe_versioned_spellings(names: dict[str, str]) -> dict[str, str]:
     name shape can hide a real value change on one spelling while
     discarding the other). There is no symbol/mangled identity available
     for a name-keyed mapping like this to check instead, so the one piece
-    of corroborating evidence within reach is used: a group is only merged
-    when *every* spelling in it already carries the identical value -- the
-    invariant a true alias must satisfy (they're the same declaration) and
-    one two unrelated declarations satisfy only by coincidence. A group
-    whose values disagree is left unmerged, each spelling kept as its own
-    entry, so the pre-existing double-report is the accepted fallback
-    rather than a newly-introduced false suppression.
+    of corroborating evidence within reach is used: a group of spellings is
+    only merged when every spelling present *on a given side* already
+    carries the identical value there -- the invariant a true alias must
+    satisfy (they're the same declaration) and one two unrelated
+    declarations satisfy only by coincidence.
+
+    This must be decided jointly across *both* sides, not independently per
+    side (Codex review, P1, fresh finding): if a group agrees in ``old``
+    (``v1::x=10, x=10``) but disagrees in ``new`` (``v1::x=11, x=10``),
+    deduping ``old`` alone would still collapse it (both entries equal
+    there) while ``new`` stays unmerged (values differ) -- comparing the
+    resulting maps then reads the *whole* old spelling as absent from the
+    merged key and reports a spurious ``CONSTANT_ADDED`` for ``v1::x``
+    instead of the real ``CONSTANT_CHANGED``. Requiring agreement on
+    *every* side that has more than one member for the group before merging
+    on *either* side closes this: a disagreement on either side leaves the
+    group unmerged everywhere, so the pre-existing double-report is the
+    accepted fallback rather than a newly-introduced false compatible
+    result.
     """
     groups: dict[str, list[str]] = {}
-    for name in names:
+    for name in {*old, *new}:
         canon_segs, _ = version_strip_segments(segments(name))
         canon = "::".join(canon_segs)
         groups.setdefault(canon, []).append(name)
-    out: dict[str, str] = {}
+
+    old_out: dict[str, str] = {}
+    new_out: dict[str, str] = {}
     for canon, group_names in groups.items():
-        if len(group_names) > 1 and len({names[n] for n in group_names}) != 1:
+        old_values = {old[n] for n in group_names if n in old}
+        new_values = {new[n] for n in group_names if n in new}
+        agrees = len(group_names) == 1 or (
+            len(old_values) <= 1 and len(new_values) <= 1
+        )
+        if not agrees:
             for n in group_names:
-                out[n] = names[n]
+                if n in old:
+                    old_out[n] = old[n]
+                if n in new:
+                    new_out[n] = new[n]
             continue
         rep = canon if canon in group_names else group_names[0]
-        out[rep] = names[rep]
-    return out
+        if old_values:
+            old_out[rep] = next(iter(old_values))
+        if new_values:
+            new_out[rep] = next(iter(new_values))
+    return old_out, new_out

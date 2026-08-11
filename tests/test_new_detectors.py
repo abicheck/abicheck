@@ -702,6 +702,25 @@ class TestHeaderConstants:
         assert len(changed) == 1
         assert changed[0].symbol == "api::v1::limit"
 
+    def test_equal_before_diverging_after_not_merged(self):
+        # Codex review, P1, fresh finding: two unrelated constants can
+        # coincidentally agree in the OLD snapshot (`v1::limit=10,
+        # limit=10`) and only diverge in NEW (`v1::limit=11, limit=10`).
+        # Deduping each side independently would collapse the OLD pair
+        # (values agree there) while leaving NEW unmerged (values
+        # disagree), so comparing the merged OLD key against NEW's
+        # unmerged keys would misreport the real v1::limit change as a
+        # compatible CONSTANT_ADDED instead of CONSTANT_CHANGED. The merge
+        # decision must be joint across both sides.
+        r = compare(
+            _snap_with_constants({"api::v1::limit": "10", "api::limit": "10"}),
+            _snap_with_constants({"api::v1::limit": "11", "api::limit": "10"}),
+        )
+        assert not _has_kind(r, ChangeKind.CONSTANT_ADDED)
+        changed = _changes_of_kind(r, ChangeKind.CONSTANT_CHANGED)
+        assert len(changed) == 1
+        assert changed[0].symbol == "api::v1::limit"
+
 
 def _snap_with_constants(constants, from_headers=True):
     s = _snap(from_headers=from_headers)

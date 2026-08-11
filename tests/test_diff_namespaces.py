@@ -66,6 +66,15 @@ def _rec(name: str) -> RecordType:
     return RecordType(name=name, kind="class")
 
 
+def _rec_nontrivial(name: str, size_bits: int = 64) -> RecordType:
+    """A type with real structural content (a known size), unlike the
+    empty/trivial ``_rec()`` -- needed to exercise the type-alias identity
+    fingerprint, which deliberately returns no evidence for an empty
+    record (Codex review, P1: every empty class of the same kind shares
+    the same trivial fingerprint, so it isn't distinguishing evidence)."""
+    return RecordType(name=name, kind="class", size_bits=size_bits)
+
+
 def _rec_public(name: str) -> RecordType:
     """A type explicitly scoped to the public-header set (ADR-024
     `--public-header`), the one reliable public-reachability signal
@@ -381,10 +390,35 @@ class TestExperimentalRemovedWithoutReplacement:
         assert len(removed) == 1
         assert removed[0].symbol == "preview::v1::bar"
 
+    def test_merged_key_stable_across_declaration_order(self) -> None:
+        """Codex review, P1: the merged key for a genuine alias pair must
+        not depend on which spelling appears first in a snapshot's own
+        declaration order -- old and new can list the same two spellings
+        in different orders (a harmless extraction-order difference) and
+        must still resolve to the SAME index key, or one looks removed
+        relative to the other's spelling.
+        """
+        old = _snap(funcs=[
+            _fn("preview::spmd::v1::communicator", mangled="_ZSame"),
+            _fn("preview::spmd::communicator", mangled="_ZSame"),
+        ])
+        # Reversed declaration order relative to `old`, otherwise identical.
+        new = _snap(funcs=[
+            _fn("preview::spmd::communicator", mangled="_ZSame"),
+            _fn("preview::spmd::v1::communicator", mangled="_ZSame"),
+        ])
+        changes = detect_experimental_namespace_changes(old, new)
+        assert not any(
+            c.kind == ChangeKind.EXPERIMENTAL_REMOVED_WITHOUT_REPLACEMENT
+            for c in changes
+        )
+
     def test_versioned_inline_namespace_type_spellings_report_once(self) -> None:
+        # Non-trivial (known-size) records: a genuine structural match is
+        # real identity evidence for a true inline-namespace alias pair.
         old = _snap(types=[
-            _rec("detail::v1::cpu_feature_map"),
-            _rec("detail::cpu_feature_map"),
+            _rec_nontrivial("detail::v1::cpu_feature_map"),
+            _rec_nontrivial("detail::cpu_feature_map"),
         ])
         new = _snap(types=[])
         changes = detect_experimental_namespace_changes(
@@ -395,6 +429,29 @@ class TestExperimentalRemovedWithoutReplacement:
             if c.kind == ChangeKind.EXPERIMENTAL_REMOVED_WITHOUT_REPLACEMENT
         ]
         assert len(removed) == 1
+
+    def test_unrelated_empty_types_sharing_version_shaped_segment_not_merged(
+        self,
+    ) -> None:
+        """Codex review, P1: an empty/trivial record carries no
+        distinguishing structure -- every empty class of the same kind
+        shares the identical fingerprint, so two genuinely unrelated empty
+        types (``preview::v1::bar`` and ``preview::bar``) must NOT be
+        treated as an alias pair. Removing one while the other survives
+        must still report the removal.
+        """
+        old = _snap(types=[
+            _rec("preview::v1::bar"),
+            _rec("preview::bar"),
+        ])
+        new = _snap(types=[_rec("preview::bar")])
+        changes = detect_experimental_namespace_changes(old, new)
+        removed = [
+            c for c in changes
+            if c.kind == ChangeKind.EXPERIMENTAL_REMOVED_WITHOUT_REPLACEMENT
+        ]
+        assert len(removed) == 1
+        assert removed[0].symbol == "preview::v1::bar"
 
     def test_leaf_survives_namespace_qualified_param_type(self) -> None:
         """Reported bug: a demangled ELF-only symbol carries its full
