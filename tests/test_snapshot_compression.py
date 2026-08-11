@@ -626,6 +626,38 @@ def test_zstd_round_trip_at_production_scale_and_level(tmp_path):
     )
 
 
+def test_gzip_round_trip_at_production_scale(tmp_path):
+    """gzip counterpart to `test_zstd_round_trip_at_production_scale_and_level`
+    above -- added per the AGENTS.md Test-quality-gates principle that
+    prompted that test ("at least one test per algorithm must go through
+    the module's actual public entry point, at a realistic content scale"),
+    which a review round correctly flagged as unfulfilled for gzip: every
+    existing gzip test used either a tiny (`_sample_snapshot`) fixture or a
+    hand-built low-level fixture, never the real `write_snapshot_bytes`/
+    `read_snapshot_bytes` chokepoint at production scale. Unlike zstd, gzip
+    (`zlib` under the hood) has no window-size *parameter* a caller can get
+    a unit wrong on -- this test exists to keep the stated principle
+    actually true for every supported algorithm, not because a gzip-specific
+    bug is already known. Cheap to run (gzip compresses this size in well
+    under a second, unlike zstd level 19), so no `slow` marker needed."""
+    snap = _graph_heavy_snapshot(n=8600)
+    original_bytes = json.dumps(snapshot_to_dict(snap)).encode()
+    assert (
+        len(original_bytes) > 8 * 1024 * 1024
+    )  # same realistic scale as the zstd test
+
+    p = tmp_path / "production_scale.abicheck.json.gz"
+    result = write_snapshot_bytes(
+        original_bytes, p, compression=SnapshotCompression.GZIP
+    )
+    assert result.compression is SnapshotCompression.GZIP
+
+    assert (
+        read_snapshot_bytes(p, max_decoded_bytes=len(original_bytes) + 10)
+        == original_bytes
+    )
+
+
 def test_oversized_stored_file_rejected_before_full_read(tmp_path, monkeypatch):
     """CodeRabbit review, refined by two later Codex rounds: the stored-
     file-size check (via fstat(), before a full read) must reject a file
