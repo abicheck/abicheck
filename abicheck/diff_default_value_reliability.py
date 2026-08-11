@@ -129,3 +129,44 @@ def default_value_fingerprint_comparison_unreliable(
     ):
         return True
     return False
+
+
+def constant_value_fingerprint_comparison_unreliable(
+    old: AbiSnapshot,
+    new: AbiSnapshot,
+    old_value: str,
+    new_value: str,
+) -> bool:
+    """True if comparing two ``AbiSnapshot.constants`` entries (same name,
+    different value) risks a false ``CONSTANT_CHANGED`` from the identical
+    fingerprint-algorithm version mismatch
+    :func:`default_value_fingerprint_comparison_unreliable` guards against
+    for ``Param.default``/``TypeField.default`` -- ``dumper_clang.py``'s
+    ``parse_constants()`` calls the very same ``_initializer_value()``, so a
+    non-literal constant's ``"expr:"``-prefixed value on the direct-clang
+    backend is exactly as unstable pre-schema-v20 (measured against a real
+    corpus: 173 of 440 findings across a v18-vs-v24 comparison were exactly
+    this -- one constant's stale fingerprint colliding with 35 unrelated
+    others').
+
+    Unlike the default-value case there is no per-declaration provenance to
+    resolve: ``dumper_hybrid.merge_snapshots`` keeps ``constants`` verbatim
+    from its castxml base (never clang-merged per-entry), so a snapshot's
+    own top-level ``ast_producer`` already answers which single backend
+    produced every entry. Checked as an EXACT ``"clang"`` match, deliberately
+    NOT :func:`default_value_representation_unreliable`'s broader
+    ``producer != "castxml"`` reasoning: that reasoning also treats a
+    ``"hybrid"`` producer as at-risk, because a hybrid merge's clang-only-
+    APPENDED fields keep their own unstable fingerprint -- true for
+    ``TypeField.default``, but not for constants, which never take that
+    per-declaration merge path at all.
+    """
+    if old_value.startswith("expr:") and (
+        old.ast_producer == "clang" and not old.clang_field_initializer_facts_reliable
+    ):
+        return True
+    if new_value.startswith("expr:") and (
+        new.ast_producer == "clang" and not new.clang_field_initializer_facts_reliable
+    ):
+        return True
+    return False

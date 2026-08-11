@@ -1264,6 +1264,87 @@ class TestConstantChanges:
         r = compare(old, new)
         assert ChangeKind.CONSTANT_REMOVED in _kinds(r)
 
+    def _clang_snap(self, constants, *, field_initializer_facts_reliable):
+        return AbiSnapshot(
+            library="libtest.so.1",
+            version="1.0",
+            functions=[],
+            variables=[],
+            types=[],
+            constants=constants,
+            from_headers=True,
+            ast_producer="clang",
+            clang_field_initializer_facts_reliable=field_initializer_facts_reliable,
+        )
+
+    def test_stale_clang_fingerprint_collision_not_reported(self):
+        """dumper_clang.py's parse_constants() shares Param.default/
+        TypeField.default's unstable pre-schema-v20 "expr:" fingerprint
+        algorithm (dumper_clang_expr._initializer_value) -- a pre-v20
+        clang-producer snapshot's fingerprint for an UNCHANGED non-literal
+        constant can collide across unrelated constants, then differ from a
+        stabilized re-dump purely from the algorithm fix, not a real edit
+        (measured against a real corpus: 173 of 440 findings in a
+        v18-vs-v24 comparison were exactly this). Must not report
+        CONSTANT_CHANGED when the OLD side's value is fingerprint-shaped and
+        unreliable."""
+        old = self._clang_snap(
+            {"K1": "expr:aaaa", "K2": "expr:aaaa"},
+            field_initializer_facts_reliable=False,
+        )
+        new = self._clang_snap(
+            {"K1": "expr:bbbb", "K2": "expr:cccc"},
+            field_initializer_facts_reliable=True,
+        )
+        r = compare(old, new)
+        assert ChangeKind.CONSTANT_CHANGED not in _kinds(r)
+
+    def test_reliable_clang_fingerprint_change_still_reported(self):
+        """The opposite of the case above: once BOTH sides are past the
+        stabilization threshold, a genuine "expr:" fingerprint change must
+        still fire -- the guard must not blanket-suppress every fingerprint
+        comparison on a clang-producer snapshot."""
+        old = self._clang_snap(
+            {"K": "expr:aaaa"}, field_initializer_facts_reliable=True
+        )
+        new = self._clang_snap(
+            {"K": "expr:bbbb"}, field_initializer_facts_reliable=True
+        )
+        r = compare(old, new)
+        assert ChangeKind.CONSTANT_CHANGED in _kinds(r)
+
+    def test_stale_fingerprint_guard_does_not_apply_to_hybrid_producer(self):
+        """dumper_hybrid.merge_snapshots keeps `constants` verbatim from its
+        castxml base -- constants never take a hybrid merge's clang-only-
+        append path the way TypeField.default can. A "hybrid"-producer
+        snapshot's constants must therefore compare normally even when
+        clang_field_initializer_facts_reliable is False, unlike
+        TypeField.default's broader "hybrid is also at risk" reasoning."""
+        old = AbiSnapshot(
+            library="libtest.so.1",
+            version="1.0",
+            functions=[],
+            variables=[],
+            types=[],
+            constants={"K": "expr:aaaa"},
+            from_headers=True,
+            ast_producer="hybrid",
+            clang_field_initializer_facts_reliable=False,
+        )
+        new = AbiSnapshot(
+            library="libtest.so.1",
+            version="1.0",
+            functions=[],
+            variables=[],
+            types=[],
+            constants={"K": "expr:bbbb"},
+            from_headers=True,
+            ast_producer="hybrid",
+            clang_field_initializer_facts_reliable=False,
+        )
+        r = compare(old, new)
+        assert ChangeKind.CONSTANT_CHANGED in _kinds(r)
+
 
 # ── Multiple simultaneous symbol changes ─────────────────────────────────
 
