@@ -1059,10 +1059,7 @@ def test_parse_root_stamps_compiler_version_from_castxml_probe(monkeypatch) -> N
     tu = extractor._parse_root(
         _root_with_one_type(), _cu(), public_header_roots=["foo.h"], target_id=""
     )
-    # PR #719, follow-up round two: also folds in a stat signature of the
-    # resolved EMULATED compiler (g++/gcc by default), so the castxml
-    # probe's own identity is a prefix, not the whole value.
-    assert tu.fact_set["compiler_version"].startswith("0.6.20260105; cc:")
+    assert tu.fact_set["compiler_version"] == "0.6.20260105"
 
 
 def test_castxml_tool_version_degrades_to_empty_on_missing_binary() -> None:
@@ -1367,13 +1364,8 @@ def test_parse_root_stamps_stat_fallback_compiler_version_when_probe_fails(
     tu = extractor._parse_root(
         _root_with_one_type(), _cu(), public_header_roots=["foo.h"], target_id=""
     )
-    # PR #719, follow-up round two: compiler_version is now the castxml
-    # identity (this part still equals cache_identity_extra()) PLUS a
-    # separate "; cc:..." suffix for the resolved emulated compiler.
-    castxml_part, _, cc_part = tu.fact_set["compiler_version"].partition("; cc:")
-    assert castxml_part.startswith("stat:")
-    assert castxml_part == extractor.cache_identity_extra()
-    assert cc_part
+    assert tu.fact_set["compiler_version"].startswith("stat:")
+    assert tu.fact_set["compiler_version"] == extractor.cache_identity_extra()
 
     # A different broken executable at the SAME path must persist a
     # different compiler_version, so two independently-collected baselines
@@ -1399,41 +1391,45 @@ def test_parse_root_stamps_msvc_compiler_family_for_msvc_compiler_binary() -> No
     assert tu.fact_set["compiler_family"] == "msvc"
 
 
-def test_parse_root_persists_resolved_emulated_compiler_identity(
+def test_parse_root_compiler_version_ignores_resolved_emulated_compiler_path(
     tmp_path: Path, monkeypatch
 ) -> None:
-    """Codex review, PR #719, follow-up round two: castxml shells out to the
-    EMULATED compiler (`cc_bin`, via `--castxml-cc-<id>`) purely to discover
-    its built-in defines/include paths, so a header conditional on
-    `__GNUC__`/`_MSC_VER` can extract differently once THAT compiler is
-    upgraded at the same path, even though castxml's own probe stays
-    identical. compiler_version must fold in a stat signature of the
-    resolved compiler_binary, distinguishing two runs against different
-    compilers at the same explicit override path."""
+    """Codex review, PR #719, follow-up round three: a prior round of this
+    fix folded a stat signature of the resolved EMULATED compiler
+    (`cc_bin`) into `compiler_version` -- a real regression, not a fix
+    (Codex review caught it): those stat fields are filesystem-local, so
+    two TUs in ONE surface resolved to DIFFERENT but same-toolchain drivers
+    (`gcc` for a `.c` TU, `g++` for a `.cpp` TU -- an entirely ordinary
+    mixed-language build) got different suffixes purely from being
+    different files on disk, tripping the D8/fact_set-inconsistency gate
+    for a perfectly healthy surface. Reverted; verify `compiler_version`
+    depends ONLY on the castxml probe/identity, not on which compiler
+    binary a given compile unit happens to resolve to."""
     from abicheck.buildsource.source_extractors import castxml as castxml_mod
 
     castxml_mod._castxml_tool_version.cache_clear()
     monkeypatch.setattr(castxml_mod, "_castxml_tool_version", lambda *_a: "0.6.3")
-    cc = tmp_path / "g++"
-    cc.write_text("a fake compiler")
+    gcc = tmp_path / "gcc"
+    gpp = tmp_path / "g++"
+    gcc.write_text("a fake gcc, different size than g++")
+    gpp.write_text("a fake g++")
 
-    extractor = CastxmlSourceExtractor(compiler_binary=str(cc))
-    tu = extractor._parse_root(
-        _root_with_one_type(), _cu(), public_header_roots=["foo.h"], target_id=""
+    extractor = CastxmlSourceExtractor()
+    tu_c = extractor._parse_root(
+        _root_with_one_type(),
+        _cu(argv=[str(gcc), "-c", "foo.c"]),
+        public_header_roots=["foo.h"],
+        target_id="",
     )
-    version1 = tu.fact_set["compiler_version"]
-    assert version1.startswith("0.6.3; cc:")
-
-    # Swapping the compiler at the SAME explicit override path must persist
-    # a DIFFERENT compiler_version, even though castxml's own probe is
-    # unchanged (monkeypatched to a fixed "0.6.3" above).
-    cc.write_text("a different fake compiler, different size")
-    tu2 = extractor._parse_root(
-        _root_with_one_type(), _cu(), public_header_roots=["foo.h"], target_id=""
+    tu_cpp = extractor._parse_root(
+        _root_with_one_type(),
+        _cu(argv=[str(gpp), "-c", "foo.cpp"]),
+        public_header_roots=["foo.h"],
+        target_id="",
     )
-    version2 = tu2.fact_set["compiler_version"]
-    assert version2 != version1
-    assert version2.startswith("0.6.3; cc:")
+    assert tu_c.fact_set["compiler_version"] == "0.6.3"
+    assert tu_cpp.fact_set["compiler_version"] == "0.6.3"
+    assert "cc:" not in tu_c.fact_set["compiler_version"]
 
 
 def test_two_castxml_producer_versions_suppress_content_comparison() -> None:

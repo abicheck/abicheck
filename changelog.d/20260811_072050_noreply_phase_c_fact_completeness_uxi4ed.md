@@ -298,17 +298,6 @@ A new changelog fragment. See changelog.d/README.md for the workflow.
   probed identity — both call sites now share one
   `_castxml_identity_with_stat_fallback()` helper instead of the earlier
   version stamping only the cache key.
-- **The castxml L4 source-ABI extractor's persisted `fact_set.
-  compiler_version` now also folds in a stat signature of the resolved
-  EMULATED compiler** (`cc_bin`, via `--castxml-cc-<id>`) — castxml shells
-  out to it purely to discover built-in defines/include paths, so a header
-  conditional on `__GNUC__`/`_MSC_VER` can extract differently once that
-  compiler is upgraded at the same path, even though castxml itself and
-  its own `--version` probe are unchanged. The equivalent D8 TU cache-key
-  half (`cache_identity_extra()`) is a known gap — see `AGENTS.md` — since
-  the resolved compiler varies per compile unit while that hook is a
-  zero-arg, once-per-extractor-instance call.
-
 ### Known gaps (see `AGENTS.md`)
 
 - Recorded, not fixed in this PR: `diff_filtering.py`'s opaque-type
@@ -331,10 +320,24 @@ A new changelog fragment. See changelog.d/README.md for the workflow.
   plus a separate `typedef struct { int x; } Foo;`), silently dropping the
   unrelated opaque tag from the snapshot. Reproduced directly against the
   parser; not fixed here — see `AGENTS.md`'s Known gaps section.
-- Recorded, not fixed: the castxml D8 TU cache key (`cache_identity_
-  extra()`) does not fold in the resolved emulated compiler's identity
-  (unlike the now-fixed persisted `fact_set.compiler_version` above),
-  since that hook is a zero-arg, once-per-extractor-instance call while
-  the resolved compiler varies per compile unit — needs a wider,
-  per-instance-hook-signature change to `source_replay.py`'s shared
-  cache-key infra. See `AGENTS.md`'s Known gaps section.
+- Recorded, not fixed — and one attempt REVERTED after a follow-up review
+  round: neither the castxml D8 TU cache key (`cache_identity_extra()`)
+  nor the persisted `fact_set.compiler_version` fold in the resolved
+  EMULATED compiler's identity. A stat-signature-based fold of
+  `compiler_version` was attempted and then reverted: it made comparisons
+  spuriously `fact_set_inconsistent` for two entirely ordinary cases —
+  mixed C/C++ builds (different TUs resolving to `gcc` vs `g++`, different
+  files on disk) and cross-machine comparisons (no shared device/inode
+  across CI workers) — worse than the pre-existing gap it was meant to
+  close. A correct fix needs a portable semantic identity (a real
+  `cc_bin --version` probe, normalized), not filesystem stat fields, plus
+  a wider signature change to `source_replay.py`'s shared cache-key infra
+  for the cache-key half. See `AGENTS.md`'s Known gaps section.
+- Recorded, not fixed: an opaque redeclaration set with genuine class/
+  struct ambiguity (`class H; struct H;`, canonicalized to a fixed
+  spelling) that later gains a same-key complete definition still
+  produces a false `SOURCE_LEVEL_KIND_CHANGED`, since the definition's own
+  real kind always wins over the canonicalized opaque value. Not fixable
+  at the extraction layer — needs new provenance on `RecordType` itself
+  (a schema-versioned model change) consumed by the generic kind-change
+  detector. See `AGENTS.md`'s Known gaps section.

@@ -617,27 +617,26 @@ class CastxmlSourceExtractor:
             # probe would let two differently-broken installs' persisted
             # baselines compare as recipe-comparable.
             #
-            # Also folds in a stat signature of the resolved EMULATED
-            # compiler (`cc_bin`, above) -- Codex review, PR #719, follow-up
-            # round two: castxml shells out to `cc_bin` (via `--castxml-cc-
-            # <id> cc_bin`) purely to discover its built-in defines/include
-            # paths (`docs/learn/architecture.md`), so a header conditional
-            # on e.g. `__GNUC__`/`_MSC_VER` can extract differently after
-            # THAT compiler is upgraded at the same path, even though
-            # castxml itself never changed and the probe above stays
-            # identical. Persisted here (per-TU `compile_unit` is already in
-            # scope) rather than in `cache_identity_extra()` -- that hook is
-            # a zero-arg, once-per-extractor-instance call
-            # (`source_replay._extractor_version()`), while the resolved
-            # `cc_bin` is genuinely per-COMPILE-UNIT (`pick_compiler_binary`
-            # reads `compile_unit.argv[0]` absent an explicit override), so
-            # threading it into the D8 TU cache key needs a wider,
-            # per-instance-hook-signature change to shared `source_replay.py`
-            # infra (also used by `ClangSourceExtractor`) -- tracked as a
-            # known gap (see AGENTS.md) rather than attempted as a reactive
-            # extension here.
-            compiler_version=(
-                f"{_castxml_identity_with_stat_fallback(self.castxml_bin)}"
-                f"; cc:{':'.join(str(f) for f in _executable_stat_key(cc_bin))}"
-            ),
+            # Does NOT also fold in the resolved EMULATED compiler
+            # (`cc_bin`, above) -- a prior round of this same fix did, via a
+            # stat signature (dev/ino/mtime_ns/size), and a follow-up review
+            # caught it as a real regression, not a completed fix (Codex
+            # review, PR #719, third follow-up round): those stat fields are
+            # filesystem-local, so (1) two TUs in ONE surface resolved to
+            # DIFFERENT but same-toolchain drivers (`gcc` for a `.c` TU,
+            # `g++` for a `.cpp` TU -- an entirely ordinary mixed-language
+            # build) get different suffixes purely from being different
+            # files, tripping `rollup_fact_set()`'s exact-equality check into
+            # `fact_set_inconsistent` for a perfectly healthy surface; and
+            # (2) an identical build run on two different machines/paths
+            # (baseline collected in CI run 1, compared against CI run 2 --
+            # an entirely ordinary workflow) never shares device/inode at
+            # all, making every such comparison spuriously inconsistent.
+            # Reverted rather than patched further under review pressure --
+            # a correct fix needs a portable SEMANTIC identity (a real
+            # `cc_bin --version` probe, normalized, mirroring
+            # `_castxml_tool_version` above) rather than filesystem stat
+            # fields; tracked as a known gap (see AGENTS.md) alongside the
+            # D8-cache-key half this same finding already covers.
+            compiler_version=_castxml_identity_with_stat_fallback(self.castxml_bin),
         )
