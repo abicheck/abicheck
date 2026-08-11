@@ -22,14 +22,25 @@ deterministic verification engine. See
 [ADR-058](../contribute/adr/058-native-compatibility-agent-skills.md) for why
 the portfolio is shaped this way.
 
+**Portfolio status (2026-08-11):** none of the four skills has measured
+evidence yet that it improves agent behavior over a well-documented CLI
+alone. `native-binary-compatibility-review` is the sole flagship subject of
+[G37](../contribute/plans/g37-agent-skill-quality-evaluation.md)'s ongoing
+behavioral evaluation; the other three are published but frozen at
+**prototype** status — working, reviewed content, but not validated and not
+receiving new scope — until the flagship experiment demonstrates a
+measurable lift. See ADR-058's 2026-08-11 amendment and
+[`skills-src/CLAUDE.md`](https://github.com/abicheck/abicheck/blob/main/skills-src/CLAUDE.md#portfolio-status-g37-scope-freeze-2026-08-11)
+for the full rationale.
+
 ## The catalogue
 
-| Skill | The question it answers |
-|---|---|
-| [`native-binary-compatibility-review`](https://github.com/abicheck/abicheck/blob/main/.agents/skills/native-binary-compatibility-review/SKILL.md) | "Will this change break existing consumers?" — review a diff, branch, commit, or PR, ending in a verdict plus a root-cause explanation. Also handles "why did this suddenly report dozens of breaks?" |
-| [`native-api-evolution`](https://github.com/abicheck/abicheck/blob/main/.agents/skills/native-api-evolution/SKILL.md) | "How do I make this API change *without* breaking compatibility?" — design-time guidance (pImpl, reserved slots, versioned interfaces, deprecation lifecycles), ending by verifying the resulting change. |
-| [`native-release-compatibility`](https://github.com/abicheck/abicheck/blob/main/.agents/skills/native-release-compatibility/SKILL.md) | "Can we ship this as a minor version, or does it need a major bump?" — a release-level decision across every library, platform, and profile. |
-| [`native-consumer-compatibility`](https://github.com/abicheck/abicheck/blob/main/.agents/skills/native-consumer-compatibility/SKILL.md) | "Will *this specific* application, plugin, or host keep working?" — a per-consumer answer that can differ from the library's global verdict. |
+| Skill | Status | The question it answers |
+|---|---|---|
+| [`native-binary-compatibility-review`](https://github.com/abicheck/abicheck/blob/main/.agents/skills/native-binary-compatibility-review/SKILL.md) | **Flagship** | "Will this change break existing consumers?" — review a diff, branch, commit, or PR, ending in a verdict plus a root-cause explanation. Also handles "why did this suddenly report dozens of breaks?" |
+| [`native-api-evolution`](https://github.com/abicheck/abicheck/blob/main/.agents/skills/native-api-evolution/SKILL.md) | Prototype | "How do I make this API change *without* breaking compatibility?" — design-time guidance (pImpl, reserved slots, versioned interfaces, deprecation lifecycles), ending by verifying the resulting change. |
+| [`native-release-compatibility`](https://github.com/abicheck/abicheck/blob/main/.agents/skills/native-release-compatibility/SKILL.md) | Prototype | "Can we ship this as a minor version, or does it need a major bump?" — a release-level decision across every library, platform, and profile. |
+| [`native-consumer-compatibility`](https://github.com/abicheck/abicheck/blob/main/.agents/skills/native-consumer-compatibility/SKILL.md) | Prototype | "Will *this specific* application, plugin, or host keep working?" — a per-consumer answer that can differ from the library's global verdict. |
 
 ## Installing them
 

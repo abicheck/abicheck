@@ -20,6 +20,27 @@ superseded in their implementation detail by this plan** — see
 [Relationship to G36's own items](#relationship-to-g36s-own-items) for exactly
 what changes and why.
 
+> **Scope note (2026-08-11, flagship-first narrowing).** Per
+> [ADR-058's 2026-08-11 amendment](../adr/058-native-compatibility-agent-skills.md),
+> the skill portfolio is frozen and `native-binary-compatibility-review` is
+> the sole flagship subject for every phase below — Phase 1's L4 golden
+> transcripts, Phase 2's live runner, and Phase 3's scenario corpus target
+> that one skill only, not the four-skill sweep the rest of this document
+> was originally scoped for. `native-api-evolution`,
+> `native-release-compatibility`, and `native-consumer-compatibility` are
+> **prototype status** (see `skills-src/CLAUDE.md`'s portfolio-status
+> table): no scenario, fixture, or evidence bundle should be built against
+> them until the flagship experiment demonstrates measurable lift. The
+> remaining text below is unchanged design — every mechanism (D1–D8, the
+> bundle schema, the rubric, the freshness gate) is skill-agnostic by
+> construction and applies unmodified to a one-skill corpus; only the
+> *breadth* narrows, not the design. Phase 3's "~6 scenarios per skill, ~24
+> total" and Phase 4's cross-agent sweep are reduced accordingly — see the
+> updated phase notes. A prototype skill re-enters scope as a Phase 3-style
+> corpus buildout only after the flagship clears the acceptance criteria
+> below, at which point it is added back one skill at a time rather than as
+> a second four-way sweep.
+
 ---
 
 ## Problem
@@ -75,7 +96,10 @@ Accepted when all of:
 2. Every published skill carries a scorecard: activation precision/recall,
    verdict accuracy against ground truth, safety-dimension pass rate across `k`
    runs, cost per resolved question, and measured lift over the no-skill
-   baseline.
+   baseline. **Sequenced, not simultaneous** (2026-08-11 scope note): this
+   criterion is satisfied for the flagship skill first; a prototype-status
+   skill's scorecard is deferred until it re-enters scope, not owed by this
+   plan's first pass.
 3. That scorecard is provably fresh — a results artifact whose recorded content
    hash does not match the current generated skill trees is rejected as
    evidence, mechanically (this replaces G36's repeatedly-patched prose
@@ -1017,16 +1041,23 @@ the evaluation non-optional rather than merely available.
 
 ### Phase 3 — Scenario corpus buildout *(M)*
 
+**Scoped to the flagship skill only** (see the 2026-08-11 scope note above).
 Category B first (every scenario `ground_truth.json` structurally cannot
-index), then Category A across the eight named categories. Target ~6 scenarios
-per skill, ~24 total.
+index), then Category A across the eight named categories. Target ~12–16
+scenarios for `native-binary-compatibility-review`, not the ~24-across-four-
+skills figure this phase originally carried — the corpus classes in D5 were
+themselves generic across all four skills, so this is a scope cut (one
+skill's worth), not a redesign. A prototype skill's corpus is out of scope
+for this phase; see the scope note for when it re-enters.
 
 ### Phase 4 — Cross-agent *(M)*
 
-Codex and Gemini CLI runners emitting the same bundle schema; Copilot and
-Cursor stay manual. G36 P1.5's cross-agent table in `skills-src/CLAUDE.md` is
-then populated from generated results for the scriptable targets rather than
-hand-maintained.
+Codex and Gemini CLI runners emitting the same bundle schema, run against the
+flagship skill only; Copilot and Cursor stay manual. G36 P1.5's cross-agent
+table in `skills-src/CLAUDE.md` is then populated from generated results for
+the scriptable targets rather than hand-maintained — one row
+(`native-binary-compatibility-review`) per target until a prototype skill is
+promoted, not all four.
 
 ### Phase 5 — agent-benchmark integration, L3 *(M, separate repo)*
 
