@@ -544,14 +544,18 @@ class TestClangVtableFactsReliabilityGate:
 
 class TestVtableChangedDegradedByLayoutUnverifiable:
     """One evidence gap must not classify BREAKING on one detector and
-    non-escalating RISK on another for the *same* type (post-processing
-    step ``degrade_vtable_changed_for_unverifiable_layout``).
+    non-escalating RISK on another for the *same* type
+    (``diff_types._vtable_transition_rests_on_unresolved_evidence`` +
+    ``_layout_evidence_is_unverifiable``).
 
     ``_vtable_transition_is_evidenced`` (diff_types.py) treats an unknown
     ``size_bits`` on either side as "keep the finding" (BREAKING), while
     ``_check_layout_unverifiable`` (diff_layout.py) treats the identical
     asymmetric-evidence condition as calm, non-escalating RISK. When both
-    fire on the same type, TYPE_VTABLE_CHANGED must be demoted to match.
+    fire on the same type for the same reason, TYPE_VTABLE_CHANGED must be
+    demoted to match — but only when the vtable finding itself rests on that
+    unresolved-size gap, and only when correlated against the exact
+    type-matched RecordType pair, not a same-named-but-different type.
     """
 
     def test_vtable_changed_degraded_when_layout_unverifiable_same_type(
@@ -611,4 +615,68 @@ class TestVtableChangedDegradedByLayoutUnverifiable:
         assert ChangeKind.LAYOUT_UNVERIFIABLE not in changes_by_kind
         vtable_change = changes_by_kind[ChangeKind.TYPE_VTABLE_CHANGED]
         assert vtable_change.effective_verdict is None
+        assert result.verdict == Verdict.BREAKING
+
+    def test_both_sides_populated_vtable_change_not_demoted(self) -> None:
+        """A real reorder (both vtable lists populated on the SAME type that
+        also carries an unrelated LAYOUT_UNVERIFIABLE finding) must stay
+        BREAKING — real evidence is never demoted just because the same type
+        also has an unresolved-size gap elsewhere (Codex review, P1)."""
+        old = _snap(types=[RecordType(
+            name="Foo", kind="class",
+            vtable=["_ZN3Foo1fEv", "_ZN3Foo1gEv"],
+            size_bits=None,
+        )])
+        new = _snap(types=[RecordType(
+            name="Foo", kind="class",
+            vtable=["_ZN3Foo1gEv", "_ZN3Foo1fEv"],  # reordered
+            size_bits=None,
+            # Populates the layout descriptor on the new side only, so
+            # LAYOUT_UNVERIFIABLE fires for this same type too — but the
+            # vtable reorder itself rests on real (both-populated) evidence,
+            # not the unresolved-size gap, so it must not be demoted.
+            base_offsets={"Base": 0},
+        )])
+        result = compare(old, new)
+        changes_by_kind = {c.kind: c for c in result.changes}
+        assert ChangeKind.LAYOUT_UNVERIFIABLE in changes_by_kind
+        vtable_change = changes_by_kind[ChangeKind.TYPE_VTABLE_CHANGED]
+        assert vtable_change.effective_verdict is None
+        assert result.verdict == Verdict.BREAKING
+
+    def test_bare_name_collision_does_not_cross_contaminate(self) -> None:
+        """Two distinct types sharing only a bare leaf name in different
+        namespaces must not correlate: ``ns2::Foo``'s unresolved layout
+        evidence must not demote ``ns1::Foo``'s real, independently-evidenced
+        vtable reorder (Codex review, P2)."""
+        old = _snap(types=[
+            RecordType(
+                name="Foo", qualified_name="ns1::Foo", kind="class",
+                vtable=["_ZN3ns13Foo1fEv", "_ZN3ns13Foo1gEv"],
+            ),
+            RecordType(
+                name="Foo", qualified_name="ns2::Foo", kind="class",
+                vtable=[], size_bits=None,
+            ),
+        ])
+        new = _snap(types=[
+            RecordType(
+                name="Foo", qualified_name="ns1::Foo", kind="class",
+                # Real reorder — both sides populated, no evidence gap of
+                # its own.
+                vtable=["_ZN3ns13Foo1gEv", "_ZN3ns13Foo1fEv"],
+            ),
+            RecordType(
+                name="Foo", qualified_name="ns2::Foo", kind="class",
+                vtable=["_ZN3ns23Foo1hEv"],
+                size_bits=None,
+                base_offsets={"Base": 0},  # asymmetric evidence -> LAYOUT_UNVERIFIABLE
+            ),
+        ])
+        result = compare(old, new)
+        vtable_changes = [
+            c for c in result.changes if c.kind == ChangeKind.TYPE_VTABLE_CHANGED
+        ]
+        ns1_change = next(c for c in vtable_changes if c.old_value.startswith("_ZN3ns13Foo"))
+        assert ns1_change.effective_verdict is None
         assert result.verdict == Verdict.BREAKING

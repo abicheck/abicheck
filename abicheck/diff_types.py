@@ -20,7 +20,7 @@ import re
 from collections import Counter
 from collections.abc import Collection, Mapping
 
-from .checker_policy import ChangeKind
+from .checker_policy import ChangeKind, Verdict
 from .checker_types import Change
 from .detector_registry import registry
 from .diff_cxx_rules import itanium_qualified_name, vtable_slot_is_override_reuse
@@ -1231,6 +1231,80 @@ def _vtable_transition_is_evidenced(
     return list(t_old.virtual_bases) != list(t_new.virtual_bases)
 
 
+def _vtable_transition_rests_on_unresolved_evidence(
+    name: str,
+    t_old: RecordType,
+    t_new: RecordType,
+    old_funcs: Mapping[str, Function],
+    new_funcs: Mapping[str, Function],
+) -> bool:
+    """True exactly when a kept ``TYPE_VTABLE_CHANGED`` finding for *name*
+    rests on the *same* "one side has no known size" evidence gap
+    ``LAYOUT_UNVERIFIABLE`` (``diff_layout.py``) reports for the same type --
+    as opposed to a real, independently-evidenced signal.
+
+    Only ever consulted after ``_vtable_transition_is_evidenced`` already
+    returned True, so this mirrors that function's own branches to isolate
+    which one supplied the evidence:
+
+    * Both sides' vtables populated -> a real reorder/replace. Not this case.
+    * The class's own virtual *functions* (a separate projection of the
+      debug info) differ -> a real signal, however imperfect. Not this case.
+    * A real ``size_bits`` delta or virtual-base change -> a real layout
+      signal. Not this case.
+    * An *unknown* ``size_bits`` on either side -> the finding was kept only
+      because an unresolved-evidence gap corroborates nothing and refutes
+      nothing. This is the one case sharing ``LAYOUT_UNVERIFIABLE``'s own
+      evidence gap, and the only one a caller should treat as demotable.
+
+    Used by ``_diff_type_vtable`` to scope its ``effective_verdict``
+    demotion precisely: co-occurrence with an unrelated
+    ``LAYOUT_UNVERIFIABLE`` finding on a *different* same-named type (a
+    real risk when correlating by bare ``Change.symbol`` alone, since two
+    distinct records can share a leaf name in different namespaces -- Codex
+    review) is not a reason to demote a genuinely-evidenced vtable change,
+    and neither is any of the three real-signal branches above (Codex
+    review: an unconditional demotion on any co-occurring
+    ``LAYOUT_UNVERIFIABLE`` wrongly downgraded a real reorder/replace with
+    both sides populated).
+    """
+    if t_old.vtable and t_new.vtable:
+        return False
+    if _owned_virtual_signatures(name, old_funcs) != _owned_virtual_signatures(
+        name, new_funcs
+    ):
+        return False
+    return t_old.size_bits is None or t_new.size_bits is None
+
+
+def _layout_evidence_is_unverifiable(
+    t_old: RecordType, t_new: RecordType, *, vtable_facts_reliable: bool
+) -> bool:
+    """True when ``diff_layout._check_layout_unverifiable``'s own
+    asymmetric-evidence condition holds for this *exact*, already
+    type-matched ``RecordType`` pair.
+
+    Reuses ``diff_layout._has_layout_descriptor`` rather than re-deriving
+    it, and is consulted with the identical ``t_old``/``t_new`` objects
+    ``diff_layout.py``'s own detector sees for this type -- so there is no
+    separate symbol-name correlation step (bare ``Change.symbol`` equality
+    across two independently-emitted findings) that a same-named-but-
+    different type could defeat.
+    """
+    from .diff_layout import _has_layout_descriptor
+
+    old_has = t_old.size_bits is not None or _has_layout_descriptor(
+        t_old, vtable_facts_reliable=vtable_facts_reliable
+    )
+    new_has = t_new.size_bits is not None or _has_layout_descriptor(
+        t_new, vtable_facts_reliable=vtable_facts_reliable
+    )
+    descriptor_in_play = _has_layout_descriptor(
+        t_old, vtable_facts_reliable=vtable_facts_reliable
+    ) or _has_layout_descriptor(t_new, vtable_facts_reliable=vtable_facts_reliable)
+    return descriptor_in_play and old_has != new_has
+
+
 def _owned_virtual_signatures(name: str, funcs: Mapping[str, Function]) -> set[str]:
     """The mangled names of *name*'s own virtual member functions.
 
@@ -1320,15 +1394,26 @@ def _diff_type_vtable(
         if Counter(t_old.vtable) == Counter(t_new.vtable)
         else f"vtable changed: {name}"
     )
-    return [
-        make_change(
-            ChangeKind.TYPE_VTABLE_CHANGED,
-            symbol=name,
-            description=description,
-            old_value=", ".join(t_old.vtable),
-            new_value=", ".join(t_new.vtable),
-        )
-    ]
+    change = make_change(
+        ChangeKind.TYPE_VTABLE_CHANGED,
+        symbol=name,
+        description=description,
+        old_value=", ".join(t_old.vtable),
+        new_value=", ".join(t_new.vtable),
+    )
+    # Degrade to RISK when this finding rests on the identical evidence gap
+    # LAYOUT_UNVERIFIABLE reports for the same (exact, already type-matched)
+    # RecordType pair -- see both helpers' own docstrings for why each half
+    # of this condition is required (Codex review).
+    if _vtable_transition_rests_on_unresolved_evidence(
+        name, t_old, t_new, old_funcs, new_funcs
+    ) and _layout_evidence_is_unverifiable(
+        t_old, t_new, vtable_facts_reliable=vtable_facts_reliable
+    ):
+        change.effective_verdict = Verdict.COMPATIBLE_WITH_RISK
+        change.modulation_reason = "layout_unverifiable_same_type"
+        change.modulation_rule = "degrade_vtable_changed_for_unverifiable_layout"
+    return [change]
 
 
 @registry.detector("enums")
