@@ -178,4 +178,33 @@ A new changelog fragment. See changelog.d/README.md for the workflow.
   `_executable_stat_key()` (mirroring `dumper_toolchain._executable_sha256`'s
   own stat-based cache key) is now folded into the `lru_cache` key by
   both real call sites, so a same-path executable swap gets a fresh
-  probe instead of the stale memoized one.
+  probe instead of the stale memoized one. A third round (Codex review)
+  fixed a real correctness gap the second round's own error handling
+  introduced the surface for: `run_bounded_for_extraction()` folds a
+  genuine scan `--budget` exhaustion into the same `SourceExtractionError`
+  as an ordinary probe failure, erasing which one happened — this
+  function's broad `except` clause was degrading BOTH to `""`, so a
+  cache lookup keyed on that identity could proceed past an expired
+  deadline with no further check in between. The probe now re-checks
+  the deadline directly on any failure; a still-exhausted budget
+  re-raises the real `deadline.DeadlineExceeded` (deliberately NOT
+  wrapped into `SourceExtractionError`), matching the un-swallowed
+  exception `_replay_cache_lookup()`'s own bare `deadline.check()`
+  already lets through for this same phase.
+
+### Known gaps (see `AGENTS.md`)
+
+- Recorded, not fixed in this PR: `diff_filtering.py`'s opaque-type
+  suppression (`_find_opaque_types()` and friends) keys by bare
+  `RecordType.name`, not a qualified identity — pre-existing on both
+  header backends, and newly reachable on the direct-clang backend by
+  this PR's own opaque-handle-type fix (which previously silently
+  dropped every forward-decl-only type on that backend instead of
+  emitting a stub). Two distinct records sharing a bare name in
+  different namespaces can collide in the same opaque set, silently
+  suppressing a real structural-change finding on an unrelated,
+  complete, public type. A correct fix needs qualified identity
+  threaded through several call sites in `diff_filtering.py` with no
+  existing test coverage for the collision case — a systematic,
+  cross-cutting rework out of scope for this PR's time budget. See
+  `AGENTS.md`'s Known gaps section for the full investigation.

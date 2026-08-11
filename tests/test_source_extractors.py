@@ -1191,8 +1191,9 @@ def test_castxml_tool_version_is_bound_by_deadline_run_bounded(monkeypatch) -> N
     deadline shorter than 5s -- it must go through the same
     deadline-aware bounded path (``deadline.run_bounded``, via
     ``run_bounded_for_extraction``) as every other subprocess this
-    extractor runs, and degrade to "" (not raise) when that path times
-    out or the scan deadline is exceeded."""
+    extractor runs. Outside an active deadline scope, a local timeout
+    still degrades to "" (not raise) -- see the next test for the
+    genuinely-active-scan-deadline case, which does not degrade."""
     from abicheck import deadline
     from abicheck.buildsource.source_extractors import castxml as castxml_mod
 
@@ -1208,6 +1209,32 @@ def test_castxml_tool_version_is_bound_by_deadline_run_bounded(monkeypatch) -> N
     assert castxml_mod._castxml_tool_version("castxml") == ""
     assert seen["cmd"] == ["castxml", "--version"]
     assert seen["timeout"] == 5
+    castxml_mod._castxml_tool_version.cache_clear()
+
+
+def test_castxml_tool_version_reraises_deadline_exceeded_under_active_budget(
+    monkeypatch,
+) -> None:
+    """Codex review, PR #719, sixth round: a genuinely exhausted scan
+    --budget must stay observable, not be silently absorbed into an
+    empty identity -- a cache lookup keyed on that "" could otherwise
+    proceed past an expired deadline with no further check in between.
+    Deliberately NOT wrapped into SourceExtractionError: both of this
+    function's callers must see the same un-swallowed
+    deadline.DeadlineExceeded that _replay_cache_lookup()'s own bare
+    deadline.check() already lets propagate for this phase."""
+    from abicheck import deadline
+    from abicheck.buildsource.source_extractors import castxml as castxml_mod
+
+    castxml_mod._castxml_tool_version.cache_clear()
+
+    def fake_run_bounded(cmd, **kw):  # type: ignore[no-untyped-def]
+        raise deadline.DeadlineExceeded(-1.0)
+
+    monkeypatch.setattr(castxml_mod.deadline, "run_bounded", fake_run_bounded)
+    with deadline.deadline_scope(-1.0):  # already-exhausted active budget
+        with pytest.raises(deadline.DeadlineExceeded):
+            castxml_mod._castxml_tool_version("castxml")
     castxml_mod._castxml_tool_version.cache_clear()
 
 

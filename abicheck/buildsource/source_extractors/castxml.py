@@ -128,8 +128,11 @@ def _castxml_tool_version(
     castxml-version-different-bundled-Clang installs are otherwise
     indistinguishable to `check_fact_compatibility`). Cached per binary path
     so a many-TU build pays this subprocess once, not once per compile
-    unit. Best-effort: any failure yields ``""`` rather than aborting
-    extraction (compiler_version is provenance, not required input).
+    unit. Best-effort: an ordinary failure yields ``""`` rather than
+    aborting extraction (compiler_version is provenance, not required
+    input) -- EXCEPT a genuine scan ``--budget`` exhaustion, which
+    re-raises ``deadline.DeadlineExceeded`` instead (see the ``except``
+    block below).
     Deliberately a local, standalone probe rather than reusing
     ``dumper_toolchain._tool_identity_metadata`` -- that module imports FROM
     ``buildsource.redaction``, so importing it here (the opposite direction)
@@ -175,6 +178,21 @@ def _castxml_tool_version(
             return f"{castxml_ver}; {bundled.group(0).strip()}"
         return castxml_ver
     except (OSError, SourceExtractionError):
+        # A genuine scan --budget exhaustion must stay observable, not be
+        # silently absorbed into an empty identity here (Codex review):
+        # run_bounded_for_extraction() folds DeadlineExceeded into
+        # SourceExtractionError the same as an ordinary timeout, erasing
+        # which one actually happened -- a cache lookup keyed on this
+        # function's "" could then proceed on a stale entry with no
+        # further deadline check in between. Re-check directly (mirrors
+        # this module's own "trust the restored deadline, not a stale
+        # snapshot" pattern in extract()'s post-parse checks); a still-
+        # exhausted budget re-raises the real deadline.DeadlineExceeded
+        # here -- deliberately NOT wrapped into SourceExtractionError, so
+        # both of this function's callers see the same un-swallowed
+        # exception _replay_cache_lookup()'s own bare deadline.check()
+        # already lets propagate for this same phase.
+        deadline.check()
         return ""
 
 
@@ -250,6 +268,14 @@ class CastxmlSourceExtractor:
         included -- after the castxml binary at the same path is upgraded
         or swapped, since nothing about that upgrade changes the extractor
         version string itself.
+
+        Raises ``deadline.DeadlineExceeded`` (rather than degrading to
+        ``""``, this function's usual best-effort contract) specifically
+        when the active scan ``--budget`` is exhausted while probing --
+        that signal must stay observable to ``_replay_cache_lookup()``'s
+        own caller, matching its already-unguarded ``deadline.check()``
+        for the same phase, rather than proceeding to a cache lookup keyed
+        on an identity that quietly hid an expired deadline.
         """
         return _castxml_tool_version(
             self.castxml_bin, *_executable_stat_key(self.castxml_bin)
