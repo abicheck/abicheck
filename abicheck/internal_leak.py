@@ -785,8 +785,8 @@ class TraversalPolicy:
 #: an unbroken chain of direct calls (ADR-046 D5).
 CALL_GRAPH_TRAVERSAL_POLICY = TraversalPolicy(
     allowed_edges=frozenset({"DECL_CALLS_DECL", "DECL_REFERENCES_DECL"}),
-    stop_conditions=lambda node_id, node_by_id: not _is_consumer_compiled_node(
-        node_id, node_by_id
+    stop_conditions=lambda node_id, node_by_id: (
+        not _is_consumer_compiled_node(node_id, node_by_id)
     ),
     effect_transitions={
         CALL_KIND_VIRTUAL: RESOLUTION_OVERAPPROX,
@@ -839,7 +839,10 @@ def _consumer_compiled_reachability(
     min_rank = _CONFIDENCE_RANK.get(policy.minimum_confidence, 0)
     adjacency: dict[str, list[GraphEdge]] = {}
     for e in graph.edges:
-        if e.kind in policy.allowed_edges and _CONFIDENCE_RANK.get(e.confidence, 0) >= min_rank:
+        if (
+            e.kind in policy.allowed_edges
+            and _CONFIDENCE_RANK.get(e.confidence, 0) >= min_rank
+        ):
             adjacency.setdefault(e.src, []).append(e)
     out: dict[str, tuple[frozenset[str], dict[str, GraphEdge], frozenset[str]]] = {}
     for entry in entries:
@@ -984,7 +987,9 @@ def compute_call_graph_leak_paths(
     from .buildsource.source_graph import is_consumer_compiled_public_entry
     from .buildsource.source_graph_findings import _format_dependency_path
 
-    if not any(e.kind in CALL_GRAPH_TRAVERSAL_POLICY.allowed_edges for e in graph.edges):
+    if not any(
+        e.kind in CALL_GRAPH_TRAVERSAL_POLICY.allowed_edges for e in graph.edges
+    ):
         return {}
 
     node_by_id = {n.id: n for n in graph.nodes}
@@ -1452,7 +1457,41 @@ def _build_call_graph_leak_change(
     entry, instead of a layout/type-graph reachability path.
     """
     kinds_seen = sorted({c.kind.value for c in triggers})
-    path_strs = proof_paths[:3]
+    # reachability_proof_path is the *representative* path for this Change,
+    # so it must prefer an exact route over an "overapprox: "-prefixed one
+    # when both exist among *proof_paths* -- the caller (_diff_call_graph_
+    # leaks) concatenates every public entry's own independently-discovered
+    # path in discovery order, not exactness order (Codex review, fresh
+    # evidence: one entry reaching dname through a virtual/function-pointer
+    # call can precede a different entry's exact route to the same dname,
+    # which would otherwise make an exact-reachable symbol's Change read
+    # back as approximate -- unlike the *within one entry's own BFS*
+    # exact-beats-overapprox preference _consumer_compiled_reachability
+    # already guarantees, nothing dedupes preference *across* entries).
+    # Searches the full list, not just the first three kept for display,
+    # since the strongest path can be truncated out of path_strs.
+    proof_path = next(
+        (p for p in proof_paths if not p.startswith("overapprox:")),
+        proof_paths[0] if proof_paths else None,
+    )
+    # path_strs is what the description text actually displays. It must
+    # lead with the same path just selected as the representative one, not
+    # an independently-taken "first three in discovery order" slice --
+    # otherwise the human-readable description could describe nothing but
+    # "overapprox: "-prefixed paths while reachability_proof_path/the
+    # correlator's evidence level both report an exact proof, an internally
+    # contradictory finding (Codex review, fresh evidence).
+    if proof_path is None:
+        path_strs: list[str] = []
+    else:
+        # .remove() drops only the one selected occurrence -- a filtered
+        # comprehension (``p != proof_path``) would drop every occurrence,
+        # silently losing a genuinely distinct duplicate path if
+        # proof_paths happens to contain proof_path more than once
+        # (CodeRabbit review).
+        rest = list(proof_paths)
+        rest.remove(proof_path)
+        path_strs = [proof_path, *rest[:2]]
     more = "" if len(proof_paths) <= 3 else f" (+{len(proof_paths) - 3} more paths)"
     change = Change(
         kind=ChangeKind.INTERNAL_SYMBOL_REQUIRED_BY_PUBLIC_API,
@@ -1472,7 +1511,7 @@ def _build_call_graph_leak_change(
         public_reachable=True,
         reachability_state=ReachabilityState.PROVEN_REACHABLE,
         reachability_kind="symbol_availability",
-        reachability_proof_path=path_strs[0] if path_strs else None,
+        reachability_proof_path=proof_path,
     )
     # ADR-052 D2 follow-up — see _build_leak_change's identical comment above.
     change.impact_assessment = assess_change(change)

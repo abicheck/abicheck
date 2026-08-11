@@ -78,13 +78,14 @@ work, not attempted here.
   node's :data:`TemplateInstantiation.emitted_symbols` is these, not a
   separate per-member node.
 
-**Deliberately not attempted this slice** (see ``docs/contribute/plans/
+``TEMPLATE_USES_DECL`` (a pointer-to-function/variable or reference NTTP
+argument) is implemented too, as a follow-up — see
+``template_graph_value_decls.py``'s own docstring.
+
+**Deliberately not attempted** (see ``docs/contribute/plans/
 g29-impact-analysis-layer.md`` Phase 5 item 1 and ADR-041's registry for the
 full, honest list of what's reserved but unpopulated):
 
-- ``TEMPLATE_USES_DECL`` — a non-type template argument (e.g. a function
-  pointer) that names a declaration rather than a literal value. Registered
-  vocabulary, no producer yet; needs its own empirical AST verification.
 - ``INSTANTIATION_MAPS_TO_EXPORT`` — redundant with reading
   ``BINARY_EXPORTS_SYMBOL`` off the same ``binary_symbol`` node
   :data:`EDGE_INSTANTIATION_EMITS_SYMBOL` already joins onto, the identical
@@ -193,28 +194,36 @@ for that identity.
 
 from __future__ import annotations
 
-import shutil
-import time
 from collections.abc import Callable, Iterable
-from concurrent.futures import ThreadPoolExecutor
-from dataclasses import dataclass, field, replace
-from functools import partial
+from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING, Any
 
-from .. import deadline, diff_cxx_rules
-from .clang_ast_run import run_clang_ast_dump
+from .. import diff_cxx_rules
 from .graph_facts import CONF_HIGH, CONF_REDUCED, GraphEdge, GraphNode
+from .template_graph_value_decls import (
+    arg_label_spelling,
+    disambiguated_specialization_qname,
+    index_value_decls,
+)
 
 if TYPE_CHECKING:
-    from .build_evidence import BuildEvidence, CompileUnit as BuildEvidenceCompileUnit
     from .source_graph import SourceGraphSummary
 
 EDGE_DECL_INSTANTIATES_TEMPLATE = "DECL_INSTANTIATES_TEMPLATE"
 EDGE_TEMPLATE_USES_TYPE = "TEMPLATE_USES_TYPE"
+EDGE_TEMPLATE_USES_DECL = "TEMPLATE_USES_DECL"
 EDGE_INSTANTIATION_EMITS_SYMBOL = "INSTANTIATION_EMITS_SYMBOL"
 
 NODE_TEMPLATE_DECL = "template_decl"
 NODE_TEMPLATE_INSTANTIATION = "template_instantiation"
+#: A resolved TEMPLATE_USES_DECL target's node kind (call_graph.py/
+#: type_graph.py's own function/variable declaration node kind).
+NODE_SOURCE_DECL = "source_decl"
+#: Raw clang decl kinds routed onto TEMPLATE_USES_DECL, not TEMPLATE_USES_TYPE.
+#: ``VarTemplateSpecializationDecl`` carries its own ``mangledName`` like ``VarDecl``.
+_VALUE_DECL_KINDS = frozenset(
+    {"FunctionDecl", "VarDecl", "VarTemplateSpecializationDecl"}
+)
 
 #: ``provenance`` tag on every node/edge this module creates.
 TEMPLATE_GRAPH_PROVENANCE = "template_graph"
@@ -762,32 +771,58 @@ def _collect_full_function_defs(
 def _template_arg_use(arg_node: dict[str, Any]) -> TemplateArgUse | None:
     """Parse one ``TemplateArgument`` child into a :class:`TemplateArgUse`,
     or ``None`` if it isn't a spellable argument at all (a pack expansion's
-    own wrapper, an expression argument with no ``type``/``value`` — clang
-    emits several ``TemplateArgument`` shapes this module doesn't model;
-    skipped rather than guessed)."""
+    own wrapper, an expression argument with no ``type``/``value``/``decl``
+    — clang emits several ``TemplateArgument`` shapes this module doesn't
+    model; skipped rather than guessed)."""
     qual_type = arg_node.get("type")
     if isinstance(qual_type, dict):
         spelling = str(qual_type.get("qualType") or "")
-    elif "value" in arg_node:
+        if not spelling:
+            return None
+        return TemplateArgUse(spelling=spelling, target_qname=_first_decl_id(arg_node))
+    if "value" in arg_node:
         # A non-type (literal) argument, e.g. an int NTTP -- has no
         # resolvable target decl (see the module docstring).
         return TemplateArgUse(spelling=str(arg_node.get("value")))
-    else:
-        return None
-    if not spelling:
-        return None
-    return TemplateArgUse(spelling=spelling, target_qname=_first_decl_id(arg_node))
+    decl = arg_node.get("decl")
+    if isinstance(decl, dict):
+        # TEMPLATE_USES_DECL: a pointer-to-function/variable or reference
+        # NTTP, e.g. `Callback<&ns::handler>` -- verified-empirically bare
+        # shape, see template_graph_value_decls.py's own docstring. Spelling
+        # is the bare, unqualified name; see arg_label_spelling for how the
+        # resulting collision risk is closed downstream.
+        name = str(decl.get("name") or "")
+        if not name:
+            return None
+        return TemplateArgUse(
+            spelling=name,
+            target_qname=_first_decl_id(arg_node),
+            target_decl_kind=str(decl.get("kind") or "") or None,
+        )
+    return None
 
 
 def _is_opaque_template_argument(node: dict[str, Any]) -> bool:
     """Whether a ``TemplateArgument`` node carries none of the fields this
-    module can spell anything from — no ``type``, no ``value``, not a pack
-    wrapper (``isPack``). A **template-template argument** (e.g.
-    ``Use<A>``/``Use<B>`` for ``template <template <typename> class C>
-    struct Use;``) produces exactly this shape (Codex review, confirmed
-    against real clang AST output): the node is entirely bare (``{"kind":
-    "TemplateArgument"}``), nothing distinguishing ``A`` from ``B``."""
-    return not node.get("isPack") and node.get("type") is None and "value" not in node
+    module can spell anything from — no ``type``, no ``value``, no *named*
+    ``decl``, not a pack wrapper (``isPack``). A **template-template
+    argument** (e.g. ``Use<A>``/``Use<B>``) produces exactly this shape
+    (Codex review): entirely bare -- unlike a decl-referencing
+    (TEMPLATE_USES_DECL) argument, which always carries a top-level
+    ``decl`` dict and so isn't opaque despite also lacking ``type``/
+    ``value``. A ``decl`` dict with no ``name`` (CodeRabbit review) is
+    itself unspellable -- :func:`_template_arg_use` already returns
+    ``None`` for it -- so it counts as opaque too, aborting the whole
+    instantiation's identity rather than recording one fewer argument.
+    """
+    decl = node.get("decl")
+    decl_named = isinstance(decl, dict) and bool(decl.get("name"))
+    return (
+        not node.get("isPack")
+        and node.get("type") is None
+        and "value" not in node
+        and not decl_named
+    )
 
 
 def _flatten_template_args(
@@ -954,6 +989,11 @@ def _resolve_specialization_qname(
         full_by_id,
         seen | {spec_id},
     )
+    if _has_unresolved_decl_argument(args, resolved_args):
+        # See _has_unresolved_decl_argument's own docstring -- same
+        # unresolved-target-collision risk as the opaque-argument case
+        # just above, reached through a different gap in the evidence.
+        return None
     return _instantiation_label(template_qname, resolved_args)
 
 
@@ -993,8 +1033,37 @@ def _resolve_arg_targets(
 
 
 def _instantiation_label(template_qname: str, args: Iterable[TemplateArgUse]) -> str:
-    spellings = ", ".join(a.spelling for a in args)
+    spellings = ", ".join(arg_label_spelling(a, _VALUE_DECL_KINDS) for a in args)
     return f"{template_qname}<{spellings}>" if spellings else template_qname
+
+
+def _has_unresolved_decl_argument(
+    original_args: Iterable[TemplateArgUse], resolved_args: Iterable[TemplateArgUse]
+) -> bool:
+    """Whether resolving ``original_args`` (raw, still carrying the
+    *original* ``target_decl_kind``) into ``resolved_args`` dropped a
+    decl-referencing (TEMPLATE_USES_DECL) argument's target -- id names no
+    declaration :func:`index_value_decls` indexed (a local ``static``, or a
+    class-member NTTP target -- ``H<&A::f>`` is a ``CXXMethodDecl``/
+    ``FieldDecl`` kind `index_value_decls` never indexes; Codex review,
+    verified empirically that a narrower :data:`_VALUE_DECL_KINDS`-only
+    check let two distinct member targets collide onto one label). Any
+    non-``None`` original ``target_decl_kind`` qualifies -- only the
+    ``decl`` branch of :func:`_template_arg_use` ever sets it, so an
+    ordinary type argument's intentional bare-spelling fallback can't
+    misfire here.
+
+    Checked against the *original* kind: once resolution fails,
+    :func:`_resolve_arg_targets` sets both fields to ``None`` on the
+    returned copy, so only the original still says "this was meant to be a
+    decl reference." Untrusted the same way an opaque (template-template)
+    argument is: two distinct unresolved targets sharing a bare name would
+    collide onto one :func:`arg_label_spelling` fallback.
+    """
+    return any(
+        orig.target_decl_kind is not None and resolved.target_qname is None
+        for orig, resolved in zip(original_args, resolved_args)
+    )
 
 
 #: Additional Itanium ctor/dtor manglings implied by the one clang's AST
@@ -1194,31 +1263,34 @@ def _walk_function_templates(
     if not isinstance(node, dict):
         return
     kind = str(node.get("kind", ""))
+    resolve_spec_qname = lambda sid: _resolve_specialization_qname(  # noqa: E731
+        sid, id_to_qname, id_to_decl_kind, id_to_template_qname, full_by_id
+    )
 
     if kind == _FUNCTION_TEMPLATE_KIND:
         name = str(node.get("name") or "")
         # An out-of-line member-template *definition* (`template <class T>
-        # void C::f(T) {}`, the class's own declaration `template <class T>
-        # void f(T);` staying in-class) detaches as a *separate*, top-level
+        # void C::f(T) {}`) detaches as a separate, top-level
         # FunctionTemplateDecl -- not nested inside CXXRecordDecl:C at all
-        # -- confirmed empirically against real clang AST output (Codex
-        # review, fresh evidence): this node's own structural `scope` is
-        # therefore `[]`, computing the bare "f" instead of "C::f", and its
-        # own children happen to resolve (via full_function_by_id's id
-        # join) to the identical instantiated symbols the correctly-scoped
-        # in-class declaration already captures -- so without this fix the
-        # graph would carry the same instantiation twice, once correctly
-        # under "C::f" and once wrongly under a bare "f" that could
-        # coincidentally merge with an unrelated global template also named
-        # "f". Clang emits `parentDeclContextId` on exactly this node shape
-        # (confirmed absent on the ordinary, correctly-nested in-class
-        # declaration) -- the id of the *real* semantic owner, resolvable
-        # through id_to_qname the same way a template argument's `decl`
-        # cross-reference already is. Preferred unconditionally when
-        # present, since clang only emits it to correct a structural
-        # mismatch in the first place.
+        # (confirmed empirically, Codex review) -- so this node's own
+        # structural `scope` is `[]`, computing a bare "f" that could
+        # coincidentally merge with an unrelated global template also
+        # named "f", duplicating the graph's own correctly-scoped "C::f"
+        # instantiation. `parentDeclContextId` (absent on an ordinary
+        # in-class declaration) names the *real* semantic owner,
+        # resolvable through id_to_qname the same way a template
+        # argument's `decl` cross-reference already is -- preferred
+        # unconditionally when present.
         owner_id = str(node.get("parentDeclContextId") or "")
-        owner_qname = id_to_qname.get(owner_id) if owner_id else None
+        owner_kind = id_to_decl_kind.get(owner_id)
+        owner_qname = disambiguated_specialization_qname(
+            owner_id,
+            id_to_qname.get(owner_id),
+            owner_kind == _CLASS_SPECIALIZATION_KIND,
+            resolve_spec_qname,
+        )
+        if owner_kind == _CLASS_SPECIALIZATION_KIND and owner_qname is None:
+            return  # unresolvable owner -- skip rather than guess (Codex review)
         qname = (
             f"{owner_qname}::{name}"
             if owner_qname and name
@@ -1256,6 +1328,10 @@ def _walk_function_templates(
                 resolved_args = _resolve_arg_targets(
                     args, id_to_qname, id_to_decl_kind, id_to_template_qname, full_by_id
                 )
+                if _has_unresolved_decl_argument(args, resolved_args):
+                    # See _has_unresolved_decl_argument's own docstring --
+                    # same reasoning as the opaque-argument skip above.
+                    continue
                 out.append(
                     TemplateInstantiation(
                         kind=_FUNCTION_KIND,
@@ -1353,6 +1429,7 @@ def _walk_function_templates(
             class_parent_scope = scope
         member_locs = qname_to_member_locs.get(class_qname, {})
         disambiguated_name: str | None = None
+        disambiguation_failed = False
         for child in node.get("inner", []) or []:
             if str(child.get("kind", "")) == _FUNCTION_TEMPLATE_KIND:
                 member_name = str(child.get("name") or "")
@@ -1371,9 +1448,14 @@ def _walk_function_templates(
                 if shared:
                     name = bare_name
                 else:
-                    if disambiguated_name is None:
-                        disambiguated_name = _specialization_scope_name(node, bare_name)
-                    name = disambiguated_name
+                    if disambiguated_name is None and not disambiguation_failed:
+                        disambiguated_name = disambiguated_specialization_qname(
+                            node_id, None, True, resolve_spec_qname
+                        )
+                        disambiguation_failed = disambiguated_name is None
+                    if disambiguation_failed:
+                        continue  # unresolvable -- skip rather than guess (Codex review)
+                    name = disambiguated_name or bare_name
             else:
                 name = bare_name
             # The scope prefix for this child comes from class_parent_scope
@@ -1517,10 +1599,12 @@ def parse_clang_ast_templates(ast: dict[str, Any]) -> list[TemplateInstantiation
     Three passes over the AST — matching :func:`type_graph.parse_clang_ast_types`'s
     own "index first, resolve second" shape:
 
-    1. :func:`_index_type_decls` — every record/enum/typedef's own clang id
-       -> qualified name, so a template argument's ``decl`` reference (a bare
-       id/kind/name stub) can be resolved to its real, scope-qualified
-       identity.
+    1. :func:`_index_type_decls`/``template_graph_value_decls.
+       index_value_decls`` — every record/enum/typedef's own clang id ->
+       qualified name, and every free function/namespace-scope variable's
+       own clang id -> its ``decl://``-node identity, so a template
+       argument's ``decl`` reference resolves regardless of whether it
+       names a type or a declaration.
     2. :func:`_collect_full_specializations` — every
        ``ClassTemplateSpecializationDecl`` id that carries real content
        (``completeDefinition: true``), wherever in the tree it physically
@@ -1536,6 +1620,15 @@ def parse_clang_ast_templates(ast: dict[str, Any]) -> list[TemplateInstantiation
     id_to_decl_kind: dict[str, str] = {}
     id_to_file: dict[str, str] = {}
     _index_type_decls(ast, [], id_to_qname, id_to_decl_kind, id_to_file)
+    index_value_decls(
+        ast,
+        [],
+        id_to_qname,
+        id_to_decl_kind,
+        _RECORD_DECL_KINDS,
+        _VALUE_DECL_KINDS,
+        _normalize_mangled,
+    )
 
     full_by_id: dict[str, dict[str, Any]] = {}
     _collect_full_specializations(ast, full_by_id)
@@ -1585,6 +1678,10 @@ def parse_clang_ast_templates(ast: dict[str, Any]) -> list[TemplateInstantiation
         resolved_args = _resolve_arg_targets(
             args, id_to_qname, id_to_decl_kind, id_to_template_qname, full_by_id
         )
+        if _has_unresolved_decl_argument(args, resolved_args):
+            # See _has_unresolved_decl_argument's own docstring -- same
+            # reasoning as the opaque-argument skip above.
+            continue
         out.append(
             TemplateInstantiation(
                 kind=_RECORD_KIND,
@@ -1723,13 +1820,12 @@ def augment_graph_with_templates(
 
     Mints a ``template_decl`` node per distinct :attr:`TemplateInstantiation.
     template_qname` and a ``template_instantiation`` node per instantiation,
-    joined by :data:`EDGE_DECL_INSTANTIATES_TEMPLATE`. A resolved argument
-    (:attr:`TemplateArgUse.target_qname` set) gets a
-    :data:`EDGE_TEMPLATE_USES_TYPE` edge onto the same ``record_type``/
-    ``enum_type``/``typedef`` node id :mod:`type_graph`'s own AST-only edges
-    would use for the identical qualified name (``type://<qname>``) — the
-    shared-node-id join, same principle as every other producer in this
-    package.
+    joined by :data:`EDGE_DECL_INSTANTIATES_TEMPLATE`. A resolved *type*
+    argument gets a :data:`EDGE_TEMPLATE_USES_TYPE` edge onto
+    ``type://<qname>``; a resolved *declaration* argument
+    (``target_decl_kind`` in :data:`_VALUE_DECL_KINDS`) gets
+    :data:`EDGE_TEMPLATE_USES_DECL` onto ``decl://<identity>`` instead —
+    the shared-node-id join, same principle as every other producer here.
 
     **An :data:`EDGE_INSTANTIATION_EMITS_SYMBOL` edge is only emitted for a
     mangled name the graph already carries a ``binary_symbol://`` node
@@ -1743,7 +1839,7 @@ def augment_graph_with_templates(
     Returns the number of edges added.
     """
     from .call_graph import _file_in_project
-    from .source_graph import _symbol_node_id, _type_node_id
+    from .source_graph import _decl_node_id, _symbol_node_id, _type_node_id
 
     node_by_id: dict[str, GraphNode] = {n.id: n for n in graph.nodes}
     known_symbols = _symbol_node_ids(graph)
@@ -1815,6 +1911,13 @@ def augment_graph_with_templates(
         for arg in inst.args:
             if not arg.target_qname:
                 continue
+            if arg.target_decl_kind in _VALUE_DECL_KINDS:
+                # TEMPLATE_USES_DECL: target_qname is already the resolved
+                # decl:// identity (see template_graph_value_decls.py).
+                decl_id = _decl_node_id(arg.target_qname)
+                ensure_node(decl_id, NODE_SOURCE_DECL, arg.target_qname)
+                add_edge(inst_id, decl_id, EDGE_TEMPLATE_USES_DECL, CONF_HIGH)
+                continue
             # arg.target_decl_kind is the target's raw clang decl kind
             # (populated by _resolve_arg_targets) -- record_type is still the
             # right default for an unrecognized/absent kind (e.g. a nested
@@ -1880,121 +1983,18 @@ def _merge_template_instantiations(
     )
 
 
-@dataclass
-class ClangTemplateGraphExtractor:
-    """Shell out to ``clang`` to emit a TU's AST and parse its template
-    instantiations.
+# ── Back-compat re-export shim (lazy, to avoid an import cycle) ────────────
+# ClangTemplateGraphExtractor moved to template_graph_extractor.py (this
+# module's own 2000-line hard cap) -- see that module's docstring. A static
+# `from .template_graph_extractor import ClangTemplateGraphExtractor` here
+# would form a real cycle (that module imports names from this one at its
+# own module level); this lazy `__getattr__` (PEP 562) preserves the
+# historical `from .template_graph import ClangTemplateGraphExtractor` path
+# without one.
+def __getattr__(name: str) -> Any:
+    if name == "ClangTemplateGraphExtractor":
+        import importlib
 
-    Side-effecting and compiler-dependent: only exercised on the
-    ``integration`` lane. A missing ``clang`` (or a parse failure) degrades
-    gracefully — extraction returns ``[]`` and records nothing (ADR-028 D3).
-    Reuses ``call_graph``'s vetted parse-only argv builder (same ABI-relevant
-    flag allowlist) so all three AST passes stay in lockstep on what is safe
-    to replay.
-    """
-
-    clang_bin: str = "clang++"
-    diagnostics: list[str] = field(default_factory=list)
-    last_jobs: int = 0
-    last_elapsed_s: float = 0.0
-
-    def available(self) -> bool:
-        return shutil.which(self.clang_bin) is not None
-
-    def _extract_from_safe_args(
-        self, argv: list[str], cwd: str | None = None
-    ) -> list[TemplateInstantiation]:
-        if not self.available():
-            self.diagnostics.append(f"{self.clang_bin} not found in PATH")
-            return []
-        ast = run_clang_ast_dump(
-            self.clang_bin, argv, cwd=cwd, diagnostics=self.diagnostics
-        )
-        if ast is None:
-            return []
-        try:
-            return parse_clang_ast_templates(ast)
-        except (ValueError, RecursionError) as exc:
-            self.diagnostics.append(f"could not parse clang AST JSON: {exc}")
-            return []
-
-    def _extract_from_compile_unit(
-        self, cu: BuildEvidenceCompileUnit
-    ) -> list[TemplateInstantiation]:
-        from .call_graph import _replay_cwd, _safe_clang_args_from_compile_unit
-
-        argv = _safe_clang_args_from_compile_unit(cu)
-        return self._extract_from_safe_args(argv, cwd=_replay_cwd(cu))
-
-    def extract_from_build(self, build: BuildEvidence) -> list[TemplateInstantiation]:
-        """Extract template instantiations across every compile unit in
-        *build* (best effort)."""
-        from .call_graph import _call_graph_jobs, _deadline_bound_worker
-
-        start = time.monotonic()
-        units = [cu for cu in build.compile_units if cu.source]
-        self.last_jobs = _call_graph_jobs(len(units))
-        if not units:
-            self.last_elapsed_s = 0.0
-            return []
-        if not self.available():
-            self.diagnostics.append(f"{self.clang_bin} not found in PATH")
-            self.last_elapsed_s = time.monotonic() - start
-            return []
-
-        all_instantiations: list[TemplateInstantiation] = []
-
-        # Dedup by (kind, template_qname, label) -- two TUs instantiating the
-        # identical template with the identical arguments (a shared public
-        # header) must not double the graph's edge count. A later TU seeing
-        # the same instantiation is merged in (_merge_template_instantiations),
-        # not dropped -- one TU may resolve an argument's target_qname or
-        # reach more of the instantiated members than another (Codex review,
-        # mirrors type_graph.py's own cross-TU merge for the identical
-        # richness gap).
-        # For a function-kind instantiation, disambiguate by its own mangled
-        # name (falling back to label only when unavailable) rather than
-        # (kind, template_qname, label) alone -- two distinct overloads of
-        # the same function template (`f<T>(T)` vs `f<T>(T,T)`) instantiated
-        # with identical template arguments produce the identical label
-        # (arity isn't a template argument), so the plain 3-tuple key would
-        # merge them into one instantiation here too, the same collision
-        # template_instantiation_node_id's own fix addresses (Codex review).
-        # A class-kind instantiation has no such ambiguity (a class template
-        # can't be overloaded), so it keeps the plain key.
-        def dedup_key(inst: TemplateInstantiation) -> tuple[str, str, str]:
-            if inst.kind == _FUNCTION_KIND and inst.emitted_symbols:
-                return (inst.kind, inst.template_qname, inst.emitted_symbols[0])
-            return (inst.kind, inst.template_qname, inst.label)
-
-        seen: dict[tuple[str, str, str], int] = {}
-
-        def add(instantiations: Iterable[TemplateInstantiation]) -> None:
-            for inst in instantiations:
-                key = dedup_key(inst)
-                idx = seen.get(key)
-                if idx is None:
-                    seen[key] = len(all_instantiations)
-                    all_instantiations.append(inst)
-                else:
-                    all_instantiations[idx] = _merge_template_instantiations(
-                        all_instantiations[idx], inst
-                    )
-
-        try:
-            if self.last_jobs > 1 and len(units) > 1:
-                pool_worker = partial(
-                    _deadline_bound_worker,
-                    deadline.current_deadline_ts(),
-                    self._extract_from_compile_unit,
-                )
-                with ThreadPoolExecutor(max_workers=self.last_jobs) as pool:
-                    for instantiations in pool.map(pool_worker, units):
-                        add(instantiations)
-            else:
-                for cu in units:
-                    add(self._extract_from_compile_unit(cu))
-        finally:
-            self.last_elapsed_s = time.monotonic() - start
-
-        return all_instantiations
+        module = importlib.import_module(".template_graph_extractor", __package__)
+        return module.ClangTemplateGraphExtractor
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

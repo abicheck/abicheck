@@ -564,15 +564,27 @@ def fold_template_graph(
     runs the call/type graph (``with_call_graph``), sharing the same
     scoping decision and clang-availability diagnostic story.
     """
+    from . import template_graph
     from .call_graph import (
         extractor_pass_fully_covered,
         narrowed_pass_confirmed,
         project_source_files,
     )
-    from .template_graph import (
-        ClangTemplateGraphExtractor,
-        augment_graph_with_templates,
-    )
+    from .template_graph import augment_graph_with_templates
+
+    # Deliberately `template_graph.ClangTemplateGraphExtractor` (through the
+    # module, not a direct `from .template_graph_extractor import ...`) --
+    # this is what makes `monkeypatch.setattr(template_graph,
+    # "ClangTemplateGraphExtractor", ...)` still redirect this call site, the
+    # exact compatibility guarantee `template_graph_extractor.py`'s own
+    # module docstring documents (Codex review, fresh evidence: an earlier
+    # revision imported the class directly from the new module here, which
+    # silently broke that guarantee for this one caller since a monkeypatch
+    # on `template_graph`'s own attribute no longer had anywhere to be read
+    # from). `template_graph`'s lazy `__getattr__` shim returns `Any`, so
+    # this attribute access itself is untyped -- annotated explicitly here
+    # rather than fixed by bypassing the shim.
+    ClangTemplateGraphExtractor: type[Any] = template_graph.ClangTemplateGraphExtractor
 
     rows = extractors if extractors is not None else []
     extractor = ClangTemplateGraphExtractor(

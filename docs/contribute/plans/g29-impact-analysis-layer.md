@@ -202,8 +202,11 @@ model:
   see Phase 5 item 6 above). **Template instantiation is done**
   (`template_graph.py`, `extractor_passes["template_graph"]`/
   `degraded_passes["template_graph"]` — see Phase 5 item 1 above), for the
-  three populated edge kinds; the four reserved ones (`TEMPLATE_USES_DECL`
-  etc.) remain open, each its own follow-up. **Macro/config dependency is
+  four populated edge kinds (`TEMPLATE_USES_DECL` closed as a follow-up,
+  see item 1's own entry above); the three remaining reserved ones
+  (`INSTANTIATION_MAPS_TO_EXPORT` — intentionally never populated, see
+  item 1 — `DECL_USES_DEFAULT_TEMPLATE_ARG`, `CONSTRAINT_DEPENDS_ON_DECL`)
+  stay open, each its own follow-up. **Macro/config dependency is
   done** (`macro_graph.py`, `extractor_passes["macro_graph"]`/
   `degraded_passes["macro_graph"]` — see Phase 5 item 2 above), for the two
   populated edge kinds (`MACRO_CONTROLS_DECL`/`DECL_USES_MACRO`); the three
@@ -737,8 +740,10 @@ the existing `type_graph.py` walk.
    node — exact, not a textual heuristic) and its instantiated members'
    emitted symbols (joined onto an existing `binary_symbol` node only,
    ADR-057 D1's "one shared node id is the whole join mechanism" rule,
-   reapplied). `TEMPLATE_USES_DECL`/`INSTANTIATION_MAPS_TO_EXPORT`/
-   `DECL_USES_DEFAULT_TEMPLATE_ARG`/`CONSTRAINT_DEPENDS_ON_DECL` remain
+   reapplied). `TEMPLATE_USES_DECL` was reserved at this point and closed
+   as a follow-up — see this item's own dedicated entry below.
+   `INSTANTIATION_MAPS_TO_EXPORT`/`DECL_USES_DEFAULT_TEMPLATE_ARG`/
+   `CONSTRAINT_DEPENDS_ON_DECL` remain
    reserved, unpopulated — see the module's own docstring (a non-type/
    function-pointer argument needing its own AST verification, redundancy
    with `BINARY_EXPORTS_SYMBOL` on the already-joined symbol node,
@@ -747,54 +752,57 @@ the existing `type_graph.py` walk.
    `docs/reference/source-graph-schema.md` for the field-level detail,
    including the two load-bearing empirical AST findings (the explicit-
    instantiation detachment quirk, and typedef-alias argument resolution).
-   **`TEMPLATE_USES_DECL` — re-investigated (2026-08, G29 Phase 5
-   follow-up), the "own AST verification" this needed now done, and a
-   second, deeper blocker found in the process; still deliberately not
-   implemented.** Confirmed against real Clang 18: the canonical
+   **`TEMPLATE_USES_DECL` — implemented (2026-08, G29 Phase 5 follow-up),
+   closing both blockers a prior investigation round found and left
+   unimplemented.** Confirmed against real Clang 18: the canonical
    `ClassTemplateSpecializationDecl`'s own `TemplateArgument` child for a
    declaration-valued NTTP (`template <auto Fn> struct Holder;` /
    `Holder<&detail::f>`) is exactly `{"kind": "TemplateArgument", "decl":
    {"id": "...", "kind": "FunctionDecl", "name": "f", "type": {"qualType":
    "void ()"}}}` — no `type`/`value` key at the `TemplateArgument`'s own
-   top level, so `_template_arg_use` (which requires one or the other)
-   currently returns `None` for it: the argument is silently dropped, not
-   mis-typed. `_first_decl_id` (used for the type-argument case) already
-   finds this shape correctly, since it checks `node.get("decl")` first,
-   pre-order — resolving *that* half is not the blocker. The real blocker
-   is downstream: `_resolve_arg_targets`/`_resolve_specialization_qname`
-   answer "what is this id's *qualified name*" by reading `id_to_qname`,
-   populated by `_index_type_decls` for `_RECORD_DECL_KINDS` only — a
-   `FunctionDecl`/`VarDecl` id is never indexed there at all, so even a
-   correctly-extracted `target_qname` would resolve to `None` downstream
-   today. Closing this needs a **second**, function/variable-scoped index
-   built the same way (own scope-qualified name, from the same whole-TU
-   walk) — not a trivial widen of `_RECORD_DECL_KINDS`, since
-   `_index_type_decls`'s own nested-specialization scoping logic (the
-   "Wrapper<int>::Nested vs Wrapper<double>::Nested" disambiguation
-   immediately below in the same function) is written specifically for
-   record-shaped children and would need its own audit for a
-   function/variable child before trusting it. A second, independent risk
-   found while investigating the fix rather than the gap itself: unlike a
-   type argument (whose `spelling` is clang's own pre-qualified `qualType`
-   printer output, e.g. `"internal::Detail"`), a decl reference's `name` is
-   **bare** (`"f"`, never `"detail::f"`) — `_template_arg_use` itself has
-   no access to the whole-TU scope index needed to qualify it at the point
-   it runs, so a naive `f"&{name}"` spelling would let two distinct
-   decl-valued instantiations that merely *share* an unqualified callee
-   name (`Holder<&ns1::f>` vs. `Holder<&ns2::f>`, or any two same-named
-   functions in different namespaces) collide onto one `template_instantiation`
-   node — silently merging two distinct instantiations' edges, exactly the
-   failure class `_flatten_template_args`'s own opaque-argument guard
-   exists to prevent for a different shape. Fixing the spelling right needs
-   the same new index the target-resolution half needs, threaded back into
-   the label-construction step, not a separate patch. Left unimplemented
-   rather than shipped with a known collision risk on this project's own
-   standard (contrast `type_graph.py`'s equally-investigated
-   `template_param`/`default_template_arg` roles, which had no such risk
-   once implemented) — this is real, scoped follow-up work (a new
-   function/variable qname index, threaded through both target resolution
-   and label construction, verified against an overload/namespace-collision
-   test case before landing), not a drive-by extension of this item.
+   top level. `_template_arg_use` now recognizes this shape directly (a
+   top-level `decl` dict), and `_is_opaque_template_argument` no longer
+   treats it as opaque (it's distinct from a template-template argument's
+   *entirely* bare `{"kind": "TemplateArgument"}`, verified empirically
+   against both real shapes). The resolution blocker — `id_to_qname`
+   (built by `_index_type_decls` for `_RECORD_DECL_KINDS` only) never
+   indexed a `FunctionDecl`/`VarDecl` id — is closed by a **second,
+   independent** whole-TU pass, `index_value_decls` (`template_graph_
+   value_decls.py`, split out to keep `template_graph.py` under its own
+   2000-line hard cap), scoped to free
+   functions and namespace-scope variables only (deliberately not
+   widening `_index_type_decls` itself, since its nested-specialization
+   scoping logic is written specifically for record-shaped children).
+   It computes each target's own `decl://`-node identity via
+   `source_graph.function_decl_identity` — the exact same computation
+   `call_graph.py`/`type_graph.py` already use for their own function/
+   variable declaration nodes — so a resolved `TEMPLATE_USES_DECL` edge
+   lands on the *same* node those modules' own edges would. The second,
+   independent label-collision risk the prior round also flagged (a bare,
+   unqualified `f"&{name}"` spelling letting `Holder<&ns1::f>` and
+   `Holder<&ns2::f>` collide onto one `template_instantiation` node) is
+   closed the same way: `arg_label_spelling` uses the *resolved*
+   `target_qname` (the unique identity string) for a decl-referencing
+   argument's contribution to the instantiation label, not the bare
+   `spelling`, falling back to the bare spelling only when unresolved (the
+   same degrade-gracefully behavior an unresolved type argument already
+   has). A member-function/static-data-member NTTP target is a known,
+   left-open gap — `index_value_decls` deliberately skips class-scope
+   descent entirely rather than risk misattributing a member's identity to
+   its enclosing namespace. See `template_graph.py`'s own docstring and
+   `tests/test_template_graph_value_decls.py`'s dedicated collision
+   regression test
+   (`test_two_instantiations_sharing_only_a_bare_callee_name_stay_distinct`).
+   A separate gap the same investigation round originally flagged and this
+   pass closed too: an argument whose target *is* a decl-referencing NTTP
+   but resolves to no declaration this TU's AST indexes anywhere (e.g. a
+   C++17 address-of-local-static NTTP, which `index_value_decls`
+   deliberately never descends into) used to fall back to the same bare,
+   collidable `spelling` `arg_label_spelling` uses for an unresolved *type*
+   argument — `_has_unresolved_decl_argument` now detects this case (by
+   comparing the pre-resolution argument's own `target_decl_kind` against
+   the post-resolution `target_qname`) and skips the whole instantiation,
+   the same discipline the opaque-argument guard above already applies.
 2. **Macro/config dependency — done.** `abicheck/buildsource/macro_graph.py`
    is a two-pass extractor (a Clang AST pass indexing every declaration's
    own `(file, begin_line, end_line)` span, plus a pure raw-text scan for
@@ -1597,12 +1605,11 @@ the existing `type_graph.py` walk.
    deliberately skips edge emission for `ClassTemplateSpecializationDecl`
    nodes entirely, for an unrelated, already-documented reason: attributing
    one specific instantiation's dependency to the shared generic template
-   node would misattribute it). That is exactly item 1's already-reserved
-   `TEMPLATE_USES_DECL` (`template_graph.py`, "a non-type template argument
-   ... that names a declaration rather than a literal value ... needs its
-   own empirical AST verification") — this item's `template_param` role
-   does not close it, and the original bullet's ambiguous wording should
-   not have been read as claiming it did.
+   node would misattribute it). That is exactly item 1's `TEMPLATE_USES_DECL`
+   (`template_graph.py`) — this item's `template_param` role did not close
+   it (the original bullet's ambiguous wording should not have been read
+   as claiming it did); it was later closed as its own follow-up under
+   item 1, see that entry.
    - **Five were already covered**, by an existing role, and needed no
      producer — the same "closed a gap by discovering pre-existing coverage"
      pattern this plan used for ADR-057 D6's tier 1 and item 3's
@@ -1811,7 +1818,23 @@ impact/composition evidence. Minimal new user-facing set:
 Plus a `RootCauseCorrelator` composer (not a detector) that groups
 `FUNC_REMOVED`/`INTERNAL_SYMBOL_REQUIRED_BY_PUBLIC_API`/
 `CONSUMER_REQUIRED_SYMBOL_REMOVED`/`RUNTIME_LOAD_FAILED` into one root cause
-with per-piece evidence levels (feeds Phase 3's `root_cause_id`).
+with per-piece evidence levels (feeds Phase 3's `root_cause_id`). **The
+correlator itself is done**: `abicheck/impact/correlation.py`'s
+`correlate_root_causes`/`RootCauseGroup` group the four kinds above by
+shared symbol identity (`caused_by_type`-else-`symbol`, the same precedence
+`reporter_markdown._root_cause_key_and_display` uses) and rank each
+member's evidence level (`artifact_proven` → `call_graph_overapprox` →
+`call_graph_proven` → `consumer_proven` → `runtime_proven`) — not purely
+from `ChangeKind`: promoted when `Change.reachability_kind` states a
+stronger tier (`appcompat._attach_consumer_impact` enriching a shared
+`FUNC_REMOVED` in place), downgraded when an `INTERNAL_SYMBOL_REQUIRED_BY_
+PUBLIC_API` finding's own proof path is `internal_leak`'s
+`"overapprox: "`-prefixed over-approximation of a virtual/function-pointer
+dispatch target. **Still open**: wiring its output
+into the JSON/SARIF `root_cause_id`/`impact_group_id` surface (today those
+are still `reporter_markdown`'s independent `caused_by_type`-only grouping,
+per `ImpactAssessment`'s own docstring) and the eight new detector/overlay
+`ChangeKind`s below.
 
 New examples (each needs a negative twin, per the review):
 
@@ -1844,7 +1867,9 @@ abicheck/buildsource/graph_facts.py  # GraphFact/FactConflict/merge, relation_ke
 abicheck/buildsource/graph_impact.py  # select_preferred_graph_path, attach_impact_metadata, _path_occurrence_id (Phase 2 D6/ADR-052 Slice 6, DONE — landed here, not under impact/)
 abicheck/buildsource/entity_resolver.py  # EntityResolver/EntityConflict (Phase 2 D4, DONE — scoped implementation)
 abicheck/buildsource/archive_graph.py  # ar-index introspection (Phase 5 item 6, DONE — archive_member/ARCHIVE_CONTAINS_OBJECT/OBJECT_DEFINES_SYMBOL)
-abicheck/buildsource/template_graph.py  # Clang template-instantiation pass (Phase 5 item 1, DONE — template_decl/template_instantiation, DECL_INSTANTIATES_TEMPLATE/TEMPLATE_USES_TYPE/INSTANTIATION_EMITS_SYMBOL)
+abicheck/buildsource/template_graph.py  # Clang template-instantiation pass (Phase 5 item 1, DONE — template_decl/template_instantiation, DECL_INSTANTIATES_TEMPLATE/TEMPLATE_USES_TYPE/INSTANTIATION_EMITS_SYMBOL/TEMPLATE_USES_DECL)
+abicheck/buildsource/template_graph_value_decls.py  # index_value_decls/arg_label_spelling, split out for TEMPLATE_USES_DECL (Phase 5 item 1 follow-up, DONE — leaf module, no import of template_graph.py even under TYPE_CHECKING)
+abicheck/buildsource/template_graph_extractor.py  # ClangTemplateGraphExtractor, split out of template_graph.py (same line-cap reason); re-exported via a lazy __getattr__ shim
 abicheck/buildsource/macro_graph.py  # Clang + raw-text macro/config-dependency pass (Phase 5 item 2, DONE — MACRO_CONTROLS_DECL/DECL_USES_MACRO)
 abicheck/buildsource/virtual_dispatch_graph.py  # pure graph transform, no clang (Phase 5 item 3, PARTIAL — VIRTUAL_CALL_MAY_DISPATCH_TO/TYPE_HAS_VTABLE; DECL_OVERRIDES_DECL already satisfied by override_graph.py, VTABLE_SLOT_MAPS_TO_DECL reserved)
 abicheck/buildsource/callback_graph.py  # Clang callback/function-pointer pass + pure join (Phase 5 item 4, PARTIAL — DECL_REGISTERS_CALLBACK/DECL_TAKES_ADDRESS_OF/CALLBACK_MAY_INVOKE; FUNCTION_POINTER_HAS_SIGNATURE populated as a node-level fact instead of an edge)
@@ -1852,7 +1877,7 @@ abicheck/internal_leak.py   # TraversalPolicy + effect_transitions (Phase 2 D5, 
 abicheck/impact/
     model.py           # ImpactAssessment, GraphProofPath, FindingDecision (Phase 3 slices 1/7, DONE — ADR-052)
     engine.py           # assess_change(...) (Phase 3 slices 1/7, DONE — ADR-052)
-    correlation.py       # RootCauseCorrelator (Phase 6, not started)
+    correlation.py       # RootCauseCorrelator (Phase 6, DONE — correlate_root_causes/RootCauseGroup; report-surface wiring still open)
     root_causes.py
     consumer_graph.py    # Phase 4 slice 1, DONE — ADR-057 (consumer graph + the source join)
     use_cases.py         # Phase 4 slice 2, DONE — ADR-057 amendment (manifest + use_case/test_case graph join; trace ingestion still not started)
@@ -1924,8 +1949,24 @@ Modified (recurring across phases): `abicheck/buildsource/source_graph.py`,
   the matrix claims with no producer is a false coverage claim), and
   `integration`-marked tests re-deriving every AST shape the fixtures encode
   from a real compiler.
+- `tests/test_template_graph_value_decls.py` — Phase 5 item 1's
+  TEMPLATE_USES_DECL follow-up, done (a sibling split of
+  `test_template_graph.py`, at its own line-count cap): pointer-to-
+  function/pointer-to-variable/reference NTTP resolution to the target's
+  real identity, the unresolved-target and empty-decl-name skip cases, the
+  label-collision regression (two instantiations sharing only a bare
+  callee name across namespaces stay distinct), the `source_decl`-not-
+  `type` node-kind routing and shared-node join, and an `integration`-
+  marked end-to-end test against a real compiler.
 - New per remaining phase: one `test_diff_<family>.py` per Phase 5 graph
-  family, `tests/test_root_cause_correlator.py` (Phase 6).
+  family. `tests/test_root_cause_correlator.py` (Phase 6), done: empty/
+  ignored-kind/singleton no-op cases, two- through four-piece correlation
+  and evidence-level ranking, first-seen group ordering, the
+  outside-the-family non-join guard, the `reachability_kind`-based
+  consumer-proven promotion (and its non-demotion of a stronger kind), the
+  `"overapprox: "`-prefixed call-graph-path downgrade (and that an exact
+  path isn't downgraded, and that it still yields to real consumer proof),
+  and `to_dict()` shape.
 - `tests/test_abi_examples.py` picks up `case194`-`case205` automatically once
   `ground_truth.json` is updated (existing harness, no new test file needed).
 
