@@ -191,6 +191,28 @@ A new changelog fragment. See changelog.d/README.md for the workflow.
   wrapped into `SourceExtractionError`), matching the un-swallowed
   exception `_replay_cache_lookup()`'s own bare `deadline.check()`
   already lets through for this same phase.
+- **Two more gaps closed in `check_fact_compatibility()`'s inconsistent-
+  rollup handling (Codex review):** a matching `hash_recipe_id` on both
+  sides no longer overrides an `old_inconsistent`/`new_inconsistent`
+  flag — `same_recipe` is now also gated on `not inconsistent`, since a
+  hand-authored or forward-produced `source_abi.json` can legally set
+  `fact_set_inconsistent: true` while its `coverage.fact_set` block still
+  carries non-empty, matching representative content on both sides (a
+  shape `rollup_fact_set()` itself never produces, since it always
+  collapses an inconsistent rollup to `{}`, but `check_fact_compatibility`
+  takes `old_fact_set`/`new_fact_set` and the inconsistency flags as
+  independent parameters); without the guard, a matching recipe id there
+  would silently re-enable opaque-hash and source-edge comparisons for a
+  pack whose own TUs disagreed on `fact_set`. Separately,
+  `source_diff._diff_fact_coverage()`'s `has_signal` check now also
+  counts a bare `fact_set_inconsistent: true` flag (both sides' rolled-up
+  `fact_set`/`fact_family_states` can be empty even when the flag alone
+  is the signal — again `rollup_fact_set()`'s own mixed-producer-pack
+  shape) — previously that degraded shape produced `has_signal=False`,
+  so `_diff_fact_coverage()` returned `[]` with no
+  `SOURCE_FACT_COVERAGE_INCOMPLETE` explanation even while `compat`'s own
+  inconsistency-driven suppression silently dropped structured/opaque/
+  source-edge findings underneath it.
 
 - **`CastxmlSourceExtractor.cache_identity_extra()` no longer collapses
   every unparseable/failed `--version` probe to the same uninformative

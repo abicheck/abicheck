@@ -492,8 +492,23 @@ def check_fact_compatibility(
     both_present = bool(old_fact_set) and bool(new_fact_set)
     one_sided = bool(old_fact_set) != bool(new_fact_set)
     inconsistent = old_inconsistent or new_inconsistent
-    same_recipe = both_present and hash_recipe_id(old_fact_set) == hash_recipe_id(
-        new_fact_set
+    # Gated on `not inconsistent` (Codex review, PR #719): `rollup_fact_set()`
+    # itself always collapses an inconsistent side to `{}`, so this couldn't
+    # fire for that caller -- but `old_fact_set`/`new_fact_set` and
+    # `old_inconsistent`/`new_inconsistent` are independent parameters, and a
+    # hand-authored or forward-produced `source_abi.json` can legally set
+    # `fact_set_inconsistent: true` in `coverage` while its `coverage.fact_set`
+    # block still carries non-empty, matching representative content on both
+    # sides. Without this guard a matching `hash_recipe_id` there would
+    # override the inconsistency the same way it overrides an ordinary
+    # producer/version mismatch, silently re-enabling opaque-hash and
+    # source-edge comparisons for a pack whose own TUs disagreed on fact_set
+    # -- exactly the untrustworthy shape `old_inconsistent`/`new_inconsistent`
+    # exist to flag, not something a declared recipe id can vouch for.
+    same_recipe = (
+        both_present
+        and not inconsistent
+        and hash_recipe_id(old_fact_set) == hash_recipe_id(new_fact_set)
     )
     hard_blocked = bool(rules & _HARD_BLOCKING_RULES)
     # No hash_recipe_id override here -- see this function's own docstring

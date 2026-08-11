@@ -748,6 +748,39 @@ def test_check_fact_compatibility_matching_recipe_id_overrides_producer_mismatch
     assert any(i.rule == "producer_mismatch" for i in compat.issues)
 
 
+def test_check_fact_compatibility_matching_recipe_id_does_not_override_inconsistent() -> (
+    None
+):
+    """Codex review, PR #719, follow-up: a matching hash_recipe_id must not
+    re-enable opaque-hash/source-edge comparisons for a side flagged
+    inconsistent -- even though `rollup_fact_set()` itself always collapses
+    an inconsistent rollup to `{}` (so this exact shape can't reach here via
+    that caller), `old_fact_set`/`new_fact_set` and
+    `old_inconsistent`/`new_inconsistent` are independent parameters, and a
+    hand-authored or forward-produced source_abi.json can legally set
+    fact_set_inconsistent=True while still carrying non-empty, matching
+    representative fact_set content on both sides."""
+    old = default_fact_set(producer="p", producer_version="1")
+    old["hash_recipe_id"] = "shared-recipe-v1"
+    new = default_fact_set(producer="p", producer_version="1")
+    new["hash_recipe_id"] = "shared-recipe-v1"
+    # Sanity: without the inconsistency flag, the matching recipe id alone
+    # is enough (both sides otherwise agree on everything already).
+    agreeing = check_fact_compatibility(old, new)
+    assert agreeing.opaque_hashes_comparable
+    assert agreeing.source_edges_comparable
+
+    compat = check_fact_compatibility(old, new, old_inconsistent=True)
+    assert not compat.opaque_hashes_comparable
+    assert not compat.source_edges_comparable
+    assert not compat.structured_content_comparable
+    assert not compat.structured_facts_comparable
+    # The reverse direction (new side inconsistent) must be symmetric.
+    compat_reversed = check_fact_compatibility(old, new, new_inconsistent=True)
+    assert not compat_reversed.opaque_hashes_comparable
+    assert not compat_reversed.source_edges_comparable
+
+
 def test_check_fact_compatibility_both_sides_empty_stays_comparable() -> None:
     """Two genuinely pre-C.8 producers (neither stamps a fact_set at all) must
     not gate anything -- only the informational fact_set_unknown warning
@@ -1106,6 +1139,37 @@ def test_diff_suppresses_content_changes_when_fact_set_empty_from_inconsistency(
     )
     changes = diff_source_abi(old, new)
     kinds = {c.kind for c in changes}
+    assert ChangeKind.PUBLIC_MACRO_VALUE_CHANGED not in kinds
+    assert ChangeKind.PUBLIC_TYPEDEF_TARGET_CHANGED not in kinds
+
+
+def test_diff_reports_coverage_incomplete_from_bare_inconsistent_flag() -> None:
+    """Codex review, PR #719, follow-up: a surface can carry
+    fact_set_inconsistent=True while BOTH fact_set and fact_family_states are
+    empty -- the marker itself is the only signal in that shape, not a
+    supplement to a non-empty fact_set/families block. Previously has_signal
+    only looked at fact_set/fact_family_states, so this degraded shape
+    produced NO SOURCE_FACT_COVERAGE_INCOMPLETE finding at all even though
+    check_fact_compatibility's own old_inconsistent gating was silently
+    suppressing structured/opaque/source-edge comparisons underneath it."""
+    old = _surface(
+        coverage={
+            "fact_set": {},
+            "fact_set_inconsistent": True,
+            "fact_family_states": {},
+        },
+        reachable_macros=[_macro_entity("FOO", "1")],
+        reachable_types=[_typedef_entity("Widget_t", "h1")],
+    )
+    new = _surface(
+        coverage={"fact_set": {}, "fact_family_states": {}},
+        reachable_macros=[_macro_entity("FOO", "2")],
+        reachable_types=[_typedef_entity("Widget_t", "h2")],
+    )
+    changes = diff_source_abi(old, new)
+    kinds = {c.kind for c in changes}
+    assert ChangeKind.SOURCE_FACT_COVERAGE_INCOMPLETE in kinds
+    # And the content-change findings it explains are indeed suppressed.
     assert ChangeKind.PUBLIC_MACRO_VALUE_CHANGED not in kinds
     assert ChangeKind.PUBLIC_TYPEDEF_TARGET_CHANGED not in kinds
 

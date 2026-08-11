@@ -204,8 +204,26 @@ def _diff_fact_coverage(
     new_fact_set = new_fact_set_raw if isinstance(new_fact_set_raw, dict) else {}
     old_families = old_families_raw if isinstance(old_families_raw, dict) else {}
     new_families = new_families_raw if isinstance(new_families_raw, dict) else {}
-
-    has_signal = bool(old_fact_set or new_fact_set or old_families or new_families)
+    # A surface can legitimately carry `fact_set_inconsistent: true` while its
+    # own rolled-up `fact_set`/`fact_family_states` are both empty -- exactly
+    # the shape `rollup_fact_set()` produces for a mixed-producer pack (Codex
+    # review, PR #719): the marker itself IS the signal there, not a
+    # supplement to one. Without including it, `has_signal` reads False, this
+    # function returns `[]` with no explanation, and `compat`'s
+    # inconsistency-driven suppression of structured/opaque/source-edge
+    # comparisons (from `check_fact_compatibility`'s own `old_inconsistent`/
+    # `new_inconsistent` gating) proceeds silently -- findings vanish with no
+    # SOURCE_FACT_COVERAGE_INCOMPLETE to say why.
+    old_inconsistent = _surface_fact_set_inconsistent(old)
+    new_inconsistent = _surface_fact_set_inconsistent(new)
+    has_signal = bool(
+        old_fact_set
+        or new_fact_set
+        or old_families
+        or new_families
+        or old_inconsistent
+        or new_inconsistent
+    )
     issues = list(compat.issues) if has_signal else []
     # A serialized surface's fact_family_states can come from a hand-written
     # or forward-versioned source_abi.json, not just rollup_coverage()'s own
