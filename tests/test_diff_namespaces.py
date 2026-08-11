@@ -326,6 +326,28 @@ class TestExperimentalRemovedWithoutReplacement:
         assert changes[0].kind == ChangeKind.EXPERIMENTAL_REMOVED_WITHOUT_REPLACEMENT
         assert changes[0].symbol == "ns::experimental::sort"
 
+    def test_alias_removal_still_fires_when_same_leaf_target_is_unrelated(
+        self,
+    ) -> None:
+        # Codex review, on the (mangled, leaf)-scoped suppression above: a
+        # matching *leaf* alone is still not enough -- two genuinely
+        # different declarations can coincidentally share both a leaf and
+        # (through unrelated aliasing) a mangled symbol. Here
+        # `api::experimental::sort` is removed while an unrelated
+        # `detail::sort` (different full path, same leaf, same mangled
+        # symbol by construction) survives; the alias itself no longer
+        # compiles for any caller that named it, so this must still fire.
+        old = _snap(funcs=[
+            _fn("api::experimental::sort", mangled="_ZSAME2"),
+        ])
+        new = _snap(funcs=[
+            _fn("detail::sort", mangled="_ZSAME2"),
+        ])
+        changes = detect_experimental_namespace_changes(old, new)
+        assert len(changes) == 1
+        assert changes[0].kind == ChangeKind.EXPERIMENTAL_REMOVED_WITHOUT_REPLACEMENT
+        assert changes[0].symbol == "api::experimental::sort"
+
     def test_silent_function_removal(self) -> None:
         old = _snap(funcs=[_fn("ns::experimental::bar")])
         new = _snap(funcs=[])

@@ -250,32 +250,58 @@ def _index_funcs_by_stable_key(
     return out
 
 
-def _mangled_leaf_pairs(
+def _mangled_stable_keys(
     index: dict[tuple[str, str], list[tuple[str, str]]],
-) -> set[tuple[str, str]]:
+) -> dict[str, set[str]]:
     """Flatten an ``_index_funcs_by_stable_key`` result into
-    ``{(mangled, leaf), ...}``, for :func:`_findings_for`'s removal-
-    suppression check.
+    ``{mangled: {stable_key, ...}, ...}``, for :func:`_findings_for`'s
+    removal-suppression check.
 
-    Scoped to ``(mangled, leaf)`` pairs, not bare mangled values: a mangled
-    symbol surviving *somewhere* in ``new`` is not enough evidence that a
-    specific removed declaration is still reachable under its own name —
-    an experimental alias's underlying symbol can legitimately keep
-    exporting under a completely unrelated declared name (a different
-    leaf) after the alias itself is deleted, and source that named the
-    alias no longer compiles even though the symbol lives on elsewhere
-    (Codex review finding). Requiring the *same leaf* too means this only
-    ever matches a declaration that could plausibly be a differently-
-    qualified spelling of the very declaration being evaluated, which is
-    the shape the original reported bug actually took (a dumper backend
-    re-qualifying the same leaf's namespace path between snapshot sides).
+    A first attempt at this scoped the check to ``(mangled, leaf)`` pairs
+    alone -- but *leaf* (the last "::"-segment) can coincide by pure
+    accident between two genuinely different declarations, e.g. an alias
+    ``api::experimental::sort`` and an unrelated ``detail::sort`` that
+    merely happens to share both the leaf ``sort`` and, through some other
+    aliasing, the same mangled symbol (Codex review, fresh evidence): under
+    a leaf-only check, deleting only the experimental alias would be
+    wrongly suppressed because ``detail::sort`` (a completely different
+    declaration) still satisfies ``(mangled, "sort")``. This function
+    instead reports the full ``stable_key`` (already stripped of any
+    experimental segment) per mangled symbol, so :func:`_findings_for` can
+    additionally check that the surviving declaration's *whole* qualified
+    path -- not just its leaf -- is plausibly a differently-qualified
+    spelling of the one being evaluated (see
+    :func:`_stable_keys_compatible`).
     """
-    return {
-        (mangled, leaf)
-        for (_, leaf), entries in index.items()
-        for _, mangled in entries
-        if mangled
-    }
+    out: dict[str, set[str]] = {}
+    for (stable_key, _leaf), entries in index.items():
+        for _, mangled in entries:
+            if mangled:
+                out.setdefault(mangled, set()).add(stable_key)
+    return out
+
+
+def _stable_keys_compatible(a: str, b: str) -> bool:
+    """Whether stable-keys *a* and *b* could be two different-completeness
+    spellings of the same declaration path, rather than two genuinely
+    different declarations that merely share a trailing segment.
+
+    True when the shorter key's own ``"::"``-segments equal the same
+    number of *trailing* segments of the longer key -- i.e. one is a
+    (possibly bare) suffix of the other (``"check_ranges"`` vs.
+    ``"oneapi::dal::detail::check_ranges"``; ``"ns::check_ranges"`` vs.
+    ``"check_ranges"``). Two keys that both carry multiple segments but
+    diverge anywhere in that trailing run (``"api::sort"`` vs.
+    ``"detail::sort"``) are *not* compatible -- deliberately: when a
+    dumper backend under-qualifies a name it drops a *prefix*, never
+    replaces an inner segment, so a genuine mismatch there means these are
+    two different declarations, not two spellings of one.
+    """
+    segs_a, segs_b = _segments(a), _segments(b)
+    if not segs_a or not segs_b:
+        return False
+    n = min(len(segs_a), len(segs_b))
+    return segs_a[-n:] == segs_b[-n:]
 
 
 def _index_types_by_stable_key(
@@ -440,14 +466,16 @@ def _findings_for(
     (always reliably public) or a ``{qualified_name: ScopeOrigin}`` map for
     the type-sourced path (public only when ``ScopeOrigin.PUBLIC_HEADER``).
     """
-    # Every (mangled, leaf) pair still present anywhere in `new_index`
-    # (function-sourced path only -- always empty for the type-sourced
-    # path, since `_index_types_by_stable_key` carries mangled="").
-    # Confirms a would-be "removed" declaration's underlying symbol is
-    # genuinely gone under its own leaf rather than merely re-bucketed by a
-    # declared-name qualification change between snapshot sides (see
-    # :func:`_classify_experimental_event`/:func:`_mangled_leaf_pairs`).
-    new_mangled_leaf_pairs = _mangled_leaf_pairs(new_index)
+    # Every stable_key still present anywhere in `new_index`, per mangled
+    # symbol (function-sourced path only -- always empty for the
+    # type-sourced path, since `_index_types_by_stable_key` carries
+    # mangled=""). Confirms a would-be "removed" declaration's underlying
+    # symbol is genuinely gone under a *compatible* spelling of its own
+    # qualified path, rather than merely re-bucketed by a declared-name
+    # qualification change between snapshot sides (see
+    # :func:`_classify_experimental_event`/:func:`_mangled_stable_keys`/
+    # :func:`_stable_keys_compatible`).
+    new_mangled_stable_keys = _mangled_stable_keys(new_index)
     out: list[Change] = []
     for (stable_key, leaf), entries in old_index.items():
         old_exp, old_stable = _split_experimental(entries, experimental_namespaces)
@@ -458,7 +486,10 @@ def _findings_for(
             new_entries, experimental_namespaces,
         )
         still_linked = any(
-            mangled and (mangled, leaf) in new_mangled_leaf_pairs
+            mangled and any(
+                _stable_keys_compatible(stable_key, new_stable_key)
+                for new_stable_key in new_mangled_stable_keys.get(mangled, ())
+            )
             for _, mangled in old_exp
         )
         event = _classify_experimental_event(

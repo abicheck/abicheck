@@ -591,6 +591,48 @@ class TestInternalTemplateLeaks:
 
         assert changes == []
 
+    def test_mach_o_leading_underscore_mangled_name_still_demangles(
+        self,
+    ) -> None:
+        # Codex review: a Mach-O direct-clang mangled name carries an extra
+        # platform leading underscore ("__Z...", not "_Z..."), so a bare
+        # `mangled.startswith("_Z")` check never recognizes it and the
+        # detector silently falls back to the differing declared names,
+        # reproducing the very false positive this fix exists to close.
+        import abicheck.demangle as dm
+
+        def fake_demangle(mangled_list: list[str]) -> dict[str, str]:
+            # demangle_batch is always called with the *normalized*
+            # (single-underscore) form.
+            sigs = {
+                "_Zcr1": "oneapi::dal::detail::check_ranges<int>",
+            }
+            return {m: sigs[m] for m in mangled_list if m in sigs}
+
+        orig = dm.demangle_batch
+        dm.demangle_batch = fake_demangle  # type: ignore[assignment]
+        try:
+            # Both declared names already carry "<...>" and a "detail"
+            # segment (so both sides are recognized as internal template
+            # instantiations even without demangling) -- only the *degree*
+            # of outer-namespace qualification differs, exactly like the
+            # bare-vs-qualified case above but exercising a shape that
+            # doesn't depend on demangling succeeding to be classified as
+            # internal in the first place, so a Mach-O prefix bug that
+            # silently skips demangling still reproduces a real leak here.
+            old = _snap(funcs=[_fn("detail::check_ranges<int>", mangled="__Zcr1")])
+            new = _snap(funcs=[
+                _fn(
+                    "oneapi::dal::detail::check_ranges<int>",
+                    mangled="__Zcr1",
+                ),
+            ])
+            changes = detect_internal_template_leaks(old, new)
+        finally:
+            dm.demangle_batch = orig  # type: ignore[assignment]
+
+        assert changes == []
+
 
 # ---------------------------------------------------------------------------
 # CPO_KIND_CHANGED

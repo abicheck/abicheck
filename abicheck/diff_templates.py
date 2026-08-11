@@ -440,12 +440,39 @@ def _public_functions(snap: AbiSnapshot) -> list[Function]:
     return [f for f in snap.functions if f.visibility == Visibility.PUBLIC]
 
 
+def _normalize_mach_o_mangled(mangled: str) -> str:
+    """Strip a Mach-O direct-clang mangled name's extra platform leading
+    underscore (``__Z...`` -> ``_Z...``).
+
+    Mirrors ``diff_cxx_rules._itanium_strip_prefix``'s identical
+    de-prefixing for the same quirk (confirmed via ``dumper_clang.py``'s
+    own ``_visibility()`` docstring: clang's ``mangledName`` is
+    ``"__ZN3lib3addEii"`` on macOS, not the plain Itanium
+    ``"_ZN3lib3addEii"``) -- a bare ``mangled.startswith("_Z")`` check
+    silently skips every symbol on that platform, which would make
+    :func:`_canonical_identity_name` fall back to the very declared-name
+    text this module exists to stop trusting (Codex review finding).
+    """
+    if mangled.startswith("__Z"):
+        return mangled[1:]
+    return mangled
+
+
 def _batch_demangle_for_identity(funcs: list[Function]) -> dict[str, str]:
     """Demangle every real mangled name in *funcs* in one batch call, for
-    :func:`_canonical_identity_name`'s mangled-preferred lookup below."""
+    :func:`_canonical_identity_name`'s mangled-preferred lookup below.
+
+    Keyed by the *normalized* mangled string (Mach-O's extra leading
+    underscore stripped, see :func:`_normalize_mach_o_mangled`) so a
+    lookup by the same normalized form always hits regardless of which
+    platform's raw mangled spelling produced it.
+    """
     from .demangle import demangle_batch
-    mangled = [f.mangled for f in funcs if f.mangled.startswith("_Z")]
-    return demangle_batch(mangled) if mangled else {}
+    normalized = [
+        n for f in funcs
+        if (n := _normalize_mach_o_mangled(f.mangled)).startswith("_Z")
+    ]
+    return demangle_batch(normalized) if normalized else {}
 
 
 def _canonical_identity_name(
@@ -482,9 +509,24 @@ def _canonical_identity_name(
     genuinely diverging from its demangled/underlying name (e.g.
     ``diff_namespaces.detect_std_reexport_removed``'s whole premise is
     that split).
+
+    **Residual gap, deliberately not chased here** (Codex review finding):
+    when no demangler is available at all (no ``cxxfilt`` package and no
+    ``c++filt`` binary on ``PATH`` -- see ``demangle.py``'s own fallback
+    chain), ``demangled`` is empty for every symbol and this falls back to
+    ``_qualified_function_name``'s declared-name-first behavior, so the
+    original false-positive this function exists to fix can still occur
+    in that environment. Closing it would need a structural (no-demangler)
+    Itanium scope parser for this module's own qname-reconstruction needs,
+    the same shape as ``diff_cxx_rules.itanium_scope_components`` -- out of
+    scope for this fix, which targets the reachable case (a real demangler
+    present, the common case this codebase already assumes throughout
+    ``diff_namespaces.py``/``diff_templates.py``'s own batch-demangle
+    helpers).
     """
-    if mangled.startswith("_Z"):
-        resolved = demangled.get(mangled)
+    normalized = _normalize_mach_o_mangled(mangled)
+    if normalized.startswith("_Z"):
+        resolved = demangled.get(normalized)
         if resolved:
             return resolved
     return _qualified_function_name(name, mangled)
