@@ -469,7 +469,7 @@ def _seed_ast_graph(
     # this module's own docstring — so it has the identical per-role fidelity
     # (no known gap for any ``ROLE_COVERAGE_MATRIX`` role, same as the
     # build-integrated pass). Without this, `source_graph_findings.
-    # _role_coverage_disagrees()` would see *no* role key on either side of a
+    # _disagreeing_roles()` would see *no* role key on either side of a
     # header-only-vs-header-only comparison, forever (this pass has never
     # stamped one, in any abicheck version) — reading as vacuous agreement
     # rather than "role coverage unknown," and letting a genuinely new

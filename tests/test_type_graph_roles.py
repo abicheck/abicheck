@@ -43,6 +43,8 @@ from abicheck.buildsource.type_graph import (
     EDGE_DECL_REFERENCES_DECL,
     EDGE_TYPE_HAS_FIELD_TYPE,
     EDGE_TYPE_INHERITS,
+    _anonymous_tag_id_referenced,
+    _declares_anonymous_enum_type,
     parse_clang_ast_types,
 )
 
@@ -274,6 +276,44 @@ def test_anonymous_enum_typedef_that_does_not_own_the_preceding_tag_is_not_match
     typedef_decl["inner"][0]["ownedTagDecl"]["id"] = "0xnotme"
     ast = _tu(_detail_ns(), _namespace("api", enum_decl, typedef_decl))
     assert _find(ast, "enum_underlying") == []
+
+
+def test_anonymous_tag_id_referenced_matches_via_nested_decl_fallback() -> None:
+    """The two id-linkage shapes clang can carry (module docstring: "the two
+    can nest either directly or one inside the other depending on clang's
+    own version") -- a top-level ``ownedTagDecl.id`` (the shape every other
+    fixture here uses) versus a nested ``EnumType.decl.id`` with no
+    ``ownedTagDecl`` at the outer level at all."""
+    assert _anonymous_tag_id_referenced(
+        {
+            "kind": "ElaboratedType",
+            "inner": [{"kind": "EnumType", "decl": {"id": "0x1", "kind": "EnumDecl"}}],
+        },
+        "0x1",
+    )
+
+
+def test_anonymous_tag_id_referenced_rejects_non_dict_and_non_matching_input() -> None:
+    """Defensive guards: a non-dict node (malformed AST) and a node with
+    neither an ``ownedTagDecl`` nor a ``decl`` id match anywhere in its
+    subtree both correctly report no match."""
+    assert not _anonymous_tag_id_referenced("not a dict", "0x1")
+    assert not _anonymous_tag_id_referenced(
+        {"kind": "ElaboratedType", "inner": [{"kind": "EnumType"}]}, "0x1"
+    )
+
+
+def test_declares_anonymous_enum_type_rejects_missing_or_non_dict_type() -> None:
+    """A node with no ``type`` key at all, or a non-dict ``type`` value, is
+    not an anonymous-enum declarator -- distinct from a node whose ``type``
+    is a dict that simply doesn't carry the marker string."""
+    assert not _declares_anonymous_enum_type({"kind": "FieldDecl", "name": "x"})
+    assert not _declares_anonymous_enum_type(
+        {"kind": "FieldDecl", "name": "x", "type": "not a dict"}
+    )
+    assert not _declares_anonymous_enum_type(
+        {"kind": "FieldDecl", "name": "x", "type": {"qualType": "int"}}
+    )
 
 
 def _anonymous_enum(tag_id: str = "0xenum") -> dict:

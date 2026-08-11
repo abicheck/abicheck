@@ -460,13 +460,13 @@ def _dependency_kinds_covered(
     )
 
 
-def _role_coverage_disagrees(
+def _disagreeing_roles(
     old: SourceGraphSummary, new: SourceGraphSummary, pass_name: str, kind: str
-) -> bool:
-    """Whether *old* and *new* disagree on which of *kind*'s
+) -> frozenset[str]:
+    """Which of *kind*'s
     :data:`~abicheck.buildsource.inline_graph_fold.ROLE_COVERAGE_MATRIX`
-    roles *pass_name* actually examined (ADR-046 D3, Codex review, fresh
-    evidence).
+    roles *old* and *new* disagree on *pass_name* having examined (ADR-046
+    D3, Codex review, fresh evidence).
 
     Deliberately stricter than
     :func:`~abicheck.buildsource.inline_graph_fold.role_pass_covered` — that
@@ -487,8 +487,8 @@ def _role_coverage_disagrees(
     know about this role at all," independent of whether it happened to run
     full or narrowed on this particular side.
 
-    Returns ``False`` (no disagreement — safe to trust normally) whenever
-    *kind* has no roles registered in the matrix at all, so a kind
+    Returns ``frozenset()`` (no disagreement — safe to trust normally)
+    whenever *kind* has no roles registered in the matrix at all, so a kind
     :data:`~abicheck.buildsource.inline_graph_fold.ROLE_COVERAGE_MATRIX`
     doesn't track (e.g. ``DECL_CALLS_DECL``, outside this file's own
     ``_DEPENDENCY_EDGE_FAMILIES``) is unaffected.
@@ -503,6 +503,19 @@ def _role_coverage_disagrees(
     there — checking only the build-integrated name would see no key at all
     on a header-only side, for every abicheck version, past or future, and
     that "always absent" is not evidence of agreement.
+
+    Split out from a bare bool-returning predicate (Codex review, fresh
+    evidence, second round): the caller used to discard *kind* from
+    :func:`_common_dependency_edge_kinds`'s whole return set the moment ANY
+    one role disagreed -- so a version-skew comparison where OLD lacks only
+    a newly-added role (e.g. G29 Phase 5 item 5's ``enum_underlying``) but
+    agrees on every established one (``field``/``alias``) silently lost
+    trust for the *entire* ``TYPE_HAS_FIELD_TYPE`` kind, including a
+    genuine new ``field``/``alias``-role dependency that has nothing to do
+    with the new role. Returning the actual disagreeing role set (not just
+    whether one exists) is what lets :func:`_untrusted_dependency_roles`
+    exclude only the disputed roles' own edges from the closure, leaving
+    every role both sides agree on fully trusted.
     """
     from .inline_graph_fold import ROLE_COVERAGE_MATRIX, _role_coverage_key
 
@@ -521,10 +534,63 @@ def _role_coverage_disagrees(
             header_key, False
         ) or graph.narrowed_passes.get(header_key, False)
 
-    for role in ROLE_COVERAGE_MATRIX.get(kind, ()):
-        if _covered(old, role) != _covered(new, role):
-            return True
-    return False
+    return frozenset(
+        role
+        for role in ROLE_COVERAGE_MATRIX.get(kind, ())
+        if _covered(old, role) != _covered(new, role)
+    )
+
+
+def _untrusted_dependency_roles(
+    old: SourceGraphSummary, new: SourceGraphSummary
+) -> dict[str, frozenset[str]]:
+    """``{kind: disagreeing_roles}`` for every dependency-edge kind where
+    *old* and *new* disagree on which :func:`_disagreeing_roles` role a
+    producer version examined -- the role-scoped counterpart of the whole-
+    kind exclusion :func:`_common_dependency_edge_kinds` used to apply.
+    Only kinds with at least one disagreeing role are present."""
+    from .inline_graph_fold import ROLE_COVERAGE_MATRIX
+
+    out: dict[str, frozenset[str]] = {}
+    for pass_name, family in _DEPENDENCY_EDGE_FAMILIES.items():
+        for kind in family:
+            if kind not in ROLE_COVERAGE_MATRIX:
+                continue
+            disagreeing = _disagreeing_roles(old, new, pass_name, kind)
+            if disagreeing:
+                out[kind] = disagreeing
+    return out
+
+
+def _edge_role(e: GraphEdge) -> str:
+    """The effective role an edge carries -- the D2-merged ``resolved`` view
+    when present, falling back to raw ``attrs`` pre-registration, mirroring
+    :meth:`~abicheck.buildsource.graph_facts.GraphEdge.relation_key`."""
+    return str((e.resolved or e.attrs).get("role", ""))
+
+
+def _drop_untrusted_role_edges(
+    graph: SourceGraphSummary, untrusted_roles: dict[str, frozenset[str]]
+) -> SourceGraphSummary:
+    """A shallow copy of *graph* with every edge whose ``(kind, role)`` is in
+    *untrusted_roles* removed -- everything else (nodes, coverage flags,
+    every other edge) is the identical object, only the closure-relevant
+    edge list narrows. Returns *graph* itself, unchanged, when
+    *untrusted_roles* is empty (the overwhelming common case: both sides
+    collected by the same abicheck version, so every role key already
+    agrees) -- no copy needed for a no-op filter."""
+    if not untrusted_roles:
+        return graph
+    import dataclasses
+
+    kept = [
+        e
+        for e in graph.edges
+        if e.kind not in untrusted_roles or _edge_role(e) not in untrusted_roles[e.kind]
+    ]
+    if len(kept) == len(graph.edges):
+        return graph
+    return dataclasses.replace(graph, edges=kept)
 
 
 def _common_dependency_edge_kinds(
@@ -702,30 +768,25 @@ def _common_dependency_edge_kinds(
             new_has = new_present or (kind in new_trusted)
             if old_has and new_has:
                 common.add(kind)
-    # A final, isolated filter (Codex review, fresh evidence) rather than
-    # threading role-awareness through every branch above: a kind admitted
-    # by either the whole-family-widening or per-kind-fallback path is still
-    # only trustworthy if both sides' *producer versions* agree on which
-    # ROLE_COVERAGE_MATRIX roles they examined for it. A collector upgrade
-    # that adds a genuinely new role under an *already-populated* kind (e.g.
-    # G29 Phase 5 item 5's `template_param`/`default_template_arg`/
-    # `enum_underlying`, all riding the pre-existing `TYPE_HAS_FIELD_TYPE`/
-    # `DECL_HAS_TYPE` kinds) is exactly what every check above this one is
-    # blind to: both sides can confirm the coarse family/kind flag while
-    # only the newer side's producer ever looked for the new role,
-    # manufacturing a false `PUBLIC_API_INTERNAL_DEPENDENCY_ADDED` the
-    # moment abicheck itself is upgraded, with no real code change at all
-    # (confirmed by direct reproduction — see ``_role_coverage_disagrees``'s
-    # own docstring and this fix's test coverage). This filter can only ever
-    # *remove* a kind neither branch above would otherwise have admitted,
-    # never add one, so it cannot introduce a new false positive of its own
-    # — and it is a no-op for the overwhelming common case (both sides
-    # collected by the same abicheck version, so every role key already
-    # agrees).
-    for pass_name, family in _DEPENDENCY_EDGE_FAMILIES.items():
-        for kind in family & common:
-            if _role_coverage_disagrees(old, new, pass_name, kind):
-                common.discard(kind)
+    # Role-coverage disagreement (ADR-046 D3, e.g. G29 Phase 5 item 5's
+    # `enum_underlying`/`template_param`/`default_template_arg` riding the
+    # pre-existing `TYPE_HAS_FIELD_TYPE`/`DECL_HAS_TYPE` kinds) is
+    # deliberately NOT filtered here anymore (Codex review, fresh evidence,
+    # second round): an earlier version of this function discarded a kind
+    # from `common` entirely the moment ANY one of its
+    # ROLE_COVERAGE_MATRIX roles disagreed between old/new — but a kind
+    # commonly carries several independent roles (`field`/`alias` alongside
+    # the newer `enum_underlying`/`template_param`/`default_template_arg`
+    # under `TYPE_HAS_FIELD_TYPE`), and a version-skew disagreement on ONE
+    # of them says nothing about whether the two sides agree on the
+    # OTHERS. Discarding the whole kind silently dropped a genuine new
+    # `field`/`alias`-role dependency that has nothing to do with the new
+    # role, the same false-negative shape this whole check exists to
+    # prevent for compatibility reports, just moved to a different axis.
+    # `_untrusted_dependency_roles()` computes the *disagreeing roles only*
+    # for the caller to exclude at the individual-edge level instead — see
+    # its own docstring and `_internal_dependency_findings`, the sole
+    # caller of both.
     return frozenset(common)
 
 
@@ -1334,10 +1395,20 @@ def _internal_dependency_findings(
     # public closure, or no semantic pass at all) cannot make every
     # pre-existing internal dependency look newly added (earlier Codex review).
     common_kinds = _common_dependency_edge_kinds(old, new)
-    if _has_internal_reach_coverage(old, common_kinds) and _has_internal_reach_coverage(
-        new, common_kinds
-    ):
-        new_internal = _public_entry_internal_reach(new, common_kinds)
+    # Role-scoped, not kind-scoped (Codex review, fresh evidence, second
+    # round): a producer-version disagreement on one ROLE_COVERAGE_MATRIX
+    # role (e.g. G29 Phase 5 item 5's `enum_underlying`) must not untrust
+    # a *different*, agreed-upon role sharing the same kind (`field`/
+    # `alias`) — see `_untrusted_dependency_roles`'s own docstring. Only the
+    # disputed roles' own edges are excluded from the closure below; every
+    # role both sides confirm stays fully trusted.
+    untrusted_roles = _untrusted_dependency_roles(old, new)
+    old_closure = _drop_untrusted_role_edges(old, untrusted_roles)
+    new_closure = _drop_untrusted_role_edges(new, untrusted_roles)
+    if _has_internal_reach_coverage(
+        old_closure, common_kinds
+    ) and _has_internal_reach_coverage(new_closure, common_kinds):
+        new_internal = _public_entry_internal_reach(new_closure, common_kinds)
         # Exclude a pair whose *edge* already existed in the old graph, even if
         # the old side never classified its target as internal (eighth Codex
         # review): a Kythe/older-pack target with no SOURCE_DECLARES/
@@ -1346,7 +1417,7 @@ def _internal_dependency_findings(
         # dependency itself is not new, only the classification evidence
         # improved. Raw reachability (ignoring classification) is the
         # authority on whether the edge is new.
-        old_reach = _dependency_reachability(old, common_kinds)
+        old_reach = _dependency_reachability(old_closure, common_kinds)
         newly_internal = {
             (entry, target)
             for entry, target in new_internal
@@ -1364,7 +1435,8 @@ def _internal_dependency_findings(
         target_paths = [
             (t, path)
             for t in raw_targets
-            if (path := _dependency_path(new, common_kinds, entry, t)) is not None
+            if (path := _dependency_path(new_closure, common_kinds, entry, t))
+            is not None
         ]
         proof_paths = [_format_dependency_path(new, path) for _, path in target_paths]
         proof = f" Proof path(s): {'; '.join(proof_paths)}." if proof_paths else ""

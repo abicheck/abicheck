@@ -369,8 +369,8 @@ def _N(nid: str, kind: str, label: str = "", **attrs: object) -> GraphNode:
     return GraphNode(id=nid, kind=kind, label=label or nid, attrs=dict(attrs))
 
 
-def _E(src: str, dst: str, kind: str) -> GraphEdge:
-    return GraphEdge(src=src, dst=dst, kind=kind)
+def _E(src: str, dst: str, kind: str, *, role: str = "") -> GraphEdge:
+    return GraphEdge(src=src, dst=dst, kind=kind, attrs={"role": role} if role else {})
 
 
 def _graph_kinds(old, new) -> list[str]:
@@ -824,7 +824,7 @@ def test_l5_internal_dep_skipped_on_new_role_within_already_covered_kind() -> No
         # Post-item-5 producer: family flag plus the new role's own key,
         # and a first-ever edge riding that new role.
         nodes=nodes,
-        edges=base + [_E("pub", "priv_type", "DECL_HAS_TYPE")],
+        edges=base + [_E("pub", "priv_type", "DECL_HAS_TYPE", role="template_param")],
         extractor_passes={
             "type_graph": True,
             _role_coverage_key("type_graph", "DECL_HAS_TYPE", "template_param"): True,
@@ -832,6 +832,46 @@ def test_l5_internal_dep_skipped_on_new_role_within_already_covered_kind() -> No
     )
     kinds = _graph_kinds(old, new)
     assert ChangeKind.PUBLIC_API_INTERNAL_DEPENDENCY_ADDED.value not in kinds
+
+
+def test_l5_internal_dep_still_flags_an_unrelated_role_under_the_same_kind() -> None:
+    # Codex review, fresh evidence, second round: a version-skew disagreement
+    # on ONE role (`template_param`, new in G29 Phase 5 item 5) must not
+    # untrust every OTHER role sharing the same DECL_HAS_TYPE kind. A
+    # genuinely new `var`-role dependency -- unrelated to the new role --
+    # must still be reported, even though old/new disagree on
+    # `template_param` coverage.
+    nodes = [
+        _N("hdr", "header", "api.h"),
+        _N("pub", "source_decl", "pub()"),
+        _N("sym", "binary_symbol", "pub"),
+        _N(
+            "priv_type",
+            "record_type",
+            "detail::PrivateType",
+            visibility="private_header",
+        ),
+    ]
+    base = [
+        _E("pub", "sym", "SOURCE_DECL_MAPS_TO_SYMBOL"),
+        _E("hdr", "pub", "SOURCE_DECLARES"),
+    ]
+    old = SourceGraphSummary(
+        nodes=nodes, edges=base, extractor_passes={"type_graph": True}
+    )
+    new = SourceGraphSummary(
+        # A first-ever `var`-role edge (unrelated to template_param) alongside
+        # the disagreeing new role's own coverage key -- only template_param
+        # is untrusted, var is unaffected.
+        nodes=nodes,
+        edges=base + [_E("pub", "priv_type", "DECL_HAS_TYPE", role="var")],
+        extractor_passes={
+            "type_graph": True,
+            _role_coverage_key("type_graph", "DECL_HAS_TYPE", "template_param"): True,
+        },
+    )
+    kinds = _graph_kinds(old, new)
+    assert ChangeKind.PUBLIC_API_INTERNAL_DEPENDENCY_ADDED.value in kinds
 
 
 def test_l5_internal_dep_flags_new_edge_when_role_coverage_agrees() -> None:
@@ -1998,7 +2038,7 @@ def test_l5_internal_dep_skipped_on_new_role_within_already_covered_header_only_
         # Post-fix header_graph.py: family flag plus the role's own key,
         # under the header-only alias, and a first-ever edge riding it.
         nodes=nodes,
-        edges=base + [_E("pub", "priv_type", "DECL_HAS_TYPE")],
+        edges=base + [_E("pub", "priv_type", "DECL_HAS_TYPE", role="template_param")],
         extractor_passes={
             "header_type_graph": True,
             _role_coverage_key(
