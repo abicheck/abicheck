@@ -265,6 +265,7 @@ class TestRejectComparisonOnlyFields:
             ({"contract_evaluation": True}, "contract_evaluation"),
             ({"policy_file": object()}, "policy_file"),
             ({"suppression": object()}, "suppression"),
+            ({"max_findings": 5}, "max_findings"),
         ],
     )
     def test_rejects_a_comparison_only_field_without_a_baseline(

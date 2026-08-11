@@ -216,11 +216,8 @@ class ScanRequest:
     lang: str = "c++"
     # L2 header compile context (dump↔scan flag parity, ADR-037 D3).
     compile: CompileContext = field(default_factory=CompileContext)
-    # --against config-surface parity with `compare` (ADR-049 Phase 5 §6.4):
-    # a `baseline` comparison can be scoped/suppressed/policy-classified the
-    # same way a direct `compare` run is, instead of always using the fixed
-    # policy="strict_abi"/suppression=None/scope_to_public_surface=True the
-    # engine previously hardcoded.
+    # --against config-surface parity with `compare` (ADR-049 Phase 5 §6.4): a `baseline` comparison can be scoped/suppressed/policy-classified the
+    # same way a direct `compare` run is, instead of always using the fixed policy="strict_abi"/suppression=None/scope_to_public_surface=True the engine previously hardcoded.
     suppression: SuppressionList | None = None
     policy: str = "strict_abi"
     policy_file: PolicyFile | None = None
@@ -249,9 +246,7 @@ class ScanRequest:
     build_config: Path | None = None
     allow_build_query: bool = False
     risk_rules_path: Path | None = None
-    # ADR-056 D2: caller-declared external DSO allow-list for the
-    # --artifact-set audit-mode bundle detector (closed-world escape hatch).
-    # Unused by run_scan.
+    # ADR-056 D2: caller-declared external DSO allow-list for the --artifact-set audit-mode bundle detector (closed-world escape hatch); unused by run_scan.
     bundle_system_providers: tuple[str, ...] = ()
     # ADR-056: real changed-path provenance (e.g. "--since origin/main" or
     # "--changed-path"), as computed by cli_scan._resolve_changed_seed.
@@ -259,6 +254,8 @@ class ScanRequest:
     # hardcoded placeholder; unused by run_scan (which threads its own
     # changed_src through _run_scan_one_member's caller directly).
     changed_src: str = "run_scan_set"
+    # `--against` summary's findings/suppressed cap; see `scan --max-findings`.
+    max_findings: int | None = None
 
 
 @dataclass(frozen=True)
@@ -1050,6 +1047,7 @@ def _reject_comparison_only_fields(req: ScanRequest) -> None:
             ("collapse_versioned_symbols", req.collapse_versioned_symbols),
             ("contract_evaluation", req.contract_evaluation),
             ("contract_mode", req.contract_mode is not None),
+            ("max_findings", req.max_findings is not None),
         )
         if is_set
     ]
@@ -1326,6 +1324,7 @@ def run_scan(req: ScanRequest) -> ScanResult:
             contract_mode=req.contract_mode,
             resolved_config=_scan_request_config(req),
             abi3_floor=req.abi3_floor,
+            max_findings=req.max_findings,
         )
     except _BudgetOverflow:
         # The failure-guard contract: overflow is exit 5, never a shrunk scope.
