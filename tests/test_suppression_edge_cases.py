@@ -486,10 +486,10 @@ class TestNamespaceGlobstarSemantics:
         # repeated segments and grows rapidly from there, since it isn't
         # the wildcard itself that's exponential, it's the chain of
         # standalone globstars regardless of what borders them.
-        # `_SegmentGlobMatcher` now handles a wildcarded segment the same
-        # way as a literal one (matched against exactly one whole name
-        # segment via a bounded per-segment regex), so every namespace
-        # pattern routes through the non-backtracking DP matcher.
+        # `_SegmentGlobMatcher` now splits the pattern into runs at every
+        # standalone globstar and walks them with a backtracking-safe DP
+        # (see that class's docstring) — matching this pattern's 5
+        # globstars in polynomial time regardless of what borders them.
         import time
 
         s = Suppression(
@@ -504,14 +504,63 @@ class TestNamespaceGlobstarSemantics:
         assert result is False
         assert elapsed < 1.0, f"namespace match took {elapsed:.2f}s — not backtracking-safe"
 
-        # Correctness: the wildcarded segment ("a*") still only matches one
-        # whole name segment, and a genuinely matching long name still
-        # matches.
+        # Correctness: the wildcarded segment ("a*") still matches one
+        # whole name segment (not spanning "::", since it's immediately
+        # bounded by a "::" joiner on both sides within its own run), and
+        # a genuinely matching long name still matches.
         assert s.matches(self._change("a1::a::a::a::a::z"))
         assert s.matches(
             self._change("x::a1::x::x::a::x::x::a::x::x::a::x::x::a::x::a::z")
         )
         assert not s.matches(self._change("a1::a::a::a::a::y"))
+
+    def test_wildcard_still_spans_namespace_separators_without_a_globstar(self):
+        # Codex review, fresh evidence: an early cut of the backtracking-
+        # safe matcher above made *every* namespace pattern route through
+        # per-segment DP, which required a bare "*"/"?" to match exactly
+        # one whole "::"-delimited segment -- a real, silent behavior
+        # change. Real, pre-existing `fnmatch` behavior (predating the
+        # whole globstar rewrite) lets a bare "*" span "::" freely:
+        # verified `fnmatch.fnmatch("oneapi::x::y::detail",
+        # "oneapi::*::detail")` is True. `namespace: "oneapi::*::detail"`
+        # silently stopped matching a real multi-namespace-deep name once
+        # per-segment matching was enforced everywhere. Fixed by only
+        # giving *globstar* boundaries the DP treatment; an ordinary
+        # wildcard's own run is still compiled as one combined regex that
+        # can span its own internal "::" joiners exactly like real
+        # fnmatch always could.
+        s = Suppression(namespace="oneapi::*::detail", reachability="any", reason="x")
+        assert s.matches(self._change("oneapi::x::y::detail"))
+        assert s.matches(self._change("oneapi::x::detail"))
+        assert not s.matches(self._change("oneapi::detail"))
+        assert not s.matches(self._change("other::x::detail"))
+
+    def test_single_globstar_namespace_matching_has_no_measurable_dp_overhead(self):
+        # Codex review: routing *every* namespace pattern (even one with
+        # zero or one globstar, which can never combine into the
+        # combinatorial backtracking this whole fix defuses) through the
+        # general run/DP matcher was a real, measured performance
+        # regression on ordinary suppression matching -- a profiled
+        # `suppression_audit`-shaped benchmark (many short-name findings
+        # audited against a fixed ruleset including one "**::vendorN::*"
+        # rule per group, scripts/benchmark_scaling.py) showed the DP path
+        # costing ~1.6x more per call than the plain compiled regex this
+        # module used before the globstar rewrite, entirely needless when
+        # there is no multi-globstar ambiguity to resolve. A pattern with
+        # at most one globstar now reuses that plain regex again
+        # (`_SegmentGlobMatcher`'s own fast-path docstring) -- this test
+        # pins the *behavior* (which must stay identical either way);
+        # `scripts/benchmark_scaling.py --scenario suppression_audit` is
+        # the actual timing guard.
+        s = Suppression(namespace="**::vendor7::*", reachability="any", reason="x")
+        assert s.matches(self._change("app::vendor7::widget"))
+        assert s.matches(self._change("app::mod::vendor7::widget"))
+        assert not s.matches(self._change("app::vendor7"))
+        # The trailing "*" spans "::" like real fnmatch always could (see
+        # test_wildcard_still_spans_namespace_separators_without_a_globstar) —
+        # not itself confined to one segment.
+        assert s.matches(self._change("app::vendor7::widget::inner"))
+        assert not s.matches(self._change("app::vendor8::widget"))
 
     def test_python314_fnmatch_end_anchor_variant_is_accepted(self):
         # Codex review, verified against Python 3.14.4: fnmatch.translate()
