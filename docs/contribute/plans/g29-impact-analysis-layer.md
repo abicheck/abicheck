@@ -1816,8 +1816,14 @@ correlator itself is done**: `abicheck/impact/correlation.py`'s
 `correlate_root_causes`/`RootCauseGroup` group the four kinds above by
 shared symbol identity (`caused_by_type`-else-`symbol`, the same precedence
 `reporter_markdown._root_cause_key_and_display` uses) and rank each
-member's evidence level (`artifact_proven` → `call_graph_proven` →
-`consumer_proven` → `runtime_proven`). **Still open**: wiring its output
+member's evidence level (`artifact_proven` → `call_graph_overapprox` →
+`call_graph_proven` → `consumer_proven` → `runtime_proven`) — not purely
+from `ChangeKind`: promoted when `Change.reachability_kind` states a
+stronger tier (`appcompat._attach_consumer_impact` enriching a shared
+`FUNC_REMOVED` in place), downgraded when an `INTERNAL_SYMBOL_REQUIRED_BY_
+PUBLIC_API` finding's own proof path is `internal_leak`'s
+`"overapprox: "`-prefixed over-approximation of a virtual/function-pointer
+dispatch target. **Still open**: wiring its output
 into the JSON/SARIF `root_cause_id`/`impact_group_id` surface (today those
 are still `reporter_markdown`'s independent `caused_by_type`-only grouping,
 per `ImpactAssessment`'s own docstring) and the eight new detector/overlay
@@ -1938,7 +1944,11 @@ Modified (recurring across phases): `abicheck/buildsource/source_graph.py`,
   family. `tests/test_root_cause_correlator.py` (Phase 6), done: empty/
   ignored-kind/singleton no-op cases, two- through four-piece correlation
   and evidence-level ranking, first-seen group ordering, the
-  outside-the-family non-join guard, and `to_dict()` shape.
+  outside-the-family non-join guard, the `reachability_kind`-based
+  consumer-proven promotion (and its non-demotion of a stronger kind), the
+  `"overapprox: "`-prefixed call-graph-path downgrade (and that an exact
+  path isn't downgraded, and that it still yields to real consumer proof),
+  and `to_dict()` shape.
 - `tests/test_abi_examples.py` picks up `case194`-`case205` automatically once
   `ground_truth.json` is updated (existing harness, no new test file needed).
 

@@ -146,6 +146,60 @@ class TestCorrelateRootCauses:
             levels_by_kind[ChangeKind.CONSUMER_RUNTIME_LOAD_FAILED] == "runtime_proven"
         )
 
+    def test_overapprox_call_graph_path_is_downgraded(self) -> None:
+        # internal_leak.compute_call_graph_leak_paths prefixes a proof path
+        # crossing a virtual/function-pointer dispatch with "overapprox: "
+        # (ADR-046 D5 effect_transitions) -- it proves *a* possible dispatch
+        # target reaches the internal symbol, not that this exact chain
+        # does, so it must not be read back as the same call_graph_proven
+        # tier an exact chain gets (Codex review, fresh evidence).
+        removed = _change(kind=ChangeKind.FUNC_REMOVED, symbol="internal_helper")
+        leaked = _change(
+            kind=ChangeKind.INTERNAL_SYMBOL_REQUIRED_BY_PUBLIC_API,
+            symbol="internal_helper",
+            caused_by_type="internal_helper",
+            reachability_proof_path="overapprox: pub() --[DECL_CALLS_DECL]--> internal_helper()",
+        )
+        groups = correlate_root_causes([removed, leaked])
+        assert len(groups) == 1
+        group = groups[0]
+        levels_by_kind = {c.kind: level for c, level in group.members}
+        assert (
+            levels_by_kind[ChangeKind.INTERNAL_SYMBOL_REQUIRED_BY_PUBLIC_API]
+            == "call_graph_overapprox"
+        )
+        assert group.strongest_evidence_level == "call_graph_overapprox"
+
+    def test_exact_call_graph_path_is_not_downgraded(self) -> None:
+        removed = _change(kind=ChangeKind.FUNC_REMOVED, symbol="internal_helper")
+        leaked = _change(
+            kind=ChangeKind.INTERNAL_SYMBOL_REQUIRED_BY_PUBLIC_API,
+            symbol="internal_helper",
+            caused_by_type="internal_helper",
+            reachability_proof_path="pub() --[DECL_CALLS_DECL]--> internal_helper()",
+        )
+        groups = correlate_root_causes([removed, leaked])
+        levels_by_kind = {c.kind: level for c, level in groups[0].members}
+        assert (
+            levels_by_kind[ChangeKind.INTERNAL_SYMBOL_REQUIRED_BY_PUBLIC_API]
+            == "call_graph_proven"
+        )
+
+    def test_overapprox_call_graph_path_still_yields_to_consumer_proof(self) -> None:
+        removed = _change(kind=ChangeKind.FUNC_REMOVED, symbol="internal_helper")
+        leaked = _change(
+            kind=ChangeKind.INTERNAL_SYMBOL_REQUIRED_BY_PUBLIC_API,
+            symbol="internal_helper",
+            caused_by_type="internal_helper",
+            reachability_proof_path="overapprox: pub() --[DECL_CALLS_DECL]--> internal_helper()",
+        )
+        overlay = _change(
+            kind=ChangeKind.CONSUMER_REQUIRED_SYMBOL_REMOVED,
+            symbol="internal_helper",
+        )
+        groups = correlate_root_causes([removed, leaked, overlay])
+        assert groups[0].strongest_evidence_level == "consumer_proven"
+
     def test_all_four_kinds_rank_runtime_proven_strongest(self) -> None:
         pieces = [
             _change(kind=ChangeKind.FUNC_REMOVED, symbol="s"),

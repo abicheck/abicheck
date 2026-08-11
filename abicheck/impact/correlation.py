@@ -55,18 +55,34 @@ against). This mirrors ``_root_cause_key_and_display``'s
 four-kind family instead of every ``ChangeKind`` in the report.
 
 Evidence level is derived from :data:`EVIDENCE_LEVEL_BY_KIND` (a per-``kind``
-default), then promoted when ``Change.reachability_kind`` states a stronger
-tier the kind alone wouldn't reveal (see :func:`_evidence_level_for`) — this
-covers ``appcompat._attach_consumer_impact``, which enriches an *existing*
-``FUNC_REMOVED`` in place with ``reachability_kind="consumer_proven"``
-instead of emitting a separate ``CONSUMER_REQUIRED_SYMBOL_REMOVED`` overlay
-whenever ``uncovered_missing_symbols`` finds the symbol already covered
-(Codex review, fresh evidence: without this promotion, a shared Change
-carrying real consumer proof read back as the weaker kind-only
-``artifact_proven``, silently understating a group's
-``strongest_evidence_level``). What this promotion does **not** attempt: a
-``FUNC_REMOVED`` from a header-only comparison (no export table ever
-consulted) still reads as ``artifact_proven`` by default, since nothing in
+default), then adjusted per-``Change`` when a producer recorded something the
+kind alone doesn't reveal (see :func:`_evidence_level_for`):
+
+- **Promoted** to ``"consumer_proven"`` when ``reachability_kind`` says so —
+  this covers ``appcompat._attach_consumer_impact``, which enriches an
+  *existing* ``FUNC_REMOVED`` in place with
+  ``reachability_kind="consumer_proven"`` instead of emitting a separate
+  ``CONSUMER_REQUIRED_SYMBOL_REMOVED`` overlay whenever
+  ``uncovered_missing_symbols`` finds the symbol already covered (Codex
+  review, fresh evidence: without this promotion, a shared Change carrying
+  real consumer proof read back as the weaker kind-only ``artifact_proven``,
+  silently understating a group's ``strongest_evidence_level``).
+- **Downgraded** to ``"call_graph_overapprox"`` when an
+  ``INTERNAL_SYMBOL_REQUIRED_BY_PUBLIC_API`` finding's own
+  ``reachability_proof_path`` carries ``internal_leak.
+  compute_call_graph_leak_paths``'s ``"overapprox: "`` prefix — that path
+  crossed a virtual/function-pointer edge
+  (``CALL_GRAPH_TRAVERSAL_POLICY.effect_transitions``, ADR-046 D5), so it
+  proves *a* possible dispatch target reaches the internal symbol, not that
+  this exact chain does (Codex review, fresh evidence:
+  ``_build_call_graph_leak_change`` always sets
+  ``reachability_state=PROVEN_REACHABLE`` regardless of this degradation, so
+  the proof-path string is the only place the signal survives onto the
+  ``Change`` for this module to read).
+
+What neither adjustment attempts: a ``FUNC_REMOVED`` from a header-only
+comparison (no export table ever consulted) still reads as
+``artifact_proven`` by default, since nothing in
 :class:`~abicheck.checker_types.Change` records *which* evidence tier
 actually produced a given finding — the same per-finding-provenance gap
 ``AGENTS.md``'s "Evidence-provider model" entry documents as a deliberately
@@ -93,14 +109,25 @@ EVIDENCE_LEVEL_BY_KIND: dict[ChangeKind, str] = {
     ChangeKind.CONSUMER_RUNTIME_LOAD_FAILED: "runtime_proven",
 }
 
-#: Rank order for :data:`EVIDENCE_LEVEL_BY_KIND`'s values, weakest first —
-#: used only to pick a group's :attr:`RootCauseGroup.strongest_evidence_level`
-#: and to order :attr:`RootCauseGroup.evidence_levels`; not exposed as a
-#: standalone numeric score since the levels themselves are the stable,
-#: documented vocabulary.
+#: Rank order for every evidence level this module can produce, weakest
+#: first — used only to pick a group's
+#: :attr:`RootCauseGroup.strongest_evidence_level` and to order
+#: :attr:`RootCauseGroup.evidence_levels`; not exposed as a standalone
+#: numeric score since the levels themselves are the stable, documented
+#: vocabulary. ``"call_graph_overapprox"`` is not one of
+#: :data:`EVIDENCE_LEVEL_BY_KIND`'s values — it's a per-``Change`` downgrade
+#: :func:`_evidence_level_for` applies, so it can't be derived from that
+#: dict's values the way the other four levels could; ranked below
+#: ``"call_graph_proven"`` (an approximate dispatch-target proof is weaker
+#: than an exact one) but above ``"artifact_proven"`` (it still proves *some*
+#: reachability path exists, which a bare export-table removal says nothing
+#: about).
 _EVIDENCE_RANK = {
-    level: rank
-    for rank, level in enumerate(dict.fromkeys(EVIDENCE_LEVEL_BY_KIND.values()))
+    "artifact_proven": 0,
+    "call_graph_overapprox": 1,
+    "call_graph_proven": 2,
+    "consumer_proven": 3,
+    "runtime_proven": 4,
 }
 
 
@@ -153,10 +180,29 @@ class RootCauseGroup:
         }
 
 
+def _is_overapprox_call_graph_path(change: Change) -> bool:
+    """True when *change*'s call-graph proof path crossed a virtual/
+    function-pointer dispatch and is therefore an over-approximation, not an
+    exact proof.
+
+    Reads ``reachability_proof_path`` — the one place this signal survives
+    onto the ``Change`` — since :func:`~abicheck.internal_leak.
+    _build_call_graph_leak_change` always sets
+    ``reachability_state=PROVEN_REACHABLE`` regardless of degradation. See
+    :func:`~abicheck.internal_leak.compute_call_graph_leak_paths`'s
+    docstring for the ``"overapprox: "`` prefix this checks for.
+    """
+    path = change.reachability_proof_path
+    return path is not None and path.startswith("overapprox:")
+
+
 def _evidence_level_for(change: Change) -> str:
     """*change*'s evidence level: its kind's default from
-    :data:`EVIDENCE_LEVEL_BY_KIND`, promoted to ``"consumer_proven"`` when
-    ``reachability_kind`` says so and that outranks the kind default.
+    :data:`EVIDENCE_LEVEL_BY_KIND`, then adjusted per the module docstring's
+    "Evidence level is derived..." section — downgraded to
+    ``"call_graph_overapprox"`` for an over-approximate call-graph path, else
+    promoted to ``"consumer_proven"`` when ``reachability_kind`` says so and
+    that outranks the (possibly already-downgraded) base.
 
     Only ever called for a *change* whose ``kind`` is already a key of
     :data:`EVIDENCE_LEVEL_BY_KIND` (:func:`correlate_root_causes` filters to
@@ -164,6 +210,11 @@ def _evidence_level_for(change: Change) -> str:
     ``.get()`` with a ``None`` fallback.
     """
     base = EVIDENCE_LEVEL_BY_KIND[change.kind]
+    if (
+        change.kind == ChangeKind.INTERNAL_SYMBOL_REQUIRED_BY_PUBLIC_API
+        and _is_overapprox_call_graph_path(change)
+    ):
+        base = "call_graph_overapprox"
     if (
         change.reachability_kind == "consumer_proven"
         and _EVIDENCE_RANK["consumer_proven"] > _EVIDENCE_RANK[base]
