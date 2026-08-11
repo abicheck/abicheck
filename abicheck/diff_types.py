@@ -1274,6 +1274,16 @@ def _vtable_transition_rests_on_unresolved_evidence(
         name, new_funcs
     ):
         return False
+    # A virtual-base change is real, independent evidence regardless of
+    # whether size_bits is known on either side (Codex review): it is not
+    # gated behind a known size in _vtable_transition_is_evidenced's own
+    # size-known branch, and must not be treated as unresolved here either
+    # -- otherwise a genuine hierarchy change (also separately reported via
+    # TYPE_BASE_CHANGED/BASE_CLASS_VIRTUAL_CHANGED) could have its
+    # TYPE_VTABLE_CHANGED half demoted to RISK merely because size_bits
+    # happens to be unknown.
+    if list(t_old.virtual_bases) != list(t_new.virtual_bases):
+        return False
     return t_old.size_bits is None or t_new.size_bits is None
 
 

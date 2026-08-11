@@ -644,6 +644,32 @@ class TestVtableChangedDegradedByLayoutUnverifiable:
         assert vtable_change.effective_verdict is None
         assert result.verdict == Verdict.BREAKING
 
+    def test_virtual_base_change_not_demoted_even_with_unknown_size(self) -> None:
+        """A genuine virtual-base addition is real, independent evidence —
+        it must not be demoted just because size_bits also happens to be
+        unknown (and LAYOUT_UNVERIFIABLE also fires for the same type from
+        an unrelated asymmetric layout-descriptor gap) (Codex review, P2
+        follow-up)."""
+        old = _snap(types=[RecordType(
+            name="Foo", kind="class",
+            vtable=[],
+            virtual_bases=[],
+            size_bits=None,
+        )])
+        new = _snap(types=[RecordType(
+            name="Foo", kind="class",
+            vtable=["_ZN3Foo1fEv"],
+            virtual_bases=["Base"],
+            size_bits=None,
+            base_offsets={"Base": 0},  # asymmetric evidence -> LAYOUT_UNVERIFIABLE
+        )])
+        result = compare(old, new)
+        changes_by_kind = {c.kind: c for c in result.changes}
+        assert ChangeKind.LAYOUT_UNVERIFIABLE in changes_by_kind
+        vtable_change = changes_by_kind[ChangeKind.TYPE_VTABLE_CHANGED]
+        assert vtable_change.effective_verdict is None
+        assert result.verdict == Verdict.BREAKING
+
     def test_bare_name_collision_does_not_cross_contaminate(self) -> None:
         """Two distinct types sharing only a bare leaf name in different
         namespaces must not correlate: ``ns2::Foo``'s unresolved layout
