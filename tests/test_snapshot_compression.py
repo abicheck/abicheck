@@ -432,17 +432,24 @@ def test_plain_snapshot_overflow(tmp_path):
         read_snapshot_bytes(p, max_decoded_bytes=100)
 
 
-def test_zstd_max_window_size_is_kibibytes_not_bytes():
-    """Codex review, PR #699: python-zstandard's ``ZstdDecompressor(
-    max_window_size=...)`` takes its argument in *kibibytes*, confirmed
-    against its own docstring -- passing a raw byte count (as an earlier
-    version of this module did) silently permitted a window 1024x larger
-    than the documented "2 GiB window ceiling" (effectively ~2 TiB)."""
-    from abicheck.snapshot_io import _ZSTD_MAX_WINDOW_LOG, _ZSTD_MAX_WINDOW_SIZE_KIB
+def test_zstd_max_window_size_is_bytes_not_kibibytes():
+    """python-zstandard's ``ZstdDecompressor(max_window_size=...)`` docstring
+    *claims* kibibytes, but the underlying implementation (both the C
+    extension and ``backend_cffi.py``'s ``_ensure_dctx``) passes the value
+    straight through to ``ZSTD_DCtx_setMaxWindowSize()`` with no ``* 1024``
+    -- and that libzstd API takes a raw byte count. An earlier revision of
+    this module divided the intended byte ceiling by 1024 (reading the
+    docstring at face value), which shrank the accepted window to
+    1/1024th of the intended 2 GiB and made any snapshot compressed with a
+    real multi-megabyte window (e.g. the writer's 8 MiB baseline level)
+    undecodable. See ``test_zstd_decoder_rejects_realistic_writer_window``
+    below for the end-to-end repro of that failure mode."""
+    from abicheck.snapshot_io import _ZSTD_MAX_WINDOW_LOG, _ZSTD_MAX_WINDOW_SIZE_BYTES
 
-    intended_byte_ceiling = 1 << _ZSTD_MAX_WINDOW_LOG
-    assert _ZSTD_MAX_WINDOW_SIZE_KIB * 1024 == intended_byte_ceiling
-    assert intended_byte_ceiling == 2 * 1024 * 1024 * 1024  # 2 GiB, per the comment
+    assert _ZSTD_MAX_WINDOW_SIZE_BYTES == 1 << _ZSTD_MAX_WINDOW_LOG
+    assert (
+        _ZSTD_MAX_WINDOW_SIZE_BYTES == 2 * 1024 * 1024 * 1024
+    )  # 2 GiB, per the comment
 
 
 def test_zstd_decoder_rejects_window_above_ceiling(tmp_path):
@@ -451,7 +458,7 @@ def test_zstd_decoder_rejects_window_above_ceiling(tmp_path):
     not silently allow an oversized one because of a unit-conversion bug.
     zstd's own ZSTD_WINDOWLOG_MAX is 31 (2 GiB) on a 64-bit build, i.e.
     exactly this module's ceiling, so a legitimate max-size frame (window_log
-    31) must still decode successfully with the fixed KiB-denominated value
+    31) must still decode successfully with the fixed byte-denominated value
     -- if the conversion silently permitted a *smaller* effective window than
     intended, this would fail instead."""
     zstandard = pytest.importorskip("zstandard")
@@ -466,6 +473,38 @@ def test_zstd_decoder_rejects_window_above_ceiling(tmp_path):
     # succeed rather than raising "too much memory" for a legitimate,
     # at-the-ceiling window.
     assert read_snapshot_bytes(p) == b"a" * (1 << 20)
+
+
+def test_zstd_decoder_rejects_realistic_writer_window(tmp_path):
+    """End-to-end repro of the KiB/bytes unit bug: a frame whose *actually
+    required* window (not just its nominal window_log ceiling -- see the
+    highly-compressible fixture in `test_zstd_decoder_rejects_window_above_
+    ceiling` above, whose real required window collapses to far less than
+    its window_log) is a realistic multi-megabyte size, matching what the
+    writer picks at its baseline compression level. Low-entropy data lets
+    the *frame's own recorded window_size* stay large despite compressing
+    well, so this exercises the real ceiling instead of coincidentally
+    fitting under the pre-fix (1/1024th) ceiling too. Confirmed the old,
+    KiB-denominated ceiling (2097152, interpreted as raw bytes by
+    python-zstandard) rejects this frame with "Frame requires too much
+    memory for decoding", while the fixed byte ceiling decodes it."""
+    zstandard = pytest.importorskip("zstandard")
+    import random
+
+    random.seed(2026)
+    # An 8 MiB window (window_log=23), with enough genuinely incompressible
+    # payload that the frame's recorded window_size stays at the full 8 MiB
+    # rather than collapsing to the (smaller) content size.
+    payload = bytes(random.randrange(256) for _ in range(9 * 1024 * 1024))
+    params = zstandard.ZstdCompressionParameters.from_level(19, window_log=23)
+    cctx = zstandard.ZstdCompressor(compression_params=params)
+    compressed = cctx.compress(payload)
+    frame = zstandard.get_frame_parameters(compressed)
+    assert frame.window_size == 8 * 1024 * 1024
+
+    p = tmp_path / "realistic_window.abicheck.json.zst"
+    p.write_bytes(compressed)
+    assert read_snapshot_bytes(p, max_decoded_bytes=len(payload) + 10) == payload
 
 
 def test_oversized_stored_file_rejected_before_full_read(tmp_path, monkeypatch):

@@ -117,15 +117,23 @@ DEFAULT_MAX_STORED_BYTES = 2 * 1024 * 1024 * 1024  # 2 GiB
 # zstd window-size bound, independent of the decoded-size limit above: caps
 # how much memory a hostile frame can force the decompressor to allocate for
 # its sliding window, regardless of how much data it claims/produces.
-# ``python-zstandard``'s ``ZstdDecompressor(max_window_size=...)`` takes this
-# value in *kibibytes*, not bytes (confirmed against its own docstring: "an
-# upper limit on the window size for decompression operations in kibibytes")
-# -- passing a raw byte count here would silently permit a window 1024x
-# larger than intended. `_ZSTD_MAX_WINDOW_SIZE_KIB` is the value actually
-# passed to the constructor; the bit-shift below only sizes the byte ceiling
-# this comment/the ADR describe.
+# ``python-zstandard``'s ``ZstdDecompressor(max_window_size=...)`` docstring
+# claims this value is in *kibibytes*, but the underlying implementation
+# (``backend_cffi.py``'s ``_ensure_dctx``, and the C extension alike) passes
+# it straight through to ``ZSTD_DCtx_setMaxWindowSize()`` with no `* 1024`
+# anywhere -- and that libzstd API takes a raw *byte* count. Confirmed
+# empirically: decompressing a real frame with an 8 MiB window succeeds with
+# ``max_window_size=8 * 1024 * 1024`` and fails with
+# ``max_window_size=8 * 1024`` (the KiB-scaled value the docstring implies),
+# so the parameter is bytes in practice, not KiB. `_ZSTD_MAX_WINDOW_SIZE_BYTES`
+# is the value actually passed to the constructor; dividing it by 1024 (as an
+# earlier revision of this module did, reading the docstring at face value)
+# silently shrank the accepted window to 1/1024th of the intended ceiling,
+# making any snapshot the writer compressed with a larger window
+# undecodable. See ADR-059 §8, which already documents the ceiling in bytes
+# (`max_window_size = 1 << 31`).
 _ZSTD_MAX_WINDOW_LOG = 31  # 2 GiB window ceiling
-_ZSTD_MAX_WINDOW_SIZE_KIB = (1 << _ZSTD_MAX_WINDOW_LOG) // 1024
+_ZSTD_MAX_WINDOW_SIZE_BYTES = 1 << _ZSTD_MAX_WINDOW_LOG
 
 _MAX_DECODED_BYTES_ENV = "_ABICHECK_SNAPSHOT_MAX_DECODED_BYTES"
 _MAX_STORED_BYTES_ENV = "_ABICHECK_SNAPSHOT_MAX_STORED_BYTES"
@@ -343,7 +351,7 @@ def _decompress_gzip(data: bytes, *, max_decoded_bytes: int, source: str) -> byt
 
 def _decompress_zstd(data: bytes, *, max_decoded_bytes: int, source: str) -> bytes:
     zstandard = _zstd_module()
-    dctx = zstandard.ZstdDecompressor(max_window_size=_ZSTD_MAX_WINDOW_SIZE_KIB)
+    dctx = zstandard.ZstdDecompressor(max_window_size=_ZSTD_MAX_WINDOW_SIZE_BYTES)
     out = io.BytesIO()
     try:
         with dctx.stream_reader(io.BytesIO(data)) as reader:
@@ -593,7 +601,7 @@ def _try_decode_prefix(
             with gzip.GzipFile(fileobj=io.BytesIO(head), mode="rb") as gz:
                 return bytes(gz.read(n))
         zstandard = _zstd_module()
-        dctx = zstandard.ZstdDecompressor(max_window_size=_ZSTD_MAX_WINDOW_SIZE_KIB)
+        dctx = zstandard.ZstdDecompressor(max_window_size=_ZSTD_MAX_WINDOW_SIZE_BYTES)
         with dctx.stream_reader(io.BytesIO(head)) as reader:
             return bytes(reader.read(n))
     except Exception:
