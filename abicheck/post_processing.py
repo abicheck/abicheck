@@ -38,6 +38,7 @@ from .post_processing_reachability import MarkReachability as MarkReachability
 if TYPE_CHECKING:
     from .checker_types import Change
     from .model import AbiSnapshot
+    from .policy_file import PolicyFile
     from .suppression import Suppression, SuppressionList
 
 
@@ -224,40 +225,75 @@ class SuppressLayoutUnverifiableCoveredByVtableChanged:
     and (b) means a ``TYPE_VTABLE_CHANGED`` later excluded as
     out-of-public-surface no longer prevents its now-orphaned
     ``LAYOUT_UNVERIFIABLE`` from still contributing to the verdict via
-    ``ctx.redundant`` (unlike ``ctx.out_of_surface``, which does not).
+    ``ctx.redundant`` (unlike ``ctx.out_of_surface``, which does not; a
+    ``checker.compare``-level check still guards the reverse ordering
+    problem where ``DemoteUnreachableInternalChurn``, which runs even later,
+    demotes the covering finding *after* this step already folded its pair —
+    see ``checker._vtable_gap_finding_is_verdict_subsumed``'s own docstring).
+
+    The fold itself only happens when the covering finding's own
+    *policy-resolved* verdict (``ctx.policy``/``ctx.policy_file``, resolved
+    right here rather than deferred) is at least as severe as the redundant
+    finding's own would be (Codex review, fresh evidence) — otherwise it is
+    left untouched in ``changes``. This is deliberately decided *before* the
+    finding leaves ``changes``, not after: an earlier revision computed this
+    same comparison only in ``checker.compare()``, after unconditionally
+    folding first, which correctly fixed the legacy ``DiffResult.verdict``
+    but left every *other* consumer of ``DiffResult.changes`` blind to a
+    non-subsumed finding — the severity-scheme exit code
+    (``severity.compute_exit_code``, called with ``result.changes`` at
+    several call sites in ``cli.py``/``cli_compare_release_helpers.py``/
+    ``cli_helpers_compare.py``/``reporter_markdown.py``) and the JSON/SARIF
+    severity gate (``reporter._build_severity_json``,
+    ``sarif._severity_gate_properties``) all read ``DiffResult.changes``
+    directly and never saw the finding once it moved to
+    ``redundant_changes``, regardless of what the legacy verdict said.
+    Deciding here instead means a non-subsumed finding is simply never
+    removed from ``changes`` — every consumer of that one canonical list
+    sees it, with nothing to special-case downstream.
 
     ``caused_by_type`` is tagged with the
-    ``VTABLE_COVERS_UNVERIFIABLE_LAYOUT_GAP_PREFIX`` marker (not just the
-    bare qualified name) so ``checker.compare``'s ``verdict_redundant``
-    filter excludes it from verdict computation entirely — mirroring the
-    ``"rename:"`` exclusion ``SuppressRenamedPairs`` already relies on for
-    the identical reason (Codex review): without it, this finding would
-    still count toward the verdict via ``ctx.redundant`` even after a
-    policy override or suppression rule targeting the covering
-    ``TYPE_VTABLE_CHANGED`` had already resolved it.
+    ``VTABLE_COVERS_UNVERIFIABLE_LAYOUT_GAP_PREFIX`` marker on a finding that
+    *is* folded, so ``checker.compare``'s ``verdict_redundant`` filter can
+    still recognize and exclude it from legacy-verdict computation —
+    mirroring the ``"rename:"`` exclusion ``SuppressRenamedPairs`` already
+    relies on for the identical reason. By the time that check runs, folding
+    already guarantees subsumption, so it only needs to additionally guard
+    the ``DemoteUnreachableInternalChurn`` ordering case above — it no
+    longer re-derives the policy comparison itself.
     """
 
     name = "suppress_layout_unverifiable_covered_by_vtable_changed"
 
     def run(self, changes: list[Change], ctx: PipelineContext) -> list[Change]:
-        from .checker_policy import ChangeKind
+        from .checker_policy import ChangeKind, Verdict, compute_verdict
         from .checker_types import VTABLE_COVERS_UNVERIFIABLE_LAYOUT_GAP_PREFIX
+        from .policy_file import _VERDICT_ORDER
 
-        covered_types = {
-            c.qualified_name
+        def _resolved_verdict(change: Change) -> Verdict:
+            if ctx.policy_file is not None:
+                return ctx.policy_file.compute_verdict([change])
+            return compute_verdict([change], policy=ctx.policy)
+
+        covering_by_type: dict[str, Change] = {
+            c.qualified_name: c
             for c in changes
             if c.kind == ChangeKind.TYPE_VTABLE_CHANGED
             and c.vtable_covers_unverifiable_layout_gap
             and c.qualified_name
         }
-        if not covered_types:
+        if not covering_by_type:
             return changes
         kept: list[Change] = []
         for c in changes:
-            if (
-                c.kind == ChangeKind.LAYOUT_UNVERIFIABLE
-                and c.qualified_name in covered_types
-            ):
+            covering = (
+                covering_by_type.get(c.qualified_name or "")
+                if c.kind == ChangeKind.LAYOUT_UNVERIFIABLE
+                else None
+            )
+            if covering is not None and _VERDICT_ORDER.index(
+                _resolved_verdict(covering)
+            ) >= _VERDICT_ORDER.index(_resolved_verdict(c)):
                 c.caused_by_type = (
                     f"{VTABLE_COVERS_UNVERIFIABLE_LAYOUT_GAP_PREFIX}{c.qualified_name}"
                 )
@@ -1409,6 +1445,11 @@ class PostProcessingPipeline:
         # for scope_to_public_surface would instead bind `True` here and
         # leave scoping disabled, with no error).
         internal_namespaces: tuple[str, ...] | None = None,
+        # Same append-only rule (Codex review, fresh evidence): see
+        # PipelineContext.policy's own docstring for why
+        # SuppressLayoutUnverifiableCoveredByVtableChanged needs these.
+        policy: str = "strict_abi",
+        policy_file: PolicyFile | None = None,
     ) -> PipelineContext:
         """Run all steps, returning the final PipelineContext."""
         ctx = PipelineContext(
@@ -1421,6 +1462,8 @@ class PostProcessingPipeline:
             force_public_symbols=set(force_public_symbols or set()),
             collapse_versioned_symbols=collapse_versioned_symbols,
             public_surface_allowlist=public_surface_allowlist,
+            policy=policy,
+            policy_file=policy_file,
         )
         # ``FilterRedundant`` sets ``ctx.kept = kept`` — an *aliasing* contract,
         # not a snapshot: every step from that point on is required to either

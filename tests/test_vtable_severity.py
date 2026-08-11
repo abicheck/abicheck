@@ -973,9 +973,13 @@ class TestLayoutUnverifiableSuppressedByVtableChanged:
         flagged: overriding ONLY the covering TYPE_VTABLE_CHANGED to
         compatible, while LAYOUT_UNVERIFIABLE keeps its own RISK default,
         must NOT silently drop LAYOUT_UNVERIFIABLE's own policy-resolved
-        contribution — the fold's "fully subsumed" premise no longer holds
-        once the covering finding's resolved severity is lower than the
-        redundant finding's own, so the verdict must still reflect it."""
+        contribution. The subsumption check now runs *before* the fold
+        (Codex review), so a non-subsumed LAYOUT_UNVERIFIABLE is simply
+        never folded in the first place — it stays a normal, visible
+        top-level finding in ``result.changes`` rather than moving through
+        ``redundant_changes``, which is what keeps every exit-code/gate
+        consumer that reads ``result.changes`` directly (not just the
+        legacy verdict) able to see it."""
         old = _snap(
             types=[
                 RecordType(
@@ -1003,8 +1007,60 @@ class TestLayoutUnverifiableSuppressedByVtableChanged:
         )
         result = compare(old, new, policy_file=pf)
         assert result.verdict == Verdict.COMPATIBLE_WITH_RISK
+        changes_kinds = {c.kind for c in result.changes}
+        assert ChangeKind.LAYOUT_UNVERIFIABLE in changes_kinds
         redundant_kinds = {c.kind for c in result.redundant_changes}
-        assert ChangeKind.LAYOUT_UNVERIFIABLE in redundant_kinds
+        assert ChangeKind.LAYOUT_UNVERIFIABLE not in redundant_kinds
+
+    def test_non_subsumed_finding_reaches_the_severity_exit_code_gate(self) -> None:
+        """End-to-end regression for the exact gap Codex review found: the
+        severity-scheme exit code (``severity.compute_exit_code``) is a
+        *separate* consumer from the legacy verdict, and reads
+        ``result.changes`` directly — several CLI/reporter call sites do the
+        same. A non-subsumed LAYOUT_UNVERIFIABLE must be visible to it, not
+        just to ``result.verdict``."""
+        from abicheck.severity import SeverityConfig, SeverityLevel, compute_exit_code
+
+        old = _snap(
+            types=[
+                RecordType(
+                    name="Foo",
+                    kind="class",
+                    vtable=[],
+                    size_bits=None,
+                )
+            ]
+        )
+        new = _snap(
+            types=[
+                RecordType(
+                    name="Foo",
+                    kind="class",
+                    vtable=["_ZN3Foo1fEv"],
+                    size_bits=None,
+                    base_offsets={"Base": 0},
+                )
+            ]
+        )
+        pf = PolicyFile(
+            base_policy="strict_abi",
+            overrides={ChangeKind.TYPE_VTABLE_CHANGED: Verdict.COMPATIBLE},
+        )
+        result = compare(old, new, policy_file=pf)
+        cfg = SeverityConfig(
+            abi_breaking=SeverityLevel.INFO,
+            potential_breaking=SeverityLevel.ERROR,
+            quality_issues=SeverityLevel.INFO,
+            addition=SeverityLevel.INFO,
+        )
+        exit_code = compute_exit_code(
+            result.changes,
+            cfg,
+            policy=result.policy,
+            kind_sets=result._effective_kind_sets(),
+            policy_file=result.policy_file,
+        )
+        assert exit_code != 0
 
     def test_folded_finding_excluded_when_covering_demoted_as_unreachable_internal(
         self,

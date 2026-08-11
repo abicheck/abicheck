@@ -168,47 +168,34 @@ def _vtable_gap_finding_is_verdict_subsumed(
     redundant_change: Change,
     kept: list[Change],
     out_of_surface: list[Change],
-    policy: str,
-    policy_file: PolicyFile | None,
 ) -> bool:
     """True iff *redundant_change* (a ``LAYOUT_UNVERIFIABLE`` folded by
     ``SuppressLayoutUnverifiableCoveredByVtableChanged``) may safely be
     excluded from ``verdict_redundant``.
 
-    The fold's premise -- this finding adds no new information because a
-    stronger, already-counted ``TYPE_VTABLE_CHANGED`` covers the identical
-    evidence gap -- only holds when the covering finding's own
-    *policy-resolved* verdict is at least as severe as this finding's own
-    policy-resolved verdict would be (Codex review). Under the unconfigured
-    default policy it always holds (BREAKING already dominates RISK), which
-    is why this was missed initially: the exclusion was added, and tested,
-    against exactly the case where it happens to be a no-op. It stops
-    holding the moment a policy overrides either kind independently -- e.g.
-    ``type_vtable_changed: ignore`` while ``layout_unverifiable`` keeps its
-    RISK default, or a policy that explicitly raises
-    ``layout_unverifiable``'s own severity -- at which point blindly
-    excluding the redundant finding would silently defeat that override
-    instead of reflecting it.
+    The policy-severity comparison this used to make itself now happens
+    *before* the fold, inside ``SuppressLayoutUnverifiableCoveredByVtableChanged``
+    (Codex review, fresh evidence): folding only ever happens when the
+    covering finding's resolved verdict already subsumes this one, so by
+    construction, if the covering ``TYPE_VTABLE_CHANGED`` is still present in
+    ``kept`` here, subsumption already holds and there is nothing left to
+    recompute. See that step's own docstring for why deciding earlier,
+    rather than after the fold as an earlier revision of this function did,
+    matters: several exit-code/gate consumers besides the legacy verdict
+    read ``DiffResult.changes`` directly and never saw a non-subsumed
+    finding once it had already been moved to ``redundant_changes``.
 
-    Resolves both findings' verdicts through the exact same
-    ``_compute_verdict_for`` path the real verdict computation uses (for
-    both the named-``policy`` and ``policy_file`` cases), so this can never
-    drift from how the verdict is actually scored.
-
-    The covering finding is looked up in *two* buckets, not just ``kept``
-    (Codex review, fresh evidence): ``SuppressLayoutUnverifiableCoveredByVtableChanged``
-    runs before ``DetectInternalLeaks``/``DemoteUnreachableInternalChurn``, so
-    a covering ``TYPE_VTABLE_CHANGED`` on a confirmed-unreachable internal
+    What *does* still need checking here is a second, independent way the
+    covering finding can stop counting: ``SuppressLayoutUnverifiableCoveredByVtableChanged``
+    runs before ``DetectInternalLeaks``/``DemoteUnreachableInternalChurn``,
+    so a covering ``TYPE_VTABLE_CHANGED`` on a confirmed-unreachable internal
     type can itself be demoted to ``out_of_surface`` *after* the fold already
     happened. An out-of-surface finding contributes nothing to the verdict by
-    design (that demotion's whole point) -- so the paired
-    ``LAYOUT_UNVERIFIABLE`` about the exact same type must be excluded too,
-    unconditionally, rather than falling through to the "covering vanished,
-    stay conservative" branch and silently resurrecting a verdict
-    contribution for a type already proven outside the public surface.
+    design -- so the paired ``LAYOUT_UNVERIFIABLE`` about the exact same type
+    must be excluded too, unconditionally, rather than silently resurrecting
+    a verdict contribution for a type already proven outside the public
+    surface.
     """
-    from .policy_file import _VERDICT_ORDER
-
     tag = (redundant_change.caused_by_type or "")[
         len(VTABLE_COVERS_UNVERIFIABLE_LAYOUT_GAP_PREFIX) :
     ]
@@ -216,15 +203,9 @@ def _vtable_gap_finding_is_verdict_subsumed(
     def _is_covering(c: Change) -> bool:
         return c.kind is ChangeKind.TYPE_VTABLE_CHANGED and c.qualified_name == tag
 
-    covering = next((k for k in kept if _is_covering(k)), None)
-    if covering is not None:
-        redundant_v = _compute_verdict_for([redundant_change], policy, policy_file)
-        covering_v = _compute_verdict_for([covering], policy, policy_file)
-        return _VERDICT_ORDER.index(covering_v) >= _VERDICT_ORDER.index(redundant_v)
+    if any(_is_covering(c) for c in kept):
+        return True
     if any(_is_covering(c) for c in out_of_surface):
-        # The covering finding was proven out-of-surface after the fold ran
-        # -- it contributes nothing to the verdict, and neither should this
-        # finding about the identical (now confirmed-private) type.
         return True
     # The covering finding is missing from both buckets for some other,
     # genuinely unexpected reason -- stay conservative and count the
@@ -528,6 +509,7 @@ def _run_post_processing(
     force_public_symbols: set[str] | None,
     collapse_versioned_symbols: bool,
     public_surface_allowlist: set[str] | None = None,
+    policy: str = "strict_abi",
 ) -> tuple[
     list[Change],
     list[Change],
@@ -558,6 +540,8 @@ def _run_post_processing(
         force_public_symbols=force_public_symbols,
         collapse_versioned_symbols=collapse_versioned_symbols,
         public_surface_allowlist=public_surface_allowlist,
+        policy=policy,
+        policy_file=policy_file,
     )
     # scoping is "resolved" unless it was requested and had to fall back to the
     # full export table (issue #235: an unconfirmed scope must not read as a
@@ -963,6 +947,7 @@ def compare(
         force_public_symbols,
         collapse_versioned_symbols,
         public_surface_allowlist=public_surface_allowlist,
+        policy=policy,
     )
 
     # ADR-049 D9 — contract relevance is classified *before* compatibility
@@ -1004,14 +989,13 @@ def compare(
     #
     # vtable_covers_unverifiable_layout_gap: a *conditional* exclusion, for a
     # LAYOUT_UNVERIFIABLE finding SuppressLayoutUnverifiableCoveredByVtableChanged
-    # folded away as subsumed by a co-located TYPE_VTABLE_CHANGED. Unlike the
-    # unconditional "rename:" exclusion above, this one is NOT a blanket
-    # prefix check (Codex review): whether the fold is still safe to exclude
-    # from the verdict depends on each finding's own *policy-resolved*
-    # severity, not their unconfigured defaults -- see
-    # _vtable_gap_finding_is_verdict_subsumed's own docstring for why a
-    # blanket exclusion could silently defeat an explicit policy override on
-    # either kind.
+    # folded away as subsumed by a co-located TYPE_VTABLE_CHANGED. The policy
+    # comparison that makes the fold safe already happened before the fold
+    # (inside that pipeline step, so every DiffResult.changes-reading
+    # consumer -- not just this legacy verdict -- sees a non-subsumed finding
+    # correctly); what's left to check here is only the narrower
+    # DemoteUnreachableInternalChurn ordering case
+    # _vtable_gap_finding_is_verdict_subsumed's own docstring describes.
     verdict_redundant = [
         c
         for c in redundant
@@ -1020,9 +1004,7 @@ def compare(
             (c.caused_by_type or "").startswith(
                 VTABLE_COVERS_UNVERIFIABLE_LAYOUT_GAP_PREFIX
             )
-            and _vtable_gap_finding_is_verdict_subsumed(
-                c, kept, out_of_surface, policy, policy_file
-            )
+            and _vtable_gap_finding_is_verdict_subsumed(c, kept, out_of_surface)
         )
     ]
 

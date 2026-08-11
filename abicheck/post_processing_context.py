@@ -38,6 +38,7 @@ from .checker_policy import ChangeKind
 if TYPE_CHECKING:
     from .checker_types import Change
     from .model import AbiSnapshot
+    from .policy_file import PolicyFile
     from .suppression import SuppressionList
     from .surface import PublicSurface
 
@@ -103,6 +104,24 @@ class PipelineContext:
     # SONAME change. The late SONAME policy should not call that bump
     # unnecessary after this step has moved the matched removals out of kept.
     versioned_scheme_soname_relink_required: bool = False
+    # Threaded from checker.compare()'s own `policy`/`policy_file` parameters
+    # (Codex review, fresh evidence) so a pipeline step can resolve a
+    # finding's *policy-aware* severity without waiting for compare()'s own
+    # post-pipeline verdict computation. Needed specifically by
+    # SuppressLayoutUnverifiableCoveredByVtableChanged: folding a
+    # LAYOUT_UNVERIFIABLE finding out of `changes` is only safe when the
+    # covering TYPE_VTABLE_CHANGED's own resolved severity actually subsumes
+    # it -- deciding that *after* the fold (as an earlier revision did) left
+    # every exit-code/gate consumer that reads `DiffResult.changes` directly
+    # (there are several beyond the legacy verdict: the severity-scheme exit
+    # code, the JSON/SARIF severity gate, release-bundle gating) unable to
+    # see a non-subsumed finding at all, since it had already been moved out
+    # of `changes` into `redundant_changes` before any of them ran. Deciding
+    # at fold time instead means a non-subsumed finding is simply never
+    # removed from `changes` in the first place -- every consumer of that one
+    # canonical list sees it, with nothing to special-case.
+    policy: str = "strict_abi"
+    policy_file: PolicyFile | None = None
 
 
 # diff_types.py builds ENUM_MEMBER_*/ENUM_LAST_MEMBER_VALUE_CHANGED's symbol
@@ -110,48 +129,52 @@ class PipelineContext:
 # containing type name directly) — MarkReachability.run needs this set to
 # know when to peel the member suffix before checking the owning EnumType's
 # public-header origin.
-_ENUM_MEMBER_KINDS = frozenset({
-    ChangeKind.ENUM_MEMBER_REMOVED,
-    ChangeKind.ENUM_MEMBER_ADDED,
-    ChangeKind.ENUM_MEMBER_VALUE_CHANGED,
-    ChangeKind.ENUM_LAST_MEMBER_VALUE_CHANGED,
-})
+_ENUM_MEMBER_KINDS = frozenset(
+    {
+        ChangeKind.ENUM_MEMBER_REMOVED,
+        ChangeKind.ENUM_MEMBER_ADDED,
+        ChangeKind.ENUM_MEMBER_VALUE_CHANGED,
+        ChangeKind.ENUM_LAST_MEMBER_VALUE_CHANGED,
+    }
+)
 
 # L4 (source_diff.py) / L5 (source_graph_findings.py) findings below are
 # public *by construction* -- each built only from an already-proven-public
 # entity, never a bare namespace-name heuristic (Codex review, many passes).
 # NOT extended to SOURCE_BINARY_PROVENANCE_MISMATCH (aggregate, symbol="")
 # or ODR_SOURCE_CONFLICT's sibling checks not scoped to public types.
-_PUBLIC_SOURCE_ABI_KINDS = frozenset({
-    ChangeKind.PUBLIC_TYPEDEF_REMOVED,
-    ChangeKind.PUBLIC_TYPEDEF_TARGET_CHANGED,
-    ChangeKind.PUBLIC_MACRO_REMOVED,
-    ChangeKind.PUBLIC_MACRO_VALUE_CHANGED,
-    ChangeKind.INLINE_FUNCTION_REMOVED,
-    ChangeKind.UNINSTANTIATED_TEMPLATE_REMOVED,
-    ChangeKind.CONCEPT_TIGHTENED,
-    ChangeKind.CONSTEXPR_VALUE_CHANGED,
-    ChangeKind.DEFAULT_ARGUMENT_CHANGED,
-    ChangeKind.INLINE_BODY_CHANGED,
-    ChangeKind.TEMPLATE_BODY_CHANGED,
-    ChangeKind.GENERATED_HEADER_CHANGED,
-    ChangeKind.SOURCE_DECL_BINARY_SYMBOL_MISMATCH,
-    ChangeKind.ODR_SOURCE_CONFLICT,
-    # L5 (source_graph_findings.py) kinds whose subject is itself a
-    # proven-public entry/decl/symbol, not just something touching one.
-    # NOT extended to BUILD_OPTION_REACHES_PUBLIC_SYMBOL/TARGET_DEPENDENCY_
-    # ADDED -- keyed on an option/target that merely reaches something
-    # public, not a public entity itself.
-    ChangeKind.PUBLIC_REACHABILITY_CHANGED,
-    ChangeKind.GENERATED_HEADER_REACHES_PUBLIC_API,
-    ChangeKind.CALL_GRAPH_PUBLIC_ENTRY_REACHABILITY_CHANGED,
-    ChangeKind.PUBLIC_API_INTERNAL_DEPENDENCY_ADDED,
-    ChangeKind.INCLUDE_GRAPH_PUBLIC_HEADER_DRIFT,
-    ChangeKind.EXPORTED_SYMBOL_SOURCE_OWNER_CHANGED,
-    # _mapping_drift_findings fires only on old_sym != new_sym, and a
-    # SOURCE_DECL_MAPS_TO_SYMBOL edge's target is always a genuinely
-    # *exported* symbol (source_link.relink_surface_exports matches only
-    # against the real export set) -- so at least one side has this decl
-    # actually exported whenever it fires (Codex review).
-    ChangeKind.SOURCE_TO_BINARY_MAPPING_CHANGED,
-})
+_PUBLIC_SOURCE_ABI_KINDS = frozenset(
+    {
+        ChangeKind.PUBLIC_TYPEDEF_REMOVED,
+        ChangeKind.PUBLIC_TYPEDEF_TARGET_CHANGED,
+        ChangeKind.PUBLIC_MACRO_REMOVED,
+        ChangeKind.PUBLIC_MACRO_VALUE_CHANGED,
+        ChangeKind.INLINE_FUNCTION_REMOVED,
+        ChangeKind.UNINSTANTIATED_TEMPLATE_REMOVED,
+        ChangeKind.CONCEPT_TIGHTENED,
+        ChangeKind.CONSTEXPR_VALUE_CHANGED,
+        ChangeKind.DEFAULT_ARGUMENT_CHANGED,
+        ChangeKind.INLINE_BODY_CHANGED,
+        ChangeKind.TEMPLATE_BODY_CHANGED,
+        ChangeKind.GENERATED_HEADER_CHANGED,
+        ChangeKind.SOURCE_DECL_BINARY_SYMBOL_MISMATCH,
+        ChangeKind.ODR_SOURCE_CONFLICT,
+        # L5 (source_graph_findings.py) kinds whose subject is itself a
+        # proven-public entry/decl/symbol, not just something touching one.
+        # NOT extended to BUILD_OPTION_REACHES_PUBLIC_SYMBOL/TARGET_DEPENDENCY_
+        # ADDED -- keyed on an option/target that merely reaches something
+        # public, not a public entity itself.
+        ChangeKind.PUBLIC_REACHABILITY_CHANGED,
+        ChangeKind.GENERATED_HEADER_REACHES_PUBLIC_API,
+        ChangeKind.CALL_GRAPH_PUBLIC_ENTRY_REACHABILITY_CHANGED,
+        ChangeKind.PUBLIC_API_INTERNAL_DEPENDENCY_ADDED,
+        ChangeKind.INCLUDE_GRAPH_PUBLIC_HEADER_DRIFT,
+        ChangeKind.EXPORTED_SYMBOL_SOURCE_OWNER_CHANGED,
+        # _mapping_drift_findings fires only on old_sym != new_sym, and a
+        # SOURCE_DECL_MAPS_TO_SYMBOL edge's target is always a genuinely
+        # *exported* symbol (source_link.relink_surface_exports matches only
+        # against the real export set) -- so at least one side has this decl
+        # actually exported whenever it fires (Codex review).
+        ChangeKind.SOURCE_TO_BINARY_MAPPING_CHANGED,
+    }
+)
