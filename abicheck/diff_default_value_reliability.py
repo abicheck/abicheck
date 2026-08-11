@@ -94,35 +94,52 @@ def _is_expr_fingerprint(value: str) -> bool:
     return bool(_EXPR_FINGERPRINT_RE.match(value))
 
 
-def _fingerprint_comparison_unreliable(old_affected: bool, new_affected: bool) -> bool:
+def _fingerprint_comparison_unreliable(
+    old_is_fingerprint: bool,
+    old_legacy: bool,
+    new_is_fingerprint: bool,
+    new_legacy: bool,
+) -> bool:
     """The single decision rule every fingerprint-reliability guard in this
-    module reduces to, given whether EACH side's own value is a fingerprint
-    produced by the unstable pre-v20 algorithm ("affected" -- fingerprint-
-    shaped AND that side's own reliability flag is unset).
+    module reduces to. *_is_fingerprint* is whether THIS side's own value
+    has the fingerprint shape at all (:func:`_is_expr_fingerprint`);
+    *_legacy* is whether, IF it were fingerprint-shaped, that fingerprint
+    would have come from the unstable pre-v20 algorithm (producer- and
+    reliability-flag-derived, independent of the value's actual shape).
 
-    Suppressing whenever *either* side is independently affected -- what an
-    earlier version of both guards did -- is too conservative: two
-    extractions that BOTH used the identical pre-v20 algorithm produce
-    fingerprints that are directly comparable TO EACH OTHER (same
-    algorithm, same input -> same output; the algorithm being old and buggy
-    is not itself the risk). Only a MISMATCH between generations -- one
-    side pre-v20, the other stabilized (or never using this algorithm at
-    all) -- means a fingerprint difference could be an artifact of the
-    algorithm change rather than a real edit. A genuine constant/default
-    edit between two archived, equally-legacy baselines was being silently
-    dropped by the naive "either side affected" OR (Codex review, fresh
-    evidence, PR #720).
+    Two risks this collapses into one earlier boolean ("affected" =
+    ``is_fingerprint and legacy``) used to conflate, each fixed the same
+    review round (Codex review, fresh evidence, PR #720):
 
-    Deliberately just an XOR over two independently-computed booleans, not
-    a bigger rewrite: each caller already carries its own domain-specific
-    knowledge of what "affected" means for its own fact (per-declaration
-    provenance and producer-inclusive-of-hybrid for defaults; whole-
-    snapshot ``ast_producer`` and producer-exclusive-of-hybrid for
-    constants) -- this function's only job is the one decision both callers
-    were getting wrong in the same way, kept in exactly one place so a
-    future caller inherits the fix instead of re-deriving it.
+    1. Suppressing whenever *either* side was independently affected (an
+       OR) is too conservative when BOTH sides are fingerprint-shaped:
+       two extractions that both used the identical pre-v20 algorithm
+       produce fingerprints that are directly comparable TO EACH OTHER
+       (same algorithm, same input -> same output). Only a MISMATCH
+       between generations -- one side pre-v20, the other stabilized --
+       means a fingerprint difference could be an algorithm artifact
+       rather than a real edit. Fixed by comparing legacy status only
+       between two sides that are BOTH fingerprint-shaped.
+    2. The mirror bug the first fix alone still had: when EXACTLY ONE
+       side is fingerprint-shaped (a literal on one side, a compound
+       expression on the other), that is ALWAYS a genuine value-shape
+       change no algorithm version could produce spuriously -- the
+       unstable ``_canonical_expr`` only ever affects the HASH of an
+       already-compound expression, never whether a declaration's own
+       AST node was a literal or not (:func:`dumper_clang_expr.
+       _initializer_value` keeps a literal's plain value regardless of
+       algorithm version). Naively reducing ``is_fingerprint and legacy``
+       to one boolean before comparing lost this distinction: a legacy
+       fingerprint XORed against a non-fingerprint literal read as
+       "generations differ" and wrongly suppressed a confirmed
+       expression-to-literal (or literal-to-expression) edit.
+
+    So: never suppress unless BOTH sides are genuinely fingerprint-shaped,
+    and even then only when their legacy status actually differs.
     """
-    return old_affected != new_affected
+    if not (old_is_fingerprint and new_is_fingerprint):
+        return False
+    return old_legacy != new_legacy
 
 
 def default_value_representation_unreliable(
@@ -201,19 +218,20 @@ def default_value_fingerprint_comparison_unreliable(
     flag was unset — even though the old side's own literal value never
     depended on that flag at all.
 
-    The actual suppress/don't-suppress decision, given each side's own
-    "affected" status, is :func:`_fingerprint_comparison_unreliable` —
-    an XOR, not an OR: two sides that BOTH used the pre-v20 algorithm are
-    directly comparable to each other (Codex review, fresh evidence,
-    PR #720).
+    The actual suppress/don't-suppress decision is
+    :func:`_fingerprint_comparison_unreliable` — never suppressed unless
+    BOTH sides are genuinely fingerprint-shaped (a literal-vs-expression
+    shape change is always a confirmed real edit, whatever either side's
+    reliability), and even then only on a legacy-generation MISMATCH, not
+    whenever either side is independently unreliable (Codex review, fresh
+    evidence, PR #720).
     """
-    old_affected = _is_expr_fingerprint(
-        old_value
-    ) and default_value_representation_unreliable(old, old_producer)
-    new_affected = _is_expr_fingerprint(
-        new_value
-    ) and default_value_representation_unreliable(new, new_producer)
-    return _fingerprint_comparison_unreliable(old_affected, new_affected)
+    return _fingerprint_comparison_unreliable(
+        _is_expr_fingerprint(old_value),
+        default_value_representation_unreliable(old, old_producer),
+        _is_expr_fingerprint(new_value),
+        default_value_representation_unreliable(new, new_producer),
+    )
 
 
 def constant_value_fingerprint_comparison_unreliable(
@@ -265,19 +283,20 @@ def constant_value_fingerprint_comparison_unreliable(
     get its genuine ``CONSTANT_CHANGED`` silently suppressed regardless of
     producer (Codex review, fresh evidence, PR #720).
 
-    The actual suppress/don't-suppress decision, given each side's own
-    "affected" status, is :func:`_fingerprint_comparison_unreliable` — an
-    XOR, not an OR: two archived baselines that BOTH came from the same
-    pre-v20 direct-clang build are directly comparable to each other, so a
-    genuine edit between them must still be reported (Codex review, fresh
-    evidence, PR #720).
+    The actual suppress/don't-suppress decision is
+    :func:`_fingerprint_comparison_unreliable` — never suppressed unless
+    BOTH sides are genuinely fingerprint-shaped (a literal-vs-expression
+    shape change is always a confirmed real edit), and even then only on a
+    legacy-generation MISMATCH: two archived baselines that BOTH came from
+    the same pre-v20 direct-clang build are directly comparable to each
+    other, so a genuine edit between them must still be reported (Codex
+    review, fresh evidence, PR #720).
     """
-    old_affected = _is_expr_fingerprint(old_value) and (
+    return _fingerprint_comparison_unreliable(
+        _is_expr_fingerprint(old_value),
         old.ast_producer not in ("castxml", "hybrid")
-        and not old.clang_field_initializer_facts_reliable
-    )
-    new_affected = _is_expr_fingerprint(new_value) and (
+        and not old.clang_field_initializer_facts_reliable,
+        _is_expr_fingerprint(new_value),
         new.ast_producer not in ("castxml", "hybrid")
-        and not new.clang_field_initializer_facts_reliable
+        and not new.clang_field_initializer_facts_reliable,
     )
-    return _fingerprint_comparison_unreliable(old_affected, new_affected)

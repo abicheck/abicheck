@@ -18,9 +18,9 @@ in ``diff_default_value_reliability.py`` (PR #720 retrospective).
 
 Why this file exists, not just more hand-picked examples
 ----------------------------------------------------------
-PR #720's review round found FIVE distinct bugs in these guards across five
-separate passes, each one a different edge of the same small state space
-(producer x reliability x value-shape):
+PR #720's review round found SEVEN distinct bugs in these guards across
+seven separate passes, each one a different edge of the same small state
+space (producer x reliability x value-shape):
 
 1. The degraded-facts *warning* (a different module, ``serialization.py``)
    listing a flag no real detector consulted for a given producer.
@@ -38,15 +38,23 @@ separate passes, each one a different edge of the same small state space
 6. Both guards suppressing whenever *either* side was independently
    "unreliable" (an OR), when two archived snapshots that used the exact
    same legacy algorithm are directly comparable TO EACH OTHER — the
-   correct rule is an XOR (a MISMATCH between generations), not an OR.
+   correct rule is a MISMATCH between generations, not "either side risky".
+7. Fix #6's own naive collapse of ``is_fingerprint and legacy`` into one
+   "affected" boolean before comparing lost the value-SHAPE distinction: a
+   legacy fingerprint on one side XORed against a plain literal on the
+   other read as "generations differ" and wrongly suppressed a confirmed
+   expression-to-literal (or literal-to-expression) edit — a change no
+   algorithm version could ever produce spuriously, since the unstable
+   algorithm only affects a compound expression's HASH, never whether a
+   declaration's own value was a literal at all.
 
 None of these were caught by unit tests before review, because every
 existing test picked ONE hand-crafted scenario per property instead of
 covering the state space that determines the guards' output. The state
 space here is genuinely small and finite (producer in 4 values, reliable in
-2, value-shape in 3, times two sides = well under a thousand combinations)
+2, value-shape in 2, times two sides = well under a thousand combinations)
 — cheap enough to enumerate completely rather than sample. This file does
-that: instead of re-deriving whether each of those five bugs is fixed by
+that: instead of re-deriving whether each of those seven bugs is fixed by
 picking one more example, it asserts INVARIANTS that must hold across the
 *entire* reachable input space, so any future change that reintroduces one
 of these bugs (or a sibling one this exact review round didn't happen to
@@ -140,16 +148,14 @@ class _GuardInvariants:
     def _call(self, old: AbiSnapshot, new: AbiSnapshot, old_value: str, new_value: str):
         raise NotImplementedError
 
-    def _affected(self, producer, reliable, value):
-        """First-principles ("is this side even capable of carrying a
-        stale legacy fingerprint") reference — independent of the guard's
-        own internal XOR wiring, so this doesn't just test the
-        implementation against itself."""
-        return (
-            _is_expr_fingerprint(value)
-            and producer not in self.safe_producers
-            and not reliable
-        )
+    def _is_legacy(self, producer, reliable):
+        """First-principles ("if this side WERE fingerprint-shaped, would
+        that fingerprint be from the unstable pre-v20 algorithm") reference
+        — independent of the guard's own internal wiring, so this doesn't
+        just test the implementation against itself. Deliberately does NOT
+        fold in the value's own shape (bug #7's own lesson: shape and
+        legacy-status are two separate questions)."""
+        return producer not in self.safe_producers and not reliable
 
     @pytest.mark.parametrize(
         "old_producer,old_reliable,new_producer,new_reliable,old_value,new_value",
@@ -159,7 +165,7 @@ class _GuardInvariants:
             )
         ),
     )
-    def test_suppresses_iff_exactly_one_side_affected(
+    def test_suppresses_iff_both_fingerprint_shaped_and_legacy_differs(
         self,
         old_producer,
         old_reliable,
@@ -170,10 +176,29 @@ class _GuardInvariants:
     ):
         old = _snap(ast_producer=old_producer, reliable=old_reliable, version="1.0")
         new = _snap(ast_producer=new_producer, reliable=new_reliable, version="2.0")
-        expected = self._affected(
-            old_producer, old_reliable, old_value
-        ) != self._affected(new_producer, new_reliable, new_value)
+        both_fingerprint_shaped = _is_expr_fingerprint(
+            old_value
+        ) and _is_expr_fingerprint(new_value)
+        expected = both_fingerprint_shaped and (
+            self._is_legacy(old_producer, old_reliable)
+            != self._is_legacy(new_producer, new_reliable)
+        )
         assert self._call(old, new, old_value, new_value) is expected
+
+    def test_shape_mismatch_never_suppresses(self):
+        """Bug #7's invariant: one side a literal, the other a genuine
+        fingerprint (whatever either side's producer/reliability) is
+        ALWAYS a confirmed real edit -- the unstable algorithm only ever
+        affects a compound expression's fingerprint HASH, never whether a
+        declaration's own value was a literal at all, so this shape
+        transition can never be an algorithm-version artifact."""
+        for old_producer, old_reliable, new_producer, new_reliable in itertools.product(
+            _PRODUCERS, _RELIABLE, _PRODUCERS, _RELIABLE
+        ):
+            old = _snap(ast_producer=old_producer, reliable=old_reliable, version="1.0")
+            new = _snap(ast_producer=new_producer, reliable=new_reliable, version="2.0")
+            assert self._call(old, new, _LITERAL_VALUE, _FINGERPRINT_A) is False
+            assert self._call(old, new, _FINGERPRINT_A, _LITERAL_VALUE) is False
 
     def test_neither_side_fingerprint_shaped_never_suppresses(self):
         """Bug #5's invariant, phrased structurally: two values that are

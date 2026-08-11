@@ -1016,6 +1016,45 @@ class TestParamDefaultChanged:
         r = compare(old, new)
         assert ChangeKind.PARAM_DEFAULT_VALUE_CHANGED in _kinds(r)
 
+    def test_expression_to_literal_edit_reported_even_from_legacy_side(self):
+        """The XOR fix above has its own mirror bug: naively collapsing
+        "is this side a fingerprint AND is it legacy" into one boolean
+        before comparing lost the value-SHAPE distinction. A pre-v20
+        clang snapshot's compound default becoming a plain LITERAL (or
+        vice versa) is ALWAYS a confirmed real edit -- the unstable
+        algorithm only ever affects a compound expression's fingerprint
+        HASH, never whether a declaration's own value was a literal at
+        all -- so this shape transition must fire regardless of either
+        side's reliability (Codex review, fresh evidence, PR #720)."""
+        f_old = _pub_func(
+            "connect",
+            "_Z7connectv",
+            params=[Param(name="timeout", type="int", default="expr:aaaaaaaaaaaaaaaa")],
+        )
+        f_new = _pub_func(
+            "connect",
+            "_Z7connectv",
+            params=[Param(name="timeout", type="int", default="42")],
+        )
+        old = AbiSnapshot(
+            library="libtest.so.1",
+            version="1.0",
+            functions=[f_old],
+            from_headers=True,
+            ast_producer="clang",
+            clang_field_initializer_facts_reliable=False,
+        )
+        new = AbiSnapshot(
+            library="libtest.so.1",
+            version="2.0",
+            functions=[f_new],
+            from_headers=True,
+            ast_producer="clang",
+            clang_field_initializer_facts_reliable=False,
+        )
+        r = compare(old, new)
+        assert ChangeKind.PARAM_DEFAULT_VALUE_CHANGED in _kinds(r)
+
     def test_genuine_expr_namespace_default_change_still_reported(self):
         """Mirrors constant_value_fingerprint_comparison_unreliable's own
         identical fix: the guard matches the FULL clang fingerprint shape
@@ -1488,6 +1527,23 @@ class TestConstantChanges:
         new = self._clang_snap(
             {"K": "expr:bbbbbbbbbbbbbbbb"}, field_initializer_facts_reliable=False
         )
+        r = compare(old, new)
+        assert ChangeKind.CONSTANT_CHANGED in _kinds(r)
+
+    def test_expression_to_literal_edit_reported_even_from_legacy_side(self):
+        """The XOR fix above has its own mirror bug: naively collapsing
+        "is this side a fingerprint AND is it legacy" into one boolean
+        before comparing lost the value-SHAPE distinction. A pre-v20
+        clang constant becoming a plain LITERAL (or vice versa) is
+        ALWAYS a confirmed real edit -- the unstable algorithm only ever
+        affects a compound expression's fingerprint HASH, never whether
+        a declaration's own value was a literal at all -- so this shape
+        transition must fire regardless of either side's reliability
+        (Codex review, fresh evidence, PR #720)."""
+        old = self._clang_snap(
+            {"K": "expr:aaaaaaaaaaaaaaaa"}, field_initializer_facts_reliable=False
+        )
+        new = self._clang_snap({"K": "42"}, field_initializer_facts_reliable=False)
         r = compare(old, new)
         assert ChangeKind.CONSTANT_CHANGED in _kinds(r)
 
