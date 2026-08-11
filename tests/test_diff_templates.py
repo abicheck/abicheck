@@ -15,6 +15,8 @@ from abicheck.checker_policy import ChangeKind
 from abicheck.diff_templates import (
     _count_top_level_template_args,
     _return_is_unspecified,
+    _strip_leading_return_type,
+    _strip_param_signature,
     _strip_template_args,
     detect_cpo_kind_changed,
     detect_internal_template_leaks,
@@ -122,6 +124,351 @@ class TestReturnIsUnspecified:
 
 
 # ---------------------------------------------------------------------------
+# _strip_param_signature
+# ---------------------------------------------------------------------------
+
+
+class TestStripParamSignature:
+    """Codex review: a call operator's own name is spelled ``operator()`` —
+    naively stopping at the first top-level ``(`` corrupted
+    ``ns::C::operator()(ns::T const&) const`` down to ``ns::C::operator``,
+    losing the ``()`` that is actually part of the identifier.
+    """
+
+    def test_call_operator_keeps_its_parentheses(self) -> None:
+        sig = "ns::experimental::C::operator()(ns::detail::T const&) const"
+        assert _strip_param_signature(sig) == "ns::experimental::C::operator()"
+
+    def test_zero_arg_call_operator(self) -> None:
+        assert _strip_param_signature("ns::C::operator()() const") == "ns::C::operator()"
+
+    def test_plain_function_unaffected(self) -> None:
+        assert _strip_param_signature("lib::sort(int*, int*)") == "lib::sort"
+
+    def test_symbolic_operator_unaffected(self) -> None:
+        assert _strip_param_signature("ns::C::operator+(int)") == "ns::C::operator+"
+
+    def test_conversion_operator_unaffected(self) -> None:
+        sig = "ns::C::operator ns::Bar() const"
+        assert _strip_param_signature(sig) == "ns::C::operator ns::Bar"
+
+    def test_no_parens_returns_unchanged(self) -> None:
+        assert _strip_param_signature("lib::sort") == "lib::sort"
+
+    def test_lookalike_operator_suffix_is_not_special_cased(self) -> None:
+        # Codex review: "cooperator" merely *ends with* the substring
+        # "operator" — it is an ordinary identifier, not a disguised call
+        # operator, and its parameter list must strip normally.
+        assert _strip_param_signature("ns::cooperator(int)") == "ns::cooperator"
+
+    def test_function_pointer_return_type_does_not_truncate_at_wrapper_paren(
+        self,
+    ) -> None:
+        # Codex review: a function template returning a function pointer
+        # demangles with the return type's own declarator wrapped *around*
+        # the name and its real arguments — the first "(" in the string
+        # opens that wrapper, not the function's own parameter list.
+        sig = "int (*ns::experimental::bar<int>(int))()"
+        result = _strip_param_signature(sig)
+        # The real fix is that _segments() (the actual downstream leaf
+        # consumer) still recovers the correct leaf despite the wrapper
+        # prefix surviving in the stripped text.
+        from abicheck.diff_namespaces import _segments
+        assert _segments(result)[-1] == "bar"
+
+    def test_call_operator_after_function_pointer_wrapper(self) -> None:
+        # Both fixes composed: a wrapping declarator paren followed later
+        # by a genuine call operator's own empty parentheses.
+        sig = "int (*ns::C::operator()(int))()"
+        result = _strip_param_signature(sig)
+        assert result.endswith("operator()")
+
+    def test_member_function_pointer_return_type_does_not_truncate(self) -> None:
+        # Codex review, fresh evidence after the plain-pointer-wrapper fix:
+        # a template returning a pointer to *member* function has the "*"
+        # preceded by the owning class's own scope ("ns::C::*"), not glued
+        # directly to "(" — the plain "qualified[i+1] in '*&'" check missed
+        # this shape entirely.
+        sig = "int (ns::C::*ns::experimental::bar<int>(int))()"
+        result = _strip_param_signature(sig)
+        from abicheck.diff_namespaces import _segments
+        assert _segments(result)[-1] == "bar"
+
+    def test_pointer_parameter_is_not_mistaken_for_a_wrapper(self) -> None:
+        # A "*" in the parameter list itself (not a return-type wrapper)
+        # must not trip the wrapper heuristic — it's followed by ","/")",
+        # never a further "(".
+        assert _strip_param_signature("lib::sort(int*, int*)") == "lib::sort"
+
+    def test_decltype_return_type_does_not_truncate(self) -> None:
+        # Codex review, fresh evidence: a dependent decltype expression in
+        # the return type also has its own "(" preceded by whitespace
+        # ("decltype (...)") and no "*"/"&" at all — the current rule
+        # (whitespace-preceded "(" is never a real parameter list) covers
+        # this the same way it covers the two pointer-wrapper shapes.
+        sig = "decltype ({parm#1}+{parm#1}) ns::sort<int>(int)"
+        result = _strip_param_signature(sig)
+        from abicheck.diff_namespaces import _segments
+        assert _segments(result)[-1] == "sort"
+
+    def test_decltype_with_nested_unrelated_call_does_not_truncate(self) -> None:
+        # Codex review, fresh evidence: a decltype expression whose own
+        # content has a further nested, unrelated call ("g()") defeats a
+        # naive "skip just this one '(' character" rule -- the scan lands
+        # on the nested "(" of "g()" next, which is *not* preceded by
+        # whitespace (glued to "g"), so it would be mistaken for the real
+        # parameter list. The whole balanced decltype group must be
+        # skipped, not just its opening character.
+        sig = "decltype ((g())?{parm#1} : {parm#1}) ns::experimental::f<int>(int)"
+        result = _strip_param_signature(sig)
+        from abicheck.diff_namespaces import _segments
+        assert _segments(result)[-1] == "f"
+
+    def test_decltype_with_arithmetic_star_is_not_a_declarator(self) -> None:
+        # Codex review, fresh evidence: real GCC output for a dependent
+        # decltype expression can itself contain a "*" that is ordinary
+        # multiplication ("{parm#1}*(g())"), not a pointer-declarator wrapper
+        # star. The un-gated version accepted that arithmetic "*" as if it
+        # opened a wrapper, matched the following "(" of the unrelated
+        # nested call "g()" as the wrapper's real call, and returned an
+        # empty slice between the adjacent "*(" -- collapsing the whole
+        # identity down to "". _pointer_declarator_star_index now requires
+        # only whitespace/identifier/scope/template-bracket characters
+        # before a star counts as a declarator prefix; anything else (like
+        # the "{" opening this decltype's own token stream) means the "("
+        # never opened a real wrapper, so the whole balanced group is
+        # skipped instead (same as any other decltype expression).
+        sig = "decltype ({parm#1}*(g())) ns::sort<int>(int)"
+        result = _strip_param_signature(sig)
+        assert result != ""
+        from abicheck.diff_namespaces import _segments
+        assert _segments(result)[-1] == "sort"
+
+    def test_decltype_auto_return_type_has_no_space_before_its_paren(self) -> None:
+        # Codex review, fresh evidence: real GCC/Clang output for
+        # "decltype(auto) ns::sort<int>(int)" glues "decltype"'s own "("
+        # directly to the keyword, with no space -- unlike every other
+        # decltype/return-type shape this function handles, all of which
+        # have at least one space before their first "(". That means it
+        # bypasses the whitespace-gated branch entirely and was mistaken
+        # for the real parameter list, truncating the identity down to
+        # just "decltype". Fixed by recognizing the specific glued
+        # "decltype(auto)" spelling and skipping it explicitly, the same
+        # way every other decltype shape is skipped.
+        sig = "decltype(auto) ns::sort<int>(int)"
+        result = _strip_param_signature(sig)
+        from abicheck.diff_namespaces import _segments
+        assert _segments(result)[-1] == "sort"
+        # The leaked "decltype(auto) " prefix is stripped downstream by
+        # _strip_leading_return_type, same as every other function-template
+        # return-type leak -- verify that composition resolves to the bare
+        # qualified name, matching the variable side of a CPO transition.
+        assert _strip_leading_return_type(result) == "ns::sort<int>"
+
+    def test_conversion_operator_to_function_pointer_type(self) -> None:
+        # Codex review, fresh evidence: a conversion operator to a
+        # function-pointer type is demangled as two immediately-adjacent
+        # parenthesized groups glued to the operator's own return-type
+        # spelling ("operator int (*)(double)() const") -- the bare "(*)"
+        # marker (no name, since it names a type not a declarator) glued
+        # directly to the target's own parameter list "(double)", both
+        # glued directly to the operator's own real, empty "()". The
+        # un-fixed version stopped at "(double)", corrupting the identity
+        # down to "...operator int (*)" and losing the target-type
+        # distinction entirely -- two conversion operators to *different*
+        # function-pointer types ("int (*)(double)" vs "int (*)(long)")
+        # would report under the same misleading leaf. The fix must skip
+        # the target's own glued parameter-list group too (but not consume
+        # the operator's own trailing "()", which needs to stay visible so
+        # the outer search correctly stops there) -- keeping the full
+        # target-type spelling as part of the identity, which is what
+        # actually distinguishes one conversion operator from another.
+        sig = "ns::experimental::C::operator int (*)(double)() const"
+        result = _strip_param_signature(sig)
+        assert result == "ns::experimental::C::operator int (*)(double)"
+        other = _strip_param_signature(
+            "ns::experimental::C::operator int (*)(long)() const"
+        )
+        assert result != other
+
+    def test_conversion_operator_to_decltype_target(self) -> None:
+        # Codex review, fresh evidence beyond the function-pointer target
+        # case above: a conversion operator can target *any*
+        # "decltype(...)" spelling, not just "decltype(auto)"
+        # ("operator decltype(nullptr)() const" for a conversion to
+        # std::nullptr_t). The earlier fix special-cased the literal
+        # "(auto)" content, so this shape still truncated the identity
+        # down to just "...operator decltype". Generalized to skip the
+        # whole balanced group after a glued "decltype(", whatever it
+        # contains -- same as the "(auto)" case, just no longer limited to
+        # that one spelling.
+        sig = "ns::experimental::C::operator decltype(nullptr)() const"
+        result = _strip_param_signature(sig)
+        assert result == "ns::experimental::C::operator decltype(nullptr)"
+
+    def test_unbalanced_expression_paren_falls_back_safely(self) -> None:
+        # No matching close paren for the leading (whitespace-preceded)
+        # "(" -- must not raise or infinite-loop, just give up and return
+        # the input unchanged.
+        assert _strip_param_signature("decltype (unbalanced") == "decltype (unbalanced"
+
+    def test_return_type_comparison_operator_degrades_safely(self) -> None:
+        # Codex review: a return type that is itself a template
+        # instantiation whose own non-type template argument contains a
+        # comparison operator ("std::enable_if<(sizeof(int)>1), T>::type
+        # ns::sort<int>(int)" -- real GCC output) still truncates the
+        # identity at that argument's own "(", since the ">" in ">1)" is
+        # lexically indistinguishable from a genuine template-close ">"
+        # without actually parsing the expression grammar -- a known,
+        # deliberately-unfixed limitation (see this function's own
+        # docstring). This test only pins the *safety* contract: no
+        # exception, no hang, and the leaf ends up as *some* fixed string
+        # rather than corrupting into something callers can't handle.
+        sig = (
+            "std::enable_if<((sizeof (int))>(1)), int>::type "
+            "ns::experimental::sort<int>(int)"
+        )
+        result = _strip_param_signature(sig)
+        assert isinstance(result, str) and result
+
+    def test_pointer_wrapper_leaves_a_clean_qualified_name(self) -> None:
+        # Codex review, fresh evidence: skipping a pointer-declarator
+        # wrapper left its own "(" and "*"/"Class::*" text sitting in the
+        # returned prefix -- harmless for a leaf-only consumer (_segments()
+        # takes only the last "::"-segment) but wrong for a caller using
+        # the whole result as a qualified-name *identity*
+        # (detect_cpo_kind_changed), which never matched a
+        # pointer-to-member-function CPO transition against the corrupted
+        # prefix. This is exactly the shape detect_cpo_kind_changed feeds
+        # in (template args already stripped by _strip_template_args
+        # before this function ever sees it).
+        assert _strip_param_signature("int (*ns::sort(int))()") == "ns::sort"
+        assert _strip_param_signature("int (ns::C::*ns::sort(int))()") == "ns::sort"
+
+    def test_rvalue_reference_wrapper_advances_past_both_ampersands(self) -> None:
+        # Codex review, fresh evidence: an rvalue-reference declarator
+        # wrapper is spelled "&&", not a single "&" (real GCC output:
+        # "int (&&ns::sort<int>(int))()" for _ZN2ns4sortIiEEOFivEi). The
+        # un-fixed version recorded only the *first* "&", so the later
+        # slice (starting right after the recorded index) started at the
+        # *second* "&" and left it glued to the front of the recovered
+        # name ("&ns::sort<int>" instead of "ns::sort<int>") -- a
+        # same-named CPO variable would never match this corrupted
+        # prefix. Fixed by recording the second "&"'s index when it
+        # immediately follows the first, so the slice drops the whole
+        # "&&" token.
+        assert _strip_param_signature("int (&&ns::sort<int>(int))()") == "ns::sort<int>"
+
+    def test_pointer_wrapper_with_pointer_template_argument(self) -> None:
+        # Codex review, fresh evidence: the previous fix recovered the clean
+        # name via prefix.rindex("*") over the *whole* prefix once a wrapper
+        # was skipped -- wrong whenever the wrapped call's own name also
+        # carries a pointer template argument ("bar<int*>"), since that
+        # argument's "*" sits to the right of (and so wins rindex over) the
+        # wrapper's own "*". "int (*ns::experimental::bar<int*>(int*))()"
+        # collapsed to a bare ">" before this was fixed to track the
+        # wrapper's own star position directly instead of re-deriving it.
+        assert (
+            _strip_param_signature("int (*ns::experimental::bar<int*>(int*))()")
+            == "ns::experimental::bar<int*>"
+        )
+        assert (
+            _strip_param_signature("int (ns::C::*ns::bar<int*>(int*))()")
+            == "ns::bar<int*>"
+        )
+
+    def test_member_pointer_wrapper_with_multi_arg_template_owner(self) -> None:
+        # Codex review, fresh evidence: a member-function-pointer wrapper's
+        # owning class can itself be a template with more than one argument
+        # ("ns::C<int, double>::*..."), and that comma inside the owner's
+        # own template-argument list sits *before* the wrapper's own "*" is
+        # ever reached while scanning forward. The un-tracked version
+        # (no "<"/">" depth) mistook that comma for the parameter-list
+        # terminator, rejected the wrapper entirely, and corrupted the
+        # eventual leaf. Tracking angle-bracket depth so only a *top-level*
+        # comma/close-paren ends the scan fixes it.
+        assert (
+            _strip_param_signature(
+                "int (ns::C<int, double>::*ns::experimental::bar<int>(int))()"
+            )
+            == "ns::experimental::bar<int>"
+        )
+
+    def test_member_pointer_wrapper_owner_with_pointer_template_argument(self) -> None:
+        # CodeRabbit review, fresh evidence: the owning class's own
+        # template-argument list can itself contain a pointer type
+        # ("ns::C<int*, double>::*..."), and that "*" sits *before* the
+        # wrapper's own "*" is ever reached while scanning forward. The
+        # un-gated version recorded that template-argument "*" as the
+        # declarator star (since only "," was special-cased at depth > 0,
+        # not "*"/"&"), corrupting the eventual leaf down to a fragment of
+        # the owner's own template-argument text. Fixed by skipping *every*
+        # character while inside the template-argument list (depth > 0),
+        # not just commas — a "*"/"&" there can never be the wrapper's own
+        # declarator.
+        assert (
+            _strip_param_signature(
+                "int (ns::C<int*, double>::*ns::experimental::bar<int>(int))()"
+            )
+            == "ns::experimental::bar<int>"
+        )
+
+    def test_cpo_kind_changed_matches_across_pointer_to_member_wrapper(self) -> None:
+        # End-to-end: a function template returning a pointer to member
+        # function must still be recognized as the same qualified name as
+        # a same-named CPO variable.
+        import abicheck.demangle as dm
+
+        def fake_demangle(mangled_list: list[str]) -> dict[str, str]:
+            sigs = {
+                "_Zfn": "int (ns::C::*ns::sort<int>(int))()",
+                "_ZN2ns4sortE": "ns::sort",
+            }
+            return {m: sigs[m] for m in mangled_list if m in sigs}
+
+        orig = dm.demangle_batch
+        dm.demangle_batch = fake_demangle  # type: ignore[assignment]
+        try:
+            old = _snap(funcs=[_fn("", mangled="_Zfn")])
+            new = _snap(vars_=[_var("sort", type_="ns::__sort_fn", mangled="_ZN2ns4sortE")])
+            changes = detect_cpo_kind_changed(old, new)
+        finally:
+            dm.demangle_batch = orig  # type: ignore[assignment]
+
+        assert len(changes) == 1
+        assert changes[0].kind == ChangeKind.CPO_KIND_CHANGED
+
+    def test_cpo_kind_changed_matches_across_pointer_template_argument(self) -> None:
+        # End-to-end for the pointer-template-argument regression: a
+        # pointer-returning function template whose own name carries a
+        # pointer template argument must still be recognized as the same
+        # qualified name as a same-named CPO variable, not corrupted down
+        # to a bare ">" by a stale rindex("*") over the whole prefix.
+        import abicheck.demangle as dm
+
+        def fake_demangle(mangled_list: list[str]) -> dict[str, str]:
+            sigs = {
+                "_Zfn": "int (*ns::experimental::bar<int*>(int*))()",
+                "_ZN2ns12experimental3barE": "ns::experimental::bar",
+            }
+            return {m: sigs[m] for m in mangled_list if m in sigs}
+
+        orig = dm.demangle_batch
+        dm.demangle_batch = fake_demangle  # type: ignore[assignment]
+        try:
+            old = _snap(funcs=[_fn("", mangled="_Zfn")])
+            new = _snap(vars_=[
+                _var("bar", type_="ns::experimental::__bar_fn", mangled="_ZN2ns12experimental3barE"),
+            ])
+            changes = detect_cpo_kind_changed(old, new)
+        finally:
+            dm.demangle_batch = orig  # type: ignore[assignment]
+
+        assert len(changes) == 1
+        assert changes[0].kind == ChangeKind.CPO_KIND_CHANGED
+
+
+# ---------------------------------------------------------------------------
 # INTERNAL_TEMPLATE_LEAKS_VIA_PUBLIC_API
 # ---------------------------------------------------------------------------
 
@@ -171,6 +518,34 @@ class TestInternalTemplateLeaks:
         old = _snap(funcs=[_fn("lib::__detail::plain_helper")])
         new = _snap(funcs=[])
         assert detect_internal_template_leaks(old, new) == []
+
+    def test_purely_additive_instantiation_set_does_not_fire(self) -> None:
+        # Reported bug: an internal-namespace template that only gained new
+        # instantiations (every existing one is still there, unchanged) does
+        # not remove anything a consumer could already be linked against —
+        # an addition alone cannot break an already-linked consumer, so this
+        # must not be reported as INTERNAL_TEMPLATE_LEAKS_VIA_PUBLIC_API.
+        old = _snap(funcs=[_fn("lib::__detail::walk<int>")])
+        new = _snap(funcs=[
+            _fn("lib::__detail::walk<int>"),
+            _fn("lib::__detail::walk<char>"),
+        ])
+        assert detect_internal_template_leaks(old, new) == []
+
+    def test_removed_instantiation_alongside_addition_still_fires(self) -> None:
+        # A mix of "existing instantiation vanished" and "new one appeared"
+        # must still fire — the removal alone already breaks a consumer that
+        # linked against it.
+        old = _snap(funcs=[
+            _fn("lib::__detail::walk<int>"),
+            _fn("lib::__detail::walk<char>"),
+        ])
+        new = _snap(funcs=[
+            _fn("lib::__detail::walk<int>"),
+            _fn("lib::__detail::walk<double>"),
+        ])
+        changes = detect_internal_template_leaks(old, new)
+        assert len(changes) == 1
 
 
 # ---------------------------------------------------------------------------

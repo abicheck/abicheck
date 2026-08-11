@@ -196,6 +196,82 @@ class TestScanArtifactSetForwarding:
 
 
 @pytest.mark.skipif(not RUN_SH.is_file(), reason="action/run.sh not found")
+class TestScanPolicyFlagsOmittedWithoutBaseline:
+    """P1 regression (Codex review): cli_scan.py's
+    ``_reject_comparison_only_flags()`` hard-rejects ``--policy``/
+    ``--policy-file``/``--suppress`` on a scan with no ``--against``
+    baseline. ``action.yml``'s ``policy`` input has a non-empty default
+    (``strict_abi``), so it is *always* present in ``INPUT_POLICY`` — an
+    unconditional forward would break every existing audit-only scan step
+    with a usage error. These three flags must only be forwarded when a
+    baseline is actually present.
+    """
+
+    def test_audit_only_scan_omits_default_policy_flag(self) -> None:
+        # Simulates exactly how the real composite Action invokes an
+        # audit-only scan step: action.yml's own default fills INPUT_POLICY
+        # with "strict_abi" even though the user never set `policy:`.
+        cmd = _run_cmd({
+            "INPUT_MODE": "scan",
+            "INPUT_NEW_LIBRARY": "new.so",
+            "INPUT_POLICY": "strict_abi",
+        })
+        assert "--policy" not in cmd
+
+    def test_audit_only_scan_omits_explicit_policy_file_and_suppress(self) -> None:
+        # Unlike `policy`, these two have no action.yml default — but an
+        # audit-only step that explicitly sets them must still omit the
+        # flags (the CLI has nothing to apply them to without a baseline).
+        cmd = _run_cmd({
+            "INPUT_MODE": "scan",
+            "INPUT_NEW_LIBRARY": "new.so",
+            "INPUT_POLICY_FILE": "policy.yml",
+            "INPUT_SUPPRESS": "suppress.yml",
+        })
+        assert "--policy-file" not in cmd
+        assert "--suppress" not in cmd
+
+    def test_new_library_set_audit_only_omits_default_policy_flag(self) -> None:
+        # The --artifact-set path is unconditionally audit-only (ADR-056).
+        cmd = _run_cmd({
+            "INPUT_MODE": "scan",
+            "INPUT_NEW_LIBRARY_SET": "a.so,b.so",
+            "INPUT_POLICY": "strict_abi",
+        })
+        assert "--policy" not in cmd
+
+    def test_scan_with_baseline_forwards_policy_flags(self) -> None:
+        cmd = _run_cmd({
+            "INPUT_MODE": "scan",
+            "INPUT_NEW_LIBRARY": "new.so",
+            "INPUT_AGAINST": "old.so",
+            "INPUT_POLICY": "sdk_vendor",
+            "INPUT_POLICY_FILE": "policy.yml",
+            "INPUT_SUPPRESS": "suppress.yml",
+        })
+        i = cmd.index("--policy")
+        assert cmd[i + 1] == "sdk_vendor"
+        i = cmd.index("--policy-file")
+        assert cmd[i + 1] == "policy.yml"
+        i = cmd.index("--suppress")
+        assert cmd[i + 1] == "suppress.yml"
+
+    def test_audit_true_alias_omits_default_policy_flag_even_with_against(self) -> None:
+        # The deprecated `audit: true` back-compat alias forces audit-only
+        # by skipping --against outright even when it resolved to a value
+        # elsewhere — the policy flags must follow the same rule.
+        cmd = _run_cmd({
+            "INPUT_MODE": "scan",
+            "INPUT_NEW_LIBRARY": "new.so",
+            "INPUT_AGAINST": "old.so",
+            "INPUT_AUDIT": "true",
+            "INPUT_POLICY": "strict_abi",
+        })
+        assert "--against" not in cmd
+        assert "--policy" not in cmd
+
+
+@pytest.mark.skipif(not RUN_SH.is_file(), reason="action/run.sh not found")
 class TestCompareBundleSystemProvidersForwarding:
     def test_forwarded_for_single_pair_compare(self) -> None:
         cmd = _run_cmd(

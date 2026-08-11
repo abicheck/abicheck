@@ -1032,7 +1032,37 @@ class AbiSnapshot:
     )
 
     def index(self) -> None:
-        """Build lookup indexes. Uses first-wins for duplicate mangled names."""
+        """Build lookup indexes. Uses first-wins for duplicate mangled names.
+
+        Idempotent — a second call is a no-op. ``function_map``/
+        ``variable_map``/``type_by_name`` already guard their own lazy
+        ``self.index()`` call on ``is None``, but several detector modules
+        (``diff_cpp_patterns.py``, ``diff_templates.py``, ``diff_filtering.py``,
+        ``post_processing.py``) call ``index()`` directly, once per detector,
+        without knowing whether an earlier detector already indexed this same
+        snapshot. Without this guard, ``index()`` unconditionally rebuilt all
+        three maps *and re-logged* every duplicate-name warning below on each
+        call — for one compare/scan run with a genuine duplicate type name,
+        the identical warning could log up to ~7 times per side.
+
+        This trades away rebuild-on-mutation (Codex/CodeRabbit review):
+        appending to ``functions``/``variables``/``types`` *after* an
+        earlier ``index()`` call and expecting a following ``index()`` to
+        pick up the addition will instead keep serving the stale maps —
+        there is no cheap, reliable way to detect an in-place list mutation
+        to invalidate on. This is safe because every real producer already
+        treats a snapshot's collections as fixed once built and resets all
+        three cache fields to ``None`` together when it *does* need to
+        rebuild them from a changed collection (see ``dumper_hybrid.py``,
+        ``dumper_scoping.py``, ``clang_layout_tool.py``) — ``index()`` is
+        never called, mutate, called again on the same live object anywhere
+        in this codebase. A caller with a genuine need to re-index after
+        mutating a snapshot in place must reset ``_func_by_mangled``/
+        ``_var_by_mangled``/``_type_by_name`` to ``None`` first, the same
+        way those three modules already do.
+        """
+        if self._type_by_name is not None:
+            return
         func_map: dict[str, Function] = {}
         dup_funcs: dict[str, int] = {}
         for f in self.functions:

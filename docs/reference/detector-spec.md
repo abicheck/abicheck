@@ -166,7 +166,7 @@ One row per `ChangeKind` (396 total). Columns fuse the verdict partition (`check
 | `instantiation_missing_from_binary` | breaking | `BREAKING` | `error` | L2 | `instantiation_missing_from_binary` | [case79](examples/case79_missing_template_instantiation.md) |
 | `integer_model_changed` | breaking | `BREAKING` | `error` | L1 | `integer_model_changed` | [case112](examples/case112_lp64_ilp64.md) |
 | `internal_symbol_required_by_public_api` | breaking | `BREAKING` | `error` | L5 | `internal_symbol_required_by_public_api` | [case192](examples/case192_call_graph_break_survives_suppression.md) |
-| `internal_template_leaks_via_public_api` | breaking | `BREAKING` | `error` | L2 | `internal_template_leaks_via_public_api` | [case77](examples/case77_detail_templated_base_changed.md), [case85](examples/case85_internal_template_signature_changed.md) |
+| `internal_template_leaks_via_public_api` | breaking | `BREAKING` | `error` | L2 | `internal_template_leaks_via_public_api` | [case85](examples/case85_internal_template_signature_changed.md) |
 | `internal_type_leaks_via_public_api` | breaking | `BREAKING` | `error` | L2 | `internal_type_leaks_via_public_api` | [case74](examples/case74_detail_base_class_changed.md), [case75](examples/case75_detail_embedded_by_value.md), [case76](examples/case76_detail_pimpl_vtable_changed.md) |
 | `interpreter_changed` | risk | `COMPATIBLE_WITH_RISK` | `warning` | L0 | `interpreter_changed` | — |
 | `kabi_crc_changed` | breaking | `BREAKING` | `error` | L0 | `kabi_crc_changed` | [case175](examples/case175_kabi_crc_changed.md) |
@@ -347,16 +347,16 @@ One row per `ChangeKind` (396 total). Columns fuse the verdict partition (`check
 | `type_became_opaque` | breaking | `BREAKING` | `error` | L1 | `type_became_opaque` | [case28](examples/case28_typedef_opaque.md) |
 | `type_deprecated_added` | quality | `COMPATIBLE` | `warning` | L2 | `type_deprecated_added` | — |
 | `type_deprecated_removed` | quality | `COMPATIBLE` | `warning` | L2 | `type_deprecated_removed` | — |
-| `type_field_added` | breaking | `BREAKING` | `error` | L1 | `type_field_added` | [case43](examples/case43_base_class_member_added.md) |
+| `type_field_added` | breaking | `BREAKING` | `error` | L1 | `type_field_added` | [case43](examples/case43_base_class_member_added.md), [case77](examples/case77_detail_templated_base_changed.md) |
 | `type_field_added_compatible` | addition | `COMPATIBLE` | `warning` | L1 | `type_field_added_compatible` | [case94](examples/case94_empty_tag_gained_state.md) |
-| `type_field_offset_changed` | breaking | `BREAKING` | `error` | L1 | `type_field_offset_changed` | [case117](examples/case117_no_unique_address.md), [case140](examples/case140_empty_base_optimization_lost.md), [case43](examples/case43_base_class_member_added.md) |
+| `type_field_offset_changed` | breaking | `BREAKING` | `error` | L1 | `type_field_offset_changed` | [case117](examples/case117_no_unique_address.md), [case140](examples/case140_empty_base_optimization_lost.md), [case43](examples/case43_base_class_member_added.md), [case77](examples/case77_detail_templated_base_changed.md) |
 | `type_field_removed` | breaking | `BREAKING` | `error` | unspecified | `type_field_removed` | — |
 | `type_field_type_changed` | breaking | `BREAKING` | `error` | L1 | `type_field_type_changed` | [case30](examples/case30_field_qualifiers.md), [case45](examples/case45_multi_dim_array_change.md) |
 | `type_kind_changed` | breaking | `BREAKING` | `error` | L1 | `type_kind_changed` | [case55](examples/case55_type_kind_changed.md) |
 | `type_lost_abstract` | quality | `COMPATIBLE` | `warning` | L2 | `type_lost_abstract` | — |
 | `type_lost_final` | risk | `COMPATIBLE_WITH_RISK` | `warning` | unspecified | `type_lost_final` | — |
 | `type_removed` | breaking | `BREAKING` | `error` | L1 | `type_removed` | [case107](examples/case107_task_scheduler_init_removed.md), [case108](examples/case108_task_class_removed.md), [case109](examples/case109_flow_graph_policy_renames.md), [case41](examples/case41_type_changes.md), +1 |
-| `type_size_changed` | breaking | `BREAKING` | `error` | L1 | `type_size_changed` | [case07](examples/case07_struct_layout.md), [case117](examples/case117_no_unique_address.md), [case140](examples/case140_empty_base_optimization_lost.md), [case14](examples/case14_cpp_class_size.md), +10 |
+| `type_size_changed` | breaking | `BREAKING` | `error` | L1 | `type_size_changed` | [case07](examples/case07_struct_layout.md), [case117](examples/case117_no_unique_address.md), [case140](examples/case140_empty_base_optimization_lost.md), [case14](examples/case14_cpp_class_size.md), +11 |
 | `type_visibility_changed` | breaking | `BREAKING` | `error` | unspecified | `type_visibility_changed` | — |
 | `type_vtable_changed` | breaking | `BREAKING` | `error` | L1 | `type_vtable_changed` | [case09](examples/case09_cpp_vtable.md), [case38](examples/case38_virtual_methods.md), [case72](examples/case72_covariant_return_changed.md) |
 | `typedef_base_changed` | breaking | `BREAKING` | `error` | L1 | `typedef_base_changed` | [case73](examples/case73_typedef_underlying_changed.md), [case80](examples/case80_pimpl_shared_to_unique.md) |

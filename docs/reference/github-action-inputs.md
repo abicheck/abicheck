@@ -4,7 +4,7 @@
 
 Every `with:` input and `outputs.*` value for the [abicheck GitHub Action](../use/github-action.md), generated directly from `action.yml` — see that page for setup, mode/input compatibility, and usage recipes; this page is the exhaustive field list only.
 
-## Inputs (76)
+## Inputs (77)
 
 | Input | Required | Default | Description |
 |---|:--:|---|---|
@@ -23,6 +23,7 @@ Every `with:` input and `outputs.*` value for the [abicheck GitHub Action](../us
 | `header` | no | — | Public header file(s) applied to both sides (space-separated). Required when input is an ELF binary; ignored for JSON snapshots. If old and new actually declare different header sets (e.g. a new release added a header), set `old-header`/`new-header` instead -- a bare `header` parses BOTH snapshots against the same files, which silently hides the removed/added declarations you're trying to check. |
 | `old-header` | no | — | Public header(s) for the old side only (overrides header for old). Space-separated. |
 | `new-header` | no | — | Public header(s) for the new side only (overrides header for new). Space-separated. |
+| `public-header-dir` | no | — | Directory whose headers are treated as public for provenance classification (repeatable, space-separated) — establishes the public/internal boundary so leakage/RTTI/exported-vs-public cross-checks run instead of skipping. dump and scan modes only (`--public-header-dir` on the CLI); compare has no equivalent flag. |
 | `include` | no | — | Extra include directories for castxml, applied to both sides. Space-separated. |
 | `old-include` | no | — | Include directories for old side only. Space-separated. |
 | `new-include` | no | — | Include directories for new side only. Space-separated. |

@@ -1449,7 +1449,7 @@
       "severity": "error",
       "min_evidence": "L2",
       "doc_slug": "internal_template_leaks_via_public_api",
-      "examples": "case77_detail_templated_base_changed,case85_internal_template_signature_changed"
+      "examples": "case85_internal_template_signature_changed"
     },
     {
       "kind": "internal_type_leaks_via_public_api",
@@ -3078,7 +3078,7 @@
       "severity": "error",
       "min_evidence": "L1",
       "doc_slug": "type_field_added",
-      "examples": "case43_base_class_member_added"
+      "examples": "case43_base_class_member_added,case77_detail_templated_base_changed"
     },
     {
       "kind": "type_field_added_compatible",
@@ -3096,7 +3096,7 @@
       "severity": "error",
       "min_evidence": "L1",
       "doc_slug": "type_field_offset_changed",
-      "examples": "case117_no_unique_address,case140_empty_base_optimization_lost,case43_base_class_member_added"
+      "examples": "case117_no_unique_address,case140_empty_base_optimization_lost,case43_base_class_member_added,case77_detail_templated_base_changed"
     },
     {
       "kind": "type_field_removed",
@@ -3159,7 +3159,7 @@
       "severity": "error",
       "min_evidence": "L1",
       "doc_slug": "type_size_changed",
-      "examples": "case07_struct_layout,case117_no_unique_address,case140_empty_base_optimization_lost,case14_cpp_class_size,case17_template_abi,case18_dependency_leak,case26_union_field_added,case36_anon_struct,case40_field_layout,case43_base_class_member_added,case44_cyclic_type_member_added,case45_multi_dim_array_change,case48_leaf_struct_through_pointer,case94_empty_tag_gained_state"
+      "examples": "case07_struct_layout,case117_no_unique_address,case140_empty_base_optimization_lost,case14_cpp_class_size,case17_template_abi,case18_dependency_leak,case26_union_field_added,case36_anon_struct,case40_field_layout,case43_base_class_member_added,case44_cyclic_type_member_added,case45_multi_dim_array_change,case48_leaf_struct_through_pointer,case77_detail_templated_base_changed,case94_empty_tag_gained_state"
     },
     {
       "kind": "type_visibility_changed",

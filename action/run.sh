@@ -269,6 +269,7 @@ if [[ "$MODE" == "dump" ]]; then
 
   add_flag "-H" "${INPUT_HEADER:-}"
   add_flag "-H" "${INPUT_NEW_HEADER:-}"
+  add_flag "--public-header-dir" "${INPUT_PUBLIC_HEADER_DIR:-}"
   add_flag "-I" "${INPUT_INCLUDE:-}"
   add_flag "-I" "${INPUT_NEW_INCLUDE:-}"
   add_single_flag "--version" "${INPUT_NEW_VERSION:-}"
@@ -655,6 +656,10 @@ elif [[ "$MODE" == "scan" ]]; then
     add_sided_flag "-I" "new" "${INPUT_NEW_INCLUDE:-}"
   fi
 
+  # --public-header-dir is not side-aware on the CLI (unlike -H/-I above),
+  # so it's forwarded once regardless of which branch above ran.
+  add_flag "--public-header-dir" "${INPUT_PUBLIC_HEADER_DIR:-}"
+
   # Cross-compiler flags -- documented root-Action inputs, but previously
   # only wired to dump mode's branch (Codex review, same gap as compare
   # mode above).
@@ -702,6 +707,24 @@ elif [[ "$MODE" == "scan" ]]; then
   add_single_flag "--budget" "${INPUT_BUDGET:-}"
   add_single_flag "--risk-rules" "${INPUT_RISK_RULES:-}"
   add_flag "--crosscheck" "${INPUT_CROSSCHECK:-}"
+  # `scan --against` takes @policy_options (--policy/--policy-file/
+  # --suppress) the same as compare, but this branch never forwarded them —
+  # the only way to apply a policy or suppression file to a scan step was
+  # the generic extra-args passthrough (Codex review / reported gap).
+  #
+  # Only forwarded when a baseline is actually present (same condition as
+  # the --against forwarding above): cli_scan.py's
+  # _reject_comparison_only_flags() hard-rejects any of these three when
+  # --against was not given, and `policy` has a non-empty action.yml
+  # default (`strict_abi`) -- forwarding it unconditionally would turn
+  # --policy strict_abi into an always-present explicit flag and break
+  # every existing audit-only (no baseline) scan step with a usage error
+  # (Codex review, P1).
+  if [[ "$FORCE_AUDIT_ONLY" != "true" && -z "$SCAN_ARTIFACT_SET" && -n "${INPUT_AGAINST:-}" ]]; then
+    add_single_flag "--policy" "${INPUT_POLICY:-}"
+    add_single_flag "--policy-file" "${INPUT_POLICY_FILE:-}"
+    add_single_flag "--suppress" "${INPUT_SUPPRESS:-}"
+  fi
 
   if [[ "${INPUT_ALLOW_BUILD_QUERY:-false}" == "true" ]]; then
     CMD+=(--allow-build-query)

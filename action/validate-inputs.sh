@@ -278,6 +278,16 @@ if [[ -n "$_ABI_BASELINE" && "$MODE" != "compare" && "$MODE" != "scan" ]]; then
   _warn "abi-baseline is set but has no effect: it only applies to mode: compare or mode: scan (mode is '$MODE')."
 fi
 
+# public-header-dir: dump and scan modes only (the CLI's own
+# --public-header-dir flag exists on those two subcommands only; compare has
+# no equivalent). run.sh's compare/deps-tree/deps-compare branches never
+# forward it, so a caller setting it there would have the input silently
+# discarded without this warning (Codex review).
+_PUBLIC_HEADER_DIR="${INPUT_PUBLIC_HEADER_DIR:-}"
+if [[ -n "$_PUBLIC_HEADER_DIR" && "$MODE" != "dump" && "$MODE" != "scan" ]]; then
+  _warn "public-header-dir is set but has no effect: it only applies to mode: dump or mode: scan (mode is '$MODE')."
+fi
+
 # new-library-set: scan mode only (ADR-056). The scan-mode arm above already
 # fails outright on an invalid combination (new-library also set, or
 # against/abi-baseline also set) -- this only covers the inert case (set on

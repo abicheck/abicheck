@@ -173,3 +173,34 @@ class TestDuplicateMangledSymbols:
         # Must be first one
         assert indexed.mangled == mangled
         assert indexed.type == "int"
+
+    def test_index_is_idempotent_no_repeated_warning(self) -> None:
+        """``index()`` must not re-log the duplicate-name warning on a second
+        call for the same snapshot.
+
+        Several detector modules (diff_cpp_patterns.py, diff_templates.py,
+        diff_filtering.py, post_processing.py) call ``snap.index()`` directly
+        rather than through the memoized ``function_map``/``variable_map``/
+        ``type_by_name`` accessors — before this fix, ``index()`` itself
+        unconditionally rebuilt all three maps (and re-logged every
+        duplicate-name warning) on every call, so one compare/scan run with a
+        genuine duplicate could log the identical warning repeatedly.
+        """
+        import logging
+
+        from abicheck.model import RecordType
+
+        snap = AbiSnapshot(
+            library="lib.so", version="1.0",
+            types=[
+                RecordType(name="Dup", kind="struct"),
+                RecordType(name="Dup", kind="struct"),
+            ],
+        )
+        with __import__("unittest.mock", fromlist=["patch"]).patch.object(
+            logging.getLogger("abicheck.model"), "warning"
+        ) as mock_warn:
+            snap.index()
+            snap.index()
+            snap.index()
+        assert mock_warn.call_count == 1

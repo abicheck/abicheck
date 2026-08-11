@@ -110,6 +110,13 @@ _TEMPLATE_ARGS_RE = re.compile(r"<[^<>]")
 # string) on both sides, so `operator` must stand as its own token.
 _OPERATOR_TOKEN_RE = re.compile(r"(?<![A-Za-z0-9_])operator(?![A-Za-z0-9_])")
 
+# Matches a `decltype` token immediately at the end of a prefix, with no
+# separating whitespace before the "(" that follows it -- the one dependent-
+# expression shape that reaches `decltype`'s own "(" glued directly to the
+# keyword (`decltype(auto)`) rather than with a space (`decltype (expr)`,
+# every other shape `_strip_param_signature` handles).
+_DECLTYPE_TOKEN_RE = re.compile(r"(?<![A-Za-z0-9_])decltype$")
+
 
 def _looks_like_template_instantiation(name: str) -> bool:
     """A declared C++ name is a template instantiation iff it contains a
@@ -126,9 +133,109 @@ def _qualified_function_name(name: str, mangled: str) -> str:
     return name
 
 
+def _pointer_declarator_star_index(qualified: str, paren_index: int) -> int:
+    """Return the index of the ``*``/``&`` that opens a function-pointer or
+    member-function-pointer declarator at the ``(`` found at *paren_index*
+    — the real call is *nested inside* this group, immediately after that
+    ``*``/``&`` (optionally preceded by a scope like ``Class::`` for a
+    member-pointer wrapper) — or -1 if this ``(`` does not open one.
+
+    Distinguishing signal: the group reaches a ``*``/``&`` and *then* a
+    further ``(`` before the next ``,``/``)`` at this nesting level. An
+    ordinary parameter list can also contain a bare ``*``/``&`` (a
+    pointer/reference parameter type, e.g. ``lib::sort(int*, int*)``), but
+    never followed by another ``(`` before that parameter ends.
+
+    Returns the *first* such ``*``/``&``'s index rather than merely a bool
+    so a caller can later recover the wrapper's own scope prefix without
+    re-searching — a plain boolean plus a later whole-prefix ``rindex("*")``
+    picks the *last* ``*`` in the prefix instead, which is wrong whenever
+    the wrapped call's own name carries a pointer template argument (e.g.
+    ``int (*ns::bar<int*>(int*))()`` — the trailing ``int*>`` template
+    argument's ``*`` sits after the wrapper's own, and is the rightmost one
+    in the eventual prefix) (Codex review).
+
+    Tracks ``<``/``>`` nesting depth so a comma *inside* a template argument
+    list is never mistaken for the parameter-list comma that would end the
+    scan — a member-pointer wrapper's owning class can itself be a template
+    with multiple arguments (``int (ns::C<int, double>::*ns::bar<int>(int))()``),
+    and that comma appears before the wrapper's own ``*`` is ever reached
+    (Codex review, fresh evidence: the un-tracked version bailed out on it
+    and corrupted the eventual leaf).
+
+    Only whitespace, identifier/scope characters (``Ident::Ident::``), and a
+    balanced template-argument list may appear *before* the star — anything
+    else means this ``(`` was never a scope-qualified pointer/member-pointer
+    declarator to begin with, so bail out immediately rather than let some
+    later, unrelated ``*``/``&`` be mistaken for the declarator's own. A
+    dependent ``decltype`` expression can itself contain a ``*`` that is
+    ordinary multiplication, not a declarator (``decltype ({parm#1}*(g()))
+    ns::sort<int>(int)`` — real GCC output): the un-gated version accepted
+    that arithmetic ``*`` as if it opened a wrapper, matched the following
+    ``(`` of the unrelated nested call ``g()`` as the wrapper's real call,
+    and returned an empty slice between the adjacent ``*(`` — collapsing the
+    whole identity to ``""`` (Codex review, fresh evidence).
+    """
+    star_index = -1
+    depth = 0
+    for offset, ch in enumerate(qualified[paren_index + 1:]):
+        idx = paren_index + 1 + offset
+        if ch == "<":
+            depth += 1
+            continue
+        if ch == ">":
+            depth = max(0, depth - 1)
+            continue
+        if star_index == -1:
+            if depth > 0:
+                # Inside the owning class's own template-argument list --
+                # every character here (including "*"/"&"/",") belongs to
+                # those arguments, never to the wrapper's own declarator.
+                # A pointer template argument (``ns::C<int*, double>::*...``)
+                # would otherwise have its "*" recorded as the declarator
+                # star, corrupting the eventual leaf (CodeRabbit review).
+                continue
+            if ch in "*&":
+                # An rvalue-reference declarator is "&&", not a single
+                # "&" -- when the second "&" immediately follows, record
+                # *its* index instead of the first, so the later slice
+                # (which starts right after the recorded index) drops the
+                # whole token rather than leaving a stray "&" glued to the
+                # front of the recovered name (Codex review, fresh
+                # evidence: "int (&&ns::sort<int>(int))()" left "&ns::sort
+                # <int>" before this fix).
+                if ch == "&" and idx + 1 < len(qualified) and qualified[idx + 1] == "&":
+                    star_index = idx + 1
+                else:
+                    star_index = idx
+            elif ch.isalnum() or ch in "_: \t":
+                continue
+            else:
+                return -1
+        elif ch == "(":
+            return star_index
+        elif ch in ",)" and depth == 0:
+            return -1
+    return -1
+
+
+def _matching_close_paren(qualified: str, open_index: int) -> int:
+    """Return the index of the ``)`` matching the ``(`` at *open_index*
+    (depth-balanced across any nested parens), or -1 if unbalanced."""
+    depth = 0
+    for i in range(open_index, len(qualified)):
+        if qualified[i] == "(":
+            depth += 1
+        elif qualified[i] == ")":
+            depth -= 1
+            if depth == 0:
+                return i
+    return -1
+
+
 def _strip_param_signature(qualified: str) -> str:
-    """Strip a function's parameter-list signature (from the first
-    top-level ``(``), preserving any ``::`` namespace/class qualification.
+    """Strip a function's parameter-list signature (from its own top-level
+    ``(``), preserving any ``::`` namespace/class qualification.
 
     Used to compare a function's demangled name (``lib::sort(int*, int*)``)
     against a variable's demangled name (``lib::sort``) so the two sides of
@@ -136,15 +243,150 @@ def _strip_param_signature(qualified: str) -> str:
     correlated *by their full qualified name*, not just a bare leaf — two
     unrelated namespaces reusing the same leaf identifier (``ns1::sort`` vs
     ``ns2::sort``) must never collapse together (see :func:`detect_cpo_kind_changed`).
+
+    Two shapes make "the first top-level ``(`` in the string" the wrong
+    thing to stop at (both Codex review, all verified with real c++filt
+    output shapes — the second subsumes several distinct return-type forms
+    found across successive review rounds):
+
+    * A call operator's own name is spelled ``operator()`` — those
+      parentheses are the identifier, not an argument list. Naively
+      stopping at the first ``(`` corrupted
+      ``ns::C::operator()(ns::T const&) const`` down to just
+      ``ns::C::operator``. Skipping it needs an actual ``operator`` *token*
+      immediately before an *empty* ``()`` pair, not merely a name ending
+      in the substring ``"operator"`` — ``ns::cooperator(int)`` is a plain
+      function, not a disguised call operator, and stripping its params
+      must behave normally.
+    * A ``(`` that is any part of the *return type* rather than the real
+      parameter list. The general signal: a real call's own ``(`` is
+      always glued directly to the identifier/template-close that names
+      it, with no separating whitespace in demangled output, while every
+      return-type shape found so far has at least one space before its
+      first ``(`` — so a whitespace-preceded ``(`` is never the real
+      parameter list. What to do next differs by shape, distinguished by
+      :func:`_pointer_declarator_star_index`:
+
+      - A function-pointer/member-function-pointer declarator
+        (``int (*ns::f<int>(int))()`` / ``int (ns::C::*ns::f<int>(int))()``)
+        nests the real call *inside* this group, right after the
+        ``*``/``&`` — so only this one ``(`` character is skipped, letting
+        the search land on that nested call.
+      - Anything else — a dependent ``decltype``/similar expression
+        (``decltype ({parm#1}+{parm#1}) ns::sort<int>(int)``, or one whose
+        own content has further nested, unrelated parens like a call —
+        ``decltype ((g())?{parm#1}:{parm#1}) f<int>(int)``) has no real
+        call nested inside it at all; the real call, if any, comes *after*
+        this group's own matching close paren. The whole balanced group is
+        skipped via :func:`_matching_close_paren` rather than just its
+        opening character, so an unrelated nested ``(`` inside the
+        expression (``g()`` above) is never mistaken for the real one.
+
+      Neither branch misfires on an ordinary pointer/reference *parameter*
+      (``lib::sort(int*, int*)``, whose only ``(`` is glued to ``sort`` —
+      never reached by this whitespace-gated logic at all).
+
+    Skipping a pointer-declarator wrapper leaves its own opening ``(`` and
+    ``*``/``Class::*`` text sitting in the returned prefix (e.g.
+    ``"int (ns::C::*ns::sort"`` for ``int (ns::C::*ns::sort<int>(int))()``)
+    — harmless for a caller that only takes the *last* ``::``-segment
+    (``_index_funcs_by_stable_key``'s leaf), but wrong for a caller using
+    the whole result as a qualified-name *identity*
+    (:func:`detect_cpo_kind_changed`, which failed to match a
+    pointer-to-member-function CPO transition against this corrupted
+    prefix — Codex review). The clean name is recovered by taking the text
+    after the wrapper's own ``*``/``&`` — but its *position*, found while
+    recognizing the declarator via :func:`_pointer_declarator_star_index`,
+    must be tracked and reused rather than re-derived from the final prefix
+    with ``rindex("*")``: when the wrapped call's own name carries a
+    pointer template argument (``int (*ns::bar<int*>(int*))()``), that
+    argument's own ``*`` sits later in the prefix than the wrapper's, so a
+    whole-prefix ``rindex`` picks the wrong one and corrupts the name down
+    to a lone ``">"`` (Codex review, fresh evidence after this function's
+    own prior fix for the pointer-wrapper case).
+
+    **Known, deliberately-unfixed limitation**: a return type that is
+    itself a template instantiation whose *own* non-type template argument
+    contains a comparison operator (``std::enable_if<(sizeof(int)>1),
+    T>::type ns::sort<int>(int)`` — real GCC output) still truncates the
+    identity at that argument's own ``(``, since the ``>`` in ``>1)`` is
+    lexically indistinguishable from a genuine template-close ``>`` (as in
+    the overwhelmingly common ``f<int>(args)`` shape) without actually
+    parsing the expression grammar — the same "angle bracket problem" real
+    C++ parsers resolve with lookahead/backtracking or semantic analysis,
+    out of scope for this lexical scanner (Codex review; verified this
+    degrades safely — no crash/hang, just a wrong-but-inert leaf, and that
+    no simple heuristic here can distinguish the two ``>`` uses without
+    also breaking the ordinary template-function-call case).
     """
-    depth = 0
-    for i, ch in enumerate(qualified):
-        if ch == "(":
-            if depth == 0:
-                return qualified[:i]
-            depth += 1
-        elif ch == ")":
-            depth = max(0, depth - 1)
+    i = qualified.find("(")
+    saw_pointer_wrapper = False
+    wrapper_star_index = -1
+    while i != -1:
+        prefix = qualified[:i]
+        m = _OPERATOR_TOKEN_RE.search(prefix)
+        if m is not None and m.end() == len(prefix) and qualified[i:i + 2] == "()":
+            # operator()'s own, empty parentheses are part of the
+            # identifier — skip exactly that pair and keep searching for
+            # the real parameter-list opener.
+            i = qualified.find("(", i + 2)
+            continue
+        if _DECLTYPE_TOKEN_RE.search(prefix):
+            # A "decltype(...)" return type with no space before its own
+            # "(" (real GCC/Clang output for e.g. "decltype(auto)" or a
+            # conversion operator's "decltype(nullptr)" target) bypasses
+            # the whitespace-gated branch below entirely and would
+            # otherwise be mistaken for the real parameter list, truncating
+            # the identity down to just "decltype" (Codex review, fresh
+            # evidence — the fixed-"(auto)"-only check missed every other
+            # decltype(...) content, e.g. decltype(nullptr)). Skip the
+            # whole balanced group, whatever it contains, same as every
+            # other decltype shape.
+            close = _matching_close_paren(qualified, i)
+            if close == -1:
+                return qualified
+            i = qualified.find("(", close + 1)
+            continue
+        if i == 0 or qualified[i - 1].isspace():
+            star_index = _pointer_declarator_star_index(qualified, i)
+            if star_index != -1:
+                saw_pointer_wrapper = True
+                wrapper_star_index = star_index
+                i = qualified.find("(", i + 1)
+            else:
+                close = _matching_close_paren(qualified, i)
+                if close == -1:
+                    return qualified
+                # A function-pointer/reference *type* used as a return type
+                # (e.g. a conversion operator's target,
+                # ``operator int (*)(double)() const``) is spelled as two
+                # immediately-adjacent parenthesized groups with no
+                # separating whitespace: the bare ``(*)``/``(&)`` marker
+                # (no name, since it names a type rather than a declarator)
+                # glued directly to the target's own parameter list. Both
+                # belong to the return type, not the outer function's own
+                # parameter list — skip that one glued group too, or the
+                # search would land on ``(double)`` and mistake it for the
+                # real parameter list, corrupting the identity to
+                # ``"...operator int (*)"`` (Codex review, fresh evidence).
+                # Deliberately bounded to a *single* extra group: the
+                # conversion operator's own trailing ``()`` is glued the
+                # exact same way, and must be left for the outer loop's own
+                # classification (its lack of a preceding "operator" token
+                # immediately before it means it correctly falls through to
+                # `return prefix`, keeping the target-type spelling that
+                # distinguishes this operator from a same-named one
+                # converting to a different type) rather than being
+                # swallowed here too.
+                if close + 1 < len(qualified) and qualified[close + 1] == "(":
+                    inner_close = _matching_close_paren(qualified, close + 1)
+                    if inner_close != -1:
+                        close = inner_close
+                i = qualified.find("(", close + 1)
+            continue
+        if saw_pointer_wrapper and wrapper_star_index != -1:
+            return qualified[wrapper_star_index + 1:i]
+        return prefix
     return qualified
 
 
@@ -272,17 +514,22 @@ def detect_internal_template_leaks(
     new: AbiSnapshot,
     internal_namespaces: tuple[str, ...] = _INTERNAL_TEMPLATE_NAMESPACES,
 ) -> list[Change]:
-    """Report internal-namespace function templates whose instantiations changed.
+    """Report internal-namespace function templates with a removed instantiation.
 
     Strategy:
       1. Index OLD functions by ``(stem_without_template_args,
          param_arity_signature)``. Stem includes the internal namespace
          path so "internal" status is preserved.
       2. Match against NEW functions by the same key.
-      3. For internal-namespace stems whose instantiation set changed
-         (instantiations removed, added, or signature-changed), emit a
-         single ``INTERNAL_TEMPLATE_LEAKS_VIA_PUBLIC_API`` finding per
-         stem.
+      3. For internal-namespace stems where at least one OLD
+         ``(name, signature)`` instantiation pair is absent from NEW
+         (removed outright, or replaced by a signature change — the two are
+         indistinguishable from a consumer's perspective, since either way
+         the old mangled name it linked against is gone), emit a single
+         ``INTERNAL_TEMPLATE_LEAKS_VIA_PUBLIC_API`` finding per stem. A
+         *purely* additive instantiation-set change (every OLD pair still
+         present in NEW, only new ones gained) does not fire — an addition
+         alone cannot break an already-linked consumer (Codex review).
 
     The detector is intentionally per-stem rather than per-instantiation
     so a reviewer sees one finding even when 30 instantiations shift.
@@ -304,6 +551,17 @@ def detect_internal_template_leaks(
         old_sigs = _instantiation_set(old_by_stem.get(stem, []))
         new_sigs = _instantiation_set(new_by_stem.get(stem, []))
         if old_sigs == new_sigs:
+            continue
+        # Direction matters: a (name, signature) pair that existed in OLD but
+        # is absent from NEW means a consumer TU that already resolved and
+        # linked against that mangled instantiation now has nothing to link
+        # against — that's the real "must rebuild every consumer" break this
+        # kind exists to report. A pair present only in NEW (a *new*
+        # instantiation the library started emitting, with every previously
+        # existing one still there unchanged) adds a symbol a consumer could
+        # not already be depending on; it cannot break an already-linked
+        # consumer, so it is not reported here.
+        if not (old_sigs - new_sigs):
             continue
         changes.append(_leak_change(stem, old_sigs, new_sigs))
     return changes
