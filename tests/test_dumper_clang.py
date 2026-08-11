@@ -455,10 +455,15 @@ def test_parse_types_opaque_redecl_kind_canonicalizes_regardless_of_order(
     """`class Handle; struct Handle;` (either order) is legal, compiler-
     accepted C++ redeclaring one opaque type with different-but-compatible
     class keys. RecordType.kind must canonicalize to the same value
-    ("class", tu_merge's own min(kind)) regardless of which spelling
-    happened to come first, or reordering the two forward decls alone would
-    flip the emitted kind and produce a false SOURCE_LEVEL_KIND_CHANGED
-    (Codex review, PR #719)."""
+    ("struct" -- class/struct are collapsed to one fixed spelling before
+    any min(kind), PR #719 follow-up) regardless of which spelling happened
+    to come first, or reordering the two forward decls alone would flip the
+    emitted kind and produce a false SOURCE_LEVEL_KIND_CHANGED (Codex
+    review, PR #719). Collapsing to one fixed spelling (rather than
+    min()-over-observed-spellings) also matters when the observed SET of
+    redecls itself differs between two otherwise-unchanged snapshots -- see
+    test_parse_types_opaque_redecl_kind_stable_when_a_compatible_redecl_is_added
+    below."""
     root = _tu(
         {
             "kind": "CXXRecordDecl",
@@ -480,7 +485,55 @@ def test_parse_types_opaque_redecl_kind_canonicalizes_regardless_of_order(
     ]
     assert len(types) == 1
     assert types[0].is_opaque is True
-    assert types[0].kind == "class"
+    assert types[0].kind == "struct"
+
+
+def test_parse_types_opaque_redecl_kind_stable_when_a_compatible_redecl_is_added() -> (
+    None
+):
+    """Codex review, PR #719, follow-up: a snapshot with ONLY `struct H;`
+    must canonicalize to the SAME kind as a later snapshot that adds the
+    legal, semantics-preserving redeclaration `class H;` alongside it --
+    both describe the identical opaque type. Before class/struct were
+    canonicalized to one fixed spelling, min() over the OBSERVED set of
+    redecl spellings changed value the moment `class H;` was added (min
+    over {"struct"} is "struct", but min over {"class", "struct"} is
+    "class"), producing a false SOURCE_LEVEL_KIND_CHANGED for a header
+    change that didn't alter the type's real kind at all."""
+    struct_only = _tu(
+        {
+            "kind": "CXXRecordDecl",
+            "name": "H",
+            "tagUsed": "struct",
+            "loc": {"file": "include/foo.h", "line": 1},
+        }
+    )
+    struct_and_class = _tu(
+        {
+            "kind": "CXXRecordDecl",
+            "name": "H",
+            "tagUsed": "struct",
+            "loc": {"file": "include/foo.h", "line": 1},
+        },
+        {
+            "kind": "CXXRecordDecl",
+            "name": "H",
+            "tagUsed": "class",
+            "loc": {"file": "include/foo.h", "line": 2},
+        },
+    )
+    before = [
+        t
+        for t in _ClangAstParser(struct_only, set(), set()).parse_types()
+        if t.name == "H"
+    ]
+    after = [
+        t
+        for t in _ClangAstParser(struct_and_class, set(), set()).parse_types()
+        if t.name == "H"
+    ]
+    assert len(before) == len(after) == 1
+    assert before[0].kind == after[0].kind == "struct"
 
 
 def test_parse_types_opaque_redecl_merges_deprecated_from_a_later_decl() -> None:
@@ -600,10 +653,10 @@ def test_parse_types_opaque_redecl_uses_most_recent_deprecated_reason() -> None:
 def test_parse_types_opaque_redecl_keeps_public_location_over_private() -> None:
     """A public `struct Handle;` compatibly redeclared with a different class
     key in a private header (`class Handle;`) must keep its PUBLIC
-    source_location -- kind canonicalization (min(kind) -> "class") must not
-    also drag the private redecl's location along with it, or a genuinely
-    public handle would silently read as PRIVATE_HEADER downstream (Codex
-    review, PR #719)."""
+    source_location -- kind canonicalization (class/struct collapsed to one
+    fixed spelling, PR #719 follow-up) must not also drag the private
+    redecl's location along with it, or a genuinely public handle would
+    silently read as PRIVATE_HEADER downstream (Codex review, PR #719)."""
     root = _tu(
         {
             "kind": "CXXRecordDecl",
@@ -621,7 +674,7 @@ def test_parse_types_opaque_redecl_keeps_public_location_over_private() -> None:
     parser = _ClangAstParser(root, set(), set(), public_header_paths=["include/foo.h"])
     types = [t for t in parser.parse_types() if t.name == "Handle"]
     assert len(types) == 1
-    assert types[0].kind == "class"  # still canonicalized via min(kind)
+    assert types[0].kind == "struct"  # canonicalized to a fixed spelling
     assert types[0].source_location == "include/foo.h:1"
 
     # Reversed declaration order: the public one still wins the location.
@@ -644,16 +697,16 @@ def test_parse_types_opaque_redecl_keeps_public_location_over_private() -> None:
     )
     types2 = [t for t in parser2.parse_types() if t.name == "Handle"]
     assert len(types2) == 1
-    assert types2[0].kind == "class"
+    assert types2[0].kind == "struct"
     assert types2[0].source_location == "include/foo.h:2"
 
 
 def test_parse_types_definition_kind_not_overridden_by_opaque_redecl() -> None:
     """`class Foo;` (unchanged) followed by a definition changing from
     `class Foo { ... };` to `struct Foo { ... };` -- the opaque forward
-    decl's own canonicalized `opaque_kinds` entry ("class") must NOT also
-    apply to the surviving COMPLETE record, or a real kind change on the
-    definition itself would be silently hidden (Codex review, PR #719)."""
+    decl's own canonicalized `opaque_kinds` entry must NOT also apply to
+    the surviving COMPLETE record, or a real kind change on the definition
+    itself would be silently hidden (Codex review, PR #719)."""
     root = _tu(
         {
             "kind": "CXXRecordDecl",

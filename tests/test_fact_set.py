@@ -224,6 +224,24 @@ def test_check_fact_compatibility_inconsistent_rollup_is_not_forgiven_like_absen
     assert both_absent.structured_content_comparable
 
 
+def test_check_fact_compatibility_reports_issue_for_inconsistent_matching_fact_sets() -> (
+    None
+):
+    """Codex review, PR #719, follow-up round two: check_fact_set_compatibility
+    only ever compares the two rolled-up fact_set dicts it's given -- it has
+    no visibility into old_inconsistent/new_inconsistent, so it reports
+    nothing when those dicts happen to be identical. Without an explicit
+    issue for the inconsistency itself, a caller like _diff_fact_coverage
+    that only reports when compat.issues is non-empty would silently
+    suppress findings with no SOURCE_FACT_COVERAGE_INCOMPLETE to explain
+    why."""
+    fs = default_fact_set(producer="p", producer_version="1")
+    compat = check_fact_compatibility(fs, fs, old_inconsistent=True)
+    assert any(i.rule == "fact_set_inconsistent" for i in compat.issues)
+    assert not compat.structured_facts_comparable
+    assert not compat.opaque_hashes_comparable
+
+
 def test_rollup_coverage_worst_of_wins() -> None:
     tus = [
         _tu(coverage={"functions": "complete", "macros": "complete"}),
@@ -1170,6 +1188,42 @@ def test_diff_reports_coverage_incomplete_from_bare_inconsistent_flag() -> None:
     kinds = {c.kind for c in changes}
     assert ChangeKind.SOURCE_FACT_COVERAGE_INCOMPLETE in kinds
     # And the content-change findings it explains are indeed suppressed.
+    assert ChangeKind.PUBLIC_MACRO_VALUE_CHANGED not in kinds
+    assert ChangeKind.PUBLIC_TYPEDEF_TARGET_CHANGED not in kinds
+
+
+def test_diff_reports_coverage_incomplete_when_inconsistent_flag_has_matching_fact_sets() -> (
+    None
+):
+    """Codex review, PR #719, follow-up round two: a serialized/forward-
+    produced surface can set fact_set_inconsistent=True while its
+    coverage.fact_set block still carries non-empty, IDENTICAL
+    representative content on both sides (the inconsistency is a fact about
+    the surface's own constituent TUs, not about the rolled-up dict this
+    comparison sees). Previously check_fact_set_compatibility found no
+    producer/version mismatch between two identical fact_sets, so
+    compat.issues stayed empty and _diff_fact_coverage's early return fired
+    with NO SOURCE_FACT_COVERAGE_INCOMPLETE explanation, even though
+    check_fact_compatibility's own old_inconsistent gating was silently
+    suppressing every category underneath it."""
+    fs = default_fact_set(producer="p", producer_version="1")
+    old = _surface(
+        coverage={
+            "fact_set": fs,
+            "fact_set_inconsistent": True,
+            "fact_family_states": {},
+        },
+        reachable_macros=[_macro_entity("FOO", "1")],
+        reachable_types=[_typedef_entity("Widget_t", "h1")],
+    )
+    new = _surface(
+        coverage={"fact_set": fs, "fact_family_states": {}},
+        reachable_macros=[_macro_entity("FOO", "2")],
+        reachable_types=[_typedef_entity("Widget_t", "h2")],
+    )
+    changes = diff_source_abi(old, new)
+    kinds = {c.kind for c in changes}
+    assert ChangeKind.SOURCE_FACT_COVERAGE_INCOMPLETE in kinds
     assert ChangeKind.PUBLIC_MACRO_VALUE_CHANGED not in kinds
     assert ChangeKind.PUBLIC_TYPEDEF_TARGET_CHANGED not in kinds
 

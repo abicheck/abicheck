@@ -212,7 +212,35 @@ A new changelog fragment. See changelog.d/README.md for the workflow.
   so `_diff_fact_coverage()` returned `[]` with no
   `SOURCE_FACT_COVERAGE_INCOMPLETE` explanation even while `compat`'s own
   inconsistency-driven suppression silently dropped structured/opaque/
-  source-edge findings underneath it.
+  source-edge findings underneath it. A follow-up round (Codex review)
+  closed the residual gap the same non-empty-matching-`fact_set` shape
+  left open in `_diff_fact_coverage()` itself: even after `has_signal`
+  correctly read `True`, `compat.issues` stayed empty because
+  `check_fact_set_compatibility()` only ever compares the two rolled-up
+  `fact_set` dicts it's given — it has no visibility into
+  `old_inconsistent`/`new_inconsistent` at all, so two identical fact_sets
+  produce no issue regardless of the inconsistency flag. `check_fact_
+  compatibility()` now appends an explicit `fact_set_inconsistent`
+  `FactSetIssue` whenever `old_inconsistent`/`new_inconsistent` is set, so
+  `_diff_fact_coverage()`'s "only report when there's something to say"
+  early return no longer fires silently for this shape.
+- **`dumper_clang.py`'s opaque class/struct kind canonicalization no
+  longer depends on which particular subset of legally-compatible
+  redeclarations happens to be present in a given snapshot** (Codex
+  review) — `min(kind)` over the *observed* redecl spellings was only
+  stable when that observed set itself was stable, but C++ permits
+  forward-declaring a type with one class-key (`struct H;`) and later
+  adding a legal, semantics-preserving redeclaration with the other
+  (`class H;`); adding or removing that second, compatible redecl between
+  two otherwise-unchanged snapshots changed which spelling `min()` saw and
+  could flip the emitted `RecordType.kind`, producing a false
+  `SOURCE_LEVEL_KIND_CHANGED` for a header change that didn't alter the
+  type's real kind at all. `class`/`struct` are now collapsed to one fixed
+  spelling (`"struct"`) before folding into `opaque_kinds`, so the
+  canonicalized value depends only on the identity's real kind category;
+  `union` — a genuinely different, non-interchangeable type category
+  (mirroring `tu_merge._record_kinds_compatible`'s existing rule) — is
+  left untouched.
 
 - **`CastxmlSourceExtractor.cache_identity_extra()` no longer collapses
   every unparseable/failed `--version` probe to the same uninformative

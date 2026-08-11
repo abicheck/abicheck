@@ -1463,7 +1463,7 @@ class _ClangAstParser:
             if (msg := _clang_deprecated_message(node)) is not None:  # most recent wins
                 deprecated[identity] = msg
             if not (node_is_def := _is_record_definition(node)):
-                k = _record_kind(node)
+                k = "struct" if _record_kind(node) == "class" else _record_kind(node)
                 opaque_kinds[identity] = min(k, opaque_kinds.get(identity, k))
             if (existing := best.get(identity)) is None:
                 best[identity] = (entry, name)

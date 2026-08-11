@@ -492,6 +492,36 @@ def check_fact_compatibility(
     both_present = bool(old_fact_set) and bool(new_fact_set)
     one_sided = bool(old_fact_set) != bool(new_fact_set)
     inconsistent = old_inconsistent or new_inconsistent
+    if inconsistent:
+        # check_fact_set_compatibility() above only ever compares the two
+        # ROLLED-UP fact_set dicts it was given -- it has no visibility into
+        # old_inconsistent/new_inconsistent at all, so it reports nothing
+        # when those dicts happen to be identical (Codex review, PR #719,
+        # follow-up): a serialized/forward-produced surface can carry
+        # fact_set_inconsistent=True while still stamping matching,
+        # non-empty representative fact_set content on both sides (the
+        # inconsistency is a fact about the surface's own constituent TUs,
+        # not about the rolled-up dict this comparison sees). Without an
+        # explicit issue here, that shape left `issues` empty even though
+        # every category below is gated off by `inconsistent` -- a caller
+        # like `_diff_fact_coverage()` that only reports when `issues` is
+        # non-empty would then silently suppress findings with no
+        # SOURCE_FACT_COVERAGE_INCOMPLETE to explain why.
+        sides = [
+            label
+            for label, flag in (("old", old_inconsistent), ("new", new_inconsistent))
+            if flag
+        ]
+        issues.append(
+            FactSetIssue(
+                "warning",
+                "fact_set_inconsistent",
+                f"{' and '.join(sides)} side's own TUs disagreed on fact_set "
+                "(a mixed-producer pack); structured content, opaque "
+                "body/template hashes, source_edges, and removal detection "
+                "are all treated as not comparable for this comparison.",
+            )
+        )
     # Gated on `not inconsistent` (Codex review, PR #719): `rollup_fact_set()`
     # itself always collapses an inconsistent side to `{}`, so this couldn't
     # fire for that caller -- but `old_fact_set`/`new_fact_set` and
