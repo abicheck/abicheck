@@ -391,9 +391,10 @@ def _compute_freshness(
 
 
 def compute_content_digest(manifest: dict[str, Any]) -> str:
-    """The normalized "did anything really change" digest -- only library
-    name + snapshot sha256, sorted by library, matches action.yml's
-    documented contract ("library names + per-file digests").
+    """The normalized "did anything really change" digest -- library name +
+    snapshot sha256 + (when staged, G30 P1.6/ADR-047 §8 S14) staged-binary
+    sha256, sorted by library, matches action.yml's documented contract
+    ("library names + per-file digests").
 
     Deliberately excludes every other manifest field, most importantly
     ``created_at``: ``dumper.py`` auto-stamps a fresh one on every dump
@@ -402,6 +403,21 @@ def compute_content_digest(manifest: dict[str, Any]) -> str:
     content was identical, defeating its purpose as a change signal
     (CodeRabbit review). Sorted by library so the digest is independent of
     entry/matrix order too.
+
+    ``binary_sha256`` -- the staged ELF binary's own digest, present only
+    for a bundle member with ``stage_binary: true`` -- is included
+    alongside ``sha256`` (the snapshot's digest), not folded into it or
+    left out: a rebuilt binary with unchanged ABI (a code-only or
+    reproducibility-only change) has identical snapshot content but
+    different binary bytes, and bundle resolution (``resolve_bundle()`` in
+    ``abicheck/buildsource/baseline_set.py``) consumes that staged binary
+    directly, not the snapshot -- omitting it would let a rerun with a
+    genuinely different binary be treated as a safe identical-content retry
+    and silently keep the STALE binary published (Codex review). Omitted
+    from the hashed row entirely (not hashed as ``None``/``""``) when a
+    library has no staged binary, so a manifest schema predating G30 P1.6
+    (no ``binary_sha256`` field at all) still reproduces the same digest a
+    reader of that older schema would compute.
 
     A standalone function (not inlined in ``main()``) so a caller outside
     this script's own CLI invocation -- e.g. ``publish-baseline.yml``'s
@@ -414,13 +430,17 @@ def compute_content_digest(manifest: dict[str, Any]) -> str:
     stamped timestamps and the tar archive's own filesystem metadata vary
     run to run).
     """
+
+    def _row(a: dict[str, Any]) -> dict[str, Any]:
+        row = {"library": a["library"], "sha256": a["sha256"]}
+        if a.get("binary_sha256"):
+            row["binary_sha256"] = a["binary_sha256"]
+        return row
+
     return hashlib.sha256(
         json.dumps(
             sorted(
-                (
-                    {"library": a["library"], "sha256": a["sha256"]}
-                    for a in manifest["artifacts"]
-                ),
+                (_row(a) for a in manifest["artifacts"]),
                 key=lambda a: a["library"],
             ),
             sort_keys=True,

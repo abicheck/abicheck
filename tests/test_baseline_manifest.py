@@ -1116,6 +1116,46 @@ class TestMainCli:
             manifest_a
         ) != build_manifest_module.compute_content_digest(manifest_b)
 
+    def test_compute_content_digest_changes_with_a_different_staged_binary(
+        self,
+    ) -> None:
+        # Codex review, PR #726: a bundle member's staged ELF binary
+        # (binary_sha256, G30 P1.6/ADR-047 §8 S14) can change bytes-for-
+        # bytes (a code-only or reproducibility-only rebuild) with the
+        # library's *snapshot* content -- and therefore "sha256" --
+        # completely unchanged. resolve_bundle() consumes the staged
+        # binary directly, so the digest must be sensitive to it too, or a
+        # rerun that genuinely republished a different binary would be
+        # (wrongly) treated as a safe identical-content retry and the
+        # stale binary would stay published.
+        manifest_a = {
+            "artifacts": [
+                {"library": "libfoo", "sha256": "aaa", "binary_sha256": "bin1"}
+            ]
+        }
+        manifest_b = {
+            "artifacts": [
+                {"library": "libfoo", "sha256": "aaa", "binary_sha256": "bin2"}
+            ]
+        }
+        assert build_manifest_module.compute_content_digest(
+            manifest_a
+        ) != build_manifest_module.compute_content_digest(manifest_b)
+
+    def test_compute_content_digest_stable_when_neither_manifest_has_binary_sha256(
+        self,
+    ) -> None:
+        # A manifest schema predating G30 P1.6 (no binary_sha256 field at
+        # all) must still reproduce the same digest an equivalent manifest
+        # with an explicit-but-absent field would.
+        manifest_a = {"artifacts": [{"library": "libfoo", "sha256": "aaa"}]}
+        manifest_b = {
+            "artifacts": [{"library": "libfoo", "sha256": "aaa", "binary_sha256": ""}]
+        }
+        assert build_manifest_module.compute_content_digest(
+            manifest_a
+        ) == build_manifest_module.compute_content_digest(manifest_b)
+
 
 class TestStageBinary:
     """G30 P1.6 (ADR-047 §6/§8 S14 correction): a ``stage_binary: true``

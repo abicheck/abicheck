@@ -105,7 +105,7 @@ outputs:
     description: 'Number of libraries successfully dumped into this baseline-set.'
     value: ${{ steps.run-baseline.outputs.library-count }}
   content-digest:
-    description: 'SHA-256 over the manifest''s artifact list (library names + per-file digests) -- changes whenever any library''s snapshot content changes.'
+    description: 'SHA-256 over the manifest''s artifact list (library names + per-file digests, including each staged bundle-member binary''s own digest when present) -- changes whenever any library''s snapshot content, or a staged binary''s bytes, changes.'
     value: ${{ steps.run-baseline.outputs.content-digest }}
   refresh-required:
     description: >
