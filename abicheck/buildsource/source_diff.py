@@ -156,9 +156,14 @@ def _surface_fact_set(surface: SourceAbiSurface) -> dict[str, object]:
 
 def _surface_fact_set_inconsistent(surface: SourceAbiSurface) -> bool:
     """Whether this surface's own TUs disagreed on ``fact_set`` -- see
-    ``fact_set.fact_set_rollup_is_inconsistent``'s docstring."""
+    ``fact_set.fact_set_rollup_is_inconsistent``'s docstring.
+
+    ``bool(...)`` alone would misread a hand-edited/forward-produced
+    ``source_abi.json`` storing this flag as the string ``"false"`` as
+    truthy (Codex review) -- require the actual JSON boolean ``True``.
+    """
     cov = surface.coverage if isinstance(surface.coverage, dict) else {}
-    return bool(cov.get("fact_set_inconsistent"))
+    return cov.get("fact_set_inconsistent") is True
 
 
 def _diff_fact_coverage(

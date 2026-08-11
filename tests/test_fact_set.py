@@ -1105,6 +1105,35 @@ def test_diff_suppresses_content_changes_when_fact_set_empty_from_inconsistency(
     assert ChangeKind.PUBLIC_TYPEDEF_TARGET_CHANGED not in kinds
 
 
+def test_diff_still_reports_content_changes_when_inconsistent_flag_is_string_false() -> (
+    None
+):
+    """Codex review, PR #719, fourth round: a hand-edited/forward-produced
+    ``source_abi.json`` storing this flag as the JSON-looking-but-wrong
+    string `"false"` (not the real boolean) must NOT be read as truthy --
+    `bool("false")` is `True` in Python, which would wrongly suppress a
+    genuinely consistent surface's content-change findings."""
+    fs = default_fact_set(producer="p", producer_version="1")
+    old = _surface(
+        coverage={
+            "fact_set": fs,
+            "fact_set_inconsistent": "false",
+            "fact_family_states": {},
+        },
+        reachable_macros=[_macro_entity("FOO", "1")],
+        reachable_types=[_typedef_entity("Widget_t", "h1")],
+    )
+    new = _surface(
+        coverage={"fact_set": fs, "fact_family_states": {}},
+        reachable_macros=[_macro_entity("FOO", "2")],
+        reachable_types=[_typedef_entity("Widget_t", "h2")],
+    )
+    changes = diff_source_abi(old, new)
+    kinds = {c.kind for c in changes}
+    assert ChangeKind.PUBLIC_MACRO_VALUE_CHANGED in kinds
+    assert ChangeKind.PUBLIC_TYPEDEF_TARGET_CHANGED in kinds
+
+
 def test_diff_still_reports_removals_when_fact_sets_match() -> None:
     fs = default_fact_set(producer="p", producer_version="1")
     old = _surface(

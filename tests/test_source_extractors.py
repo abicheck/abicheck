@@ -1123,6 +1123,56 @@ def test_castxml_tool_version_recognizes_llvm_spelled_banner(monkeypatch) -> Non
     castxml_mod._castxml_tool_version.cache_clear()
 
 
+def test_castxml_tool_version_reads_stderr_banner(monkeypatch) -> None:
+    """Codex review, PR #719, fourth round: some castxml wrapper/build
+    combinations write the --version banner to stderr rather than stdout
+    (dumper_castxml_probe.py's own combined-transcript read already handles
+    this) -- the probe must not silently return "" for those installs."""
+    import subprocess as subprocess_mod
+
+    from abicheck.buildsource.source_extractors import castxml as castxml_mod
+
+    castxml_mod._castxml_tool_version.cache_clear()
+
+    def fake_run(*_args, **_kwargs):
+        return subprocess_mod.CompletedProcess(
+            args=["castxml", "--version"],
+            returncode=0,
+            stdout="",
+            stderr="castxml version 0.6.3\nUbuntu clang version 17.0.6\n",
+        )
+
+    monkeypatch.setattr(castxml_mod.subprocess, "run", fake_run)
+    version = castxml_mod._castxml_tool_version("castxml")
+    assert version.startswith("0.6.3")
+    assert "clang version 17.0.6" in version
+    castxml_mod._castxml_tool_version.cache_clear()
+
+
+def test_castxml_tool_version_matches_banner_case_insensitively(monkeypatch) -> None:
+    """Codex review, PR #719, fourth round: a build that capitalizes
+    "CastXML version ..." must still be recognized -- mirrors
+    dumper_castxml_probe's case-insensitive ``_CASTXML_VERSION_RE``."""
+    import subprocess as subprocess_mod
+
+    from abicheck.buildsource.source_extractors import castxml as castxml_mod
+
+    castxml_mod._castxml_tool_version.cache_clear()
+
+    def fake_run(*_args, **_kwargs):
+        return subprocess_mod.CompletedProcess(
+            args=["castxml", "--version"],
+            returncode=0,
+            stdout="CastXML Version 0.6.3\n",
+            stderr="",
+        )
+
+    monkeypatch.setattr(castxml_mod.subprocess, "run", fake_run)
+    version = castxml_mod._castxml_tool_version("castxml")
+    assert version.startswith("0.6.3")
+    castxml_mod._castxml_tool_version.cache_clear()
+
+
 def test_castxml_extractor_cache_identity_extra_folds_probed_tool_version(
     monkeypatch,
 ) -> None:

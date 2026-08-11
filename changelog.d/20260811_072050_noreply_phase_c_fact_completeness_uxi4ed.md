@@ -120,4 +120,13 @@ A new changelog fragment. See changelog.d/README.md for the workflow.
   inconsistent side's `{}` suppresses `structured_content_comparable`/
   `opaque_hashes_comparable`/`source_edges_comparable` the same way an
   asymmetric absence already does, instead of silently passing structured
-  content changes through as trusted (Codex review, PR #719).
+  content changes through as trusted (Codex review, PR #719). Two more
+  fixes in the same round: the surface-level `fact_set_inconsistent` read
+  now requires the actual JSON boolean `True` rather than `bool(...)`
+  truthiness, which misread the string `"false"` (from a hand-edited/
+  forward-produced `source_abi.json`) as truthy; and the castxml
+  `compiler_version` probe now reads the combined stdout+stderr
+  transcript case-insensitively (mirroring `dumper_castxml_probe.py`'s
+  own normalization), since a wrapper/build combination that writes its
+  `--version` banner to stderr or capitalizes `CastXML` previously
+  probed as an empty identity.

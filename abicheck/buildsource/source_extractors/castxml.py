@@ -74,7 +74,7 @@ _unredact_home = unredact_home
 _compiler_binary = pick_compiler_binary
 _replay_extra_flags = replay_extra_flags
 
-_CASTXML_VERSION_RE = re.compile(r"castxml version (\S+)")
+_CASTXML_VERSION_RE = re.compile(r"castxml version\s+(\S+)", re.IGNORECASE)
 #: castxml's own internal frontend is ALWAYS its bundled Clang (a
 #: `--castxml-cc-<id>` selects an *emulation* mode, gcc or msvc, never a
 #: literal execution path -- see AGENTS.md's toolchain-profile note), so
@@ -122,11 +122,16 @@ def _castxml_tool_version(castxml_bin: str) -> str:
         )
         if r.returncode != 0:
             return ""
-        m = _CASTXML_VERSION_RE.search(r.stdout)
+        # Some wrapper/build combinations write the banner to stderr rather
+        # than stdout (dumper_castxml_probe.py already normalizes this the
+        # same way) -- read the combined transcript, not stdout alone
+        # (Codex review).
+        transcript = f"{r.stdout}\n{r.stderr}"
+        m = _CASTXML_VERSION_RE.search(transcript)
         if not m:
             return ""
         castxml_ver = m.group(1)
-        bundled = _CASTXML_BUNDLED_COMPILER_RE.search(r.stdout)
+        bundled = _CASTXML_BUNDLED_COMPILER_RE.search(transcript)
         if bundled:
             return f"{castxml_ver}; {bundled.group(0).strip()}"
         return castxml_ver
