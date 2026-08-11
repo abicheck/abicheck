@@ -154,6 +154,90 @@ class TestSeverityBlockingCompatibleFindings:
         assert not summary.get("findings")
 
 
+class TestResolveMaxBaselineFindings:
+    """`_resolve_max_baseline_findings` -- CLI/API override, env var, default.
+
+    Low-effort DX follow-up: the report cap used to be hard-coded with no
+    override and no per-kind visibility into what a truncation cut.
+    """
+
+    def test_no_override_no_env_uses_default(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.delenv("ABICHECK_MAX_BASELINE_FINDINGS", raising=False)
+        assert csb._resolve_max_baseline_findings(None) == csb._MAX_BASELINE_FINDINGS
+
+    def test_explicit_override_wins_over_env(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("ABICHECK_MAX_BASELINE_FINDINGS", "5")
+        assert csb._resolve_max_baseline_findings(50) == 50
+
+    def test_explicit_zero_or_negative_is_a_usage_error(self) -> None:
+        with pytest.raises(click.ClickException):
+            csb._resolve_max_baseline_findings(0)
+
+    def test_env_var_override(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("ABICHECK_MAX_BASELINE_FINDINGS", "7")
+        assert csb._resolve_max_baseline_findings(None) == 7
+
+    def test_malformed_env_var_falls_back_to_default(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("ABICHECK_MAX_BASELINE_FINDINGS", "not-a-number")
+        assert csb._resolve_max_baseline_findings(None) == csb._MAX_BASELINE_FINDINGS
+
+    def test_non_positive_env_var_falls_back_to_default(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("ABICHECK_MAX_BASELINE_FINDINGS", "0")
+        assert csb._resolve_max_baseline_findings(None) == csb._MAX_BASELINE_FINDINGS
+
+
+class TestBaselineSummaryTruncationKinds:
+    """`_baseline_summary` reports a per-kind breakdown of truncated findings."""
+
+    @staticmethod
+    def _diff(kinds: list[str]):
+        from abicheck.checker_policy import ChangeKind
+        from abicheck.checker_types import Change, DiffResult
+
+        kind_map = {
+            "func_removed": ChangeKind.FUNC_REMOVED,
+            "type_size_changed": ChangeKind.TYPE_SIZE_CHANGED,
+        }
+        breaks = [
+            Change(kind=kind_map[k], symbol=f"_Z{i:02d}v", description="d")
+            for i, k in enumerate(kinds)
+        ]
+        return DiffResult(changes=breaks, old_version="1", new_version="2", library="l")
+
+    def test_truncated_findings_report_a_per_kind_breakdown(self) -> None:
+        kinds = ["func_removed"] * 15 + ["type_size_changed"] * 10
+        diff = self._diff(kinds)
+        summary = csb._baseline_summary(diff, max_findings=5)
+        assert summary["findings_truncated"] is True
+        assert len(summary["findings"]) == 5
+        # 15 + 10 = 25 total, 5 kept -> 20 cut, split across the two kinds in
+        # the same 15:10 ratio the input carried (kept greedily bucket by
+        # bucket, so which 5 survive is deterministic but not what this test
+        # pins -- only that every cut instance is accounted for).
+        assert sum(summary["findings_truncated_kinds"].values()) == 20
+        assert set(summary["findings_truncated_kinds"]) == {
+            "func_removed",
+            "type_size_changed",
+        }
+
+    def test_max_findings_override_changes_the_cap(self) -> None:
+        diff = self._diff(["func_removed"] * 8)
+        summary = csb._baseline_summary(diff, max_findings=3)
+        assert len(summary["findings"]) == 3
+        assert summary["findings_truncated"] is True
+        assert summary["findings_truncated_kinds"] == {"func_removed": 5}
+
+    def test_no_truncation_below_the_cap_has_no_kind_breakdown(self) -> None:
+        diff = self._diff(["func_removed"] * 3)
+        summary = csb._baseline_summary(diff, max_findings=5)
+        assert "findings_truncated" not in summary
+        assert "findings_truncated_kinds" not in summary
+
+
 class TestPublicProvenanceSet:
     def test_directory_activates_provenance(self, tmp_path: Path) -> None:
         d = tmp_path / "include"
