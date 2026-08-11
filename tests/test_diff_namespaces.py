@@ -302,6 +302,30 @@ class TestExperimentalRemovedWithoutReplacement:
         assert changes[0].kind == ChangeKind.EXPERIMENTAL_REMOVED_WITHOUT_REPLACEMENT
         assert changes[0].symbol == "ns::experimental::sort"
 
+    def test_alias_removal_still_fires_when_underlying_symbol_survives_elsewhere(
+        self,
+    ) -> None:
+        # Codex review, on the mangled-still-linked suppression above: the
+        # suppression must not treat "this mangled symbol exists *somewhere*
+        # in new" as proof the removed declaration survives -- an
+        # experimental alias's underlying symbol can keep exporting under a
+        # completely unrelated declared name (a different leaf) after the
+        # alias itself is deleted, and source that named the alias no
+        # longer compiles even though the symbol lives on elsewhere. The
+        # suppression must be scoped to the *same leaf*, not any leaf.
+        old = _snap(funcs=[
+            _fn("ns::experimental::sort", mangled="_ZSAME"),
+        ])
+        # The mangled symbol survives, but only under an entirely different
+        # leaf ("relabelled") -- not a re-qualified spelling of "sort".
+        new = _snap(funcs=[
+            _fn("ns::detail::relabelled", mangled="_ZSAME"),
+        ])
+        changes = detect_experimental_namespace_changes(old, new)
+        assert len(changes) == 1
+        assert changes[0].kind == ChangeKind.EXPERIMENTAL_REMOVED_WITHOUT_REPLACEMENT
+        assert changes[0].symbol == "ns::experimental::sort"
+
     def test_silent_function_removal(self) -> None:
         old = _snap(funcs=[_fn("ns::experimental::bar")])
         new = _snap(funcs=[])

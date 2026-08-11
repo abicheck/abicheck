@@ -250,22 +250,31 @@ def _index_funcs_by_stable_key(
     return out
 
 
-def _public_mangled_set(snap: AbiSnapshot) -> set[str]:
-    """Return every non-empty ``Function.mangled`` value among *snap*'s
-    public functions, for :func:`_findings_for`'s removal-suppression
-    check.
+def _mangled_leaf_pairs(
+    index: dict[tuple[str, str], list[tuple[str, str]]],
+) -> set[tuple[str, str]]:
+    """Flatten an ``_index_funcs_by_stable_key`` result into
+    ``{(mangled, leaf), ...}``, for :func:`_findings_for`'s removal-
+    suppression check.
 
-    Exact raw-string equality, not a "is this a real Itanium/MSVC
-    mangling" validity check: the question this answers is "does an
-    identical exported-symbol string still appear in *new*", which holds
-    regardless of whether the mangled field happens to encode a verifiable
-    mangling (a C-linkage export where ``mangled == name`` still answers
-    it correctly).
+    Scoped to ``(mangled, leaf)`` pairs, not bare mangled values: a mangled
+    symbol surviving *somewhere* in ``new`` is not enough evidence that a
+    specific removed declaration is still reachable under its own name —
+    an experimental alias's underlying symbol can legitimately keep
+    exporting under a completely unrelated declared name (a different
+    leaf) after the alias itself is deleted, and source that named the
+    alias no longer compiles even though the symbol lives on elsewhere
+    (Codex review finding). Requiring the *same leaf* too means this only
+    ever matches a declaration that could plausibly be a differently-
+    qualified spelling of the very declaration being evaluated, which is
+    the shape the original reported bug actually took (a dumper backend
+    re-qualifying the same leaf's namespace path between snapshot sides).
     """
-    from .model import Visibility
     return {
-        f.mangled for f in snap.functions
-        if f.visibility == Visibility.PUBLIC and f.mangled
+        (mangled, leaf)
+        for (_, leaf), entries in index.items()
+        for _, mangled in entries
+        if mangled
     }
 
 
@@ -424,21 +433,21 @@ def _findings_for(
     *,
     old_origins: dict[str, ScopeOrigin] | None = None,
     new_origins: dict[str, ScopeOrigin] | None = None,
-    new_mangled_set: set[str] | None = None,
 ) -> list[Change]:
     """Walk old/new indices, emitting one finding per classified event.
 
     *old_origins*/*new_origins* are ``None`` for the function-sourced path
     (always reliably public) or a ``{qualified_name: ScopeOrigin}`` map for
     the type-sourced path (public only when ``ScopeOrigin.PUBLIC_HEADER``).
-
-    *new_mangled_set* — every real mangled symbol still publicly exported in
-    ``new`` (function-sourced path only; ``None`` for the type-sourced path,
-    which has no mangled symbols at all). Used to confirm a would-be
-    "removed" declaration's underlying symbol is genuinely gone rather than
-    merely re-bucketed by a declared-name qualification change between
-    snapshot sides (see :func:`_classify_experimental_event`).
     """
+    # Every (mangled, leaf) pair still present anywhere in `new_index`
+    # (function-sourced path only -- always empty for the type-sourced
+    # path, since `_index_types_by_stable_key` carries mangled="").
+    # Confirms a would-be "removed" declaration's underlying symbol is
+    # genuinely gone under its own leaf rather than merely re-bucketed by a
+    # declared-name qualification change between snapshot sides (see
+    # :func:`_classify_experimental_event`/:func:`_mangled_leaf_pairs`).
+    new_mangled_leaf_pairs = _mangled_leaf_pairs(new_index)
     out: list[Change] = []
     for (stable_key, leaf), entries in old_index.items():
         old_exp, old_stable = _split_experimental(entries, experimental_namespaces)
@@ -448,8 +457,9 @@ def _findings_for(
         new_exp, new_stable = _split_experimental(
             new_entries, experimental_namespaces,
         )
-        still_linked = new_mangled_set is not None and any(
-            mangled and mangled in new_mangled_set for _, mangled in old_exp
+        still_linked = any(
+            mangled and (mangled, leaf) in new_mangled_leaf_pairs
+            for _, mangled in old_exp
         )
         event = _classify_experimental_event(
             old_exp, old_stable, new_exp, new_stable, still_linked=still_linked,
@@ -494,7 +504,6 @@ def detect_experimental_namespace_changes(
         _index_funcs_by_stable_key(new, experimental_namespaces),
         experimental_namespaces,
         "declaration",
-        new_mangled_set=_public_mangled_set(new),
     ))
     out.extend(_findings_for(
         _index_types_by_stable_key(old, experimental_namespaces),
