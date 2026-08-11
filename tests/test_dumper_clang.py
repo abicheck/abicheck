@@ -536,6 +536,51 @@ def test_parse_types_opaque_redecl_kind_stable_when_a_compatible_redecl_is_added
     assert before[0].kind == after[0].kind == "struct"
 
 
+def test_parse_types_opaque_kind_matches_later_complete_definition_of_same_key() -> (
+    None
+):
+    """Codex review, PR #719, follow-up round two: a snapshot with ONLY
+    `class H;` (no ambiguity -- a single, unopposed opaque redeclaration)
+    must keep reporting its REAL kind ("class"), not a forced canonical
+    spelling. Otherwise, comparing it against a later snapshot where `H`
+    gains a same-key COMPLETE definition (`class H {};`) -- whose kind is
+    always its own real, unmodified `_record_kind`, never overridden --
+    would read as a class/struct mismatch purely because the OPAQUE side
+    was unconditionally relabeled, producing a false
+    SOURCE_LEVEL_KIND_CHANGED even though the class key never changed."""
+    opaque_only = _tu(
+        {
+            "kind": "CXXRecordDecl",
+            "name": "H",
+            "tagUsed": "class",
+            "loc": {"file": "include/foo.h", "line": 1},
+        }
+    )
+    complete_same_key = _tu(
+        {
+            "kind": "CXXRecordDecl",
+            "name": "H",
+            "tagUsed": "class",
+            "loc": {"file": "include/foo.h", "line": 1},
+            "completeDefinition": True,
+        }
+    )
+    before = [
+        t
+        for t in _ClangAstParser(opaque_only, set(), set()).parse_types()
+        if t.name == "H"
+    ]
+    after = [
+        t
+        for t in _ClangAstParser(complete_same_key, set(), set()).parse_types()
+        if t.name == "H"
+    ]
+    assert len(before) == len(after) == 1
+    assert before[0].is_opaque is True
+    assert after[0].is_opaque is False
+    assert before[0].kind == after[0].kind == "class"
+
+
 def test_parse_types_opaque_redecl_merges_deprecated_from_a_later_decl() -> None:
     """`struct Handle; struct [[deprecated("old")]] Handle;` -- both nodes
     are non-definitions, so the kind tie-break keeps the FIRST one, which

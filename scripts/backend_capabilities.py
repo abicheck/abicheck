@@ -565,14 +565,18 @@ FACT_ROWS: tuple[FactRow, ...] = (
         "EnumType",
         "underlying_type",
         _FULL,
-        _FULL,
+        _PARTIAL,
         note=(
-            'clang reads `fixedUnderlyingType` (`"int"` for an unfixed '
-            "enum, since clang's AST JSON only exposes an explicit `enum E : "
-            "T`). castxml reads the `<Enumeration type=...>` id, which "
-            "resolves to the real compiler-picked underlying integer type "
-            "either way — fixed or implementation-chosen from the member "
-            "value range (verified against real castxml 0.6.3 output). Not "
+            "clang reads `fixedUnderlyingType` — the REAL, correct value "
+            'for a fixed enum (`enum E : short`) — but hard-codes `"int"` '
+            "for an unfixed enum (Codex review, PR #719, follow-up), since "
+            "clang's AST JSON exposes no compiler-selected-underlying-type "
+            "fact for the unfixed case at all; the true value can differ "
+            "(e.g. `unsigned int`, chosen from the member value range). "
+            "castxml reads the `<Enumeration type=...>` id, which resolves "
+            "to the real compiler-picked underlying integer type either way "
+            "— fixed or implementation-chosen (verified against real "
+            "castxml 0.6.3 output) — so it stays `_FULL`. Not "
             "hybrid-backfilled (see `hybrid_backfilled` above), but since "
             "castxml itself is now a real producer, hybrid inherits a real "
             "answer instead of the previous silent `int` default. No diff "

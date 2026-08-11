@@ -92,6 +92,7 @@ from .dumper_clang_qualifiers import (  # noqa: F401  (compatibility re-exports)
     _field_own_cv_source,
     _last_top_level_ptr_end,
     _record_kind,
+    _reduce_opaque_kind_set,
 )
 from .dumper_clang_vtable import (
     _index_template_param_defaults,
@@ -1447,7 +1448,7 @@ class _ClangAstParser:
         best: dict[str, tuple[_Decl, str]] = {}
         order: list[str] = []
         deprecated: dict[str, str] = {}
-        opaque_kinds: dict[str, str] = {}  # min(kind) of non-def redecls
+        opaque_kind_sets: dict[str, set[str]] = {}  # raw kinds of non-def redecls
         for entry in self._records:
             node = entry.node
             if _is_builtin_file(entry.file):
@@ -1463,8 +1464,7 @@ class _ClangAstParser:
             if (msg := _clang_deprecated_message(node)) is not None:  # most recent wins
                 deprecated[identity] = msg
             if not (node_is_def := _is_record_definition(node)):
-                k = "struct" if _record_kind(node) == "class" else _record_kind(node)
-                opaque_kinds[identity] = min(k, opaque_kinds.get(identity, k))
+                opaque_kind_sets.setdefault(identity, set()).add(_record_kind(node))
             if (existing := best.get(identity)) is None:
                 best[identity] = (entry, name)
                 order.append(identity)
@@ -1480,7 +1480,7 @@ class _ClangAstParser:
                 override_name=rec[1],
                 is_opaque=not _is_record_definition(rec[0].node),
                 dep_msg=deprecated.get(identity),
-                override_kind=opaque_kinds.get(identity),
+                override_kind=_reduce_opaque_kind_set(opaque_kind_sets.get(identity)),
             )
             for identity in order
         ]

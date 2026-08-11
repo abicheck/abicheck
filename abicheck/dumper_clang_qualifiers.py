@@ -373,3 +373,41 @@ def _record_kind(node: dict[str, Any]) -> str:
     """``"union"``/``"struct"``/``"class"`` from a record's ``tagUsed``."""
     tag = node.get("tagUsed")
     return tag if tag in ("union", "struct") else "class"
+
+
+def _reduce_opaque_kind_set(kinds: set[str] | None) -> str | None:
+    """Reduce all raw kinds observed for one identity's non-def redecls to a
+    single ``RecordType.kind`` override (Codex review, PR #719, two follow-up
+    rounds).
+
+    Three cases, checked in order:
+
+    1. ``kinds`` is ``None``/empty (the identity has no opaque redecl at all
+       -- it only ever appears as a complete definition): no override.
+    2. Exactly one DISTINCT raw kind was ever observed: return it UNCHANGED.
+       This is the case the second follow-up round fixed -- an identity with
+       only `class H;` (no ambiguity at all) must keep reporting `"class"`,
+       not a forced canonical spelling, or comparing it against a later
+       COMPLETE definition using the same real `"class"` key would produce a
+       false ``SOURCE_LEVEL_KIND_CHANGED`` purely from the opaque side being
+       relabeled to something the identity was never actually declared with.
+    3. Two or more distinct raw kinds were observed (genuine ambiguity, e.g.
+       both `struct H;` and `class H;` compatibly forward-declare the same
+       identity): fold `"class"`/`"struct"` to one fixed spelling first (they
+       are interchangeable class-keys, mirrors
+       ``tu_merge._record_kinds_compatible``) so the canonicalized result no
+       longer depends on which particular SUBSET of the ambiguous group
+       happens to be present in a given snapshot (the first follow-up
+       round's fix -- adding/removing a compatible redecl must not flip the
+       observed set). If folding collapses to one value, use it. Otherwise
+       (a `union` genuinely mixed with `class`/`struct`, an ODR-inconsistent
+       header this parser cannot resolve) fall back to a deterministic
+       ``min()`` over the raw kinds, the same tie-break used before either
+       fix.
+    """
+    if not kinds:
+        return None
+    if len(kinds) == 1:
+        return next(iter(kinds))
+    folded = {"struct" if k == "class" else k for k in kinds}
+    return folded.pop() if len(folded) == 1 else min(kinds)

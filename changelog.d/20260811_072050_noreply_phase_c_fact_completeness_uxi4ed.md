@@ -240,7 +240,38 @@ A new changelog fragment. See changelog.d/README.md for the workflow.
   canonicalized value depends only on the identity's real kind category;
   `union` — a genuinely different, non-interchangeable type category
   (mirroring `tu_merge._record_kinds_compatible`'s existing rule) — is
-  left untouched.
+  left untouched. A follow-up round (Codex review) found the unconditional
+  fold itself was a *new* regression: an identity with only ONE observed
+  opaque redeclaration (no ambiguity at all — e.g. just `class H;`, no
+  competing `struct H;`) was still being unconditionally relabeled to the
+  fixed `"struct"` spelling, so comparing it against a LATER snapshot
+  where the same identity gains a same-key COMPLETE definition
+  (`class H {};`, whose kind is always its own real, unmodified
+  `_record_kind`) produced a false `SOURCE_LEVEL_KIND_CHANGED` purely
+  because the opaque side had been fabricated to a different spelling than
+  its real declared class-key. Fixed by tracking the full set of raw kinds
+  observed per identity (`opaque_kind_sets`) rather than an eagerly-folded
+  running value: an identity with exactly one distinct raw kind now keeps
+  it UNCHANGED (matches any later same-key definition exactly); the fold
+  to one fixed spelling only applies once genuine ambiguity is
+  observed — two or more distinct raw kinds for the same identity in one
+  snapshot. `_reduce_opaque_kind_set()` (new, in `dumper_clang_qualifiers.py`
+  — `dumper_clang.py` sits at its 2000-line hard cap) documents the three
+  cases explicitly.
+
+- **`docs/reference/header-backend-capabilities.md`'s `EnumType.
+  underlying_type` row now marks direct-clang `⚠️ Partial` instead of
+  `✅ Yes`** (Codex review) — `_enum_underlying()` correctly reads the real
+  compiler-selected type for a FIXED enum (`enum E : short`) via
+  `fixedUnderlyingType`, but hard-codes the dataclass default `"int"` for
+  an UNFIXED enum, since clang's AST JSON exposes no compiler-selected-
+  underlying-type fact for that case at all — the true value can differ
+  (e.g. `unsigned int`, chosen from the member value range, which is
+  exactly the case castxml's own extraction now resolves correctly).
+  Rendering direct-clang as fully capable collapsed this real precision
+  gap; `scripts/backend_capabilities.py`'s row updated and
+  `docs/reference/header-backend-capabilities.md` regenerated
+  (`python scripts/gen_backend_capability_matrix.py`).
 
 - **`CastxmlSourceExtractor.cache_identity_extra()` no longer collapses
   every unparseable/failed `--version` probe to the same uninformative
