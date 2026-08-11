@@ -978,6 +978,44 @@ class TestParamDefaultChanged:
         r = compare(old, new)
         assert ChangeKind.PARAM_DEFAULT_VALUE_CHANGED not in _kinds(r)
 
+    def test_genuine_edit_reported_when_both_sides_share_legacy_algorithm(self):
+        """Mirrors constant_value_fingerprint_comparison_unreliable's own
+        identical fix: when BOTH archived snapshots came from the same
+        pre-v20 direct-clang build, their fingerprints use the identical
+        legacy algorithm and are directly comparable to each other --
+        suppressing whenever EITHER side is independently unreliable was
+        too conservative and would silently drop a genuine default-value
+        edit between two equally-legacy baselines (Codex review, fresh
+        evidence, PR #720)."""
+        f_old = _pub_func(
+            "connect",
+            "_Z7connectv",
+            params=[Param(name="timeout", type="int", default="expr:aaaaaaaaaaaaaaaa")],
+        )
+        f_new = _pub_func(
+            "connect",
+            "_Z7connectv",
+            params=[Param(name="timeout", type="int", default="expr:bbbbbbbbbbbbbbbb")],
+        )
+        old = AbiSnapshot(
+            library="libtest.so.1",
+            version="1.0",
+            functions=[f_old],
+            from_headers=True,
+            ast_producer="clang",
+            clang_field_initializer_facts_reliable=False,
+        )
+        new = AbiSnapshot(
+            library="libtest.so.1",
+            version="2.0",
+            functions=[f_new],
+            from_headers=True,
+            ast_producer="clang",
+            clang_field_initializer_facts_reliable=False,
+        )
+        r = compare(old, new)
+        assert ChangeKind.PARAM_DEFAULT_VALUE_CHANGED in _kinds(r)
+
     def test_genuine_expr_namespace_default_change_still_reported(self):
         """Mirrors constant_value_fingerprint_comparison_unreliable's own
         identical fix: the guard matches the FULL clang fingerprint shape
@@ -1433,6 +1471,25 @@ class TestConstantChanges:
         )
         r = compare(old, new)
         assert ChangeKind.CONSTANT_CHANGED not in _kinds(r)
+
+    def test_genuine_edit_reported_when_both_sides_share_legacy_algorithm(self):
+        """When BOTH archived snapshots came from the same pre-v20
+        direct-clang build, their fingerprints use the identical (if
+        collision-prone) legacy algorithm and are directly comparable TO
+        EACH OTHER -- suppressing whenever EITHER side is independently
+        unreliable (the naive OR an earlier version of this guard used) was
+        too conservative: it made a genuine constant edit between two
+        archived schema-v19 baselines produce no CONSTANT_CHANGED at all
+        (Codex review, fresh evidence, PR #720). Suppression is for a
+        MISMATCH between generations, not for every unreliable fingerprint."""
+        old = self._clang_snap(
+            {"K": "expr:aaaaaaaaaaaaaaaa"}, field_initializer_facts_reliable=False
+        )
+        new = self._clang_snap(
+            {"K": "expr:bbbbbbbbbbbbbbbb"}, field_initializer_facts_reliable=False
+        )
+        r = compare(old, new)
+        assert ChangeKind.CONSTANT_CHANGED in _kinds(r)
 
     def test_genuine_expr_namespace_constant_change_still_reported(self):
         """The guard matches the FULL clang fingerprint shape (``"expr:"``

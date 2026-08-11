@@ -373,6 +373,95 @@ class TestReserialization:
 
 
 # ---------------------------------------------------------------------------
+# Exhaustive grid over the degraded-facts warning's (producer x header-
+# confirmation) domain per flag (PR #720 retrospective). The three rounds of
+# review that found the hybrid-producer, inferred-header, and round-trip
+# bugs above each fixed exactly one (flag, producer, header-confirmed) cell
+# at a time; nothing forced every OTHER cell in the same small grid to also
+# be checked, so a fourth wrong cell could easily have shipped unnoticed.
+# The grid is small enough (4 producers x 2 header-confirmation states x 7
+# flags = 56 cells) to enumerate completely rather than keep adding one more
+# hand-picked example per bug report — see
+# ``abicheck/diff_default_value_reliability.py``'s module docstring for the
+# same reasoning applied to the sibling fingerprint-reliability guards, and
+# ``tests/test_fingerprint_reliability_properties.py`` for that exhaustive
+# suite.
+# ---------------------------------------------------------------------------
+
+# Each flag's own DEGRADED-value rule at a schema version below every
+# per-flag threshold (so only the producer term of each flag's real
+# computation in snapshot_from_dict — see SCHEMA_VERSION's own version-
+# history comments — still varies; the schema-threshold term is uniformly
+# "not met" for every flag at schema_version=1).
+_FLAG_DEGRADED_FOR_PRODUCER = {
+    "header_cv_facts_reliable": lambda p: p != "clang",
+    "clang_deprecation_facts_reliable": lambda p: p == "clang",
+    "clang_field_initializer_facts_reliable": lambda p: p != "castxml",
+    "clang_vtable_facts_reliable": lambda p: p == "clang",
+    "clang_restrict_facts_reliable": lambda p: p != "castxml",
+    "clang_va_list_facts_reliable": lambda p: p != "castxml",
+    "castxml_var_access_facts_reliable": lambda p: p != "clang",
+}
+
+# Each flag's own CONSULTED rule -- does the one real detector that reads
+# this flag even reach the point of checking it, for this (producer,
+# header-confirmed) combination. Mirrors the table `snapshot_from_dict`
+# builds (see its own extensive comment for the per-flag reasoning); this
+# is the independently-maintained pin the exhaustive grid test below checks
+# it against.
+_FLAG_CONSULTED_FOR = {
+    "header_cv_facts_reliable": lambda p, h: True,
+    "clang_deprecation_facts_reliable": lambda p, h: h,
+    "clang_field_initializer_facts_reliable": lambda p, h: h,
+    "clang_vtable_facts_reliable": lambda p, h: True,
+    "clang_restrict_facts_reliable": lambda p, h: h,
+    "clang_va_list_facts_reliable": lambda p, h: h and p == "clang",
+    "castxml_var_access_facts_reliable": lambda p, h: h and p == "castxml",
+}
+
+_GRID_PRODUCERS = (None, "clang", "castxml", "hybrid")
+
+
+def _load_with_producer_and_header_confirmation(producer, header_confirmed):
+    """Load a schema-v1 dict (below every per-flag threshold) with the
+    given `ast_producer` and header-confirmation state, returning the
+    UserWarning message (or None if no warning fired)."""
+    d = _load_fixture("v1.json")
+    d["schema_version"] = 1
+    if producer is not None:
+        d["ast_producer"] = producer
+    if header_confirmed:
+        d["from_headers"] = True
+    else:
+        # Omitting the key entirely -- rather than setting it False -- is
+        # what triggers `from_headers_inferred=True` (a GUESSED, not
+        # confirmed, header-aware side): see snapshot_from_dict's own
+        # from_headers-inference comment.
+        d.pop("from_headers", None)
+    with warnings.catch_warnings(record=True) as record:
+        warnings.simplefilter("always")
+        snap = snapshot_from_dict(d)
+    assert snap.functions, (
+        "fixture must carry at least one function for from_headers to infer True"
+    )
+    return str(record[0].message) if record else ""
+
+
+@pytest.mark.parametrize("flag_name", sorted(_FLAG_DEGRADED_FOR_PRODUCER))
+@pytest.mark.parametrize("header_confirmed", [True, False])
+@pytest.mark.parametrize("producer", _GRID_PRODUCERS)
+def test_degraded_facts_warning_grid(producer, header_confirmed, flag_name):
+    message = _load_with_producer_and_header_confirmation(producer, header_confirmed)
+    degraded = _FLAG_DEGRADED_FOR_PRODUCER[flag_name](producer)
+    consulted = _FLAG_CONSULTED_FOR[flag_name](producer, header_confirmed)
+    expect_listed = degraded and consulted
+    assert (flag_name in message) is expect_listed, (
+        f"{flag_name} producer={producer!r} header_confirmed={header_confirmed}: "
+        f"expected listed={expect_listed}, message={message!r}"
+    )
+
+
+# ---------------------------------------------------------------------------
 # Documentation/constant sync — a stale docs number silently misleads readers
 # about what "current" means (docs/reference/snapshot-format.md drifted to a
 # hardcoded "8" while SCHEMA_VERSION had moved on to 11; this pins them together).

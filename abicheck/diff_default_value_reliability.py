@@ -37,6 +37,34 @@ class of gap ``AbiSnapshot.clang_field_initializer_facts_reliable`` closes
 for ``TypeField.default``'s own presence/absence, reused here for a
 different reason: a default's presence was never unreliable, only the
 non-literal VALUE representation is.
+
+PR #720 retrospective — why five distinct bugs in this small a module took
+five separate review rounds to surface, and what changed about how it's
+tested: every one of them was a different edge of the SAME finite state
+space (each side's producer x reliability-flag x value-shape), and every
+test that existed before that PR picked ONE hand-crafted example per
+property instead of covering that space. A hand-picked example proves the
+one scenario its author thought of works; it says nothing about the dozens
+of other reachable combinations. Concretely, the OR-vs-XOR bug (both guards
+suppressed whenever EITHER side was independently unreliable, when the
+correct rule is a MISMATCH between the two sides' extraction generations)
+survived four earlier review rounds that each fixed a different bug in the
+same two functions, because none of those rounds' new tests happened to
+cover "both sides equally unreliable." ``tests/test_fingerprint_
+reliability_properties.py`` closes that gap structurally rather than
+example-by-example: the reachable domain here is genuinely small (four
+producer values x two reliability states x two value shapes, per side) —
+cheap enough to enumerate EXHAUSTIVELY rather than sample, so it asserts
+invariants ("two fingerprint-shaped values with identical producer and
+reliability are never suppressed", "two non-fingerprint values are never
+suppressed", "the decision is symmetric in old/new") across the entire
+space at once. The general lesson, not just this module's: when a
+function's behavior is fully determined by a handful of independent
+enum/boolean inputs, prefer a test that enumerates that state space and
+asserts invariants over one more hand-picked scenario per bug report —
+it converts "did we think to test this one case" into "is this true for
+every case," which is exactly the class of check a human/LLM review pass
+manually re-deriving edge cases one at a time cannot exhaustively provide.
 """
 
 from __future__ import annotations
@@ -64,6 +92,37 @@ def _is_expr_fingerprint(value: str) -> bool:
     """True if *value* is exactly a clang structural-expression fingerprint,
     not merely ``"expr:"``-prefixed text (see ``_EXPR_FINGERPRINT_RE``)."""
     return bool(_EXPR_FINGERPRINT_RE.match(value))
+
+
+def _fingerprint_comparison_unreliable(old_affected: bool, new_affected: bool) -> bool:
+    """The single decision rule every fingerprint-reliability guard in this
+    module reduces to, given whether EACH side's own value is a fingerprint
+    produced by the unstable pre-v20 algorithm ("affected" -- fingerprint-
+    shaped AND that side's own reliability flag is unset).
+
+    Suppressing whenever *either* side is independently affected -- what an
+    earlier version of both guards did -- is too conservative: two
+    extractions that BOTH used the identical pre-v20 algorithm produce
+    fingerprints that are directly comparable TO EACH OTHER (same
+    algorithm, same input -> same output; the algorithm being old and buggy
+    is not itself the risk). Only a MISMATCH between generations -- one
+    side pre-v20, the other stabilized (or never using this algorithm at
+    all) -- means a fingerprint difference could be an artifact of the
+    algorithm change rather than a real edit. A genuine constant/default
+    edit between two archived, equally-legacy baselines was being silently
+    dropped by the naive "either side affected" OR (Codex review, fresh
+    evidence, PR #720).
+
+    Deliberately just an XOR over two independently-computed booleans, not
+    a bigger rewrite: each caller already carries its own domain-specific
+    knowledge of what "affected" means for its own fact (per-declaration
+    provenance and producer-inclusive-of-hybrid for defaults; whole-
+    snapshot ``ast_producer`` and producer-exclusive-of-hybrid for
+    constants) -- this function's only job is the one decision both callers
+    were getting wrong in the same way, kept in exactly one place so a
+    future caller inherits the fix instead of re-deriving it.
+    """
+    return old_affected != new_affected
 
 
 def default_value_representation_unreliable(
@@ -141,16 +200,20 @@ def default_value_fingerprint_comparison_unreliable(
     solely because the OLD snapshot's ``clang_field_initializer_facts_reliable``
     flag was unset — even though the old side's own literal value never
     depended on that flag at all.
+
+    The actual suppress/don't-suppress decision, given each side's own
+    "affected" status, is :func:`_fingerprint_comparison_unreliable` —
+    an XOR, not an OR: two sides that BOTH used the pre-v20 algorithm are
+    directly comparable to each other (Codex review, fresh evidence,
+    PR #720).
     """
-    if _is_expr_fingerprint(old_value) and default_value_representation_unreliable(
-        old, old_producer
-    ):
-        return True
-    if _is_expr_fingerprint(new_value) and default_value_representation_unreliable(
-        new, new_producer
-    ):
-        return True
-    return False
+    old_affected = _is_expr_fingerprint(
+        old_value
+    ) and default_value_representation_unreliable(old, old_producer)
+    new_affected = _is_expr_fingerprint(
+        new_value
+    ) and default_value_representation_unreliable(new, new_producer)
+    return _fingerprint_comparison_unreliable(old_affected, new_affected)
 
 
 def constant_value_fingerprint_comparison_unreliable(
@@ -201,15 +264,20 @@ def constant_value_fingerprint_comparison_unreliable(
     namespace) would otherwise collide with the ``"expr:"`` PREFIX check and
     get its genuine ``CONSTANT_CHANGED`` silently suppressed regardless of
     producer (Codex review, fresh evidence, PR #720).
+
+    The actual suppress/don't-suppress decision, given each side's own
+    "affected" status, is :func:`_fingerprint_comparison_unreliable` — an
+    XOR, not an OR: two archived baselines that BOTH came from the same
+    pre-v20 direct-clang build are directly comparable to each other, so a
+    genuine edit between them must still be reported (Codex review, fresh
+    evidence, PR #720).
     """
-    if _is_expr_fingerprint(old_value) and (
+    old_affected = _is_expr_fingerprint(old_value) and (
         old.ast_producer not in ("castxml", "hybrid")
         and not old.clang_field_initializer_facts_reliable
-    ):
-        return True
-    if _is_expr_fingerprint(new_value) and (
+    )
+    new_affected = _is_expr_fingerprint(new_value) and (
         new.ast_producer not in ("castxml", "hybrid")
         and not new.clang_field_initializer_facts_reliable
-    ):
-        return True
-    return False
+    )
+    return _fingerprint_comparison_unreliable(old_affected, new_affected)
