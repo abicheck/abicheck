@@ -1265,27 +1265,30 @@ def main(argv: list[str] | None = None) -> int:
                         # one.
                         "requested_model": args.model,
                     }
-                    (out_dir / "final.md").write_text(_final_text(events), encoding="utf-8")
                     if args.model:
-                        # A crash between this write and the index.append a
-                        # few lines down leaves this directory with a
-                        # final.md but no index row — exactly what
-                        # _recovered_record() below treats as recoverable on
-                        # a later resume. That function has no other way to
-                        # learn what --model this run was pinned to (no
+                        # Written *before* final.md deliberately: final.md's
+                        # existence is the recovery sentinel _recovered_record()
+                        # checks below (and _run_once's own crash-recovery
+                        # branch, symmetrically) — a crash between the two
+                        # writes must not be able to land on the side where
+                        # the sentinel exists but this sidecar doesn't, or a
+                        # later resume sees a "complete" directory with no way
+                        # to learn what --model this run was pinned to (no
                         # init event was ever captured, so events.jsonl is
-                        # absent or empty), and a recovered row with no
-                        # identity at all would then either be silently
-                        # treated as compatible with everything (if nothing
-                        # else in the batch has an identity either) or force
+                        # absent or empty). A recovered row with no identity
+                        # at all would then either be silently treated as
+                        # compatible with everything (if nothing else in the
+                        # batch has an identity either) or force
                         # run_skill_eval.py to refuse the whole batch as an
                         # unknown-vs-known mix — for a run that really was
                         # pinned consistently with the rest. Persisting the
                         # pin here, unconditionally rather than only on a
-                        # detected crash, is what makes it recoverable.
+                        # detected crash, and strictly before the sentinel,
+                        # is what makes it recoverable.
                         (out_dir / "requested_model.txt").write_text(
                             args.model, encoding="utf-8"
                         )
+                    (out_dir / "final.md").write_text(_final_text(events), encoding="utf-8")
                 mixed = check_one_model(_in_scope_index(), record)
                 if mixed:
                     raise RuntimeError(f"{sid}/{arm}/{rep}: {mixed}")
