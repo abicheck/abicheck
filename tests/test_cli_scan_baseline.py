@@ -194,6 +194,33 @@ class TestResolveMaxBaselineFindings:
         assert csb._resolve_max_baseline_findings(None) == csb._MAX_BASELINE_FINDINGS
 
 
+class TestAccumulateKindCounts:
+    """`_accumulate_kind_counts` directly -- the ``if counter:`` empty-input
+    branch is never reached through `_baseline_summary`/`_add_severity_
+    blocking_compatible_findings` (both only call it when a truncation
+    actually happened), so it needs its own direct coverage.
+    """
+
+    def test_empty_kinds_with_no_existing_field_adds_nothing(self) -> None:
+        summary: dict = {}
+        csb._accumulate_kind_counts(summary, "findings_truncated_kinds", [])
+        assert "findings_truncated_kinds" not in summary
+
+    def test_non_empty_kinds_are_counted_and_sorted(self) -> None:
+        summary: dict = {}
+        csb._accumulate_kind_counts(
+            summary, "findings_truncated_kinds", ["b_kind", "a_kind", "a_kind"]
+        )
+        assert summary["findings_truncated_kinds"] == {"a_kind": 2, "b_kind": 1}
+
+    def test_a_second_call_accumulates_onto_the_first(self) -> None:
+        summary: dict = {"findings_truncated_kinds": {"a_kind": 1}}
+        csb._accumulate_kind_counts(
+            summary, "findings_truncated_kinds", ["a_kind", "b_kind"]
+        )
+        assert summary["findings_truncated_kinds"] == {"a_kind": 2, "b_kind": 1}
+
+
 class TestBaselineSummaryTruncationKinds:
     """`_baseline_summary` reports a per-kind breakdown of truncated findings."""
 
