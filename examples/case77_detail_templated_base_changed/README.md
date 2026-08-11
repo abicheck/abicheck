@@ -26,7 +26,7 @@ oneDAL's `descriptor : public detail::descriptor_base<Task>` pattern.
 ```bash
 g++ -std=c++17 -shared -fPIC -g v1.cpp -o libfoo_v1.so
 g++ -std=c++17 -shared -fPIC -g v2.cpp -o libfoo_v2.so
-abicheck compare libfoo_v1.so libfoo_v2.so -H old=v1.h -H new=v2.h --ast-frontend clang
+abicheck compare libfoo_v1.so libfoo_v2.so
 ```
 
 ## Expected abicheck finding
@@ -41,42 +41,43 @@ Verdict: BREAKING (exit 4)
   layout grows for every Task the library instantiates
   (task::classification, task::regression), shifting neighbor_count_'s
   offset in every knn_descriptor<Task>.
-- internal_type_leaks_via_public_api: descriptor_base<Task> is an
-  internal-namespace type reachable from the public knn_descriptor<Task>
-  via a nominal base-class edge, so its own layout change counts as part
-  of the effective public ABI.
-
-Note: internal_template_leaks_via_public_api does *not* fire here.
-get_max_iter() (the public knn_descriptor<Task> accessor added alongside
-the field) only *adds* to descriptor_base's own instantiation set — it
-never removes one — and detect_internal_template_leaks only reports a
-removed instantiation. A purely-additive instantiation-set change (a new
-specialization, a new overload) was a real false positive against Intel
-oneDAL and must not itself be flagged breaking; the field addition's real
-break is caught by the type-layout kinds above instead.
 ```
+
+Note: `internal_template_leaks_via_public_api` does *not* fire here.
+`get_max_iter()` (the public `knn_descriptor<Task>` accessor added
+alongside the field) only *adds* to `descriptor_base`'s own instantiation
+set — it never removes one — and `detect_internal_template_leaks` only
+reports a removed instantiation. A purely-additive instantiation-set
+change (a new specialization, a new overload) was a real false positive
+against Intel oneDAL and must not itself be flagged breaking; the field
+addition's real break is caught by the type-layout kinds above instead,
+straight from DWARF debug info — no header AST needed. Passing headers
+(`-H old=v1.h -H new=v2.h --ast-frontend clang`) additionally surfaces
+`internal_type_leaks_via_public_api` (L2: descriptor_base<Task> is an
+internal-namespace type reachable from the public `knn_descriptor<Task>`
+via a nominal base-class edge), but that finding is corroborating, not
+required for the BREAKING verdict.
 
 ## Minimum evidence
 
-`min_evidence: L2` — the header AST is what lets abicheck see
-`knn_descriptor<Task> : public detail::descriptor_base<Task>` and expand
-that template relationship per instantiation (`task::classification`,
-`task::regression`). castxml is the documented default backend for this
-evidence layer; clang (`--ast-frontend clang`) is a supported alternative
-AST frontend used above.
+`min_evidence: L1` — every kind this case is calibrated on
+(`type_field_added`/`type_field_offset_changed`/`type_size_changed`) is
+visible from DWARF debug info alone: the compiler emits complete,
+independent layout facts for each `Task` instantiation it actually
+generates, so no header AST is needed to see that `descriptor_base<Task>`
+grew.
 
 ## Why abicheck catches it
 
-The header AST records the templated inheritance edge, so abicheck's
-template-instantiation walk (distinct from the plain nominal-base walk used
-for a non-template `detail::` base) follows `knn_descriptor<Task>` into
-`detail::descriptor_base<Task>` for each `Task` the library actually
-instantiates. Because the base template's own layout/member-function set
-changed, the internal-namespace function-template leak detector emits
-`internal_template_leaks_via_public_api`, keyed by the fully mangled,
-per-instantiation names that show up in a real consumer's symbol table —
-so the "internal" template change is reported as part of the effective
-public ABI, not dismissed as private churn.
+DWARF debug info records each compiled `descriptor_base<Task>`
+instantiation's own complete field/size/offset layout — independent of
+any header AST, since debug info is emitted per compilation, not derived
+from source text. abicheck's binary-tier (L1) type-layout diff compares
+those layouts directly and finds `max_iter_` added and `neighbor_count_`'s
+offset shifted for every `Task` the library actually instantiates
+(`task::classification`, `task::regression`) — the same object-layout fact
+a real consumer's stack frame depends on, reported without needing to
+resolve the templated inheritance edge from source.
 
 ## Runtime failure demonstration
 

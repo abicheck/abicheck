@@ -340,13 +340,38 @@ class TestNamespaceGlobstarSemantics:
         s = Suppression(namespace="foo**::**", reachability="any", reason="x")
         # Whatever "foo**" matches on its own (plain fnmatch semantics,
         # unaffected by this fix), the trailing "::**" must still be a
-        # genuinely separate, non-corrupting segment — verified indirectly
-        # by confirming the translated regex keeps both segments distinct
-        # rather than collapsing to the bare single segment "foo**".
-        from abicheck.suppression import _translate_namespace_glob
-        translated = _translate_namespace_glob("foo**::**")
-        assert "(?:::.*)?" in translated
+        # genuinely separate, non-corrupting segment — verified behaviorally
+        # rather than against a specific regex substring, since a later fix
+        # (Codex review, fresh evidence) changed *how* this exact adjacency
+        # is translated (delegated to fnmatch.translate directly, which
+        # already handles a wildcard segment bordering "**" correctly) while
+        # keeping the same observable behavior this test checks: the "::"
+        # boundary is still required (never collapsed away), so a bare
+        # "foobar" with no "::" anywhere must NOT match even though "foo**"
+        # alone would ordinarily match it.
         assert s.matches(self._change("foo::bar"))
+        assert not s.matches(self._change("foobar"))
+
+    def test_wildcard_segment_bordering_globstar_still_requires_separator(self):
+        # Codex review, fresh evidence: the segment-collapse fix above did
+        # not fully close this bug. "foo**::**" translated to
+        # "foo.*(?:::.*)?" -- the whole trailing "::" absorption is
+        # *optional*, and since "foo**"'s own regex ("foo.*") is itself an
+        # unconstrained greedy wildcard, it can swallow an unrelated suffix
+        # like "bar" directly, letting the optional group match nothing at
+        # all. The result: Suppression(namespace="foo**::**") matched bare
+        # "foobar" even though no "::" appears anywhere in it -- the
+        # original (pre-globstar-rewrite) fnmatch-style pattern required
+        # that literal "::" to be present (verified against real
+        # fnmatch.translate("foo**::**"), which already handles this exact
+        # adjacency correctly). A real-world catch-all rule like
+        # "namespace: 'oneapi::detail**::**'" would then also over-suppress
+        # an unrelated "oneapi::detail_other::..." finding.
+        s = Suppression(namespace="foo**::**", reachability="any", reason="x")
+        assert not s.matches(self._change("foobar"))
+        assert s.matches(self._change("foobar::baz"))
+        assert s.matches(self._change("foo::bar"))
+        assert s.matches(self._change("foo::bar::baz"))
 
     def test_python314_fnmatch_end_anchor_variant_is_accepted(self):
         # Codex review, verified against Python 3.14.4: fnmatch.translate()

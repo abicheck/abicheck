@@ -3232,7 +3232,7 @@
    "expected_absent_kinds": [
     "internal_template_leaks_via_public_api"
    ],
-   "min_evidence": "L2",
+   "min_evidence": "L1",
    "platforms": [
     "linux",
     "macos",

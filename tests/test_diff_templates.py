@@ -223,6 +223,26 @@ class TestStripParamSignature:
         from abicheck.diff_namespaces import _segments
         assert _segments(result)[-1] == "f"
 
+    def test_decltype_with_arithmetic_star_is_not_a_declarator(self) -> None:
+        # Codex review, fresh evidence: real GCC output for a dependent
+        # decltype expression can itself contain a "*" that is ordinary
+        # multiplication ("{parm#1}*(g())"), not a pointer-declarator wrapper
+        # star. The un-gated version accepted that arithmetic "*" as if it
+        # opened a wrapper, matched the following "(" of the unrelated
+        # nested call "g()" as the wrapper's real call, and returned an
+        # empty slice between the adjacent "*(" -- collapsing the whole
+        # identity down to "". _pointer_declarator_star_index now requires
+        # only whitespace/identifier/scope/template-bracket characters
+        # before a star counts as a declarator prefix; anything else (like
+        # the "{" opening this decltype's own token stream) means the "("
+        # never opened a real wrapper, so the whole balanced group is
+        # skipped instead (same as any other decltype expression).
+        sig = "decltype ({parm#1}*(g())) ns::sort<int>(int)"
+        result = _strip_param_signature(sig)
+        assert result != ""
+        from abicheck.diff_namespaces import _segments
+        assert _segments(result)[-1] == "sort"
+
     def test_unbalanced_expression_paren_falls_back_safely(self) -> None:
         # No matching close paren for the leading (whitespace-preceded)
         # "(" -- must not raise or infinite-loop, just give up and return

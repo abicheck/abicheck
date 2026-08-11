@@ -155,6 +155,19 @@ def _pointer_declarator_star_index(qualified: str, paren_index: int) -> int:
     and that comma appears before the wrapper's own ``*`` is ever reached
     (Codex review, fresh evidence: the un-tracked version bailed out on it
     and corrupted the eventual leaf).
+
+    Only whitespace, identifier/scope characters (``Ident::Ident::``), and a
+    balanced template-argument list may appear *before* the star — anything
+    else means this ``(`` was never a scope-qualified pointer/member-pointer
+    declarator to begin with, so bail out immediately rather than let some
+    later, unrelated ``*``/``&`` be mistaken for the declarator's own. A
+    dependent ``decltype`` expression can itself contain a ``*`` that is
+    ordinary multiplication, not a declarator (``decltype ({parm#1}*(g()))
+    ns::sort<int>(int)`` — real GCC output): the un-gated version accepted
+    that arithmetic ``*`` as if it opened a wrapper, matched the following
+    ``(`` of the unrelated nested call ``g()`` as the wrapper's real call,
+    and returned an empty slice between the adjacent ``*(`` — collapsing the
+    whole identity to ``""`` (Codex review, fresh evidence).
     """
     star_index = -1
     depth = 0
@@ -162,12 +175,20 @@ def _pointer_declarator_star_index(qualified: str, paren_index: int) -> int:
         idx = paren_index + 1 + offset
         if ch == "<":
             depth += 1
-        elif ch == ">":
+            continue
+        if ch == ">":
             depth = max(0, depth - 1)
-        elif ch in "*&":
-            if star_index == -1:
+            continue
+        if star_index == -1:
+            if ch in "*&":
                 star_index = idx
-        elif ch == "(" and star_index != -1:
+            elif ch == "," and depth > 0:
+                continue
+            elif ch.isalnum() or ch in "_: \t":
+                continue
+            else:
+                return -1
+        elif ch == "(":
             return star_index
         elif ch in ",)" and depth == 0:
             return -1

@@ -112,6 +112,11 @@ def _fnmatch_segment_regex(segment: str) -> str:
     return m.group(1) if m else translated
 
 
+def _has_wildcard_char(segment: str) -> bool:
+    """Whether *segment* itself contains an fnmatch wildcard character."""
+    return "*" in segment or "?" in segment
+
+
 def _translate_namespace_glob(pattern: str) -> str:
     """Translate a ``namespace``/``entity_namespace``/``cause_namespace``
     glob to a regex pattern string, with pathspec/gitignore-style semantics
@@ -133,6 +138,23 @@ def _translate_namespace_glob(pattern: str) -> str:
     matches ``a::b`` as well as ``a::x::b`` and ``a::x::y::b``. A single
     ``*``/``?`` (never a full ``**`` segment on its own) keeps its original
     fnmatch behavior unchanged, via :func:`_fnmatch_segment_regex`.
+
+    A ``**`` segment immediately adjacent (via a literal ``::``) to a
+    segment that itself contains its *own* wildcard is a special case the
+    hand-rolled optional-``::`` absorption above cannot express correctly:
+    that neighboring segment's own unconstrained wildcard can silently
+    swallow what should be a mandatory ``::`` boundary, since the whole
+    absorbing group is optional and a greedy ``.*`` never needs it —
+    ``foo**::**`` compiled (before this fix) to ``foo.*(?:::.*)?``, which
+    matches bare ``foobar`` even though no ``::`` appears anywhere in it
+    (Codex review, fresh evidence: the original, pre-rewrite fnmatch-style
+    pattern required that literal ``::`` to be present — verified against
+    real ``fnmatch.translate("foo**::**")``, which already handles this
+    exact adjacency correctly via an atomic group). Rather than re-derive
+    that same guarantee by hand, :func:`_fnmatch_segment_regex` is asked to
+    translate the adjacent wildcard segment *together with* its bordering
+    ``**`` (and the ``::`` between them) as one combined fnmatch string,
+    reusing CPython's own correct handling instead of reinventing it.
     """
     # A run of adjacent "**" segments means the same thing as one — collapse
     # "a::**::**::b" to "a::**::b". Done on the already-split segment list,
@@ -147,9 +169,12 @@ def _translate_namespace_glob(pattern: str) -> str:
             continue
         segments.append(seg)
     parts: list[str] = []
-    for i, seg in enumerate(segments):
+    i = 0
+    n = len(segments)
+    while i < n:
+        seg = segments[i]
         if seg == "**":
-            if i == 0 and i == len(segments) - 1:
+            if i == 0 and i == n - 1:
                 # A standalone "**" (the whole pattern, after the collapse
                 # above) is a catch-all — it must consume arbitrary
                 # namespace text, not just "" or a "::"-terminated prefix
@@ -158,8 +183,36 @@ def _translate_namespace_glob(pattern: str) -> str:
                 # ending in "::", so "namespace: '**'" stopped matching an
                 # ordinary name like "oneapi::dal::foo" entirely).
                 parts.append(".*")
-            else:
-                parts.append("(?:.*::)?" if i == 0 else "(?:::.*)?")
+                i += 1
+                continue
+            prev_has_wildcard = i > 0 and _has_wildcard_char(segments[i - 1])
+            next_has_wildcard = i + 1 < n and _has_wildcard_char(segments[i + 1])
+            if prev_has_wildcard and next_has_wildcard:
+                combined = _fnmatch_segment_regex(
+                    segments[i - 1] + "::**::" + segments[i + 1]
+                )
+                parts[-1] = combined
+                i += 2
+                continue
+            if prev_has_wildcard:
+                # `parts[-1]` is still exactly the previous segment's own
+                # regex fragment (appended on the prior loop iteration) —
+                # replace it in place with the combined translation; any
+                # earlier "::" joiner sits in its own separate `parts`
+                # entry and is untouched.
+                combined = _fnmatch_segment_regex(segments[i - 1] + "::**")
+                parts[-1] = combined
+                i += 1
+                continue
+            if next_has_wildcard:
+                combined = _fnmatch_segment_regex("**::" + segments[i + 1])
+                if i > 0:
+                    parts.append("::")
+                parts.append(combined)
+                i += 2
+                continue
+            parts.append("(?:.*::)?" if i == 0 else "(?:::.*)?")
+            i += 1
             continue
         # A leading "**" already absorbs its own trailing "::" (or correctly
         # contributes none, for the zero-segment match) — every other
@@ -168,6 +221,7 @@ def _translate_namespace_glob(pattern: str) -> str:
         if i > 0 and not prev_is_leading_globstar:
             parts.append("::")
         parts.append(_fnmatch_segment_regex(seg))
+        i += 1
     return "(?s:" + "".join(parts) + ")\\Z"
 
 
