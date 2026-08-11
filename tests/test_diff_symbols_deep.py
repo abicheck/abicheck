@@ -1313,6 +1313,39 @@ class TestConstantChanges:
         r = compare(old, new)
         assert ChangeKind.CONSTANT_CHANGED in _kinds(r)
 
+    def test_stale_fingerprint_collision_suppressed_for_unknown_producer(self):
+        """``ast_producer`` itself wasn't tracked before schema v10 -- eight
+        versions before ``parse_constants()``'s "expr:" fingerprint risk
+        even existed in the wild -- so a snapshot straddling that boundary
+        reads ``ast_producer=None``: "unknown", not "definitely not clang".
+        An exact ``== "clang"`` producer check would wrongly trust an
+        "expr:" value from exactly the producer this guard exists to
+        distrust (Codex review, PR #720)."""
+        old = AbiSnapshot(
+            library="libtest.so.1",
+            version="1.0",
+            functions=[],
+            variables=[],
+            types=[],
+            constants={"K1": "expr:aaaa", "K2": "expr:aaaa"},
+            from_headers=True,
+            ast_producer=None,
+            clang_field_initializer_facts_reliable=False,
+        )
+        new = AbiSnapshot(
+            library="libtest.so.1",
+            version="1.0",
+            functions=[],
+            variables=[],
+            types=[],
+            constants={"K1": "expr:bbbb", "K2": "expr:cccc"},
+            from_headers=True,
+            ast_producer=None,
+            clang_field_initializer_facts_reliable=True,
+        )
+        r = compare(old, new)
+        assert ChangeKind.CONSTANT_CHANGED not in _kinds(r)
+
     def test_stale_fingerprint_guard_does_not_apply_to_hybrid_producer(self):
         """dumper_hybrid.merge_snapshots keeps `constants` verbatim from its
         castxml base -- constants never take a hybrid merge's clang-only-

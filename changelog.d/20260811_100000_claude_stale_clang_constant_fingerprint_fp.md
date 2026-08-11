@@ -22,8 +22,14 @@ A new changelog fragment. See changelog.d/README.md for the workflow.
   shared by 36 unrelated constants). Added
   `constant_value_fingerprint_comparison_unreliable`
   (`diff_default_value_reliability.py`) and wired it into
-  `_diff_constants`'s `CONSTANT_CHANGED` branch — scoped to an exact
-  `ast_producer == "clang"` match rather than the broader `!= "castxml"`
+  `_diff_constants`'s `CONSTANT_CHANGED` branch — scoped to `ast_producer
+  not in ("castxml", "hybrid")` rather than the broader `!= "castxml"`
   check the default-value case uses, since `dumper_hybrid.merge_snapshots`
   keeps `constants` verbatim from its castxml base and never takes a
   hybrid merge's clang-only-append path the way `TypeField.default` can.
+  Deliberately not an exact `== "clang"` match either: `ast_producer`
+  itself wasn't tracked before schema v10, eight versions before this
+  fingerprint risk even existed, so a snapshot straddling that boundary
+  reads `ast_producer=None` — treated as possibly-clang, not excluded,
+  mirroring `default_value_representation_unreliable`'s own handling of
+  the identical gap.

@@ -153,20 +153,35 @@ def constant_value_fingerprint_comparison_unreliable(
     resolve: ``dumper_hybrid.merge_snapshots`` keeps ``constants`` verbatim
     from its castxml base (never clang-merged per-entry), so a snapshot's
     own top-level ``ast_producer`` already answers which single backend
-    produced every entry. Checked as an EXACT ``"clang"`` match, deliberately
-    NOT :func:`default_value_representation_unreliable`'s broader
-    ``producer != "castxml"`` reasoning: that reasoning also treats a
-    ``"hybrid"`` producer as at-risk, because a hybrid merge's clang-only-
-    APPENDED fields keep their own unstable fingerprint -- true for
-    ``TypeField.default``, but not for constants, which never take that
-    per-declaration merge path at all.
+    produced every entry. Checked as ``NOT in ("castxml", "hybrid")`` --
+    NEITHER of :func:`default_value_representation_unreliable`'s two
+    producer checks alone is right here. Its broader ``producer !=
+    "castxml"`` treats a ``"hybrid"`` producer as at-risk too, because a
+    hybrid merge's clang-only-APPENDED fields keep their own unstable
+    fingerprint -- true for ``TypeField.default``, but not for constants,
+    which never take that per-declaration merge path at all, so ``"hybrid"``
+    is excluded here same as ``"castxml"``. But an exact ``== "clang"``
+    match is too narrow the other direction: ``ast_producer`` itself wasn't
+    tracked before schema v10 (eight versions before this class of risk even
+    existed in the wild), so a snapshot straddling that boundary reads
+    ``ast_producer=None`` -- "unknown", not "definitely not clang" -- and
+    excluding it would silently trust an ``"expr:"`` value from exactly the
+    producer this guard exists to distrust (Codex review, PR #720; mirrors
+    :func:`default_value_representation_unreliable`'s own third-round
+    ``None``-is-clang-family-risk fix for the identical shape of gap). Safe
+    for a genuinely castxml-authored ``None``-producer legacy snapshot too:
+    castxml never emits an ``"expr:"``-prefixed value at all (it keeps the
+    verbatim source expression instead), so the ``.startswith("expr:")``
+    guard alone already excludes it regardless of producer precision.
     """
     if old_value.startswith("expr:") and (
-        old.ast_producer == "clang" and not old.clang_field_initializer_facts_reliable
+        old.ast_producer not in ("castxml", "hybrid")
+        and not old.clang_field_initializer_facts_reliable
     ):
         return True
     if new_value.startswith("expr:") and (
-        new.ast_producer == "clang" and not new.clang_field_initializer_facts_reliable
+        new.ast_producer not in ("castxml", "hybrid")
+        and not new.clang_field_initializer_facts_reliable
     ):
         return True
     return False
