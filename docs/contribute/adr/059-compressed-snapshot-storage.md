@@ -354,6 +354,80 @@ None of the above blocks what *is* implemented: `dump`, `compare`, `scan
 already transparently read/write plain, gzip, and zstd snapshots today —
 see the acceptance table in the PR/CHANGELOG entry for this ADR.
 
+### 12. Postmortem: the `max_window_size` unit bug (and what it changed about this ADR's tests)
+
+A real-world `.json.zst` baseline (window_size 8 MiB, content_size ~150 MB —
+exactly the scale this ADR's own "Real-world audit" table above cites)
+could not be read back after this ADR shipped: `ZstdDecompressor(
+max_window_size=...)` was being called with an intended-byte value silently
+divided by 1024 (a docstring-literal reading of `python-zstandard`'s
+`max_window_size` parameter, which claims kibibytes; the underlying
+implementation — both backends — passes the value straight through to
+`ZSTD_DCtx_setMaxWindowSize()`, and that libzstd API takes raw bytes). The
+effective accepted window shrank to ~2 MiB against an intended 2 GiB, so any
+snapshot compressed with a real multi-megabyte window failed to decode with
+`ZstdError: Frame requires too much memory for decoding` — surfaced to users
+as a misleading `Cannot detect format of '...'`, since the sniffing path
+(`bounded_decoded_prefix`/`_try_decode_prefix`) swallows the underlying
+decompression exception into "unrecognized format" by design (see
+"Detection" above).
+
+**Root cause, generalized beyond this one bug:** every existing test
+validated *shape*, not *the actual external-library contract*:
+
+1. A unit test asserted the fixed ceiling's own internal arithmetic
+   (`_ZSTD_MAX_WINDOW_SIZE_KIB * 1024 == intended_byte_ceiling`) — a
+   tautology against the bug's own (wrong) formula, not a check against
+   `python-zstandard`'s actual runtime behavior.
+2. A second test *did* attempt to exercise a real "at the ceiling" frame
+   (`window_log=31`), but with a small, highly-compressible fixture
+   (`b"a" * (1 << 20)`). zstd's single-segment framing collapses a frame's
+   *recorded* `window_size` down to its `content_size` whenever content
+   fits inside the nominal window — so that fixture's real required window
+   was ~1 MiB, comfortably under the *buggy* ~2 MiB effective ceiling too.
+   The test exercised none of the failure mode it was written to catch,
+   and passed identically before and after the bug.
+3. No test exercised the storage layer's actual public contract — write
+   through the real production path (`ZSTD_LEVEL_BASELINE`, no manual
+   `CompressionParameters` override) at a large-enough scale to force zstd's
+   real auto-selected window, then read it back. Every zstd test either
+   compressed a tiny in-memory fixture or hand-built a `CompressionParameters`
+   object, none of which is what `write_snapshot`/`dump` actually do.
+
+**The general lesson, not specific to zstd:** a test that only checks a
+value's internal arithmetic, or that exercises a *toy-shaped* boundary
+condition (small/no-op input at a small-number-but-large-magnitude nominal
+parameter), can pass on both sides of a real regression. When a module's
+job is "honor an external library's storage contract" (this ADR's whole
+premise), at least one test per algorithm must go through the *actual
+public write path*, at a *content scale realistic enough to trigger the
+condition being defended against* (here: content large enough that zstd's
+auto window-sizing stops collapsing to a toy value) — never only a
+hand-constructed shortcut into the library's lower-level API. `snapshot_io.py`'s
+test suite (`tests/test_snapshot_compression.py`) now has three such tests
+built around a payload sized to force a real 8 MiB window (matching the
+`ZSTD_LEVEL_BASELINE` auto-selection observed against a real ~150 MB
+snapshot): one exercising `_decompress_zstd` directly, one exercising
+`bounded_decoded_prefix`'s sniffing path, and one exercising
+`sniff_text_format` end to end — plus a full production-write-path
+round-trip test (`test_zstd_round_trip_at_production_scale_and_level`) that
+never constructs a `CompressionParameters` at all, only calls
+`write_snapshot_bytes`/`read_snapshot_bytes` the way `dump`/`compare`
+actually do. All four fail against the pre-fix code with the same
+`Frame requires too much memory for decoding` symptom the field report hit,
+and pass with it.
+
+A related, independently-found gap in the same fix (Codex review): the
+ceiling itself (`1 << 31`) is only valid on a 64-bit libzstd build —
+`ZSTD_DCtx_setMaxWindowSize()` bound-checks its argument against the
+backend's own reported `[windowLogMin, windowLogMax]` range and *errors*
+(not just declines an oversized frame) if exceeded, and a 32-bit build's
+`ZSTD_WINDOWLOG_MAX_32` is 30. `_zstd_max_window_size_bytes()` now clamps
+to `min(31, zstandard.WINDOWLOG_MAX)` — the backend's own runtime-reported
+ceiling — rather than a value this module asserts unconditionally, with a
+unit test simulating a lower `WINDOWLOG_MAX` to pin the clamp directly
+rather than relying on access to an actual 32-bit build.
+
 ## Non-goals (explicit)
 
 - **DWARF/scan extraction memory (RSS)** is out of scope. This ADR touches

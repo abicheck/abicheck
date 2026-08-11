@@ -605,6 +605,20 @@ Several mechanisms guard test quality so coverage can't be "filled" without veri
   `ABICHECK_MIN_EXECUTED=<n>`; the session fails unless at least `<n>` tests actually ran,
   so a missing external tool can't turn a lane green with zero work done. Wired into the
   `abicc`, `libabigail`, and `integration` CI lanes.
+- **Third-party-boundary tests must exercise the real public API at realistic scale, not
+  just internal arithmetic.** Lesson from a real incident (ADR-059 §12: `snapshot_io.py`'s
+  zstd `max_window_size` was silently computed in the wrong unit for months): one test
+  asserted a value's own formula was self-consistent (a tautology against the bug's own
+  wrong formula), and a second used a toy-shaped fixture (small, highly-compressible input
+  at a large nominal parameter) whose *actual* required behavior collapsed to something
+  trivial — both passed identically before and after the regression. When a module's job is
+  "honor an external library's/format's contract," at least one test per algorithm must go
+  through the module's *actual public entry point*, at a *content scale realistic enough to
+  trigger the condition being defended against*, never only a hand-constructed shortcut into
+  the dependency's lower-level API. See `tests/test_snapshot_compression.py`'s
+  `test_zstd_round_trip_at_production_scale_and_level` for the pattern: real `AbiSnapshot` →
+  real `write_snapshot_bytes`/`read_snapshot_bytes` chokepoints → scaled past the threshold
+  where the defended-against condition actually reproduces.
 
 ## Line-coverage floor
 

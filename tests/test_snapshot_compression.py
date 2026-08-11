@@ -564,6 +564,60 @@ def test_zstd_decoder_rejects_realistic_writer_window(tmp_path):
     assert read_snapshot_bytes(p, max_decoded_bytes=len(payload) + 10) == payload
 
 
+@pytest.mark.slow
+def test_zstd_round_trip_at_production_scale_and_level(tmp_path):
+    """The postmortem regression test for the KiB/bytes unit bug (ADR-059
+    §12): every test above hand-builds a `zstandard.CompressionParameters`
+    object to force a specific window -- useful for pinning the exact
+    mechanism, but none of them go through the *actual* production write
+    path, which never sets an explicit window and instead lets zstd
+    auto-select one from `ZSTD_LEVEL_BASELINE` and the input size. This test
+    calls only the same public functions `dump`/`write_snapshot` call
+    (`write_snapshot_bytes`/`read_snapshot_bytes`, no manual compression
+    params) against a real, large-enough `AbiSnapshot` (`_graph_heavy_
+    snapshot`, scaled up past the point its serialized JSON exceeds 8 MiB --
+    the threshold where zstd stops collapsing its recorded window down to
+    the content size) so the frame really does carry the same 8 MiB window
+    a real oneDAL-scale baseline does (confirmed below), then asserts a full
+    round trip. Would have caught the original bug directly: it fails with
+    the same "Frame requires too much memory for decoding" against the
+    pre-fix ceiling and passes with the fix, with no knowledge of zstd's
+    internal APIs required to write or understand it. `slow`-marked (not in
+    the fast default suite): real level-19 compression of an 8+ MiB payload
+    takes several seconds, unlike every other test in this file -- still
+    covered by CI's dedicated `-m slow` lane (`ci.yml`)."""
+    zstandard = pytest.importorskip("zstandard")
+
+    snap = _graph_heavy_snapshot(n=8600)
+    original_bytes = json.dumps(snapshot_to_dict(snap)).encode()
+    assert (
+        len(original_bytes) > 8 * 1024 * 1024
+    )  # past the single-segment collapse point
+
+    # The real production chokepoint: no manual CompressionParameters, no
+    # explicit window -- exactly what `dump`/`write_snapshot` call.
+    p = tmp_path / "production_scale.abicheck.json.zst"
+    result = write_snapshot_bytes(
+        original_bytes, p, compression=SnapshotCompression.ZSTD
+    )
+    assert result.compression is SnapshotCompression.ZSTD
+
+    # Sanity-check the premise before trusting the round trip below: the
+    # real writer (level=ZSTD_LEVEL_BASELINE, no explicit window) must
+    # actually produce the realistic 8 MiB window this test exists to catch
+    # a regression against -- if a future zstandard/libzstd upgrade changed
+    # that auto-selection, this assertion (not a silent pass) is what would
+    # tell us the fixture needs revisiting.
+    frame = zstandard.get_frame_parameters(p.read_bytes())
+    assert frame.window_size == 8 * 1024 * 1024
+    assert frame.content_size == len(original_bytes)
+
+    assert (
+        read_snapshot_bytes(p, max_decoded_bytes=len(original_bytes) + 10)
+        == original_bytes
+    )
+
+
 def test_oversized_stored_file_rejected_before_full_read(tmp_path, monkeypatch):
     """CodeRabbit review, refined by two later Codex rounds: the stored-
     file-size check (via fstat(), before a full read) must reject a file
