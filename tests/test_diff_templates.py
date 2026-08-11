@@ -265,6 +265,32 @@ class TestStripParamSignature:
         # qualified name, matching the variable side of a CPO transition.
         assert _strip_leading_return_type(result) == "ns::sort<int>"
 
+    def test_conversion_operator_to_function_pointer_type(self) -> None:
+        # Codex review, fresh evidence: a conversion operator to a
+        # function-pointer type is demangled as two immediately-adjacent
+        # parenthesized groups glued to the operator's own return-type
+        # spelling ("operator int (*)(double)() const") -- the bare "(*)"
+        # marker (no name, since it names a type not a declarator) glued
+        # directly to the target's own parameter list "(double)", both
+        # glued directly to the operator's own real, empty "()". The
+        # un-fixed version stopped at "(double)", corrupting the identity
+        # down to "...operator int (*)" and losing the target-type
+        # distinction entirely -- two conversion operators to *different*
+        # function-pointer types ("int (*)(double)" vs "int (*)(long)")
+        # would report under the same misleading leaf. The fix must skip
+        # the target's own glued parameter-list group too (but not consume
+        # the operator's own trailing "()", which needs to stay visible so
+        # the outer search correctly stops there) -- keeping the full
+        # target-type spelling as part of the identity, which is what
+        # actually distinguishes one conversion operator from another.
+        sig = "ns::experimental::C::operator int (*)(double)() const"
+        result = _strip_param_signature(sig)
+        assert result == "ns::experimental::C::operator int (*)(double)"
+        other = _strip_param_signature(
+            "ns::experimental::C::operator int (*)(long)() const"
+        )
+        assert result != other
+
     def test_unbalanced_expression_paren_falls_back_safely(self) -> None:
         # No matching close paren for the leading (whitespace-preceded)
         # "(" -- must not raise or infinite-loop, just give up and return

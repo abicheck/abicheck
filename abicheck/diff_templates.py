@@ -320,6 +320,31 @@ def _strip_param_signature(qualified: str) -> str:
                 close = _matching_close_paren(qualified, i)
                 if close == -1:
                     return qualified
+                # A function-pointer/reference *type* used as a return type
+                # (e.g. a conversion operator's target,
+                # ``operator int (*)(double)() const``) is spelled as two
+                # immediately-adjacent parenthesized groups with no
+                # separating whitespace: the bare ``(*)``/``(&)`` marker
+                # (no name, since it names a type rather than a declarator)
+                # glued directly to the target's own parameter list. Both
+                # belong to the return type, not the outer function's own
+                # parameter list — skip that one glued group too, or the
+                # search would land on ``(double)`` and mistake it for the
+                # real parameter list, corrupting the identity to
+                # ``"...operator int (*)"`` (Codex review, fresh evidence).
+                # Deliberately bounded to a *single* extra group: the
+                # conversion operator's own trailing ``()`` is glued the
+                # exact same way, and must be left for the outer loop's own
+                # classification (its lack of a preceding "operator" token
+                # immediately before it means it correctly falls through to
+                # `return prefix`, keeping the target-type spelling that
+                # distinguishes this operator from a same-named one
+                # converting to a different type) rather than being
+                # swallowed here too.
+                if close + 1 < len(qualified) and qualified[close + 1] == "(":
+                    inner_close = _matching_close_paren(qualified, close + 1)
+                    if inner_close != -1:
+                        close = inner_close
                 i = qualified.find("(", close + 1)
             continue
         if saw_pointer_wrapper and wrapper_star_index != -1:
