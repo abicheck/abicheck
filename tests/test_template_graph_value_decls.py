@@ -503,7 +503,19 @@ def test_real_clang_function_pointer_nttp_resolves_and_joins_source_decl(
 ) -> None:
     """Re-verifies TEMPLATE_USES_DECL end to end against a real compiler,
     for a pointer-to-function, a pointer-to-variable, *and* a reference-to-
-    variable NTTP, rather than only the hand-crafted fixtures above."""
+    variable NTTP, rather than only the hand-crafted fixtures above.
+
+    Pins ``--target=x86_64-linux-gnu`` regardless of host OS -- the CI
+    Windows lane's own bundled ``clang++`` defaults to the MSVC target
+    (Itanium ``_Z...`` vs. MSVC ``?...`` mangling, the same divergence
+    ``AGENTS.md``'s "Known gaps" entry documents for ``msvc_scope_
+    components``), so without pinning, this test's label assertions --
+    which check a specific mangled spelling, not the mangling scheme
+    itself -- fail on that lane alone (confirmed via a real Windows CI run:
+    `KeyError: 'Callback<_ZN2ns7handlerEi>'`). `-fsyntax-only` over this
+    self-contained, no-``#include`` source needs no target-specific
+    standard library, so cross-targeting is safe here.
+    """
     clang_bin = shutil.which("clang++") or shutil.which("clang")
     if clang_bin is None:
         pytest.skip("clang++ not found in PATH")
@@ -520,6 +532,7 @@ def test_real_clang_function_pointer_nttp_resolves_and_joins_source_decl(
     result = subprocess.run(
         [
             clang_bin,
+            "--target=x86_64-linux-gnu",
             "-std=c++17",
             "-Xclang",
             "-ast-dump=json",
