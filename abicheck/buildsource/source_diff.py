@@ -413,12 +413,19 @@ def _diff_generated(
     the normal declaration diff intentionally skips generated entities and there
     is no removal diff for ``reachable_types``, so without the removal pass a
     generated config header dropping a public record/enum/typedef/decl would
-    produce no L4 finding at all. The removal loop is additionally skipped when
+    produce no L4 finding at all. The removal loop is skipped when
     ``compat.structured_facts_comparable`` is false (a fact_set name/version
     mismatch): an entity's absence there may only mean the old contract never
     mandated collecting its family, not that it was actually removed (Codex
-    review). Content-change detection is not gated -- an identity present on
-    both sides means the same thing regardless of contract version.
+    review). The content-change loop is skipped when
+    ``compat.structured_content_comparable`` is false: a structured fact's
+    ``type_hash``/``value`` is producer-recipe-dependent the same way an
+    opaque body/template hash already is (an extractor upgrade can start
+    extracting a real value for a field it previously only defaulted, e.g.
+    ``EnumType.underlying_type`` on the castxml producer -- G31 Phase C,
+    Codex review, PR #719), so a differing producer/producer_version/
+    compiler_version pair cannot be trusted to mean the entity's own content
+    actually changed.
     """
     changes: list[Change] = []
     for old_bucket, new_bucket in (
@@ -427,7 +434,11 @@ def _diff_generated(
     ):
         old_b = _by_identity(old_bucket)
         new_b = _by_identity(new_bucket)
-        for key in sorted(set(old_b) & set(new_b)):
+        for key in (
+            sorted(set(old_b) & set(new_b))
+            if compat.structured_content_comparable
+            else ()
+        ):
             ov, nv = old_b[key], new_b[key]
             # A generated constexpr value change is still a baked-in public
             # constant change, so keep the stronger constexpr_value_changed
@@ -488,11 +499,17 @@ def _diff_typedefs(
     artifact comparison. Generated typedefs are reported as
     ``generated_header_changed`` by ``_diff_generated`` and skipped here so they
     are not double-counted.
+
+    The content-change loop is skipped when ``compat.structured_content_comparable``
+    is false, the same producer-recipe-dependence reasoning ``_diff_generated``
+    documents for its own content loop.
     """
     old_t = {e.identity(): e for e in old.reachable_types if e.kind == "typedef"}
     new_t = {e.identity(): e for e in new.reachable_types if e.kind == "typedef"}
     changes: list[Change] = []
-    for key in sorted(set(old_t) & set(new_t)):
+    for key in (
+        sorted(set(old_t) & set(new_t)) if compat.structured_content_comparable else ()
+    ):
         ov, nv = old_t[key], new_t[key]
         if _is_generated(nv):
             continue
@@ -553,10 +570,18 @@ def _diff_typedefs(
 def _diff_macros(
     old: SourceAbiSurface, new: SourceAbiSurface, compat: FactCompatibility
 ) -> list[Change]:
+    """Flag a public macro whose value changed (ADR-030 D6).
+
+    The content-change loop is skipped when ``compat.structured_content_comparable``
+    is false, the same producer-recipe-dependence reasoning ``_diff_generated``
+    documents for its own content loop.
+    """
     old_m = _by_identity(old.reachable_macros)
     new_m = _by_identity(new.reachable_macros)
     changes: list[Change] = []
-    for key in sorted(set(old_m) & set(new_m)):
+    for key in (
+        sorted(set(old_m) & set(new_m)) if compat.structured_content_comparable else ()
+    ):
         ov, nv = old_m[key], new_m[key]
         name = nv.qualified_name
         if ov.value != nv.value:

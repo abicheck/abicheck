@@ -38,7 +38,7 @@ from defusedxml import ElementTree as DefusedET
 
 from ... import deadline
 from ..build_evidence import CompileUnit
-from ..source_abi import SourceAbiTu
+from ..source_abi import SourceAbiTu, coverage_state_for_family, default_fact_set
 from ._argv import (
     is_msvc_mode,
     pick_compiler_binary,
@@ -361,4 +361,61 @@ class CastxmlSourceExtractor:
             {name for el in root.findall(".//File") if (name := el.get("name"))},
             compile_unit.directory,
         )
+        self._stamp_fact_set_and_coverage(tu, compile_unit)
         return tu
+
+    def _stamp_fact_set_and_coverage(
+        self, tu: SourceAbiTu, compile_unit: CompileUnit
+    ) -> None:
+        """ADR-038 C.8: record this TU's canonical fact-set identity + per-family
+        coverage (Codex review, PR #719 -- previously never stamped at all, so
+        two castxml-produced TUs compared as if they had no fact_set identity,
+        the same forward-compat "pre-C.8 producer" treatment
+        ``check_fact_compatibility`` reserves for a hand-edited/third-party
+        pack -- silently exempting every castxml comparison from the
+        producer/producer_version recipe-drift gating ``structured_content_
+        comparable``/``opaque_hashes_comparable`` exist to provide, including
+        for the ``EnumType.underlying_type`` case that motivated this fix).
+
+        A full extraction always attempts every family the extractor
+        collects at all (no user-selectable partial mode) and never returns a
+        TU on failure -- ``extract()`` raises ``SourceExtractionError``
+        instead, recorded as partial L4 coverage by the caller -- so there is
+        no per-family diagnostic signal here the way ``clang.py``'s
+        ``ast_recovered`` has; every collected family is unconditionally
+        ``complete``/``empty-confirmed``.
+        """
+        coverage: dict[str, str] = {
+            family: coverage_state_for_family(
+                entities_present=bool(entities), family_diagnostics_seen=False
+            )
+            for family, entities in (
+                ("functions", tu.functions),
+                ("variables", tu.variables),
+                ("types", tu.types),
+                ("constexpr_values", tu.constexpr_values),
+                ("read_files", tu.read_files),
+            )
+        }
+        # castxml is good for declarations/types/public const-constexpr values
+        # but weak for function bodies and macro expansions (module docstring,
+        # ADR-030 D3 table) -- this extractor genuinely never attempts these
+        # three families, a permanent producer limitation, not a collection
+        # failure (coverage_state_for_family's `unsupported` state).
+        for family in ("macros", "templates", "inline_bodies", "source_edges"):
+            coverage[family] = coverage_state_for_family(
+                entities_present=False, family_diagnostics_seen=False, unsupported=True
+            )
+        tu.coverage = coverage
+        # castxml's own bundled internal Clang is invoked in gcc- or
+        # msvc-emulation mode (`--castxml-cc-<id>`, mirroring
+        # build_castxml_command's own cc_id derivation) -- never the direct
+        # `clang -ast-dump=json` recipe `default_fact_set`'s "clang" default
+        # describes, so this extractor always passes its own real family.
+        cc_bin = pick_compiler_binary(compile_unit, self.compiler_binary)
+        compiler_family = "msvc" if is_msvc_mode(cc_bin) else "gnu"
+        tu.fact_set = default_fact_set(
+            producer=self.name,
+            producer_version=CASTXML_EXTRACTOR_VERSION,
+            compiler_family=compiler_family,
+        )

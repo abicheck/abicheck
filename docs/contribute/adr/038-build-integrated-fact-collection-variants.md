@@ -833,6 +833,34 @@ recorded before this field existed keep comparing exactly as before. A
 `fact_set.name`/`version` mismatch is never overridable this way — that is
 the mandatory-family contract itself, not a hashing-recipe detail.
 
+**C.11 amendment (G31 Phase C fact-completeness, Codex review, PR #719):**
+`FactCompatibility` gained a fourth boolean, `structured_content_comparable`,
+gated identically to `opaque_hashes_comparable` (same producer/
+producer_version/compiler_version/`hash_recipe_id` rule set). This closes a
+gap C.11's original design left open on purpose: a *structured* fact's own
+content — `type_hash`/`value`, not an opaque body/template hash — was
+argued comparable "regardless of which mandatory-family contract collected
+it," on the premise that a structured fact's extraction recipe cannot change
+independently of `fact_set.version` the way an opaque hash's
+canonicalization recipe can. `EnumType.underlying_type` broke that premise
+for real: the castxml producer started extracting a genuine value for a
+field that was previously always the dataclass default `"int"`, on a
+producer-version bump alone, with no `fact_set.version` change — so a
+persisted old-producer baseline's enum `type_hash` and a freshly-extracted
+new-producer `type_hash` could differ for an *unchanged* header, purely from
+the extractor upgrade. `source_diff.py`'s `_diff_generated`/`_diff_typedefs`/
+`_diff_macros` now skip their content-change loop (not their existence/
+removal loop, which stays gated by `structured_facts_comparable` alone) when
+`structured_content_comparable` is false. The castxml extractor itself
+previously never stamped a `fact_set`/`coverage` block at all — a pre-C.8
+producer, in `check_fact_compatibility`'s forward-compat terms — so it was
+silently exempt from every rule in this section; it now stamps both, via
+`default_fact_set()` (extended with a `compiler_family` parameter so
+castxml's own gcc-/msvc-emulated recipe is never mislabeled `"clang"`) and
+an honest `unsupported` coverage state for the three families it never
+attempts (`macros`, `templates`, `inline_bodies`, plus `source_edges`,
+which only the clang-family extractors currently populate).
+
 ### C.12 — Target/pack isolation
 
 The plugin's per-TU fact filename was keyed on source path + compile-context

@@ -618,6 +618,7 @@ def test_check_fact_compatibility_name_mismatch_blocks_everything() -> None:
     new["name"] = "some-other-fact-set"
     compat = check_fact_compatibility(old, new)
     assert not compat.structured_facts_comparable
+    assert not compat.structured_content_comparable
     assert not compat.opaque_hashes_comparable
     assert not compat.source_edges_comparable
 
@@ -636,6 +637,7 @@ def test_check_fact_compatibility_matching_recipe_id_overrides_producer_mismatch
     )
     new["hash_recipe_id"] = "clang-json-canonical-v3"
     compat = check_fact_compatibility(old, new)
+    assert compat.structured_content_comparable
     assert compat.opaque_hashes_comparable
     assert compat.source_edges_comparable
     # The producer_mismatch issue is still reported for visibility even though
@@ -649,12 +651,13 @@ def test_check_fact_compatibility_one_side_empty_stays_comparable() -> None:
     fs = default_fact_set(producer="p", producer_version="1")
     compat = check_fact_compatibility(fs, {})
     assert compat.structured_facts_comparable
+    assert compat.structured_content_comparable
     assert compat.opaque_hashes_comparable
     assert compat.source_edges_comparable
 
 
 def test_fact_compatibility_is_frozen() -> None:
-    compat = FactCompatibility(True, True, True, ())
+    compat = FactCompatibility(True, True, True, True, ())
     with pytest.raises(AttributeError):
         compat.opaque_hashes_comparable = False  # type: ignore[misc]
 
@@ -876,11 +879,13 @@ def test_diff_suppresses_generated_header_removal_on_fact_set_name_mismatch() ->
     assert ChangeKind.GENERATED_HEADER_CHANGED not in {c.kind for c in changes}
 
 
-def test_diff_still_reports_content_changes_on_fact_set_name_mismatch() -> None:
-    """Removal detection is suppressed on a contract mismatch, but a content
-    comparison for an identity present on *both* sides stays meaningful
-    regardless -- a type_hash/value means the same thing under any
-    mandatory-family contract."""
+def test_diff_suppresses_content_changes_on_fact_set_name_mismatch() -> None:
+    """A fact_set name mismatch is hard-blocking (rule 1) -- both removal
+    detection AND content-change detection are suppressed, since the two
+    sides don't even agree on what the mandatory-family contract promises
+    (Codex review, PR #719: `structured_content_comparable` closed the
+    previous unconditional content-comparison gap the docstring below used
+    to document as intentional)."""
     old_fs = default_fact_set(producer="p", producer_version="1")
     new_fs = dict(old_fs)
     new_fs["name"] = "some-other-fact-set"
@@ -896,8 +901,55 @@ def test_diff_still_reports_content_changes_on_fact_set_name_mismatch() -> None:
     )
     changes = diff_source_abi(old, new)
     kinds = {c.kind for c in changes}
+    assert ChangeKind.PUBLIC_MACRO_VALUE_CHANGED not in kinds
+    assert ChangeKind.PUBLIC_TYPEDEF_TARGET_CHANGED not in kinds
+
+
+def test_diff_still_reports_content_changes_when_fact_sets_agree() -> None:
+    """The ordinary case: matching fact_set on both sides (same producer,
+    same producer_version) keeps content-change detection fully live."""
+    fs = default_fact_set(producer="p", producer_version="1")
+    old = _surface(
+        coverage={"fact_set": fs, "fact_family_states": {}},
+        reachable_macros=[_macro_entity("FOO", "1")],
+        reachable_types=[_typedef_entity("Widget_t", "h1")],
+    )
+    new = _surface(
+        coverage={"fact_set": fs, "fact_family_states": {}},
+        reachable_macros=[_macro_entity("FOO", "2")],
+        reachable_types=[_typedef_entity("Widget_t", "h2")],
+    )
+    changes = diff_source_abi(old, new)
+    kinds = {c.kind for c in changes}
     assert ChangeKind.PUBLIC_MACRO_VALUE_CHANGED in kinds
     assert ChangeKind.PUBLIC_TYPEDEF_TARGET_CHANGED in kinds
+
+
+def test_diff_suppresses_content_changes_on_producer_version_mismatch() -> None:
+    """The concrete motivating case (Codex review, PR #719): a producer_version
+    drift alone (same fact_set name/version, same producer) must not be read
+    as a real content change -- the extraction recipe for a given structured
+    fact can change between producer releases (EnumType.underlying_type going
+    from an always-"int" placeholder to a real extracted value on the castxml
+    producer is exactly this shape), so a differing type_hash/value for an
+    UNCHANGED header is indistinguishable from a genuine one without matching
+    producer_version."""
+    old_fs = default_fact_set(producer="p", producer_version="1")
+    new_fs = default_fact_set(producer="p", producer_version="2")
+    old = _surface(
+        coverage={"fact_set": old_fs, "fact_family_states": {}},
+        reachable_macros=[_macro_entity("FOO", "1")],
+        reachable_types=[_typedef_entity("Widget_t", "h1")],
+    )
+    new = _surface(
+        coverage={"fact_set": new_fs, "fact_family_states": {}},
+        reachable_macros=[_macro_entity("FOO", "2")],
+        reachable_types=[_typedef_entity("Widget_t", "h2")],
+    )
+    changes = diff_source_abi(old, new)
+    kinds = {c.kind for c in changes}
+    assert ChangeKind.PUBLIC_MACRO_VALUE_CHANGED not in kinds
+    assert ChangeKind.PUBLIC_TYPEDEF_TARGET_CHANGED not in kinds
 
 
 def test_diff_still_reports_removals_when_fact_sets_match() -> None:

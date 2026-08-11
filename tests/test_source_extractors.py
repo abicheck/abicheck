@@ -994,6 +994,92 @@ def test_parse_root_omits_unscoped_typedefs() -> None:
     assert any(e.qualified_name == "Rec" for e in tu.types)
 
 
+# -- fact_set / coverage stamping (Codex review, PR #719) --------------------
+
+
+def test_parse_root_stamps_fact_set_and_coverage() -> None:
+    """The castxml extractor previously never stamped ``fact_set``/``coverage``
+    at all, so two castxml-produced TUs compared as if neither carried a
+    fact_set identity -- silently exempting every castxml comparison from the
+    producer/producer_version recipe-drift gating this ADR-038 C.8 apparatus
+    exists to provide."""
+    from xml.etree.ElementTree import Element, SubElement
+
+    root = Element("GCC_XML")
+    SubElement(root, "File", id="f1", name="foo.h")
+    SubElement(root, "FundamentalType", id="t_int", name="int")
+    SubElement(root, "Location", id="loc1", file="f1", line="3")
+    SubElement(
+        root, "Class", id="c1", name="Widget", size="64", align="64", location="loc1"
+    )
+
+    extractor = CastxmlSourceExtractor()
+    tu = extractor._parse_root(
+        root, _cu(), public_header_roots=["foo.h"], target_id="target://libfoo"
+    )
+    assert tu.fact_set["producer"] == "castxml-source"
+    assert tu.fact_set["producer_version"] == CASTXML_EXTRACTOR_VERSION
+    # castxml's own bundled Clang runs in gcc-emulation mode by default (no
+    # MSVC compiler_binary override configured), never the direct
+    # `clang -ast-dump=json` recipe default_fact_set's "clang" default names.
+    assert tu.fact_set["compiler_family"] == "gnu"
+    # Families this extractor genuinely collects.
+    assert tu.coverage["types"] == "complete"
+    # Families this extractor never attempts at all -- a permanent producer
+    # limitation, not a collection failure.
+    for family in ("macros", "templates", "inline_bodies", "source_edges"):
+        assert tu.coverage[family] == "unsupported"
+
+
+def test_parse_root_stamps_msvc_compiler_family_for_msvc_compiler_binary() -> None:
+    from xml.etree.ElementTree import Element, SubElement
+
+    root = Element("GCC_XML")
+    SubElement(root, "File", id="f1", name="foo.h")
+
+    extractor = CastxmlSourceExtractor(compiler_binary="cl.exe")
+    tu = extractor._parse_root(
+        root, _cu(), public_header_roots=["foo.h"], target_id="target://libfoo"
+    )
+    assert tu.fact_set["compiler_family"] == "msvc"
+
+
+def test_two_castxml_producer_versions_suppress_content_comparison() -> None:
+    """End-to-end through fact_set.check_fact_compatibility: a castxml TU
+    stamped under one CASTXML_EXTRACTOR_VERSION and one stamped under a
+    different version are no longer treated as unconditionally comparable —
+    the concrete gap this whole fix closes."""
+    from abicheck.buildsource.fact_set import check_fact_compatibility
+
+    old_fs = dict(
+        CastxmlSourceExtractor()
+        ._parse_root(
+            _root_with_one_type(), _cu(), public_header_roots=["foo.h"], target_id=""
+        )
+        .fact_set
+    )
+    new_fs = dict(old_fs)
+    new_fs["producer_version"] = "9.9"  # simulates an extractor upgrade
+    compat = check_fact_compatibility(old_fs, new_fs)
+    assert not compat.structured_content_comparable
+    # Removal detection (existence, not content) is unaffected -- both sides
+    # still agree on the same fact_set name/version contract.
+    assert compat.structured_facts_comparable
+
+
+def _root_with_one_type() -> object:
+    from xml.etree.ElementTree import Element, SubElement
+
+    root = Element("GCC_XML")
+    SubElement(root, "File", id="f1", name="foo.h")
+    SubElement(root, "FundamentalType", id="t_int", name="int")
+    SubElement(root, "Location", id="loc1", file="f1", line="3")
+    SubElement(
+        root, "Class", id="c1", name="Widget", size="64", align="64", location="loc1"
+    )
+    return root
+
+
 # -- end-to-end via real castxml (integration) -------------------------------
 
 

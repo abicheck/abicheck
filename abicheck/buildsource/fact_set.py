@@ -92,14 +92,30 @@ class FactCompatibility:
       promises. This specifically gates *existence/removal* claims (an
       identity present old, absent new): under a contract mismatch, absence
       may only mean the old contract never mandated collecting that family,
-      not that the entity disappeared. It does **not** gate a *content*
-      comparison for an identity present on **both** sides — a signature/type
+      not that the entity disappeared. `source_diff.py`'s removal-detection
+      loops in `_diff_generated`/`_diff_typedefs`/`_diff_macros` are what this
+      gates.
+    - ``structured_content_comparable``: whether a structured fact's hash
+      (``type_hash``/``value``) means the same thing for a *content*
+      comparison on an identity present on **both** sides. An earlier design
+      here argued this never needs producer-recipe gating — "a signature/type
       hash means the same thing regardless of which mandatory-family contract
-      collected it, so those comparisons remain valid even under this flag
-      (a review found the previous wording implied otherwise while nothing
-      consumed it that way; `source_diff.py`'s removal-detection loops in
-      `_diff_generated`/`_diff_typedefs`/`_diff_macros` are what this
-      actually gates).
+      collected it" — on the premise that a structured fact's extraction
+      recipe cannot change independently of ``fact_set.version`` the way an
+      opaque hash's canonicalization recipe can. G31 Phase C fact-completeness
+      broke that premise for real: `EnumType.underlying_type` went from an
+      always-``"int"`` placeholder to a genuinely extracted value on a
+      castxml-producer version bump alone, with no `fact_set.version` change
+      — so a persisted old-producer baseline's enum `type_hash` and a
+      fresh new-producer extraction's `type_hash` can now differ for an
+      UNCHANGED header, purely from the extractor upgrade (Codex review, PR
+      #719). Gated identically to ``opaque_hashes_comparable`` (same
+      producer/producer_version/compiler_version/``hash_recipe_id`` override
+      rules) rather than trusted unconditionally, accepting that a genuine
+      content change spanning a real producer/compiler upgrade may go
+      unreported until both sides are re-collected with the same producer —
+      the same trade-off ``opaque_hashes_comparable`` already accepts for
+      body/template hashes.
     - ``opaque_hashes_comparable``: producer-specific body/template hashes
       (``inline_body_changed``, ``template_body_changed``) — false on a
       producer/producer_version/compiler_version mismatch too, since the
@@ -114,6 +130,7 @@ class FactCompatibility:
     """
 
     structured_facts_comparable: bool
+    structured_content_comparable: bool
     opaque_hashes_comparable: bool
     source_edges_comparable: bool
     issues: tuple[FactSetIssue, ...]
@@ -320,15 +337,16 @@ _HARD_BLOCKING_RULES = frozenset(
     {"fact_set_name_mismatch", "fact_set_version_mismatch"}
 )
 
-#: FactSetIssue rules whose presence means opaque body/template hashes may
-#: not be byte-comparable across the old/new pair (rule 3: producer/
-#: producer_version/compiler_version/compiler_family identify the
-#: canonicalization recipe that produced the opaque hashes -- a different
-#: compiler family mangles/canonicalizes differently even when the abicheck
-#: producer identity matches, same reasoning as a compiler_version drift).
-#: These *are* overridable by a matching hash_recipe_id -- a differential
-#: conformance run can prove two different producer/compiler identities emit
-#: byte-comparable hashes.
+#: FactSetIssue rules whose presence means opaque body/template hashes (and,
+#: since G31 Phase C's enum-underlying-type finding, a structured fact's own
+#: content hash too) may not be byte-/meaning-comparable across the old/new
+#: pair (rule 3: producer/producer_version/compiler_version/compiler_family
+#: identify the extraction/canonicalization recipe -- a different compiler
+#: family mangles/canonicalizes differently even when the abicheck producer
+#: identity matches, same reasoning as a compiler_version drift). These *are*
+#: overridable by a matching hash_recipe_id -- a differential conformance run
+#: can prove two different producer/compiler identities emit
+#: byte-/meaning-comparable hashes.
 _RECIPE_OVERRIDABLE_RULES = frozenset(
     {
         "producer_mismatch",
@@ -390,10 +408,10 @@ def check_fact_compatibility(
     specific evidence categories instead of only reporting prose that nothing
     downstream reads. A matching :func:`hash_recipe_id` on both sides
     overrides an otherwise-invalidating producer/producer_version/
-    compiler_version mismatch for ``opaque_hashes_comparable`` and
-    ``source_edges_comparable`` specifically — those two sides have declared
-    they use the same canonicalization recipe despite differing producer
-    identity strings.
+    compiler_version mismatch for ``structured_content_comparable``,
+    ``opaque_hashes_comparable``, and ``source_edges_comparable``
+    specifically — those sides have declared they use the same
+    canonicalization recipe despite differing producer identity strings.
 
     When one or both sides carry no ``fact_set`` at all (a pre-C.8 producer),
     :func:`check_fact_set_compatibility` reports only the informational
@@ -407,10 +425,11 @@ def check_fact_compatibility(
     if same_recipe:
         same_recipe = hash_recipe_id(old_fact_set) == hash_recipe_id(new_fact_set)
     hard_blocked = bool(rules & _HARD_BLOCKING_RULES)
+    recipe_agrees = same_recipe or not (rules & _RECIPE_OVERRIDABLE_RULES)
     return FactCompatibility(
         structured_facts_comparable=not hard_blocked,
-        opaque_hashes_comparable=not hard_blocked
-        and (same_recipe or not (rules & _RECIPE_OVERRIDABLE_RULES)),
+        structured_content_comparable=not hard_blocked and recipe_agrees,
+        opaque_hashes_comparable=not hard_blocked and recipe_agrees,
         source_edges_comparable=not hard_blocked
         and (same_recipe or not (rules & _SOURCE_EDGE_OVERRIDABLE_RULES)),
         issues=tuple(issues),
