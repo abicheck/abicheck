@@ -193,10 +193,61 @@ def _load_risk_rules(path: Path | None) -> RiskRules:
     return RiskRules.from_dict(block if isinstance(block, dict) else raw)
 
 
-#: Cap on findings embedded in the ``scan --baseline`` summary so a large
-#: diff cannot blow up the always-on scan text/JSON output; ``--format json``
-#: on the full ``compare`` command remains the way to see everything.
+#: Default cap on findings embedded in the ``scan --baseline`` summary so a
+#: large diff cannot blow up the always-on scan text/JSON output;
+#: ``--format json`` on the full ``compare`` command remains the way to see
+#: everything. Overridable per run via ``scan --max-findings``/
+#: ``ScanRequest.max_findings``, or globally via the
+#: ``ABICHECK_MAX_BASELINE_FINDINGS`` env var when neither passes an explicit
+#: value -- see :func:`_resolve_max_baseline_findings`.
 _MAX_BASELINE_FINDINGS = 20
+
+#: Env var read by :func:`_resolve_max_baseline_findings` when a caller does
+#: not pass an explicit ``max_findings``. Kept distinct from a CLI/API default
+#: of ``None`` so "not specified" is distinguishable from "explicitly 20".
+_MAX_BASELINE_FINDINGS_ENV_VAR = "ABICHECK_MAX_BASELINE_FINDINGS"
+
+
+def _resolve_max_baseline_findings(max_findings: int | None) -> int:
+    """Resolve the effective findings cap: explicit override, else env, else default.
+
+    *max_findings* is the per-call override (``scan --max-findings`` /
+    ``ScanRequest.max_findings``); it wins when given. Otherwise
+    ``ABICHECK_MAX_BASELINE_FINDINGS`` lets a CI job raise (or lower) the cap
+    globally without a code change, matching how other numeric env-var knobs
+    in this codebase work. An unset or non-positive-int env value is ignored
+    (falls back to :data:`_MAX_BASELINE_FINDINGS`) rather than raising --
+    this cap only ever bounds report *size*, so a malformed override should
+    degrade to the safe default, not fail the scan.
+    """
+    if max_findings is not None:
+        if max_findings < 1:
+            # A plain ValueError, not click.ClickException: this shared helper
+            # is also reached from the Python API (service_scan.run_scan ->
+            # scan_engine.run_scan_core -> _run_baseline_compare), whose
+            # callers never import click. The CLI path itself never reaches
+            # this branch -- `scan --max-findings` is a `click.IntRange(min=1)`
+            # option, so click already rejects a non-positive value before
+            # cli_scan.scan_cmd ever calls in this deep (Codex review: a
+            # click.ClickException leaking through the typed API is also the
+            # wrong exception type for that boundary -- run_scan's own
+            # upfront check raises errors.ValidationError instead, and this
+            # is only a defensive fallback for a caller that bypasses it).
+            raise ValueError(
+                f"max_findings must be a positive integer, got {max_findings}"
+            )
+        return max_findings
+    import os
+
+    env_value = os.environ.get(_MAX_BASELINE_FINDINGS_ENV_VAR)
+    if env_value:
+        try:
+            parsed = int(env_value)
+        except ValueError:
+            return _MAX_BASELINE_FINDINGS
+        if parsed >= 1:
+            return parsed
+    return _MAX_BASELINE_FINDINGS
 
 
 #: The two severity categories made up of findings ``_baseline_summary``
@@ -206,7 +257,7 @@ _COMPATIBLE_SEVERITY_CATEGORIES = frozenset({"addition", "quality_issues"})
 
 
 def _add_severity_blocking_compatible_findings(
-    summary: dict[str, Any], diff: Any, gate: dict[str, Any]
+    summary: dict[str, Any], diff: Any, gate: dict[str, Any], max_findings: int | None = None
 ) -> None:
     """Itemize compatible findings when severity made *them* the blocking cause.
 
@@ -220,9 +271,13 @@ def _add_severity_blocking_compatible_findings(
 
     Only the blocking case is added, and only for the two categories that can
     be blocking-yet-compatible, so every other run's summary is byte-identical.
-    The cap is the shared ``_MAX_BASELINE_FINDINGS`` budget the gating buckets
-    already spent from -- an addition that blocks is worth naming, but not at
-    the price of unbounded output.
+    The cap is the same resolved ``--max-findings`` budget the gating buckets
+    already spent from (see :func:`_resolve_max_baseline_findings`) -- an
+    addition that blocks is worth naming, but not at the price of unbounded
+    output. *max_findings* must be the identical value already passed to
+    :func:`_baseline_summary` for this ``diff``, so the two stages agree on
+    one cap rather than each resolving (and potentially disagreeing on) their
+    own.
     """
     if not gate.get("blocking"):
         return
@@ -232,6 +287,7 @@ def _add_severity_blocking_compatible_findings(
     blocking = _blocking_compatible_changes(diff, blamed)
     if not blocking:
         return
+    cap = _resolve_max_baseline_findings(max_findings)
     findings: list[dict[str, Any]] = list(summary.get("findings") or [])
     added = _baseline_finding_dicts(blocking, "compatible")
     # Both groups get a share; neither may evict the other outright. Two
@@ -250,12 +306,29 @@ def _add_severity_blocking_compatible_findings(
     # reserved floor guarantees the compatible blockers are represented at
     # all. Both are causes of the exit code; a report that names only one is
     # wrong whichever one it names.
-    reserved = min(len(added), max(1, _MAX_BASELINE_FINDINGS // 4))
-    head = findings[: _MAX_BASELINE_FINDINGS - reserved]
-    tail = added[: _MAX_BASELINE_FINDINGS - len(head)]
+    reserved = min(len(added), max(1, cap // 4))
+    head = findings[: cap - reserved]
+    tail = added[: cap - len(head)]
     summary["findings"] = head + tail
     if len(findings) > len(head) or len(added) > len(tail):
         summary["findings_truncated"] = True
+        # Findings evicted here were either already counted in `findings`
+        # (now bumped out to make room for a compatible blocker) or never
+        # made it in at all (`added` beyond `tail`) -- both are real cuts a
+        # reader can't otherwise see the shape of without rerunning at a
+        # higher cap, so both accumulate onto the same per-kind ledger
+        # `_baseline_summary` started (Low-effort DX follow-up: report cap
+        # was hard-coded with no per-kind visibility into what was cut).
+        _accumulate_kind_counts(
+            summary,
+            "findings_truncated_kinds",
+            (d["kind"] for d in findings[len(head) :]),
+        )
+        _accumulate_kind_counts(
+            summary,
+            "findings_truncated_kinds",
+            (d["kind"] for d in added[len(tail) :]),
+        )
 
 
 def _blocking_compatible_changes(diff: Any, blamed: set[str]) -> list[Any]:
@@ -285,6 +358,35 @@ def _blocking_compatible_changes(diff: Any, blamed: set[str]) -> list[Any]:
         if getattr(category, "value", str(category)) in blamed:
             kept.append(change)
     return kept
+
+
+def _change_kind_str(c: Any) -> str:
+    """The same tolerant ``kind`` read ``_baseline_finding_dicts`` uses, standalone.
+
+    Shared so the per-kind truncation ledger (:func:`_accumulate_kind_counts`)
+    counts a raw ``Change``/duck-typed stand-in the identical way the finding
+    dicts spell its ``kind`` -- a mismatch here would make the ledger's keys
+    disagree with the ``kind`` values in ``summary["findings"]`` itself.
+    """
+    kind = getattr(c, "kind", None)
+    return str(getattr(kind, "value", str(kind)))
+
+
+def _accumulate_kind_counts(summary: dict[str, Any], field: str, kinds: Any) -> None:
+    """Add *kinds* (an iterable of kind strings) onto ``summary[field]``.
+
+    Kept as a running dict (not overwritten) since both ``_baseline_summary``
+    and :func:`_add_severity_blocking_compatible_findings` can each cut
+    findings from the same summary -- a second pass's cuts must add to the
+    first's counts, not replace them. Sorted by kind name (not count) so the
+    JSON is deterministic and diff-friendly across runs of the same input.
+    """
+    from collections import Counter
+
+    counter: Counter[str] = Counter(summary.get(field) or {})
+    counter.update(kinds)
+    if counter:
+        summary[field] = dict(sorted(counter.items()))
 
 
 def _baseline_finding_dicts(changes: list[Any], bucket: str) -> list[dict[str, Any]]:
@@ -467,14 +569,23 @@ def _resolve_baseline_header_scope(
     return bl_headers, bl_includes, bl_public_headers, bl_public_dirs
 
 
-def _baseline_summary(diff: Any) -> dict[str, Any]:
+def _baseline_summary(diff: Any, max_findings: int | None = None) -> dict[str, Any]:
     """Build the always-on ``scan --against`` summary block from *diff*.
 
     Counts, detector provenance, the capped gating findings and the
     suppression audit trail — everything except the contract-context block,
     which :func:`_baseline_contract_block` adds separately because it also
     installs the front end's resolved configuration onto *diff*.
+
+    *max_findings* overrides the default cap (``scan --max-findings`` /
+    ``ScanRequest.max_findings``); ``None`` falls back to
+    :func:`_resolve_max_baseline_findings` (env var, else the built-in
+    default). Whenever a bucket is truncated, the kinds cut are also
+    accumulated into ``findings_truncated_kinds``/``suppressed_truncated_kinds``
+    (kind -> count cut) so the shape of what was dropped is visible without
+    rerunning at a higher cap.
     """
+    cap = _resolve_max_baseline_findings(max_findings)
     summary: dict[str, Any] = {
         "breaking": len(diff.breaking),
         "api_break": len(diff.source_breaks),
@@ -532,6 +643,7 @@ def _baseline_summary(diff: Any) -> dict[str, Any]:
         + len(not_evaluated)
     )
     findings: list[dict[str, Any]] = []
+    cut_kinds: list[str] = []
     for bucket_name, bucket_changes in (
         ("breaking", diff.breaking),
         ("api_break", diff.source_breaks),
@@ -542,14 +654,19 @@ def _baseline_summary(diff: Any) -> dict[str, Any]:
         # why it did not gate.
         ("not_evaluated", not_evaluated),
     ):
-        remaining = _MAX_BASELINE_FINDINGS - len(findings)
-        if remaining <= 0:
-            break
-        findings.extend(_baseline_finding_dicts(bucket_changes[:remaining], bucket_name))
+        remaining = max(0, cap - len(findings))
+        included, excluded = bucket_changes[:remaining], bucket_changes[remaining:]
+        findings.extend(_baseline_finding_dicts(included, bucket_name))
+        # Keep tallying excluded kinds across every remaining bucket (not just
+        # the one that first hit the cap) -- a bucket entirely past the cap
+        # would otherwise contribute nothing to `findings_truncated_kinds`,
+        # silently hiding its shape (see module-level truncation entry).
+        cut_kinds.extend(_change_kind_str(c) for c in excluded)
     if findings:
         summary["findings"] = findings
-        if total_gating > _MAX_BASELINE_FINDINGS:
+        if total_gating > cap:
             summary["findings_truncated"] = True
+            _accumulate_kind_counts(summary, "findings_truncated_kinds", cut_kinds)
 
     # ADR-049 Phase 5: surface the same suppression audit trail `compare`'s
     # own JSON report already exposes (`DiffResult.suppressed_changes`,
@@ -563,10 +680,15 @@ def _baseline_summary(diff: Any) -> dict[str, Any]:
     if suppressed_changes:
         summary["suppressed_count"] = len(suppressed_changes)
         summary["suppressed"] = _baseline_finding_dicts(
-            suppressed_changes[:_MAX_BASELINE_FINDINGS], "suppressed"
+            suppressed_changes[:cap], "suppressed"
         )
-        if len(suppressed_changes) > _MAX_BASELINE_FINDINGS:
+        if len(suppressed_changes) > cap:
             summary["suppressed_truncated"] = True
+            _accumulate_kind_counts(
+                summary,
+                "suppressed_truncated_kinds",
+                (_change_kind_str(c) for c in suppressed_changes[cap:]),
+            )
     return summary
 
 
@@ -633,6 +755,7 @@ def _run_baseline_compare(
     resolved_config: Any = None,
     sev_config: Any = None,
     exit_code_scheme: str = "legacy",
+    max_findings: int | None = None,
 ) -> tuple[str, int, dict[str, Any]]:
     """Compare *new_snap* against *baseline*, preserving scan authority.
 
@@ -660,6 +783,13 @@ def _run_baseline_compare(
     caller (:func:`~abicheck.scan_engine.run_scan_core`) still folds the
     orthogonal contract-coverage floor and the cross-check severity
     promotion on top of whichever value this returns, exactly as before.
+
+    *max_findings* overrides the default report cap (``scan --max-findings``
+    / ``ScanRequest.max_findings``); ``None`` resolves through
+    :func:`_resolve_max_baseline_findings` (env var, else the built-in
+    default of 20). Threaded through to both :func:`_baseline_summary` and
+    :func:`_add_severity_blocking_compatible_findings` so the two stages
+    agree on one cap.
 
     The embedded L3/L4/L5 build/source packs on either snapshot are diffed via
     :func:`prepare_embedded_build_source` — the same path ``abicheck compare``
@@ -753,7 +883,7 @@ def _run_baseline_compare(
         contract_evaluation=contract_evaluation,
         contract_mode=contract_mode,
     )
-    summary = _baseline_summary(diff)
+    summary = _baseline_summary(diff, max_findings=max_findings)
     # ADR-049 Phase 5: install this front end's own resolved configuration
     # over the narrower object `checker.compare` reconstructs from its
     # arguments, then emit the whole persisted context -- which `scan
@@ -797,7 +927,9 @@ def _run_baseline_compare(
             policy_file=diff.policy_file,
         )
         summary["severity"] = gate
-        _add_severity_blocking_compatible_findings(summary, diff, gate)
+        _add_severity_blocking_compatible_findings(
+            summary, diff, gate, max_findings=max_findings
+        )
         # Taken *off the emitted block* rather than computed alongside it:
         # `_build_severity_json` routes through `severity.compute_gate_decision`,
         # whose whole purpose is that an exit code and the categories blamed

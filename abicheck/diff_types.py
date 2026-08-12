@@ -1231,6 +1231,106 @@ def _vtable_transition_is_evidenced(
     return list(t_old.virtual_bases) != list(t_new.virtual_bases)
 
 
+def _vtable_transition_rests_on_unresolved_evidence(
+    t_old: RecordType,
+    t_new: RecordType,
+    old_funcs: Mapping[str, Function],
+    new_funcs: Mapping[str, Function],
+) -> bool:
+    """True exactly when a kept ``TYPE_VTABLE_CHANGED`` finding for this
+    already-matched ``RecordType`` pair rests on the *same* "one side has no
+    known size" evidence gap ``LAYOUT_UNVERIFIABLE`` (``diff_layout.py``)
+    reports for the same type -- as opposed to a real, independently-evidenced
+    signal.
+
+    Only ever consulted after ``_vtable_transition_is_evidenced`` already
+    returned True, so this mirrors that function's own branches to isolate
+    which one supplied the evidence:
+
+    * Both sides' vtables populated -> a real reorder/replace. Not this case.
+    * The class's own virtual *functions* (a separate projection of the
+      debug info) differ -> a real signal, however imperfect. Not this case.
+    * A real ``size_bits`` delta, or a virtual or non-virtual base change ->
+      a real layout signal. Not this case.
+    * An *unknown* ``size_bits`` on either side -> the finding was kept only
+      because an unresolved-evidence gap corroborates nothing and refutes
+      nothing. This is the one case sharing ``LAYOUT_UNVERIFIABLE``'s own
+      evidence gap, and the only one a caller should treat as demotable.
+
+    Used by ``_diff_type_vtable`` to scope its correlation marker
+    (``Change.vtable_covers_unverifiable_layout_gap``) precisely; the
+    finding's own severity is never changed (an earlier design that demoted
+    it via ``effective_verdict`` was reverted as unsafe -- see AGENTS.md's
+    "Findings emitted from absent evidence" entry). Co-occurrence with an
+    unrelated ``LAYOUT_UNVERIFIABLE`` finding on a *different* same-named
+    type (a real risk when correlating by bare ``Change.symbol`` alone,
+    since two distinct records can share a leaf name in different
+    namespaces -- Codex review) is not a reason to mark a
+    genuinely-evidenced vtable change, and neither is any of the three
+    real-signal branches above (Codex review: an earlier revision of this
+    marker fired on any co-occurring ``LAYOUT_UNVERIFIABLE`` regardless,
+    wrongly tagging a real reorder/replace with both sides populated).
+    """
+    if t_old.vtable and t_new.vtable:
+        return False
+    # A single normalized identity for *both* sides, not each RecordType's
+    # own (possibly unset) qualified_name independently -- t_old and t_new
+    # already arrived here as one matched pair (TypeMap's own ambiguity-safe
+    # bare-name fallback, upstream of this function), so a legacy snapshot
+    # leaving qualified_name unset on one side must not desynchronize the
+    # identity this function matches owners against on the other (Codex
+    # review, fresh evidence).
+    qualified = t_new.qualified_name or t_old.qualified_name or t_new.name or t_old.name
+    if _owned_virtual_signatures_for_record(
+        qualified, old_funcs
+    ) != _owned_virtual_signatures_for_record(qualified, new_funcs):
+        return False
+    # A virtual-base change is real, independent evidence regardless of
+    # whether size_bits is known on either side (Codex review): it is not
+    # gated behind a known size in _vtable_transition_is_evidenced's own
+    # size-known branch, and must not be treated as unresolved here either
+    # -- otherwise a genuine hierarchy change (also separately reported via
+    # TYPE_BASE_CHANGED/BASE_CLASS_VIRTUAL_CHANGED) could have its
+    # TYPE_VTABLE_CHANGED half demoted to RISK merely because size_bits
+    # happens to be unknown.
+    if list(t_old.virtual_bases) != list(t_new.virtual_bases):
+        return False
+    # An ordinary (non-virtual) base addition, removal, or reorder is the
+    # identical class of independent evidence -- diff_types._diff_type_bases
+    # separately reports it as TYPE_BASE_CHANGED/BASE_CLASS_POSITION_CHANGED
+    # regardless of size_bits, so this correlation must not tag the
+    # co-occurring vtable finding as resting purely on an evidence gap just
+    # because size_bits also happens to be unknown (Codex review, fresh
+    # evidence -- the identical false-correlation risk the virtual_bases
+    # check above already guards against, just for the non-virtual case).
+    if list(t_old.bases) != list(t_new.bases):
+        return False
+    return t_old.size_bits is None or t_new.size_bits is None
+
+
+def _layout_evidence_is_unverifiable(
+    t_old: RecordType, t_new: RecordType, *, vtable_facts_reliable: bool
+) -> bool:
+    """True when ``diff_layout._check_layout_unverifiable``'s own
+    asymmetric-evidence condition holds for this *exact*, already
+    type-matched ``RecordType`` pair.
+
+    Delegates to ``diff_layout._layout_evidence_asymmetric`` -- the exact
+    predicate ``_check_layout_unverifiable`` itself evaluates -- rather than
+    a hand-duplicated copy, so the two can never silently drift apart
+    (Codex review). Consulted with the identical ``t_old``/``t_new``
+    objects ``diff_layout.py``'s own detector sees for this type -- so
+    there is no separate symbol-name correlation step (bare
+    ``Change.symbol`` equality across two independently-emitted findings)
+    that a same-named-but-different type could defeat.
+    """
+    from .diff_layout import _layout_evidence_asymmetric
+
+    return _layout_evidence_asymmetric(
+        t_old, t_new, vtable_facts_reliable=vtable_facts_reliable
+    )
+
+
 def _owned_virtual_signatures(name: str, funcs: Mapping[str, Function]) -> set[str]:
     """The mangled names of *name*'s own virtual member functions.
 
@@ -1270,6 +1370,64 @@ def _owned_virtual_signatures(name: str, funcs: Mapping[str, Function]) -> set[s
         mangled
         for mangled, fn in funcs.items()
         if getattr(fn, "is_virtual", False) and _owns(fn)
+    }
+
+
+def _owned_virtual_signatures_for_record(
+    qualified: str, funcs: Mapping[str, Function]
+) -> set[str]:
+    """The mangled names of *funcs*' virtual member functions owned by
+    *qualified* -- an exact identity, matched by the bare-leaf suffix
+    matching ``_owned_virtual_signatures`` above uses.
+
+    That function's eager namespace-suffix matching is safe for its own
+    caller (``_vtable_transition_is_evidenced``): over-inclusion just makes
+    the two sides' sets differ, which reads as "real evidence, keep the
+    finding" -- the safe direction for a suppression. It is unsafe here: our
+    caller, ``_vtable_transition_rests_on_unresolved_evidence``, treats
+    "sets differ" as real evidence and *declines to correlate* -- so an
+    unrelated same-leaf-name record in a different namespace (e.g. an
+    unrelated ``ns2::Foo::g`` while scoping ``ns1::Foo``'s own evidence gap)
+    silently makes a genuine ``ns1::Foo`` pair's sets look different and the
+    pair never receives ``correlated_change_kind`` (Codex review, fresh
+    evidence).
+
+    ``owner_class_of`` always returns a *fully* scope-qualified owner when it
+    returns anything at all -- its display-name branch only fires on an
+    already-qualified name, and its mangled-name fallback reconstructs the
+    complete nested-name chain, never a partial one. So an exact string
+    comparison against *qualified* (also fully qualified -- see the caller)
+    is precise here, unlike the bare-name comparison an earlier revision
+    tried and reverted (see ``_owned_virtual_signatures``'s own docstring).
+
+    Takes the identity as a plain string, computed *once* by the caller from
+    both ``RecordType``s of an already-matched pair, rather than deriving it
+    separately per side from each ``RecordType``'s own ``qualified_name``:
+    a legacy stored snapshot can carry ``qualified_name=None`` for a record
+    the *other* side (or ``TypeMap``'s own ambiguity-safe bare-name
+    fallback) already knows is the same namespaced type as a fresher
+    snapshot's fully-qualified one -- comparing each side against its own,
+    independently-derived identity would then compare "Foo" (old) against
+    "ns::Foo" (new), permanently mismatching every owner and manufacturing a
+    spurious "independently evidenced" verdict for a comparison that has
+    nothing to do with either side's actual virtual surface (Codex review,
+    fresh evidence).
+
+    Declining a match is always safe for this caller: it only feeds a
+    cosmetic cross-reference annotation, never a finding's presence or
+    severity. A template specialization whose owner reconstruction falls
+    back to the raw Itanium argument encoding (``BoxIiE``) rather than the
+    spelled ``qualified_name`` (``Box<int>``) simply produces no match here
+    -- the same outcome eager suffix matching already had for that case
+    (neither spelling shares a namespace-suffix with the other), so this is
+    not a new gap.
+    """
+    from .diff_cxx_rules import owner_class_of
+
+    return {
+        mangled
+        for mangled, fn in funcs.items()
+        if getattr(fn, "is_virtual", False) and owner_class_of(fn) == qualified
     }
 
 
@@ -1320,15 +1478,57 @@ def _diff_type_vtable(
         if Counter(t_old.vtable) == Counter(t_new.vtable)
         else f"vtable changed: {name}"
     )
-    return [
-        make_change(
-            ChangeKind.TYPE_VTABLE_CHANGED,
-            symbol=name,
-            description=description,
-            old_value=", ".join(t_old.vtable),
-            new_value=", ".join(t_new.vtable),
-        )
-    ]
+    change = make_change(
+        ChangeKind.TYPE_VTABLE_CHANGED,
+        symbol=name,
+        description=description,
+        old_value=", ".join(t_old.vtable),
+        new_value=", ".join(t_new.vtable),
+    )
+    # Tag (never demote) when this finding rests on the identical evidence
+    # gap LAYOUT_UNVERIFIABLE reports for the same (exact, already
+    # type-matched) RecordType pair.
+    #
+    # An earlier revision of this fix set ``effective_verdict =
+    # COMPATIBLE_WITH_RISK`` here instead -- wrong, and wrong for a reason
+    # this file's own AGENTS.md "Findings emitted from absent evidence"
+    # entry already states for the sibling suppression this mirrors: "an
+    # unknown size on either side corroborates nothing but also refutes
+    # nothing, so the finding is kept... not a fallback for missing
+    # information." The genuinely ambiguous case this branch identifies --
+    # old vtable populated, new vtable empty/differing, new-side evidence
+    # missing -- is indistinguishable from a real removal of the class's
+    # last virtual method whose only definition happens to live in a TU the
+    # new side's debug info doesn't cover (Codex review, fresh evidence: a
+    # pure-virtual method absent from both function maps reaches exactly
+    # this branch). Demoting BREAKING to RISK there risks hiding a real ABI
+    # break behind a capture gap, the opposite of this codebase's documented
+    # default (false-negative-avoidance over false-positive-avoidance).
+    #
+    # So the finding stays BREAKING here, full stop. Instead this only
+    # records ``qualified_name`` + a dedicated internal correlation marker
+    # (``vtable_covers_unverifiable_layout_gap`` -- deliberately NOT
+    # ``modulation_reason``/``modulation_rule``, which are a public,
+    # report-facing audit trail for an actual verdict override that did not
+    # happen here; Codex review) so a post-processing step
+    # (``post_processing.AnnotateLayoutUnverifiableCoveredByVtableChanged``)
+    # can recognize that THIS type's LAYOUT_UNVERIFIABLE finding shares the
+    # exact same evidence gap and cross-reference it via
+    # ``Change.correlated_change_kind`` -- rather than reporting the same
+    # gap twice at two different (and, before this fix, contradictory-
+    # looking) severities with no link between them. Both findings stay
+    # fully reported; nothing is ever removed from ``changes`` for this
+    # reason (an earlier fold-based design was reverted -- see AGENTS.md's
+    # "Findings emitted from absent evidence" entry for why a compare()-time
+    # removal here can never be correct for every downstream consumer).
+    if _vtable_transition_rests_on_unresolved_evidence(
+        t_old, t_new, old_funcs, new_funcs
+    ) and _layout_evidence_is_unverifiable(
+        t_old, t_new, vtable_facts_reliable=vtable_facts_reliable
+    ):
+        change.qualified_name = t_new.qualified_name or t_new.name
+        change.vtable_covers_unverifiable_layout_gap = True
+    return [change]
 
 
 @registry.detector("enums")

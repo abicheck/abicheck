@@ -13,8 +13,52 @@ independent product-surface changes; and all of P1 (behavioral evaluation
 against the examples corpus, cross-agent validation, and public publication
 channels), none of which have run yet. See
 [G36](../plans/g36-native-compatibility-agent-skills.md) for phase-by-phase
-status.
+status. **Portfolio expansion is frozen as of the 2026-08-11 amendment
+below**: `native-binary-compatibility-review` is the sole flagship
+evaluation target for G37's behavioral/comparative-lift work; the other
+three shipped skills are demoted to prototype status until it demonstrates
+measurable lift over an unequipped agent.
 **Decision maker:** (pending — recorded per repository convention)
+
+> **Amendment (2026-08-11, flagship-first portfolio freeze).** A strategy
+> reassessment ahead of G37's implementation found that none of the four
+> shipped skills has any evidence yet that it improves agent behavior over a
+> well-documented CLI and `AGENTS.md`/`CLAUDE.md` alone — every gate that
+> exists today (generation, structural, drift, lexical-trigger) proves the
+> *artifact* is well-formed, not that the *behavior* it produces is better
+> than the unequipped baseline. Building L1l/L2/L3 evaluation
+> infrastructure (G37) across all four skills before that question is
+> answered for even one would repeat the same premature-scale mistake this
+> amendment corrects: PR #686's own review history — headers applied to the
+> wrong side, an old artifact re-analyzed against new headers,
+> `--used-by`/full-vs-scoped verdict conflation, `--depth` mistaken for an
+> enforcement flag, contract coverage conflated with the compatibility
+> verdict, and initially-inverted Mach-O semantics, among others — shows how
+> costly a wrong skill-interpretation layer can be, and four unvalidated
+> skills multiply that surface by four before a single one has justified
+> its existence.
+> **Decision:** freeze the published portfolio at the four skills already
+> shipped (no fifth skill, no further scope added to the existing three
+> non-flagship skills) and designate `native-binary-compatibility-review` —
+> the skill with the cleanest ground truth (a binary compatibility verdict
+> against `examples/ground_truth.json`, no release-matrix or per-consumer
+> scoping to stand up first) — as the **sole flagship** subject for G37's
+> L1l/L2/L3 evaluation work. `native-api-evolution`,
+> `native-release-compatibility`, and `native-consumer-compatibility` remain
+> published (removing working, reviewed content is not the goal) but move
+> to **prototype status**: not extended, not an L2/L3 evaluation target, and
+> not to be treated as validated in any user-facing claim, until the
+> flagship experiment shows a measurable, reproducible lift on G37 D7's
+> gating comparator — `skill-agent:` (offered via progressive disclosure)
+> vs. `baseline` (bare agent, no skill) — that justifies the same
+> investment for a second skill. See
+> [G37](../plans/g37-agent-skill-quality-evaluation.md)'s scope note for the
+> phase-by-phase detail; the same portfolio-status table is kept in
+> `skills-src/CLAUDE.md`, the skills' own source tree. This does not reopen
+> ADR-058's admission
+> bar or four-skill taxonomy — it only sequences *validation* of what
+> already shipped, and a skill promoted back to active status after a
+> passing experiment needs no re-decision here.
 
 > **Amendment (2026-08-09, same date — MCP retired hours after this ADR was
 > accepted).** #684 removed the MCP server (`abicheck-mcp`,

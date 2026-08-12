@@ -1104,6 +1104,50 @@ class TestServiceLayerContractValidation:
                 ScanRequest(binaries=[new_snap_breaking], contract_evaluation=True)
             )
 
+    def test_max_findings_is_forwarded_to_run_scan_core(
+        self, old_snap: Path, new_snap_breaking: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # Codex review: ScanRequest.max_findings must actually reach
+        # run_scan_core, not just exist as a no-op field on the dataclass.
+        from abicheck.service_scan import run_scan
+
+        called: dict[str, object] = {}
+
+        def fake_run_scan_core(**kw):
+            called.update(kw)
+            raise SystemExit  # short-circuit before any real work
+
+        monkeypatch.setattr("abicheck.scan_engine.run_scan_core", fake_run_scan_core)
+        with pytest.raises(SystemExit):
+            run_scan(self._request(new_snap_breaking, old_snap, max_findings=3))
+        assert called["max_findings"] == 3
+
+    @pytest.mark.parametrize("bad_value", [0, -1])
+    def test_a_non_positive_max_findings_is_rejected_before_scanning(
+        self,
+        old_snap: Path,
+        new_snap_breaking: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        bad_value: int,
+    ) -> None:
+        # Codex review: a bad value used to only surface once _baseline_summary()
+        # built the report (wasting the scan) and as a click.ClickException
+        # leaking through this click-free API. Now rejected up front, as a
+        # plain ValidationError, before any scanning happens.
+        from abicheck.errors import ValidationError
+        from abicheck.service_scan import run_scan
+
+        called: list[object] = []
+        monkeypatch.setattr(
+            "abicheck.scan_engine.run_scan_core",
+            lambda **kw: called.append(kw),
+        )
+        with pytest.raises(ValidationError, match="max_findings"):
+            run_scan(
+                self._request(new_snap_breaking, old_snap, max_findings=bad_value)
+            )
+        assert called == []
+
 
 class TestScanResolvesTheSameTypedConfig:
     """Phase 5's other half: "route both direct compare and scan baseline

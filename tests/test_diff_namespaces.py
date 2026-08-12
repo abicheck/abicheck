@@ -15,13 +15,17 @@ the default fast test suite.
 from __future__ import annotations
 
 import pytest
+from hypothesis import given, strategies as st
 
 from abicheck.checker_policy import ChangeKind
 from abicheck.diff_namespaces import (
     DEFAULT_EXPERIMENTAL_NAMESPACES,
+    _IndexItem,
     _looks_like_std_reexport,
     _origin_by_name,
+    _paired_stable_indices,
     _segments,
+    _stable_keys_compatible,
     _strip_experimental,
     _version_strip_segments,
     _version_suffix,
@@ -64,6 +68,16 @@ def _fn(name: str, mangled: str | None = None,
 
 def _rec(name: str) -> RecordType:
     return RecordType(name=name, kind="class")
+
+
+def _rec_at(name: str, source_location: str = "communicator.h:10") -> RecordType:
+    """A type with a declaring source location set. NOT identity evidence
+    for the type-alias merge (``_type_index_items`` always uses ``None``
+    for types -- see its docstring for why `source_location` was tried
+    and falsified as type identity, same as an earlier structural
+    fingerprint attempt); this helper exists only to build the specific
+    location shapes those falsifying test cases need."""
+    return RecordType(name=name, kind="class", source_location=source_location)
 
 
 def _rec_public(name: str) -> RecordType:
@@ -166,6 +180,28 @@ class TestOriginByName:
 
 
 # ---------------------------------------------------------------------------
+# _stable_keys_compatible
+# ---------------------------------------------------------------------------
+
+
+class TestStableKeysCompatible:
+    def test_bare_leaf_is_compatible_with_any_qualified_form(self) -> None:
+        assert _stable_keys_compatible("check_ranges", "oneapi::dal::detail::check_ranges")
+        assert _stable_keys_compatible("ns::check_ranges", "check_ranges")
+
+    def test_identical_keys_are_compatible(self) -> None:
+        assert _stable_keys_compatible("ns::sort", "ns::sort")
+
+    def test_diverging_multi_segment_keys_are_not_compatible(self) -> None:
+        assert not _stable_keys_compatible("api::sort", "detail::sort")
+
+    def test_empty_key_is_never_compatible(self) -> None:
+        assert not _stable_keys_compatible("", "ns::sort")
+        assert not _stable_keys_compatible("ns::sort", "")
+        assert not _stable_keys_compatible("", "")
+
+
+# ---------------------------------------------------------------------------
 # detect_experimental_namespace_changes — graduations
 # ---------------------------------------------------------------------------
 
@@ -264,6 +300,157 @@ class TestExperimentalGraduated:
 
 
 class TestExperimentalRemovedWithoutReplacement:
+    def test_declared_experimental_alias_removal_survives_demangled_divergence(
+        self,
+    ) -> None:
+        # Codex review, on the mangled-preference fix above: a using-
+        # declaration/re-export can legitimately declare a name in
+        # `experimental::` whose *mangled symbol* demangles to the
+        # underlying stable declaration it aliases (no "experimental"
+        # segment at all) -- the same declared-vs-underlying divergence
+        # `detect_std_reexport_removed` is built on. Namespace
+        # classification must come from the *declared* name only, or this
+        # would silently defeat EXPERIMENTAL_REMOVED_WITHOUT_REPLACEMENT
+        # for every alias-shaped experimental declaration.
+        import abicheck.demangle as dm
+
+        def fake_demangle(mangled_list: list[str]) -> dict[str, str]:
+            # The alias's own mangled symbol demangles to the *stable*
+            # underlying name -- no "experimental" segment survives a
+            # demangle-preferred reading.
+            sigs = {"_ZN2ns4sortE": "ns::sort"}
+            return {m: sigs[m] for m in mangled_list if m in sigs}
+
+        orig = dm.demangle_batch
+        dm.demangle_batch = fake_demangle  # type: ignore[assignment]
+        try:
+            old = _snap(funcs=[
+                _fn("ns::experimental::sort", mangled="_ZN2ns4sortE"),
+            ])
+            # Genuine removal: the alias is dropped and its mangled symbol
+            # is gone from `new` entirely (no stable twin either).
+            new = _snap(funcs=[])
+            changes = detect_experimental_namespace_changes(old, new)
+        finally:
+            dm.demangle_batch = orig  # type: ignore[assignment]
+
+        assert len(changes) == 1
+        assert changes[0].kind == ChangeKind.EXPERIMENTAL_REMOVED_WITHOUT_REPLACEMENT
+        assert changes[0].symbol == "ns::experimental::sort"
+
+    def test_alias_removal_still_fires_when_underlying_symbol_survives_elsewhere(
+        self,
+    ) -> None:
+        # Codex review, on the mangled-still-linked suppression above: the
+        # suppression must not treat "this mangled symbol exists *somewhere*
+        # in new" as proof the removed declaration survives -- an
+        # experimental alias's underlying symbol can keep exporting under a
+        # completely unrelated declared name (a different leaf) after the
+        # alias itself is deleted, and source that named the alias no
+        # longer compiles even though the symbol lives on elsewhere. The
+        # suppression must be scoped to the *same leaf*, not any leaf.
+        old = _snap(funcs=[
+            _fn("ns::experimental::sort", mangled="_ZSAME"),
+        ])
+        # The mangled symbol survives, but only under an entirely different
+        # leaf ("relabelled") -- not a re-qualified spelling of "sort".
+        new = _snap(funcs=[
+            _fn("ns::detail::relabelled", mangled="_ZSAME"),
+        ])
+        changes = detect_experimental_namespace_changes(old, new)
+        assert len(changes) == 1
+        assert changes[0].kind == ChangeKind.EXPERIMENTAL_REMOVED_WITHOUT_REPLACEMENT
+        assert changes[0].symbol == "ns::experimental::sort"
+
+    def test_alias_removal_still_fires_when_same_leaf_target_is_unrelated(
+        self,
+    ) -> None:
+        # Codex review, on the (mangled, leaf)-scoped suppression above: a
+        # matching *leaf* alone is still not enough -- two genuinely
+        # different declarations can coincidentally share both a leaf and
+        # (through unrelated aliasing) a mangled symbol. Here
+        # `api::experimental::sort` is removed while an unrelated
+        # `detail::sort` (different full path, same leaf, same mangled
+        # symbol by construction) survives; the alias itself no longer
+        # compiles for any caller that named it, so this must still fire.
+        old = _snap(funcs=[
+            _fn("api::experimental::sort", mangled="_ZSAME2"),
+        ])
+        new = _snap(funcs=[
+            _fn("detail::sort", mangled="_ZSAME2"),
+        ])
+        changes = detect_experimental_namespace_changes(old, new)
+        assert len(changes) == 1
+        assert changes[0].kind == ChangeKind.EXPERIMENTAL_REMOVED_WITHOUT_REPLACEMENT
+        assert changes[0].symbol == "api::experimental::sort"
+
+    def test_bare_name_demangled_signature_does_not_defeat_suppression(
+        self,
+    ) -> None:
+        # Codex review, on the stable-key compatibility check above: a
+        # bare-named OLD declaration demangles to a *full signature*
+        # ("ns::experimental::check_ranges()"), while an already-qualified
+        # NEW declared name never carries one ("experimental::check_ranges"
+        # -- header-derived names are never signatures). Comparing those
+        # two stable-keys without stripping the trailing "()" first would
+        # mismatch on that alone and wrongly re-fire the original reported
+        # false positive through a different door.
+        import abicheck.demangle as dm
+
+        def fake_demangle(mangled_list: list[str]) -> dict[str, str]:
+            sigs = {"_Zex1": "ns::experimental::check_ranges()"}
+            return {m: sigs[m] for m in mangled_list if m in sigs}
+
+        orig = dm.demangle_batch
+        dm.demangle_batch = fake_demangle  # type: ignore[assignment]
+        try:
+            old = _snap(funcs=[_fn("check_ranges", mangled="_Zex1")])
+            new = _snap(funcs=[
+                _fn("experimental::check_ranges", mangled="_Zex1"),
+            ])
+            changes = detect_experimental_namespace_changes(old, new)
+        finally:
+            dm.demangle_batch = orig  # type: ignore[assignment]
+
+        assert not any(
+            c.kind == ChangeKind.EXPERIMENTAL_REMOVED_WITHOUT_REPLACEMENT
+            for c in changes
+        )
+
+    def test_all_collapsed_overloads_must_survive_to_suppress(self) -> None:
+        # Codex review: when neither side's declared name carries a
+        # signature, two overloads sharing one leaf collapse into a
+        # *single* (stable_key, leaf) bucket -- `old_exp` can hold more
+        # than one entry. A single surviving sibling overload's mangled
+        # symbol must not suppress the whole bucket's removal when a
+        # different, genuinely-removed sibling shares it.
+        import abicheck.demangle as dm
+
+        def fake_demangle(mangled_list: list[str]) -> dict[str, str]:
+            sigs = {"_ZM2": "ns::experimental::foo()"}
+            return {m: sigs[m] for m in mangled_list if m in sigs}
+
+        orig = dm.demangle_batch
+        dm.demangle_batch = fake_demangle  # type: ignore[assignment]
+        try:
+            old = _snap(funcs=[
+                _fn("ns::experimental::foo", mangled="_ZM1"),
+                _fn("ns::experimental::foo", mangled="_ZM2"),
+            ])
+            # M1 is genuinely removed. M2 survives, but re-qualified as a
+            # bare name that demangles to a full signature -- landing in a
+            # *different* bucket key than OLD's own (no "()" there), which
+            # is what makes `still_linked` the only remaining signal.
+            new = _snap(funcs=[_fn("foo", mangled="_ZM2")])
+            changes = detect_experimental_namespace_changes(old, new)
+        finally:
+            dm.demangle_batch = orig  # type: ignore[assignment]
+
+        assert any(
+            c.kind == ChangeKind.EXPERIMENTAL_REMOVED_WITHOUT_REPLACEMENT
+            for c in changes
+        )
+
     def test_silent_function_removal(self) -> None:
         old = _snap(funcs=[_fn("ns::experimental::bar")])
         new = _snap(funcs=[])
@@ -272,7 +459,7 @@ class TestExperimentalRemovedWithoutReplacement:
         c = changes[0]
         assert c.kind == ChangeKind.EXPERIMENTAL_REMOVED_WITHOUT_REPLACEMENT
         assert c.symbol == "ns::experimental::bar"
-        # ADR-044 D1 (Codex review): _index_funcs_by_stable_key only ever
+        # ADR-044 D1 (Codex review): _func_index_items only ever
         # indexes Visibility.PUBLIC functions, so this finding's mere
         # existence already proves its subject is public — tagged directly
         # so a broad namespace: "ns::experimental::*" suppression rule
@@ -335,6 +522,349 @@ class TestExperimentalRemovedWithoutReplacement:
         changes = detect_experimental_namespace_changes(old, new)
         assert changes == []
 
+    def test_versioned_inline_namespace_spellings_report_once(self) -> None:
+        # A versioned inline namespace makes the same declaration reachable
+        # under two qualified spellings -- the full path and the
+        # version-elided path unqualified lookup from the enclosing scope
+        # also resolves to. Both spellings mangle to the SAME symbol (the
+        # ABI mangles an inline namespace's segment either way) -- that
+        # shared mangled name is the identity evidence the merge requires.
+        # When a header-AST producer surfaces both as separate
+        # declarations, removing the entity must read as ONE
+        # EXPERIMENTAL_REMOVED_WITHOUT_REPLACEMENT, not one per spelling.
+        old = _snap(funcs=[
+            _fn("preview::spmd::v1::communicator", mangled="_ZSame"),
+            _fn("preview::spmd::communicator", mangled="_ZSame"),
+        ])
+        new = _snap(funcs=[])
+        changes = detect_experimental_namespace_changes(old, new)
+        removed = [
+            c for c in changes
+            if c.kind == ChangeKind.EXPERIMENTAL_REMOVED_WITHOUT_REPLACEMENT
+        ]
+        assert len(removed) == 1
+
+    def test_unrelated_declaration_sharing_version_shaped_segment_not_merged(
+        self,
+    ) -> None:
+        """Codex review, P1: a version-shaped segment (``v1``) is not proof
+        of an *inline* namespace -- it's a legal name for an ordinary one
+        too. Two functions with DIFFERENT mangled names (genuinely distinct
+        declarations, not an inline-namespace alias pair) must each be
+        judged on their own -- removing one while the other survives must
+        still report the removal, not be silently absorbed just because
+        they share a leaf name.
+        """
+        old = _snap(funcs=[
+            _fn("preview::v1::bar", mangled="_ZOne"),
+            _fn("preview::bar", mangled="_ZTwo"),
+        ])
+        new = _snap(funcs=[_fn("preview::bar", mangled="_ZTwo")])
+        changes = detect_experimental_namespace_changes(old, new)
+        removed = [
+            c for c in changes
+            if c.kind == ChangeKind.EXPERIMENTAL_REMOVED_WITHOUT_REPLACEMENT
+        ]
+        assert len(removed) == 1
+        assert removed[0].symbol == "preview::v1::bar"
+
+    def test_merged_key_stable_across_declaration_order(self) -> None:
+        """Codex review, P1: the merged key for a genuine alias pair must
+        not depend on which spelling appears first in a snapshot's own
+        declaration order -- old and new can list the same two spellings
+        in different orders (a harmless extraction-order difference) and
+        must still resolve to the SAME index key, or one looks removed
+        relative to the other's spelling.
+        """
+        old = _snap(funcs=[
+            _fn("preview::spmd::v1::communicator", mangled="_ZSame"),
+            _fn("preview::spmd::communicator", mangled="_ZSame"),
+        ])
+        # Reversed declaration order relative to `old`, otherwise identical.
+        new = _snap(funcs=[
+            _fn("preview::spmd::communicator", mangled="_ZSame"),
+            _fn("preview::spmd::v1::communicator", mangled="_ZSame"),
+        ])
+        changes = detect_experimental_namespace_changes(old, new)
+        assert not any(
+            c.kind == ChangeKind.EXPERIMENTAL_REMOVED_WITHOUT_REPLACEMENT
+            for c in changes
+        )
+
+    def test_reported_symbol_stable_within_a_coincidentally_shared_raw_key(
+        self,
+    ) -> None:
+        """Codex review, P1, fresh evidence: sorting the pooled raw KEYS
+        (see `_paired_stable_indices`'s hash-seed-determinism fix) makes
+        which *merged component* a genuine alias pair resolves to
+        deterministic, but says nothing about declaration order WITHIN one
+        raw bucket -- two structurally distinct declarations (different
+        mangled symbols, no alias relationship at all) can coincidentally
+        collapse onto the same (stripped, leaf) raw key purely from
+        string-stripping (``ns::experimental::foo`` and
+        ``experimental::ns::foo`` both strip their first "experimental"
+        segment down to ``ns::foo``). Which one `_emit_experimental_change`
+        reports as the finding's `symbol` must not depend on which order
+        the snapshot happened to declare them in -- unlike PYTHONHASHSEED,
+        that order isn't hash-randomized within one process, but it also
+        isn't something this tool controls (unstable AST/DWARF traversal
+        order between two extractions of nominally the same library).
+        """
+        old_forward = _snap(funcs=[
+            _fn("ns::experimental::foo", mangled="_ZA"),
+            _fn("experimental::ns::foo", mangled="_ZB"),
+        ])
+        old_reversed = _snap(funcs=[
+            _fn("experimental::ns::foo", mangled="_ZB"),
+            _fn("ns::experimental::foo", mangled="_ZA"),
+        ])
+        new = _snap(funcs=[])
+        forward_symbols = {
+            c.symbol
+            for c in detect_experimental_namespace_changes(old_forward, new)
+            if c.kind == ChangeKind.EXPERIMENTAL_REMOVED_WITHOUT_REPLACEMENT
+        }
+        reversed_symbols = {
+            c.symbol
+            for c in detect_experimental_namespace_changes(old_reversed, new)
+            if c.kind == ChangeKind.EXPERIMENTAL_REMOVED_WITHOUT_REPLACEMENT
+        }
+        assert forward_symbols == reversed_symbols
+
+    def test_bare_vs_qualified_name_same_mangled_symbol_no_false_positive(
+        self,
+    ) -> None:
+        # Reported regression (shared with diff_templates.py's
+        # INTERNAL_TEMPLATE_LEAKS_VIA_PUBLIC_API): a header/AST dumper
+        # backend can populate ``Function.name`` with inconsistent
+        # qualification for the *identical* linked symbol across two
+        # snapshots -- a bare leaf on one side, a namespace-qualified
+        # spelling with its own formatting on the other. Keying the
+        # (stable_key, leaf) index on the declared name alone made a
+        # still-exported symbol (confirmed unchanged via `nm` in the field)
+        # read as removed-without-replacement purely because the dumper
+        # changed how much of its own name it qualified between two
+        # versions, not because the symbol moved out of `experimental::`.
+        import abicheck.demangle as dm
+
+        def fake_demangle(mangled_list: list[str]) -> dict[str, str]:
+            sigs = {"_Zex1": "ns::experimental::check_ranges"}
+            return {m: sigs[m] for m in mangled_list if m in sigs}
+
+        orig = dm.demangle_batch
+        dm.demangle_batch = fake_demangle  # type: ignore[assignment]
+        try:
+            old = _snap(funcs=[_fn("check_ranges", mangled="_Zex1")])
+            # A real, documented quirk (AGENTS.md): a header AST backend can
+            # drop the enclosing namespace from a declared name. The mangled
+            # symbol -- what a consumer actually links against -- is
+            # unchanged.
+            new = _snap(funcs=[
+                _fn("experimental::check_ranges", mangled="_Zex1"),
+            ])
+            changes = detect_experimental_namespace_changes(old, new)
+        finally:
+            dm.demangle_batch = orig  # type: ignore[assignment]
+
+        assert not any(
+            c.kind == ChangeKind.EXPERIMENTAL_REMOVED_WITHOUT_REPLACEMENT
+            for c in changes
+        )
+
+    def test_version_stripping_ignores_parameter_type_segments(self) -> None:
+        """Codex review, P2: a function's ``stripped`` deliberately keeps
+        its full parameter-list signature (to keep overloads distinct), so
+        naively scanning it for a version-shaped segment can strip one out
+        of a *parameter's own type* (``ns::v2::T``) instead of only the
+        declaration's own scope path -- corrupting the grouping key
+        differently for each spelling of a genuine alias pair (one
+        correctly loses its real scope-level ``v1``, the other incorrectly
+        loses the parameter's unrelated ``v2``) so they land in different
+        canon groups and never merge, even though they share a mangled
+        name. Both spellings here carry the identical parameter type
+        (``ns::v2::T``, itself version-shaped) and the same mangled name;
+        removing the function must read as ONE finding.
+        """
+        old = _snap(funcs=[
+            _fn("preview::v1::foo(ns::v2::T)", mangled="_ZSame"),
+            _fn("preview::foo(ns::v2::T)", mangled="_ZSame"),
+        ])
+        new = _snap(funcs=[])
+        changes = detect_experimental_namespace_changes(old, new)
+        removed = [
+            c for c in changes
+            if c.kind == ChangeKind.EXPERIMENTAL_REMOVED_WITHOUT_REPLACEMENT
+        ]
+        assert len(removed) == 1
+
+    def test_overloaded_raw_key_never_used_as_merge_evidence(self) -> None:
+        """Codex review, P1, fresh evidence: a header-derived qualified name
+        can omit a function's parameter-list signature
+        (``_qualified_function_name`` returns ``name`` as-is whenever it
+        already contains ``"::"``), so two genuinely distinct overloads can
+        share one layer-1 raw key -- and that raw key's aggregated identity
+        set then spans BOTH overloads' mangled names.
+
+        Reviewer's exact scenario: OLD has overloads A and B both spelled
+        ``preview::v1::foo`` (raw key identity ``{A, B}``) plus a
+        version-elided alias spelling ``preview::foo`` that only ever named
+        A (raw key identity ``{A}``). The two sets DO intersect on A, but
+        that intersection isn't proof the alias raw key means the same
+        thing as the *whole* overloaded raw key -- treating it as evidence
+        would merge all three qnames into one component. NEW keeps only B
+        (still spelled ``preview::v1::foo``); if the merge fired, the
+        merged entity would read as "still present" (B's survival) and A's
+        removal -- alias included -- would vanish entirely, unreported.
+
+        A raw key with an ambiguous (>1 value) identity set must never
+        qualify as layer-2 merge evidence, so A's alias spelling must still
+        surface its own removal.
+        """
+        old = _snap(funcs=[
+            _fn("preview::v1::foo", mangled="_ZFooA"),
+            _fn("preview::v1::foo", mangled="_ZFooB"),
+            _fn("preview::foo", mangled="_ZFooA"),
+        ])
+        new = _snap(funcs=[_fn("preview::v1::foo", mangled="_ZFooB")])
+        changes = detect_experimental_namespace_changes(old, new)
+        removed = [
+            c for c in changes
+            if c.kind == ChangeKind.EXPERIMENTAL_REMOVED_WITHOUT_REPLACEMENT
+        ]
+        assert len(removed) == 1
+        assert removed[0].symbol == "preview::foo"
+
+    def test_bare_fallback_mangled_name_never_used_as_merge_evidence(self) -> None:
+        """Codex review, P1, fresh evidence: ``Function.mangled`` is not
+        always a real ABI-mangled name -- both header-AST producers fall
+        back to the bare declaration name when no real linkage name is
+        available (``dwarf_snapshot.py``'s ``mangled = linkage_name or
+        name``, ``dumper_clang.py``'s ``mangled = ... or name``). Two
+        structurally unrelated declarations that both hit this fallback
+        can then coincidentally carry the SAME bare-name "mangled" value
+        even though their scopes genuinely differ -- reproduced here with
+        the reviewer's exact repro shape: an old ``preview::v1::foo`` and
+        an unrelated new ``preview::foo``, both falling back to the bare
+        leaf ``"foo"`` as their `mangled` field (no ``_Z``/``?`` prefix --
+        not a real mangled name). This must NOT read as a genuine alias:
+        removing the versioned spelling must still be reported.
+        """
+        old = _snap(funcs=[
+            _fn("preview::v1::foo", mangled="foo"),
+            _fn("preview::foo", mangled="foo"),
+        ])
+        new = _snap(funcs=[_fn("preview::foo", mangled="foo")])
+        changes = detect_experimental_namespace_changes(old, new)
+        removed = [
+            c for c in changes
+            if c.kind == ChangeKind.EXPERIMENTAL_REMOVED_WITHOUT_REPLACEMENT
+        ]
+        assert len(removed) == 1
+        assert removed[0].symbol == "preview::v1::foo"
+
+    def test_unrelated_reexports_sharing_mangled_symbol_merge_is_accepted(
+        self,
+    ) -> None:
+        """Known, documented limitation (see `_paired_stable_indices`'s
+        "Residual, deliberately-accepted gap" docstring paragraph): a
+        shared mangled name proves two spellings resolve to the same
+        linked symbol, not that they are the same declaration reached two
+        ways through inline-namespace lookup. Two independent
+        using-declarations can each alias the identical underlying
+        function under two unrelated qualified names -- one that happens
+        to nest under a version-shaped segment, one that doesn't -- and
+        this module has no evidence (no producer captures real
+        inline-namespace status) to tell that apart from a genuine
+        inline-namespace alias pair. Removing only the versioned
+        using-declaration is therefore wrongly absorbed into the
+        surviving, genuinely-unrelated one -- pinned here as the accepted
+        cost of the mangled-identity merge this whole module exists to
+        provide, not a newly-introduced regression.
+        """
+        old = _snap(funcs=[
+            _fn("preview::v1::foo", mangled="_ZSameReexport"),
+            _fn("preview::foo", mangled="_ZSameReexport"),
+        ])
+        new = _snap(funcs=[_fn("preview::foo", mangled="_ZSameReexport")])
+        changes = detect_experimental_namespace_changes(old, new)
+        assert not any(
+            c.kind == ChangeKind.EXPERIMENTAL_REMOVED_WITHOUT_REPLACEMENT
+            for c in changes
+        )
+
+    def test_versioned_inline_namespace_type_spellings_double_report_is_accepted(
+        self,
+    ) -> None:
+        """Known, documented limitation (see `_type_index_items`'s
+        docstring): unlike a function's mangled name, no `RecordType`
+        field has survived adversarial review as reliable alias-identity
+        evidence -- a structural fingerprint and `source_location` were
+        both tried and falsified by concrete Codex review
+        counterexamples. Two spellings of the same type via a versioned
+        inline namespace are therefore reported as two separate
+        `EXPERIMENTAL_REMOVED_WITHOUT_REPLACEMENT` findings rather than
+        merged into one, even though (unlike the unrelated-declaration
+        tests below) they really are the same entity here.
+        """
+        old = _snap(types=[
+            _rec_at("detail::v1::cpu_feature_map", "spmd.h:10"),
+            _rec_at("detail::cpu_feature_map", "spmd.h:10"),
+        ])
+        new = _snap(types=[])
+        changes = detect_experimental_namespace_changes(
+            old, new, experimental_namespaces=("detail",),
+        )
+        removed = [
+            c for c in changes
+            if c.kind == ChangeKind.EXPERIMENTAL_REMOVED_WITHOUT_REPLACEMENT
+        ]
+        assert len(removed) == 2
+
+    def test_unrelated_types_sharing_version_shaped_segment_not_merged(
+        self,
+    ) -> None:
+        """With no type-alias merging at all, two unrelated types that
+        happen to share a leaf name via a version-shaped segment are
+        naturally never merged -- removing one while the other survives
+        must still report the removal.
+        """
+        old = _snap(types=[
+            _rec("preview::v1::bar"),
+            _rec("preview::bar"),
+        ])
+        new = _snap(types=[_rec("preview::bar")])
+        changes = detect_experimental_namespace_changes(old, new)
+        removed = [
+            c for c in changes
+            if c.kind == ChangeKind.EXPERIMENTAL_REMOVED_WITHOUT_REPLACEMENT
+        ]
+        assert len(removed) == 1
+        assert removed[0].symbol == "preview::v1::bar"
+
+    def test_unrelated_types_sharing_a_bare_filename_location_not_merged(
+        self,
+    ) -> None:
+        """Codex review, P1, fresh finding: a `source_location` can
+        legitimately be a bare filename with no line (clang/DWARF both
+        omit the line when it's unavailable), so two unrelated types in
+        the same file both missing line info would collide on an
+        identical location under location-based identity. With type
+        identity always `None` now, this can't happen -- included as a
+        regression pin for the specific counterexample.
+        """
+        old = _snap(types=[
+            _rec_at("preview::v1::bar", "shared.h"),
+            _rec_at("preview::bar", "shared.h"),
+        ])
+        new = _snap(types=[_rec_at("preview::bar", "shared.h")])
+        changes = detect_experimental_namespace_changes(old, new)
+        removed = [
+            c for c in changes
+            if c.kind == ChangeKind.EXPERIMENTAL_REMOVED_WITHOUT_REPLACEMENT
+        ]
+        assert len(removed) == 1
+        assert removed[0].symbol == "preview::v1::bar"
+
     def test_leaf_survives_namespace_qualified_param_type(self) -> None:
         """Reported bug: a demangled ELF-only symbol carries its full
         signature (``Class::method(ns::Type const&, long) const``), not just
@@ -370,7 +900,7 @@ class TestExperimentalRemovedWithoutReplacement:
         # parameter-type fragment split out of the unstripped signature —
         # unlike the leaf, the '{old}' declaration text legitimately still
         # carries the full signature (Codex review: needed to distinguish
-        # one overload from another; see _index_funcs_by_stable_key).
+        # one overload from another; see _func_index_items).
         assert "leaf 'get_alloc_kind'" in c.description
         assert "leaf 'data_type" not in c.description
 
@@ -721,3 +1251,306 @@ class TestInlineNamespaceVersionBump:
         old = _snap(funcs=[_fn("ns::_V1::only_one")])
         new = _snap(funcs=[_fn("ns::_V2::only_one")])
         assert len(detect_inline_namespace_version_bump(old, new)) == 1
+
+
+# ---------------------------------------------------------------------------
+# _paired_stable_indices — generalized property tests
+# ---------------------------------------------------------------------------
+#
+# Retrospective (see docs/contribute/adr/060-alias-merge-identity-evidence.md
+# for the full assessment): every hand-written example test above pins one
+# SPECIFIC counterexample a reviewer happened to find by inspection. Across
+# this detector's review history, five rounds each found a genuine bug in
+# the merge primitive itself (not in a caller's domain logic) that no
+# hand-written example test caught, because each new example test was
+# written to confirm the fix just made, not to adversarially search the
+# input space the way a reviewer with fresh eyes did. These property tests
+# instead state the primitive's actual CONTRACT as invariants and let
+# Hypothesis search for a counterexample the way a reviewer would -- each
+# property below is annotated with which review-round bug class it
+# generalizes, so a regression in any of them fails a fast, deterministic
+# test instead of waiting for another review round.
+#
+# The strategy below generates items sharing a `leaf` (and, once a version
+# segment is stripped, a `canon`) purely by chance -- `_ENTITY_NAMES` has
+# only two values, so collisions (both genuine-alias and coincidental)
+# happen often across the default 100 Hypothesis examples without needing
+# to force them.
+
+_ENTITY_NAMES = st.sampled_from(["alpha", "beta"])
+_IDENTITIES = st.sampled_from([None, "id-alpha", "id-beta", "id-other"])
+_SIDES = st.sampled_from(["old", "new"])
+
+
+@st.composite
+def _alias_item_placements(draw):
+    """A random list of ``(side, stripped, leaf, identity)`` placements.
+
+    Every item's `leaf` is its entity name; `stripped` is either the bare
+    `"ns::{entity}"` or the version-elided-from `"ns::v1::{entity}"` --
+    both strip to the same canon, modeling the real experimental-stripped
+    shape ``_func_index_items``/``_type_index_items`` produce. `identity`
+    is drawn independently per item, so two items sharing a leaf may have
+    equal identity (a genuine alias pair), unequal identity (coincidental
+    name collision, the P1 counterexample class), or one/both `None` (no
+    evidence, the "falsified identity mechanism" class).
+    """
+    n = draw(st.integers(min_value=1, max_value=6))
+    placements = []
+    for _ in range(n):
+        entity = draw(_ENTITY_NAMES)
+        versioned = draw(st.booleans())
+        stripped = f"ns::v1::{entity}" if versioned else f"ns::{entity}"
+        identity = draw(_IDENTITIES)
+        side = draw(_SIDES)
+        placements.append((side, stripped, entity, identity))
+    return placements
+
+
+def _build_paired_items(
+    placements: list[tuple[str, str, str, object | None]],
+) -> tuple[list[_IndexItem], list[_IndexItem]]:
+    old_items: list[_IndexItem] = []
+    new_items: list[_IndexItem] = []
+    for i, (side, stripped, leaf, identity) in enumerate(placements):
+        item = _IndexItem(qname=f"q{i}", stripped=stripped, leaf=leaf, identity=identity)
+        (old_items if side == "old" else new_items).append(item)
+    return old_items, new_items
+
+
+class TestPairedStableIndicesProperties:
+    @given(placements=_alias_item_placements())
+    def test_every_item_appears_exactly_once(self, placements) -> None:
+        """No item is lost or duplicated by the merge -- the most basic
+        wiring invariant, but exactly what silently breaks first if a
+        future edit changes the pooling/component-splitting logic."""
+        old_items, new_items = _build_paired_items(placements)
+        old_out, new_out = _paired_stable_indices(old_items, new_items)
+        assert sorted(q for qs in old_out.values() for q in qs) == sorted(
+            it.qname for it in old_items
+        )
+        assert sorted(q for qs in new_out.values() for q in qs) == sorted(
+            it.qname for it in new_items
+        )
+
+    @given(placements=_alias_item_placements())
+    def test_never_merges_across_raw_keys_without_shared_identity(
+        self, placements
+    ) -> None:
+        """Generalizes the original P1 finding (blind version-stripping
+        merged unrelated declarations sharing a leaf name) and its later
+        variants (empty-string identity, value-equality-only identity):
+        whenever a single output key's qnames span two or more DISTINCT
+        raw spellings (``stripped``), every pair of those distinct
+        spellings must be connected by at least one shared, non-``None``
+        identity value somewhere among their own items. No amount of
+        coincidental name shape is ever enough on its own.
+
+        Items sharing the exact same ``stripped`` (a literal, byte-
+        identical raw-key collision -- e.g. the existing, unconditional
+        experimental/stable-graduation bucketing this module has always
+        done, unrelated to version-segment aliasing) are grouped by raw
+        key first and exempted from needing identity evidence *among
+        themselves* -- that bucketing predates and is orthogonal to the
+        alias-merge feature this property is about (a Hypothesis-found
+        regression: an earlier version of this property demanded evidence
+        even within one raw key, which is stricter than the primitive's
+        actual, correct contract and broke on legitimate same-spelling
+        collisions).
+        """
+        old_items, new_items = _build_paired_items(placements)
+        by_qname = {it.qname: it for it in old_items + new_items}
+        old_out, new_out = _paired_stable_indices(old_items, new_items)
+        key_to_qnames: dict[tuple[str, str], list[str]] = {}
+        for out in (old_out, new_out):
+            for key, qnames in out.items():
+                key_to_qnames.setdefault(key, []).extend(qnames)
+        for key, qnames in key_to_qnames.items():
+            items = [by_qname[q] for q in qnames]
+            idents_by_raw: dict[str, set[object]] = {}
+            for it in items:
+                if it.identity is not None:
+                    idents_by_raw.setdefault(it.stripped, set()).add(it.identity)
+            raw_keys = sorted({it.stripped for it in items})
+            for i, raw_a in enumerate(raw_keys):
+                for raw_b in raw_keys[i + 1 :]:
+                    a, b = idents_by_raw.get(raw_a), idents_by_raw.get(raw_b)
+                    assert a and b and (a & b), (key, raw_a, raw_b, a, b)
+
+    @given(placements=_alias_item_placements())
+    def test_shared_identity_within_a_leaf_always_merges(self, placements) -> None:
+        """Generalizes the "canonicalize keys across unequal alias
+        membership" finding: two items that DO share real identity
+        evidence must end up under the SAME key regardless of which
+        side(s) they were placed on -- a singleton on one side and a pair
+        on the other must not silently disagree on the key for what is
+        the same entity.
+
+        This guarantee only holds when each side's raw key is itself
+        UNAMBIGUOUS evidence -- exactly one distinct identity value among
+        its own items (Codex review, P1, fresh evidence: a raw key
+        aggregating more than one identity, the overloaded-function-name
+        shape, is not reliable evidence and must not be required to merge
+        with anything; see ``_paired_stable_indices``'s docstring). Two
+        raw keys whose *own* identity sets are each a singleton, and those
+        singletons are equal, must still resolve to one key regardless of
+        side placement -- that part of the original finding is unchanged.
+        """
+        old_items, new_items = _build_paired_items(placements)
+        old_out, new_out = _paired_stable_indices(old_items, new_items)
+        qname_to_key: dict[str, tuple[str, str]] = {}
+        for out in (old_out, new_out):
+            for key, qnames in out.items():
+                for q in qnames:
+                    qname_to_key[q] = key
+        by_leaf: dict[str, list[_IndexItem]] = {}
+        for it in old_items + new_items:
+            by_leaf.setdefault(it.leaf, []).append(it)
+        for group in by_leaf.values():
+            # Per-raw-key identity sets, aggregated across old+new (mirrors
+            # `_paired_stable_indices`'s own `raw_identities`) -- only a
+            # raw key whose set is an unambiguous singleton is eligible to
+            # participate in the merge guarantee below.
+            idents_by_raw: dict[str, set[object]] = {}
+            for it in group:
+                if it.identity is not None:
+                    idents_by_raw.setdefault(it.stripped, set()).add(it.identity)
+            unambiguous_raw = {
+                raw for raw, idents in idents_by_raw.items() if len(idents) == 1
+            }
+            by_identity: dict[object, set[tuple[str, str]]] = {}
+            for it in group:
+                if it.identity is None or it.stripped not in unambiguous_raw:
+                    continue
+                by_identity.setdefault(it.identity, set()).add(qname_to_key[it.qname])
+            for identity, keys in by_identity.items():
+                assert len(keys) == 1, (identity, keys)
+
+    @given(placements=_alias_item_placements(), shuffle_seed=st.integers())
+    def test_output_independent_of_encounter_order(
+        self, placements, shuffle_seed
+    ) -> None:
+        """Generalizes the "keep merged keys stable across declaration
+        order" finding directly: shuffling the SAME items (same content,
+        different list order -- modeling two independent extractor runs
+        listing declarations differently) must never change the resulting
+        keys or groupings.
+        """
+        import random
+
+        old_items, new_items = _build_paired_items(placements)
+        old_out1, new_out1 = _paired_stable_indices(old_items, new_items)
+
+        rng = random.Random(shuffle_seed)
+        shuffled_old = list(old_items)
+        shuffled_new = list(new_items)
+        rng.shuffle(shuffled_old)
+        rng.shuffle(shuffled_new)
+        old_out2, new_out2 = _paired_stable_indices(shuffled_old, shuffled_new)
+
+        def _normalize(d: dict[tuple[str, str], list[str]]) -> set[tuple[tuple[str, str], frozenset]]:
+            return {(k, frozenset(v)) for k, v in d.items()}
+
+        assert _normalize(old_out1) == _normalize(old_out2)
+        assert _normalize(new_out1) == _normalize(new_out2)
+
+    @given(placements=_alias_item_placements())
+    def test_identity_ignores_parameter_signature_noise(self, placements) -> None:
+        """Generalizes the P2 "canonicalize only the function's
+        declaration scope" finding: appending an arbitrary, version-shaped
+        parenthesized suffix (modeling a function's parameter-list
+        signature) to every item's `stripped` must never change which
+        items get merged -- the canon computation must be blind to
+        anything after the top-level `(`.
+        """
+        old_items, new_items = _build_paired_items(placements)
+        old_out1, new_out1 = _paired_stable_indices(old_items, new_items)
+
+        def _with_signature_noise(items: list[_IndexItem]) -> list[_IndexItem]:
+            return [
+                it._replace(stripped=f"{it.stripped}(ns::v2::T, ns::v3::U)")
+                for it in items
+            ]
+
+        old_out2, new_out2 = _paired_stable_indices(
+            _with_signature_noise(old_items), _with_signature_noise(new_items)
+        )
+
+        def _grouping(
+            d: dict[tuple[str, str], list[str]],
+        ) -> set[frozenset[str]]:
+            return {frozenset(v) for v in d.values()}
+
+        assert _grouping(old_out1) == _grouping(old_out2)
+        assert _grouping(new_out1) == _grouping(new_out2)
+
+    @given(placements=_alias_item_placements())
+    def test_qname_lists_are_content_stable_regardless_of_input_list_identity(
+        self, placements
+    ) -> None:
+        """A narrower companion to `test_output_independent_of_encounter_order`:
+        even the exact *list* of qnames stored per key (not just the set of
+        keys/groupings) must be the same multiset across two independent
+        calls with the same content. This is what a hash-randomized
+        internal ordering step (pooling raw keys through a bare ``set``,
+        rather than a sorted list) would violate even though the coarser
+        grouping-only property above cannot see it -- see the dedicated
+        cross-process test below for the actual `PYTHONHASHSEED` evidence.
+        """
+        old_items, new_items = _build_paired_items(placements)
+        old_out1, new_out1 = _paired_stable_indices(list(old_items), list(new_items))
+        old_out2, new_out2 = _paired_stable_indices(list(old_items), list(new_items))
+
+        def _normalize(d: dict[tuple[str, str], list[str]]) -> set[tuple[tuple[str, str], tuple[str, ...]]]:
+            return {(k, tuple(sorted(v))) for k, v in d.items()}
+
+        assert _normalize(old_out1) == _normalize(old_out2)
+        assert _normalize(new_out1) == _normalize(new_out2)
+
+
+class TestDeterminismAcrossHashSeeds:
+    def test_reported_symbol_independent_of_pythonhashseed(self) -> None:
+        """Codex review, P1, fresh finding: pooling raw keys through a bare
+        ``{*raw_old, *raw_new}`` set iterated them in Python's
+        hash-randomized order (``PYTHONHASHSEED``, randomized per process
+        by default), so which of two alias spellings ended up first in a
+        merged bucket -- and therefore which one
+        ``_emit_experimental_change`` reports as the finding's ``symbol``
+        -- could differ between two runs of the IDENTICAL input. Since a
+        suppression rule can match on the exact reported symbol name, this
+        made the verdict itself depend on an environment variable most
+        users never set. A property test within a single pytest process
+        cannot observe this (the hash seed is fixed for the process's
+        lifetime); this test spawns real subprocesses with different
+        explicit seeds and asserts they agree, the only way to actually
+        exercise the bug this class of fix addresses.
+        """
+        import os
+        import subprocess
+        import sys
+
+        script = (
+            "from abicheck.diff_namespaces import detect_experimental_namespace_changes\n"
+            "from abicheck.model import AbiSnapshot, Function, Visibility\n"
+            "def mk(names):\n"
+            "    funcs = [Function(name=n, mangled='_ZSame', return_type='void',"
+            " visibility=Visibility.PUBLIC) for n in names]\n"
+            "    return AbiSnapshot(library='l', version='1', functions=funcs)\n"
+            "old = mk(['preview::v1::foo', 'preview::foo'])\n"
+            "new = mk([])\n"
+            "changes = detect_experimental_namespace_changes(old, new)\n"
+            "print(changes[0].symbol if changes else None)\n"
+        )
+        symbols = set()
+        for seed in ("0", "1", "2", "3", "4", "5"):
+            env = dict(os.environ, PYTHONHASHSEED=seed)
+            result = subprocess.run(
+                [sys.executable, "-c", script],
+                env=env,
+                capture_output=True,
+                text=True,
+                timeout=30,
+            )
+            assert result.returncode == 0, result.stderr
+            symbols.add(result.stdout.strip())
+        assert len(symbols) == 1, symbols

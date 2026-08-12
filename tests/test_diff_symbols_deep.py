@@ -686,12 +686,12 @@ class TestParamDefaultChanged:
         f_old = _pub_func(
             "connect",
             "_Z7connectv",
-            params=[Param(name="timeout", type="int", default="expr:oldalgo1234")],
+            params=[Param(name="timeout", type="int", default="expr:1111111111111111")],
         )
         f_new = _pub_func(
             "connect",
             "_Z7connectv",
-            params=[Param(name="timeout", type="int", default="expr:newalgo5678")],
+            params=[Param(name="timeout", type="int", default="expr:2222222222222222")],
         )
         old = AbiSnapshot(
             library="libtest.so.1",
@@ -724,12 +724,12 @@ class TestParamDefaultChanged:
         f_old = _pub_func(
             "connect",
             "_Z7connectv",
-            params=[Param(name="timeout", type="int", default="expr:oldalgo1234")],
+            params=[Param(name="timeout", type="int", default="expr:1111111111111111")],
         )
         f_new = _pub_func(
             "connect",
             "_Z7connectv",
-            params=[Param(name="timeout", type="int", default="expr:newalgo5678")],
+            params=[Param(name="timeout", type="int", default="expr:2222222222222222")],
         )
         old = AbiSnapshot(
             library="libtest.so.1",
@@ -769,12 +769,12 @@ class TestParamDefaultChanged:
         f_old = _pub_func(
             "connect",
             "_Z7connectv",
-            params=[Param(name="timeout", type="int", default="expr:oldalgo1234")],
+            params=[Param(name="timeout", type="int", default="expr:1111111111111111")],
         )
         f_new = _pub_func(
             "connect",
             "_Z7connectv",
-            params=[Param(name="timeout", type="int", default="expr:newalgo5678")],
+            params=[Param(name="timeout", type="int", default="expr:2222222222222222")],
         )
         legacy_dict = snapshot_to_dict(
             AbiSnapshot(
@@ -821,7 +821,7 @@ class TestParamDefaultChanged:
         f_new = _pub_func(
             "connect",
             "_Z7connectv",
-            params=[Param(name="timeout", type="int", default="expr:newalgo5678")],
+            params=[Param(name="timeout", type="int", default="expr:2222222222222222")],
         )
         old = AbiSnapshot(
             library="libtest.so.1",
@@ -850,12 +850,12 @@ class TestParamDefaultChanged:
         f_old = _pub_func(
             "connect",
             "_Z7connectv",
-            params=[Param(name="timeout", type="int", default="expr:aaaa")],
+            params=[Param(name="timeout", type="int", default="expr:aaaaaaaaaaaaaaaa")],
         )
         f_new = _pub_func(
             "connect",
             "_Z7connectv",
-            params=[Param(name="timeout", type="int", default="expr:bbbb")],
+            params=[Param(name="timeout", type="int", default="expr:bbbbbbbbbbbbbbbb")],
         )
         old = AbiSnapshot(
             library="libtest.so.1",
@@ -916,7 +916,7 @@ class TestParamDefaultChanged:
         f_old = _pub_func(
             "connect",
             "_Z7connectv",
-            params=[Param(name="timeout", type="int", default="expr:oldalgo1234")],
+            params=[Param(name="timeout", type="int", default="expr:1111111111111111")],
         )
         f_new = _pub_func(
             "connect",
@@ -941,6 +941,156 @@ class TestParamDefaultChanged:
         )
         r = compare(old, new)
         assert ChangeKind.PARAM_DEFAULT_VALUE_REMOVED in _kinds(r)
+
+    def test_change_suppressed_when_only_new_side_is_unreliable(self):
+        """The mirror of test_real_change_from_literal_to_fingerprint_still_
+        detected above: every existing scenario made the OLD side the
+        unreliable one. Checked per side (this function's own docstring),
+        so a RELIABLE old side with a fingerprint-shaped value must still
+        decline the comparison when the NEW side's own fingerprint is the
+        one that can't be trusted."""
+        f_old = _pub_func(
+            "connect",
+            "_Z7connectv",
+            params=[Param(name="timeout", type="int", default="expr:aaaaaaaaaaaaaaaa")],
+        )
+        f_new = _pub_func(
+            "connect",
+            "_Z7connectv",
+            params=[Param(name="timeout", type="int", default="expr:bbbbbbbbbbbbbbbb")],
+        )
+        old = AbiSnapshot(
+            library="libtest.so.1",
+            version="1.0",
+            functions=[f_old],
+            from_headers=True,
+            ast_producer="clang",
+            clang_field_initializer_facts_reliable=True,
+        )
+        new = AbiSnapshot(
+            library="libtest.so.1",
+            version="2.0",
+            functions=[f_new],
+            from_headers=True,
+            ast_producer="clang",
+            clang_field_initializer_facts_reliable=False,
+        )
+        r = compare(old, new)
+        assert ChangeKind.PARAM_DEFAULT_VALUE_CHANGED not in _kinds(r)
+
+    def test_genuine_edit_reported_when_both_sides_share_legacy_algorithm(self):
+        """Mirrors constant_value_fingerprint_comparison_unreliable's own
+        identical fix: when BOTH archived snapshots came from the same
+        pre-v20 direct-clang build, their fingerprints use the identical
+        legacy algorithm and are directly comparable to each other --
+        suppressing whenever EITHER side is independently unreliable was
+        too conservative and would silently drop a genuine default-value
+        edit between two equally-legacy baselines (Codex review, fresh
+        evidence, PR #720)."""
+        f_old = _pub_func(
+            "connect",
+            "_Z7connectv",
+            params=[Param(name="timeout", type="int", default="expr:aaaaaaaaaaaaaaaa")],
+        )
+        f_new = _pub_func(
+            "connect",
+            "_Z7connectv",
+            params=[Param(name="timeout", type="int", default="expr:bbbbbbbbbbbbbbbb")],
+        )
+        old = AbiSnapshot(
+            library="libtest.so.1",
+            version="1.0",
+            functions=[f_old],
+            from_headers=True,
+            ast_producer="clang",
+            clang_field_initializer_facts_reliable=False,
+        )
+        new = AbiSnapshot(
+            library="libtest.so.1",
+            version="2.0",
+            functions=[f_new],
+            from_headers=True,
+            ast_producer="clang",
+            clang_field_initializer_facts_reliable=False,
+        )
+        r = compare(old, new)
+        assert ChangeKind.PARAM_DEFAULT_VALUE_CHANGED in _kinds(r)
+
+    def test_expression_to_literal_edit_reported_even_from_legacy_side(self):
+        """The XOR fix above has its own mirror bug: naively collapsing
+        "is this side a fingerprint AND is it legacy" into one boolean
+        before comparing lost the value-SHAPE distinction. A pre-v20
+        clang snapshot's compound default becoming a plain LITERAL (or
+        vice versa) is ALWAYS a confirmed real edit -- the unstable
+        algorithm only ever affects a compound expression's fingerprint
+        HASH, never whether a declaration's own value was a literal at
+        all -- so this shape transition must fire regardless of either
+        side's reliability (Codex review, fresh evidence, PR #720)."""
+        f_old = _pub_func(
+            "connect",
+            "_Z7connectv",
+            params=[Param(name="timeout", type="int", default="expr:aaaaaaaaaaaaaaaa")],
+        )
+        f_new = _pub_func(
+            "connect",
+            "_Z7connectv",
+            params=[Param(name="timeout", type="int", default="42")],
+        )
+        old = AbiSnapshot(
+            library="libtest.so.1",
+            version="1.0",
+            functions=[f_old],
+            from_headers=True,
+            ast_producer="clang",
+            clang_field_initializer_facts_reliable=False,
+        )
+        new = AbiSnapshot(
+            library="libtest.so.1",
+            version="2.0",
+            functions=[f_new],
+            from_headers=True,
+            ast_producer="clang",
+            clang_field_initializer_facts_reliable=False,
+        )
+        r = compare(old, new)
+        assert ChangeKind.PARAM_DEFAULT_VALUE_CHANGED in _kinds(r)
+
+    def test_genuine_expr_namespace_default_change_still_reported(self):
+        """Mirrors constant_value_fingerprint_comparison_unreliable's own
+        identical fix: the guard matches the FULL clang fingerprint shape
+        (``"expr:"`` plus exactly 16 hex digits), not merely the ``"expr:"``
+        prefix. castxml keeps a default's verbatim source expression, so a
+        real castxml default referencing a qualified name whose next
+        component happens to spell `expr` produces a legitimate value like
+        `"expr::OLD_VALUE"` -- a plain prefix check would misidentify it as
+        a clang fingerprint and silently suppress the real change (Codex
+        review, fresh evidence, PR #720)."""
+        f_old = _pub_func(
+            "connect",
+            "_Z7connectv",
+            params=[Param(name="timeout", type="int", default="expr::OLD_VALUE")],
+        )
+        f_new = _pub_func(
+            "connect",
+            "_Z7connectv",
+            params=[Param(name="timeout", type="int", default="expr::NEW_VALUE")],
+        )
+        old = AbiSnapshot(
+            library="libtest.so.1",
+            version="1.0",
+            functions=[f_old],
+            from_headers=True,
+            ast_producer="castxml",
+        )
+        new = AbiSnapshot(
+            library="libtest.so.1",
+            version="2.0",
+            functions=[f_new],
+            from_headers=True,
+            ast_producer="castxml",
+        )
+        r = compare(old, new)
+        assert ChangeKind.PARAM_DEFAULT_VALUE_CHANGED in _kinds(r)
 
 
 # ── param_renamed ────────────────────────────────────────────────────────
@@ -1263,6 +1413,206 @@ class TestConstantChanges:
         new = _snap(constants={})
         r = compare(old, new)
         assert ChangeKind.CONSTANT_REMOVED in _kinds(r)
+
+    def _clang_snap(self, constants, *, field_initializer_facts_reliable):
+        return AbiSnapshot(
+            library="libtest.so.1",
+            version="1.0",
+            functions=[],
+            variables=[],
+            types=[],
+            constants=constants,
+            from_headers=True,
+            ast_producer="clang",
+            clang_field_initializer_facts_reliable=field_initializer_facts_reliable,
+        )
+
+    def test_stale_clang_fingerprint_collision_not_reported(self):
+        """dumper_clang.py's parse_constants() shares Param.default/
+        TypeField.default's unstable pre-schema-v20 "expr:" fingerprint
+        algorithm (dumper_clang_expr._initializer_value) -- a pre-v20
+        clang-producer snapshot's fingerprint for an UNCHANGED non-literal
+        constant can collide across unrelated constants, then differ from a
+        stabilized re-dump purely from the algorithm fix, not a real edit
+        (measured against a real corpus: 173 of 440 findings in a
+        v18-vs-v24 comparison were exactly this). Must not report
+        CONSTANT_CHANGED when the OLD side's value is fingerprint-shaped and
+        unreliable."""
+        old = self._clang_snap(
+            {"K1": "expr:aaaaaaaaaaaaaaaa", "K2": "expr:aaaaaaaaaaaaaaaa"},
+            field_initializer_facts_reliable=False,
+        )
+        new = self._clang_snap(
+            {"K1": "expr:bbbbbbbbbbbbbbbb", "K2": "expr:cccccccccccccccc"},
+            field_initializer_facts_reliable=True,
+        )
+        r = compare(old, new)
+        assert ChangeKind.CONSTANT_CHANGED not in _kinds(r)
+
+    def test_reliable_clang_fingerprint_change_still_reported(self):
+        """The opposite of the case above: once BOTH sides are past the
+        stabilization threshold, a genuine "expr:" fingerprint change must
+        still fire -- the guard must not blanket-suppress every fingerprint
+        comparison on a clang-producer snapshot."""
+        old = self._clang_snap(
+            {"K": "expr:aaaaaaaaaaaaaaaa"}, field_initializer_facts_reliable=True
+        )
+        new = self._clang_snap(
+            {"K": "expr:bbbbbbbbbbbbbbbb"}, field_initializer_facts_reliable=True
+        )
+        r = compare(old, new)
+        assert ChangeKind.CONSTANT_CHANGED in _kinds(r)
+
+    def test_stale_fingerprint_collision_suppressed_for_unknown_producer(self):
+        """``ast_producer`` itself wasn't tracked before schema v10 -- eight
+        versions before ``parse_constants()``'s "expr:" fingerprint risk
+        even existed in the wild -- so a snapshot straddling that boundary
+        reads ``ast_producer=None``: "unknown", not "definitely not clang".
+        An exact ``== "clang"`` producer check would wrongly trust an
+        "expr:" value from exactly the producer this guard exists to
+        distrust (Codex review, PR #720)."""
+        old = AbiSnapshot(
+            library="libtest.so.1",
+            version="1.0",
+            functions=[],
+            variables=[],
+            types=[],
+            constants={"K1": "expr:aaaaaaaaaaaaaaaa", "K2": "expr:aaaaaaaaaaaaaaaa"},
+            from_headers=True,
+            ast_producer=None,
+            clang_field_initializer_facts_reliable=False,
+        )
+        new = AbiSnapshot(
+            library="libtest.so.1",
+            version="1.0",
+            functions=[],
+            variables=[],
+            types=[],
+            constants={"K1": "expr:bbbbbbbbbbbbbbbb", "K2": "expr:cccccccccccccccc"},
+            from_headers=True,
+            ast_producer=None,
+            clang_field_initializer_facts_reliable=True,
+        )
+        r = compare(old, new)
+        assert ChangeKind.CONSTANT_CHANGED not in _kinds(r)
+
+    def test_stale_fingerprint_collision_suppressed_when_new_side_unreliable(self):
+        """Checked per side (constant_value_fingerprint_comparison_
+        unreliable's own docstring): every scenario above made the OLD side
+        the unreliable one. A RELIABLE old side with a fingerprint-shaped
+        constant value must still decline the comparison when the NEW
+        side's own fingerprint is the one that can't be trusted."""
+        old = self._clang_snap(
+            {"K": "expr:aaaaaaaaaaaaaaaa"}, field_initializer_facts_reliable=True
+        )
+        new = self._clang_snap(
+            {"K": "expr:bbbbbbbbbbbbbbbb"}, field_initializer_facts_reliable=False
+        )
+        r = compare(old, new)
+        assert ChangeKind.CONSTANT_CHANGED not in _kinds(r)
+
+    def test_genuine_edit_reported_when_both_sides_share_legacy_algorithm(self):
+        """When BOTH archived snapshots came from the same pre-v20
+        direct-clang build, their fingerprints use the identical (if
+        collision-prone) legacy algorithm and are directly comparable TO
+        EACH OTHER -- suppressing whenever EITHER side is independently
+        unreliable (the naive OR an earlier version of this guard used) was
+        too conservative: it made a genuine constant edit between two
+        archived schema-v19 baselines produce no CONSTANT_CHANGED at all
+        (Codex review, fresh evidence, PR #720). Suppression is for a
+        MISMATCH between generations, not for every unreliable fingerprint."""
+        old = self._clang_snap(
+            {"K": "expr:aaaaaaaaaaaaaaaa"}, field_initializer_facts_reliable=False
+        )
+        new = self._clang_snap(
+            {"K": "expr:bbbbbbbbbbbbbbbb"}, field_initializer_facts_reliable=False
+        )
+        r = compare(old, new)
+        assert ChangeKind.CONSTANT_CHANGED in _kinds(r)
+
+    def test_expression_to_literal_edit_reported_even_from_legacy_side(self):
+        """The XOR fix above has its own mirror bug: naively collapsing
+        "is this side a fingerprint AND is it legacy" into one boolean
+        before comparing lost the value-SHAPE distinction. A pre-v20
+        clang constant becoming a plain LITERAL (or vice versa) is
+        ALWAYS a confirmed real edit -- the unstable algorithm only ever
+        affects a compound expression's fingerprint HASH, never whether
+        a declaration's own value was a literal at all -- so this shape
+        transition must fire regardless of either side's reliability
+        (Codex review, fresh evidence, PR #720)."""
+        old = self._clang_snap(
+            {"K": "expr:aaaaaaaaaaaaaaaa"}, field_initializer_facts_reliable=False
+        )
+        new = self._clang_snap({"K": "42"}, field_initializer_facts_reliable=False)
+        r = compare(old, new)
+        assert ChangeKind.CONSTANT_CHANGED in _kinds(r)
+
+    def test_genuine_expr_namespace_constant_change_still_reported(self):
+        """The guard matches the FULL clang fingerprint shape (``"expr:"``
+        plus exactly 16 hex digits), not merely the ``"expr:"`` prefix.
+        `dumper_castxml._iter_public_constants` passes its raw XML `init`
+        text straight through, so a real castxml constant referencing a
+        qualified name whose next component happens to spell `expr` (an
+        expression-template library's namespace, say) produces a legitimate
+        verbatim value like `"expr::OLD_VALUE"` -- which a plain prefix
+        check would misidentify as a clang fingerprint and silently
+        suppress the real change (Codex review, fresh evidence, PR #720)."""
+        old = AbiSnapshot(
+            library="libtest.so.1",
+            version="1.0",
+            functions=[],
+            variables=[],
+            types=[],
+            constants={"K": "expr::OLD_VALUE"},
+            from_headers=True,
+            ast_producer=None,
+            clang_field_initializer_facts_reliable=False,
+        )
+        new = AbiSnapshot(
+            library="libtest.so.1",
+            version="1.0",
+            functions=[],
+            variables=[],
+            types=[],
+            constants={"K": "expr::NEW_VALUE"},
+            from_headers=True,
+            ast_producer=None,
+            clang_field_initializer_facts_reliable=False,
+        )
+        r = compare(old, new)
+        assert ChangeKind.CONSTANT_CHANGED in _kinds(r)
+
+    def test_stale_fingerprint_guard_does_not_apply_to_hybrid_producer(self):
+        """dumper_hybrid.merge_snapshots keeps `constants` verbatim from its
+        castxml base -- constants never take a hybrid merge's clang-only-
+        append path the way TypeField.default can. A "hybrid"-producer
+        snapshot's constants must therefore compare normally even when
+        clang_field_initializer_facts_reliable is False, unlike
+        TypeField.default's broader "hybrid is also at risk" reasoning."""
+        old = AbiSnapshot(
+            library="libtest.so.1",
+            version="1.0",
+            functions=[],
+            variables=[],
+            types=[],
+            constants={"K": "expr:aaaaaaaaaaaaaaaa"},
+            from_headers=True,
+            ast_producer="hybrid",
+            clang_field_initializer_facts_reliable=False,
+        )
+        new = AbiSnapshot(
+            library="libtest.so.1",
+            version="1.0",
+            functions=[],
+            variables=[],
+            types=[],
+            constants={"K": "expr:bbbbbbbbbbbbbbbb"},
+            from_headers=True,
+            ast_producer="hybrid",
+            clang_field_initializer_facts_reliable=False,
+        )
+        r = compare(old, new)
+        assert ChangeKind.CONSTANT_CHANGED in _kinds(r)
 
 
 # ── Multiple simultaneous symbol changes ─────────────────────────────────

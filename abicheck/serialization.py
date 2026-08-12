@@ -265,6 +265,18 @@ from .model import (
 #     False so `diff_symbols._diff_var_access` declines to trust it, instead
 #     of reporting a false `VAR_ACCESS_WIDENED` for every private/protected
 #     static member purely from a tool upgrade.
+#
+# Reading an OLDER snapshot (the direction every CI baseline actually hits —
+# a baseline is committed once and outlives however many abicheck pin bumps
+# happen before it's next regenerated) used to be entirely silent whenever it
+# degraded one of the `*_facts_reliable` flags above: the flag itself was set
+# correctly, but nothing surfaced that fact to whoever was reading the
+# comparison. `snapshot_from_dict` now emits a `UserWarning` naming exactly
+# which flags got degraded, once, at load time — but only when the version
+# gap actually degraded something; a trivial one-version-behind snapshot that
+# doesn't hit any producer-specific threshold above stays silent, since every
+# CI baseline is *always* some number of versions behind and warning
+# regardless of relevance would just be noise.
 SCHEMA_VERSION: int = 24
 
 # Schema version at which CastXML field CV facts became reliable (see v9 above).
@@ -1449,6 +1461,126 @@ def snapshot_from_dict(d: dict[str, Any]) -> AbiSnapshot:
             from .python_ext import detect_python_extension
 
             snap.python_ext = detect_python_extension(snap)
+
+    # A degraded *_facts_reliable flag used to load with no signal at all --
+    # the flag itself was computed correctly, but nothing ever told the
+    # person running the comparison that any detector would decline to
+    # trust a stale-but-real-looking fact on this snapshot. Two separate
+    # situations both leave a flag False, and both need the same visible
+    # signal rather than silence:
+    #   (1) THIS snapshot's own schema_version predates SCHEMA_VERSION, and
+    #       the gap crossed one of the per-flag thresholds above -- the
+    #       direction every CI baseline actually hits, since a baseline is
+    #       committed once and outlives however many abicheck pin bumps
+    #       happen before it's next regenerated.
+    #   (2) schema_version reads as CURRENT, but an explicit False marker in
+    #       `d` carried a degraded flag forward from an earlier, genuinely
+    #       older extraction -- the "explicit-marker-wins" round-trip-
+    #       stability path every flag's own computation above already
+    #       implements. `snapshot_to_dict` always re-stamps schema_version
+    #       to the CURRENT SCHEMA_VERSION on save (it describes the writing
+    #       tool's format capability, not the snapshot's true field-fact
+    #       origin -- see e.g. header_cv_facts_reliable_value's own comment),
+    #       so a legacy snapshot that was loaded and simply re-saved reads
+    #       as current-schema on its next load even though the underlying
+    #       facts were never regenerated. Gating this warning on
+    #       schema_version alone would make it disappear across exactly that
+    #       round-trip (Codex review, PR #720) -- the flags themselves, not
+    #       the version number, are the ground truth here.
+    # Each entry pairs a flag with whether it is even CONSULTED by the one
+    # detector that reads it, given THIS side's own AST producer and header
+    # confirmation. Most flags' value computation already collapses to
+    # "reliable" for every producer their consumer doesn't gate on (see each
+    # flag's own computation above) -- but two don't: clang_va_list_facts_
+    # reliable's value treats "hybrid" the same as "clang" (correct for the
+    # fact's own provenance), yet diff_symbols._diff_param_va_list only ever
+    # consults it when BOTH sides are exactly "clang" (never "hybrid").
+    # castxml_var_access_facts_reliable is the mirror case for "castxml" vs.
+    # diff_symbols._diff_var_access. Listing either one for a hybrid
+    # snapshot would claim reduced detection coverage that regenerating the
+    # snapshot could never restore, since no detector consults it for that
+    # producer regardless of schema version (Codex review, PR #720).
+    #
+    # Separately, five of the seven flags' one real consumer requires
+    # CONFIRMED (non-inferred) header awareness on this side before it ever
+    # reads the flag at all: clang_restrict/clang_va_list/
+    # castxml_var_access's detectors each exit through
+    # diff_symbols._both_header_aware before consulting their flag, and
+    # clang_deprecation/clang_field_initializer's shared consumer
+    # (fact_provenance.fact_producer) opens with the identical
+    # ``from_headers and not from_headers_inferred`` check. A schema-v1..v5
+    # snapshot that predates the explicit ``from_headers`` key gets
+    # ``from_headers`` GUESSED true from a populated surface -- real, but
+    # not "confirmed" -- so none of these five detectors will ever consult
+    # their flag for it regardless of whether a fresh dump would restore it
+    # (Codex review, PR #720). header_cv_facts_reliable and
+    # clang_vtable_facts_reliable are the two exceptions: their consumers
+    # (variable/field cv checks, layout/vtable diffing) apply to any
+    # snapshot carrying the underlying fact, header-confirmed or not.
+    _header_confirmed = from_headers and not from_headers_inferred
+    _degraded_facts = sorted(
+        name
+        for name, reliable, consulted in (
+            ("header_cv_facts_reliable", header_cv_facts_reliable_value, True),
+            (
+                "clang_deprecation_facts_reliable",
+                clang_deprecation_facts_reliable_value,
+                _header_confirmed,
+            ),
+            (
+                "clang_field_initializer_facts_reliable",
+                clang_field_initializer_facts_reliable_value,
+                _header_confirmed,
+            ),
+            (
+                "clang_vtable_facts_reliable",
+                clang_vtable_facts_reliable_value,
+                True,
+            ),
+            (
+                "clang_restrict_facts_reliable",
+                clang_restrict_facts_reliable_value,
+                _header_confirmed,
+            ),
+            (
+                "clang_va_list_facts_reliable",
+                clang_va_list_facts_reliable_value,
+                _header_confirmed and ast_producer_value == "clang",
+            ),
+            (
+                "castxml_var_access_facts_reliable",
+                castxml_var_access_facts_reliable_value,
+                _header_confirmed and ast_producer_value == "castxml",
+            ),
+        )
+        if not reliable and consulted
+    )
+    if _degraded_facts:
+        import warnings
+
+        if _schema_version < SCHEMA_VERSION:
+            _reason = (
+                f"Snapshot schema_version {_schema_version} predates this "
+                f"abicheck's schema_version {SCHEMA_VERSION}"
+            )
+        else:
+            _reason = (
+                "This snapshot carries facts preserved from an earlier, "
+                f"older extraction (its schema_version reads as the current "
+                f"{SCHEMA_VERSION} because it was re-saved since, but the "
+                "underlying facts below were never regenerated)"
+            )
+        warnings.warn(
+            f"{_reason}: "
+            f"{', '.join(_degraded_facts)} "
+            f"{'is' if len(_degraded_facts) == 1 else 'are'} marked unreliable on "
+            "this snapshot, so the affected detectors will decline to trust these "
+            "stale facts rather than risk a false positive purely from this tool "
+            "upgrade. Detection coverage for these fields is reduced until this "
+            "snapshot is regenerated with the current abicheck.",
+            UserWarning,
+            stacklevel=2,
+        )
 
     return snap
 

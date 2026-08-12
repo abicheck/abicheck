@@ -20,6 +20,27 @@ superseded in their implementation detail by this plan** — see
 [Relationship to G36's own items](#relationship-to-g36s-own-items) for exactly
 what changes and why.
 
+> **Scope note (2026-08-11, flagship-first narrowing).** Per
+> [ADR-058's 2026-08-11 amendment](../adr/058-native-compatibility-agent-skills.md),
+> the skill portfolio is frozen and `native-binary-compatibility-review` is
+> the sole flagship subject for every phase below — Phase 1's L4 golden
+> transcripts, Phase 2's live runner, and Phase 3's scenario corpus target
+> that one skill only, not the four-skill sweep the rest of this document
+> was originally scoped for. `native-api-evolution`,
+> `native-release-compatibility`, and `native-consumer-compatibility` are
+> **prototype status** (see `skills-src/CLAUDE.md`'s portfolio-status
+> table): no scenario, fixture, or evidence bundle should be built against
+> them until the flagship experiment demonstrates measurable lift. The
+> remaining text below is unchanged design — every mechanism (D1–D8, the
+> bundle schema, the rubric, the freshness gate) is skill-agnostic by
+> construction and applies unmodified to a one-skill corpus; only the
+> *breadth* narrows, not the design. Phase 3's "~6 scenarios per skill, ~24
+> total" and Phase 4's cross-agent sweep are reduced accordingly — see the
+> updated phase notes. A prototype skill re-enters scope as a Phase 3-style
+> corpus buildout only after the flagship clears the acceptance criteria
+> below, at which point it is added back one skill at a time rather than as
+> a second four-way sweep.
+
 ---
 
 ## Problem
@@ -75,7 +96,10 @@ Accepted when all of:
 2. Every published skill carries a scorecard: activation precision/recall,
    verdict accuracy against ground truth, safety-dimension pass rate across `k`
    runs, cost per resolved question, and measured lift over the no-skill
-   baseline.
+   baseline. **Sequenced, not simultaneous** (2026-08-11 scope note): this
+   criterion is satisfied for the flagship skill first; a prototype-status
+   skill's scorecard is deferred until it re-enters scope, not owed by this
+   plan's first pass.
 3. That scorecard is provably fresh — a results artifact whose recorded content
    hash does not match the current generated skill trees is rejected as
    evidence, mechanically (this replaces G36's repeatedly-patched prose
@@ -1009,63 +1033,98 @@ real baseline for dimensions 1, 3, 4, 5. Dimensions 2 and 6 gate at zero from
 the first run — including if that first run fails, which blocks rather than
 baselines.
 
-**Done when:** a maintainer's local run produces committed bundles per skill
-that CI re-grades and accepts; a deliberately regressed `SKILL.md` fails the
-re-grade; and a skill edit committed *without* refreshed bundles fails the
-freshness check. The third is the one that matters — it is what makes running
-the evaluation non-optional rather than merely available.
+**Done when:** a maintainer's local run produces committed bundles — for the
+flagship skill while the 2026-08-11 scope note holds, per skill again once a
+prototype skill re-enters scope — that CI re-grades and accepts; a
+deliberately regressed `SKILL.md` fails the re-grade; and a skill edit
+committed *without* refreshed bundles fails the freshness check. The third is
+the one that matters — it is what makes running the evaluation non-optional
+rather than merely available.
 
 ### Phase 3 — Scenario corpus buildout *(M)*
 
+**Scoped to the flagship skill only** (see the 2026-08-11 scope note above).
 Category B first (every scenario `ground_truth.json` structurally cannot
-index), then Category A across the eight named categories. Target ~6 scenarios
-per skill, ~24 total.
+index), then Category A across the eight named categories. Target ~12–16
+scenarios for `native-binary-compatibility-review`, not the ~24-across-four-
+skills figure this phase originally carried — the corpus classes in D5 were
+themselves generic across all four skills, so this is a scope cut (one
+skill's worth), not a redesign. A prototype skill's corpus is out of scope
+for this phase; see the scope note for when it re-enters.
 
 ### Phase 4 — Cross-agent *(M)*
 
-Codex and Gemini CLI runners emitting the same bundle schema; Copilot and
-Cursor stay manual. G36 P1.5's cross-agent table in `skills-src/CLAUDE.md` is
-then populated from generated results for the scriptable targets rather than
-hand-maintained.
+Codex and Gemini CLI runners emitting the same bundle schema, run against the
+flagship skill only; Copilot and Cursor stay manual. G36 P1.5's cross-agent
+table in `skills-src/CLAUDE.md` is then populated from generated results for
+the scriptable targets rather than hand-maintained — one row
+(`native-binary-compatibility-review`) per target until a prototype skill is
+promoted, not all four.
 
 ### Phase 5 — agent-benchmark integration, L3 *(M, separate repo)*
 
 Pack consumption, the four arms, the loader `references/` fix, the scorecard
-and its dashboard row.
+and its dashboard row. **Scoped to the flagship skill** (2026-08-11 scope
+note): the pack's other three skills are prototype status and carry no
+Phase 3 corpus for an arm to run against yet, so there is nothing for a
+prototype skill's row to score until it re-enters scope.
 
-**Done when:** each skill has a published quality-per-cost number on both
-comparisons — the gating `skill-agent:` vs `baseline` and the reported
-`skill:` vs `docs` — whichever direction each comes out.
+**Done when:** the flagship skill has a published quality-per-cost number on
+both comparisons — the gating `skill-agent:` vs `baseline` and the reported
+`skill:` vs `docs` — whichever direction each comes out. Extended to a
+prototype skill only after Phase 3's corpus buildout runs for it, the same
+one-skill-at-a-time re-entry the scope note describes for Phases 3–4.
 
 ### Phase 6 — Publication gate *(S)*
 
-G36 P1.4's publication precondition becomes a check: publication requires a
-fresh per-skill hashes across every published skill, a **build digest equal to the one at the published
-commit** (D6 — over `abicheck/` plus `pyproject.toml` and the resolved runtime
-dependency versions, since the narrow surface hash is not sufficient here and
-the package tree alone is not the build; defined by inclusion, so committing
-the evidence itself cannot invalidate it), a complete evidence set for the full suite, zero failures on
-dimensions 2 and 6, dimensions 1/3/4/5 at or
-above baseline, and a Phase 5 scorecard showing non-negative lift on
-**`skill-agent:` vs `baseline`** — D7's declared deployment comparator. The
-`skill:` vs `docs` number is published alongside it and never gates: gating on
-it here would have blocked exactly the skill D7 describes as legitimate — one
-that wins the progressive-disclosure comparison it is deployed under and loses
-the content comparison it is not.
+G36 P1.4's publication precondition becomes a check, and — 2026-08-11 scope
+note — it gates the **flagship skill's own re-publication** (a
+`native-binary-compatibility-review` content change), not a sweep over all
+four: publication requires a fresh hash for that skill, a **build digest
+equal to the one at the published commit** (D6 — over `abicheck/` plus
+`pyproject.toml` and the resolved runtime dependency versions, since the
+narrow surface hash is not sufficient here and the package tree alone is not
+the build; defined by inclusion, so committing the evidence itself cannot
+invalidate it), a complete evidence set for the full suite, zero failures on
+dimensions 2 and 6, dimensions 1/3/4/5 at or above baseline, and a Phase 5
+scorecard showing non-negative lift on **`skill-agent:` vs `baseline`** —
+D7's declared deployment comparator. The `skill:` vs `docs` number is
+published alongside it and never gates: gating on it here would have blocked
+exactly the skill D7 describes as legitimate — one that wins the
+progressive-disclosure comparison it is deployed under and loses the content
+comparison it is not. A prototype skill has no publication gate to satisfy
+while frozen — it is already published and not being re-evaluated, so there
+is no re-publication decision for this phase to gate; the gate applies to it
+only once it is promoted, evaluated through Phases 3–5, and reaches its own
+content-change publication event.
 
 ## Cost model
 
+**The mechanism below is general — sized for the eventual four-skill,
+~24-scenario corpus — not a claim about what runs today.** The 2026-08-11
+scope note caps "the skills the diff actually touches" and "the
+affected-skill set" at one, the flagship, for as long as the freeze holds:
+`--suite full` today means the ~12–16 flagship scenarios Phase 3 builds, not
+24, and `--suite risk`'s per-change numbers below shrink the same way. The
+selection *rule* (risk-selected by moved hash, not a fixed sample) is what
+this section documents, and it is unchanged by the freeze — only its inputs
+are narrower until a prototype skill re-enters scope and the corpus grows
+back toward the sizing below.
+
 Per live run: ~4–8 agent turns over a small fixture repository. At 24 scenarios
-× `k=3` that is ~72 agent sessions per full pass. Two knobs shrink a
-per-change run, and **`k` is deliberately not one of them**:
+× `k=3` that is ~72 agent sessions per full pass (steady state, all four
+skills in scope). Two knobs shrink a per-change run, and **`k` is
+deliberately not one of them**:
 
 - `--suite risk` — the per-change evidence suite, at `k=3`: every Category B
   scenario, **plus every Category A scenario whose ground truth is not a
   compatible verdict, plus a standing floor of compatible-ground-truth
   scenarios** (see below), restricted to the skills the diff actually touches.
-  Typically ~10–14 scenarios (30–42 sessions).
-- `--suite full` — all 24 scenarios at `k=3` (72 sessions), before publication
-  and whenever the affected-skill set is wide.
+  Typically ~10–14 scenarios (30–42 sessions) at steady state; while the
+  freeze holds, bounded by the flagship's own corpus instead.
+- `--suite full` — every ready scenario for the skills in scope at `k=3`
+  (~72 sessions at steady state; ~36–48 while the freeze holds), before
+  publication and whenever the affected-skill set is wide.
 
 **The evidence suite is risk-selected, not a fixed sample, and that is what
 makes acceptance criterion 1 true.** An earlier draft evaluated only Category B

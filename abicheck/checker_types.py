@@ -314,6 +314,44 @@ class Change:
     # `checker.compare`, *before* the verdict is computed.
     compatibility_evaluation_status: CompatibilityEvaluationStatus | None = None
     compatibility_decision: Verdict | None = None
+    # Set by diff_types._diff_type_vtable on a TYPE_VTABLE_CHANGED finding
+    # when it rests on the identical asymmetric-layout-evidence gap
+    # LAYOUT_UNVERIFIABLE (diff_layout.py) reports for the same type. Purely
+    # an internal cross-detector correlation key for
+    # post_processing.AnnotateLayoutUnverifiableCoveredByVtableChanged, which
+    # sets the co-located LAYOUT_UNVERIFIABLE finding's own
+    # ``correlated_change_kind`` from it — deliberately NOT
+    # ``modulation_reason``/``modulation_rule`` (Codex review): this finding's
+    # own severity is never touched, so tagging it as a "modulation" would be
+    # a false audit entry (a public field reporters and
+    # ``impact.engine.assess_change()`` expose as a real verdict-modulation
+    # reason code) for a finding whose verdict never changed. Also
+    # deliberately never used to *remove* either finding from ``changes``
+    # (three earlier revisions tried variants of that and each was found
+    # unsafe by review — see AGENTS.md's "Findings emitted from absent
+    # evidence" entry for the full account). ``False`` for every ordinary
+    # TYPE_VTABLE_CHANGED and every other finding kind.
+    #
+    # ``field(kw_only=True)``, per-field rather than the ``dataclasses.
+    # KW_ONLY`` sentinel (Codex review, fresh evidence): ``Change`` is
+    # documented as a public Python-API type (checker_types.py's own module
+    # docstring; CLAUDE.md: "changing their public surface is a breaking
+    # change to the Python API — coordinate it"), and a whole-class
+    # ``KW_ONLY`` marker placed after ``description`` would make every
+    # pre-existing optional field keyword-only too — breaking any external
+    # caller that previously passed ``old_value``/``new_value``/etc.
+    # positionally, which this codebase cannot audit (only its own call
+    # sites, all of which already pass every field beyond the first three by
+    # keyword). Appended at the very end of the dataclass instead of
+    # mid-list, for the same reason `field(kw_only=True)` alone doesn't
+    # already make position irrelevant: a plain field inserted anywhere
+    # earlier still shifts every later *positional* argument for a
+    # hypothetical caller reaching that far — appending keeps every
+    # pre-existing field's position, and therefore every pre-existing
+    # positional caller's behavior, completely unchanged. Mirrors
+    # ``AbiSnapshot``'s identical per-field fix in PR #582 exactly (that
+    # precedent predates this dataclass's own instance of the same bug).
+    vtable_covers_unverifiable_layout_gap: bool = field(default=False, kw_only=True)
 
 
 @dataclass

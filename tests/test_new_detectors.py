@@ -669,6 +669,48 @@ class TestHeaderConstants:
                     _snap_with_constants({}, from_headers=False))
         assert not _has_kind(r, ChangeKind.CONSTANT_REMOVED)
 
+    def test_versioned_inline_namespace_spellings_double_report_is_accepted(self):
+        # Known, documented limitation (see _diff_constants's docstring): a
+        # versioned inline namespace can make the same constant reachable
+        # under two qualified spellings (the full path and the
+        # version-elided path unqualified lookup also resolves to), and
+        # both changing together is reported once PER spelling rather than
+        # merged into one finding. A value-equality-based merge was tried
+        # and reverted -- Codex review found it fundamentally unsound
+        # without real per-constant identity evidence (no mangled symbol
+        # or source location is threaded through `AbiSnapshot.constants`
+        # today): it can both merge two constants that never even coexist
+        # on the same side, and hide a real, isolated removal behind an
+        # unrelated constant that coincidentally started with the same
+        # value. This test pins the current, honest (if noisier) behavior
+        # rather than a heuristic merge that traded a display annoyance for
+        # a correctness risk.
+        r = compare(
+            _snap_with_constants({
+                "detail::v1::cpu_feature_map": "1",
+                "detail::cpu_feature_map": "1",
+            }),
+            _snap_with_constants({
+                "detail::v1::cpu_feature_map": "2",
+                "detail::cpu_feature_map": "2",
+            }),
+        )
+        assert len(_changes_of_kind(r, ChangeKind.CONSTANT_CHANGED)) == 2
+
+    def test_unrelated_constant_removal_not_masked_by_coincidental_survivor(self):
+        # Codex review, P1: two unrelated constants that happen to share a
+        # value must not have one's removal absorbed by the other's
+        # survival, however the comparison is implemented -- with no merge
+        # at all (current behavior), this is automatic: each spelling is
+        # its own independent key.
+        r = compare(
+            _snap_with_constants({"api::v1::limit": "10", "api::limit": "10"}),
+            _snap_with_constants({"api::limit": "10"}),
+        )
+        assert _has_kind(r, ChangeKind.CONSTANT_REMOVED)
+        removed = _changes_of_kind(r, ChangeKind.CONSTANT_REMOVED)
+        assert removed[0].symbol == "api::v1::limit"
+
 
 def _snap_with_constants(constants, from_headers=True):
     s = _snap(from_headers=from_headers)

@@ -216,11 +216,8 @@ class ScanRequest:
     lang: str = "c++"
     # L2 header compile context (dump↔scan flag parity, ADR-037 D3).
     compile: CompileContext = field(default_factory=CompileContext)
-    # --against config-surface parity with `compare` (ADR-049 Phase 5 §6.4):
-    # a `baseline` comparison can be scoped/suppressed/policy-classified the
-    # same way a direct `compare` run is, instead of always using the fixed
-    # policy="strict_abi"/suppression=None/scope_to_public_surface=True the
-    # engine previously hardcoded.
+    # --against config-surface parity with `compare` (ADR-049 Phase 5 §6.4): a `baseline` comparison can be scoped/suppressed/policy-classified the
+    # same way a direct `compare` run is, instead of always using the fixed policy="strict_abi"/suppression=None/scope_to_public_surface=True the engine previously hardcoded.
     suppression: SuppressionList | None = None
     policy: str = "strict_abi"
     policy_file: PolicyFile | None = None
@@ -249,9 +246,7 @@ class ScanRequest:
     build_config: Path | None = None
     allow_build_query: bool = False
     risk_rules_path: Path | None = None
-    # ADR-056 D2: caller-declared external DSO allow-list for the
-    # --artifact-set audit-mode bundle detector (closed-world escape hatch).
-    # Unused by run_scan.
+    # ADR-056 D2: caller-declared external DSO allow-list for the --artifact-set audit-mode bundle detector (closed-world escape hatch); unused by run_scan.
     bundle_system_providers: tuple[str, ...] = ()
     # ADR-056: real changed-path provenance (e.g. "--since origin/main" or
     # "--changed-path"), as computed by cli_scan._resolve_changed_seed.
@@ -259,6 +254,8 @@ class ScanRequest:
     # hardcoded placeholder; unused by run_scan (which threads its own
     # changed_src through _run_scan_one_member's caller directly).
     changed_src: str = "run_scan_set"
+    # `--against` summary's findings/suppressed cap; see `scan --max-findings`.
+    max_findings: int | None = None
 
 
 @dataclass(frozen=True)
@@ -1022,36 +1019,39 @@ def _load_risk_rules_for_service(risk_rules_path: Path) -> Any:
         raise ValueError(str(exc.format_message())) from exc
 
 
-def _reject_comparison_only_fields(req: ScanRequest) -> None:
-    """Raise :class:`ValidationError` if a baseline-comparison-only
-    ``ScanRequest`` field is set with no baseline for it to apply to.
+#: Every ``ScanRequest`` field meaningful only for a baseline comparison,
+#: keyed to a predicate that's ``True`` when *req* carries a caller-set,
+#: non-default value. A plain dict (not logic buried in
+#: ``_reject_comparison_only_fields``) so a structural test can cross-check
+#: its keys against ``_run_baseline_compare``'s own signature -- generalizing
+#: the "forwarded but never guarded" gap a P2 review caught twice here (see
+#: `test_every_baseline_only_field_is_guarded`).
+_COMPARISON_ONLY_FIELD_PREDICATES: dict[str, Callable[[ScanRequest], bool]] = {
+    "suppression": lambda r: r.suppression is not None,
+    "policy": lambda r: r.policy != "strict_abi",
+    "policy_file": lambda r: r.policy_file is not None,
+    "scope_to_public_surface": lambda r: r.scope_to_public_surface is not True,
+    "force_public_symbols": lambda r: bool(r.force_public_symbols),
+    "pattern_verdicts": lambda r: r.pattern_verdicts,
+    "env_matrix": lambda r: r.env_matrix is not None,
+    "collapse_versioned_symbols": lambda r: r.collapse_versioned_symbols,
+    "contract_evaluation": lambda r: r.contract_evaluation,
+    "contract_mode": lambda r: r.contract_mode is not None,
+    "max_findings": lambda r: r.max_findings is not None,
+}
 
-    Shared by :func:`run_scan` (called only when ``req.baseline`` is
-    ``None`` or ``req.mode`` is audit) and :func:`run_scan_set` (always
-    audit-only by definition, ADR-056 D2, so this always applies there).
-    Extracted so both entry points enforce the identical contract instead
-    of each hand-rolling its own field list (P2 regression, Codex review:
-    ``run_scan_set()``, once made public/re-exported, only ever validated
-    ``req.baseline`` itself -- a direct Python API caller passing e.g.
-    ``policy_file``/``env_matrix``/``suppression`` to it got them silently
-    accepted and discarded under default audit classification, instead of
-    rejected the way an equivalent ``run_scan()`` call already is).
+
+def _reject_comparison_only_fields(req: ScanRequest) -> None:
+    """Raise :class:`ValidationError` for a set ``_COMPARISON_ONLY_FIELD_PREDICATES`` field with no baseline for it to apply to.
+
+    Shared by :func:`run_scan` (baseline ``None``/audit mode) and
+    :func:`run_scan_set` (always audit-only, ADR-056 D2) so both entry points
+    enforce the identical contract (P2 regression, Codex review:
+    ``run_scan_set()`` used to only validate ``req.baseline`` itself, letting
+    e.g. ``policy_file``/``env_matrix`` through silently discarded).
     """
     _non_default = [
-        name
-        for name, is_set in (
-            ("suppression", req.suppression is not None),
-            ("policy", req.policy != "strict_abi"),
-            ("policy_file", req.policy_file is not None),
-            ("scope_to_public_surface", req.scope_to_public_surface is not True),
-            ("force_public_symbols", bool(req.force_public_symbols)),
-            ("pattern_verdicts", req.pattern_verdicts),
-            ("env_matrix", req.env_matrix is not None),
-            ("collapse_versioned_symbols", req.collapse_versioned_symbols),
-            ("contract_evaluation", req.contract_evaluation),
-            ("contract_mode", req.contract_mode is not None),
-        )
-        if is_set
+        name for name, is_set in _COMPARISON_ONLY_FIELD_PREDICATES.items() if is_set(req)
     ]
     if _non_default:
         raise ValidationError(
@@ -1195,12 +1195,11 @@ def run_scan(req: ScanRequest) -> ScanResult:
         raise ValueError("run_scan accepts exactly one binary")
     binary = req.binaries[0]
 
-    # ADR-049 Phase 5 review (Codex, PR #657): these fields only mean
-    # anything for a baseline comparison (`run_scan_core` only calls
-    # `_run_baseline_compare` when `baseline is not None` AND `scan_mode is
-    # not ScanMode.AUDIT`) -- without one they'd be silently accepted and
-    # discarded, which could hide a `policy_file` requiring evidence the
-    # caller actually needed. Mirrors the CLI's identical `scan_cmd` guard.
+    if req.max_findings is not None and req.max_findings < 1:
+        # Up front, not after a wasted full scan (Codex review).
+        raise ValidationError(f"ScanRequest.max_findings must be positive, got {req.max_findings}")
+    # ADR-049 Phase 5 review (Codex, PR #657): these fields only mean anything for a baseline comparison (`run_scan_core` only calls
+    # `_run_baseline_compare` when `baseline is not None` AND `scan_mode is not ScanMode.AUDIT`) -- without one they'd be silently accepted and discarded, which could hide a `policy_file` requiring evidence the caller actually needed. Mirrors the CLI's identical `scan_cmd` guard.
     if req.baseline is None or ScanMode(req.mode) is ScanMode.AUDIT:
         _reject_comparison_only_fields(req)
     else:
@@ -1326,6 +1325,7 @@ def run_scan(req: ScanRequest) -> ScanResult:
             contract_mode=req.contract_mode,
             resolved_config=_scan_request_config(req),
             abi3_floor=req.abi3_floor,
+            max_findings=req.max_findings,
         )
     except _BudgetOverflow:
         # The failure-guard contract: overflow is exit 5, never a shrunk scope.

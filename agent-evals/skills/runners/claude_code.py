@@ -71,6 +71,22 @@ PACK = EVAL_DIR / "skill-eval-pack.json"
 
 ARMS = ("skill", "baseline")
 
+#: G37's 2026-08-11 scope note (docs/contribute/plans/
+#: g37-agent-skill-quality-evaluation.md) and ADR-058's same-dated amendment:
+#: `native-binary-compatibility-review` is the sole flagship subject for every
+#: phase, and the other three shipped skills are prototype status — not an
+#: L2/L3 evaluation target until the flagship experiment shows measurable
+#: lift. `scenarios.yaml` still carries `status: ready` entries for
+#: `native-api-evolution` and `native-release-compatibility` (declared before
+#: the freeze; not yet re-scoped to `status: planned` there — see that file's
+#: own status-field contract before repurposing it for this), so the default,
+#: unscoped "every ready scenario" selection below would otherwise run
+#: prototype-skill scenarios and mix their results into a nominally
+#: flagship-only experiment. Filtered here rather than in the pack so a
+#: prototype skill's already-authored scenarios stay intact for when it
+#: re-enters scope, one skill at a time, rather than needing to be re-added.
+FLAGSHIP_SKILL = "native-binary-compatibility-review"
+
 #: Identical for both arms — the treatment must be the skill, nothing else.
 #: `Skill` is included so the skill arm can actually invoke what it finds;
 #: the baseline arm has no skills installed, so offering it the tool changes
@@ -450,6 +466,28 @@ def visible_native_skills(events: list[dict]) -> list[str] | None:
     return None
 
 
+def _parse_events(text: str | None) -> list[dict]:
+    """Parse a `stream-json` transcript into events, one JSON object per line.
+
+    Shared by every reader of this format: a completed run's own stdout, a
+    recovered run's persisted `events.jsonl`, and — since `subprocess.run`
+    still populates `TimeoutExpired.stdout` with whatever was captured
+    before the kill — a timed-out run's partial transcript too. A blank or
+    malformed line is skipped rather than failing the whole parse, since a
+    timeout can cut a transcript off mid-line.
+    """
+    events: list[dict] = []
+    for line in (text or "").splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            events.append(json.loads(line))
+        except json.JSONDecodeError:
+            continue
+    return events
+
+
 def resolved_model(events: list[dict]) -> str | None:
     """The model the CLI actually used, or None if it never said.
 
@@ -469,18 +507,85 @@ def resolved_model(events: list[dict]) -> str | None:
     return None
 
 
+def _model_label(row: dict) -> str | None:
+    """The best available identifier for reporting which model a row used.
+
+    Resolved name first (the CLI's own account of what it actually ran),
+    falling back to the requested `--model` argument only when no resolved
+    name was captured (a timeout). Reporting-only — `_models_compatible`
+    below is what actually decides consistency, and the two must agree on
+    which field wins or a message could name one identity while the check
+    that produced it used the other.
+    """
+    model = row.get("model")
+    if isinstance(model, str):
+        return model
+    requested = row.get("requested_model")
+    return requested if isinstance(requested, str) else None
+
+
+def _models_compatible(a: dict, b: dict) -> bool:
+    """Whether two rows can be shown to have used the same model.
+
+    Compares the *resolved* model name (`model`, read from the CLI's own
+    `system/init` event) first, when both rows have one — that is real
+    evidence, and the only thing that catches an alias like `sonnet`
+    silently resolving to a different version between two runs (an earlier
+    revision of this check compared the *requested* alias whenever present
+    and could accept exactly that drift, since two rows both pinned to
+    `sonnet` always looked identical regardless of what either resolved
+    to).
+
+    Falls back to comparing the requested `--model` argument directly only
+    when *neither* row has a resolved name — Claude Code documents an alias
+    like `sonnet` as pointing at "the latest" model, a moving target, so a
+    shared alias is trusted only when it is the single best evidence
+    available on *both* sides, never when one side could instead be checked
+    against a real resolved name. Concretely: a row with a resolved name
+    and a row with *only* a requested one (a completed, pinned run
+    alongside a *different* pinned run that timed out before capturing its
+    own resolved name, say) are never treated as compatible by matching
+    aliases — an earlier revision of this function did exactly that, and it
+    is the same unprovable-drift shape as comparing two resolved names
+    cross-field.
+
+    So: whenever *both* rows carry some identity signal (resolved or
+    requested) but the comparison above didn't resolve them as equal or
+    unequal — because the signal isn't in a shared, trustworthy field —
+    this returns False (incompatible) rather than guessing. Only when
+    *neither* row has any identity signal at all does this return True
+    (compatible), matching check_one_model's own documented "unknown never
+    refuses the batch on its own" policy for that case.
+    """
+    a_model, b_model = a.get("model"), b.get("model")
+    if isinstance(a_model, str) and isinstance(b_model, str):
+        return a_model == b_model
+    a_requested, b_requested = a.get("requested_model"), b.get("requested_model")
+    if (
+        not isinstance(a_model, str)
+        and not isinstance(b_model, str)
+        and isinstance(a_requested, str)
+        and isinstance(b_requested, str)
+    ):
+        return a_requested == b_requested
+    a_has_identity = isinstance(a_model, str) or isinstance(a_requested, str)
+    b_has_identity = isinstance(b_model, str) or isinstance(b_requested, str)
+    if a_has_identity and b_has_identity:
+        return False
+    return True
+
+
 def check_one_model(index: list[dict], record: dict) -> str | None:
     """Why this run is not comparable with the batch so far, if it is not."""
-    models = {row["model"] for row in index if isinstance(row.get("model"), str)}
-    model = record.get("model")
-    if not isinstance(model, str) or not models or model in models:
-        return None
-    return (
-        f"this run used {model} while the batch so far used "
-        f"{', '.join(sorted(models))}; an arm-to-arm difference would not be "
-        f"attributable to the skill. Pass --model to pin one, or start a fresh "
-        f"output root."
-    )
+    for row in index:
+        if not _models_compatible(row, record):
+            return (
+                f"this run used {_model_label(record)} while an earlier run "
+                f"in the batch used {_model_label(row)}; an arm-to-arm "
+                f"difference would not be attributable to the skill. Pass "
+                f"--model to pin one, or start a fresh output root."
+            )
+    return None
 
 
 def check_treatment(arm: str, scenario: dict, visible: list[str] | None) -> str | None:
@@ -618,15 +723,7 @@ def _run_once(
     if proc.stderr:
         (out_dir / "runner.err").write_text(proc.stderr, encoding="utf-8")
 
-    events: list[dict] = []
-    for line in proc.stdout.splitlines():
-        line = line.strip()
-        if not line:
-            continue
-        try:
-            events.append(json.loads(line))
-        except json.JSONDecodeError:
-            continue
+    events = _parse_events(proc.stdout)
 
     (out_dir / "final.md").write_text(_final_text(events), encoding="utf-8")
     usage = _usage(events, elapsed)
@@ -656,6 +753,10 @@ def _run_once(
         "exit_code": proc.returncode,
         "visible_skills": visible,
         "model": resolved_model(events),
+        # The raw --model argument, alias and all (e.g. "sonnet") — see
+        # _models_compatible's own docstring for when comparisons fall back
+        # to this instead of the resolved name above.
+        "requested_model": model,
         "wall_clock_seconds": usage["wall_clock_seconds"],
     }
 
@@ -803,14 +904,11 @@ def _recovered_record(
         except json.JSONDecodeError:
             pass
     events_path = out_dir / "events.jsonl"
-    events: list[dict] = []
-    if events_path.is_file():
-        for line in events_path.read_text(encoding="utf-8").splitlines():
-            if line.strip():
-                try:
-                    events.append(json.loads(line))
-                except json.JSONDecodeError:
-                    continue
+    events = (
+        _parse_events(events_path.read_text(encoding="utf-8"))
+        if events_path.is_file()
+        else []
+    )
     visible = visible_native_skills(events)
     record["visible_skills"] = visible
     # The resume path is exactly what `check_one_model` was written for, and a
@@ -818,6 +916,17 @@ def _recovered_record(
     # accept the next run on whatever the default has moved to, and the arm
     # comparison would carry the model difference the guard exists to catch.
     record["model"] = resolved_model(events)
+    # A crashed-and-recovered timeout has no init event to resolve a model
+    # from at all (see the sidecar's own write site in main()) — this is
+    # the only other place its `--model` pin survives, and without it the
+    # recovered row has no identity whatsoever, either wrongly reading as
+    # compatible with anything or forcing run_skill_eval.py to refuse the
+    # whole batch as an unknown-vs-known mix.
+    requested_path = out_dir / "requested_model.txt"
+    if requested_path.is_file():
+        requested = requested_path.read_text(encoding="utf-8").strip()
+        if requested:
+            record["requested_model"] = requested
     problem = check_treatment(arm, scenario, visible)
     if problem is None:
         # The third rejection `_run_once` can raise. It fires *before* the model
@@ -864,7 +973,22 @@ def main(argv: list[str] | None = None) -> int:
         help=f"Comma-separated subset of {','.join(ARMS)}",
     )
     parser.add_argument(
-        "--scenarios", default="", help="Comma-separated ids; default: every ready one"
+        "--scenarios",
+        default="",
+        help=(
+            "Comma-separated ids; default: every ready scenario for the "
+            f"flagship skill ({FLAGSHIP_SKILL})"
+        ),
+    )
+    parser.add_argument(
+        "--include-prototype-skills",
+        action="store_true",
+        help=(
+            "Also select ready scenarios for prototype-status skills (all "
+            f"skills other than {FLAGSHIP_SKILL}). Off by default per G37's "
+            "2026-08-11 scope note — the portfolio is frozen and only the "
+            "flagship skill is a live evaluation target."
+        ),
     )
     parser.add_argument("--timeout", type=int, default=900)
     args = parser.parse_args(argv)
@@ -924,10 +1048,33 @@ def main(argv: list[str] | None = None) -> int:
             file=sys.stderr,
         )
         return 1
+    if not args.include_prototype_skills:
+        # Explicitly named ids get the same refusal an unknown id gets, rather
+        # than being silently dropped — the freeze is a policy choice the
+        # caller must be told about, not a filter that quietly shrinks what
+        # they asked for. The default (unnamed) sweep is narrowed below
+        # instead of refused, since "every ready scenario" is documented as
+        # meaning "every ready flagship scenario" while the freeze holds.
+        prototype_wanted = sorted(
+            sid
+            for sid in wanted
+            if pack["scenarios"].get(sid, {}).get("skill") != FLAGSHIP_SKILL
+        )
+        if prototype_wanted:
+            print(
+                f"{', '.join(prototype_wanted)}: not the flagship skill "
+                f"({FLAGSHIP_SKILL}) — G37's 2026-08-11 scope note excludes "
+                f"prototype-status skills from evaluation by default. Pass "
+                f"--include-prototype-skills to run them anyway.",
+                file=sys.stderr,
+            )
+            return 1
     scenarios = {
         sid: entry
         for sid, entry in sorted(pack["scenarios"].items())
-        if entry["status"] == "ready" and (not wanted or sid in wanted)
+        if entry["status"] == "ready"
+        and (not wanted or sid in wanted)
+        and (args.include_prototype_skills or entry.get("skill") == FLAGSHIP_SKILL)
     }
     if not scenarios:
         print("no ready scenarios selected", file=sys.stderr)
@@ -991,6 +1138,32 @@ def main(argv: list[str] | None = None) -> int:
         tmp.write_text(json.dumps(index, indent=2), encoding="utf-8")
         os.replace(tmp, index_path)
 
+    def _in_scope_index() -> list[dict]:
+        # Scoped by *skill inclusion policy* (flagship-only, unless
+        # --include-prototype-skills), not by this invocation's own
+        # `scenarios` subset. The subset changes across invocations that
+        # pass different explicit --scenarios ids — e.g. one run of
+        # scenario A under model X followed by another run of scenario B
+        # under model Y, both flagship scenarios — and filtering to only
+        # the current invocation's ids would compare each run against an
+        # empty or unrelated index, missing a real model difference
+        # `run_skill_eval.py` will later aggregate together (it groups by
+        # skill/arm, not by which invocation produced a row). Rows for a
+        # scenario the pack no longer lists are excluded the same way
+        # `run_skill_eval.py` treats them as orphaned — never graded, so a
+        # model difference there never reaches an aggregate either. A
+        # function, not a value computed once, so both the newly-produced
+        # and the recovered-record paths below see `index` as it stood
+        # immediately before their own append.
+        in_pack = [row for row in index if row.get("scenario_id") in pack["scenarios"]]
+        if args.include_prototype_skills:
+            return in_pack
+        return [
+            row
+            for row in in_pack
+            if pack["scenarios"][row["scenario_id"]].get("skill") == FLAGSHIP_SKILL
+        ]
+
     for sid, scenario in scenarios.items():
         if not supported_here(scenario):
             print(
@@ -1004,8 +1177,19 @@ def main(argv: list[str] | None = None) -> int:
                     print(f"skip {sid}/{arm}/{rep} (already run)")
                     continue
                 if (out_dir / "final.md").exists():
+                    recovered = _recovered_record(out_dir, sid, arm, rep, scenario)
+                    # A record `_run_once` itself rejected for a model
+                    # mismatch has already written final.md by the time the
+                    # rejection is raised (see check_one_model below and
+                    # _recovered_record's own docstring for the parallel
+                    # case this mirrors) — so without this check, a later
+                    # resume would recover and index exactly the record the
+                    # first invocation refused to accept.
+                    mixed = check_one_model(_in_scope_index(), recovered)
+                    if mixed:
+                        raise RuntimeError(f"{sid}/{arm}/{rep} (recovered): {mixed}")
                     print(f"recover {sid}/{arm}/{rep} (ran, was not indexed)")
-                    index.append(_recovered_record(out_dir, sid, arm, rep, scenario))
+                    index.append(recovered)
                     flush()
                     continue
                 if out_dir.exists():
@@ -1021,7 +1205,37 @@ def main(argv: list[str] | None = None) -> int:
                     record = _run_once(
                         sid, scenario, arm, rep, out_dir, args.timeout, args.model
                     )
-                except subprocess.TimeoutExpired:
+                except subprocess.TimeoutExpired as exc:
+                    # subprocess.run() kills the process and still populates
+                    # TimeoutExpired.stdout/.stderr with whatever had already
+                    # been captured — a timeout after the CLI emitted its
+                    # early system/init event carries a real resolved model,
+                    # and discarding that would force a fallback identity
+                    # comparison (below) where a direct one was available.
+                    #
+                    # Despite text=True on the subprocess.run() call above,
+                    # CPython's own POSIX _communicate() builds this
+                    # exception's stdout/stderr from the raw byte buffers
+                    # collected so far — bypassing the text-mode decode step
+                    # that normally only runs once communicate() completes
+                    # normally — so these two attributes are bytes here, not
+                    # str, and Path.write_text() would raise TypeError on
+                    # them unconverted (verified against a real timeout).
+                    timeout_stdout = exc.stdout
+                    if isinstance(timeout_stdout, bytes):
+                        timeout_stdout = timeout_stdout.decode("utf-8", errors="replace")
+                    timeout_stderr = exc.stderr
+                    if isinstance(timeout_stderr, bytes):
+                        timeout_stderr = timeout_stderr.decode("utf-8", errors="replace")
+                    events = _parse_events(timeout_stdout)
+                    if events:
+                        (out_dir / "events.jsonl").write_text(
+                            timeout_stdout or "", encoding="utf-8"
+                        )
+                    if timeout_stderr:
+                        (out_dir / "runner.err").write_text(
+                            timeout_stderr, encoding="utf-8"
+                        )
                     record = {
                         "scenario_id": sid,
                         "arm": arm,
@@ -1029,9 +1243,53 @@ def main(argv: list[str] | None = None) -> int:
                         "skill": scenario["skill"],
                         "exit_code": None,
                         "timed_out": True,
+                        "model": resolved_model(events),
+                        # "requested_model" is set whenever --model pinned
+                        # one, so this row still carries a fallback identity
+                        # even when the process died before an init event
+                        # (or before that event survived capture at all):
+                        # _models_compatible() only falls back to the
+                        # requested alias when a resolved name is missing on
+                        # at least one side, so a pinned-model timeout with
+                        # no resolved model compares equal to another row
+                        # that ALSO has no resolved name (another timeout
+                        # under the same pin) without masking a real
+                        # resolved-model difference against a completed
+                        # sibling — that comparison uses both sides' resolved
+                        # names instead, this run's included. Left absent
+                        # (None) when --model was not passed — genuinely
+                        # unknown, and both this run's own check_one_model
+                        # call below and run_skill_eval.py's later
+                        # grading-time check correctly treat an unknown
+                        # identity as never provably consistent with a known
+                        # one.
+                        "requested_model": args.model,
                     }
-                    (out_dir / "final.md").write_text("", encoding="utf-8")
-                mixed = check_one_model(index, record)
+                    if args.model:
+                        # Written *before* final.md deliberately: final.md's
+                        # existence is the recovery sentinel _recovered_record()
+                        # checks below (and _run_once's own crash-recovery
+                        # branch, symmetrically) — a crash between the two
+                        # writes must not be able to land on the side where
+                        # the sentinel exists but this sidecar doesn't, or a
+                        # later resume sees a "complete" directory with no way
+                        # to learn what --model this run was pinned to (no
+                        # init event was ever captured, so events.jsonl is
+                        # absent or empty). A recovered row with no identity
+                        # at all would then either be silently treated as
+                        # compatible with everything (if nothing else in the
+                        # batch has an identity either) or force
+                        # run_skill_eval.py to refuse the whole batch as an
+                        # unknown-vs-known mix — for a run that really was
+                        # pinned consistently with the rest. Persisting the
+                        # pin here, unconditionally rather than only on a
+                        # detected crash, and strictly before the sentinel,
+                        # is what makes it recoverable.
+                        (out_dir / "requested_model.txt").write_text(
+                            args.model, encoding="utf-8"
+                        )
+                    (out_dir / "final.md").write_text(_final_text(events), encoding="utf-8")
+                mixed = check_one_model(_in_scope_index(), record)
                 if mixed:
                     raise RuntimeError(f"{sid}/{arm}/{rep}: {mixed}")
                 index.append(record)

@@ -31,6 +31,7 @@ from .diff_cxx_rules import (
     virtual_method_addition,
 )
 from .diff_default_value_reliability import (
+    constant_value_fingerprint_comparison_unreliable,
     default_value_fingerprint_comparison_unreliable,
 )
 from .diff_helpers import (
@@ -1905,13 +1906,28 @@ def _diff_param_va_list(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
 def _diff_constants(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
     """Detect preprocessor / const-constant changes (ABICC: Changed/Added/Removed_Constant).
 
-    Header-tier only: ``AbiSnapshot.constants`` is populated solely from castxml
-    header parsing. If either side was NOT (confirmed) parsed from headers
-    (DWARF/symbols mode, a snapshot taken before constant extraction, or a
-    legacy/inferred headerless snapshot), its ``constants`` map is empty only
-    because the data is *unavailable* — comparing would report every constant as
-    removed (or added, depending on direction). Skip unless both sides are
-    header-aware.
+    Header-tier only: ``AbiSnapshot.constants`` is populated from header
+    parsing (castxml, and the direct-clang backend's own
+    ``parse_constants()``). If either side was NOT (confirmed) parsed from
+    headers (DWARF/symbols mode, a snapshot taken before constant extraction,
+    or a legacy/inferred headerless snapshot), its ``constants`` map is empty
+    only because the data is *unavailable* — comparing would report every
+    constant as removed (or added, depending on direction). Skip unless both
+    sides are header-aware.
+
+    ``constant_value_fingerprint_comparison_unreliable`` declines a CHANGED
+    verdict when either side's value is a pre-stabilization direct-clang
+    fingerprint that can't be trusted against a fresh one — see that
+    function's own docstring (``diff_default_value_reliability.py``) for why.
+
+    Known limitation, not attempted here: a versioned inline namespace can
+    make the same constant reachable under two qualified spellings
+    (``detail::v1::x`` / ``detail::x``), double-reporting one real change.
+    A value-equality merge was tried and reverted as unsound in both
+    directions (merges unrelated same-valued constants; misses spellings
+    that started with different values) -- see ``qualified_name_segments``'s
+    module docstring for the full reasoning; a header constant has no
+    identity beyond its own value to merge on safely.
     """
     if not _both_header_aware(old, new):
         return []
@@ -1931,6 +1947,10 @@ def _diff_constants(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
                 )
             )
         elif new_val != old_val:
+            if constant_value_fingerprint_comparison_unreliable(
+                old, new, old_val, new_val
+            ):
+                continue
             changes.append(
                 make_change(
                     ChangeKind.CONSTANT_CHANGED,
@@ -1970,8 +1990,7 @@ def _diff_var_access(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
     if old.ast_producer != "castxml" or new.ast_producer != "castxml":
         return []
     if not (
-        old.castxml_var_access_facts_reliable
-        and new.castxml_var_access_facts_reliable
+        old.castxml_var_access_facts_reliable and new.castxml_var_access_facts_reliable
     ):
         return []
     return var_access_changes(_public_variables(old), _public_variables(new))

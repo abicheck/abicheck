@@ -74,6 +74,31 @@ class TestSniffTextFormat:
         p.write_text("   \n  {}")
         assert sniff_text_format(p) == "json"
 
+    def test_zstd_compressed_json_with_realistic_window(self, tmp_path):
+        """End-to-end repro of the reported bug: a `.json.zst` baseline
+        whose frame records a realistic multi-megabyte window (matching the
+        writer's real baseline level -- content large enough to keep zstd
+        out of the single-segment mode that would otherwise collapse the
+        recorded window down to the content size) must still sniff as
+        `json` rather than falling through to `unknown` -- which is what
+        surfaced as the user-facing "Cannot detect format" error when
+        `snapshot_io._ZSTD_MAX_WINDOW_SIZE_BYTES` was computed in KiB
+        instead of bytes."""
+        zstandard = pytest.importorskip("zstandard")
+
+        blob = "a" * (9 * 1024 * 1024)
+        text = json.dumps({"library": "x", "version": "1", "blob": blob})
+
+        params = zstandard.ZstdCompressionParameters.from_level(19, window_log=23)
+        cctx = zstandard.ZstdCompressor(compression_params=params)
+        compressed = cctx.compress(text.encode())
+        frame = zstandard.get_frame_parameters(compressed)
+        assert frame.window_size == 8 * 1024 * 1024
+
+        p = tmp_path / "baseline.json.zst"
+        p.write_bytes(compressed)
+        assert sniff_text_format(p) == "json"
+
 
 # ── expand_header_inputs() ──────────────────────────────────────────────────
 
@@ -1335,9 +1360,7 @@ class TestHeaderScopedInferredRoots:
                     "macho", tmp_path / "x.dylib", [umb], [], "1.0", "c++"
                 )
 
-    def test_explicit_device_context_failure_propagates_not_swallowed(
-        self, tmp_path
-    ):
+    def test_explicit_device_context_failure_propagates_not_swallowed(self, tmp_path):
         # Codex review: AstContextMissingError/AstContextAmbiguousError only
         # ever come from a NON-"host" --frontend-context request (ADR-050
         # D5) -- there is no "device" default, so seeing either here always
@@ -1864,7 +1887,9 @@ class TestCompareRequestAdr055Evidence:
         calls_by_path = {c["path"]: c for c in calls}
         assert calls_by_path[old_p]["dump_manifest"] is None
 
-    def test_per_side_compile_override_wins_over_pair_compile(self, tmp_path, monkeypatch):
+    def test_per_side_compile_override_wins_over_pair_compile(
+        self, tmp_path, monkeypatch
+    ):
         from abicheck.compile_context import CompileContext
 
         old_p = self._make_snap_file(tmp_path, "libtest", "1.0")
@@ -1985,7 +2010,9 @@ class TestCompareRequestAdr055Evidence:
         run_compare_request(request)
         assert embed_calls == []
 
-    def test_embedded_evidence_is_diffed_into_extra_changes(self, tmp_path, monkeypatch):
+    def test_embedded_evidence_is_diffed_into_extra_changes(
+        self, tmp_path, monkeypatch
+    ):
         """Codex review (P1): embed_build_source alone only writes
         snap.build_source -- the checker never reads it directly, so it must
         also be diffed (prepare_embedded_build_source) and forwarded to
@@ -2125,7 +2152,9 @@ class TestCompareRequestAdr055Evidence:
         run_compare_request(request)
         assert embed_calls[0]["extractor"] == "castxml"
 
-    def test_public_headers_forwarded_to_embed_build_source(self, tmp_path, monkeypatch):
+    def test_public_headers_forwarded_to_embed_build_source(
+        self, tmp_path, monkeypatch
+    ):
         """Codex review (P1): omitting the side's public-header roots from
         embed_build_source leaves source replay's own public-header set
         empty, so the L4 extractor can classify every declaration as non-API
@@ -2221,7 +2250,10 @@ class TestCompareRequestAdr055Evidence:
         private_inc = SimpleNamespace(path="/proj/private_support", project_owned=True)
         tu = SimpleNamespace(includes=[private_inc], forced_includes=())
         manifest = SimpleNamespace(
-            roots=[], public_header_paths=[], public_header_dirs=[], translation_units=[tu]
+            roots=[],
+            public_header_paths=[],
+            public_header_dirs=[],
+            translation_units=[tu],
         )
 
         embed_calls: list[dict] = []
@@ -3502,7 +3534,9 @@ class TestRunDumpHeaderGraph:
         ast = {"kind": "TranslationUnitDecl", "inner": []}
         with (
             patch("abicheck.service._dump_pe", return_value=snap),
-            patch("abicheck.dumper._clang_header_dump", return_value=(ast, None)) as mock_ast,
+            patch(
+                "abicheck.dumper._clang_header_dump", return_value=(ast, None)
+            ) as mock_ast,
         ):
             result = run_dump(p, "pe", [header], [], "1.0", "c++")
         mock_ast.assert_called_once()
@@ -3551,7 +3585,9 @@ class TestRunDumpHeaderGraph:
         cc = CompileContext(frontend_context="device")
         with (
             patch("abicheck.service._dump_pe", return_value=snap),
-            patch("abicheck.dumper._clang_header_dump", return_value=(ast, None)) as mock_ast,
+            patch(
+                "abicheck.dumper._clang_header_dump", return_value=(ast, None)
+            ) as mock_ast,
         ):
             run_dump(p, "pe", [header], [], "1.0", "c++", compile=cc)
         mock_ast.assert_called_once()
@@ -3595,7 +3631,9 @@ class TestRunDumpHeaderGraph:
         ast = {"kind": "TranslationUnitDecl", "inner": []}
         with (
             patch("abicheck.service._dump_pe", return_value=snap),
-            patch("abicheck.dumper._clang_header_dump", return_value=(ast, None)) as mock_ast,
+            patch(
+                "abicheck.dumper._clang_header_dump", return_value=(ast, None)
+            ) as mock_ast,
         ):
             result = run_dump(p, "pe", [hdr_dir], [], "1.0", "c++")
         mock_ast.assert_called_once()
@@ -4746,9 +4784,7 @@ class TestRunCompareRequestResolutionParity:
         )
         return calls
 
-    def test_follow_dependencies_populates_both_elf_sides(
-        self, tmp_path, monkeypatch
-    ):
+    def test_follow_dependencies_populates_both_elf_sides(self, tmp_path, monkeypatch):
         self._stub_dump(monkeypatch)
         calls = self._stub_dependency_population(monkeypatch)
         run_compare_request(
@@ -4940,7 +4976,6 @@ class TestComparePipelinePhases:
         # A JSON snapshot has no detected binary format, same as on the CLI.
         assert pair.old_fmt is None and pair.new_fmt is None
         assert pair.old_evidence.collect_mode == pair.new_evidence.collect_mode == "off"
-
 
     def test_layer_coverage_rows_reach_the_result(self, tmp_path, monkeypatch):
         """The one branch in `classify_compare_pair` nothing else exercises.

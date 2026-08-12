@@ -718,6 +718,10 @@ _COMPARISON_ONLY_FLAGS = {
     # ADR-049 D8: a pack's only application here is the baseline comparison's
     # policy file, so without one it would configure nothing.
     "pack_paths": "--pack",
+    # The findings/suppressed cap only applies to the --against summary
+    # `_baseline_summary` builds -- without a baseline there is no such
+    # summary to cap.
+    "max_findings": "--max-findings",
 }
 
 
@@ -1216,6 +1220,19 @@ def _discover_scan_project_config(
     help="Time guard (e.g. 15m); FAILS on overflow, never shrinks scope.",
 )
 @click.option(
+    "--max-findings",
+    "max_findings",
+    type=click.IntRange(min=1),
+    default=None,
+    help="With --against: cap on findings embedded in the summary's "
+    "findings/suppressed lists (default 20, or $ABICHECK_MAX_BASELINE_FINDINGS "
+    "when set). Raising it never changes the verdict/exit code -- only how "
+    "much of the diff the always-on summary itemizes; --format json on the "
+    "full `compare` command remains the way to see everything unconditionally. "
+    "When truncated, `findings_truncated_kinds`/`suppressed_truncated_kinds` "
+    "still report a kind -> count breakdown of what was cut.",
+)
+@click.option(
     "--abi3",
     "abi3",
     default=None,
@@ -1373,6 +1390,7 @@ def scan_cmd(
     since: str | None,
     changed_paths_opt: tuple[str, ...],
     budget: str | None,
+    max_findings: int | None,
     abi3: str | None,
     dry_run: bool,
     crosschecks: tuple[str, ...],
@@ -1901,6 +1919,7 @@ def scan_cmd(
             compile_context=None if compile_context.is_default else compile_context,
             defer_cleanup=build_dir_cleanups,
             abi3_floor=abi3_floor,
+            max_findings=max_findings,
         )
     except _BudgetOverflow as bo:
         click.echo(bo.message, err=True)
