@@ -32,18 +32,33 @@ change once per spelling.
 :func:`version_strip_segments` directly, gated on real extraction-data
 identity (a shared mangled name, a shared source location) before ever
 merging two spellings -- see its own module docstring. There is
-deliberately **no** merge helper here for a plain name-keyed mapping like
-``AbiSnapshot.constants``: a header constant carries no identity beyond its
-own value, and value-equality alone was tried and repeatedly shown
-(Codex review, P1, three rounds) to be indistinguishable from coincidence
-in both directions -- it can hide a real value divergence between two
-unrelated declarations that happen to start equal, and it can also merge
-two unrelated declarations that never even coexist in the same snapshot,
-each present on only one side. ``diff_symbols._diff_constants`` therefore
-compares ``AbiSnapshot.constants`` unmodified; double-reporting a constant
-value change once per versioned-namespace spelling is an accepted, documented
-limitation (see that function's docstring) rather than a heuristic that
-cannot be made sound with the data available today.
+deliberately **no** merge helper here for comparing a plain name-keyed
+mapping like ``AbiSnapshot.constants`` *across two different snapshots*: a
+header constant carries no identity beyond its own value there, and
+value-equality alone was tried and repeatedly shown (Codex review, P1,
+three rounds) to be indistinguishable from coincidence in both directions
+-- it can hide a real value divergence between two unrelated declarations
+that happen to start equal, and it can also merge two unrelated
+declarations that never even coexist in the same snapshot, each present on
+only one side. ``diff_symbols._diff_constants`` therefore compares
+``AbiSnapshot.constants`` unmodified across snapshots; double-reporting a
+constant value *change* once per versioned-namespace spelling remains an
+accepted, documented limitation there (see that function's docstring).
+
+:func:`dedup_versioned_namespace_alias_items` is a narrower, different
+operation this module *does* provide: collapsing a using-declaration's
+re-exported spelling of a constant back onto the single declaration it
+names, *within one already-collected snapshot's own item list* -- not
+across two snapshots being compared. It is safe where the rejected
+cross-snapshot merge was not because it is gated on strictly more, and
+different, evidence: both a real :func:`version_strip_segments` structural
+match (never a declaration's own leaf name) AND identical values, for two
+entries that provably coexist in the same extraction pass. A
+using-declaration cannot legally re-export a constant under a different
+value, so within one snapshot this combination can only misfire on two
+genuinely distinct declarations that coincidentally share both a
+version-alias-shaped name pair and an identical value -- a materially
+narrower coincidence than the bare value equality rejected above.
 """
 
 from __future__ import annotations
@@ -140,3 +155,49 @@ def version_strip_segments(segs: list[str]) -> tuple[tuple[str, ...], int | None
         if v is not None:
             return tuple(segs[:i] + segs[i + 1 :]), v
     return tuple(segs), None
+
+
+def dedup_versioned_namespace_alias_items(
+    items: list[tuple[str, str, str]],
+) -> list[tuple[str, str, str]]:
+    """Collapse a using-declaration's re-exported spelling of a header
+    constant back onto the single declaration it names.
+
+    *items* is ``(qualified_name, value, declaring_header)`` triples from one
+    already-collected header-AST extraction pass (the shape
+    ``dumper_castxml.py``'s ``_iter_public_constants`` produces). A plain
+    ``namespace v1 { constexpr T x = ...; } using v1::x;`` re-export makes a
+    header-AST producer emit a *second*, independent declaration for the
+    using-declaration -- keyed under its own qualified name (``ns::x``)
+    alongside the real declaration's (``ns::v1::x``). Nothing keyed by exact
+    name -- not ``model.py``'s first-wins dedup, not a caller iterating
+    ``AbiSnapshot.constants`` -- can tell these apart on its own: the two
+    don't collide on a key, they are two distinct keys naming one
+    declaration. See this module's own docstring for why this is a
+    deliberately narrower, same-snapshot operation, not the value-equality
+    merge already rejected for cross-snapshot comparison.
+
+    For every item whose qualified name strips one versioned-inline-namespace
+    segment (:func:`version_strip_segments`), if the stripped spelling is
+    ALSO present in *items* with an identical value, the versioned original
+    is dropped and only the shorter, version-stripped alias -- the spelling
+    a consumer of the ``using`` re-export actually writes -- is kept.
+    Returns *items* unchanged (same list identity not guaranteed, but same
+    contents) when no such pair exists, which is the overwhelmingly common
+    case: most versioned-namespace declarations have no re-export at all.
+    """
+    by_name = {name: value for name, value, _header in items}
+    drop: set[str] = set()
+    for name, value, _header in items:
+        stripped_segs, version = version_strip_segments(segments(name))
+        if version is None:
+            continue
+        stripped_name = "::".join(stripped_segs)
+        if stripped_name == name:
+            continue
+        alias_value = by_name.get(stripped_name)
+        if alias_value is not None and alias_value == value:
+            drop.add(name)
+    if not drop:
+        return items
+    return [item for item in items if item[0] not in drop]

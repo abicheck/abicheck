@@ -2160,109 +2160,115 @@ Once a root command genuinely clears the bar above, pick the right home:
   fact has resolved-target validation today, not just this one — closing
   it here alone would be an inconsistent one-off fix for a structural gap;
   it belongs with the toolchain-identity probe above once that lands.
-- **A using-declaration re-exporting a namespace-scope constant produces
+- **A using-declaration re-exporting a namespace-scope constant produced
   two `AbiSnapshot.constants` entries for one declaration on the castxml
-  backend — reported against real oneDAL headers, investigated, not
-  fixed.** `cpu.hpp` opens a plain (non-inline) `namespace v1 { constexpr
-  ... cpu_feature_map = ...; }` and later does `using
-  v1::cpu_feature_map;` inside the enclosing `detail` namespace — an
-  ordinary C++ re-export pattern, not versioned-inline-namespace ABI
-  tagging (`inline namespace v1 {}`, which is the shape
-  `diff_namespaces.py`'s `_paired_stable_indices`/
+  backend — reported against real oneDAL headers, now fixed on castxml;
+  a complementary clang-side false negative remains open.** `cpu.hpp`
+  opens a plain (non-inline) `namespace v1 { constexpr ... cpu_feature_map
+  = ...; }` and later does `using v1::cpu_feature_map;` inside the
+  enclosing `detail` namespace — an ordinary C++ re-export pattern, not
+  versioned-inline-namespace ABI tagging (`inline namespace v1 {}`, which
+  is the shape `diff_namespaces.py`'s `_paired_stable_indices`/
   `EXPERIMENTAL_REMOVED_WITHOUT_REPLACEMENT` machinery already merges
-  aliases for — that machinery is function/type-scoped and, separately,
-  keys on `experimental`/`preview`/`v0` segments specifically, so it
-  neither targets nor would catch this pattern even if it applied to
-  constants). castxml's `<Variable>` XML apparently records the
-  using-declaration as a second full element rather than a reference to
-  the original, so `dumper_castxml.py`'s `_iter_public_constants()` (the
-  shared source for `parse_constants()`) emits both
+  aliases for — that machinery is function/type-scoped, cross-*snapshot*
+  (old vs. new), and keys on `experimental`/`preview`/`v0` segments
+  specifically, so it neither targets nor would catch this same-snapshot
+  pattern even if it applied to constants). castxml's `<Variable>` XML
+  records the using-declaration as a second full element rather than a
+  reference to the original, so `dumper_castxml.py`'s
+  `_iter_public_constants()` (the shared source for `parse_constants()`/
+  `parse_constant_headers()`) used to emit both
   `detail::v1::cpu_feature_map` and `detail::cpu_feature_map` as
   independent entries in `AbiSnapshot.constants` with the same value —
-  distinct qualified-name *keys*, not a key collision, so this is
+  distinct qualified-name *keys*, not a key collision, so this was
   invisible to `model.py`'s existing first-wins duplicate-name dedup
   (`function_map`/`variable_map`/`type_by_name` all dedup by identity —
   mangled name or bare type name — under which a using-shadow naturally
   collapses onto its target; `AbiSnapshot.constants` has no mangled-name
-  equivalent and no alias-identity mechanism at all). Reported at real
-  scale, not a one-off: 98 alias groups across 267 constants in the
-  reporting library's own dump. The same castxml behavior duplicates
-  other declaration kinds too, with two different outcomes: 1,477 of
-  6,009 mangled function names were duplicated the same way, but that
-  half is **not** a live bug — `model.py`'s mangled-name-keyed
-  `function_map`/`variable_map` already collapse a using-shadow function
-  or variable onto its target for free, since a using-declaration doesn't
-  change what a symbol mangles to. A duplicated bare *type* name
-  (`range` alongside `v1::range`) is a live gap, but a different-shaped
-  one from the type-dedup entry already documented above (opaque-type
-  suppression keyed by bare `RecordType.name` colliding *across
-  namespaces* on an accidentally-shared bare name) — `range`/`v1::range`
-  are two distinct qualified spellings of what may be the same
-  using-re-exported record, so today's exact-bare-name first-wins dedup
-  does not merge them either, and would need the identical alias-identity
-  mechanism this entry is about, not the cross-namespace-collision fix
-  already scoped there.
+  equivalent). Reported at real scale, not a one-off: 98 alias groups
+  across 267 constants in the reporting library's own dump. The same
+  castxml behavior duplicates other declaration kinds too, with two
+  different outcomes: 1,477 of 6,009 mangled function names were
+  duplicated the same way, but that half was **never** a live bug —
+  `model.py`'s mangled-name-keyed `function_map`/`variable_map` already
+  collapse a using-shadow function or variable onto its target for free,
+  since a using-declaration doesn't change what a symbol mangles to. A
+  duplicated bare *type* name (`range` alongside `v1::range`) is a
+  **separate, still-open** gap from the type-dedup entry already
+  documented above (opaque-type suppression keyed by bare
+  `RecordType.name` colliding *across namespaces* on an accidentally-
+  shared bare name) — `range`/`v1::range` are two distinct qualified
+  spellings of what may be the same using-re-exported record, so today's
+  exact-bare-name first-wins dedup does not merge them either, and would
+  need its own, differently-shaped fix (threaded through `RecordType`
+  identity, not `AbiSnapshot.constants`), not attempted here.
 
-  **Confirmed independently that the duplicate-entry shape is castxml-only
-  — but the direct-clang L2 backend is not clean either, it just fails in
-  the opposite direction (Codex review, fresh evidence).** Verified
-  directly against real Clang 18 (`-Xclang -ast-dump=json`) on a minimal
-  repro of the same shape (a namespace-scope `constexpr` re-exported into
-  an enclosing namespace via `using`): Clang's AST represents the
-  using-declaration as a `UsingDecl` node carrying the qualified target
-  name (`v1::cpu_feature_map`) but no `init`/value of its own, immediately
-  followed by an **implicit**, **unnamed** `UsingShadowDecl`
+  **Fixed**: `qualified_name_segments.dedup_versioned_namespace_alias_items()`
+  collapses the versioned spelling onto its version-stripped alias within
+  one already-collected `_iter_public_constants()` item list, gated on
+  BOTH (1) the two qualified names differing by exactly one
+  versioned-inline-namespace *segment* (`version_strip_segments` — the
+  same, already-trusted structural check `diff_namespaces.py` already
+  relies on for its own alias merging, which by construction never
+  matches a declaration's own leaf name) AND (2) the two values being
+  byte-identical. This is deliberately **not** the plain value-equality
+  merge this same module's own docstring already rejected after three
+  review rounds (P1): that heuristic had no name evidence at all and ran
+  *across* two different snapshots being compared, so it could merge
+  unrelated same-valued declarations that never even coexist together.
+  This fix is narrower on every axis — same-snapshot only, and gated on a
+  real structural name relationship in addition to value equality — so it
+  can only misfire on two genuinely distinct declarations that
+  coincidentally share both a version-alias-shaped qualified-name pair
+  and an identical value within the same extraction pass, a materially
+  narrower coincidence than bare value equality alone. Keeps the
+  version-stripped (shorter) spelling — the one a consumer of the `using`
+  re-export actually writes. See
+  `tests/test_qualified_name_segments.py` and
+  `TestConstantExtraction.test_using_reexported_constant_is_deduplicated`
+  (`tests/test_dumper_members.py`) for the regression coverage, including
+  the safety-gate cases (differing values never merge; a versioned
+  constant with no re-export keeps its full name; a leaf name shaped like
+  a version segment, e.g. a constant literally named `v1`, is never
+  stripped).
+
+  **Still open, deliberately not attempted in this same pass: the
+  complementary clang-side false negative.** Verified directly against
+  real Clang 18 (`-Xclang -ast-dump=json`) that the direct-clang L2
+  backend never reproduces the castxml duplication, but not because it
+  handles the using-declaration correctly — it drops it entirely. A
+  using-declaration lowers to a `UsingDecl` node carrying the qualified
+  target name (`v1::cpu_feature_map`) but no `init`/value of its own,
+  immediately followed by an **implicit**, **unnamed** `UsingShadowDecl`
   (`"isImplicit": true`, no `name` key at all — confirmed by inspecting
   the emitted JSON directly, not inferred). `dumper_clang.py`'s
   `_categorize()` has no branch matching either `UsingDecl` or
   `UsingShadowDecl` — its `VarDecl` branch requires both `kind ==
   "VarDecl"` and a non-empty `name`, neither of which either using-related
-  node satisfies — so both are silently dropped and the direct-clang
-  backend never emits the duplicate. Not verified against a live castxml
-  run (no castxml binary available in this environment to reproduce the
-  XML shape directly) — the castxml-side mechanism above is taken from the
-  original report, not independently re-derived from castxml's own
-  output.
-
-  This is *complementary* missing coverage, not a clean bill of health for
-  Clang: because the re-exported spelling never enters `AbiSnapshot.
-  constants` at all on that backend, a release that removes only the
-  `using v1::cpu_feature_map;` re-export while keeping the real
-  `v1::cpu_feature_map` definition breaks every consumer of the re-exported
-  spelling, but both the old and new Clang-derived snapshots contain only
-  the one underlying key — `_diff_constants()` has nothing to compare and
-  emits no `CONSTANT_REMOVED`, a silent false negative. Castxml's two
-  qualified keys, over-reporting as they are for the case this entry is
-  about, would at least detect that removal correctly. So the two backends
-  fail in opposite directions on the same underlying gap (no alias-identity
-  evidence for constants) — over-reporting on castxml, under-reporting on
-  clang — and any eventual fix (value-based or identity-based) must
-  preserve the alias spelling as its own comparable entity for add/remove
-  detection, not just collapse the duplicate down to one key.
-
-  **Not fixed here.** A correct fix needs proven identity between the two
-  entries, not name-based merging, for the same reason the
-  versioned-inline-namespace alias work above insists on identity
-  evidence rather than a raw segment-strip match: two of this module's own
-  sibling identity heuristics were each independently falsified twice and
-  documented as accepted limitations rather than attempted a third time
-  (see `_type_index_items`'s and `_diff_constants`'s own docstrings, and
-  `constant_value_fingerprint_comparison_unreliable`, referenced above in
-  the metamorphic-property-tests section) — merging two `AbiSnapshot.
-  constants` entries purely because they share an identical value string
-  would repeat exactly that mistake: two unrelated constants can
-  legitimately share a value, and a value-based merge would then silently
-  under-report a real add/remove pair for one of them. The other route —
-  threading the castxml `<Variable>` element's own using-shadow/target
-  relationship (if castxml's XML even exposes one; unconfirmed here) through
-  `_iter_public_constants()`'s current `(qualified_name, init_value,
-  declaring_header)` output shape as new alias-identity evidence, in the
-  same "most specific available identity, ambiguity-safe fallback" spirit
-  ADR-045/048/049 already establish for types/L5 nodes/flat symbols — needs
-  the real castxml XML inspected first to know whether that evidence is
-  even present, which this environment cannot do. Filed here rather than
-  guessed at, per this file's own "known gaps over risky reactive
-  patches" convention.
+  node satisfies — so both are silently dropped and the re-exported
+  spelling never enters `AbiSnapshot.constants` at all on that backend.
+  This is *complementary* missing coverage, not a clean bill of health:
+  a release that removes only the `using v1::cpu_feature_map;` re-export
+  while keeping the real `v1::cpu_feature_map` definition breaks every
+  consumer of the re-exported spelling, but both the old and new
+  Clang-derived snapshots contain only the one underlying key —
+  `_diff_constants()` has nothing to compare and emits no
+  `CONSTANT_REMOVED`, a silent false negative. Castxml's (now-deduplicated)
+  alias spelling would still detect that removal correctly. Closing this
+  needs `dumper_clang.py` to actually *capture* the alias as a new,
+  separate declaration (resolving `UsingShadowDecl.target` back to the
+  real `VarDecl` it shadows, then re-registering it under the
+  using-declaration's own enclosing-scope name) — new extraction, not a
+  dedup pass over what's already collected, and therefore a materially
+  different and riskier change than the castxml-side fix above: it adds a
+  new declaration to the clang-derived surface rather than removing a
+  spurious one, so a mistake there risks fabricating findings instead of
+  merely missing one. Not verified against a live castxml run either (no
+  castxml binary available in this environment to reproduce the XML shape
+  directly) — the castxml-side mechanism above is taken from the original
+  report, not independently re-derived from castxml's own output. Filed
+  here rather than attempted under the same pass, per this file's own
+  "known gaps over risky reactive patches" convention.
 
 ## What NOT to do
 

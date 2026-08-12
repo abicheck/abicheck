@@ -318,6 +318,22 @@ _CONSTANTS_XML = """<?xml version="1.0"?>
 </CastXML>"""
 
 
+_USING_REEXPORT_CONST_XML = """<?xml version="1.0"?>
+<CastXML>
+  <Variable id="_20" name="cpu_feature_map" type="_6" init="42" context="_3" file="f1" line="1"/>
+  <Variable id="_21" name="cpu_feature_map" type="_6" init="42" context="_2" file="f1" line="2"/>
+  <Variable id="_22" name="kOther" type="_6" init="1" context="_4" file="f1" line="3"/>
+  <Variable id="_23" name="kOther" type="_6" init="2" context="_1" file="f1" line="4"/>
+  <Variable id="_24" name="kVersionOnly" type="_6" init="9" context="_3" file="f1" line="5"/>
+  <FundamentalType id="_6" name="const int" size="32"/>
+  <Namespace id="_1" name="::"/>
+  <Namespace id="_2" name="detail" context="_1"/>
+  <Namespace id="_3" name="v1" context="_2"/>
+  <Namespace id="_4" name="v1" context="_1"/>
+  <File id="f1" name="test.h"/>
+</CastXML>"""
+
+
 _PRIVATE_CONST_XML = """<?xml version="1.0"?>
 <CastXML>
   <Variable id="_13" name="kPublic" type="_6" init="1" context="_9" access="public" file="f1" line="3" static="1"/>
@@ -369,6 +385,50 @@ class TestConstantExtraction:
         # (the context walk stops cleanly).
         p = _make_parser(_CONST_DEFENSIVE_XML, public_header_paths=["api.h"])
         assert p.parse_constants() == {"kReal": "1"}
+
+    def test_using_reexported_constant_is_deduplicated(self) -> None:
+        # Regression (reported against real oneDAL headers): `namespace v1 {
+        # constexpr ... cpu_feature_map = ...; }` followed by `using
+        # v1::cpu_feature_map;` in the enclosing `detail` namespace makes
+        # castxml emit a *second* <Variable> for the using-declaration --
+        # `detail::v1::cpu_feature_map` (the real declaration) and
+        # `detail::cpu_feature_map` (the re-export), same value, two
+        # different qualified-name keys. Only the version-stripped alias
+        # spelling -- the one a consumer of the `using` re-export actually
+        # writes -- survives; the versioned original is dropped.
+        p = _make_parser(_USING_REEXPORT_CONST_XML, public_header_paths=["test.h"])
+        consts = p.parse_constants()
+        assert consts["detail::cpu_feature_map"] == "42"
+        assert "detail::v1::cpu_feature_map" not in consts
+
+    def test_differing_values_are_not_merged_as_an_alias(self) -> None:
+        # Safety gate: two constants whose names merely *look* like a
+        # versioned-namespace alias pair (`v1::kOther` / `kOther`) but carry
+        # different values are two genuinely distinct declarations -- a
+        # using-declaration can never legally re-export a constant under a
+        # different value, so a value mismatch means "not an alias" and both
+        # must be kept.
+        p = _make_parser(_USING_REEXPORT_CONST_XML, public_header_paths=["test.h"])
+        consts = p.parse_constants()
+        assert consts["v1::kOther"] == "1"
+        assert consts["kOther"] == "2"
+
+    def test_versioned_constant_with_no_reexport_keeps_its_full_name(self) -> None:
+        # The overwhelmingly common case: a versioned-namespace constant with
+        # no `using` re-export at all must keep its real, fully-qualified
+        # name -- there is no alias spelling in the snapshot to collapse onto.
+        p = _make_parser(_USING_REEXPORT_CONST_XML, public_header_paths=["test.h"])
+        consts = p.parse_constants()
+        assert consts["detail::v1::kVersionOnly"] == "9"
+
+    def test_using_reexport_dedup_applies_to_constant_headers_too(self) -> None:
+        # parse_constant_headers() shares _iter_public_constants() with
+        # parse_constants() (see that method's own docstring) -- the two
+        # maps must never disagree, including after this dedup.
+        p = _make_parser(_USING_REEXPORT_CONST_XML, public_header_paths=["test.h"])
+        headers = p.parse_constant_headers()
+        assert "detail::cpu_feature_map" in headers
+        assert "detail::v1::cpu_feature_map" not in headers
 
 
 def test_default_argument_value_is_parsed() -> None:
