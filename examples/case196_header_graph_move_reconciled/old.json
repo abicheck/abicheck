@@ -7,22 +7,22 @@
     },
     "compile_units": 0,
     "edge_kinds": {
-      "SOURCE_DECLARES": 1
+      "SOURCE_DECLARES": 2
     },
     "include_edges": {
       "collected": false,
       "count": 0
     },
     "node_kinds": {
-      "header": 1,
-      "source_decl": 1,
+      "header": 2,
+      "source_decl": 2,
       "target": 1
     },
     "reference_edges": {
       "collected": false,
       "count": 0
     },
-    "source_decls": 1,
+    "source_decls": 2,
     "targets": 1,
     "type_edges": {
       "collected": false,
@@ -35,7 +35,7 @@
       "attrs": {},
       "confidence": "unknown",
       "conflicts": [],
-      "dst": "decl://_ZN4demo1fEi",
+      "dst": "decl://_ZN4demo7processEv",
       "edge": "SOURCE_DECLARES",
       "facts": [
         {
@@ -47,18 +47,52 @@
       "occurrences": [],
       "provenance": "source_abi",
       "resolved": {},
-      "src": "header://include/demo/api_v1.h"
+      "src": "header://include/demo/api.h"
+    },
+    {
+      "attrs": {},
+      "confidence": "unknown",
+      "conflicts": [],
+      "dst": "decl://_ZN4demo6detail6helperEi",
+      "edge": "SOURCE_DECLARES",
+      "facts": [
+        {
+          "attrs": {},
+          "confidence": "unknown",
+          "producer": "source_abi"
+        }
+      ],
+      "occurrences": [],
+      "provenance": "source_abi",
+      "resolved": {},
+      "src": "header://include/demo/detail_v1.h"
+    },
+    {
+      "attrs": {},
+      "confidence": "unknown",
+      "conflicts": [],
+      "dst": "decl://_ZN4demo6detail6helperEi",
+      "edge": "DECL_CALLS_DECL",
+      "facts": [],
+      "occurrences": [],
+      "provenance": "",
+      "resolved": {},
+      "src": "decl://_ZN4demo7processEv"
     }
   ],
   "external_graph_refs": [],
   "extractor_passes": {},
-  "graph_id": "sha256:6b17e1fe3dc1c93301997278889e7f1eef8e73e78ce9efd23b0f8dcad6545a8c",
+  "graph_id": "sha256:bf90ddda62564d24dda5b9c2e243c4c63dd6b62df92427a7e433b7f2414856d8",
   "indexes": {
     "by_binary_symbol": {},
     "by_file": {},
     "by_source_decl": {
-      "decl://_ZN4demo1fEi": [
-        "header://include/demo/api_v1.h"
+      "decl://_ZN4demo6detail6helperEi": [
+        "decl://_ZN4demo7processEv",
+        "header://include/demo/detail_v1.h"
+      ],
+      "decl://_ZN4demo7processEv": [
+        "header://include/demo/api.h"
       ]
     },
     "by_target": {}
@@ -114,9 +148,9 @@
           "producer": "source_abi"
         }
       ],
-      "id": "decl://_ZN4demo1fEi",
+      "id": "decl://_ZN4demo7processEv",
       "kind": "source_decl",
-      "label": "demo::f",
+      "label": "demo::process",
       "provenance": "source_abi",
       "resolved": {
         "consumer_compiled_body": false,
@@ -139,9 +173,61 @@
           "producer": "source_abi"
         }
       ],
-      "id": "header://include/demo/api_v1.h",
+      "id": "header://include/demo/api.h",
       "kind": "header",
-      "label": "include/demo/api_v1.h",
+      "label": "include/demo/api.h",
+      "provenance": "source_abi",
+      "resolved": {
+        "origin": "UNKNOWN"
+      }
+    },
+    {
+      "attrs": {
+        "consumer_compiled_body": false,
+        "decl_kind": "function",
+        "visibility": "private_header"
+      },
+      "confidence": "unknown",
+      "conflicts": [],
+      "facts": [
+        {
+          "attrs": {
+            "consumer_compiled_body": false,
+            "decl_kind": "function",
+            "visibility": "private_header"
+          },
+          "confidence": "unknown",
+          "producer": "source_abi"
+        }
+      ],
+      "id": "decl://_ZN4demo6detail6helperEi",
+      "kind": "source_decl",
+      "label": "demo::detail::helper",
+      "provenance": "source_abi",
+      "resolved": {
+        "consumer_compiled_body": false,
+        "decl_kind": "function",
+        "visibility": "private_header"
+      }
+    },
+    {
+      "attrs": {
+        "origin": "UNKNOWN"
+      },
+      "confidence": "unknown",
+      "conflicts": [],
+      "facts": [
+        {
+          "attrs": {
+            "origin": "UNKNOWN"
+          },
+          "confidence": "unknown",
+          "producer": "source_abi"
+        }
+      ],
+      "id": "header://include/demo/detail_v1.h",
+      "kind": "header",
+      "label": "include/demo/detail_v1.h",
       "provenance": "source_abi",
       "resolved": {
         "origin": "UNKNOWN"

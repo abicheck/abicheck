@@ -5,7 +5,7 @@ This document explains how each ABI checking tool works, what it measured on the
 
 > **Note:** abicheck's exact, up-to-date change-kind count is tracked in the
 > [Change Kind Reference](change-kinds.md).
-> The `examples/` catalog currently has **193 cases** (`examples/ground_truth.json`
+> The `examples/` catalog currently has **196 cases** (`examples/ground_truth.json`
 > is the source of truth — see `examples/README.md`). Two benchmarks run against it:
 >
 > - A **pinned 74-case cross-tool subset** (`case01`-`case73` + `case26b`),
@@ -15,11 +15,11 @@ This document explains how each ABI checking tool works, what it measured on the
 > - A **full-catalog sweep** scoring every case, with SKIP/ERROR/TIMEOUT counted
 >   as misses. See [Full-catalog benchmark](#full-catalog-benchmark-2026-07-18-all-195-cases).
 >
-> **Which denominator is which.** Of the 193 catalog cases, **159** are
+> **Which denominator is which.** Of the 196 catalog cases, **159** are
 > compilable `v1`/`v2` shared-library (`.so`) pairs that abidiff/ABICC can also
 > run against — abicheck's own competitor benchmark builds and scores these
-> through the normal build → dump → compare pipeline. The remaining **34**
-> don't fit that shape (10 single-artifact audit/cross-source checks, 11
+> through the normal build → dump → compare pipeline. The remaining **37**
+> don't fit that shape (10 single-artifact audit/cross-source checks, 14
 > build-source-pack (L3-L5) replays, 6 committed snapshot-pair fixtures, 5
 > multi-library bundle directories, 1 kernel-BTF blob, 1 Python stub-pair) and
 > have no abidiff/ABICC equivalent, so they're scored by abicheck alone through
@@ -56,22 +56,22 @@ ABICC/libabigail on a stable cross-tool corpus?"
 
 | Scan | Scope | Execution | Result | Quality signal |
 |------|:-----:|-----------|--------|----------------|
-| Catalog metadata | 193 ground-truth entries | `examples/ground_truth.json` + `tests/test_evidence_tiers.py` | 159 binary competitor `.so` lanes + 34 dedicated non-`.so` lanes | Single source of truth for examples, verdicts, expected kinds, and minimum evidence; split recomputed directly from `ground_truth.json`'s `mode`/`bundle`/`fixtures`/`skip` fields (see the "Which denominator is which" note above) |
+| Catalog metadata | 196 ground-truth entries | `examples/ground_truth.json` + `tests/test_evidence_tiers.py` | 159 binary competitor `.so` lanes + 37 dedicated non-`.so` lanes | Single source of truth for examples, verdicts, expected kinds, and minimum evidence; split recomputed directly from `ground_truth.json`'s `mode`/`bundle`/`fixtures`/`skip` fields (see the "Which denominator is which" note above) |
 | Build/autodiscovery | 211 integration items | `python -m pytest tests/test_example_autodiscovery.py -v --tb=short -m integration` | gcc: 146 passed / 60 skipped / 5 xfailed; clang: 146 passed / 59 skipped / 6 xfailed | Green default single-library build lane; skipped items are covered by dedicated bundle/source/audit/BTF tests |
-| Full example proof matrix | 193 catalog cases | `validation/scripts/collect_full_example_matrix.py` over CI artifacts + bundle/G20/L3-L5/BTF proofs | Dedicated full-catalog proof lane | Full-catalog source of truth; a `SKIP` in one lane is accepted only when a dedicated lane proves the case |
-| Default/debug verdicts | 193 catalog cases | `PYTHONPATH=. python tests/validate_examples.py --toolchain {gcc,clang} --json` | gcc: 146 PASS / 42 SKIP / 5 XFAIL; clang: 146 PASS / 41 SKIP / 6 XFAIL. Both lanes carry the same 1-2 undocumented `expected_kinds` mismatches (verdict correct, kind set incomplete): gcc on `case116_atomic_qualifier_changed`; clang on that plus `case115_bit_int_width_changed` | Single-library debug lane; dedicated non-`.so` cases skip here by design; XFAIL is not green full-matrix scope |
+| Full example proof matrix | 196 catalog cases | `validation/scripts/collect_full_example_matrix.py` over CI artifacts + bundle/G20/L3-L5/BTF proofs | Dedicated full-catalog proof lane | Full-catalog source of truth; a `SKIP` in one lane is accepted only when a dedicated lane proves the case |
+| Default/debug verdicts | 196 catalog cases | `PYTHONPATH=. python tests/validate_examples.py --toolchain {gcc,clang} --json` | gcc: 146 PASS / 42 SKIP / 5 XFAIL; clang: 146 PASS / 41 SKIP / 6 XFAIL. Both lanes carry the same 1-2 undocumented `expected_kinds` mismatches (verdict correct, kind set incomplete): gcc on `case116_atomic_qualifier_changed`; clang on that plus `case115_bit_int_width_changed` | Single-library debug lane; dedicated non-`.so` cases skip here by design; XFAIL is not green full-matrix scope |
 | Bundle release verdicts | 5 bundle cases | `PYTHONPATH=. python validation/scripts/run_bundle_examples.py --json` | 5 PASS | Runs the ADR-023 multi-library examples through `abicheck compare old/ new/` |
-| Runtime smoke | 193 catalog cases | `PYTHONPATH=. python validation/scripts/run_example_runtime_smoke.py --json` | Runtime-only proof lane | Runtime harness has no BUILD_ERROR/BASELINE_ERROR bucket |
-| Release headers | 193 catalog cases | `validate_examples.py --artifact-variant release-headers --json` in CI artifact | Reduced-evidence informational lane | False-positive guard passed |
-| Stripped headers | 193 catalog cases | `validate_examples.py --artifact-variant stripped-headers --json` in CI artifact | Reduced-evidence informational lane | Expected signal-loss backlogs remain |
+| Runtime smoke | 196 catalog cases | `PYTHONPATH=. python validation/scripts/run_example_runtime_smoke.py --json` | Runtime-only proof lane | Runtime harness has no BUILD_ERROR/BASELINE_ERROR bucket |
+| Release headers | 196 catalog cases | `validate_examples.py --artifact-variant release-headers --json` in CI artifact | Reduced-evidence informational lane | False-positive guard passed |
+| Stripped headers | 196 catalog cases | `validate_examples.py --artifact-variant stripped-headers --json` in CI artifact | Reduced-evidence informational lane | Expected signal-loss backlogs remain |
 | Build/source smoke | 10 representative cases | `validate_examples.py case01 case04 case98 case105 case122 case129 case130 case131 case132 case133 --artifact-variant build-source --json` in CI artifact | 10 PASS | Build/source evidence catches the build-flag mode cases in the smoke set |
-| Binary competitor scan | 159 shared-library pairs × 2 external tools (4 tool/mode combinations) | abicc (dumper + xml) and libabigail `abidiff` (+headers) over built `.so` pairs | 636 tool invocations attempted; per-tool correct/accuracy in the [full-catalog benchmark](#full-catalog-benchmark-2026-07-18-all-195-cases) below | Competitor `.so` lane only; the 34 dedicated non-`.so` cases are represented in their own lanes, not as missing `.so` results |
+| Binary competitor scan | 159 shared-library pairs × 2 external tools (4 tool/mode combinations) | abicc (dumper + xml) and libabigail `abidiff` (+headers) over built `.so` pairs | 636 tool invocations attempted; per-tool correct/accuracy in the [full-catalog benchmark](#full-catalog-benchmark-2026-07-18-all-195-cases) below | Competitor `.so` lane only; the 37 dedicated non-`.so` cases are represented in their own lanes, not as missing `.so` results |
 | Scan-depth matrix | not independently re-run this pass | `abicheck scan --depth {binary,headers,build,source,full}` | see prior methodology note below | Compare-style status by depth; full-catalog audit/cross-source/bundle/BTF/snapshot cases are covered by dedicated lanes |
 
 Rows sourced from CI-artifact-generating scripts that this pass did not
 independently re-execute (full example proof matrix, runtime smoke, release/
 stripped headers, build/source smoke, scan-depth matrix) keep their
-case-count denominator updated to the current 193-case catalog but carry
+case-count denominator updated to the current 196-case catalog but carry
 forward their last-known CI result; re-run them via the commands above for a
 byte-for-byte refresh. The scan-depth matrix specifically needs a fresh run
 of `abicheck scan --depth` across the current comparable-target set (it was

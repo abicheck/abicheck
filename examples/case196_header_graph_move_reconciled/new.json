@@ -7,22 +7,22 @@
     },
     "compile_units": 0,
     "edge_kinds": {
-      "SOURCE_DECLARES": 1
+      "SOURCE_DECLARES": 2
     },
     "include_edges": {
       "collected": false,
       "count": 0
     },
     "node_kinds": {
-      "header": 1,
-      "source_decl": 1,
+      "header": 2,
+      "source_decl": 2,
       "target": 1
     },
     "reference_edges": {
       "collected": false,
       "count": 0
     },
-    "source_decls": 1,
+    "source_decls": 2,
     "targets": 1,
     "type_edges": {
       "collected": false,
@@ -35,7 +35,7 @@
       "attrs": {},
       "confidence": "unknown",
       "conflicts": [],
-      "dst": "decl://_ZN4demo1fEl",
+      "dst": "decl://_ZN4demo7processEv",
       "edge": "SOURCE_DECLARES",
       "facts": [
         {
@@ -48,16 +48,50 @@
       "provenance": "source_abi",
       "resolved": {},
       "src": "header://include/demo/api.h"
+    },
+    {
+      "attrs": {},
+      "confidence": "unknown",
+      "conflicts": [],
+      "dst": "decl://_ZN4demo6detail6helperEl",
+      "edge": "SOURCE_DECLARES",
+      "facts": [
+        {
+          "attrs": {},
+          "confidence": "unknown",
+          "producer": "source_abi"
+        }
+      ],
+      "occurrences": [],
+      "provenance": "source_abi",
+      "resolved": {},
+      "src": "header://include/demo/detail_v2.h"
+    },
+    {
+      "attrs": {},
+      "confidence": "unknown",
+      "conflicts": [],
+      "dst": "decl://_ZN4demo6detail6helperEl",
+      "edge": "DECL_CALLS_DECL",
+      "facts": [],
+      "occurrences": [],
+      "provenance": "",
+      "resolved": {},
+      "src": "decl://_ZN4demo7processEv"
     }
   ],
   "external_graph_refs": [],
   "extractor_passes": {},
-  "graph_id": "sha256:23c5d029462d7acdf1c1b9b5cc91109bb19f66b68c07922e9b7d1184c585efb1",
+  "graph_id": "sha256:eb39d61732e89abc1309a64d0573f6b73f0aa7de0214f9b7bbfa08f948940e79",
   "indexes": {
     "by_binary_symbol": {},
     "by_file": {},
     "by_source_decl": {
-      "decl://_ZN4demo1fEl": [
+      "decl://_ZN4demo6detail6helperEl": [
+        "decl://_ZN4demo7processEv",
+        "header://include/demo/detail_v2.h"
+      ],
+      "decl://_ZN4demo7processEv": [
         "header://include/demo/api.h"
       ]
     },
@@ -114,9 +148,9 @@
           "producer": "source_abi"
         }
       ],
-      "id": "decl://_ZN4demo1fEl",
+      "id": "decl://_ZN4demo7processEv",
       "kind": "source_decl",
-      "label": "demo::f",
+      "label": "demo::process",
       "provenance": "source_abi",
       "resolved": {
         "consumer_compiled_body": false,
@@ -142,6 +176,58 @@
       "id": "header://include/demo/api.h",
       "kind": "header",
       "label": "include/demo/api.h",
+      "provenance": "source_abi",
+      "resolved": {
+        "origin": "UNKNOWN"
+      }
+    },
+    {
+      "attrs": {
+        "consumer_compiled_body": false,
+        "decl_kind": "function",
+        "visibility": "private_header"
+      },
+      "confidence": "unknown",
+      "conflicts": [],
+      "facts": [
+        {
+          "attrs": {
+            "consumer_compiled_body": false,
+            "decl_kind": "function",
+            "visibility": "private_header"
+          },
+          "confidence": "unknown",
+          "producer": "source_abi"
+        }
+      ],
+      "id": "decl://_ZN4demo6detail6helperEl",
+      "kind": "source_decl",
+      "label": "demo::detail::helper",
+      "provenance": "source_abi",
+      "resolved": {
+        "consumer_compiled_body": false,
+        "decl_kind": "function",
+        "visibility": "private_header"
+      }
+    },
+    {
+      "attrs": {
+        "origin": "UNKNOWN"
+      },
+      "confidence": "unknown",
+      "conflicts": [],
+      "facts": [
+        {
+          "attrs": {
+            "origin": "UNKNOWN"
+          },
+          "confidence": "unknown",
+          "producer": "source_abi"
+        }
+      ],
+      "id": "header://include/demo/detail_v2.h",
+      "kind": "header",
+      "label": "include/demo/detail_v2.h",
       "provenance": "source_abi",
       "resolved": {
         "origin": "UNKNOWN"

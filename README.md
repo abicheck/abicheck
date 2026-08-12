@@ -243,7 +243,7 @@ python scripts/benchmark_comparison.py --suite pinned74
 
 ### Detection by evidence source
 
-The [five sources of information](#how-it-works--multiple-sources-of-information) each find breaks the weaker sources are blind to. The table below is derived from the `examples/ground_truth.json` minimum-evidence labels of the 185 compare-style catalog cases (184 excluding the one documented detector gap, `case111`). The `--evidence-tiers` mode empirically scans the runnable catalog at L0-L3; L4 source-pack measurement is tracked as a separate extension:
+The [five input sources of information](#how-it-works--multiple-sources-of-information) reveal breaks that weaker sources cannot detect. L5 is a derived source graph, not a sixth input source. The table below is derived from the `examples/ground_truth.json` minimum-evidence labels of the 185 compare-style catalog cases (184 excluding the one documented detector gap, `case111`). The `--evidence-tiers` mode empirically scans the runnable catalog at L0-L3; L4 source-pack measurement is tracked as a separate extension:
 
 ```bash
 python scripts/benchmark_comparison.py --evidence-tiers

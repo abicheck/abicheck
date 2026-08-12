@@ -162,15 +162,37 @@ than shipped with a misleading claim of reachability.
 
 A second review round (same PR) found the corrected "unreachable" framing
 had itself overclaimed: it is only a *pure* move that's unreachable.
-Constructing real `SourceEntity`/`BuildEvidence` facts (a function `demo::f`
-whose parameter type changes `int`→`long` — moving its Itanium mangled name
-— in the same release its header moves) and running them through the
-**actual production fold**, `source_graph.build_source_graph()`, confirmed
+Constructing real `SourceEntity`/`BuildEvidence` facts (a function whose
+parameter type changes `int`→`long` — moving its Itanium mangled name — in
+the same release its header moves) and running them through the **actual
+production fold**, `source_graph.build_source_graph()`, confirmed
 empirically that the qualified-name alias tier pairs the resulting two
 distinct-id nodes, and the file-vs-name comparison in `_classify_outcome`
 correctly reports `declaration_moved` — a compound edit (signature change +
 header move, sharing a qualified name) genuinely reaches this outcome
 through the real pipeline, not through a hand-invented id.
+
+A third review round found the *second* version's own fixture design
+overclaimed something else: it made the identity-perturbing edit a
+**public** function `demo::f`, but a public function's mangled-name-moving
+signature change is itself a real, independent BREAKING change (the old
+exported symbol disappears from the export table) — cataloging that
+scenario as `COMPATIBLE_WITH_RISK` contradicts `ground_truth.json`'s
+one-canonical-verdict invariant (one canonical verdict applies to the
+scenario a case describes, not to a hand-isolated fixture slice of it).
+Fixed by moving the identity-perturbing edit onto a **private** helper
+(`demo::detail::helper`, `visibility="private_header"`) reached only
+through a public caller's (`demo::process`) `DECL_CALLS_DECL` dependency
+edge — the same shape `case160_public_api_internal_dep_added` already
+demonstrates, needed here because `graph_reconcile`'s own public-
+reachability gate (`_public_reachable_ids`) suppresses a reconciliation
+finding entirely for a declaration with no live path from a public entry
+point. With the identity-perturbing edit confined to a never-exported
+private declaration, `COMPATIBLE_WITH_RISK` (backed by
+`public_api_internal_dependency_added` + `declaration_moved`, both pure
+RISK-tier L5 findings) is the genuinely correct canonical verdict — a real
+end-to-end comparison of this exact scenario has nothing BREAKING to
+contradict it.
 `case196_header_graph_move_reconciled` now ships built exactly this way
 (real dataclasses → real fold → real diff, not hand-assembled
 `GraphNode`/`GraphEdge` objects), closing the example gap correctly.

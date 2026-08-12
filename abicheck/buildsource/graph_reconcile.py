@@ -83,7 +83,14 @@ qualified name stays exactly the same -- the qualified-name alias tier
 pairs the two nodes despite the differing ids, and since the declaring file
 differs while the name does not, :func:`_classify_outcome` reports
 ``OUTCOME_MOVED``. See ``examples/case196_header_graph_move_reconciled/``
-for a fixture built through the real fold demonstrating exactly this. The
+for a fixture built through the real fold demonstrating exactly this --
+note the identity-perturbing edit there lands on a *private* helper reached
+only via a public caller's dependency edge, not a public function itself:
+an earlier version of that fixture used a public function directly, which
+a review round correctly flagged as cataloging a scenario that is itself a
+real BREAKING change (the public function's old mangled symbol disappears)
+under a ``COMPATIBLE_WITH_RISK`` verdict, contradicting
+``ground_truth.json``'s one-canonical-verdict invariant. The
 *pure*-move shape is still unreachable, and closing that specific gap for
 real would need a producer-side node-id/attribute signal that's actually
 file-sensitive (see

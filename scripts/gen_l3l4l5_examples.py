@@ -458,34 +458,57 @@ def build_cases() -> dict[str, tuple[str, dict[str, Any], dict[str, Any]]]:
         ),
     )
 
-    # case196: a public function keeps its exact qualified name but its
+    # case196: a private (never-exported) internal helper -- reached only
+    # through a public function's own dependency, matching case160/161/162's
+    # "internal dependency" shape -- keeps its exact qualified name but its
     # parameter type changes (int -> long) in the same release its header is
-    # reorganized (api_v1.h -> api.h). Unlike case194/195 (which hand-build a
-    # GraphNode/GraphEdge pair directly), this fixture is produced by running
-    # REAL SourceEntity/BuildEvidence facts through the actual production
-    # fold (source_graph.build_source_graph) -- the same function dump
-    # --sources/--build-info calls -- so the two resulting node ids are
-    # genuinely distinct for the reason a real extractor would make them
-    # distinct (the signature change moves the Itanium mangled name, which
-    # source_graph.py's node-id scheme keys on), not because this script
-    # invented an artificial suffix. This is deliberately NOT a "pure" move
-    # (an unchanged signature can never change a mangled name, so a pure
-    # move cannot itself perturb node identity -- see graph_reconcile.py's
-    # own "Known gap" note); it's the realistic compound edit that DOES
-    # reach the reconciler: the qualified-name alias tier pairs the two
-    # nodes (same "demo::f"), and since the declaring file also changed,
-    # ADR-048's outcome classification reports declaration_moved. In a real
-    # end-to-end compare() run the signature change would independently
-    # surface as its own (likely BREAKING, since the old mangled symbol
-    # disappears) flat finding -- this L5-only fixture demonstrates just the
-    # reconciliation annotation, matching case194/195's own scope.
-    def _fn_entity(mangled: str, path: str) -> SourceEntity:
+    # reorganized (detail_v1.h -> detail_v2.h). Unlike case194/195 (which
+    # hand-build a GraphNode/GraphEdge pair directly), this fixture is
+    # produced by running REAL SourceEntity/BuildEvidence facts through the
+    # actual production fold (source_graph.build_source_graph) -- the same
+    # function dump --sources/--build-info calls -- so the two resulting
+    # node ids are genuinely distinct for the reason a real extractor would
+    # make them distinct (the signature change moves the Itanium mangled
+    # name, which source_graph.py's node-id scheme keys on), not because
+    # this script invented an artificial suffix. This is deliberately NOT a
+    # "pure" move (an unchanged signature can never change a mangled name,
+    # so a pure move cannot itself perturb node identity -- see
+    # graph_reconcile.py's own "Known gap" note); it's the realistic
+    # compound edit that DOES reach the reconciler: the qualified-name alias
+    # tier pairs the two nodes, and since the declaring file also changed,
+    # ADR-048's outcome classification reports declaration_moved.
+    #
+    # The helper is deliberately PRIVATE (`visibility="private_header"`),
+    # unlike an earlier version of this fixture which used a public
+    # function -- Codex review (fresh evidence) caught that a *public*
+    # function's mangled-name-moving signature change is itself a real
+    # BREAKING change (the old exported symbol disappears), so cataloging
+    # that shape as COMPATIBLE_WITH_RISK contradicted ground_truth.json's
+    # invariant that one canonical verdict applies to the scenario a case
+    # describes. A private helper reached only via a public caller's own
+    # DECL_CALLS_DECL edge (mirroring case160's public_api_internal_dep_added
+    # producer) makes COMPATIBLE_WITH_RISK the genuinely correct verdict: the
+    # helper is never part of the exported symbol table, so a real
+    # end-to-end compare() of this exact scenario has no BREAKING/API_BREAK
+    # finding to contradict -- only the two RISK-tier L5 findings this
+    # fixture reproduces.
+    def _pub_caller() -> SourceEntity:
         return SourceEntity(
-            id="demo::f",
+            id="demo::process",
             kind="function",
-            qualified_name="demo::f",
-            mangled_name=mangled,
+            qualified_name="demo::process",
+            mangled_name="_ZN4demo7processEv",
             visibility="public_header",
+            source_location=_loc("include/demo/api.h", 1),
+        )
+
+    def _helper_entity(mangled: str, path: str) -> SourceEntity:
+        return SourceEntity(
+            id="demo::detail::helper",
+            kind="function",
+            qualified_name="demo::detail::helper",
+            mangled_name=mangled,
+            visibility="private_header",
             source_location=_loc(path, 1),
         )
 
@@ -494,16 +517,38 @@ def build_cases() -> dict[str, tuple[str, dict[str, Any], dict[str, Any]]]:
     )
     l5j_old_surface = SourceAbiSurface(
         library="libdemo.so",
-        reachable_declarations=[_fn_entity("_ZN4demo1fEi", "include/demo/api_v1.h")],
+        reachable_declarations=[
+            _pub_caller(),
+            _helper_entity("_ZN4demo6detail6helperEi", "include/demo/detail_v1.h"),
+        ],
     )
     l5j_new_surface = SourceAbiSurface(
         library="libdemo.so",
-        reachable_declarations=[_fn_entity("_ZN4demo1fEl", "include/demo/api.h")],
+        reachable_declarations=[
+            _pub_caller(),
+            _helper_entity("_ZN4demo6detail6helperEl", "include/demo/detail_v2.h"),
+        ],
+    )
+    l5j_old_graph = build_source_graph(l5j_build, l5j_old_surface)
+    l5j_old_graph.edges.append(
+        GraphEdge(
+            src="decl://_ZN4demo7processEv",
+            dst="decl://_ZN4demo6detail6helperEi",
+            kind="DECL_CALLS_DECL",
+        )
+    )
+    l5j_new_graph = build_source_graph(l5j_build, l5j_new_surface)
+    l5j_new_graph.edges.append(
+        GraphEdge(
+            src="decl://_ZN4demo7processEv",
+            dst="decl://_ZN4demo6detail6helperEl",
+            kind="DECL_CALLS_DECL",
+        )
     )
     cases["case196_header_graph_move_reconciled"] = (
         "L5",
-        build_source_graph(l5j_build, l5j_old_surface).to_dict(),
-        build_source_graph(l5j_build, l5j_new_surface).to_dict(),
+        l5j_old_graph.to_dict(),
+        l5j_new_graph.to_dict(),
     )
 
     return cases

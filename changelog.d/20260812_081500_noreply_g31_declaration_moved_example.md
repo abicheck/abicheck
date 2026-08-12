@@ -13,3 +13,17 @@
   shapes are reachable through a real evidence producer today (a compound
   move-plus-identity-changing edit) and which are not yet (a pure move with
   an unchanged signature).
+
+### Fixed
+
+- **`case196_header_graph_move_reconciled`'s canonical verdict was wrong** —
+  a review round caught that the fixture's identity-perturbing edit landed
+  on a *public* function, whose mangled-name-moving signature change is
+  itself a real, independent BREAKING change (the old exported symbol
+  disappears), contradicting `ground_truth.json`'s one-canonical-verdict
+  invariant under a `COMPATIBLE_WITH_RISK` label. Redesigned so the edit
+  lands on a **private** helper reached only through a public caller's
+  dependency edge (the same shape `case160_public_api_internal_dep_added`
+  demonstrates) — `COMPATIBLE_WITH_RISK` is now the genuinely correct
+  canonical verdict, carried by two RISK-tier L5 findings
+  (`public_api_internal_dependency_added` + `declaration_moved`).
