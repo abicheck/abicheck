@@ -165,13 +165,20 @@ def test_evidence_coverage_finding_excluded_from_compatibility_buckets():
     assert model.incomplete_blocking is False
 
 
-def test_evidence_required_missing_is_always_blocking():
+def test_evidence_required_missing_advisory_by_default_blocking_under_gate():
+    # Codex review: evidence_required_missing is NOT intrinsically
+    # always-blocking — action/run.sh's own gate only turns the check red on
+    # an API_BREAK verdict when fail-on-api-break is actually set (its
+    # default is false), so a hardcoded always-True here disagreed with the
+    # check this comment is supposed to mirror. Blocking-ness follows the
+    # finding's own resolved severity ("api_break") the same way every other
+    # api_break finding is gated in this module.
     report = _compare_report(
         [
             {
                 "kind": "evidence_required_missing",
-                "symbol": "evidence:required",
-                "description": "Policy requires source ABI evidence, none collected.",
+                "symbol": "evidence:build_context",
+                "description": "Policy requires build context evidence, none collected.",
                 "severity": "api_break",
             },
         ]
@@ -179,7 +186,64 @@ def test_evidence_required_missing_is_always_blocking():
     model = build_model(report)
     assert model.counts == (0, 0, 0)
     assert len(model.incomplete) == 1
-    assert model.incomplete_blocking is True
+    assert model.incomplete[0].symbol == "Required evidence: build context"
+    assert model.incomplete_blocking is False
+
+    model_gated = build_model(report, gate_api_break=True)
+    assert model_gated.incomplete_blocking is True
+
+
+def test_evidence_required_missing_preserves_distinct_layers():
+    # Codex review: one evidence_required_missing finding per missing layer
+    # must not collapse to one indistinguishable "Required evidence" label —
+    # a maintainer needs to know *which* layers to supply.
+    report = _compare_report(
+        [
+            {
+                "kind": "evidence_required_missing",
+                "symbol": "evidence:build_context",
+                "description": "d1",
+                "severity": "api_break",
+            },
+            {
+                "kind": "evidence_required_missing",
+                "symbol": "evidence:source_abi",
+                "description": "d2",
+                "severity": "api_break",
+            },
+        ]
+    )
+    model = build_model(report)
+    symbols = {f.symbol for f in model.incomplete}
+    assert symbols == {
+        "Required evidence: build context",
+        "Required evidence: source ABI",
+    }
+
+
+def test_source_fact_coverage_incomplete_and_dwarf_info_missing_are_incomplete():
+    report = _compare_report(
+        [
+            {
+                "kind": "source_fact_coverage_incomplete",
+                "symbol": "",
+                "description": "incomplete fact set",
+                "severity": "risk",
+            },
+            {
+                "kind": "dwarf_info_missing",
+                "symbol": "<dwarf>",
+                "description": "no DWARF on new binary",
+                "severity": "compatible",
+            },
+        ]
+    )
+    model = build_model(report)
+    assert model.counts == (0, 0, 0)
+    assert len(model.incomplete) == 2
+    assert model.incomplete_blocking is False
+    symbols = {f.symbol for f in model.incomplete}
+    assert symbols == {"Source-fact coverage", "Debug info coverage"}
 
 
 def test_layer_coverage_asymmetric_blocking_when_potential_breaking_gated():
@@ -215,18 +279,35 @@ def test_render_header_analysis_incomplete_not_worded_as_review():
     assert "🛑 Analysis incomplete" in body
 
 
-def test_render_header_source_analysis_incomplete_when_blocking():
+def test_render_header_evidence_required_missing_advisory_by_default():
     report = _compare_report(
         [
             {
                 "kind": "evidence_required_missing",
-                "symbol": "evidence:required",
+                "symbol": "evidence:source_abi",
                 "description": "Policy requires source ABI evidence, none collected.",
                 "severity": "api_break",
             },
         ]
     )
     body = render_comment(build_model(report), sha="deadbeef")
+    assert "Analysis coverage reduced" in body
+    assert "Source analysis incomplete" not in body
+    assert "Review recommended" not in body
+
+
+def test_render_header_source_analysis_incomplete_when_blocking():
+    report = _compare_report(
+        [
+            {
+                "kind": "evidence_required_missing",
+                "symbol": "evidence:source_abi",
+                "description": "Policy requires source ABI evidence, none collected.",
+                "severity": "api_break",
+            },
+        ]
+    )
+    body = render_comment(build_model(report, gate_api_break=True), sha="deadbeef")
     assert "Source analysis incomplete" in body
     assert "🛑" in body
     assert "Review recommended" not in body

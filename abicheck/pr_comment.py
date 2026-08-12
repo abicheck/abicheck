@@ -45,12 +45,13 @@ they only say "ABI BREAKING" when the bucket actually holds a genuine
 instead when every member is a gate-promoted COMPATIBLE finding.
 
 **A fourth, orthogonal bucket — "analysis incomplete" — never joins the three
-compatibility buckets above.** ``layer_coverage_asymmetric`` and
-``evidence_required_missing`` (see :data:`_EVIDENCE_KIND_VALUES`) are not
-claims about the API/ABI at all: they say the *comparison itself* ran with
-degraded or missing evidence, so some real changes may be undetectable. The
-severity field the checker stamps on them (``risk``/``api_break``, so the
-underlying finding still sorts correctly everywhere else that reads
+compatibility buckets above.** ``layer_coverage_asymmetric``,
+``evidence_required_missing``, ``source_fact_coverage_incomplete``, and
+``dwarf_info_missing`` (see :data:`_EVIDENCE_KIND_VALUES`) are not claims
+about the API/ABI at all: they say the *comparison itself* ran with degraded
+or missing evidence, so some real changes may be undetectable. The severity
+field the checker stamps on them (``risk``/``api_break``/``compatible``, so
+the underlying finding still sorts correctly everywhere else that reads
 ``severity``) is an artifact of reusing the ``Verdict`` enum for gating, not a
 compatibility verdict — folding them into "Needs review" is exactly the bug
 this split fixes: a clean, implementation-only PR with zero API changes but
@@ -59,7 +60,10 @@ headline as a PR with a genuine, risky source-API change, giving a reviewer no
 way to tell "something in this diff might be unsafe" apart from "we couldn't
 fully check this diff." They render in their own "🛑 Analysis incomplete"
 section with a headline that says so explicitly, and never contribute to the
-Breaking/Needs review/Safe counts.
+Breaking/Needs review/Safe counts. Whether that headline reads as *blocking*
+(🛑) or merely *advisory* (⚠️) mirrors the Action's own red/green gate exactly
+(see :func:`_incomplete_is_blocking`) — none of these four kinds is
+intrinsically always-blocking.
 
 The body carries a hidden HTML :data:`MARKER` so the action can find and
 update the same comment across runs, and surfaces the scanned commit SHA in
@@ -82,24 +86,66 @@ _ADDITION_KIND_VALUES = frozenset(k.value for k in ADDITION_KINDS)
 
 # Kind value strings that mean "this comparison's own evidence was degraded
 # or incomplete" rather than "this is a compatibility finding" — see the
-# module docstring's "analysis incomplete" bucket. `layer_coverage_asymmetric`
-# is an advisory RISK finding (the base was scanned with evidence the target
-# lacks); `evidence_required_missing` is a hard, policy-driven failure
-# (ADR-033 D7: a declared-mandatory evidence layer is absent). Both describe
-# the *comparison's* coverage, never a change to the library's own API/ABI, so
-# neither belongs in the Breaking/Needs review/Safe compatibility buckets.
+# module docstring's "analysis incomplete" bucket. Every kind here describes
+# the *comparison's* own evidence coverage, never a change to the library's
+# own API/ABI, so none of them belong in the Breaking/Needs review/Safe
+# compatibility buckets (Codex review: `source_fact_coverage_incomplete` and
+# `dwarf_info_missing` are the same class of signal as the two kinds this set
+# originally shipped with, and were previously left in Needs review/Safe —
+# exactly the confusion this bucket exists to remove):
+#
+# - `layer_coverage_asymmetric` — advisory RISK: the baseline was scanned
+#   with an evidence layer the candidate lacks.
+# - `evidence_required_missing` — a policy-declared-mandatory evidence layer
+#   is absent (ADR-033 D7); one finding per missing layer.
+# - `source_fact_coverage_incomplete` — advisory RISK: L4 source-fact
+#   evidence used an incomplete or incompatible fact-set (ADR-038 C.8).
+# - `dwarf_info_missing` — COMPATIBLE by default severity: struct/enum
+#   layout comparison was skipped for lack of DWARF debug info.
 _EVIDENCE_KIND_VALUES = frozenset(
-    {"layer_coverage_asymmetric", "evidence_required_missing"}
+    {
+        "layer_coverage_asymmetric",
+        "evidence_required_missing",
+        "source_fact_coverage_incomplete",
+        "dwarf_info_missing",
+    }
 )
 
-# Friendlier symbol labels for the evidence-incomplete kinds above — their
-# real "symbol" is an internal marker (e.g. "evidence:coverage"), not
-# something naming a change in the library's surface, so showing it verbatim
-# in the Symbol column reads as internal-tool noise to a maintainer.
-_EVIDENCE_SYMBOL_LABEL = {
+# Friendlier default labels for the evidence-incomplete kinds above, used
+# whenever the finding's own `symbol` is an internal marker rather than
+# something naming a change in the library's surface (an empty string, a
+# bracketed sentinel like "<dwarf>", or an "evidence:<layer>" key) — showing
+# one of those verbatim in the Symbol column reads as internal-tool noise to
+# a maintainer.
+_EVIDENCE_KIND_DEFAULT_LABEL = {
     "layer_coverage_asymmetric": "Evidence coverage",
     "evidence_required_missing": "Required evidence",
+    "source_fact_coverage_incomplete": "Source-fact coverage",
+    "dwarf_info_missing": "Debug info coverage",
 }
+
+# `evidence_required_missing` emits one finding *per missing layer*
+# (`evidence:build_context` / `evidence:source_abi` / `evidence:graph_summary`
+# — see `buildsource/evidence_policy.py`'s `_REQUIRE_EVIDENCE_LAYERS`), so
+# collapsing all of them to one flat "Required evidence" label would make the
+# standard-detail renderer's own by-symbol grouping (`_group_by_api`) fold
+# distinct layer requirements into a single row, hiding which layer(s) are
+# actually missing (Codex review).
+_EVIDENCE_LAYER_LABEL = {
+    "build_context": "build context",
+    "source_abi": "source ABI",
+    "graph_summary": "source graph",
+}
+
+
+def _evidence_symbol_label(kind: str, raw_symbol: str) -> str:
+    """Friendly, per-layer-distinct display label for an analysis-incomplete
+    finding's ``symbol`` — see the two constants above."""
+    if kind == "evidence_required_missing" and raw_symbol.startswith("evidence:"):
+        layer_key = raw_symbol.split(":", 1)[1]
+        layer_label = _EVIDENCE_LAYER_LABEL.get(layer_key, layer_key.replace("_", " "))
+        return f"Required evidence: {layer_label}"
+    return _EVIDENCE_KIND_DEFAULT_LABEL.get(kind, raw_symbol or kind)
 
 # Hidden marker used to find-and-update the sticky comment across runs.
 MARKER = "<!-- abicheck-sticky-report -->"
@@ -207,10 +253,11 @@ class CommentModel:
     # into `total_changes` separately so `should_post("changes")` still fires
     # on a report that carries only this.
     incomplete: list[Finding] = field(default_factory=list)
-    # Whether the incomplete bucket represents a hard evidence-policy failure
-    # (`evidence_required_missing`, or `layer_coverage_asymmetric` gated to
-    # `error` by `potential_breaking`) rather than a softer advisory notice —
-    # drives the headline's emoji/wording (see `_header`).
+    # Whether the incomplete bucket actually turns the Action's check red —
+    # i.e. whether `_incomplete_is_blocking` found a finding whose severity
+    # is gated to blocking (see that function's own docstring for exactly
+    # which severity/gate-flag combinations qualify). Drives the headline's
+    # emoji/wording (see `_header`).
     incomplete_blocking: bool = False
     # Severity-config categories ("abi_breaking" / "potential_breaking" /
     # "addition" / "quality_issues") responsible for a non-empty Breaking
@@ -338,7 +385,7 @@ def _bucket_changes(
             # compatibility gating and does not apply to them.
             if kind in _EVIDENCE_KIND_VALUES:
                 loc = c.get("source_location")
-                symbol = _EVIDENCE_SYMBOL_LABEL.get(kind, str(c.get("symbol", "")))
+                symbol = _evidence_symbol_label(kind, str(c.get("symbol", "")))
                 incomplete.append(
                     Finding(
                         kind=kind,
@@ -377,33 +424,43 @@ def _incomplete_is_blocking(
     levels: dict[str, str] | None,
     gate_api_break: bool = False,
 ) -> bool:
-    """Whether the analysis-incomplete bucket represents a hard failure.
+    """Whether the analysis-incomplete bucket represents a hard failure —
+    i.e. whether it actually turns the *Action's* check red, mirroring
+    ``action/run.sh``'s own gate exactly (Codex review: an earlier revision
+    hardcoded ``evidence_required_missing`` as always-blocking on the theory
+    that ADR-033 D7 "fails the run outright" — true of the raw CLI's
+    ``compare`` exit code under the legacy scheme, since an ``API_BREAK``
+    verdict always exits nonzero there, but this module renders the
+    composite Action's *sticky comment*, and ``action/run.sh``'s own gate
+    only turns the check red on an ``API_BREAK`` verdict when
+    ``fail-on-api-break: true`` was actually set — see
+    ``action/run.sh``'s ``INPUT_FAIL_ON_API_BREAK`` check. Hardcoding this
+    kind as always-blocking made the sticky comment disagree with the check
+    it exists to mirror on the Action's own default config).
 
-    ``evidence_required_missing`` always fails the run outright (ADR-033 D7,
-    a structural policy check outside this module's control — not something
-    the severity config gates). Beyond that, this defers to each finding's
-    own already-resolved ``severity`` (Codex review: a named policy or
-    ``--policy-file`` override can promote a coverage-gap kind like
-    ``layer_coverage_asymmetric`` all the way to ``breaking`` — e.g. a
-    ``plugin_abi``-style profile that treats every risk kind as breaking —
-    and the JSON finding then already carries ``severity: "breaking"``
-    independent of any ``potential_breaking`` severity-config knob) rather
-    than re-deriving blocking-ness from one specific kind + one specific
-    level check, which would silently disagree with a red exit code the
-    checker already produced for a different reason:
+    This defers to each finding's own already-resolved ``severity`` instead
+    of one specific kind's default severity, so a named policy or
+    ``--policy-file`` override that promotes a coverage-gap kind (e.g.
+    ``layer_coverage_asymmetric`` under a ``plugin_abi``-style profile that
+    treats every risk kind as breaking) is honoured too, without
+    re-deriving blocking-ness from one hardcoded kind + one hardcoded level
+    check that would silently disagree with a red exit code the checker
+    already produced for a different reason:
 
     - ``severity == "breaking"`` always blocks (a policy override already
       decided this).
-    - ``severity == "api_break"`` blocks under ``fail-on-api-break``
-      (mirrors how the module gates every other api_break finding) or when
+    - ``severity == "api_break"`` (the default for ``evidence_required_missing``)
+      blocks under ``fail-on-api-break`` (mirrors how the module gates every
+      other api_break finding) or when ``potential_breaking`` is configured
+      to ``error``.
+    - ``severity == "risk"`` (the default for ``layer_coverage_asymmetric``
+      and ``source_fact_coverage_incomplete``) blocks only when
       ``potential_breaking`` is configured to ``error``.
-    - ``severity == "risk"`` (the default for ``layer_coverage_asymmetric``)
-      blocks only when ``potential_breaking`` is configured to ``error``.
+    - ``severity == "compatible"`` (the default for ``dwarf_info_missing``)
+      never blocks.
     """
     levels = levels or {}
     for f in findings:
-        if f.kind == "evidence_required_missing":
-            return True
         if f.severity == "breaking":
             return True
         if f.severity == "api_break" and (
