@@ -11,7 +11,7 @@ generated: false
 
 **abicheck** compares two versions of a C/C++ shared library and tells you whether existing binaries will break. It supports ELF (Linux), PE/COFF (Windows), and Mach-O (macOS) binaries.
 
-On all platforms it provides binary metadata analysis (exports, imports, dependencies) and header AST analysis (via castxml). Debug info cross-check uses DWARF on Linux and PDB on Windows; Mach-O has no debug-info cross-check today, so macOS relies on binary metadata plus header AST — see [Platform Support](../reference/platforms.md) for exactly what each platform sees without headers.
+On all platforms it provides binary metadata analysis (exports, imports, dependencies) and header AST analysis (via castxml). Debug info cross-check uses DWARF on Linux (falling back to BTF/CTF when DWARF isn't present) and PDB on Windows; Mach-O has no debug-info cross-check today, so macOS relies on binary metadata plus header AST — see [Platform Support](../reference/platforms.md) for exactly what each platform sees without headers.
 
 > **In CI already?** Skip straight to the [GitHub Action](../use/github-action.md)
 > — it installs everything and runs the check in a few lines of YAML.

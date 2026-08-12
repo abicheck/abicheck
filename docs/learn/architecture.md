@@ -50,7 +50,7 @@ flowchart TD
     MACHO["Mach-O<br/>macholib"]
     SNAP["L0 — Binary metadata<br/>Snapshot (JSON model)"]
     AST["L2 — Header AST<br/>castxml (all platforms)"]
-    DBG["L1 — Debug-info cross-check<br/>DWARF (Linux) · PDB (Windows) · none on Mach-O"]
+    DBG["L1 — Debug-info cross-check<br/>DWARF/BTF/CTF (Linux) · PDB (Windows) · none on Mach-O"]
     CHK["Checker → Changes → Verdict"]
 
     CLI --> FMT
@@ -202,6 +202,13 @@ When debug info is available in the binary:
 - Verifies member offsets (catches `#pragma pack` or `-march`-specific alignment differences)
 - Checks vtable slot offsets
 - Detects calling convention and frame register changes
+
+`abicheck/dumper_debug.py` doesn't stop at DWARF for ELF: it falls back to
+**BTF** and then **CTF** when DWARF isn't present (`DWARF > BTF > CTF` for
+userspace binaries; kernel binaries prefer BTF over their own embedded
+DWARF), converting either into the same metadata shape the checker
+consumes — so a headerless, DWARF-less ELF binary carrying BTF or CTF
+still gets L1 evidence, not just L0.
 
 abicheck has no Mach-O debug-map/DWARF reader today — a headerless macOS
 `.dylib`'s own binary/debug-info evidence is always L0 (exports +

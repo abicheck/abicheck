@@ -84,7 +84,7 @@ snapshots and ABICC Perl dumps (Data::Dumper `.dump` files) are loaded directly.
 You can mix them freely (see below).
 
 If headers are not provided, `compare` uses whatever debug info is available
-instead — DWARF on ELF, PDB on PE — falling back further to L0
+instead — DWARF (falling back to BTF/CTF) on ELF, PDB on PE — falling back further to L0
 binary-metadata analysis (exported symbols plus platform-specific facts —
 SONAME/dependencies/rpaths on ELF, machine type/imports/delay-load/hardening
 on PE, install name/dependencies/rpaths on Mach-O — never a bare symbol
