@@ -1,0 +1,195 @@
+name: 'Test: release-contract publish + safe-retry (live E2E fixture)'
+
+# Live half of publish-baseline.yml's "Upload release asset" step, which the
+# review this workflow closes out flagged as covered only by structural/
+# stubbed-gh tests (tests/test_publish_baseline_workflows.py) -- real
+# `gh release upload`/`gh api ... -H 'Accept: application/octet-stream'`
+# authentication and JSON shape are never exercised by those. This workflow
+# proves, against a REAL disposable GitHub Release this run creates and
+# deletes: (1) a fresh publish uploads a real asset, and (2) an identical
+# second publish under the same release-tag is a genuine no-op retry (it
+# does not fail, and does not duplicate the asset) -- the exact behavior
+# `--clobber` used to paper over unconditionally before that fix.
+#
+# The genuinely-differing-content hard-fail path (and the cross-profile
+# collision guard) are NOT re-proven live here -- both are already covered,
+# more cheaply and more precisely, by tests/test_publish_baseline_workflows.py's
+# TestUploadReleaseAssetRetryDispatchesBySuffix/
+# TestUploadReleaseAssetRejectsCrossProfileCollision (a stubbed `gh` gives
+# exact control over "existing asset has different content" without needing
+# a second live release). This workflow's job is proving the parts a stub
+# CANNOT stand in for: real `gh` authentication and the real GitHub Release
+# API's actual response shape.
+#
+# workflow_dispatch only, deliberately -- NOT pull_request/pull_request_target
+# and NOT even a `pull_request`-scoped trigger the way test-baseline-
+# rotation.yml (its cache-only sibling) is: creating a real Release needs
+# `contents: write`, which this repository's fork-PR safety net (ADR-047
+# section 12) assumes baseline-PUBLISHING workflows never request outside a
+# push/workflow_dispatch/release trigger. Every asset/tag/release this run
+# touches is namespaced by github.run_id, so concurrent runs never collide,
+# and every job's own release/tag is deleted in the cleanup job (if:
+# always()) regardless of whether verify passed.
+#
+# Every third-party Action reference is SHA-pinned, matching
+# publish-baseline.yml's own bar (AGENTS.md "Action pinning is deliberately
+# partial") -- this workflow requests contents: write to create/delete a
+# real release, the same elevated-permission class.
+
+permissions:
+  contents: read
+
+on:
+  workflow_dispatch: {}
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.run_id }}
+  cancel-in-progress: false
+
+jobs:
+  # ── Build one small library + its build-output.json ─────────────────────
+  build-fixture:
+    name: 'Build library + create disposable release'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: write
+    outputs:
+      profile-id: ${{ steps.profile.outputs.id }}
+      release-tag: ${{ steps.release.outputs.tag }}
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10  # v6
+        with:
+          persist-credentials: false
+
+      - name: Compute a per-run profile id and release tag
+        id: profile
+        shell: bash
+        run: echo "id=publish-e2e-${{ github.run_id }}" >> "$GITHUB_OUTPUT"
+
+      - name: Build one library
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p run
+          cd examples/case01_symbol_removal
+          gcc -shared -fPIC v1.c -o "${GITHUB_WORKSPACE}/run/libexample.so"
+
+      - name: Write a minimal build-output.json
+        shell: bash
+        env:
+          PROFILE_ID: ${{ steps.profile.outputs.id }}
+        run: |
+          set -euo pipefail
+          python3 -c "
+          import json, os
+          out = {
+              'schema': 'abicheck.build-output/v1',
+              'profile': {'id': os.environ['PROFILE_ID']},
+              'targets': [{'id': 'libexample', 'binary': 'libexample.so'}],
+          }
+          with open('run/build-output.json', 'w', encoding='utf-8') as f:
+              json.dump(out, f)
+          "
+
+      - name: Upload build-output artifact
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7
+        with:
+          name: 'publish-e2e-build-${{ github.run_id }}'
+          path: run
+
+      - name: Create a disposable, run_id-namespaced release
+        id: release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          tag="abicheck-publish-e2e-test-${{ github.run_id }}"
+          gh release create "$tag" \
+            --repo "${{ github.repository }}" \
+            --title "abicheck publish-baseline.yml E2E fixture (run ${{ github.run_id }})" \
+            --notes "Disposable release created by test-baseline-publish-e2e.yml. Deleted by this same run's cleanup job." \
+            --target "${{ github.sha }}"
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+
+  # ── First publish: must upload a real, fresh asset ───────────────────────
+  publish-1:
+    name: 'publish-baseline.yml run #1 (fresh upload)'
+    needs: build-fixture
+    uses: ./.github/workflows/publish-baseline.yml
+    permissions:
+      contents: write
+    with:
+      build-output-artifact-prefix: 'publish-e2e-build-'
+      release-tag: ${{ needs.build-fixture.outputs.release-tag }}
+      install-deps: false
+
+  # ── Second publish: identical content, must be a safe no-op retry ────────
+  publish-2:
+    name: 'publish-baseline.yml run #2 (identical content, must not fail or duplicate)'
+    needs: [build-fixture, publish-1]
+    uses: ./.github/workflows/publish-baseline.yml
+    permissions:
+      contents: write
+    with:
+      build-output-artifact-prefix: 'publish-e2e-build-'
+      release-tag: ${{ needs.build-fixture.outputs.release-tag }}
+      install-deps: false
+
+  # ── Prove run #2 didn't duplicate the asset ───────────────────────────────
+  verify:
+    name: 'Verify: exactly one asset exists after two identical publishes'
+    needs: [build-fixture, publish-1, publish-2]
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    steps:
+      - name: Confirm exactly one asset named for this profile exists on the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ needs.build-fixture.outputs.release-tag }}
+          PROFILE_ID: ${{ needs.build-fixture.outputs.profile-id }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          asset_name="abicheck-baseline-${PROFILE_ID}.tar.zst"
+          count=$(gh release view "$RELEASE_TAG" --repo "${{ github.repository }}" --json assets \
+            | jq --arg name "$asset_name" '[.assets[] | select(.name == $name)] | length')
+          echo "asset '$asset_name' count on $RELEASE_TAG: $count"
+          if [[ "$count" != "1" ]]; then
+            echo "::error::expected exactly 1 asset named '$asset_name' on $RELEASE_TAG after two identical publishes, found $count -- either the first publish never uploaded it, or the second publish's safe-retry check failed to recognize the identical content and duplicated/replaced it." >&2
+            exit 1
+          fi
+
+  # ── Delete this run's own disposable release + tag -- nothing else does ──
+  cleanup:
+    name: "Cleanup: delete this run's disposable release and tag"
+    needs: [build-fixture, publish-1, publish-2, verify]
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: write
+    steps:
+      - name: Delete the disposable release and its tag
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ needs.build-fixture.outputs.release-tag }}
+        shell: bash
+        run: |
+          set -uo pipefail
+          # Not -e: best-effort cleanup, same convention as
+          # test-baseline-rotation.yml's own cleanup job -- a failed
+          # earlier job may mean the release/tag was never created, and
+          # that must not fail this job.
+          if [[ -z "$RELEASE_TAG" ]]; then
+            echo "no release-tag recorded (build-fixture likely failed before creating one) -- nothing to delete."
+            exit 0
+          fi
+          if gh release delete "$RELEASE_TAG" --repo "${{ github.repository }}" --yes --cleanup-tag >/dev/null 2>&1; then
+            echo "deleted release and tag: $RELEASE_TAG"
+          else
+            echo "no release to delete (already gone or never created): $RELEASE_TAG"
+          fi

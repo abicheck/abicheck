@@ -11,4 +11,8 @@
   forward `expected-project-ref`** to `resolve-baseline`'s wrong-commit
   guard — previously only reachable via a hand-rolled `resolve-baseline`
   step, not through the composed check-target path an `accepted-main` PR
-  gate typically uses.
+  gate typically uses. `check-project.yml` forwards it only to a cell whose
+  `baseline-channel` is `accepted-main`, since a `release-contract` (or any
+  tag/asset-selected) cell's manifest records a release tag, not a Git ref,
+  and would otherwise fail closed on a `project_ref` it was never going to
+  match in a mixed-channel project matrix.

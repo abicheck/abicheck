@@ -35,6 +35,7 @@ import os
 from pathlib import Path
 from typing import Any
 
+import pytest
 import yaml
 
 from abicheck.buildsource.baseline_publish import (
@@ -60,6 +61,7 @@ WORKFLOWS_DIR = Path(__file__).resolve().parents[1] / ".github" / "workflows"
 PUBLISH_BASELINE = WORKFLOWS_DIR / "publish-baseline.yml"
 UPDATE_MAIN_BASELINE = WORKFLOWS_DIR / "update-main-baseline.yml"
 TEST_BASELINE_ROTATION = WORKFLOWS_DIR / "test-baseline-rotation.yml"
+TEST_BASELINE_PUBLISH_E2E = WORKFLOWS_DIR / "test-baseline-publish-e2e.yml"
 
 #: The full commit SHA every elevated-permission workflow in this repository
 #: pins actions/checkout@v6/actions/setup-python@v6/actions/
@@ -588,6 +590,110 @@ class TestBaselineRotationFixture:
         assert "actions/caches" in step["run"]
         assert "$KEY_1" in step["run"]
         assert "$KEY_2" in step["run"]
+
+
+@pytest.mark.skipif(
+    not TEST_BASELINE_PUBLISH_E2E.is_file(),
+    reason="test-baseline-publish-e2e.yml not found",
+)
+class TestBaselinePublishE2eFixture:
+    """Structural tests for the live release-publish/safe-retry E2E fixture
+    -- the counterpart to TestBaselineRotationFixture above, but for
+    publish-baseline.yml's real `gh release upload`/`gh api` path rather
+    than update-main-baseline.yml's cache path. See the workflow file's own
+    header comment for the full rationale and scope.
+    """
+
+    def test_workflow_dispatch_only(self) -> None:
+        # Deliberately NOT pull_request/pull_request_target -- this
+        # workflow requests contents: write to create a real release,
+        # which ADR-047 section 12's fork-PR safety net assumes a
+        # baseline-publishing workflow never does outside
+        # push/workflow_dispatch/release.
+        data = _load(TEST_BASELINE_PUBLISH_E2E)
+        assert set(data[True]) == {"workflow_dispatch"}
+
+    def test_top_level_permissions_are_read_only(self) -> None:
+        # Elevated (contents: write) permissions are granted per-job, not
+        # at the workflow level -- the same least-privilege shape
+        # test-baseline-rotation.yml uses for its own actions: write.
+        data = _load(TEST_BASELINE_PUBLISH_E2E)
+        assert data["permissions"] == {"contents": "read"}
+
+    def test_both_publishes_call_the_real_reusable_workflow(self) -> None:
+        data = _load(TEST_BASELINE_PUBLISH_E2E)
+        assert (
+            data["jobs"]["publish-1"]["uses"]
+            == "./.github/workflows/publish-baseline.yml"
+        )
+        assert (
+            data["jobs"]["publish-2"]["uses"]
+            == "./.github/workflows/publish-baseline.yml"
+        )
+
+    def test_both_publishes_target_the_same_release_tag_and_artifact_prefix(
+        self,
+    ) -> None:
+        data = _load(TEST_BASELINE_PUBLISH_E2E)
+        p1 = data["jobs"]["publish-1"]["with"]
+        p2 = data["jobs"]["publish-2"]["with"]
+        assert (
+            p1["release-tag"]
+            == p2["release-tag"]
+            == ("${{ needs.build-fixture.outputs.release-tag }}")
+        )
+        assert (
+            p1["build-output-artifact-prefix"]
+            == p2["build-output-artifact-prefix"]
+            == "publish-e2e-build-"
+        )
+
+    def test_publish_2_depends_on_publish_1_completing_first(self) -> None:
+        data = _load(TEST_BASELINE_PUBLISH_E2E)
+        assert "publish-1" in data["jobs"]["publish-2"]["needs"]
+
+    def test_verify_depends_on_both_publishes(self) -> None:
+        data = _load(TEST_BASELINE_PUBLISH_E2E)
+        needs = data["jobs"]["verify"]["needs"]
+        assert "publish-1" in needs and "publish-2" in needs
+
+    def test_verify_checks_exactly_one_asset_exists(self) -> None:
+        data = _load(TEST_BASELINE_PUBLISH_E2E)
+        step = _steps(data["jobs"]["verify"])[0]
+        assert '"$count" != "1"' in step["run"]
+
+    def test_cleanup_job_always_runs_and_needs_every_other_job(self) -> None:
+        data = _load(TEST_BASELINE_PUBLISH_E2E)
+        cleanup = data["jobs"]["cleanup"]
+        assert cleanup["if"] == "always()"
+        for job_name in ("build-fixture", "publish-1", "publish-2", "verify"):
+            assert job_name in cleanup["needs"]
+
+    def test_cleanup_deletes_the_release_via_gh_release_delete(self) -> None:
+        data = _load(TEST_BASELINE_PUBLISH_E2E)
+        step = _steps(data["jobs"]["cleanup"])[0]
+        assert "gh release delete" in step["run"]
+        assert "$RELEASE_TAG" in step["run"]
+
+    def test_every_uses_is_sha_pinned_or_local(self) -> None:
+        # Same elevated-permission SHA-pinning bar as
+        # TestElevatedPermissionActionsArePinnedToASha above -- this
+        # workflow also requests contents: write.
+        data = _load(TEST_BASELINE_PUBLISH_E2E)
+        for uses in _all_uses(data):
+            if uses.startswith("./"):
+                continue
+            assert "@" in uses, uses
+            ref = uses.rsplit("@", 1)[1]
+            assert len(ref) == 40 and all(c in "0123456789abcdef" for c in ref), uses
+
+    def test_checkout_pin_matches_this_repositorys_existing_pin(self) -> None:
+        data = _load(TEST_BASELINE_PUBLISH_E2E)
+        uses = _all_uses(data)
+        checkout_uses = [u for u in uses if u.startswith("actions/checkout@")]
+        assert checkout_uses and all(
+            u == f"actions/checkout@{_CHECKOUT_V6_SHA}" for u in checkout_uses
+        )
 
 
 class TestUploadReleaseAssetRetryDispatchesBySuffix:

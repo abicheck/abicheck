@@ -234,14 +234,18 @@ on:
         default: ''
       expected-project-ref:
         description: >
-          Forwarded to every cell's check-target invocation's own
-          expected-project-ref input -- require each cell's resolved
-          baseline-set manifest.json project_ref to match this value
-          exactly (e.g. github.event.pull_request.base.sha for an
-          accepted-main PR gate across a whole project), failing closed
-          with wrong_project_ref otherwise. Omit to skip the check --
-          correct for release-contract or any channel resolved by
-          tag/asset selection rather than a Git ref.
+          Forwarded to check-target's own expected-project-ref input, but
+          ONLY for a cell whose baseline-channel is accepted-main -- require
+          that cell's resolved baseline-set manifest.json project_ref to
+          match this value exactly (e.g. github.event.pull_request.base.sha
+          for an accepted-main PR gate), failing closed with
+          wrong_project_ref otherwise. A release-contract (or any
+          tag/asset-selected) cell's manifest records a release tag, not a
+          Git ref, so this value is never applicable there -- forwarding it
+          unscoped to every cell in a mixed-channel matrix would make every
+          release-contract cell fail closed on a project_ref it was never
+          going to match (Codex review). Omit to skip the check on every
+          cell.
         type: string
         default: ''
 
@@ -843,7 +847,7 @@ jobs:
           baseline-path: 'baseline-sets/${{ matrix.profile_id }}-${{ matrix.baseline_channel }}'
           baseline-required: ${{ matrix.required }}
           candidate-build-output: ${{ steps.candidate.outputs.build-output }}
-          expected-project-ref: ${{ inputs.expected-project-ref }}
+          expected-project-ref: ${{ matrix.baseline_channel == 'accepted-main' && inputs.expected-project-ref || '' }}
           requested-depth: ${{ matrix.requested_depth }}
           gate-mode: ${{ matrix.gate_mode }}
           project: ${{ inputs.project != '' && inputs.project || github.repository }}
