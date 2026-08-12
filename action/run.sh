@@ -160,35 +160,6 @@ _baseline_unavailable() {
   exit 1
 }
 
-# `gh release download --pattern` treats its argument as a glob (Go's
-# filepath.Match), not a literal filename -- an asset name containing a
-# literal glob metacharacter ('*', '?', '[') would otherwise silently fail
-# to match itself, or (worse) match an unrelated asset that happens to fit
-# the accidental pattern. Only INPUT_BASELINE_ASSET_NAME_TEMPLATE (a
-# caller-controlled input, not derived from any fixed template abicheck
-# itself picks) can ever introduce one of these characters into asset_name.
-# Backslash-escape each metacharacter (and a literal backslash itself, so
-# escaping is idempotent/unambiguous) before using the resolved name as a
-# --pattern value; the raw, unescaped asset_name is still used everywhere
-# else (the local downloaded-file path, error messages) since only the
-# glob argument needs this treatment (Codex review).
-_escape_glob_metachars() {
-  local s="$1" out="" i c
-  for ((i = 0; i < ${#s}; i++)); do
-    c="${s:$i:1}"
-    case "$c" in
-      # ']' is escaped too even though it's only meaningful as part of an
-      # unescaped '[...]' class (and escaping '[' alone already makes any
-      # following ']' literal) -- escaping it unconditionally is harmless
-      # and doesn't depend on this reasoning holding for every glob engine
-      # gh's --pattern might use.
-      '\' | '*' | '?' | '[' | ']') out+="\\$c" ;;
-      *) out+="$c" ;;
-    esac
-  done
-  printf '%s' "$out"
-}
-
 # ---------------------------------------------------------------------------
 # Baseline-set fallback: when no single *.abicheck.json asset was found on
 # the release, but baseline-profile was given, try a release-contract
@@ -228,20 +199,65 @@ _try_baseline_set_fallback() {
     asset_template='abicheck-baseline-{profile}.tar.zst'
   fi
   local asset_name="${asset_template//\{profile\}/$INPUT_BASELINE_PROFILE}"
-  local asset_pattern
-  asset_pattern="$(_escape_glob_metachars "$asset_name")"
 
+  # NOT `gh release download --pattern`: that flag is a glob (Go's
+  # filepath.Match), not a literal-filename lookup -- a custom
+  # baseline-asset-name-template containing a glob metacharacter ('*',
+  # '?', '[', ']') would otherwise silently fail to match its own asset,
+  # or (worse) match an unrelated one. An earlier fix backslash-escaped
+  # those characters before use as --pattern, but that is *itself* wrong
+  # on a Windows runner: Go's path/filepath.Match disables escaping on
+  # Windows entirely (backslash is the OS path separator there instead),
+  # so the escaped pattern would fail to match on exactly the runners the
+  # earlier fix's own sibling ($_PY_BIN resolution, above) exists to
+  # support (Codex review). Exact-name lookup through the release API
+  # sidesteps glob semantics -- and therefore this whole platform split --
+  # entirely: list the release's real assets and match $asset_name as a
+  # literal string, the same technique publish-baseline.yml's own "Upload
+  # release asset" step already uses for the identical "does this exact
+  # asset already exist" question. Python, not jq, for the JSON parse --
+  # this composite Action installs no jq (self-hosted runners need not
+  # have it either; see $_PY_BIN's own "Python, not jq" precedent further
+  # down this file).
   echo "::group::Fetch release-contract baseline-set '$asset_name'"
   local set_download_dir="$BASELINE_DIR/baseline-set-download"
   mkdir -p "$set_download_dir"
+  local assets_json=""
   if [[ "$ABI_BASELINE" == "latest-release" ]]; then
-    gh release download ${_GH_REPO_FLAG[@]+"${_GH_REPO_FLAG[@]}"} --pattern "$asset_pattern" -D "$set_download_dir" || true
+    assets_json=$(gh release view ${_GH_REPO_FLAG[@]+"${_GH_REPO_FLAG[@]}"} --json assets 2>/dev/null) || assets_json=""
   else
-    gh release download "$ABI_BASELINE" ${_GH_REPO_FLAG[@]+"${_GH_REPO_FLAG[@]}"} --pattern "$asset_pattern" -D "$set_download_dir" || true
+    assets_json=$(gh release view "$ABI_BASELINE" ${_GH_REPO_FLAG[@]+"${_GH_REPO_FLAG[@]}"} --json assets 2>/dev/null) || assets_json=""
+  fi
+  local existing_url=""
+  if [[ -n "$assets_json" ]]; then
+    existing_url=$(printf '%s' "$assets_json" | "$_PY_BIN" -c '
+import json
+import sys
+
+name = sys.argv[1]
+try:
+    data = json.load(sys.stdin)
+except Exception:
+    sys.exit(0)
+for asset in data.get("assets") or []:
+    if asset.get("name") == name:
+        print(asset.get("apiUrl") or "")
+        break
+' "$asset_name")
+  fi
+
+  local archive_path="$set_download_dir/$asset_name"
+  if [[ -n "$existing_url" ]]; then
+    # .apiUrl (the authenticated REST API asset endpoint), not .url (the
+    # unauthenticated browser-download URL) -- mirrors publish-baseline.yml's
+    # own identical download step and its own reasoning for why (a private
+    # caller repository's browser-download URL doesn't reliably work through
+    # `gh api`).
+    gh api "$existing_url" -H 'Accept: application/octet-stream' > "$archive_path" 2>/dev/null \
+      || rm -f "$archive_path"
   fi
   echo "::endgroup::"
 
-  local archive_path="$set_download_dir/$asset_name"
   if [[ ! -f "$archive_path" ]]; then
     _baseline_unavailable "No *.abicheck.json baseline asset, and no baseline-set archive '$asset_name' either, found in the release. Publish a single *.abicheck.json[.gz|.zst] snapshot asset (abi-baseline's original single-library contract), or a release-contract baseline-set archive whose name matches baseline-asset-name-template ('$asset_template')."
     return 1

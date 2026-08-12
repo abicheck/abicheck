@@ -27,10 +27,15 @@ target's snapshot from it via ``abicheck.buildsource.baseline_set
 
 These tests extract the relevant fragment verbatim from run.sh (the same
 "parse the real file, don't hand-copy it" discipline as
-``test_action_run_sh_dry_run_baseline.py``) and stub ``gh`` with a shell
-function that distinguishes the two download shapes by how many
-``--pattern`` flags it receives (three for the original single-snapshot
-search, one for the baseline-set archive fallback).
+``test_action_run_sh_dry_run_baseline.py``) and stub ``gh`` to distinguish
+three call shapes: ``release download`` (the original single-snapshot
+search, always "finds nothing" here so every test exercises the fallback),
+``release view --json assets`` (the baseline-set archive's own exact-name
+lookup, answering from a fixture-built assets list), and ``api <url>``
+(the actual asset download, catting the fixture archive). The fallback
+looks the asset up by EXACT name rather than a `--pattern` glob (a second
+review round found the glob-escaping approach it used to use was itself
+platform-dependent -- see ``TestExactAssetNameLookup`` below).
 """
 
 from __future__ import annotations
@@ -38,7 +43,6 @@ from __future__ import annotations
 import io
 import json
 import os
-import shlex
 import shutil
 import subprocess
 import tarfile
@@ -132,31 +136,52 @@ def _build_baseline_set_archive(
     return archive_path
 
 
-# A `gh` stub that distinguishes the two download shapes by --pattern count:
-# 3 (the original *.abicheck.json[.gz|.zst] search) always "finds nothing"
-# (return 1, download nothing) so every test here exercises the fallback;
-# 1 (the baseline-set archive fetch) copies $FIXTURE_ARCHIVE into the -D
-# directory under the requested pattern's exact name (a literal filename in
-# this code path, not a real glob) when $FIXTURE_ARCHIVE is set, else also
-# "finds nothing".
+# A `gh` stub covering the three real call shapes the fallback (plus the
+# single-snapshot search ahead of it) makes:
+#   - `release download ... --pattern ...` (the original single-snapshot
+#     search) always "finds nothing" -- every test here exercises the
+#     baseline-set fallback, never the single-snapshot path.
+#   - `release view [tag] ... --json assets` answers from
+#     $FIXTURE_ASSETS_JSON (a JSON `{"assets": [...]}` document the test
+#     builds -- see `_resolved_asset_name`/`_run_baseline_fallback` below),
+#     or an empty assets list when unset.
+#   - `api <url>` cats $FIXTURE_ARCHIVE regardless of the exact URL (these
+#     tests only ever register zero or one asset, so there is nothing to
+#     disambiguate) when $FIXTURE_ARCHIVE is set, else fails.
 _GH_STUB = r"""
 gh() {
-  local dest="" pattern="" pattern_count=0
-  while [[ $# -gt 0 ]]; do
-    case "$1" in
-      --pattern) pattern="$2"; pattern_count=$((pattern_count + 1)); shift 2 ;;
-      -D) dest="$2"; shift 2 ;;
-      *) shift ;;
-    esac
-  done
-  if [[ "$pattern_count" -eq 1 && -n "${FIXTURE_ARCHIVE:-}" ]]; then
-    mkdir -p "$dest"
-    cp "$FIXTURE_ARCHIVE" "$dest/$pattern"
+  if [[ "$1" == "release" && "$2" == "download" ]]; then
+    return 1
+  fi
+  if [[ "$1" == "release" && "$2" == "view" ]]; then
+    if [[ -n "${FIXTURE_ASSETS_JSON:-}" ]]; then
+      printf '%s' "$FIXTURE_ASSETS_JSON"
+    else
+      printf '{"assets": []}'
+    fi
     return 0
+  fi
+  if [[ "$1" == "api" ]]; then
+    if [[ -n "${FIXTURE_ARCHIVE:-}" ]]; then
+      cat "$FIXTURE_ARCHIVE"
+      return 0
+    fi
+    return 1
   fi
   return 1
 }
 """
+
+
+def _resolved_asset_name(env: dict[str, str]) -> str:
+    """Mirrors run.sh's own asset_name computation (template + profile),
+    so a fixture's advertised asset name always matches what the real
+    script will actually look up."""
+    template = env.get("INPUT_BASELINE_ASSET_NAME_TEMPLATE") or ""
+    if not template:
+        template = "abicheck-baseline-{profile}.tar.zst"
+    profile = env.get("INPUT_BASELINE_PROFILE", "")
+    return template.replace("{profile}", profile)
 
 
 def _run_bash_script(
@@ -188,19 +213,34 @@ def _run_bash_script(
         os.unlink(path)
 
 
+def _run_baseline_fallback(
+    env_extra: dict[str, str],
+    *,
+    trailer: str = (
+        '\necho "REACHED_END OLD_LIBRARY=${INPUT_OLD_LIBRARY:-} '
+        'AGAINST=${INPUT_AGAINST:-}"\n'
+    ),
+) -> subprocess.CompletedProcess[str]:
+    env = {**os.environ, **env_extra}
+    if env.get("FIXTURE_ARCHIVE") and "FIXTURE_ASSETS_JSON" not in env_extra:
+        asset_name = _resolved_asset_name(env)
+        env["FIXTURE_ASSETS_JSON"] = json.dumps(
+            {"assets": [{"name": asset_name, "apiUrl": "fixture://asset"}]}
+        )
+    script = (
+        'MODE="${INPUT_MODE:-compare}"\n'
+        'FORCE_AUDIT_ONLY="${INPUT_AUDIT:-false}"\n'
+        + _GH_STUB
+        + _baseline_region()
+        + trailer
+    )
+    return _run_bash_script(script, env)
+
+
 @pytest.mark.skipif(not RUN_SH.is_file(), reason="action/run.sh not found")
 class TestBaselineSetFallback:
     def _run(self, env_extra: dict[str, str]) -> subprocess.CompletedProcess[str]:
-        script = (
-            'MODE="${INPUT_MODE:-compare}"\n'
-            'FORCE_AUDIT_ONLY="${INPUT_AUDIT:-false}"\n'
-            + _GH_STUB
-            + _baseline_region()
-            + '\necho "REACHED_END OLD_LIBRARY=${INPUT_OLD_LIBRARY:-} '
-            'AGAINST=${INPUT_AGAINST:-}"\n'
-        )
-        env = {**os.environ, **env_extra}
-        return _run_bash_script(script, env)
+        return _run_baseline_fallback(env_extra)
 
     def test_resolves_from_baseline_set_when_no_single_snapshot_asset(
         self, tmp_path: Path
@@ -308,11 +348,10 @@ class TestBaselineSetFallback:
                 "INPUT_ABI_BASELINE": "latest-release",
                 "INPUT_BASELINE_PROFILE": "windows-x86_64-msvc-release",
                 "INPUT_BASELINE_TARGET": "libpvxs",
-                # The `gh` stub above copies $FIXTURE_ARCHIVE to the
-                # requested pattern's exact name regardless of the archive's
-                # own on-disk filename (it distinguishes fetch shapes purely
-                # by --pattern count, not by matching names) -- so this
-                # archive, built under the default PROFILE, IS found and
+                # `_run_baseline_fallback` auto-advertises a fixture asset
+                # named for the REQUESTED profile (matching what run.sh's
+                # own asset_name computation resolves to), so this archive
+                # -- built under the default PROFILE -- IS found and
                 # fetched successfully under the requested
                 # "windows-x86_64-msvc-release" name. The failure is
                 # entirely `resolve_target()`'s own wrong_profile check
@@ -430,6 +469,7 @@ class TestBaselineSetFallback:
             + _baseline_region()
             + '\necho "REACHED_END"\n'
         )
+        asset_name = _resolved_asset_name({"INPUT_BASELINE_PROFILE": PROFILE})
         env = {
             **os.environ,
             "INPUT_MODE": "compare",
@@ -437,6 +477,9 @@ class TestBaselineSetFallback:
             "INPUT_BASELINE_PROFILE": PROFILE,
             "INPUT_BASELINE_TARGET": "libpvxs",
             "FIXTURE_ARCHIVE": str(archive),
+            "FIXTURE_ASSETS_JSON": json.dumps(
+                {"assets": [{"name": asset_name, "apiUrl": "fixture://asset"}]}
+            ),
         }
         result = _run_bash_script(script, env)
         assert result.returncode == 0, result.stdout + result.stderr
@@ -445,86 +488,62 @@ class TestBaselineSetFallback:
 
 
 @pytest.mark.skipif(not RUN_SH.is_file(), reason="action/run.sh not found")
-class TestEscapeGlobMetachars:
-    """Regression (Codex review): `gh release download --pattern` treats
-    its argument as a glob (Go's ``filepath.Match``), not a literal
-    filename. A ``baseline-asset-name-template`` containing a literal
-    glob metacharacter (``[``, ``?``, ``*``) would otherwise either fail
-    to match its own asset, or accidentally match an unrelated one.
-    ``_escape_glob_metachars`` backslash-escapes each metacharacter (and a
-    literal backslash itself) before the resolved name is used as a
-    ``--pattern`` value -- extracted and run directly here, the same
-    "test the real function, not a re-implementation" discipline this
-    file's other tests use for the wider baseline-set fallback."""
+class TestExactAssetNameLookup:
+    """Regression (Codex review, second round): the earlier fix backslash-
+    escaped glob metacharacters before using the resolved asset name as a
+    `gh release download --pattern` value -- but that escaping is ITSELF
+    wrong on a Windows runner: Go's path/filepath.Match disables escaping
+    entirely there (treating '\\' as the OS path separator instead), so
+    the escaped pattern would fail to match on exactly the runners this
+    whole area of the fallback exists to support. The fallback now looks
+    the asset up by EXACT name via `gh release view --json assets` + `gh
+    api <apiUrl>` instead of a `--pattern` glob at all, sidestepping
+    platform-dependent glob semantics entirely -- confirmed here by
+    resolving a baseline whose profile (and therefore resolved asset name)
+    is built from every glob metacharacter this fallback used to have to
+    escape."""
 
-    @pytest.mark.parametrize(
-        ("raw", "expected"),
-        [
-            (
-                "abicheck-baseline-linux-x86_64-gcc13-release.tar.zst",
-                "abicheck-baseline-linux-x86_64-gcc13-release.tar.zst",
-            ),
-            (
-                "abicheck-baseline-[release].tar.zst",
-                "abicheck-baseline-\\[release\\].tar.zst",
-            ),
-            ("abicheck-baseline-a?b.tar.zst", "abicheck-baseline-a\\?b.tar.zst"),
-            ("abicheck-baseline-*.tar.zst", "abicheck-baseline-\\*.tar.zst"),
-            ("abicheck-baseline-a\\b.tar.zst", "abicheck-baseline-a\\\\b.tar.zst"),
-            ("[*?]\\", "\\[\\*\\?\\]\\\\"),
-        ],
-    )
-    def test_escapes_glob_metacharacters(self, raw: str, expected: str) -> None:
-        script = (
-            _baseline_region()
-            + f"\nprintf '%s' \"$(_escape_glob_metachars {shlex.quote(raw)})\"\n"
-        )
-        result = _run_bash_script(script, {**os.environ})
-        assert result.returncode == 0, result.stdout + result.stderr
-        assert result.stdout == expected
-
-    def test_pattern_flag_receives_the_escaped_not_raw_asset_name(
+    def test_resolves_an_asset_name_containing_glob_metacharacters(
         self, tmp_path: Path
     ) -> None:
-        """End-to-end: a profile containing a literal ``[``/``]`` makes it
-        into ``--pattern`` only in escaped form, confirmed by inspecting
-        what the stubbed ``gh`` actually received (not just the standalone
-        helper's own output)."""
-        captured = tmp_path / "captured-pattern.txt"
-        gh_stub = f"""
-gh() {{
-  local pattern="" pattern_count=0
-  while [[ $# -gt 0 ]]; do
-    case "$1" in
-      --pattern) pattern="$2"; pattern_count=$((pattern_count + 1)); shift 2 ;;
-      -D) shift 2 ;;
-      *) shift ;;
-    esac
-  done
-  if [[ "$pattern_count" -eq 1 ]]; then
-    printf '%s' "$pattern" > {shlex.quote(str(captured))}
-  fi
-  return 1
-}}
-"""
-        profile = "linux-[custom]-release"
-        script = (
-            'MODE="${INPUT_MODE:-compare}"\n'
-            'FORCE_AUDIT_ONLY="${INPUT_AUDIT:-false}"\n'
-            + gh_stub
-            + _baseline_region()
-            + '\necho "REACHED_END"\n'
+        profile = "linux-[x86*64]-gcc13?release"
+        archive = _build_baseline_set_archive(tmp_path, profile=profile)
+        result = _run_baseline_fallback(
+            {
+                "INPUT_MODE": "compare",
+                "INPUT_ABI_BASELINE": "latest-release",
+                "INPUT_BASELINE_PROFILE": profile,
+                "INPUT_BASELINE_TARGET": "libpvxs",
+                "FIXTURE_ARCHIVE": str(archive),
+            }
         )
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert "libpvxs.abicheck.json" in result.stdout
+
+    def test_an_asset_whose_name_only_differs_is_not_matched(
+        self, tmp_path: Path
+    ) -> None:
+        """Exact-string lookup, not a glob: an advertised asset with a
+        DIFFERENT name (even one that would have matched a naively
+        unescaped glob pattern) must never resolve."""
+        archive = _build_baseline_set_archive(tmp_path, profile=PROFILE)
         env = {
-            **os.environ,
             "INPUT_MODE": "compare",
             "INPUT_ABI_BASELINE": "latest-release",
-            "INPUT_BASELINE_PROFILE": profile,
+            "INPUT_BASELINE_PROFILE": PROFILE,
             "INPUT_BASELINE_TARGET": "libpvxs",
+            "FIXTURE_ARCHIVE": str(archive),
+            "FIXTURE_ASSETS_JSON": json.dumps(
+                {
+                    "assets": [
+                        {
+                            "name": "totally-unrelated.tar.zst",
+                            "apiUrl": "fixture://asset",
+                        }
+                    ]
+                }
+            ),
         }
-        _run_bash_script(script, env)
-
-        assert captured.is_file(), "gh stub was never invoked with a single --pattern"
-        seen_pattern = captured.read_text(encoding="utf-8")
-        assert seen_pattern == "abicheck-baseline-linux-\\[custom\\]-release.tar.zst"
-        assert seen_pattern != f"abicheck-baseline-{profile}.tar.zst"
+        result = _run_baseline_fallback(env)
+        assert result.returncode == 1
+        assert "baseline-set archive" in result.stdout + result.stderr

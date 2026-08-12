@@ -448,9 +448,37 @@ def compute_content_digest(manifest: dict[str, Any]) -> str:
     ).hexdigest()
 
 
-def recompute_content_digest_from_disk(
-    manifest: dict[str, Any], base_dir: Path
-) -> str:
+def _resolve_under_base_dir(base_dir: Path, rel: str) -> Path | None:
+    """Resolve *rel* under *base_dir*, refusing an absolute path or an
+    escape (e.g. ``"../../.abicheck-baseline/libfoo.abicheck.json"``) --
+    ``None`` if refused.
+
+    *rel* comes from an EXISTING (previously-published) asset's
+    ``manifest.json``, which is untrusted content restored from that
+    archive -- a broken or maliciously-crafted asset containing no
+    snapshot of its own could otherwise point ``snapshot``/``binary`` at a
+    path outside the extracted archive (e.g. this SAME publish job's own
+    fresh baseline directory, which exists on disk at the same time),
+    hashing THAT file instead and coincidentally matching
+    ``NEW_CONTENT_DIGEST`` -- taking the safe-retry exit for a broken
+    asset that a real consumer's ``resolve_target()``/``resolve_bundle()``
+    (``_resolve_under_baseline_dir`` there) would later reject outright
+    (Codex review). Standalone, not imported from
+    ``abicheck.buildsource.baseline_set``: this module is deliberately
+    dependency-free of the ``abicheck`` package (see this file's own
+    top-of-module docstring), so the identical containment check is
+    re-implemented here rather than imported across that boundary.
+    """
+    if Path(rel).is_absolute():
+        return None
+    candidate = (base_dir / rel).resolve()
+    root_resolved = base_dir.resolve()
+    if candidate != root_resolved and not candidate.is_relative_to(root_resolved):
+        return None
+    return base_dir / rel
+
+
+def recompute_content_digest_from_disk(manifest: dict[str, Any], base_dir: Path) -> str:
     """:func:`compute_content_digest`, but sourcing each artifact's
     sha256/binary_sha256 from the ACTUAL bytes on disk under *base_dir*,
     never from *manifest*'s own declared fields.
@@ -487,7 +515,14 @@ def recompute_content_digest_from_disk(
                 "has no 'snapshot' filename -- cannot verify its real "
                 "content."
             )
-        snapshot_path = base_dir / snapshot_name
+        snapshot_path = _resolve_under_base_dir(base_dir, snapshot_name)
+        if snapshot_path is None:
+            raise SystemExit(
+                f"existing asset's manifest declares snapshot "
+                f"{snapshot_name!r} for library {library!r}, which is an "
+                "absolute path or escapes the extracted archive -- "
+                "refusing to hash a file outside it."
+            )
         if not snapshot_path.is_file():
             raise SystemExit(
                 f"existing asset's manifest declares snapshot "
@@ -524,7 +559,14 @@ def recompute_content_digest_from_disk(
 
         binary_rel = artifact.get("binary")
         if binary_rel:
-            binary_path = base_dir / binary_rel
+            binary_path = _resolve_under_base_dir(base_dir, binary_rel)
+            if binary_path is None:
+                raise SystemExit(
+                    f"existing asset's manifest declares a staged binary "
+                    f"{binary_rel!r} for library {library!r}, which is an "
+                    "absolute path or escapes the extracted archive -- "
+                    "refusing to hash a file outside it."
+                )
             if not binary_path.is_file():
                 raise SystemExit(
                     f"existing asset's manifest declares a staged binary "
