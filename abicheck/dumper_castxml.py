@@ -42,7 +42,6 @@ from .model import (
     Visibility,
 )
 from .provenance import build_public_set, classify_origin, header_from_location
-from .qualified_name_segments import dedup_versioned_namespace_alias_items
 
 #: Base names of semantic contract / calling-convention attributes worth
 #: diffing. castxml passes GNU attributes through its compound ``attributes``
@@ -1365,7 +1364,9 @@ class _CastxmlParser:
             # Only const / constexpr: the initializer is a baked-in contract.
             # (constexpr implies const, so this captures both.)
             type_name = self._type_name(el.get("type", ""))
-            is_const = el.get("const") == "1" or re.search(r"\bconst\b", type_name)
+            is_const = el.get("const") == "1" or bool(
+                re.search(r"\bconst\b", type_name)
+            )
             if not is_const:
                 continue
             if not self._decl_is_public(el):
@@ -1381,7 +1382,7 @@ class _CastxmlParser:
                     header_from_location(self._source_location(el)) or "",
                 )
             )
-        return dedup_versioned_namespace_alias_items(out)
+        return out
 
     def _qualified_name(self, el: Any) -> str:
         """Build a namespace/class-qualified name by walking ``context``.

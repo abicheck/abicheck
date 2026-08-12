@@ -32,45 +32,18 @@ change once per spelling.
 :func:`version_strip_segments` directly, gated on real extraction-data
 identity (a shared mangled name, a shared source location) before ever
 merging two spellings -- see its own module docstring. There is
-deliberately **no** merge helper here for comparing a plain name-keyed
-mapping like ``AbiSnapshot.constants`` *across two different snapshots*: a
-header constant carries no identity beyond its own value there, and
-value-equality alone was tried and repeatedly shown (Codex review, P1,
-three rounds) to be indistinguishable from coincidence in both directions
--- it can hide a real value divergence between two unrelated declarations
-that happen to start equal, and it can also merge two unrelated
-declarations that never even coexist in the same snapshot, each present on
-only one side. ``diff_symbols._diff_constants`` therefore compares
-``AbiSnapshot.constants`` unmodified across snapshots; double-reporting a
-constant value *change* once per versioned-namespace spelling remains an
-accepted, documented limitation there (see that function's docstring).
-
-:func:`dedup_versioned_namespace_alias_items` is a narrower, different
-operation this module *does* provide: collapsing a using-declaration's
-re-exported spelling of a constant back onto the single declaration it
-names, *within one already-collected snapshot's own item list* -- not
-across two snapshots being compared. It is safe where the rejected
-cross-snapshot merge was not because it is gated on strictly more, and
-different, evidence: both a real :func:`version_strip_segments` structural
-match (never a declaration's own leaf name) AND identical values, for two
-entries that provably coexist in the same extraction pass. A
-using-declaration cannot legally re-export a constant under a different
-value, so within one snapshot this combination can only misfire on two
-genuinely distinct declarations that coincidentally share both a
-version-alias-shaped name pair and an identical value -- a materially
-narrower coincidence than the bare value equality rejected above, and an
-accepted residual risk documented on the function itself (Codex review,
-P2) rather than eliminated, since doing so needs real using-shadow/target
-evidence no header-AST producer available here exposes.
-
-It always keeps the version-*qualified* spelling and drops the
-version-*stripped* alias, never the reverse (Codex review, P1: an earlier
-revision kept the shorter alias instead, which silently manufactured a
-``CONSTANT_REMOVED``/``CONSTANT_ADDED`` pair whenever a release added or
-removed only the ``using`` re-export while the real declaration was
-unchanged -- see the function's own docstring for why keeping the
-canonical spelling is the direction that stays diff-invariant across that
-transition).
+deliberately **no** merge helper here for a plain name-keyed mapping like
+``AbiSnapshot.constants``: a header constant carries no identity beyond its
+own value, and value-equality alone was tried and repeatedly shown
+(Codex review, P1, three rounds) to be indistinguishable from coincidence
+in both directions -- it can hide a real value divergence between two
+unrelated declarations that happen to start equal, and it can also merge
+two unrelated declarations that never even coexist in the same snapshot,
+each present on only one side. ``diff_symbols._diff_constants`` therefore
+compares ``AbiSnapshot.constants`` unmodified; double-reporting a constant
+value change once per versioned-namespace spelling is an accepted, documented
+limitation (see that function's docstring) rather than a heuristic that
+cannot be made sound with the data available today.
 """
 
 from __future__ import annotations
@@ -167,88 +140,3 @@ def version_strip_segments(segs: list[str]) -> tuple[tuple[str, ...], int | None
         if v is not None:
             return tuple(segs[:i] + segs[i + 1 :]), v
     return tuple(segs), None
-
-
-def dedup_versioned_namespace_alias_items(
-    items: list[tuple[str, str, str]],
-) -> list[tuple[str, str, str]]:
-    """Collapse a using-declaration's re-exported spelling of a header
-    constant back onto the single declaration it names.
-
-    *items* is ``(qualified_name, value, declaring_header)`` triples from one
-    already-collected header-AST extraction pass (the shape
-    ``dumper_castxml.py``'s ``_iter_public_constants`` produces). A plain
-    ``namespace v1 { constexpr T x = ...; } using v1::x;`` re-export makes a
-    header-AST producer emit a *second*, independent declaration for the
-    using-declaration -- keyed under its own qualified name (``ns::x``)
-    alongside the real declaration's (``ns::v1::x``). Nothing keyed by exact
-    name -- not ``model.py``'s first-wins dedup, not a caller iterating
-    ``AbiSnapshot.constants`` -- can tell these apart on its own: the two
-    don't collide on a key, they are two distinct keys naming one
-    declaration. See this module's own docstring for why this is a
-    deliberately narrower, same-snapshot operation, not the value-equality
-    merge already rejected for cross-snapshot comparison.
-
-    For every item whose qualified name strips one versioned-inline-namespace
-    segment (:func:`version_strip_segments`), if the stripped (alias)
-    spelling is ALSO present in *items* with an identical value, the
-    version-*stripped* alias is dropped and only the version-*qualified*
-    original -- the real declaration's own full name -- is kept.
-
-    This direction (drop the alias, keep the qualified original) is
-    deliberate and load-bearing, not a style choice (Codex review, P1: an
-    earlier revision did the reverse). ``AbiSnapshot.constants`` is built
-    independently per side of a comparison, so whether a given side's item
-    list even contains the alias spelling depends only on whether *that
-    side's* headers happened to declare the ``using`` re-export -- a
-    release can add or remove just the re-export while the real declaration
-    is completely unchanged. Keeping the version-stripped alias (the
-    earlier, wrong direction) meant a side WITHOUT the re-export kept its
-    one qualified key while a side WITH it collapsed down to the alias key
-    instead -- two different surviving keys for the unchanged declaration,
-    which ``_diff_constants`` then read as a spurious
-    ``CONSTANT_REMOVED``/``CONSTANT_ADDED`` pair. Keeping the qualified
-    spelling instead is invariant to whether either side happens to carry
-    the alias: a side with the re-export collapses down to the SAME key a
-    side without it already used, so adding or removing only the re-export
-    produces no key-set difference at all. The trade-off this accepts is the
-    complementary one already documented for the direct-clang backend in
-    ``AGENTS.md``'s Known gaps -- the re-export's own addition/removal goes
-    undetected -- rather than a new, castxml-only failure mode of fabricated
-    add/remove noise.
-
-    Returns *items* unchanged (same list identity not guaranteed, but same
-    contents) when no such pair exists, which is the overwhelmingly common
-    case: most versioned-namespace declarations have no re-export at all.
-
-    **Accepted residual risk (Codex review, P2):** the gate is name-shape
-    plus value-equality, not proven using-shadow/target identity -- no
-    header-AST producer available here exposes that relationship. Two
-    genuinely independent declarations that happen to form a
-    version-alias-shaped name pair AND happen to share a value at the
-    moment of extraction (e.g. an unrelated top-level ``x`` and a nested
-    ``v1::x`` that both currently equal the same literal) will merge, and a
-    later, independent change to the dropped one can then read as an
-    ``ADDED`` instead of a ``CHANGED``. This is the same class of
-    accepted, documented limitation as ``diff_symbols._diff_constants``'s
-    own value-fingerprint caveat and `_type_index_items`'s structural-
-    identity caveat -- narrower here than either (it requires the
-    coincidence to hold at extraction time, not just eventually), but not
-    eliminated, since doing so needs real identity evidence this module
-    does not have.
-    """
-    by_name = {name: value for name, value, _header in items}
-    drop: set[str] = set()
-    for name, value, _header in items:
-        stripped_segs, version = version_strip_segments(segments(name))
-        if version is None:
-            continue
-        stripped_name = "::".join(stripped_segs)
-        if stripped_name == name:
-            continue
-        alias_value = by_name.get(stripped_name)
-        if alias_value is not None and alias_value == value:
-            drop.add(stripped_name)
-    if not drop:
-        return items
-    return [item for item in items if item[0] not in drop]
