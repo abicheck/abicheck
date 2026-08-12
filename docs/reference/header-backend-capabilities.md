@@ -3,6 +3,8 @@ doc_type: reference
 audience:
   - library-maintainer
   - contributor
+canonical_for:
+  - ast-frontend-resolution
 level: advanced
 lifecycle: active
 generated: false

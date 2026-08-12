@@ -29,7 +29,10 @@ It supports ELF (Linux), PE/COFF (Windows), and Mach-O (macOS) binaries, and it'
 
 ## How the documentation is organized
 
-The docs are two complementary tracks, each ordered from introductory to expert:
+The docs are built from two complementary tracks, each ordered from
+introductory to expert — the "Where to go next" list below routes by task/
+persona instead, for whichever track (or both) a given question actually
+needs:
 
 1. **Learn the problem** — [ABI/API Handling & Recommendations](learn/abi-api-handling.md)
    is educational material that needs no abicheck knowledge: what ABI/API
@@ -92,6 +95,7 @@ The docs are two complementary tracks, each ordered from introductory to expert:
 **Automating through Python or an agent?**
 
 - [Python API](use/python-api.md) — typed requests, and a CLI/Python parity table.
+- [Agent Skills](use/agent-skills.md) — four portable, triggerable skills a coding agent (Claude Code, Copilot, Codex, Cursor, Gemini CLI) loads to answer a compatibility question in the user's own words, no MCP server required.
 
 **Migrating from another tool?**
 
