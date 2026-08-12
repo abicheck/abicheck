@@ -8,8 +8,10 @@
   when neither headers nor debug info are present. `README.md`,
   `docs/start/getting-started.md`, and `docs/learn/architecture.md` no
   longer claim DWARF debug-info cross-check on macOS — abicheck has no
-  Mach-O DWARF/debug-map reader, so a headerless Mach-O scan is always L0
-  only (already correctly documented on `docs/reference/platforms.md`).
+  Mach-O DWARF/debug-map reader, so a headerless Mach-O input's own
+  binary/debug-info evidence is always L0 only (`--sources`/`--build-info`
+  can still attach L3–L5 evidence independently of platform; already
+  correctly documented on `docs/reference/platforms.md`).
   `docs/use/cli-usage.md` and `docs/use/tool-modes.md` got the same
   DWARF/PDB-before-symbols-only correction. `docs/reference/
   header-backend-capabilities.md` and `docs/use/github-action.md` now state

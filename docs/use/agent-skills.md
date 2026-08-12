@@ -24,12 +24,14 @@ deterministic verification engine. See
 [ADR-058](../contribute/adr/058-native-compatibility-agent-skills.md) for why
 the portfolio is shaped this way.
 
-> **Requires unreleased abicheck 0.6.x.** These skills are published from
-> `main` and check the installed abicheck version before doing anything
-> else — they refuse to run rather than fail partway through on the latest
-> published release, **0.5.0** (see "Requirements" below for exactly why).
-> If `pip show abicheck` / `pyproject.toml`'s `version` on your checkout
-> isn't `0.6.0` or later yet, these skills are not installable for you yet.
+> **Requires unreleased abicheck 0.6.x to run.** You can install these
+> skills (copying a directory works regardless of your abicheck version)
+> against the latest published release, **0.5.0** — but each skill checks
+> the installed abicheck version as its own first step and refuses to run
+> rather than fail partway through, since several commands/options it
+> drives postdate 0.5.0 (see "Prerequisites" below). If `pip show abicheck`
+> / `pyproject.toml`'s `version` isn't `0.6.0` or later yet, an installed
+> skill will decline to execute until it is.
 
 **Portfolio status (2026-08-11):** none of the four skills has measured
 evidence yet that it improves agent behavior over a well-documented CLI
