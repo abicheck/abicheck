@@ -1281,6 +1281,40 @@ reclassify:
     assert rule.to_verdict == Verdict.API_BREAK
 
 
+def test_reclassify_rule_for_change_no_op_against_a_floor_clamped_override(
+    tmp_path: Path,
+) -> None:
+    """Codex review (second round): the no-op comparison verdict must apply
+    the identical frozen-namespace floor the `overrides:` branch itself
+    applies -- not the override's raw value. `overrides: func_removed:
+    ignore` (COMPATIBLE) on a frozen-namespace finding already clamps back
+    to BREAKING (the base verdict) via the floor with no reclassify: rule
+    involved at all -- so a `reclassify: ... to: break` rule here restates
+    an already-BREAKING outcome and is a no-op, even though the *raw*
+    override value (COMPATIBLE) differs from `to: break`. Verified by
+    deliberately comparing against the raw override instead of the
+    floor-clamped one and confirming this test fails."""
+    from abicheck.severity import reclassify_rule_for_change
+
+    p = tmp_path / "policy.yaml"
+    p.write_text(
+        """
+overrides:
+  func_removed: ignore
+reclassify:
+  - kind: func_removed
+    symbol: foo
+    to: break
+""".strip(),
+        encoding="utf-8",
+    )
+    pf = PolicyFile.load(p)
+    change = _change(
+        ChangeKind.FUNC_REMOVED, "foo", frozen_namespace_violation="detail.*"
+    )
+    assert reclassify_rule_for_change(change, pf) is None
+
+
 def test_reclassify_rule_for_change_none_when_no_rule_matches(tmp_path: Path) -> None:
     from abicheck.severity import reclassify_rule_for_change
 

@@ -364,7 +364,14 @@ def reclassify_rule_for_change(
     is already BREAKING (Codex review: a matching-but-no-op rule was still
     stamping ``reclassified_by``, making the PR comment falsely report a
     downgrade that never happened). Only a rule that actually *changes* the
-    verdict from what would apply in its absence counts as deciding it.
+    verdict from what would apply in its absence counts as deciding it. That
+    comparison verdict is computed through the identical frozen-namespace
+    floor the ``overrides:`` branch below applies -- not the override's raw
+    value (Codex review, second round: a frozen-namespace finding with e.g.
+    ``overrides: func_removed: ignore`` plus ``reclassify: ... to: break``
+    would, absent the rule, already clamp back to BREAKING via the floor;
+    comparing against the raw COMPATIBLE override instead made the rule read
+    as deciding a verdict that was already going to be BREAKING anyway).
     """
     if isinstance(getattr(change, "effective_verdict", None), Verdict):
         return None
@@ -383,11 +390,21 @@ def reclassify_rule_for_change(
     # The verdict that would apply if *this* reclassify rule didn't exist --
     # the next step down the same precedence chain effective_verdict_for_change
     # walks (a same-kind overrides: entry, else the base policy's own
-    # verdict) -- so a rule that merely restates it is recognized as a no-op
-    # regardless of which of the two it happens to restate.
-    next_priority_v = (
-        cast(Verdict, overrides[kind]) if overrides and kind in overrides else base_v
-    )
+    # verdict), with the identical frozen-namespace floor clamp the overrides:
+    # branch below applies -- so a rule that merely restates it is recognized
+    # as a no-op regardless of which of the two it happens to restate, and
+    # regardless of whether the floor would already have clamped it.
+    if overrides and kind in overrides:
+        override_v = cast(Verdict, overrides[kind])
+        if (
+            _has_frozen_namespace_violation(change)
+            and _VERDICT_ORDER.index(override_v) < _VERDICT_ORDER.index(base_v)
+        ):
+            next_priority_v = base_v
+        else:
+            next_priority_v = override_v
+    else:
+        next_priority_v = base_v
     for rule in rules:
         if rule.matches(change, today):
             reclass_v = rule.to_verdict
