@@ -393,7 +393,8 @@ def policy_options(func: F) -> F:
         "policy_file_path",
         type=POLICY_FILE_PARAM,
         default=None,
-        help="YAML policy file with per-kind verdict overrides, or a built-in name "
+        help="YAML policy file with per-kind ('overrides:') or selector-scoped "
+        "('reclassify:') verdict re-classification, or a built-in name "
         "(e.g. 'security'). Overrides --policy.",
     )(func)
     func = click.option(

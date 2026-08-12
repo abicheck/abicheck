@@ -244,7 +244,7 @@ files**, not in `.abicheck.yml`:
 
 | Concept | File / flag | Top-level schema | Docs |
 |---------|-------------|------------------|------|
-| Policy profile | `--policy-file <file>` (`PolicyFile.load`, `policy_file.py`) — note `--policy` only takes the built-in names `strict_abi`/`sdk_vendor`/`plugin_abi` | `base_policy`, `overrides`, `frozen_namespaces`, `evidence_policy` | [Policies](../use/policies.md) |
+| Policy profile | `--policy-file <file>` (`PolicyFile.load`, `policy_file.py`) — note `--policy` only takes the built-in names `strict_abi`/`sdk_vendor`/`plugin_abi` | `base_policy`, `overrides`, `reclassify`, `frozen_namespaces`, `evidence_policy` | [Policies](../use/policies.md) |
 | Suppression rules | `--suppress <file>` (`suppression.py`) | Suppression rule entries (YAML or ABICC format) | [Suppressions](../use/suppressions.md) |
 
 The `evidence_policy` block is part of the **policy file**, not `.abicheck.yml`.

@@ -90,7 +90,7 @@ Compare two ABI surfaces and report changes.
 | `--secondary-output` | no | — | File path to write --secondary-format's output to. Must differ from --output/-o, or the secondary render would silently overwrite the primary report. |
 | `--demangle`, `--no-demangle` | no | — | Demangle C++ symbol names in markdown/review output (default ON; use --no-demangle to turn off). json/sarif always keep raw mangled names, and HTML is rendered structurally and is never demangled regardless of this flag. |
 | `--policy` | no | `strict_abi` | Built-in policy profile for verdict classification. Ignored when --policy-file is given. Choices: `strict_abi`, `sdk_vendor`, `plugin_abi`. |
-| `--policy-file` | no | — | YAML policy file with per-kind verdict overrides, or a built-in name (e.g. 'security'). Overrides --policy. |
+| `--policy-file` | no | — | YAML policy file with per-kind ('overrides:') or selector-scoped ('reclassify:') verdict re-classification, or a built-in name (e.g. 'security'). Overrides --policy. |
 | `--suppress` | no | — | Suppression file (YAML) to filter known/intentional changes. |
 | `--pdb-path` | no | — | Explicit PDB file path for Windows PE debug info. Applies to both sides; scope to one with an 'old='/'new=' prefix, repeating the flag per side (e.g. --pdb-path old=a.pdb --pdb-path new=b.pdb). Overrides automatic PDB discovery (ADR-040). |
 | `--used-by` | no | — | Application binary whose actual imports/required symbol versions scope the comparison (repeatable; folds `appcompat`). The full library comparison still runs once; the worst app-scoped result becomes the primary verdict/exit code, with the full verdict and unrelated changes kept as informational context. OLD/NEW may be real library binaries or JSON snapshots carrying binary evidence (a `dump` of a real library, not headers-only). Mutually exclusive with --required-symbol/--required-symbols. |
@@ -446,7 +446,7 @@ Deterministic source-intelligence scan (classify → always-on tier → level).
 | `--crosscheck` | no | — | Per-check level KEY=LEVEL (off\|info\|warning\|error); repeatable. |
 | `--risk-rules` | no | — | Override the risk\_rules profile (YAML). |
 | `--policy` | no | `strict_abi` | Built-in policy profile for verdict classification. Ignored when --policy-file is given. Choices: `strict_abi`, `sdk_vendor`, `plugin_abi`. |
-| `--policy-file` | no | — | YAML policy file with per-kind verdict overrides, or a built-in name (e.g. 'security'). Overrides --policy. |
+| `--policy-file` | no | — | YAML policy file with per-kind ('overrides:') or selector-scoped ('reclassify:') verdict re-classification, or a built-in name (e.g. 'security'). Overrides --policy. |
 | `--suppress` | no | — | Suppression file (YAML) to filter known/intentional changes. |
 | `--scope-public-headers`, `--no-scope-public-headers` | no | `True` | Restrict findings to the public-header ABI surface (ADR-024): changes to symbols/types not reachable from public-header-declared exported API are recorded as filtered, not reported. Internal-type leaks are never hidden. On by default; use --no-scope-public-headers to report every finding regardless of surface. |
 | `--severity-preset` | no | — | Severity preset: 'default', 'strict', or 'info-only'. Controls exit codes and report labels. Per-category --severity-* options override the chosen preset. Choices: `default`, `strict`, `info-only`. |

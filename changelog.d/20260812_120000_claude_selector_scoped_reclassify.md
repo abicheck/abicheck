@@ -142,4 +142,11 @@ A new changelog fragment. See changelog.d/README.md for the workflow.
   is now the single source of truth; `to` is always its derived canonical
   spelling (`break`/`warn`/`risk`/`ignore`) — a no-op for every
   policy-file-loaded rule, since the loader already derives one from the
-  other.
+  other. Every other `--policy-file` schema summary in the repo now
+  mentions `reclassify:` alongside `overrides:` instead of describing only
+  the older primitive: `--policy-file`'s own `--help` text
+  (`cli_options.py`), the GitHub Action's `policy-file` input description
+  (`action.yml`, regenerated into `docs/reference/github-action-inputs.md`
+  and `docs/reference/cli-reference.md`), the Python API's
+  `checker.compare(policy_file=...)` docstring, and
+  `docs/reference/config-file.md`'s policy-file schema summary table.

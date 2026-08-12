@@ -69,7 +69,7 @@ Every `with:` input and `outputs.*` value for the [abicheck GitHub Action](../us
 | `output-file` | no | — | Path to write the report file. If not set, output goes to stdout and job summary. |
 | `snapshot-compression` | no | — | dump mode only (ADR-059). Storage envelope for the written snapshot: 'auto' (default) infers gzip/zstd/plain from output-file's canonical suffix (.abicheck.json.gz/.abicheck.json.zst/plain .abicheck.json); an explicit 'none', 'gzip', or 'zstd' is used as-is and is a hard error if it contradicts output-file's suffix, mirroring the CLI's own --compression flag it maps to directly. Ignored by every other mode -- compare/scan/deps-tree/deps-compare produce a report, not a stored snapshot, and transparently read a compressed snapshot operand either way via magic-byte detection regardless of this input. |
 | `policy` | no | strict_abi | Built-in policy profile: strict_abi (default), sdk_vendor, plugin_abi. |
-| `policy-file` | no | — | Path to a YAML policy file with per-kind verdict overrides. |
+| `policy-file` | no | — | Path to a YAML policy file with per-kind (overrides:) or selector-scoped (reclassify:) verdict re-classification. |
 | `suppress` | no | — | Path to a YAML suppression file to filter known/intentional changes. |
 | `verbose` | no | false | Enable verbose/debug output from abicheck. |
 | `python-version` | no | 3.13 | Python version for setup-python. |
