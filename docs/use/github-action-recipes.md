@@ -452,18 +452,33 @@ about the API/ABI at all, so the comment says "Source analysis incomplete" or
 "Analysis coverage reduced" instead, so a reviewer can tell "this PR's
 comparison had a coverage gap" apart from "this PR made a risky API change."
 Whether that headline reads as blocking (🛑) or advisory (⚠️) mirrors the
-Action's own gate exactly: an `api_break`/`risk`-severity coverage-gap
-finding is blocking only under `fail-on-api-break`, and a `breaking`-severity
-one only under `fail-on-breaking` — never merely because evidence happened
-to be incomplete. The one exception is a `compatible`-severity finding (e.g.
-`dwarf_info_missing`) whose resolved severity-config category (`addition` or
-`quality_issues`) is set to `error`: that blocks unconditionally, regardless
-of `fail-on-api-break`/`fail-on-breaking`, because it's compare's own
-exit-code-1 `SEVERITY_ERROR` tier, which has no `fail-on-*` gate of its own.
-A `--contract-evaluation` run's own coverage-failure ledger
-(`contract_coverage_failures`) is folded in the same way — its
-`contract_coverage_exit_contribution` is likewise unconditional, with no
-`fail-on-*` flag to disable it.
+Action's own gate exactly, and follows whichever exit-code scheme actually
+produced the report:
+
+- **Legacy scheme** (no `--severity-*` flags): an `api_break`-severity
+  finding blocks under `fail-on-api-break` alone, and a `breaking`-severity
+  one under `fail-on-breaking` alone — both map to a fixed exit code
+  (2 / 4) regardless of any config. A `risk`-severity finding (e.g.
+  `layer_coverage_asymmetric`'s default) **never** blocks under this
+  scheme: its fixed legacy exit code is 0.
+- **Severity-aware scheme** (`--severity-*` active): `api_break`/`risk`
+  share the `potential_breaking` category and block only when *both*
+  that category is configured `error` *and* `fail-on-api-break`; a
+  `breaking`-severity finding needs *both* `abi_breaking: error` *and*
+  `fail-on-breaking`. The matching `fail-on-*` flag alone is not enough —
+  `compare`'s exit-code-2/4 tiers require the category actually gated,
+  under either scheme.
+
+Two exceptions are unconditional, with no `fail-on-*` gate at all: a
+`compatible`-severity finding (e.g. `dwarf_info_missing`) whose resolved
+severity-config category (`addition` or `quality_issues`) is set to `error`
+— compare's own exit-code-1 `SEVERITY_ERROR` tier — and a
+`--contract-evaluation` run's own coverage-failure ledger
+(`contract_coverage_failures`): its `contract_coverage_exit_contribution`
+folds into the real exit code regardless of any other axis, including a
+`--used-by`/`--required-symbol` scoped verdict — a scoped-compatible run
+whose contract coverage also failed still renders the blocking headline,
+not "✅ Compatible (scoped)".
 
 A breaking/review finding's row also carries, when the report provides them:
 the **demangled C++ signature** as the primary Symbol value (with the raw

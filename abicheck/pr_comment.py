@@ -267,9 +267,20 @@ class CommentModel:
     # Whether the incomplete bucket actually turns the Action's check red —
     # i.e. whether `_incomplete_is_blocking` found a finding whose severity
     # is gated to blocking (see that function's own docstring for exactly
-    # which severity/gate-flag combinations qualify). Drives the headline's
-    # emoji/wording (see `_header`).
+    # which severity/gate-flag combinations qualify), OR the contract-
+    # coverage ledger contributed (see `contract_coverage_blocking` below).
+    # Drives the headline's emoji/wording (see `_header`).
     incomplete_blocking: bool = False
+    # Specifically whether `contract_coverage_exit_contribution` (ADR-049
+    # Phase 5's ledger) is what's blocking — tracked separately from the
+    # general `incomplete_blocking` because this one axis is documented as
+    # *always* additive to the real exit code (AGENTS.md: "no fail-on-*
+    # condition... folded with max... on compare and scan --against alike"),
+    # even ahead of a `--used-by`/`--required-symbol` scoped verdict — a
+    # scoped-COMPATIBLE run whose contract coverage also failed must not
+    # render "✅ Compatible (scoped)" as if that were the whole story
+    # (Codex review; see `_header`'s scoped_verdict branch).
+    contract_coverage_blocking: bool = False
     # Severity-config categories ("abi_breaking" / "potential_breaking" /
     # "addition" / "quality_issues") responsible for a non-empty Breaking
     # bucket. Populated alongside `breaking` in every mode (see
@@ -574,58 +585,90 @@ def _incomplete_is_blocking(
 ) -> bool:
     """Whether the analysis-incomplete bucket represents a hard failure —
     i.e. whether it actually turns the *Action's* check red, mirroring
-    ``action/run.sh``'s own ``compare``-mode gate exactly. Three rounds of
-    Codex review corrected three different overclaims here; read together,
+    ``action/run.sh``'s own ``compare``-mode gate exactly. Four rounds of
+    Codex review corrected four different overclaims here; read together,
     they say the same thing about every finding-severity/exit-code tier
     ``compare`` can produce, so each is listed once below rather than as a
-    change log:
+    change log.
 
-    - ``severity == "breaking"`` (exit code 4, the ``BREAKING`` verdict
-      label) blocks only under ``gate_breaking`` (``fail-on-breaking``,
-      default ``True`` — matches the Action input's own default, so an
-      un-plumbed caller's behaviour is unchanged) — see
-      ``action/run.sh``'s ``INPUT_FAIL_ON_BREAKING`` check. **Not**
-      unconditional: a named policy or ``--policy-file`` override can
-      promote a coverage-gap kind (e.g. ``layer_coverage_asymmetric`` under
-      a ``plugin_abi``-style profile) all the way to ``severity:
-      "breaking"`` in the JSON, and that promotion is still subject to
-      whatever ``fail-on-breaking`` the run was configured with, exactly
-      like a genuine ``BREAKING``-verdict finding.
-    - ``severity in ("api_break", "risk")`` (exit code 2, the ``API_BREAK``
-      label) blocks only under ``gate_api_break`` (``fail-on-api-break``),
-      exactly like every other api_break/risk finding this module gates
-      (see ``_bucket_changes``'s ``gate_api_break`` handling).
-      ``potential_breaking: error`` alone is deliberately **not**
-      sufficient: unlike ``action/run.sh``'s ``scan``-mode branch (which
-      really does have an unconditional severity-gate check independent of
-      ``fail-on-api-break``), ``compare``-mode's own branch has no
-      equivalent unconditional check for its exit-code-2/4 tiers — every
-      severity-aware exit code ``compare`` can produce for a
-      ``potential_breaking``/``abi_breaking`` category maps to the exact
-      same ``API_BREAK``/``BREAKING`` verdict labels a *plain* finding
-      would, gated the same way.
+    The fourth round's fix is the one worth spelling out precisely: earlier
+    rounds treated ``api_break``/``risk``/``breaking`` severities alike
+    regardless of *which exit-code scheme actually produced the report* —
+    but the two schemes disagree on what a bare ``risk``-severity finding
+    contributes. *legacy* scheme (``report["severity"]`` absent — no
+    ``--severity-*`` flags; *levels* is ``{}``) maps every verdict to a
+    **fixed** exit code via ``severity.legacy_exit_code`` regardless of any
+    per-category config: ``BREAKING`` → 4, ``API_BREAK`` → 2, and
+    critically ``COMPATIBLE_WITH_RISK`` (a bare ``risk`` finding) → **0** —
+    it never gates at all under legacy, no matter ``fail-on-api-break``.
+    *severity-aware* scheme (*levels* non-empty) instead computes the exit
+    code via ``severity.compute_exit_code``, which folds in a category's
+    exit contribution **only when that category's configured level is
+    ``error``** — so under this scheme ``api_break``/``risk`` (both
+    ``potential_breaking``) and ``breaking`` (``abi_breaking``) need their
+    matching category actually gated to ``error``, not just present, before
+    the matching ``fail-on-*`` flag means anything. Treating every
+    ``risk``/``api_break``/``breaking`` finding as blocking under its
+    ``fail-on-*`` flag alone — as an earlier revision did — is right for
+    ``api_break``/``breaking`` under legacy scheme (where the mapping truly
+    is unconditional), but wrong for ``risk`` under legacy (never gates)
+    and wrong for all three under severity-aware scheme with the matching
+    category left at its default, non-``error`` level.
+
+    - ``severity == "breaking"``:
+        - legacy scheme: blocks under ``gate_breaking`` alone (the
+          ``BREAKING`` verdict's fixed exit-4 mapping is unconditional).
+        - severity-aware scheme: blocks only when *both* ``abi_breaking``
+          is configured ``error`` *and* ``gate_breaking``.
+    - ``severity in ("api_break", "risk")``:
+        - legacy scheme: ``api_break`` blocks under ``gate_api_break``
+          alone (fixed exit-2 mapping); ``risk`` never blocks (fixed exit-0
+          mapping — ``COMPATIBLE_WITH_RISK`` is exit 0 under legacy).
+        - severity-aware scheme: either blocks only when *both*
+          ``potential_breaking`` is configured ``error`` *and*
+          ``gate_api_break`` — the two severities share one category, so
+          they share one condition.
     - The finding's resolved severity-config *category*
       (``_finding_category`` — ``addition``/``quality_issues`` for a
       ``compatible``-severity finding like the default for
       ``dwarf_info_missing``) blocks **unconditionally** when *levels*
       marks that category ``error`` — this is exit code 1, compare's own
       ``SEVERITY_ERROR`` tier, which ``action/run.sh`` gates with no
-      ``fail-on-*`` condition at all (unlike the two tiers above). Without
-      this check, a ``quality_issues: error`` config that already fails the
-      real Action step would still render the merely-advisory "⚠️ Analysis
-      coverage reduced" headline right next to a red check.
-    - Otherwise (a ``compatible``-severity finding with no matching
-      category promoted to ``error``) never blocks.
+      ``fail-on-*`` condition at all (unlike the two tiers above, under
+      either scheme). Without this check, a ``quality_issues: error``
+      config that already fails the real Action step would still render
+      the merely-advisory "⚠️ Analysis coverage reduced" headline right
+      next to a red check.
+    - Otherwise never blocks.
     """
     levels = levels or {}
+    severity_aware = bool(levels)
     for f in findings:
         category = _finding_category(f.severity, f.kind)
-        if category in ("addition", "quality_issues") and levels.get(category) == "error":
-            return True
-        if f.severity == "breaking" and gate_breaking:
-            return True
-        if f.severity in ("api_break", "risk") and gate_api_break:
-            return True
+        if category in ("addition", "quality_issues"):
+            if levels.get(category) == "error":
+                return True
+            continue
+        if severity_aware:
+            if (
+                category == "abi_breaking"
+                and levels.get("abi_breaking") == "error"
+                and gate_breaking
+            ):
+                return True
+            if (
+                category == "potential_breaking"
+                and levels.get("potential_breaking") == "error"
+                and gate_api_break
+            ):
+                return True
+        else:
+            if f.severity == "breaking" and gate_breaking:
+                return True
+            if f.severity == "api_break" and gate_api_break:
+                return True
+            # f.severity == "risk" never gates under the legacy scheme —
+            # COMPATIBLE_WITH_RISK's fixed legacy exit code is 0.
     return False
 
 
@@ -726,7 +769,8 @@ def _from_compare(
     # unconditionally blocking, independent of gate_api_break/gate_breaking.
     incomplete = incomplete + _contract_coverage_findings(report)
     contract_exit = report.get("contract_coverage_exit_contribution")
-    if isinstance(contract_exit, int) and contract_exit >= 1:
+    contract_coverage_blocking = isinstance(contract_exit, int) and contract_exit >= 1
+    if contract_coverage_blocking:
         incomplete_blocking = True
     # ADR-043 `compare --used-by`/`--required-symbol(s)`: the JSON report
     # overwrites `verdict` with the scoped result and adds `full_verdict` plus
@@ -750,6 +794,7 @@ def _from_compare(
         safe=safe,
         incomplete=incomplete,
         incomplete_blocking=incomplete_blocking,
+        contract_coverage_blocking=contract_coverage_blocking,
         breaking_categories=_breaking_categories(breaking),
         breaking_severities=_breaking_severities(breaking),
         scoped_verdict=scoped_verdict,
@@ -1166,7 +1211,18 @@ _POLICY_ONLY_HEADER: dict[frozenset[str], tuple[str, str]] = {
 
 
 def _header(model: CommentModel) -> tuple[str, str]:
-    if model.scoped_verdict is not None:
+    if model.scoped_verdict is not None and not model.contract_coverage_blocking:
+        # `contract_coverage_blocking` is deliberately checked here, not
+        # just later at the ordinary `incomplete_blocking` branch (Codex
+        # review): the contract-coverage axis folds into the real exit code
+        # unconditionally, on top of *any* other verdict including a scoped
+        # one — a --used-by/--required-symbol run reporting a scoped
+        # COMPATIBLE verdict does not silence an orthogonal coverage
+        # failure that already turned the real exit code non-zero. When
+        # both are present, fall through to the rest of this function
+        # instead of returning the scoped header early, so a genuine
+        # full-library break (checked next) still wins if present, and the
+        # incomplete-blocking branch below is reached otherwise.
         header = _SCOPED_HEADER.get(model.scoped_verdict)
         if header is not None:
             return header

@@ -2169,6 +2169,19 @@ elif [[ "$MODE" == "scan" ]]; then
     FINAL_EXIT=1
   fi
 
+  # ADR-049 Phase 7's contract-coverage axis is orthogonal and unconditional
+  # -- no fail-on-* flag disables it, matching the SEVERITY_ERROR tier above
+  # (AGENTS.md: "no fail-on-* condition at all"). Without this check the step
+  # stayed green for a coverage-only exit: VERDICT/GATE_TIER is set to
+  # COVERAGE_INCOMPLETE above but was never read here (Codex review) --
+  # `_coverage_gated()` already reads the report's own zeroed contribution
+  # under `contract.unresolved: warn`, so VERDICT never reaches this value in
+  # that case to begin with.
+  if [[ "${GATE_TIER:-$VERDICT}" == "COVERAGE_INCOMPLETE" ]]; then
+    echo "::error::abicheck scan could not close the selected --contract domain on the available evidence; see contract_coverage_failures in the JSON report. Accept incomplete assurance with contract.unresolved: warn to allow."
+    FINAL_EXIT=1
+  fi
+
 else
   # compare mode: BREAKING/API_BREAK follow fail-on flags; REMOVED_LIBRARY
   # only appears when --fail-on-removed-library was passed to the CLI
@@ -2193,6 +2206,13 @@ else
   # Severity-driven exit code 1 (from --severity-* flags)
   if [[ "${GATE_TIER:-$VERDICT}" == "SEVERITY_ERROR" ]]; then
     echo "::error::Severity-level error detected by abicheck."
+    FINAL_EXIT=1
+  fi
+
+  # ADR-049 Phase 7's contract-coverage axis, unconditional exactly like the
+  # scan-mode check above and for the same reason -- see that comment.
+  if [[ "${GATE_TIER:-$VERDICT}" == "COVERAGE_INCOMPLETE" ]]; then
+    echo "::error::abicheck could not close the selected --contract domain on the available evidence; see contract_coverage_failures in the JSON report. Accept incomplete assurance with contract.unresolved: warn to allow."
     FINAL_EXIT=1
   fi
 fi

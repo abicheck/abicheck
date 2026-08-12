@@ -363,6 +363,82 @@ def test_incomplete_blocking_under_fail_on_api_break():
     assert model_ungated.incomplete_blocking is False
 
 
+def test_legacy_risk_severity_never_blocks_even_under_gate_api_break():
+    # Codex review: under the LEGACY exit-code scheme (no --severity-*
+    # flags — the default for layer_coverage_asymmetric's own "risk"
+    # severity), severity.legacy_exit_code maps COMPATIBLE_WITH_RISK to a
+    # FIXED exit code of 0 — it never gates the process exit at all,
+    # regardless of fail-on-api-break. An earlier revision treated
+    # "risk" the same as "api_break" (fixed exit 2, genuinely gated by
+    # fail-on-api-break), which is correct for api_break but wrong for
+    # risk under this scheme.
+    report = _compare_report(
+        [
+            {
+                "kind": "layer_coverage_asymmetric",
+                "symbol": "evidence:coverage",
+                "description": "Base was analyzed with evidence the target lacks.",
+                "severity": "risk",
+            },
+        ]
+    )
+    assert "severity" not in report  # legacy scheme: no --severity-* config
+    model = build_model(report, gate_api_break=True, gate_breaking=True)
+    assert model.incomplete_blocking is False
+
+
+def test_severity_aware_api_break_needs_category_gated_not_just_gate_flag():
+    # Codex review: under the SEVERITY-AWARE scheme, severity.compute_exit_code
+    # only folds in a category's contribution when that category's configured
+    # level is "error" — gate_api_break alone (with potential_breaking left at
+    # its default, non-error level) must not be sufficient, unlike under the
+    # legacy scheme where api_break's exit-2 mapping is unconditional.
+    report = _compare_report(
+        [
+            {
+                "kind": "layer_coverage_asymmetric",
+                "symbol": "evidence:coverage",
+                "description": "Base was analyzed with evidence the target lacks.",
+                "severity": "api_break",
+            },
+        ]
+    )
+    report["severity"] = {"config": {"potential_breaking": "warning"}}
+    model = build_model(report, gate_api_break=True)
+    assert model.incomplete_blocking is False
+
+    # With potential_breaking actually gated to error, both conditions are
+    # now met and it blocks.
+    report["severity"] = {"config": {"potential_breaking": "error"}}
+    model_gated = build_model(report, gate_api_break=True)
+    assert model_gated.incomplete_blocking is True
+
+
+def test_severity_aware_breaking_needs_abi_breaking_category_gated():
+    report = _compare_report(
+        [
+            {
+                "kind": "layer_coverage_asymmetric",
+                "symbol": "evidence:coverage",
+                "description": "Promoted by a plugin_abi-style policy.",
+                "severity": "breaking",
+            },
+        ]
+    )
+    report["severity"] = {"config": {"abi_breaking": "warning"}}
+    model = build_model(report, gate_breaking=True)
+    assert model.incomplete_blocking is False
+
+    report["severity"] = {"config": {"abi_breaking": "error"}}
+    model_gated = build_model(report, gate_breaking=True)
+    assert model_gated.incomplete_blocking is True
+
+    # abi_breaking:error alone, without gate_breaking, still doesn't block —
+    # compare's exit-4 tier is still gated by fail-on-breaking either way.
+    model_ungated_flag = build_model(report, gate_breaking=False)
+    assert model_ungated_flag.incomplete_blocking is False
+
+
 def test_incomplete_breaking_severity_honors_gate_breaking():
     # Codex review: a policy override that promotes an evidence-coverage
     # finding all the way to severity: "breaking" must still respect
@@ -455,6 +531,73 @@ def test_contract_coverage_failures_join_incomplete_bucket():
     body = render_comment(model, sha="x")
     assert "Source analysis incomplete" in body
     assert "🛑 Analysis incomplete" in body
+
+
+def test_contract_coverage_blocking_overrides_scoped_compatible_headline():
+    # Codex review: contract_coverage_exit_contribution folds into the real
+    # exit code unconditionally, on top of ANY other verdict — including a
+    # --used-by/--required-symbol scoped COMPATIBLE one. A scoped-compatible
+    # run whose contract coverage also failed must not render
+    # "✅ Compatible (scoped)" as if that were the whole story: the real
+    # exit code is already non-zero from the orthogonal coverage axis.
+    report = _compare_report([])  # clean full-library diff too
+    report["verdict"] = "COMPATIBLE"
+    report["used_by"] = [
+        {
+            "app": "/opt/app/bin/myapp",
+            "verdict": "COMPATIBLE",
+            "required_symbol_count": 3,
+            "missing_symbols": [],
+            "missing_versions": [],
+            "relevant_change_count": 0,
+            "symbol_coverage": 100.0,
+        }
+    ]
+    report["contract_coverage_failures"] = [
+        {
+            "provider": "export_table",
+            "side": "new",
+            "record_id": "libfoo.so",
+            "reason": "export table not captured",
+            "status": "unresolved",
+            "completeness": "absent",
+            "mode": "exports",
+            "suppressible": False,
+        }
+    ]
+    report["contract_coverage_exit_contribution"] = 1
+    model = build_model(report)
+    assert model.scoped_verdict == "COMPATIBLE"
+    assert model.contract_coverage_blocking is True
+    body = render_comment(model, sha="x")
+    assert "Source analysis incomplete" in body
+    assert "Compatible (scoped)" not in body
+
+
+def test_contract_coverage_advisory_does_not_override_scoped_compatible():
+    # The inverse: when contract coverage did NOT contribute to the exit
+    # code (contribution 0, or the key absent entirely), the scoped
+    # COMPATIBLE headline is untouched — this is the pre-existing,
+    # already-tested behavior, confirmed unaffected by the fix above.
+    report = _compare_report()
+    report["full_verdict"] = report["verdict"]
+    report["verdict"] = "COMPATIBLE"
+    report["used_by"] = [
+        {
+            "app": "/opt/app/bin/myapp",
+            "verdict": "COMPATIBLE",
+            "required_symbol_count": 3,
+            "missing_symbols": [],
+            "missing_versions": [],
+            "relevant_change_count": 0,
+            "symbol_coverage": 100.0,
+        }
+    ]
+    model = build_model(report)
+    assert model.scoped_verdict == "COMPATIBLE"
+    assert model.contract_coverage_blocking is False
+    body = render_comment(model, sha="x")
+    assert "Compatible (scoped)" in body
 
 
 def test_contract_coverage_exit_contribution_zero_is_advisory():
