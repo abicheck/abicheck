@@ -64,6 +64,39 @@ graph nodes):
   the probing side. Recorded, but produces NO match — the pair stays a true
   add + true remove in the flat diff, at reduced confidence.
 - **true add / true remove** — no candidate at all.
+
+**Reachability note: ``OUTCOME_MOVED`` needs a compound edit, not a pure
+move.** Every graph-node-id constructor across ``abicheck/buildsource/``
+(``header_graph.py``'s ``_decl_identity``, ``source_graph.py``'s
+``_type_node_id``/``_decl_node_id``/``function_decl_identity``, and every
+downstream caller) keys a node's id purely off its mangled or qualified
+name, never a declaring file path. A *pure* move (a declaration keeping its
+exact signature but changing only its declaring header) therefore gets the
+SAME node id on both sides of a real comparison and never reaches this
+module as a removed+added pair at all -- an unchanged signature can never
+change a mangled name, so there is no id-level signal for a pure move to
+ride in on. What genuinely does reach this module (verified against the
+real production fold, ``source_graph.build_source_graph``, not a hand-built
+node pair) is a *compound* edit: a declaration whose signature ALSO changes
+(moving its mangled name) in the same release its header moves, while its
+qualified name stays exactly the same -- the qualified-name alias tier
+pairs the two nodes despite the differing ids, and since the declaring file
+differs while the name does not, :func:`_classify_outcome` reports
+``OUTCOME_MOVED``. See ``examples/case196_header_graph_move_reconciled/``
+for a fixture built through the real fold demonstrating exactly this --
+note the identity-perturbing edit there lands on a *private* helper reached
+only via a public caller's dependency edge, not a public function itself:
+an earlier version of that fixture used a public function directly, which
+a review round correctly flagged as cataloging a scenario that is itself a
+real BREAKING change (the public function's old mangled symbol disappears)
+under a ``COMPATIBLE_WITH_RISK`` verdict, contradicting
+``ground_truth.json``'s one-canonical-verdict invariant. The
+*pure*-move shape is still unreachable, and closing that specific gap for
+real would need a producer-side node-id/attribute signal that's actually
+file-sensitive (see
+``docs/contribute/plans/g31-header-graph-default-on-followup.md``'s "Known
+gap" note under Phase B for the fuller investigation) -- a separate,
+narrower gap from the general outcome's reachability.
 """
 
 from __future__ import annotations
@@ -240,7 +273,9 @@ def _neighbor_identity(node: GraphNode) -> str:
     available, so the tuple this feeds is never actually empty.
     """
     if node.kind in _FILE_LIKE_KINDS:
-        path = str(node.attrs.get("def_file") or node.attrs.get("file") or node.label or "")
+        path = str(
+            node.attrs.get("def_file") or node.attrs.get("file") or node.label or ""
+        )
         return f"{node.kind}:{_project_relative_path(path)}" if path else node.kind
     ident = resolve_identity_for_node(node)
     if ident.qualified_name:

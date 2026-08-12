@@ -3,8 +3,8 @@
 > Updated: 2026-03-09; content reviewed 2026-06-07. The ABICC rule mapping is a historical parity snapshot; the current ChangeKind total is **396**, see the [Change Kind Reference](../reference/change-kinds.md).
 > Source: ABICC `RulesBin.xml` (196 rules), `RulesSrc.xml` (100 rules + `Removed_Const_Overload`), `RegTests.pm` (~153 C++ + ~102 C named scenarios)
 > Target: abicheck's three coverage surfaces —
-> `examples/` (195 ground-truth entries today: 159 binary shared-library
-> competitor lanes plus 36 dedicated non-.so lanes, including
+> `examples/` (196 ground-truth entries today: 159 binary shared-library
+> competitor lanes plus 37 dedicated non-.so lanes, including
 > fixture/source-only L2/L5/source cases; the original 74-case subset is the
 > release-pinned cross-tool benchmark — see [Tool Comparison](../reference/tool-comparison.md)
 > for how the split is derived and kept in sync), `tests/` (large
@@ -32,7 +32,7 @@
 | **Abicheck covers (has ChangeKind + tests)** | **66/66 (100%)** |
 | Abicheck ChangeKind enum members | **396 change kinds** (this table's per-rule mappings reflect an earlier snapshot) |
 | All ChangeKinds have assertion tests | **Yes** (enforced by `test_changekind_completeness.py`) |
-| Abicheck example cases | 193 total: 159 binary shared-library competitor lanes + 34 dedicated non-.so lanes (including fixture/source-only L2/L5/source cases) |
+| Abicheck example cases | 196 total: 159 binary shared-library competitor lanes + 37 dedicated non-.so lanes (including fixture/source-only L2/L5/source cases) |
 | ABICC scenarios NOT in abicheck | **0** |
 
 ---

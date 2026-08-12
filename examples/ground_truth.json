@@ -3860,6 +3860,26 @@
    "platforms": [
     "linux"
    ]
+  },
+  "case196_header_graph_move_reconciled": {
+   "abi_break": false,
+   "api_break": false,
+   "bad_practice": true,
+   "category": "risk",
+   "description": "A private, never-exported internal helper (demo::detail::helper) keeps its exact qualified name but its parameter type changes (int -> long, moving its Itanium mangled name) in the same release its declaring header is reorganized (detail_v1.h -> detail_v2.h), in the derived L5 source graph. Unlike case194 -- a pure rename with an unchanged signature -- this is the realistic compound edit that actually reaches G31 Phase B's graph reconciliation (ADR-048): a pure move alone can never change a node's identity (an unchanged signature can never change a mangled name), so only a move that coincides with an identity-perturbing edit is reachable through the real production fold (source_graph.build_source_graph). A public INLINE function (demo::process) genuinely starts calling the helper only on the new side of the fixture -- both surfaces carry a coverage.fact_set/fact_family_states rollup naming the one full-walk source_edges producer, and the fixture calls source_graph.mark_source_edges_extractor_coverage() (the real production certification helper) rather than hand-forcing extractor_passes['call_graph'] directly -- a review round caught that the hand-forced version bypassed the real certification gate, since running the real helper against this exact surface data would instead degrade (not certify) an unconfirmed rollup, so the old side's zero calls is a genuinely CONFIRMED zero via the real production path, not merely unproven absence of evidence. demo::process is specifically inline (fed via SourceAbiSurface.reachable_inline_bodies, not reachable_declarations) rather than an ordinary out-of-line exported function -- a review round caught that an ordinary out-of-line public function's own internal calls are compiled into the library's binary only, never into any consumer's (source_graph.is_consumer_compiled_public_entry), so seeding this scenario from a non-consumer-compiled caller risked cataloging a production false positive as canonical ground truth; an inline caller's body is compiled into every consumer TU that includes the header, making its call genuinely consumer-visible under any reasonable reachability notion. The helper is itself also INLINE (not just declared, fed via reachable_inline_bodies) -- a review round caught a real linkability gap in an earlier version of this fixture: since demo::process's own body (including its call to detail::helper) is emitted into every CONSUMER's own translation unit, an ordinary out-of-line, non-exported detail::helper would leave that consumer-emitted call as an unresolved external symbol reference at link time -- a real, consumer-visible link failure, not a purely internal, risk-only change. Making detail::helper inline too (an ordinary header-only-library pattern: a private detail header providing an inline implementation, transitively included by the public header) means its own body is also emitted into that same consumer TU, so the call resolves entirely locally with no external symbol needed -- a real consumer program built against this exact scenario genuinely links and runs cleanly. The helper is deliberately private (never part of the exported symbol table), unlike an earlier version of this case that used a public function directly as the identity-perturbing edit's own subject -- a public function's mangled-name-moving signature change is itself a real BREAKING change, which would have contradicted ground_truth.json's invariant that one canonical verdict applies to the scenario a case describes. With the helper private and inline, COMPATIBLE_WITH_RISK is the correct canonical verdict: a real end-to-end compare() of this exact scenario has no BREAKING/API_BREAK finding to contradict, only the two RISK-tier L5 findings this fixture reproduces (public_api_internal_dependency_added, since demo::process genuinely gains a confirmed-new internal dependency, and declaration_moved for the helper itself).",
+   "expected": "COMPATIBLE_WITH_RISK",
+   "expected_kinds": [
+    "declaration_moved",
+    "public_api_internal_dependency_added"
+   ],
+   "fixtures": [
+    "old.json",
+    "new.json"
+   ],
+   "min_evidence": "L5",
+   "platforms": [
+    "linux"
+   ]
   }
  },
  "version": "4",

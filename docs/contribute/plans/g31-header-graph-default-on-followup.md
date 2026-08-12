@@ -131,6 +131,180 @@ node/edge identity and merge logic. `abicheck/binder.py`/`abicheck/resolver.py`
 building a second identity-resolution mechanism from scratch.
 `abicheck/demangle.py` — canonical-name derivation for the mangled-name key.
 
+**`declaration_moved` example coverage — closed, after one wrong attempt
+(Codex review, PR #727).** ADR-048's D2 (`graph_reconcile.py`) defines three
+reconciliation outcomes — `declaration_renamed`, `declaration_moved`,
+`declaration_identity_reconciled` — but only `declaration_renamed` (case194)
+and the deliberate ambiguous-rename counter-example (case195) had
+example-catalog coverage before this pass.
+
+A first attempt built a `declaration_moved` fixture (a private field-type
+target keeping its exact qualified name but moving to a different declaring
+header) the same way `tests/test_graph_reconcile.py`'s own
+`test_move_reconciles_when_file_changes_but_name_does_not` unit test does:
+two `GraphNode`s with matching `qualified_name` but artificially distinct
+ids (`type://old`/`type://new` in the unit test; `@v1`/`@v2` suffixes in the
+first attempt) so `diff_source_graph`'s node-id diff treats them as a
+removed+added pair for the reconciler to re-pair via the alias tier. Review
+caught that this doesn't reflect anything a **real** `dump --sources`/
+`--build-info` run can produce: every graph-node-id constructor in
+`abicheck/buildsource/` (`header_graph.py`'s `_decl_identity()`/`seed_decl`,
+`source_graph.py`'s `_type_node_id`/`_decl_node_id`/`function_decl_identity`,
+and every one of their callers in `call_graph.py`/`type_graph.py`/
+`macro_graph.py`/`callback_graph.py`/`override_graph.py`/`template_graph.py`/
+`graph_backends.py`, confirmed by grepping every `_type_node_id`/
+`_decl_node_id`/`_debug_type_node_id` call site) keys a declaration's or
+type's node id purely off its mangled or qualified name, never a file path
+— so a *pure* move (unchanged signature, only the header changes) gets the
+**same** node id on both sides of a real comparison and never reaches the
+reconciler as a removed+added pair at all. First attempt reverted rather
+than shipped with a misleading claim of reachability.
+
+A second review round (same PR) found the corrected "unreachable" framing
+had itself overclaimed: it is only a *pure* move that's unreachable.
+Constructing real `SourceEntity`/`BuildEvidence` facts (a function whose
+parameter type changes `int`→`long` — moving its Itanium mangled name — in
+the same release its header moves) and running them through the **actual
+production fold**, `source_graph.build_source_graph()`, confirmed
+empirically that the qualified-name alias tier pairs the resulting two
+distinct-id nodes, and the file-vs-name comparison in `_classify_outcome`
+correctly reports `declaration_moved` — a compound edit (signature change +
+header move, sharing a qualified name) genuinely reaches this outcome
+through the real pipeline, not through a hand-invented id.
+
+A third review round found the *second* version's own fixture design
+overclaimed something else: it made the identity-perturbing edit a
+**public** function `demo::f`, but a public function's mangled-name-moving
+signature change is itself a real, independent BREAKING change (the old
+exported symbol disappears from the export table) — cataloging that
+scenario as `COMPATIBLE_WITH_RISK` contradicts `ground_truth.json`'s
+one-canonical-verdict invariant (one canonical verdict applies to the
+scenario a case describes, not to a hand-isolated fixture slice of it).
+Fixed by moving the identity-perturbing edit onto a **private** helper
+(`demo::detail::helper`, `visibility="private_header"`) reached only
+through a public caller's (`demo::process`) `DECL_CALLS_DECL` dependency
+edge, needed because `graph_reconcile`'s own public-reachability gate
+(`_public_reachable_ids`) suppresses a reconciliation finding entirely for
+a declaration with no live path from a public entry point. A fourth review
+round caught that adding that same call edge to *both* the old and new
+graphs (pointing at the helper's two different per-version mangled-name
+node ids) made `source_graph_findings._internal_dependency_findings` — the
+`public_api_internal_dependency_added` producer, `case160_public_api_
+internal_dep_added`'s own subject — fire on a raw-node-id artifact rather
+than a genuinely new dependency: that detector compares raw target ids
+across versions, not reconciled identities, so it read the pre-existing
+call relationship as newly added. Fixed by restricting the call edge to the
+**new** side only, which still satisfies the reachability gate (only one
+side needs the edge) without asserting a spurious new dependency; the
+detector's own coverage gate then declines to credit anything as newly
+reached when the old side carries no dependency-edge coverage at all — the
+state as of the fourth review round, where `declaration_moved` was the
+fixture's sole finding.
+
+A fifth review round found that restricting coverage to the new side was
+itself a fixture artifact, not a faithful real-world scenario: a real
+`collect_inline_pack()`/`fold_call_graph()` run certifies `call_graph`
+coverage identically on *both* sides of an ordinary comparison, so an
+old-side coverage gap this fixture had to manufacture by hand doesn't occur
+in practice, and it was suppressing the very `public_api_internal_dependency_
+added` finding this case exists to demonstrate. Fixed by adding the matching
+old-side call edge too — now genuinely resolvable to distinct per-version
+node ids without the raw-node-id-artifact problem the fourth round found,
+because both sides carry real, independently-derived coverage rather than
+one side's coverage being suppressed as a workaround. A sixth review round
+then found the fifth round's coverage fix was itself hand-forced (setting
+`extractor_passes["call_graph"] = "full"` directly) rather than earned
+through the real production path; fixed by routing both sides through
+`mark_source_edges_extractor_coverage()`, the same helper a real
+`collect_inline_pack()` run uses to certify coverage, so the fixture's
+coverage state is produced identically to how a real run would produce it.
+With the identity-perturbing edit confined to a never-exported private
+declaration, and both sides' dependency-edge coverage genuinely certified,
+the fixture now emits **two** findings through the real pipeline:
+`declaration_moved` (RISK-tier L5, from the header move) and
+`public_api_internal_dependency_added` (RISK-tier L5, from the public
+caller's now-newly-visible dependency on the moved private helper).
+`COMPATIBLE_WITH_RISK` — backed by both findings together, matching
+`ground_truth.json`'s `expected_kinds: ["declaration_moved",
+"public_api_internal_dependency_added"]` — is the genuinely correct
+canonical verdict; a real end-to-end comparison of this exact scenario has
+nothing BREAKING to contradict it.
+`case196_header_graph_move_reconciled` now ships built exactly this way
+(real dataclasses → real fold → real diff, not hand-assembled
+`GraphNode`/`GraphEdge` objects), closing the example gap correctly.
+`graph_reconcile.py`'s own module docstring and
+`tests/test_graph_reconcile.py`'s existing unit test are unaffected — the
+unit test's artificial ids are still legitimate for testing the
+classifier's pure logic in isolation.
+
+**What remains genuinely open**: the *pure*-move shape (declaration keeps
+its exact signature, only its header changes) is still unreachable from any
+current real producer — closing that needs a real producer-side change
+(some node-id or edge/attribute signal that changes when a declaration's
+file does but its identity doesn't), which is its own scoped design (which
+node kinds should be file-sensitive, how that interacts with the existing
+alias/structural-context tiers, whether it's a new node attribute compared
+separately from the identity-based node id rather than folded into the id
+itself) — not a drive-by extension of an example-catalog PR.
+
+**A seventh, deeper finding, investigated and deliberately not attempted
+this pass (Codex review, PR #727, fresh evidence).** `case196`'s own
+`SourceAbiSurface`s are constructed directly by the generator script
+(`_pub_caller()`/`_helper_entity()` fed straight into `SourceAbiSurface(...)`
+and then `build_source_graph()`), not produced by running raw
+`SourceEntity`/`BuildEvidence` facts through `link_source_abi()` — the plan
+text and the generator's own comments describe this as exercising "the
+actual production fold," which is true of `build_source_graph()` itself but
+overstates what feeds it: `link_source_abi()`, the function that actually
+turns per-TU extractor output into a `SourceAbiSurface`, is never called at
+all. That gap is not cosmetic. `link_source_abi()`'s very first filter
+(`_is_public(entity) or entity.qualified_name in forced`, `source_link.py`)
+runs *before* any entity is routed into `reachable_declarations`/
+`reachable_inline_bodies`/etc., and it keys purely on the entity's own
+`visibility`/`api_relevant` — it has no notion of "reachable through a
+public caller's own dependency edge." `demo::detail::helper` carries
+`visibility="private_header"`, so a `link_source_abi()` call over the
+equivalent raw `SourceAbiTu` facts would drop it before it ever reached a
+reachable bucket, on **both** sides — the DECL_CALLS_DECL edge that would
+otherwise justify keeping it (mirroring `public_api_internal_dependency_
+added`'s own "already public via a dependency, not via its own header"
+logic) is consulted by `graph_reconcile`/`source_graph_findings` only
+*after* linking, never by `link_source_abi()` itself. The one existing
+escape hatch, `forced_public`, would route it through — but `forced_public`
+only ever carries a real value from ADR-049's `--contract-evaluation`
+overlays (`contract_pipeline.py`'s `force_public_symbols`); a bare
+`dump --sources`/`--build-info` run (`inline.collect_inline_pack()` →
+`run_source_replay()`) always calls `link_source_abi()` with an empty one.
+So today, a real `dump --sources` run over source code shaped exactly like
+this case's own narrative comments would **not** reproduce this scenario:
+the private helper would be absent from the L4 surface entirely (old side),
+and the graph's `declaration_moved`/`public_api_internal_dependency_added`
+findings this case demonstrates would not fire. Confirmed by reading
+`link_source_abi()`, `source_replay.run_source_replay()`, and
+`inline.collect_inline_pack()` directly; not attempted as a live repro
+build. **Not fixed here.** A correct fix has two independent parts, each
+its own scoped design: (1) `link_source_abi()` would need a second
+admission path — "not directly public, but reachable through an
+already-admitted public entity's own dependency edge" — which means either
+running the reachability walk *before* the visibility filter (a real
+ordering change to a function every other L4/L5 consumer already depends
+on) or accepting a documented two-pass linking model; (2) even with that,
+`case196`'s own scenario needs the DECL_CALLS_DECL fact to exist *before*
+linking (today it's `source_edges`, an L5-shaped fact folded by
+`build_source_graph()` *after* linking, not an L4 input `link_source_abi()`
+consumes at all) — so part (1) alone is not sufficient without also
+deciding how a pre-link reachability signal is supposed to reach
+`link_source_abi()` in the first place. Given this session had already
+produced six review rounds on this exact fixture, an eighth reactive patch
+attempting both of these under continued review pressure was judged a worse
+risk than documenting the gap honestly: the case still correctly exercises
+`build_source_graph()`'s real fold and `graph_reconcile`'s real
+classification logic against a hand-constructed-but-internally-consistent
+`SourceAbiSurface` input — which is a genuine, if narrower, claim than "a
+bare `dump --sources` run over equivalent source reproduces this end to
+end," and the plan's and generator's own claims should be read with that
+narrower scope in mind pending a dedicated follow-up.
+
 ## Phase C — CastXML schema-completeness audit + backend unification
 
 **Problem.** Two independent gaps, related but separable:
@@ -1577,18 +1751,166 @@ building a second identity-resolution mechanism from scratch.
   no second dict *construction* from disk at all, and no dependence on the
   cache key matching) is still open if the memoization's residual cost
   (cache-key recomputation, one dict lookup) ever turns out to matter.
-- Hybrid-backend provenance-tagged merging: extend G28 Phase 3's
-  `--ast-frontend hybrid` per-field provenance model to graph nodes/edges,
-  not just snapshot facts.
-- Header-defined body fingerprints (for detecting a behavior-preserving
-  vs. behavior-changing inline/template body edit, distinct from a
-  signature change).
+- **Hybrid-backend provenance-tagged merging** (finalized scope, not
+  attempted): extend G28 Phase 3's `--ast-frontend hybrid` per-field
+  provenance model (`fact_provenance.py`'s `func_fact_key`/`type_fact_key`/
+  `enum_fact_key`/`field_fact_key` — `"func:<mangled>:<fact>"`-shaped keys
+  mapping to `"castxml"`/`"clang"`) to graph nodes/edges, not just snapshot
+  facts. **Where the gap actually is, confirmed by reading the hybrid path**:
+  under `service.run_dump(header_backend="hybrid")`, the L2 graph is *not*
+  independently built per backend and then merged the way the flat snapshot
+  is — `_attach_header_graph`'s `_skip_header_graph_attach=True` on both
+  recursive castxml/clang sub-dumps means neither one gets its own graph,
+  and the graph is attached exactly once, after the merge, from
+  `header_graph.build_header_only_graph(merged_snapshot, clang_ast_root,
+  ...)`. Two different halves of the resulting graph therefore have two
+  different, currently-untracked provenance stories: (1) `seed_decl()`'s
+  per-node `attrs["visibility"]` comes from `entity.origin` on the *merged*
+  snapshot's `Function`/`Variable` — which is itself the output of G28 Phase
+  3's castxml-primary/clang-backfill merge, i.e. already a per-field
+  provenance decision `fact_provenance.py` recorded, but that record is
+  never carried onto the graph node built from it; (2) every structural
+  edge (`TYPE_INHERITS`/`TYPE_HAS_FIELD_TYPE`/`DECL_HAS_TYPE`/
+  `DECL_CALLS_DECL`/`DECL_REFERENCES_DECL`) comes from `ast_root`, which
+  under hybrid is *always* the clang sub-dump's AST (castxml never builds
+  graph edges at all, hybrid or not — confirmed: no code path calls
+  `build_header_only_graph` with a castxml-sourced AST), so every edge in a
+  hybrid graph is unconditionally clang-only regardless of provenance and
+  needs no new tagging — it's already unambiguous. **The real, scoped fix**
+  is therefore narrower than "provenance-tag the whole graph": only (1)
+  needs new plumbing — `header_graph.seed_decl()`/its type-node sibling
+  would need to read the merged snapshot's own `AbiSnapshot.fact_provenance`
+  map (`model.py`'s `kw_only` field, already populated by
+  `dumper_hybrid.merge_snapshots` and already present on the `merged`
+  snapshot object `_attach_header_graph`'s hybrid call site already passes
+  through — not discarded, just never consulted by `build_header_only_graph`
+  today) and copy the relevant `func_fact_key(mangled, "visibility")`-shaped entry onto
+  `GraphNode.attrs["visibility_provenance"]` (a new, additive attr — never
+  changes an existing attr's meaning) when that node's identity resolves to
+  a fact `fact_provenance` actually tracked. **Consumers, and why this
+  hasn't blocked anything so far**: no current L5 detector reads a
+  per-attr node provenance at all (`is_public_dependency_node`/
+  `is_consumer_compiled_public_entry` key off `visibility`/
+  `consumer_compiled_body` directly, never off where either value came
+  from), so this gap has produced no known incorrect finding — it would
+  only start mattering if a future detector needed to discount/flag a
+  finding resting on a clang-backfilled (vs. castxml-primary) visibility
+  determination specifically, e.g. to surface "this RISK finding's
+  reachability classification rests on a fact clang had to backfill, verify
+  it if that matters for your review" the way `LAYOUT_UNVERIFIABLE`
+  annotates an analogous evidence-absence gap for layout facts (see this
+  same plan's "Findings emitted from absent evidence" AGENTS.md entry for
+  the general pattern). **Files that would change**: `header_graph.py`
+  (`seed_decl`/type-node builders gain an optional `fact_provenance`
+  parameter), `service.py`'s hybrid branch (thread `merge_snapshots`'
+  provenance dict through to the `_attach_header_graph` call instead of
+  discarding it), `graph_facts.py` (no schema change needed — `attrs` is
+  already an open dict). No `SOURCE_GRAPH_VERSION` bump needed unless a new
+  detector starts depending on the new attr's presence for correctness
+  rather than reading it as optional enrichment.
+- **Header-defined body fingerprints** (finalized scope, not attempted):
+  detect a behavior-preserving vs. behavior-changing inline/template body
+  edit in a header, distinct from a signature change — today invisible to
+  every evidence tier below L4 (a signature-unchanged body edit changes no
+  flat snapshot fact and moves no graph node id, so L0-L2 report nothing,
+  and the L2-only header graph carries no body-derived fact at all to
+  report a change in). **This already exists at L4, for the build-integrated
+  path only**: `source_extractors/clang.py`'s per-TU replay computes
+  `SourceEntity.body_hash` via `clang_nodes._subtree_hash()` — an
+  alpha-equivalence-normalized structural fingerprint of a clang AST
+  subtree, already parameter-aware (`_param_ids`) so a body referencing its
+  own parameters normalizes correctly — and `source_diff._diff_inline_bodies()`
+  compares it old-vs-new to emit `inline_body_changed`
+  (never `BREAKING`, per this directory's D3 rule). **The scoped gap**:
+  `header_graph.py`'s L2-only AST walk parses the *identical shape* of
+  `clang -ast-dump=json` tree `source_extractors/clang.py` does (both are
+  `clang -ast-dump=json` over public headers, structurally the same input
+  `_subtree_hash()` already consumes) but never computes or stores a body
+  hash for the inline/template function bodies it already visits when
+  seeding `DECL_CALLS_DECL`/`DECL_REFERENCES_DECL` edges — so the *same*
+  fingerprinting `_subtree_hash()` already provides for L4 could, in
+  principle, be reused verbatim for L2, closing the gap for the common
+  no-build-integration case (any `dump`/`compare` with headers, not just
+  `--sources`/`--build-info`). **Design sketch, not implemented**: (1)
+  `header_graph.seed_decl()` gains a body-hash computation for a
+  `FunctionDecl`/`CXXMethodDecl` node with a real `CompoundStmt` body child
+  (skipping declaration-only/pure-virtual nodes, mirroring
+  `_subtree_hash`'s own `_param_ids`-aware call convention exactly), stored
+  as a new `GraphNode.attrs["body_hash"]`; (2) a new `graph_reconcile`-
+  adjacent or `source_graph_findings`-sibling diff function compares two
+  matched `source_decl` nodes' `body_hash` (matched the same way
+  `diff_source_graph_findings` already matches other node facts — by node
+  id when unchanged, or via `graph_reconcile`'s alias tier when a compound
+  edit also moved the id) and emits a new RISK-tier finding when they
+  differ but the node's own signature-derived facts (mangled name/params)
+  did not — reusing the *existing* `inline_body_changed` `ChangeKind` is
+  the natural choice over minting a new one, provided its
+  `default_verdict`/severity/`min_evidence` in `change_registry.py`
+  tolerate an `L2`-sourced instance alongside its current L4-only
+  producer (needs checking against that entry's own assumptions before
+  reuse — the CLAUDE.md "Adding a new ChangeKind" 4-step procedure applies
+  either way, whether reusing or minting). (3) needs new example-catalog
+  coverage (an L2-only fixture demonstrating the finding) and a
+  `min_evidence` reclassification check (`scripts/evidence_tiers.py`) if
+  `inline_body_changed` is reused, since that registry currently derives
+  its tier from the kind alone, not per-producer. **Deliberately not
+  attempted in this pass**: this is a genuinely new detection capability
+  (new node attr + new diff function + new/reused `ChangeKind` wiring +
+  catalog coverage), not a fix to existing code, and — per this same
+  phase's own repeated lesson from the vptr-offset and case196 fixture
+  work above — a change touching a shared, heavily-reviewed AST-walk
+  function (`header_graph.seed_decl`) deserves its own dedicated
+  implementation-and-review pass rather than a documentation-pass
+  drive-by.
 - Preprocessor/build-context reconciliation: macros, `#ifdef` conditionals,
   and compile-DB flags flowing into the header parse consistently between
   the flat-snapshot pass and the graph pass (today each independently
   resolves its own compiler flags/include roots — see
   `service._attach_header_graph`'s own `-isystem` deferred-root handling,
   which G28 Phase 4's hardening already had to fix once for a cache-key gap).
+  **Audited (this pass): all three named inputs turn out to already be
+  reconciled, not independently resolved — this bullet is stale and the
+  item is closed.** (1) *Manual flags* (`--gcc-options`/`--gcc-option`) —
+  `_attach_header_graph` and the primary snapshot pass both receive the
+  identical `CompileContext` object (`compile: CompileContext | None`), a
+  frozen dataclass whose `gcc_options`/`gcc_option_tokens` fields are where
+  a manual `-D`/`-U` define lives; there is no second, independently
+  resolved copy for the graph pass to diverge from. (2) *`-isystem`/
+  include-root inference* — `_attach_header_graph` re-invokes the same
+  pure functions the primary pass already ran (`expand_header_inputs`,
+  `resolve_inferred_header_roots`) over the identical raw `headers`/
+  `includes`/`gcc_options`/`gcc_option_tokens` inputs; since both are
+  deterministic pure functions of those inputs, the two calls cannot
+  disagree — this is redundant computation (already tracked above as the
+  memoization's "residual cost"), not a reconciliation gap. (3)
+  *Compile-DB flags* — this one WAS a real, exactly-this-shape divergence,
+  and reading `cli_dump_helpers.py`'s ELF `dump` path found it already
+  fixed, under a prior Codex review, before this pass started: the main
+  header-AST parse consumes `effective_gcc_options` (`_merge_gcc_options`),
+  which folds in the `-p`/`--compile-db`-derived `-D`/`-I`/`-std` flags on
+  top of the plain `--gcc-options` value — and, per that same function's
+  own code comment ("effective_gcc_options folds in the -p/
+  --compile-db-derived ... flags that compile_context itself does not
+  carry ... Without this, a header that only parses successfully with
+  those compile-DB flags would produce a valid main snapshot while a
+  second clang pass parses it without them and silently degrades"), the
+  identical `effective_gcc_options` value is folded into the
+  `CompileContext` passed to `_attach_header_graph` too
+  (`dataclasses.replace(compile_context, gcc_options=effective_gcc_options)`
+  when they differ), specifically so the header-graph attach and the
+  clang-layout attach (G28 Phase 4) both see what the primary pass saw.
+  Separately, the fully-integrated `--sources`/`--build-info` path
+  (`inline.py`) doesn't call `_attach_header_graph` at all — its own L5
+  graph is built by real per-TU clang replay against the compile DB's
+  actual flags (`call_graph.py`/`type_graph.py`, `inline_graph_fold.py`),
+  a structurally separate mechanism from the header-only L2 graph this
+  bullet is about; `cli_buildsource.embed_build_source` only backfills the
+  L2 graph as a fallback when that build-integrated fold produced none of
+  its own, never runs both against divergent flag sets for the same
+  snapshot. No code change made — the fix already exists and is verified
+  present; this pass is a documentation correction only, closing an item
+  this plan had carried as open past the point a prior review round
+  already closed it.
 
 **Files likely to change.** `abicheck/dumper_castxml.py`,
 `abicheck/dumper_clang.py`, `abicheck/dumper.py` (`_header_ast_parser`),

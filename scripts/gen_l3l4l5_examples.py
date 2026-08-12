@@ -60,6 +60,8 @@ from abicheck.buildsource.source_graph import (  # noqa: E402
     GraphEdge,
     GraphNode,
     SourceGraphSummary,
+    build_source_graph,
+    mark_source_edges_extractor_coverage,
 )
 
 EXAMPLES = _REPO / "examples"
@@ -455,6 +457,199 @@ def build_cases() -> dict[str, tuple[str, dict[str, Any], dict[str, Any]]]:
             [l5i_parent, l5i_hdr, new_x, new_y],
             [l5i_decl_edge, _field_edge("RawX"), _field_edge("RawY")],
         ),
+    )
+
+    # case196: a private (never-exported) internal helper -- reached only
+    # through a public function's own dependency, matching case160/161/162's
+    # "internal dependency" shape -- keeps its exact qualified name but its
+    # parameter type changes (int -> long) in the same release its header is
+    # reorganized (detail_v1.h -> detail_v2.h). Unlike case194/195 (which
+    # hand-build a GraphNode/GraphEdge pair directly), this fixture is
+    # produced by running REAL SourceEntity/BuildEvidence facts through the
+    # actual production fold (source_graph.build_source_graph) -- the same
+    # function dump --sources/--build-info calls. NOTE (Codex review, PR
+    # #727): the SourceAbiSurface below is still hand-constructed, bypassing
+    # source_link.link_source_abi() -- a bare `dump --sources` run cannot
+    # currently reproduce this exact scenario, since link_source_abi()
+    # filters a private-visibility entity out of the surface before any
+    # dependency-edge reachability is considered. See the "seventh finding"
+    # entry in docs/contribute/plans/g31-header-graph-default-on-followup.md
+    # for the full analysis and what a real fix needs. -- so the two resulting
+    # node ids are genuinely distinct for the reason a real extractor would
+    # make them distinct (the signature change moves the Itanium mangled
+    # name, which source_graph.py's node-id scheme keys on), not because
+    # this script invented an artificial suffix. This is deliberately NOT a
+    # "pure" move (an unchanged signature can never change a mangled name,
+    # so a pure move cannot itself perturb node identity -- see
+    # graph_reconcile.py's own "Known gap" note); it's the realistic
+    # compound edit that DOES reach the reconciler: the qualified-name alias
+    # tier pairs the two nodes, and since the declaring file also changed,
+    # ADR-048's outcome classification reports declaration_moved.
+    #
+    # The helper is deliberately PRIVATE (`visibility="private_header"`),
+    # unlike an earlier version of this fixture which used a public
+    # function -- Codex review (fresh evidence) caught that a *public*
+    # function's mangled-name-moving signature change is itself a real
+    # BREAKING change (the old exported symbol disappears), so cataloging
+    # that shape as COMPATIBLE_WITH_RISK contradicted ground_truth.json's
+    # invariant that one canonical verdict applies to the scenario a case
+    # describes. A private helper reached only via a public caller's own
+    # DECL_CALLS_DECL edge (mirroring case160's public_api_internal_dep_added
+    # producer) makes COMPATIBLE_WITH_RISK the genuinely correct verdict: the
+    # helper is never part of the exported symbol table, so a real
+    # end-to-end compare() of this exact scenario has no BREAKING/API_BREAK
+    # finding to contradict -- only the two RISK-tier L5 findings this
+    # fixture reproduces.
+    # The caller is deliberately INLINE (fed via reachable_inline_bodies,
+    # not reachable_declarations): build_source_graph() stamps a real
+    # attrs["consumer_compiled_body"] on every node from which list of a
+    # SourceAbiSurface it came from, and graph_reconcile._public_reachable_
+    # ids's walk mirrors source_graph_findings._internal_dependency_
+    # findings's own dependency-edge closure (is_public_dependency_node) --
+    # which does not itself require consumer_compiled_body. An earlier
+    # version of this fixture placed the caller in reachable_declarations
+    # (an ordinary out-of-line function), which a review round correctly
+    # flagged: an ordinary out-of-line public function's own internal calls
+    # are compiled into the LIBRARY's binary only, never into any
+    # consumer's (see is_consumer_compiled_public_entry's docstring and its
+    # real callers -- post_processing_reachability.MarkReachability,
+    # internal_leak.py's leak-path walk), so seeding this scenario from a
+    # non-consumer-compiled caller risked cataloging a production false
+    # positive as canonical ground truth. An inline caller's body IS
+    # compiled into every consumer TU that includes the header, so its
+    # internal call is genuinely consumer-visible under either predicate,
+    # sidestepping the question of which one graph_reconcile "should" use.
+    def _pub_caller() -> SourceEntity:
+        return SourceEntity(
+            id="demo::process",
+            kind="function",
+            qualified_name="demo::process",
+            mangled_name="_ZN4demo7processEv",
+            visibility="public_header",
+            source_location=_loc("include/demo/api.h", 1),
+        )
+
+    # The helper is deliberately INLINE too (CodeRabbit review, fresh
+    # evidence): demo::process is itself inline, so its body -- including
+    # its call to detail::helper -- is emitted into every CONSUMER'S own
+    # translation unit, not just the library's. If detail::helper were an
+    # ordinary out-of-line, non-exported declaration (this fixture's
+    # earlier shape), that consumer-emitted call would be an unresolved
+    # external symbol reference at link time -- a real, consumer-visible
+    # link failure, not a purely-internal, risk-only refactor. Making
+    # detail::helper inline too (a private "detail" header providing an
+    # inline implementation, transitively included by the public header --
+    # an entirely ordinary header-only-library pattern) means its own body
+    # is ALSO emitted into that same consumer TU, so the call resolves
+    # locally with no external symbol needed at all: COMPATIBLE_WITH_RISK
+    # is genuinely correct because a real consumer program built against
+    # this exact scenario links and runs cleanly.
+    def _helper_entity(mangled: str, path: str) -> SourceEntity:
+        return SourceEntity(
+            id="demo::detail::helper",
+            kind="function",
+            qualified_name="demo::detail::helper",
+            mangled_name=mangled,
+            visibility="private_header",
+            source_location=_loc(path, 1),
+        )
+
+    l5j_build = BuildEvidence(
+        targets=[Target(id="libdemo", name="demo", kind=TargetKind.SHARED_LIBRARY)]
+    )
+    # Both surfaces carry a coverage.fact_set/fact_family_states rollup
+    # naming the one source_edges producer whose coverage genuinely matches
+    # a full, unfiltered call/type-graph replay
+    # (source_graph._FULL_WALK_SOURCE_EDGES_PRODUCER) -- so
+    # mark_source_edges_extractor_coverage(), the REAL production
+    # certification helper (Codex review, fresh evidence), actually
+    # certifies extractor_passes["call_graph"] from this data, rather than
+    # the generator hand-forcing that flag directly (which a prior version
+    # of this fixture did -- verified empirically that doing so bypasses
+    # the real gate: an uncertified source_edges rollup degrades the pass
+    # instead of confirming it, so a regression in real coverage
+    # propagation could not have been caught by this fixture at all). The
+    # old side's state is "empty-confirmed" (its source_edges is
+    # deliberately []) rather than "complete" -- mirroring what a real
+    # full-walk producer reports for a TU it examined and found nothing in.
+    _FULL_WALK_PRODUCER = "abicheck-cc-clang-extractor"
+    l5j_old_surface = SourceAbiSurface(
+        library="libdemo.so",
+        reachable_inline_bodies=[
+            _pub_caller(),
+            _helper_entity("_ZN4demo6detail6helperEi", "include/demo/detail_v1.h"),
+        ],
+        coverage={
+            "fact_family_states": {"source_edges": "empty-confirmed"},
+            "fact_set": {"producer": _FULL_WALK_PRODUCER},
+        },
+    )
+    # The demo::process -> demo::detail::helper call relationship is
+    # deliberately fed as a SourceAbiSurface.source_edges row (the same L4
+    # wire format a real Clang-plugin/replay extractor emits) rather than
+    # appended onto the graph after the fact -- routing it through
+    # build_source_graph()'s own fold_source_edges() call (Codex review,
+    # fresh evidence) so this fixture actually exercises the real
+    # producer/fold path it claims to, gets real "source_edges" provenance
+    # stamped, and can't silently stay green if that fold regresses.
+    # Present on the NEW side only (not old): dependency reachability
+    # (source_graph_findings._internal_dependency_findings) compares raw
+    # target node ids across versions, not reconciled identities, so an
+    # edge present on BOTH sides pointing at the helper's two different
+    # per-version mangled-name node ids would make the "no internal
+    # dependency -> reaches 1" finding text literally false (the
+    # dependency would already have existed in old, just under a
+    # different raw id) -- a real detector limitation caught by an
+    # earlier review round (dependency reachability doesn't consult
+    # graph_reconcile's pairing). Restricting the edge to the new side
+    # only makes the scenario, and the finding text, both literally true:
+    # demo::process starts depending on the (already-existing-but-
+    # previously-unreached) private helper in the same release the
+    # helper's own signature and header change.
+    l5j_new_surface = SourceAbiSurface(
+        library="libdemo.so",
+        reachable_inline_bodies=[
+            _pub_caller(),
+            _helper_entity("_ZN4demo6detail6helperEl", "include/demo/detail_v2.h"),
+        ],
+        source_edges=[
+            {
+                "edge": "DECL_CALLS_DECL",
+                "src": "_ZN4demo7processEv",
+                "dst": "_ZN4demo6detail6helperEl",
+            }
+        ],
+        coverage={
+            "fact_family_states": {"source_edges": "complete"},
+            "fact_set": {"producer": _FULL_WALK_PRODUCER},
+        },
+    )
+    l5j_old_graph = build_source_graph(l5j_build, l5j_old_surface)
+    l5j_new_graph = build_source_graph(l5j_build, l5j_new_surface)
+    # mark_source_edges_extractor_coverage() -- the real production
+    # certification helper build_source_graph() itself does NOT call
+    # automatically (see its own docstring: a caller running a real
+    # call_graph/type_graph replay owns extractor_passes directly and must
+    # not have this helper's coarser source_edges-only certification
+    # override it) -- reads each surface's own coverage rollup above and
+    # only certifies extractor_passes["call_graph"] when it names the
+    # full-walk producer with a genuinely confirmed state; re-finalize so
+    # coverage.call_edges reflects the certification (graph_id is
+    # unaffected, since it hashes only nodes/edges). With both sides
+    # genuinely certified this way, the pre-existing zero-vs-one difference
+    # is a genuinely new dependency (not a raw-node-id artifact, unlike the
+    # shape an earlier review round rejected -- that one involved the SAME
+    # target across versions misread as new; this one is a real
+    # zero-to-one), and public_api_internal_dependency_added correctly
+    # fires alongside declaration_moved.
+    mark_source_edges_extractor_coverage(l5j_old_graph, l5j_old_surface)
+    mark_source_edges_extractor_coverage(l5j_new_graph, l5j_new_surface)
+    l5j_old_graph.finalize()
+    l5j_new_graph.finalize()
+    cases["case196_header_graph_move_reconciled"] = (
+        "L5",
+        l5j_old_graph.to_dict(),
+        l5j_new_graph.to_dict(),
     )
 
     return cases
