@@ -83,7 +83,7 @@ def _emitted_kinds(case_name: str) -> list[str]:
 def test_corpus_is_non_empty() -> None:
     # Guards against the discovery query silently matching nothing (which would
     # turn every parametrized assertion below into a vacuous pass).
-    assert len(_CASES) == 14, f"expected the 14 L3/L4/L5 cases, found {_CASES}"
+    assert len(_CASES) == 13, f"expected the 13 L3/L4/L5 cases, found {_CASES}"
 
 
 @pytest.mark.parametrize("case_name", _CASES)

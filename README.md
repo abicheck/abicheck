@@ -211,7 +211,7 @@ protocol server.
 
 ## Examples
 
-The [`examples/`](examples/README.md) directory contains **196 real-world ABI/API scenarios** (191 single-library cases plus 5 multi-library bundle cases) with ground-truth verdicts:
+The [`examples/`](examples/README.md) directory contains **195 real-world ABI/API scenarios** (190 single-library cases plus 5 multi-library bundle cases) with ground-truth verdicts:
 
 - Most are single-library `v1`/`v2` examples with a consumer app, including cases 187–189 and 191 (a public struct/class/function gaining a dependency on an internal type, proven both as a real artifact-level break and via the L2 header-only semantic graph, built automatically at `--depth headers` and above).
 - The G20 audit/cross-source cases (143–151) are single-build snapshots demonstrating intra-version cross-checks.
@@ -227,7 +227,7 @@ The authoritative completeness gate is the full example matrix: compiler lanes, 
 
 ## Validation snapshot
 
-The main validation target is the full **196-case catalog**. To scan it for the current checkout:
+The main validation target is the full **195-case catalog**. To scan it for the current checkout:
 
 ```bash
 python scripts/benchmark_comparison.py --suite all

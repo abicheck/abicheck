@@ -15,7 +15,7 @@ generated: false
 gives abicheck the most evidence to work with (see
 [how much evidence you need](#how-much-evidence-do-you-need) below).
 
-The repo includes 196 ABI scenario examples. Most are single-library cases with
+The repo includes 195 ABI scenario examples. Most are single-library cases with
 paired `v1`/`v2` sources and headers; the L3/L4/L5 build/source-only cases
 (152–164) ship hand-built evidence-model fixture pairs; bundle/release-level
 cases use release-style layouts.

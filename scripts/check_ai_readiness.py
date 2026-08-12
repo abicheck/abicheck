@@ -725,20 +725,6 @@ def check_doc_count_sync(f: Findings) -> None:
     n_catalog = len(verdicts)
 
     # (file, human label, expected value, regex capturing the documented number)
-    #
-    # Deliberately NOT tracked here: `docs/reference/tool-comparison.md`'s
-    # "## Full-catalog benchmark (<date>, all N cases)" heading. Unlike every
-    # anchor below (a live "how big is the catalog right now" claim), that
-    # heading pins the denominator of one specific, dated, already-measured
-    # benchmark run (its own "Reproducibility envelope" note records the exact
-    # commit; its results table reads `Correct / <that same N>`) — mechanically
-    # bumping N there whenever the catalog grows would silently overstate what
-    # was actually measured, without a real rerun to back the new number
-    # (caught by review on the PR that added case196: this file's own N was
-    # briefly bumped 195->196 despite the run underneath it staying pinned at
-    # 193, which the results table and reproducibility envelope still said).
-    # Bump that heading's own number only alongside an actual rerun that
-    # produces new results to match.
     anchors = [
         (
             ROOT / "README.md",
@@ -769,6 +755,12 @@ def check_doc_count_sync(f: Findings) -> None:
             "catalog size (validation target)",
             n_catalog,
             r"the full \*\*(\d+)-case catalog\*\*",
+        ),
+        (
+            DOCS / "reference" / "tool-comparison.md",
+            "catalog size (full-catalog benchmark heading)",
+            n_catalog,
+            r"## Full-catalog benchmark \([^,]+, all (\d+) cases\)",
         ),
         (
             DOCS / "start" / "first-check.md",

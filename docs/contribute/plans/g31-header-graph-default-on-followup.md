@@ -131,6 +131,55 @@ node/edge identity and merge logic. `abicheck/binder.py`/`abicheck/resolver.py`
 building a second identity-resolution mechanism from scratch.
 `abicheck/demangle.py` — canonical-name derivation for the mangled-name key.
 
+**Known gap: `declaration_moved` has no real-world example, and cannot yet
+get one — attempted, and reverted (Codex review, PR #727).** ADR-048's D2
+(`graph_reconcile.py`) defines three reconciliation outcomes —
+`declaration_renamed`, `declaration_moved`, `declaration_identity_reconciled`
+— but only `declaration_renamed` (case194) and the deliberate
+ambiguous-rename counter-example (case195) ever got example-catalog
+coverage. An attempt to add a `declaration_moved` case (a private field-type
+target keeping its exact qualified name but moving to a different declaring
+header) built the fixture the same way `tests/test_graph_reconcile.py`'s own
+`test_move_reconciles_when_file_changes_but_name_does_not` unit test does:
+two `GraphNode`s with matching `qualified_name` but artificially distinct
+ids (`type://old`/`type://new` in the unit test; `@v1`/`@v2` suffixes in the
+attempted example) so `diff_source_graph`'s node-id diff treats them as a
+removed+added pair for the reconciler to then re-pair via the alias tier.
+
+Review caught that this doesn't reflect anything a **real** `dump --sources`/
+`--build-info` run can currently produce. Every graph-node-id constructor in
+`abicheck/buildsource/` — `header_graph.py`'s `_decl_identity()`/`seed_decl`,
+`source_graph.py`'s `_type_node_id`/`_decl_node_id`/`function_decl_identity`,
+and every one of their callers in `call_graph.py`/`type_graph.py`/
+`macro_graph.py`/`callback_graph.py`/`override_graph.py`/`template_graph.py`/
+`graph_backends.py` (confirmed by grepping every `_type_node_id`/
+`_decl_node_id`/`_debug_type_node_id` call site) — keys a declaration's or
+type's node id purely off its mangled name or qualified name (falling back
+to a signature hash, never a file path). `_header_node_id(path)` IS
+file-keyed, but `"header"` is deliberately excluded from
+`_RECONCILABLE_KINDS` (file/build/link-graph nodes are structural build
+facts, not "the same entity" candidates — see the module docstring). The
+practical consequence: a real declaration that keeps its exact qualified
+name but moves to a different declaring header gets the **same** node id on
+both sides of a real comparison — it never appears as a removed+added pair
+at all, so `graph_reconcile`'s move-classification branch
+(`_classify_outcome`'s `moved and not renamed` case) never actually runs on
+real input today. The unit test above is a legitimate, narrower thing (it
+tests the classifier's own logic given an already-reconciled pair, the same
+way a pure-function unit test is allowed to construct inputs no real
+producer emits) — but an example-catalog case carries a stronger implicit
+claim (`examples/CLAUDE.md`: reproducible via a real `abicheck` command
+against the case's real fixtures), which this scenario cannot honestly meet
+yet. Reverted rather than shipped with a misleading claim of reachability.
+
+Closing this needs a real producer-side change first — some node-id (or
+edge/attribute) signal that actually changes when a declaration's file
+does but its identity doesn't — which is its own scoped design (which node
+kinds should be file-sensitive, how that interacts with the existing
+alias/structural-context tiers, whether it's a new node attribute compared
+separately from the identity-based node id rather than folded into the id
+itself) — not a drive-by extension of an example-catalog PR.
+
 ## Phase C — CastXML schema-completeness audit + backend unification
 
 **Problem.** Two independent gaps, related but separable:
