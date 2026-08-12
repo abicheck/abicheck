@@ -226,10 +226,11 @@ class Finding:
     # correctly: a risk finding promoted by `potential_breaking: error` is
     # not a "source API break" (Codex review, PR #595).
     severity: str = ""
-    # Remediation text ("how to fix"), sourced verbatim from the report's own
+    # Free-form consequence text, sourced verbatim from the report's own
     # `impact` field (`change_registry.py`'s `impact=` on the matching
     # `ChangeKindMeta` entry) when present. Rendered under the finding's own
-    # row as "**Fix:** ..." (`_flat_row`) whenever non-empty.
+    # row as "**Impact:** ..." (`_flat_row`) whenever non-empty — not every
+    # entry is an actionable remediation step, so it is never labelled "Fix".
     impact: str = ""
     # The raw Itanium-mangled linker symbol, set only when `symbol` above was
     # swapped for its demangled form (`_demangle_symbol`) — i.e. `symbol` is
@@ -497,51 +498,63 @@ def _bucket_changes(
     return breaking, review, safe, incomplete
 
 
-def _incomplete_is_blocking(findings: list[Finding], gate_api_break: bool) -> bool:
+def _incomplete_is_blocking(
+    findings: list[Finding],
+    gate_api_break: bool,
+    gate_breaking: bool = True,
+    levels: dict[str, str] | None = None,
+) -> bool:
     """Whether the analysis-incomplete bucket represents a hard failure —
     i.e. whether it actually turns the *Action's* check red, mirroring
-    ``action/run.sh``'s own ``compare``-mode gate exactly.
+    ``action/run.sh``'s own ``compare``-mode gate exactly. Three rounds of
+    Codex review corrected three different overclaims here; read together,
+    they say the same thing about every finding-severity/exit-code tier
+    ``compare`` can produce, so each is listed once below rather than as a
+    change log:
 
-    Two rounds of Codex review corrected two different overclaims here:
-
-    1. An earlier revision hardcoded ``evidence_required_missing`` as
-       always-blocking on the theory that ADR-033 D7 "fails the run
-       outright" — true of the raw CLI's ``compare`` exit code under the
-       legacy scheme (an ``API_BREAK`` verdict always exits nonzero there),
-       but this module renders the composite Action's *sticky comment*, and
-       ``action/run.sh``'s own gate only turns the check red on an
-       ``API_BREAK`` verdict when ``fail-on-api-break: true`` was actually
-       set. Fixed by deferring to each finding's own already-resolved
-       ``severity`` instead of one hardcoded kind.
-    2. That fix still let a ``potential_breaking: error`` severity-config
-       alone mark a ``risk``/``api_break`` finding as blocking, without
-       ``gate_api_break`` — reading ``action/run.sh``'s ``scan``-mode branch,
-       which really does have an unconditional severity-gate check
-       independent of ``fail-on-api-break``. But this module only ever
-       targets ``compare``-mode reports (see the module docstring), and
-       ``compare``-mode's own branch in ``action/run.sh`` has **no**
-       equivalent unconditional check for its exit-code-2/4 tiers — every
-       severity-aware exit code the *compare* CLI can produce for a
-       ``potential_breaking``/``abi_breaking`` category (2 or 4) maps to the
-       exact same ``API_BREAK``/``BREAKING`` verdict labels a *plain*
-       finding would, and compare's ``API_BREAK`` label is gated solely by
-       ``fail-on-api-break`` (only exit code 1 — the ``addition``/
-       ``quality_issues`` categories — gets compare's own unconditional
-       ``SEVERITY_ERROR`` gate). So for this module, ``potential_breaking:
-       error`` is not by itself a sufficient blocking signal; only
-       ``gate_api_break`` (``fail-on-api-break: true``) is.
-
-    - ``severity == "breaking"`` always blocks — the checker itself (or a
-      policy override) already decided this is a genuine, gated break.
-    - ``severity in ("api_break", "risk")`` blocks only under
-      ``gate_api_break``, exactly like every other api_break/risk finding
-      this module gates (see ``_bucket_changes``'s ``gate_api_break``
-      handling).
-    - ``severity == "compatible"`` (the default for ``dwarf_info_missing``)
-      never blocks.
+    - ``severity == "breaking"`` (exit code 4, the ``BREAKING`` verdict
+      label) blocks only under ``gate_breaking`` (``fail-on-breaking``,
+      default ``True`` — matches the Action input's own default, so an
+      un-plumbed caller's behaviour is unchanged) — see
+      ``action/run.sh``'s ``INPUT_FAIL_ON_BREAKING`` check. **Not**
+      unconditional: a named policy or ``--policy-file`` override can
+      promote a coverage-gap kind (e.g. ``layer_coverage_asymmetric`` under
+      a ``plugin_abi``-style profile) all the way to ``severity:
+      "breaking"`` in the JSON, and that promotion is still subject to
+      whatever ``fail-on-breaking`` the run was configured with, exactly
+      like a genuine ``BREAKING``-verdict finding.
+    - ``severity in ("api_break", "risk")`` (exit code 2, the ``API_BREAK``
+      label) blocks only under ``gate_api_break`` (``fail-on-api-break``),
+      exactly like every other api_break/risk finding this module gates
+      (see ``_bucket_changes``'s ``gate_api_break`` handling).
+      ``potential_breaking: error`` alone is deliberately **not**
+      sufficient: unlike ``action/run.sh``'s ``scan``-mode branch (which
+      really does have an unconditional severity-gate check independent of
+      ``fail-on-api-break``), ``compare``-mode's own branch has no
+      equivalent unconditional check for its exit-code-2/4 tiers — every
+      severity-aware exit code ``compare`` can produce for a
+      ``potential_breaking``/``abi_breaking`` category maps to the exact
+      same ``API_BREAK``/``BREAKING`` verdict labels a *plain* finding
+      would, gated the same way.
+    - The finding's resolved severity-config *category*
+      (``_finding_category`` — ``addition``/``quality_issues`` for a
+      ``compatible``-severity finding like the default for
+      ``dwarf_info_missing``) blocks **unconditionally** when *levels*
+      marks that category ``error`` — this is exit code 1, compare's own
+      ``SEVERITY_ERROR`` tier, which ``action/run.sh`` gates with no
+      ``fail-on-*`` condition at all (unlike the two tiers above). Without
+      this check, a ``quality_issues: error`` config that already fails the
+      real Action step would still render the merely-advisory "⚠️ Analysis
+      coverage reduced" headline right next to a red check.
+    - Otherwise (a ``compatible``-severity finding with no matching
+      category promoted to ``error``) never blocks.
     """
+    levels = levels or {}
     for f in findings:
-        if f.severity == "breaking":
+        category = _finding_category(f.severity, f.kind)
+        if category in ("addition", "quality_issues") and levels.get(category) == "error":
+            return True
+        if f.severity == "breaking" and gate_breaking:
             return True
         if f.severity in ("api_break", "risk") and gate_api_break:
             return True
@@ -619,7 +632,9 @@ def _breaking_severities(findings: list[Finding]) -> frozenset[str]:
 
 
 def _from_compare(
-    report: dict[str, object], gate_api_break: bool = False
+    report: dict[str, object],
+    gate_api_break: bool = False,
+    gate_breaking: bool = True,
 ) -> CommentModel:
     levels = _severity_levels(report)
     breaking, review, safe, incomplete = _bucket_changes(
@@ -646,7 +661,9 @@ def _from_compare(
         review=review,
         safe=safe,
         incomplete=incomplete,
-        incomplete_blocking=_incomplete_is_blocking(incomplete, gate_api_break),
+        incomplete_blocking=_incomplete_is_blocking(
+            incomplete, gate_api_break, gate_breaking, levels
+        ),
         breaking_categories=_breaking_categories(breaking),
         breaking_severities=_breaking_severities(breaking),
         scoped_verdict=scoped_verdict,
@@ -667,7 +684,9 @@ def _from_compare(
 
 
 def _from_appcompat(
-    report: dict[str, object], gate_api_break: bool = False
+    report: dict[str, object],
+    gate_api_break: bool = False,
+    gate_breaking: bool = True,
 ) -> CommentModel:
     levels = _severity_levels(report)
     breaking, review, safe, incomplete = _bucket_changes(
@@ -714,7 +733,9 @@ def _from_appcompat(
         review=review,
         safe=safe,
         incomplete=incomplete,
-        incomplete_blocking=_incomplete_is_blocking(incomplete, gate_api_break),
+        incomplete_blocking=_incomplete_is_blocking(
+            incomplete, gate_api_break, gate_breaking, levels
+        ),
         breaking_categories=_breaking_categories(breaking),
         breaking_severities=_breaking_severities(breaking),
     )
@@ -889,6 +910,28 @@ def _release_lib_row(
 def _from_release(
     report: dict[str, object], gate_api_break: bool = False
 ) -> CommentModel:
+    """Build a release-mode (directory/package operand) :class:`CommentModel`.
+
+    **Known gap, deliberately not closed here (Codex review):** unlike
+    :func:`_from_compare`/:func:`_from_appcompat`, this never routes an
+    evidence-coverage kind (``_EVIDENCE_KIND_VALUES``) into
+    ``CommentModel.incomplete`` — a release whose only finding is e.g.
+    ``layer_coverage_asymmetric`` still renders under the ordinary Needs
+    review bucket. Closing this properly needs a data source this function
+    doesn't have: the per-library aggregate counts below (``nb``/``nr``/
+    ``ns``) come from authoritative integer fields
+    (``breaking``/``source_breaks``/``risk_changes``/…), but the only
+    itemized, kind-level view of a library's findings is
+    ``cli_compare_release.py``'s capped, truncatable ``findings`` list (at
+    most 10 total per library, no ``severity`` field) — building an
+    incomplete-bucket count from that would be sample-based and could
+    silently undercount for a library with many findings, unlike the
+    exhaustive walk the other two modes do over the full, uncapped
+    ``changes``/``relevant_changes`` list. A correct fix adds an
+    authoritative per-category evidence-finding count to the release JSON
+    schema itself — a `cli_compare_release.py` change, not a rendering-only
+    fix confined to this module.
+    """
     rows: list[tuple[str, str, int, int, int]] = []
     levels = _severity_levels(report)
     categories: set[str] = set()
@@ -954,18 +997,26 @@ def _as_int(value: object) -> int:
 
 
 def build_model(
-    report: dict[str, object], gate_api_break: bool = False
+    report: dict[str, object],
+    gate_api_break: bool = False,
+    gate_breaking: bool = True,
 ) -> CommentModel:
     """Detect the report shape and normalise it into a :class:`CommentModel`.
 
     When *gate_api_break* is set (the action's ``fail-on-api-break``), API/source
     breaks are filed under Breaking so the comment matches the now-red check.
+    *gate_breaking* mirrors ``fail-on-breaking`` (default ``True``, matching
+    that Action input's own default) — only used today by the
+    analysis-incomplete bucket's blocking derivation (see
+    ``_incomplete_is_blocking``); the ordinary Breaking bucket's
+    classification is a compatibility judgement, not a gate one (ADR-042),
+    so it is unaffected by either flag.
     """
     if isinstance(report.get("libraries"), list):
         return _from_release(report, gate_api_break)
     if "application" in report or isinstance(report.get("relevant_changes"), list):
-        return _from_appcompat(report, gate_api_break)
-    return _from_compare(report, gate_api_break)
+        return _from_appcompat(report, gate_api_break, gate_breaking)
+    return _from_compare(report, gate_api_break, gate_breaking)
 
 
 def should_post(model: CommentModel, on: str) -> bool:
@@ -1149,18 +1200,22 @@ def _flat_row(f: Finding) -> str:
     when one was recovered, with the raw mangled linker symbol kept as
     evidence in the Detail column — a maintainer thinks in the signature,
     not the mangled name, but the mangled form is still the real linker
-    fact behind a binary-level finding. Full-detail rows also carry
-    remediation guidance ("how to fix") when the report's own `impact`
-    field is present (`change_registry.py`'s per-kind `impact=` template) —
-    a maintainer reading a breaking/review finding needs to know what to
-    *do* about it, not just what changed.
+    fact behind a binary-level finding. Full-detail rows also carry the
+    report's own `impact` field (`change_registry.py`'s per-kind `impact=`
+    template) when present, labelled **Impact:** — deliberately not
+    "**Fix:**" (Codex review): an `impact=` entry is a free-form
+    explanation of consequences, not a guaranteed repair step — e.g.
+    `symbol_version_defined_removed`'s entry only says old binaries get a
+    link error, `struct_size_changed`'s only confirms the layout break is
+    visible at binary level — so labelling every one of them as a "fix"
+    would misrepresent entries that carry no remediation at all.
     """
     loc = f" · `{_esc(f.location)}`" if f.location else ""
     cell = (_esc(f.detail) + loc) if f.detail else _esc(f.location or "—")
     if f.mangled:
         cell += f"<br>linker: `{_esc(f.mangled)}`"
     if f.impact:
-        cell += f"<br>**Fix:** {_esc(f.impact)}"
+        cell += f"<br>**Impact:** {_esc(f.impact)}"
     return f"| `{_esc(f.kind)}` | `{_esc(f.symbol)}` | {cell} |"
 
 

@@ -1964,6 +1964,14 @@ _maybe_post_pr_comment() {
   if [[ "${INPUT_FAIL_ON_API_BREAK:-false}" == "true" ]]; then
     PR_GATE_ARGS+=(--gate-api-break)
   fi
+  # Mirror fail-on-breaking too (default true) — only affects the
+  # analysis-incomplete bucket's blocking headline (Codex review): without
+  # this, a policy override promoting a coverage-gap finding to
+  # severity: "breaking" would always render the blocking headline even
+  # when fail-on-breaking: false left the check green.
+  if [[ "${INPUT_FAIL_ON_BREAKING:-true}" == "false" ]]; then
+    PR_GATE_ARGS+=(--no-gate-breaking)
+  fi
 
   # Link the workflow run (where the full JSON/SARIF report is uploaded as an
   # artifact) so a condensed/truncated comment always points at the full detail.

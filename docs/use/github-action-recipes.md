@@ -461,8 +461,9 @@ A breaking/review finding's row also carries, when the report provides them:
 the **demangled C++ signature** as the primary Symbol value (with the raw
 mangled linker symbol kept alongside as evidence, in full detail — see
 `linker: ...`), a normalized **source location** with CI-runner-specific
-checkout-path noise stripped, and a **Fix:** remediation line drawn from the
-finding's own `impact` field.
+checkout-path noise stripped, and an **Impact:** line drawn from the
+finding's own `impact` field (a free-form consequence note, not a guaranteed
+remediation step).
 
 ```yaml
 permissions:

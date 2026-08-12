@@ -12,11 +12,10 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Tests for the sticky PR-comment renderer and the ``pr-comment`` CLI."""
+"""Tests for the sticky PR-comment renderer (see test_pr_comment_cli.py for
+the ``pr-comment`` CLI command)."""
 
 from __future__ import annotations
-
-import json
 
 import pytest
 
@@ -425,6 +424,64 @@ def test_incomplete_blocking_under_fail_on_api_break():
     model = build_model(report, gate_api_break=True)
     assert model.incomplete_blocking is True
     model_ungated = build_model(report, gate_api_break=False)
+    assert model_ungated.incomplete_blocking is False
+
+
+def test_incomplete_breaking_severity_honors_gate_breaking():
+    # Codex review: a policy override that promotes an evidence-coverage
+    # finding all the way to severity: "breaking" must still respect
+    # fail-on-breaking (gate_breaking) — not block unconditionally, the way
+    # an earlier revision did.
+    report = _compare_report(
+        [
+            {
+                "kind": "layer_coverage_asymmetric",
+                "symbol": "evidence:coverage",
+                "description": "Base was analyzed with evidence the target lacks.",
+                "severity": "breaking",
+            },
+        ]
+    )
+    model_default = build_model(report)  # gate_breaking defaults True
+    assert model_default.incomplete_blocking is True
+    model_ungated = build_model(report, gate_breaking=False)
+    assert model_ungated.incomplete_blocking is False
+
+
+def test_incomplete_quality_issues_error_blocks_unconditionally():
+    # Codex review: dwarf_info_missing (default severity "compatible",
+    # category "quality_issues") gated by `quality_issues: error` fails the
+    # real Action step at compare's own exit-code-1 SEVERITY_ERROR tier,
+    # which action/run.sh gates with no fail-on-* condition at all — this
+    # must block regardless of gate_api_break/gate_breaking.
+    report = _compare_report(
+        [
+            {
+                "kind": "dwarf_info_missing",
+                "symbol": "<dwarf>",
+                "description": "no DWARF on new binary",
+                "severity": "compatible",
+            },
+        ]
+    )
+    report["severity"] = {"config": {"quality_issues": "error"}}
+    model = build_model(report, gate_api_break=False, gate_breaking=False)
+    assert model.incomplete_blocking is True
+    body = render_comment(model, sha="x")
+    assert "Source analysis incomplete" in body
+
+    # Without the quality_issues gate, the same finding stays advisory.
+    report_ungated = _compare_report(
+        [
+            {
+                "kind": "dwarf_info_missing",
+                "symbol": "<dwarf>",
+                "description": "no DWARF on new binary",
+                "severity": "compatible",
+            },
+        ]
+    )
+    model_ungated = build_model(report_ungated)
     assert model_ungated.incomplete_blocking is False
 
 
@@ -1274,10 +1331,12 @@ def test_full_detail_expands_all_sections():
     assert body.count("<details open>") == 3
 
 
-def test_breaking_finding_renders_remediation_from_impact_field():
+def test_breaking_finding_renders_impact_field():
     # A breaking finding's `impact` field (change_registry.py's per-kind
-    # remediation text, already emitted by reporter.py) answers "how to fix
-    # it" — the comment must surface it, not just the raw kind/description.
+    # consequence text, already emitted by reporter.py) answers "what does
+    # this actually do" — the comment must surface it, not just the raw
+    # kind/description. Labelled "Impact:", not "Fix:" (Codex review: not
+    # every impact= entry is an actionable remediation step).
     report = _compare_report(
         [
             {
@@ -1291,7 +1350,8 @@ def test_breaking_finding_renders_remediation_from_impact_field():
         ]
     )
     body = render_comment(build_model(report), sha="x", detail="full")
-    assert "**Fix:**" in body
+    assert "**Impact:**" in body
+    assert "**Fix:**" not in body
     assert "dynamic linker will refuse to load" in body
 
 
@@ -1416,6 +1476,25 @@ def test_location_without_shared_prefix_or_ci_pattern_left_unchanged():
     model = build_model(report)
     locations = {f.location for f in model.breaking}
     assert locations == {"/opt/build/foo.h:10", "/srv/other/bar.h:20"}
+
+
+def test_location_without_a_colon_left_unchanged():
+    # A location with no ":line" suffix at all (e.g. source_fact_coverage_
+    # incomplete's bracketed "[L4]" tier marker) must not raise or corrupt
+    # the string — _normalize_location's no-colon branch.
+    report = _compare_report(
+        [
+            {
+                "kind": "func_removed",
+                "symbol": "foo_init",
+                "description": "removed",
+                "severity": "breaking",
+                "source_location": "[L4]",
+            },
+        ]
+    )
+    model = build_model(report)
+    assert model.breaking[0].location == "[L4]"
 
 
 def test_safe_quality_section_full_detail_table_with_rows():
@@ -1908,56 +1987,5 @@ def test_header_untracked_category_falls_back_to_abi_breaking():
     assert "## ❌ abicheck — ABI BREAKING" in body
 
 
-# ---------------------------------------------------------------------------
-# CLI command
-#
-# `pr-comment` is Action/library-only (ADR-043 D1): not a registered `abicheck`
-# subcommand, invoked as `python -m abicheck.cli_pr_comment` (see
-# action/run.sh). Tests below drive the standalone Click command object
-# directly rather than through `abicheck.cli.main`.
-# ---------------------------------------------------------------------------
-
-
-def _run_cli(args):
-    from click.testing import CliRunner
-
-    from abicheck.cli_pr_comment import pr_comment_cmd
-
-    return CliRunner().invoke(pr_comment_cmd, args)
-
-
-def test_cli_pr_comment_writes_body(tmp_path):
-    report = tmp_path / "report.json"
-    report.write_text(json.dumps(_compare_report()), encoding="utf-8")
-    out = tmp_path / "comment.md"
-    result = _run_cli([str(report), "--sha", "abc1234", "-o", str(out)])
-    assert result.exit_code == 0
-    body = out.read_text(encoding="utf-8")
-    assert MARKER in body
-    assert "ABI BREAKING" in body
-
-
-def test_cli_pr_comment_skip_writes_empty_file(tmp_path):
-    report = tmp_path / "report.json"
-    report.write_text(json.dumps(_compare_report([])), encoding="utf-8")
-    out = tmp_path / "comment.md"
-    result = _run_cli([str(report), "--on", "changes", "-o", str(out)])
-    assert result.exit_code == 0
-    # nothing to post → empty file so the action's `-s` check skips
-    assert out.read_text(encoding="utf-8") == ""
-
-
-def test_cli_pr_comment_invalid_json_errors(tmp_path):
-    report = tmp_path / "bad.json"
-    report.write_text("{not json", encoding="utf-8")
-    result = _run_cli([str(report)])
-    assert result.exit_code != 0
-    assert "Cannot read JSON report" in result.output
-
-
-def test_cli_pr_comment_non_object_errors(tmp_path):
-    report = tmp_path / "arr.json"
-    report.write_text("[1, 2, 3]", encoding="utf-8")
-    result = _run_cli([str(report)])
-    assert result.exit_code != 0
-    assert "must be an object" in result.output
+# `pr-comment` CLI command tests live in test_pr_comment_cli.py (this file's
+# own line-count cap; CLAUDE.md's "Files that are large" section).

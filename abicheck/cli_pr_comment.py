@@ -70,6 +70,15 @@ from .cli import _write_or_echo
     "turns the check red on them).",
 )
 @click.option(
+    "--gate-breaking/--no-gate-breaking",
+    default=True,
+    show_default=True,
+    help="Whether an ABI break actually turns the check red (mirror "
+    "fail-on-breaking). Only affects the analysis-incomplete bucket's "
+    "blocking headline today — the ordinary Breaking bucket is a "
+    "compatibility judgement, not a gate one, and is unaffected.",
+)
+@click.option(
     "-o",
     "--output",
     type=click.Path(path_type=Path),
@@ -84,6 +93,7 @@ def pr_comment_cmd(
     run_label: str | None,
     report_url: str | None,
     gate_api_break: bool,
+    gate_breaking: bool,
     output: Path | None,
 ) -> None:
     """Render a sticky PR-comment body from a JSON REPORT.
@@ -111,7 +121,7 @@ def pr_comment_cmd(
     if not isinstance(data, dict):
         raise click.ClickException("JSON report must be an object")
 
-    model = build_model(data, gate_api_break=gate_api_break)
+    model = build_model(data, gate_api_break=gate_api_break, gate_breaking=gate_breaking)
     if not should_post(model, post_on):
         # Nothing to post — leave an empty file so a `-s` check skips posting.
         if output is not None:

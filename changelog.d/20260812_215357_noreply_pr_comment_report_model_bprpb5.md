@@ -15,10 +15,26 @@ A new changelog fragment. See changelog.d/README.md for the workflow.
   review/Safe counts, so a clean, implementation-only PR with a coverage gap
   no longer reads as "this PR made a risky API change." Whether that headline
   is blocking or advisory mirrors `action/run.sh`'s actual `compare`-mode
-  gate exactly (only `fail-on-api-break`/`fail-on-breaking`-gated severities
-  block; a `potential_breaking: error` severity-config alone does not, since
-  compare mode — unlike `scan` mode — has no independent unconditional
-  severity gate for its exit-code-2/4 tiers).
+  gate exactly: a `breaking`-severity finding blocks only under the new
+  `gate_breaking` flag (`fail-on-breaking`, default `True`); an
+  `api_break`/`risk`-severity finding only under `gate_api_break`
+  (`fail-on-api-break`; `potential_breaking: error` alone is not sufficient,
+  since compare mode — unlike `scan` mode — has no independent unconditional
+  severity gate for its exit-code-2/4 tiers); and a `compatible`-severity
+  finding (e.g. `dwarf_info_missing`) whose resolved `addition`/
+  `quality_issues` severity-config category is `error` blocks
+  unconditionally — that's compare's own exit-code-1 `SEVERITY_ERROR` tier,
+  which has no `fail-on-*` gate at all.
+- **Release-mode (`compare` on directory/package operands) reports still
+  fold evidence-coverage findings into their per-library counts** rather
+  than a separate incomplete count — documented, not fixed, in this pass:
+  the release JSON's per-library `findings` list is capped (10 total,
+  possibly truncated) and carries no `severity` field, so any bucketing
+  built on it would be unavoidably best-effort/sample-based, unlike the
+  exhaustive `compare`/`appcompat` path. A correct fix needs an
+  authoritative per-category evidence-finding count added to
+  `cli_compare_release.py`'s release JSON schema — a separate, scoped
+  change, not a `pr_comment.py`-only fix.
 - **Sticky PR comment "Needs review" headline names the actual reason**
   instead of a generic `⚠️ Review recommended` whenever every finding in the
   bucket agrees on one severity: `⚠️ Source API changed; binary ABI
@@ -36,9 +52,11 @@ A new changelog fragment. See changelog.d/README.md for the workflow.
   (`Calculator::multiply(int, int) const`) as the primary Symbol value
   instead of the raw mangled linker name, with the mangled form kept as
   `linker: ...` evidence in full-detail rows.
-- **Sticky PR comment now renders a `Fix:` remediation line** (from the
-  report's own `impact` field, already emitted by `reporter.py`) under any
-  breaking/review/incomplete finding that carries one.
+- **Sticky PR comment now renders an `Impact:` line** (from the report's own
+  `impact` field, already emitted by `reporter.py`) under any
+  breaking/review/incomplete finding that carries one — labelled "Impact",
+  not "Fix", since not every `impact=` entry is an actionable remediation
+  step.
 - **Sticky PR comment normalizes an absolute CI-checkout location** (e.g.
   `/home/runner/work/<repo>/<repo>/include/foo.h:10`) down to its
   repo-relative form (`include/foo.h:10`) when it matches the
