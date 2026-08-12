@@ -81,6 +81,20 @@
   and its Mach-O `__Z` variant, or MSVC `?`), which a bare-name fallback
   never does.
 
+- **Known, documented residual gap** (function alias-merge only): a shared
+  mangled name proves two spellings resolve to the same linked symbol, not
+  that they're the same declaration reached two ways through
+  inline-namespace lookup. Two independent `using`-declarations can each
+  alias the identical underlying function under two unrelated qualified
+  names, one of which happens to nest under a version-shaped segment — no
+  current header-AST/DWARF producer captures real inline-namespace status
+  onto the snapshot, so this module has no way to distinguish that from a
+  genuine alias pair. Removing only the versioned alias in that narrow
+  case is wrongly absorbed into the surviving, unrelated declaration.
+  Documented rather than chased further (closing it needs a producer-side
+  model addition, out of scope here) — see `_paired_stable_indices`'s
+  "Residual, deliberately-accepted gap" docstring paragraph.
+
 - **Test infrastructure**: added `tests/test_diff_namespaces.py::TestPairedStableIndicesProperties`,
   a Hypothesis property-test suite testing the merge primitive
   (`_paired_stable_indices`) directly, stating its contract as invariants

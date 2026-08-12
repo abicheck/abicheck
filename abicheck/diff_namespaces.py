@@ -216,6 +216,32 @@ def _paired_stable_indices(
     pre-existing double-report is the accepted fallback rather than a
     newly-introduced false suppression.
 
+    **Residual, deliberately-accepted gap** (Codex review, P1, fresh
+    evidence): a shared mangled name proves two spellings resolve to the
+    *same linked symbol*, not that they are *the same declaration* reached
+    two ways through inline-namespace lookup. Two textually distinct
+    ``using``-declarations can each independently alias the identical
+    underlying function under two unrelated qualified names -- one that
+    happens to nest under a version-shaped segment, one that doesn't --
+    the same declared-name/underlying-symbol divergence
+    ``detect_std_reexport_removed`` is itself built on. Removing only the
+    versioned alias would then be wrongly absorbed into the surviving,
+    genuinely-unrelated one, because mangled identity is the only evidence
+    this function has and cannot by itself distinguish "one declaration,
+    two lookup paths" from "two declarations, one shared symbol". No
+    stronger evidence is available from any current producer: real
+    inline-namespace status is a per-namespace AST/DWARF fact (clang's own
+    `-ast-dump=json` exposes `NamespaceDecl.isInline`; DWARF5 similarly
+    distinguishes an inline namespace's `DW_TAG_namespace`), but nothing in
+    `dumper_castxml.py`/`dumper_clang.py`/`dwarf_snapshot.py` captures it
+    onto `AbiSnapshot` today -- closing this needs a producer-side model
+    addition, not a cleverer identity check here, and is out of scope for
+    a drive-by fix. Accepted as narrow and theoretical (it requires two
+    independent re-exports of one symbol to coincidentally land on a
+    version-shaped and version-elided pair of the same leaf) against the
+    alternative of reopening the exact false-positive this whole function
+    exists to close.
+
     The ambiguous-set case matters because a raw key's items are not
     always one declaration: a header-derived qualified name can omit a
     function's parameter-list signature (see ``_func_index_items``), so

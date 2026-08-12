@@ -722,6 +722,36 @@ class TestExperimentalRemovedWithoutReplacement:
         assert len(removed) == 1
         assert removed[0].symbol == "preview::v1::foo"
 
+    def test_unrelated_reexports_sharing_mangled_symbol_merge_is_accepted(
+        self,
+    ) -> None:
+        """Known, documented limitation (see `_paired_stable_indices`'s
+        "Residual, deliberately-accepted gap" docstring paragraph): a
+        shared mangled name proves two spellings resolve to the same
+        linked symbol, not that they are the same declaration reached two
+        ways through inline-namespace lookup. Two independent
+        using-declarations can each alias the identical underlying
+        function under two unrelated qualified names -- one that happens
+        to nest under a version-shaped segment, one that doesn't -- and
+        this module has no evidence (no producer captures real
+        inline-namespace status) to tell that apart from a genuine
+        inline-namespace alias pair. Removing only the versioned
+        using-declaration is therefore wrongly absorbed into the
+        surviving, genuinely-unrelated one -- pinned here as the accepted
+        cost of the mangled-identity merge this whole module exists to
+        provide, not a newly-introduced regression.
+        """
+        old = _snap(funcs=[
+            _fn("preview::v1::foo", mangled="_ZSameReexport"),
+            _fn("preview::foo", mangled="_ZSameReexport"),
+        ])
+        new = _snap(funcs=[_fn("preview::foo", mangled="_ZSameReexport")])
+        changes = detect_experimental_namespace_changes(old, new)
+        assert not any(
+            c.kind == ChangeKind.EXPERIMENTAL_REMOVED_WITHOUT_REPLACEMENT
+            for c in changes
+        )
+
     def test_versioned_inline_namespace_type_spellings_double_report_is_accepted(
         self,
     ) -> None:
