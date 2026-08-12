@@ -31,3 +31,12 @@
   compile context, where only an auto-discovered file's parse failure
   degrades to a warning, instead of presenting the second, narrower rule
   as if it applied everywhere.
+- **The published docs now carry a site-wide "unreleased" banner.**
+  GitHub Pages deploys the documentation site on every push to `main`
+  with no separate build for a tagged release, so it can describe
+  `main`-only features (Agent Skills, `--contract` domains) with no
+  indication the reader isn't looking at the latest published release —
+  a documentation review's P0.1 finding. `docs/hooks.py` reads
+  `pyproject.toml`'s own `version` at build time and stamps it into a new
+  mkdocs-material announcement bar (`docs/overrides/main.html`) shown on
+  every page, so the banner can't itself go stale between manual updates.
