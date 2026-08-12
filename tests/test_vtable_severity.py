@@ -855,6 +855,57 @@ class TestLayoutUnverifiableCorrelatedWithVtableChanged:
             is None
         )
 
+    def test_owned_virtual_function_signature_change_not_tagged(self) -> None:
+        """A real change in the class's own virtual function set (a separate
+        evidence stream from RecordType.vtable, sourced from snapshot.
+        functions) is independent evidence — the co-occurring
+        LAYOUT_UNVERIFIABLE for the same type must not be correlated just
+        because size_bits also happens to be unknown. Distinct from the
+        both-populated-vtable case above: here the vtable list itself is
+        empty on one side, so only the owned-virtual-signatures branch of
+        _vtable_transition_rests_on_unresolved_evidence is exercised."""
+        old = _snap(
+            types=[
+                RecordType(
+                    name="Foo",
+                    kind="class",
+                    vtable=[],
+                    size_bits=None,
+                )
+            ]
+        )
+        new = _snap(
+            types=[
+                RecordType(
+                    name="Foo",
+                    kind="class",
+                    vtable=["_ZN3Foo1fEv"],
+                    size_bits=None,
+                    base_offsets={
+                        "Base": 0
+                    },  # asymmetric evidence -> LAYOUT_UNVERIFIABLE
+                )
+            ],
+            functions=[
+                Function(
+                    name="Foo::f",
+                    mangled="_ZN3Foo1fEv",
+                    return_type="void",
+                    is_virtual=True,
+                )
+            ],
+        )
+        result = compare(old, new)
+        changes_by_kind = {c.kind: c for c in result.changes}
+        assert ChangeKind.LAYOUT_UNVERIFIABLE in changes_by_kind
+        vtable_change = changes_by_kind[ChangeKind.TYPE_VTABLE_CHANGED]
+        assert vtable_change.vtable_covers_unverifiable_layout_gap is False
+        assert result.verdict == Verdict.BREAKING
+        assert (
+            changes_by_kind[ChangeKind.LAYOUT_UNVERIFIABLE].correlated_change_kind
+            is None
+        )
+
     def test_virtual_base_change_not_tagged_even_with_unknown_size(self) -> None:
         """A genuine virtual-base addition is real, independent evidence —
         the co-occurring LAYOUT_UNVERIFIABLE for the same type must not be
