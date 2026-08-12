@@ -91,7 +91,28 @@ asset_template="${ASSET_NAME_TEMPLATE:-}"
 if [[ -z "$asset_template" ]]; then
   asset_template='abicheck-baseline-{profile}.tar.zst'
 fi
-asset_name="${asset_template//\{profile\}/${PROFILE:-}}"
+# NOT "${asset_template//\{profile\}/${PROFILE:-}}" -- Bash 5.2's default
+# `patsub_replacement` shopt gives '&' in a ${var//pattern/REPLACEMENT}
+# replacement's TEXT the special "insert the matched pattern text" meaning
+# (like sed's `&` backreference), so a profile containing a literal '&'
+# (e.g. "linux&asan") would silently expand to "...linux{profile}asan..."
+# instead of the literal string -- reproduced directly against real Bash
+# 5.2.21. Bash 3.2 (macOS stock) has no such interpretation, so the SAME
+# template/profile pair would resolve to two DIFFERENT asset names
+# depending purely on which runner published vs. consumed it (Codex
+# review). `_substitute_literal` sidesteps the whole replacement-TEXT
+# position entirely via prefix/suffix pattern-REMOVAL (`%%`/`#`, which
+# carry no such special-character semantics) plus plain string
+# concatenation for the inserted text.
+_substitute_literal() {
+  local haystack="$1" needle="$2" replacement="$3" result=""
+  while [[ "$haystack" == *"$needle"* ]]; do
+    result+="${haystack%%"$needle"*}$replacement"
+    haystack="${haystack#*"$needle"}"
+  done
+  printf '%s' "$result$haystack"
+}
+asset_name="$(_substitute_literal "$asset_template" '{profile}' "${PROFILE:-}")"
 
 # Reject a newline/carriage-return in the resolved name BEFORE creating any
 # archive or writing to $GITHUB_OUTPUT -- profile/asset-name-template can

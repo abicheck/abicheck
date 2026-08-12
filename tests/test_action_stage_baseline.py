@@ -212,6 +212,33 @@ class TestStageBaseline:
         assert "{profile" not in outputs["asset-name"]
         assert outputs["asset-name"] == "abicheck-baseline-linux.tar.zst"
 
+    def test_ampersand_in_profile_is_substituted_literally(
+        self, tmp_path: Path
+    ) -> None:
+        # Regression (Codex review, P2): Bash 5.2's default
+        # `patsub_replacement` shopt gives '&' in a
+        # ${var//pattern/REPLACEMENT}'s replacement TEXT the special
+        # "insert the matched pattern text" meaning (like sed's `&`
+        # backreference) -- a profile containing a literal '&' (e.g.
+        # "linux&asan") previously expanded to
+        # "abicheck-baseline-linux{profile}asan.tar" instead of the
+        # literal string, and resolved DIFFERENTLY on Bash 3.2 (macOS
+        # stock, no such interpretation), so the same template/profile
+        # pair could resolve to two different asset names purely
+        # depending on which runner published vs. consumed it.
+        baseline_dir = _make_baseline_dir(tmp_path)
+        result, outputs = _run_action(
+            {
+                "BASELINE_PATH": str(baseline_dir),
+                "ASSET_NAME_TEMPLATE": "out-{profile}.tar",
+                "PROFILE": "linux&asan",
+            },
+            tmp_path,
+        )
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert outputs["asset-name"] == "out-linux&asan.tar"
+        assert "{profile}" not in outputs["asset-name"]
+
     @pytest.mark.skipif(
         os.name == "nt", reason="PATH-shadowing setup below is POSIX-specific"
     )

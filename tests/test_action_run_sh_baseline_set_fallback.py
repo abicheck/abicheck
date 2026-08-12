@@ -421,6 +421,32 @@ class TestBaselineSetFallback:
         assert "outcome: wrong_profile" in result.stdout + result.stderr
         assert "REACHED_END" not in result.stdout
 
+    def test_ampersand_in_profile_is_substituted_literally(
+        self, tmp_path: Path
+    ) -> None:
+        # Regression (Codex review, P2): Bash 5.2's default
+        # `patsub_replacement` shopt gives '&' in a
+        # ${var//pattern/REPLACEMENT}'s replacement TEXT the special
+        # "insert the matched pattern text" meaning (like sed's `&`
+        # backreference) -- a baseline-profile containing a literal '&'
+        # previously expanded to "...{profile}..." instead of the literal
+        # string, and resolved DIFFERENTLY on Bash 3.2 (macOS stock, no
+        # such interpretation).
+        profile = "linux&asan"
+        archive = _build_baseline_set_archive(tmp_path, profile=profile)
+        result = self._run(
+            {
+                "INPUT_MODE": "compare",
+                "INPUT_ABI_BASELINE": "latest-release",
+                "INPUT_BASELINE_PROFILE": profile,
+                "INPUT_BASELINE_TARGET": "libpvxs",
+                "FIXTURE_ARCHIVE": str(archive),
+            }
+        )
+        assert result.returncode == 0, result.stderr
+        assert "REACHED_END" in result.stdout
+        assert "libpvxs.abicheck.json" in result.stdout
+
     def test_no_asset_at_all_reports_combined_failure(self) -> None:
         # No single-snapshot asset AND no baseline-set archive either.
         result = self._run(

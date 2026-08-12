@@ -33,6 +33,7 @@ import json
 import os
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 from typing import Any
 
@@ -185,14 +186,32 @@ class TestCheckScriptBehavior:
             "HEAD_SHA": head_sha,
             "PR_LABELS_JSON": json.dumps(pr_labels or []),
         }
-        return subprocess.run(
-            [_bash_executable(), "-c", _check_script()],
-            capture_output=True,
-            text=True,
-            env=env,
-            cwd=repo,
-            check=False,
-        )
+        # A temp-file invocation, not `bash -c "<script>"` -- the extracted
+        # check script has grown large enough (workflow-file guard,
+        # residual-gap documentation, the corrected glob translator) that
+        # Windows' Git-Bash `-c` argument passing truncates it mid-parse,
+        # surfacing as a bare "unterminated f-string"/"here-document
+        # delimited by end-of-file" syntax error purely from where the
+        # string got cut, not a real syntax error in the script itself
+        # (confirmed: identical content passed via a file runs cleanly;
+        # reproduced by a real windows-latest CI failure on this exact
+        # test file). Mirrors test_action_run_sh_baseline_set_fallback.py's
+        # and test_action_run_sh_dry_run_baseline.py's identical
+        # `_run_bash_script` helper.
+        fd, path = tempfile.mkstemp(suffix=".sh")
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8", newline="\n") as fh:
+                fh.write(_check_script())
+            return subprocess.run(
+                [_bash_executable(), path],
+                capture_output=True,
+                text=True,
+                env=env,
+                cwd=repo,
+                check=False,
+            )
+        finally:
+            os.unlink(path)
 
     def test_fails_when_pr_touches_a_protected_baseline_file(
         self, tmp_path: Path

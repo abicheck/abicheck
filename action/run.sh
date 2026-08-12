@@ -136,6 +136,29 @@ if [[ "$MODE" == "scan" && "${INPUT_ESTIMATE:-false}" == "true" ]]; then
 fi
 FORCE_AUDIT_ONLY="${INPUT_AUDIT:-false}"
 
+# Replaces every literal (non-glob) occurrence of $2 in $1 with $3, via
+# prefix/suffix parameter-expansion pattern REMOVAL (`%%`/`#`) plus plain
+# string concatenation for the inserted text -- NOT
+# `${haystack//$needle/$replacement}`'s replacement-TEXT position, whose
+# '&' Bash 5.2 default `patsub_replacement` shopt gives the special
+# "insert the matched pattern text" meaning (like sed's `&` backreference,
+# reproduced directly against real Bash 5.2.21). A baseline-profile
+# containing a literal '&' (e.g. "linux&asan") would otherwise silently
+# expand to "...linux{profile}asan..." instead of the literal string on
+# Bash 5.2+, while resolving correctly on Bash 3.2 (macOS stock, no such
+# interpretation) -- the SAME template/profile pair resolving to two
+# DIFFERENT asset names purely depending on which runner published vs.
+# consumed it (Codex review). `%%`/`#` pattern-removal carries no such
+# special-character semantics in either position.
+_substitute_literal() {
+  local haystack="$1" needle="$2" replacement="$3" result=""
+  while [[ "$haystack" == *"$needle"* ]]; do
+    result+="${haystack%%"$needle"*}$replacement"
+    haystack="${haystack#*"$needle"}"
+  done
+  printf '%s' "$result$haystack"
+}
+
 # ---------------------------------------------------------------------------
 # Baseline auto-fetch: resolve INPUT_ABI_BASELINE → INPUT_OLD_LIBRARY
 #
@@ -198,7 +221,8 @@ _try_baseline_set_fallback() {
   if [[ -z "$asset_template" ]]; then
     asset_template='abicheck-baseline-{profile}.tar.zst'
   fi
-  local asset_name="${asset_template//\{profile\}/$INPUT_BASELINE_PROFILE}"
+  local asset_name
+  asset_name="$(_substitute_literal "$asset_template" '{profile}' "$INPUT_BASELINE_PROFILE")"
 
   # NOT `gh release download --pattern`: that flag is a glob (Go's
   # filepath.Match), not a literal-filename lookup -- a custom
