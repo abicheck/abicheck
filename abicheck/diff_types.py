@@ -1273,9 +1273,17 @@ def _vtable_transition_rests_on_unresolved_evidence(
     """
     if t_old.vtable and t_new.vtable:
         return False
+    # A single normalized identity for *both* sides, not each RecordType's
+    # own (possibly unset) qualified_name independently -- t_old and t_new
+    # already arrived here as one matched pair (TypeMap's own ambiguity-safe
+    # bare-name fallback, upstream of this function), so a legacy snapshot
+    # leaving qualified_name unset on one side must not desynchronize the
+    # identity this function matches owners against on the other (Codex
+    # review, fresh evidence).
+    qualified = t_new.qualified_name or t_old.qualified_name or t_new.name or t_old.name
     if _owned_virtual_signatures_for_record(
-        t_old, old_funcs
-    ) != _owned_virtual_signatures_for_record(t_new, new_funcs):
+        qualified, old_funcs
+    ) != _owned_virtual_signatures_for_record(qualified, new_funcs):
         return False
     # A virtual-base change is real, independent evidence regardless of
     # whether size_bits is known on either side (Codex review): it is not
@@ -1366,11 +1374,11 @@ def _owned_virtual_signatures(name: str, funcs: Mapping[str, Function]) -> set[s
 
 
 def _owned_virtual_signatures_for_record(
-    t: RecordType, funcs: Mapping[str, Function]
+    qualified: str, funcs: Mapping[str, Function]
 ) -> set[str]:
-    """The mangled names of *t*'s own virtual member functions, matched by
-    *t*'s exact qualified identity rather than the bare-leaf suffix matching
-    ``_owned_virtual_signatures`` above uses.
+    """The mangled names of *funcs*' virtual member functions owned by
+    *qualified* -- an exact identity, matched by the bare-leaf suffix
+    matching ``_owned_virtual_signatures`` above uses.
 
     That function's eager namespace-suffix matching is safe for its own
     caller (``_vtable_transition_is_evidenced``): over-inclusion just makes
@@ -1387,15 +1395,23 @@ def _owned_virtual_signatures_for_record(
     ``owner_class_of`` always returns a *fully* scope-qualified owner when it
     returns anything at all -- its display-name branch only fires on an
     already-qualified name, and its mangled-name fallback reconstructs the
-    complete nested-name chain, never a partial one. ``RecordType.
-    qualified_name`` (when set) and ``RecordType.name`` itself (for a
-    DWARF-produced or global-scope record, which already bakes the qualified
-    path into ``name``, or has no namespace to bake in) are exactly as
-    qualified. An earlier revision compared against the *bare* ``name``
-    instead and was reverted for exactly the mismatch that caused (see
-    ``_owned_virtual_signatures``'s own docstring) -- comparing against the
-    qualified spelling here avoids that mismatch without needing suffix
-    matching at all.
+    complete nested-name chain, never a partial one. So an exact string
+    comparison against *qualified* (also fully qualified -- see the caller)
+    is precise here, unlike the bare-name comparison an earlier revision
+    tried and reverted (see ``_owned_virtual_signatures``'s own docstring).
+
+    Takes the identity as a plain string, computed *once* by the caller from
+    both ``RecordType``s of an already-matched pair, rather than deriving it
+    separately per side from each ``RecordType``'s own ``qualified_name``:
+    a legacy stored snapshot can carry ``qualified_name=None`` for a record
+    the *other* side (or ``TypeMap``'s own ambiguity-safe bare-name
+    fallback) already knows is the same namespaced type as a fresher
+    snapshot's fully-qualified one -- comparing each side against its own,
+    independently-derived identity would then compare "Foo" (old) against
+    "ns::Foo" (new), permanently mismatching every owner and manufacturing a
+    spurious "independently evidenced" verdict for a comparison that has
+    nothing to do with either side's actual virtual surface (Codex review,
+    fresh evidence).
 
     Declining a match is always safe for this caller: it only feeds a
     cosmetic cross-reference annotation, never a finding's presence or
@@ -1408,7 +1424,6 @@ def _owned_virtual_signatures_for_record(
     """
     from .diff_cxx_rules import owner_class_of
 
-    qualified = t.qualified_name or t.name
     return {
         mangled
         for mangled, fn in funcs.items()

@@ -1121,6 +1121,73 @@ class TestLayoutUnverifiableCorrelatedWithVtableChanged:
             == ChangeKind.TYPE_VTABLE_CHANGED.value
         )
 
+    def test_owned_virtual_signature_uses_one_normalized_identity_for_both_sides(
+        self,
+    ) -> None:
+        """A legacy stored snapshot can leave ``RecordType.qualified_name``
+        unset (``None``) on one side while the fresher other side (or
+        ``TypeMap``'s own ambiguity-safe bare-name fallback, upstream of
+        this function) already knows both sides are the same namespaced
+        ``ns::Foo`` record. Deriving each side's owner-matching identity
+        independently from its own ``RecordType`` — "Foo" (old, unset) vs.
+        "ns::Foo" (new, set) — would permanently mismatch a virtual method
+        present unchanged on *both* sides purely because of that spelling
+        difference, manufacturing a spurious "independently evidenced"
+        verdict and withholding the correlation (Codex review, fresh
+        evidence). The fix normalizes to one shared identity for both
+        sides."""
+        old = _snap(
+            types=[
+                RecordType(
+                    name="Foo",
+                    qualified_name=None,  # legacy snapshot: unset
+                    kind="class",
+                    vtable=[],
+                    size_bits=None,
+                )
+            ],
+            functions=[
+                Function(
+                    name="ns::Foo::f",
+                    mangled="_ZN2ns3Foo1fEv",
+                    return_type="void",
+                    is_virtual=True,
+                )
+            ],
+        )
+        new = _snap(
+            types=[
+                RecordType(
+                    name="Foo",
+                    qualified_name="ns::Foo",
+                    kind="class",
+                    vtable=["_ZN2ns3Foo1fEv"],
+                    size_bits=None,
+                    # ns::Foo's own asymmetric-evidence gap — the case this
+                    # correlation exists to catch.
+                    base_offsets={"Base": 0},
+                )
+            ],
+            functions=[
+                # Same virtual method, unchanged from the old side.
+                Function(
+                    name="ns::Foo::f",
+                    mangled="_ZN2ns3Foo1fEv",
+                    return_type="void",
+                    is_virtual=True,
+                )
+            ],
+        )
+        result = compare(old, new)
+        changes_by_kind = {c.kind: c for c in result.changes}
+        assert ChangeKind.LAYOUT_UNVERIFIABLE in changes_by_kind
+        vtable_change = changes_by_kind[ChangeKind.TYPE_VTABLE_CHANGED]
+        assert vtable_change.vtable_covers_unverifiable_layout_gap is True
+        assert (
+            changes_by_kind[ChangeKind.LAYOUT_UNVERIFIABLE].correlated_change_kind
+            == ChangeKind.TYPE_VTABLE_CHANGED.value
+        )
+
     def test_correlation_independent_of_policy_override(self) -> None:
         """The annotation is set purely from the two detectors' own evidence
         — it must not depend on, or be defeated/created by, a PolicyFile
