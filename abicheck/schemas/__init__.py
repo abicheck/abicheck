@@ -408,7 +408,15 @@ from typing import Any
 #:       the 2.32 fix didn't reach, so a binding-scoped suppression's audit
 #:       trail couldn't show why it matched. Additive optional key (Codex
 #:       review, fresh evidence).
-REPORT_SCHEMA_VERSION = "2.33"
+#: 2.34 — ``policy_reclassify[]`` items gain the optional ``binding`` key,
+#:       matching ``reclassify.ReclassifyRule.to_report_dict()``'s new
+#:       ``binding`` selector output (the ``reclassify:`` rule form's own
+#:       ``binding`` selector, wired through in this same change). The
+#:       schema's ``policy_reclassify`` item previously set
+#:       ``additionalProperties: false`` without listing this key, so valid
+#:       output using the feature failed validation against the bundled
+#:       schema. Additive optional key (Codex review, fresh evidence).
+REPORT_SCHEMA_VERSION = "2.34"
 
 #: SemVer-style (MAJOR.MINOR) version of the ``scan`` JSON output, emitted as
 #: ``scan_schema_version`` at the top level of both public scan dict shapes:

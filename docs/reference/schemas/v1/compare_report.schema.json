@@ -913,6 +913,7 @@
           "entity_namespace": { "type": "string" },
           "cause_namespace": { "type": "string" },
           "source_location": { "type": "string" },
+          "binding": { "type": "string", "enum": ["global", "weak", "local", "unique", "other"] },
           "reason": { "type": "string" },
           "label": { "type": "string" },
           "expires": { "type": "string" }
