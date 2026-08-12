@@ -902,6 +902,71 @@ def test_capture_macros_dedup_key_preserves_source_looking_flag_operand(
     assert out["cu://b"] == {"NDEBUG": "0"}
 
 
+def test_capture_macros_dedups_compile_db_shape_absolute_source_relative_argv(
+    monkeypatch,
+) -> None:
+    # Codex review: CompileDbAdapter resolves CompileUnit.source to an
+    # ABSOLUTE path (CompileEntry.from_dict joins a relative "file" onto
+    # "directory") while argv keeps the compile database's own, still
+    # RELATIVE spelling -- the real-world shape a compile_commands.json
+    # produces, not a synthetic edge case. A bare string-equality filter
+    # would strip nothing here and silently fall back to one probe per TU.
+    import abicheck.buildsource.build_evidence as be
+    import abicheck.buildsource.preprocessor_scan as ps
+
+    monkeypatch.setenv("ABICHECK_PREPROCESSOR_SCAN_JOBS", "1")
+    build = be.BuildEvidence(
+        compile_units=[
+            be.CompileUnit(
+                id=f"cu://{i}",
+                source=f"/work/build/src/{i}.cpp",  # absolute, like CompileDbAdapter
+                directory="/work/build",
+                language="CXX",
+                argv=["clang++", "-c", f"src/{i}.cpp", "-DNDEBUG=1"],  # relative
+            )
+            for i in range(10)
+        ]
+    )
+    probes = {"n": 0}
+
+    def _fake_run(self, cmd, cwd, unit):
+        probes["n"] += 1
+        return "#define NDEBUG 1\n"
+
+    monkeypatch.setattr(ps.ClangPreprocessorExtractor, "_run", _fake_run)
+    out = ps.ClangPreprocessorExtractor().capture_macros(build)
+
+    assert probes["n"] == 1, f"expected one deduped probe, got {probes['n']}"
+    assert len(out) == 10
+
+
+def test_normalize_source_path() -> None:
+    from abicheck.buildsource.preprocessor_scan import _normalize_source_path
+
+    assert _normalize_source_path("", "/work/build") == ""
+    # Relative path joined onto directory, then normalized.
+    assert _normalize_source_path("src/a.cpp", "/work/build") == "/work/build/src/a.cpp"
+    # Already-absolute path: directory is ignored by os.path.join, just
+    # normpath'd.
+    assert (
+        _normalize_source_path("/work/build/src/a.cpp", "/elsewhere")
+        == "/work/build/src/a.cpp"
+    )
+    # No directory: bare normpath.
+    assert _normalize_source_path("src/./a.cpp", None) == "src/a.cpp"
+
+
+def test_preprocessor_scan_version_bumped_for_probes_truncated() -> None:
+    # Codex review: the additive probes_truncated field needs its schema
+    # version bumped so a consumer negotiating either version can detect
+    # the changed shape.
+    from abicheck.buildsource.preprocessor_scan import PREPROCESSOR_SCAN_VERSION
+    from abicheck.schemas import SCAN_SCHEMA_VERSION
+
+    assert PREPROCESSOR_SCAN_VERSION >= 2
+    assert SCAN_SCHEMA_VERSION != "1.10"
+
+
 def test_run_preprocessor_scan_disabled_via_env(monkeypatch) -> None:
     from abicheck.buildsource import build_evidence as be
 

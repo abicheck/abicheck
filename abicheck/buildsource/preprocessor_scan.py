@@ -68,7 +68,13 @@ _ProbeItem = TypeVar("_ProbeItem")
 
 #: Preprocessor-scan fact-schema version. Independent of every other buildsource
 #: schema version (see ``buildsource/CLAUDE.md`` "Versioning").
-PREPROCESSOR_SCAN_VERSION: int = 1
+#: 1 — initial shape.
+#: 2 — added the additive ``probes_truncated`` int (perf controls above):
+#:     distinct compile-context probes / public headers skipped by the
+#:     ``ABICHECK_PREPROCESSOR_SCAN_MAX_PROBES`` cap. ``0`` (the default,
+#:     same as an unset field) when nothing was truncated, so an ordinary
+#:     scan's payload is unchanged from version 1 (Codex review).
+PREPROCESSOR_SCAN_VERSION: int = 2
 
 
 # ---------------------------------------------------------------------------
@@ -609,12 +615,17 @@ class ClangPreprocessorExtractor:
             # happens to end in a source extension -- e.g. ``-include
             # config_a.c`` -- must survive into the signature: two units
             # differing only in that operand are NOT the same compile
-            # context and must not be dedup-merged (Codex review).
-            source_token = unredact_home(cu.source)
+            # context and must not be dedup-merged (Codex review). Matched
+            # via _normalize_source_path, not bare equality: CompileUnit.source
+            # is commonly already absolute while the matching argv token is
+            # still directory-relative, and a bare-string mismatch there
+            # would strip nothing -- silently falling back to one probe per
+            # TU (Codex review, see that helper's docstring).
+            source_norm = _normalize_source_path(unredact_home(cu.source), cwd)
             sig = (
                 cu.language,
                 cwd,
-                tuple(a for a in argv if a != source_token),
+                tuple(a for a in argv if _normalize_source_path(a, cwd) != source_norm),
             )
             groups.setdefault(sig, []).append(cu)
             if sig not in commands:
@@ -819,6 +830,28 @@ def _context_flags(args: list[str]) -> list[str]:
     context reused to preprocess each public header on its own.
     """
     return [a for a in args if not a.lower().endswith(_SOURCE_EXTS)]
+
+
+def _normalize_source_path(path: str, directory: str | None) -> str:
+    """Best-effort absolute, normalized form of *path* for TU-source matching.
+
+    A compile-DB-sourced ``CompileUnit.source`` is commonly already resolved
+    to an absolute path, while the matching argv token is whatever spelling
+    the build recorded verbatim -- often still relative to the TU's own
+    ``directory``. Comparing the two by bare string equality then strips
+    nothing, silently degrading the ``capture_macros`` dedup back to one
+    probe per TU (Codex review). Joining a relative *path* onto *directory*
+    (matching how a real compiler resolves it) before ``normpath``-ing both
+    sides makes the common shapes ("directory"-relative argv token vs.
+    already-absolute ``source``) compare equal again. Falls back to a bare
+    ``normpath`` when *directory* is unavailable or *path* is already
+    absolute -- ``os.path.join`` with an absolute second argument already
+    discards the first, so this is safe either way.
+    """
+    if not path:
+        return path
+    joined = os.path.join(directory, path) if directory else path
+    return os.path.normpath(joined)
 
 
 def run_preprocessor_scan(
