@@ -1913,6 +1913,15 @@ def _diff_elf_deleted_fallback(old: AbiSnapshot, new: AbiSnapshot) -> list[Chang
                 name=f_old.name,
                 old_value="exported",
                 new_value="absent_from_dynsym",
+                # See Change.symbol_binding's docstring — None when not
+                # captured. This is the other common export-disappearance
+                # path besides plain FUNC_REMOVED (Codex review): a
+                # binding-scoped suppression rule must see this too, or it
+                # can never match here even though f_old already carries the
+                # captured binding.
+                symbol_binding=(
+                    f_old.elf_binding.value if f_old.elf_binding else None
+                ),
             )
         )
 

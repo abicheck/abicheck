@@ -355,8 +355,11 @@ class Change:
     # ELF symbol linkage (Function.elf_binding / Variable.elf_binding's value
     # string — "global"/"weak"/"local"/"unique"/"other") of the removed
     # symbol, stamped by diff_symbols._check_removed_function/_var_removed on
-    # FUNC_REMOVED/FUNC_REMOVED_ELF_ONLY/VAR_REMOVED findings only. None for
-    # every other kind, and None here too when the symbol's binding was never
+    # FUNC_REMOVED/FUNC_REMOVED_ELF_ONLY/VAR_REMOVED findings, and by
+    # diff_platform._diff_elf_deleted_fallback on FUNC_DELETED_ELF_FALLBACK
+    # (the other common export-disappearance path — a function still
+    # declared but silently absent from .dynsym). None for every other
+    # kind, and None here too when the symbol's binding was never
     # captured (non-ELF platform, older snapshot, ELF metadata without a
     # matching .dynsym entry). Exists so a suppression rule's ``binding:``
     # selector (suppression.py) can narrow a removal rule to the common

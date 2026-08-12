@@ -278,7 +278,11 @@ class Function:
     # heavier removal-severity *demotion* keyed off this same fact was
     # attempted and reverted — this field only makes the fact visible on the
     # model and matchable by a suppression selector, it does not itself
-    # change any verdict).
+    # change any verdict). Known gap, same as elf_visibility: a symbol-
+    # versioned bare name with mixed bindings across versions (e.g. a GLOBAL
+    # old-ABI @V1 and a WEAK default @@V2) collapses to whichever entry
+    # elf.symbol_map's last-write-wins dict happens to keep — see AGENTS.md's
+    # dedicated entry for this field.
     elf_binding: SymbolBinding | None = None
 
 

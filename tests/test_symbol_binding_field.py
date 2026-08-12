@@ -119,6 +119,33 @@ class TestChangeSymbolBindingStamp:
         changes = _var_removed("g", v_old)
         assert changes[0].symbol_binding == "global"
 
+    def test_elf_deleted_fallback_stamps_symbol_binding(self) -> None:
+        from abicheck.diff_platform import _diff_elf_deleted_fallback
+
+        f_old = Function(
+            name="f",
+            mangled="_Z1fv",
+            return_type="void",
+            elf_binding=SymbolBinding.WEAK,
+        )
+        f_new = Function(name="f", mangled="_Z1fv", return_type="void")
+        old = AbiSnapshot(
+            library="lib.so",
+            version="1.0",
+            functions=[f_old],
+            elf=ElfMetadata(symbols=[ElfSymbol(name="_Z1fv", binding=SymbolBinding.WEAK)]),
+        )
+        new = AbiSnapshot(
+            library="lib.so",
+            version="2.0",
+            functions=[f_new],
+            elf=ElfMetadata(symbols=[]),
+        )
+        changes = _diff_elf_deleted_fallback(old, new)
+        assert len(changes) == 1
+        assert changes[0].kind == ChangeKind.FUNC_DELETED_ELF_FALLBACK
+        assert changes[0].symbol_binding == "weak"
+
 
 class TestSuppressionBindingSelector:
     def _make_change(self, binding: str | None) -> object:

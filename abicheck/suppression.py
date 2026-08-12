@@ -861,8 +861,9 @@ def _matches_binding(binding: str, change: Change) -> bool:
     """Return True if *change*'s ELF symbol linkage equals *binding*.
 
     ``change.symbol_binding`` is ``None`` for every change kind other than
-    ``FUNC_REMOVED``/``FUNC_REMOVED_ELF_ONLY``/``VAR_REMOVED`` (the only
-    detectors that stamp it), and also ``None`` on a removal whose binding
+    ``FUNC_REMOVED``/``FUNC_REMOVED_ELF_ONLY``/``VAR_REMOVED``/
+    ``FUNC_DELETED_ELF_FALLBACK`` (the only kinds any detector stamps it
+    on), and also ``None`` on one of those whose binding
     was never captured (non-ELF platform, older snapshot, no matching
     ``.dynsym`` entry). A rule with an explicit ``binding:`` selector never
     matches either case — an unknown binding is not the same fact as a
@@ -1017,8 +1018,9 @@ class Suppression:
     """``"global" | "weak" | "local" | "unique" | "other"`` — the removed
     symbol's ELF linkage (``Change.symbol_binding``, from
     ``Function.elf_binding``/``Variable.elf_binding``). Only ever set on a
-    ``FUNC_REMOVED``/``FUNC_REMOVED_ELF_ONLY``/``VAR_REMOVED`` finding; a
-    rule combining this with any other ``change_kind`` never matches.
+    ``FUNC_REMOVED``/``FUNC_REMOVED_ELF_ONLY``/``VAR_REMOVED``/
+    ``FUNC_DELETED_ELF_FALLBACK`` finding; a rule combining this with any
+    other ``change_kind`` never matches.
     Conjunctive with every other selector (AND semantics), like
     :attr:`member_name` — combine with :attr:`symbol_pattern` or
     :attr:`namespace` to scope it. Never matches a change whose binding was
