@@ -197,6 +197,56 @@ class TestStageBaseline:
         assert "{profile" not in outputs["asset-name"]
         assert outputs["asset-name"] == "abicheck-baseline-linux.tar.zst"
 
+    @pytest.mark.skipif(
+        os.name == "nt", reason="PATH-shadowing setup below is POSIX-specific"
+    )
+    def test_falls_back_to_python_zstandard_when_zstd_binary_is_absent(
+        self, tmp_path: Path
+    ) -> None:
+        # Regression (Codex review, P2): `tar --zstd` shells out to a
+        # separate `zstd` executable, and this composite Action -- unlike
+        # actions/baseline -- has no dependency-install step, so a minimal/
+        # self-hosted runner without zstd pre-installed would otherwise
+        # hard-fail on the DEFAULT asset-name-template alone. Simulates
+        # that by giving the subprocess a PATH built from symlinks to every
+        # needed tool EXCEPT zstd, so `command -v zstd` genuinely fails,
+        # then confirms the script still produces a real, extractable
+        # zstd archive via the Python `zstandard` fallback.
+        import shutil
+
+        baseline_dir = _make_baseline_dir(tmp_path)
+        scratch_bin = tmp_path / "no-zstd-bin"
+        scratch_bin.mkdir()
+        for tool in ("bash", "tar", "python3", "pip", "sh", "env", "gzip", "rm"):
+            resolved = shutil.which(tool)
+            if resolved is not None:
+                (scratch_bin / tool).symlink_to(resolved)
+        assert (scratch_bin / "tar").exists(), "tar must be on the scratch PATH"
+        assert not (scratch_bin / "zstd").exists()
+
+        result, outputs = _run_action(
+            {
+                "BASELINE_PATH": str(baseline_dir),
+                "PROFILE": "linux",
+                "PATH": str(scratch_bin),
+            },
+            tmp_path,
+        )
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert "zstandard" in (result.stdout + result.stderr)
+        archive_path = tmp_path / outputs["asset-name"]
+        assert archive_path.is_file()
+
+        # Confirm it's a real, valid zstd archive TarExtractor can read
+        # back -- not just that the script exited 0.
+        from abicheck.package import TarExtractor
+
+        extracted = tmp_path / "extracted"
+        extracted.mkdir()
+        TarExtractor().extract(archive_path, extracted)
+        assert (extracted / "manifest.json").is_file()
+        assert (extracted / "libfoo.abicheck.json").is_file()
+
     def test_missing_baseline_path_fails(self, tmp_path: Path) -> None:
         result, _ = _run_action({}, tmp_path)
         assert result.returncode == 1

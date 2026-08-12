@@ -65,7 +65,19 @@ jobs:
       - name: Compute a per-run profile id and release tag
         id: profile
         shell: bash
-        run: echo "id=publish-e2e-${{ github.run_id }}" >> "$GITHUB_OUTPUT"
+        # NOT prefixed with "publish-e2e-" -- publish-baseline.yml's own
+        # "publish" job downloads its build-output artifact from the exact
+        # name "${build-output-artifact-prefix}${profile-id}"
+        # (build-output-artifact-prefix is set to 'publish-e2e-build-'
+        # below), which must match the "Upload build-output artifact" step
+        # further down byte-for-byte. A profile id carrying its own
+        # "publish-e2e-" prefix on top of that made the expected name
+        # "publish-e2e-build-publish-e2e-<run_id>", never matching the
+        # actually-uploaded "publish-e2e-build-<run_id>" -- the publish job
+        # could never find its build output, so this fixture always failed
+        # before testing either the fresh-upload or safe-retry path at all
+        # (Codex review).
+        run: echo "id=${{ github.run_id }}" >> "$GITHUB_OUTPUT"
 
       - name: Build one library
         shell: bash

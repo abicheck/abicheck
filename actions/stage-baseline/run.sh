@@ -47,7 +47,35 @@ asset_name="${asset_template//\{profile\}/${PROFILE:-}}"
 
 case "$asset_name" in
   *.tar.zst)
-    tar --zstd -cf "$asset_name" -C "$BASELINE_PATH" .
+    # `tar --zstd` shells out to a separate `zstd` executable (confirmed
+    # against real GNU tar 1.35: --help describes --zstd as "filter the
+    # archive through zstd", and a runner without that binary on PATH
+    # fails with "zstd: not found" even though tar itself recognizes the
+    # flag) -- this composite Action, unlike actions/baseline, has no
+    # dependency-install step, so a minimal/self-hosted runner without
+    # zstd pre-installed would otherwise hard-fail on the DEFAULT
+    # asset-name-template alone (Codex review). Falls back to Python's
+    # `zstandard` package (already an abicheck core dependency, so it's
+    # present on any runner abicheck itself installed onto -- and cheap to
+    # install standalone otherwise) when the `zstd` CLI isn't available,
+    # rather than requiring an undeclared runner prerequisite.
+    if command -v zstd >/dev/null 2>&1; then
+      tar --zstd -cf "$asset_name" -C "$BASELINE_PATH" .
+    else
+      echo "::notice::'zstd' executable not found on PATH -- falling back to Python's zstandard package to build $asset_name." >&2
+      python3 -c "import zstandard" >/dev/null 2>&1 || pip install --quiet zstandard
+      tar -cf "$asset_name.tmp-payload" -C "$BASELINE_PATH" .
+      python3 -c "
+import sys
+import zstandard
+
+src, dst = sys.argv[1], sys.argv[2]
+cctx = zstandard.ZstdCompressor()
+with open(src, 'rb') as inp, open(dst, 'wb') as out, cctx.stream_writer(out) as writer:
+    writer.write(inp.read())
+" "$asset_name.tmp-payload" "$asset_name"
+      rm -f "$asset_name.tmp-payload"
+    fi
     ;;
   *.tar.gz | *.tgz)
     tar -czf "$asset_name" -C "$BASELINE_PATH" .
