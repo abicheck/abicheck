@@ -48,6 +48,47 @@ def test_reclassify_rule_matches_by_symbol_pattern() -> None:
     assert not rule.matches(unmatched_kind)
 
 
+def test_reclassify_rule_matches_by_binding() -> None:
+    # Codex review, fresh evidence: `binding` selector was implemented on
+    # Suppression but never wired through ReclassifyRule/policy_file.py's
+    # reclassify: loader, so the two selector grammars silently drifted.
+    rule = ReclassifyRule(
+        to_verdict=Verdict.COMPATIBLE_WITH_RISK,
+        to="risk",
+        change_kind="func_removed",
+        symbol="_Z1fv",
+        binding="weak",
+    )
+    matched = _change(ChangeKind.FUNC_REMOVED, "_Z1fv", symbol_binding="weak")
+    unmatched_binding = _change(ChangeKind.FUNC_REMOVED, "_Z1fv", symbol_binding="global")
+    unmatched_no_binding = _change(ChangeKind.FUNC_REMOVED, "_Z1fv")
+
+    assert rule.matches(matched)
+    assert not rule.matches(unmatched_binding)
+    assert not rule.matches(unmatched_no_binding)
+
+
+def test_reclassify_binding_is_conjunctive_only() -> None:
+    # binding alone (no other selector) isn't a valid rule -- same
+    # conjunctive-only rule Suppression.binding follows.
+    with pytest.raises(ValueError):
+        ReclassifyRule(to_verdict=Verdict.COMPATIBLE_WITH_RISK, to="risk", binding="weak")
+
+
+def test_policy_file_loads_reclassify_binding_selector(tmp_path: Path) -> None:
+    p = tmp_path / "policy.yml"
+    p.write_text(
+        "base_policy: strict_abi\n"
+        "reclassify:\n"
+        "  - kind: func_removed\n"
+        "    symbol: _Z1fv\n"
+        "    binding: weak\n"
+        "    to: risk\n"
+    )
+    pf = PolicyFile.load(p)
+    assert pf.reclassify[0].binding == "weak"
+
+
 def test_reclassify_rule_requires_a_selector() -> None:
     with pytest.raises(ValueError):
         ReclassifyRule(to_verdict=Verdict.COMPATIBLE_WITH_RISK, to="risk")

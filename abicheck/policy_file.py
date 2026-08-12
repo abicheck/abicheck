@@ -305,8 +305,8 @@ def _parse_reclassify_expires(raw: Any, path: Path, index: int) -> date | None:
 #: deliberately not in this set.
 _RECLASSIFY_STRING_FIELDS: tuple[str, ...] = (
     "symbol", "symbol_pattern", "type_pattern", "member_name", "namespace",
-    "entity_namespace", "cause_namespace", "source_location", "reason",
-    "label",
+    "entity_namespace", "cause_namespace", "source_location", "binding",
+    "reason", "label",
 )
 
 
@@ -390,6 +390,7 @@ def _parse_reclassify(raw: Any, path: Path) -> list[ReclassifyRule]:
                 entity_namespace=string_fields["entity_namespace"],
                 cause_namespace=string_fields["cause_namespace"],
                 source_location=string_fields["source_location"],
+                binding=string_fields["binding"],
                 change_kind=kind,
                 reason=string_fields["reason"],
                 label=string_fields["label"],

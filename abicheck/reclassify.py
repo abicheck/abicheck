@@ -154,6 +154,7 @@ RECLASSIFY_KNOWN_KEYS: frozenset[str] = frozenset(
         "entity_namespace",
         "cause_namespace",
         "source_location",
+        "binding",
         "to",
         "reason",
         "label",
@@ -180,12 +181,13 @@ class ReclassifyRule:
             passes an inconsistent or omitted ``to`` gets it overwritten with
             the canonical spelling for its ``to_verdict`` instead.
         symbol, symbol_pattern, type_pattern, member_name, namespace,
-        entity_namespace, cause_namespace, source_location, change_kind,
-        expires: Same selector grammar and semantics as the identically
-            named :class:`~abicheck.suppression.Suppression` fields —
-            see that class's docstrings for each. At least one selector
-            is required, enforced by the same validation
-            :class:`Suppression` already performs.
+        entity_namespace, cause_namespace, source_location, binding,
+        change_kind, expires: Same selector grammar and semantics as the
+            identically named :class:`~abicheck.suppression.Suppression`
+            fields — see that class's docstrings for each. At least one
+            selector is required, enforced by the same validation
+            :class:`Suppression` already performs. ``binding`` is
+            conjunctive-only there and stays that way here.
         reason: Optional human-readable justification, for audit output.
         label: Optional grouping tag, mirroring
             :attr:`Suppression.label`.
@@ -205,6 +207,12 @@ class ReclassifyRule:
     reason: str | None = None
     label: str | None = None
     expires: date | None = None
+    #: ELF symbol linkage selector -- see ``Suppression.binding`` for the
+    #: full grammar/caveat (provider-side evidence only, conjunctive-only:
+    #: can narrow another selector here but never stand alone). Added after
+    #: `expires` (Codex review, fresh evidence: this rule form otherwise
+    #: fell out of sync with `Suppression`'s selector grammar).
+    binding: str | None = None
     #: Built at construction time and reused for every :meth:`matches` call
     #: rather than re-validated/re-compiled per call — mirrors how
     #: :class:`~abicheck.suppression.Suppression` itself eagerly compiles its
@@ -259,6 +267,7 @@ class ReclassifyRule:
             source_location=self.source_location,
             change_kind=self.change_kind,
             expires=self.expires,
+            binding=self.binding,
         )
 
     def matches(self, change: Any, today: date | None = None) -> bool:
@@ -299,6 +308,7 @@ class ReclassifyRule:
             "entity_namespace",
             "cause_namespace",
             "source_location",
+            "binding",
         ):
             val = getattr(self, field_name)
             if val is not None:
@@ -334,7 +344,7 @@ class ReclassifyRule:
         for field_name in (
             "symbol", "symbol_pattern", "type_pattern", "member_name",
             "namespace", "entity_namespace", "cause_namespace",
-            "source_location",
+            "source_location", "binding",
         ):
             val = getattr(self, field_name)
             if val is not None:
