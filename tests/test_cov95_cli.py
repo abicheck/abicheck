@@ -517,6 +517,33 @@ class TestLoadSuppressionAndPolicy:
         assert pf is not None
         assert "is ignored when --policy-file is given" in capsys.readouterr().err
 
+    def test_policy_file_surfaces_validate_overrides_warnings(
+        self, tmp_path: Path, capsys
+    ) -> None:
+        """A risky override (e.g. downgrading func_removed) must be echoed --
+        `PolicyFile.validate_overrides()` previously had no caller, so its
+        warnings never reached a user."""
+        pol = tmp_path / "policy.yaml"
+        pol.write_text(
+            "base_policy: strict_abi\noverrides:\n  func_removed: ignore\n"
+        )
+        _, pf = _load_suppression_and_policy(None, "strict_abi", pol)
+        assert pf is not None
+        err = capsys.readouterr().err
+        assert "HIGH RISK" in err
+        assert "func_removed" in err
+
+    def test_policy_file_no_warnings_for_safe_overrides(
+        self, tmp_path: Path, capsys
+    ) -> None:
+        pol = tmp_path / "policy.yaml"
+        pol.write_text(
+            "base_policy: strict_abi\noverrides:\n  enum_member_renamed: ignore\n"
+        )
+        _, pf = _load_suppression_and_policy(None, "strict_abi", pol)
+        assert pf is not None
+        assert capsys.readouterr().err == ""
+
 
 # ── _load_probe_matrix_changes (cli.py:1112-1117) ─────────────────────────────
 

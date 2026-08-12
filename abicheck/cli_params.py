@@ -376,4 +376,14 @@ def _load_suppression_and_policy(
                 "Set base_policy in the YAML file to override the base policy.",
                 err=True,
             )
+        # A policy override that downgrades a critical or otherwise-BREAKING
+        # kind is exactly the kind of mistake `validate_overrides()` exists to
+        # catch -- but the method was previously dead code, called from
+        # nowhere in the CLI, so nobody ever saw its warnings. Surface them
+        # here, the one place every `--policy-file` consumer (`compare`,
+        # `compare-release`, `scan --against`, `appcompat`) already funnels
+        # through, so a risky override is flagged regardless of which command
+        # loaded it.
+        for warning in pf.validate_overrides():
+            click.echo(f"Warning: {warning}", err=True)
     return suppression, pf
