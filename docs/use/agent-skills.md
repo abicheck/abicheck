@@ -26,7 +26,8 @@ the portfolio is shaped this way.
 
 > **Requires unreleased abicheck 0.6.x to run.** You can install these
 > skills (copying a directory works regardless of your abicheck version)
-> against the latest published release, **0.5.0** — but each skill checks
+> against the latest published release, **{{ latest_published_version }}**
+> — but each skill checks
 > the installed abicheck version against its own declared range —
 > `>=0.6.0,<0.7.0` for every skill published today — and refuses to run
 > rather than fail partway through, since several commands/options it
