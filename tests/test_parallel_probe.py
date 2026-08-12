@@ -163,17 +163,56 @@ def test_reorder_leaves_pre_mark_messages_alone() -> None:
     assert diag.messages == ["preexisting message", "fail a", "fail b"]
 
 
-def test_reorder_noop_for_zero_or_one_message() -> None:
+def test_reorder_noop_for_zero_messages() -> None:
     diag = OrderedDiagnostics()
     mark = diag.mark()
     diag.reorder(mark, ["a", "b", "c"])  # 0 new messages
     assert diag.messages == []
 
+
+def test_reorder_single_message_result_unchanged() -> None:
     diag = OrderedDiagnostics()
     mark = diag.mark()
     diag.record("a", "only failure")
     diag.reorder(mark, ["a", "b", "c"])  # 1 new message
     assert diag.messages == ["only failure"]
+
+
+def test_reorder_consumes_by_unit_even_for_a_single_message_batch() -> None:
+    # Codex review, fresh evidence: an earlier revision short-circuited
+    # reorder() for a 0-or-1-message batch WITHOUT consuming that message's
+    # _by_unit entry. OrderedDiagnostics is designed to be reused across
+    # many mark()/reorder() cycles on one instance (e.g. one extractor's
+    # several sequential probe batches) -- if a later, unrelated batch also
+    # records for the SAME unit, reorder() would pop BOTH the stale message
+    # from the earlier single-message batch and the new one, silently
+    # duplicating the stale message into the later batch's reordered slice.
+    diag = OrderedDiagnostics()
+
+    # Batch 1: exactly one message, for unit "a" -- the shape that used to
+    # leak.
+    mark1 = diag.mark()
+    diag.record("a", "first failure for a")
+    diag.reorder(mark1, ["a"])
+    assert diag.messages == ["first failure for a"]
+
+    # Batch 2: unrelated batch, but unit "a" fails again (a real scenario --
+    # the same compile unit/header appears in a later probe run). Recorded
+    # out of the batch's own input order (b before a) to also exercise the
+    # reorder itself, not just the leak.
+    mark2 = diag.mark()
+    diag.record("b", "second failure for b")
+    diag.record("a", "second failure for a")
+    diag.reorder(mark2, ["a", "b"])
+
+    # Batch 1's message must appear exactly once, at its own position;
+    # batch 2's contribution must be exactly its own two messages, in "a",
+    # "b" order -- never "first failure for a" resurfacing inside batch 2.
+    assert diag.messages == [
+        "first failure for a",
+        "second failure for a",
+        "second failure for b",
+    ]
 
 
 def test_reorder_a_unit_absent_from_unit_order_is_dropped() -> None:

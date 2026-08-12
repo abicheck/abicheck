@@ -152,19 +152,31 @@ class OrderedDiagnostics:
     def reorder(self, mark: int, unit_order: Iterable[str]) -> None:
         """Re-sort the messages recorded since *mark* into *unit_order*.
 
-        A no-op when 0 or 1 messages were recorded since *mark* — completion
-        order and input order are trivially the same then, and *unit_order*
-        need not even be exhausted in that case. A unit contributing more
-        than one message (a caller probing it more than once in the same
-        batch) keeps those messages in the order :meth:`record` saw them,
-        just relocated as a group to that unit's position in *unit_order*.
-        A unit named in *unit_order* that never recorded anything
-        contributes nothing (``dict.pop(unit, [])`` — never a KeyError). A
-        recorded unit *not* named in *unit_order* (a caller passing a
-        stale/partial sequence) is silently dropped from ``messages`` — pass
-        the exact sequence the batch was dispatched with.
+        A no-op only when *nothing* was recorded since *mark* — there is
+        nothing to reorder or to consume from ``_by_unit``. Deliberately
+        **not** short-circuited for exactly one new message either (an
+        earlier revision did, on the reasoning that one message has only one
+        possible order): that left its ``_by_unit`` entry unconsumed, so a
+        *later*, unrelated batch that also happens to record for the same
+        unit would ``pop()`` both the stale message and the new one,
+        silently duplicating the stale one into the later batch's reordered
+        slice (Codex review, fresh evidence — this collector is designed to
+        be reused across many ``mark()``/``reorder()`` cycles on one
+        instance, e.g. one extractor's several sequential probe batches, so
+        this is a real, not merely theoretical, reuse pattern). Always
+        popping keeps every call's ``_by_unit`` contribution fully consumed,
+        which is what makes reuse safe.
+
+        A unit contributing more than one message (a caller probing it more
+        than once in the same batch) keeps those messages in the order
+        :meth:`record` saw them, just relocated as a group to that unit's
+        position in *unit_order*. A unit named in *unit_order* that never
+        recorded anything contributes nothing (``dict.pop(unit, [])`` —
+        never a KeyError). A recorded unit *not* named in *unit_order* (a
+        caller passing a stale/partial sequence) is silently dropped from
+        ``messages`` — pass the exact sequence the batch was dispatched with.
         """
-        if len(self.messages) - mark <= 1:
+        if len(self.messages) <= mark:
             return
         ordered: list[str] = []
         for unit in unit_order:
