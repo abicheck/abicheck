@@ -719,9 +719,10 @@ def compile_context_options(func: F) -> F:
         "toolchain mismatch, an unsupported CastXML release, or a direct-include "
         "guard. Disabled by default because the frontends can produce materially "
         "different findings. A non-host --frontend-context (SYCL/DPC++) under an "
-        "unpinned auto (not pinned to castxml via ABICHECK_AST_FRONTEND=castxml) "
+        "auto that resolves to plain castxml (no ABICHECK_AST_FRONTEND pin) "
         "routes to Clang without this flag, since CastXML has no host/device "
-        "concept to fall back from; a castxml-pinned auto still rejects it.",
+        "concept to fall back from; a castxml- or hybrid-pinned auto (hybrid "
+        "has no device concept either) still rejects it.",
     )(func)
     func = click.option(
         "--ast-frontend",
@@ -737,9 +738,10 @@ def compile_context_options(func: F) -> F:
         "resolves to castxml (or the ABICHECK_AST_FRONTEND pin) and never "
         "changes producer unless --allow-ast-frontend-fallback (or "
         "ABICHECK_ALLOW_AST_FALLBACK=1) is explicitly set — except a non-host "
-        "--frontend-context (SYCL/DPC++), which an unpinned auto routes to "
-        "clang since castxml can't satisfy it at all (a castxml-pinned auto, "
-        "via ABICHECK_AST_FRONTEND=castxml, still rejects it). "
+        "--frontend-context (SYCL/DPC++), which an auto resolving to plain "
+        "castxml (no pin) routes to clang since castxml can't satisfy it at "
+        "all (a castxml- or hybrid-pinned auto still rejects it, since "
+        "hybrid has no device concept either). "
         "Env: ABICHECK_AST_FRONTEND.",
     )(func)
     return func
