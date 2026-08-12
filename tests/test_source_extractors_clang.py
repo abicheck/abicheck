@@ -720,6 +720,33 @@ def test_build_command_sycl_host_only_skipped_when_already_pinned() -> None:
     assert cmd.count("-fsycl-device-only") == 1
 
 
+def test_build_command_sycl_host_only_gated_on_invoked_binary_not_recorded_argv() -> (
+    None
+):
+    """The host-only decision must be gated on the binary this command will
+    actually be RUN with (``clang_bin``), not on ``pick_compiler_binary``'s
+    *emulated* compiler, which falls back to the compile unit's own recorded
+    ``argv[0]`` when no ``--gcc-path``/``compiler_binary`` override is given.
+    Without an override, L4 replay invokes the generic default ``"clang"``
+    even for a TU whose real build used ``icpx`` -- appending
+    ``-fsycl-host-only`` there would hit stock clang's "unknown argument"
+    hard-rejection on every such SYCL TU (Codex review)."""
+    cu = _cu(
+        argv=["icpx", "-fsycl", "-c", "foo.cpp"],
+        abi_relevant_flags=["-fsycl"],
+    )
+    # No explicit clang_bin/compiler_binary override -- mirrors
+    # `_make_source_extractor`'s own default (`compiler_binary=None` whenever
+    # `clang_bin == "clang"`), so `pick_compiler_binary` falls back to `cu`'s
+    # own recorded `argv[0]` ("icpx") purely for flag-shape emulation, while
+    # the binary actually invoked stays the generic default.
+    cmd = build_clang_command(cu, Path("foo.cpp"))
+    assert cmd[0] == "clang"
+    assert "-fsycl-host-only" not in cmd
+    macro_cmd = build_clang_macro_command(cu, Path("foo.cpp"))
+    assert "-fsycl-host-only" not in macro_cmd
+
+
 # -- source_abi_from_clang_ast (pure, D4) ------------------------------------
 
 

@@ -218,7 +218,7 @@ def _std_flag(standard: str, msvc: bool) -> list[str]:
 
 
 def _clang_context_args(
-    compile_unit: CompileUnit, compiler_binary: str | None
+    compile_unit: CompileUnit, compiler_binary: str | None, *, clang_bin: str = "clang"
 ) -> tuple[list[str], bool]:
     """The shared compile-context argv prefix (no mode tail / source) and msvc flag.
 
@@ -244,6 +244,20 @@ def _clang_context_args(
     single pass (``-fsycl-host-only``/``-fsycl-device-only``) or explicitly
     disable SYCL (``-fno-sycl`` last-flag-wins) — see
     ``_needs_sycl_host_only``'s own docstring for the full precedence.
+
+    The host-only decision is gated on *clang_bin* — the binary this command
+    will actually be run with — not on ``pick_compiler_binary``'s *emulated*
+    compiler below (``cc_bin``, used only for flag-shape decisions like
+    ``msvc``/language-standard translation). Without ``--gcc-path``/an
+    explicit ``compiler_binary`` override, ``cc_bin`` falls back to the real
+    build's own recorded ``argv[0]`` (e.g. ``icpx``) purely to emulate its
+    accepted flag shape, while *clang_bin* stays the generic default
+    (``"clang"``) that is genuinely invoked. Gating on ``cc_bin`` instead
+    would append ``-fsycl-host-only`` to a stock clang invocation whenever a
+    SYCL TU's real build happened to use an Intel driver — stock clang
+    hard-rejects the flag ("unknown argument"), turning every such TU into a
+    failed/partial L4 extraction instead of the single ordinary pass stock
+    clang already parses a bare ``-fsycl`` as (Codex review).
     """
     cc_bin = pick_compiler_binary(compile_unit, compiler_binary)
     msvc = is_msvc_mode(cc_bin)
@@ -284,7 +298,7 @@ def _clang_context_args(
             if not flag.startswith("-std=")
             and not flag.lower().startswith(("/std:", "-std:"))
         ]
-    if _needs_sycl_host_only(cc_bin, [*cmd, *extra]):
+    if _needs_sycl_host_only(clang_bin, [*cmd, *extra]):
         extra = [*extra, "-fsycl-host-only"]
     cmd += extra
     return cmd, msvc
@@ -301,7 +315,7 @@ def build_clang_command(
 
     A clang-cl/MSVC compile unit is driven through clang's ``cl`` driver mode.
     """
-    cmd, _msvc = _clang_context_args(compile_unit, compiler_binary)
+    cmd, _msvc = _clang_context_args(compile_unit, compiler_binary, clang_bin=clang_bin)
     # Syntax-only AST dump to stdout as JSON. -ferror-limit=0 keeps parsing past
     # recoverable errors so a single bad decl does not blank the whole dump.
     return [
@@ -329,7 +343,7 @@ def build_clang_macro_command(
     ``public_macro_value_changed`` to ever fire (Codex review #339, P2). Same
     compile context as the AST pass so the macro set matches the real build.
     """
-    cmd, msvc = _clang_context_args(compile_unit, compiler_binary)
+    cmd, msvc = _clang_context_args(compile_unit, compiler_binary, clang_bin=clang_bin)
     # cl-driver mode ignores -dD; clang-cl's `/d1PP` is the documented "retain
     # macro definitions in /E mode" flag, so a Windows/clang-cl build still emits
     # #define directives for macros_from_preprocessor (Codex review #339, P2). We
