@@ -89,7 +89,13 @@ jobs:
           fi
 
           echo "::group::Diff $BASE_SHA...$HEAD_SHA"
-          CHANGED_FILES=$(git diff --name-only "$BASE_SHA...$HEAD_SHA")
+          # --no-renames: with rename detection on, a protected file renamed
+          # to an unprotected path can show up as only its destination path
+          # (the source path -- the one that actually matches a protected
+          # glob -- never appears), letting a changed protected file evade
+          # this check entirely. Listing both the old and new path for every
+          # touched file closes that gap.
+          CHANGED_FILES=$(git diff --no-renames --name-only "$BASE_SHA...$HEAD_SHA")
           echo "$CHANGED_FILES"
           echo "::endgroup::"
 

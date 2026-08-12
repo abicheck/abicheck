@@ -339,6 +339,45 @@ class TestCheckScriptBehavior:
         assert result.returncode == 1
         assert "could not be resolved" in result.stdout + result.stderr
 
+    def test_a_renamed_protected_file_is_still_caught(self, tmp_path: Path) -> None:
+        # Regression for the self-approval gap a rename can otherwise open:
+        # with git's default rename detection, `git diff --name-only` shows
+        # only the destination path for a detected rename, and if that
+        # destination falls outside every protected glob, the source path
+        # -- the one that actually matches -- never appears in the diff at
+        # all. The check step passes `--no-renames` specifically so both
+        # paths are always listed.
+        repo = tmp_path / "repo"
+        _init_repo(repo)
+        (repo / "abi").mkdir()
+        content = "x" * 500 + "\n"
+        (repo / "abi" / "libfoo.abicheck.json").write_text(
+            content, encoding="utf-8"
+        )
+        base_sha = _commit_all(repo, "base")
+
+        # Move the protected baseline out to an unprotected path, with a
+        # small edit -- similar enough content for git to detect this as a
+        # rename rather than an unrelated add+delete.
+        (repo / "abi" / "libfoo.abicheck.json").unlink()
+        (repo / "notes.md").write_text(content + "y\n", encoding="utf-8")
+        head_sha = _commit_all(repo, "rename baseline out of the protected dir")
+
+        # Confirm the fixture actually exercises rename detection before
+        # trusting the result below.
+        diff_with_renames = _git(
+            repo, "diff", "--name-only", f"{base_sha}...{head_sha}"
+        )
+        assert diff_with_renames == "notes.md", (
+            "fixture did not produce a detected rename: " + diff_with_renames
+        )
+
+        result = self._run(
+            repo, base_sha=base_sha, head_sha=head_sha, protected_paths="abi/**"
+        )
+        assert result.returncode == 1, result.stdout + result.stderr
+        assert "abi/libfoo.abicheck.json" in result.stdout
+
     def test_multiple_protected_path_patterns(self, tmp_path: Path) -> None:
         repo = tmp_path / "repo"
         _init_repo(repo)

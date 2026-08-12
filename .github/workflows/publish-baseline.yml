@@ -280,6 +280,14 @@ jobs:
           python-version: ${{ inputs.python-version }}
           install-deps: ${{ inputs.install-deps }}
 
+      # Packages according to $asset_name's OWN extension, not unconditional
+      # zstd -- a caller customizing asset-name-template away from the
+      # default (e.g. to ".tar.gz") must get an archive whose bytes actually
+      # match that extension. Root action.yml's own baseline-set fallback
+      # (action/run.sh's _try_baseline_set_fallback) picks its extractor by
+      # this same asset name's suffix, so an unconditional zstd here would
+      # silently produce a ".tar.gz"-named file containing zstd bytes,
+      # which that consumer would then fail to gunzip (Codex review).
       - name: Package baseline-set
         id: package
         shell: bash
@@ -290,7 +298,21 @@ jobs:
         run: |
           set -euo pipefail
           asset_name="${ASSET_NAME_TEMPLATE//\{profile\}/$PROFILE_ID}"
-          tar --zstd -cf "$asset_name" -C "$BASELINE_PATH" .
+          case "$asset_name" in
+            *.tar.zst)
+              tar --zstd -cf "$asset_name" -C "$BASELINE_PATH" .
+              ;;
+            *.tar.gz | *.tgz)
+              tar -czf "$asset_name" -C "$BASELINE_PATH" .
+              ;;
+            *.tar)
+              tar -cf "$asset_name" -C "$BASELINE_PATH" .
+              ;;
+            *)
+              echo "::error::asset-name-template resolved to '$asset_name', which has no recognized archive extension (.tar.zst/.tar.gz/.tgz/.tar) -- resolve-baseline/root-action.yml's baseline-set consumers pick their extractor from this exact suffix, so an unrecognized one would silently produce an asset nothing downstream can extract." >&2
+              exit 1
+              ;;
+          esac
           echo "asset-name=$asset_name" >> "$GITHUB_OUTPUT"
 
       # `release-contract` is documented (ADR-047 §10, publish-baseline.md)

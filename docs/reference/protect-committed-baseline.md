@@ -1,3 +1,15 @@
+---
+doc_type: reference
+audience:
+  - ci-owner
+  - library-maintainer
+level: intermediate
+summarizes:
+  - baseline-storage-backends
+lifecycle: active
+generated: false
+---
+
 # `protect-committed-baseline.yml` Reference
 
 A `workflow_call` reusable workflow that closes a specific self-approval gap
@@ -96,3 +108,7 @@ to a dedicated trusted workflow.
 - [Storing Baselines](../use/baseline-storage.md) — the base-commit-read
   recipe (fix 1 above), and the `abi-baseline`/baseline-set-archive fetch
   recipes this workflow complements.
+- [Resolving Baselines](resolve-baseline.md) — the canonical reference for
+  how a baseline (committed file, release asset, or baseline-set archive) is
+  located and validated in the first place; this workflow only protects the
+  committed-file case from silent self-approval once resolved.
