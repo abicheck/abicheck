@@ -550,7 +550,13 @@ REPORT_SCHEMA_VERSION = "2.32"
 #:        configurable (``scan --max-findings`` / ``ABICHECK_MAX_BASELINE_
 #:        FINDINGS``, default still 20), which does not change the schema,
 #:        only how much of a diff a given run itemizes.
-SCAN_SCHEMA_VERSION = "1.10"
+#: 1.11 -- ``_baseline_finding_dicts`` entries gain the optional
+#:        ``symbol_binding`` key (the removed symbol's ELF linkage), mirroring
+#:        the compare-report schema's 2.30 addition -- ``scan --against``
+#:        shares the same ``--suppress`` surface as ``compare``, so a
+#:        binding-scoped suppression's match/no-match needs to be auditable
+#:        here too. Additive optional key, present only when captured.
+SCAN_SCHEMA_VERSION = "1.11"
 
 _SCHEMA_DIR = Path(__file__).resolve().parent
 COMPARE_REPORT_SCHEMA_PATH = _SCHEMA_DIR / "compare_report.schema.json"

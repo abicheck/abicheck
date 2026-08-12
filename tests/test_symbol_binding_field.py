@@ -307,3 +307,20 @@ class TestReportSerialization:
 
         props = _change_detail_properties(self._change(None))
         assert "symbolBinding" not in props
+
+    def test_scan_baseline_finding_dicts_includes_symbol_binding(self) -> None:
+        # scan --against shares the same --suppress surface as compare, so
+        # its own finding projector needs the field too (Codex review,
+        # fresh evidence).
+        from abicheck.cli_scan_baseline import _baseline_finding_dicts
+
+        entries = _baseline_finding_dicts([self._change("weak")], "breaking")
+        assert entries[0]["symbol_binding"] == "weak"
+
+    def test_scan_baseline_finding_dicts_omits_symbol_binding_when_unset(
+        self,
+    ) -> None:
+        from abicheck.cli_scan_baseline import _baseline_finding_dicts
+
+        entries = _baseline_finding_dicts([self._change(None)], "breaking")
+        assert "symbol_binding" not in entries[0]
