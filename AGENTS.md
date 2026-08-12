@@ -2567,6 +2567,52 @@ Once a root command genuinely clears the bar above, pick the right home:
   dropping information from one side's snapshot in isolation — a
   materially larger, cross-cutting change on its own, not a follow-up
   patch to the same per-snapshot helper.
+- **`AbiSnapshot.typedefs` is a flat `dict[str, str]` keyed by bare
+  (unqualified) name on both header backends — a member/nested typedef
+  silently collides with, and can be overwritten by, any other typedef
+  anywhere in the snapshot sharing the same bare spelling. Confirmed by
+  reading both producers directly, not yet fixed (G31 Phase C CastXML
+  fact-completeness audit).** `dumper_castxml.py`'s `parse_typedefs()` and
+  `dumper_clang.py`'s `parse_typedefs()` both do the identical
+  `typedefs[name] = underlying`, where `name` is the typedef's own local
+  `name` attribute/node field — never the scope-joined qualified spelling
+  `_qualified_name()`/`_qualified()` uses for every other declaration kind
+  in the same two modules. Verified directly against real CastXML XML
+  output (`--castxml-output=1`, clang-emulated) for a minimal repro: a
+  member typedef nested inside a struct (`struct WithUsing { using
+  value_type = int; ... };`) is emitted as an ordinary top-level
+  `<Typedef name="value_type" ... context="_12" .../>` element, structurally
+  indistinguishable from a namespace-scope typedef except for its
+  `context` attribute — which `parse_typedefs()` never reads. Two structs
+  each declaring their own `value_type` member alias (an extremely common
+  C++ pattern — STL-container-shaped types conventionally expose
+  `value_type`/`size_type`/`reference`/... as member typedefs) collide on
+  the identical bare key `"value_type"` in the resulting dict, and
+  whichever element is encountered last in document order silently wins —
+  the other's aliasing information is dropped from the snapshot entirely,
+  with no warning, error, or any user-visible sign of the loss. The same
+  collision shape reproduces on the direct-clang backend: `_typedefs` is
+  populated by the same flat walk used for every other decl kind, but
+  `parse_typedefs()` discards the entry's own recovered `scope` and keys
+  only on `node["name"]`. **Not fixed here**: this is a real, if narrow,
+  public-model change — `AbiSnapshot.typedefs`'s key shape is read by
+  `type_reachability.py`'s `_typedef_spelling_targets()` (see the
+  "Type reachability" entry above, which already works around this same
+  bare-key ambiguity from the *consumer* side via its own
+  ambiguity-counting helper, `_typedef_spelling_targets`, rather than
+  assuming a bare key uniquely names one typedef), by `diff_types.py`'s
+  typedef diffing, and by `surface.py`'s typedef-following in
+  `_walk_type_closure` — none of which currently have test coverage for
+  the cross-class member-typedef-collision case to validate a change
+  against. A correct fix needs a qualified (or at minimum
+  collision-detecting) key threaded through both producers and every
+  consumer simultaneously, each independently re-verified against the
+  FP-rate/mutation-score gates before trusting it — the same systematic,
+  cross-cutting shape (and the same "known gaps over risky reactive
+  patches" reasoning) as the already-documented bare-`RecordType.name`
+  opaque-type-suppression collision above, for a different model field.
+  Filed here per this file's own convention rather than attempted under
+  this pass's time budget.
 
 ## What NOT to do
 

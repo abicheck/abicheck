@@ -3880,6 +3880,26 @@
    "platforms": [
     "linux"
    ]
+  },
+  "case197_header_graph_identity_reconciled": {
+   "abi_break": false,
+   "api_break": false,
+   "bad_practice": true,
+   "category": "risk",
+   "description": "The sibling scenario to case196, isolating ADR-048's other reconciliation outcome. A private, never-exported internal helper (demo::detail::helper) keeps its exact qualified name AND its declaring header (include/demo/detail.h, unchanged on both sides) but its parameter type changes (int -> long, moving its Itanium mangled name) -- the identical fixture design as case196 with the header-path variable held constant, so only the mangled-name-moving signature change perturbs node identity. graph_reconcile._classify_outcome() reports declaration_moved when the qualified-name alias tier pairs two nodes AND the declaring file also changed (case196); it reports declaration_identity_reconciled -- the residual branch, fired when neither renamed nor moved individually holds -- when the qualified name is paired but the declaring file stayed the same, which is exactly this case's shape. Every other design decision mirrors case196's own justification: demo::process is a public INLINE caller (so its own body, including the call to detail::helper, is compiled into every consumer TU, making the internal call genuinely consumer-visible); detail::helper is itself INLINE too (so a consumer's locally-emitted call resolves without an external symbol, keeping this a genuinely link-clean, risk-only scenario rather than a link failure); the new-side-only source_edges row keeps the public_api_internal_dependency_added finding's 'zero calls before, one call after' text literally true (dependency reachability compares raw per-version node ids, not reconciled identities); and both surfaces carry a coverage.fact_set/fact_family_states rollup naming the one full-walk source_edges producer, certified through the real source_graph.mark_source_edges_extractor_coverage() production helper rather than a hand-forced extractor_passes flag. The helper stays private (never exported) for the same reason case196's does: a public function's mangled-name-moving signature change is itself a real BREAKING change, which would contradict this file's invariant that one canonical verdict applies to the scenario a case describes. With the helper private and inline, COMPATIBLE_WITH_RISK is the correct canonical verdict: a real end-to-end compare() of this exact scenario has no BREAKING/API_BREAK finding to contradict, only the two RISK-tier L5 findings this fixture reproduces (public_api_internal_dependency_added, since demo::process genuinely gains a confirmed-new internal dependency, and declaration_identity_reconciled for the helper itself).",
+   "expected": "COMPATIBLE_WITH_RISK",
+   "expected_kinds": [
+    "declaration_identity_reconciled",
+    "public_api_internal_dependency_added"
+   ],
+   "fixtures": [
+    "old.json",
+    "new.json"
+   ],
+   "min_evidence": "L5",
+   "platforms": [
+    "linux"
+   ]
   }
  },
  "version": "4",

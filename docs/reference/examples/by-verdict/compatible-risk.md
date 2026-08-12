@@ -3,7 +3,7 @@
 
 Backward-compatible at the symbol level but with behavioral risk.
 
-_30 case(s)._ [← back to all examples](../index.md)
+_31 case(s)._ [← back to all examples](../index.md)
 
 | Case | Title | Verdict | Category |
 |------|-------|---------|----------|
@@ -37,3 +37,4 @@ _30 case(s)._ [← back to all examples](../index.md)
 | [case194_header_graph_rename_reconciled](../case194_header_graph_rename_reconciled.md) | Internal Dependency Target Renamed, Safely Reconciled | 🟡 COMPATIBLE_WITH_RISK | Risk |
 | [case195_header_graph_ambiguous_rename_not_reconciled](../case195_header_graph_ambiguous_rename_not_reconciled.md) | Ambiguous Simultaneous Rename, Correctly Not Reconciled | 🟡 COMPATIBLE_WITH_RISK | Risk |
 | [case196_header_graph_move_reconciled](../case196_header_graph_move_reconciled.md) | Declaration Reconciled as Moved Across a Compound Edit | 🟡 COMPATIBLE_WITH_RISK | Risk |
+| [case197_header_graph_identity_reconciled](../case197_header_graph_identity_reconciled.md) | Declaration Reconciled as Identity-Reconciled (Header Unchanged) | 🟡 COMPATIBLE_WITH_RISK | Risk |
