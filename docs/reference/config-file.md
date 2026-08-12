@@ -59,10 +59,17 @@ error (exit `64`; see [Exit Codes](exit-codes.md)) — the run never proceeds
 on a config abicheck could not fully validate.
 
 This "hard error" rule applies unconditionally to `compare`'s own project
-config — severity, scope, policy, and the `targets:`/`bundles:`/`profiles:`/
-`baseline:` block above — whether the file came from an explicit `--config`
-or was auto-discovered by walking up from the current directory: a parse
-failure always raises a usage error (exit `64`), never a warn-and-continue.
+config — severity, scope, policy — whether the file came from an explicit
+`--config` or was auto-discovered by walking up from the current directory:
+a parse failure always raises a usage error (exit `64`), never a
+warn-and-continue. It only reaches as far as `BuildConfig.from_dict()`
+itself validates, though: `targets:`/`bundles:`/`profiles:`/`baseline:` are
+recognized top-level keys (so an unrecognized sibling key still errors) but
+their *contents* are opaque to this loader — `compare` never inspects them
+at all, so e.g. an invalid `targets.foo.kind` passes silently here. Only
+`abicheck project validate`/`abicheck project plan` (`project_targets.py`)
+actually validate that block's contents, deeply and independently of this
+loader.
 
 A *separate* load of the same `.abicheck.yml` — the `compile:` block shared
 by `compare`/`dump`/`scan`'s L2 compile context (`gcc-path`, includes,

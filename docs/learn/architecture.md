@@ -27,11 +27,12 @@ the model, and [Evidence & Detectability](evidence-and-detectability.md) for the
 conceptual companion.
 
 abicheck supports Linux (ELF), Windows (PE/COFF), and macOS (Mach-O), each with
-implemented binary-metadata, header-AST, and debug-info cross-check support —
-see the [platform support matrix](limitations.md#platform-support-matrix) for
-the per-platform tool/format breakdown and per-toolchain CI-validation
-maturity (implemented capability and CI-proven maturity are not the same
-thing, especially on Windows).
+implemented binary-metadata and header-AST support; debug-info cross-check is
+implemented for ELF (DWARF) and PE (PDB) but not for Mach-O — see the
+[platform support matrix](limitations.md#platform-support-matrix) for the
+per-platform tool/format breakdown and per-toolchain CI-validation maturity
+(implemented capability and CI-proven maturity are not the same thing,
+especially on Windows).
 
 ---
 

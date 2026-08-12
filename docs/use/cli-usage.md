@@ -85,8 +85,9 @@ You can mix them freely (see below).
 
 If headers are not provided, `compare` uses whatever debug info is available
 instead — DWARF on ELF, PDB on PE — falling back further to symbols-only
-analysis only when neither headers nor debug info are present, and prints a
-warning either way. Less evidence means a weaker analysis that may miss
+analysis only when neither headers nor debug info are present. Only the ELF
+path prints an explicit no-headers warning today; PE and Mach-O degrade the
+same way without one. Less evidence means a weaker analysis that may miss
 signature/type-level ABI breaks; see
 [Evidence & Detectability](../learn/evidence-and-detectability.md).
 
@@ -105,8 +106,9 @@ abicheck compare libfoo-1.0.json libfoo-2.0.json
 
 If headers are not provided, `compare` uses whatever debug info is available
 instead — DWARF on ELF, PDB on PE — falling back further to symbols-only
-analysis only when neither headers nor debug info are present, and prints a
-warning either way. Less evidence means a weaker analysis that may miss
+analysis only when neither headers nor debug info are present. Only the ELF
+path prints an explicit no-headers warning today; PE and Mach-O degrade the
+same way without one. Less evidence means a weaker analysis that may miss
 signature/type-level ABI breaks; see
 [Evidence & Detectability](../learn/evidence-and-detectability.md).
 
