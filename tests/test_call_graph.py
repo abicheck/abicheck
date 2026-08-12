@@ -1368,8 +1368,8 @@ def test_extract_from_build_parallelizes_and_dedupes(monkeypatch) -> None:
     monkeypatch.setattr(cg.shutil, "which", lambda _b: "/usr/bin/clang++")
     seen_sources: list[str] = []
 
-    def fake_extract(self, argv, cwd=None):
-        del self, cwd
+    def fake_extract(self, argv, cwd=None, *, diagnostics=None):
+        del self, cwd, diagnostics
         seen_sources.append(argv[-1])
         return [CallEdge("caller", "callee")]
 
@@ -1406,8 +1406,8 @@ def test_extract_from_build_propagates_deadline_into_pool_workers(monkeypatch) -
     monkeypatch.setattr(cg.shutil, "which", lambda _b: "/usr/bin/clang++")
     seen_remaining: list[float | None] = []
 
-    def fake_extract(self, argv, cwd=None):
-        del self, cwd
+    def fake_extract(self, argv, cwd=None, *, diagnostics=None):
+        del self, cwd, diagnostics
         seen_remaining.append(deadline.remaining())
         return []
 
@@ -1430,6 +1430,56 @@ def test_extract_from_build_propagates_deadline_into_pool_workers(monkeypatch) -
         "deadline did not cross the executor boundary"
     )
     assert all(0 < r <= 30.0 for r in seen_remaining)
+
+
+def test_extract_from_build_diagnostics_deterministic_under_real_thread_pool(
+    monkeypatch,
+) -> None:
+    # Codex review: extract_from_build's parallel workers used to append
+    # straight to the shared self.diagnostics list, recording entries in
+    # subprocess-completion order rather than input order -- nondeterministic
+    # across runs of identical, pinned inputs. Each unit's diagnostics are
+    # now collected into a fresh per-call list and only folded into
+    # self.diagnostics on the single driving thread, in pool.map's own
+    # input-ordered result iteration.
+    import time
+
+    import abicheck.buildsource.call_graph as cg
+
+    monkeypatch.setenv("ABICHECK_CALL_GRAPH_JOBS", "4")
+    monkeypatch.setattr(cg, "_call_graph_mem_cap", lambda: 4)
+    monkeypatch.setattr(cg.shutil, "which", lambda _b: "/usr/bin/clang++")
+    n = 8
+
+    def fake_extract(self, argv, cwd=None, *, diagnostics=None):
+        del self, cwd
+        # Reverse-staggered sleep: the LAST-dispatched unit tends to finish
+        # FIRST -- the opposite of input order.
+        idx = int(argv[-1].removesuffix(".cpp"))
+        time.sleep((n - idx) * 0.01)
+        if diagnostics is not None:
+            diagnostics.append(f"failed for cu {idx}")
+        return []
+
+    monkeypatch.setattr(
+        cg.ClangCallGraphExtractor, "_extract_from_safe_args", fake_extract
+    )
+    build = BuildEvidence(
+        compile_units=[CompileUnit(id=f"cu://{i}", source=f"{i}.cpp") for i in range(n)]
+    )
+
+    first_diagnostics = set()
+    for _ in range(5):
+        ext = ClangCallGraphExtractor()
+        ext.extract_from_build(build)
+        first_diagnostics.add(tuple(ext.diagnostics))
+
+    assert len(first_diagnostics) == 1, (
+        f"diagnostics order varied across identical runs: {first_diagnostics}"
+    )
+    assert next(iter(first_diagnostics)) == tuple(
+        f"failed for cu {i}" for i in range(n)
+    )
 
 
 def test_extract_from_args_deadline_exceeded_degrades_to_diagnostic(

@@ -49,22 +49,19 @@ import re
 import shutil
 import subprocess  # noqa: S404 - preprocessor scan shells out to clang (never shell=True)
 import threading
-from collections.abc import Callable
-from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import PurePosixPath
-from typing import TYPE_CHECKING, Any, TypeVar, cast
+from typing import TYPE_CHECKING, Any, cast
 
 from .. import deadline, process_resources
+from ..parallel_probe import OrderedDiagnostics, run_parallel_probes
 from .model import CoverageStatus, LayerConfidence, LayerCoverage
 
 if TYPE_CHECKING:
     from .build_evidence import BuildEvidence, CompileUnit
 
 _log = logging.getLogger(__name__)
-
-_ProbeItem = TypeVar("_ProbeItem")
 
 #: Preprocessor-scan fact-schema version. Independent of every other buildsource
 #: schema version (see ``buildsource/CLAUDE.md`` "Versioning").
@@ -555,7 +552,6 @@ class ClangPreprocessorExtractor:
     """
 
     clang_bin: str = "clang++"
-    diagnostics: list[str] = field(default_factory=list)
     runs_attempted: int = 0
     runs_ok: int = 0
     #: Distinct compile-context probes skipped by the
@@ -572,12 +568,28 @@ class ClangPreprocessorExtractor:
     #: Guards ``runs_attempted``/``runs_ok`` (plain ``+= 1`` on an instance
     #: attribute is not atomic — a thread switch between the read and the
     #: write would lose an increment) now that ``_run`` can be invoked
-    #: concurrently from ``_run_probes``' thread pool. ``diagnostics.append``
-    #: and ``deadline_exhausted = True`` need no lock: CPython's GIL makes a
-    #: single ``list.append``/attribute-store atomic on its own.
+    #: concurrently from :func:`abicheck.parallel_probe.run_parallel_probes`'
+    #: thread pool. ``deadline_exhausted = True`` alone needs no lock:
+    #: CPython's GIL makes a single attribute-store atomic on its own.
+    #: ``diagnostics`` (below) has its own, independent lock internally.
     _counter_lock: threading.Lock = field(
         default_factory=threading.Lock, compare=False, repr=False
     )
+    #: Ordered, thread-safe diagnostics collector — see
+    #: :class:`abicheck.parallel_probe.OrderedDiagnostics` for why a plain
+    #: ``list[str]`` mutated directly from worker threads is unsound here
+    #: (nondeterministic order across identical, pinned inputs).
+    _diag: OrderedDiagnostics = field(default_factory=OrderedDiagnostics)
+
+    @property
+    def diagnostics(self) -> list[str]:
+        """Back-compat view: the flat, completion-ordered message list.
+
+        Returns the live underlying list (not a copy) — ``ex.diagnostics
+        .append(...)``/``.clear()`` from a caller/test still mutate real
+        state, same as when this was a plain field.
+        """
+        return self._diag.messages
 
     def available(self) -> bool:
         return shutil.which(self.clang_bin) is not None
@@ -618,9 +630,9 @@ class ClangPreprocessorExtractor:
                 "(set ABICHECK_PREPROCESSOR_SCAN_MAX_PROBES to raise)"
             )
 
-        def _probe(cu: CompileUnit) -> tuple[CompileUnit, str | None]:
+        def _probe(cu: CompileUnit) -> tuple[CompileUnit, dict[str, str]]:
             if self.deadline_exhausted:
-                return cu, None
+                return cu, {}
             argv = (
                 depfile_args_from_argv(cu.argv, directory=cu.directory)
                 if cu.argv
@@ -636,41 +648,25 @@ class ClangPreprocessorExtractor:
                 *(unredact_home(a) for a in argv),
             ]
             cwd = unredact_home(cu.directory) if cu.directory else None
-            return cu, self._run(cmd, cwd, cu.id)
-
-        out: dict[str, dict[str, str]] = {}
-        for cu, text in self._run_probes(units, _probe):
+            text = self._run(cmd, cwd, cu.id)
+            # Parse to the small {macro: value} map INSIDE the worker, not
+            # after collecting -- pool.map() (via _run_probes) materializes
+            # its whole result list before capture_macros sees any of it, so
+            # returning the raw clang stdout here would hold every probe's
+            # full output in memory simultaneously instead of one at a time
+            # like the previous serial loop did (Codex review).
             if text is None:
-                continue
-            abi = select_abi_macros(parse_defined_macros(text))
+                return cu, {}
+            return cu, select_abi_macros(parse_defined_macros(text))
+
+        mark = self._diag.mark()
+        out: dict[str, dict[str, str]] = {}
+        jobs = _preprocessor_scan_jobs(len(units))
+        for cu, abi in run_parallel_probes(units, _probe, jobs=jobs):
             if abi:
                 out[cu.id] = abi
+        self._diag.reorder(mark, (cu.id for cu in units))
         return out
-
-    def _run_probes(
-        self,
-        items: list[_ProbeItem],
-        probe: Callable[[_ProbeItem], tuple[_ProbeItem, str | None]],
-    ) -> list[tuple[_ProbeItem, str | None]]:
-        """Run ``probe`` over ``items``, in parallel when there's more than one.
-
-        Each probe is an independent, I/O-bound ``clang -E`` subprocess wait —
-        the active scan deadline is captured once here and re-established
-        inside each worker (``contextvars`` don't cross a
-        ``ThreadPoolExecutor`` boundary, same reasoning as
-        ``source_replay._deadline_bound_worker``).
-        """
-        jobs = _preprocessor_scan_jobs(len(items))
-        if jobs <= 1 or len(items) <= 1:
-            return [probe(item) for item in items]
-        deadline_ts = deadline.current_deadline_ts()
-
-        def _bound(item: _ProbeItem) -> tuple[_ProbeItem, str | None]:
-            with deadline.with_deadline_ts(deadline_ts):
-                return probe(item)
-
-        with ThreadPoolExecutor(max_workers=jobs) as pool:
-            return list(pool.map(_bound, items))
 
     def _run(self, cmd: list[str], cwd: str | None, unit: str) -> str | None:
         # P0 follow-up: bound by the active scan --budget deadline (not just a
@@ -721,20 +717,21 @@ class ClangPreprocessorExtractor:
                 except deadline.DeadlineExceeded:
                     pass
                 else:
-                    self.diagnostics.append(f"clang -E timed out for {unit}: {exc}")
+                    self._diag.record(unit, f"clang -E timed out for {unit}: {exc}")
                     return None
             self.deadline_exhausted = True
-            self.diagnostics.append(
-                f"clang -E skipped for {unit}: scan --budget exceeded ({exc})"
+            self._diag.record(
+                unit, f"clang -E skipped for {unit}: scan --budget exceeded ({exc})"
             )
             return None
         except (OSError, subprocess.SubprocessError) as exc:
-            self.diagnostics.append(f"clang -E failed for {unit}: {exc}")
+            self._diag.record(unit, f"clang -E failed for {unit}: {exc}")
             return None
         if proc.returncode != 0 and not proc.stdout.strip():
-            self.diagnostics.append(
+            self._diag.record(
+                unit,
                 f"clang -E nonzero exit for {unit}: "
-                f"{proc.stderr.strip()[:200] or 'no output'}"
+                f"{proc.stderr.strip()[:200] or 'no output'}",
             )
             return None
         with self._counter_lock:
@@ -779,9 +776,9 @@ class ClangPreprocessorExtractor:
                 "(set ABICHECK_PREPROCESSOR_SCAN_MAX_PROBES to raise)"
             )
 
-        def _probe(hdr: str) -> tuple[str, str | None]:
+        def _probe(hdr: str) -> tuple[str, list[str]]:
             if self.deadline_exhausted:
-                return hdr, None
+                return hdr, []
             # The include context (-I flags) is relative to the build dir
             # (run_cwd), but the header path is relative to the process cwd
             # the user invoked from — so make it absolute before changing
@@ -795,12 +792,21 @@ class ClangPreprocessorExtractor:
                 *(unredact_home(a) for a in context_argv),
                 header_arg,
             ]
-            return hdr, self._run(cmd, run_cwd, hdr)
-
-        out: dict[str, list[str]] = {}
-        for hdr, text in self._run_probes(headers, _probe):
+            text = self._run(cmd, run_cwd, hdr)
+            # Parse to the small include-path list INSIDE the worker, not
+            # after collecting -- same memory reasoning as capture_macros'
+            # own _probe (Codex review).
             if text and text.strip():
-                out[hdr] = parse_depfile(text)
+                return hdr, parse_depfile(text)
+            return hdr, []
+
+        mark = self._diag.mark()
+        out: dict[str, list[str]] = {}
+        jobs = _preprocessor_scan_jobs(len(headers))
+        for hdr, includes in run_parallel_probes(headers, _probe, jobs=jobs):
+            if includes:
+                out[hdr] = includes
+        self._diag.reorder(mark, headers)
         return out
 
 

@@ -959,7 +959,9 @@ def test_extract_from_compile_unit_resolves_relative_file_against_own_cwd(
     monkeypatch.setattr(
         extractor,
         "_extract_from_safe_args",
-        lambda argv, cwd=None: [DeclRange("f", os.path.join("..", "src", "a.h"), 3, 3)],
+        lambda argv, cwd=None, *, diagnostics=None: [
+            DeclRange("f", os.path.join("..", "src", "a.h"), 3, 3)
+        ],
     )
     cu = CompileUnit(
         id="cu://a",
@@ -990,7 +992,7 @@ def test_extract_from_compile_unit_leaves_absolute_file_untouched(
     monkeypatch.setattr(
         extractor,
         "_extract_from_safe_args",
-        lambda argv, cwd=None: [DeclRange("f", abs_file, 3, 3)],
+        lambda argv, cwd=None, *, diagnostics=None: [DeclRange("f", abs_file, 3, 3)],
     )
     cu = CompileUnit(
         id="cu://a", source="a.cpp", input_files=["a.cpp"], directory=str(out_dir)
@@ -1046,7 +1048,9 @@ def test_extract_from_build_keeps_distinct_spans_for_same_identity(monkeypatch) 
     definition = DeclRange("Widget", "t.h", 10, 14)
     per_unit = {"cu://a": [forward], "cu://b": [definition]}
     monkeypatch.setattr(
-        extractor, "_extract_from_compile_unit", lambda cu: per_unit[cu.id]
+        extractor,
+        "_extract_from_compile_unit",
+        lambda cu, *, diagnostics=None: per_unit[cu.id],
     )
     build = BuildEvidence(
         compile_units=[
@@ -1065,7 +1069,9 @@ def test_extract_from_build_dedups_exact_duplicate_span(monkeypatch) -> None:
     extractor = ClangMacroGraphExtractor(clang_bin="clang++")
     monkeypatch.setattr(extractor, "available", lambda: True)
     same = DeclRange("Widget", "t.h", 2, 2)
-    monkeypatch.setattr(extractor, "_extract_from_compile_unit", lambda cu: [same])
+    monkeypatch.setattr(
+        extractor, "_extract_from_compile_unit", lambda cu, *, diagnostics=None: [same]
+    )
     build = BuildEvidence(
         compile_units=[
             CompileUnit(id="cu://a", source="a.cpp", input_files=["a.cpp"]),

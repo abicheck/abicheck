@@ -1241,7 +1241,9 @@ def test_same_private_type_as_return_and_param_stays_role_distinct() -> None:
         },
     )
     edges = parse_clang_ast_types(ast)
-    has_type = [e for e in edges if e.kind == "DECL_HAS_TYPE" and e.dst == "detail::Impl"]
+    has_type = [
+        e for e in edges if e.kind == "DECL_HAS_TYPE" and e.dst == "detail::Impl"
+    ]
     roles = {e.role for e in has_type}
     assert roles == {"return", "param"}
 
@@ -1537,7 +1539,7 @@ def test_extract_from_build_merges_richer_edge_across_compile_units(
     extractor = ClangTypeGraphExtractor(clang_bin="clang++")
     monkeypatch.setattr(extractor, "available", lambda: True)
 
-    def _fake_extract(cu: CompileUnit) -> list[TypeEdge]:
+    def _fake_extract(cu: CompileUnit, *, diagnostics=None) -> list[TypeEdge]:
         if cu.source == "src/a.cpp":
             # This TU doesn't see detail::Impl's declaration.
             return [
@@ -1591,7 +1593,7 @@ def test_extract_from_build_propagates_deadline_into_pool_workers(monkeypatch) -
     extractor = ClangTypeGraphExtractor(clang_bin="clang++")
     monkeypatch.setattr(extractor, "available", lambda: True)
 
-    def _fake_extract(cu: CompileUnit) -> list[TypeEdge]:
+    def _fake_extract(cu: CompileUnit, *, diagnostics=None) -> list[TypeEdge]:
         seen_remaining.append(deadline.remaining())
         return []
 

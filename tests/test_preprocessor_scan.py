@@ -917,6 +917,150 @@ def test_capture_macros_probes_per_tu_even_with_source_looking_flag_operand(
     assert out["cu://b"] == {"NDEBUG": "0"}
 
 
+def test_capture_macros_probe_returns_parsed_dict_not_raw_text(monkeypatch) -> None:
+    # Codex review: capture_macros' probe must return the small, already-
+    # parsed {macro: value} dict, not raw clang stdout -- run_parallel_probes
+    # fully materializes its whole result list before the caller sees any
+    # of it, so returning raw text there would hold every probe's full
+    # output in memory simultaneously instead of one at a time the way the
+    # previous serial loop did. See tests/test_parallel_probe.py for the
+    # generalized version of this contract, decoupled from this module.
+    import abicheck.buildsource.build_evidence as be
+    import abicheck.buildsource.preprocessor_scan as ps
+
+    monkeypatch.setenv("ABICHECK_PREPROCESSOR_SCAN_JOBS", "1")
+    build = be.BuildEvidence(
+        compile_units=[
+            be.CompileUnit(id="cu://a", source="a.cpp", language="CXX", argv=["a.cpp"])
+        ]
+    )
+    real_run_parallel_probes = ps.run_parallel_probes
+    captured: list[object] = []
+
+    def _spy(items, probe, *, jobs):
+        results = real_run_parallel_probes(items, probe, jobs=jobs)
+        captured.extend(r for _, r in results)
+        return results
+
+    monkeypatch.setattr(ps, "run_parallel_probes", _spy)
+    monkeypatch.setattr(
+        ps.ClangPreprocessorExtractor,
+        "_run",
+        lambda self, cmd, cwd, unit: "#define NDEBUG 1\n",
+    )
+    ps.ClangPreprocessorExtractor().capture_macros(build)
+
+    assert captured == [{"NDEBUG": "1"}]
+    assert all(isinstance(r, dict) for r in captured)
+
+
+def test_capture_header_includes_probe_returns_parsed_list_not_raw_text(
+    monkeypatch,
+) -> None:
+    # Same memory-shape guard as capture_macros', for the -M depfile pass.
+    from abicheck.buildsource import preprocessor_scan as ps
+
+    monkeypatch.setenv("ABICHECK_PREPROCESSOR_SCAN_JOBS", "1")
+    real_run_parallel_probes = ps.run_parallel_probes
+    captured: list[object] = []
+
+    def _spy(items, probe, *, jobs):
+        results = real_run_parallel_probes(items, probe, jobs=jobs)
+        captured.extend(r for _, r in results)
+        return results
+
+    monkeypatch.setattr(ps, "run_parallel_probes", _spy)
+    monkeypatch.setattr(
+        ps.ClangPreprocessorExtractor,
+        "_run",
+        lambda self, cmd, cwd, unit: "foo.o: include/foo.h src/detail/impl.h\n",
+    )
+    ps.ClangPreprocessorExtractor().capture_header_includes(
+        ["include/foo.h"], ["-Iinclude"]
+    )
+
+    assert captured == [["include/foo.h", "src/detail/impl.h"]]
+    assert all(isinstance(r, list) for r in captured)
+
+
+def test_diagnostics_property_reflects_live_underlying_list() -> None:
+    # capture_macros/capture_header_includes' deterministic-ordering fix
+    # moved `diagnostics` from a plain field to a property backed by
+    # OrderedDiagnostics; back-compat direct mutation (`.append`/`.clear()`)
+    # must still work exactly like a plain list attribute would.
+    from abicheck.buildsource import preprocessor_scan as ps
+
+    ex = ps.ClangPreprocessorExtractor()
+    assert ex.diagnostics == []
+    ex.diagnostics.append("a")
+    ex.diagnostics.append("b")
+    assert ex.diagnostics == ["a", "b"]
+    assert ex._diag.messages is ex.diagnostics  # same underlying list object
+    ex.diagnostics.clear()
+    assert ex.diagnostics == []
+
+
+def test_capture_macros_diagnostics_deterministic_under_real_thread_pool(
+    monkeypatch,
+) -> None:
+    # End-to-end version of test_reorder_batch_diagnostics_restores_input_order:
+    # real ThreadPoolExecutor workers, deliberately staggered so LATER-input
+    # units finish FIRST, confirming coverage()'s diagnostics[0] sample is
+    # stable across repeated runs of identical, pinned inputs regardless of
+    # actual completion order.
+    import time
+
+    import abicheck.buildsource.build_evidence as be
+    import abicheck.buildsource.preprocessor_scan as ps
+    from abicheck import deadline
+
+    monkeypatch.setenv("ABICHECK_PREPROCESSOR_SCAN_JOBS", "4")
+    n = 8
+    build = be.BuildEvidence(
+        compile_units=[
+            be.CompileUnit(
+                id=f"cu://{i}",
+                source=f"{i}.cpp",
+                language="CXX",
+                argv=["clang++", "-c", f"{i}.cpp", f"-DTAG={i}"],
+            )
+            for i in range(n)
+        ]
+    )
+
+    class _P:
+        stdout = ""
+        stderr = "boom"
+        returncode = 1
+
+    def _fake_run_bounded(cmd, **kwargs):
+        # Reverse-staggered sleep: the LAST-dispatched unit (highest TAG)
+        # sleeps LEAST, so it tends to finish FIRST -- the opposite of
+        # input order.
+        tag = int(next(a for a in cmd if a.startswith("-DTAG=")).split("=")[1])
+        time.sleep((n - tag) * 0.01)
+        return _P()
+
+    monkeypatch.setattr(deadline, "run_bounded", _fake_run_bounded)
+
+    first_samples = set()
+    for _ in range(5):
+        ex = ps.ClangPreprocessorExtractor()
+        ex.capture_macros(build)
+        result = ps.PreprocessorScanResult(
+            ran=True, attempted=ex.runs_attempted, succeeded=ex.runs_ok
+        )
+        result.diagnostics = list(ex.diagnostics)
+        first_samples.add(result.coverage().detail)
+
+    assert len(first_samples) == 1, (
+        f"coverage detail varied across identical runs: {first_samples}"
+    )
+    # And it must specifically be the FIRST unit BY INPUT ORDER (cu://0),
+    # not whichever one happened to finish its subprocess first.
+    assert "cu://0" in next(iter(first_samples))
+
+
 def test_preprocessor_scan_version_bumped_for_probes_truncated() -> None:
     # Codex review: the additive probes_truncated field needs its schema
     # version bumped so a consumer negotiating either version can detect
