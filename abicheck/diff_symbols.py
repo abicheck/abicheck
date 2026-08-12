@@ -1919,6 +1919,15 @@ def _diff_constants(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
     verdict when either side's value is a pre-stabilization direct-clang
     fingerprint that can't be trusted against a fresh one — see that
     function's own docstring (``diff_default_value_reliability.py``) for why.
+
+    Known limitation, not attempted here: a versioned inline namespace can
+    make the same constant reachable under two qualified spellings
+    (``detail::v1::x`` / ``detail::x``), double-reporting one real change.
+    A value-equality merge was tried and reverted as unsound in both
+    directions (merges unrelated same-valued constants; misses spellings
+    that started with different values) -- see ``qualified_name_segments``'s
+    module docstring for the full reasoning; a header constant has no
+    identity beyond its own value to merge on safely.
     """
     if not _both_header_aware(old, new):
         return []
