@@ -406,6 +406,30 @@ def _paired_stable_indices(
                     old_out.setdefault(key, []).extend(raw_old[rk])
                 if rk in raw_new:
                     new_out.setdefault(key, []).extend(raw_new[rk])
+
+    # Sort every bucket's qname list before returning (Codex review, P1,
+    # fresh evidence): sorting the pooled raw KEYS (above) makes which
+    # *merged component* a genuine alias pair resolves to deterministic,
+    # but says nothing about declaration order WITHIN one raw bucket --
+    # two structurally distinct declarations that happen to collapse onto
+    # the same (stripped, leaf) raw key (a coincidental exact-string
+    # collision, e.g. `ns::experimental::foo` and `experimental::ns::foo`
+    # both stripping to `ns::foo`; genuinely different mangled symbols,
+    # unrelated to any Layer 2 alias-merge decision) retained plain
+    # snapshot/declaration-iteration order, and `_emit_experimental_change`
+    # reports whichever qname happens to be first. Unlike PYTHONHASHSEED,
+    # that order isn't hash-randomized within one process, but it isn't
+    # something this tool controls either -- two independent extractions
+    # of nominally the same library can enumerate declarations in a
+    # different order (unstable AST/DWARF traversal order, parallel
+    # extraction, ...), which would then report a different `symbol` for
+    # the identical logical change and could make an exact-name suppression
+    # selector match in one run and not another. Sorting makes the choice
+    # of "first" a pure function of the qname strings themselves.
+    for bucket in old_out.values():
+        bucket.sort()
+    for bucket in new_out.values():
+        bucket.sort()
     return old_out, new_out
 
 

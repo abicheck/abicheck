@@ -95,6 +95,20 @@
   model addition, out of scope here) — see `_paired_stable_indices`'s
   "Residual, deliberately-accepted gap" docstring paragraph.
 
+- Fixed a further nondeterminism gap in the same merge primitive: sorting
+  the pooled raw keys (fixed earlier for `PYTHONHASHSEED`-dependent output)
+  only made which *merged component* a genuine alias pair resolves to
+  deterministic -- it said nothing about declaration order *within* one raw
+  bucket. Two structurally distinct declarations (different mangled
+  symbols, no alias relationship) can coincidentally collapse onto the same
+  `(stripped, leaf)` raw key purely from string-stripping (`ns::
+  experimental::foo` and `experimental::ns::foo` both strip their first
+  "experimental" segment down to `ns::foo`), and which one gets reported as
+  the finding's `symbol` depended on plain snapshot declaration order --
+  not hash-randomized like `PYTHONHASHSEED`, but not something this tool
+  controls either. `_paired_stable_indices` now sorts every output bucket's
+  qname list before returning it.
+
 - **Test infrastructure**: added `tests/test_diff_namespaces.py::TestPairedStableIndicesProperties`,
   a Hypothesis property-test suite testing the merge primitive
   (`_paired_stable_indices`) directly, stating its contract as invariants

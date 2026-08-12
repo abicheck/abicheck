@@ -591,6 +591,46 @@ class TestExperimentalRemovedWithoutReplacement:
             for c in changes
         )
 
+    def test_reported_symbol_stable_within_a_coincidentally_shared_raw_key(
+        self,
+    ) -> None:
+        """Codex review, P1, fresh evidence: sorting the pooled raw KEYS
+        (see `_paired_stable_indices`'s hash-seed-determinism fix) makes
+        which *merged component* a genuine alias pair resolves to
+        deterministic, but says nothing about declaration order WITHIN one
+        raw bucket -- two structurally distinct declarations (different
+        mangled symbols, no alias relationship at all) can coincidentally
+        collapse onto the same (stripped, leaf) raw key purely from
+        string-stripping (``ns::experimental::foo`` and
+        ``experimental::ns::foo`` both strip their first "experimental"
+        segment down to ``ns::foo``). Which one `_emit_experimental_change`
+        reports as the finding's `symbol` must not depend on which order
+        the snapshot happened to declare them in -- unlike PYTHONHASHSEED,
+        that order isn't hash-randomized within one process, but it also
+        isn't something this tool controls (unstable AST/DWARF traversal
+        order between two extractions of nominally the same library).
+        """
+        old_forward = _snap(funcs=[
+            _fn("ns::experimental::foo", mangled="_ZA"),
+            _fn("experimental::ns::foo", mangled="_ZB"),
+        ])
+        old_reversed = _snap(funcs=[
+            _fn("experimental::ns::foo", mangled="_ZB"),
+            _fn("ns::experimental::foo", mangled="_ZA"),
+        ])
+        new = _snap(funcs=[])
+        forward_symbols = {
+            c.symbol
+            for c in detect_experimental_namespace_changes(old_forward, new)
+            if c.kind == ChangeKind.EXPERIMENTAL_REMOVED_WITHOUT_REPLACEMENT
+        }
+        reversed_symbols = {
+            c.symbol
+            for c in detect_experimental_namespace_changes(old_reversed, new)
+            if c.kind == ChangeKind.EXPERIMENTAL_REMOVED_WITHOUT_REPLACEMENT
+        }
+        assert forward_symbols == reversed_symbols
+
     def test_bare_vs_qualified_name_same_mangled_symbol_no_false_positive(
         self,
     ) -> None:
