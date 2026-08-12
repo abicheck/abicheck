@@ -21,4 +21,12 @@ A new changelog fragment. See changelog.d/README.md for the workflow.
   e.g. `soname_changed` is already `risk` under `strict_abi`, so a policy
   file that explicitly restates `soname_changed: risk` no longer reads as a
   downgrade. Only an override strictly weaker than the base policy's own
-  verdict for that kind is now flagged.
+  verdict for that kind is now flagged. Finally, `compare-release`'s
+  sequential per-library fan-out reloads the same `--policy-file` once per
+  library (plus again for JUnit's re-run), which used to mean the identical
+  warning logged once per library; a new `service.
+  dedup_policy_override_warnings()` scope collapses that down to one
+  warning per release run (the `--jobs N>1` process-pool path is
+  unaffected, and every other caller — a plain `compare`, `scan --against`,
+  or a direct Python API call — is unaffected too, since it never enters
+  that scope).

@@ -1372,34 +1372,45 @@ def compare_release_cmd(
         # JUnit still re-runs pairs in _collect_release_extras because it
         # needs old AbiSnapshot too. Bundle analysis reuses the
         # _diff_result stashed in each library entry from the first pass.
-        library_results, worst_verdict, diff_pairs = _compare_release_libraries(
-            matched_keys,
-            old_map,
-            new_map,
-            old_debug_dir,
-            new_debug_dir,
-            resolve_debug_info,
-            old_h,
-            new_h,
-            old_inc,
-            new_inc,
-            old_version,
-            new_version,
-            lang,
-            suppress,
-            policy,
-            policy_file_path,
-            output_dir,
-            collect_diff_results=(fmt == "junit"),
-            annotate=annotate,
-            annotate_additions=annotate_additions,
-            jobs=jobs,
-            scope_to_public_surface=scope_public_headers,
-            include_dependencies=include_dependencies,
-            severity_config=severity_config,
-            contract_evaluation=contract_evaluation,
-            contract_mode=contract_mode,
-        )
+        #
+        # dedup_policy_override_warnings(): this fan-out reloads the same
+        # --policy-file once per library (plus again for JUnit's re-run), so
+        # without this a single risky override would log its
+        # validate_overrides() warning once per library instead of once for
+        # the whole release (Codex review). Only dedupes within this process
+        # -- `--jobs N>1` dispatches libraries to a ProcessPoolExecutor, which
+        # this context can't reach; see the context manager's own docstring.
+        from . import service
+
+        with service.dedup_policy_override_warnings():
+            library_results, worst_verdict, diff_pairs = _compare_release_libraries(
+                matched_keys,
+                old_map,
+                new_map,
+                old_debug_dir,
+                new_debug_dir,
+                resolve_debug_info,
+                old_h,
+                new_h,
+                old_inc,
+                new_inc,
+                old_version,
+                new_version,
+                lang,
+                suppress,
+                policy,
+                policy_file_path,
+                output_dir,
+                collect_diff_results=(fmt == "junit"),
+                annotate=annotate,
+                annotate_additions=annotate_additions,
+                jobs=jobs,
+                scope_to_public_surface=scope_public_headers,
+                include_dependencies=include_dependencies,
+                severity_config=severity_config,
+                contract_evaluation=contract_evaluation,
+                contract_mode=contract_mode,
+            )
 
         # ADR-049 Phase 7's orthogonal contract-coverage floor, aggregated
         # across every library with max() -- one library's incomplete
