@@ -464,7 +464,7 @@ jobs:
           # deliberately excludes profile, so without this an unverifiable
           # legacy/malformed asset could pass as a safe retry purely on
           # matching library digests (Codex review).
-          if [[ "$existing_profile" != "$NEW_PROFILE" ]]; then
+          if [[ -z "$existing_profile" || -z "$NEW_PROFILE" || "$existing_profile" != "$NEW_PROFILE" ]]; then
             echo "::error::$ASSET_NAME already exists on release $RELEASE_TAG but was published for a DIFFERENT (or missing) profile ('$existing_profile', this run is '$NEW_PROFILE') -- asset-name-template resolved to the same name for two distinct profiles, or the existing asset's manifest has no profile recorded at all, so this is never a safe retry regardless of content. Include '{profile}' in asset-name-template so each profile in a multi-profile matrix gets its own asset name." >&2
             exit 1
           fi

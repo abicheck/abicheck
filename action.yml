@@ -401,12 +401,12 @@ inputs:
       a tag name (e.g. "v2.0.0") fetches from that release; a file path uses the
       file directly. Requires GITHUB_TOKEN with contents:read permission.
       Overrides old-library (compare) / against (scan) when set. When the
-      resolved release has no single *.abicheck.json[.gz|.zst] asset, set
+      resolved release has no single `*.abicheck.json[.gz|.zst]` asset, set
       baseline-profile and baseline-target to instead fetch a
-      release-contract baseline-set archive (abicheck-baseline-<profile>
-      .tar.zst, published by publish-baseline.yml -- see
-      docs/reference/publish-baseline.md); the single-snapshot search
-      always takes priority when both exist.
+      release-contract baseline-set archive
+      (`abicheck-baseline-<profile>.tar.zst`, published by
+      publish-baseline.yml -- see docs/reference/publish-baseline.md); the
+      single-snapshot search always takes priority when both exist.
     required: false
   baseline-profile:
     description: >

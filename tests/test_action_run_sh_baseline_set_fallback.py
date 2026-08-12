@@ -38,6 +38,7 @@ from __future__ import annotations
 import io
 import json
 import os
+import shlex
 import shutil
 import subprocess
 import tarfile
@@ -301,14 +302,21 @@ class TestBaselineSetFallback:
                 "INPUT_ABI_BASELINE": "latest-release",
                 "INPUT_BASELINE_PROFILE": "windows-x86_64-msvc-release",
                 "INPUT_BASELINE_TARGET": "libpvxs",
-                # asset-name-template substitutes {profile} with the
-                # REQUESTED profile, so the fixture -- built under the
-                # default PROFILE -- is never even found under this name;
-                # confirms the archive-not-found path, not just wrong_profile.
+                # The `gh` stub above copies $FIXTURE_ARCHIVE to the
+                # requested pattern's exact name regardless of the archive's
+                # own on-disk filename (it distinguishes fetch shapes purely
+                # by --pattern count, not by matching names) -- so this
+                # archive, built under the default PROFILE, IS found and
+                # fetched successfully under the requested
+                # "windows-x86_64-msvc-release" name. The failure is
+                # entirely `resolve_target()`'s own wrong_profile check
+                # (manifest.profile != the requested profile), not an
+                # archive-not-found path.
                 "FIXTURE_ARCHIVE": str(archive),
             }
         )
         assert result.returncode == 1
+        assert "outcome: wrong_profile" in result.stdout + result.stderr
         assert "REACHED_END" not in result.stdout
 
     def test_no_asset_at_all_reports_combined_failure(self) -> None:
@@ -375,3 +383,89 @@ class TestBaselineSetFallback:
         )
         assert result.returncode == 0, result.stderr
         assert "libpvxs.abicheck.json" in result.stdout
+
+
+@pytest.mark.skipif(not RUN_SH.is_file(), reason="action/run.sh not found")
+class TestEscapeGlobMetachars:
+    """Regression (Codex review): `gh release download --pattern` treats
+    its argument as a glob (Go's ``filepath.Match``), not a literal
+    filename. A ``baseline-asset-name-template`` containing a literal
+    glob metacharacter (``[``, ``?``, ``*``) would otherwise either fail
+    to match its own asset, or accidentally match an unrelated one.
+    ``_escape_glob_metachars`` backslash-escapes each metacharacter (and a
+    literal backslash itself) before the resolved name is used as a
+    ``--pattern`` value -- extracted and run directly here, the same
+    "test the real function, not a re-implementation" discipline this
+    file's other tests use for the wider baseline-set fallback."""
+
+    @pytest.mark.parametrize(
+        ("raw", "expected"),
+        [
+            (
+                "abicheck-baseline-linux-x86_64-gcc13-release.tar.zst",
+                "abicheck-baseline-linux-x86_64-gcc13-release.tar.zst",
+            ),
+            (
+                "abicheck-baseline-[release].tar.zst",
+                "abicheck-baseline-\\[release\\].tar.zst",
+            ),
+            ("abicheck-baseline-a?b.tar.zst", "abicheck-baseline-a\\?b.tar.zst"),
+            ("abicheck-baseline-*.tar.zst", "abicheck-baseline-\\*.tar.zst"),
+            ("abicheck-baseline-a\\b.tar.zst", "abicheck-baseline-a\\\\b.tar.zst"),
+            ("[*?]\\", "\\[\\*\\?\\]\\\\"),
+        ],
+    )
+    def test_escapes_glob_metacharacters(self, raw: str, expected: str) -> None:
+        script = (
+            _baseline_region()
+            + f"\nprintf '%s' \"$(_escape_glob_metachars {shlex.quote(raw)})\"\n"
+        )
+        result = _run_bash_script(script, {**os.environ})
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert result.stdout == expected
+
+    def test_pattern_flag_receives_the_escaped_not_raw_asset_name(
+        self, tmp_path: Path
+    ) -> None:
+        """End-to-end: a profile containing a literal ``[``/``]`` makes it
+        into ``--pattern`` only in escaped form, confirmed by inspecting
+        what the stubbed ``gh`` actually received (not just the standalone
+        helper's own output)."""
+        captured = tmp_path / "captured-pattern.txt"
+        gh_stub = f"""
+gh() {{
+  local pattern="" pattern_count=0
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --pattern) pattern="$2"; pattern_count=$((pattern_count + 1)); shift 2 ;;
+      -D) shift 2 ;;
+      *) shift ;;
+    esac
+  done
+  if [[ "$pattern_count" -eq 1 ]]; then
+    printf '%s' "$pattern" > {shlex.quote(str(captured))}
+  fi
+  return 1
+}}
+"""
+        profile = "linux-[custom]-release"
+        script = (
+            'MODE="${INPUT_MODE:-compare}"\n'
+            'FORCE_AUDIT_ONLY="${INPUT_AUDIT:-false}"\n'
+            + gh_stub
+            + _baseline_region()
+            + '\necho "REACHED_END"\n'
+        )
+        env = {
+            **os.environ,
+            "INPUT_MODE": "compare",
+            "INPUT_ABI_BASELINE": "latest-release",
+            "INPUT_BASELINE_PROFILE": profile,
+            "INPUT_BASELINE_TARGET": "libpvxs",
+        }
+        _run_bash_script(script, env)
+
+        assert captured.is_file(), "gh stub was never invoked with a single --pattern"
+        seen_pattern = captured.read_text(encoding="utf-8")
+        assert seen_pattern == "abicheck-baseline-linux-\\[custom\\]-release.tar.zst"
+        assert seen_pattern != f"abicheck-baseline-{profile}.tar.zst"

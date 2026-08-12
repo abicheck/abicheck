@@ -95,11 +95,23 @@ jobs:
           # glob -- never appears), letting a changed protected file evade
           # this check entirely. Listing both the old and new path for every
           # touched file closes that gap.
-          CHANGED_FILES=$(git diff --no-renames --name-only "$BASE_SHA...$HEAD_SHA")
-          echo "$CHANGED_FILES"
+          #
+          # -z (NUL-delimited), written to a temp file rather than captured
+          # into an environment variable: `git diff --name-only`'s ordinary
+          # newline-delimited output C-quotes any pathname containing a
+          # control character (a literal newline, tab, or quote), so the
+          # matcher below would see a quoted string instead of the real
+          # pathname and silently fail to match a protected file whose name
+          # contains one -- and an env var can't hold arbitrary bytes (a
+          # NUL byte) even if it could. A temp file sidesteps both (Codex
+          # review).
+          changed_files_file="$(mktemp)"
+          trap 'rm -f "$changed_files_file"' EXIT
+          git diff --no-renames --name-only -z "$BASE_SHA...$HEAD_SHA" > "$changed_files_file"
+          tr '\0' '\n' < "$changed_files_file"
           echo "::endgroup::"
 
-          CHANGED_FILES="$CHANGED_FILES" python3 - <<'PYEOF'
+          CHANGED_FILES_FILE="$changed_files_file" python3 - <<'PYEOF'
           import json
           import os
           import re
@@ -138,7 +150,14 @@ jobs:
 
 
           def matches(path: str, pattern: str) -> bool:
-              return re.match(glob_to_regex(pattern), path) is not None
+              # re.DOTALL: a pathname CAN legally contain a literal newline
+              # (confirmed: git tracks and diffs one fine) -- "**"'s ".*"
+              # translation must be able to consume that character too, or
+              # a protected path containing one would never match even
+              # once the real (not C-quoted) bytes are correctly parsed.
+              return (
+                  re.match(glob_to_regex(pattern), path, re.DOTALL) is not None
+              )
 
 
           patterns = [
@@ -150,11 +169,12 @@ jobs:
               print("::error::protected-paths resolved to no patterns -- refusing to run a check that would protect nothing.")
               sys.exit(1)
 
-          changed = [
-              line
-              for line in os.environ.get("CHANGED_FILES", "").splitlines()
-              if line
-          ]
+          with open(os.environ["CHANGED_FILES_FILE"], "rb") as changed_fh:
+              changed = [
+                  path.decode("utf-8", "surrogateescape")
+                  for path in changed_fh.read().split(b"\0")
+                  if path
+              ]
           hits = sorted(
               {path for path in changed if any(matches(path, pat) for pat in patterns)}
           )

@@ -81,7 +81,27 @@ case "$asset_name" in
       tar --zstd -cf "$asset_name" -C "$BASELINE_PATH" .
     else
       echo "::notice::'zstd' executable not found on PATH -- falling back to Python's zstandard package to build $asset_name." >&2
-      python3 -c "import zstandard" >/dev/null 2>&1 || pip install --quiet zstandard
+      # Resolved explicitly rather than assuming a bare `python3` --
+      # Git Bash on Windows only ever resolves `python` on a stock CPython
+      # layout (the same gap this repo's own reusable-workflow tests
+      # already document for other steps), so a bare `python3` call here
+      # would fail with a bare "command not found" on that platform even
+      # though a usable interpreter exists (Codex review).
+      PY="$(command -v python3 || command -v python || true)"
+      if [[ -z "$PY" ]]; then
+        echo "::error::neither 'zstd' nor a Python interpreter is available on PATH -- cannot build $asset_name. Install zstd on this runner, or use a .tar.gz/.tgz/.tar asset-name-template instead." >&2
+        exit 1
+      fi
+      if ! "$PY" -c "import zstandard" >/dev/null 2>&1; then
+        # A bare pip failure (e.g. PEP 668's "externally-managed-environment"
+        # refusal on a system Python) previously surfaced as pip's own raw
+        # error with no guidance -- give an actionable fallback instead
+        # (Codex review).
+        if ! "$PY" -m pip install --quiet zstandard; then
+          echo "::error::'zstd' is absent and installing the Python 'zstandard' package failed -- install zstd on this runner, or use a .tar.gz/.tgz/.tar asset-name-template instead." >&2
+          exit 1
+        fi
+      fi
       tar -cf "$asset_name.tmp-payload" -C "$BASELINE_PATH" .
       # Copied in bounded 1 MiB chunks, not a single inp.read() -- a
       # baseline-set archive can approach the multi-gigabyte GitHub
@@ -90,7 +110,7 @@ case "$asset_name" in
       # it to zstandard's own stream_writer (which itself streams output
       # fine) can still OOM-kill a memory-constrained or self-hosted
       # runner (Codex review).
-      python3 -c "
+      "$PY" -c "
 import sys
 import zstandard
 

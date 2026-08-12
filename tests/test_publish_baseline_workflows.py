@@ -32,6 +32,7 @@ pure-Python mirror" risk.
 from __future__ import annotations
 
 import os
+import sys
 from pathlib import Path
 from typing import Any
 
@@ -696,6 +697,23 @@ class TestBaselinePublishE2eFixture:
         )
 
 
+# NOTE (CodeRabbit nitpick, deliberately not done): the five
+# `TestUploadReleaseAsset*` classes below each carry a near-identical
+# `_upload_step_script()` + gh-stub + tempfile-run harness. Consolidating
+# them into one parametrized module-level helper was considered and
+# deliberately deferred -- each class stubs `gh` with a *different* shape
+# (a plain safe-retry echo, a cross-profile-collision reject, a
+# missing-profile reject, a corrupted-existing-content reject, a
+# genuinely-different-content reject), and the harnesses already diverge
+# enough in what they assert and set up (real `build_manifest.py` module
+# loading, different manifest fixtures, different expected stdout/exit
+# codes) that forcing them through one shared parametrized shape risks
+# obscuring exactly the behavioral distinction each test exists to pin,
+# for a readability win that is marginal at best. Revisit only if a sixth
+# near-identical case appears and the duplication becomes a real
+# maintenance cost, not preemptively.
+
+
 class TestUploadReleaseAssetRetryDispatchesBySuffix:
     """Regression (Codex review): the "Upload release asset" step's safe-
     retry comparison used to always download the existing asset to a
@@ -724,6 +742,16 @@ class TestUploadReleaseAssetRetryDispatchesBySuffix:
         )
         return step["run"]
 
+    @pytest.mark.skipif(
+        sys.platform == "win32",
+        reason=(
+            "This step's embedded script invokes `python3` directly -- Git "
+            "Bash on Windows typically only resolves `python`, not "
+            "`python3`, so this test exercises real POSIX behavior a "
+            "Windows test runner cannot provide (mirrors "
+            "test_reusable_workflows.py's identical convention)."
+        ),
+    )
     def test_identical_tar_gz_content_is_a_safe_retry(self, tmp_path: Path) -> None:
         import importlib.util
         import json
@@ -869,6 +897,16 @@ class TestUploadReleaseAssetRejectsCrossProfileCollision:
         )
         return step["run"]
 
+    @pytest.mark.skipif(
+        sys.platform == "win32",
+        reason=(
+            "This step's embedded script invokes `python3` directly -- Git "
+            "Bash on Windows typically only resolves `python`, not "
+            "`python3`, so this test exercises real POSIX behavior a "
+            "Windows test runner cannot provide (mirrors "
+            "test_reusable_workflows.py's identical convention)."
+        ),
+    )
     def test_same_content_different_profile_is_rejected(self, tmp_path: Path) -> None:
         import importlib.util
         import json
@@ -1010,6 +1048,16 @@ class TestUploadReleaseAssetRejectsMissingProfile:
         )
         return step["run"]
 
+    @pytest.mark.skipif(
+        sys.platform == "win32",
+        reason=(
+            "This step's embedded script invokes `python3` directly -- Git "
+            "Bash on Windows typically only resolves `python`, not "
+            "`python3`, so this test exercises real POSIX behavior a "
+            "Windows test runner cannot provide (mirrors "
+            "test_reusable_workflows.py's identical convention)."
+        ),
+    )
     def test_existing_manifest_with_no_profile_is_rejected(
         self, tmp_path: Path
     ) -> None:
@@ -1141,6 +1189,16 @@ class TestUploadReleaseAssetRejectsCorruptedExistingContent:
         )
         return step["run"]
 
+    @pytest.mark.skipif(
+        sys.platform == "win32",
+        reason=(
+            "This step's embedded script invokes `python3` directly -- Git "
+            "Bash on Windows typically only resolves `python`, not "
+            "`python3`, so this test exercises real POSIX behavior a "
+            "Windows test runner cannot provide (mirrors "
+            "test_reusable_workflows.py's identical convention)."
+        ),
+    )
     def test_declared_digest_matching_but_real_bytes_differing_is_rejected(
         self, tmp_path: Path
     ) -> None:
@@ -1289,6 +1347,16 @@ class TestUploadReleaseAssetRejectsGenuinelyDifferentContent:
         )
         return step["run"]
 
+    @pytest.mark.skipif(
+        sys.platform == "win32",
+        reason=(
+            "This step's embedded script invokes `python3` directly -- Git "
+            "Bash on Windows typically only resolves `python`, not "
+            "`python3`, so this test exercises real POSIX behavior a "
+            "Windows test runner cannot provide (mirrors "
+            "test_reusable_workflows.py's identical convention)."
+        ),
+    )
     def test_self_consistent_but_genuinely_different_content_is_rejected(
         self, tmp_path: Path
     ) -> None:

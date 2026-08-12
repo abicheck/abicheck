@@ -151,11 +151,10 @@ and a restore-keys prefix match that landed on any other commit reports
 
 - name: Resolve accepted-main baseline for libpvxs
   id: baseline
-  # not yet in a tagged release as of this writing -- pin a commit/tag that
-  # actually includes the expected-project-ref input (introduced after
-  # c9e135a3233b6d45e9571533f71293fde458a469, the placeholder pin used
-  # elsewhere on this page), not just "main or newer" generically.
-  uses: abicheck/abicheck/actions/resolve-baseline@<pin-a-commit-with-expected-project-ref>
+  # not yet in a tagged release as of this writing -- pin a commit that
+  # actually includes the expected-project-ref input, not just "main or
+  # newer" generically.
+  uses: abicheck/abicheck/actions/resolve-baseline@f1471d8307cfb1ee085f615f0694350bf3c116d7
   with:
     baseline-path: .baseline-staged
     channel: accepted-main
@@ -175,7 +174,7 @@ committed baseline read via `git show base_sha:path`, or `release-contract`)
 ```yaml
 - name: Resolve accepted-main baseline for libpvxs
   id: baseline
-  uses: abicheck/abicheck/actions/resolve-baseline@c9e135a3233b6d45e9571533f71293fde458a469  # not yet in a tagged release; pin main or newer
+  uses: abicheck/abicheck/actions/resolve-baseline@f1471d8307cfb1ee085f615f0694350bf3c116d7  # not yet in a tagged release; pin main or newer
   with:
     baseline-path: ./restored-baseline # staged by an earlier actions/cache step
     channel: accepted-main

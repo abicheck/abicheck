@@ -150,6 +150,35 @@ _baseline_unavailable() {
   exit 1
 }
 
+# `gh release download --pattern` treats its argument as a glob (Go's
+# filepath.Match), not a literal filename -- an asset name containing a
+# literal glob metacharacter ('*', '?', '[') would otherwise silently fail
+# to match itself, or (worse) match an unrelated asset that happens to fit
+# the accidental pattern. Only INPUT_BASELINE_ASSET_NAME_TEMPLATE (a
+# caller-controlled input, not derived from any fixed template abicheck
+# itself picks) can ever introduce one of these characters into asset_name.
+# Backslash-escape each metacharacter (and a literal backslash itself, so
+# escaping is idempotent/unambiguous) before using the resolved name as a
+# --pattern value; the raw, unescaped asset_name is still used everywhere
+# else (the local downloaded-file path, error messages) since only the
+# glob argument needs this treatment (Codex review).
+_escape_glob_metachars() {
+  local s="$1" out="" i c
+  for ((i = 0; i < ${#s}; i++)); do
+    c="${s:$i:1}"
+    case "$c" in
+      # ']' is escaped too even though it's only meaningful as part of an
+      # unescaped '[...]' class (and escaping '[' alone already makes any
+      # following ']' literal) -- escaping it unconditionally is harmless
+      # and doesn't depend on this reasoning holding for every glob engine
+      # gh's --pattern might use.
+      '\' | '*' | '?' | '[' | ']') out+="\\$c" ;;
+      *) out+="$c" ;;
+    esac
+  done
+  printf '%s' "$out"
+}
+
 # ---------------------------------------------------------------------------
 # Baseline-set fallback: when no single *.abicheck.json asset was found on
 # the release, but baseline-profile was given, try a release-contract
@@ -185,14 +214,16 @@ _try_baseline_set_fallback() {
     asset_template='abicheck-baseline-{profile}.tar.zst'
   fi
   local asset_name="${asset_template//\{profile\}/$INPUT_BASELINE_PROFILE}"
+  local asset_pattern
+  asset_pattern="$(_escape_glob_metachars "$asset_name")"
 
   echo "::group::Fetch release-contract baseline-set '$asset_name'"
   local set_download_dir="$BASELINE_DIR/baseline-set-download"
   mkdir -p "$set_download_dir"
   if [[ "$ABI_BASELINE" == "latest-release" ]]; then
-    gh release download ${_GH_REPO_FLAG[@]+"${_GH_REPO_FLAG[@]}"} --pattern "$asset_name" -D "$set_download_dir" || true
+    gh release download ${_GH_REPO_FLAG[@]+"${_GH_REPO_FLAG[@]}"} --pattern "$asset_pattern" -D "$set_download_dir" || true
   else
-    gh release download "$ABI_BASELINE" ${_GH_REPO_FLAG[@]+"${_GH_REPO_FLAG[@]}"} --pattern "$asset_name" -D "$set_download_dir" || true
+    gh release download "$ABI_BASELINE" ${_GH_REPO_FLAG[@]+"${_GH_REPO_FLAG[@]}"} --pattern "$asset_pattern" -D "$set_download_dir" || true
   fi
   echo "::endgroup::"
 

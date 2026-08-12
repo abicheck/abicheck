@@ -351,9 +351,7 @@ class TestCheckScriptBehavior:
         _init_repo(repo)
         (repo / "abi").mkdir()
         content = "x" * 500 + "\n"
-        (repo / "abi" / "libfoo.abicheck.json").write_text(
-            content, encoding="utf-8"
-        )
+        (repo / "abi" / "libfoo.abicheck.json").write_text(content, encoding="utf-8")
         base_sha = _commit_all(repo, "base")
 
         # Move the protected baseline out to an unprotected path, with a
@@ -397,3 +395,35 @@ class TestCheckScriptBehavior:
         )
         assert result.returncode == 1
         assert "baselines/b.json" in result.stdout
+
+    def test_protected_path_containing_a_newline_is_still_caught(
+        self, tmp_path: Path
+    ) -> None:
+        # Regression (Codex review): ordinary newline-delimited
+        # `git diff --name-only` output C-quotes a pathname containing a
+        # control character (a literal newline here), so the matcher
+        # would previously see the quoted, escaped string
+        # ("abi/weird\\nfile.json") rather than the real path -- which
+        # never matches "abi/**" -- letting a changed protected file with
+        # this shape of name evade the check entirely. The script now
+        # uses `git diff -z` (NUL-delimited, real bytes) via a temp file
+        # instead of an env var.
+        repo = tmp_path / "repo"
+        _init_repo(repo)
+        (repo / "abi").mkdir()
+        weird_name = "abi/weird\nfile.json"
+        (repo / weird_name).write_text("old", encoding="utf-8")
+        base_sha = _commit_all(repo, "base")
+        (repo / weird_name).write_text("new", encoding="utf-8")
+        head_sha = _commit_all(repo, "change the newline-named file")
+
+        # Confirm the fixture actually exercises a real embedded newline
+        # in the tracked pathname before trusting the result below.
+        tracked = _git(repo, "ls-files")
+        assert "\\n" in tracked or "\n" in weird_name
+
+        result = self._run(
+            repo, base_sha=base_sha, head_sha=head_sha, protected_paths="abi/**"
+        )
+        assert result.returncode == 1, result.stdout + result.stderr
+        assert "weird" in result.stdout and "file.json" in result.stdout

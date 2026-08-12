@@ -55,11 +55,26 @@ def _tar_zstd_available() -> bool:
     with tempfile.TemporaryDirectory() as td:
         src = Path(td) / "f.txt"
         src.write_text("x", encoding="utf-8")
-        result = subprocess.run(
-            ["tar", "--zstd", "-cf", str(Path(td) / "f.tar.zst"), "-C", td, "f.txt"],
-            capture_output=True,
-            check=False,
-        )
+        try:
+            result = subprocess.run(
+                [
+                    "tar",
+                    "--zstd",
+                    "-cf",
+                    str(Path(td) / "f.tar.zst"),
+                    "-C",
+                    td,
+                    "f.txt",
+                ],
+                capture_output=True,
+                check=False,
+            )
+        except OSError:
+            # `tar` itself is absent (not just missing zstd support) --
+            # without this, module collection would raise here and abort
+            # the whole file instead of skipping the individual tests that
+            # actually need it (Codex review).
+            return False
         return result.returncode == 0
 
 

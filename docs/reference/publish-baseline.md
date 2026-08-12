@@ -115,7 +115,7 @@ Reusable workflow (`workflow_call`); wire it to a `release: types:
 | `build-info` | `''` | Path to a shared build/source facts pack, relative to the downloaded build-output artifact. |
 | `depth` | `''` | Evidence depth passed to every dump call. |
 | `validation` | `strict` | Forwarded to `actions/baseline`'s `validation` input. |
-| `snapshot-compression` | `none` | Forwarded to `actions/baseline`'s `snapshot-compression` input (ADR-059) — independent of this workflow's own `tar --zstd` packaging of the *whole* baseline-set directory; see [Storing Baselines](../use/baseline-storage.md#compressing-stored-snapshots). |
+| `snapshot-compression` | `none` | Forwarded to `actions/baseline`'s `snapshot-compression` input (ADR-059) — independent of this workflow's own archive packaging of the *whole* baseline-set directory (encoding chosen from `asset-name-template`'s extension, via [`actions/stage-baseline`](#actionsstage-baseline)); see [Storing Baselines](../use/baseline-storage.md#compressing-stored-snapshots). |
 
 Secret: `github-token` (optional) — falls back to the job's own
 `GITHUB_TOKEN` (`permissions: contents: write` on the `publish` job).
@@ -175,6 +175,11 @@ Outputs `asset-name` (the resolved filename) and `archive-path` (identical
 to `asset-name` — the archive is written to the current working
 directory). Read-only over its input: it never commits, pushes, or
 uploads the archive it produces.
+
+See [Storing Baselines](../use/baseline-storage.md) for the narrative
+picture of where a staged archive fits among abicheck's baseline-storage
+backends — this page documents `actions/stage-baseline` itself as a fact
+source, not the concepts around it.
 
 ## `update-main-baseline.yml`
 
