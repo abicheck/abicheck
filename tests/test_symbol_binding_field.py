@@ -81,8 +81,12 @@ class TestSerializationRoundTrip:
         assert loaded.functions[0].elf_binding == SymbolBinding.WEAK
         assert loaded.variables[0].elf_binding == SymbolBinding.WEAK
 
-    def test_missing_elf_binding_key_loads_as_none(self) -> None:
-        # Simulates an older snapshot predating this field.
+    def test_missing_elf_binding_key_backfilled_from_elf_symbols(self) -> None:
+        # Simulates an older (pre-this-field) snapshot: the per-declaration
+        # elf_binding key is absent, but the elf.symbols block that carries
+        # the same underlying fact is still present -- snapshot_from_dict
+        # must backfill from it rather than leave an already-known fact as
+        # None (Codex review).
         snap = _snapshot_with_binding(SymbolBinding.GLOBAL)
         _populate_elf_visibility(snap)
         d = snapshot_to_dict(snap)
@@ -91,8 +95,42 @@ class TestSerializationRoundTrip:
         for v in d["variables"]:
             v.pop("elf_binding", None)
         loaded = snapshot_from_dict(d)
+        assert loaded.functions[0].elf_binding == SymbolBinding.GLOBAL
+        assert loaded.variables[0].elf_binding == SymbolBinding.GLOBAL
+
+    def test_missing_elf_binding_stays_none_without_elf_metadata(self) -> None:
+        # No elf block at all (e.g. a non-ELF-format snapshot, or one
+        # genuinely missing the metadata) -- nothing to backfill from, so
+        # the ordinary missing-key default applies.
+        func = Function(name="f", mangled="_Z1fv", return_type="void")
+        snap = AbiSnapshot(library="lib.so", version="1.0", functions=[func], elf=None)
+        d = snapshot_to_dict(snap)
+        d["functions"][0].pop("elf_binding", None)
+        loaded = snapshot_from_dict(d)
         assert loaded.functions[0].elf_binding is None
-        assert loaded.variables[0].elf_binding is None
+
+    def test_missing_elf_binding_stays_none_when_no_matching_symbol(self) -> None:
+        # elf block present, but no .dynsym entry for this declaration's
+        # mangled name -- nothing to backfill from either.
+        func = Function(name="f", mangled="_Z1fv", return_type="void")
+        snap = AbiSnapshot(
+            library="lib.so", version="1.0", functions=[func], elf=ElfMetadata(symbols=[])
+        )
+        d = snapshot_to_dict(snap)
+        d["functions"][0].pop("elf_binding", None)
+        loaded = snapshot_from_dict(d)
+        assert loaded.functions[0].elf_binding is None
+
+    def test_explicit_elf_binding_is_not_overwritten_by_backfill(self) -> None:
+        # An already-serialized non-None value must be preserved untouched,
+        # never recomputed -- even if a differently-keyed elf.symbols entry
+        # would otherwise suggest something else (backfill only ever fills
+        # a None).
+        snap = _snapshot_with_binding(SymbolBinding.WEAK)
+        _populate_elf_visibility(snap)
+        d = snapshot_to_dict(snap)
+        loaded = snapshot_from_dict(d)
+        assert loaded.functions[0].elf_binding == SymbolBinding.WEAK
 
 
 class TestChangeSymbolBindingStamp:
