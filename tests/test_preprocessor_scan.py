@@ -644,16 +644,25 @@ def test_scan_engine_clang_bin_excludes_cl_style_drivers() -> None:
 # ── perf controls: dedup / parallel jobs / probe cap / disable knob ──────────
 
 
-def test_capture_macros_dedups_identical_compile_contexts(monkeypatch) -> None:
-    # Compile units sharing the same (language, cwd, flags) signature must
-    # collapse into ONE clang -E -dM probe, fanned out to every unit in the
-    # group — the fix for oneDAL's --depth build scan cost (AGENTS.md
-    # "Known gaps"): thousands of TUs sharing a build-wide flag set no
-    # longer pay one subprocess each.
+def test_capture_macros_never_dedups_by_flags_even_with_identical_context(
+    monkeypatch,
+) -> None:
+    # Codex review, fresh evidence: capture_macros must probe EVERY compile
+    # unit individually, even when many units share the exact same
+    # (language, cwd, flags) signature -- an earlier revision of this perf
+    # fix deduped by that signature and was reverted, because `clang -E
+    # -dM` reflects the TU's own source/#include chain too, not just its
+    # command line. Two units sharing identical flags here still resolve
+    # DIFFERENT NDEBUG values (as a debug-only TU #undef-ing it, or a
+    # conditionally-included config header, would in real life) -- exactly
+    # the divergence find_macro_divergence exists to catch. A dedup-by-flags
+    # implementation would collapse this to one probed value and silently
+    # hide the divergence.
     import abicheck.buildsource.build_evidence as be
     import abicheck.buildsource.preprocessor_scan as ps
 
     monkeypatch.setenv("ABICHECK_PREPROCESSOR_SCAN_JOBS", "1")
+    n = 50
     build = be.BuildEvidence(
         compile_units=[
             be.CompileUnit(
@@ -663,21 +672,28 @@ def test_capture_macros_dedups_identical_compile_contexts(monkeypatch) -> None:
                 directory="/work/build",
                 argv=["clang++", "-c", f"src/{i}.cpp", "-Iinclude", "-DNDEBUG=1"],
             )
-            for i in range(50)
+            for i in range(n)
         ]
     )
     probes = {"n": 0}
 
     def _fake_run(self, cmd, cwd, unit):
         probes["n"] += 1
-        return "#define NDEBUG 1\n"
+        # Every TU shares identical flags, but odd-numbered ones resolve a
+        # different NDEBUG value -- simulating a per-TU #include divergence
+        # a flag-based dedup could never observe.
+        idx = int(unit.rsplit("/", 1)[-1])
+        return "#define NDEBUG 1\n" if idx % 2 == 0 else "#define NDEBUG 0\n"
 
     monkeypatch.setattr(ps.ClangPreprocessorExtractor, "_run", _fake_run)
     out = ps.ClangPreprocessorExtractor().capture_macros(build)
 
-    assert probes["n"] == 1, f"expected one deduped probe, got {probes['n']}"
-    assert len(out) == 50
-    assert all(v == {"NDEBUG": "1"} for v in out.values())
+    assert probes["n"] == n, f"expected one probe per TU, got {probes['n']}"
+    assert len(out) == n
+    divergent = find_macro_divergence(out)
+    assert any(d.macro == "NDEBUG" for d in divergent), (
+        "a real per-TU macro divergence must survive, not be hidden by dedup"
+    )
 
 
 def test_capture_macros_probes_each_distinct_compile_context(monkeypatch) -> None:
@@ -734,9 +750,8 @@ def test_preprocessor_scan_jobs_env_override(monkeypatch) -> None:
 
 
 def test_capture_macros_respects_max_probes_cap(monkeypatch) -> None:
-    # A build with many DISTINCT compile contexts still bounds worst-case
-    # cost; the truncation is reported, never silent (AGENTS.md "No silent
-    # caps").
+    # A build with many compile units still bounds worst-case cost; the
+    # truncation is reported, never silent (AGENTS.md "No silent caps").
     import abicheck.buildsource.build_evidence as be
     import abicheck.buildsource.preprocessor_scan as ps
 
@@ -761,7 +776,7 @@ def test_capture_macros_respects_max_probes_cap(monkeypatch) -> None:
     ex = ps.ClangPreprocessorExtractor()
     out = ex.capture_macros(build)
 
-    assert len(out) == 3  # only the first 3 distinct contexts were probed
+    assert len(out) == 3  # only the first 3 compile units were probed
     assert ex.probes_truncated == 7
     assert any("capped at 3" in d for d in ex.diagnostics)
 
@@ -817,17 +832,17 @@ def test_capture_macros_and_header_includes_truncation_accumulates(
 
     monkeypatch.setattr(ps.ClangPreprocessorExtractor, "_run", _fake_run)
     ex = ps.ClangPreprocessorExtractor()
-    ex.capture_macros(build)  # 5 distinct contexts, cap 2 -> truncates 3
+    ex.capture_macros(build)  # 5 compile units, cap 2 -> truncates 3
     ex.capture_header_includes([f"h{i}.h" for i in range(5)], [])  # truncates 3 more
 
     assert ex.probes_truncated == 6
 
 
 def test_coverage_downgrades_to_partial_when_probes_truncated(monkeypatch) -> None:
-    # Codex review: a capped scan never inspected some distinct compile
-    # contexts / public headers at all -- their macro values/divergences/
-    # leaks are genuinely unknown, not absent, so the coverage row must not
-    # read as a clean PRESENT even when every ATTEMPTED probe succeeded.
+    # Codex review: a capped scan never inspected some compile units /
+    # public headers at all -- their macro values/divergences/leaks are
+    # genuinely unknown, not absent, so the coverage row must not read as a
+    # clean PRESENT even when every ATTEMPTED probe succeeded.
     from abicheck.buildsource import build_evidence as be, preprocessor_scan as ps
 
     monkeypatch.setenv("ABICHECK_PREPROCESSOR_SCAN_JOBS", "1")
@@ -855,19 +870,19 @@ def test_coverage_downgrades_to_partial_when_probes_truncated(monkeypatch) -> No
     assert result.attempted == result.succeeded  # every attempted probe "succeeded"
     cov = result.coverage()
     assert cov.status.value == "partial"
-    assert "compile-context probe(s) skipped" in cov.detail
+    assert "skipped (ABICHECK_PREPROCESSOR_SCAN_MAX_PROBES)" in cov.detail
     # Must not misreport a failed-run count that never happened.
     assert "0 clang run(s) failed" not in cov.detail
 
 
-def test_capture_macros_dedup_key_preserves_source_looking_flag_operand(
+def test_capture_macros_probes_per_tu_even_with_source_looking_flag_operand(
     monkeypatch,
 ) -> None:
-    # Codex review: a flag operand that happens to end in a source extension
-    # (e.g. `-include config_a.c`) must survive into the dedup signature --
-    # only the TU's OWN source token is stripped. Two units differing only in
-    # that operand are genuinely different compile contexts and must not be
-    # merged (which would silently hide a real per-TU macro divergence).
+    # Two units sharing everything but a flag operand that happens to end in
+    # a source extension (e.g. `-include config_a.c`) must each still get
+    # their own probe -- unsurprising now that capture_macros never dedups
+    # at all, but pinned as a regression guard against a future dedup
+    # attempt reintroducing exactly this collision.
     import abicheck.buildsource.build_evidence as be
     import abicheck.buildsource.preprocessor_scan as ps
 
@@ -897,63 +912,9 @@ def test_capture_macros_dedup_key_preserves_source_looking_flag_operand(
     monkeypatch.setattr(ps.ClangPreprocessorExtractor, "_run", _fake_run)
     out = ps.ClangPreprocessorExtractor().capture_macros(build)
 
-    assert len(seen_cmds) == 2  # NOT deduped into one probe
+    assert len(seen_cmds) == 2
     assert out["cu://a"] == {"NDEBUG": "1"}
     assert out["cu://b"] == {"NDEBUG": "0"}
-
-
-def test_capture_macros_dedups_compile_db_shape_absolute_source_relative_argv(
-    monkeypatch,
-) -> None:
-    # Codex review: CompileDbAdapter resolves CompileUnit.source to an
-    # ABSOLUTE path (CompileEntry.from_dict joins a relative "file" onto
-    # "directory") while argv keeps the compile database's own, still
-    # RELATIVE spelling -- the real-world shape a compile_commands.json
-    # produces, not a synthetic edge case. A bare string-equality filter
-    # would strip nothing here and silently fall back to one probe per TU.
-    import abicheck.buildsource.build_evidence as be
-    import abicheck.buildsource.preprocessor_scan as ps
-
-    monkeypatch.setenv("ABICHECK_PREPROCESSOR_SCAN_JOBS", "1")
-    build = be.BuildEvidence(
-        compile_units=[
-            be.CompileUnit(
-                id=f"cu://{i}",
-                source=f"/work/build/src/{i}.cpp",  # absolute, like CompileDbAdapter
-                directory="/work/build",
-                language="CXX",
-                argv=["clang++", "-c", f"src/{i}.cpp", "-DNDEBUG=1"],  # relative
-            )
-            for i in range(10)
-        ]
-    )
-    probes = {"n": 0}
-
-    def _fake_run(self, cmd, cwd, unit):
-        probes["n"] += 1
-        return "#define NDEBUG 1\n"
-
-    monkeypatch.setattr(ps.ClangPreprocessorExtractor, "_run", _fake_run)
-    out = ps.ClangPreprocessorExtractor().capture_macros(build)
-
-    assert probes["n"] == 1, f"expected one deduped probe, got {probes['n']}"
-    assert len(out) == 10
-
-
-def test_normalize_source_path() -> None:
-    from abicheck.buildsource.preprocessor_scan import _normalize_source_path
-
-    assert _normalize_source_path("", "/work/build") == ""
-    # Relative path joined onto directory, then normalized.
-    assert _normalize_source_path("src/a.cpp", "/work/build") == "/work/build/src/a.cpp"
-    # Already-absolute path: directory is ignored by os.path.join, just
-    # normpath'd.
-    assert (
-        _normalize_source_path("/work/build/src/a.cpp", "/elsewhere")
-        == "/work/build/src/a.cpp"
-    )
-    # No directory: bare normpath.
-    assert _normalize_source_path("src/./a.cpp", None) == "src/a.cpp"
 
 
 def test_preprocessor_scan_version_bumped_for_probes_truncated() -> None:

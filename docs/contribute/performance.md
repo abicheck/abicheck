@@ -487,42 +487,55 @@ ABI-macro-value capture (`clang -E -dM`) and public-header-leak detection
 real-world build it dominated `scan --depth build`'s wall time: a reported
 4-minute-to-20-minute jump on a library with ~2000 translation units, ~920s
 spent in this tier alone — one *serial* `clang -E -dM` invocation per compile
-unit, with no cap and no dedup, even though L3 ingestion itself (`bazel
-aquery`) cost only single-digit seconds.
+unit, with no cap, even though L3 ingestion itself (`bazel aquery`) cost only
+single-digit seconds.
 
-Two fixes, both semantics-preserving for the ABI-macro-value/leak facts this
-tier reports:
+**Parallel probing**, semantics-preserving for the ABI-macro-value/leak facts
+this tier reports: each probe is one I/O-bound `clang -E`/`-M` subprocess
+wait — unlike L4's AST parse, it is not GIL- or RAM-heavy — so probes run
+concurrently via a thread pool, one probe per compile unit / public header
+(unchanged from before this fix).
 
-- **Dedup by compile context.** The curated ABI-macro list
-  (`_GLIBCXX_USE_CXX11_ABI`, `NDEBUG`, `_ITERATOR_DEBUG_LEVEL`, …) is almost
-  always driven by command-line/predefined macros (`-D`/`-std`/`--target`/…),
-  not by a TU's own source text, so `capture_macros` now probes each
-  **distinct (language, cwd, flag-set) signature once** and fans the result
-  out to every compile unit sharing it — a build with thousands of TUs
-  sharing a handful of distinct compile contexts pays a handful of probes,
-  not thousands. (Accepted approximation, same class as this tier's other
-  advisory-only tradeoffs: a TU that `#define`s one of the curated macros
-  itself, overriding its own command-line value, is invisible to this dedup.)
-- **Parallel probing.** Each probe is one I/O-bound `clang -E`/`-M` subprocess
-  wait — unlike L4's AST parse, it is not GIL- or RAM-heavy — so probes run
-  concurrently via a thread pool.
+**Deliberately NOT deduped by compile context.** An earlier revision of this
+fix probed once per distinct `(language, cwd, flags)` signature and fanned
+the result out to every compile unit sharing it, on the premise that the
+curated ABI-macro list (`_GLIBCXX_USE_CXX11_ABI`, `NDEBUG`,
+`_ITERATOR_DEBUG_LEVEL`, …) is almost always driven by command-line/
+predefined macros, not by a TU's own source text. Reverted (Codex review,
+fresh evidence): `clang -E -dM` reflects the TU's own source and `#include`
+chain too — two TUs sharing identical flags can legitimately resolve a
+curated macro differently (a debug-only TU `#undef`-ing `NDEBUG`, a
+conditionally-included config header) — and that is *exactly* the shape of
+bug `find_macro_divergence` exists to catch. Flag-based dedup would silently
+fan the first such TU's value out over the rest, hiding a real divergence
+rather than merely under-covering a rare case — a detection regression in
+the tier's own core purpose, worse than the perf win it bought. See this
+repo's "known gaps over risky reactive patches" convention (root
+`AGENTS.md`).
 
 Knobs (`abicheck/buildsource/preprocessor_scan.py`), mirroring the L4
 conventions above:
 
 - **`ABICHECK_PREPROCESSOR_SCAN_JOBS`** — worker count for the probe pool.
-  Auto = one worker per distinct probe, capped by the same
+  Auto = one worker per compile unit / public header, capped by the same
   `max(8, 2×cpu_count)` ceiling L4 uses. Set `=1` to force serial
   (determinism).
 - **`ABICHECK_PREPROCESSOR_SCAN_MAX_PROBES`** (default 512) — caps the number
-  of *distinct* compile-context probes attempted, bounding worst-case cost on
-  a build with an unusually large number of distinct contexts. Truncation is
-  reported in the scan's diagnostics and folded into the S2 coverage row's
-  detail — never silent (this file's "no silent caps" convention).
+  of compile units / public headers probed, bounding worst-case cost on a
+  build with an unusually large number of either. Truncation is reported in
+  the scan's diagnostics and folds the coverage row down to `partial` (never
+  silent — this file's "no silent caps" convention).
 - **`ABICHECK_PREPROCESSOR_SCAN`** (default on) — set `=0` to skip the S2
   tier entirely while keeping L3 for the other tiers. Reported as an honest
   `not_collected` coverage row, the same as a missing compile DB or missing
   `clang` — never silently counted as clean.
+
+The remaining, undeduped cost (~920s serial → roughly that divided by the
+worker count, parallel) is a real, unavoidable floor for this tier's design:
+every compile unit's macro-affecting `#include` chain can only be observed by
+actually running the preprocessor over it. A caller that wants the D2
+coverage row without this cost has the disable knob above; there is no
+"fast and still divergence-complete" third option.
 
 ### Why not precompiled headers (PCH) / modules?
 

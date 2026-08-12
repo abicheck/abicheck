@@ -70,7 +70,7 @@ _ProbeItem = TypeVar("_ProbeItem")
 #: schema version (see ``buildsource/CLAUDE.md`` "Versioning").
 #: 1 — initial shape.
 #: 2 — added the additive ``probes_truncated`` int (perf controls above):
-#:     distinct compile-context probes / public headers skipped by the
+#:     compile units / public headers skipped by the
 #:     ``ABICHECK_PREPROCESSOR_SCAN_MAX_PROBES`` cap. ``0`` (the default,
 #:     same as an unset field) when nothing was truncated, so an ordinary
 #:     scan's payload is unchanged from version 1 (Codex review).
@@ -79,42 +79,42 @@ PREPROCESSOR_SCAN_VERSION: int = 2
 
 # ---------------------------------------------------------------------------
 # perf controls (P0 follow-up — see AGENTS.md "Known gaps": oneDAL --depth
-# build scan time 4m -> 20m, almost entirely this module's serial, un-deduped
-# per-TU ``clang -E -dM`` fan-out)
+# build scan time 4m -> 20m, almost entirely this module's serial per-TU
+# ``clang -E -dM`` fan-out)
 # ---------------------------------------------------------------------------
 #
-# Two independent, additive optimizations, both semantics-preserving for the
-# ABI-macro-value/leak facts this module reports:
-#
-# 1. **Dedup by compile context.** The curated ABI-macro list
-#    (``_ABI_MACRO_NAMES``) is overwhelmingly command-line/predefined —
-#    driven by ``-D``/``-std``/``--target``/... flags, not by a TU's own
-#    source text — so two compile units sharing the identical (language, cwd,
-#    flag-set) signature produce the identical ``-dM`` dump for those macros.
-#    ``capture_macros`` therefore probes each distinct signature **once** and
-#    fans the result out to every compile unit sharing it, rather than
-#    invoking clang per TU. This is the "scope to changed/representative
-#    TUs" fix: on a real build, thousands of TUs collapse to a handful of
-#    distinct compile contexts. (Accepted approximation: a TU that
-#    ``#define``s one of the curated macros itself, overriding its own
-#    command-line/predefined value, is invisible to this dedup — the same
-#    class of approximation this module's docstring already accepts for the
-#    D2 tier being advisory-only.)
-# 2. **Parallel probing.** Each probe is one ``clang -E -dM``/``-M``
+# 1. **Parallel probing.** Each probe is one ``clang -E -dM``/``-M``
 #    subprocess wait — I/O-bound, not CPU/RAM-heavy like L4's AST parse — so
 #    probes run concurrently via a thread pool, sized by
 #    :func:`_preprocessor_scan_jobs` (env-tunable, mirrors
-#    ``source_replay.py``'s ``ABICHECK_L4_JOBS`` convention).
+#    ``source_replay.py``'s ``ABICHECK_L4_JOBS`` convention). Semantics-
+#    preserving: every compile unit is still individually probed, so a real
+#    per-TU macro divergence is still detected exactly as before.
+# 2. **A cap on probe count** (``ABICHECK_PREPROCESSOR_SCAN_MAX_PROBES``) so
+#    a build with an unusually large number of compile units still bounds
+#    worst-case cost; any truncation is reported in ``diagnostics`` rather
+#    than silently dropped (AGENTS.md "No silent caps").
+# 3. **A disable knob** (``ABICHECK_PREPROCESSOR_SCAN=0``) for a caller that
+#    wants to keep L3 but skip this advisory-only, compiler-shelling-out
+#    tier entirely — reported as a normal ``ran=False``/``skipped_reason``
+#    coverage row, same as "no compile units"/"no clang" (never silently
+#    counted clean).
 #
-# A third, explicit control caps the number of *distinct* probes attempted
-# (``ABICHECK_PREPROCESSOR_SCAN_MAX_PROBES``) so a build with an unusually
-# large number of distinct compile contexts still bounds worst-case cost;
-# any truncation is reported in ``diagnostics`` rather than silently
-# dropped (AGENTS.md "No silent caps"). A fourth control disables the S2
-# tier outright (``ABICHECK_PREPROCESSOR_SCAN=0``) for a caller that wants
-# to keep L3 but skip this advisory-only, compiler-shelling-out tier
-# entirely — reported as a normal ``ran=False``/``skipped_reason`` coverage
-# row, same as "no compile units"/"no clang" (never silently counted clean).
+# **Deliberately NOT deduped by compile context.** An earlier revision of
+# this fix probed once per distinct (language, cwd, flags) signature and
+# fanned the result out to every compile unit sharing it, on the premise
+# that the curated ABI-macro list (``_ABI_MACRO_NAMES``) is overwhelmingly
+# command-line/predefined. Reverted (Codex review, fresh evidence): ``clang
+# -E -dM`` reflects the TU's own source and ``#include`` chain too, not just
+# its command line — two TUs sharing identical flags can legitimately
+# diverge there (a debug-only TU ``#undef``-ing ``NDEBUG``, a conditionally-
+# included config header) — and that is *exactly* the shape of bug
+# :func:`find_macro_divergence` exists to catch. Flag-based dedup would
+# silently fan the first such TU's value out over the rest, hiding a real
+# divergence rather than merely under-covering a rare case — a detection
+# regression in the tier's own core purpose, worse than the perf win it
+# bought. See the "known gaps over risky reactive patches" convention this
+# repo already applies elsewhere (root ``AGENTS.md``).
 
 
 def preprocessor_scan_enabled() -> bool:
@@ -397,9 +397,9 @@ class PreprocessorScanResult:
     skipped_reason: str = ""
     tus_scanned: int = 0
     headers_scanned: int = 0
-    attempted: int = 0  # total clang -E invocations attempted (post-dedup)
+    attempted: int = 0  # total clang -E invocations attempted
     succeeded: int = 0  # invocations that returned usable output
-    probes_truncated: int = 0  # distinct compile-context probes skipped (cap)
+    probes_truncated: int = 0  # compile units / public headers skipped (cap)
     diagnostics: list[str] = field(default_factory=list)
     abi_macros: dict[str, dict[str, str]] = field(
         default_factory=dict
@@ -443,7 +443,7 @@ class PreprocessorScanResult:
         if self.attempted and self.succeeded < self.attempted:
             status = CoverageStatus.PARTIAL
         if self.probes_truncated:
-            # A capped scan never inspected some distinct compile contexts
+            # A capped scan never inspected some compile units
             # (capture_macros) or public headers (capture_header_includes) at
             # all -- their macro values/divergences/leaks are unknown, not
             # absent, so this is not a clean PRESENT row (Codex review).
@@ -457,7 +457,7 @@ class PreprocessorScanResult:
             detail += f"; {self.attempted - self.succeeded} clang run(s) failed"
         if self.probes_truncated:
             detail += (
-                f"; {self.probes_truncated} distinct compile-context probe(s) "
+                f"; {self.probes_truncated} compile unit(s)/header(s) "
                 "skipped (ABICHECK_PREPROCESSOR_SCAN_MAX_PROBES)"
             )
         return LayerCoverage(
@@ -585,21 +585,42 @@ class ClangPreprocessorExtractor:
     def capture_macros(self, build: BuildEvidence) -> dict[str, dict[str, str]]:
         """Return ``{compile_unit_id: {abi_macro: value}}`` via ``clang -E -dM``.
 
-        Probes are **deduplicated by compile context** (language, cwd, flag
-        set) and run **in parallel** — see the module-level "perf controls"
-        docstring above for why this is safe for the curated ABI-macro list.
-        One probe's result is fanned out to every compile unit sharing its
-        signature.
+        Probes run **in parallel** (see the module-level "perf controls"
+        docstring above), one per compile unit — **not** deduplicated by
+        compile context. An earlier revision of this fix probed once per
+        distinct (language, cwd, flags) signature and fanned the result out
+        to every unit sharing it; reverted (Codex review, fresh evidence):
+        ``clang -E -dM`` reflects not just command-line/predefined macros
+        but whatever the TU's own source and its ``#include`` chain define,
+        and two TUs sharing identical flags can legitimately diverge there
+        (a debug-only TU ``#undef``-ing ``NDEBUG``, a conditionally-included
+        config header). That is *exactly* the shape of bug
+        ``find_macro_divergence`` exists to catch — flag-based dedup would
+        silently fan the FIRST such TU's value out over the rest, hiding a
+        real divergence rather than merely under-covering a rare case. A
+        detection regression in the tier's own core purpose is worse than
+        the perf win, so this stays one probe per TU; parallelism (below)
+        and the cap/disable knobs are the safe wins that remain.
         """
         from .include_graph import _lang_flag, depfile_args_from_argv
         from .source_extractors._argv import unredact_home
 
-        groups: dict[tuple[Any, ...], list[CompileUnit]] = {}
-        commands: dict[tuple[Any, ...], tuple[list[str], str | None, str]] = {}
-        order: list[tuple[Any, ...]] = []
-        for cu in build.compile_units:
-            if not cu.source:
-                continue
+        units: list[CompileUnit] = [cu for cu in build.compile_units if cu.source]
+
+        max_probes = _preprocessor_scan_max_probes()
+        if len(units) > max_probes:
+            truncated = len(units) - max_probes
+            self.probes_truncated += truncated
+            units = units[:max_probes]
+            self.diagnostics.append(
+                f"preprocessor macro scan capped at {max_probes} compile "
+                f"unit(s); {truncated} skipped "
+                "(set ABICHECK_PREPROCESSOR_SCAN_MAX_PROBES to raise)"
+            )
+
+        def _probe(cu: CompileUnit) -> tuple[CompileUnit, str | None]:
+            if self.deadline_exhausted:
+                return cu, None
             argv = (
                 depfile_args_from_argv(cu.argv, directory=cu.directory)
                 if cu.argv
@@ -607,57 +628,22 @@ class ClangPreprocessorExtractor:
             )
             if not argv:
                 argv = [cu.source]
-            argv = [unredact_home(a) for a in argv]
+            cmd = [
+                self.clang_bin,
+                "-E",
+                "-dM",
+                *_lang_flag(cu.language),
+                *(unredact_home(a) for a in argv),
+            ]
             cwd = unredact_home(cu.directory) if cu.directory else None
-            # Strip only the TU's OWN source token, not every source-looking
-            # one (unlike _context_flags, built for the header-context path
-            # where the whole argv is flags-only). A flag operand that
-            # happens to end in a source extension -- e.g. ``-include
-            # config_a.c`` -- must survive into the signature: two units
-            # differing only in that operand are NOT the same compile
-            # context and must not be dedup-merged (Codex review). Matched
-            # via _normalize_source_path, not bare equality: CompileUnit.source
-            # is commonly already absolute while the matching argv token is
-            # still directory-relative, and a bare-string mismatch there
-            # would strip nothing -- silently falling back to one probe per
-            # TU (Codex review, see that helper's docstring).
-            source_norm = _normalize_source_path(unredact_home(cu.source), cwd)
-            sig = (
-                cu.language,
-                cwd,
-                tuple(a for a in argv if _normalize_source_path(a, cwd) != source_norm),
-            )
-            groups.setdefault(sig, []).append(cu)
-            if sig not in commands:
-                order.append(sig)
-                cmd = [self.clang_bin, "-E", "-dM", *_lang_flag(cu.language), *argv]
-                commands[sig] = (cmd, cwd, cu.id)
-
-        max_probes = _preprocessor_scan_max_probes()
-        if len(order) > max_probes:
-            truncated = len(order) - max_probes
-            self.probes_truncated += truncated
-            order = order[:max_probes]
-            self.diagnostics.append(
-                f"preprocessor macro scan capped at {max_probes} distinct "
-                f"compile context(s); {truncated} skipped "
-                "(set ABICHECK_PREPROCESSOR_SCAN_MAX_PROBES to raise)"
-            )
-
-        def _probe(sig: tuple[Any, ...]) -> tuple[tuple[Any, ...], str | None]:
-            if self.deadline_exhausted:
-                return sig, None
-            cmd, cwd, label = commands[sig]
-            return sig, self._run(cmd, cwd, label)
+            return cu, self._run(cmd, cwd, cu.id)
 
         out: dict[str, dict[str, str]] = {}
-        for sig, text in self._run_probes(order, _probe):
+        for cu, text in self._run_probes(units, _probe):
             if text is None:
                 continue
             abi = select_abi_macros(parse_defined_macros(text))
-            if not abi:
-                continue
-            for cu in groups[sig]:
+            if abi:
                 out[cu.id] = abi
         return out
 
@@ -830,28 +816,6 @@ def _context_flags(args: list[str]) -> list[str]:
     context reused to preprocess each public header on its own.
     """
     return [a for a in args if not a.lower().endswith(_SOURCE_EXTS)]
-
-
-def _normalize_source_path(path: str, directory: str | None) -> str:
-    """Best-effort absolute, normalized form of *path* for TU-source matching.
-
-    A compile-DB-sourced ``CompileUnit.source`` is commonly already resolved
-    to an absolute path, while the matching argv token is whatever spelling
-    the build recorded verbatim -- often still relative to the TU's own
-    ``directory``. Comparing the two by bare string equality then strips
-    nothing, silently degrading the ``capture_macros`` dedup back to one
-    probe per TU (Codex review). Joining a relative *path* onto *directory*
-    (matching how a real compiler resolves it) before ``normpath``-ing both
-    sides makes the common shapes ("directory"-relative argv token vs.
-    already-absolute ``source``) compare equal again. Falls back to a bare
-    ``normpath`` when *directory* is unavailable or *path* is already
-    absolute -- ``os.path.join`` with an absolute second argument already
-    discards the first, so this is safe either way.
-    """
-    if not path:
-        return path
-    joined = os.path.join(directory, path) if directory else path
-    return os.path.normpath(joined)
 
 
 def run_preprocessor_scan(
