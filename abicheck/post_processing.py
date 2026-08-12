@@ -1479,12 +1479,6 @@ DEFAULT_PIPELINE = PostProcessingPipeline(
         # resolved C-header surface (ctx.surf_new) and defer to it; otherwise it
         # uses the recovered Python API as the extension's public-contract oracle.
         DemoteOffPythonSurface(),
-        # ADR-044 D1: must run before ApplySuppression so a broad suppression
-        # rule can see whether the change it is about to remove is part of the
-        # effective public ABI.
-        MarkReachability(),
-        ApplySuppression(),
-        SuppressRenamedPairs(),
         # Reads markers TYPE_VTABLE_CHANGED set at emission time (diff_types.py)
         # to cross-reference a LAYOUT_UNVERIFIABLE finding covering the identical
         # evidence gap via Change.correlated_change_kind. Never removes anything
@@ -1492,8 +1486,27 @@ DEFAULT_PIPELINE = PostProcessingPipeline(
         # removal-based design was unsafe), so its position relative to
         # scoping/suppression/FilterRedundant is not load-bearing the way a
         # filtering step's would be -- kept here simply to run once both
-        # findings are guaranteed to exist in `changes`.
+        # findings are guaranteed to exist in `changes` (i.e. after scoping
+        # has settled which findings are even still present).
+        #
+        # Must run *before* MarkReachability, though (Codex review, fresh
+        # evidence): that step caches each tagged change's whole
+        # ImpactAssessment via impact.engine.assess_change(), and
+        # assess_change() itself prefers a cached assessment's own
+        # correlated_change_kind over the flat Change field once one exists
+        # (impact/engine.py's own documented contract for reusing a cached
+        # assessment). Running this step after MarkReachability would let it
+        # set the flat field on a change whose impact_assessment was already
+        # cached with correlated_change_kind=None -- silently stale for every
+        # consumer of that unified object (JSON/SARIF's impact_assessment
+        # block) even though the flat top-level field is correct.
         AnnotateLayoutUnverifiableCoveredByVtableChanged(),
+        # ADR-044 D1: must run before ApplySuppression so a broad suppression
+        # rule can see whether the change it is about to remove is part of the
+        # effective public ABI.
+        MarkReachability(),
+        ApplySuppression(),
+        SuppressRenamedPairs(),
         FilterRedundant(),
         EnrichAffectedSymbols(),
         AttributeStdlibEmbedding(),

@@ -838,6 +838,17 @@ def _add_correlation_property(tc: ET.Element, change: Change) -> None:
     only ever sees the first match (Codex review, fresh evidence: this
     silently dropped the correlation whenever contract evaluation had
     already stamped the same testcase).
+
+    When creating a fresh ``<properties>`` element (none already present),
+    it is inserted as *tc*'s first child rather than appended at the end.
+    For a *secondary* same-symbol change (``_append_extra_failures``), the
+    primary change's own ``<failure>`` child may already be present on
+    *tc* by the time this runs -- appending here would then produce
+    ``<testcase><failure/><properties/></testcase>``, which schema-
+    validating JUnit consumers reject or ignore, since the JUnit XSD
+    requires ``<properties>`` (if present) before any
+    ``<failure>``/``<error>``/``<skipped>`` result element (Codex review,
+    fresh evidence).
     """
     if not change.correlated_change_kind:
         return
@@ -848,7 +859,11 @@ def _add_correlation_property(tc: ET.Element, change: Change) -> None:
     # only ever sees the first such element (Codex review).
     props = tc.find("properties")
     if props is None:
-        props = ET.SubElement(tc, "properties")
+        # tc.insert(0, ...), not ET.SubElement (which would append after any
+        # <failure> a primary change already added) -- see this function's
+        # own docstring for why ordering matters here.
+        props = ET.Element("properties")
+        tc.insert(0, props)
     p = ET.SubElement(props, "property")
     p.set("name", "abicheck.correlated_change_kind")
     p.set("value", change.correlated_change_kind)

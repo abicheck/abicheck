@@ -1146,3 +1146,59 @@ class TestLayoutUnverifiableCorrelatedWithVtableChanged:
         out_of_surface_kinds = {c.kind for c in result.out_of_surface_changes}
         assert ChangeKind.TYPE_VTABLE_CHANGED in out_of_surface_kinds
         assert ChangeKind.LAYOUT_UNVERIFIABLE in out_of_surface_kinds
+
+    def test_correlation_reaches_cached_impact_assessment(self) -> None:
+        """Codex review, fresh evidence: when a configured suppression
+        requires reachability evidence, MarkReachability caches each tagged
+        change's whole ImpactAssessment via impact.engine.assess_change() --
+        and assess_change() prefers a cached assessment's own
+        correlated_change_kind over the flat Change field once one exists.
+        The annotation step must therefore run *before* MarkReachability, or
+        JSON/SARIF's unified impact_assessment block would silently omit the
+        correlation the flat top-level field still carries correctly."""
+        from abicheck.suppression import Suppression, SuppressionList
+
+        old = _snap(
+            types=[
+                RecordType(
+                    name="Foo",
+                    kind="class",
+                    vtable=[],
+                    size_bits=None,
+                )
+            ]
+        )
+        new = _snap(
+            types=[
+                RecordType(
+                    name="Foo",
+                    kind="class",
+                    vtable=["_ZN3Foo1fEv"],
+                    size_bits=None,
+                    base_offsets={"Base": 0},
+                )
+            ]
+        )
+        # A broad selector forces SuppressionList.needs_reachability_evidence()
+        # to True, which is what makes MarkReachability actually run (and
+        # cache impact_assessment) instead of early-returning.
+        suppression = SuppressionList(
+            [
+                Suppression(
+                    namespace="unrelated::*",
+                    reason="unrelated rule, present only to force reachability evidence",
+                )
+            ]
+        )
+        result = compare(old, new, suppression=suppression)
+        layout_change = next(
+            c for c in result.changes if c.kind == ChangeKind.LAYOUT_UNVERIFIABLE
+        )
+        assert (
+            layout_change.correlated_change_kind == ChangeKind.TYPE_VTABLE_CHANGED.value
+        )
+        assert layout_change.impact_assessment is not None
+        assert (
+            layout_change.impact_assessment.correlated_change_kind
+            == ChangeKind.TYPE_VTABLE_CHANGED.value
+        )

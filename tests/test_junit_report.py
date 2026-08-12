@@ -1863,6 +1863,15 @@ class TestContractEvaluationProperties:
         # recorded -- the property write and the <failure> decision are
         # independent.
         assert tc.find("failure") is not None  # the primary (vtable) failure
+        # Codex review, fresh evidence: the primary (vtable) change's own
+        # <failure> is appended to *tc* before this secondary change's
+        # <properties> block is created (_emit_testcases runs before
+        # _append_extra_failures) -- schema-validating JUnit consumers
+        # expect <properties>, if present, before any <failure>/<error>/
+        # <skipped> result element, so the new block must be inserted first
+        # rather than appended after the existing failure.
+        child_tags = [child.tag for child in tc]
+        assert child_tags.index("properties") < child_tags.index("failure")
 
     def test_stamped_finding_without_optional_fields_omits_them(self) -> None:
         # contract_reason_code/contract_assurance/contract_evidence_refs are
