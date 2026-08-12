@@ -41,19 +41,6 @@ _tar_zstd_works() {
   return "$ok"
 }
 
-# Portable-ish realpath -- GNU coreutils' realpath is the common case, but
-# not guaranteed present on every runner; python3's os.path.realpath is an
-# equivalent fallback (Codex review, staging-directory-containment fix
-# below needs a real, symlink-resolved comparison, not a textual prefix
-# match on the possibly-relative input paths).
-_realpath() {
-  if command -v realpath >/dev/null 2>&1; then
-    realpath "$1"
-  else
-    python3 -c 'import os, sys; print(os.path.realpath(sys.argv[1]))' "$1"
-  fi
-}
-
 if [[ -z "${BASELINE_PATH:-}" ]]; then
   echo "::error::baseline-path is required." >&2
   exit 1
@@ -90,7 +77,6 @@ if [[ -n "$_source_symlinks" ]]; then
   echo "::error::baseline-path '$BASELINE_PATH' contains a symlink, which is not supported -- baseline-set archives must contain only plain files/directories (the same structural rule actions/resolve-baseline and the root Action's baseline-set fallback both enforce on extraction). Symlinks found:"$'\n'"$_source_symlinks" >&2
   exit 1
 fi
-_baseline_path_real="$(_realpath "$BASELINE_PATH")"
 
 # NOTE: the default is intentionally NOT embedded as
 # "${ASSET_NAME_TEMPLATE:-abicheck-baseline-{profile}.tar.zst}" -- bash's
@@ -159,31 +145,43 @@ esac
 # claim -- `mktemp -d` honors `$TMPDIR`, and a self-hosted runner (or a
 # caller) can set `TMPDIR` to a path under baseline-path, or baseline-path
 # itself could BE `$TMPDIR` (Codex review). Verified explicitly instead of
-# assumed: resolve both to real (symlink-free) paths and check the staging
-# directory is neither baseline-path itself nor nested inside it. On a
-# collision, retry once against a location that deliberately ignores
-# `$TMPDIR` (plain `/tmp`) -- the one caller-configurable variable that
-# could have caused it -- before giving up with an actionable error rather
-# than silently proceeding into the exact self-inclusion bug this staging
-# scheme exists to prevent.
+# assumed -- but NOT via a `realpath`-based STRING comparison (a first
+# version of this fix tried that and a real windows-latest CI run caught
+# it failing to detect an actual collision: `$BASELINE_PATH` arrives from
+# the caller as a Windows-style backslash path, while `mktemp`'s own
+# output is POSIX-style, and Git Bash/MSYS's `realpath`/Python's
+# os.path.realpath do not reliably normalize the two to an identically
+# comparable form -- a real, not hypothetical, cross-platform gap). A
+# filesystem-IDENTITY check sidesteps path-string representation entirely:
+# drop a marker file in the candidate staging directory, then ask `find`
+# -- the SAME traversal mechanism `tar -C "$BASELINE_PATH" .` itself
+# uses -- whether that marker is reachable from baseline-path at all. Two
+# paths naming the same inode always agree regardless of which string
+# form either one is spelled in. On a collision, retry once against a
+# location that deliberately ignores `$TMPDIR` (plain `/tmp`) -- the one
+# caller-configurable variable that could have caused it -- before giving
+# up with an actionable error rather than silently proceeding into the
+# exact self-inclusion bug this staging scheme exists to prevent.
+_staging_dir_escapes_baseline() {
+  local candidate="$1" marker found
+  marker="$candidate/.stage-baseline-marker"
+  : > "$marker"
+  found="$(find "$BASELINE_PATH" -samefile "$marker" 2>/dev/null)"
+  rm -f "$marker"
+  [[ -z "$found" ]]
+}
 _make_staging_dir() {
-  local candidate candidate_real
+  local candidate
   candidate="$(mktemp -d)"
-  candidate_real="$(_realpath "$candidate")"
-  case "$candidate_real" in
-    "$_baseline_path_real" | "$_baseline_path_real"/*)
+  if ! _staging_dir_escapes_baseline "$candidate"; then
+    rm -rf "$candidate"
+    candidate="$(TMPDIR=/tmp mktemp -d)"
+    if ! _staging_dir_escapes_baseline "$candidate"; then
       rm -rf "$candidate"
-      candidate="$(TMPDIR=/tmp mktemp -d)"
-      candidate_real="$(_realpath "$candidate")"
-      case "$candidate_real" in
-        "$_baseline_path_real" | "$_baseline_path_real"/*)
-          rm -rf "$candidate"
-          echo "::error::could not create a staging directory outside baseline-path '$BASELINE_PATH' -- both \$TMPDIR-derived and plain /tmp-derived locations resolve inside it. Set TMPDIR to a location disjoint from baseline-path, or move baseline-path itself out from under /tmp." >&2
-          return 1
-          ;;
-      esac
-      ;;
-  esac
+      echo "::error::could not create a staging directory outside baseline-path '$BASELINE_PATH' -- both \$TMPDIR-derived and plain /tmp-derived locations resolve inside it. Set TMPDIR to a location disjoint from baseline-path, or move baseline-path itself out from under /tmp." >&2
+      return 1
+    fi
+  fi
   printf '%s\n' "$candidate"
 }
 _staging_dir="$(_make_staging_dir)" || exit 1
