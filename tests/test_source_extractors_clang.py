@@ -831,6 +831,82 @@ class TestSyclHostOnlyGatedOnInvokedBinary:
 
         assert clang_mod._needs_sycl_host_only is dumper_clang._needs_sycl_host_only
 
+    @pytest.mark.slow
+    def test_property_intel_only_sycl_pass_flags_never_reach_a_non_intel_invoked_binary(
+        self,
+    ) -> None:
+        """The STRUCTURAL invariant behind the whole matrix above, checked
+        generatively rather than against a fixed list of examples: for ANY
+        invoked binary name and ANY compile unit (recorded argv[0], SYCL
+        flags, pinning), neither ``-fsycl-host-only`` nor
+        ``-fsycl-device-only`` may appear in the built command unless the
+        binary genuinely invoked understands them -- whether abicheck would
+        have appended one itself, or the real build's own recorded argv/
+        abi_relevant_flags already carried one through. That second path is
+        not hypothetical: this exact property test, run against an earlier
+        revision of this fix that only closed the insertion side, found it
+        (a real build recorded as ``icpx -fsycl-host-only``, replayed
+        against a plain ``clang`` invocation, reproduced "unknown
+        argument"). Also fuzzes casing/``.exe`` suffixes and random
+        recorded-argv0/flag noise, so a future regression shaped differently
+        from any single hand-picked example still falls out of this
+        property rather than needing its own new example test."""
+        from hypothesis import given, settings, strategies as st
+
+        driver_stem = st.sampled_from(
+            [
+                "icx",
+                "icpx",
+                "dpcpp",
+                "dpcpp-cl",
+                "clang",
+                "clang++",
+                "clang-cl",
+                "gcc",
+                "g++",
+                "cl",
+            ]
+        )
+        binary_name = st.builds(
+            lambda stem, exe: f"{stem}{'.exe' if exe else ''}",
+            driver_stem,
+            st.booleans(),
+        )
+        sycl_flag = st.sampled_from(
+            ["-fsycl", "-fno-sycl", "-fsycl-host-only", "-fsycl-device-only"]
+        )
+
+        @given(
+            invoked=binary_name,
+            recorded_argv0=binary_name,
+            flags=st.lists(sycl_flag, max_size=3),
+        )
+        @settings(max_examples=200, deadline=None)
+        def _check(invoked: str, recorded_argv0: str, flags: list[str]) -> None:
+            cu = _cu(
+                argv=[recorded_argv0, *flags, "-c", "foo.cpp"],
+                abi_relevant_flags=list(flags),
+            )
+            invoked_is_intel = Path(invoked).stem.lower().removesuffix(".exe") in {
+                "icx",
+                "icpx",
+                "dpcpp",
+                "dpcpp-cl",
+            }
+            for cmd in (
+                build_clang_command(cu, Path("foo.cpp"), clang_bin=invoked),
+                build_clang_macro_command(cu, Path("foo.cpp"), clang_bin=invoked),
+            ):
+                assert cmd[0] == invoked
+                pinned = {"-fsycl-host-only", "-fsycl-device-only"} & set(cmd)
+                if pinned:
+                    assert invoked_is_intel, (
+                        f"{pinned} reached a non-Intel invoked binary {invoked!r} "
+                        f"(recorded argv[0]={recorded_argv0!r}, flags={flags!r})"
+                    )
+
+        _check()
+
 
 # -- source_abi_from_clang_ast (pure, D4) ------------------------------------
 

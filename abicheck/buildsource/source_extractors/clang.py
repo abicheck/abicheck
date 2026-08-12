@@ -61,7 +61,7 @@ from pathlib import Path
 from typing import Any
 
 from ... import deadline
-from ...dumper_clang import _needs_sycl_host_only
+from ...dumper_clang import _is_intel_sycl_driver, _needs_sycl_host_only
 from ...header_conditionals import _include_guard_macro, _strip_comments
 from ..build_evidence import CompileUnit
 from ..model import LayerConfidence
@@ -131,8 +131,22 @@ from .clang_source_edges import build_source_edges
 #: resolved compiler override (Codex review). 0.9: the reconstructed command now
 #: appends ``-fsycl-host-only`` for a SYCL-enabled Intel oneAPI invocation
 #: (Codex review) -- a pre-0.9 cache entry for the same TU was built without
-#: that flag and must not be reused as-is.
-CLANG_EXTRACTOR_VERSION = "0.9"
+#: that flag and must not be reused as-is. 0.10: a real build's own recorded
+#: ``-fsycl-host-only``/``-fsycl-device-only`` (Intel-only SYCL pass-selector
+#: flags carried through via ``abi_relevant_flags``) is now stripped when the
+#: invoked binary isn't Intel-family, closing the same class of "unknown
+#: argument" failure via a different code path than 0.9's own fix.
+CLANG_EXTRACTOR_VERSION = "0.10"
+
+#: Intel oneAPI SYCL pass-selector flags (``-fsycl-host-only``/
+#: ``-fsycl-device-only``): meaningful ONLY on an Intel oneAPI driver
+#: (:func:`abicheck.dumper_clang._is_intel_sycl_driver`) -- every other
+#: clang-family binary hard-rejects both as "unknown argument". Shared
+#: between the insertion gate (``_needs_sycl_host_only``, which checks
+#: membership to detect an already-pinned pass) and the strip below (which
+#: removes a real build's own recorded use of either flag when the binary
+#: this command will actually run with doesn't understand them).
+_INTEL_ONLY_SYCL_PASS_FLAGS = frozenset({"-fsycl-host-only", "-fsycl-device-only"})
 
 
 @functools.lru_cache(maxsize=8)
@@ -301,6 +315,19 @@ def _clang_context_args(
             if not flag.startswith("-std=")
             and not flag.lower().startswith(("/std:", "-std:"))
         ]
+    if not _is_intel_sycl_driver(clang_bin):
+        # A real build's own recorded -fsycl-host-only/-fsycl-device-only
+        # (carried through above via replay_extra_flags's abi_relevant_flags/
+        # argv scan) is just as Intel-only as the flag WE would otherwise
+        # append below -- every non-Intel clang-family binary hard-rejects
+        # both the same way. Strip them so a TU whose real build already
+        # pinned a single SYCL pass explicitly still replays under a
+        # non-Intel invoked binary instead of failing on "unknown argument"
+        # via this different code path (Codex review: caught by the
+        # generalized Hypothesis property test below, not the original
+        # report -- a bare -fsycl is deliberately left alone, since stock
+        # clang parses that one fine as an ordinary single pass).
+        extra = [flag for flag in extra if flag not in _INTEL_ONLY_SYCL_PASS_FLAGS]
     if _needs_sycl_host_only(clang_bin, [*cmd, *extra]):
         extra = [*extra, "-fsycl-host-only"]
     cmd += extra

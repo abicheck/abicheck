@@ -27,4 +27,13 @@ A new changelog fragment. See changelog.d/README.md for the workflow.
   gated flag here doesn't repeat the same mistake; `tests/
   test_source_extractors_clang.py::TestSyclHostOnlyGatedOnInvokedBinary`
   sweeps a matrix of invoked/recorded-`argv[0]` combinations as a regression
-  guard for the whole bug class, not just the one reported pair.
+  guard for the whole bug class, not just the one reported pair. A
+  generalized Hypothesis property test in the same class then found the
+  same bug class reachable via a second, different code path: a real
+  build's own recorded `-fsycl-host-only`/`-fsycl-device-only` (carried
+  through verbatim via `abi_relevant_flags`) reached a non-Intel invoked
+  binary unchanged, hitting the identical "unknown argument" failure
+  independent of the insertion-side fix above. `_clang_context_args` now
+  also strips both Intel-only SYCL pass-selector flags from the carried-
+  through flags whenever the invoked binary isn't Intel-family (bumping
+  `CLANG_EXTRACTOR_VERSION` to `0.10`).
