@@ -77,6 +77,7 @@ from .reporter_markdown import (
     _resolve_scoped_gate_findings as _resolve_scoped_gate_findings,
     _root_cause_key_and_display as _root_cause_key_and_display,
     _section_severity_label as _section_severity_label,
+    _suppress_dangling_correlation_notes as _suppress_dangling_correlation_notes,
     _to_markdown_leaf as _to_markdown_leaf,
     _to_markdown_root_cause as _to_markdown_root_cause,
     apply_show_only as apply_show_only,
@@ -356,6 +357,7 @@ def _to_json_leaf(
             kind_sets=result._effective_kind_sets(),
             policy_file=result.policy_file,
         )
+        changes = _suppress_dangling_correlation_notes(changes)
     type_changes = [c for c in changes if c.kind in _ROOT_TYPE_CHANGE_KINDS]
     non_type_changes = [c for c in changes if c.kind not in _ROOT_TYPE_CHANGE_KINDS]
     # G29 Phase 3 follow-up (ADR-052): computed once over the full filtered
@@ -644,6 +646,7 @@ def _to_json_root_cause(
             kind_sets=result._effective_kind_sets(),
             policy_file=result.policy_file,
         )
+        changes = _suppress_dangling_correlation_notes(changes)
     effective_policy = result.policy or "strict_abi"
     eff_sets = result._effective_kind_sets()
 
@@ -1085,6 +1088,7 @@ def to_json(
             kind_sets=result._effective_kind_sets(),
             policy_file=result.policy_file,
         )
+        changes = _suppress_dangling_correlation_notes(changes)
 
     d = _build_json_base(result)
     _add_abi_surface_breakdown(d, result)

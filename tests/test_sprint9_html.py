@@ -801,3 +801,51 @@ def test_correlated_change_kind_rendered_in_not_evaluated_table() -> None:
     assert "Not Evaluated (Contract)" in out
     assert "type_vtable_changed" in out
     assert "See also" in out
+
+
+def test_correlation_note_hidden_when_show_only_filters_out_the_target() -> None:
+    """``--show-only`` can keep a LAYOUT_UNVERIFIABLE (risk) finding while
+    filtering out the co-reported TYPE_VTABLE_CHANGED (breaking) its
+    correlated_change_kind names — the HTML report's "See also" note must
+    not reference a finding this filtered view no longer shows (Codex
+    review, fresh evidence: the markdown-only fix for this left HTML, JSON,
+    SARIF, and JUnit with the identical gap).
+
+    Uses real Change/DiffResult objects (not this file's SimpleNamespace
+    _ch/_result helpers) since generate_html_report's show_only path filters
+    on isinstance(c, Change) -- a SimpleNamespace would be silently dropped
+    rather than exercising the filter this test targets."""
+    from abicheck.checker import Change, ChangeKind, DiffResult, Verdict
+
+    layout_change = Change(
+        ChangeKind.LAYOUT_UNVERIFIABLE,
+        "Foo",
+        "layout evidence unverifiable",
+        qualified_name="Foo",
+        correlated_change_kind=ChangeKind.TYPE_VTABLE_CHANGED.value,
+    )
+    vtable_change = Change(
+        ChangeKind.TYPE_VTABLE_CHANGED,
+        "Foo",
+        "vtable changed",
+        qualified_name="Foo",
+    )
+    r = DiffResult(
+        old_version="1.0",
+        new_version="2.0",
+        library="libtest.so.1",
+        changes=[layout_change, vtable_change],
+        verdict=Verdict.BREAKING,
+    )
+
+    out_full = generate_html_report(r)
+    assert "See also" in out_full
+
+    out_filtered = generate_html_report(r, show_only="risk")
+    assert "type_vtable_changed" not in out_filtered
+    assert "See also" not in out_filtered
+    assert "layout evidence unverifiable" in out_filtered
+
+    # The original Change objects are never mutated by the filtered render.
+    assert layout_change.correlated_change_kind == ChangeKind.TYPE_VTABLE_CHANGED.value
+    assert "See also" in generate_html_report(r)

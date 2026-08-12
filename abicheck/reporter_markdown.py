@@ -1847,25 +1847,36 @@ def _suppress_dangling_correlation_notes(changes: Sequence[Change]) -> list[Chan
     cleared on any change whose named target is not itself present in
     *changes*.
 
-    ``--show-only`` (applied upstream of every markdown view, before this
-    point) can keep a ``LAYOUT_UNVERIFIABLE`` finding while filtering out
-    the co-reported ``TYPE_VTABLE_CHANGED`` its ``correlated_change_kind``
-    names -- rendering "See also: type_vtable_changed finding for the same
-    symbol" with nothing in the *visible* report to actually see (Codex
-    review, fresh evidence). Same shape of gap for the older ADR-041
-    pairing (``PUBLIC_API_INTERNAL_DEPENDENCY_ADDED`` <-> an
+    ``--show-only`` can keep a ``LAYOUT_UNVERIFIABLE`` finding while
+    filtering out the co-reported ``TYPE_VTABLE_CHANGED`` its
+    ``correlated_change_kind`` names -- rendering "See also:
+    type_vtable_changed finding for the same symbol" with nothing in the
+    *visible* report to actually see (Codex review, fresh evidence). Same
+    shape of gap for the older ADR-041 pairing
+    (``PUBLIC_API_INTERNAL_DEPENDENCY_ADDED`` <-> an
     ``inline_body_changed``/``template_body_changed``/
     ``public_typedef_target_changed`` on the same public entry), so this
     checks both identity keys the two pairings correlate by --
     ``qualified_name`` (the vtable/layout pairing) and ``symbol`` (the
     ADR-041 pairing) -- rather than hard-coding one.
 
-    Never mutates the original ``Change`` objects (shared with every other
-    format -- JSON, SARIF, HTML, JUnit -- which apply their own filters, if
-    any, independently); only a shallow copy handed to *this* renderer is
-    touched, and only its ``correlated_change_kind`` field. Never changes a
-    finding's presence, kind, or severity -- purely a display-time fix for
-    what would otherwise be a dangling cross-reference.
+    Defined here (reporter_markdown.py) but re-exported by ``reporter.py``
+    and called by every format that independently applies ``--show-only``
+    to its own filtered ``changes`` list before rendering
+    ``correlated_change_kind`` -- JSON/root-cause-JSON (``reporter.py``),
+    SARIF (``sarif.py``), the HTML report (``html_report.py``), and JUnit
+    XML (``junit_report.py``), in addition to markdown's own three views
+    (default/leaf/root-cause). A gap first fixed only in markdown left the
+    other four formats independently able to render the same dangling
+    reference (Codex review, fresh evidence: caught one commit after the
+    markdown-only fix landed).
+
+    Never mutates the original ``Change`` objects (shared across every
+    format, each of which applies its own filter, if any, independently);
+    only a shallow copy handed to the calling renderer is touched, and only
+    its ``correlated_change_kind`` field. Never changes a finding's
+    presence, kind, or severity -- purely a display-time fix for what would
+    otherwise be a dangling cross-reference.
     """
     present_by_qualified_name = {
         (c.qualified_name, c.kind.value) for c in changes if c.qualified_name

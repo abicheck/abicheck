@@ -1132,6 +1132,46 @@ class TestMarkdownReporter:
         )
         assert "See also" in to_markdown(r)
 
+    def test_json_correlation_cleared_when_show_only_filters_out_the_target(self):
+        """The same dangling-correlation gap as the markdown test above, but
+        for the JSON report (Codex review, fresh evidence: a fix scoped only
+        to markdown left every other format independently able to render
+        the same stale correlated_change_kind reference)."""
+        layout_change = Change(
+            ChangeKind.LAYOUT_UNVERIFIABLE,
+            "Foo",
+            "layout evidence unverifiable",
+            qualified_name="Foo",
+            correlated_change_kind=ChangeKind.TYPE_VTABLE_CHANGED.value,
+        )
+        vtable_change = Change(
+            ChangeKind.TYPE_VTABLE_CHANGED,
+            "Foo",
+            "vtable changed",
+            qualified_name="Foo",
+        )
+        r = _result(Verdict.BREAKING, [layout_change, vtable_change])
+
+        d_full = json.loads(to_json(r))
+        by_kind = {c["kind"]: c for c in d_full["changes"]}
+        assert by_kind["layout_unverifiable"]["correlated_change_kind"] == (
+            "type_vtable_changed"
+        )
+
+        d_filtered = json.loads(to_json(r, show_only="risk"))
+        filtered_kinds = {c["kind"] for c in d_filtered["changes"]}
+        assert "type_vtable_changed" not in filtered_kinds
+        assert "layout_unverifiable" in filtered_kinds
+        layout_entry = next(
+            c for c in d_filtered["changes"] if c["kind"] == "layout_unverifiable"
+        )
+        assert "correlated_change_kind" not in layout_entry
+
+        # The original Change object is never mutated by the filtered render.
+        assert (
+            layout_change.correlated_change_kind == ChangeKind.TYPE_VTABLE_CHANGED.value
+        )
+
 
 # ---------------------------------------------------------------------------
 # Severity-aware reporter output

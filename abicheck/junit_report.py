@@ -48,7 +48,7 @@ from typing import TYPE_CHECKING, cast
 from .checker_policy import ChangeKind, Verdict
 from .checker_types import Change, DiffResult
 from .contract_gating import is_evaluated
-from .reporter import _finding_id, apply_show_only
+from .reporter import _finding_id, _suppress_dangling_correlation_notes, apply_show_only
 from .reporter_markdown import _root_cause_key_and_display
 
 if TYPE_CHECKING:
@@ -524,6 +524,7 @@ def _build_testsuite(
             kind_sets=result._effective_kind_sets(),
             policy_file=result.policy_file,
         )
+        changes = _suppress_dangling_correlation_notes(changes)
 
     change_by_symbol, extra_changes = _partition_changes(changes)
     all_symbols = _collect_all_symbols(old_snapshot, show_only, change_by_symbol)

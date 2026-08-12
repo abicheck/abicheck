@@ -1799,6 +1799,56 @@ class TestContractEvaluationProperties:
         tc = root.find("testsuite/testcase[@name='Foo']")
         assert tc.find("properties") is None
 
+    def test_correlation_property_absent_when_show_only_filters_out_the_target(
+        self,
+    ) -> None:
+        """``--show-only`` can keep a LAYOUT_UNVERIFIABLE (risk) finding
+        while filtering out the co-reported TYPE_VTABLE_CHANGED (breaking)
+        its correlated_change_kind names — the JUnit
+        ``abicheck.correlated_change_kind`` property must not reference a
+        finding this filtered view no longer includes (Codex review, fresh
+        evidence: a fix scoped only to markdown left JUnit with the
+        identical gap)."""
+        layout_change = Change(
+            ChangeKind.LAYOUT_UNVERIFIABLE,
+            "Foo",
+            "layout evidence unverifiable",
+            qualified_name="Foo",
+            correlated_change_kind=ChangeKind.TYPE_VTABLE_CHANGED.value,
+        )
+        vtable_change = Change(
+            ChangeKind.TYPE_VTABLE_CHANGED,
+            "Foo",
+            "vtable changed",
+            qualified_name="Foo",
+        )
+        r = _make_result([layout_change, vtable_change])
+
+        xml_full = to_junit_xml(r)
+        root_full = _parse(xml_full)
+        tc_full = root_full.find("testsuite/testcase[@name='Foo']")
+        props_full = {p.get("name"): p.get("value") for p in tc_full.find("properties")}
+        assert props_full["abicheck.correlated_change_kind"] == "type_vtable_changed"
+
+        xml_filtered = to_junit_xml(r, show_only="risk")
+        root_filtered = _parse(xml_filtered)
+        names_filtered = {
+            tc.get("name") for tc in root_filtered.findall("testsuite/testcase")
+        }
+        assert "Foo" in names_filtered
+        tc_filtered = root_filtered.find("testsuite/testcase[@name='Foo']")
+        properties_filtered = tc_filtered.find("properties")
+        if properties_filtered is not None:
+            props_filtered = {
+                p.get("name"): p.get("value") for p in properties_filtered
+            }
+            assert "abicheck.correlated_change_kind" not in props_filtered
+
+        # The original Change object is never mutated by the filtered render.
+        assert (
+            layout_change.correlated_change_kind == ChangeKind.TYPE_VTABLE_CHANGED.value
+        )
+
     def test_correlated_change_kind_merges_into_existing_contract_properties(
         self,
     ) -> None:

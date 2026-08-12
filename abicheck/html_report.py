@@ -843,7 +843,7 @@ def generate_html_report(
     # Apply show_only filter (display-only, does not affect metrics)
     if show_only:
         from .checker import Change as _Change
-        from .reporter import apply_show_only
+        from .reporter import _suppress_dangling_correlation_notes, apply_show_only
 
         typed_changes = [c for c in all_changes if isinstance(c, _Change)]
         _kind_sets_fn = getattr(result, "_effective_kind_sets", None)
@@ -854,6 +854,7 @@ def generate_html_report(
             kind_sets=_kind_sets_fn() if _kind_sets_fn is not None else None,
             policy_file=getattr(result, "policy_file", None),
         )
+        filtered = _suppress_dangling_correlation_notes(filtered)
         display_changes: list[object] = list(filtered)
     else:
         display_changes = all_changes
