@@ -27,6 +27,7 @@ A fully-specified comparison request — the single input to ``run_compare``.
 | `old` | `InputSpec` | *(required)* |
 | `new` | `InputSpec` | *(required)* |
 | `lang` | `str` | `'c++'` |
+| `lang_explicit` | `bool` | `False` |
 | `frontend` | `str` | `'auto'` |
 | `has_sources` | `bool` | `False` |
 | `policy` | `str` | `'strict_abi'` |
@@ -107,6 +108,7 @@ A fully-specified snapshot-extraction request — the input to ``run_dump_reques
 |---|---|---|
 | `input` | `InputSpec` | *(required)* |
 | `lang` | `str` | `'c++'` |
+| `lang_explicit` | `bool` | `False` |
 | `frontend` | `str` | `'auto'` |
 | `has_sources` | `bool` | `False` |
 | `depth` | `str \| None` | `None` |
@@ -411,6 +413,7 @@ Auto-detect input type and return an ABI snapshot.
 | `version` | `str` | `''` |
 | `lang` | `str` | `'c++'` |
 | *(keyword-only below)* | | |
+| `lang_explicit` | `bool` | `False` |
 | `is_elf` | `bool \| None` | `None` |
 | `pdb_path` | `Path \| None` | `None` |
 | `dwarf_only` | `bool` | `False` |
@@ -501,6 +504,7 @@ Extract an ABI snapshot from a native binary (ELF, PE, or Mach-O).
 | `version` | `str` | `''` |
 | `lang` | `str` | `'c++'` |
 | *(keyword-only below)* | | |
+| `lang_explicit` | `bool` | `False` |
 | `pdb_path` | `Path \| None` | `None` |
 | `dwarf_only` | `bool` | `False` |
 | `debug_roots` | `list[Path] \| None` | `None` |

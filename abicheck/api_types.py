@@ -377,6 +377,16 @@ class CompareRequest:
     old: InputSpec
     new: InputSpec
     lang: str = "c++"
+    # G31 Phase C follow-up: `lang` alone cannot say whether the caller
+    # genuinely wants this language forced or is just leaving the field at
+    # its dataclass default (the CLI has the identical problem with Click's
+    # `--lang` default — see `cli.dump_cmd`'s `lang_explicit` and AGENTS.md's
+    # "dump --lang c++ is silently discarded ..." known gap). `False` (the
+    # default) preserves the pre-existing behavior exactly: `resolve_input`
+    # auto-detects unless `lang == "c"`. Set `True` when `lang` reflects a
+    # real, deliberate request (e.g. forwarded from a genuine CLI `--lang`)
+    # so the header-AST pass honors it even on a language-ambiguous header.
+    lang_explicit: bool = False
     frontend: str = "auto"
     has_sources: bool = False
     policy: str = "strict_abi"
@@ -610,6 +620,10 @@ class DumpRequest:
 
     input: InputSpec
     lang: str = "c++"
+    # See `CompareRequest.lang_explicit` — the identical default-vs-explicit
+    # ambiguity and the same conservative default (`False`: auto-detect
+    # unless `lang == "c"`, unchanged from before this field existed).
+    lang_explicit: bool = False
     frontend: str = "auto"
     # Mirrors `CompareRequest.has_sources`: the legacy "this run has source
     # evidence" flag, which alone satisfies the `android` frontend's rule even

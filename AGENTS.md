@@ -890,22 +890,50 @@ Once a root command genuinely clears the bar above, pick the right home:
   `abicheck dump` CLI, not a hand-built AST or `RecordType` — see
   `tests/test_clang_header_backend_integration.py::
   test_cli_dump_explicit_lang_cpp_forces_cpp_mode_on_ambiguous_header`.
-  **Still open**: `service.py`'s `_dump_elf`/`_header_graph_lang` pair
-  (`compare`'s implicit-dump path and the Python `service.run_dump`/
-  `DumpRequest` API) and PE/Mach-O's `_header_graph_lang` computation carry
-  the identical explicit-vs-default ambiguity — `run_dump`'s own `lang: str
-  = "c++"` signature can't distinguish an API caller's genuine
-  `lang="c++"` from the default either, so an explicit request through
-  `compare`'s implicit dump or a direct `service.run_dump("c++")`/
-  `DumpRequest(lang="c++")` call is still silently treated as auto-detect on
-  a language-ambiguous header. Closing that needs the wider design this
-  entry originally sketched (a `lang: str | None = None` API default plus a
-  real "auto"/explicit tri-state, which is a public-API shape change
-  needing its own coordinated pass — not a `lang_explicit` bolt-on, since
-  there is no Click parameter-source equivalent to lean on for a direct
-  Python caller) — deliberately not attempted in this pass, consistent with
-  scoping this fix to the one call path where a real, reachable divergence
-  was reproduced end-to-end.
+  **Closed for `service.run_dump`/`DumpRequest`/`CompareRequest` in a later
+  pass, once a real conda-forge castxml build (0.7.0, within the
+  `>=0.6.11,<0.8.0` policy range — `castxml_policy.py`) was available in this
+  environment to verify against, alongside clang 18.** Rather than the
+  `lang: str | None = None` tri-state default this entry originally
+  sketched — a public-API *shape* change with a wide, hard-to-verify blast
+  radius across every `resolve_input`/`run_dump` caller (`compare`, `scan`,
+  `appcompat`, `l0_export_delta`, ...), most of which still legitimately pass
+  a concrete, Click-defaulted `lang` string that must keep auto-detecting —
+  the actual fix is the same **additive** `lang_explicit: bool = False`
+  parameter the CLI fix above already established, generalized one layer
+  up: `service.resolve_input`/`run_dump`/`_dump_elf`/`_dump_pe`/
+  `_dump_macho` and `service_header_scoped._try_header_scoped_dump` all gain
+  it (default `False`, a no-op — every existing caller's behavior is
+  bit-for-bit unchanged), `DumpRequest.lang_explicit`/
+  `CompareRequest.lang_explicit` carry it on the typed API, and
+  `service_dump_pipeline.run_dump_request`/`service_compare_pipeline.
+  resolve_compare_request` thread it through `resolve_side_snapshot` (their
+  one shared per-side resolution function) to `service.resolve_input`. The
+  `dump`/`compare` CLIs resolve it the identical way `dump_cmd` already did
+  — `compare_cmd` mirrors the established `_frontend_explicit`/
+  `_nostdinc_explicit` `ctx.get_parameter_source(...)==COMMANDLINE` pattern
+  already used one function over in `cli_compare_helpers._embed_inline_
+  source_side` for `--ast-frontend`/`--nostdinc`, extended to `--lang` and
+  threaded through `cli_resolve._resolve_compare_snapshots` into
+  `CompareRequest`. The whole-snapshot disk cache key
+  (`service_dump_cache._dump_cache_extra_key`/`cached_run_dump`) folds
+  `lang_explicit` in too — the identical `lang` string now legitimately
+  resolves to two different parsed ASTs depending on it, so a cache entry
+  for one must never serve the other. `scan`/`appcompat`/the
+  release/set-input fan-out/`l0_export_delta` are **not** touched by this
+  pass — they still pass their own already-resolved, Click-defaulted `lang`
+  string with `lang_explicit` defaulted `False`, so they keep their
+  pre-existing (unfixed, but also not regressed) behavior; wiring each is
+  the identical mechanical pattern applied here, left for its own follow-up
+  rather than expanding this pass's verified surface further. Verified
+  end-to-end against the same real, intentionally-C-compatible POD struct
+  through `service.resolve_input`, `DumpRequest`/`run_dump_request`,
+  `CompareRequest`/`resolve_compare_request`, and the real `compare` CLI
+  (Click parameter-source spy) — see
+  `tests/test_clang_header_backend_integration.py::
+  test_dump_request_and_compare_request_lang_explicit_forces_cpp_mode` and
+  `tests/test_service_dump_cache.py`'s
+  `test_differs_by_lang_explicit`/`test_lang_explicit_reaches_run_dump_and_keys_separately`.
 - **Opaque-type suppression is keyed by bare `RecordType.name`, not a
   qualified identity — pre-existing on both header backends, newly reachable
   on direct-clang by PR #719's opaque-handle-type fix (Codex review,

@@ -254,6 +254,7 @@ def _dump_cache_extra_key(
     lang: str = "c++",
     *,
     uses_ast: bool = True,
+    lang_explicit: bool = False,
 ) -> str:
     """Build the ``extra`` cache-key material for a cacheable dump — every
     input to ``run_dump`` that affects its output besides the binary content
@@ -310,6 +311,14 @@ def _dump_cache_extra_key(
     ``ABICHECK_AST_FRONTEND=castxml`` pin) never triggers this fallback
     (the castxml failure surfaces verbatim instead), so it's correctly
     excluded — the tool truly never runs for those.
+
+    ``lang_explicit`` (G31 Phase C follow-up): whether *lang* is a genuinely
+    explicit request rather than the request-level default (see
+    :attr:`abicheck.api_types.DumpRequest.lang_explicit`). Two calls with the
+    identical *lang* string but different ``lang_explicit`` can resolve to a
+    genuinely different force-C++-vs-auto-detect decision on a
+    language-ambiguous header, and therefore a different parsed AST — folded
+    into the key so they can never collide.
     """
     from .dumper import _resolve_header_backend
 
@@ -325,6 +334,7 @@ def _dump_cache_extra_key(
                 "no-ast",
                 sep.join(sorted(str(p) for p in (public_headers or []))),
                 sep.join(sorted(str(p) for p in (public_header_dirs or []))),
+                str(lang_explicit),
             ]
         )
 
@@ -413,6 +423,7 @@ def _dump_cache_extra_key(
             header_graph_clang,
             sep.join(sorted(str(p) for p in (public_headers or []))),
             sep.join(sorted(str(p) for p in (public_header_dirs or []))),
+            str(lang_explicit),
         ]
     )
 
@@ -426,6 +437,7 @@ def cached_run_dump(
     version: str = "",
     lang: str = "c++",
     *,
+    lang_explicit: bool = False,
     pdb_path: Path | None = None,
     dwarf_only: bool = False,
     debug_roots: list[Path] | None = None,
@@ -496,6 +508,7 @@ def cached_run_dump(
             includes,
             version,
             lang,
+            lang_explicit=lang_explicit,
             pdb_path=pdb_path,
             dwarf_only=dwarf_only,
             debug_roots=debug_roots,
@@ -581,6 +594,7 @@ def cached_run_dump(
             _extra_public_header_dirs,
             lang,
             uses_ast=_uses_ast,
+            lang_explicit=lang_explicit,
         )
         # NUL-joined (see _dump_cache_extra_key's own docstring on why NUL,
         # not a printable delimiter, is the only collision-safe choice here

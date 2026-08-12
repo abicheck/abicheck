@@ -71,6 +71,7 @@ def _try_header_scoped_dump(
     includes: list[Path],
     version: str,
     lang: str,
+    lang_explicit: bool = False,
     header_backend: str = "auto",
     compile: CompileContext | None = None,
     public_headers: list[Path] | None = None,
@@ -87,6 +88,13 @@ def _try_header_scoped_dump(
     ``reason`` is one of ``"header-backend-unavailable"`` /
     ``"mangling-fallback"``.  This mirrors the public-API scoping that
     ``abidw --headers-dir`` / abi-dumper apply for ELF.
+
+    ``lang_explicit`` (G31 Phase C follow-up): forces *lang* on this pass
+    regardless of value when set, matching the sibling force decision
+    ``service.run_dump``'s own ``_header_graph_lang`` computes for the same
+    request — see :attr:`abicheck.api_types.DumpRequest.lang_explicit`.
+    ``False`` (the default) is a no-op: identical to the pre-existing
+    "force only bare ``'c'``" behavior.
     """
     from .dumper import _dump_macho as _dumper_macho, _dump_pe as _dumper_pe
     from .service_scan import CompileContext, expand_header_inputs
@@ -99,7 +107,7 @@ def _try_header_scoped_dump(
     resolved_headers = expand_header_inputs(headers)
 
     compiler = "cc" if lang.lower() == "c" else "c++"
-    lang_arg = lang if lang.lower() == "c" else None
+    lang_arg = lang if (lang_explicit or lang.lower() == "c") else None
     cc = compile if compile is not None else CompileContext()
     # P3 parity with the ELF path: auto-add the inferred public-header roots so a
     # -H umbrella resolves its own relative includes without a separate -I on

@@ -1284,6 +1284,7 @@ def handle_non_elf_dump(
     compile_db_context_matched: bool = False,
     include_dependencies: bool = False,
     snapshot_compression: str = "auto",
+    lang_explicit: bool = False,
 ) -> None:
     """Handle the PE/Mach-O native dump path and output writing (split from cli.py).
 
@@ -1348,6 +1349,7 @@ def handle_non_elf_dump(
             list(eff_includes),
             version,
             lang,
+            lang_explicit=lang_explicit,
             pdb_path=pdb_path,
             public_headers=list(public_headers),
             public_header_dirs=list(public_header_dirs),

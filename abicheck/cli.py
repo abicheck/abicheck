@@ -775,6 +775,7 @@ def dump_cmd(so_path: Path | None, headers: tuple[Path, ...], includes: tuple[Pa
             depth=depth, compile_db_context_matched=compile_db_matched,
             include_dependencies=include_dependencies,
             snapshot_compression=snapshot_compression,
+            lang_explicit=lang_explicit,
         )
         return
 

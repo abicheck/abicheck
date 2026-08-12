@@ -155,6 +155,7 @@ def run_dump_request(
         side,
         evidence,
         lang=lang,
+        lang_explicit=request.lang_explicit,
         header_backend=header_backend,
         fmt=fmt,
         public_headers=public_headers,

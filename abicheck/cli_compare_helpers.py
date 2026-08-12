@@ -1270,6 +1270,19 @@ def run_compare(
     )
     _setup_verbosity(verbose)
 
+    # G31 Phase C follow-up (AGENTS.md "dump --lang c++ is silently
+    # discarded ..." known gap): --lang carries the same Click default
+    # ("c++", indistinguishable from a genuine --lang c++) that dump_cmd's
+    # own lang_explicit detection exists to resolve — mirrors the
+    # already-established _frontend_explicit/_nostdinc_explicit pattern in
+    # _embed_inline_source_sides below. Threaded through
+    # _resolve_compare_snapshots -> CompareRequest.lang_explicit so a live
+    # ELF/PE/Mach-O side's header-AST pass honors an explicit request on a
+    # language-ambiguous header instead of silently auto-detecting past it.
+    lang_explicit = (
+        ctx.get_parameter_source("lang") == click.core.ParameterSource.COMMANDLINE
+    )
+
     required_symbols, required_symbols_from_file, required_symbols_sha = (
         load_required_symbols(required_symbols_opt, required_symbols_file)
     )
@@ -1583,6 +1596,7 @@ def run_compare(
         old_dump_manifest=old_manifest_obj,
         new_dump_manifest=new_manifest_obj,
         include_dependencies=include_dependencies,
+        lang_explicit=lang_explicit,
     )
 
     suppression, pf = _load_suppression_and_policy(
