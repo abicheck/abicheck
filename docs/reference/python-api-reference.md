@@ -27,7 +27,6 @@ A fully-specified comparison request — the single input to ``run_compare``.
 | `old` | `InputSpec` | *(required)* |
 | `new` | `InputSpec` | *(required)* |
 | `lang` | `str` | `'c++'` |
-| `lang_explicit` | `bool` | `False` |
 | `frontend` | `str` | `'auto'` |
 | `has_sources` | `bool` | `False` |
 | `policy` | `str` | `'strict_abi'` |
@@ -52,6 +51,7 @@ A fully-specified comparison request — the single input to ``run_compare``.
 | `dependency_search_paths` | `tuple[Path, ...]` | `()` |
 | `ld_library_path` | `str` | `''` |
 | `frontend_context` | `str` | `'host'` |
+| `lang_explicit` | `bool` | `False` |
 
 ## `CompareResult`
 
@@ -108,7 +108,6 @@ A fully-specified snapshot-extraction request — the input to ``run_dump_reques
 |---|---|---|
 | `input` | `InputSpec` | *(required)* |
 | `lang` | `str` | `'c++'` |
-| `lang_explicit` | `bool` | `False` |
 | `frontend` | `str` | `'auto'` |
 | `has_sources` | `bool` | `False` |
 | `depth` | `str \| None` | `None` |
@@ -121,6 +120,7 @@ A fully-specified snapshot-extraction request — the input to ``run_dump_reques
 | `dependency_search_paths` | `tuple[Path, ...]` | `()` |
 | `ld_library_path` | `str` | `''` |
 | `frontend_context` | `str` | `'host'` |
+| `lang_explicit` | `bool` | `False` |
 
 ## `InputSpec`
 

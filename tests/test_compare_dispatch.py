@@ -340,6 +340,43 @@ def test_embed_inline_source_forwards_toolchain_and_collects(
     assert captured["pdb_path"] == Path("/p.pdb")
 
 
+def test_embed_inline_source_forwards_lang_explicit(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """G31 Phase C follow-up (Codex review): a raw --old/new-sources tree's
+    inline dump must forward `lang_explicit` to dump_cmd's private
+    `_resolved_lang_explicit` hook -- without it, `compare --lang c++
+    --old-sources tree/` would silently lose the explicit signal in the
+    nested `ctx.invoke(dump_cmd, ...)` sub-context (the identical loss
+    `frontend_explicit`/`nostdinc_explicit` already exist to work around),
+    auto-detecting instead of honoring the request on a language-ambiguous
+    header."""
+    import abicheck.cli as climod
+    from abicheck.service_scan import CompileContext
+
+    tree = tmp_path / "src"
+    tree.mkdir()
+    captured: dict = {}
+
+    class _Ctx:
+        def invoke(self, _cmd, **kwargs):  # type: ignore[no-untyped-def]
+            captured.update(kwargs)
+
+    monkeypatch.setattr(climod, "_normalize_binary_input", lambda p: (Path(p), "elf"))
+    climod._embed_inline_source_side(
+        _Ctx(), input_path=tmp_path / "lib.so", sources=tree,
+        headers=(), includes=(), version="1.0", lang="c++",
+        lang_explicit=True,
+        header_backend="auto", compile_context=CompileContext(),
+        frontend_explicit=False, nostdinc_explicit=False, build_info=None,
+        follow_deps=False, search_paths=(), ld_library_path="",
+        dwarf_only=False, debug_format=None, pdb_path=None,
+        collect_mode="source-target", out_dir=tmp_path, label="old",
+    )
+
+    assert captured["_resolved_lang_explicit"] is True
+
+
 def test_embed_inline_source_forwards_debug_roots(tmp_path: Path, monkeypatch) -> None:
     """P1.1 Codex-review regression: --debug-root/--debuginfod must reach the
     inline dump too — without this, a raw --old/new-sources tree bypassed

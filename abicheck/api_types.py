@@ -55,7 +55,7 @@ D4 adds ``InputSpec.follow_linker_scripts`` — see each one's own docstring.
 from __future__ import annotations
 
 from collections.abc import Iterable
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -377,16 +377,6 @@ class CompareRequest:
     old: InputSpec
     new: InputSpec
     lang: str = "c++"
-    # G31 Phase C follow-up: `lang` alone cannot say whether the caller
-    # genuinely wants this language forced or is just leaving the field at
-    # its dataclass default (the CLI has the identical problem with Click's
-    # `--lang` default — see `cli.dump_cmd`'s `lang_explicit` and AGENTS.md's
-    # "dump --lang c++ is silently discarded ..." known gap). `False` (the
-    # default) preserves the pre-existing behavior exactly: `resolve_input`
-    # auto-detects unless `lang == "c"`. Set `True` when `lang` reflects a
-    # real, deliberate request (e.g. forwarded from a genuine CLI `--lang`)
-    # so the header-AST pass honors it even on a language-ambiguous header.
-    lang_explicit: bool = False
     frontend: str = "auto"
     has_sources: bool = False
     policy: str = "strict_abi"
@@ -485,6 +475,23 @@ class CompareRequest:
     # `service_compare_evidence._compile_context`'s own docstring for the
     # accepted limitation and how to work around it.
     frontend_context: str = "host"
+    # G31 Phase C follow-up: `lang` alone cannot say whether the caller
+    # genuinely wants this language forced or is just leaving the field at
+    # its dataclass default (the CLI has the identical problem with Click's
+    # `--lang` default — see `cli.dump_cmd`'s `lang_explicit` and AGENTS.md's
+    # "dump --lang c++ is silently discarded ..." known gap). `False` (the
+    # default) preserves the pre-existing behavior exactly: `resolve_input`
+    # auto-detects unless `lang == "c"`. Set `True` when `lang` reflects a
+    # real, deliberate request (e.g. forwarded from a genuine CLI `--lang`)
+    # so the header-AST pass honors it even on a language-ambiguous header.
+    # `kw_only=True` (not a positional field, and appended at the true end
+    # rather than inserted mid-list) so an existing positional caller of this
+    # documented public request type — `CompareRequest(old, new, "c++",
+    # "clang", ...)` — keeps binding every field to what it always did,
+    # instead of silently shifting onto this new one (Codex review; the
+    # identical PR #582 lesson AGENTS.md's `Change`-dataclass entry already
+    # documents for exactly this mistake).
+    lang_explicit: bool = field(default=False, kw_only=True)
 
     def validation_errors(self) -> list[str]:
         """Return a list of human-readable validation problems (empty == valid).
@@ -620,10 +627,6 @@ class DumpRequest:
 
     input: InputSpec
     lang: str = "c++"
-    # See `CompareRequest.lang_explicit` — the identical default-vs-explicit
-    # ambiguity and the same conservative default (`False`: auto-detect
-    # unless `lang == "c"`, unchanged from before this field existed).
-    lang_explicit: bool = False
     frontend: str = "auto"
     # Mirrors `CompareRequest.has_sources`: the legacy "this run has source
     # evidence" flag, which alone satisfies the `android` frontend's rule even
@@ -654,6 +657,13 @@ class DumpRequest:
     # `service_compare_evidence._compile_context` for the accepted limitation
     # that shared merge rule carries.
     frontend_context: str = "host"
+    # See `CompareRequest.lang_explicit` — the identical default-vs-explicit
+    # ambiguity and the same conservative default (`False`: auto-detect
+    # unless `lang == "c"`, unchanged from before this field existed).
+    # `kw_only=True`, appended at the true end (not inserted mid-list), for
+    # the same positional-caller-safety reason as `CompareRequest`'s own
+    # field (Codex review).
+    lang_explicit: bool = field(default=False, kw_only=True)
 
     def validation_errors(self) -> list[str]:
         """Return a list of human-readable validation problems (empty == valid).
