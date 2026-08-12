@@ -243,6 +243,8 @@ class TestStageBaseline:
             "rm",
             "mktemp",
             "mv",
+            "find",
+            "realpath",
         ):
             resolved = shutil.which(tool)
             if resolved is not None:
@@ -469,6 +471,49 @@ class TestStageBaseline:
         # all, so this warning must never appear post-fix.
         assert "archive cannot contain itself" not in (result.stdout + result.stderr)
 
+    def test_tmpdir_inside_baseline_path_falls_back_to_plain_tmp(
+        self, tmp_path: Path
+    ) -> None:
+        # Regression (Codex review, P2): `mktemp -d`'s default location is
+        # NOT unconditionally guaranteed to be outside baseline-path --
+        # `mktemp -d` honors $TMPDIR, and a self-hosted runner (or a
+        # caller) can set TMPDIR to a path under baseline-path. The
+        # staging directory is now verified (via realpath) to be outside
+        # baseline-path, falling back to a plain /tmp-derived location
+        # (ignoring the caller-configurable TMPDIR) when the default
+        # collides.
+        baseline_dir = _make_baseline_dir(tmp_path)
+        bogus_tmpdir = baseline_dir / "tmp-inside-baseline"
+        bogus_tmpdir.mkdir()
+
+        result, outputs = _run_action(
+            {
+                "BASELINE_PATH": str(baseline_dir),
+                "ASSET_NAME_TEMPLATE": "out-{profile}.tar",
+                "PROFILE": "p1",
+                "TMPDIR": str(bogus_tmpdir),
+            },
+            tmp_path,
+        )
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert outputs["asset-name"] == "out-p1.tar"
+        archive_path = tmp_path / "out-p1.tar"
+        assert archive_path.is_file()
+        with tarfile.open(archive_path, "r:") as tf:
+            names = {Path(m.name).name for m in tf.getmembers()}
+        assert "manifest.json" in names
+        assert "libfoo.abicheck.json" in names
+        # Pre-fix, staging directly under $TMPDIR (nested inside
+        # baseline-path) meant tar's traversal encountered its own
+        # in-progress output file mid-archive -- GNU tar's own
+        # self-inclusion detection degrades this to a harmless
+        # skip-with-warning on this repo's tested tar version, but that's
+        # not a guaranteed cross-implementation behavior. Post-fix, the
+        # containment check catches the collision and falls back to a
+        # plain /tmp-derived staging directory before tar ever runs, so
+        # this warning must never appear.
+        assert "archive cannot contain itself" not in (result.stdout + result.stderr)
+
     def test_missing_baseline_path_fails(self, tmp_path: Path) -> None:
         result, _ = _run_action({}, tmp_path)
         assert result.returncode == 1
@@ -480,6 +525,40 @@ class TestStageBaseline:
         )
         assert result.returncode == 1
         assert "does not exist" in (result.stdout + result.stderr)
+
+    def test_baseline_path_without_manifest_fails(self, tmp_path: Path) -> None:
+        # Regression (Codex review, P2): an existing-but-wrong directory
+        # (empty, or simply not a real baseline-set) previously packaged
+        # and reported success anyway -- the mistake only surfaced much
+        # later, opaquely, when resolve-baseline couldn't find
+        # manifest.json inside the extracted archive.
+        baseline_dir = tmp_path / "not-a-baseline-set"
+        baseline_dir.mkdir()
+        (baseline_dir / "some-other-file.txt").write_text("x", encoding="utf-8")
+
+        result, outputs = _run_action(
+            {"BASELINE_PATH": str(baseline_dir), "PROFILE": "p1"}, tmp_path
+        )
+        assert result.returncode == 1
+        assert "manifest.json" in (result.stdout + result.stderr)
+        assert "asset-name" not in outputs
+
+    def test_symlink_in_baseline_path_is_rejected(self, tmp_path: Path) -> None:
+        # Regression (Codex review, P2): both actions/resolve-baseline/
+        # run.sh and the root Action's baseline-set fallback reject ANY
+        # symlink found after extracting a baseline-set archive -- a
+        # source directory that already contains one previously packaged
+        # and reported success here anyway, producing an asset neither
+        # canonical consumer could actually use.
+        baseline_dir = _make_baseline_dir(tmp_path)
+        (baseline_dir / "manifest.json.link").symlink_to(baseline_dir / "manifest.json")
+
+        result, outputs = _run_action(
+            {"BASELINE_PATH": str(baseline_dir), "PROFILE": "p1"}, tmp_path
+        )
+        assert result.returncode == 1
+        assert "symlink" in (result.stdout + result.stderr)
+        assert "asset-name" not in outputs
 
     def test_empty_profile_still_substitutes(self, tmp_path: Path) -> None:
         baseline_dir = _make_baseline_dir(tmp_path)

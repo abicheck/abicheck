@@ -41,6 +41,19 @@ _tar_zstd_works() {
   return "$ok"
 }
 
+# Portable-ish realpath -- GNU coreutils' realpath is the common case, but
+# not guaranteed present on every runner; python3's os.path.realpath is an
+# equivalent fallback (Codex review, staging-directory-containment fix
+# below needs a real, symlink-resolved comparison, not a textual prefix
+# match on the possibly-relative input paths).
+_realpath() {
+  if command -v realpath >/dev/null 2>&1; then
+    realpath "$1"
+  else
+    python3 -c 'import os, sys; print(os.path.realpath(sys.argv[1]))' "$1"
+  fi
+}
+
 if [[ -z "${BASELINE_PATH:-}" ]]; then
   echo "::error::baseline-path is required." >&2
   exit 1
@@ -49,6 +62,35 @@ if [[ ! -d "$BASELINE_PATH" ]]; then
   echo "::error::baseline-path '$BASELINE_PATH' does not exist or is not a directory." >&2
   exit 1
 fi
+# A caller passing an existing-but-wrong directory (empty, or the wrong
+# selection entirely) previously packaged and reported success anyway --
+# the failure only surfaced much later, opaquely, when resolve-baseline
+# couldn't find manifest.json inside the extracted archive. Every real
+# baseline-set has one at its root (actions/baseline's own "Dump
+# baseline-set" step always writes one); requiring it here turns a
+# confusing downstream failure into an immediate, actionable one at the
+# point the mistake was actually made (Codex review).
+if [[ ! -f "$BASELINE_PATH/manifest.json" ]]; then
+  echo "::error::baseline-path '$BASELINE_PATH' has no manifest.json at its root -- this does not look like a baseline-set directory (actions/baseline's own 'Dump baseline-set' step always writes one). Refusing to package and publish a directory that resolve-baseline could never actually resolve anything from." >&2
+  exit 1
+fi
+# Reject any symlink under baseline-path BEFORE packaging -- both
+# actions/resolve-baseline/run.sh and the root Action's baseline-set
+# fallback (action/run.sh's _try_baseline_set_fallback) now reject ANY
+# symlink found after extracting a baseline-set archive, so a source
+# directory that already contains one would package and report success
+# here while producing an asset neither canonical consumer can actually
+# use (Codex review). A baseline-set has no legitimate reason to contain
+# a symlink -- structurally reject it at the source, not just on the
+# extraction side. Command substitution, not piped into `grep -q`, for
+# the same SIGPIPE/pipefail-misreport reason documented at
+# resolve-baseline/run.sh's own identical check.
+_source_symlinks="$(find "$BASELINE_PATH" -type l)"
+if [[ -n "$_source_symlinks" ]]; then
+  echo "::error::baseline-path '$BASELINE_PATH' contains a symlink, which is not supported -- baseline-set archives must contain only plain files/directories (the same structural rule actions/resolve-baseline and the root Action's baseline-set fallback both enforce on extraction). Symlinks found:"$'\n'"$_source_symlinks" >&2
+  exit 1
+fi
+_baseline_path_real="$(_realpath "$BASELINE_PATH")"
 
 # NOTE: the default is intentionally NOT embedded as
 # "${ASSET_NAME_TEMPLATE:-abicheck-baseline-{profile}.tar.zst}" -- bash's
@@ -111,11 +153,40 @@ esac
 # guaranteed cross-implementation behavior (Codex review), and relying on
 # it would mean this step's stderr always carries a spurious "archive
 # cannot contain itself" notice for this caller shape regardless.
-# `mktemp -d`'s default location (`$TMPDIR`/`/tmp`) is never inside a
-# checked-out workspace, so staging there and moving afterward sidesteps
-# the self-inclusion class of bug entirely, regardless of which archive
-# format is being built.
-_staging_dir="$(mktemp -d)"
+#
+# `mktemp -d`'s default location is NOT unconditionally guaranteed to be
+# outside baseline-path, despite an earlier version of this comment's
+# claim -- `mktemp -d` honors `$TMPDIR`, and a self-hosted runner (or a
+# caller) can set `TMPDIR` to a path under baseline-path, or baseline-path
+# itself could BE `$TMPDIR` (Codex review). Verified explicitly instead of
+# assumed: resolve both to real (symlink-free) paths and check the staging
+# directory is neither baseline-path itself nor nested inside it. On a
+# collision, retry once against a location that deliberately ignores
+# `$TMPDIR` (plain `/tmp`) -- the one caller-configurable variable that
+# could have caused it -- before giving up with an actionable error rather
+# than silently proceeding into the exact self-inclusion bug this staging
+# scheme exists to prevent.
+_make_staging_dir() {
+  local candidate candidate_real
+  candidate="$(mktemp -d)"
+  candidate_real="$(_realpath "$candidate")"
+  case "$candidate_real" in
+    "$_baseline_path_real" | "$_baseline_path_real"/*)
+      rm -rf "$candidate"
+      candidate="$(TMPDIR=/tmp mktemp -d)"
+      candidate_real="$(_realpath "$candidate")"
+      case "$candidate_real" in
+        "$_baseline_path_real" | "$_baseline_path_real"/*)
+          rm -rf "$candidate"
+          echo "::error::could not create a staging directory outside baseline-path '$BASELINE_PATH' -- both \$TMPDIR-derived and plain /tmp-derived locations resolve inside it. Set TMPDIR to a location disjoint from baseline-path, or move baseline-path itself out from under /tmp." >&2
+          return 1
+          ;;
+      esac
+      ;;
+  esac
+  printf '%s\n' "$candidate"
+}
+_staging_dir="$(_make_staging_dir)" || exit 1
 trap 'rm -rf "$_staging_dir"' EXIT
 
 case "$asset_name" in
