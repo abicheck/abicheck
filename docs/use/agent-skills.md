@@ -30,9 +30,12 @@ the portfolio is shaped this way.
 > the installed abicheck version against its own declared range —
 > `>=0.6.0,<0.7.0` for every skill published today — and refuses to run
 > rather than fail partway through, since several commands/options it
-> drives postdate 0.5.0 (see "Prerequisites" below). If `pip show abicheck`
-> / `pyproject.toml`'s `version` isn't inside that `0.6.x` range, an
-> installed skill will decline to execute.
+> drives postdate 0.5.0 (see "Prerequisites" below). The check runs
+> `abicheck --version` — the executable actually on `PATH` when the skill
+> runs, not a source checkout's `pyproject.toml` (the two can differ, e.g.
+> a 0.6.x checkout with a separately installed 0.5.0 package). If that
+> version isn't inside the `0.6.x` range, an installed skill will decline
+> to execute.
 
 **Portfolio status (2026-08-11):** none of the four skills has measured
 evidence yet that it improves agent behavior over a well-documented CLI
