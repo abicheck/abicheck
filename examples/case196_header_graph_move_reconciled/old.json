@@ -66,18 +66,6 @@
       "provenance": "source_abi",
       "resolved": {},
       "src": "header://include/demo/detail_v1.h"
-    },
-    {
-      "attrs": {},
-      "confidence": "unknown",
-      "conflicts": [],
-      "dst": "decl://_ZN4demo6detail6helperEi",
-      "edge": "DECL_CALLS_DECL",
-      "facts": [],
-      "occurrences": [],
-      "provenance": "",
-      "resolved": {},
-      "src": "decl://_ZN4demo7processEv"
     }
   ],
   "external_graph_refs": [],
@@ -88,7 +76,6 @@
     "by_file": {},
     "by_source_decl": {
       "decl://_ZN4demo6detail6helperEi": [
-        "decl://_ZN4demo7processEv",
         "header://include/demo/detail_v1.h"
       ],
       "decl://_ZN4demo7processEv": [

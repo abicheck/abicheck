@@ -529,14 +529,20 @@ def build_cases() -> dict[str, tuple[str, dict[str, Any], dict[str, Any]]]:
             _helper_entity("_ZN4demo6detail6helperEl", "include/demo/detail_v2.h"),
         ],
     )
+    # The DECL_CALLS_DECL edge is deliberately added on the NEW side only
+    # (not old): dependency reachability (source_graph_findings.
+    # _internal_dependency_findings) compares raw target node ids across
+    # versions, not reconciled identities, so an edge present on BOTH sides
+    # pointing at the helper's two different per-version mangled-name node
+    # ids would make the "no internal dependency -> reaches 1" finding text
+    # literally false (the dependency already existed in old, just under a
+    # different raw id) -- a real detector limitation caught by review
+    # (dependency reachability doesn't consult graph_reconcile's pairing).
+    # Restricting the edge to the new side only makes the scenario, and the
+    # finding text, both literally true: demo::process starts depending on
+    # the (already-existing-but-previously-unreached) private helper in the
+    # same release the helper's own signature and header change.
     l5j_old_graph = build_source_graph(l5j_build, l5j_old_surface)
-    l5j_old_graph.edges.append(
-        GraphEdge(
-            src="decl://_ZN4demo7processEv",
-            dst="decl://_ZN4demo6detail6helperEi",
-            kind="DECL_CALLS_DECL",
-        )
-    )
     l5j_new_graph = build_source_graph(l5j_build, l5j_new_surface)
     l5j_new_graph.edges.append(
         GraphEdge(

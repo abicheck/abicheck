@@ -7,28 +7,25 @@
 | **Category** | Risk |
 | **Platforms** | Linux |
 | **Flags** | Bad practice |
-| **Detected `ChangeKind`s** | `declaration_moved`, `public_api_internal_dependency_added` |
+| **Detected `ChangeKind`s** | `declaration_moved` |
 | **Source files** | `examples/case196_header_graph_move_reconciled/` |
 
 **Category:** Risk (Source Graph / Reconciliation) | **Verdict:** 🟡 COMPATIBLE_WITH_RISK
 
 ## Verdict and consumer impact
 
-A private, never-exported internal helper `demo::detail::helper` — reached
-only through a public function `demo::process`'s own dependency, the same
-shape `case160`
-demonstrates — keeps its exact qualified name, but two things change about
-it in the same release: its parameter type changes from `int` to `long`
-(which moves its Itanium mangled name, `_ZN4demo6detail6helperEi` →
-`_ZN4demo6detail6helperEl`), and its declaring header is reorganized
-(`include/demo/detail_v1.h` → `include/demo/detail_v2.h`). Because the
-mangled name — and therefore the L5 graph node's own id — changed, the raw
-graph diff would show an unrelated node removal plus node addition that
-happen to share the name `demo::detail::helper`. abicheck's graph
-reconciliation (ADR-048) recognizes the two as the same declaration via the
-qualified-name alias tier, and — since the declaring file also changed
-while the qualified name did not — classifies the outcome as
-`declaration_moved`.
+A private, never-exported internal helper `demo::detail::helper` keeps its
+exact qualified name, but two things change about it in the same release:
+its parameter type changes from `int` to `long` (which moves its Itanium
+mangled name, `_ZN4demo6detail6helperEi` → `_ZN4demo6detail6helperEl`), and
+its declaring header is reorganized (`include/demo/detail_v1.h` →
+`include/demo/detail_v2.h`). Because the mangled name — and therefore the L5
+graph node's own id — changed, the raw graph diff would show an unrelated
+node removal plus node addition that happen to share the name
+`demo::detail::helper`. abicheck's graph reconciliation (ADR-048) recognizes
+the two as the same declaration via the qualified-name alias tier, and —
+since the declaring file also changed while the qualified name did not —
+classifies the outcome as `declaration_moved`.
 
 This is deliberately **not** a "pure" move: an unchanged function signature
 can never change its own mangled name, so a pure declaring-file move cannot
@@ -37,6 +34,30 @@ by itself perturb a node's identity in the current graph model (see
 the compound, *reachable* shape a real move-plus-signature-change release
 takes, not the unreachable pure-move shape an earlier attempt at this case
 mistakenly modeled).
+
+A public function, `demo::process`, calls the helper — but only on the
+**new** side of this fixture, deliberately. Graph reconciliation's own
+public-reachability gate (`graph_reconcile._public_reachable_ids`) still
+needs *some* live path from a public entry to the helper on at least one
+side, or it suppresses the `declaration_moved` finding entirely as a purely
+internal, never-publicly-reached refactor. But
+`source_graph_findings._internal_dependency_findings` (the detector behind
+`public_api_internal_dependency_added`) compares raw target node ids across
+versions rather than reconciled identities — a review round caught that
+adding the same call edge to *both* sides, pointing at the helper's two
+different per-version mangled-name ids, would make that detector's "no
+internal dependency → reaches 1" finding text literally false (the
+dependency would already have existed in old, just under a different raw
+id) as well as inflate this case's expected findings with an artifact
+rather than a genuinely new dependency. Restricting the call edge to the new
+side avoids both problems: `demo::process`'s edge satisfies the
+reachability gate (so `declaration_moved` still fires) without asserting a
+public dependency that isn't genuinely new — and, since
+`_internal_dependency_findings` requires both sides to carry dependency-edge
+coverage before crediting anything as "newly reached" (an evidence-poor
+side can't make a pre-existing edge look invented), no
+`public_api_internal_dependency_added` finding is produced here at all: this
+case reproduces `declaration_moved` alone.
 
 The helper is deliberately **private** — a review round on an earlier
 version of this case caught that a *public* function's mangled-name-moving
@@ -48,8 +69,8 @@ describes: cataloging a scenario that genuinely breaks the ABI as
 confined to a `private_header`-visibility declaration never present in the
 exported symbol table, a real end-to-end `compare()` of this exact scenario
 has nothing BREAKING to contradict — `COMPATIBLE_WITH_RISK` is the genuinely
-correct canonical answer, carried entirely by the two RISK-tier L5 findings
-this fixture reproduces.
+correct canonical answer, carried entirely by the single RISK-tier L5
+`declaration_moved` finding this fixture reproduces.
 
 ## Old/new diff
 
@@ -89,14 +110,13 @@ for c in diff_source_graph_findings(old, new):
 ## Expected abicheck finding
 
 ```text
-public_api_internal_dependency_added demo::process no internal dependency -> reaches 1 internal decl(s)/type(s)
 declaration_moved demo::detail::helper demo::detail::helper -> demo::detail::helper
 ```
 
-Verdict: COMPATIBLE_WITH_RISK — both are pure L5-evidence risk annotations.
-Because the identity-perturbing edit lands on a `private_header`-visibility
+Verdict: COMPATIBLE_WITH_RISK — a pure L5-evidence risk annotation. Because
+the identity-perturbing edit lands on a `private_header`-visibility
 declaration, a real binary comparison of this exact scenario has no
-BREAKING/API_BREAK finding to sit alongside them; reconciliation only
+BREAKING/API_BREAK finding to sit alongside it; reconciliation only
 explains/localizes, it never suppresses or replaces another finding
 (ADR-028 D3).
 
@@ -119,12 +139,16 @@ qualified name changed too). `graph_reconcile._classify_outcome` then
 compares each side's declaring file, recovered from the real
 `SOURCE_DECLARES` edge `build_source_graph` creates from each function's
 `SourceLocation`: the name held still but the file differs, so the outcome
-is classified `declaration_moved` rather than `declaration_renamed`.
-Separately, `source_graph_findings._internal_dependency_findings` sees
-`demo::process` (public) reach `demo::detail::helper` (private) via the
-`DECL_CALLS_DECL` edge, firing `public_api_internal_dependency_added` —
-exactly `case160`'s
-own producer, reused unchanged here.
+is classified `declaration_moved` rather than `declaration_renamed`. The
+`demo::process` → `demo::detail::helper` `DECL_CALLS_DECL` edge exists only
+in the new graph, purely to satisfy `graph_reconcile._public_reachable_ids`'s
+gate (a purely-internal, never-publicly-reached rename/move is suppressed
+rather than reported as RISK) — with dependency-edge coverage absent on the
+old side, `source_graph_findings._internal_dependency_findings` (the
+`public_api_internal_dependency_added` producer, demonstrated in
+`case160`) correctly
+declines to credit anything as newly reached here, so this case reproduces
+`declaration_moved` alone.
 
 ## Runtime failure demonstration
 
@@ -137,9 +161,8 @@ reviewer sees an unexplained "`demo::detail::helper` removed,
 `demo::detail::helper` added" pair (same name, different mangled symbol,
 easy to misread as two unrelated internal declarations) and has to manually
 confirm whether it matters; with it, the PR comment notes the pair is the
-same internal declaration, relocated and resignatured, alongside the
-existing internal-dependency risk note — legibility for an entirely
-internal refactor, not a break to chase down.
+same internal declaration, relocated and resignatured — legibility for an
+entirely internal refactor, not a break to chase down.
 
 ## Safe redesign
 

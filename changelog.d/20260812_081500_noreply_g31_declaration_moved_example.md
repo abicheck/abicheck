@@ -23,7 +23,17 @@
   disappears), contradicting `ground_truth.json`'s one-canonical-verdict
   invariant under a `COMPATIBLE_WITH_RISK` label. Redesigned so the edit
   lands on a **private** helper reached only through a public caller's
-  dependency edge (the same shape `case160_public_api_internal_dep_added`
-  demonstrates) — `COMPATIBLE_WITH_RISK` is now the genuinely correct
-  canonical verdict, carried by two RISK-tier L5 findings
-  (`public_api_internal_dependency_added` + `declaration_moved`).
+  dependency edge — `COMPATIBLE_WITH_RISK` is now the genuinely correct
+  canonical verdict.
+- **A follow-up review round caught the private-helper redesign's own new
+  artifact**: adding the public caller's dependency edge to *both* the old
+  and new graphs made `public_api_internal_dependency_added` fire on a
+  raw-node-id mismatch rather than a genuinely new dependency (the
+  detector compares raw target ids across versions, not
+  graph-reconciliation-paired identities, so it read a pre-existing call
+  relationship — reaching the helper's old mangled name — as newly added
+  once the helper's node id moved). Fixed by restricting that call edge to
+  the new side only, which still satisfies the reachability gate that keeps
+  the reconciliation finding from being suppressed, without asserting a
+  spurious new dependency. `case196` now reproduces a single RISK-tier L5
+  `declaration_moved` finding.

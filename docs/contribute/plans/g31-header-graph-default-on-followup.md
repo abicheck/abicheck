@@ -183,15 +183,25 @@ scenario a case describes, not to a hand-isolated fixture slice of it).
 Fixed by moving the identity-perturbing edit onto a **private** helper
 (`demo::detail::helper`, `visibility="private_header"`) reached only
 through a public caller's (`demo::process`) `DECL_CALLS_DECL` dependency
-edge — the same shape `case160_public_api_internal_dep_added` already
-demonstrates, needed here because `graph_reconcile`'s own public-
-reachability gate (`_public_reachable_ids`) suppresses a reconciliation
-finding entirely for a declaration with no live path from a public entry
-point. With the identity-perturbing edit confined to a never-exported
-private declaration, `COMPATIBLE_WITH_RISK` (backed by
-`public_api_internal_dependency_added` + `declaration_moved`, both pure
-RISK-tier L5 findings) is the genuinely correct canonical verdict — a real
-end-to-end comparison of this exact scenario has nothing BREAKING to
+edge, needed because `graph_reconcile`'s own public-reachability gate
+(`_public_reachable_ids`) suppresses a reconciliation finding entirely for
+a declaration with no live path from a public entry point. A fourth review
+round caught that adding that same call edge to *both* the old and new
+graphs (pointing at the helper's two different per-version mangled-name
+node ids) made `source_graph_findings._internal_dependency_findings` — the
+`public_api_internal_dependency_added` producer, `case160_public_api_
+internal_dep_added`'s own subject — fire on a raw-node-id artifact rather
+than a genuinely new dependency: that detector compares raw target ids
+across versions, not reconciled identities, so it read the pre-existing
+call relationship as newly added. Fixed by restricting the call edge to the
+**new** side only, which still satisfies the reachability gate (only one
+side needs the edge) without asserting a spurious new dependency; the
+detector's own coverage gate then declines to credit anything as newly
+reached when the old side carries no dependency-edge coverage at all. With
+the identity-perturbing edit confined to a never-exported private
+declaration, `COMPATIBLE_WITH_RISK` (backed by the single RISK-tier L5
+`declaration_moved` finding) is the genuinely correct canonical verdict — a
+real end-to-end comparison of this exact scenario has nothing BREAKING to
 contradict it.
 `case196_header_graph_move_reconciled` now ships built exactly this way
 (real dataclasses → real fold → real diff, not hand-assembled
