@@ -297,7 +297,9 @@ def two_sided_input_options(func: F) -> F:
         "(e.g. --header old=v1/foo.h --header new=v2/foo.h). Repeatable (ADR-040). "
         "Recommended for full ABI analysis; without headers, abicheck uses whatever "
         "artifact evidence is available instead (ELF may add DWARF, PE may add PDB, "
-        "Mach-O stays export-only) but has no header AST or public-surface scoping. "
+        "Mach-O stays limited to binary metadata: exports plus load-command facts "
+        "like install name, dependencies, and rpaths) but has no header AST or "
+        "public-surface scoping. "
         "Scopes the ABI surface to declarations in these headers for ELF; on PE/Mach-O scoping is "
         "best-effort and falls back to the export table when castxml is unavailable or names don't match "
         "(e.g. MSVC C++ mangling). Validated for native binaries; ignored for snapshots.",

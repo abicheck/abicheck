@@ -18,6 +18,10 @@
   `ABICHECK_ALLOW_AST_FALLBACK=1`), matching `action.yml`/`cli_options.py`.
   `docs/reference/config-file.md` no longer says the `targets:`/`bundles:`/
   `profiles:` run-plan generator is "planned but not built" — `abicheck
-  project plan` implements it — and now explains why an explicit `--config`
-  fails loudly on a malformed file while an auto-discovered one only warns
-  and falls back, instead of reading as two disconnected rules.
+  project plan` implements it — and now distinguishes `compare`'s own
+  project-config load (severity/scope/policy: always a hard error on a
+  malformed file, explicit `--config` or auto-discovered alike) from the
+  separate `compile:`-block loader shared by `compare`/`dump`/`scan`'s L2
+  compile context, where only an auto-discovered file's parse failure
+  degrades to a warning, instead of presenting the second, narrower rule
+  as if it applied everywhere.

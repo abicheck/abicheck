@@ -74,8 +74,8 @@ loader.
 A *separate* load of the same `.abicheck.yml` — the `compile:` block shared
 by `compare`/`dump`/`scan`'s L2 compile context (`gcc-path`, includes,
 sysroot, …), resolved by `merge_compile_config()` in `cli_options.py` — does
-distinguish explicit from auto-discovered: an explicit `--config`/
-`--build-config` that fails to parse still fails loudly, but an
+distinguish explicit from auto-discovered: an explicit `--config` that
+fails to parse still fails loudly, but an
 **auto-discovered** file that fails only prints a warning and continues
 with the CLI's own compile context, since a config the user never pointed
 at explicitly could otherwise silently break an unrelated invocation just
