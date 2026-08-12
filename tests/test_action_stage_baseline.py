@@ -262,6 +262,47 @@ class TestStageBaseline:
         assert (extracted / "manifest.json").is_file()
         assert (extracted / "libfoo.abicheck.json").is_file()
 
+    def test_leading_dash_asset_name_python_fallback_cleanup_does_not_fail(
+        self, tmp_path: Path
+    ) -> None:
+        # Regression (Codex review, P2): a custom asset-name-template can
+        # legally resolve to a name starting with '-' (a perfectly legal
+        # leading filename character on every real filesystem, and not
+        # rejected by the newline/CR/path-separator/drive-prefix/'#' guard
+        # above). When the Python zstandard fallback path runs (no usable
+        # `zstd`/`tar --zstd` on this runner), its own cleanup
+        # `rm -f "$asset_name.tmp-payload"` parsed a leading-dash filename
+        # as a run of short options instead of a literal filename, exiting
+        # nonzero -- and under this script's own `set -euo pipefail`, that
+        # aborted the whole step (never writing the `asset-name` output)
+        # even though the archive itself was built successfully.
+        import shutil
+
+        baseline_dir = _make_baseline_dir(tmp_path)
+        scratch_bin = tmp_path / "no-zstd-bin"
+        scratch_bin.mkdir()
+        for tool in ("bash", "tar", "python3", "pip", "sh", "env", "gzip", "rm"):
+            resolved = shutil.which(tool)
+            if resolved is not None:
+                (scratch_bin / tool).symlink_to(resolved)
+        assert not (scratch_bin / "zstd").exists()
+
+        result, outputs = _run_action(
+            {
+                "BASELINE_PATH": str(baseline_dir),
+                "ASSET_NAME_TEMPLATE": "-nightly.tar.zst",
+                "PATH": str(scratch_bin),
+            },
+            tmp_path,
+        )
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert outputs.get("asset-name") == "-nightly.tar.zst", (
+            result.stdout + result.stderr
+        )
+        archive_path = tmp_path / "-nightly.tar.zst"
+        assert archive_path.is_file()
+        assert not (tmp_path / "-nightly.tar.zst.tmp-payload").exists()
+
     def test_newline_in_resolved_name_is_rejected(self, tmp_path: Path) -> None:
         # Regression (Codex review, P1): a newline embedded in profile (or
         # asset-name-template) survives substitution into asset_name, and

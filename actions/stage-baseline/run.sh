@@ -158,7 +158,20 @@ with open(src, 'rb') as inp, open(dst, 'wb') as out, cctx.stream_writer(out) as 
             break
         writer.write(chunk)
 " "$asset_name.tmp-payload" "$asset_name"
-      rm -f "$asset_name.tmp-payload"
+      # "./$asset_name.tmp-payload", not a bare "$asset_name.tmp-payload"
+      # -- rm's own arg parser treats a leading '-' as a run of short
+      # options, not part of a filename (e.g. a resolved
+      # "-nightly.tar.zst.tmp-payload" fails with "rm: invalid option --
+      # 'n'"). A custom asset-name-template resolving to a name starting
+      # with '-' packages fine up to this point -- '-' is a perfectly
+      # legal leading filename character on every real filesystem, and
+      # this script's own newline/CR/path-separator/drive-prefix/'#' guard
+      # above does not reject it -- but this cleanup would otherwise abort
+      # the whole step under `set -euo pipefail` even though the archive
+      # was already built successfully, the same class of gap the upload
+      # step in publish-baseline.yml already guards against for this
+      # supported filename case (Codex review).
+      rm -f "./$asset_name.tmp-payload"
     fi
     ;;
   *.tar.gz | *.tgz)
