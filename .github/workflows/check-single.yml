@@ -76,8 +76,9 @@ on:
         default: ''
       baseline-artifact-name:
         description: >-
-          Optional: an artifact name to download into the directory named
-          by baseline-path before running check-target.
+          Optional: an artifact name to download into the workflow-owned
+          .check-single-baseline directory before running check-target.
+          When set, baseline-path is ignored.
         type: string
         default: ''
       build-output-artifact-name:
@@ -402,16 +403,14 @@ jobs:
       - name: Clear baseline staging before download
         if: inputs.baseline-artifact-name != ''
         shell: bash
-        env:
-          BASELINE_STAGING_PATH: ${{ inputs.baseline-path }}
-        run: rm -rf "$BASELINE_STAGING_PATH"
+        run: rm -rf .check-single-baseline
 
       - name: Download baseline artifact
         if: inputs.baseline-artifact-name != ''
         uses: actions/download-artifact@v8
         with:
           name: ${{ inputs.baseline-artifact-name }}
-          path: ${{ inputs.baseline-path }}
+          path: .check-single-baseline
 
       - name: Clear build-output staging before download
         if: inputs.build-output-artifact-name != ''
@@ -436,7 +435,7 @@ jobs:
           bundle-members: ${{ inputs.bundle-members }}
           profile: ${{ inputs.profile }}
           baseline-channel: ${{ inputs.baseline-channel }}
-          baseline-path: ${{ inputs.baseline-path }}
+          baseline-path: ${{ inputs.baseline-artifact-name != '' && '.check-single-baseline' || inputs.baseline-path }}
           baseline-required: ${{ inputs.baseline-required }}
           candidate-build-output: ${{ inputs.candidate-build-output }}
           requested-depth: ${{ inputs.requested-depth }}

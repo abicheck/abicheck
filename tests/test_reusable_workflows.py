@@ -241,11 +241,11 @@ class TestCheckSingleOptionalArtifactStaging:
         ):
             assert names.index(step_name) < run_idx
 
-    def test_baseline_artifact_downloads_into_baseline_path(self) -> None:
+    def test_baseline_artifact_downloads_into_workflow_owned_staging(self) -> None:
         data = _load(CHECK_SINGLE)
         steps = _steps(data["jobs"]["check"])
         step = next(s for s in steps if s.get("name") == "Download baseline artifact")
-        assert step["with"]["path"] == "${{ inputs.baseline-path }}"
+        assert step["with"]["path"] == ".check-single-baseline"
 
     @pytest.mark.parametrize(
         ("clear_name", "download_name"),
@@ -263,10 +263,10 @@ class TestCheckSingleOptionalArtifactStaging:
     ) -> None:
         """The earlier `actions/checkout` step already populates the whole
         workspace from the caller's own repository -- a stale checked-in
-        file at `candidate`/the resolved `baseline-path`/`build-output`
+        file at `candidate`/the fixed baseline staging path/`build-output`
         would otherwise survive an artifact download that doesn't happen to
         overwrite it (a missing file, or a differently-laid-out artifact),
-        and `new-library`/`baseline-path` are fixed caller-supplied paths
+        and `new-library` is a fixed caller-supplied path
         here (unlike check-project.yml's glob-based candidate resolver), so
         a stale file is scanned/compared as if it were the real upload
         (Codex review). The clear must share its download's own `if:` --
@@ -280,7 +280,7 @@ class TestCheckSingleOptionalArtifactStaging:
         assert clear_step.get("if") == download_step.get("if")
         assert names.index(clear_name) < names.index(download_name)
 
-    def test_baseline_clear_step_targets_the_resolved_baseline_path(self) -> None:
+    def test_baseline_staging_cannot_target_a_caller_controlled_path(self) -> None:
         data = _load(CHECK_SINGLE)
         steps = _steps(data["jobs"]["check"])
         clear_step = next(
@@ -288,10 +288,14 @@ class TestCheckSingleOptionalArtifactStaging:
             for s in steps
             if s.get("name") == "Clear baseline staging before download"
         )
-        assert (
-            clear_step["env"]["BASELINE_STAGING_PATH"] == "${{ inputs.baseline-path }}"
+        assert clear_step["run"] == "rm -rf .check-single-baseline"
+        assert "env" not in clear_step
+
+        run_step = next(s for s in steps if s.get("name") == "Run check-target")
+        assert run_step["with"]["baseline-path"] == (
+            "${{ inputs.baseline-artifact-name != '' && '.check-single-baseline' "
+            "|| inputs.baseline-path }}"
         )
-        assert "$BASELINE_STAGING_PATH" in clear_step["run"]
 
 
 class TestCheckProjectAlwaysOnRequirements:
@@ -1024,7 +1028,9 @@ class TestCandidateResolverConfinesMatchesToTheArtifactRoot:
             "isn't a bug in the workflow script itself."
         ),
     )
-    def test_absolute_pattern_is_rejected_without_globbing(self, tmp_path: Path) -> None:
+    def test_absolute_pattern_is_rejected_without_globbing(
+        self, tmp_path: Path
+    ) -> None:
         # An absolute recursive pattern like '/**/*' would otherwise expand
         # glob.glob against the whole runner filesystem BEFORE the
         # commonpath confinement check ever ran -- a needlessly slow/heavy
