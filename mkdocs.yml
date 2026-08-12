@@ -141,6 +141,7 @@ nav:
     - Run Plan Schema: reference/run-plan-schema.md
     - Reusable Workflows: reference/reusable-workflows.md
     - publish-baseline / update-main-baseline: reference/publish-baseline.md
+    - protect-committed-baseline Workflow: reference/protect-committed-baseline.md
     - Configuration File: reference/config-file.md
     - Config Keys Reference: reference/config-keys-reference.md
     - Compatibility Evaluation Config: reference/compatibility-evaluation-config.md

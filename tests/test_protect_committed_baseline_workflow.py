@@ -1,0 +1,360 @@
+# Copyright 2026 Nikolay Petrov
+# SPDX-License-Identifier: Apache-2.0
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+"""Tests for ``.github/workflows/protect-committed-baseline.yml`` (P1,
+baseline-storage architecture review): the trusted gate against an ordinary
+PR silently "approving itself" by updating a committed baseline it is also
+compared against.
+
+Structural tests assert the workflow's shape (``workflow_call`` only,
+read-only permissions, a SHA-pinned checkout) the way
+``tests/test_publish_baseline_workflows.py`` does for its siblings.
+Behavioral tests extract the check step's ``run:`` script verbatim and
+execute it against a real disposable git repository -- the same
+"parse the real file, don't hand-copy it" discipline
+``test_action_run_sh_dry_run_baseline.py`` uses for ``action/run.sh``.
+"""
+
+from __future__ import annotations
+
+import json
+import os
+import subprocess
+from pathlib import Path
+from typing import Any
+
+import pytest
+import yaml
+
+WORKFLOW_PATH = (
+    Path(__file__).resolve().parents[1]
+    / ".github"
+    / "workflows"
+    / "protect-committed-baseline.yml"
+)
+
+
+def _load() -> dict[str, Any]:
+    with WORKFLOW_PATH.open(encoding="utf-8") as fh:
+        return yaml.safe_load(fh)
+
+
+def _check_job(data: dict[str, Any]) -> dict[str, Any]:
+    return data["jobs"]["check"]
+
+
+def _check_step(data: dict[str, Any]) -> dict[str, Any]:
+    for step in _check_job(data)["steps"]:
+        if (
+            step.get("name")
+            == "Check whether this PR modifies a protected baseline path"
+        ):
+            return step
+    raise AssertionError("check step not found")
+
+
+class TestStructure:
+    def test_parses_as_valid_workflow_yaml(self) -> None:
+        data = _load()
+        assert data["jobs"]["check"]["steps"]
+
+    def test_is_workflow_call_only(self) -> None:
+        # Never pull_request/pull_request_target directly -- the calling
+        # repository's own pull_request-triggered workflow decides when
+        # this runs, same convention as publish-baseline.yml/
+        # update-main-baseline.yml (ADR-047 §12).
+        data = _load()
+        assert set(data[True]) == {"workflow_call"}
+
+    def test_permissions_are_read_only(self) -> None:
+        data = _load()
+        job = _check_job(data)
+        perms = job["permissions"]
+        assert perms == {"contents": "read", "pull-requests": "read"}
+
+    def test_checkout_is_sha_pinned_with_fetch_depth_0(self) -> None:
+        data = _load()
+        job = _check_job(data)
+        checkout_step = next(s for s in job["steps"] if "uses" in s)
+        assert "@" in checkout_step["uses"]
+        ref = checkout_step["uses"].split("@", 1)[1]
+        assert len(ref) == 40, "expected a full commit SHA, not a floating tag"
+        assert checkout_step["with"]["fetch-depth"] == 0
+        assert checkout_step["with"]["persist-credentials"] is False
+
+    def test_required_input_has_no_default(self) -> None:
+        data = _load()
+        protected_paths = data[True]["workflow_call"]["inputs"]["protected-paths"]
+        assert protected_paths["required"] is True
+        assert "default" not in protected_paths
+
+    def test_bypass_label_defaults_to_disabled(self) -> None:
+        data = _load()
+        bypass = data[True]["workflow_call"]["inputs"]["bypass-label"]
+        assert bypass["default"] == ""
+
+
+def _bash_executable() -> str:
+    if os.name != "nt":
+        return "bash"
+    for candidate in (
+        os.environ.get("GIT_BASH_PATH"),
+        r"C:\Program Files\Git\bin\bash.exe",
+        r"C:\Program Files\Git\usr\bin\bash.exe",
+    ):
+        if candidate and Path(candidate).is_file():
+            return candidate
+    return "bash"
+
+
+def _check_script() -> str:
+    step = _check_step(_load())
+    return step["run"]
+
+
+def _git(repo: Path, *args: str) -> str:
+    result = subprocess.run(
+        ["git", "-C", str(repo), *args],
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    return result.stdout.strip()
+
+
+def _init_repo(repo: Path) -> None:
+    repo.mkdir(parents=True, exist_ok=True)
+    subprocess.run(["git", "init", "-q"], cwd=repo, check=True)
+    subprocess.run(
+        ["git", "config", "user.email", "test@example.com"], cwd=repo, check=True
+    )
+    subprocess.run(["git", "config", "user.name", "test"], cwd=repo, check=True)
+
+
+def _commit_all(repo: Path, message: str) -> str:
+    subprocess.run(["git", "add", "-A"], cwd=repo, check=True)
+    subprocess.run(["git", "commit", "-q", "-m", message], cwd=repo, check=True)
+    return _git(repo, "rev-parse", "HEAD")
+
+
+@pytest.mark.skipif(
+    not WORKFLOW_PATH.is_file(), reason="protect-committed-baseline.yml not found"
+)
+class TestCheckScriptBehavior:
+    def _run(
+        self,
+        repo: Path,
+        *,
+        base_sha: str,
+        head_sha: str,
+        protected_paths: str,
+        bypass_label: str = "",
+        pr_labels: list[str] | None = None,
+    ) -> subprocess.CompletedProcess[str]:
+        env = {
+            **os.environ,
+            "PROTECTED_PATHS": protected_paths,
+            "BYPASS_LABEL": bypass_label,
+            "BASE_SHA": base_sha,
+            "HEAD_SHA": head_sha,
+            "PR_LABELS_JSON": json.dumps(pr_labels or []),
+        }
+        return subprocess.run(
+            [_bash_executable(), "-c", _check_script()],
+            capture_output=True,
+            text=True,
+            env=env,
+            cwd=repo,
+            check=False,
+        )
+
+    def test_fails_when_pr_touches_a_protected_baseline_file(
+        self, tmp_path: Path
+    ) -> None:
+        repo = tmp_path / "repo"
+        _init_repo(repo)
+        (repo / "abi").mkdir()
+        (repo / "abi" / "libfoo.abicheck.json").write_text("old", encoding="utf-8")
+        (repo / "src.c").write_text("old", encoding="utf-8")
+        base_sha = _commit_all(repo, "base")
+
+        (repo / "abi" / "libfoo.abicheck.json").write_text("new", encoding="utf-8")
+        (repo / "src.c").write_text("new", encoding="utf-8")
+        head_sha = _commit_all(repo, "changes both code and baseline")
+
+        result = self._run(
+            repo, base_sha=base_sha, head_sha=head_sha, protected_paths="abi/**"
+        )
+        assert result.returncode == 1
+        assert "abi/libfoo.abicheck.json" in result.stdout
+        assert "silently approve itself" in result.stdout
+
+    def test_passes_when_pr_does_not_touch_protected_paths(
+        self, tmp_path: Path
+    ) -> None:
+        repo = tmp_path / "repo"
+        _init_repo(repo)
+        (repo / "abi").mkdir()
+        (repo / "abi" / "libfoo.abicheck.json").write_text("old", encoding="utf-8")
+        (repo / "src.c").write_text("old", encoding="utf-8")
+        base_sha = _commit_all(repo, "base")
+
+        (repo / "src.c").write_text("new", encoding="utf-8")
+        head_sha = _commit_all(repo, "code only")
+
+        result = self._run(
+            repo, base_sha=base_sha, head_sha=head_sha, protected_paths="abi/**"
+        )
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert "No protected baseline files" in result.stdout
+
+    def test_bypass_label_allows_a_reviewed_refresh(self, tmp_path: Path) -> None:
+        repo = tmp_path / "repo"
+        _init_repo(repo)
+        (repo / "abi").mkdir()
+        (repo / "abi" / "libfoo.abicheck.json").write_text("old", encoding="utf-8")
+        base_sha = _commit_all(repo, "base")
+
+        (repo / "abi" / "libfoo.abicheck.json").write_text(
+            "refreshed", encoding="utf-8"
+        )
+        head_sha = _commit_all(repo, "baseline refresh")
+
+        # Without the label: fails.
+        result = self._run(
+            repo,
+            base_sha=base_sha,
+            head_sha=head_sha,
+            protected_paths="abi/**",
+            bypass_label="baseline-refresh",
+            pr_labels=[],
+        )
+        assert result.returncode == 1
+
+        # With the label: passes, and says so.
+        result = self._run(
+            repo,
+            base_sha=base_sha,
+            head_sha=head_sha,
+            protected_paths="abi/**",
+            bypass_label="baseline-refresh",
+            pr_labels=["baseline-refresh", "unrelated-label"],
+        )
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert "::notice::" in result.stdout
+
+    def test_a_lone_star_does_not_cross_a_path_separator(self, tmp_path: Path) -> None:
+        repo = tmp_path / "repo"
+        _init_repo(repo)
+        (repo / "baselines" / "linux-x86_64").mkdir(parents=True)
+        (repo / "baselines" / "linux-x86_64" / "libfoo.abicheck.json").write_text(
+            "old", encoding="utf-8"
+        )
+        base_sha = _commit_all(repo, "base")
+
+        # Protected pattern only covers one directory level deep --
+        # baselines/<profile>/<file>.abicheck.json -- a file nested one
+        # level deeper must NOT match a lone "*".
+        (repo / "baselines" / "linux-x86_64" / "extra").mkdir()
+        (
+            repo / "baselines" / "linux-x86_64" / "extra" / "libfoo.abicheck.json"
+        ).write_text("new", encoding="utf-8")
+        head_sha = _commit_all(repo, "add a nested file")
+
+        result = self._run(
+            repo,
+            base_sha=base_sha,
+            head_sha=head_sha,
+            protected_paths="baselines/*/*.abicheck.json",
+        )
+        assert result.returncode == 0, result.stdout + result.stderr
+
+    def test_double_star_crosses_path_separators(self, tmp_path: Path) -> None:
+        repo = tmp_path / "repo"
+        _init_repo(repo)
+        (repo / "abi" / "sub" / "dir").mkdir(parents=True)
+        (repo / "abi" / "sub" / "dir" / "libfoo.abicheck.json").write_text(
+            "old", encoding="utf-8"
+        )
+        base_sha = _commit_all(repo, "base")
+        (repo / "abi" / "sub" / "dir" / "libfoo.abicheck.json").write_text(
+            "new", encoding="utf-8"
+        )
+        head_sha = _commit_all(repo, "nested change")
+
+        result = self._run(
+            repo, base_sha=base_sha, head_sha=head_sha, protected_paths="abi/**"
+        )
+        assert result.returncode == 1
+
+    def test_unrelated_directory_sharing_a_leaf_name_is_not_matched(
+        self, tmp_path: Path
+    ) -> None:
+        repo = tmp_path / "repo"
+        _init_repo(repo)
+        (repo / "src" / "abi").mkdir(parents=True)
+        (repo / "src" / "abi" / "note.md").write_text("old", encoding="utf-8")
+        base_sha = _commit_all(repo, "base")
+        (repo / "src" / "abi" / "note.md").write_text("new", encoding="utf-8")
+        head_sha = _commit_all(repo, "unrelated change")
+
+        result = self._run(
+            repo, base_sha=base_sha, head_sha=head_sha, protected_paths="abi/**"
+        )
+        assert result.returncode == 0, result.stdout + result.stderr
+
+    def test_missing_protected_paths_is_a_usage_error(self, tmp_path: Path) -> None:
+        repo = tmp_path / "repo"
+        _init_repo(repo)
+        (repo / "f.txt").write_text("a", encoding="utf-8")
+        base_sha = _commit_all(repo, "base")
+        (repo / "f.txt").write_text("b", encoding="utf-8")
+        head_sha = _commit_all(repo, "change")
+
+        result = self._run(
+            repo, base_sha=base_sha, head_sha=head_sha, protected_paths=""
+        )
+        assert result.returncode == 1
+        assert "resolved to no patterns" in result.stdout + result.stderr
+
+    def test_missing_base_or_head_sha_is_a_usage_error(self, tmp_path: Path) -> None:
+        repo = tmp_path / "repo"
+        _init_repo(repo)
+        (repo / "f.txt").write_text("a", encoding="utf-8")
+        _commit_all(repo, "base")
+
+        result = self._run(repo, base_sha="", head_sha="", protected_paths="abi/**")
+        assert result.returncode == 1
+        assert "could not be resolved" in result.stdout + result.stderr
+
+    def test_multiple_protected_path_patterns(self, tmp_path: Path) -> None:
+        repo = tmp_path / "repo"
+        _init_repo(repo)
+        (repo / "abi").mkdir()
+        (repo / "baselines").mkdir()
+        (repo / "abi" / "a.json").write_text("old", encoding="utf-8")
+        (repo / "baselines" / "b.json").write_text("old", encoding="utf-8")
+        base_sha = _commit_all(repo, "base")
+        (repo / "baselines" / "b.json").write_text("new", encoding="utf-8")
+        head_sha = _commit_all(repo, "change second pattern's file")
+
+        result = self._run(
+            repo,
+            base_sha=base_sha,
+            head_sha=head_sha,
+            protected_paths="abi/**\nbaselines/**",
+        )
+        assert result.returncode == 1
+        assert "baselines/b.json" in result.stdout

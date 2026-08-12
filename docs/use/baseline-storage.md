@@ -209,6 +209,45 @@ git push
 
 No download step needed — the baseline file is in the repo.
 
+### A committed baseline can silently "approve itself" in a PR — read it from the base commit
+
+The PR workflow above resolves `old-library: abi/libfoo.abicheck.json`
+from whatever is checked out, which on a `pull_request` run is the PR's
+own head commit. If the *same* PR also updates
+`abi/libfoo.abicheck.json` to match a new (possibly incompatible) binary,
+the comparison silently passes — it never reads the baseline as it stood
+at the PR's *base* commit, so it's comparing the new binary against a
+baseline the PR itself just rewrote to match it.
+
+Fix by reading the baseline from the base commit explicitly:
+
+```yaml
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+      - name: Materialize the baseline from the PR base commit
+        run: |
+          git show "${{ github.event.pull_request.base.sha }}:abi/libfoo.abicheck.json" \
+            > /tmp/baseline.abicheck.json
+      - name: ABI compatibility check
+        uses: abicheck/abicheck@v0.5.0
+        with:
+          old-library: /tmp/baseline.abicheck.json
+          new-library: build/libfoo.so
+          new-header: include/foo.h
+```
+
+This way the PR can freely update its own copy of `abi/libfoo.abicheck.json`
+(e.g. to keep it in sync for the *next* PR), but the comparison always
+uses the base-commit content, which the PR itself cannot have written.
+
+As defense-in-depth (a project that hasn't applied the fix above to every
+recipe, or a workflow it doesn't control the source of), the
+[`protect-committed-baseline.yml`](../reference/protect-committed-baseline.md)
+reusable workflow fails outright any ordinary PR that touches a configured
+baseline path at all, unless it carries an explicit human-reviewed bypass
+label.
+
 ## Recipe C: GitHub Actions Cache
 
 Best for: ephemeral, branch-scoped comparisons (e.g., comparing HEAD~1 vs HEAD)

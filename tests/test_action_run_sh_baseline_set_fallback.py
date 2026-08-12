@@ -153,9 +153,7 @@ gh() {
 
 @pytest.mark.skipif(not RUN_SH.is_file(), reason="action/run.sh not found")
 class TestBaselineSetFallback:
-    def _run(
-        self, env_extra: dict[str, str]
-    ) -> subprocess.CompletedProcess[str]:
+    def _run(self, env_extra: dict[str, str]) -> subprocess.CompletedProcess[str]:
         script = (
             'MODE="${INPUT_MODE:-compare}"\n'
             'FORCE_AUDIT_ONLY="${INPUT_AUDIT:-false}"\n'
@@ -193,9 +191,7 @@ class TestBaselineSetFallback:
         # exactly the snapshot filename the manifest recorded.
         assert "libpvxs.abicheck.json" in result.stdout
 
-    def test_resolves_from_baseline_set_for_a_tag_release(
-        self, tmp_path: Path
-    ) -> None:
+    def test_resolves_from_baseline_set_for_a_tag_release(self, tmp_path: Path) -> None:
         archive = _build_baseline_set_archive(tmp_path)
         result = self._run(
             {
@@ -218,12 +214,12 @@ class TestBaselineSetFallback:
         script = (
             'MODE="${INPUT_MODE:-compare}"\n'
             'FORCE_AUDIT_ONLY="${INPUT_AUDIT:-false}"\n'
-            'gh() {\n'
+            "gh() {\n"
             '  local dest=""\n'
-            '  while [[ $# -gt 0 ]]; do\n'
+            "  while [[ $# -gt 0 ]]; do\n"
             '    case "$1" in\n'
             '      -D) dest="$2"; shift 2 ;;\n'
-            '      *) shift ;;\n'
+            "      *) shift ;;\n"
             "    esac\n"
             "  done\n"
             '  mkdir -p "$dest"\n'
@@ -311,9 +307,7 @@ class TestBaselineSetFallback:
         assert result.returncode == 1
         assert "baseline-set archive" in result.stdout + result.stderr
 
-    def test_dry_run_tolerates_unresolvable_baseline_set(
-        self, tmp_path: Path
-    ) -> None:
+    def test_dry_run_tolerates_unresolvable_baseline_set(self, tmp_path: Path) -> None:
         result = self._run(
             {
                 "INPUT_MODE": "compare",

@@ -1,0 +1,189 @@
+name: 'abicheck protect-committed-baseline'
+
+# G30 P1 (baseline-storage architecture review): closes the "a PR can
+# silently approve itself" gap a committed `accepted-main`/moving-channel
+# baseline is exposed to. A workflow like:
+#
+#   old-library: abi/libfoo.abicheck.json
+#
+# resolves that path from the PR's own *working tree* -- if the same PR
+# also updates abi/libfoo.abicheck.json to match its new binary, the
+# comparison silently passes regardless of what actually changed, because
+# it never reads the file's content as of the PR's base commit. This
+# reusable workflow is the trusted gate that closes it: an ordinary
+# pull_request that touches a configured baseline path fails the check
+# unless it carries `bypass-label` -- forcing a genuine baseline refresh
+# through explicit human review (the label) or a dedicated trusted
+# workflow (update-main-baseline.yml/publish-baseline.yml, which push
+# directly rather than going through a fork-writable PR diff at all).
+#
+# Fork-safe by construction: runs on an ordinary `pull_request` trigger
+# only (read-only `contents`/`pull-requests` permissions, the default
+# GITHUB_TOKEN) -- never wire this reusable workflow into a
+# `pull_request_target` caller, which would hand a fork PR's own workflow
+# changes elevated permissions for no benefit this check needs (ADR-047
+# §12 already states the same rule for the baseline-publishing workflows).
+
+on:
+  workflow_call:
+    inputs:
+      protected-paths:
+        description: >-
+          Newline-separated glob patterns naming committed baseline files
+          this check protects, e.g. "abi/**" or "baselines/*/*.abicheck.json".
+          "**" matches zero or more path segments (crosses "/"); a lone "*"
+          matches within one path segment only (never crosses "/"); "?"
+          matches one character (never "/").
+        type: string
+        required: true
+      bypass-label:
+        description: >-
+          A PR label that opts a specific PR out of this check (e.g. for an
+          explicitly reviewed, human-approved manual baseline refresh).
+          Empty (the default) disables the bypass entirely -- every PR
+          touching a protected path fails unconditionally.
+        type: string
+        default: ''
+      base-sha:
+        description: >-
+          Overrides the PR base SHA used for the diff. Defaults to
+          github.event.pull_request.base.sha -- set this only when calling
+          from a non-pull_request-triggered context.
+        type: string
+        default: ''
+      head-sha:
+        description: >-
+          Overrides the PR head SHA used for the diff. Defaults to
+          github.event.pull_request.head.sha.
+        type: string
+        default: ''
+
+jobs:
+  check:
+    name: 'Protect committed baseline'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      pull-requests: read
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10  # v6
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Check whether this PR modifies a protected baseline path
+        shell: bash
+        env:
+          PROTECTED_PATHS: ${{ inputs.protected-paths }}
+          BYPASS_LABEL: ${{ inputs.bypass-label }}
+          BASE_SHA: ${{ inputs.base-sha != '' && inputs.base-sha || github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ inputs.head-sha != '' && inputs.head-sha || github.event.pull_request.head.sha }}
+          PR_LABELS_JSON: ${{ toJSON(github.event.pull_request.labels.*.name) }}
+        run: |
+          set -euo pipefail
+
+          if [[ -z "$BASE_SHA" || -z "$HEAD_SHA" ]]; then
+            echo "::error::base-sha/head-sha could not be resolved -- this reusable workflow must be called from a pull_request-triggered workflow (github.event.pull_request must be set), or base-sha/head-sha passed explicitly."
+            exit 1
+          fi
+
+          echo "::group::Diff $BASE_SHA...$HEAD_SHA"
+          CHANGED_FILES=$(git diff --name-only "$BASE_SHA...$HEAD_SHA")
+          echo "$CHANGED_FILES"
+          echo "::endgroup::"
+
+          CHANGED_FILES="$CHANGED_FILES" python3 - <<'PYEOF'
+          import json
+          import os
+          import re
+          import sys
+
+
+          def glob_to_regex(pattern: str) -> str:
+              """Translate a "**"-aware glob into an anchored regex. "**"
+              matches zero or more path segments (crosses "/"); a lone "*"
+              matches within one path segment only (never crosses "/");
+              "?" matches one character (never "/"). Everything else is a
+              literal."""
+              out = ["^"]
+              i, n = 0, len(pattern)
+              while i < n:
+                  c = pattern[i]
+                  if pattern[i : i + 2] == "**":
+                      out.append(".*")
+                      i += 2
+                      if i < n and pattern[i] == "/":
+                          out.append("/?")
+                          i += 1
+                      continue
+                  if c == "*":
+                      out.append("[^/]*")
+                      i += 1
+                      continue
+                  if c == "?":
+                      out.append("[^/]")
+                      i += 1
+                      continue
+                  out.append(re.escape(c))
+                  i += 1
+              out.append("$")
+              return "".join(out)
+
+
+          def matches(path: str, pattern: str) -> bool:
+              return re.match(glob_to_regex(pattern), path) is not None
+
+
+          patterns = [
+              line.strip()
+              for line in os.environ.get("PROTECTED_PATHS", "").splitlines()
+              if line.strip()
+          ]
+          if not patterns:
+              print("::error::protected-paths resolved to no patterns -- refusing to run a check that would protect nothing.")
+              sys.exit(1)
+
+          changed = [
+              line
+              for line in os.environ.get("CHANGED_FILES", "").splitlines()
+              if line
+          ]
+          hits = sorted(
+              {path for path in changed if any(matches(path, pat) for pat in patterns)}
+          )
+          if not hits:
+              print("No protected baseline files were touched by this PR.")
+              sys.exit(0)
+
+          bypass_label = os.environ.get("BYPASS_LABEL", "")
+          pr_labels = set(json.loads(os.environ.get("PR_LABELS_JSON") or "[]"))
+          if bypass_label and bypass_label in pr_labels:
+              print(
+                  f"::notice::this PR modifies protected baseline file(s) "
+                  f"({', '.join(hits)}), but carries the '{bypass_label}' "
+                  "bypass label -- treating this as an explicitly reviewed, "
+                  "human-approved baseline refresh."
+              )
+              sys.exit(0)
+
+          hint = (
+              f" Add the '{bypass_label}' label if this is a genuine, "
+              "reviewed baseline refresh."
+              if bypass_label
+              else ""
+          )
+          print(
+              "::error::this PR modifies "
+              f"{len(hits)} protected committed-baseline file(s): "
+              f"{', '.join(hits)}. An ordinary PR that both changes the "
+              "compared binary/headers AND updates the baseline it is "
+              "compared against can silently approve itself -- a real "
+              "incompatible change and its own baseline update land "
+              "together, so the comparison never actually detects it. "
+              "Refresh the baseline through a dedicated trusted workflow "
+              "(a push-triggered update, never a PR diff) instead."
+              + hint
+          )
+          sys.exit(1)
+          PYEOF

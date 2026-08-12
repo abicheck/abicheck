@@ -134,8 +134,11 @@ topics:
       - actions/resolve-baseline/action.yml
       - .github/workflows/publish-baseline.yml
       - .github/workflows/update-main-baseline.yml
+      - .github/workflows/protect-committed-baseline.yml
+      - action.yml
     task_pages:
       - reference/publish-baseline.md
+      - reference/protect-committed-baseline.md
 
   cli-surface:
     canonical_page: use/cli-usage.md
