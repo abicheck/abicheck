@@ -99,9 +99,7 @@ _logger = logging.getLogger(__name__)
 # -- specifically so *one* scope dedupes a warning repeated across both
 # loaders, not just repeated calls to this one. See
 # `policy_file.dedup_validate_overrides_warnings`'s own docstring for what
-# this does and does not cover (in particular: `compare-release --jobs N>1`'s
-# `ProcessPoolExecutor` workers are a separate process each and don't share
-# this scope).
+# this does and does not cover.
 dedup_policy_override_warnings = _policy_file.dedup_validate_overrides_warnings
 
 # Magic-byte length for format detection

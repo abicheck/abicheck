@@ -437,7 +437,10 @@ def _compare_release_libraries(
     (used by the JUnit output format).
 
     When *jobs* > 1, comparisons are dispatched in parallel via
-    :func:`_compare_one_library` using a :class:`ProcessPoolExecutor`.
+    :func:`_compare_one_library` using a :class:`ThreadPoolExecutor` -- not
+    a ``ProcessPoolExecutor``, as this docstring wrongly claimed before
+    (Codex review, fresh evidence; see :func:`_compare_release_parallel`'s
+    own docstring for why the distinction matters).
     """
     import os as _os
 
@@ -573,13 +576,61 @@ def _compare_release_parallel(
     Results are collected by key and returned in *matched_keys* order so the
     report is deterministic regardless of completion timing (parallel is now the
     default via ``-j 0``); CI snapshots and downstream diffs depend on this.
+
+    Uses a :class:`ThreadPoolExecutor` (real OS threads sharing this
+    process's memory), *not* a ``ProcessPoolExecutor`` -- a stale claim in
+    an earlier revision of this docstring said otherwise (Codex review,
+    fresh evidence). That distinction matters for `policy_file.
+    dedup_validate_overrides_warnings()`: a `ContextVar` set in the calling
+    thread is *not* automatically visible to a new thread `ThreadPoolExecutor`
+    spawns -- each worker thread starts with the `ContextVar`'s default value
+    -- so submitting bare `_compare_one_library` calls would silently escape
+    the caller's dedup scope and warn once per library even under the
+    default (`--jobs 0`, auto-detected CPU count > 1) parallel path. Fixed by
+    explicitly propagating a copy of the calling thread's
+    `contextvars.Context` into each submitted call via ``Context.run``.
+
+    Two subtleties this went through, both caught by a real (initially
+    intermittent, then reliably reproducing) test failure rather than by
+    inspection -- worth recording so a future edit here doesn't reintroduce
+    either:
+
+    1. ``copy_context()`` must be called in *this* (the calling) thread, at
+       submission time -- not inside the function a worker thread executes.
+       Calling it from within the submitted callable copies whatever context
+       that already-new worker thread started with (the `ContextVar`
+       default), not this thread's dedup scope, silently reproducing the
+       exact bug this fix exists to close.
+    2. Each submission needs its *own* fresh copy, not one `Context` object
+       shared across tasks -- ``Context.run`` raises ``RuntimeError`` if the
+       same `Context` object is entered from more than one thread
+       concurrently.
+
+    Every copy still shares the same mutable dedup ``set`` object the
+    `ContextVar` points to (copying a context copies variable *bindings*,
+    not the values they point to), so every worker's dedup check is against
+    the one real, shared set regardless of which thread runs it -- guarded
+    by `policy_file`'s own dedup lock against the resulting cross-thread
+    race on that shared set (also caught by the same test failure).
     """
     from concurrent.futures import ThreadPoolExecutor, as_completed
+    from contextvars import Context, copy_context
+
+    def _run_in_context(ctx: Context, key: str) -> dict[str, object]:
+        # `ctx` was captured in the calling thread at submission time (see
+        # point 1 in the docstring above) -- this closure has a concrete
+        # signature (rather than `executor.submit(ctx.run, fn, *args)`
+        # directly) so it stays checkable by mypy: `Context.run`'s own
+        # ParamSpec-generic signature otherwise defeats `submit`'s overload
+        # resolution against `_compare_one_library`'s real params.
+        return ctx.run(_compare_one_library, key, *common_args)
 
     results_by_key: dict[str, dict[str, object]] = {}
     with ThreadPoolExecutor(max_workers=max_workers) as executor:
         futures = {
-            executor.submit(_compare_one_library, key, *common_args): key
+            # copy_context() runs here, in the calling thread -- see point 1
+            # above. A fresh copy per key -- see point 2.
+            executor.submit(_run_in_context, copy_context(), key): key
             for key in matched_keys
         }
         for future in as_completed(futures):
@@ -1289,13 +1340,13 @@ def compare_release_cmd(
 
     # dedup_validate_overrides_warnings(): this whole release run reloads
     # the same --policy-file several times over -- the early strict-
-    # suppression validation just below, the per-library fan-out, and (when
-    # a probe matrix is given) the matrix-result path all load it
-    # independently, so without this a single risky override would log its
-    # validate_overrides() warning once per load instead of once for the
-    # whole run (Codex review). Only dedupes within this process -- `--jobs
-    # N>1` dispatches per-library work to a ProcessPoolExecutor, which this
-    # context can't reach; see the context manager's own docstring.
+    # suppression validation just below, the per-library fan-out (including
+    # its default `--jobs 0` ThreadPoolExecutor parallel path -- see
+    # _compare_release_parallel's own docstring for how the dedup scope
+    # reaches those worker threads), and (when a probe matrix is given) the
+    # matrix-result path all load it independently, so without this a
+    # single risky override would log its validate_overrides() warning
+    # once per load instead of once for the whole run (Codex review).
     from .policy_file import dedup_validate_overrides_warnings
 
     with dedup_validate_overrides_warnings():

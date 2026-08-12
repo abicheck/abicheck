@@ -30,6 +30,11 @@ A new changelog fragment. See changelog.d/README.md for the workflow.
   whole `compare-release` run and shared by both loaders
   (`cli_params._load_suppression_and_policy` and `service.
   load_suppression_and_policy`), collapses that down to one warning per
-  release run (the `--jobs N>1` process-pool path is unaffected, and every
-  other caller — a plain `compare`, `scan --against`, or a direct Python
-  API call — is unaffected too, since it never enters that scope).
+  release run — including under `compare-release`'s default `--jobs 0`
+  parallel fan-out, which dispatches per-library work to a
+  `ThreadPoolExecutor`: the dedup scope is now explicitly propagated into
+  each worker thread via a `contextvars.Context` copy taken in the calling
+  thread, and the shared dedup set's check-then-add is now lock-guarded
+  against the cross-thread race that bare propagation alone left open
+  (every other caller — a plain `compare`, `scan --against`, or a direct
+  Python API call — is unaffected, since it never enters this scope).

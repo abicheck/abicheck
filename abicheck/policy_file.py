@@ -54,6 +54,7 @@ from __future__ import annotations
 import contextlib
 import contextvars
 import hashlib
+import threading
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -636,6 +637,18 @@ class PolicyFile:
 _warning_dedup_var: contextvars.ContextVar[set[tuple[str, str]] | None] = (
     contextvars.ContextVar("_policy_override_warning_dedup", default=None)
 )
+# Guards the check-then-add on `_warning_dedup_var`'s set below. The GIL
+# makes each individual `set` op atomic, but "is this key already present,
+# and if not add it" is two ops -- without this lock, two worker threads
+# racing to be first past `dedup_validate_overrides_warnings()`'s ``set()``
+# (`compare-release`'s ThreadPoolExecutor fan-out, both starting on the
+# first, identical policy-file load) can both observe "not yet seen" and
+# both emit, reproducing the exact flooding this whole mechanism exists to
+# prevent. One process-wide lock is deliberately simple: the critical
+# section is a handful of dict/set ops per warning, never I/O, so contention
+# cost is negligible next to correctness (confirmed by a real intermittent
+# test failure under `ThreadPoolExecutor` before this lock was added).
+_warning_dedup_lock = threading.Lock()
 
 
 @contextlib.contextmanager
@@ -653,9 +666,15 @@ def dedup_validate_overrides_warnings() -> Iterator[None]:
     which ever enter this scope.
 
     Only dedupes within one OS process: a `ContextVar` set here is not
-    visible to a separate process (e.g. `compare-release --jobs N>1`'s
-    `ProcessPoolExecutor` workers), which is an accepted, narrower gap rather
-    than a reason to withhold the fix for the default sequential path.
+    automatically visible to a *different* process, so a caller that forks
+    or spawns a subprocess to do its per-library work would need to
+    propagate this scope itself (nothing in this codebase currently does).
+    `compare-release`'s own parallel fan-out uses a `ThreadPoolExecutor`
+    (real OS threads, not separate processes) precisely so this scope
+    *can* reach it -- see `cli_compare_release._compare_release_parallel`'s
+    own docstring for how it explicitly propagates a `contextvars.Context`
+    copy into each worker thread, since `ThreadPoolExecutor` does not do
+    that automatically either.
     """
     token = _warning_dedup_var.set(set())
     try:
@@ -681,10 +700,11 @@ def pending_validate_overrides_warnings(pf: PolicyFile) -> list[str]:
         return warnings
     key_base = pf.source_sha256 or str(pf.source_path)
     fresh = []
-    for warning in warnings:
-        key = (key_base, warning)
-        if key in seen:
-            continue
-        seen.add(key)
-        fresh.append(warning)
+    with _warning_dedup_lock:
+        for warning in warnings:
+            key = (key_base, warning)
+            if key in seen:
+                continue
+            seen.add(key)
+            fresh.append(warning)
     return fresh
