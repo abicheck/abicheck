@@ -37,4 +37,10 @@ A new changelog fragment. See changelog.d/README.md for the workflow.
   a `datetime`) to a `date`, matching `suppress:`'s existing handling.
   `PolicyFile`'s new `reclassify` field is keyword-only, so an external
   caller constructing `PolicyFile(base, overrides, source_path)`
-  positionally is unaffected.
+  positionally is unaffected. `scan --against`'s severity-scheme report now
+  correctly names a `reclassify:`-demoted finding as the scan's own
+  blocking cause (`severity.classify_change_object` gained an optional
+  `policy_file` parameter, threaded through
+  `cli_scan_baseline._blocking_compatible_changes`) instead of silently
+  omitting it — the gate/exit-code computation was already correct, only
+  the itemized report was missing the symbol.

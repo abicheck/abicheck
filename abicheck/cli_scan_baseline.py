@@ -342,6 +342,17 @@ def _blocking_compatible_changes(diff: Any, blamed: set[str]) -> list[Any]:
     gate itself routed through -- so the two cannot disagree about which
     category a finding belongs to, and an ADR-027 per-finding demotion is
     honoured identically in both.
+
+    Passes ``diff.policy_file`` through, not just ``diff._effective_kind_sets()``
+    (Codex review): a kind-global `overrides:` entry is already baked into
+    the kind sets, but a selector-scoped `reclassify:` rule (A: selector-
+    scoped reclassification) isn't expressible as a kind set at all -- only
+    the real ``PolicyFile`` object can answer "did a rule reclassify *this
+    symbol*". Without it, a `reclassify:`-demoted finding that still blocks
+    the gate (e.g. reclassified to a category the severity preset also
+    errors on) was silently missing from the scan's own blocking-findings
+    report, even though the gate itself (`_build_severity_json`, which does
+    already pass `policy_file`) correctly named it as blocking.
     """
     from .severity import classify_change_object
 
@@ -352,6 +363,7 @@ def _blocking_compatible_changes(diff: Any, blamed: set[str]) -> list[Any]:
                 change,
                 policy=getattr(diff, "policy", None),
                 kind_sets=diff._effective_kind_sets(),
+                policy_file=getattr(diff, "policy_file", None),
             )
         except Exception:  # pragma: no cover - duck-typed stand-ins in tests
             continue

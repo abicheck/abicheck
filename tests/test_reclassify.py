@@ -421,3 +421,57 @@ reclassify:
     assert "reclassify:" in text
     assert "to=risk" in text
     assert "COMDAT-inline demotions" in text
+
+
+# --- cli_scan_baseline._blocking_compatible_changes / classify_change_object ----
+
+
+def test_reclassified_finding_is_identified_as_the_scan_blocker(tmp_path: Path) -> None:
+    """A `reclassify:`-demoted BREAKING finding that lands in `diff.compatible`
+    (as QUALITY_ISSUES, since func_removed isn't an ADDITION_KINDS member)
+    must still be nameable as the scan's own blocking finding -- not just
+    correctly gated (that already worked; `_build_severity_json` passes
+    `policy_file`) but correctly *reported*, via
+    `cli_scan_baseline._blocking_compatible_changes` /
+    `severity.classify_change_object` (Codex review)."""
+    from abicheck.checker_types import DiffResult
+    from abicheck.cli_scan_baseline import _blocking_compatible_changes
+    from abicheck.severity import IssueCategory, classify_change_object
+
+    p = tmp_path / "policy.yaml"
+    p.write_text(
+        """
+reclassify:
+  - kind: func_removed
+    symbol: "_ZN6oneapi3dal3fooEv"
+    to: ignore
+""".strip(),
+        encoding="utf-8",
+    )
+    pf = PolicyFile.load(p)
+    reclassified = _change(ChangeKind.FUNC_REMOVED, "_ZN6oneapi3dal3fooEv")
+    diff = DiffResult(
+        changes=[reclassified], old_version="1", new_version="2", library="l",
+        policy_file=pf,
+    )
+
+    # The reclassify rule already correctly moves it into `.compatible`
+    # (DiffResult._effective_verdict_for_change already passes policy_file).
+    assert diff.compatible == [reclassified]
+
+    # Without policy_file, classify_change_object can't see the
+    # selector-scoped rule and falls back to the raw kind category.
+    assert (
+        classify_change_object(reclassified, kind_sets=diff._effective_kind_sets())
+        == IssueCategory.ABI_BREAKING
+    )
+    # With it, the reclassification is honored.
+    assert (
+        classify_change_object(
+            reclassified, kind_sets=diff._effective_kind_sets(), policy_file=pf
+        )
+        == IssueCategory.QUALITY_ISSUES
+    )
+
+    blocked = _blocking_compatible_changes(diff, {"quality_issues"})
+    assert blocked == [reclassified]

@@ -187,6 +187,7 @@ def classify_change_object(
     *,
     policy: str | None = None,
     kind_sets: KindSets | None = None,
+    policy_file: object | None = None,
 ) -> IssueCategory:
     """Classify a *change* honouring its per-finding ``effective_verdict`` (A4).
 
@@ -195,8 +196,19 @@ def classify_change_object(
     ``Change`` carrying ``effective_verdict``) reads compatible in the
     severity-aware exit code and category counts, not just the verdict. Falls
     back to kind-based ``classify_change`` for plain stubs with no override.
+
+    *policy_file* is optional and defaults to ``None`` (unchanged prior
+    behavior for every existing caller that doesn't pass it): without it,
+    only a *kind-global* `overrides:` entry baked into *kind_sets* (e.g. via
+    ``DiffResult._effective_kind_sets()``) is visible here -- a
+    selector-scoped `reclassify:` rule needs the real ``PolicyFile`` object,
+    which *kind_sets* alone cannot express (Codex review: a scan's
+    blocking-finding report was silently omitting a `reclassify:`-demoted
+    finding for exactly this reason).
     """
-    return classify_effective_change(change, policy=policy, kind_sets=kind_sets)
+    return classify_effective_change(
+        change, policy=policy, kind_sets=kind_sets, policy_file=policy_file
+    )
 
 
 _VERDICT_ORDER = [
