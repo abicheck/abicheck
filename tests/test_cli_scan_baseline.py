@@ -154,6 +154,208 @@ class TestSeverityBlockingCompatibleFindings:
         assert not summary.get("findings")
 
 
+class TestResolveMaxBaselineFindings:
+    """`_resolve_max_baseline_findings` -- CLI/API override, env var, default.
+
+    Low-effort DX follow-up: the report cap used to be hard-coded with no
+    override and no per-kind visibility into what a truncation cut.
+    """
+
+    def test_no_override_no_env_uses_default(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.delenv("ABICHECK_MAX_BASELINE_FINDINGS", raising=False)
+        assert csb._resolve_max_baseline_findings(None) == csb._MAX_BASELINE_FINDINGS
+
+    def test_explicit_override_wins_over_env(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("ABICHECK_MAX_BASELINE_FINDINGS", "5")
+        assert csb._resolve_max_baseline_findings(50) == 50
+
+    def test_explicit_zero_or_negative_is_a_usage_error(self) -> None:
+        # Plain ValueError, not click.ClickException: this shared helper is
+        # also reached from the Python API, whose callers never import click
+        # (Codex review). The CLI's own --max-findings IntRange(min=1) means
+        # this branch is unreachable from cli_scan.scan_cmd.
+        with pytest.raises(ValueError, match="positive integer"):
+            csb._resolve_max_baseline_findings(0)
+
+    def test_env_var_override(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("ABICHECK_MAX_BASELINE_FINDINGS", "7")
+        assert csb._resolve_max_baseline_findings(None) == 7
+
+    def test_malformed_env_var_falls_back_to_default(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("ABICHECK_MAX_BASELINE_FINDINGS", "not-a-number")
+        assert csb._resolve_max_baseline_findings(None) == csb._MAX_BASELINE_FINDINGS
+
+    def test_non_positive_env_var_falls_back_to_default(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("ABICHECK_MAX_BASELINE_FINDINGS", "0")
+        assert csb._resolve_max_baseline_findings(None) == csb._MAX_BASELINE_FINDINGS
+
+
+class TestAccumulateKindCounts:
+    """`_accumulate_kind_counts` directly -- the ``if counter:`` empty-input
+    branch is never reached through `_baseline_summary`/`_add_severity_
+    blocking_compatible_findings` (both only call it when a truncation
+    actually happened), so it needs its own direct coverage.
+    """
+
+    def test_empty_kinds_with_no_existing_field_adds_nothing(self) -> None:
+        summary: dict = {}
+        csb._accumulate_kind_counts(summary, "findings_truncated_kinds", [])
+        assert "findings_truncated_kinds" not in summary
+
+    def test_non_empty_kinds_are_counted_and_sorted(self) -> None:
+        summary: dict = {}
+        csb._accumulate_kind_counts(
+            summary, "findings_truncated_kinds", ["b_kind", "a_kind", "a_kind"]
+        )
+        assert summary["findings_truncated_kinds"] == {"a_kind": 2, "b_kind": 1}
+
+    def test_a_second_call_accumulates_onto_the_first(self) -> None:
+        summary: dict = {"findings_truncated_kinds": {"a_kind": 1}}
+        csb._accumulate_kind_counts(
+            summary, "findings_truncated_kinds", ["a_kind", "b_kind"]
+        )
+        assert summary["findings_truncated_kinds"] == {"a_kind": 2, "b_kind": 1}
+
+
+class TestBaselineSummaryTruncationKinds:
+    """`_baseline_summary` reports a per-kind breakdown of truncated findings."""
+
+    @staticmethod
+    def _diff(kinds: list[str]):
+        from abicheck.checker_policy import ChangeKind
+        from abicheck.checker_types import Change, DiffResult
+
+        kind_map = {
+            "func_removed": ChangeKind.FUNC_REMOVED,
+            "type_size_changed": ChangeKind.TYPE_SIZE_CHANGED,
+        }
+        breaks = [
+            Change(kind=kind_map[k], symbol=f"_Z{i:02d}v", description="d")
+            for i, k in enumerate(kinds)
+        ]
+        return DiffResult(changes=breaks, old_version="1", new_version="2", library="l")
+
+    def test_truncated_findings_report_a_per_kind_breakdown(self) -> None:
+        kinds = ["func_removed"] * 15 + ["type_size_changed"] * 10
+        diff = self._diff(kinds)
+        summary = csb._baseline_summary(diff, max_findings=5)
+        assert summary["findings_truncated"] is True
+        assert len(summary["findings"]) == 5
+        # 15 + 10 = 25 total, 5 kept -> 20 cut, split across the two kinds in
+        # the same 15:10 ratio the input carried (kept greedily bucket by
+        # bucket, so which 5 survive is deterministic but not what this test
+        # pins -- only that every cut instance is accounted for).
+        assert sum(summary["findings_truncated_kinds"].values()) == 20
+        assert set(summary["findings_truncated_kinds"]) == {
+            "func_removed",
+            "type_size_changed",
+        }
+
+    def test_max_findings_override_changes_the_cap(self) -> None:
+        diff = self._diff(["func_removed"] * 8)
+        summary = csb._baseline_summary(diff, max_findings=3)
+        assert len(summary["findings"]) == 3
+        assert summary["findings_truncated"] is True
+        assert summary["findings_truncated_kinds"] == {"func_removed": 5}
+
+    def test_no_truncation_below_the_cap_has_no_kind_breakdown(self) -> None:
+        diff = self._diff(["func_removed"] * 3)
+        summary = csb._baseline_summary(diff, max_findings=5)
+        assert "findings_truncated" not in summary
+        assert "findings_truncated_kinds" not in summary
+
+
+class TestBaselineSummaryKeysArePinned:
+    """Every top-level key `_baseline_summary` can emit is pinned here.
+
+    A generalized forcing function for the review round on PR #724 that
+    found `findings_truncated_kinds`/`suppressed_truncated_kinds` shipped
+    without a `SCAN_SCHEMA_VERSION` bump: this test only tracks key *names*
+    (it can't check whether the version was actually bumped), but a real new
+    key now fails CI here immediately, which is what makes it discoverable
+    at all -- silently adding a key that isn't in `_KNOWN_KEYS` is the thing
+    that let a schema bump go unnoticed the first time. Landing a new key
+    means updating this set *and*, per
+    ``abicheck/schemas/__init__.py``'s ``SCAN_SCHEMA_VERSION`` docstring,
+    bumping the version with a history entry, and documenting it under the
+    ``output-formats`` topic (``docs/use/output-formats.md`` /
+    ``docs/_meta/topics.yaml``).
+    """
+
+    _KNOWN_KEYS = frozenset(
+        {
+            "breaking",
+            "api_break",
+            "risk",
+            "compatible",
+            "not_evaluated",
+            "detectors",
+            "findings",
+            "findings_truncated",
+            "findings_truncated_kinds",
+            "suppressed_count",
+            "suppressed",
+            "suppressed_truncated",
+            "suppressed_truncated_kinds",
+        }
+    )
+
+    def _diff_exercising_every_optional_key(self):
+        from abicheck.checker_policy import ChangeKind
+        from abicheck.checker_types import Change
+
+        breaking = [
+            Change(kind=ChangeKind.FUNC_REMOVED, symbol=f"_Zb{i:02d}v", description="d")
+            for i in range(30)
+        ]
+        suppressed = [
+            Change(
+                kind=ChangeKind.FUNC_REMOVED,
+                symbol=f"_Zs{i:02d}v",
+                description="d",
+                suppression_rule="r",
+            )
+            for i in range(30)
+        ]
+        return types.SimpleNamespace(
+            breaking=breaking,
+            source_breaks=[],
+            risk=[],
+            compatible=[],
+            not_evaluated=[breaking[0]],
+            detector_results=[
+                types.SimpleNamespace(
+                    name="d1", changes_count=1, enabled=True, coverage_gap=None
+                )
+            ],
+            suppressed_changes=suppressed,
+        )
+
+    def test_every_emitted_key_is_pinned(self) -> None:
+        diff = self._diff_exercising_every_optional_key()
+        summary = csb._baseline_summary(diff, max_findings=5)
+        unknown = set(summary) - self._KNOWN_KEYS
+        assert not unknown, (
+            f"_baseline_summary emitted unpinned key(s) {sorted(unknown)} -- "
+            "add them to _KNOWN_KEYS here, and see this class's docstring "
+            "for the schema-version/doc-registration checklist that goes "
+            "with landing a real new report field."
+        )
+
+    def test_pinned_keys_are_all_actually_reachable(self) -> None:
+        # The complementary direction: a key that's pinned here but that
+        # _baseline_summary can no longer produce (renamed, removed) would
+        # otherwise go unnoticed -- this input is constructed specifically
+        # to trigger every optional branch at once.
+        diff = self._diff_exercising_every_optional_key()
+        summary = csb._baseline_summary(diff, max_findings=5)
+        assert self._KNOWN_KEYS <= set(summary)
+
+
 class TestPublicProvenanceSet:
     def test_directory_activates_provenance(self, tmp_path: Path) -> None:
         d = tmp_path / "include"

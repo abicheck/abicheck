@@ -654,6 +654,37 @@ Every JSON report carries a top-level `report_schema_version` field
 }
 ```
 
+#### `scan --against`: the report cap and truncation (`--max-findings`)
+
+`scan --against`'s `diff` block itemizes the comparison's gating findings
+(`findings`) and any `--suppress`-silenced ones (`suppressed`), each capped at
+20 entries by default so a large diff can't blow up the always-on scan output
+— `compare --format json` remains the way to see every finding
+unconditionally. Raise or lower the cap per run with `scan --max-findings N`
+(`ScanRequest.max_findings` in the typed Python API), or globally via the
+`ABICHECK_MAX_BASELINE_FINDINGS` environment variable when neither passes an
+explicit value; either configures the same cap, and it only changes how much
+of the diff a run itemizes — never the verdict or exit code.
+
+When either list is actually truncated, the block sets the existing
+`findings_truncated`/`suppressed_truncated` booleans (schema 1.8+) and, since
+schema 1.10, also `findings_truncated_kinds`/`suppressed_truncated_kinds` — a
+`ChangeKind -> count` map of what was cut from that list, so the shape of a
+truncated diff (which kinds dominate) is visible without rerunning at a
+higher cap. Both maps are absent when nothing was truncated.
+
+```json
+{
+  "scan_schema_version": "1.10",
+  "diff": {
+    "breaking": 25,
+    "findings": ["... 20 entries ..."],
+    "findings_truncated": true,
+    "findings_truncated_kinds": {"func_removed": 5}
+  }
+}
+```
+
 ### Scoped vs. full-library results (`full_verdict`/`full_severity`/`full_summary`)
 
 A `--used-by`/`--required-symbol(s)` scoped compare gates its exit code and

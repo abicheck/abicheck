@@ -882,6 +882,7 @@ def run_scan_core(
     sev_config: Any = None,
     exit_code_scheme: str = "legacy",
     sibling_exported_symbols: frozenset[str] | None = None,
+    max_findings: int | None = None,
 ) -> ScanCoreResult:
     """The shared scan orchestration (classify → always-on tier → level → compare).
 
@@ -895,6 +896,12 @@ def run_scan_core(
     tier's ``CrosscheckConfig`` unchanged — see
     :class:`~abicheck.buildsource.crosscheck.CrosscheckConfig` for what it
     does. ``None``/empty for the single-binary ``scan``/``compare`` paths.
+
+    ``max_findings`` overrides the default ``--against`` report cap (default
+    20; see ``cli_scan_baseline._resolve_max_baseline_findings``) and is
+    forwarded to ``_run_baseline_compare`` unchanged. ``None`` (the default)
+    resolves via the ``ABICHECK_MAX_BASELINE_FINDINGS`` env var, else the
+    built-in default. No-op when ``baseline`` is not given.
 
     ``sev_config``/``exit_code_scheme`` are forwarded, unchanged, to
     ``_run_baseline_compare`` when a ``baseline`` is given — closing the
@@ -1129,6 +1136,7 @@ def run_scan_core(
                     resolved_config=resolved_config,
                     sev_config=sev_config,
                     exit_code_scheme=exit_code_scheme,
+                    max_findings=max_findings,
                 )
         except deadline.DeadlineExceeded as exc:
             elapsed = time.monotonic() - start

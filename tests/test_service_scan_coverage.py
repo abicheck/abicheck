@@ -265,6 +265,7 @@ class TestRejectComparisonOnlyFields:
             ({"contract_evaluation": True}, "contract_evaluation"),
             ({"policy_file": object()}, "policy_file"),
             ({"suppression": object()}, "suppression"),
+            ({"max_findings": 5}, "max_findings"),
         ],
     )
     def test_rejects_a_comparison_only_field_without_a_baseline(
@@ -276,6 +277,83 @@ class TestRejectComparisonOnlyFields:
 
     def test_plain_audit_request_is_accepted(self) -> None:
         assert _reject_comparison_only_fields(self._audit_request()) is None
+
+
+class TestCliApiParity:
+    """Structural regression tests generalizing two gaps a PR #724 review
+    round found in this exact area, on two different fields (first several
+    policy/contract fields via `run_scan_set()`'s missing guard, most
+    recently `max_findings` reaching `run_scan_core` with no override, no
+    validation, and no typed-API field at all): a CLI-only knob threaded
+    through `run_scan_core`/`_run_baseline_compare` silently has no typed-API
+    equivalent, or a `ScanRequest` field meaningful only for a baseline
+    comparison silently has no guard. Both were previously only caught by
+    hand-picked example tests (`test_rejects_a_comparison_only_field_without_
+    a_baseline` above) -- which only proves the *listed* fields are guarded,
+    never that the list itself is complete. These derive the expected set
+    from the real function signatures instead, so a newly-added field that
+    should join one of these lists fails CI on its own, without a human
+    remembering to extend the example list too.
+    """
+
+    #: `_run_baseline_compare`/`ScanRequest` share these parameter names, but
+    #: both matter for a plain one-build audit too -- not baseline-only.
+    _ALWAYS_RELEVANT_FIELDS = frozenset(
+        {"headers", "includes", "public_header_dirs", "lang", "baseline"}
+    )
+
+    def test_every_baseline_only_field_is_guarded(self) -> None:
+        import inspect
+        from dataclasses import fields
+
+        from abicheck.cli_scan_baseline import _run_baseline_compare
+        from abicheck.service_scan import _COMPARISON_ONLY_FIELD_PREDICATES
+
+        baseline_only_params = set(inspect.signature(_run_baseline_compare).parameters)
+        req_field_names = {f.name for f in fields(ScanRequest)}
+        candidates = (
+            baseline_only_params & req_field_names
+        ) - self._ALWAYS_RELEVANT_FIELDS
+        missing = candidates - set(_COMPARISON_ONLY_FIELD_PREDICATES)
+        assert not missing, (
+            f"ScanRequest field(s) {sorted(missing)} share a name with a "
+            "_run_baseline_compare parameter but aren't in "
+            "_COMPARISON_ONLY_FIELD_PREDICATES -- a caller can set them "
+            "without --against and get a silent no-op instead of a "
+            "ValidationError."
+        )
+
+    def test_every_run_scan_core_kwarg_matching_a_scan_request_field_is_forwarded(
+        self,
+    ) -> None:
+        import ast
+        import inspect
+        import textwrap
+        from dataclasses import fields
+
+        from abicheck.scan_engine import run_scan_core
+        from abicheck.service_scan import run_scan
+
+        core_params = set(inspect.signature(run_scan_core).parameters)
+        req_field_names = {f.name for f in fields(ScanRequest)}
+        candidates = core_params & req_field_names
+
+        tree = ast.parse(textwrap.dedent(inspect.getsource(run_scan)))
+        forwarded: set[str] = set()
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Call) and getattr(node.func, "id", None) == (
+                "run_scan_core"
+            ):
+                forwarded = {kw.arg for kw in node.keywords if kw.arg}
+
+        missing = candidates - forwarded
+        assert not missing, (
+            f"ScanRequest field(s) {sorted(missing)} share a name with a "
+            "run_scan_core parameter but aren't passed by run_scan()'s call "
+            "to it -- the field exists on ScanRequest but silently does "
+            "nothing (the exact shape of the ScanRequest.max_findings gap a "
+            "Codex review found on PR #724)."
+        )
 
 
 # ── _scan_subprocess_worker: run-in-child entry (lines 874-883) ───────────────

@@ -344,6 +344,12 @@ REPORT_SCHEMA_VERSION = "2.27"
 #: estimate/report, where ``report`` nests the former). Same additive/breaking
 #: bump policy as :data:`REPORT_SCHEMA_VERSION` above; independent of it (scan
 #: and compare are separate contracts that evolve on their own schedules).
+#: Adding a top-level ``diff``-block key: update this version's history entry
+#: below AND ``cli_scan_baseline.py``'s ``_baseline_summary`` docstring AND
+#: ``tests/test_cli_scan_baseline.py``'s ``TestBaselineSummaryKeysArePinned``
+#: (whose own failure is what makes an unversioned new key discoverable at
+#: all — see PR #724, where the two truncation keys shipped one commit ahead
+#: of this bump).
 #: 1.0 — initial versioned envelope.
 #: 1.1 — added five additive optional top-level keys — ``check_id``,
 #:       ``profile_id``, ``requested_depth``, ``effective_depth``,
@@ -465,7 +471,18 @@ REPORT_SCHEMA_VERSION = "2.27"
 #:       -- which prefers this block -- dropped the gated target from
 #:       ``blocking_targets`` (Codex review). It never lowers the gate: the
 #:       promotion is a floor.
-SCAN_SCHEMA_VERSION = "1.9"
+#: 1.10 -- the ``diff`` block's ``findings``/``suppressed`` truncation now
+#:        carries a per-kind breakdown: ``findings_truncated_kinds``/
+#:        ``suppressed_truncated_kinds`` (``ChangeKind -> count`` of what was
+#:        cut), alongside the existing ``findings_truncated``/
+#:        ``suppressed_truncated`` booleans. Both are new, additive keys,
+#:        present only when the corresponding list was actually truncated --
+#:        an ordinary (untruncated) scan is unchanged from 1.9. The
+#:        ``findings``/``suppressed`` truncation cap itself also became
+#:        configurable (``scan --max-findings`` / ``ABICHECK_MAX_BASELINE_
+#:        FINDINGS``, default still 20), which does not change the schema,
+#:        only how much of a diff a given run itemizes.
+SCAN_SCHEMA_VERSION = "1.10"
 
 _SCHEMA_DIR = Path(__file__).resolve().parent
 COMPARE_REPORT_SCHEMA_PATH = _SCHEMA_DIR / "compare_report.schema.json"
