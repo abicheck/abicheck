@@ -1849,6 +1849,49 @@ class TestUsedByScoping:
             "func_removed", "pe_ordinal_retargeted",
         }
 
+    def test_json_full_mode_scoped_only_correlator_evidence(
+        self, tmp_path, monkeypatch
+    ) -> None:
+        # G29 Phase 6 follow-up (Codex review): a scoped-only
+        # CONSUMER_REQUIRED_SYMBOL_REMOVED sibling of a real FUNC_REMOVED
+        # change is a genuine RootCauseCorrelator two-piece group -- both the
+        # pre-existing regular `changes[]` entry (root, via
+        # reporter._add_changes_block) and the newly-appended scoped-only
+        # entry (via cli_compare_fold.py's own fold-in) must carry the same
+        # correlator evidence for the same underlying group.
+        from abicheck import dumper as dumper_mod
+
+        old, new = _breaking_pair()  # real diff: "bar"/_Z3barv removed
+        app_path = tmp_path / "app"
+        app_path.write_bytes(b"\x7fELF" + b"\x00" * 200)
+        old_p = tmp_path / "old.so"
+        old_p.write_bytes(b"\x7fELF" + b"\x00" * 200)
+        new_p = tmp_path / "new.so"
+        new_p.write_bytes(b"\x7fELF" + b"\x00" * 200)
+        monkeypatch.setattr(dumper_mod, "dump", MagicMock(side_effect=[old, new]))
+        scoped_only = Change(
+            kind=ChangeKind.CONSUMER_REQUIRED_SYMBOL_REMOVED,
+            symbol="pub_entry",
+            description="required by consumer",
+            caused_by_type="_Z3barv",
+        )
+        res = self._result(verdict=Verdict.BREAKING, breaking_for_app=[scoped_only])
+        self._patch_scope(monkeypatch, res)
+        result = _invoke(
+            "compare", str(old_p), str(new_p), "--used-by", str(app_path),
+            "--format", "json",
+        )
+        assert result.exit_code == 4
+        data = json.loads(result.stdout)
+        entries = {c["kind"]: c for c in data["changes"]}
+        assert set(entries) == {"func_removed", "consumer_required_symbol_removed"}
+        for entry in entries.values():
+            evidence = entry["impact_assessment"]["root_cause_evidence"]
+            assert evidence["strongest_evidence_level"] == "consumer_proven"
+            assert evidence["evidence_levels"] == [
+                "artifact_proven", "consumer_proven",
+            ]
+
     def test_markdown_root_cause_mode_merges_scoped_only_into_existing_group(
         self, tmp_path, monkeypatch
     ) -> None:

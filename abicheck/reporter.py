@@ -374,7 +374,7 @@ def _to_json_leaf(
     _rc_lookup = root_cause_lookup_for_changes(
         changes, extra_causes=_scoped_only_extra_causes(result, show_only)
     )
-    _rc_evidence = root_cause_evidence_lookup_for_changes(changes)
+    _rc_evidence = _scoped_only_evidence_lookup(result, changes, show_only)
 
     effective_policy = result.policy or "strict_abi"
     eff_sets = result._effective_kind_sets()
@@ -591,6 +591,30 @@ def _add_entries_to_root_causes(
     d["root_cause_count"] = len(root_causes)
 
 
+def _scoped_only_changes_filtered(
+    result: DiffResult, show_only: str | None
+) -> list[Change]:
+    """``result.scoped_only_changes``, filtered by the same ``--show-only``
+    as the caller's own ``changes`` list -- the shared computation
+    :func:`_scoped_only_extra_causes` and
+    :func:`~abicheck.impact.correlation.correlate_root_causes` callers below
+    both need, kept as one function so the two can never filter differently
+    (Codex review: an evidence lookup built from an unfiltered scoped-only
+    set could correlate a finding via a sibling ``--show-only`` had already
+    excluded).
+    """
+    scoped_only = list(getattr(result, "scoped_only_changes", ()) or ())
+    if show_only and scoped_only:
+        scoped_only = apply_show_only(
+            scoped_only,
+            show_only,
+            policy=result.policy,
+            kind_sets=result._effective_kind_sets(),
+            policy_file=result.policy_file,
+        )
+    return scoped_only
+
+
 def _scoped_only_extra_causes(
     result: DiffResult, show_only: str | None
 ) -> frozenset[str]:
@@ -612,16 +636,35 @@ def _scoped_only_extra_causes(
     ``root_causes[].root_cause_id``/SARIF/JUnit sibling depending on which
     report mode rendered it.
     """
-    scoped_only = list(getattr(result, "scoped_only_changes", ()) or ())
-    if show_only and scoped_only:
-        scoped_only = apply_show_only(
-            scoped_only,
-            show_only,
-            policy=result.policy,
-            kind_sets=result._effective_kind_sets(),
-            policy_file=result.policy_file,
-        )
+    scoped_only = _scoped_only_changes_filtered(result, show_only)
     return frozenset(c.caused_by_type for c in scoped_only if c.caused_by_type)
+
+
+def _scoped_only_evidence_lookup(
+    result: DiffResult, changes: list[Change], show_only: str | None
+) -> dict[str, dict[str, object]]:
+    """``finding_id -> root_cause_evidence`` for *changes* combined with
+    *result*'s own filtered ``scoped_only_changes`` (G29 Phase 6 follow-up,
+    Codex review).
+
+    ``RootCauseCorrelator`` groups by the actual ``Change`` objects it's
+    given, so a regular finding that only correlates via a scoped-only
+    (``--used-by``/``--required-symbol``) sibling -- e.g. a
+    ``FUNC_REMOVED``/``INTERNAL_SYMBOL_REQUIRED_BY_PUBLIC_API`` pair split
+    across ``changes`` and ``scoped_only_changes`` -- needs the sibling in
+    the same :func:`~abicheck.impact.correlation.correlate_root_causes` call
+    to be recognized as a group at all; a lookup built from *changes* alone
+    (as :func:`root_cause_evidence_lookup_for_changes` would be if called
+    directly here) silently under-correlates, contradicting
+    ``sarif.to_sarif``'s identical ``changes + scoped_only_changes``
+    computation. The returned lookup covers *both* sides -- a caller
+    rendering only ``changes`` (e.g. :func:`_add_changes_block`, before
+    ``cli_compare_fold.py``'s later scoped-only fold-in) still finds every
+    entry it needs by ``finding_id``, and the fold-in itself reuses this
+    same lookup for the scoped-only entries it appends.
+    """
+    scoped_only = _scoped_only_changes_filtered(result, show_only)
+    return root_cause_evidence_lookup_for_changes(changes + scoped_only)
 
 
 def _to_json_root_cause(
@@ -675,7 +718,7 @@ def _to_json_root_cause(
     # mode provides it, `_to_json_leaf` included) and `root_causes[].findings`
     # never drift from each other.
     _rc_lookup = root_cause_lookup_for_changes(changes, extra_causes=extra_causes)
-    _rc_evidence = root_cause_evidence_lookup_for_changes(changes)
+    _rc_evidence = _scoped_only_evidence_lookup(result, changes, show_only)
     entry_by_id = {
         id(c): _change_to_dict(
             c,
@@ -693,10 +736,18 @@ def _to_json_root_cause(
     grouped = _group_changes_by_root_cause(changes, extra_causes=extra_causes)
     # G29 Phase 6 follow-up: a group's own evidence summary (this is a
     # group-level fold, not a per-finding one -- keyed by the same
-    # root_cause_id this loop already computes below, from
-    # RootCauseCorrelator's own groups over the identical `changes`).
+    # root_cause_id this loop already computes below). Correlated over
+    # `changes` plus the same filtered scoped-only set _rc_evidence above
+    # uses (Codex review) -- root_causes[] itself only ever groups `changes`
+    # (scoped-only findings are folded into a *separate* payload by
+    # cli_compare_fold.py, never into this array), but a group that only
+    # exists because of a scoped-only sibling must still report the
+    # strongest evidence actually available for it.
     _group_evidence = {
-        group.root_cause_id: group for group in correlate_root_causes(changes)
+        group.root_cause_id: group
+        for group in correlate_root_causes(
+            changes + _scoped_only_changes_filtered(result, show_only)
+        )
     }
 
     root_causes = []
@@ -1051,12 +1102,17 @@ def _add_changes_block(
     does (review finding) -- without it, a finding here correlating only via
     a scoped-only overlay silently lost its
     ``impact_assessment.root_cause_id``, disagreeing with root-cause mode,
-    SARIF, and JUnit for the identical finding.
+    SARIF, and JUnit for the identical finding. ``root_cause_evidence``
+    (G29 Phase 6 follow-up, Codex review) gets the same treatment via
+    :func:`_scoped_only_evidence_lookup`, which correlates against the
+    actual scoped-only ``Change`` objects (not just their ``caused_by_type``
+    strings) -- ``RootCauseCorrelator`` needs the real sibling to recognize
+    a multi-piece group at all.
     """
     _rc_lookup = root_cause_lookup_for_changes(
         changes, extra_causes=_scoped_only_extra_causes(result, show_only)
     )
-    _rc_evidence = root_cause_evidence_lookup_for_changes(changes)
+    _rc_evidence = _scoped_only_evidence_lookup(result, changes, show_only)
     d["changes"] = [
         _change_to_dict(
             c,
