@@ -45,6 +45,24 @@ if [[ -z "$asset_template" ]]; then
 fi
 asset_name="${asset_template//\{profile\}/${PROFILE:-}}"
 
+# Reject a newline/carriage-return in the resolved name BEFORE creating any
+# archive or writing to $GITHUB_OUTPUT -- profile/asset-name-template can
+# both be influenced by external/PR-controlled metadata in some call
+# chains, and an embedded newline surviving into the raw
+# "asset-name=$asset_name" line below would let the runner parse the
+# remainder as ADDITIONAL, attacker-chosen output key=value assignments (a
+# real GitHub Actions output-injection vector -- e.g. a crafted value like
+# "x"$'\n'"asset-name=other.tar.zst" overriding this step's own declared
+# output). Also rejects a path separator: asset_name is meant to be a bare
+# filename written into the current working directory, never a path
+# escaping it (Codex review).
+case "$asset_name" in
+  *$'\n'* | *$'\r'* | */*)
+    echo "::error::asset-name-template resolved to a value containing a newline, carriage return, or path separator -- refusing to create an archive or write a GITHUB_OUTPUT line from it." >&2
+    exit 1
+    ;;
+esac
+
 case "$asset_name" in
   *.tar.zst)
     # `tar --zstd` shells out to a separate `zstd` executable (confirmed
@@ -65,6 +83,13 @@ case "$asset_name" in
       echo "::notice::'zstd' executable not found on PATH -- falling back to Python's zstandard package to build $asset_name." >&2
       python3 -c "import zstandard" >/dev/null 2>&1 || pip install --quiet zstandard
       tar -cf "$asset_name.tmp-payload" -C "$BASELINE_PATH" .
+      # Copied in bounded 1 MiB chunks, not a single inp.read() -- a
+      # baseline-set archive can approach the multi-gigabyte GitHub
+      # Release asset limit documented in docs/use/baseline-storage.md, so
+      # buffering the whole uncompressed payload in memory before handing
+      # it to zstandard's own stream_writer (which itself streams output
+      # fine) can still OOM-kill a memory-constrained or self-hosted
+      # runner (Codex review).
       python3 -c "
 import sys
 import zstandard
@@ -72,7 +97,11 @@ import zstandard
 src, dst = sys.argv[1], sys.argv[2]
 cctx = zstandard.ZstdCompressor()
 with open(src, 'rb') as inp, open(dst, 'wb') as out, cctx.stream_writer(out) as writer:
-    writer.write(inp.read())
+    while True:
+        chunk = inp.read(1024 * 1024)
+        if not chunk:
+            break
+        writer.write(chunk)
 " "$asset_name.tmp-payload" "$asset_name"
       rm -f "$asset_name.tmp-payload"
     fi

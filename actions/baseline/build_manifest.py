@@ -495,6 +495,31 @@ def recompute_content_digest_from_disk(
                 "file exists in the extracted archive."
             )
         meta = _read_snapshot_meta(snapshot_path)
+        # Validated against the manifest's OWN declared value, not merely
+        # recomputed and trusted on its own: if the real bytes match a
+        # fresh run (this function's whole reason for existing) but the
+        # ALREADY-PUBLISHED manifest.json's own declared sha256 is stale
+        # or corrupted, silently substituting the recomputed value here
+        # would report "identical content" and let publish-baseline.yml
+        # skip re-uploading -- leaving that self-inconsistent manifest.json
+        # published. A real consumer later resolving this exact asset
+        # (resolve_target()/resolve_bundle()'s own _snapshot_digest_issue/
+        # _binary_digest_issue checks) verifies bytes against THAT
+        # declared field, not this function's recomputed one, and would
+        # then reject a baseline this function just called a safe retry
+        # (Codex review). A mismatch here means the published asset needs
+        # a real fix (re-upload or explicit deletion), not a silent skip.
+        declared_sha256 = artifact.get("sha256")
+        if declared_sha256 and declared_sha256 != meta["sha256"]:
+            raise SystemExit(
+                f"existing asset's manifest declares sha256 "
+                f"{declared_sha256!r} for library {library!r}, but the "
+                f"snapshot's actual content hashes to {meta['sha256']!r} "
+                "-- the published manifest.json is self-inconsistent with "
+                "the archive it shipped with (stale or corrupted "
+                "declaration). This is not a safe retry regardless of "
+                "what the overall content digest says."
+            )
         row: dict[str, Any] = {"library": library, "sha256": meta["sha256"]}
 
         binary_rel = artifact.get("binary")
@@ -506,7 +531,20 @@ def recompute_content_digest_from_disk(
                     f"{binary_rel!r} for library {library!r}, but no such "
                     "file exists in the extracted archive."
                 )
-            row["binary_sha256"] = _file_sha256(binary_path)
+            binary_sha256 = _file_sha256(binary_path)
+            declared_binary_sha256 = artifact.get("binary_sha256")
+            if declared_binary_sha256 and declared_binary_sha256 != binary_sha256:
+                raise SystemExit(
+                    f"existing asset's manifest declares binary_sha256 "
+                    f"{declared_binary_sha256!r} for library {library!r}, "
+                    f"but the staged binary's actual content hashes to "
+                    f"{binary_sha256!r} -- the published manifest.json is "
+                    "self-inconsistent with the archive it shipped with "
+                    "(stale or corrupted declaration). This is not a safe "
+                    "retry regardless of what the overall content digest "
+                    "says."
+                )
+            row["binary_sha256"] = binary_sha256
         recomputed_artifacts.append(row)
 
     return compute_content_digest({"artifacts": recomputed_artifacts})

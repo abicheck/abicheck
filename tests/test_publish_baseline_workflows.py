@@ -1261,5 +1261,152 @@ gh() {{
             os.unlink(path)
 
         assert result.returncode == 1, result.stdout + result.stderr
+        # Second-round regression (Codex review): the declared-vs-actual
+        # validation added to recompute_content_digest_from_disk() itself
+        # now catches this exact scenario even earlier/more precisely
+        # (a self-inconsistent manifest.json), rather than falling through
+        # to the generic "DIFFERENT content" digest-mismatch error --
+        # still a hard failure either way, never a silent "safe retry".
+        assert "self-inconsistent" in (result.stdout + result.stderr)
+        assert "safe re-run" not in result.stdout
+
+
+class TestUploadReleaseAssetRejectsGenuinelyDifferentContent:
+    """The genuinely-different-content path -- both the existing manifest's
+    declared digest AND its recomputed real digest agree with EACH OTHER
+    (a self-consistent, uncorrupted asset), but that content is genuinely
+    different from the fresh run's own content. Must still reach the
+    original "DIFFERENT content" immutability error, not the newer
+    self-inconsistent-manifest check (which is about declared-vs-actual
+    disagreement WITHIN the existing asset, a different failure mode).
+    """
+
+    def _upload_step_script(self) -> str:
+        data = _load(PUBLISH_BASELINE)
+        steps = _steps(data["jobs"]["publish"])
+        step = next(
+            s for s in steps if s.get("name", "").startswith("Upload release asset")
+        )
+        return step["run"]
+
+    def test_self_consistent_but_genuinely_different_content_is_rejected(
+        self, tmp_path: Path
+    ) -> None:
+        import importlib.util
+        import json
+        import shutil
+        import subprocess
+        import tarfile
+        import tempfile
+
+        src_root = (
+            Path(__file__).resolve().parents[1]
+            / "actions"
+            / "baseline"
+            / "build_manifest.py"
+        )
+        module_dir = tmp_path / ".publish-baseline-src" / "actions" / "baseline"
+        module_dir.mkdir(parents=True)
+        shutil.copy(src_root, module_dir / "build_manifest.py")
+
+        module_spec = importlib.util.spec_from_file_location(
+            "test_build_manifest_module_genuinely_different", src_root
+        )
+        assert module_spec is not None and module_spec.loader is not None
+        build_manifest = importlib.util.module_from_spec(module_spec)
+        module_spec.loader.exec_module(build_manifest)
+
+        # The EXISTING asset's declared sha256 correctly matches its own
+        # real bytes (self-consistent) -- but that content genuinely
+        # differs from what the "new" run produced.
+        existing_snapshot = {"schema_version": 9, "functions": [], "types": []}
+        existing_hash = build_manifest.compute_snapshot_content_hash(existing_snapshot)
+        existing_manifest = {
+            "manifest_version": 1,
+            "project_ref": "v1.0.0",
+            "profile": "linux-x86_64-gcc13-release",
+            "snapshot_schema": None,
+            "fact_set": None,
+            "artifacts": [
+                {
+                    "library": "libfoo",
+                    "artifact": "build/libfoo.so",
+                    "snapshot": "libfoo.abicheck.json",
+                    "sha256": existing_hash,
+                }
+            ],
+        }
+
+        new_snapshot = {
+            "schema_version": 9,
+            "functions": [{"name": "new_function"}],
+            "types": [],
+        }
+        new_hash = build_manifest.compute_snapshot_content_hash(new_snapshot)
+        new_manifest = {
+            **existing_manifest,
+            "artifacts": [{**existing_manifest["artifacts"][0], "sha256": new_hash}],
+        }
+        new_content_digest = build_manifest.compute_content_digest(new_manifest)
+
+        asset_src = tmp_path / "asset-src"
+        asset_src.mkdir()
+        (asset_src / "manifest.json").write_text(
+            json.dumps(existing_manifest), encoding="utf-8"
+        )
+        (asset_src / "libfoo.abicheck.json").write_text(
+            json.dumps(existing_snapshot), encoding="utf-8"
+        )
+        asset_name = "abicheck-baseline-genuinely-different.tar"
+        archive_path = tmp_path / asset_name
+        with tarfile.open(archive_path, "w") as tf:
+            tf.add(asset_src, arcname=".")
+
+        gh_stub = f"""
+gh() {{
+  if [[ "$1" == "release" && "$2" == "view" ]]; then
+    echo '{{"assets": [{{"name": "{asset_name}", "apiUrl": "https://api.example/asset"}}]}}'
+    return 0
+  fi
+  if [[ "$1" == "api" ]]; then
+    cat "{archive_path.as_posix()}"
+    return 0
+  fi
+  echo "unexpected gh invocation: $*" >&2
+  return 1
+}}
+"""
+        script = gh_stub + "\n" + self._upload_step_script()
+
+        env = os.environ.copy()
+        env.update(
+            {
+                "GH_TOKEN": "fake-token",
+                "RELEASE_TAG": "v1.0.0",
+                "ASSET_NAME": asset_name,
+                "REPO": "abicheck/abicheck",
+                "NEW_CONTENT_DIGEST": new_content_digest,
+                "NEW_PROFILE": existing_manifest["profile"],
+                "PYTHONPATH": str(Path(__file__).resolve().parents[1]),
+            }
+        )
+
+        fd, path = tempfile.mkstemp(suffix=".sh")
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8", newline="\n") as fh:
+                fh.write(script)
+            result = subprocess.run(
+                [_bash_executable(), path],
+                capture_output=True,
+                text=True,
+                env=env,
+                cwd=tmp_path,
+                check=False,
+            )
+        finally:
+            os.unlink(path)
+
+        assert result.returncode == 1, result.stdout + result.stderr
         assert "DIFFERENT content" in (result.stdout + result.stderr)
+        assert "self-inconsistent" not in (result.stdout + result.stderr)
         assert "safe re-run" not in result.stdout

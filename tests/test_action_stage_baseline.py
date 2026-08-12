@@ -247,6 +247,50 @@ class TestStageBaseline:
         assert (extracted / "manifest.json").is_file()
         assert (extracted / "libfoo.abicheck.json").is_file()
 
+    def test_newline_in_resolved_name_is_rejected(self, tmp_path: Path) -> None:
+        # Regression (Codex review, P1): a newline embedded in profile (or
+        # asset-name-template) survives substitution into asset_name, and
+        # writing "asset-name=<value-with-a-newline>" straight to
+        # $GITHUB_OUTPUT lets the runner parse the remainder as ADDITIONAL,
+        # attacker-chosen output key=value lines -- a real GitHub Actions
+        # output-injection vector when profile/asset-name-template values
+        # are influenced by external/PR-controlled metadata.
+        baseline_dir = _make_baseline_dir(tmp_path)
+        result, outputs = _run_action(
+            {
+                "BASELINE_PATH": str(baseline_dir),
+                "PROFILE": "linux\nasset-name=injected.tar.zst",
+            },
+            tmp_path,
+        )
+        assert result.returncode == 1
+        assert "newline" in (result.stdout + result.stderr)
+        assert "asset-name" not in outputs
+
+    def test_carriage_return_in_resolved_name_is_rejected(self, tmp_path: Path) -> None:
+        baseline_dir = _make_baseline_dir(tmp_path)
+        result, outputs = _run_action(
+            {"BASELINE_PATH": str(baseline_dir), "PROFILE": "linux\rx"},
+            tmp_path,
+        )
+        assert result.returncode == 1
+        assert "carriage return" in (result.stdout + result.stderr)
+        assert "asset-name" not in outputs
+
+    def test_path_separator_in_resolved_name_is_rejected(self, tmp_path: Path) -> None:
+        baseline_dir = _make_baseline_dir(tmp_path)
+        result, outputs = _run_action(
+            {
+                "BASELINE_PATH": str(baseline_dir),
+                "ASSET_NAME_TEMPLATE": "../escaped-{profile}.tar",
+                "PROFILE": "x",
+            },
+            tmp_path,
+        )
+        assert result.returncode == 1
+        assert "path separator" in (result.stdout + result.stderr)
+        assert "asset-name" not in outputs
+
     def test_missing_baseline_path_fails(self, tmp_path: Path) -> None:
         result, _ = _run_action({}, tmp_path)
         assert result.returncode == 1
