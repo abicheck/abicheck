@@ -373,24 +373,45 @@ def _bucket_changes(
 
 
 def _incomplete_is_blocking(
-    findings: list[Finding], levels: dict[str, str] | None
+    findings: list[Finding],
+    levels: dict[str, str] | None,
+    gate_api_break: bool = False,
 ) -> bool:
     """Whether the analysis-incomplete bucket represents a hard failure.
 
     ``evidence_required_missing`` always fails the run outright (ADR-033 D7,
     a structural policy check outside this module's control — not something
-    the severity config gates). ``layer_coverage_asymmetric`` alone is only
-    advisory unless the report's own severity config promotes
-    ``potential_breaking`` to ``error`` (the knob its underlying ``risk``
-    severity would otherwise be gated by).
+    the severity config gates). Beyond that, this defers to each finding's
+    own already-resolved ``severity`` (Codex review: a named policy or
+    ``--policy-file`` override can promote a coverage-gap kind like
+    ``layer_coverage_asymmetric`` all the way to ``breaking`` — e.g. a
+    ``plugin_abi``-style profile that treats every risk kind as breaking —
+    and the JSON finding then already carries ``severity: "breaking"``
+    independent of any ``potential_breaking`` severity-config knob) rather
+    than re-deriving blocking-ness from one specific kind + one specific
+    level check, which would silently disagree with a red exit code the
+    checker already produced for a different reason:
+
+    - ``severity == "breaking"`` always blocks (a policy override already
+      decided this).
+    - ``severity == "api_break"`` blocks under ``fail-on-api-break``
+      (mirrors how the module gates every other api_break finding) or when
+      ``potential_breaking`` is configured to ``error``.
+    - ``severity == "risk"`` (the default for ``layer_coverage_asymmetric``)
+      blocks only when ``potential_breaking`` is configured to ``error``.
     """
-    kinds = {f.kind for f in findings}
-    if "evidence_required_missing" in kinds:
-        return True
-    if "layer_coverage_asymmetric" in kinds and (levels or {}).get(
-        "potential_breaking"
-    ) == "error":
-        return True
+    levels = levels or {}
+    for f in findings:
+        if f.kind == "evidence_required_missing":
+            return True
+        if f.severity == "breaking":
+            return True
+        if f.severity == "api_break" and (
+            gate_api_break or levels.get("potential_breaking") == "error"
+        ):
+            return True
+        if f.severity == "risk" and levels.get("potential_breaking") == "error":
+            return True
     return False
 
 
@@ -492,7 +513,7 @@ def _from_compare(
         review=review,
         safe=safe,
         incomplete=incomplete,
-        incomplete_blocking=_incomplete_is_blocking(incomplete, levels),
+        incomplete_blocking=_incomplete_is_blocking(incomplete, levels, gate_api_break),
         breaking_categories=_breaking_categories(breaking),
         breaking_severities=_breaking_severities(breaking),
         scoped_verdict=scoped_verdict,
@@ -555,7 +576,7 @@ def _from_appcompat(
         review=review,
         safe=safe,
         incomplete=incomplete,
-        incomplete_blocking=_incomplete_is_blocking(incomplete, levels),
+        incomplete_blocking=_incomplete_is_blocking(incomplete, levels, gate_api_break),
         breaking_categories=_breaking_categories(breaking),
         breaking_severities=_breaking_severities(breaking),
     )
@@ -907,17 +928,24 @@ def _header(model: CommentModel) -> tuple[str, str]:
         # happen — every mode populates breaking_categories) — fall back to
         # the conservative default rather than under-stating a red check.
         return "❌", "ABI BREAKING"
-    if model.incomplete:
-        # Degraded/missing comparison evidence is not a compatibility claim
-        # (see module docstring) — say so explicitly rather than folding it
-        # into the generic "Review recommended" wording, which would read as
-        # "this PR changed the API in a way that needs a human look," not
-        # "we couldn't fully check this PR."
-        if model.incomplete_blocking:
-            return "🛑", "Source analysis incomplete"
-        return "⚠️", "Analysis coverage reduced"
+    if model.incomplete and model.incomplete_blocking:
+        # A hard evidence-policy failure fails the run the same way a
+        # genuine break does (ADR-033 D7 / a gated coverage risk), so it
+        # takes the same headline priority as `b` above — ahead of a
+        # separate, merely-advisory review finding. Say so explicitly rather
+        # than folding it into the generic "Review recommended" wording,
+        # which would read as "this PR changed the API," not "we couldn't
+        # check this PR."
+        return "🛑", "Source analysis incomplete"
     if r:
+        # A real compatibility finding always keeps headline priority over a
+        # merely-advisory coverage gap (Codex review) — an ungated
+        # `layer_coverage_asymmetric` must not bury a genuine source-API
+        # change behind "Analysis coverage reduced". `_incomplete_note`
+        # still calls the coverage gap out separately.
         return "⚠️", "Review recommended"
+    if model.incomplete:
+        return "⚠️", "Analysis coverage reduced"
     if s:
         return "✅", "Compatible — safe changes only"
     return "✅", "No ABI changes"
@@ -1207,12 +1235,16 @@ def _gate_note(model: CommentModel) -> list[str]:
 
 def _incomplete_note(model: CommentModel) -> list[str]:
     """Explain the analysis-incomplete bucket when it did *not* win the
-    headline (a genuine breaking finding took priority — see `_header`), so a
-    reviewer looking at an "ABI BREAKING" headline still learns the analysis
-    itself was also degraded, rather than discovering it only in the
-    collapsed details section below.
+    headline — a genuine breaking finding, or (for a merely-advisory
+    coverage gap) a real review finding, took priority instead (see
+    `_header`) — so a reviewer looking at an "ABI BREAKING" or "Review
+    recommended" headline still learns the analysis itself was also
+    degraded, rather than discovering it only in the collapsed details
+    section below.
     """
-    if not model.incomplete or not model.breaking:
+    if not model.incomplete:
+        return []
+    if not model.breaking and not (model.review and not model.incomplete_blocking):
         return []
     n = len(model.incomplete)
     word = "finding" if n == 1 else "findings"

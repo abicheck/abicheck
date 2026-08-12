@@ -261,6 +261,82 @@ def test_real_breaking_finding_wins_headline_over_incomplete():
     assert "analysis-coverage finding" in body  # the note pointing at the section
 
 
+def test_real_review_finding_keeps_headline_over_advisory_incomplete():
+    # Codex review: an ungated `layer_coverage_asymmetric` (advisory, not
+    # blocking) must not bury a genuine, separate review-bucket finding
+    # (e.g. a default-severity api_break) behind "Analysis coverage
+    # reduced" — a real compatibility finding always keeps headline
+    # priority over a merely-advisory coverage gap.
+    report = _compare_report(
+        [
+            {
+                "kind": "enum_member_added",
+                "symbol": "E::X",
+                "description": "closed enum",
+                "severity": "api_break",
+            },
+            {
+                "kind": "layer_coverage_asymmetric",
+                "symbol": "evidence:coverage",
+                "description": "Base was analyzed with evidence the target lacks.",
+                "severity": "risk",
+            },
+        ]
+    )
+    model = build_model(report)
+    assert model.incomplete_blocking is False
+    assert len(model.review) == 1
+    body = render_comment(model, sha="deadbeef")
+    assert "Review recommended" in body
+    assert "Analysis coverage reduced" not in body
+    # The coverage gap is still surfaced, just not as the headline.
+    assert "🛑 Analysis incomplete" in body
+    assert "analysis-coverage finding" in body
+
+
+def test_incomplete_blocking_when_policy_promotes_severity_to_breaking():
+    # Codex review: a named policy / --policy-file override can promote
+    # layer_coverage_asymmetric all the way to `severity: "breaking"` in the
+    # JSON without touching the `potential_breaking` severity-config knob at
+    # all — blocking-ness must follow the finding's own resolved severity,
+    # not just the one kind + one level check.
+    report = _compare_report(
+        [
+            {
+                "kind": "layer_coverage_asymmetric",
+                "symbol": "evidence:coverage",
+                "description": "Base was analyzed with evidence the target lacks.",
+                "severity": "breaking",
+            },
+        ]
+    )
+    model = build_model(report)
+    assert model.incomplete_blocking is True
+    body = render_comment(model, sha="deadbeef")
+    assert "Source analysis incomplete" in body
+    assert "🛑" in body
+
+
+def test_incomplete_blocking_under_fail_on_api_break():
+    # gate_api_break (the action's fail-on-api-break) must gate an
+    # api_break-severity incomplete finding the same way it gates every
+    # other api_break finding elsewhere in this module.
+    report = _compare_report(
+        [
+            {
+                "kind": "layer_coverage_asymmetric",
+                "symbol": "evidence:coverage",
+                "description": "Base was analyzed with evidence the target lacks.",
+                "severity": "api_break",
+            },
+        ]
+    )
+    model = build_model(report, gate_api_break=True)
+    assert model.incomplete_blocking is True
+    model_ungated = build_model(report, gate_api_break=False)
+    assert model_ungated.incomplete_blocking is False
+
+
 def test_used_by_scoped_compatible_overrides_breaking_headline():
     # ADR-043 `compare --used-by`: the full library still has breaking
     # changes (unrelated to the app), but the scoped verdict is COMPATIBLE —
