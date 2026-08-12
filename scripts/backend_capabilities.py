@@ -273,6 +273,7 @@ FACT_ROWS: tuple[FactRow, ...] = (
         ),
     ),
     FactRow("Function", "hidden_friend_owner", _FULL, _FULL),
+    FactRow("Function", "elf_binding", _OTHER, _OTHER, note=_DYNSYM),
     # ── Variable ───────────────────────────────────────────────────────────
     FactRow("Variable", "name", _FULL, _FULL),
     FactRow("Variable", "mangled", _FULL, _FULL),
@@ -341,6 +342,7 @@ FACT_ROWS: tuple[FactRow, ...] = (
         hybrid_backfilled=True,
         note="clang side wired in G31 Phase C (schema v19).",
     ),
+    FactRow("Variable", "elf_binding", _OTHER, _OTHER, note=_DYNSYM),
     # ── TypeField ──────────────────────────────────────────────────────────
     FactRow("TypeField", "name", _FULL, _FULL),
     FactRow("TypeField", "type", _FULL, _FULL),

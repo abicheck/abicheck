@@ -245,6 +245,10 @@ def _change_detail_properties(change: Change) -> dict[str, Any]:
         props["causedCount"] = change.caused_count
     if change.correlated_change_kind:
         props["correlatedChangeKind"] = change.correlated_change_kind
+    # ELF symbol linkage of a removed symbol (see reporter.py's identical
+    # symbol_binding property for the full rationale) -- Codex review.
+    if change.symbol_binding:
+        props["symbolBinding"] = change.symbol_binding
     return props
 
 

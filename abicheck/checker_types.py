@@ -352,6 +352,31 @@ class Change:
     # ``AbiSnapshot``'s identical per-field fix in PR #582 exactly (that
     # precedent predates this dataclass's own instance of the same bug).
     vtable_covers_unverifiable_layout_gap: bool = field(default=False, kw_only=True)
+    # ELF symbol linkage (Function.elf_binding / Variable.elf_binding's value
+    # string — "global"/"weak"/"local"/"unique"/"other") of the removed
+    # symbol, stamped by diff_symbols._check_removed_function/_var_removed on
+    # FUNC_REMOVED/FUNC_REMOVED_ELF_ONLY/VAR_REMOVED findings, and by
+    # diff_platform._diff_elf_deleted_fallback on FUNC_DELETED_ELF_FALLBACK
+    # (the other common export-disappearance path — a function still
+    # declared but silently absent from .dynsym). None for every other
+    # kind, and None here too when the symbol's binding was never
+    # captured (non-ELF platform, older snapshot, ELF metadata without a
+    # matching .dynsym entry). Exists so a suppression rule's ``binding:``
+    # selector (suppression.py) can narrow a removal rule to the common
+    # WEAK-COMDAT-inline case. Provider-side evidence only, NOT proof of
+    # safety: it names the *library's own build*'s linkage, not whether
+    # every consumer already carries its own copy — see AGENTS.md's
+    # "Linkage-blind removal" entry (the extern-template counterexample) and
+    # Suppression.binding's own docstring, which carries the full caveat.
+    # Deliberately a plain string, not
+    # the ``SymbolBinding`` enum itself: mirrors ``old_value``/``new_value``
+    # and every other string-typed selector-facing field already on this
+    # class, and keeps ``model.py``'s ``elf_metadata`` dependency from
+    # leaking into this dataclass's own import surface. Same
+    # ``field(kw_only=True)``-appended-last convention as
+    # ``vtable_covers_unverifiable_layout_gap`` immediately above, for the
+    # identical reason (Change is public API; see that field's own comment).
+    symbol_binding: str | None = field(default=None, kw_only=True)
 
 
 @dataclass

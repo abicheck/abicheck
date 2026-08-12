@@ -485,6 +485,14 @@ def _baseline_finding_dicts(
             "source_location": getattr(c, "source_location", None),
             "finding_id": report_finding_id(c),
         }
+        # ELF symbol linkage of a removed symbol (Change.symbol_binding) --
+        # scan --against shares the same --suppress surface as compare, so
+        # a binding-scoped suppression's match/no-match needs to be
+        # auditable here too, not just in compare's JSON/SARIF (Codex
+        # review, fresh evidence).
+        binding = getattr(c, "symbol_binding", None)
+        if binding:
+            entry["symbol_binding"] = binding
         _add_contract_fields(entry, c)
         if bucket == "suppressed":
             entry["suppression_rule"] = getattr(c, "suppression_rule", None)

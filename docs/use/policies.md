@@ -177,8 +177,10 @@ project-wide. [Suppressions](suppressions.md) can target one symbol/pattern/
 namespace, but only by deleting the finding. `reclassify` is the third
 option: the same selector grammar suppression rules use — `symbol`,
 `symbol_pattern`, `type_pattern`, `member_name`, `namespace`,
-`entity_namespace`, `cause_namespace`, `source_location`, `expires` — plus a
-required `to`, applied instead of deleting the finding:
+`entity_namespace`, `cause_namespace`, `source_location`, `binding`
+(conjunctive-only, same caveat as `suppress`'s `binding:` — see
+[Suppressions](suppressions.md)), `expires` — plus a required `to`, applied
+instead of deleting the finding:
 
 ```yaml
 reclassify:

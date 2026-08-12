@@ -40,6 +40,7 @@ from .model import (
     ParamKind,
     RecordType,
     ScopeOrigin,
+    SymbolBinding,
     TypeField,
     Variable,
     Visibility,
@@ -803,6 +804,41 @@ def _sub_block(parser: Callable[[dict[str, Any]], _T], raw: Any) -> _T | None:
     return parser(raw) if isinstance(raw, dict) else None
 
 
+def _backfill_missing_elf_binding(snap: AbiSnapshot) -> None:
+    """Backfill Function/Variable.elf_binding from an already-loaded
+    ``elf.symbols`` for a snapshot serialized before this field existed
+    (Codex review, fresh evidence).
+
+    A pre-this-PR snapshot's own ``elf`` block already carries the exact
+    same fact ``dumper_elf_symbols._populate_elf_visibility`` reads it
+    from at dump time -- only the newer per-declaration ``elf_binding``
+    key was never written at serialization time, so loading it as ``None``
+    (the ordinary missing-key convention) would make a fresh ``binding:``
+    suppression selector fail closed against *every* already-archived
+    baseline, not just genuinely-unknown-binding cases, until each one is
+    regenerated -- which is not always possible for an archived release.
+    Only fills a ``None``: an explicitly serialized value from a v16+
+    writer is preserved untouched, never recomputed.
+
+    Deliberately scoped to ``elf_binding`` alone -- ``elf_visibility`` has
+    the identical legacy-backfill gap but predates this PR, is unrelated to
+    the field this PR adds, and is left as it already was.
+    """
+    if snap.elf is None:
+        return
+    sym_map = snap.elf.symbol_map
+    for func in snap.functions:
+        if func.elf_binding is None:
+            elf_sym = sym_map.get(func.mangled)
+            if elf_sym is not None:
+                func.elf_binding = elf_sym.binding
+    for var in snap.variables:
+        if var.elf_binding is None:
+            elf_sym = sym_map.get(var.mangled)
+            if elf_sym is not None:
+                var.elf_binding = elf_sym.binding
+
+
 def snapshot_from_dict(d: dict[str, Any]) -> AbiSnapshot:
     # Inspect schema version for future migration hooks.
     # Snapshots without schema_version are treated as v1 (pre-versioning format).
@@ -879,6 +915,12 @@ def snapshot_from_dict(d: dict[str, Any]) -> AbiSnapshot:
             elf_visibility=ElfVisibility(f["elf_visibility"])
             if f.get("elf_visibility")
             else None,
+            # Missing on an older snapshot (predates this field) → None,
+            # same "not captured" default every other ELF-derived fact here
+            # uses.
+            elf_binding=SymbolBinding(f["elf_binding"])
+            if f.get("elf_binding")
+            else None,
             ref_qualifier=f.get("ref_qualifier", ""),
             # Tri-state: a missing key (older snapshot) loads as None,
             # which suppresses CTOR_EXPLICIT_ADDED/_REMOVED in the diff
@@ -922,6 +964,9 @@ def snapshot_from_dict(d: dict[str, Any]) -> AbiSnapshot:
             origin=_scope_origin_or_unknown(v.get("origin")),
             alignment_bits=v.get("alignment_bits"),
             deprecated=v.get("deprecated"),
+            elf_binding=SymbolBinding(v["elf_binding"])
+            if v.get("elf_binding")
+            else None,
         )
         for v in d.get("variables", [])
     ]
@@ -1582,6 +1627,7 @@ def snapshot_from_dict(d: dict[str, Any]) -> AbiSnapshot:
             stacklevel=2,
         )
 
+    _backfill_missing_elf_binding(snap)
     return snap
 
 

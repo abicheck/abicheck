@@ -33,6 +33,14 @@ from .checker_policy import (
     Verdict,
 )
 from .checker_types import Change
+from .elf_metadata import SymbolBinding
+
+# Valid values for Suppression.binding — the same value strings
+# Change.symbol_binding is stamped with (SymbolBinding.value). Imported from
+# elf_metadata rather than duplicated, and safe to import: elf_metadata.py
+# has no local imports of its own, so this carries no cycle risk (mirrors
+# model.py's identical reasoning for re-exporting the same enum).
+_VALID_BINDING: frozenset[str] = frozenset(b.value for b in SymbolBinding)
 
 # Pre-build valid change_kind values for fast validation
 _VALID_CHANGE_KINDS: frozenset[str] = frozenset(ck.value for ck in ChangeKind)
@@ -41,7 +49,7 @@ _VALID_CHANGE_KINDS: frozenset[str] = frozenset(ck.value for ck in ChangeKind)
 _KNOWN_ENTRY_KEYS: frozenset[str] = frozenset({
     "symbol", "symbol_pattern", "type_pattern", "member_name",
     "change_kind", "reason", "label", "source_location", "expires",
-    "namespace", "entity_namespace", "cause_namespace",
+    "namespace", "entity_namespace", "cause_namespace", "binding",
     "reachability", "allow_public_break", "allow_unknown_reachability",
 })
 
@@ -849,6 +857,25 @@ def _matches_member_name(compiled: re.Pattern[str], change: Change) -> bool:
     return bool(compiled.fullmatch(member))
 
 
+def _matches_binding(binding: str, change: Change) -> bool:
+    """Return True if *change*'s ELF symbol linkage equals *binding*.
+
+    ``change.symbol_binding`` is ``None`` for every change kind other than
+    ``FUNC_REMOVED``/``FUNC_REMOVED_ELF_ONLY``/``VAR_REMOVED``/
+    ``FUNC_DELETED_ELF_FALLBACK`` (the only kinds any detector stamps it
+    on), and also ``None`` on one of those whose binding
+    was never captured (non-ELF platform, older snapshot, no matching
+    ``.dynsym`` entry). A rule with an explicit ``binding:`` selector never
+    matches either case — an unknown binding is not the same fact as a
+    confirmed one, and silently treating it as a match would suppress a
+    finding this rule was never actually audited against (the same
+    fail-closed-on-unknown-evidence discipline ``reachability:
+    proven-unreachable-only`` already uses for
+    ``Change.reachability_state``).
+    """
+    return change.symbol_binding == binding
+
+
 def _matches_entity_namespace(compiled: _SegmentGlobMatcher, change: Change) -> bool:
     """Return True if the change's *own* symbol/qualified_name lies in the namespace.
 
@@ -977,6 +1004,47 @@ class Suppression:
     expires: date | None = None
     """Optional expiry date (ISO 8601). After this date, the suppression is inactive
     and a warning is emitted. Format: ``expires: 2026-06-01``."""
+    # Appended after every pre-existing positional field, and kw_only (Codex
+    # review, fresh evidence): Suppression is constructible directly by a
+    # programmatic caller (not just via SuppressionList.load's YAML path,
+    # which always passes every field by keyword — see that call site), and
+    # inserting a field earlier in the list would have silently reassigned
+    # every positional argument from that point on for such a caller (e.g. a
+    # value previously meant for `reachability` becoming `binding` instead).
+    # Same "public-API dataclass, append-and-kw_only" convention as
+    # Change.symbol_binding/Change.vtable_covers_unverifiable_layout_gap and
+    # AbiSnapshot's own PR #582 fix — see those fields' docstrings.
+    binding: str | None = field(default=None, kw_only=True)
+    """``"global" | "weak" | "local" | "unique" | "other"`` — the removed
+    symbol's ELF linkage (``Change.symbol_binding``, from
+    ``Function.elf_binding``/``Variable.elf_binding``). Only ever set on a
+    ``FUNC_REMOVED``/``FUNC_REMOVED_ELF_ONLY``/``VAR_REMOVED``/
+    ``FUNC_DELETED_ELF_FALLBACK`` finding; a rule combining this with any
+    other ``change_kind`` never matches.
+    Conjunctive with every other selector (AND semantics), like
+    :attr:`member_name` — combine with :attr:`symbol_pattern` or
+    :attr:`namespace` to scope it. Never matches a change whose binding was
+    not captured (``Change.symbol_binding is None``) — see
+    :func:`_matches_binding`.
+
+    **Provider-side evidence only — not proof a removal is safe.** ``WEAK``
+    linkage tells you the *library's own build* used vague/COMDAT linkage
+    for this symbol; it does not by itself tell you every *consumer* already
+    holds its own copy. AGENTS.md's "Linkage-blind removal" entry records
+    the concrete counterexample this codebase already had to unlearn twice:
+    a public header carrying ``extern template struct Box<int>;`` tells
+    consumer TUs *not* to instantiate, while the library's own explicit
+    instantiation still emits a ``WEAK``/COMDAT definition — so a consumer
+    can hold an undefined reference to a symbol this repo's own model would
+    still report as ``WEAK``. A ``binding: weak`` rule narrows a removal
+    finding to the *common* WEAK-COMDAT-inline case (every consumer already
+    emitted its own copy); it is not, on its own, sufficient justification
+    for suppression — confirm the removed symbol is not also documented
+    `extern template`/explicit-instantiation surface (or otherwise known to
+    have real out-of-library callers relying on the library's definition)
+    before relying on this selector alone. A separate, binding-less rule
+    still catches (does not suppress) a ``GLOBAL``/STRONG removal on the
+    same symbol set."""
     _compiled_pattern: re.Pattern[str] | None = field(default=None, init=False, repr=False)
     _compiled_type_pattern: re.Pattern[str] | None = field(default=None, init=False, repr=False)
     _compiled_member_pattern: re.Pattern[str] | None = field(default=None, init=False, repr=False)
@@ -1027,6 +1095,22 @@ class Suppression:
             raise ValueError(
                 f"Invalid reachability {self.reachability!r}. "
                 f"Valid values: {sorted(_VALID_REACHABILITY)}"
+            )
+        if self.binding is not None and (
+            # isinstance check first (Codex review, fresh evidence): a YAML
+            # value the dataclass's own `str | None` annotation doesn't
+            # enforce at runtime -- a list (`binding: [weak]`) or mapping --
+            # is unhashable, so `not in` on the frozenset below would raise
+            # TypeError instead of this constructor's documented ValueError
+            # contract, escaping SuppressionList.load's/the CLI's/the
+            # service layer's ValueError-only handling as an internal
+            # exception rather than a normal invalid-config error.
+            not isinstance(self.binding, str)
+            or self.binding not in _VALID_BINDING
+        ):
+            raise ValueError(
+                f"Invalid binding {self.binding!r}. "
+                f"Valid values: {sorted(_VALID_BINDING)}"
             )
         # ADR-044 D2 (Codex review): SuppressionList.load already rejects a
         # non-bool allow_public_break via _parse_allow_public_break, but a
@@ -1121,6 +1205,15 @@ class Suppression:
         # Applied conjunctively so it can combine with type_pattern / change_kind.
         if self._compiled_member_pattern is not None:
             if not _matches_member_name(self._compiled_member_pattern, change):
+                return False
+
+        # binding: ELF linkage of the removed symbol. Conjunctive, same
+        # position as member_name — applies ahead of the type_pattern early
+        # return so it also narrows a type_pattern-primary rule (in
+        # practice, symbol_binding is only ever set on func/var removal
+        # kinds, so it's a no-op there; kept general rather than special-cased).
+        if self.binding is not None:
+            if not _matches_binding(self.binding, change):
                 return False
 
         # entity_namespace / namespace: match the change's own identity only.
@@ -1464,6 +1557,7 @@ class SuppressionList:
                     namespace=item.get("namespace"),
                     entity_namespace=item.get("entity_namespace"),
                     cause_namespace=item.get("cause_namespace"),
+                    binding=item.get("binding"),
                     reachability=item.get("reachability"),
                     allow_public_break=allow_public_break,
                     allow_unknown_reachability=allow_unknown_reachability,

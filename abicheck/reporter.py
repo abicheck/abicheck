@@ -978,6 +978,8 @@ def _suppressed_change_entry(
     entry["reachability_state"] = assessment.reachability_state.value
     if assessment.has_signal():
         entry["impact_assessment"] = assessment.to_dict()
+    if getattr(c, "symbol_binding", None):
+        entry["symbol_binding"] = c.symbol_binding
     # ADR-049 Phase 3 (Codex review, fresh evidence): suppression is a
     # display/gate decision, not a reason to erase the contract-relevance
     # decision checker._apply_contract_evaluation_shadow already stamped on
@@ -1425,6 +1427,8 @@ def _change_annotation_fields(c: Any) -> dict[str, Any]:
     correlated = getattr(c, "correlated_change_kind", None)
     if correlated:
         out["correlated_change_kind"] = correlated
+    if getattr(c, "symbol_binding", None):
+        out["symbol_binding"] = c.symbol_binding
     return out
 
 

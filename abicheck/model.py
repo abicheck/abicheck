@@ -21,6 +21,18 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import TYPE_CHECKING
 
+# Symbol *linkage* (GLOBAL/WEAK/LOCAL/UNIQUE/OTHER, from ELF st_info.bind) —
+# reused directly from elf_metadata rather than duplicated as a second
+# model-local enum: elf_metadata.py has no local imports of its own (verified:
+# it imports only stdlib + pyelftools), so importing it here carries no cycle
+# risk, unlike ElfVisibility/Visibility above which predate this and stayed
+# model-local. binder.py separately defines its own, unrelated
+# ``SymbolBinding`` dataclass (a consumer-side *import resolution* record, not
+# a linkage classification) — that module already resolves the name collision
+# via ``as ElfSymbolBinding``; nothing here needs the same aliasing since this
+# module never imports binder.py.
+from .elf_metadata import SymbolBinding as SymbolBinding
+
 # Re-export the name-classification predicates (moved to name_classification in
 # C10) under their historical names. Redundant ``as`` aliases are the explicit
 # re-export idiom mypy recognises, so ``from .model import is_non_abi_surface_type``
@@ -251,6 +263,34 @@ class Function:
     # silently rebind existing positional-constructor arguments instead of
     # failing).
     hidden_friend_owner: str | None = None
+    # ELF symbol *linkage* (st_info.bind — GLOBAL/WEAK/LOCAL/UNIQUE/OTHER),
+    # populated from .dynsym the same way elf_visibility is (see
+    # dumper_elf_symbols._populate_elf_visibility). None on a non-ELF
+    # platform, an older snapshot predating this field, or a declaration with
+    # no matching exported symbol (e.g. a public header-only inline that
+    # never made it into the dynamic symbol table). Distinguishes a WEAK
+    # COMDAT definition (e.g. an in-class-defined/`inline` member) from a
+    # GLOBAL/STRONG export on an otherwise-identical FUNC_REMOVED finding,
+    # which neither `visibility` nor `is_inline` alone can do — but this is
+    # PROVIDER-SIDE evidence only, about the *library's own build*, not a
+    # guarantee about consumers: a WEAK/COMDAT symbol does not by itself mean
+    # every consumer already carries its own copy (a public `extern template`
+    # declaration is the documented counterexample — the consumer TU
+    # deliberately does *not* instantiate, while the library's own explicit
+    # instantiation still emits a WEAK/COMDAT definition, so the consumer can
+    # hold an undefined reference to a symbol this field still reports as
+    # WEAK). See AGENTS.md's "Linkage-blind removal" entry for why a heavier
+    # removal-severity *demotion* keyed off this same fact was attempted and
+    # reverted for exactly this reason — this field only makes the fact
+    # visible on the model and matchable by a suppression selector, it does
+    # not itself change any verdict, and a suppression author must not treat
+    # WEAK alone as sufficient justification (see Suppression.binding's own
+    # docstring for the full caveat). Known gap, same as elf_visibility: a
+    # symbol-versioned bare name with mixed bindings across versions (e.g. a GLOBAL
+    # old-ABI @V1 and a WEAK default @@V2) collapses to whichever entry
+    # elf.symbol_map's last-write-wins dict happens to keep — see AGENTS.md's
+    # dedicated entry for this field.
+    elf_binding: SymbolBinding | None = None
 
 
 @dataclass
@@ -274,6 +314,9 @@ class Variable:
     alignment_bits: int | None = None
     # See Function.deprecated for the message-string convention.
     deprecated: str | None = None
+    # See Function.elf_binding for the ELF-linkage rationale; same population
+    # path (dumper_elf_symbols._populate_elf_visibility).
+    elf_binding: SymbolBinding | None = None
 
 
 @dataclass

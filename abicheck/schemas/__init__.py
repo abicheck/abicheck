@@ -390,7 +390,33 @@ from typing import Any
 #:       absent for every change not actually decided by a ``reclassify:``
 #:       rule, which is every report without one, and never affects
 #:       ``verdict``, ``severity``, or any exit code.
-REPORT_SCHEMA_VERSION = "2.31"
+#: 2.32 — added the optional per-finding ``symbol_binding`` key: the removed
+#:       symbol's ELF linkage (``"global"``/``"weak"``/``"local"``/
+#:       ``"unique"``/``"other"``), present only on ``func_removed``/
+#:       ``func_removed_elf_only``/``var_removed``/``func_deleted_elf_fallback``
+#:       findings whose binding was captured. Lets a JSON/SARIF consumer tell
+#:       a WEAK-COMDAT removal apart from a GLOBAL/strong export's removal —
+#:       the structured counterpart to the new ``binding:`` suppression
+#:       selector (see ``suppression.py``'s ``Suppression.binding``).
+#:       Additive optional key (Codex review; renumbered from a conflicting
+#:       2.29/2.30 when the PR #735/#733 rebase claimed those versions
+#:       first).
+#: 2.33 — the same optional ``symbol_binding`` key (see 2.32) is now also
+#:       propagated onto ``suppression.suppressed_changes[]`` entries, not
+#:       just the top-level ``changes[]``/``root_causes[]`` array -- a
+#:       separate projector (``reporter._suppressed_change_entry``) that
+#:       the 2.32 fix didn't reach, so a binding-scoped suppression's audit
+#:       trail couldn't show why it matched. Additive optional key (Codex
+#:       review, fresh evidence).
+#: 2.34 — ``policy_reclassify[]`` items gain the optional ``binding`` key,
+#:       matching ``reclassify.ReclassifyRule.to_report_dict()``'s new
+#:       ``binding`` selector output (the ``reclassify:`` rule form's own
+#:       ``binding`` selector, wired through in this same change). The
+#:       schema's ``policy_reclassify`` item previously set
+#:       ``additionalProperties: false`` without listing this key, so valid
+#:       output using the feature failed validation against the bundled
+#:       schema. Additive optional key (Codex review, fresh evidence).
+REPORT_SCHEMA_VERSION = "2.34"
 
 #: SemVer-style (MAJOR.MINOR) version of the ``scan`` JSON output, emitted as
 #: ``scan_schema_version`` at the top level of both public scan dict shapes:
@@ -539,7 +565,13 @@ REPORT_SCHEMA_VERSION = "2.31"
 #:        configurable (``scan --max-findings`` / ``ABICHECK_MAX_BASELINE_
 #:        FINDINGS``, default still 20), which does not change the schema,
 #:        only how much of a diff a given run itemizes.
-SCAN_SCHEMA_VERSION = "1.10"
+#: 1.11 -- ``_baseline_finding_dicts`` entries gain the optional
+#:        ``symbol_binding`` key (the removed symbol's ELF linkage), mirroring
+#:        the compare-report schema's 2.32 addition -- ``scan --against``
+#:        shares the same ``--suppress`` surface as ``compare``, so a
+#:        binding-scoped suppression's match/no-match needs to be auditable
+#:        here too. Additive optional key, present only when captured.
+SCAN_SCHEMA_VERSION = "1.11"
 
 _SCHEMA_DIR = Path(__file__).resolve().parent
 COMPARE_REPORT_SCHEMA_PATH = _SCHEMA_DIR / "compare_report.schema.json"

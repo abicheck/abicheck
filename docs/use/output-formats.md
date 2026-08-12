@@ -648,7 +648,7 @@ Every JSON report carries a top-level `report_schema_version` field
 
 ```json
 {
-  "report_schema_version": "2.31",
+  "report_schema_version": "2.34",
   "library": "libfoo.so.1",
   "verdict": "BREAKING"
 }
@@ -682,9 +682,16 @@ ABI break apart from a suppressed cosmetic note. `scan --against --format
 text` prints the same information: an always-present `suppressed=N` count in
 the "Baseline comparison" line, and `--show-suppressed` itemizes each one.
 
+Since schema 1.11, any `findings`/`suppressed` entry for a removal whose ELF
+symbol linkage was captured also carries `symbol_binding`
+(`global`/`weak`/`local`/`unique`/`other`) — the same field
+`compare --format json`/SARIF emit (see `binding:` under
+[Suppressions](suppressions.md)), so a `binding:`-scoped suppression's
+match/no-match is auditable from `scan --against` too.
+
 ```json
 {
-  "scan_schema_version": "1.10",
+  "scan_schema_version": "1.11",
   "diff": {
     "breaking": 25,
     "findings": ["... 20 entries ..."],

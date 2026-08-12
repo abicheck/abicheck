@@ -448,6 +448,68 @@ class TestCtorDtorReconciliation:
         assert reconciled is not None
         assert reconciled.name == "Widget"
 
+    def test_reconciled_constructor_backfills_elf_binding_from_clang(self):
+        # Codex review, fresh evidence: castxml's own _populate_elf_visibility
+        # call could never match the synthetic placeholder key against
+        # .dynsym, so elf_binding/elf_visibility stay None on the castxml
+        # side even though the entity has a real exported symbol. clang_f,
+        # keyed correctly under the real mangled name from the start,
+        # already carries the right value -- the merge must carry it over
+        # once the key is reconciled, or a `binding:` suppression can never
+        # match this ctor/dtor's removal.
+        from abicheck.elf_metadata import SymbolBinding
+        from abicheck.model import ElfVisibility
+
+        synthetic = f"{SYNTHETIC_CTOR_KEY_PREFIX}ns::Widget(int)"
+        castxml_ctor = Function(
+            name="Widget",
+            mangled=synthetic,
+            return_type="void",
+            params=[Param(name="n", type="int")],
+            access=AccessLevel.PUBLIC,
+        )
+        real_mangled = "_ZN2ns6WidgetC1Ei"
+        clang_ctor = Function(
+            name="Widget",
+            mangled=real_mangled,
+            return_type="void",
+            params=[Param(name="n", type="int")],
+            access=AccessLevel.PUBLIC,
+            elf_binding=SymbolBinding.WEAK,
+            elf_visibility=ElfVisibility.DEFAULT,
+        )
+        castxml = _snap(functions=[castxml_ctor], ast_producer="castxml")
+        clang = _snap(functions=[clang_ctor], ast_producer="clang")
+        merged = merge_snapshots(castxml, clang)
+
+        reconciled = merged.func_by_mangled(real_mangled)
+        assert reconciled is not None
+        assert reconciled.elf_binding == SymbolBinding.WEAK
+        assert reconciled.elf_visibility == ElfVisibility.DEFAULT
+
+    def test_ordinary_function_elf_binding_backfills_from_clang(self):
+        # No key rewrite involved -- both sides already independently look up
+        # the identical real key, so backfilling castxml's own None from
+        # clang here is correct and safe: there is no producer disagreement
+        # to lose (CodeRabbit review: the previous name/comments read as if
+        # this asserted the *opposite*, that backfill must NOT apply here).
+        from abicheck.elf_metadata import SymbolBinding
+
+        castxml_fn = Function(name="f", mangled="_Z1fv", return_type="void")
+        clang_fn = Function(
+            name="f",
+            mangled="_Z1fv",
+            return_type="void",
+            elf_binding=SymbolBinding.GLOBAL,
+        )
+        castxml = _snap(functions=[castxml_fn], ast_producer="castxml")
+        clang = _snap(functions=[clang_fn], ast_producer="clang")
+        merged = merge_snapshots(castxml, clang)
+
+        reconciled = merged.func_by_mangled("_Z1fv")
+        assert reconciled is not None
+        assert reconciled.elf_binding == SymbolBinding.GLOBAL
+
     def test_constructor_with_comma_in_single_param_type_still_matches(self):
         # Codex review: the synthetic key's embedded param signature is a
         # bare "," join with no escaping. A single parameter whose OWN type

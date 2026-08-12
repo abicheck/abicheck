@@ -300,6 +300,8 @@ def _check_removed_function(
         symbol=mangled,
         description=f"{f_old.visibility.value.capitalize()} function removed: {f_old.name}",
         old_value=f_old.name,
+        # See Change.symbol_binding's docstring — None when not captured.
+        symbol_binding=f_old.elf_binding.value if f_old.elf_binding else None,
     )
 
 
@@ -1184,6 +1186,8 @@ def _var_removed(mangled: str, v_old: Variable) -> list[Change]:
             ChangeKind.VAR_REMOVED,
             symbol=mangled,
             name=v_old.name,
+            # See Change.symbol_binding's docstring — None when not captured.
+            symbol_binding=v_old.elf_binding.value if v_old.elf_binding else None,
         )
     ]
 
