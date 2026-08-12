@@ -1679,6 +1679,49 @@ itself) — not a drive-by extension of an example-catalog PR.
   resolves its own compiler flags/include roots — see
   `service._attach_header_graph`'s own `-isystem` deferred-root handling,
   which G28 Phase 4's hardening already had to fix once for a cache-key gap).
+  **Audited (this pass): all three named inputs turn out to already be
+  reconciled, not independently resolved — this bullet is stale and the
+  item is closed.** (1) *Manual flags* (`--gcc-options`/`--gcc-option`) —
+  `_attach_header_graph` and the primary snapshot pass both receive the
+  identical `CompileContext` object (`compile: CompileContext | None`), a
+  frozen dataclass whose `gcc_options`/`gcc_option_tokens` fields are where
+  a manual `-D`/`-U` define lives; there is no second, independently
+  resolved copy for the graph pass to diverge from. (2) *`-isystem`/
+  include-root inference* — `_attach_header_graph` re-invokes the same
+  pure functions the primary pass already ran (`expand_header_inputs`,
+  `resolve_inferred_header_roots`) over the identical raw `headers`/
+  `includes`/`gcc_options`/`gcc_option_tokens` inputs; since both are
+  deterministic pure functions of those inputs, the two calls cannot
+  disagree — this is redundant computation (already tracked above as the
+  memoization's "residual cost"), not a reconciliation gap. (3)
+  *Compile-DB flags* — this one WAS a real, exactly-this-shape divergence,
+  and reading `cli_dump_helpers.py`'s ELF `dump` path found it already
+  fixed, under a prior Codex review, before this pass started: the main
+  header-AST parse consumes `effective_gcc_options` (`_merge_gcc_options`),
+  which folds in the `-p`/`--compile-db`-derived `-D`/`-I`/`-std` flags on
+  top of the plain `--gcc-options` value — and, per that same function's
+  own code comment ("effective_gcc_options folds in the -p/
+  --compile-db-derived ... flags that compile_context itself does not
+  carry ... Without this, a header that only parses successfully with
+  those compile-DB flags would produce a valid main snapshot while a
+  second clang pass parses it without them and silently degrades"), the
+  identical `effective_gcc_options` value is folded into the
+  `CompileContext` passed to `_attach_header_graph` too
+  (`dataclasses.replace(compile_context, gcc_options=effective_gcc_options)`
+  when they differ), specifically so the header-graph attach and the
+  clang-layout attach (G28 Phase 4) both see what the primary pass saw.
+  Separately, the fully-integrated `--sources`/`--build-info` path
+  (`inline.py`) doesn't call `_attach_header_graph` at all — its own L5
+  graph is built by real per-TU clang replay against the compile DB's
+  actual flags (`call_graph.py`/`type_graph.py`, `inline_graph_fold.py`),
+  a structurally separate mechanism from the header-only L2 graph this
+  bullet is about; `cli_buildsource.embed_build_source` only backfills the
+  L2 graph as a fallback when that build-integrated fold produced none of
+  its own, never runs both against divergent flag sets for the same
+  snapshot. No code change made — the fix already exists and is verified
+  present; this pass is a documentation correction only, closing an item
+  this plan had carried as open past the point a prior review round
+  already closed it.
 
 **Files likely to change.** `abicheck/dumper_castxml.py`,
 `abicheck/dumper_clang.py`, `abicheck/dumper.py` (`_header_ast_parser`),
