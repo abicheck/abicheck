@@ -262,3 +262,46 @@ class TestSuppressionYamlLoading:
         )
         with pytest.raises(ValueError, match="unknown key"):
             SuppressionList.load(p)
+
+
+class TestReportSerialization:
+    """symbol_binding surfaces in the two primary machine-integration
+    outputs (JSON via reporter.py, SARIF via sarif.py) -- Codex review:
+    without this, weak-COMDAT and strong-export removals were
+    indistinguishable in structured output even though the `binding:`
+    suppression selector can already tell them apart at match time.
+    """
+
+    def _change(self, binding: str | None) -> object:
+        from abicheck.checker_types import Change
+
+        return Change(
+            kind=ChangeKind.FUNC_REMOVED,
+            symbol="_Z1fv",
+            description="removed",
+            symbol_binding=binding,
+        )
+
+    def test_json_report_includes_symbol_binding(self) -> None:
+        from abicheck.reporter import _change_annotation_fields
+
+        fields = _change_annotation_fields(self._change("weak"))
+        assert fields["symbol_binding"] == "weak"
+
+    def test_json_report_omits_symbol_binding_when_unset(self) -> None:
+        from abicheck.reporter import _change_annotation_fields
+
+        fields = _change_annotation_fields(self._change(None))
+        assert "symbol_binding" not in fields
+
+    def test_sarif_includes_symbol_binding(self) -> None:
+        from abicheck.sarif import _change_detail_properties
+
+        props = _change_detail_properties(self._change("global"))
+        assert props["symbolBinding"] == "global"
+
+    def test_sarif_omits_symbol_binding_when_unset(self) -> None:
+        from abicheck.sarif import _change_detail_properties
+
+        props = _change_detail_properties(self._change(None))
+        assert "symbolBinding" not in props

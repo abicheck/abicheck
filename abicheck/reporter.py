@@ -1425,6 +1425,17 @@ def _change_annotation_fields(c: Any) -> dict[str, Any]:
     correlated = getattr(c, "correlated_change_kind", None)
     if correlated:
         out["correlated_change_kind"] = correlated
+    # ELF symbol linkage of a removed symbol (Change.symbol_binding) --
+    # "global"/"weak"/"local"/"unique"/"other" on FUNC_REMOVED/
+    # FUNC_REMOVED_ELF_ONLY/VAR_REMOVED/FUNC_DELETED_ELF_FALLBACK, None
+    # otherwise or when not captured. Without this, weak-COMDAT and
+    # strong-export removals were indistinguishable in the primary
+    # machine-integration output (JSON/SARIF), even though the new
+    # `binding:` suppression selector can already tell them apart at
+    # match time (Codex review).
+    binding = getattr(c, "symbol_binding", None)
+    if binding:
+        out["symbol_binding"] = binding
     return out
 
 

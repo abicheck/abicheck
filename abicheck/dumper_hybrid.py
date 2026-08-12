@@ -384,6 +384,31 @@ def _backfill_function_facts(
         )
         if value != getattr(f, attr):
             updates[attr] = value
+    # ELF-sourced facts (elf_binding/elf_visibility) are independent of
+    # which AST backend produced the declaration -- both backends'
+    # dumper_elf_symbols._populate_elf_visibility reads the same .dynsym
+    # symbol map keyed by mangled name, so clang_f's own value is the SAME
+    # real fact, not a competing producer's opinion. This matters
+    # specifically for a synthetic ctor/dtor key just rewritten to its real
+    # clang mangled name above: castxml's own _populate_elf_visibility call
+    # could never match the synthetic placeholder key against .dynsym, so
+    # its elf_binding/elf_visibility are still None even though the entity
+    # DOES have a real exported symbol -- clang_f, keyed correctly from the
+    # start, already carries the right value (Codex review, fresh
+    # evidence). For an ordinary (non-rewritten) function this is a no-op:
+    # both sides independently looked up the identical real key, so a
+    # genuinely-None castxml value means clang's is None too. Deliberately
+    # NOT routed through _backfill_fact/provenance: this isn't a producer
+    # disagreement to record, just recovering a fact that was always there
+    # under the right key.
+    if f.elf_binding is None and clang_f is not None and clang_f.elf_binding is not None:
+        updates["elf_binding"] = clang_f.elf_binding
+    if (
+        f.elf_visibility is None
+        and clang_f is not None
+        and clang_f.elf_visibility is not None
+    ):
+        updates["elf_visibility"] = clang_f.elf_visibility
     return replace(f, **updates) if updates else f
 
 
