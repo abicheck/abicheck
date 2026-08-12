@@ -147,19 +147,36 @@ case "$asset_name" in
     ;;
 esac
 
-# Remove a pre-existing "./$asset_name" (a leftover from a PRIOR
-# invocation of this same Action against the same baseline-path/cwd)
-# before archiving, not just after -- staging the new output externally
-# only prevents self-inclusion of the file THIS run is currently writing;
-# it does nothing about a DIFFERENT, already-on-disk file left behind by
-# an earlier run. When baseline-path is (or contains) the current working
-# directory, that leftover archive is an ordinary member of baseline-path
-# as far as `tar -C "$BASELINE_PATH" .` is concerned, and would silently
-# be packaged INTO the new archive -- worse, it keeps nesting/growing on
-# every repeated invocation (Codex review). Safe to remove unconditionally
-# regardless of whether it's actually under baseline-path: this step's
-# whole job is to overwrite it with a freshly-built replacement anyway.
-rm -f "./$asset_name"
+# A pre-existing "./$asset_name" (a leftover from a PRIOR invocation of
+# this same Action against the same baseline-path/cwd) is EXCLUDED from
+# every tar invocation below via --exclude, not deleted from disk --
+# staging the new output externally only prevents self-inclusion of the
+# file THIS run is currently writing; it does nothing about a DIFFERENT,
+# already-on-disk file left behind by an earlier run, which is otherwise
+# an ordinary member of baseline-path as far as `tar -C "$BASELINE_PATH"
+# .` is concerned and would silently be packaged INTO the new archive
+# (Codex review, first round). An earlier version of this fix used
+# `rm -f "./$asset_name"` instead, unconditionally and BEFORE validating
+# asset_name's own archive suffix -- for an invalid custom
+# asset-name-template that happens to alias an existing file inside
+# baseline-path (e.g. a template resolving to "manifest.json" literally),
+# that unconditional rm deleted the input BEFORE the suffix-validation
+# case block below even ran, corrupting the supposedly read-only baseline
+# directory before reporting the (unrelated) unsupported-suffix error;
+# and even for a VALID suffix, deleting a name that aliases a genuine,
+# unrelated source member (not a stale leftover output at all) would
+# silently destroy real baseline-set content (Codex review, second
+# round). `--exclude` never touches anything on disk regardless of
+# validation order or what the name happens to alias -- GNU tar's
+# unanchored (no "/") pattern matches the basename anywhere in the
+# traversal, which is what's needed since $asset_name always lands
+# directly in cwd (never nested, already validated: no "/" is a legal
+# asset_name character), but baseline-path containing cwd rather than
+# BEING cwd means the file's position relative to baseline-path can be
+# nested. Verified directly against real GNU tar 1.35: `--exclude='out.tar'`
+# excludes both `./out.tar` at the traversal root and `./sub/out.tar`
+# nested one level down.
+_exclude_asset_name=(--exclude="$asset_name")
 
 # Every archive is built in a staging directory OUTSIDE $BASELINE_PATH,
 # then moved into place as the final $asset_name -- building it directly
@@ -242,7 +259,7 @@ case "$asset_name" in
     # proves the whole path works regardless of which way tar gets its
     # zstd support (CodeRabbit review).
     if _tar_zstd_works; then
-      tar --zstd -cf "$_staging_dir/archive" -C "$BASELINE_PATH" .
+      tar --zstd "${_exclude_asset_name[@]}" -cf "$_staging_dir/archive" -C "$BASELINE_PATH" .
     else
       echo "::notice::'zstd'/'tar --zstd' not usable on this runner -- falling back to Python's zstandard package to build $asset_name." >&2
       # Resolved explicitly rather than assuming a bare `python3` --
@@ -266,7 +283,7 @@ case "$asset_name" in
           exit 1
         fi
       fi
-      tar -cf "$_staging_dir/payload" -C "$BASELINE_PATH" .
+      tar "${_exclude_asset_name[@]}" -cf "$_staging_dir/payload" -C "$BASELINE_PATH" .
       # Copied in bounded 1 MiB chunks, not a single inp.read() -- a
       # baseline-set archive can approach the multi-gigabyte GitHub
       # Release asset limit documented in docs/use/baseline-storage.md, so
@@ -291,10 +308,10 @@ with open(src, 'rb') as inp, open(dst, 'wb') as out, cctx.stream_writer(out) as 
     fi
     ;;
   *.tar.gz | *.tgz)
-    tar -czf "$_staging_dir/archive" -C "$BASELINE_PATH" .
+    tar "${_exclude_asset_name[@]}" -czf "$_staging_dir/archive" -C "$BASELINE_PATH" .
     ;;
   *.tar)
-    tar -cf "$_staging_dir/archive" -C "$BASELINE_PATH" .
+    tar "${_exclude_asset_name[@]}" -cf "$_staging_dir/archive" -C "$BASELINE_PATH" .
     ;;
   *)
     echo "::error::asset-name-template resolved to '$asset_name', which has no recognized archive extension (.tar.zst/.tar.gz/.tgz/.tar) -- resolve-baseline/root-action.yml's baseline-set consumers pick their extractor from this exact suffix, so an unrecognized one would silently produce an asset nothing downstream can extract." >&2

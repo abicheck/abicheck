@@ -536,6 +536,73 @@ class TestStageBaseline:
         assert "libfoo.abicheck.json" in second_names
         assert "out-p1.tar" not in second_names
 
+    def test_invalid_suffix_does_not_delete_an_aliased_input_file(
+        self, tmp_path: Path
+    ) -> None:
+        # Regression (Codex review, second round): an earlier version of
+        # the repeated-invocation fix above used `rm -f "./$asset_name"`
+        # unconditionally and BEFORE the archive-suffix validation ran --
+        # when baseline-path is cwd and a misconfigured
+        # asset-name-template resolves to an existing input filename with
+        # an UNSUPPORTED suffix (e.g. "manifest.json" itself), that rm
+        # deleted the required manifest before the suffix check even had
+        # a chance to reject the template, corrupting the supposedly
+        # read-only baseline directory before reporting the (unrelated)
+        # "no recognized archive extension" error. Nothing in
+        # baseline-path may ever be deleted regardless of validation
+        # order.
+        (tmp_path / "manifest.json").write_text('{"profile": "p"}', encoding="utf-8")
+        (tmp_path / "libfoo.abicheck.json").write_text("{}", encoding="utf-8")
+
+        result, outputs = _run_action(
+            {
+                "BASELINE_PATH": str(tmp_path),
+                "ASSET_NAME_TEMPLATE": "manifest.json",
+            },
+            tmp_path,
+        )
+        assert result.returncode == 1
+        assert "no recognized archive extension" in (result.stdout + result.stderr)
+        assert "asset-name" not in outputs
+        # The manifest must survive -- this step never deletes anything
+        # from baseline-path.
+        assert (tmp_path / "manifest.json").is_file()
+        assert (tmp_path / "manifest.json").read_text(encoding="utf-8") == (
+            '{"profile": "p"}'
+        )
+
+    def test_aliased_source_member_is_excluded_not_deleted(
+        self, tmp_path: Path
+    ) -> None:
+        # A VALID archive suffix that happens to alias a genuine,
+        # unrelated source member (not a stale leftover output at all)
+        # must still never delete real baseline-set content from disk --
+        # only exclude it from THIS run's own archive.
+        (tmp_path / "manifest.json").write_text('{"profile": "p"}', encoding="utf-8")
+        (tmp_path / "libfoo.abicheck.json").write_text("{}", encoding="utf-8")
+        # A pre-existing file that happens to share the resolved asset
+        # name, containing content that is NOT a stale output from a
+        # prior run of this Action.
+        (tmp_path / "out-p1.tar").write_text("not a real archive", encoding="utf-8")
+
+        result, outputs = _run_action(
+            {
+                "BASELINE_PATH": str(tmp_path),
+                "ASSET_NAME_TEMPLATE": "out-{profile}.tar",
+                "PROFILE": "p1",
+            },
+            tmp_path,
+        )
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert outputs["asset-name"] == "out-p1.tar"
+        archive_path = tmp_path / "out-p1.tar"
+        assert archive_path.is_file()
+        with tarfile.open(archive_path, "r:") as tf:
+            names = {Path(m.name).name for m in tf.getmembers()}
+        assert "manifest.json" in names
+        assert "libfoo.abicheck.json" in names
+        assert "out-p1.tar" not in names
+
     def test_tmpdir_inside_baseline_path_falls_back_to_plain_tmp(
         self, tmp_path: Path
     ) -> None:
