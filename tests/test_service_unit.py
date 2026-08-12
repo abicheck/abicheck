@@ -1698,6 +1698,21 @@ class TestLoadSuppressionAndPolicy:
         with pytest.raises(ValidationError):
             load_suppression_and_policy(None, policy_file_path=pf)
 
+    def test_risky_override_warns(self, tmp_path, caplog):
+        """A risky override must warn even through this Tier-2 chokepoint --
+        `compare-release`'s real per-library fan-out loads its policy here,
+        not through the CLI's own `_load_suppression_and_policy` (Codex
+        review: the latter's warning never reached that path)."""
+        import logging
+
+        pf = tmp_path / "policy.yaml"
+        pf.write_text("base_policy: strict_abi\noverrides:\n  func_removed: ignore\n")
+        with caplog.at_level(logging.WARNING, logger="abicheck.service"):
+            _, p = load_suppression_and_policy(None, policy_file_path=pf)
+        assert p is not None
+        assert "HIGH RISK" in caplog.text
+        assert "func_removed" in caplog.text
+
 
 # ── run_compare() ───────────────────────────────────────────────────────────
 

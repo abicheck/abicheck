@@ -7,9 +7,18 @@ A new changelog fragment. See changelog.d/README.md for the workflow.
 - **`PolicyFile.validate_overrides()` was dead code — a risky `--policy-file`
   override never warned anyone.** The method already flagged, e.g.,
   downgrading `func_removed` to `ignore` or `type_vtable_changed` to `risk`,
-  but nothing in the CLI ever called it, so its warnings never reached a
-  user. `_load_suppression_and_policy()` — the one loader shared by
-  `compare`, `compare-release`, `scan --against`, and `appcompat` — now
-  calls it after loading a `--policy-file` and echoes every warning to
-  stderr, the same place the existing `--policy` override notice already
-  goes.
+  but nothing ever called it, so its warnings never reached a user. Wired in
+  at both places a policy file is actually loaded: `cli_params.
+  _load_suppression_and_policy()` (`compare`, `scan --against`, `appcompat`,
+  and `compare-release`'s early validation/matrix paths) now echoes each
+  warning to stderr, and `service.load_suppression_and_policy()` — the
+  Tier-2 chokepoint `compare-release`'s real per-library fan-out and any
+  direct Python API caller actually loads its policy through — now logs
+  them too, so a risky override no longer stays silent on that path either.
+  Also fixed a false positive in `validate_overrides()` itself: it flagged
+  every `_CRITICAL_BREAKING_KINDS` override without checking whether the
+  configured base policy already classified that kind below `BREAKING` —
+  e.g. `soname_changed` is already `risk` under `strict_abi`, so a policy
+  file that explicitly restates `soname_changed: risk` no longer reads as a
+  downgrade. Only an override strictly weaker than the base policy's own
+  verdict for that kind is now flagged.

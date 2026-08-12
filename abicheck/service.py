@@ -1550,6 +1550,18 @@ def load_suppression_and_policy(
                 "Set base_policy in the YAML file to override the base policy.",
                 policy,
             )
+        # This is the Tier-2 chokepoint every consumer other than the CLI's
+        # own early-validation calls actually loads its policy through --
+        # notably `compare-release`'s real per-library fan-out
+        # (`_run_compare_pair` -> `run_compare` -> `run_compare_request` ->
+        # `classify_compare_pair`), and any direct Python API caller of
+        # `run_compare`/`run_compare_request`. `cli_params.
+        # _load_suppression_and_policy`'s own warning (surfaced via
+        # `click.echo`) does not reach that path, so a risky override in a
+        # release comparison stayed silent (Codex review). Mirrors that same
+        # warning here, through the logger this module already uses above.
+        for warning in pf.validate_overrides():
+            _logger.warning("%s", warning)
     return suppression, pf
 
 

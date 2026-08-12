@@ -567,13 +567,30 @@ class PolicyFile:
         - Downgrading known-dangerous BREAKING kinds to COMPATIBLE
           (e.g., func_removed → ignore).  These almost certainly mask real breaks.
         - Downgrading BREAKING to COMPATIBLE_WITH_RISK for critical kinds.
+
+        An override is only ever flagged relative to *this* base policy's own
+        verdict for that kind (via ``_raw_verdict_for_kind``), not merely
+        because the kind is in ``_CRITICAL_BREAKING_KINDS``: some critical
+        kinds (``soname_changed``) are already COMPATIBLE_WITH_RISK under
+        e.g. ``strict_abi``, so an override that merely restates that verdict
+        (``soname_changed: risk``) is not a downgrade and must not warn (Codex
+        review) — only an override that is strictly *weaker* than the base
+        policy's own verdict for that kind is a real downgrade.
         """
-        # Derive breaking kinds from the configured base policy so that
-        # policy-specific sets (e.g. plugin_abi) are correctly flagged.
-        base_breaking, _, _, _ = policy_kind_sets(self.base_policy)
+        # Derive the base policy's own kind sets so that policy-specific sets
+        # (e.g. plugin_abi) are correctly flagged, both for the breaking-kind
+        # check below and for the per-kind base verdict comparison above.
+        base_breaking, base_api_break, base_compatible, base_risk = policy_kind_sets(
+            self.base_policy
+        )
 
         warnings: list[str] = []
         for kind, verdict in self.overrides.items():
+            base_verdict = _raw_verdict_for_kind(
+                kind, base_breaking, base_api_break, base_compatible, base_risk
+            )
+            if _VERDICT_ORDER.index(verdict) >= _VERDICT_ORDER.index(base_verdict):
+                continue  # not a downgrade from this base policy's own verdict
             if kind in _CRITICAL_BREAKING_KINDS:
                 if verdict == Verdict.COMPATIBLE:
                     warnings.append(

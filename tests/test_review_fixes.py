@@ -399,10 +399,25 @@ class TestPolicyFileValidateOverrides:
         pf = PolicyFile(overrides={
             ChangeKind.FUNC_REMOVED: Verdict.COMPATIBLE,
             ChangeKind.VAR_REMOVED: Verdict.COMPATIBLE,
-            ChangeKind.SONAME_CHANGED: Verdict.COMPATIBLE_WITH_RISK,
+            # SONAME_CHANGED is already COMPATIBLE_WITH_RISK ("risk") under
+            # strict_abi, so downgrading it all the way to COMPATIBLE
+            # ("ignore") is the real downgrade here -- merely restating the
+            # base policy's own 'risk' verdict must not warn (see
+            # test_soname_changed_restating_base_risk_does_not_warn below).
+            ChangeKind.SONAME_CHANGED: Verdict.COMPATIBLE,
         })
         warnings = pf.validate_overrides()
         assert len(warnings) == 3
+
+    def test_soname_changed_restating_base_risk_does_not_warn(self):
+        """SONAME_CHANGED is already 'risk' under strict_abi (a critical kind
+        that is not itself BREAKING) -- an override that merely restates that
+        verdict is not a downgrade and must not warn (Codex review)."""
+        pf = PolicyFile(
+            base_policy="strict_abi",
+            overrides={ChangeKind.SONAME_CHANGED: Verdict.COMPATIBLE_WITH_RISK},
+        )
+        assert pf.validate_overrides() == []
 
     def test_validate_uses_base_policy_breaking_kinds(self):
         """validate_overrides should use the base policy's breaking set."""
