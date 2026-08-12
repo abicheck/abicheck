@@ -49,7 +49,7 @@ flowchart TD
     MACHO["Mach-O<br/>macholib"]
     SNAP["L0 — Binary metadata<br/>Snapshot (JSON model)"]
     AST["L2 — Header AST<br/>castxml (all platforms)"]
-    DBG["L1 — Debug-info cross-check<br/>DWARF (Linux, macOS) · PDB (Windows)"]
+    DBG["L1 — Debug-info cross-check<br/>DWARF (Linux) · PDB (Windows) · none on Mach-O"]
     CHK["Checker → Changes → Verdict"]
 
     CLI --> FMT
@@ -196,11 +196,16 @@ or a different AST extraction tool that uses that compiler's libclang directly.
 
 When debug info is available in the binary:
 
-**DWARF** (Linux `.so`, macOS `.dylib` — via `pyelftools`):
+**DWARF** (Linux `.so` only — via `pyelftools`):
 - Cross-validates struct/class sizes against header-computed sizes
 - Verifies member offsets (catches `#pragma pack` or `-march`-specific alignment differences)
 - Checks vtable slot offsets
 - Detects calling convention and frame register changes
+
+abicheck has no Mach-O debug-map/DWARF reader today — a headerless macOS
+`.dylib` scan is always L0 (exports + load-command metadata) only, even when
+the binary carries debug info. See [Platform Support](../reference/platforms.md)
+for the full per-platform breakdown.
 
 **PDB** (Windows `.dll` — via built-in PDB parser):
 - Extracts struct/class/union sizes and field layouts from TPI stream

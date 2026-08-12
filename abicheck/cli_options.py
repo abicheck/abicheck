@@ -295,7 +295,9 @@ def two_sided_input_options(func: F) -> F:
         help="Public header file or directory. Applies to both sides; scope to "
         "one side with an 'old='/'new=' prefix, repeating the flag per side "
         "(e.g. --header old=v1/foo.h --header new=v2/foo.h). Repeatable (ADR-040). "
-        "Recommended for full ABI analysis; without headers, native binaries fall back to symbols-only mode. "
+        "Recommended for full ABI analysis; without headers, abicheck uses whatever "
+        "artifact evidence is available instead (ELF may add DWARF, PE may add PDB, "
+        "Mach-O stays export-only) but has no header AST or public-surface scoping. "
         "Scopes the ABI surface to declarations in these headers for ELF; on PE/Mach-O scoping is "
         "best-effort and falls back to the export table when castxml is unavailable or names don't match "
         "(e.g. MSVC C++ mangling). Validated for native binaries; ignored for snapshots.",
@@ -1607,7 +1609,9 @@ def _profile_targets_set_input(kwargs: dict[str, object]) -> bool:
             # Logged rather than swallowed silently (bandit B112): an operand
             # this classifier cannot read contributes no kind, and the real
             # dispatch in ``run_compare`` reports it properly.
-            logging.getLogger(__name__).debug("unclassifiable operand %r", operand, exc_info=True)
+            logging.getLogger(__name__).debug(
+                "unclassifiable operand %r", operand, exc_info=True
+            )
     return bool(kinds & {"directory", "package"})
 
 

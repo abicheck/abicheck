@@ -58,6 +58,18 @@ YAML file is also a hard error. On the CLI, any of these surfaces as a usage
 error (exit `64`; see [Exit Codes](exit-codes.md)) — the run never proceeds
 on a config abicheck could not fully validate.
 
+This "hard error" rule is for a config supplied **explicitly** via
+`--config`/`--build-config`. An **auto-discovered** `.abicheck.yml` (the
+"Discovery" table above) that fails to parse is deliberately *not*
+fail-loud the same way: it prints a warning and the run continues with the
+CLI's own compile context only, since a config the user never pointed at
+explicitly could otherwise silently break an unrelated invocation just by
+existing somewhere upward of the working directory. See
+[Build-context capture](../use/dump-compare-flags.md#build-context-capture-compile_commandsjson-evidence-layer-l3)
+for that path in detail. Both rules are enforced by the same
+`merge_compile_config()` in `cli_options.py`, branching on whether the
+config path came from an explicit flag.
+
 There is no longer an `init`/`config` scaffolding or diagnostic command
 (`abicheck init`, `config validate`, `config show-effective` are all gone —
 ADR-043) — write `.abicheck.yml` by hand, using this page as the schema/key
@@ -228,12 +240,12 @@ error), but they are handled outside the `compare` config merge:
 Recognized top-level keys (so they do not trigger the unknown-key error),
 but — like `risk_rules:`/`crosschecks:` above — not parsed by `BuildConfig`
 itself. `dump`/`compare`/`scan` never read this block; it exists solely for
-G30's GitHub Actions CI-integration primitives (a run-plan generator that
-consumes it is planned but not built yet). Parsed and validated by
-`buildsource/project_targets.py`; see the
-**[Project Targets Schema reference](project-targets-schema.md)** for the
-full field-by-field schema, the `checks:` list, and the
-`abicheck project validate` command.
+G30's GitHub Actions CI-integration primitives: `abicheck project validate`
+validates it, and `abicheck project plan` consumes it to generate
+`run-plan.json`. Parsed and validated by `buildsource/project_targets.py`;
+see the **[Project Targets Schema reference](project-targets-schema.md)**
+for the full field-by-field schema, the `checks:` list, and both
+`abicheck project` subcommands.
 
 ---
 

@@ -83,9 +83,12 @@ as an include root.
 snapshots and ABICC Perl dumps (Data::Dumper `.dump` files) are loaded directly.
 You can mix them freely (see below).
 
-If ELF headers are not provided, `compare` falls back to symbols-only analysis
-and prints a warning. This mode is useful for quick checks but may miss
-signature/type-level ABI breaks.
+If headers are not provided, `compare` uses whatever debug info is available
+instead — DWARF on ELF, PDB on PE — falling back further to symbols-only
+analysis only when neither headers nor debug info are present, and prints a
+warning either way. Less evidence means a weaker analysis that may miss
+signature/type-level ABI breaks; see
+[Evidence & Detectability](../learn/evidence-and-detectability.md).
 
 ### 2) Dump snapshots and compare later (for CI baselines)
 
@@ -100,9 +103,12 @@ abicheck dump libfoo.so.2 -H include/v2/foo.h --version 2.0 -o libfoo-2.0.json
 abicheck compare libfoo-1.0.json libfoo-2.0.json
 ```
 
-If ELF headers are not provided, `compare` falls back to symbols-only analysis
-and prints a warning. This mode is useful for quick checks but may miss
-signature/type-level ABI breaks.
+If headers are not provided, `compare` uses whatever debug info is available
+instead — DWARF on ELF, PDB on PE — falling back further to symbols-only
+analysis only when neither headers nor debug info are present, and prints a
+warning either way. Less evidence means a weaker analysis that may miss
+signature/type-level ABI breaks; see
+[Evidence & Detectability](../learn/evidence-and-detectability.md).
 
 > **Going beyond a plain `.so` + headers?** C vs C++ mode, cross-compilation,
 > feeding in the exact build flags (`-p build/`, evidence layer L3), embedding
