@@ -3,6 +3,8 @@ doc_type: reference
 audience:
   - library-maintainer
   - contributor
+canonical_for:
+  - ast-frontend-resolution
 level: advanced
 lifecycle: active
 generated: false
@@ -18,7 +20,32 @@ one backend selector, plus a merge of the two:
 | `castxml` (default) | CastXML's XML dump, produced by its own bundled real compiler | The default. It is the only backend that computes record layout on its own. |
 | `clang` | `clang -ast-dump=json`, parsed by `dumper_clang.py` | A host with clang but no CastXML, or headers CastXML chokes on. |
 | `hybrid` | Both, merged castxml-first with per-fact provenance | Recovering facts each backend alone gets wrong — notably CastXML's synthesized constructor/destructor keys. |
-| `auto` | Picks a real backend from what is installed | The usual choice when you don't care. |
+| `auto` | Resolves to `castxml` (or the `ABICHECK_AST_FRONTEND` pin) and never silently switches producer; it falls back to `clang` for a recognized toolchain-version mismatch, an unsupported CastXML release, or a direct-include-guard failure only when you opt in with `--allow-ast-frontend-fallback` (or `ABICHECK_ALLOW_AST_FALLBACK=1`) | The usual choice when you don't care, as long as CastXML is installed — with no opt-in and no CastXML at all, it fails asking you to install one or pick `clang` explicitly. |
+
+> **Exception: `--frontend-context device`.** CastXML has no SYCL/DPC++
+> host/device context concept, and `hybrid` (castxml+clang merge) has none
+> either, so a non-`host` `--frontend-context` under `auto` **resolving to
+> castxml** — whether that's `--ast-frontend auto` spelled out, or no
+> `--ast-frontend` flag at all, with no `ABICHECK_AST_FRONTEND` pin —
+> skips CastXML and routes straight to `clang`, no
+> `--allow-ast-frontend-fallback` opt-in needed, since this isn't the
+> toolchain-error fallback above, it's `auto` recognizing CastXML can't
+> satisfy the request at all. Any way of **pinning** the resolved backend
+> away from plain castxml-or-clang is rejected outright instead: an
+> **explicit** `--ast-frontend castxml`, `auto` pinned to castxml via
+> `ABICHECK_AST_FRONTEND=castxml` (an env pin is honored the same as an
+> explicit flag, not silently overridden by the device request), and
+> `hybrid` — explicit or `auto` pinned via `ABICHECK_AST_FRONTEND=hybrid`
+> — all reject a non-`host` context. Explicit `--ast-frontend clang`
+> satisfies it directly, and so does `auto` pinned to clang via
+> `ABICHECK_AST_FRONTEND=clang` — resolving to `clang` either way skips
+> the castxml/hybrid rejection paths entirely, the same as picking clang
+> outright. On `compare`, the per-side `--old-ast-frontend`/
+> `--new-ast-frontend` overrides count the same way for their own side
+> only: `--old-ast-frontend castxml` pins the old side exactly like a
+> shared `--ast-frontend castxml` would, rejecting a device context on
+> that side even while the new side (left at `auto`, unpinned) routes to
+> clang normally. See ADR-050 D5.
 
 The two parsers produce the **same** `AbiSnapshot` fields, but not the same
 *values* for every field — and a comparison that mixes producers is a real,

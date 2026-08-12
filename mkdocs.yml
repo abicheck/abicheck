@@ -5,8 +5,18 @@ repo_url: https://github.com/abicheck/abicheck
 repo_name: abicheck/abicheck
 edit_uri: edit/main/docs/
 
+# docs/hooks.py:on_config stamps extra.latest_published_version from
+# repo_facts.json's latest_release so docs/overrides/main.html's announcement bar (this site
+# is always built from `main` -- see .github/workflows/pages.yml -- and can
+# otherwise describe unreleased features with no version-boundary signal at
+# all, a documentation review's P0.1 finding) never drifts from the tree
+# actually being built.
+hooks:
+  - docs/hooks.py
+
 theme:
   name: material
+  custom_dir: docs/overrides
   palette:
     - scheme: default
       primary: indigo

@@ -307,3 +307,22 @@ topics:
 
   integration-scenario-selection:
     canonical_page: integration/index.md
+
+  agent-skills:
+    canonical_page: use/agent-skills.md
+    fact_sources:
+      - skills-src
+      - scripts/gen_agent_skills.py
+    allowed_summaries:
+      - index.md
+
+  ast-frontend-resolution:
+    canonical_page: reference/header-backend-capabilities.md
+    fact_sources:
+      - action.yml
+      - abicheck/cli_options.py
+      - abicheck/dumper.py
+    allowed_summaries:
+      - use/github-action.md
+      - use/dump-compare-flags.md
+      - use/tool-modes.md

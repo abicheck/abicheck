@@ -256,6 +256,26 @@ new canonical owner of a topic you're registering in the same change; a
 brand-new page starting without it is exactly the debt this pilot is
 meant to stop accumulating, not something to defer to a later cleanup.
 
+**ADRs are exempt from this front-matter schema**, including new ones —
+`contribute/adr/*.md` uses its own established metadata convention instead
+(a `**Date:**`/`**Status:**`/optional `**Decision maker:**`/optional
+`**Verified:**` block right under the title). Of that block, only `Status`
+(and, when present, `Verified`) is actually machine-checked —
+`scripts/adr_status_sync.py` validates a `Status` line/heading exists and
+agrees with `adr/index.md`, and validates a well-formed `Verified` receipt
+when one is given; `Date` and `Decision maker` are convention, not gated by
+anything today, so an ADR missing a `Date` still passes every existing
+check. This was flagged as an open inconsistency in a documentation review
+(new ADRs carry no YAML front matter despite the "every newly created
+manual public page" rule above) and is resolved here explicitly rather
+than left ambiguous: introducing YAML front matter on top of the
+already-working `Status`/`Verified` convention would be a second,
+redundant metadata schema for information that convention already covers
+— it would not, by itself, close the gap that `Date`/`Decision maker` are
+unenforced, which is a separate, still-open gap this exemption doesn't
+claim to fix. Don't add YAML front matter to an ADR on the strength of the
+general rule above.
+
 ## When does a new fact need a new page?
 
 Adding a feature does not, by itself, justify a new page. Create one only if

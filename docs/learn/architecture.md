@@ -27,11 +27,12 @@ the model, and [Evidence & Detectability](evidence-and-detectability.md) for the
 conceptual companion.
 
 abicheck supports Linux (ELF), Windows (PE/COFF), and macOS (Mach-O), each with
-implemented binary-metadata, header-AST, and debug-info cross-check support —
-see the [platform support matrix](limitations.md#platform-support-matrix) for
-the per-platform tool/format breakdown and per-toolchain CI-validation
-maturity (implemented capability and CI-proven maturity are not the same
-thing, especially on Windows).
+implemented binary-metadata and header-AST support; debug-info cross-check is
+implemented for ELF (DWARF/BTF/CTF) and PE (PDB) but not for Mach-O — see the
+[platform support matrix](limitations.md#platform-support-matrix) for the
+per-platform tool/format breakdown and per-toolchain CI-validation maturity
+(implemented capability and CI-proven maturity are not the same thing,
+especially on Windows).
 
 ---
 
@@ -49,7 +50,7 @@ flowchart TD
     MACHO["Mach-O<br/>macholib"]
     SNAP["L0 — Binary metadata<br/>Snapshot (JSON model)"]
     AST["L2 — Header AST<br/>castxml (all platforms)"]
-    DBG["L1 — Debug-info cross-check<br/>DWARF (Linux, macOS) · PDB (Windows)"]
+    DBG["L1 — Debug-info cross-check<br/>DWARF/BTF/CTF (Linux) · PDB (Windows) · none on Mach-O"]
     CHK["Checker → Changes → Verdict"]
 
     CLI --> FMT
@@ -196,11 +197,26 @@ or a different AST extraction tool that uses that compiler's libclang directly.
 
 When debug info is available in the binary:
 
-**DWARF** (Linux `.so`, macOS `.dylib` — via `pyelftools`):
+**DWARF** (Linux `.so` only — via `pyelftools`):
 - Cross-validates struct/class sizes against header-computed sizes
 - Verifies member offsets (catches `#pragma pack` or `-march`-specific alignment differences)
 - Checks vtable slot offsets
 - Detects calling convention and frame register changes
+
+`abicheck/dumper_debug.py` doesn't stop at DWARF for ELF: it falls back to
+**BTF** and then **CTF** when DWARF isn't present (`DWARF > BTF > CTF` for
+userspace binaries; kernel binaries prefer BTF over their own embedded
+DWARF), converting either into the same metadata shape the checker
+consumes — so a headerless, DWARF-less ELF binary carrying BTF or CTF
+still gets L1 evidence, not just L0.
+
+abicheck has no Mach-O debug-map/DWARF reader today — a headerless macOS
+`.dylib`'s own binary/debug-info evidence is always L0 (exports +
+load-command metadata) only, even when the binary carries debug info; this
+is about the L0/L1 binary-evidence layers specifically, not the whole scan
+— `--sources`/`--build-info` can still attach L3–L5 build/source evidence
+independently of the platform. See [Platform Support](../reference/platforms.md)
+for the full per-platform breakdown.
 
 **PDB** (Windows `.dll` — via built-in PDB parser):
 - Extracts struct/class/union sizes and field layouts from TPI stream

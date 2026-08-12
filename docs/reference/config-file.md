@@ -58,6 +58,40 @@ YAML file is also a hard error. On the CLI, any of these surfaces as a usage
 error (exit `64`; see [Exit Codes](exit-codes.md)) — the run never proceeds
 on a config abicheck could not fully validate.
 
+This "hard error" rule applies unconditionally to `compare`'s own project
+config — severity, scope, policy — whether the file came from an explicit
+`--config` or was auto-discovered by walking up from the current directory:
+a parse failure always raises a usage error (exit `64`), never a
+warn-and-continue. It only reaches as far as `BuildConfig.from_dict()`
+itself validates, though: `targets:`/`bundles:`/`profiles:`/`baseline:` are
+recognized top-level keys (so an unrecognized sibling key still errors) but
+their *contents* are opaque to this loader — `compare` never inspects them
+at all, so e.g. an invalid `targets.foo.kind` passes silently here. Only
+`abicheck project validate`/`abicheck project plan` (`project_targets.py`)
+actually validate that block's contents, deeply and independently of this
+loader.
+
+A *separate* load of the same `.abicheck.yml` — the `compile:` block shared
+by `compare`/`dump`/`scan`'s L2 compile context (`gcc-path`, includes,
+sysroot, …), resolved by `merge_compile_config()` in `cli_options.py` — does
+distinguish explicit from auto-discovered: an explicit `--config` that
+fails to parse still fails loudly, but an
+**auto-discovered** file that fails only prints a warning and continues
+with the CLI's own compile context, since a config the user never pointed
+at explicitly could otherwise silently break an unrelated invocation just
+by existing somewhere upward of the working directory. See
+[Build-context capture](../use/dump-compare-flags.md#build-context-capture-compile_commandsjson-evidence-layer-l3)
+for that path in detail. Don't assume this leniency extends to the rest of
+the file's blocks — it's specific to that one loader, and only when it's
+the only one invoked: a `dump`/`compare` run with `--sources`/`--build-info`
+also goes through `cli_buildsource.embed_build_source()`'s own, separate
+config resolution (L3/L4/L5 evidence collection, not the L2 compile
+context), and *that* one raises a hard `click.UsageError` on a parse
+failure unconditionally — explicit `--config` or auto-discovered alike,
+same as the project-config rule above. Passing `--sources` therefore loses
+the auto-discovered warn-and-continue leniency even for a run that would
+otherwise get it through `merge_compile_config()` alone.
+
 There is no longer an `init`/`config` scaffolding or diagnostic command
 (`abicheck init`, `config validate`, `config show-effective` are all gone —
 ADR-043) — write `.abicheck.yml` by hand, using this page as the schema/key
@@ -228,12 +262,12 @@ error), but they are handled outside the `compare` config merge:
 Recognized top-level keys (so they do not trigger the unknown-key error),
 but — like `risk_rules:`/`crosschecks:` above — not parsed by `BuildConfig`
 itself. `dump`/`compare`/`scan` never read this block; it exists solely for
-G30's GitHub Actions CI-integration primitives (a run-plan generator that
-consumes it is planned but not built yet). Parsed and validated by
-`buildsource/project_targets.py`; see the
-**[Project Targets Schema reference](project-targets-schema.md)** for the
-full field-by-field schema, the `checks:` list, and the
-`abicheck project validate` command.
+G30's GitHub Actions CI-integration primitives: `abicheck project validate`
+validates it, and `abicheck project plan` consumes it to generate
+`run-plan.json`. Parsed and validated by `buildsource/project_targets.py`;
+see the **[Project Targets Schema reference](project-targets-schema.md)**
+for the full field-by-field schema, the `checks:` list, and both
+`abicheck project` subcommands.
 
 ---
 

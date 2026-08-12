@@ -30,7 +30,7 @@ external-tool names match ABICC's official documentation.
 
 | Mode | What it is | Compiler needed? | Debug info needed? | Headers needed? |
 |------|------------|:----------------:|:------------------:|:---------------:|
-| **abicheck (native, default)** | abicheck's own pipeline, which adapts to the evidence you give it: binary metadata (L0) + DWARF/PDB layout (L1) + header AST via castxml (L2), optionally + build context (L3) / source replay (L4) — see [modes by source](#abicheck-native-modes-by-evidence-source-l0l4) | ⚠️ for headers only (castxml; GCC/Clang/MSVC) | optional (improves accuracy) | recommended (falls back to symbols-only) |
+| **abicheck (native, default)** | abicheck's own pipeline, which adapts to the evidence you give it: binary metadata (L0) + DWARF/BTF/CTF (ELF) or PDB (PE) layout (L1) + header AST via castxml/clang (L2), optionally + build context (L3) / source replay (L4) — see [modes by source](#abicheck-native-modes-by-evidence-source-l0l4) | ⚠️ for headers only (castxml/clang; GCC/Clang/MSVC) | optional (improves accuracy) | recommended (falls back to L1 debug info if present, else L0 binary-metadata analysis) |
 | abidiff + headers | `abidiff` (libabigail) | ❌ | optional (improves accuracy) | ✅ always |
 | ABICC+headers (ABICC Usage #2) | Original / headers mode | ✅ **GCC only** | ❌ | ✅ |
 | ABICC+dump (ABICC Usage #1) | abi-dumper / binary mode | ❌ | ✅ (`-g -Og`) | ❌ (optional) |
@@ -76,7 +76,7 @@ See [Architecture](../learn/architecture.md) for the full per-layer breakdown.
 | Two inputs (`.so`/`.dll`/`.dylib`, JSON snapshot, package, or directory) | ✅ | Core input; mix freely |
 | `castxml` **or** `clang` + a compiler | ⚠️ for header AST | Needed only when you pass `-H`/`--header old=`/`--header new=`. The default **`--ast-frontend auto`** resolves to **castxml** (or the `ABICHECK_AST_FRONTEND` pin) and is fail-closed: it never silently changes producer. Select clang explicitly with `--ast-frontend clang`, or opt into the two recognized runtime fallbacks with `--allow-ast-frontend-fallback` / `ABICHECK_ALLOW_AST_FALLBACK=1`; fallback snapshots record the reason and effective toolchain. Pin **one side only** with `--old-ast-frontend`/`--new-ast-frontend` when needed. The clang backend produces signatures/qualifiers/enums/typedefs/public constants but not computed record layout (DWARF covers layout). `hybrid` needs **both** tools installed and runs both, merging them — never auto-selected. |
 | Debug info (`-g`) | ❌ optional | DWARF/PDB enrich layout, calling-convention, and packing checks |
-| Headers | strongly recommended | Without them abicheck runs **symbols-only mode** and warns; type/signature breaks may be missed |
+| Headers | strongly recommended | Without them abicheck uses DWARF/BTF/CTF (ELF) or PDB (PE) if present, falling back further to L0 binary-metadata analysis when neither headers nor debug info are present — exported symbols plus platform-specific facts (SONAME/dependencies/rpaths on ELF; machine type, imports, delay-load, hardening flags, version/OS floor on PE; install name, dependencies, rpaths, and other load-command facts on Mach-O), never a bare symbol list on any platform (ELF prints an explicit warning either way; PE/Mach-O don't yet); type/signature breaks may be missed |
 
 ### What it catches
 

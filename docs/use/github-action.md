@@ -5,6 +5,8 @@ audience:
 level: beginner
 canonical_for:
   - github-actions-surface
+summarizes:
+  - ast-frontend-resolution
 lifecycle: active
 generated: false
 ---
@@ -148,7 +150,7 @@ carry binary evidence (a `dump` of a real library, not headers-only).
 | Input | Default | Description |
 |-------|---------|-------------|
 | `lang` | `c++` | Language mode for the header backend: `c++` or `c` |
-| `ast-frontend` | `auto` (resolves to castxml when present) | L2 header-AST frontend (dump/scan modes, and compare mode with a single-pair operand — shared `compile_context_options`, ADR-037 D3): `auto`, `castxml`, `clang` (`clang -ast-dump=json`, for clang-only hosts), or `hybrid` (runs both and merges them — needs both tools on the runner, never auto-selected). `auto` falls back to clang on a castxml toolchain error. Same as `ABICHECK_AST_FRONTEND`. |
+| `ast-frontend` | `auto` (resolves to castxml, fail-closed) | L2 header-AST frontend (dump/scan modes, and compare mode with a single-pair operand — shared `compile_context_options`, ADR-037 D3): `auto`, `castxml`, `clang`, or `hybrid`. Pass `--allow-ast-frontend-fallback`/`--frontend-context` via `extra-args` for the opt-in castxml→clang fallback or SYCL/DPC++ device context. Same as `ABICHECK_AST_FRONTEND`. See [Header-Backend Capabilities](../reference/header-backend-capabilities.md) for the full resolution contract (fallback triggers, the device-context exception, and how an env pin interacts with both). |
 | `gcc-path` | — | Path to cross-compiler binary (dump/scan modes, and compare mode with a single-pair operand) |
 | `gcc-prefix` | — | Cross-toolchain prefix, e.g. `aarch64-linux-gnu-` (dump/scan modes, and compare mode with a single-pair operand) |
 | `gcc-options` | — | Extra flags for the header frontend (dump/scan modes, and compare mode with a single-pair operand) |

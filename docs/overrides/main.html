@@ -1,0 +1,40 @@
+{% extends "base.html" %}
+
+{#
+  Site-wide "unreleased docs" announcement bar (mkdocs-material's
+  documented `announce` block — see
+  https://squidfunk.github.io/mkdocs-material/setup/setting-up-the-header/#announcement-bar).
+
+  GitHub Pages (.github/workflows/pages.yml) deploys this site on every
+  push to `main`, with no separate build for a tagged release, so the
+  public site can otherwise describe unreleased `main`-only features
+  (Agent Skills, `--contract` domains, ...) with nothing telling the
+  reader they aren't looking at the latest published release -- a
+  documentation review's P0.1 finding. `extra.latest_published_version`
+  is stamped by docs/hooks.py:on_config, read from repo_facts.json's
+  latest_release at build time (the fact owner for "the version actually
+  published", decoupled from pyproject.toml's own version, which can be
+  bumped ahead of a release), so this text can't itself go stale.
+
+  Deliberately links to CHANGELOG.md on GitHub, not a specific
+  "Upgrading to X" guide (docs/start/upgrading-to-0.6.md today): that
+  page's own name and content are tied to one release boundary and will
+  need renaming/rewriting at the next one, while CHANGELOG.md is
+  version-neutral by construction -- it always lists exactly what's
+  newer than any given installed version, with no per-release upkeep
+  this banner would otherwise need (Codex review, fresh evidence: the
+  banner exists specifically to avoid this class of staleness, so its
+  own destination link can't hardcode a release boundary either).
+#}
+{% block announce %}
+<span>
+  This documentation is built from <code>main</code> and may describe
+  features not yet in the latest published release,
+  <strong>v{{ config.extra.latest_published_version }}</strong> — see the
+  <a href="{{ config.repo_url }}/blob/main/CHANGELOG.md">changelog</a> for
+  what's shipped if something here doesn't match what you have installed
+  (<code>abicheck --version</code> — the executable actually on
+  <code>PATH</code>, not necessarily what <code>pip show abicheck</code>
+  reports for a different environment).
+</span>
+{% endblock %}

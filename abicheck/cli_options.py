@@ -295,7 +295,11 @@ def two_sided_input_options(func: F) -> F:
         help="Public header file or directory. Applies to both sides; scope to "
         "one side with an 'old='/'new=' prefix, repeating the flag per side "
         "(e.g. --header old=v1/foo.h --header new=v2/foo.h). Repeatable (ADR-040). "
-        "Recommended for full ABI analysis; without headers, native binaries fall back to symbols-only mode. "
+        "Recommended for full ABI analysis; without headers, abicheck uses whatever "
+        "artifact evidence is available instead (ELF may add DWARF/BTF/CTF, PE may add PDB, "
+        "Mach-O stays limited to binary metadata: exports plus load-command facts "
+        "like install name, dependencies, and rpaths) but has no header AST or "
+        "public-surface scoping. "
         "Scopes the ABI surface to declarations in these headers for ELF; on PE/Mach-O scoping is "
         "best-effort and falls back to the export table when castxml is unavailable or names don't match "
         "(e.g. MSVC C++ mangling). Validated for native binaries; ignored for snapshots.",
@@ -713,8 +717,13 @@ def compile_context_options(func: F) -> F:
         envvar="ABICHECK_ALLOW_AST_FALLBACK",
         callback=_enable_ast_fallback_for_command,
         help="Allow auto-selected CastXML to fall back to Clang for a recognized "
-        "toolchain mismatch or direct-include guard. Disabled by default because "
-        "the frontends can produce materially different findings.",
+        "toolchain mismatch, an unsupported CastXML release, or a direct-include "
+        "guard. Disabled by default because the frontends can produce materially "
+        "different findings. A non-host --frontend-context (SYCL/DPC++) under an "
+        "auto that resolves to plain castxml (no ABICHECK_AST_FRONTEND pin) "
+        "routes to Clang without this flag, since CastXML has no host/device "
+        "concept to fall back from; a castxml- or hybrid-pinned auto (hybrid "
+        "has no device concept either) still rejects it.",
     )(func)
     func = click.option(
         "--ast-frontend",
@@ -729,7 +738,13 @@ def compile_context_options(func: F) -> F:
         "costs roughly 2x a single-backend dump; never selected by auto. auto "
         "resolves to castxml (or the ABICHECK_AST_FRONTEND pin) and never "
         "changes producer unless --allow-ast-frontend-fallback (or "
-        "ABICHECK_ALLOW_AST_FALLBACK=1) is explicitly set. "
+        "ABICHECK_ALLOW_AST_FALLBACK=1) is explicitly set — except a non-host "
+        "--frontend-context (SYCL/DPC++), which an auto resolving to plain "
+        "castxml (no pin) routes to clang since castxml can't satisfy it at "
+        "all (a castxml- or hybrid-pinned auto still rejects it, since "
+        "hybrid has no device concept either; an explicit clang, or auto "
+        "pinned to clang via ABICHECK_AST_FRONTEND=clang, satisfies it "
+        "directly). "
         "Env: ABICHECK_AST_FRONTEND.",
     )(func)
     return func
@@ -1608,7 +1623,9 @@ def _profile_targets_set_input(kwargs: dict[str, object]) -> bool:
             # Logged rather than swallowed silently (bandit B112): an operand
             # this classifier cannot read contributes no kind, and the real
             # dispatch in ``run_compare`` reports it properly.
-            logging.getLogger(__name__).debug("unclassifiable operand %r", operand, exc_info=True)
+            logging.getLogger(__name__).debug(
+                "unclassifiable operand %r", operand, exc_info=True
+            )
     return bool(kinds & {"directory", "package"})
 
 
