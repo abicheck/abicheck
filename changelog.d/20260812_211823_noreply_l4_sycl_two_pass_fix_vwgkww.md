@@ -50,5 +50,24 @@ A new changelog fragment. See changelog.d/README.md for the workflow.
   replaying it under a different compilation context than the one actually
   recorded. A bare, unselected `-fsycl` (no explicit pin either way) is
   deliberately left untouched, matching the L2 backend's own established
-  accepted approximation for that ambiguous shape. Bumps
-  `CLANG_EXTRACTOR_VERSION` to `0.11`.
+  accepted approximation for that ambiguous shape.
+- **`_argv._carry_abi_relevant_flags` (shared by the castxml and clang
+  extractors) silently corrupted last-flag-wins toggle state for a repeated
+  flag**: `extract_abi_relevant_flags` preserves every occurrence of a
+  matching flag from the real build's argv, in order, with no dedup of its
+  own — but the carry-through step deduped a flag against every earlier
+  occurrence of the *identical literal token* it had already carried, not
+  just against flags already emitted from the structured fields. A layered
+  build config recording e.g. `-fno-sycl -fsycl -fno-sycl` (SYCL enabled
+  then explicitly disabled again) collapsed to `-fno-sycl -fsycl` — the
+  decisive final `-fno-sycl` silently dropped as a "duplicate" of the
+  first — reversing the real effective state and, combined with the
+  `-fsycl-host-only` insertion fix above, could append `-fsycl-host-only`
+  and stamp SYCL-host facts for a translation unit the real build compiled
+  *without* SYCL at all (Codex review). Fixed by only checking (never
+  updating) the caller's initial "already emitted from structured fields"
+  set, so every genuine repeat within `abi_relevant_flags` itself now
+  survives in the real build's own order and multiplicity — the same class
+  of fix applies to any other toggle-style flag pair sharing one spelling
+  (`-fexceptions`/`-fno-exceptions`, …), not just `-fsycl`/`-fno-sycl`.
+  Bumps `CLANG_EXTRACTOR_VERSION` to `0.12`.

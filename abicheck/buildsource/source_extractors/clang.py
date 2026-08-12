@@ -145,8 +145,14 @@ from .clang_source_edges import build_source_edges
 #: selectors symmetrically; a bare, unselected ``-fsycl`` (ambiguous, no
 #: explicit pin either way) is left carried through as-is, matching the L2
 #: header-AST backend's own established "accepted approximation" for that
-#: shape (see ``_needs_sycl_host_only``'s own docstring).
-CLANG_EXTRACTOR_VERSION = "0.11"
+#: shape (see ``_needs_sycl_host_only``'s own docstring). 0.12:
+#: ``_argv._carry_abi_relevant_flags`` (shared by castxml/clang) no longer
+#: dedups a repeated flag WITHIN ``abi_relevant_flags`` itself -- a real,
+#: layered build config can legitimately record the same toggle-style flag
+#: more than once (e.g. ``-fno-sycl -fsycl -fno-sycl``), and the old dedup
+#: silently dropped every repeat, corrupting last-flag-wins state for any
+#: such pair, not just SYCL (Codex review).
+CLANG_EXTRACTOR_VERSION = "0.12"
 
 
 @functools.lru_cache(maxsize=8)

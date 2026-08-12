@@ -248,13 +248,34 @@ def _carry_abi_relevant_flags(
     Skips flags whose prefix matches a structured toolchain option (sysroot,
     target, isysroot) because those are already emitted from the structured
     fields and the split spelling would dangle if re-appended.
+
+    *seen* is checked but never updated by this loop (Codex review, fresh
+    evidence): an earlier revision added each carried flag to *seen* as it
+    went, which silently dropped every REPEAT of an already-carried literal
+    token. That is wrong for a toggle-style flag pair sharing one spelling
+    across BOTH states (``-fsycl``/``-fno-sycl``, ``-fexceptions``/
+    ``-fno-exceptions``, …): a real, layered build config can legitimately
+    record the identical flag more than once
+    (``extract_abi_relevant_flags`` preserves every occurrence, in order,
+    with no dedup of its own), and only the LAST occurrence decides the
+    real compiler's effective state. Deduping WITHIN this carry-through
+    collapsed a sequence like ``-fno-sycl -fsycl -fno-sycl`` down to
+    ``-fno-sycl -fsycl`` (dropping the second, decisive ``-fno-sycl`` as a
+    "duplicate" of the first) — silently reversing the real effective
+    state from disabled to enabled. Checking only the CALLER's initial
+    *seen* (flags already emitted from the structured fields) still avoids
+    re-emitting those, which is this function's only documented purpose;
+    every occurrence of a flag genuinely repeated within
+    ``abi_relevant_flags`` itself is now carried through faithfully, in
+    the real build's own order and multiplicity, so last-flag-wins
+    scanning downstream (e.g. ``dumper_clang._needs_sycl_host_only``) sees
+    the same sequence the real compiler did.
     """
     for flag in abi_relevant_flags:
         if flag.startswith(STRUCTURED_TOOLCHAIN_FLAG_PREFIXES):
             continue
         if flag not in seen:
             out.append(flag)
-            seen.add(flag)
 
 
 def _match_gnu_include_search(tok: str, argv: list[str], i: int, out: list[str]) -> int:

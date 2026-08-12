@@ -664,6 +664,55 @@ def test_build_command_carries_abi_flags_and_unwraps_launcher() -> None:
     assert "ccache" not in cmd
 
 
+def test_replay_extra_flags_preserves_repeated_toggle_flags_in_order() -> None:
+    """A layered build config can legitimately record the SAME literal flag
+    more than once (e.g. a base default followed by a target-specific
+    override, followed by a later reset) -- ``extract_abi_relevant_flags``
+    preserves every occurrence, in order, with no dedup of its own. An
+    earlier revision of ``_carry_abi_relevant_flags`` deduped WITHIN the
+    carry-through itself, silently dropping every repeat of an
+    already-carried token -- collapsing ``-fno-sycl -fsycl -fno-sycl`` down
+    to ``-fno-sycl -fsycl`` and reversing the real last-flag-wins state from
+    disabled to enabled (Codex review). Every occurrence must now survive,
+    in the original order, so downstream last-flag-wins scanning sees
+    exactly what the real compiler saw."""
+    from abicheck.buildsource.source_extractors._argv import replay_extra_flags
+
+    cu = _cu(
+        argv=["icpx", "-fno-sycl", "-fsycl", "-fno-sycl", "-c", "foo.cpp"],
+        abi_relevant_flags=["-fno-sycl", "-fsycl", "-fno-sycl"],
+    )
+    extra = replay_extra_flags(cu, [], "gnu")
+    assert extra == ["-fno-sycl", "-fsycl", "-fno-sycl"]
+
+
+def test_build_command_respects_final_disabled_sycl_toggle_despite_earlier_enable() -> (
+    None
+):
+    """The end-to-end consequence of the dedup-ordering bug above: a
+    compile unit recorded as ``-fno-sycl -fsycl -fno-sycl`` (SYCL enabled
+    then explicitly disabled again -- last-flag-wins means SYCL is OFF for
+    this real TU) must NOT get ``-fsycl-host-only`` appended, even on a
+    genuinely Intel-family invoked binary. Appending it would fabricate a
+    SYCL-host AST for a TU the real build compiled WITHOUT SYCL (Codex
+    review)."""
+    cu = _cu(
+        argv=["icpx", "-fno-sycl", "-fsycl", "-fno-sycl", "-c", "foo.cpp"],
+        abi_relevant_flags=["-fno-sycl", "-fsycl", "-fno-sycl"],
+    )
+    cmd = build_clang_command(cu, Path("foo.cpp"), clang_bin="icpx")
+    assert "-fsycl-host-only" not in cmd
+    # The sanity check: the SAME sequence ending in -fsycl (SYCL enabled)
+    # DOES still get the flag appended, proving this isn't just "never
+    # appends" but genuinely reads the final toggle state.
+    enabled_cu = _cu(
+        argv=["icpx", "-fno-sycl", "-fsycl", "-c", "foo.cpp"],
+        abi_relevant_flags=["-fno-sycl", "-fsycl"],
+    )
+    enabled_cmd = build_clang_command(enabled_cu, Path("foo.cpp"), clang_bin="icpx")
+    assert "-fsycl-host-only" in enabled_cmd
+
+
 def test_build_command_carries_sycl_language_mode() -> None:
     """-fsycl must reach the reconstructed L4 replay command via
     abi_relevant_flags -- a resolved --gcc-path override can now actually
@@ -970,6 +1019,51 @@ class TestSyclHostOnlyGatedOnInvokedBinary:
                         f"{pinned} reached a non-Intel invoked binary {invoked!r} "
                         f"(recorded argv[0]={recorded_argv0!r}, flags={flags!r})"
                     )
+
+        _check()
+
+    @pytest.mark.slow
+    def test_property_host_only_insertion_reflects_true_last_flag_wins_state(
+        self,
+    ) -> None:
+        """Generalizes ``test_replay_extra_flags_preserves_repeated_toggle_
+        flags_in_order``/``test_build_command_respects_final_disabled_sycl_
+        toggle_despite_earlier_enable`` above: for ANY sequence of
+        ``-fsycl``/``-fno-sycl`` toggles -- including repeats, exactly what
+        a layered build config can legitimately record -- on a compile unit
+        replayed via a genuinely Intel-family invoked binary,
+        ``-fsycl-host-only`` must be appended iff the LAST toggle in the
+        ORIGINAL, un-deduped sequence actually enables SYCL (honoring a
+        legacy ``dpcpp`` driver's own SYCL-on-by-default), computed here
+        independently of ``_needs_sycl_host_only``'s own implementation so
+        this test cannot pass merely by re-deriving the same bug. Directly
+        exercises the code path an earlier revision of the carry-through
+        dedup corrupted (Codex review)."""
+        from hypothesis import given, settings, strategies as st
+
+        from abicheck.dumper_clang import _dpcpp_defaults_sycl_on
+
+        intel_driver = st.sampled_from(["icpx", "icx", "dpcpp"])
+        toggle = st.sampled_from(["-fsycl", "-fno-sycl"])
+
+        @given(invoked=intel_driver, toggles=st.lists(toggle, max_size=5))
+        @settings(max_examples=200, deadline=None)
+        def _check(invoked: str, toggles: list[str]) -> None:
+            cu = _cu(
+                argv=[invoked, *toggles, "-c", "foo.cpp"],
+                abi_relevant_flags=list(toggles),
+            )
+            enabled = _dpcpp_defaults_sycl_on(invoked)
+            for tok in toggles:
+                if tok == "-fsycl":
+                    enabled = True
+                elif tok == "-fno-sycl":
+                    enabled = False
+            cmd = build_clang_command(cu, Path("foo.cpp"), clang_bin=invoked)
+            assert ("-fsycl-host-only" in cmd) == enabled, (
+                f"invoked={invoked!r} toggles={toggles!r} expected "
+                f"enabled={enabled} but got cmd={cmd!r}"
+            )
 
         _check()
 
