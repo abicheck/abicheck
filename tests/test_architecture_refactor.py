@@ -273,6 +273,7 @@ class TestPostProcessingPipeline:
             "mark_reachability",
             "apply_suppression",
             "suppress_renamed_pairs",
+            "clear_orphaned_vtable_gap_correlation",
             "filter_redundant",
             "enrich_affected_symbols",
             "attribute_stdlib_embedding",

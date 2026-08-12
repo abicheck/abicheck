@@ -818,6 +818,70 @@ class SuppressRenamedPairs:
         return kept
 
 
+class ClearOrphanedVtableGapCorrelation:
+    """Clear ``Change.correlated_change_kind`` on a ``LAYOUT_UNVERIFIABLE``
+    finding whose covering ``TYPE_VTABLE_CHANGED`` no longer survives in
+    ``changes`` by the time suppression has run.
+
+    ``AnnotateLayoutUnverifiableCoveredByVtableChanged`` above runs early —
+    deliberately *before* ``ApplySuppression`` (see that step's own
+    docstring for why it must also run before ``MarkReachability``,
+    two steps earlier). A suppression rule can target only the covering
+    ``TYPE_VTABLE_CHANGED`` (e.g. an ``allow_public_break`` waiver on that
+    one finding) without touching the co-reported ``LAYOUT_UNVERIFIABLE`` —
+    when that happens, the earlier annotation is left pointing at a finding
+    ``ApplySuppression`` already moved out of ``changes`` into
+    ``ctx.suppressed``. Left uncorrected, JSON/SARIF would keep publishing
+    a "see also: type_vtable_changed" reference to a finding the same
+    report never actually shows, and Markdown/HTML would render a "See
+    also" note pointing at nothing (Codex review, fresh evidence).
+
+    Runs *after* ``ApplySuppression``/``SuppressRenamedPairs`` so it sees
+    the settled post-suppression ``changes`` list, and *never* re-sets a
+    correlation that wasn't already there — only clears one whose covering
+    finding has since vanished. A ``LAYOUT_UNVERIFIABLE`` finding that is
+    itself suppressed needs no handling here: it left ``changes`` along
+    with its (now-irrelevant) correlation.
+
+    Also updates a cached ``Change.impact_assessment`` (set by
+    ``MarkReachability``, two steps before the original annotation, when a
+    configured suppression needs reachability evidence) to keep it in sync
+    with the cleared flat field — ``impact.engine.assess_change()`` prefers
+    a cached assessment's own ``correlated_change_kind`` over the flat
+    field once one exists, so leaving the cache untouched here would
+    resurrect the exact dangling reference this step exists to remove, just
+    inside the unified ``impact_assessment`` object instead of the
+    top-level field.
+    """
+
+    name = "clear_orphaned_vtable_gap_correlation"
+
+    def run(self, changes: list[Change], ctx: PipelineContext) -> list[Change]:
+        import dataclasses
+
+        from .checker_policy import ChangeKind
+
+        surviving_covering_types = {
+            c.qualified_name
+            for c in changes
+            if c.kind == ChangeKind.TYPE_VTABLE_CHANGED
+            and c.vtable_covers_unverifiable_layout_gap
+            and c.qualified_name
+        }
+        for c in changes:
+            if (
+                c.kind == ChangeKind.LAYOUT_UNVERIFIABLE
+                and c.correlated_change_kind == ChangeKind.TYPE_VTABLE_CHANGED.value
+                and c.qualified_name not in surviving_covering_types
+            ):
+                c.correlated_change_kind = None
+                if c.impact_assessment is not None:
+                    c.impact_assessment = dataclasses.replace(
+                        c.impact_assessment, correlated_change_kind=None
+                    )
+        return changes
+
+
 class FilterRedundant:
     """Split changes into kept + redundant (derived from root type changes)."""
 
@@ -1507,6 +1571,11 @@ DEFAULT_PIPELINE = PostProcessingPipeline(
         MarkReachability(),
         ApplySuppression(),
         SuppressRenamedPairs(),
+        # Runs immediately after suppression settles `changes` so it sees
+        # the final post-suppression set -- see its own docstring for why a
+        # suppression targeting only the covering TYPE_VTABLE_CHANGED would
+        # otherwise leave the earlier annotation dangling.
+        ClearOrphanedVtableGapCorrelation(),
         FilterRedundant(),
         EnrichAffectedSymbols(),
         AttributeStdlibEmbedding(),

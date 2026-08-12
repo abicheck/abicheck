@@ -1271,3 +1271,58 @@ class TestLayoutUnverifiableCorrelatedWithVtableChanged:
             layout_change.impact_assessment.correlated_change_kind
             == ChangeKind.TYPE_VTABLE_CHANGED.value
         )
+
+    def test_correlation_cleared_when_covering_finding_is_suppressed(self) -> None:
+        """Codex review, fresh evidence: a suppression rule can target only
+        the covering TYPE_VTABLE_CHANGED (e.g. an allow_public_break waiver
+        on that one finding) without touching the co-reported
+        LAYOUT_UNVERIFIABLE. The early annotation runs before
+        ApplySuppression (it must, to seed MarkReachability's cache
+        correctly -- see AnnotateLayoutUnverifiableCoveredByVtableChanged's
+        own docstring), so left uncorrected the surviving LAYOUT_UNVERIFIABLE
+        finding would keep a "see also: type_vtable_changed" reference to a
+        finding the report no longer shows at all. Also confirms a
+        previously-cached impact_assessment is kept in sync, not left
+        pointing at the now-stale value."""
+        from abicheck.suppression import Suppression, SuppressionList
+
+        old = _snap(
+            types=[
+                RecordType(
+                    name="Foo",
+                    kind="class",
+                    vtable=[],
+                    size_bits=None,
+                )
+            ]
+        )
+        new = _snap(
+            types=[
+                RecordType(
+                    name="Foo",
+                    kind="class",
+                    vtable=["_ZN3Foo1fEv"],
+                    size_bits=None,
+                    base_offsets={"Base": 0},
+                )
+            ]
+        )
+        suppression = SuppressionList(
+            [
+                Suppression(
+                    symbol="Foo",
+                    change_kind="type_vtable_changed",
+                    allow_public_break=True,
+                    reason="waiver on the vtable finding only",
+                )
+            ]
+        )
+        result = compare(old, new, suppression=suppression)
+        kinds = {c.kind for c in result.changes}
+        assert ChangeKind.TYPE_VTABLE_CHANGED not in kinds
+        layout_change = next(
+            c for c in result.changes if c.kind == ChangeKind.LAYOUT_UNVERIFIABLE
+        )
+        assert layout_change.correlated_change_kind is None
+        if layout_change.impact_assessment is not None:
+            assert layout_change.impact_assessment.correlated_change_kind is None
