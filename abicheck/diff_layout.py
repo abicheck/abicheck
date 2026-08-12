@@ -283,19 +283,15 @@ def _check_tail_padding_reuse(
     return []
 
 
-def _check_layout_unverifiable(
-    name: str,
-    old_rec: RecordType,
-    new_rec: RecordType,
-    *,
-    vtable_facts_reliable: bool = True,
-) -> list[Change]:
-    """Emit LAYOUT_UNVERIFIABLE when evidence is present on one side only.
-
-    One side carries a populated layout descriptor, the other has no layout
-    evidence at all (size unknown). Calm, non-escalating: we cannot confirm
-    or rule out a change. Gated on the descriptor so it never fires on
-    snapshots predating the v7 layout fields.
+def _layout_evidence_asymmetric(
+    old_rec: RecordType, new_rec: RecordType, *, vtable_facts_reliable: bool
+) -> bool:
+    """True when *old_rec*/*new_rec* carry layout evidence on exactly one
+    side -- the one asymmetric-evidence condition ``_check_layout_unverifiable``
+    below keys off, extracted so ``diff_types._layout_evidence_is_unverifiable``
+    can consult the *identical* predicate for its cross-detector correlation
+    instead of a hand-duplicated copy that could silently drift out of sync
+    with this function (Codex review).
 
     ``vtable_facts_reliable`` is threaded straight into
     ``_has_layout_descriptor`` — see that function's own docstring for why a
@@ -312,12 +308,39 @@ def _check_layout_unverifiable(
     descriptor_in_play = _has_layout_descriptor(
         old_rec, vtable_facts_reliable=vtable_facts_reliable
     ) or _has_layout_descriptor(new_rec, vtable_facts_reliable=vtable_facts_reliable)
-    if descriptor_in_play and old_has != new_has:
+    return descriptor_in_play and old_has != new_has
+
+
+def _check_layout_unverifiable(
+    name: str,
+    old_rec: RecordType,
+    new_rec: RecordType,
+    *,
+    vtable_facts_reliable: bool = True,
+) -> list[Change]:
+    """Emit LAYOUT_UNVERIFIABLE when evidence is present on one side only.
+
+    One side carries a populated layout descriptor, the other has no layout
+    evidence at all (size unknown). Calm, non-escalating: we cannot confirm
+    or rule out a change. Gated on the descriptor so it never fires on
+    snapshots predating the v7 layout fields.
+    """
+    if _layout_evidence_asymmetric(
+        old_rec, new_rec, vtable_facts_reliable=vtable_facts_reliable
+    ):
         return [
             make_change(
                 ChangeKind.LAYOUT_UNVERIFIABLE,
                 symbol=name,
                 name=name,
+                # Precise type identity (not the bare ``symbol`` two distinct
+                # same-named records in different namespaces would share) --
+                # lets diff_types.py's TYPE_VTABLE_CHANGED-covers-this-gap
+                # cross-reference check
+                # (post_processing.AnnotateLayoutUnverifiableCoveredByVtableChanged)
+                # correlate against the *exact* RecordType this finding is
+                # about, rather than a same-named-but-different one.
+                qualified_name=new_rec.qualified_name or new_rec.name,
             )
         ]
     return []

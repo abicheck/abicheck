@@ -1,4 +1,5 @@
 """Tests for SARIF 2.1.0 output (Sprint 7)."""
+
 from __future__ import annotations
 
 import json
@@ -53,6 +54,7 @@ def _valued_change() -> Change:
 # Schema structure tests
 # ---------------------------------------------------------------------------
 
+
 class TestSarifSchema:
     def test_top_level_keys(self) -> None:
         doc = to_sarif(_make_result([_breaking_change()]))
@@ -77,8 +79,12 @@ class TestSarifSchema:
 
     def test_rules_deduplicated(self) -> None:
         """Two changes of same kind → one rule."""
-        c1 = Change(kind=ChangeKind.FUNC_REMOVED, symbol="foo", description="foo removed")
-        c2 = Change(kind=ChangeKind.FUNC_REMOVED, symbol="bar", description="bar removed")
+        c1 = Change(
+            kind=ChangeKind.FUNC_REMOVED, symbol="foo", description="foo removed"
+        )
+        c2 = Change(
+            kind=ChangeKind.FUNC_REMOVED, symbol="bar", description="bar removed"
+        )
         doc = to_sarif(_make_result([c1, c2]))
         rules = doc["runs"][0]["tool"]["driver"]["rules"]
         func_removed_rules = [r for r in rules if r["id"] == "func_removed"]
@@ -97,6 +103,7 @@ class TestSarifSchema:
 # ---------------------------------------------------------------------------
 # Severity mapping
 # ---------------------------------------------------------------------------
+
 
 class TestSeverityMapping:
     def test_func_removed_is_error(self) -> None:
@@ -135,6 +142,7 @@ class TestSeverityMapping:
 # _parse_source_location (direct unit tests)
 # ---------------------------------------------------------------------------
 
+
 class TestParseSourceLocation:
     def test_file_and_line(self) -> None:
         from abicheck.sarif import _parse_source_location
@@ -149,7 +157,11 @@ class TestParseSourceLocation:
     def test_windows_path_with_column(self) -> None:
         from abicheck.sarif import _parse_source_location
 
-        assert _parse_source_location("C:\\foo\\bar.h:42:7") == ("C:\\foo\\bar.h", 42, 7)
+        assert _parse_source_location("C:\\foo\\bar.h:42:7") == (
+            "C:\\foo\\bar.h",
+            42,
+            7,
+        )
 
     def test_bare_filename_no_colon(self) -> None:
         from abicheck.sarif import _parse_source_location
@@ -159,7 +171,11 @@ class TestParseSourceLocation:
     def test_non_numeric_line(self) -> None:
         from abicheck.sarif import _parse_source_location
 
-        assert _parse_source_location("foo.h:notaline") == ("foo.h:notaline", None, None)
+        assert _parse_source_location("foo.h:notaline") == (
+            "foo.h:notaline",
+            None,
+            None,
+        )
 
     def test_column_non_numeric_still_yields_line(self) -> None:
         from abicheck.sarif import _parse_source_location
@@ -174,25 +190,34 @@ class TestParseSourceLocation:
         from abicheck.sarif import _parse_source_location
 
         assert _parse_source_location("generated:headers/foo.h:42") == (
-            "generated:headers/foo.h", 42, None,
+            "generated:headers/foo.h",
+            42,
+            None,
         )
 
     def test_colon_in_path_prefix_with_column(self) -> None:
         from abicheck.sarif import _parse_source_location
 
         assert _parse_source_location("generated:headers/foo.h:42:7") == (
-            "generated:headers/foo.h", 42, 7,
+            "generated:headers/foo.h",
+            42,
+            7,
         )
 
     def test_windows_path_no_column(self) -> None:
         from abicheck.sarif import _parse_source_location
 
-        assert _parse_source_location("C:\\foo\\bar.h:42") == ("C:\\foo\\bar.h", 42, None)
+        assert _parse_source_location("C:\\foo\\bar.h:42") == (
+            "C:\\foo\\bar.h",
+            42,
+            None,
+        )
 
 
 # ---------------------------------------------------------------------------
 # Result content
 # ---------------------------------------------------------------------------
+
 
 class TestResultContent:
     def test_result_message_plain(self) -> None:
@@ -224,7 +249,9 @@ class TestResultContent:
 
     def test_result_location_file_and_line(self) -> None:
         c = Change(
-            kind=ChangeKind.FUNC_REMOVED, symbol="_Z3foov", description="removed",
+            kind=ChangeKind.FUNC_REMOVED,
+            symbol="_Z3foov",
+            description="removed",
             source_location="include/foo.h:42",
         )
         doc = to_sarif(_make_result([c]))
@@ -235,7 +262,9 @@ class TestResultContent:
     def test_result_location_file_line_column(self) -> None:
         """A file:line:column location must not leak ':line' into the URI."""
         c = Change(
-            kind=ChangeKind.FUNC_REMOVED, symbol="_Z3foov", description="removed",
+            kind=ChangeKind.FUNC_REMOVED,
+            symbol="_Z3foov",
+            description="removed",
             source_location="include/foo.h:42:7",
         )
         doc = to_sarif(_make_result([c]))
@@ -246,7 +275,9 @@ class TestResultContent:
     def test_result_location_bare_filename_no_colon(self) -> None:
         """A source_location with no colon at all has no line to extract."""
         c = Change(
-            kind=ChangeKind.FUNC_REMOVED, symbol="_Z3foov", description="removed",
+            kind=ChangeKind.FUNC_REMOVED,
+            symbol="_Z3foov",
+            description="removed",
             source_location="foo.h",
         )
         doc = to_sarif(_make_result([c]))
@@ -257,7 +288,9 @@ class TestResultContent:
     def test_result_location_non_numeric_line(self) -> None:
         """A source_location whose 'line' segment isn't numeric has no region."""
         c = Change(
-            kind=ChangeKind.FUNC_REMOVED, symbol="_Z3foov", description="removed",
+            kind=ChangeKind.FUNC_REMOVED,
+            symbol="_Z3foov",
+            description="removed",
             source_location="foo.h:notaline",
         )
         doc = to_sarif(_make_result([c]))
@@ -267,7 +300,9 @@ class TestResultContent:
 
     def test_result_location_windows_path_with_column(self) -> None:
         c = Change(
-            kind=ChangeKind.FUNC_REMOVED, symbol="_Z3foov", description="removed",
+            kind=ChangeKind.FUNC_REMOVED,
+            symbol="_Z3foov",
+            description="removed",
             source_location="C:\\include\\foo.h:42:7",
         )
         doc = to_sarif(_make_result([c]))
@@ -300,6 +335,53 @@ class TestResultContent:
         doc = to_sarif(_make_result([_breaking_change()]))
         props = doc["runs"][0]["results"][0]["properties"]
         assert "correlatedChangeKind" not in props
+
+    def test_correlation_cleared_when_show_only_filters_out_the_target(self) -> None:
+        """``--show-only`` can keep a LAYOUT_UNVERIFIABLE (risk) finding
+        while filtering out the co-reported TYPE_VTABLE_CHANGED (breaking)
+        its correlated_change_kind names — SARIF's ``correlatedChangeKind``
+        property must not reference a finding this filtered view no longer
+        includes (Codex review, fresh evidence: a fix scoped only to
+        markdown left SARIF with the identical gap)."""
+        layout_change = Change(
+            kind=ChangeKind.LAYOUT_UNVERIFIABLE,
+            symbol="Foo",
+            description="layout evidence unverifiable",
+            qualified_name="Foo",
+            correlated_change_kind=ChangeKind.TYPE_VTABLE_CHANGED.value,
+        )
+        vtable_change = Change(
+            kind=ChangeKind.TYPE_VTABLE_CHANGED,
+            symbol="Foo",
+            description="vtable changed",
+            qualified_name="Foo",
+        )
+        result = _make_result([layout_change, vtable_change])
+
+        doc_full = to_sarif(result)
+        results_full = doc_full["runs"][0]["results"]
+        layout_result_full = next(
+            r for r in results_full if r["ruleId"] == "layout_unverifiable"
+        )
+        assert (
+            layout_result_full["properties"]["correlatedChangeKind"]
+            == "type_vtable_changed"
+        )
+
+        doc_filtered = to_sarif(result, show_only="risk")
+        results_filtered = doc_filtered["runs"][0]["results"]
+        rule_ids = {r["ruleId"] for r in results_filtered}
+        assert "type_vtable_changed" not in rule_ids
+        assert "layout_unverifiable" in rule_ids
+        layout_result_filtered = next(
+            r for r in results_filtered if r["ruleId"] == "layout_unverifiable"
+        )
+        assert "correlatedChangeKind" not in layout_result_filtered["properties"]
+
+        # The original Change object is never mutated by the filtered render.
+        assert (
+            layout_change.correlated_change_kind == ChangeKind.TYPE_VTABLE_CHANGED.value
+        )
 
     def test_result_reachability_fields(self) -> None:
         # ADR-044 P1 item 4: reachability evidence (previously description-
@@ -360,6 +442,7 @@ class TestResultContent:
 # Invocation / automation details
 # ---------------------------------------------------------------------------
 
+
 class TestInvocation:
     def test_invocation_breaking_still_execution_successful(self) -> None:
         """executionSuccessful reports the tool run, not the ABI/severity gate.
@@ -377,7 +460,11 @@ class TestInvocation:
         assert doc["runs"][0]["invocations"][0]["executionSuccessful"] is True
 
     def test_automation_details_id(self) -> None:
-        doc = to_sarif(_make_result([_breaking_change()], library="libfoo.so.1", old="1.0", new="2.0"))
+        doc = to_sarif(
+            _make_result(
+                [_breaking_change()], library="libfoo.so.1", old="1.0", new="2.0"
+            )
+        )
         aid = doc["runs"][0]["automationDetails"]["id"]
         assert "abicheck/libfoo.so.1/1.0_to_2.0" == aid
 
@@ -391,6 +478,7 @@ class TestInvocation:
 # ---------------------------------------------------------------------------
 # Serialization
 # ---------------------------------------------------------------------------
+
 
 class TestSerialization:
     def test_to_sarif_str_is_valid_json(self) -> None:
@@ -406,6 +494,7 @@ class TestSerialization:
 # ---------------------------------------------------------------------------
 # Exit code contract tests
 # ---------------------------------------------------------------------------
+
 
 class TestExitCodes:
     """SARIF invocations[].exitCode must mirror abicheck compare CLI contract.
@@ -424,6 +513,7 @@ class TestExitCodes:
 
     def test_api_break_exit_code_is_2(self) -> None:
         from abicheck.checker import ChangeKind
+
         api_change = Change(
             kind=ChangeKind.ENUM_MEMBER_RENAMED,
             symbol="Status",
@@ -442,12 +532,15 @@ class TestExitCodes:
         Deployment risk is surfaced via exitCodeDescription, not a non-zero exit.
         """
         from abicheck.checker import ChangeKind, Verdict
+
         risk_change = Change(
             kind=ChangeKind.SYMBOL_VERSION_REQUIRED_ADDED,
             symbol="libc.so.6",
             description="New GLIBC_2.34 version requirement added",
         )
-        doc = to_sarif(_make_result([risk_change], verdict=Verdict.COMPATIBLE_WITH_RISK))
+        doc = to_sarif(
+            _make_result([risk_change], verdict=Verdict.COMPATIBLE_WITH_RISK)
+        )
         invocation = doc["runs"][0]["invocations"][0]
         assert invocation["exitCode"] == 0
         assert invocation["exitCodeDescription"] == "COMPATIBLE_WITH_RISK"
@@ -475,6 +568,7 @@ class TestExitCodes:
 # Confidence, evidence tiers, and policy in SARIF properties
 # ---------------------------------------------------------------------------
 
+
 class TestSarifConfidenceAndPolicy:
     """SARIF run properties must include confidence, evidence, and policy metadata."""
 
@@ -487,6 +581,7 @@ class TestSarifConfidenceAndPolicy:
 
     def test_confidence_with_tiers_and_warnings(self) -> None:
         from abicheck.checker_policy import Confidence
+
         r = _make_result([_breaking_change()])
         r.confidence = Confidence.LOW
         r.evidence_tiers = ["elf"]
@@ -504,6 +599,7 @@ class TestSarifConfidenceAndPolicy:
 
     def test_policy_overrides_in_properties(self) -> None:
         from abicheck.policy_file import PolicyFile
+
         r = _make_result([_breaking_change()])
         r.policy_file = PolicyFile(
             base_policy="strict_abi",
@@ -522,6 +618,7 @@ class TestSarifConfidenceAndPolicy:
 # ---------------------------------------------------------------------------
 # Severity-aware invocation gate
 # ---------------------------------------------------------------------------
+
 
 class TestSeverityGate:
     """Without severity_config, the invocation exit is inferred purely from
@@ -768,7 +865,8 @@ class TestScopedGate:
             kind=ChangeKind.PE_ORDINAL_RETARGETED,
             symbol="ordinal:5",
             description="ordinal 5 retargeted",
-            old_value="OldFunc", new_value="NewFunc",
+            old_value="OldFunc",
+            new_value="NewFunc",
         )
         r = _make_result([], verdict=Verdict.COMPATIBLE)
         r.scoped_verdict = Verdict.BREAKING  # type: ignore[attr-defined]
@@ -799,7 +897,8 @@ class TestScopedGate:
             kind=ChangeKind.PE_ORDINAL_RETARGETED,
             symbol="ordinal:5",
             description="ordinal 5 retargeted",
-            old_value="OldFunc", new_value="NewFunc",
+            old_value="OldFunc",
+            new_value="NewFunc",
         )
         r = _make_result([], verdict=Verdict.COMPATIBLE)
         r.scoped_verdict = Verdict.BREAKING  # type: ignore[attr-defined]
@@ -825,7 +924,8 @@ class TestScopedGate:
             kind=ChangeKind.PE_ORDINAL_RETARGETED,
             symbol="ordinal:5",
             description="ordinal 5 retargeted",
-            old_value="OldFunc", new_value="NewFunc",
+            old_value="OldFunc",
+            new_value="NewFunc",
         )
         r = _make_result([], verdict=Verdict.COMPATIBLE)
         r.scoped_verdict = Verdict.BREAKING  # type: ignore[attr-defined]
@@ -887,11 +987,15 @@ class TestRootCauseMode:
 
     def test_groups_findings_sharing_caused_by_type(self) -> None:
         root = Change(
-            ChangeKind.FUNC_REMOVED, "ns::internal::helper", "helper removed",
+            ChangeKind.FUNC_REMOVED,
+            "ns::internal::helper",
+            "helper removed",
         )
         overlay = Change(
-            ChangeKind.INTERNAL_SYMBOL_REQUIRED_BY_PUBLIC_API, "pub_entry",
-            "required", caused_by_type="ns::internal::helper",
+            ChangeKind.INTERNAL_SYMBOL_REQUIRED_BY_PUBLIC_API,
+            "pub_entry",
+            "required",
+            caused_by_type="ns::internal::helper",
         )
         r = _make_result([root, overlay], verdict=Verdict.BREAKING)
         doc = to_sarif(r, report_mode="root-cause")
@@ -992,11 +1096,15 @@ class TestImpactAssessmentRootCause:
         self,
     ) -> None:
         root = Change(
-            ChangeKind.FUNC_REMOVED, "ns::internal::helper", "helper removed",
+            ChangeKind.FUNC_REMOVED,
+            "ns::internal::helper",
+            "helper removed",
         )
         overlay = Change(
-            ChangeKind.INTERNAL_SYMBOL_REQUIRED_BY_PUBLIC_API, "pub_entry",
-            "required", caused_by_type="ns::internal::helper",
+            ChangeKind.INTERNAL_SYMBOL_REQUIRED_BY_PUBLIC_API,
+            "pub_entry",
+            "required",
+            caused_by_type="ns::internal::helper",
         )
         r = _make_result([root, overlay], verdict=Verdict.BREAKING)
         # report_mode defaults to "full" -- properties.rootCauseId/rootCause
@@ -1017,11 +1125,15 @@ class TestImpactAssessmentRootCause:
         # report_mode="root-cause" properties.rootCauseId for the same
         # finding -- both are the same underlying computation.
         root = Change(
-            ChangeKind.FUNC_REMOVED, "ns::internal::helper", "helper removed",
+            ChangeKind.FUNC_REMOVED,
+            "ns::internal::helper",
+            "helper removed",
         )
         overlay = Change(
-            ChangeKind.INTERNAL_SYMBOL_REQUIRED_BY_PUBLIC_API, "pub_entry",
-            "required", caused_by_type="ns::internal::helper",
+            ChangeKind.INTERNAL_SYMBOL_REQUIRED_BY_PUBLIC_API,
+            "pub_entry",
+            "required",
+            caused_by_type="ns::internal::helper",
         )
         r = _make_result([root, overlay], verdict=Verdict.BREAKING)
         full_doc = to_sarif(r)
@@ -1031,8 +1143,7 @@ class TestImpactAssessmentRootCause:
             for res in full_doc["runs"][0]["results"]
         }
         rc_ids = {
-            res["properties"]["rootCauseId"]
-            for res in rc_doc["runs"][0]["results"]
+            res["properties"]["rootCauseId"] for res in rc_doc["runs"][0]["results"]
         }
         assert full_ids == rc_ids
 

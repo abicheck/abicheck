@@ -68,6 +68,7 @@ topics:
       - abicheck/severity.py
       - abicheck/cli_scan.py
       - abicheck/cli_scan_baseline.py
+      - abicheck/scan_engine.py
     reference_page: reference/exit-codes.md
     task_pages:
       - use/ci-gating.md
@@ -249,6 +250,9 @@ topics:
       - abicheck/html_report.py
       - abicheck/sarif.py
       - abicheck/junit_report.py
+      - abicheck/schemas/__init__.py
+      - abicheck/cli_scan_baseline.py
+      - abicheck/scan_engine.py
     allowed_summaries:
       - start/first-report.md
       - start/choose-your-workflow.md

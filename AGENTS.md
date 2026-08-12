@@ -636,6 +636,26 @@ Several mechanisms guard test quality so coverage can't be "filled" without veri
   `ABICHECK_MIN_EXECUTED=<n>`; the session fails unless at least `<n>` tests actually ran,
   so a missing external tool can't turn a lane green with zero work done. Wired into the
   `abicc`, `libabigail`, and `integration` CI lanes.
+- **Third-party-boundary tests must exercise the real public API at realistic scale, not
+  just internal arithmetic.** Lesson from a real incident (ADR-059 §12: `snapshot_io.py`'s
+  zstd `max_window_size` was silently computed in the wrong unit for months): one test
+  asserted a value's own formula was self-consistent (a tautology against the bug's own
+  wrong formula), and a second used a toy-shaped fixture (small, highly-compressible input
+  at a large nominal parameter) whose *actual* required behavior collapsed to something
+  trivial — both passed identically before and after the regression. When a module's job is
+  "honor an external library's/format's contract," **every** supported algorithm needs at
+  least one test that goes through the module's *actual public entry point*, at a *content
+  scale realistic enough to trigger the condition being defended against* where one is known
+  — never only a hand-constructed shortcut into the dependency's lower-level API. This
+  applies per algorithm even when only one of them has a known incident to defend against: a
+  principle that silently excludes the algorithm nobody has broken yet isn't a principle, and
+  a review round caught exactly that gap here (gzip had none). See
+  `tests/test_snapshot_compression.py`'s `test_zstd_round_trip_at_production_scale_and_level`
+  (real `AbiSnapshot` → real `write_snapshot_bytes`/`read_snapshot_bytes` chokepoints → scaled
+  past the threshold where the KiB/bytes regression actually reproduces) and its gzip sibling
+  `test_gzip_round_trip_at_production_scale` (same chokepoints/scale, no known incident to
+  reproduce, added purely to keep this bullet true for every supported algorithm) for the
+  pattern to follow for the next storage/serialization boundary.
 
 ## Line-coverage floor
 
@@ -766,6 +786,149 @@ Once a root command genuinely clears the bar above, pick the right home:
 
 ## Known gaps — acknowledged remaining work
 
+- **Opaque-type suppression is keyed by bare `RecordType.name`, not a
+  qualified identity — pre-existing on both header backends, newly reachable
+  on direct-clang by PR #719's opaque-handle-type fix (Codex review,
+  investigated, not fixed).** `diff_filtering._find_opaque_types()` (and its
+  siblings `_find_by_value_types()`/`_downgrade_opaque_type_changes()`) index
+  a snapshot's opaque/impl-private types by `t.name` alone, and
+  `_root_type_name()` derives a `Change`'s matching key from `Change.symbol`
+  the same way `diff_types.py` stamps it — also the bare name for a
+  top-level type change (`name = t_old.name`), never `qualified_name`. Two
+  distinct records sharing a bare name in different namespaces (a complete,
+  genuinely public `api::Foo` and an unrelated forward-only `impl::Foo`)
+  therefore collide in the same `opaque: set[str]`: if `impl::Foo` is opaque,
+  `_downgrade_opaque_type_changes()` silently suppresses a real
+  `TYPE_SIZE_CHANGED`/field-change finding on the unrelated, complete,
+  public `api::Foo` too, since both match the bare key `"Foo"`. Confirmed
+  by reading the code (no live repro run); this predates PR #719 and
+  already applied identically to castxml's own `is_opaque=True` types — the
+  PR's clang-backend opaque-stub fix (previously clang silently dropped
+  every forward-decl-only type instead of emitting a stub) makes this
+  reachable from a new source, not a new bug class. **Not fixed here**: a
+  correct fix needs qualified identity threaded consistently through
+  `_find_opaque_types`/`_find_by_value_types`/`_downgrade_opaque_type_changes`
+  and `_root_type_name`'s several call sites in `diff_filtering.py` (at
+  least five, by grep), none of which currently have test coverage for the
+  cross-namespace-collision case to validate a change against — a
+  systematic, cross-cutting rework, not a scoped fix reactive to one review
+  comment. Filed here rather than attempted under this PR's time budget,
+  per this file's own "known gaps over risky reactive patches" convention.
+- **`dumper_clang.py`'s `parse_types()` conflates a C/C++ tag-namespace
+  identity with an ordinary-namespace typedef identity that happens to
+  share the same spelling — pre-existing, not introduced by PR #719's own
+  changes, but investigated and confirmed reachable in this pass (Codex
+  review, investigated, not fixed).** For a legal (if unusual) header like
+  `struct Foo; typedef struct { int x; } Foo;` — an unrelated forward-only
+  tag `Foo` and a SEPARATE anonymous struct given the ordinary-namespace
+  name `Foo` via typedef, which C's two-namespace rule keeps genuinely
+  distinct — `parse_types()`'s `identity = "::".join([*entry.scope, name])`
+  computation uses the same bare `name` for both (the tag's own `name`,
+  and the anonymous record's `anon_names`-derived typedef fallback name),
+  so the two collide into one `identity` key. Reproduced directly against
+  `_ClangAstParser`: only ONE `RecordType` named `Foo` is emitted (the
+  typedef-backed definition), and the unrelated opaque tag `struct Foo;`
+  is silently absent from the snapshot entirely — the exact regression
+  PR #719's own opaque-handle-type fix was written to prevent, just
+  reached through a different, adjacent mechanism (a spelling collision
+  across namespaces rather than declaration-order/redecl-set instability).
+  **Not fixed here**: closing it correctly needs the tag-namespace vs.
+  ordinary-namespace distinction threaded through the `identity` key
+  itself (and every downstream consumer that currently assumes `identity`
+  uniquely names one type — `_build_record`, the opaque/deprecated/kind
+  merge maps this same function already builds), which is a real, if
+  narrow, data-model change to a function this same PR already revised
+  three times this session (the opaque-stub fix, the kind-canonicalization
+  fix, and that fix's own regression fix) — each of which independently
+  needed careful re-verification against `dumper_clang.py`'s exact
+  2000-line hard cap. A fourth, differently-shaped change to the same
+  function under continued review pressure is exactly the risk profile
+  this file's own "known gaps over risky reactive patches" convention
+  exists to avoid; a correct fix needs its own dedicated pass with fresh
+  test coverage for the namespace-collision case specifically, not a
+  same-session extension.
+- **The castxml L4 source-ABI extractor does not fold the resolved
+  EMULATED compiler's identity into either `fact_set.compiler_version` or
+  the D8 TU cache key — attempted once for the persisted half, and
+  REVERTED after a follow-up review caught it as a real regression, not a
+  fix (Codex review, PR #719, three follow-up rounds).** castxml shells
+  out to the emulated compiler (`cc_bin`, resolved per compile unit by
+  `pick_compiler_binary` — the real build's own recorded `argv[0]`, absent
+  an explicit `--gcc-path` override) purely to discover its built-in
+  defines/include paths (`docs/learn/architecture.md`), so a header
+  conditional on `__GNUC__`/`_MSC_VER` can extract differently once that
+  compiler is upgraded at the same path, even though castxml itself and
+  its own `--version` probe stay identical — a real gap. The second
+  follow-up round's fix folded a STAT signature (`dev`/`ino`/`mtime_ns`/
+  `size`) of the resolved `cc_bin` into `fact_set.compiler_version`
+  (`_stamp_fact_set_and_coverage()` already has the per-TU `compile_unit`
+  in scope). The third follow-up round found this made things WORSE, not
+  better: those stat fields are filesystem-local, so (1) two TUs in ONE
+  surface resolved to DIFFERENT but same-toolchain drivers (`gcc` for a
+  `.c` TU, `g++` for a `.cpp` TU — an entirely ordinary mixed-language
+  build) get different suffixes purely from being different files on
+  disk, tripping `rollup_fact_set()`'s exact-equality check into
+  `fact_set_inconsistent` for a perfectly healthy, unchanged surface; and
+  (2) an identical build run on two different machines/paths (baseline
+  collected in one CI run, compared against another — an entirely
+  ordinary workflow) never shares device/inode at all, making every such
+  cross-machine comparison spuriously inconsistent and silently
+  suppressing every structured/opaque/source-edge finding. Between
+  "silently under-detect genuine toolchain drift" (the pre-existing gap)
+  and "spuriously suppress every finding on completely ordinary mixed-
+  language or cross-machine comparisons" (the attempted fix), the second
+  is strictly worse for typical usage, so the stat-based fold was
+  reverted rather than patched further under review pressure. **Not fixed
+  here, either half**: a correct fix needs a portable SEMANTIC identity —
+  a real `cc_bin --version` probe, normalized (mirroring
+  `_castxml_tool_version`'s existing shape, but for an arbitrary
+  gcc/clang/MSVC driver rather than castxml specifically) — not
+  filesystem stat fields, for the persisted half; the D8 cache-key half
+  additionally needs a wider, per-instance-hook-signature change to
+  `source_replay.py`'s shared cache-key infra (also used by
+  `ClangSourceExtractor`, whose analogous `--gcc-path` case resolves once
+  per extractor construction, not per TU, so its existing zero-arg hook
+  shape doesn't transfer directly), plus a decision on probing cost (a
+  version probe per distinct resolved `cc_bin` across a build with mixed
+  toolchains, cached the same way `_castxml_tool_version`'s `lru_cache`
+  already is). Left for a dedicated follow-up with its own MSVC-vs-
+  GCC-vs-Clang version-probe design, not a same-PR reactive patch.
+- **A compatible-but-ambiguous opaque redeclaration set (`class H; struct
+  H;`) that later gains a same-key COMPLETE definition still produces a
+  false `SOURCE_LEVEL_KIND_CHANGED` — investigated, not fixed (Codex
+  review, PR #719, fourth follow-up round on this same area).** The
+  earlier "keep the definition's own kind" fix (this same file, above)
+  deliberately never applies `dumper_clang.py`'s canonicalized opaque
+  `override_kind` to a record that survives as a COMPLETE definition — the
+  definition's own real, unmodified `_record_kind()` always wins, which is
+  correct in isolation (a real kind change on the definition itself must
+  never be hidden). But this means an identity whose opaque forward decls
+  were genuinely ambiguous (`class H;` AND `struct H;`, both present,
+  canonicalized to the fixed `"struct"` spelling per the kind-stability fix
+  above) reports "struct" in an old snapshot with no definition, while a
+  new snapshot adding a same-key `class H {...};` definition reports the
+  definition's real "class" — a spurious kind-change finding even though
+  "class" was always one of the two already-compatible, already-declared
+  keys. Reproduced directly against `_ClangAstParser`. **Not fixable at
+  the extraction layer**: an opaque snapshot has no way to know in advance
+  which of the ambiguous, compatible keys a LATER definition will use, so
+  no fixed canonicalization choice can match every possible future
+  definition. The generic comparison (`diff_types_abicc_parity.
+  _diff_type_kind_changes()`, shared across all producers) does a plain
+  `t_old.kind != t_new.kind` check with no notion of "this kind was
+  extracted from a genuinely ambiguous, unresolved forward-decl set" —
+  and correctly so, since blanket-suppressing every class↔struct
+  transition would hide the genuine, intentional ones this detector
+  exists to catch. Closing this properly needs new PROVENANCE carried on
+  `RecordType` itself (e.g. a `kind_ambiguous`-shaped field, schema-
+  versioned, populated by both header backends, read by the diff layer to
+  skip exactly this one shape of transition) — a cross-cutting model
+  change touching `model.py`, both backends, serialization, and the
+  detector, not a scoped fix reactive to one review comment, and
+  `dumper_clang.py`'s `parse_types()` has already been revised four times
+  in this same PR session for adjacent findings in this exact area. Filed
+  here per this file's own "known gaps over risky reactive patches"
+  convention rather than attempted under continued review pressure.
 - **Linkage-blind removal — attempted twice, reverted twice. The evidence
   keeps proving something adjacent to the invariant.** A symbol vanishing from
   the export table is reported as `func_removed` (and, on the same symbol,
@@ -1166,6 +1329,135 @@ Once a root command genuinely clears the bar above, pick the right home:
   `evidence-absence` axis (one FP guard, three FN sentinels), the unit tests
   above, and three Hypothesis properties in
   `tests/test_detector_properties.py`.
+
+  **A named follow-on, found by a user rather than by any gate in this
+  repo, and worth being explicit about why: two detectors reading the
+  identical evidence gap and reaching two different severities is its own
+  bug class, distinct from either detector being individually wrong.**
+  `LAYOUT_UNVERIFIABLE` (`diff_layout.py`) answers "was there real layout
+  evidence for this type" from the exact same asymmetric-evidence condition
+  `_vtable_transition_is_evidenced` above declines to suppress on. Both
+  answers are individually correct and individually documented (this entry
+  is the vtable side's own justification) — but a type carrying both at
+  once reads as a hard BREAKING verdict sitting next to a finding that
+  already says the evidence for that type couldn't be verified either way,
+  reproducible with zero real ABI change (scanning a binary against a dump
+  of itself; reported against real oneDAL binaries, three types, two
+  libraries). None of this repo's existing quality gates were positioned to
+  catch it: the FP-rate/tier-accuracy gates are verdict-level (the overall
+  verdict was already correctly `BREAKING`, dominated by the vtable
+  finding, so nothing there looked wrong), and every existing test —
+  including the Hypothesis properties this entry already describes — is
+  scoped to one detector's own correctness in isolation, never to whether
+  two detectors' outputs are mutually *legible* when they land on the same
+  subject.
+
+  **The fix went through four designs before landing, and the last pivot is
+  the one worth reading closely — it generalizes past this one pair of
+  detectors.** (1) Demoting `TYPE_VTABLE_CHANGED` was tried first and
+  rejected immediately: a real last-virtual-method removal with a new-side
+  capture gap is indistinguishable from this same evidence gap, so
+  softening its severity risks a false negative on a genuine break. (2)
+  Folding the now-redundant `LAYOUT_UNVERIFIABLE` finding into
+  `redundant_changes` unconditionally was tried next, and review found four
+  real defects in it in turn: correlating on bare `Change.symbol` (two
+  distinct same-named records in different namespaces can share it, so
+  fold on `qualified_name`); folding on mere co-occurrence rather than a
+  marker recording *why* the stronger finding was kept (an
+  independently-evidenced `TYPE_VTABLE_CHANGED` — a real reorder, a real
+  size delta, a real virtual-base change — must never trigger the fold);
+  reusing `Change.modulation_reason`/`modulation_rule` for internal
+  signaling (those are a public, report-facing audit trail for an actual
+  verdict override — tagging an unmodulated finding with them is a false
+  audit entry a downstream consumer would read as real); and running the
+  fold *before* `FilterNonPublicSurface`/`ApplySuppression` had settled
+  both findings, which both hid the redundant finding from a suppression
+  rule targeting it directly and let it outlive its covering finding's
+  later exclusion. (3) Fixing all four and gating the fold on a
+  policy-resolved-verdict subsumption check (`checker.
+  _vtable_gap_finding_is_verdict_subsumed`) closed the `PolicyFile`-override
+  case, but review found the fix was still solving the wrong layer: **the
+  severity-scheme axis (`severity.SeverityConfig` — `abi_breaking`/
+  `potential_breaking`/etc., each independently `error`/`warning`/`info`)
+  is chosen by the CLI/reporter caller entirely *after* `compare()`
+  returns, so no compare()-time decision to remove a finding from
+  `changes` can ever be correct for it.** Concretely: a caller configuring
+  `abi_breaking=info` / `potential_breaking=error` wants
+  `LAYOUT_UNVERIFIABLE`'s error-level contribution to reach
+  `severity.compute_exit_code`, but that function reads `result.changes`
+  directly — if the fold already removed the finding because the
+  *policy* axis (a completely orthogonal gate, resolved before
+  `compare()` returns) ranked the covering `TYPE_VTABLE_CHANGED` as more
+  severe, the severity axis never gets a chance to see it, and this
+  reproduces with **zero policy override involved** (Codex review, fresh
+  evidence). The same review round also found the fold's pipeline
+  ordering relative to `DemoteUnreachableInternalChurn` (which runs later,
+  to demote a confirmed-unreachable internal-namespace type) could orphan
+  an already-made fold decision when the covering finding was itself
+  demoted afterward. (4) **The only structurally-safe fix was to stop
+  removing information from `changes` for this reason at all.**
+  `post_processing.AnnotateLayoutUnverifiableCoveredByVtableChanged`
+  leaves both findings exactly where they always were and only sets the
+  already-existing, generic `Change.correlated_change_kind` field (reused
+  from its original ADR-041 purpose, not a new one) on the redundant
+  `LAYOUT_UNVERIFIABLE` finding, pointing at `"type_vtable_changed"`.
+  `Change.vtable_covers_unverifiable_layout_gap` (set in
+  `diff_types._diff_type_vtable`) still records which `TYPE_VTABLE_CHANGED`
+  findings rest purely on the ambiguous evidence gap versus real,
+  independent evidence — that detection logic is exactly what survived all
+  four designs unchanged; only the *action* taken on it changed. This
+  design is immune by construction to every one of the defects above and
+  to any future one shaped like them, because nothing is ever hidden from
+  a consumer that reads `changes` — there is no "was this the right time
+  to remove it" question left to get wrong. **The general principle this
+  leaves behind: never remove a finding from a shared, multiply-consumed
+  list (`DiffResult.changes`) to resolve what is fundamentally a
+  *presentation* problem (two findings reading as contradictory) when that
+  list has independent downstream consumers — a legacy verdict, a
+  policy-file override, a severity-scheme exit code, a future pipeline
+  step — that this fix cannot fully enumerate and whose configuration is
+  chosen after the removal decision was made. Annotate; never remove.**
+  Regression coverage: `tests/test_vtable_severity.py`'s
+  `TestLayoutUnverifiableCorrelatedWithVtableChanged` (hand-picked example
+  cases, including one exercising the severity-axis gap directly via
+  `severity.compute_exit_code`) and a generalized Hypothesis property,
+  `test_layout_unverifiable_always_correlated_when_vtable_change_shares_its_gap`
+  in `tests/test_detector_properties.py`, checking the annotation holds
+  over arbitrarily generated classes and evidence-descriptor shapes.
+
+  **A whole-class structural fix was attempted mid-way through the fold
+  design (2) above, for the field-ordering half of it, and reverted — the
+  in-repo audit that justified it was the wrong audit.** (This sub-entry
+  predates the pivot to design (4) and is kept because the lesson is
+  independent of which design won.) The field-ordering bug (found twice
+  now: first on `AbiSnapshot` in PR #582, again on the new `Change` field
+  this fix originally added mid-list) was first "fixed" by making `Change`
+  keyword-only from `old_value` onward via the `dataclasses.KW_ONLY`
+  sentinel, on the strength of an AST-parse of every `Change(...)` call
+  site in this repo confirming every positional call anywhere passes
+  exactly the three required leading fields and never more. That audit
+  answers the wrong question for a type this codebase itself documents as
+  public API (`checker_types.py`'s own module docstring; CLAUDE.md:
+  "changing their public surface is a breaking change to the Python API —
+  coordinate it"): it proves this repo's own call sites are safe, and says
+  nothing about an external consumer who previously called `Change(kind,
+  symbol, description, old_value, new_value, ...)` positionally — for whom
+  the whole-class sentinel is exactly the same breaking shift the fix
+  exists to prevent, just moved to a boundary this repo cannot see or test
+  (Codex review, fresh evidence). Reverted in favor of the same per-field
+  `field(kw_only=True)` PR #582 already used for `AbiSnapshot`, applied
+  only to the one new field (`vtable_covers_unverifiable_layout_gap`) and
+  appended at the true end of the dataclass (not mid-list) so every
+  pre-existing field's position — and therefore every pre-existing
+  positional caller's behavior, in or out of this repo — is completely
+  unchanged. The lesson generalizes beyond this one field: for a type
+  documented as public API, "no in-repo caller breaks" is not the bar:
+  prefer the narrowest change that cannot break a caller this repo cannot
+  see, even when a broader structural fix looks more complete. The
+  `KW_ONLY` sentinel is still the right tool for a genuinely *internal*
+  dataclass with no external-construction contract (nothing here argues
+  against it in general) — the mistake was applying it to one that has
+  such a contract without checking for one first.
 
 - **Evidence-provider model — investigated, found not to reproduce as
   described; no fix applied.** A status-review follow-up asked whether

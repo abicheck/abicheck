@@ -31,6 +31,7 @@ from .diff_cxx_rules import (
     virtual_method_addition,
 )
 from .diff_default_value_reliability import (
+    constant_value_fingerprint_comparison_unreliable,
     default_value_fingerprint_comparison_unreliable,
 )
 from .diff_helpers import (
@@ -1905,27 +1906,28 @@ def _diff_param_va_list(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
 def _diff_constants(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
     """Detect preprocessor / const-constant changes (ABICC: Changed/Added/Removed_Constant).
 
-    Header-tier only: ``AbiSnapshot.constants`` is populated solely from castxml
-    header parsing. If either side was NOT (confirmed) parsed from headers
-    (DWARF/symbols mode, a snapshot taken before constant extraction, or a
-    legacy/inferred headerless snapshot), its ``constants`` map is empty only
-    because the data is *unavailable* — comparing would report every constant as
-    removed (or added, depending on direction). Skip unless both sides are
-    header-aware.
+    Header-tier only: ``AbiSnapshot.constants`` is populated from header
+    parsing (castxml, and the direct-clang backend's own
+    ``parse_constants()``). If either side was NOT (confirmed) parsed from
+    headers (DWARF/symbols mode, a snapshot taken before constant extraction,
+    or a legacy/inferred headerless snapshot), its ``constants`` map is empty
+    only because the data is *unavailable* — comparing would report every
+    constant as removed (or added, depending on direction). Skip unless both
+    sides are header-aware.
 
-    Known limitation, not attempted here: a versioned inline namespace
-    (``detail::v1::x``) can make the same constant reachable under two
-    qualified spellings, and when the header-AST producer surfaces both as
-    separate top-level declarations, this reports one ``CONSTANT_CHANGED``
-    per spelling for what is really a single change. A value-equality-based
-    merge was tried and reverted -- see
-    ``qualified_name_segments``'s module docstring for why it cannot be made
-    sound without identity evidence this snapshot format doesn't carry
-    (unlike a function's mangled name or a type's source location, a header
-    constant has no such identity beyond its own value, and Codex review
-    found concrete cases in both directions: merging two unrelated
-    same-valued constants, and failing to merge two spellings that
-    coincidentally started with different values).
+    ``constant_value_fingerprint_comparison_unreliable`` declines a CHANGED
+    verdict when either side's value is a pre-stabilization direct-clang
+    fingerprint that can't be trusted against a fresh one — see that
+    function's own docstring (``diff_default_value_reliability.py``) for why.
+
+    Known limitation, not attempted here: a versioned inline namespace can
+    make the same constant reachable under two qualified spellings
+    (``detail::v1::x`` / ``detail::x``), double-reporting one real change.
+    A value-equality merge was tried and reverted as unsound in both
+    directions (merges unrelated same-valued constants; misses spellings
+    that started with different values) -- see ``qualified_name_segments``'s
+    module docstring for the full reasoning; a header constant has no
+    identity beyond its own value to merge on safely.
     """
     if not _both_header_aware(old, new):
         return []
@@ -1945,6 +1947,10 @@ def _diff_constants(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
                 )
             )
         elif new_val != old_val:
+            if constant_value_fingerprint_comparison_unreliable(
+                old, new, old_val, new_val
+            ):
+                continue
             changes.append(
                 make_change(
                     ChangeKind.CONSTANT_CHANGED,

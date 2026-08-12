@@ -519,6 +519,36 @@ class TestInternalTemplateLeaks:
         new = _snap(funcs=[])
         assert detect_internal_template_leaks(old, new) == []
 
+    def test_non_template_func_with_templated_param_type_ignored(self) -> None:
+        # Codex review: a demangled identity carries its *full signature*,
+        # including parameter types. `_looks_like_template_instantiation`
+        # only checks for a top-level "<" anywhere in the string -- so a
+        # plain (non-template) internal function taking a templated
+        # parameter type (`lib::__detail::plain_helper(std::vector<int>)`)
+        # was misclassified as a template instantiation itself, purely
+        # because its own *parameter type* happens to be one. This must
+        # stay out of scope, same as test_non_template_internal_funcs_ignored
+        # above -- a plain function's removal is `func_removed`'s job, not
+        # this detector's.
+        import abicheck.demangle as dm
+
+        def fake_demangle(mangled_list: list[str]) -> dict[str, str]:
+            sigs = {
+                "_Zph1": "lib::__detail::plain_helper(std::vector<int>)",
+            }
+            return {m: sigs[m] for m in mangled_list if m in sigs}
+
+        orig = dm.demangle_batch
+        dm.demangle_batch = fake_demangle  # type: ignore[assignment]
+        try:
+            old = _snap(funcs=[_fn("plain_helper", mangled="_Zph1")])
+            new = _snap(funcs=[])
+            changes = detect_internal_template_leaks(old, new)
+        finally:
+            dm.demangle_batch = orig  # type: ignore[assignment]
+
+        assert changes == []
+
     def test_purely_additive_instantiation_set_does_not_fire(self) -> None:
         # Reported bug: an internal-namespace template that only gained new
         # instantiations (every existing one is still there, unchanged) does
@@ -546,6 +576,92 @@ class TestInternalTemplateLeaks:
         ])
         changes = detect_internal_template_leaks(old, new)
         assert len(changes) == 1
+
+    def test_bare_vs_qualified_name_same_mangled_symbol_no_false_positive(
+        self,
+    ) -> None:
+        # Reported regression: a header/AST dumper backend can populate
+        # ``Function.name`` with inconsistent qualification for the
+        # *identical* linked symbol across two snapshots (a bare leaf on
+        # one side, a fully namespace/template-qualified spelling with its
+        # own formatting on the other -- verified in the field with real
+        # oneAPI/oneDAL headers: a still-exported instantiation, confirmed
+        # unchanged via `nm`, read as removed-and-re-added purely because
+        # the dumper changed how much of its own name it qualified between
+        # two library versions). Keying stem/instantiation identity on the
+        # declared name alone made every such declaration a false leak.
+        # Both sides share the *same* mangled symbol, so once identity
+        # prefers the demangled form, they must resolve to one identical
+        # stem regardless of what each side's own ``name`` field spelled.
+        import abicheck.demangle as dm
+
+        def fake_demangle(mangled_list: list[str]) -> dict[str, str]:
+            sigs = {
+                "_Zcr1": "oneapi::dal::detail::train_parameters<int>::check_ranges",
+            }
+            return {m: sigs[m] for m in mangled_list if m in sigs}
+
+        orig = dm.demangle_batch
+        dm.demangle_batch = fake_demangle  # type: ignore[assignment]
+        try:
+            old = _snap(funcs=[_fn("check_ranges", mangled="_Zcr1")])
+            # NEW's own declared name drops the enclosing "oneapi::dal::"
+            # namespace (a real, documented dumper-backend quirk) even
+            # though the mangled symbol -- and hence the demangled
+            # canonical form above -- is unchanged.
+            new = _snap(funcs=[
+                _fn(
+                    "detail::train_parameters<int>::check_ranges",
+                    mangled="_Zcr1",
+                ),
+            ])
+            changes = detect_internal_template_leaks(old, new)
+        finally:
+            dm.demangle_batch = orig  # type: ignore[assignment]
+
+        assert changes == []
+
+    def test_mach_o_leading_underscore_mangled_name_still_demangles(
+        self,
+    ) -> None:
+        # Codex review: a Mach-O direct-clang mangled name carries an extra
+        # platform leading underscore ("__Z...", not "_Z..."), so a bare
+        # `mangled.startswith("_Z")` check never recognizes it and the
+        # detector silently falls back to the differing declared names,
+        # reproducing the very false positive this fix exists to close.
+        import abicheck.demangle as dm
+
+        def fake_demangle(mangled_list: list[str]) -> dict[str, str]:
+            # demangle_batch is always called with the *normalized*
+            # (single-underscore) form.
+            sigs = {
+                "_Zcr1": "oneapi::dal::detail::check_ranges<int>",
+            }
+            return {m: sigs[m] for m in mangled_list if m in sigs}
+
+        orig = dm.demangle_batch
+        dm.demangle_batch = fake_demangle  # type: ignore[assignment]
+        try:
+            # Both declared names already carry "<...>" and a "detail"
+            # segment (so both sides are recognized as internal template
+            # instantiations even without demangling) -- only the *degree*
+            # of outer-namespace qualification differs, exactly like the
+            # bare-vs-qualified case above but exercising a shape that
+            # doesn't depend on demangling succeeding to be classified as
+            # internal in the first place, so a Mach-O prefix bug that
+            # silently skips demangling still reproduces a real leak here.
+            old = _snap(funcs=[_fn("detail::check_ranges<int>", mangled="__Zcr1")])
+            new = _snap(funcs=[
+                _fn(
+                    "oneapi::dal::detail::check_ranges<int>",
+                    mangled="__Zcr1",
+                ),
+            ])
+            changes = detect_internal_template_leaks(old, new)
+        finally:
+            dm.demangle_batch = orig  # type: ignore[assignment]
+
+        assert changes == []
 
 
 # ---------------------------------------------------------------------------

@@ -206,6 +206,40 @@ class TestReportValidatesAgainstSchema:
         for c in additions:
             assert c["reviewer_action"] in declared_enum
 
+    def test_layout_unverifiable_correlation_validates_against_packaged_schema(self):
+        # Schema 2.28: correlated_change_kind gained a second producer
+        # (LAYOUT_UNVERIFIABLE, via
+        # post_processing.AnnotateLayoutUnverifiableCoveredByVtableChanged)
+        # beyond ADR-041's original public_api_internal_dependency_added --
+        # validate a real payload carrying that second producer's value
+        # against the packaged schema, the same "don't just check no error"
+        # discipline the reviewer_action regression guard above uses.
+        old = AbiSnapshot(
+            library="libfoo.so.1",
+            version="1.0",
+            types=[RecordType(name="Foo", kind="class", vtable=[], size_bits=None)],
+        )
+        new = AbiSnapshot(
+            library="libfoo.so.1",
+            version="2.0",
+            types=[
+                RecordType(
+                    name="Foo",
+                    kind="class",
+                    vtable=["_ZN3Foo1fEv"],
+                    size_bits=None,
+                    base_offsets={"Base": 0},
+                )
+            ],
+        )
+        payload = json.loads(reporter.to_json(compare(old, new)))
+        self._validate(payload)
+        layout_findings = [
+            c for c in payload["changes"] if c["kind"] == "layout_unverifiable"
+        ]
+        assert layout_findings, "fixture must produce a layout_unverifiable finding"
+        assert layout_findings[0]["correlated_change_kind"] == "type_vtable_changed"
+
     def test_contract_evaluation_report_validates(self):
         # ADR-049 Phase 3 (schema 2.23): compare(..., contract_evaluation=True)
         # stamps three new optional per-finding keys -- validate a real
@@ -296,9 +330,7 @@ class TestReportValidatesAgainstSchema:
 
         old, new = _breaking_pair()
         suppression = SuppressionList([Suppression(symbol="_Z5api_bv")])
-        result = compare(
-            old, new, suppression=suppression, contract_evaluation=True
-        )
+        result = compare(old, new, suppression=suppression, contract_evaluation=True)
         assert result.suppressed_changes, "fixture must produce a suppressed finding"
         for c in result.suppressed_changes:
             assert c.contract_relevance is not None
@@ -423,8 +455,10 @@ class TestReportValidatesAgainstSchema:
         from abicheck.post_processing import PipelineContext
 
         return build_contract_stage(
-            old, new,
-            scope_to_public_surface=True, force_public_symbols=None,
+            old,
+            new,
+            scope_to_public_surface=True,
+            force_public_symbols=None,
             pp_ctx=PipelineContext(old=old, new=new),
         )
 
@@ -444,15 +478,18 @@ class TestReportValidatesAgainstSchema:
         new = AbiSnapshot(library="lib", version="2")
         kept = [
             Change(
-                ChangeKind.TYPE_SIZE_CHANGED, "Cfg",
+                ChangeKind.TYPE_SIZE_CHANGED,
+                "Cfg",
                 "size changed from 64 to 72 bytes",
             )
         ]
         redundant = [
             Change(
-                ChangeKind.FUNC_PARAMS_CHANGED, "config_init",
+                ChangeKind.FUNC_PARAMS_CHANGED,
+                "config_init",
                 "parameter type changed in config_init(Cfg*)",
-                old_value="Cfg (64 bytes)", new_value="Cfg (72 bytes)",
+                old_value="Cfg (64 bytes)",
+                new_value="Cfg (72 bytes)",
             )
         ]
         assert redundant[0].contract_relevance is None
@@ -483,7 +520,8 @@ class TestReportValidatesAgainstSchema:
         ]
         reconciled = [
             Change(
-                ChangeKind.TYPE_FIELD_ADDED, "Cfg::flag",
+                ChangeKind.TYPE_FIELD_ADDED,
+                "Cfg::flag",
                 "conditional field phantom add cleared by build context",
             )
         ]
@@ -502,7 +540,8 @@ class TestReportValidatesAgainstSchema:
 
         old, new = _fp_pair()
         result = compare(
-            old, new,
+            old,
+            new,
             scope_to_public_surface=True,
             reconcile_build_context=True,
             contract_evaluation=True,

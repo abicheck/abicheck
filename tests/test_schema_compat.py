@@ -10,6 +10,7 @@ identical logical content. Tests verify:
 
 import json
 import re
+import warnings
 from pathlib import Path
 
 import pytest
@@ -247,6 +248,217 @@ class TestReserialization:
         d["schema_version"] = 999
         with pytest.raises(IncompatibleSnapshotSchemaError):
             snapshot_from_dict(d)
+
+    def test_older_version_warns_when_a_fact_is_degraded(self):
+        """A snapshot older than SCHEMA_VERSION used to load with no signal
+        at all -- the *_facts_reliable flags degraded silently, and CI
+        (which reads a committed, once-generated baseline against whatever
+        abicheck version its pin currently resolves to -- the "reader newer
+        than snapshot" direction it always hits) never saw anything. Loading
+        a legacy header-derived, clang-producer snapshot should now raise a
+        loud UserWarning naming exactly which facts got degraded."""
+        d = _load_fixture("v4.json")
+        d["schema_version"] = 9
+        d["from_headers"] = True
+        d["ast_producer"] = "clang"
+        with pytest.warns(UserWarning, match="clang_deprecation_facts_reliable"):
+            snap = snapshot_from_dict(d)
+        assert snap.clang_deprecation_facts_reliable is False
+
+    def test_older_version_silent_when_nothing_is_degraded(self):
+        """The opposite of the case above: an older snapshot whose producer
+        isn't affected by any of the reliability flags shouldn't warn at all
+        -- every CI baseline is *always* some number of versions behind, and
+        warning regardless of whether that gap ever mattered would be
+        exactly the noise this fix is not meant to introduce."""
+        d = _load_fixture("v4.json")
+        d["schema_version"] = SCHEMA_VERSION - 1
+        d["from_headers"] = False
+        with warnings.catch_warnings():
+            warnings.simplefilter("error")
+            snapshot_from_dict(d)
+
+    def test_older_version_silent_for_hybrid_producer_flags_no_detector_reads(self):
+        """clang_va_list_facts_reliable / castxml_var_access_facts_reliable
+        each have exactly one consumer, and each gates strictly on an EXACT
+        producer match ("clang"-only, "castxml"-only respectively -- neither
+        includes "hybrid", unlike most of the other flags). Their own value
+        computation still marks both False for a "hybrid" producer (correct
+        for the underlying fact's provenance), so naively listing every
+        False flag would warn about "reduced coverage" a hybrid snapshot's
+        regeneration could never actually restore, since no detector reads
+        either flag for that producer regardless of schema version (Codex
+        review, PR #720)."""
+        d = _load_fixture("v4.json")
+        d["schema_version"] = 22  # < both _MIN_SCHEMA_VERSION_FOR_CLANG_VA_LIST_FACTS
+        # and _MIN_SCHEMA_VERSION_FOR_CASTXML_VAR_ACCESS_FACTS thresholds
+        d["from_headers"] = True
+        d["ast_producer"] = "hybrid"
+        with warnings.catch_warnings():
+            warnings.simplefilter("error")
+            snap = snapshot_from_dict(d)
+        assert snap.clang_va_list_facts_reliable is False
+        assert snap.castxml_var_access_facts_reliable is False
+
+    def test_older_version_warns_for_clang_producer_va_list_flag(self):
+        """The producer filter above must not over-filter: a genuine
+        "clang" producer (not "hybrid") still gets the warning, since
+        diff_symbols._diff_param_va_list DOES consult the flag for that
+        producer."""
+        d = _load_fixture("v4.json")
+        d["schema_version"] = 22
+        d["from_headers"] = True
+        d["ast_producer"] = "clang"
+        with pytest.warns(UserWarning, match="clang_va_list_facts_reliable"):
+            snapshot_from_dict(d)
+
+    def test_degraded_flag_still_warns_after_reserialization_to_current_schema(self):
+        """snapshot_to_dict always re-stamps schema_version to the CURRENT
+        SCHEMA_VERSION on save -- so a legacy snapshot that's loaded (which
+        degrades a flag) and then simply re-saved reads as current-schema on
+        its NEXT load, even though the underlying facts were never
+        regenerated. Gating the warning purely on schema_version would make
+        it silently disappear across exactly this round-trip (Codex review,
+        PR #720) -- it must still fire, driven by the preserved explicit
+        False marker rather than the version number."""
+        d = _load_fixture("v4.json")
+        d["schema_version"] = 9
+        d["from_headers"] = True
+        d["ast_producer"] = "clang"
+        with warnings.catch_warnings(record=True) as first_load_warnings:
+            warnings.simplefilter("always")
+            snap = snapshot_from_dict(d)
+        assert len(first_load_warnings) == 1
+
+        resaved = snapshot_to_dict(snap)
+        assert resaved["schema_version"] == SCHEMA_VERSION
+
+        with pytest.warns(UserWarning, match="clang_deprecation_facts_reliable"):
+            snap2 = snapshot_from_dict(resaved)
+        assert snap2.clang_deprecation_facts_reliable is False
+
+    def test_older_version_silent_for_inferred_header_flags_no_detector_reads(self):
+        """Five of the seven flags' one real consumer requires CONFIRMED
+        (non-inferred) header awareness before it ever reads the flag:
+        clang_restrict/clang_va_list/castxml_var_access's detectors each
+        exit through diff_symbols._both_header_aware, and clang_deprecation/
+        clang_field_initializer's shared consumer
+        (fact_provenance.fact_producer) opens with the identical
+        ``from_headers and not from_headers_inferred`` check. A schema-v1
+        snapshot with no explicit ``from_headers`` key gets it GUESSED true
+        from a populated surface -- real, but not "confirmed" -- so none of
+        these five detectors will ever consult their flag for it (Codex
+        review, PR #720). header_cv_facts_reliable is the one exception
+        exercised here: its consumers (variable/field cv checks) apply
+        regardless of header confirmation, so it still warns."""
+        d = _load_fixture("v1.json")
+        d.pop("from_headers", None)
+        d.pop("ast_producer", None)
+        d["schema_version"] = 1
+        with pytest.warns(UserWarning) as record:
+            snap = snapshot_from_dict(d)
+        assert snap.from_headers is True
+        assert snap.from_headers_inferred is True
+        assert len(record) == 1
+        message = str(record[0].message)
+        assert "header_cv_facts_reliable" in message
+        for degraded_but_unconsulted in (
+            "clang_deprecation_facts_reliable",
+            "clang_field_initializer_facts_reliable",
+            "clang_restrict_facts_reliable",
+            "clang_va_list_facts_reliable",
+            "castxml_var_access_facts_reliable",
+        ):
+            assert degraded_but_unconsulted not in message
+
+
+# ---------------------------------------------------------------------------
+# Exhaustive grid over the degraded-facts warning's (producer x header-
+# confirmation) domain per flag (PR #720 retrospective). The three rounds of
+# review that found the hybrid-producer, inferred-header, and round-trip
+# bugs above each fixed exactly one (flag, producer, header-confirmed) cell
+# at a time; nothing forced every OTHER cell in the same small grid to also
+# be checked, so a fourth wrong cell could easily have shipped unnoticed.
+# The grid is small enough (4 producers x 2 header-confirmation states x 7
+# flags = 56 cells) to enumerate completely rather than keep adding one more
+# hand-picked example per bug report — see
+# ``abicheck/diff_default_value_reliability.py``'s module docstring for the
+# same reasoning applied to the sibling fingerprint-reliability guards, and
+# ``tests/test_fingerprint_reliability_properties.py`` for that exhaustive
+# suite.
+# ---------------------------------------------------------------------------
+
+# Each flag's own DEGRADED-value rule at a schema version below every
+# per-flag threshold (so only the producer term of each flag's real
+# computation in snapshot_from_dict — see SCHEMA_VERSION's own version-
+# history comments — still varies; the schema-threshold term is uniformly
+# "not met" for every flag at schema_version=1).
+_FLAG_DEGRADED_FOR_PRODUCER = {
+    "header_cv_facts_reliable": lambda p: p != "clang",
+    "clang_deprecation_facts_reliable": lambda p: p == "clang",
+    "clang_field_initializer_facts_reliable": lambda p: p != "castxml",
+    "clang_vtable_facts_reliable": lambda p: p == "clang",
+    "clang_restrict_facts_reliable": lambda p: p != "castxml",
+    "clang_va_list_facts_reliable": lambda p: p != "castxml",
+    "castxml_var_access_facts_reliable": lambda p: p != "clang",
+}
+
+# Each flag's own CONSULTED rule -- does the one real detector that reads
+# this flag even reach the point of checking it, for this (producer,
+# header-confirmed) combination. Mirrors the table `snapshot_from_dict`
+# builds (see its own extensive comment for the per-flag reasoning); this
+# is the independently-maintained pin the exhaustive grid test below checks
+# it against.
+_FLAG_CONSULTED_FOR = {
+    "header_cv_facts_reliable": lambda p, h: True,
+    "clang_deprecation_facts_reliable": lambda p, h: h,
+    "clang_field_initializer_facts_reliable": lambda p, h: h,
+    "clang_vtable_facts_reliable": lambda p, h: True,
+    "clang_restrict_facts_reliable": lambda p, h: h,
+    "clang_va_list_facts_reliable": lambda p, h: h and p == "clang",
+    "castxml_var_access_facts_reliable": lambda p, h: h and p == "castxml",
+}
+
+_GRID_PRODUCERS = (None, "clang", "castxml", "hybrid")
+
+
+def _load_with_producer_and_header_confirmation(producer, header_confirmed):
+    """Load a schema-v1 dict (below every per-flag threshold) with the
+    given `ast_producer` and header-confirmation state, returning the
+    UserWarning message (or None if no warning fired)."""
+    d = _load_fixture("v1.json")
+    d["schema_version"] = 1
+    if producer is not None:
+        d["ast_producer"] = producer
+    if header_confirmed:
+        d["from_headers"] = True
+    else:
+        # Omitting the key entirely -- rather than setting it False -- is
+        # what triggers `from_headers_inferred=True` (a GUESSED, not
+        # confirmed, header-aware side): see snapshot_from_dict's own
+        # from_headers-inference comment.
+        d.pop("from_headers", None)
+    with warnings.catch_warnings(record=True) as record:
+        warnings.simplefilter("always")
+        snap = snapshot_from_dict(d)
+    assert snap.functions, (
+        "fixture must carry at least one function for from_headers to infer True"
+    )
+    return str(record[0].message) if record else ""
+
+
+@pytest.mark.parametrize("flag_name", sorted(_FLAG_DEGRADED_FOR_PRODUCER))
+@pytest.mark.parametrize("header_confirmed", [True, False])
+@pytest.mark.parametrize("producer", _GRID_PRODUCERS)
+def test_degraded_facts_warning_grid(producer, header_confirmed, flag_name):
+    message = _load_with_producer_and_header_confirmation(producer, header_confirmed)
+    degraded = _FLAG_DEGRADED_FOR_PRODUCER[flag_name](producer)
+    consulted = _FLAG_CONSULTED_FOR[flag_name](producer, header_confirmed)
+    expect_listed = degraded and consulted
+    assert (flag_name in message) is expect_listed, (
+        f"{flag_name} producer={producer!r} header_confirmed={header_confirmed}: "
+        f"expected listed={expect_listed}, message={message!r}"
+    )
 
 
 # ---------------------------------------------------------------------------

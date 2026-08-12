@@ -355,7 +355,10 @@ def test_parse_types_fields_bases_and_forward_decl_skipped() -> None:
                 },
             ],
         },
-        # A forward declaration of the same kind must NOT emit a (false) record.
+        # A forward declaration with no definition anywhere in this TU emits
+        # an opaque stub (G31 Phase C fact-completeness, PR #719 follow-up)
+        # -- mirrors castxml's own `incomplete="1"` handling instead of the
+        # previous emit-nothing behavior.
         {
             "kind": "CXXRecordDecl",
             "name": "Opaque",
@@ -364,8 +367,13 @@ def test_parse_types_fields_bases_and_forward_decl_skipped() -> None:
         },
     )
     types = {t.name: t for t in _ClangAstParser(root, set(), set()).parse_types()}
-    assert "Opaque" not in types
+    opaque = types["Opaque"]
+    assert opaque.is_opaque is True
+    assert opaque.fields == []
+    assert opaque.bases == []
+    assert opaque.size_bits is None
     derived = types["Derived"]
+    assert derived.is_opaque is False
     assert derived.kind == "struct"
     assert [f.name for f in derived.fields] == ["a", "flags"]
     assert derived.fields[1].is_bitfield is True
@@ -376,6 +384,396 @@ def test_parse_types_fields_bases_and_forward_decl_skipped() -> None:
     assert derived.size_bits is None
     assert derived.fields[0].offset_bits is None
     assert derived.has_anonymous_aggregate_fields is False
+
+
+def test_parse_types_forward_decl_and_definition_collapse_to_one_complete_record() -> (
+    None
+):
+    """A forward declaration followed by its own complete definition in the
+    SAME TU (`struct Foo; struct Foo { int x; };`) -- confirmed with a real
+    clang build that both land in self._records as separate CXXRecordDecl
+    nodes sharing one identity -- must collapse to ONE record (the
+    definition), not two, and must not be flagged opaque."""
+    root = _tu(
+        {
+            "kind": "CXXRecordDecl",
+            "name": "Foo",
+            "tagUsed": "struct",
+            "loc": {"file": "include/foo.h", "line": 1},
+        },
+        {
+            "kind": "CXXRecordDecl",
+            "name": "Foo",
+            "tagUsed": "struct",
+            "loc": {"file": "include/foo.h", "line": 2},
+            "completeDefinition": True,
+            "inner": [{"kind": "FieldDecl", "name": "x", "type": {"qualType": "int"}}],
+        },
+    )
+    types = [
+        t for t in _ClangAstParser(root, set(), set()).parse_types() if t.name == "Foo"
+    ]
+    assert len(types) == 1
+    assert types[0].is_opaque is False
+    assert [f.name for f in types[0].fields] == ["x"]
+
+
+def test_parse_types_definition_before_forward_decl_still_wins() -> None:
+    """Order independence: the definition appearing FIRST in source order
+    must still win over a later forward-decl stub sharing the same
+    identity."""
+    root = _tu(
+        {
+            "kind": "CXXRecordDecl",
+            "name": "Foo",
+            "tagUsed": "struct",
+            "loc": {"file": "include/foo.h", "line": 1},
+            "completeDefinition": True,
+            "inner": [{"kind": "FieldDecl", "name": "x", "type": {"qualType": "int"}}],
+        },
+        {
+            "kind": "CXXRecordDecl",
+            "name": "Foo",
+            "tagUsed": "struct",
+            "loc": {"file": "include/foo.h", "line": 5},
+        },
+    )
+    types = [
+        t for t in _ClangAstParser(root, set(), set()).parse_types() if t.name == "Foo"
+    ]
+    assert len(types) == 1
+    assert types[0].is_opaque is False
+    assert [f.name for f in types[0].fields] == ["x"]
+
+
+@pytest.mark.parametrize(
+    "first_kind, second_kind", [("class", "struct"), ("struct", "class")]
+)
+def test_parse_types_opaque_redecl_kind_canonicalizes_regardless_of_order(
+    first_kind: str, second_kind: str
+) -> None:
+    """`class Handle; struct Handle;` (either order) is legal, compiler-
+    accepted C++ redeclaring one opaque type with different-but-compatible
+    class keys. RecordType.kind must canonicalize to the same value
+    ("struct" -- class/struct are collapsed to one fixed spelling before
+    any min(kind), PR #719 follow-up) regardless of which spelling happened
+    to come first, or reordering the two forward decls alone would flip the
+    emitted kind and produce a false SOURCE_LEVEL_KIND_CHANGED (Codex
+    review, PR #719). Collapsing to one fixed spelling (rather than
+    min()-over-observed-spellings) also matters when the observed SET of
+    redecls itself differs between two otherwise-unchanged snapshots -- see
+    test_parse_types_opaque_redecl_kind_stable_when_a_compatible_redecl_is_added
+    below."""
+    root = _tu(
+        {
+            "kind": "CXXRecordDecl",
+            "name": "Handle",
+            "tagUsed": first_kind,
+            "loc": {"file": "include/foo.h", "line": 1},
+        },
+        {
+            "kind": "CXXRecordDecl",
+            "name": "Handle",
+            "tagUsed": second_kind,
+            "loc": {"file": "include/foo.h", "line": 2},
+        },
+    )
+    types = [
+        t
+        for t in _ClangAstParser(root, set(), set()).parse_types()
+        if t.name == "Handle"
+    ]
+    assert len(types) == 1
+    assert types[0].is_opaque is True
+    assert types[0].kind == "struct"
+
+
+def test_parse_types_opaque_redecl_kind_stable_when_a_compatible_redecl_is_added() -> (
+    None
+):
+    """Codex review, PR #719, follow-up: a snapshot with ONLY `struct H;`
+    must canonicalize to the SAME kind as a later snapshot that adds the
+    legal, semantics-preserving redeclaration `class H;` alongside it --
+    both describe the identical opaque type. Before class/struct were
+    canonicalized to one fixed spelling, min() over the OBSERVED set of
+    redecl spellings changed value the moment `class H;` was added (min
+    over {"struct"} is "struct", but min over {"class", "struct"} is
+    "class"), producing a false SOURCE_LEVEL_KIND_CHANGED for a header
+    change that didn't alter the type's real kind at all."""
+    struct_only = _tu(
+        {
+            "kind": "CXXRecordDecl",
+            "name": "H",
+            "tagUsed": "struct",
+            "loc": {"file": "include/foo.h", "line": 1},
+        }
+    )
+    struct_and_class = _tu(
+        {
+            "kind": "CXXRecordDecl",
+            "name": "H",
+            "tagUsed": "struct",
+            "loc": {"file": "include/foo.h", "line": 1},
+        },
+        {
+            "kind": "CXXRecordDecl",
+            "name": "H",
+            "tagUsed": "class",
+            "loc": {"file": "include/foo.h", "line": 2},
+        },
+    )
+    before = [
+        t
+        for t in _ClangAstParser(struct_only, set(), set()).parse_types()
+        if t.name == "H"
+    ]
+    after = [
+        t
+        for t in _ClangAstParser(struct_and_class, set(), set()).parse_types()
+        if t.name == "H"
+    ]
+    assert len(before) == len(after) == 1
+    assert before[0].kind == after[0].kind == "struct"
+
+
+def test_parse_types_opaque_kind_matches_later_complete_definition_of_same_key() -> (
+    None
+):
+    """Codex review, PR #719, follow-up round two: a snapshot with ONLY
+    `class H;` (no ambiguity -- a single, unopposed opaque redeclaration)
+    must keep reporting its REAL kind ("class"), not a forced canonical
+    spelling. Otherwise, comparing it against a later snapshot where `H`
+    gains a same-key COMPLETE definition (`class H {};`) -- whose kind is
+    always its own real, unmodified `_record_kind`, never overridden --
+    would read as a class/struct mismatch purely because the OPAQUE side
+    was unconditionally relabeled, producing a false
+    SOURCE_LEVEL_KIND_CHANGED even though the class key never changed."""
+    opaque_only = _tu(
+        {
+            "kind": "CXXRecordDecl",
+            "name": "H",
+            "tagUsed": "class",
+            "loc": {"file": "include/foo.h", "line": 1},
+        }
+    )
+    complete_same_key = _tu(
+        {
+            "kind": "CXXRecordDecl",
+            "name": "H",
+            "tagUsed": "class",
+            "loc": {"file": "include/foo.h", "line": 1},
+            "completeDefinition": True,
+        }
+    )
+    before = [
+        t
+        for t in _ClangAstParser(opaque_only, set(), set()).parse_types()
+        if t.name == "H"
+    ]
+    after = [
+        t
+        for t in _ClangAstParser(complete_same_key, set(), set()).parse_types()
+        if t.name == "H"
+    ]
+    assert len(before) == len(after) == 1
+    assert before[0].is_opaque is True
+    assert after[0].is_opaque is False
+    assert before[0].kind == after[0].kind == "class"
+
+
+def test_parse_types_opaque_redecl_merges_deprecated_from_a_later_decl() -> None:
+    """`struct Handle; struct [[deprecated("old")]] Handle;` -- both nodes
+    are non-definitions, so the kind tie-break keeps the FIRST one, which
+    carries no DeprecatedAttr of its own (real clang attaches the attribute
+    per-node). The message must still surface on the merged RecordType
+    instead of vanishing with the discarded node (Codex review, PR #719)."""
+    root = _tu(
+        {
+            "kind": "CXXRecordDecl",
+            "name": "Handle",
+            "tagUsed": "struct",
+            "loc": {"file": "include/foo.h", "line": 1},
+        },
+        {
+            "kind": "CXXRecordDecl",
+            "name": "Handle",
+            "tagUsed": "struct",
+            "loc": {"file": "include/foo.h", "line": 2},
+            "inner": [{"kind": "DeprecatedAttr", "message": "old"}],
+        },
+    )
+    types = [
+        t
+        for t in _ClangAstParser(root, set(), set()).parse_types()
+        if t.name == "Handle"
+    ]
+    assert len(types) == 1
+    assert types[0].is_opaque is True
+    assert types[0].deprecated == "old"
+
+
+def test_parse_types_opaque_redecl_merges_bare_deprecated_marker() -> None:
+    """`struct Handle; struct [[deprecated]] Handle;` (no message) -- the
+    merge must preserve the intentionally meaningful empty-string marker
+    from the discarded later node, not just a truthy message string, or
+    ``deprecated`` wrongly reads as ``None`` (Codex review, PR #719)."""
+    root = _tu(
+        {
+            "kind": "CXXRecordDecl",
+            "name": "Handle",
+            "tagUsed": "struct",
+            "loc": {"file": "include/foo.h", "line": 1},
+        },
+        {
+            "kind": "CXXRecordDecl",
+            "name": "Handle",
+            "tagUsed": "struct",
+            "loc": {"file": "include/foo.h", "line": 2},
+            "inner": [{"kind": "DeprecatedAttr"}],
+        },
+    )
+    types = [
+        t
+        for t in _ClangAstParser(root, set(), set()).parse_types()
+        if t.name == "Handle"
+    ]
+    assert len(types) == 1
+    assert types[0].deprecated == ""
+
+
+def test_parse_types_opaque_redecl_uses_most_recent_deprecated_reason() -> None:
+    """`struct [[deprecated]] H; struct [[deprecated("old")]] H;` -- real
+    clang's own diagnostic uses the MOST RECENT redeclaration's marker as
+    the effective reason (verified empirically: `-Wdeprecated-declarations`
+    reports "old", pointing at the second decl, not the bare first one; the
+    reverse order reports the bare form). The merge must overwrite with each
+    later marker, not keep whichever (bare or messaged) came first (Codex
+    review, PR #719)."""
+    root = _tu(
+        {
+            "kind": "CXXRecordDecl",
+            "name": "H",
+            "tagUsed": "struct",
+            "loc": {"file": "include/foo.h", "line": 1},
+            "inner": [{"kind": "DeprecatedAttr"}],
+        },
+        {
+            "kind": "CXXRecordDecl",
+            "name": "H",
+            "tagUsed": "struct",
+            "loc": {"file": "include/foo.h", "line": 2},
+            "inner": [{"kind": "DeprecatedAttr", "message": "old"}],
+        },
+    )
+    types = [
+        t for t in _ClangAstParser(root, set(), set()).parse_types() if t.name == "H"
+    ]
+    assert len(types) == 1
+    assert types[0].deprecated == "old"
+
+    # Reversed order: the later (now bare) marker wins instead.
+    root2 = _tu(
+        {
+            "kind": "CXXRecordDecl",
+            "name": "H",
+            "tagUsed": "struct",
+            "loc": {"file": "include/foo.h", "line": 1},
+            "inner": [{"kind": "DeprecatedAttr", "message": "old"}],
+        },
+        {
+            "kind": "CXXRecordDecl",
+            "name": "H",
+            "tagUsed": "struct",
+            "loc": {"file": "include/foo.h", "line": 2},
+            "inner": [{"kind": "DeprecatedAttr"}],
+        },
+    )
+    types2 = [
+        t for t in _ClangAstParser(root2, set(), set()).parse_types() if t.name == "H"
+    ]
+    assert len(types2) == 1
+    assert types2[0].deprecated == ""
+
+
+def test_parse_types_opaque_redecl_keeps_public_location_over_private() -> None:
+    """A public `struct Handle;` compatibly redeclared with a different class
+    key in a private header (`class Handle;`) must keep its PUBLIC
+    source_location -- kind canonicalization (class/struct collapsed to one
+    fixed spelling, PR #719 follow-up) must not also drag the private
+    redecl's location along with it, or a genuinely public handle would
+    silently read as PRIVATE_HEADER downstream (Codex review, PR #719)."""
+    root = _tu(
+        {
+            "kind": "CXXRecordDecl",
+            "name": "Handle",
+            "tagUsed": "struct",
+            "loc": {"file": "include/foo.h", "line": 1},
+        },
+        {
+            "kind": "CXXRecordDecl",
+            "name": "Handle",
+            "tagUsed": "class",
+            "loc": {"file": "src/internal.h", "line": 2},
+        },
+    )
+    parser = _ClangAstParser(root, set(), set(), public_header_paths=["include/foo.h"])
+    types = [t for t in parser.parse_types() if t.name == "Handle"]
+    assert len(types) == 1
+    assert types[0].kind == "struct"  # canonicalized to a fixed spelling
+    assert types[0].source_location == "include/foo.h:1"
+
+    # Reversed declaration order: the public one still wins the location.
+    root2 = _tu(
+        {
+            "kind": "CXXRecordDecl",
+            "name": "Handle",
+            "tagUsed": "class",
+            "loc": {"file": "src/internal.h", "line": 1},
+        },
+        {
+            "kind": "CXXRecordDecl",
+            "name": "Handle",
+            "tagUsed": "struct",
+            "loc": {"file": "include/foo.h", "line": 2},
+        },
+    )
+    parser2 = _ClangAstParser(
+        root2, set(), set(), public_header_paths=["include/foo.h"]
+    )
+    types2 = [t for t in parser2.parse_types() if t.name == "Handle"]
+    assert len(types2) == 1
+    assert types2[0].kind == "struct"
+    assert types2[0].source_location == "include/foo.h:2"
+
+
+def test_parse_types_definition_kind_not_overridden_by_opaque_redecl() -> None:
+    """`class Foo;` (unchanged) followed by a definition changing from
+    `class Foo { ... };` to `struct Foo { ... };` -- the opaque forward
+    decl's own canonicalized `opaque_kinds` entry must NOT also apply to
+    the surviving COMPLETE record, or a real kind change on the definition
+    itself would be silently hidden (Codex review, PR #719)."""
+    root = _tu(
+        {
+            "kind": "CXXRecordDecl",
+            "name": "Foo",
+            "tagUsed": "class",
+            "loc": {"file": "include/foo.h", "line": 1},
+        },
+        {
+            "kind": "CXXRecordDecl",
+            "name": "Foo",
+            "tagUsed": "struct",
+            "loc": {"file": "include/foo.h", "line": 2},
+            "completeDefinition": True,
+            "inner": [{"kind": "FieldDecl", "name": "x", "type": {"qualType": "int"}}],
+        },
+    )
+    types = [
+        t for t in _ClangAstParser(root, set(), set()).parse_types() if t.name == "Foo"
+    ]
+    assert len(types) == 1
+    assert types[0].is_opaque is False
+    assert types[0].kind == "struct"  # the definition's own kind, not "class"
 
 
 def test_parse_types_sets_qualified_name_for_namespaced_record() -> None:

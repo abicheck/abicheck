@@ -31,6 +31,7 @@ from abicheck.buildsource.fact_set import (
     FactSetIssue,
     check_fact_compatibility,
     check_fact_set_compatibility,
+    fact_set_rollup_is_inconsistent,
     hash_recipe_id,
     incomplete_families,
     rollup_coverage,
@@ -169,6 +170,76 @@ def test_rollup_fact_set_mixed_present_and_missing_returns_empty() -> None:
     fs = default_fact_set(producer="p", producer_version="1")
     tus = [_tu(fact_set=fs), _tu(fact_set=dict(fs)), _tu()]
     assert rollup_fact_set(tus) == {}
+
+
+def test_fact_set_rollup_is_inconsistent_false_for_agreeing_tus() -> None:
+    fs = default_fact_set(producer="p", producer_version="1")
+    tus = [_tu(fact_set=fs), _tu(fact_set=dict(fs))]
+    assert rollup_fact_set(tus) == fs
+    assert fact_set_rollup_is_inconsistent(tus) is False
+
+
+def test_fact_set_rollup_is_inconsistent_false_when_everyone_is_silent() -> None:
+    """Both roll up to ``{}``, but "no TU ever reported one" is absence, not
+    disagreement -- must not be flagged inconsistent."""
+    tus = [_tu(), _tu()]
+    assert rollup_fact_set(tus) == {}
+    assert fact_set_rollup_is_inconsistent(tus) is False
+
+
+def test_fact_set_rollup_is_inconsistent_true_for_disagreeing_tus() -> None:
+    tus = [
+        _tu(fact_set=default_fact_set(producer="a", producer_version="1")),
+        _tu(fact_set=default_fact_set(producer="b", producer_version="1")),
+    ]
+    assert rollup_fact_set(tus) == {}
+    assert fact_set_rollup_is_inconsistent(tus) is True
+
+
+def test_fact_set_rollup_is_inconsistent_true_for_mixed_presence() -> None:
+    fs = default_fact_set(producer="p", producer_version="1")
+    tus = [_tu(fact_set=fs), _tu(fact_set=dict(fs)), _tu()]
+    assert rollup_fact_set(tus) == {}
+    assert fact_set_rollup_is_inconsistent(tus) is True
+
+
+def test_check_fact_compatibility_inconsistent_rollup_is_not_forgiven_like_absence() -> (
+    None
+):
+    """Both sides collapse to the SAME ``{}`` fact_set as the genuinely
+    both-absent case, but one side's ``{}`` came from an inconsistent
+    mixed-producer pack (not "never reported") -- must not receive the
+    same forgiveness (Codex review, PR #719), including for existence/
+    removal detection: an inconsistent side cannot establish absence
+    either (second round -- unlike the pre-existing asymmetric-absence
+    exemption, which is deliberately untouched)."""
+    compat = check_fact_compatibility({}, {}, old_inconsistent=True)
+    assert not compat.structured_facts_comparable
+    assert not compat.structured_content_comparable
+    assert not compat.opaque_hashes_comparable
+    assert not compat.source_edges_comparable
+    # Symmetric (both absent, neither inconsistent) case is untouched.
+    both_absent = check_fact_compatibility({}, {})
+    assert both_absent.structured_facts_comparable
+    assert both_absent.structured_content_comparable
+
+
+def test_check_fact_compatibility_reports_issue_for_inconsistent_matching_fact_sets() -> (
+    None
+):
+    """Codex review, PR #719, follow-up round two: check_fact_set_compatibility
+    only ever compares the two rolled-up fact_set dicts it's given -- it has
+    no visibility into old_inconsistent/new_inconsistent, so it reports
+    nothing when those dicts happen to be identical. Without an explicit
+    issue for the inconsistency itself, a caller like _diff_fact_coverage
+    that only reports when compat.issues is non-empty would silently
+    suppress findings with no SOURCE_FACT_COVERAGE_INCOMPLETE to explain
+    why."""
+    fs = default_fact_set(producer="p", producer_version="1")
+    compat = check_fact_compatibility(fs, fs, old_inconsistent=True)
+    assert any(i.rule == "fact_set_inconsistent" for i in compat.issues)
+    assert not compat.structured_facts_comparable
+    assert not compat.opaque_hashes_comparable
 
 
 def test_rollup_coverage_worst_of_wins() -> None:
@@ -409,6 +480,28 @@ def test_link_source_abi_no_fact_set_stays_empty() -> None:
     surface = link_source_abi([SourceAbiTu(tu_id="cu://a.cpp")])
     assert surface.coverage["fact_set"] == {}
     assert surface.coverage["fact_family_states"] == {}
+    assert surface.coverage["fact_set_inconsistent"] is False
+
+
+def test_link_source_abi_stamps_fact_set_inconsistent_flag() -> None:
+    """A mixed-producer pack's ``fact_set`` rolls up to ``{}`` (existing
+    behavior), but the surface must also carry a distinct signal that this
+    was an inconsistency, not an absence -- link_source_abi's own rollup
+    call site is what feeds diff_source_abi's fact-compatibility gate
+    (Codex review, PR #719)."""
+    tus = [
+        SourceAbiTu(
+            tu_id="cu://a.cpp",
+            fact_set=default_fact_set(producer="a", producer_version="1"),
+        ),
+        SourceAbiTu(
+            tu_id="cu://b.cpp",
+            fact_set=default_fact_set(producer="b", producer_version="1"),
+        ),
+    ]
+    surface = link_source_abi(tus)
+    assert surface.coverage["fact_set"] == {}
+    assert surface.coverage["fact_set_inconsistent"] is True
 
 
 # -- diff_source_abi: SOURCE_FACT_COVERAGE_INCOMPLETE ------------------------
@@ -461,6 +554,28 @@ def test_diff_fires_on_fact_set_version_mismatch() -> None:
     ]
     assert len(matches) == 1
     assert "fact_set_version_mismatch" in matches[0].description
+
+
+def test_diff_coverage_finding_describes_structured_content_suppression() -> None:
+    """Codex review, PR #719: the coverage finding must name the structured
+    content-change findings it suppresses -- an earlier revision described
+    only opaque-hash/source-edges suppression and, for a fact_set mismatch,
+    explicitly (and by then incorrectly) claimed content-change findings
+    were unaffected."""
+    old_fs = default_fact_set(producer="p", producer_version="1")
+    new_fs = default_fact_set(producer="p", producer_version="2")
+    old = _surface(coverage={"fact_set": old_fs, "fact_family_states": {}})
+    new = _surface(coverage={"fact_set": new_fs, "fact_family_states": {}})
+    changes = diff_source_abi(old, new)
+    matches = [
+        c for c in changes if c.kind == ChangeKind.SOURCE_FACT_COVERAGE_INCOMPLETE
+    ]
+    assert len(matches) == 1
+    description = matches[0].description
+    assert "generated_header_changed" in description
+    assert "public_typedef_target_changed" in description
+    assert "public_macro_value_changed" in description
+    assert "unaffected" not in description
 
 
 def test_diff_fires_on_incomplete_mandatory_family() -> None:
@@ -618,6 +733,7 @@ def test_check_fact_compatibility_name_mismatch_blocks_everything() -> None:
     new["name"] = "some-other-fact-set"
     compat = check_fact_compatibility(old, new)
     assert not compat.structured_facts_comparable
+    assert not compat.structured_content_comparable
     assert not compat.opaque_hashes_comparable
     assert not compat.source_edges_comparable
 
@@ -628,7 +744,13 @@ def test_check_fact_compatibility_matching_recipe_id_overrides_producer_mismatch
     """A differential conformance run (ADR-038 C.6) can prove two differently
     named producers emit byte-comparable opaque hashes; declaring the same
     hash_recipe_id on both sides should override the producer-mismatch gate
-    rather than forcing every future comparison to suppress unnecessarily."""
+    for the two categories it actually vouches for -- rather than forcing
+    every future comparison to suppress unnecessarily -- but NOT for
+    structured_content_comparable (Codex review, PR #719: hash_recipe_id is
+    a declared statement about the opaque-hash canonicalization recipe
+    specifically; it proves nothing about whether structured fact
+    extraction, e.g. what a type_hash is built from, also stayed identical
+    between the two producer versions)."""
     old = default_fact_set(producer="abicheck-clang-plugin", producer_version="0.4")
     old["hash_recipe_id"] = "clang-json-canonical-v3"
     new = default_fact_set(
@@ -636,6 +758,7 @@ def test_check_fact_compatibility_matching_recipe_id_overrides_producer_mismatch
     )
     new["hash_recipe_id"] = "clang-json-canonical-v3"
     compat = check_fact_compatibility(old, new)
+    assert not compat.structured_content_comparable
     assert compat.opaque_hashes_comparable
     assert compat.source_edges_comparable
     # The producer_mismatch issue is still reported for visibility even though
@@ -643,18 +766,78 @@ def test_check_fact_compatibility_matching_recipe_id_overrides_producer_mismatch
     assert any(i.rule == "producer_mismatch" for i in compat.issues)
 
 
-def test_check_fact_compatibility_one_side_empty_stays_comparable() -> None:
-    """A pre-C.8 producer (no fact_set at all) must not gate anything -- only
-    the informational fact_set_unknown warning fires (forward-compat)."""
-    fs = default_fact_set(producer="p", producer_version="1")
-    compat = check_fact_compatibility(fs, {})
+def test_check_fact_compatibility_matching_recipe_id_does_not_override_inconsistent() -> (
+    None
+):
+    """Codex review, PR #719, follow-up: a matching hash_recipe_id must not
+    re-enable opaque-hash/source-edge comparisons for a side flagged
+    inconsistent -- even though `rollup_fact_set()` itself always collapses
+    an inconsistent rollup to `{}` (so this exact shape can't reach here via
+    that caller), `old_fact_set`/`new_fact_set` and
+    `old_inconsistent`/`new_inconsistent` are independent parameters, and a
+    hand-authored or forward-produced source_abi.json can legally set
+    fact_set_inconsistent=True while still carrying non-empty, matching
+    representative fact_set content on both sides."""
+    old = default_fact_set(producer="p", producer_version="1")
+    old["hash_recipe_id"] = "shared-recipe-v1"
+    new = default_fact_set(producer="p", producer_version="1")
+    new["hash_recipe_id"] = "shared-recipe-v1"
+    # Sanity: without the inconsistency flag, the matching recipe id alone
+    # is enough (both sides otherwise agree on everything already).
+    agreeing = check_fact_compatibility(old, new)
+    assert agreeing.opaque_hashes_comparable
+    assert agreeing.source_edges_comparable
+
+    compat = check_fact_compatibility(old, new, old_inconsistent=True)
+    assert not compat.opaque_hashes_comparable
+    assert not compat.source_edges_comparable
+    assert not compat.structured_content_comparable
+    assert not compat.structured_facts_comparable
+    # The reverse direction (new side inconsistent) must be symmetric.
+    compat_reversed = check_fact_compatibility(old, new, new_inconsistent=True)
+    assert not compat_reversed.opaque_hashes_comparable
+    assert not compat_reversed.source_edges_comparable
+
+
+def test_check_fact_compatibility_both_sides_empty_stays_comparable() -> None:
+    """Two genuinely pre-C.8 producers (neither stamps a fact_set at all) must
+    not gate anything -- only the informational fact_set_unknown warning
+    fires (forward-compat, the ORIGINAL C.8 design)."""
+    compat = check_fact_compatibility({}, {})
     assert compat.structured_facts_comparable
+    assert compat.structured_content_comparable
     assert compat.opaque_hashes_comparable
     assert compat.source_edges_comparable
 
 
+def test_check_fact_compatibility_one_side_empty_suppresses_content_only() -> None:
+    """The concrete motivating case (Codex review, PR #719): exactly ONE side
+    stamps a fact_set (e.g. a fresh dump from an extractor that just started
+    participating in this protocol) while the other has none at all (e.g. an
+    already-persisted baseline from before that extractor stamped anything).
+    Unlike the symmetric both-empty case, this asymmetry must NOT be read as
+    "nothing to check" -- the unstamped side could be exactly the legacy
+    producer version the newly-stamped side's own recipe-drift gating exists
+    to guard against, so content comparability defaults to unknown/untrusted.
+    Existence/removal detection is untouched -- that's a separate,
+    pre-existing forward-compat contract this asymmetry doesn't change."""
+    fs = default_fact_set(producer="p", producer_version="1")
+    compat = check_fact_compatibility(fs, {})
+    assert compat.structured_facts_comparable
+    assert not compat.structured_content_comparable
+    assert not compat.opaque_hashes_comparable
+    assert not compat.source_edges_comparable
+    # The reverse direction (new side unstamped, old side stamped) must be
+    # symmetric.
+    compat_reversed = check_fact_compatibility({}, fs)
+    assert compat_reversed.structured_facts_comparable
+    assert not compat_reversed.structured_content_comparable
+    assert not compat_reversed.opaque_hashes_comparable
+    assert not compat_reversed.source_edges_comparable
+
+
 def test_fact_compatibility_is_frozen() -> None:
-    compat = FactCompatibility(True, True, True, ())
+    compat = FactCompatibility(True, True, True, True, ())
     with pytest.raises(AttributeError):
         compat.opaque_hashes_comparable = False  # type: ignore[misc]
 
@@ -876,11 +1059,13 @@ def test_diff_suppresses_generated_header_removal_on_fact_set_name_mismatch() ->
     assert ChangeKind.GENERATED_HEADER_CHANGED not in {c.kind for c in changes}
 
 
-def test_diff_still_reports_content_changes_on_fact_set_name_mismatch() -> None:
-    """Removal detection is suppressed on a contract mismatch, but a content
-    comparison for an identity present on *both* sides stays meaningful
-    regardless -- a type_hash/value means the same thing under any
-    mandatory-family contract."""
+def test_diff_suppresses_content_changes_on_fact_set_name_mismatch() -> None:
+    """A fact_set name mismatch is hard-blocking (rule 1) -- both removal
+    detection AND content-change detection are suppressed, since the two
+    sides don't even agree on what the mandatory-family contract promises
+    (Codex review, PR #719: `structured_content_comparable` closed the
+    previous unconditional content-comparison gap the docstring below used
+    to document as intentional)."""
     old_fs = default_fact_set(producer="p", producer_version="1")
     new_fs = dict(old_fs)
     new_fs["name"] = "some-other-fact-set"
@@ -891,6 +1076,178 @@ def test_diff_still_reports_content_changes_on_fact_set_name_mismatch() -> None:
     )
     new = _surface(
         coverage={"fact_set": new_fs, "fact_family_states": {}},
+        reachable_macros=[_macro_entity("FOO", "2")],
+        reachable_types=[_typedef_entity("Widget_t", "h2")],
+    )
+    changes = diff_source_abi(old, new)
+    kinds = {c.kind for c in changes}
+    assert ChangeKind.PUBLIC_MACRO_VALUE_CHANGED not in kinds
+    assert ChangeKind.PUBLIC_TYPEDEF_TARGET_CHANGED not in kinds
+
+
+def test_diff_still_reports_content_changes_when_fact_sets_agree() -> None:
+    """The ordinary case: matching fact_set on both sides (same producer,
+    same producer_version) keeps content-change detection fully live."""
+    fs = default_fact_set(producer="p", producer_version="1")
+    old = _surface(
+        coverage={"fact_set": fs, "fact_family_states": {}},
+        reachable_macros=[_macro_entity("FOO", "1")],
+        reachable_types=[_typedef_entity("Widget_t", "h1")],
+    )
+    new = _surface(
+        coverage={"fact_set": fs, "fact_family_states": {}},
+        reachable_macros=[_macro_entity("FOO", "2")],
+        reachable_types=[_typedef_entity("Widget_t", "h2")],
+    )
+    changes = diff_source_abi(old, new)
+    kinds = {c.kind for c in changes}
+    assert ChangeKind.PUBLIC_MACRO_VALUE_CHANGED in kinds
+    assert ChangeKind.PUBLIC_TYPEDEF_TARGET_CHANGED in kinds
+
+
+def test_diff_suppresses_content_changes_on_producer_version_mismatch() -> None:
+    """The concrete motivating case (Codex review, PR #719): a producer_version
+    drift alone (same fact_set name/version, same producer) must not be read
+    as a real content change -- the extraction recipe for a given structured
+    fact can change between producer releases (EnumType.underlying_type going
+    from an always-"int" placeholder to a real extracted value on the castxml
+    producer is exactly this shape), so a differing type_hash/value for an
+    UNCHANGED header is indistinguishable from a genuine one without matching
+    producer_version."""
+    old_fs = default_fact_set(producer="p", producer_version="1")
+    new_fs = default_fact_set(producer="p", producer_version="2")
+    old = _surface(
+        coverage={"fact_set": old_fs, "fact_family_states": {}},
+        reachable_macros=[_macro_entity("FOO", "1")],
+        reachable_types=[_typedef_entity("Widget_t", "h1")],
+    )
+    new = _surface(
+        coverage={"fact_set": new_fs, "fact_family_states": {}},
+        reachable_macros=[_macro_entity("FOO", "2")],
+        reachable_types=[_typedef_entity("Widget_t", "h2")],
+    )
+    changes = diff_source_abi(old, new)
+    kinds = {c.kind for c in changes}
+    assert ChangeKind.PUBLIC_MACRO_VALUE_CHANGED not in kinds
+    assert ChangeKind.PUBLIC_TYPEDEF_TARGET_CHANGED not in kinds
+
+
+def test_diff_suppresses_content_changes_when_fact_set_empty_from_inconsistency() -> (
+    None
+):
+    """The concrete motivating case (Codex review, PR #719): one side's
+    `fact_set` is `{}` because its own TUs disagreed on it (a mixed-producer
+    pack), not because nothing was ever reported. That is NOT the same claim
+    as the genuinely-both-absent forgiven case, and must suppress structured
+    content-change findings the same way an asymmetric absence does."""
+    fs = default_fact_set(producer="p", producer_version="1")
+    old = _surface(
+        coverage={
+            "fact_set": {},
+            "fact_set_inconsistent": True,
+            "fact_family_states": {},
+        },
+        reachable_macros=[_macro_entity("FOO", "1")],
+        reachable_types=[_typedef_entity("Widget_t", "h1")],
+    )
+    new = _surface(
+        coverage={"fact_set": fs, "fact_family_states": {}},
+        reachable_macros=[_macro_entity("FOO", "2")],
+        reachable_types=[_typedef_entity("Widget_t", "h2")],
+    )
+    changes = diff_source_abi(old, new)
+    kinds = {c.kind for c in changes}
+    assert ChangeKind.PUBLIC_MACRO_VALUE_CHANGED not in kinds
+    assert ChangeKind.PUBLIC_TYPEDEF_TARGET_CHANGED not in kinds
+
+
+def test_diff_reports_coverage_incomplete_from_bare_inconsistent_flag() -> None:
+    """Codex review, PR #719, follow-up: a surface can carry
+    fact_set_inconsistent=True while BOTH fact_set and fact_family_states are
+    empty -- the marker itself is the only signal in that shape, not a
+    supplement to a non-empty fact_set/families block. Previously has_signal
+    only looked at fact_set/fact_family_states, so this degraded shape
+    produced NO SOURCE_FACT_COVERAGE_INCOMPLETE finding at all even though
+    check_fact_compatibility's own old_inconsistent gating was silently
+    suppressing structured/opaque/source-edge comparisons underneath it."""
+    old = _surface(
+        coverage={
+            "fact_set": {},
+            "fact_set_inconsistent": True,
+            "fact_family_states": {},
+        },
+        reachable_macros=[_macro_entity("FOO", "1")],
+        reachable_types=[_typedef_entity("Widget_t", "h1")],
+    )
+    new = _surface(
+        coverage={"fact_set": {}, "fact_family_states": {}},
+        reachable_macros=[_macro_entity("FOO", "2")],
+        reachable_types=[_typedef_entity("Widget_t", "h2")],
+    )
+    changes = diff_source_abi(old, new)
+    kinds = {c.kind for c in changes}
+    assert ChangeKind.SOURCE_FACT_COVERAGE_INCOMPLETE in kinds
+    # And the content-change findings it explains are indeed suppressed.
+    assert ChangeKind.PUBLIC_MACRO_VALUE_CHANGED not in kinds
+    assert ChangeKind.PUBLIC_TYPEDEF_TARGET_CHANGED not in kinds
+
+
+def test_diff_reports_coverage_incomplete_when_inconsistent_flag_has_matching_fact_sets() -> (
+    None
+):
+    """Codex review, PR #719, follow-up round two: a serialized/forward-
+    produced surface can set fact_set_inconsistent=True while its
+    coverage.fact_set block still carries non-empty, IDENTICAL
+    representative content on both sides (the inconsistency is a fact about
+    the surface's own constituent TUs, not about the rolled-up dict this
+    comparison sees). Previously check_fact_set_compatibility found no
+    producer/version mismatch between two identical fact_sets, so
+    compat.issues stayed empty and _diff_fact_coverage's early return fired
+    with NO SOURCE_FACT_COVERAGE_INCOMPLETE explanation, even though
+    check_fact_compatibility's own old_inconsistent gating was silently
+    suppressing every category underneath it."""
+    fs = default_fact_set(producer="p", producer_version="1")
+    old = _surface(
+        coverage={
+            "fact_set": fs,
+            "fact_set_inconsistent": True,
+            "fact_family_states": {},
+        },
+        reachable_macros=[_macro_entity("FOO", "1")],
+        reachable_types=[_typedef_entity("Widget_t", "h1")],
+    )
+    new = _surface(
+        coverage={"fact_set": fs, "fact_family_states": {}},
+        reachable_macros=[_macro_entity("FOO", "2")],
+        reachable_types=[_typedef_entity("Widget_t", "h2")],
+    )
+    changes = diff_source_abi(old, new)
+    kinds = {c.kind for c in changes}
+    assert ChangeKind.SOURCE_FACT_COVERAGE_INCOMPLETE in kinds
+    assert ChangeKind.PUBLIC_MACRO_VALUE_CHANGED not in kinds
+    assert ChangeKind.PUBLIC_TYPEDEF_TARGET_CHANGED not in kinds
+
+
+def test_diff_still_reports_content_changes_when_inconsistent_flag_is_string_false() -> (
+    None
+):
+    """Codex review, PR #719, fourth round: a hand-edited/forward-produced
+    ``source_abi.json`` storing this flag as the JSON-looking-but-wrong
+    string `"false"` (not the real boolean) must NOT be read as truthy --
+    `bool("false")` is `True` in Python, which would wrongly suppress a
+    genuinely consistent surface's content-change findings."""
+    fs = default_fact_set(producer="p", producer_version="1")
+    old = _surface(
+        coverage={
+            "fact_set": fs,
+            "fact_set_inconsistent": "false",
+            "fact_family_states": {},
+        },
+        reachable_macros=[_macro_entity("FOO", "1")],
+        reachable_types=[_typedef_entity("Widget_t", "h1")],
+    )
+    new = _surface(
+        coverage={"fact_set": fs, "fact_family_states": {}},
         reachable_macros=[_macro_entity("FOO", "2")],
         reachable_types=[_typedef_entity("Widget_t", "h2")],
     )

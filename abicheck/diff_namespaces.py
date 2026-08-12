@@ -548,24 +548,117 @@ def _origin_by_name(types: list[RecordType]) -> dict[str, ScopeOrigin]:
     return out
 
 
+def _stable_keys_compatible(a: str, b: str) -> bool:
+    """Whether stable-keys *a* and *b* could be two different-completeness
+    spellings of the same declaration path, rather than two genuinely
+    different declarations that merely share a trailing segment.
+
+    True when the shorter key's own ``"::"``-segments equal the same
+    number of *trailing* segments of the longer key -- i.e. one is a
+    (possibly bare) suffix of the other (``"check_ranges"`` vs.
+    ``"oneapi::dal::detail::check_ranges"``; ``"ns::check_ranges"`` vs.
+    ``"check_ranges"``). Two keys that both carry multiple segments but
+    diverge anywhere in that trailing run (``"api::sort"`` vs.
+    ``"detail::sort"``) are *not* compatible -- deliberately: when a
+    dumper backend under-qualifies a name it drops a *prefix*, never
+    replaces an inner segment, so a genuine mismatch there means these are
+    two different declarations, not two spellings of one.
+
+    **Residual, deliberately-accepted gap** (Codex review, fresh evidence):
+    when the shorter key is *bare* (a single segment, identical to the
+    leaf itself -- e.g. an alias declared with no namespace context beyond
+    the experimental marker, ``experimental::sort`` stripping to bare
+    ``"sort"``), this reduces to plain leaf matching, and a genuinely
+    unrelated declaration that happens to share both that leaf and (via
+    some other aliasing) the removed alias's mangled symbol
+    (``experimental::sort`` vs. an unrelated ``detail::sort``) is wrongly
+    treated as compatible, suppressing a real removal. There is no further
+    string-only signal available to break this tie: a dumper backend
+    under-qualifying a name and a coincidental same-leaf collision produce
+    *the exact same bare stable-key*, and the two fixes are in direct
+    tension -- requiring more than one segment before allowing suppression
+    closes this gap but reopens the original reported bug for every alias
+    declared with no namespace context beyond ``experimental::`` itself
+    (also a real, and more common, shape). This function resolves that
+    tension in favor of the originally reported, verified false-positive
+    (the far more common shape in practice: a genuinely-unqualified
+    top-level experimental alias whose target happens to share a leaf
+    *and* be reachable via the identical mangled symbol is a narrow,
+    largely theoretical construction). Closing it for real needs evidence
+    this module does not have access to -- e.g. a per-declaration source
+    location correlated against the target's own definition site -- not a
+    cleverer string comparison.
+    """
+    segs_a, segs_b = _segments(a), _segments(b)
+    if not segs_a or not segs_b:
+        return False
+    n = min(len(segs_a), len(segs_b))
+    return segs_a[-n:] == segs_b[-n:]
+
+
+def _identity_stable_keys(items: list[_IndexItem]) -> dict[object, set[str]]:
+    """Flatten a flat ``_IndexItem`` list into ``{identity: {stripped, ...}}``,
+    for :func:`_findings_for`'s dumper-qualification-drift suppression check.
+
+    Mirrors what was originally a raw-``f.mangled``-keyed helper, but keyed
+    off ``_IndexItem.identity`` instead -- i.e. already gated through
+    :func:`_looks_like_real_mangled_name`, not a raw, possibly-fallback
+    ``Function.mangled`` -- so this suppression reuses the SAME
+    evidence-quality bar layer 2 of :func:`_paired_stable_indices` requires,
+    rather than reintroducing the bare-name-fallback false-alias bug that
+    bar was built to close. A raw key's items are not always one
+    declaration (two overloads can share a layer-1 bucket -- see
+    ``_func_index_items``), so this is built from the *flat* item list, not
+    from a paired index's already-bucketed values, and each item
+    contributes its own ``stripped`` independently.
+
+    Each ``stripped`` value is signature-stripped before being recorded:
+    ``_IndexItem.stripped`` deliberately keeps a demangled entry's
+    parameter list (needed for layer-1 overload disambiguation), but a
+    bare-named declaration demangles to a full signature
+    (``"ns::check_ranges()"``) while an already-qualified declared name on
+    the other snapshot side never carries one (``"check_ranges"``), so
+    comparing those two raw values directly always mismatches on the
+    trailing ``"()"`` alone -- the exact false-negative this suppression
+    check exists to close, reappearing through a different door.
+    """
+    out: dict[object, set[str]] = {}
+    for item in items:
+        if item.identity is not None:
+            out.setdefault(item.identity, set()).add(_strip_param_signature(item.stripped))
+    return out
+
+
 def _classify_experimental_event(
     old_exp: list[str],
     old_stable: list[str],
     new_exp: list[str],
     new_stable: list[str],
+    *,
+    still_linked: bool = False,
 ) -> str | None:
     """Return ``"graduated"``, ``"removed"``, or ``None`` for a key pair.
 
     Graduation requires an experimental presence in old AND a new stable
     twin that did not exist before. Removal requires no replacement on
     either side. Everything else is silent.
+
+    *still_linked* — resolved by the caller via identity (mangled-symbol)
+    lookup, always ``False`` for the type-sourced path (``RecordType`` has
+    no identity evidence -- see ``_type_index_items``) — suppresses a
+    would-be "removed" classification: dumper backends can populate
+    ``Function.name`` with different qualification for the identical
+    linked symbol across snapshot sides, which can change this key's
+    bucket without the symbol actually disappearing. A real removal is
+    never linked in ``new`` at all, so this never masks a genuine break
+    (Codex review finding).
     """
     if not old_exp:
         return None
     if new_exp and new_stable and not old_stable:
         return "graduated"
     if not new_exp and not new_stable and not old_stable:
-        return "removed"
+        return None if still_linked else "removed"
     return None
 
 
@@ -652,13 +745,40 @@ def _findings_for(
     *,
     old_origins: dict[str, ScopeOrigin] | None = None,
     new_origins: dict[str, ScopeOrigin] | None = None,
+    old_items: list[_IndexItem] | None = None,
+    new_items: list[_IndexItem] | None = None,
 ) -> list[Change]:
     """Walk old/new indices, emitting one finding per classified event.
 
     *old_origins*/*new_origins* are ``None`` for the function-sourced path
     (always reliably public) or a ``{qualified_name: ScopeOrigin}`` map for
     the type-sourced path (public only when ``ScopeOrigin.PUBLIC_HEADER``).
+
+    *old_items*/*new_items* are the flat (pre-pairing) ``_IndexItem`` lists
+    the caller built ``old_index``/``new_index`` from, used only for the
+    dumper-qualification-drift suppression check below -- ``None`` (the
+    default) disables it entirely, degrading to the pre-suppression
+    behaviour. Always empty-equivalent for the type-sourced path since
+    ``_type_index_items`` never assigns identity.
     """
+    # Grouped by RAW (stripped, leaf) key, not by qname: two overloads can
+    # share one identical, undemangled declared qname (`_qualified_
+    # function_name` returns a name-with-"::"  as-is, no signature), so a
+    # qname-keyed `{qname: identity}` map would silently collapse their two
+    # distinct identities onto one (whichever item's entry a dict comp
+    # visits last) -- corrupting the per-item correlation the `still_linked`
+    # check below depends on (Codex review, fresh evidence: reproduced with
+    # two same-qname overloads, one genuinely removed, one surviving under a
+    # differently-qualified spelling -- the dict collision let the survivor's
+    # identity stand in for the removed sibling's too, wrongly suppressing
+    # the real removal). Matching items back to a bucket structurally --
+    # by raw-key membership, exactly mirroring how `_paired_stable_indices`
+    # itself assembled that bucket -- keeps every item's own identity intact
+    # regardless of how many items share a qname string.
+    old_by_raw: dict[tuple[str, str], list[_IndexItem]] = {}
+    for item in old_items or []:
+        old_by_raw.setdefault((item.stripped, item.leaf), []).append(item)
+    new_identity_stable_keys = _identity_stable_keys(new_items or [])
     out: list[Change] = []
     for (stable_key, leaf), qnames in old_index.items():
         old_exp, old_stable = _split_experimental(qnames, experimental_namespaces)
@@ -669,11 +789,64 @@ def _findings_for(
             new_qnames,
             experimental_namespaces,
         )
+        # Recover the exact `_IndexItem`s that make up this bucket -- via
+        # raw-key membership, not qname -- so `still_linked` below can use
+        # each item's own identity even when several items share a qname
+        # string. `stable_key` can be a merged `frozenset` of raw keys here
+        # (see `_paired_stable_indices`) once two version-segment-aliased
+        # spellings have already been unioned into one bucket; a singleton
+        # bucket's own key IS its one raw key.
+        old_key_raw_keys: frozenset[tuple[str, str]]
+        if isinstance(stable_key, frozenset):
+            old_key_raw_keys = stable_key
+        else:
+            assert isinstance(stable_key, str)
+            old_key_raw_keys = frozenset({(stable_key, leaf)})
+        old_key_items = [
+            item for raw_key in old_key_raw_keys for item in old_by_raw.get(raw_key, [])
+        ]
+        old_exp_items = [
+            item
+            for item in old_key_items
+            if any(s in experimental_namespaces for s in _segments(item.qname))
+        ]
+        # Independently confirm a would-be "removed" declaration's
+        # underlying symbol is genuinely gone under a *compatible* spelling
+        # of its own qualified path, rather than merely re-bucketed by a
+        # declared-name qualification change between snapshot sides.
+        #
+        # `all(...)`, not `any(...)` (Codex review, fresh evidence): a
+        # bucket can hold *multiple* overloads that share one declared
+        # name and therefore one (stable_key, leaf) key when neither side
+        # demangles (header-derived Function.name carries no parameter
+        # list at all, so two overloads with different mangled symbols
+        # collapse into one `old_exp` list). `any(...)` would let a single
+        # surviving sibling overload's mangled symbol suppress the *whole*
+        # bucket's removal, silently hiding a genuinely removed sibling
+        # overload. Requiring every entry to independently correlate to a
+        # survivor still suppresses correctly for the common
+        # single-overload case (`all` over one element is `any` over one
+        # element) while never masking a real removal sitting alongside an
+        # unrelated survivor. `old_exp_items` is non-empty whenever `old_exp`
+        # is (same underlying declarations, just recovered structurally), so
+        # `all(...)` over it is never vacuously true here.
+        still_linked = bool(old_exp_items) and all(
+            item.identity is not None
+            and any(
+                _stable_keys_compatible(
+                    _strip_param_signature(item.stripped),
+                    candidate,
+                )
+                for candidate in new_identity_stable_keys.get(item.identity, ())
+            )
+            for item in old_exp_items
+        )
         event = _classify_experimental_event(
             old_exp,
             old_stable,
             new_exp,
             new_stable,
+            still_linked=still_linked,
         )
         if event is None:
             continue
@@ -717,22 +890,22 @@ def detect_experimental_namespace_changes(
     graduation event.
     """
     out: list[Change] = []
-    old_func_index, new_func_index = _paired_stable_indices(
-        _func_index_items(old, experimental_namespaces),
-        _func_index_items(new, experimental_namespaces),
-    )
+    old_func_items = _func_index_items(old, experimental_namespaces)
+    new_func_items = _func_index_items(new, experimental_namespaces)
+    old_func_index, new_func_index = _paired_stable_indices(old_func_items, new_func_items)
     out.extend(
         _findings_for(
             old_func_index,
             new_func_index,
             experimental_namespaces,
             "declaration",
+            old_items=old_func_items,
+            new_items=new_func_items,
         )
     )
-    old_type_index, new_type_index = _paired_stable_indices(
-        _type_index_items(old, experimental_namespaces),
-        _type_index_items(new, experimental_namespaces),
-    )
+    old_type_items = _type_index_items(old, experimental_namespaces)
+    new_type_items = _type_index_items(new, experimental_namespaces)
+    old_type_index, new_type_index = _paired_stable_indices(old_type_items, new_type_items)
     out.extend(
         _findings_for(
             old_type_index,
@@ -741,6 +914,8 @@ def detect_experimental_namespace_changes(
             "type",
             old_origins=_origin_by_name(old.types),
             new_origins=_origin_by_name(new.types),
+            old_items=old_type_items,
+            new_items=new_type_items,
         )
     )
     return out

@@ -318,9 +318,12 @@ def test_extract_runs_in_compile_unit_directory(tmp_path: Path, monkeypatch) -> 
 
     class _Result:
         returncode = 0
+        stdout = ""
         stderr = ""
 
     def _fake_run(cmd: list[str], **kw: object) -> _Result:
+        if "-o" not in cmd:  # the --version compiler-identity probe
+            return _Result()
         captured["cwd"] = kw.get("cwd")
         out = cmd[cmd.index("-o") + 1]
         Path(out).write_text('<GCC_XML><File id="f1" name="foo.h"/></GCC_XML>')
@@ -346,9 +349,12 @@ def test_extract_uses_deadline_bounded_not_raw_subprocess(monkeypatch) -> None:
 
     class _Result:
         returncode = 0
+        stdout = ""
         stderr = ""
 
     def _fake_run(cmd, **kw):  # type: ignore[no-untyped-def]
+        if "-o" not in cmd:  # the --version compiler-identity probe
+            return _Result()
         seen.update(kw)
         out = cmd[cmd.index("-o") + 1]
         Path(out).write_text('<GCC_XML><File id="f1" name="foo.h"/></GCC_XML>')
@@ -532,9 +538,12 @@ def test_extract_unredacts_home_for_replay(tmp_path: Path, monkeypatch) -> None:
 
     class _Result:
         returncode = 0
+        stdout = ""
         stderr = ""
 
     def _fake_run(cmd: list[str], **kw: object) -> _Result:
+        if "-o" not in cmd:  # the --version compiler-identity probe
+            return _Result()
         captured["cmd"] = cmd
         captured["cwd"] = kw.get("cwd")
         out = cmd[cmd.index("-o") + 1]
@@ -570,9 +579,12 @@ def test_extract_unredacts_home_in_macro_value(tmp_path: Path, monkeypatch) -> N
 
     class _Result:
         returncode = 0
+        stdout = ""
         stderr = ""
 
     def _fake_run(cmd: list[str], **kw: object) -> _Result:
+        if "-o" not in cmd:  # the --version compiler-identity probe
+            return _Result()
         captured["cmd"] = cmd
         out = cmd[cmd.index("-o") + 1]
         Path(out).write_text('<GCC_XML><File id="f1" name="foo.h"/></GCC_XML>')
@@ -994,6 +1006,490 @@ def test_parse_root_omits_unscoped_typedefs() -> None:
     assert any(e.qualified_name == "Rec" for e in tu.types)
 
 
+# -- fact_set / coverage stamping (Codex review, PR #719) --------------------
+
+
+def test_parse_root_stamps_fact_set_and_coverage() -> None:
+    """The castxml extractor previously never stamped ``fact_set``/``coverage``
+    at all, so two castxml-produced TUs compared as if neither carried a
+    fact_set identity -- silently exempting every castxml comparison from the
+    producer/producer_version recipe-drift gating this ADR-038 C.8 apparatus
+    exists to provide."""
+    from xml.etree.ElementTree import Element, SubElement
+
+    root = Element("GCC_XML")
+    SubElement(root, "File", id="f1", name="foo.h")
+    SubElement(root, "FundamentalType", id="t_int", name="int")
+    SubElement(root, "Location", id="loc1", file="f1", line="3")
+    SubElement(
+        root, "Class", id="c1", name="Widget", size="64", align="64", location="loc1"
+    )
+
+    extractor = CastxmlSourceExtractor()
+    tu = extractor._parse_root(
+        root, _cu(), public_header_roots=["foo.h"], target_id="target://libfoo"
+    )
+    assert tu.fact_set["producer"] == "castxml-source"
+    assert tu.fact_set["producer_version"] == CASTXML_EXTRACTOR_VERSION
+    # castxml's own bundled Clang runs in gcc-emulation mode by default (no
+    # MSVC compiler_binary override configured), never the direct
+    # `clang -ast-dump=json` recipe default_fact_set's "clang" default names.
+    assert tu.fact_set["compiler_family"] == "gnu"
+    # Families this extractor genuinely collects.
+    assert tu.coverage["types"] == "complete"
+    # Families this extractor never attempts at all -- a permanent producer
+    # limitation, not a collection failure.
+    for family in ("macros", "templates", "inline_bodies", "source_edges"):
+        assert tu.coverage[family] == "unsupported"
+
+
+def test_parse_root_stamps_compiler_version_from_castxml_probe(monkeypatch) -> None:
+    """Codex review, PR #719: an unstamped compiler_version means two runs on
+    the same abicheck release but different castxml/bundled-Clang builds
+    would be silently treated as recipe-agreeing -- deterministic coverage
+    for the probe wiring, independent of whether a real castxml happens to
+    be on this host's PATH."""
+    from abicheck.buildsource.source_extractors import castxml as castxml_mod
+
+    castxml_mod._castxml_tool_version.cache_clear()
+    monkeypatch.setattr(
+        castxml_mod, "_castxml_tool_version", lambda _bin, *_args: "0.6.20260105"
+    )
+    extractor = CastxmlSourceExtractor()
+    tu = extractor._parse_root(
+        _root_with_one_type(), _cu(), public_header_roots=["foo.h"], target_id=""
+    )
+    assert tu.fact_set["compiler_version"] == "0.6.20260105"
+
+
+def test_castxml_tool_version_degrades_to_empty_on_missing_binary() -> None:
+    from abicheck.buildsource.source_extractors.castxml import _castxml_tool_version
+
+    _castxml_tool_version.cache_clear()
+    assert _castxml_tool_version("definitely-not-a-real-binary-xyz") == ""
+
+
+def test_castxml_tool_version_includes_bundled_clang_identity(monkeypatch) -> None:
+    """Codex review, PR #719, second round: two castxml installs sharing the
+    same castxml release but bundling a different Clang must not read as
+    the same compiler_version -- the bundled Clang is what actually resolves
+    a compiler-selected fact like an unfixed enum's underlying type."""
+    import subprocess as subprocess_mod
+
+    from abicheck.buildsource.source_extractors import castxml as castxml_mod
+
+    castxml_mod._castxml_tool_version.cache_clear()
+
+    def fake_run(*_args, **_kwargs):
+        return subprocess_mod.CompletedProcess(
+            args=["castxml", "--version"],
+            returncode=0,
+            stdout=(
+                "castxml version 0.6.3\n\n"
+                "CastXML project maintained and supported by Kitware "
+                "(kitware.com).\n\n"
+                "Ubuntu clang version 17.0.6 (9ubuntu1)\n"
+                "Target: x86_64-pc-linux-gnu\n"
+                "Thread model: posix\n"
+                "InstalledDir:\n"
+            ),
+            stderr="",
+        )
+
+    monkeypatch.setattr(castxml_mod.deadline, "run_bounded", fake_run)
+    version = castxml_mod._castxml_tool_version("castxml")
+    assert version.startswith("0.6.3")
+    assert "clang version 17.0.6" in version
+    castxml_mod._castxml_tool_version.cache_clear()
+
+
+def test_castxml_tool_version_recognizes_llvm_spelled_banner(monkeypatch) -> None:
+    """Codex review, PR #719, third round: some castxml/frontend builds spell
+    the bundled-compiler banner line "LLVM version ..." rather than "clang
+    version ..." (the same variance `dumper_castxml_probe._CLANG_VERSION_RE`
+    already documents/handles) -- two installs differing only in that
+    spelling must not collapse to the identical compiler_version."""
+    import subprocess as subprocess_mod
+
+    from abicheck.buildsource.source_extractors import castxml as castxml_mod
+
+    castxml_mod._castxml_tool_version.cache_clear()
+
+    def fake_run(*_args, **_kwargs):
+        return subprocess_mod.CompletedProcess(
+            args=["castxml", "--version"],
+            returncode=0,
+            stdout=(
+                "castxml version 0.6.3\n\n"
+                "CastXML project maintained and supported by Kitware "
+                "(kitware.com).\n\n"
+                "LLVM version 18.1.8\n"
+                "Target: x86_64-pc-linux-gnu\n"
+            ),
+            stderr="",
+        )
+
+    monkeypatch.setattr(castxml_mod.deadline, "run_bounded", fake_run)
+    version = castxml_mod._castxml_tool_version("castxml")
+    assert "LLVM version 18.1.8" in version
+    castxml_mod._castxml_tool_version.cache_clear()
+
+
+def test_castxml_tool_version_reads_stderr_banner(monkeypatch) -> None:
+    """Codex review, PR #719, fourth round: some castxml wrapper/build
+    combinations write the --version banner to stderr rather than stdout
+    (dumper_castxml_probe.py's own combined-transcript read already handles
+    this) -- the probe must not silently return "" for those installs."""
+    import subprocess as subprocess_mod
+
+    from abicheck.buildsource.source_extractors import castxml as castxml_mod
+
+    castxml_mod._castxml_tool_version.cache_clear()
+
+    def fake_run(*_args, **_kwargs):
+        return subprocess_mod.CompletedProcess(
+            args=["castxml", "--version"],
+            returncode=0,
+            stdout="",
+            stderr="castxml version 0.6.3\nUbuntu clang version 17.0.6\n",
+        )
+
+    monkeypatch.setattr(castxml_mod.deadline, "run_bounded", fake_run)
+    version = castxml_mod._castxml_tool_version("castxml")
+    assert version.startswith("0.6.3")
+    assert "clang version 17.0.6" in version
+    castxml_mod._castxml_tool_version.cache_clear()
+
+
+def test_castxml_tool_version_matches_banner_case_insensitively(monkeypatch) -> None:
+    """Codex review, PR #719, fourth round: a build that capitalizes
+    "CastXML version ..." must still be recognized -- mirrors
+    dumper_castxml_probe's case-insensitive ``_CASTXML_VERSION_RE``."""
+    import subprocess as subprocess_mod
+
+    from abicheck.buildsource.source_extractors import castxml as castxml_mod
+
+    castxml_mod._castxml_tool_version.cache_clear()
+
+    def fake_run(*_args, **_kwargs):
+        return subprocess_mod.CompletedProcess(
+            args=["castxml", "--version"],
+            returncode=0,
+            stdout="CastXML Version 0.6.3\n",
+            stderr="",
+        )
+
+    monkeypatch.setattr(castxml_mod.deadline, "run_bounded", fake_run)
+    version = castxml_mod._castxml_tool_version("castxml")
+    assert version.startswith("0.6.3")
+    castxml_mod._castxml_tool_version.cache_clear()
+
+
+def test_castxml_tool_version_is_bound_by_deadline_run_bounded(monkeypatch) -> None:
+    """Codex review, PR #719, fifth round: the probe previously called plain
+    ``subprocess.run(timeout=5)``, ignoring an active scan ``--budget``
+    deadline shorter than 5s -- it must go through the same
+    deadline-aware bounded path (``deadline.run_bounded``, via
+    ``run_bounded_for_extraction``) as every other subprocess this
+    extractor runs. Outside an active deadline scope, a local timeout
+    still degrades to "" (not raise) -- see the next test for the
+    genuinely-active-scan-deadline case, which does not degrade."""
+    from abicheck import deadline
+    from abicheck.buildsource.source_extractors import castxml as castxml_mod
+
+    castxml_mod._castxml_tool_version.cache_clear()
+    seen: dict[str, object] = {}
+
+    def fake_run_bounded(cmd, **kw):  # type: ignore[no-untyped-def]
+        seen["cmd"] = cmd
+        seen["timeout"] = kw.get("timeout")
+        raise deadline.DeadlineExceeded(-1.0)
+
+    monkeypatch.setattr(castxml_mod.deadline, "run_bounded", fake_run_bounded)
+    assert castxml_mod._castxml_tool_version("castxml") == ""
+    assert seen["cmd"] == ["castxml", "--version"]
+    assert seen["timeout"] == 5
+    castxml_mod._castxml_tool_version.cache_clear()
+
+
+def test_castxml_tool_version_reraises_deadline_exceeded_under_active_budget(
+    monkeypatch,
+) -> None:
+    """Codex review, PR #719, sixth round: a genuinely exhausted scan
+    --budget must stay observable, not be silently absorbed into an
+    empty identity -- a cache lookup keyed on that "" could otherwise
+    proceed past an expired deadline with no further check in between.
+    Deliberately NOT wrapped into SourceExtractionError: both of this
+    function's callers must see the same un-swallowed
+    deadline.DeadlineExceeded that _replay_cache_lookup()'s own bare
+    deadline.check() already lets propagate for this phase."""
+    from abicheck import deadline
+    from abicheck.buildsource.source_extractors import castxml as castxml_mod
+
+    castxml_mod._castxml_tool_version.cache_clear()
+
+    def fake_run_bounded(cmd, **kw):  # type: ignore[no-untyped-def]
+        raise deadline.DeadlineExceeded(-1.0)
+
+    monkeypatch.setattr(castxml_mod.deadline, "run_bounded", fake_run_bounded)
+    with deadline.deadline_scope(-1.0):  # already-exhausted active budget
+        with pytest.raises(deadline.DeadlineExceeded):
+            castxml_mod._castxml_tool_version("castxml")
+    castxml_mod._castxml_tool_version.cache_clear()
+
+
+def test_castxml_tool_version_refreshes_when_executable_is_swapped(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """Codex review, PR #719, sixth round: caching the probe by binary PATH
+    alone means a long-lived process keeps serving the OLD identity forever
+    if the executable AT THAT SAME PATH is replaced in place (an in-place
+    upgrade, or a swapped PATH entry) without the process restarting.
+    ``_executable_stat_key()``'s dev/ino/mtime/size, folded into the
+    lru_cache key by real callers, must make a same-path swap re-probe."""
+    import os
+    import subprocess as subprocess_mod
+
+    from abicheck.buildsource.source_extractors import castxml as castxml_mod
+
+    castxml_mod._castxml_tool_version.cache_clear()
+    exe = tmp_path / "castxml"
+    exe.write_text("v1")
+    responses = iter(["castxml version 1.0.0\n", "castxml version 2.0.0\n"])
+
+    def fake_run(*_args, **_kwargs):
+        return subprocess_mod.CompletedProcess(
+            args=["castxml", "--version"],
+            returncode=0,
+            stdout=next(responses),
+            stderr="",
+        )
+
+    monkeypatch.setattr(castxml_mod.deadline, "run_bounded", fake_run)
+    monkeypatch.setattr(castxml_mod.shutil, "which", lambda _bin: str(exe))
+
+    key1 = castxml_mod._executable_stat_key(str(exe))
+    assert castxml_mod._castxml_tool_version(str(exe), *key1) == "1.0.0"
+
+    # "Swap" the executable at the same path -- content and mtime change.
+    exe.write_text("v2, a different length")
+    os.utime(exe, ns=(exe.stat().st_atime_ns + 10**9, exe.stat().st_mtime_ns + 10**9))
+    key2 = castxml_mod._executable_stat_key(str(exe))
+    assert key2 != key1  # the stat signature actually changed
+    assert castxml_mod._castxml_tool_version(str(exe), *key2) == "2.0.0"
+    castxml_mod._castxml_tool_version.cache_clear()
+
+
+def test_castxml_extractor_cache_identity_extra_folds_probed_tool_version(
+    monkeypatch,
+) -> None:
+    """Codex review, PR #719: without this hook a warm SourceAbiCache replays
+    a stale SourceAbiTu after the castxml binary at the same path is
+    upgraded/swapped, since CASTXML_EXTRACTOR_VERSION alone doesn't change.
+    ``source_replay._extractor_version()`` folds ``cache_identity_extra()``
+    into the D8 TU cache key when an extractor exposes one -- verify this
+    extractor exposes exactly the probed castxml/bundled-Clang identity."""
+    from abicheck.buildsource.source_extractors import castxml as castxml_mod
+
+    castxml_mod._castxml_tool_version.cache_clear()
+    monkeypatch.setattr(
+        castxml_mod, "_castxml_tool_version", lambda _bin, *_args: "0.6.3; clang 17.0.6"
+    )
+    extractor = CastxmlSourceExtractor(castxml_bin="my-castxml")
+    assert extractor.cache_identity_extra() == "0.6.3; clang 17.0.6"
+
+
+def test_cache_identity_extra_falls_back_to_stat_when_version_unparseable(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """Codex review, PR #719, seventh round: two DIFFERENT broken/unparseable
+    castxml installs at the same path must not both collapse to the same
+    uninformative "" cache identity -- cache_identity_extra() falls back to
+    the executable's own stat signature so a same-path swap between two
+    such installs still changes the D8 TU cache key."""
+    from abicheck.buildsource.source_extractors import castxml as castxml_mod
+
+    castxml_mod._castxml_tool_version.cache_clear()
+    monkeypatch.setattr(castxml_mod, "_castxml_tool_version", lambda *_a: "")
+    exe = tmp_path / "castxml"
+    exe.write_text("broken")
+    monkeypatch.setattr(castxml_mod.shutil, "which", lambda _bin: str(exe))
+    extractor = CastxmlSourceExtractor(castxml_bin=str(exe))
+
+    identity1 = extractor.cache_identity_extra()
+    assert identity1.startswith("stat:")
+    assert identity1 != ""
+
+    # A different broken executable at the SAME path must change identity.
+    exe.write_text("a different broken binary, different size")
+    identity2 = extractor.cache_identity_extra()
+    assert identity2 != identity1
+
+
+def test_cache_identity_extra_stays_empty_when_binary_unresolvable(
+    monkeypatch,
+) -> None:
+    """No executable to stat at all (never found on PATH) -- no stat
+    fallback is possible, so this stays "" rather than fabricating one."""
+    from abicheck.buildsource.source_extractors import castxml as castxml_mod
+
+    castxml_mod._castxml_tool_version.cache_clear()
+    monkeypatch.setattr(castxml_mod, "_castxml_tool_version", lambda *_a: "")
+    monkeypatch.setattr(castxml_mod.shutil, "which", lambda _bin: None)
+    extractor = CastxmlSourceExtractor(castxml_bin="definitely-not-a-real-binary-xyz")
+    assert extractor.cache_identity_extra() == ""
+
+
+def test_parse_root_stamps_stat_fallback_compiler_version_when_probe_fails(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """Codex review, PR #719, eighth round: a failed/unparseable version probe
+    must not persist a bare "" compiler_version into the fact_set -- two
+    DIFFERENT broken castxml installs at the same path would then compare as
+    recipe-agreeing (check_fact_compatibility sees identical producer/
+    producer_version/compiler_version), letting an unchanged enum's
+    underlying-type disagreement slip through as GENERATED_HEADER_CHANGED
+    with no compiler_version_mismatch warning to explain it. Verify
+    fact_set["compiler_version"] gets the SAME stat-based fallback identity
+    cache_identity_extra() already uses, not the probe's bare ""."""
+    from abicheck.buildsource.source_extractors import castxml as castxml_mod
+
+    castxml_mod._castxml_tool_version.cache_clear()
+    monkeypatch.setattr(castxml_mod, "_castxml_tool_version", lambda *_a: "")
+    exe = tmp_path / "castxml"
+    exe.write_text("broken")
+    monkeypatch.setattr(castxml_mod.shutil, "which", lambda _bin: str(exe))
+
+    extractor = CastxmlSourceExtractor(castxml_bin=str(exe))
+    tu = extractor._parse_root(
+        _root_with_one_type(), _cu(), public_header_roots=["foo.h"], target_id=""
+    )
+    assert tu.fact_set["compiler_version"].startswith("stat:")
+    assert tu.fact_set["compiler_version"] == extractor.cache_identity_extra()
+
+    # A different broken executable at the SAME path must persist a
+    # different compiler_version, so two independently-collected baselines
+    # against different bundled frontends aren't silently treated as
+    # recipe-comparable.
+    exe.write_text("a different broken binary, different size")
+    tu2 = extractor._parse_root(
+        _root_with_one_type(), _cu(), public_header_roots=["foo.h"], target_id=""
+    )
+    assert tu2.fact_set["compiler_version"] != tu.fact_set["compiler_version"]
+
+
+def test_parse_root_stamps_msvc_compiler_family_for_msvc_compiler_binary() -> None:
+    from xml.etree.ElementTree import Element, SubElement
+
+    root = Element("GCC_XML")
+    SubElement(root, "File", id="f1", name="foo.h")
+
+    extractor = CastxmlSourceExtractor(compiler_binary="cl.exe")
+    tu = extractor._parse_root(
+        root, _cu(), public_header_roots=["foo.h"], target_id="target://libfoo"
+    )
+    assert tu.fact_set["compiler_family"] == "msvc"
+
+
+def test_parse_root_compiler_version_ignores_resolved_emulated_compiler_path(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """Codex review, PR #719, follow-up round three: a prior round of this
+    fix folded a stat signature of the resolved EMULATED compiler
+    (`cc_bin`) into `compiler_version` -- a real regression, not a fix
+    (Codex review caught it): those stat fields are filesystem-local, so
+    two TUs in ONE surface resolved to DIFFERENT but same-toolchain drivers
+    (`gcc` for a `.c` TU, `g++` for a `.cpp` TU -- an entirely ordinary
+    mixed-language build) got different suffixes purely from being
+    different files on disk, tripping the D8/fact_set-inconsistency gate
+    for a perfectly healthy surface. Reverted; verify `compiler_version`
+    depends ONLY on the castxml probe/identity, not on which compiler
+    binary a given compile unit happens to resolve to."""
+    from abicheck.buildsource.source_extractors import castxml as castxml_mod
+
+    castxml_mod._castxml_tool_version.cache_clear()
+    monkeypatch.setattr(castxml_mod, "_castxml_tool_version", lambda *_a: "0.6.3")
+    gcc = tmp_path / "gcc"
+    gpp = tmp_path / "g++"
+    gcc.write_text("a fake gcc, different size than g++")
+    gpp.write_text("a fake g++")
+
+    extractor = CastxmlSourceExtractor()
+    tu_c = extractor._parse_root(
+        _root_with_one_type(),
+        _cu(argv=[str(gcc), "-c", "foo.c"]),
+        public_header_roots=["foo.h"],
+        target_id="",
+    )
+    tu_cpp = extractor._parse_root(
+        _root_with_one_type(),
+        _cu(argv=[str(gpp), "-c", "foo.cpp"]),
+        public_header_roots=["foo.h"],
+        target_id="",
+    )
+    assert tu_c.fact_set["compiler_version"] == "0.6.3"
+    assert tu_cpp.fact_set["compiler_version"] == "0.6.3"
+    assert "cc:" not in tu_c.fact_set["compiler_version"]
+
+
+def test_two_castxml_producer_versions_suppress_content_comparison() -> None:
+    """End-to-end through fact_set.check_fact_compatibility: a castxml TU
+    stamped under one CASTXML_EXTRACTOR_VERSION and one stamped under a
+    different version are no longer treated as unconditionally comparable —
+    the concrete gap this whole fix closes."""
+    from abicheck.buildsource.fact_set import check_fact_compatibility
+
+    old_fs = dict(
+        CastxmlSourceExtractor()
+        ._parse_root(
+            _root_with_one_type(), _cu(), public_header_roots=["foo.h"], target_id=""
+        )
+        .fact_set
+    )
+    new_fs = dict(old_fs)
+    new_fs["producer_version"] = "9.9"  # simulates an extractor upgrade
+    compat = check_fact_compatibility(old_fs, new_fs)
+    assert not compat.structured_content_comparable
+    # Removal detection (existence, not content) is unaffected -- both sides
+    # still agree on the same fact_set name/version contract.
+    assert compat.structured_facts_comparable
+
+
+def test_legacy_unstamped_castxml_baseline_suppresses_content_comparison() -> None:
+    """The literal transition case (Codex review, PR #719, second round): an
+    already-persisted L4 baseline predates this PR entirely, so it carries NO
+    fact_set at all (``{}``) -- not merely an older CASTXML_EXTRACTOR_VERSION
+    stamp. Compared against a freshly re-collected new side that DOES stamp
+    one, content comparison must still be suppressed; the asymmetric-absence
+    case is not the same as the "neither side ever stamped one" forward-compat
+    case."""
+    from abicheck.buildsource.fact_set import check_fact_compatibility
+
+    new_fs = dict(
+        CastxmlSourceExtractor()
+        ._parse_root(
+            _root_with_one_type(), _cu(), public_header_roots=["foo.h"], target_id=""
+        )
+        .fact_set
+    )
+    compat = check_fact_compatibility({}, new_fs)
+    assert not compat.structured_content_comparable
+    assert compat.structured_facts_comparable
+
+
+def _root_with_one_type() -> object:
+    from xml.etree.ElementTree import Element, SubElement
+
+    root = Element("GCC_XML")
+    SubElement(root, "File", id="f1", name="foo.h")
+    SubElement(root, "FundamentalType", id="t_int", name="int")
+    SubElement(root, "Location", id="loc1", file="f1", line="3")
+    SubElement(
+        root, "Class", id="c1", name="Widget", size="64", align="64", location="loc1"
+    )
+    return root
+
+
 # -- end-to-end via real castxml (integration) -------------------------------
 
 
@@ -1032,6 +1528,9 @@ def test_castxml_extractor_end_to_end(tmp_path: Path) -> None:
     # The public const is captured with its value (enables constexpr_value_changed).
     consts = {e.qualified_name: e.value for e in tu.constexpr_values}
     assert any("kAnswer" in k for k in consts)
+    # Codex review, PR #719: a real castxml install resolves a non-empty
+    # compiler_version, not the "" default a probe failure would leave.
+    assert tu.fact_set["compiler_version"] != ""
 
 
 def test_entity_from_typedef_carries_provenance() -> None:

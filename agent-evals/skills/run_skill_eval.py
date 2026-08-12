@@ -42,6 +42,67 @@ from graders.dimensions import grade_run  # noqa: E402
 
 PACK = Path(__file__).resolve().parent / "skill-eval-pack.json"
 
+#: Mirrors runners/claude_code.py's FLAGSHIP_SKILL. The runner already keeps
+#: a fresh --out root from *producing* new prototype-skill rows by default,
+#: but that filter cannot retroactively clean an --out root created before
+#: the 2026-08-11 scope freeze (docs/contribute/plans/
+#: g37-agent-skill-quality-evaluation.md), or one built with
+#: --include-prototype-skills. index.json still indexes every recorded row
+#: regardless of which skill it belongs to, so this grading step is the
+#: second, independent place the freeze must be enforced — without it, an
+#: old or explicitly-opted-in prototype-skill row would silently fold into a
+#: nominally flagship-only aggregate.
+FLAGSHIP_SKILL = "native-binary-compatibility-review"
+
+
+def _model_label(row: dict) -> str | None:
+    """Mirrors runners/claude_code.py's own `_model_label`.
+
+    Resolved name first — real evidence of what the CLI actually ran, and
+    the only thing that would catch an alias like `sonnet` silently
+    resolving to a different version between two runs — falling back to
+    the requested `--model` argument only when no resolved name was
+    captured (a timeout, which never reaches the CLI's init event; see
+    that module's `TimeoutExpired` handler).
+    """
+    model = row.get("model")
+    if isinstance(model, str):
+        return model
+    requested = row.get("requested_model")
+    return requested if isinstance(requested, str) else None
+
+
+def _models_compatible(a: dict, b: dict) -> bool:
+    """Mirrors runners/claude_code.py's own `_models_compatible` exactly.
+
+    Kept as an incremental pairwise check here too, not folded into flat
+    per-field sets: a row can carry *both* a resolved name and a requested
+    identity (a completed, pinned run), and a set keyed by "resolved if
+    present, else requested" would silently drop that row's resolved
+    identity from consideration in a comparison that should have used it.
+    See that module's docstring for the full reasoning, including why a
+    requested alias is compared only when *neither* row has a resolved
+    name — Claude Code documents an alias like `sonnet` as pointing at
+    "the latest" model, a moving target, so it is trusted only when it is
+    the single best evidence available on both sides.
+    """
+    a_model, b_model = a.get("model"), b.get("model")
+    if isinstance(a_model, str) and isinstance(b_model, str):
+        return a_model == b_model
+    a_requested, b_requested = a.get("requested_model"), b.get("requested_model")
+    if (
+        not isinstance(a_model, str)
+        and not isinstance(b_model, str)
+        and isinstance(a_requested, str)
+        and isinstance(b_requested, str)
+    ):
+        return a_requested == b_requested
+    a_has_identity = isinstance(a_model, str) or isinstance(a_requested, str)
+    b_has_identity = isinstance(b_model, str) or isinstance(b_requested, str)
+    if a_has_identity and b_has_identity:
+        return False
+    return True
+
 
 def _pct(part: int, whole: int) -> str:
     return "—" if not whole else f"{100 * part / whole:.0f}%"
@@ -80,6 +141,15 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     parser.add_argument("--runs", required=True, help="The runner's --out root")
     parser.add_argument("--json", help="Write the full grading to this path")
+    parser.add_argument(
+        "--include-prototype-skills",
+        action="store_true",
+        help=(
+            "Also grade recorded rows for prototype-status skills (all "
+            f"skills other than {FLAGSHIP_SKILL}). Off by default per G37's "
+            "2026-08-11 scope note."
+        ),
+    )
     args = parser.parse_args(argv)
 
     root = Path(args.runs)
@@ -93,6 +163,9 @@ def main(argv: list[str] | None = None) -> int:
 
     graded: list[dict] = []
     orphaned: set[str] = set()
+    excluded_prototype: set[str] = set()
+    model_rows: list[dict] = []
+    unknown_model: set[str] = set()
     for row in index:
         sid, arm, rep = row["scenario_id"], row["arm"], row["repetition"]
         run_dir = root / sid / arm / str(rep)
@@ -105,14 +178,76 @@ def main(argv: list[str] | None = None) -> int:
             # printed no summary at all, discarding every other gradeable run.
             orphaned.add(sid)
             continue
+        if not args.include_prototype_skills and pack["scenarios"][sid].get(
+            "skill"
+        ) != FLAGSHIP_SKILL:
+            # A prototype-skill row can reach index.json even though the
+            # runner no longer schedules new ones by default — an --out root
+            # created before the freeze, or built with the runner's own
+            # --include-prototype-skills. Excluding it here, not just at
+            # scheduling time, is what keeps a stale or opted-in row from
+            # silently folding into a nominally flagship-only aggregate.
+            excluded_prototype.add(sid)
+            continue
         grade = grade_run(run_dir, pack["scenarios"][sid], arm)
         grade.update(scenario_id=sid, arm=arm, repetition=rep)
         graded.append(grade)
+        if isinstance(row.get("model"), str) or isinstance(row.get("requested_model"), str):
+            model_rows.append(row)
+        else:
+            # A timed-out run with no --model pin has a genuinely unknown
+            # model (see runners/claude_code.py's TimeoutExpired handler) —
+            # not a value that happens to be missing. It is graded (a
+            # timeout is a real, meaningful result for dimensions 1/3), but
+            # letting it sail past the pairwise check below purely because
+            # it contributes no identity to compare against would accept
+            # exactly the batch that check exists to refuse: known model X
+            # on some rows, silently-unproven model on this one.
+            unknown_model.add(f"{sid}/{arm}/{rep}")
+
+    if unknown_model and model_rows:
+        known = sorted({label for r in model_rows if (label := _model_label(r))})
+        print(
+            "runs graded here include rows with no recorded model alongside "
+            f"rows recorded under {', '.join(known)} — not "
+            "provably the same model, so not provably attributable to the "
+            "skill: " + ", ".join(sorted(unknown_model)),
+            file=sys.stderr,
+        )
+        return 1
+
+    # Pairwise against every row already accepted, not one flat identity set
+    # per row: a row can carry *both* a resolved name and a requested
+    # identity (a completed, pinned run), and collapsing that down to a
+    # single "best" identity per row — the way an earlier revision of this
+    # check did — silently drops the field a sibling timeout under the same
+    # pin actually needs to compare against. See _models_compatible's own
+    # docstring for the full reasoning.
+    for i, row in enumerate(model_rows):
+        for earlier in model_rows[:i]:
+            if not _models_compatible(earlier, row):
+                sid, arm, rep = row["scenario_id"], row["arm"], row["repetition"]
+                print(
+                    f"{sid}/{arm}/{rep} used {_model_label(row)} while an "
+                    f"earlier graded run used {_model_label(earlier)}; an "
+                    "apparent skill/baseline difference would not be "
+                    "attributable to the skill. Split --runs into separate "
+                    "per-model output roots.",
+                    file=sys.stderr,
+                )
+                return 1
 
     if orphaned:
         print(
             "skipped runs for scenario(s) the pack no longer lists: "
             + ", ".join(sorted(orphaned)),
+            file=sys.stderr,
+        )
+    if excluded_prototype:
+        print(
+            "skipped runs for prototype-status skill scenario(s) (pass "
+            "--include-prototype-skills to grade them): "
+            + ", ".join(sorted(excluded_prototype)),
             file=sys.stderr,
         )
 

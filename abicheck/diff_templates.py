@@ -440,14 +440,156 @@ def _public_functions(snap: AbiSnapshot) -> list[Function]:
     return [f for f in snap.functions if f.visibility == Visibility.PUBLIC]
 
 
+def _normalize_mach_o_mangled(mangled: str) -> str:
+    """Strip a Mach-O direct-clang mangled name's extra platform leading
+    underscore (``__Z...`` -> ``_Z...``).
+
+    Mirrors ``diff_cxx_rules._itanium_strip_prefix``'s identical
+    de-prefixing for the same quirk (confirmed via ``dumper_clang.py``'s
+    own ``_visibility()`` docstring: clang's ``mangledName`` is
+    ``"__ZN3lib3addEii"`` on macOS, not the plain Itanium
+    ``"_ZN3lib3addEii"``) -- a bare ``mangled.startswith("_Z")`` check
+    silently skips every symbol on that platform, which would make
+    :func:`_canonical_identity_name` fall back to the very declared-name
+    text this module exists to stop trusting (Codex review finding).
+    """
+    if mangled.startswith("__Z"):
+        return mangled[1:]
+    return mangled
+
+
+def _batch_demangle_for_identity(funcs: list[Function]) -> dict[str, str]:
+    """Demangle every real mangled name in *funcs* in one batch call, for
+    :func:`_canonical_identity_name`'s mangled-preferred lookup below.
+
+    Keyed by the *normalized* mangled string (Mach-O's extra leading
+    underscore stripped, see :func:`_normalize_mach_o_mangled`) so a
+    lookup by the same normalized form always hits regardless of which
+    platform's raw mangled spelling produced it.
+    """
+    from .demangle import demangle_batch
+    normalized = [
+        n for f in funcs
+        if (n := _normalize_mach_o_mangled(f.mangled)).startswith("_Z")
+    ]
+    return demangle_batch(normalized) if normalized else {}
+
+
+def _canonical_identity_name(
+    name: str, mangled: str, demangled: dict[str, str],
+) -> str:
+    """Return the most stable available qualified identity for a function,
+    for use where "is this the same declaration on both sides" must be
+    judged by *linked-symbol* identity rather than the dumper's own
+    qualification of ``Function.name``.
+
+    Prefers a successfully demangled ``mangled`` over trusting ``name``'s
+    own qualification whenever a real mangled name is available: two
+    dumper backends -- or the same backend across different inputs/
+    versions -- can populate ``Function.name`` with inconsistent
+    qualification for the *identical* linked symbol (a bare leaf on one
+    snapshot side, a fully namespace/template-qualified spelling with its
+    own formatting quirks on the other). ``mangled`` is the ground truth
+    the linker actually resolves against, so demangling it consistently on
+    both snapshot sides yields matching identities even when ``name``
+    doesn't -- a confirmed real-world false positive: a still-exported
+    template method (verified present on both sides via ``nm``) read as
+    "removed and re-added" purely because the header dumper changed how
+    much of its own name it qualified between two library versions, not
+    because the symbol itself changed.
+
+    Deliberately used only for :func:`detect_internal_template_leaks`'s
+    stem/instantiation-set grouping, which exists to decide whether a
+    specific instantiation is still linkable -- a binary-identity
+    question. Every other detector in this module keys off
+    :func:`_qualified_function_name`'s declared-name-first precedence
+    instead, because they care about the *source-level* spelling
+    (``CPO_KIND_CHANGED`` and friends); switching that precedence there
+    too would silently defeat detectors that depend on a declared name
+    genuinely diverging from its demangled/underlying name (e.g.
+    ``diff_namespaces.detect_std_reexport_removed``'s whole premise is
+    that split).
+
+    **Residual gap, deliberately not chased here** (Codex review finding):
+    when no demangler is available at all (no ``cxxfilt`` package and no
+    ``c++filt`` binary on ``PATH`` -- see ``demangle.py``'s own fallback
+    chain), ``demangled`` is empty for every symbol and this falls back to
+    ``_qualified_function_name``'s declared-name-first behavior, so the
+    original false-positive this function exists to fix can still occur
+    in that environment. Closing it would need a structural (no-demangler)
+    Itanium scope parser for this module's own qname-reconstruction needs,
+    the same shape as ``diff_cxx_rules.itanium_scope_components`` -- out of
+    scope for this fix, which targets the reachable case (a real demangler
+    present, the common case this codebase already assumes throughout
+    ``diff_namespaces.py``/``diff_templates.py``'s own batch-demangle
+    helpers).
+
+    **MSVC manglings hit the identical fallback, for a different reason**
+    (Codex review, fresh evidence): this codebase has no MSVC demangler at
+    all (``demangle.py``'s ``demangle_batch`` only ever recognizes the
+    Itanium ``_Z`` prefix), so a Windows/``clang-cl`` snapshot's
+    ``?``-prefixed manglings never reach ``demangled`` regardless of
+    normalization, and this falls back to the declared name exactly as
+    above. Unlike the no-demangler-installed case, there IS a structural
+    (no-demangler) MSVC parser in this codebase --
+    ``diff_cxx_rules.msvc_scope_components``/``msvc_qualified_name`` --
+    but it cannot help *this* detector specifically: its own docstring
+    documents that it deliberately rejects any template-shaped component
+    (the ``?$...`` marker), returning ``None`` rather than mis-parsing an
+    MSVC template-argument encoding it doesn't model -- and
+    ``detect_internal_template_leaks`` exists to inspect exactly template
+    instantiations (gated on ``_looks_like_template_instantiation``), so
+    the one MSVC parser available in this codebase is structurally unable
+    to answer the one question this function asks for the input class it
+    was built for. A real fix needs an MSVC template-argument-aware
+    structural parser, which does not exist here and is a much larger,
+    independently-scoped undertaking (matching this codebase's existing,
+    repeatedly-documented position that no MSVC family-specific parser
+    beyond plain scope recovery exists yet).
+    """
+    normalized = _normalize_mach_o_mangled(mangled)
+    if normalized.startswith("_Z"):
+        resolved = demangled.get(normalized)
+        if resolved:
+            return resolved
+    return _qualified_function_name(name, mangled)
+
+
+def _callable_identity_name(
+    name: str, mangled: str, demangled: dict[str, str],
+) -> str:
+    """:func:`_canonical_identity_name`, with any parameter-list signature
+    stripped -- the callable-name portion alone.
+
+    A demangled identity carries its full signature (return type included,
+    for a template instantiation); if that raw form is fed straight into
+    :func:`_looks_like_template_instantiation`/:func:`_strip_template_args`,
+    a plain (non-template) internal function taking a *templated parameter
+    type* (``lib::detail::foo(std::vector<int>)``) is misclassified as a
+    template instantiation itself, because the check only looks for a
+    top-level ``<`` anywhere in the string -- including inside a parameter
+    type it never should have inspected (Codex review, fresh evidence: this
+    module's own ``test_non_template_internal_funcs_ignored`` invariant
+    says such a helper is out of scope, and the unstripped form silently
+    violated it once identity started preferring the demangled form
+    unconditionally). Stripping the signature first restricts template
+    detection to the callable's own name, matching what
+    :func:`_qualified_function_name`'s declared-name path already gave for
+    free (a header-derived declared name never carries a signature to
+    begin with).
+    """
+    return _strip_param_signature(_canonical_identity_name(name, mangled, demangled))
+
+
 def _internal_template_stems(
     funcs: list[Function],
     internal_namespaces: tuple[str, ...],
+    demangled: dict[str, str],
 ) -> set[str]:
     """Return template stems that live in one of *internal_namespaces*."""
     out: set[str] = set()
     for f in funcs:
-        qname = _qualified_function_name(f.name, f.mangled)
+        qname = _callable_identity_name(f.name, f.mangled, demangled)
         if not _looks_like_template_instantiation(qname):
             continue
         stem = _strip_template_args(qname)
@@ -456,11 +598,13 @@ def _internal_template_stems(
     return out
 
 
-def _functions_by_stem(funcs: list[Function]) -> dict[str, list[Function]]:
+def _functions_by_stem(
+    funcs: list[Function], demangled: dict[str, str],
+) -> dict[str, list[Function]]:
     """Group *funcs* by template-args-stripped stem."""
     out: dict[str, list[Function]] = defaultdict(list)
     for f in funcs:
-        qname = _qualified_function_name(f.name, f.mangled)
+        qname = _callable_identity_name(f.name, f.mangled, demangled)
         out[_strip_template_args(qname)].append(f)
     return out
 
@@ -474,9 +618,11 @@ def _function_signature(f: Function) -> tuple[str, int, str]:
     )
 
 
-def _instantiation_set(funcs: list[Function]) -> set[tuple[str, tuple[str, int, str]]]:
+def _instantiation_set(
+    funcs: list[Function], demangled: dict[str, str],
+) -> set[tuple[str, tuple[str, int, str]]]:
     return {
-        (_qualified_function_name(f.name, f.mangled), _function_signature(f))
+        (_canonical_identity_name(f.name, f.mangled, demangled), _function_signature(f))
         for f in funcs
     }
 
@@ -536,20 +682,24 @@ def detect_internal_template_leaks(
     """
     old_funcs = _public_functions(old)
     new_funcs = _public_functions(new)
+    # One batched demangle call across both sides -- not two -- so a symbol
+    # unchanged between old and new resolves to byte-identical canonical
+    # text on both sides regardless of demangle_batch's own dict-ordering.
+    demangled = _batch_demangle_for_identity(old_funcs + new_funcs)
     internal_stems = (
-        _internal_template_stems(old_funcs, internal_namespaces)
-        | _internal_template_stems(new_funcs, internal_namespaces)
+        _internal_template_stems(old_funcs, internal_namespaces, demangled)
+        | _internal_template_stems(new_funcs, internal_namespaces, demangled)
     )
     if not internal_stems:
         return []
 
-    old_by_stem = _functions_by_stem(old_funcs)
-    new_by_stem = _functions_by_stem(new_funcs)
+    old_by_stem = _functions_by_stem(old_funcs, demangled)
+    new_by_stem = _functions_by_stem(new_funcs, demangled)
 
     changes: list[Change] = []
     for stem in sorted(internal_stems):
-        old_sigs = _instantiation_set(old_by_stem.get(stem, []))
-        new_sigs = _instantiation_set(new_by_stem.get(stem, []))
+        old_sigs = _instantiation_set(old_by_stem.get(stem, []), demangled)
+        new_sigs = _instantiation_set(new_by_stem.get(stem, []), demangled)
         if old_sigs == new_sigs:
             continue
         # Direction matters: a (name, signature) pair that existed in OLD but

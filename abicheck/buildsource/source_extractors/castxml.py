@@ -28,6 +28,8 @@ context→argv builder is pure and unit-testable; only :meth:`extract` shells ou
 
 from __future__ import annotations
 
+import functools
+import re
 import shutil
 import tempfile
 from pathlib import Path
@@ -38,7 +40,7 @@ from defusedxml import ElementTree as DefusedET
 
 from ... import deadline
 from ..build_evidence import CompileUnit
-from ..source_abi import SourceAbiTu
+from ..source_abi import SourceAbiTu, coverage_state_for_family, default_fact_set
 from ._argv import (
     is_msvc_mode,
     pick_compiler_binary,
@@ -50,8 +52,18 @@ from ._argv import (
 from ._deadline_bound import run_bounded_for_extraction
 from .base import SourceExtractionError, assemble_source_tu
 
-#: castxml extractor schema/behaviour version, recorded in the dump provenance.
-CASTXML_EXTRACTOR_VERSION = "0.1"
+#: castxml extractor schema/behaviour version, recorded in the dump provenance
+#: and folded into ``source_replay.compute_tu_cache_key``'s per-TU cache key
+#: (ADR-033 D8) -- bump whenever this extractor's output can change for the
+#: same inputs, so a warm ``SourceAbiCache`` entry from before the change is
+#: invalidated rather than replayed. 0.2 (Codex review, PR #719): this
+#: extractor's ``enums = parser.parse_enums()`` reuses the shared
+#: ``_CastxmlParser`` that ``dumper_castxml.py`` also uses for the L2 header
+#: snapshot -- the same parser started extracting ``EnumType.underlying_type``
+#: for real (previously always the dataclass default ``"int"``), so an
+#: upgrading user's warm per-TU cache would keep replaying the old default
+#: without this bump.
+CASTXML_EXTRACTOR_VERSION = "0.2"
 
 #: Backwards-compatible aliases — the compile-context → argv helpers now live in
 #: the shared ``_argv`` module (reused by the clang backend, phase 5) but are
@@ -60,6 +72,158 @@ CASTXML_EXTRACTOR_VERSION = "0.1"
 _unredact_home = unredact_home
 _compiler_binary = pick_compiler_binary
 _replay_extra_flags = replay_extra_flags
+
+_CASTXML_VERSION_RE = re.compile(r"castxml version\s+(\S+)", re.IGNORECASE)
+#: castxml's own internal frontend is ALWAYS its bundled Clang (a
+#: `--castxml-cc-<id>` selects an *emulation* mode, gcc or msvc, never a
+#: literal execution path -- see AGENTS.md's toolchain-profile note), so
+#: real `--version` output always names it on its own banner line (e.g.
+#: "Ubuntu clang version 17.0.6 (9ubuntu1)"), distinct from the leading
+#: "castxml version X.Y.Z" line this module already parses. The banner
+#: spelling itself varies ("clang version ..." vs "LLVM version ..." --
+#: same reasoning `dumper_castxml_probe._CLANG_VERSION_RE` already
+#: documents for the identical bundled frontend), so both are matched
+#: (Codex review, PR #719).
+_CASTXML_BUNDLED_COMPILER_RE = re.compile(
+    r"^.*\b(?:clang|LLVM) version\b.*$", re.MULTILINE | re.IGNORECASE
+)
+
+
+def _castxml_identity_with_stat_fallback(castxml_bin: str) -> str:
+    """The probed castxml/bundled-Clang identity, falling back to the
+    executable's own stat signature when the version probe fails or its
+    banner doesn't parse (Codex review, PR #719).
+
+    Shared by :meth:`CastxmlSourceExtractor.cache_identity_extra` (the D8 TU
+    cache key) and :meth:`CastxmlSourceExtractor._stamp_fact_set_and_coverage`
+    (the persisted ``fact_set.compiler_version``) so both read the SAME
+    fallback identity. Stamping only the cache key and leaving
+    ``compiler_version`` at the version probe's bare ``""`` would still let
+    two DIFFERENT broken/unparseable castxml installs at the same path
+    collapse to an identical ``compiler_version=""`` in two independently
+    persisted baselines -- ``check_fact_compatibility`` would then treat them
+    as recipe-comparable even though their (unprobeable) bundled Clang
+    builds may disagree on a compiler-selected fact like an unfixed enum's
+    underlying type. ``compiler_version`` is used only for opaque
+    string-equality comparison and diagnostic display (`fact_set.py`'s
+    ``compiler_version_mismatch`` issue), never parsed as a real version, so
+    a ``stat:...`` fallback string there is exactly as valid a value as the
+    real probed identity -- the same reasoning ``cache_identity_extra``'s own
+    docstring already gives for using it as a cache key.
+    """
+    key = _executable_stat_key(castxml_bin)
+    version = _castxml_tool_version(castxml_bin, *key)
+    if version:
+        return version
+    dev, ino, mtime_ns, size = key
+    return "" if dev == -1 else f"stat:{dev}:{ino}:{mtime_ns}:{size}"
+
+
+def _executable_stat_key(path: str) -> tuple[int, int, int, int]:
+    """``(dev, ino, mtime_ns, size)`` for *path*, or all ``-1`` if unreadable.
+
+    Mirrors ``dumper_toolchain._executable_sha256``'s own cache-key stat
+    fields: a long-lived process caching :func:`_castxml_tool_version` only
+    by binary *path* would keep serving the OLD identity forever if the
+    file at that path is replaced in place (an in-place upgrade, or a
+    swapped `PATH` entry) without the process restarting -- these fields
+    change identity, so passing them as extra cache-key args invalidates a
+    warm entry the moment the executable itself changes (Codex review,
+    PR #719).
+    """
+    try:
+        st = Path(shutil.which(path) or path).stat()
+    except OSError:
+        return (-1, -1, -1, -1)
+    return (st.st_dev, st.st_ino, st.st_mtime_ns, st.st_size)
+
+
+@functools.lru_cache(maxsize=8)
+def _castxml_tool_version(
+    castxml_bin: str,
+    _dev: int = -1,
+    _ino: int = -1,
+    _mtime_ns: int = -1,
+    _size: int = -1,
+) -> str:
+    """``castxml --version``'s own version *and* bundled-Clang identity for
+    *castxml_bin*, cached (ADR-038 C.8 fact_set -- mirrors ``clang.py``'s
+    ``_clang_compiler_version``).
+
+    Both halves matter for provenance, not just the castxml release number:
+    two castxml installations can share the same castxml version while
+    bundling different Clang builds, and it is the bundled Clang that
+    resolves a compiler-selected fact like an unfixed enum's underlying
+    type (Codex review, PR #719 -- confirmed empirically that two same-
+    castxml-version-different-bundled-Clang installs are otherwise
+    indistinguishable to `check_fact_compatibility`). Cached per binary path
+    so a many-TU build pays this subprocess once, not once per compile
+    unit. Best-effort: an ordinary failure yields ``""`` rather than
+    aborting extraction (compiler_version is provenance, not required
+    input) -- EXCEPT a genuine scan ``--budget`` exhaustion, which
+    re-raises ``deadline.DeadlineExceeded`` instead (see the ``except``
+    block below).
+    Deliberately a local, standalone probe rather than reusing
+    ``dumper_toolchain._tool_identity_metadata`` -- that module imports FROM
+    ``buildsource.redaction``, so importing it here (the opposite direction)
+    would form a real import cycle the AI-readiness `import-cycle-growth`
+    gate rejects (CLAUDE.md "M1-3").
+
+    The ``_dev``/``_ino``/``_mtime_ns``/``_size`` params (see
+    :func:`_executable_stat_key`) are cache-key-only -- unused by the probe
+    itself, only by ``lru_cache``, so a same-path executable swap within
+    one process still gets a fresh probe instead of the stale memoized one.
+    A caller that omits them (as every existing test does) always keys on
+    the same ``-1`` sentinel quadruple, which is a distinct, harmless entry
+    from a real call passing the actual stat -- both correct, just cached
+    separately.
+    """
+    del _dev, _ino, _mtime_ns, _size  # cache-key only, see docstring
+    try:
+        # Bounded by the active scan --budget, not just this call's own 5s
+        # cap (Codex review) -- a stalled probe under a short remaining
+        # budget must fail fast, same as every other subprocess this
+        # extractor runs, rather than silently eating up to 5s of it.
+        r = run_bounded_for_extraction(
+            [castxml_bin, "--version"],
+            timeout=5,
+            tool_label="castxml --version",
+            unit_label=castxml_bin,
+            capture_output=True,
+            text=True,
+        )
+        if r.returncode != 0:
+            return ""
+        # Some wrapper/build combinations write the banner to stderr rather
+        # than stdout (dumper_castxml_probe.py already normalizes this the
+        # same way) -- read the combined transcript, not stdout alone
+        # (Codex review).
+        transcript = f"{r.stdout}\n{r.stderr}"
+        m = _CASTXML_VERSION_RE.search(transcript)
+        if not m:
+            return ""
+        castxml_ver = m.group(1)
+        bundled = _CASTXML_BUNDLED_COMPILER_RE.search(transcript)
+        if bundled:
+            return f"{castxml_ver}; {bundled.group(0).strip()}"
+        return castxml_ver
+    except (OSError, SourceExtractionError):
+        # A genuine scan --budget exhaustion must stay observable, not be
+        # silently absorbed into an empty identity here (Codex review):
+        # run_bounded_for_extraction() folds DeadlineExceeded into
+        # SourceExtractionError the same as an ordinary timeout, erasing
+        # which one actually happened -- a cache lookup keyed on this
+        # function's "" could then proceed on a stale entry with no
+        # further deadline check in between. Re-check directly (mirrors
+        # this module's own "trust the restored deadline, not a stale
+        # snapshot" pattern in extract()'s post-parse checks); a still-
+        # exhausted budget re-raises the real deadline.DeadlineExceeded
+        # here -- deliberately NOT wrapped into SourceExtractionError, so
+        # both of this function's callers see the same un-swallowed
+        # exception _replay_cache_lookup()'s own bare deadline.check()
+        # already lets propagate for this same phase.
+        deadline.check()
+        return ""
 
 
 def _std_flag(standard: str, cc_id: str) -> list[str]:
@@ -123,6 +287,40 @@ class CastxmlSourceExtractor:
 
     def available(self) -> bool:
         return shutil.which(self.castxml_bin) is not None
+
+    def cache_identity_extra(self) -> str:
+        """Fold the probed castxml/bundled-Clang identity into the D8 TU
+        cache key (Codex review, PR #719) -- mirrors
+        ``ClangSourceExtractor.cache_identity_extra``. Without this, a
+        warm ``SourceAbiCache`` keyed only on ``version`` (the fixed
+        ``CASTXML_EXTRACTOR_VERSION`` string) replays a stale cached
+        ``SourceAbiTu`` -- stale enum facts and ``compiler_version``
+        included -- after the castxml binary at the same path is upgraded
+        or swapped, since nothing about that upgrade changes the extractor
+        version string itself.
+
+        Raises ``deadline.DeadlineExceeded`` (rather than degrading to
+        ``""``, this function's usual best-effort contract) specifically
+        when the active scan ``--budget`` is exhausted while probing --
+        that signal must stay observable to ``_replay_cache_lookup()``'s
+        own caller, matching its already-unguarded ``deadline.check()``
+        for the same phase, rather than proceeding to a cache lookup keyed
+        on an identity that quietly hid an expired deadline.
+
+        Falls back to the executable's own stat signature (Codex review)
+        when ``castxml --version`` fails to run or its banner doesn't
+        parse -- otherwise two DIFFERENT broken/unparseable installs at
+        the same path would both collapse to the identical uninformative
+        ``""``, leaving the TU cache unable to tell them apart. The SAME
+        fallback identity is also persisted into ``fact_set.compiler_version``
+        by ``_stamp_fact_set_and_coverage`` (via the shared
+        ``_castxml_identity_with_stat_fallback`` helper, Codex review,
+        PR #719) -- restricting it to the cache key alone would still leave
+        two differently-broken installs' *persisted baselines*
+        indistinguishable, even though this in-process cache key already
+        tells them apart.
+        """
+        return _castxml_identity_with_stat_fallback(self.castxml_bin)
 
     def extract(
         self,
@@ -351,4 +549,94 @@ class CastxmlSourceExtractor:
             {name for el in root.findall(".//File") if (name := el.get("name"))},
             compile_unit.directory,
         )
+        self._stamp_fact_set_and_coverage(tu, compile_unit)
         return tu
+
+    def _stamp_fact_set_and_coverage(
+        self, tu: SourceAbiTu, compile_unit: CompileUnit
+    ) -> None:
+        """ADR-038 C.8: record this TU's canonical fact-set identity + per-family
+        coverage (Codex review, PR #719 -- previously never stamped at all, so
+        two castxml-produced TUs compared as if they had no fact_set identity,
+        the same forward-compat "pre-C.8 producer" treatment
+        ``check_fact_compatibility`` reserves for a hand-edited/third-party
+        pack -- silently exempting every castxml comparison from the
+        producer/producer_version recipe-drift gating ``structured_content_
+        comparable``/``opaque_hashes_comparable`` exist to provide, including
+        for the ``EnumType.underlying_type`` case that motivated this fix).
+
+        A full extraction always attempts every family the extractor
+        collects at all (no user-selectable partial mode) and never returns a
+        TU on failure -- ``extract()`` raises ``SourceExtractionError``
+        instead, recorded as partial L4 coverage by the caller -- so there is
+        no per-family diagnostic signal here the way ``clang.py``'s
+        ``ast_recovered`` has; every collected family is unconditionally
+        ``complete``/``empty-confirmed``.
+        """
+        coverage: dict[str, str] = {
+            family: coverage_state_for_family(
+                entities_present=bool(entities), family_diagnostics_seen=False
+            )
+            for family, entities in (
+                ("functions", tu.functions),
+                ("variables", tu.variables),
+                ("types", tu.types),
+                ("constexpr_values", tu.constexpr_values),
+                ("read_files", tu.read_files),
+            )
+        }
+        # castxml is good for declarations/types/public const-constexpr values
+        # but weak for function bodies and macro expansions (module docstring,
+        # ADR-030 D3 table) -- this extractor genuinely never attempts these
+        # three families, a permanent producer limitation, not a collection
+        # failure (coverage_state_for_family's `unsupported` state).
+        for family in ("macros", "templates", "inline_bodies", "source_edges"):
+            coverage[family] = coverage_state_for_family(
+                entities_present=False, family_diagnostics_seen=False, unsupported=True
+            )
+        tu.coverage = coverage
+        # castxml's own bundled internal Clang is invoked in gcc- or
+        # msvc-emulation mode (`--castxml-cc-<id>`, mirroring
+        # build_castxml_command's own cc_id derivation) -- never the direct
+        # `clang -ast-dump=json` recipe `default_fact_set`'s "clang" default
+        # describes, so this extractor always passes its own real family.
+        cc_bin = pick_compiler_binary(compile_unit, self.compiler_binary)
+        compiler_family = "msvc" if is_msvc_mode(cc_bin) else "gnu"
+        tu.fact_set = default_fact_set(
+            producer=self.name,
+            producer_version=CASTXML_EXTRACTOR_VERSION,
+            compiler_family=compiler_family,
+            # Codex review, PR #719: this extractor's own recipe -- what
+            # underlying integer type an unfixed enum resolves to, in
+            # particular -- is castxml's OWN compiler build, not just this
+            # producer's abicheck-side version; two runs on the same
+            # abicheck release but different castxml/bundled-Clang builds
+            # can legitimately disagree on it. Uses the same stat-fallback
+            # identity as cache_identity_extra() (Codex review, PR #719,
+            # follow-up) -- persisting a bare "" here on a failed/unparseable
+            # probe would let two differently-broken installs' persisted
+            # baselines compare as recipe-comparable.
+            #
+            # Does NOT also fold in the resolved EMULATED compiler
+            # (`cc_bin`, above) -- a prior round of this same fix did, via a
+            # stat signature (dev/ino/mtime_ns/size), and a follow-up review
+            # caught it as a real regression, not a completed fix (Codex
+            # review, PR #719, third follow-up round): those stat fields are
+            # filesystem-local, so (1) two TUs in ONE surface resolved to
+            # DIFFERENT but same-toolchain drivers (`gcc` for a `.c` TU,
+            # `g++` for a `.cpp` TU -- an entirely ordinary mixed-language
+            # build) get different suffixes purely from being different
+            # files, tripping `rollup_fact_set()`'s exact-equality check into
+            # `fact_set_inconsistent` for a perfectly healthy surface; and
+            # (2) an identical build run on two different machines/paths
+            # (baseline collected in CI run 1, compared against CI run 2 --
+            # an entirely ordinary workflow) never shares device/inode at
+            # all, making every such comparison spuriously inconsistent.
+            # Reverted rather than patched further under review pressure --
+            # a correct fix needs a portable SEMANTIC identity (a real
+            # `cc_bin --version` probe, normalized, mirroring
+            # `_castxml_tool_version` above) rather than filesystem stat
+            # fields; tracked as a known gap (see AGENTS.md) alongside the
+            # D8-cache-key half this same finding already covers.
+            compiler_version=_castxml_identity_with_stat_fallback(self.castxml_bin),
+        )

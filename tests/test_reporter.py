@@ -1,4 +1,5 @@
 """Tests for abi_check.reporter — JSON and Markdown output."""
+
 import json
 
 from abicheck.checker import Change, ChangeKind, DiffResult, Verdict
@@ -15,9 +16,12 @@ class TestReviewDigest:
         assert "_Z3foov" in out  # top impacted symbol
 
     def test_manual_review_banner_on_scope_fallback(self):
-        r = _result(Verdict.BREAKING, changes=[
-            Change(ChangeKind.FUNC_REMOVED, "x", "removed"),
-        ])
+        r = _result(
+            Verdict.BREAKING,
+            changes=[
+                Change(ChangeKind.FUNC_REMOVED, "x", "removed"),
+            ],
+        )
         r.scope_to_public_surface = True
         r.scope_resolved = False
         out = to_review_digest(r)
@@ -94,7 +98,8 @@ class TestReviewDigestSeverityAware:
 
 def _result(verdict: Verdict, changes=None) -> DiffResult:
     return DiffResult(
-        old_version="1.0", new_version="2.0",
+        old_version="1.0",
+        new_version="2.0",
         library="libtest.so.1",
         changes=changes or [],
         verdict=verdict,
@@ -162,7 +167,9 @@ class TestEvidenceStatusInJson:
         assert "evidence_status" not in d["changes"][0]
 
     def test_evidence_required_missing_is_not_checkable(self):
-        c = Change(ChangeKind.EVIDENCE_REQUIRED_MISSING, "s", "required evidence missing")
+        c = Change(
+            ChangeKind.EVIDENCE_REQUIRED_MISSING, "s", "required evidence missing"
+        )
         r = _result(Verdict.API_BREAK, changes=[c])
         d = json.loads(to_json(r))
         assert d["changes"][0]["evidence_status"] == "not_checkable"
@@ -204,7 +211,9 @@ class TestEvidenceStatusInJson:
         """Codex review on #557: experimental_graduated (ADDITION_KINDS) was
         misclassified as operation="modified" since its kind name contains
         no "_added" suffix."""
-        c = Change(ChangeKind.EXPERIMENTAL_GRADUATED, "lib::sort", "graduated to stable")
+        c = Change(
+            ChangeKind.EXPERIMENTAL_GRADUATED, "lib::sort", "graduated to stable"
+        )
         r = _result(Verdict.COMPATIBLE, changes=[c])
         d = json.loads(to_json(r))
         assert d["changes"][0]["operation"] == "added"
@@ -212,7 +221,9 @@ class TestEvidenceStatusInJson:
     def test_change_recommended_action_field(self):
         breaking = Change(ChangeKind.FUNC_REMOVED, "s1", "removed")
         api_break = Change(ChangeKind.FIELD_RENAMED, "s2", "renamed")
-        risk = Change(ChangeKind.SYMBOL_VERSION_REQUIRED_ADDED, "s3", "version req added")
+        risk = Change(
+            ChangeKind.SYMBOL_VERSION_REQUIRED_ADDED, "s3", "version req added"
+        )
         quality = Change(ChangeKind.VISIBILITY_LEAK, "s4", "visibility leak")
         addition = Change(ChangeKind.FUNC_ADDED, "s5", "added")
         r = _result(
@@ -238,8 +249,12 @@ class TestEvidenceStatusInJson:
         c = Change(ChangeKind.FUNC_REMOVED, "s", "removed")
         pf = PolicyFile(overrides={ChangeKind.FUNC_REMOVED: Verdict.COMPATIBLE})
         r = DiffResult(
-            old_version="1.0", new_version="2.0", library="libtest.so",
-            changes=[c], verdict=Verdict.COMPATIBLE, policy_file=pf,
+            old_version="1.0",
+            new_version="2.0",
+            library="libtest.so",
+            changes=[c],
+            verdict=Verdict.COMPATIBLE,
+            policy_file=pf,
         )
         d = json.loads(to_json(r))
         # func_removed is not itself an addition kind -> quality issue, not
@@ -253,7 +268,9 @@ class TestEvidenceStatusInJson:
         # recommended_action itself, so the key is omitted there.
         breaking = Change(ChangeKind.FUNC_REMOVED, "s1", "removed")
         api_break = Change(ChangeKind.FIELD_RENAMED, "s2", "renamed")
-        risk = Change(ChangeKind.SYMBOL_VERSION_REQUIRED_ADDED, "s3", "version req added")
+        risk = Change(
+            ChangeKind.SYMBOL_VERSION_REQUIRED_ADDED, "s3", "version req added"
+        )
         quality = Change(ChangeKind.VISIBILITY_LEAK, "s4", "visibility leak")
         addition = Change(ChangeKind.FUNC_ADDED, "s5", "added")
         r = _result(
@@ -286,8 +303,12 @@ class TestEvidenceStatusInJson:
         c = Change(ChangeKind.FUNC_ADDED, "s", "added")
         pf = PolicyFile(overrides={ChangeKind.FUNC_ADDED: Verdict.COMPATIBLE})
         r = DiffResult(
-            old_version="1.0", new_version="2.0", library="libtest.so",
-            changes=[c], verdict=Verdict.COMPATIBLE, policy_file=pf,
+            old_version="1.0",
+            new_version="2.0",
+            library="libtest.so",
+            changes=[c],
+            verdict=Verdict.COMPATIBLE,
+            policy_file=pf,
         )
         d = json.loads(to_json(r))
         assert d["changes"][0]["reviewer_action"] == "confirm_public_api_intent"
@@ -322,8 +343,12 @@ class TestEvidenceStatusInJson:
         pf = PolicyFile(overrides={ChangeKind.FUNC_REMOVED: Verdict.COMPATIBLE})
         r1 = _result(Verdict.BREAKING, changes=[c1])
         r2 = DiffResult(
-            old_version="1.0", new_version="2.0", library="libtest.so",
-            changes=[c2], verdict=Verdict.COMPATIBLE, policy_file=pf,
+            old_version="1.0",
+            new_version="2.0",
+            library="libtest.so",
+            changes=[c2],
+            verdict=Verdict.COMPATIBLE,
+            policy_file=pf,
         )
         d1 = json.loads(to_json(r1))
         d2 = json.loads(to_json(r2))
@@ -341,14 +366,18 @@ class TestEvidenceStatusInJson:
         (parameter name/index here) that disambiguates them (Codex review,
         PR #557)."""
         c1 = Change(
-            ChangeKind.PARAM_POINTER_LEVEL_CHANGED, "_Z3foov",
+            ChangeKind.PARAM_POINTER_LEVEL_CHANGED,
+            "_Z3foov",
             "Parameter 'x' pointer level changed from 1 to 2",
-            old_value="1", new_value="2",
+            old_value="1",
+            new_value="2",
         )
         c2 = Change(
-            ChangeKind.PARAM_POINTER_LEVEL_CHANGED, "_Z3foov",
+            ChangeKind.PARAM_POINTER_LEVEL_CHANGED,
+            "_Z3foov",
             "Parameter 'y' pointer level changed from 1 to 2",
-            old_value="1", new_value="2",
+            old_value="1",
+            new_value="2",
         )
         r = _result(Verdict.BREAKING, changes=[c1, c2])
         d = json.loads(to_json(r))
@@ -433,7 +462,10 @@ class TestEvidenceStatusInJson:
         c = Change(ChangeKind.TYPE_SIZE_CHANGED, "Cfg", "struct Cfg grew")
         r = _result(Verdict.BREAKING, changes=[c])
         d = json.loads(to_json(r, report_mode="leaf"))
-        assert d["leaf_changes"][0]["recommended_action"] == "recompile_and_relink_required"
+        assert (
+            d["leaf_changes"][0]["recommended_action"]
+            == "recompile_and_relink_required"
+        )
         assert d["changes"][0]["recommended_action"] == "recompile_and_relink_required"
 
     def test_leaf_mode_root_type_change_carries_reviewer_action(self):
@@ -458,7 +490,9 @@ class TestEvidenceStatusInJson:
         from abicheck.severity import PRESET_DEFAULT
 
         c = Change(
-            ChangeKind.TYPE_SIZE_CHANGED, "Cfg", "struct Cfg grew",
+            ChangeKind.TYPE_SIZE_CHANGED,
+            "Cfg",
+            "struct Cfg grew",
             frozen_namespace_violation="**::detail::r1::*",
         )
         pf = PolicyFile(overrides={ChangeKind.TYPE_SIZE_CHANGED: Verdict.COMPATIBLE})
@@ -480,7 +514,9 @@ class TestEvidenceStatusInJson:
         from abicheck.severity import PRESET_DEFAULT
 
         c = Change(
-            ChangeKind.FUNC_REMOVED, "_Z3foov", "removed: foo",
+            ChangeKind.FUNC_REMOVED,
+            "_Z3foov",
+            "removed: foo",
             frozen_namespace_violation="**::detail::r1::*",
         )
         pf = PolicyFile(overrides={ChangeKind.FUNC_REMOVED: Verdict.COMPATIBLE})
@@ -517,11 +553,15 @@ class TestRootCauseReporter:
 
     def test_groups_findings_sharing_caused_by_type(self):
         root = Change(
-            ChangeKind.FUNC_REMOVED, "ns::internal::helper", "helper removed",
+            ChangeKind.FUNC_REMOVED,
+            "ns::internal::helper",
+            "helper removed",
         )
         overlay = Change(
-            ChangeKind.INTERNAL_SYMBOL_REQUIRED_BY_PUBLIC_API, "pub_entry",
-            "required", caused_by_type="ns::internal::helper",
+            ChangeKind.INTERNAL_SYMBOL_REQUIRED_BY_PUBLIC_API,
+            "pub_entry",
+            "required",
+            caused_by_type="ns::internal::helper",
         )
         r = _result(Verdict.BREAKING, changes=[root, overlay])
         d = json.loads(to_json(r, report_mode="root-cause"))
@@ -530,7 +570,8 @@ class TestRootCauseReporter:
         assert group["root"] == "ns::internal::helper"
         assert group["finding_count"] == 2
         assert {f["symbol"] for f in group["findings"]} == {
-            "ns::internal::helper", "pub_entry",
+            "ns::internal::helper",
+            "pub_entry",
         }
 
     def test_ungrouped_finding_is_its_own_singleton(self):
@@ -594,7 +635,8 @@ class TestRootCauseReporter:
         surface whenever they're non-empty."""
         c = Change(ChangeKind.FUNC_REMOVED, "foo", "removed: foo")
         r = DiffResult(
-            old_version="1.0", new_version="2.0",
+            old_version="1.0",
+            new_version="2.0",
             library="libtest.so.1",
             changes=[c],
             verdict=Verdict.BREAKING,
@@ -603,7 +645,9 @@ class TestRootCauseReporter:
         )
         d = json.loads(to_json(r, report_mode="root-cause"))
         assert d["redundant_count"] == 3
-        assert d["pattern_modulations"] == [{"pattern": "cpp_pimpl", "action": "demoted"}]
+        assert d["pattern_modulations"] == [
+            {"pattern": "cpp_pimpl", "action": "demoted"}
+        ]
 
     def test_root_cause_id_is_stable_for_the_same_root(self):
         c1 = Change(ChangeKind.FUNC_REMOVED, "ns::internal::helper", "removed")
@@ -684,11 +728,15 @@ class TestImpactAssessmentRootCause:
 
     def test_correlated_findings_share_root_cause_id_in_full_mode(self):
         root = Change(
-            ChangeKind.FUNC_REMOVED, "ns::internal::helper", "helper removed",
+            ChangeKind.FUNC_REMOVED,
+            "ns::internal::helper",
+            "helper removed",
         )
         overlay = Change(
-            ChangeKind.INTERNAL_SYMBOL_REQUIRED_BY_PUBLIC_API, "pub_entry",
-            "required", caused_by_type="ns::internal::helper",
+            ChangeKind.INTERNAL_SYMBOL_REQUIRED_BY_PUBLIC_API,
+            "pub_entry",
+            "required",
+            caused_by_type="ns::internal::helper",
         )
         r = _result(Verdict.BREAKING, changes=[root, overlay])
         d = json.loads(to_json(r))  # report_mode defaults to "full"
@@ -718,11 +766,15 @@ class TestImpactAssessmentRootCause:
         SARIF, and JUnit, which already fold scoped_only_changes into their
         own root-cause grouping (see reporter._scoped_only_extra_causes)."""
         root = Change(
-            ChangeKind.FUNC_REMOVED, "ns::internal::helper", "helper removed",
+            ChangeKind.FUNC_REMOVED,
+            "ns::internal::helper",
+            "helper removed",
         )
         scoped_only_overlay = Change(
-            ChangeKind.CONSUMER_REQUIRED_SYMBOL_REMOVED, "pub_entry",
-            "required by consumer", caused_by_type="ns::internal::helper",
+            ChangeKind.CONSUMER_REQUIRED_SYMBOL_REMOVED,
+            "pub_entry",
+            "required by consumer",
+            caused_by_type="ns::internal::helper",
         )
         r = _result(Verdict.BREAKING, changes=[root])
         r.scoped_only_changes = (scoped_only_overlay,)  # type: ignore[attr-defined]
@@ -733,11 +785,15 @@ class TestImpactAssessmentRootCause:
 
     def test_leaf_mode_also_correlates_via_scoped_only_changes(self):
         root = Change(
-            ChangeKind.FUNC_REMOVED, "ns::internal::helper", "helper removed",
+            ChangeKind.FUNC_REMOVED,
+            "ns::internal::helper",
+            "helper removed",
         )
         scoped_only_overlay = Change(
-            ChangeKind.CONSUMER_REQUIRED_SYMBOL_REMOVED, "pub_entry",
-            "required by consumer", caused_by_type="ns::internal::helper",
+            ChangeKind.CONSUMER_REQUIRED_SYMBOL_REMOVED,
+            "pub_entry",
+            "required by consumer",
+            caused_by_type="ns::internal::helper",
         )
         r = _result(Verdict.BREAKING, changes=[root])
         r.scoped_only_changes = (scoped_only_overlay,)  # type: ignore[attr-defined]
@@ -750,11 +806,15 @@ class TestImpactAssessmentRootCause:
         # Cross-check: the unconditional impact_assessment id must equal
         # --report-mode root-cause's own root_cause_id for the same root.
         root = Change(
-            ChangeKind.FUNC_REMOVED, "ns::internal::helper", "helper removed",
+            ChangeKind.FUNC_REMOVED,
+            "ns::internal::helper",
+            "helper removed",
         )
         overlay = Change(
-            ChangeKind.INTERNAL_SYMBOL_REQUIRED_BY_PUBLIC_API, "pub_entry",
-            "required", caused_by_type="ns::internal::helper",
+            ChangeKind.INTERNAL_SYMBOL_REQUIRED_BY_PUBLIC_API,
+            "pub_entry",
+            "required",
+            caused_by_type="ns::internal::helper",
         )
         r = _result(Verdict.BREAKING, changes=[root, overlay])
         full = json.loads(to_json(r))
@@ -768,15 +828,22 @@ class TestImpactAssessmentRootCause:
         # scoping docstring) -- both correlated findings need to be
         # suppressed together for the grouping to be visible here.
         root = Change(
-            ChangeKind.FUNC_REMOVED, "ns::internal::helper", "helper removed",
+            ChangeKind.FUNC_REMOVED,
+            "ns::internal::helper",
+            "helper removed",
         )
         overlay = Change(
-            ChangeKind.INTERNAL_SYMBOL_REQUIRED_BY_PUBLIC_API, "pub_entry",
-            "required", caused_by_type="ns::internal::helper",
+            ChangeKind.INTERNAL_SYMBOL_REQUIRED_BY_PUBLIC_API,
+            "pub_entry",
+            "required",
+            caused_by_type="ns::internal::helper",
         )
         r = DiffResult(
-            old_version="1.0", new_version="2.0", library="libtest.so.1",
-            changes=[], suppressed_changes=[root, overlay],
+            old_version="1.0",
+            new_version="2.0",
+            library="libtest.so.1",
+            changes=[],
+            suppressed_changes=[root, overlay],
             verdict=Verdict.COMPATIBLE,
         )
         d = json.loads(to_json(r))
@@ -794,11 +861,15 @@ class TestRootCauseMarkdown:
 
     def test_groups_findings_sharing_caused_by_type(self):
         root = Change(
-            ChangeKind.FUNC_REMOVED, "ns::internal::helper", "helper removed",
+            ChangeKind.FUNC_REMOVED,
+            "ns::internal::helper",
+            "helper removed",
         )
         overlay = Change(
-            ChangeKind.INTERNAL_SYMBOL_REQUIRED_BY_PUBLIC_API, "pub_entry",
-            "required", caused_by_type="ns::internal::helper",
+            ChangeKind.INTERNAL_SYMBOL_REQUIRED_BY_PUBLIC_API,
+            "pub_entry",
+            "required",
+            caused_by_type="ns::internal::helper",
         )
         r = _result(Verdict.BREAKING, changes=[root, overlay])
         md = to_markdown(r, report_mode="root-cause")
@@ -841,8 +912,11 @@ class TestRootCauseMarkdown:
         """Codex review: --show-impact silently dropped the Impact Summary
         table under --report-mode root-cause, unlike full/leaf markdown."""
         c = Change(
-            ChangeKind.TYPE_SIZE_CHANGED, "X", "size changed",
-            affected_symbols=["f"], caused_count=1,
+            ChangeKind.TYPE_SIZE_CHANGED,
+            "X",
+            "size changed",
+            affected_symbols=["f"],
+            caused_count=1,
         )
         r = _result(Verdict.BREAKING, changes=[c])
         md = to_markdown(r, report_mode="root-cause", show_impact=True)
@@ -856,30 +930,42 @@ class TestMarkdownReporter:
         assert "No ABI changes" in md
 
     def test_breaking_contains_section(self):
-        c = Change(ChangeKind.FUNC_REMOVED, "_Z3foov", "Public function removed: foo",
-                   old_value="foo")
+        c = Change(
+            ChangeKind.FUNC_REMOVED,
+            "_Z3foov",
+            "Public function removed: foo",
+            old_value="foo",
+        )
         md = to_markdown(_result(Verdict.BREAKING, [c]))
         assert "❌ Breaking Changes" in md
         assert "func_removed" in md
 
     def test_compatible_section(self):
-        c = Change(ChangeKind.FUNC_ADDED, "_Z6newapiv", "New public function: new_api",
-                   new_value="new_api")
+        c = Change(
+            ChangeKind.FUNC_ADDED,
+            "_Z6newapiv",
+            "New public function: new_api",
+            new_value="new_api",
+        )
         md = to_markdown(_result(Verdict.COMPATIBLE, [c]))
         assert "COMPATIBLE" in md
         assert "Additions" in md
 
     def test_noexcept_added_in_quality_section(self):
-        c = Change(ChangeKind.FUNC_NOEXCEPT_ADDED, "_Z4swapv",
-                   "noexcept specifier added: swap")
+        c = Change(
+            ChangeKind.FUNC_NOEXCEPT_ADDED, "_Z4swapv", "noexcept specifier added: swap"
+        )
         md = to_markdown(_result(Verdict.COMPATIBLE, [c]))
         assert "COMPATIBLE" in md
         assert "Quality Issues" in md
 
     def test_demangle_rewrites_mangled_names_when_enabled(self, monkeypatch):
         import abicheck.demangle as dm
+
         monkeypatch.setattr(dm, "demangle_batch", lambda syms: {"_Z3foov": "foo()"})
-        c = Change(ChangeKind.FUNC_REMOVED, "_Z3foov", "Public function removed: _Z3foov")
+        c = Change(
+            ChangeKind.FUNC_REMOVED, "_Z3foov", "Public function removed: _Z3foov"
+        )
         result = _result(Verdict.BREAKING, [c])
         md_on = to_markdown(result, demangle=True)
         assert "foo()" in md_on
@@ -892,9 +978,12 @@ class TestMarkdownReporter:
         import abicheck.demangle as dm
         from abicheck.model import AbiSnapshot
         from abicheck.service import render_output
+
         monkeypatch.setattr(dm, "demangle_batch", lambda syms: {"_Z3foov": "foo()"})
-        result = _result(Verdict.BREAKING,
-                         [Change(ChangeKind.FUNC_REMOVED, "_Z3foov", "removed _Z3foov")])
+        result = _result(
+            Verdict.BREAKING,
+            [Change(ChangeKind.FUNC_REMOVED, "_Z3foov", "removed _Z3foov")],
+        )
         old = AbiSnapshot(library="libtest.so.1", version="1.0")
         out_on = render_output("review", result, old, demangle=True)
         assert "foo()" in out_on and "_Z3foov" not in out_on
@@ -907,19 +996,27 @@ class TestMarkdownReporter:
 
     def test_risk_changes_in_json(self):
         """JSON summary must include risk_changes field with correct count."""
-        c = Change(ChangeKind.SYMBOL_VERSION_REQUIRED_ADDED, "libc.so.6",
-                   "New GLIBC_2.34 version requirement added")
+        c = Change(
+            ChangeKind.SYMBOL_VERSION_REQUIRED_ADDED,
+            "libc.so.6",
+            "New GLIBC_2.34 version requirement added",
+        )
         r = _result(Verdict.COMPATIBLE_WITH_RISK, changes=[c])
         d = json.loads(to_json(r))
         assert d["verdict"] == "COMPATIBLE_WITH_RISK"
-        assert "risk_changes" in d["summary"], "JSON summary must contain 'risk_changes' key"
+        assert "risk_changes" in d["summary"], (
+            "JSON summary must contain 'risk_changes' key"
+        )
         assert d["summary"]["risk_changes"] == 1
         assert d["summary"]["breaking"] == 0
 
     def test_risk_section_in_markdown(self):
         """Markdown must include Deployment Risk Changes section when risk > 0."""
-        c = Change(ChangeKind.SYMBOL_VERSION_REQUIRED_ADDED, "libc.so.6",
-                   "New GLIBC_2.34 version requirement added")
+        c = Change(
+            ChangeKind.SYMBOL_VERSION_REQUIRED_ADDED,
+            "libc.so.6",
+            "New GLIBC_2.34 version requirement added",
+        )
         md = to_markdown(_result(Verdict.COMPATIBLE_WITH_RISK, [c]))
         assert "COMPATIBLE_WITH_RISK" in md
         assert "⚠️ Deployment Risk Changes" in md
@@ -928,15 +1025,252 @@ class TestMarkdownReporter:
 
     def test_compatible_with_risk_emoji_in_markdown(self):
         """COMPATIBLE_WITH_RISK verdict uses ⚠️ emoji in header table."""
-        c = Change(ChangeKind.SYMBOL_VERSION_REQUIRED_ADDED, "libc.so.6",
-                   "New GLIBC_2.34 version requirement added")
+        c = Change(
+            ChangeKind.SYMBOL_VERSION_REQUIRED_ADDED,
+            "libc.so.6",
+            "New GLIBC_2.34 version requirement added",
+        )
         md = to_markdown(_result(Verdict.COMPATIBLE_WITH_RISK, [c]))
         assert "⚠️ `COMPATIBLE_WITH_RISK`" in md
+
+    def test_correlated_change_kind_rendered_in_markdown(self):
+        """Cross-detector correlation (e.g. LAYOUT_UNVERIFIABLE annotated by
+        post_processing.AnnotateLayoutUnverifiableCoveredByVtableChanged)
+        must reach the default markdown report, not just JSON/SARIF (Codex
+        review)."""
+        c = Change(
+            ChangeKind.LAYOUT_UNVERIFIABLE,
+            "Foo",
+            "layout evidence unverifiable",
+            correlated_change_kind=ChangeKind.TYPE_VTABLE_CHANGED.value,
+        )
+        md = to_markdown(_result(Verdict.COMPATIBLE_WITH_RISK, [c]))
+        assert "See also" in md
+        assert "type_vtable_changed" in md
+
+    def test_no_correlated_change_kind_text_when_unset(self):
+        c = Change(
+            ChangeKind.LAYOUT_UNVERIFIABLE, "Foo", "layout evidence unverifiable"
+        )
+        md = to_markdown(_result(Verdict.COMPATIBLE_WITH_RISK, [c]))
+        assert "See also" not in md
+
+    def test_correlated_change_kind_rendered_in_quality_issues_section(self):
+        """A policy override that reclassifies LAYOUT_UNVERIFIABLE as
+        COMPATIBLE routes the finding into the Quality Issues bucket, which
+        has its own bare one-line format — the "See also" note must still
+        reach it (Codex review, fresh evidence)."""
+        c = Change(
+            ChangeKind.LAYOUT_UNVERIFIABLE,
+            "Foo",
+            "layout evidence unverifiable",
+            correlated_change_kind=ChangeKind.TYPE_VTABLE_CHANGED.value,
+            effective_verdict=Verdict.COMPATIBLE,
+        )
+        md = to_markdown(_result(Verdict.COMPATIBLE, [c]))
+        assert "Quality Issues" in md
+        assert "See also" in md
+        assert "type_vtable_changed" in md
+
+    def test_correlated_change_kind_rendered_in_not_evaluated_section(self):
+        """A finding contract evaluation left NOT_EVALUATED routes into the
+        separate "Not Evaluated (Contract)" section, which also has its own
+        bare one-line format — the "See also" note must still reach it
+        (Codex review, fresh evidence)."""
+        from abicheck.contract_relevance_types import CompatibilityEvaluationStatus
+
+        c = Change(
+            ChangeKind.LAYOUT_UNVERIFIABLE,
+            "Foo",
+            "layout evidence unverifiable",
+            correlated_change_kind=ChangeKind.TYPE_VTABLE_CHANGED.value,
+            compatibility_evaluation_status=CompatibilityEvaluationStatus.NOT_EVALUATED,
+        )
+        md = to_markdown(_result(Verdict.NO_CHANGE, [c]))
+        assert "Not Evaluated (Contract)" in md
+        assert "See also" in md
+        assert "type_vtable_changed" in md
+
+    def test_correlation_note_hidden_when_show_only_filters_out_the_target(self):
+        """``--show-only`` can keep a LAYOUT_UNVERIFIABLE (risk) finding
+        while filtering out the co-reported TYPE_VTABLE_CHANGED (breaking)
+        its correlated_change_kind names — the "See also" note must not
+        reference a finding this filtered view no longer shows (Codex
+        review, fresh evidence)."""
+        layout_change = Change(
+            ChangeKind.LAYOUT_UNVERIFIABLE,
+            "Foo",
+            "layout evidence unverifiable",
+            qualified_name="Foo",
+            correlated_change_kind=ChangeKind.TYPE_VTABLE_CHANGED.value,
+        )
+        vtable_change = Change(
+            ChangeKind.TYPE_VTABLE_CHANGED,
+            "Foo",
+            "vtable changed",
+            qualified_name="Foo",
+        )
+        r = _result(Verdict.BREAKING, [layout_change, vtable_change])
+
+        # Unfiltered: both findings visible, the note is shown.
+        md_full = to_markdown(r)
+        assert "See also" in md_full
+
+        # --show-only risk: TYPE_VTABLE_CHANGED (breaking) is filtered out,
+        # so the note referencing it must disappear too.
+        md_filtered = to_markdown(r, show_only="risk")
+        assert "type_vtable_changed" not in md_filtered
+        assert "See also" not in md_filtered
+        # The layout finding itself must still be reported.
+        assert "layout evidence unverifiable" in md_filtered
+
+        # The original Change objects are never mutated by the filtered
+        # render — a later, unfiltered render of the same result must still
+        # show the note.
+        assert (
+            layout_change.correlated_change_kind == ChangeKind.TYPE_VTABLE_CHANGED.value
+        )
+        assert "See also" in to_markdown(r)
+
+    def test_json_correlation_cleared_when_show_only_filters_out_the_target(self):
+        """The same dangling-correlation gap as the markdown test above, but
+        for the JSON report (Codex review, fresh evidence: a fix scoped only
+        to markdown left every other format independently able to render
+        the same stale correlated_change_kind reference)."""
+        layout_change = Change(
+            ChangeKind.LAYOUT_UNVERIFIABLE,
+            "Foo",
+            "layout evidence unverifiable",
+            qualified_name="Foo",
+            correlated_change_kind=ChangeKind.TYPE_VTABLE_CHANGED.value,
+        )
+        vtable_change = Change(
+            ChangeKind.TYPE_VTABLE_CHANGED,
+            "Foo",
+            "vtable changed",
+            qualified_name="Foo",
+        )
+        r = _result(Verdict.BREAKING, [layout_change, vtable_change])
+
+        d_full = json.loads(to_json(r))
+        by_kind = {c["kind"]: c for c in d_full["changes"]}
+        assert by_kind["layout_unverifiable"]["correlated_change_kind"] == (
+            "type_vtable_changed"
+        )
+
+        d_filtered = json.loads(to_json(r, show_only="risk"))
+        filtered_kinds = {c["kind"] for c in d_filtered["changes"]}
+        assert "type_vtable_changed" not in filtered_kinds
+        assert "layout_unverifiable" in filtered_kinds
+        layout_entry = next(
+            c for c in d_filtered["changes"] if c["kind"] == "layout_unverifiable"
+        )
+        assert "correlated_change_kind" not in layout_entry
+
+        # The original Change object is never mutated by the filtered render.
+        assert (
+            layout_change.correlated_change_kind == ChangeKind.TYPE_VTABLE_CHANGED.value
+        )
+
+    def test_correlation_uses_qualified_identity_not_bare_symbol_fallback(self):
+        """A source with ``qualified_name`` set must be matched only by it,
+        never falling back to the bare ``symbol`` too -- an unrelated
+        same-leaf-name record's own surviving finding could otherwise be
+        mistaken for "the same target" the dangling correlation names
+        (Codex review, fresh evidence)."""
+        layout_change = Change(
+            ChangeKind.LAYOUT_UNVERIFIABLE,
+            "Foo",
+            "layout evidence unverifiable",
+            qualified_name="ns1::Foo",
+            correlated_change_kind=ChangeKind.TYPE_VTABLE_CHANGED.value,
+        )
+        # ns1::Foo's own covering finding -- still plain BREAKING, so
+        # --show-only risk below removes it.
+        vtable_change_ns1 = Change(
+            ChangeKind.TYPE_VTABLE_CHANGED,
+            "Foo",
+            "vtable changed",
+            qualified_name="ns1::Foo",
+        )
+        # Unrelated: a different namespace's same-leaf-name class, sharing
+        # the identical bare symbol "Foo" but independently modulated to
+        # COMPATIBLE_WITH_RISK so --show-only risk keeps *it* too.
+        vtable_change_ns2 = Change(
+            ChangeKind.TYPE_VTABLE_CHANGED,
+            "Foo",
+            "vtable changed (unrelated)",
+            qualified_name="ns2::Foo",
+            effective_verdict=Verdict.COMPATIBLE_WITH_RISK,
+        )
+        r = _result(
+            Verdict.BREAKING, [layout_change, vtable_change_ns1, vtable_change_ns2]
+        )
+
+        d_filtered = json.loads(to_json(r, show_only="risk"))
+        descriptions = {c["description"] for c in d_filtered["changes"]}
+        # ns2::Foo's own (unrelated) finding survives the filter...
+        assert "vtable changed (unrelated)" in descriptions
+        # ...but ns1::Foo's own covering finding does not.
+        assert "vtable changed" not in descriptions
+
+        layout_entry = next(
+            c for c in d_filtered["changes"] if c["kind"] == "layout_unverifiable"
+        )
+        # Must be cleared: ns1::Foo's own target is gone, and ns2::Foo's
+        # surviving same-symbol finding must not be mistaken for it.
+        assert "correlated_change_kind" not in layout_entry
+
+    def test_json_filtered_cached_impact_assessment_also_cleared(self):
+        """When a reachability-aware suppression caused MarkReachability to
+        cache the finding's whole ImpactAssessment, assess_change() prefers
+        that cache's own correlated_change_kind over the flat field --
+        clearing only the flat field on a --show-only-filtered copy leaves
+        the shared, un-copied impact_assessment object still carrying the
+        stale reference, so the filtered JSON's nested impact_assessment
+        block kept publishing it even though the top-level field was
+        correctly cleared (Codex review, fresh evidence)."""
+        from abicheck.impact.model import ImpactAssessment
+
+        layout_change = Change(
+            ChangeKind.LAYOUT_UNVERIFIABLE,
+            "Foo",
+            "layout evidence unverifiable",
+            qualified_name="Foo",
+            correlated_change_kind=ChangeKind.TYPE_VTABLE_CHANGED.value,
+            impact_assessment=ImpactAssessment(
+                correlated_change_kind=ChangeKind.TYPE_VTABLE_CHANGED.value
+            ),
+        )
+        vtable_change = Change(
+            ChangeKind.TYPE_VTABLE_CHANGED,
+            "Foo",
+            "vtable changed",
+            qualified_name="Foo",
+        )
+        r = _result(Verdict.BREAKING, [layout_change, vtable_change])
+
+        d_filtered = json.loads(to_json(r, show_only="risk"))
+        layout_entry = next(
+            c for c in d_filtered["changes"] if c["kind"] == "layout_unverifiable"
+        )
+        assert "correlated_change_kind" not in layout_entry
+        assert (
+            layout_entry.get("impact_assessment", {}).get("correlated_change_kind")
+            is None
+        )
+
+        # The original Change's cached impact_assessment is never mutated.
+        assert (
+            layout_change.impact_assessment.correlated_change_kind
+            == ChangeKind.TYPE_VTABLE_CHANGED.value
+        )
 
 
 # ---------------------------------------------------------------------------
 # Severity-aware reporter output
 # ---------------------------------------------------------------------------
+
 
 class TestSeverityMarkdown:
     """Tests for to_markdown with severity_config parameter."""
@@ -944,16 +1278,25 @@ class TestSeverityMarkdown:
     def test_severity_badges_shown_when_config_provided(self):
         """Section header for breaking changes includes ERROR badge."""
         from abicheck.severity import PRESET_DEFAULT
-        c = Change(ChangeKind.FUNC_REMOVED, "_Z3foov", "Public function removed: foo",
-                   old_value="foo")
+
+        c = Change(
+            ChangeKind.FUNC_REMOVED,
+            "_Z3foov",
+            "Public function removed: foo",
+            old_value="foo",
+        )
         md = to_markdown(_result(Verdict.BREAKING, [c]), severity_config=PRESET_DEFAULT)
         # Exact section header produced by the reporter
         assert "## \u274c Breaking Changes \u274c `ERROR`" in md
 
     def test_severity_badges_absent_without_config(self):
         """Section headers do NOT include severity badges without severity_config."""
-        c = Change(ChangeKind.FUNC_REMOVED, "_Z3foov", "Public function removed: foo",
-                   old_value="foo")
+        c = Change(
+            ChangeKind.FUNC_REMOVED,
+            "_Z3foov",
+            "Public function removed: foo",
+            old_value="foo",
+        )
         md = to_markdown(_result(Verdict.BREAKING, [c]))
         # Without severity_config, the header has no badge suffix
         assert "## \u274c Breaking Changes\n" in md
@@ -964,8 +1307,11 @@ class TestSeverityMarkdown:
     def test_severity_summary_table_in_markdown(self):
         """Markdown includes a severity configuration table when config is provided."""
         from abicheck.severity import PRESET_STRICT
+
         c = Change(ChangeKind.FUNC_ADDED, "_Z6newapiv", "New public function: new_api")
-        md = to_markdown(_result(Verdict.COMPATIBLE, [c]), severity_config=PRESET_STRICT)
+        md = to_markdown(
+            _result(Verdict.COMPATIBLE, [c]), severity_config=PRESET_STRICT
+        )
         assert "## Severity Configuration" in md
         # Exact table rows
         assert "| ABI/API Incompatibilities |" in md
@@ -980,17 +1326,24 @@ class TestSeverityMarkdown:
     def test_quality_section_with_severity_label(self):
         """Quality section header includes WARNING badge."""
         from abicheck.severity import PRESET_DEFAULT
-        c = Change(ChangeKind.FUNC_NOEXCEPT_ADDED, "_Z4swapv",
-                   "noexcept specifier added: swap")
-        md = to_markdown(_result(Verdict.COMPATIBLE, [c]), severity_config=PRESET_DEFAULT)
+
+        c = Change(
+            ChangeKind.FUNC_NOEXCEPT_ADDED, "_Z4swapv", "noexcept specifier added: swap"
+        )
+        md = to_markdown(
+            _result(Verdict.COMPATIBLE, [c]), severity_config=PRESET_DEFAULT
+        )
         # Exact section header
         assert "## \U0001f50d Quality Issues \u26a0\ufe0f `WARNING`" in md
 
     def test_additions_section_with_severity_label(self):
         """Additions section header includes INFO badge."""
         from abicheck.severity import PRESET_DEFAULT
+
         c = Change(ChangeKind.FUNC_ADDED, "_Z6newapiv", "New public function: new_api")
-        md = to_markdown(_result(Verdict.COMPATIBLE, [c]), severity_config=PRESET_DEFAULT)
+        md = to_markdown(
+            _result(Verdict.COMPATIBLE, [c]), severity_config=PRESET_DEFAULT
+        )
         # Exact section header
         assert "## \u2705 Additions \u2139\ufe0f `INFO`" in md
 
@@ -1001,6 +1354,7 @@ class TestSeverityJson:
     def test_severity_section_in_json(self):
         """JSON output includes severity section when config is provided."""
         from abicheck.severity import PRESET_DEFAULT
+
         c = Change(ChangeKind.FUNC_REMOVED, "_Z3foov", "Public function removed: foo")
         r = _result(Verdict.BREAKING, changes=[c])
         d = json.loads(to_json(r, severity_config=PRESET_DEFAULT))
@@ -1022,6 +1376,7 @@ class TestSeverityJson:
     def test_severity_exit_code_in_json(self):
         """JSON severity section includes computed exit_code."""
         from abicheck.severity import PRESET_STRICT
+
         c = Change(ChangeKind.FUNC_ADDED, "_Z6newapiv", "New public function: new_api")
         r = _result(Verdict.COMPATIBLE, changes=[c])
         d = json.loads(to_json(r, severity_config=PRESET_STRICT))
@@ -1030,6 +1385,7 @@ class TestSeverityJson:
     def test_severity_category_counts(self):
         """JSON severity categories have correct counts for mixed changes."""
         from abicheck.severity import PRESET_DEFAULT
+
         changes = [
             Change(ChangeKind.FUNC_REMOVED, "_Z3foov", "removed: foo"),
             Change(ChangeKind.FUNC_ADDED, "_Z3barv", "added: bar"),
@@ -1048,6 +1404,7 @@ class TestSeverityJson:
 # Confidence, evidence tiers, coverage warnings, and policy in reports
 # ---------------------------------------------------------------------------
 
+
 class TestConfidenceInJson:
     """JSON report must include confidence, evidence_tiers, and coverage_warnings."""
 
@@ -1060,9 +1417,13 @@ class TestConfidenceInJson:
 
     def test_confidence_with_tiers(self):
         from abicheck.checker_policy import Confidence
-        r = _result(Verdict.BREAKING, [
-            Change(ChangeKind.FUNC_REMOVED, "_Z3foov", "removed"),
-        ])
+
+        r = _result(
+            Verdict.BREAKING,
+            [
+                Change(ChangeKind.FUNC_REMOVED, "_Z3foov", "removed"),
+            ],
+        )
         r.confidence = Confidence.MEDIUM
         r.evidence_tiers = ["elf", "header"]
         r.coverage_warnings = ["DWARF debug info not available"]
@@ -1073,6 +1434,7 @@ class TestConfidenceInJson:
 
     def test_policy_overrides_in_json(self):
         from abicheck.policy_file import PolicyFile
+
         pf = PolicyFile(
             base_policy="strict_abi",
             overrides={ChangeKind.FUNC_REMOVED: Verdict.COMPATIBLE},
@@ -1093,9 +1455,13 @@ class TestConfidenceInMarkdown:
 
     def test_confidence_section_present(self):
         from abicheck.checker_policy import Confidence
-        r = _result(Verdict.COMPATIBLE, [
-            Change(ChangeKind.FUNC_ADDED, "_Z3barv", "added: bar"),
-        ])
+
+        r = _result(
+            Verdict.COMPATIBLE,
+            [
+                Change(ChangeKind.FUNC_ADDED, "_Z3barv", "added: bar"),
+            ],
+        )
         r.confidence = Confidence.LOW
         r.evidence_tiers = ["elf"]
         r.coverage_warnings = ["DWARF stripped"]
@@ -1112,6 +1478,7 @@ class TestConfidenceInMarkdown:
 
     def test_policy_overrides_shown(self):
         from abicheck.policy_file import PolicyFile
+
         pf = PolicyFile(
             base_policy="strict_abi",
             overrides={ChangeKind.FUNC_REMOVED: Verdict.COMPATIBLE},
@@ -1127,6 +1494,7 @@ class TestConfidenceInMarkdown:
 # AppCompat report traceability (file metadata + confidence)
 # ---------------------------------------------------------------------------
 
+
 class TestAppCompatTraceability:
     """AppCompat JSON/Markdown include file metadata and confidence when available."""
 
@@ -1134,9 +1502,14 @@ class TestAppCompatTraceability:
         from types import SimpleNamespace
 
         from abicheck.checker_policy import Confidence
+
         diff = _result(Verdict.COMPATIBLE)
-        diff.old_metadata = SimpleNamespace(path="/old/lib.so", sha256="aabb" * 8, size_bytes=4096)
-        diff.new_metadata = SimpleNamespace(path="/new/lib.so", sha256="ccdd" * 8, size_bytes=8192)
+        diff.old_metadata = SimpleNamespace(
+            path="/old/lib.so", sha256="aabb" * 8, size_bytes=4096
+        )
+        diff.new_metadata = SimpleNamespace(
+            path="/new/lib.so", sha256="ccdd" * 8, size_bytes=8192
+        )
         diff.confidence = Confidence.MEDIUM
         diff.evidence_tiers = ["elf", "header"]
         diff.coverage_warnings = []
@@ -1156,6 +1529,7 @@ class TestAppCompatTraceability:
 
     def test_appcompat_json_includes_file_metadata(self):
         from abicheck.reporter import appcompat_to_json
+
         r = self._appcompat_result()
         d = json.loads(appcompat_to_json(r))
         assert d["old_file"]["path"] == "/old/lib.so"
@@ -1166,6 +1540,7 @@ class TestAppCompatTraceability:
 
     def test_appcompat_markdown_includes_file_metadata(self):
         from abicheck.reporter import appcompat_to_markdown
+
         r = self._appcompat_result()
         md = appcompat_to_markdown(r)
         assert "Library Files" in md
@@ -1174,6 +1549,7 @@ class TestAppCompatTraceability:
 
     def test_appcompat_markdown_includes_policy(self):
         from abicheck.reporter import appcompat_to_markdown
+
         r = self._appcompat_result()
         md = appcompat_to_markdown(r)
         assert "**Policy**" in md
@@ -1192,9 +1568,13 @@ class TestStatJsonConfidence:
 
     def test_stat_json_with_confidence(self):
         from abicheck.checker_policy import Confidence
-        r = _result(Verdict.BREAKING, [
-            Change(ChangeKind.FUNC_REMOVED, "_Z3foov", "removed"),
-        ])
+
+        r = _result(
+            Verdict.BREAKING,
+            [
+                Change(ChangeKind.FUNC_REMOVED, "_Z3foov", "removed"),
+            ],
+        )
         r.confidence = Confidence.LOW
         r.evidence_tiers = ["elf"]
         r.coverage_warnings = ["DWARF stripped"]

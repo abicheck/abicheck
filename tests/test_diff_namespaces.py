@@ -25,6 +25,7 @@ from abicheck.diff_namespaces import (
     _origin_by_name,
     _paired_stable_indices,
     _segments,
+    _stable_keys_compatible,
     _strip_experimental,
     _version_strip_segments,
     _version_suffix,
@@ -179,6 +180,28 @@ class TestOriginByName:
 
 
 # ---------------------------------------------------------------------------
+# _stable_keys_compatible
+# ---------------------------------------------------------------------------
+
+
+class TestStableKeysCompatible:
+    def test_bare_leaf_is_compatible_with_any_qualified_form(self) -> None:
+        assert _stable_keys_compatible("check_ranges", "oneapi::dal::detail::check_ranges")
+        assert _stable_keys_compatible("ns::check_ranges", "check_ranges")
+
+    def test_identical_keys_are_compatible(self) -> None:
+        assert _stable_keys_compatible("ns::sort", "ns::sort")
+
+    def test_diverging_multi_segment_keys_are_not_compatible(self) -> None:
+        assert not _stable_keys_compatible("api::sort", "detail::sort")
+
+    def test_empty_key_is_never_compatible(self) -> None:
+        assert not _stable_keys_compatible("", "ns::sort")
+        assert not _stable_keys_compatible("ns::sort", "")
+        assert not _stable_keys_compatible("", "")
+
+
+# ---------------------------------------------------------------------------
 # detect_experimental_namespace_changes — graduations
 # ---------------------------------------------------------------------------
 
@@ -277,6 +300,157 @@ class TestExperimentalGraduated:
 
 
 class TestExperimentalRemovedWithoutReplacement:
+    def test_declared_experimental_alias_removal_survives_demangled_divergence(
+        self,
+    ) -> None:
+        # Codex review, on the mangled-preference fix above: a using-
+        # declaration/re-export can legitimately declare a name in
+        # `experimental::` whose *mangled symbol* demangles to the
+        # underlying stable declaration it aliases (no "experimental"
+        # segment at all) -- the same declared-vs-underlying divergence
+        # `detect_std_reexport_removed` is built on. Namespace
+        # classification must come from the *declared* name only, or this
+        # would silently defeat EXPERIMENTAL_REMOVED_WITHOUT_REPLACEMENT
+        # for every alias-shaped experimental declaration.
+        import abicheck.demangle as dm
+
+        def fake_demangle(mangled_list: list[str]) -> dict[str, str]:
+            # The alias's own mangled symbol demangles to the *stable*
+            # underlying name -- no "experimental" segment survives a
+            # demangle-preferred reading.
+            sigs = {"_ZN2ns4sortE": "ns::sort"}
+            return {m: sigs[m] for m in mangled_list if m in sigs}
+
+        orig = dm.demangle_batch
+        dm.demangle_batch = fake_demangle  # type: ignore[assignment]
+        try:
+            old = _snap(funcs=[
+                _fn("ns::experimental::sort", mangled="_ZN2ns4sortE"),
+            ])
+            # Genuine removal: the alias is dropped and its mangled symbol
+            # is gone from `new` entirely (no stable twin either).
+            new = _snap(funcs=[])
+            changes = detect_experimental_namespace_changes(old, new)
+        finally:
+            dm.demangle_batch = orig  # type: ignore[assignment]
+
+        assert len(changes) == 1
+        assert changes[0].kind == ChangeKind.EXPERIMENTAL_REMOVED_WITHOUT_REPLACEMENT
+        assert changes[0].symbol == "ns::experimental::sort"
+
+    def test_alias_removal_still_fires_when_underlying_symbol_survives_elsewhere(
+        self,
+    ) -> None:
+        # Codex review, on the mangled-still-linked suppression above: the
+        # suppression must not treat "this mangled symbol exists *somewhere*
+        # in new" as proof the removed declaration survives -- an
+        # experimental alias's underlying symbol can keep exporting under a
+        # completely unrelated declared name (a different leaf) after the
+        # alias itself is deleted, and source that named the alias no
+        # longer compiles even though the symbol lives on elsewhere. The
+        # suppression must be scoped to the *same leaf*, not any leaf.
+        old = _snap(funcs=[
+            _fn("ns::experimental::sort", mangled="_ZSAME"),
+        ])
+        # The mangled symbol survives, but only under an entirely different
+        # leaf ("relabelled") -- not a re-qualified spelling of "sort".
+        new = _snap(funcs=[
+            _fn("ns::detail::relabelled", mangled="_ZSAME"),
+        ])
+        changes = detect_experimental_namespace_changes(old, new)
+        assert len(changes) == 1
+        assert changes[0].kind == ChangeKind.EXPERIMENTAL_REMOVED_WITHOUT_REPLACEMENT
+        assert changes[0].symbol == "ns::experimental::sort"
+
+    def test_alias_removal_still_fires_when_same_leaf_target_is_unrelated(
+        self,
+    ) -> None:
+        # Codex review, on the (mangled, leaf)-scoped suppression above: a
+        # matching *leaf* alone is still not enough -- two genuinely
+        # different declarations can coincidentally share both a leaf and
+        # (through unrelated aliasing) a mangled symbol. Here
+        # `api::experimental::sort` is removed while an unrelated
+        # `detail::sort` (different full path, same leaf, same mangled
+        # symbol by construction) survives; the alias itself no longer
+        # compiles for any caller that named it, so this must still fire.
+        old = _snap(funcs=[
+            _fn("api::experimental::sort", mangled="_ZSAME2"),
+        ])
+        new = _snap(funcs=[
+            _fn("detail::sort", mangled="_ZSAME2"),
+        ])
+        changes = detect_experimental_namespace_changes(old, new)
+        assert len(changes) == 1
+        assert changes[0].kind == ChangeKind.EXPERIMENTAL_REMOVED_WITHOUT_REPLACEMENT
+        assert changes[0].symbol == "api::experimental::sort"
+
+    def test_bare_name_demangled_signature_does_not_defeat_suppression(
+        self,
+    ) -> None:
+        # Codex review, on the stable-key compatibility check above: a
+        # bare-named OLD declaration demangles to a *full signature*
+        # ("ns::experimental::check_ranges()"), while an already-qualified
+        # NEW declared name never carries one ("experimental::check_ranges"
+        # -- header-derived names are never signatures). Comparing those
+        # two stable-keys without stripping the trailing "()" first would
+        # mismatch on that alone and wrongly re-fire the original reported
+        # false positive through a different door.
+        import abicheck.demangle as dm
+
+        def fake_demangle(mangled_list: list[str]) -> dict[str, str]:
+            sigs = {"_Zex1": "ns::experimental::check_ranges()"}
+            return {m: sigs[m] for m in mangled_list if m in sigs}
+
+        orig = dm.demangle_batch
+        dm.demangle_batch = fake_demangle  # type: ignore[assignment]
+        try:
+            old = _snap(funcs=[_fn("check_ranges", mangled="_Zex1")])
+            new = _snap(funcs=[
+                _fn("experimental::check_ranges", mangled="_Zex1"),
+            ])
+            changes = detect_experimental_namespace_changes(old, new)
+        finally:
+            dm.demangle_batch = orig  # type: ignore[assignment]
+
+        assert not any(
+            c.kind == ChangeKind.EXPERIMENTAL_REMOVED_WITHOUT_REPLACEMENT
+            for c in changes
+        )
+
+    def test_all_collapsed_overloads_must_survive_to_suppress(self) -> None:
+        # Codex review: when neither side's declared name carries a
+        # signature, two overloads sharing one leaf collapse into a
+        # *single* (stable_key, leaf) bucket -- `old_exp` can hold more
+        # than one entry. A single surviving sibling overload's mangled
+        # symbol must not suppress the whole bucket's removal when a
+        # different, genuinely-removed sibling shares it.
+        import abicheck.demangle as dm
+
+        def fake_demangle(mangled_list: list[str]) -> dict[str, str]:
+            sigs = {"_ZM2": "ns::experimental::foo()"}
+            return {m: sigs[m] for m in mangled_list if m in sigs}
+
+        orig = dm.demangle_batch
+        dm.demangle_batch = fake_demangle  # type: ignore[assignment]
+        try:
+            old = _snap(funcs=[
+                _fn("ns::experimental::foo", mangled="_ZM1"),
+                _fn("ns::experimental::foo", mangled="_ZM2"),
+            ])
+            # M1 is genuinely removed. M2 survives, but re-qualified as a
+            # bare name that demangles to a full signature -- landing in a
+            # *different* bucket key than OLD's own (no "()" there), which
+            # is what makes `still_linked` the only remaining signal.
+            new = _snap(funcs=[_fn("foo", mangled="_ZM2")])
+            changes = detect_experimental_namespace_changes(old, new)
+        finally:
+            dm.demangle_batch = orig  # type: ignore[assignment]
+
+        assert any(
+            c.kind == ChangeKind.EXPERIMENTAL_REMOVED_WITHOUT_REPLACEMENT
+            for c in changes
+        )
+
     def test_silent_function_removal(self) -> None:
         old = _snap(funcs=[_fn("ns::experimental::bar")])
         new = _snap(funcs=[])
@@ -412,6 +586,46 @@ class TestExperimentalRemovedWithoutReplacement:
             _fn("preview::spmd::v1::communicator", mangled="_ZSame"),
         ])
         changes = detect_experimental_namespace_changes(old, new)
+        assert not any(
+            c.kind == ChangeKind.EXPERIMENTAL_REMOVED_WITHOUT_REPLACEMENT
+            for c in changes
+        )
+
+    def test_bare_vs_qualified_name_same_mangled_symbol_no_false_positive(
+        self,
+    ) -> None:
+        # Reported regression (shared with diff_templates.py's
+        # INTERNAL_TEMPLATE_LEAKS_VIA_PUBLIC_API): a header/AST dumper
+        # backend can populate ``Function.name`` with inconsistent
+        # qualification for the *identical* linked symbol across two
+        # snapshots -- a bare leaf on one side, a namespace-qualified
+        # spelling with its own formatting on the other. Keying the
+        # (stable_key, leaf) index on the declared name alone made a
+        # still-exported symbol (confirmed unchanged via `nm` in the field)
+        # read as removed-without-replacement purely because the dumper
+        # changed how much of its own name it qualified between two
+        # versions, not because the symbol moved out of `experimental::`.
+        import abicheck.demangle as dm
+
+        def fake_demangle(mangled_list: list[str]) -> dict[str, str]:
+            sigs = {"_Zex1": "ns::experimental::check_ranges"}
+            return {m: sigs[m] for m in mangled_list if m in sigs}
+
+        orig = dm.demangle_batch
+        dm.demangle_batch = fake_demangle  # type: ignore[assignment]
+        try:
+            old = _snap(funcs=[_fn("check_ranges", mangled="_Zex1")])
+            # A real, documented quirk (AGENTS.md): a header AST backend can
+            # drop the enclosing namespace from a declared name. The mangled
+            # symbol -- what a consumer actually links against -- is
+            # unchanged.
+            new = _snap(funcs=[
+                _fn("experimental::check_ranges", mangled="_Zex1"),
+            ])
+            changes = detect_experimental_namespace_changes(old, new)
+        finally:
+            dm.demangle_batch = orig  # type: ignore[assignment]
+
         assert not any(
             c.kind == ChangeKind.EXPERIMENTAL_REMOVED_WITHOUT_REPLACEMENT
             for c in changes
