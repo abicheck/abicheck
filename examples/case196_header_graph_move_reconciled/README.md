@@ -39,19 +39,25 @@ header, so its call is consumer-visible under any reasonable reachability
 notion — sidestepping that question rather than resting this case's ground
 truth on which reachability predicate a given detector happens to use.
 
-Both fixture graphs also mark their call-graph extractor pass as having
-run (`SourceGraphSummary.extractor_passes["call_graph"] = True`) — a review
-round caught that without this, `source_graph_findings.
-_dependency_kinds_covered` reads a hand-built graph's absent
-`DECL_CALLS_DECL` edges as "the pass never ran" (no signal either way), not
-"ran, confirmed zero calls", so the whole comparison would silently decline
-rather than credit a genuinely new dependency. With both sides marked, the
-old side's zero calls is a **confirmed** zero, and the new side's one call
-is a **genuinely new** dependency — not an artifact of the same target
-under two different raw ids (the shape an earlier review round correctly
-rejected for the *reverse* case, where the identical call edge existed on
-both sides pointing at the helper's two different per-version mangled-name
-ids). `source_graph_findings._internal_dependency_findings` (the
+Both fixture surfaces also carry a `coverage.fact_set`/`fact_family_states`
+rollup naming the one `source_edges` producer whose coverage genuinely
+matches a full, unfiltered call/type-graph replay
+(`source_graph._FULL_WALK_SOURCE_EDGES_PRODUCER`), and the fixture calls
+`source_graph.mark_source_edges_extractor_coverage()` — the *real*
+production certification helper — rather than hand-forcing
+`extractor_passes["call_graph"] = True` directly. A review round caught
+that the hand-forced version bypassed the real certification gate
+entirely: run against this exact surface data, the real helper would
+instead *degrade* the pass (an unconfirmed rollup, not a full-walk
+producer), so a regression in production coverage propagation could never
+have failed this fixture. With the real helper genuinely certifying both
+sides from that coverage rollup, the old side's zero calls is a
+**confirmed** zero, and the new side's one call is a **genuinely new**
+dependency — not an artifact of the same target under two different raw
+ids (the shape an earlier review round correctly rejected for the
+*reverse* case, where the identical call edge existed on both sides
+pointing at the helper's two different per-version mangled-name ids).
+`source_graph_findings._internal_dependency_findings` (the
 `public_api_internal_dependency_added` producer, demonstrated in
 [case160](../case160_public_api_internal_dep_added/README.md)) therefore
 correctly fires here, alongside `graph_reconcile`'s own

@@ -19,13 +19,13 @@
       "target": 1
     },
     "reference_edges": {
-      "collected": false,
+      "collected": true,
       "count": 0
     },
     "source_decls": 2,
     "targets": 1,
     "type_edges": {
-      "collected": false,
+      "collected": true,
       "count": 0
     }
   },
@@ -70,7 +70,8 @@
   ],
   "external_graph_refs": [],
   "extractor_passes": {
-    "call_graph": true
+    "call_graph": true,
+    "type_graph": true
   },
   "graph_id": "sha256:bf90ddda62564d24dda5b9c2e243c4c63dd6b62df92427a7e433b7f2414856d8",
   "indexes": {

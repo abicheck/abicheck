@@ -61,6 +61,7 @@ from abicheck.buildsource.source_graph import (  # noqa: E402
     GraphNode,
     SourceGraphSummary,
     build_source_graph,
+    mark_source_edges_extractor_coverage,
 )
 
 EXAMPLES = _REPO / "examples"
@@ -534,12 +535,32 @@ def build_cases() -> dict[str, tuple[str, dict[str, Any], dict[str, Any]]]:
     l5j_build = BuildEvidence(
         targets=[Target(id="libdemo", name="demo", kind=TargetKind.SHARED_LIBRARY)]
     )
+    # Both surfaces carry a coverage.fact_set/fact_family_states rollup
+    # naming the one source_edges producer whose coverage genuinely matches
+    # a full, unfiltered call/type-graph replay
+    # (source_graph._FULL_WALK_SOURCE_EDGES_PRODUCER) -- so
+    # mark_source_edges_extractor_coverage(), the REAL production
+    # certification helper (Codex review, fresh evidence), actually
+    # certifies extractor_passes["call_graph"] from this data, rather than
+    # the generator hand-forcing that flag directly (which a prior version
+    # of this fixture did -- verified empirically that doing so bypasses
+    # the real gate: an uncertified source_edges rollup degrades the pass
+    # instead of confirming it, so a regression in real coverage
+    # propagation could not have been caught by this fixture at all). The
+    # old side's state is "empty-confirmed" (its source_edges is
+    # deliberately []) rather than "complete" -- mirroring what a real
+    # full-walk producer reports for a TU it examined and found nothing in.
+    _FULL_WALK_PRODUCER = "abicheck-cc-clang-extractor"
     l5j_old_surface = SourceAbiSurface(
         library="libdemo.so",
         reachable_inline_bodies=[_pub_caller()],
         reachable_declarations=[
             _helper_entity("_ZN4demo6detail6helperEi", "include/demo/detail_v1.h"),
         ],
+        coverage={
+            "fact_family_states": {"source_edges": "empty-confirmed"},
+            "fact_set": {"producer": _FULL_WALK_PRODUCER},
+        },
     )
     # The demo::process -> demo::detail::helper call relationship is
     # deliberately fed as a SourceAbiSurface.source_edges row (the same L4
@@ -576,26 +597,31 @@ def build_cases() -> dict[str, tuple[str, dict[str, Any], dict[str, Any]]]:
                 "dst": "_ZN4demo6detail6helperEl",
             }
         ],
+        coverage={
+            "fact_family_states": {"source_edges": "complete"},
+            "fact_set": {"producer": _FULL_WALK_PRODUCER},
+        },
     )
     l5j_old_graph = build_source_graph(l5j_build, l5j_old_surface)
     l5j_new_graph = build_source_graph(l5j_build, l5j_new_surface)
-    # Mark the call-graph pass as having genuinely run (and re-finalize, so
-    # coverage.call_edges reflects it -- graph_id is unaffected, since it
-    # hashes only nodes+edges) on BOTH sides (Codex review, fresh evidence):
-    # without this, source_graph_findings._dependency_kinds_covered reads
-    # the old side's zero DECL_CALLS_DECL edges as "never collected" rather
-    # than "collected, confirmed zero", so _has_internal_reach_coverage
-    # silently declines to compare at all -- the case's own narrative claims
-    # demo::process is CONFIRMED not to have called the helper in the old
-    # release, not merely "no evidence either way", so the fixture should
-    # say so. With both sides marked, the pre-existing zero-vs-one
-    # difference is now a genuinely new dependency (not a raw-node-id
-    # artifact, unlike the shape an earlier review round rejected -- that
-    # one involved the SAME target across versions misread as new; this one
-    # is a real zero-to-one), and public_api_internal_dependency_added
-    # correctly fires alongside declaration_moved.
-    l5j_old_graph.extractor_passes["call_graph"] = True
-    l5j_new_graph.extractor_passes["call_graph"] = True
+    # mark_source_edges_extractor_coverage() -- the real production
+    # certification helper build_source_graph() itself does NOT call
+    # automatically (see its own docstring: a caller running a real
+    # call_graph/type_graph replay owns extractor_passes directly and must
+    # not have this helper's coarser source_edges-only certification
+    # override it) -- reads each surface's own coverage rollup above and
+    # only certifies extractor_passes["call_graph"] when it names the
+    # full-walk producer with a genuinely confirmed state; re-finalize so
+    # coverage.call_edges reflects the certification (graph_id is
+    # unaffected, since it hashes only nodes/edges). With both sides
+    # genuinely certified this way, the pre-existing zero-vs-one difference
+    # is a genuinely new dependency (not a raw-node-id artifact, unlike the
+    # shape an earlier review round rejected -- that one involved the SAME
+    # target across versions misread as new; this one is a real
+    # zero-to-one), and public_api_internal_dependency_added correctly
+    # fires alongside declaration_moved.
+    mark_source_edges_extractor_coverage(l5j_old_graph, l5j_old_surface)
+    mark_source_edges_extractor_coverage(l5j_new_graph, l5j_new_surface)
     l5j_old_graph.finalize()
     l5j_new_graph.finalize()
     cases["case196_header_graph_move_reconciled"] = (

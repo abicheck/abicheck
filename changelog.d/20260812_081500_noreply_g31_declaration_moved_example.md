@@ -67,3 +67,16 @@
   (confirmed zero → one) dependency, not the raw-node-id artifact the
   second round's finding was about — `case196` now reproduces both
   `declaration_moved` and `public_api_internal_dependency_added`.
+- **A sixth review round caught that the fifth round's fix hand-forced
+  `extractor_passes["call_graph"] = True` directly**, bypassing the real
+  production certification gate (`source_graph.
+  mark_source_edges_extractor_coverage()`) entirely — run against this
+  exact surface data, that real helper would instead *degrade* the pass
+  (an unconfirmed `source_edges` rollup, not a recognized full-walk
+  producer), so a regression in real coverage propagation could never have
+  failed this fixture. Fixed by populating each surface's
+  `coverage.fact_set`/`fact_family_states` to name the real full-walk
+  producer and calling the real certification helper instead of
+  hand-setting the flag. `public_api_internal_dependency_added` still
+  fires, now genuinely earned through the production coverage-propagation
+  path this fixture is meant to exercise.
