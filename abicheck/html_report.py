@@ -1159,8 +1159,22 @@ def _build_sections_html(
             kind = html.escape(str(getattr(getattr(ch, "kind", None), "value", "")))
             rel = html.escape(str(getattr(relevance, "value", "") or ""))
             reason = html.escape(str(getattr(ch, "contract_reason_code", "") or ""))
+            # Cross-detector correlation (e.g. LAYOUT_UNVERIFIABLE annotated
+            # by post_processing.AnnotateLayoutUnverifiableCoveredByVtable
+            # Changed) -- this bespoke table renders a finding contract
+            # evaluation excluded from every verdict section, so it never
+            # runs through _changes_table's own correlation rendering; a
+            # correlated finding routed here would otherwise go right back
+            # to being unexplained (Codex review, fresh evidence).
+            correlated = getattr(ch, "correlated_change_kind", None)
+            see_also = (
+                f"<div style='font-size:0.82em; color:#999; margin-top:2px;'>"
+                f"🔗 See also: <code>{html.escape(str(correlated))}</code></div>"
+                if correlated
+                else ""
+            )
             rows.append(
-                f"<tr><td><code>{symbol}</code></td><td>{kind}</td>"
+                f"<tr><td><code>{symbol}</code></td><td>{kind}{see_also}</td>"
                 f"<td>{rel}</td><td>{reason}</td></tr>"
             )
         sections.append(

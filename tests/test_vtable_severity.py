@@ -898,6 +898,52 @@ class TestLayoutUnverifiableCorrelatedWithVtableChanged:
             is None
         )
 
+    def test_ordinary_base_change_not_tagged_even_with_unknown_size(self) -> None:
+        """A genuine (non-virtual) base addition is real, independent
+        evidence — separately reported via TYPE_BASE_CHANGED/
+        BASE_CLASS_POSITION_CHANGED — so the co-occurring LAYOUT_UNVERIFIABLE
+        for the same type must not be correlated just because size_bits also
+        happens to be unknown (Codex review, fresh evidence: the identical
+        false-correlation risk already guarded for virtual_bases, but for
+        ordinary bases)."""
+        old = _snap(
+            types=[
+                RecordType(
+                    name="Foo",
+                    kind="class",
+                    vtable=[],
+                    bases=[],
+                    size_bits=None,
+                )
+            ]
+        )
+        new = _snap(
+            types=[
+                RecordType(
+                    name="Foo",
+                    kind="class",
+                    vtable=["_ZN3Foo1fEv"],
+                    bases=["Base"],
+                    size_bits=None,
+                    base_offsets={
+                        "Base": 0
+                    },  # asymmetric evidence -> LAYOUT_UNVERIFIABLE
+                )
+            ]
+        )
+        result = compare(old, new)
+        changes_by_kind = {c.kind: c for c in result.changes}
+        assert ChangeKind.LAYOUT_UNVERIFIABLE in changes_by_kind
+        vtable_change = changes_by_kind[ChangeKind.TYPE_VTABLE_CHANGED]
+        assert vtable_change.effective_verdict is None
+        assert vtable_change.modulation_reason is None
+        assert vtable_change.vtable_covers_unverifiable_layout_gap is False
+        assert result.verdict == Verdict.BREAKING
+        assert (
+            changes_by_kind[ChangeKind.LAYOUT_UNVERIFIABLE].correlated_change_kind
+            is None
+        )
+
     def test_bare_name_collision_does_not_cross_correlate(self) -> None:
         """Two distinct types sharing only a bare leaf name in different
         namespaces must not correlate: ``ns2::Foo``'s ambiguous vtable gap

@@ -755,3 +755,24 @@ def test_no_correlated_change_kind_text_when_unset() -> None:
     r = _result(verdict="COMPATIBLE_WITH_RISK", changes=[ch])
     out = generate_html_report(r)
     assert "See also" not in out
+
+
+def test_correlated_change_kind_rendered_in_not_evaluated_table() -> None:
+    # Codex review, fresh evidence: a correlated finding contract evaluation
+    # excludes routes through _build_sections_html's bespoke "Not Evaluated"
+    # table instead of _changes_table, which has its own separate rendering
+    # -- the "See also" note must reach that table too, or the report goes
+    # right back to being unexplained whenever contract relevance excludes
+    # the advisory.
+    from abicheck.contract_relevance_types import CompatibilityEvaluationStatus
+
+    ch = _ch("layout_unverifiable", "Foo", "layout evidence unverifiable")
+    ch.correlated_change_kind = "type_vtable_changed"
+    ch.compatibility_evaluation_status = CompatibilityEvaluationStatus.NOT_EVALUATED
+    ch.contract_relevance = None
+    ch.contract_reason_code = None
+    r = _result(verdict="NO_CHANGE", changes=[ch])
+    out = generate_html_report(r)
+    assert "Not Evaluated (Contract)" in out
+    assert "type_vtable_changed" in out
+    assert "See also" in out

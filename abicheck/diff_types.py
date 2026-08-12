@@ -1250,8 +1250,8 @@ def _vtable_transition_rests_on_unresolved_evidence(
     * Both sides' vtables populated -> a real reorder/replace. Not this case.
     * The class's own virtual *functions* (a separate projection of the
       debug info) differ -> a real signal, however imperfect. Not this case.
-    * A real ``size_bits`` delta or virtual-base change -> a real layout
-      signal. Not this case.
+    * A real ``size_bits`` delta, or a virtual or non-virtual base change ->
+      a real layout signal. Not this case.
     * An *unknown* ``size_bits`` on either side -> the finding was kept only
       because an unresolved-evidence gap corroborates nothing and refutes
       nothing. This is the one case sharing ``LAYOUT_UNVERIFIABLE``'s own
@@ -1283,6 +1283,16 @@ def _vtable_transition_rests_on_unresolved_evidence(
     # TYPE_VTABLE_CHANGED half demoted to RISK merely because size_bits
     # happens to be unknown.
     if list(t_old.virtual_bases) != list(t_new.virtual_bases):
+        return False
+    # An ordinary (non-virtual) base addition, removal, or reorder is the
+    # identical class of independent evidence -- diff_types._diff_type_bases
+    # separately reports it as TYPE_BASE_CHANGED/BASE_CLASS_POSITION_CHANGED
+    # regardless of size_bits, so this correlation must not tag the
+    # co-occurring vtable finding as resting purely on an evidence gap just
+    # because size_bits also happens to be unknown (Codex review, fresh
+    # evidence -- the identical false-correlation risk the virtual_bases
+    # check above already guards against, just for the non-virtual case).
+    if list(t_old.bases) != list(t_new.bases):
         return False
     return t_old.size_bits is None or t_new.size_bits is None
 
