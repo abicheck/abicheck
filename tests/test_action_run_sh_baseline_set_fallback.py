@@ -132,7 +132,20 @@ def _build_baseline_set_archive(
     }
     (src_dir / "manifest.json").write_text(json.dumps(manifest), encoding="utf-8")
     (src_dir / f"{target}.abicheck.json").write_text("{}", encoding="utf-8")
-    archive_path = tmp_path / f"abicheck-baseline-{profile}.tar.zst"
+    # A fixed, platform-safe on-disk filename -- NOT one embedding *profile*
+    # directly. A profile built to exercise a glob metacharacter (e.g.
+    # '?', '*') is a legal, if unusual, string for the resolved *logical*
+    # asset name (what `gh` advertises and this fallback looks up by exact
+    # name), but several of those characters are illegal in an actual NTFS
+    # filename -- writing this fixture archive under a profile-derived name
+    # would fail on a Windows test runner for the identical reason the
+    # production fix this file's own TestExactAssetNameLookup covers
+    # exists (Codex review, confirmed by a real windows-latest CI failure
+    # on this exact fixture before this change). The archive's real
+    # on-disk path is never asserted against by any test here -- only its
+    # *content*, via $FIXTURE_ARCHIVE -- so decoupling it from the profile
+    # string is free.
+    archive_path = tmp_path / "fixture-baseline-set.tar.zst"
     _make_tar_zst(archive_path, src_dir)
     return archive_path
 
@@ -560,3 +573,37 @@ class TestExactAssetNameLookup:
         result = _run_baseline_fallback(env)
         assert result.returncode == 1
         assert "baseline-set archive" in result.stdout + result.stderr
+
+    def test_downloaded_archive_uses_a_platform_safe_local_filename(
+        self, tmp_path: Path
+    ) -> None:
+        """Regression (Codex review, third round): the downloaded archive
+        used to be stored locally under `$asset_name` itself -- a
+        documented literal metacharacter in a custom
+        baseline-asset-name-template (e.g. '?', which this exact-name
+        lookup no longer forbids) is legal on the Linux filesystem that
+        PUBLISHED it but reserved on NTFS, so a Windows consumer's `>`
+        redirection into that same-named local file would fail even
+        though the exact-name lookup itself succeeded. The local download
+        path is now a fixed, platform-safe filename, independent of
+        $asset_name (which is still used to select the extractor)."""
+        profile = "linux-x86_64-weird?name"
+        archive = _build_baseline_set_archive(tmp_path, profile=profile)
+        result = _run_baseline_fallback(
+            {
+                "INPUT_MODE": "compare",
+                "INPUT_ABI_BASELINE": "latest-release",
+                "INPUT_BASELINE_PROFILE": profile,
+                "INPUT_BASELINE_TARGET": "libpvxs",
+                "FIXTURE_ARCHIVE": str(archive),
+            },
+            trailer=(
+                '\necho "LISTING_START"\n'
+                'ls "$BASELINE_DIR/baseline-set-download"\n'
+                'echo "LISTING_END"\n'
+                '\necho "REACHED_END"\n'
+            ),
+        )
+        assert result.returncode == 0, result.stdout + result.stderr
+        listing = result.stdout.split("LISTING_START", 1)[1].split("LISTING_END")[0]
+        assert listing.strip() == "downloaded-baseline-set"

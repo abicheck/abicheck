@@ -246,7 +246,18 @@ for asset in data.get("assets") or []:
 ' "$asset_name")
   fi
 
-  local archive_path="$set_download_dir/$asset_name"
+  # A fixed, platform-safe local filename, NOT "$set_download_dir/$asset_name"
+  # -- $asset_name is only guaranteed to be a legal filename on whatever
+  # platform PUBLISHED it. A documented literal metacharacter in a custom
+  # baseline-asset-name-template (e.g. '?', which the exact-name lookup
+  # above deliberately no longer forbids -- see this function's own comment
+  # on why it stopped rejecting glob metacharacters) is legal on a Linux
+  # publisher's filesystem but reserved on NTFS, so a Windows consumer's
+  # `>` redirection into a same-named local file would fail outright even
+  # though the exact-name lookup itself succeeded (Codex review). The
+  # archive's real encoding is still selected from $asset_name's own
+  # suffix (the case dispatch below), never from this local filename.
+  local archive_path="$set_download_dir/downloaded-baseline-set"
   if [[ -n "$existing_url" ]]; then
     # .apiUrl (the authenticated REST API asset endpoint), not .url (the
     # unauthenticated browser-download URL) -- mirrors publish-baseline.yml's
