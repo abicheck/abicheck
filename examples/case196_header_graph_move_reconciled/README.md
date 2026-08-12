@@ -25,8 +25,20 @@ the compound, *reachable* shape a real move-plus-signature-change release
 takes, not the unreachable pure-move shape an earlier attempt at this case
 mistakenly modeled).
 
-A public function, `demo::process`, calls the helper — but only on the
-**new** side of this fixture, deliberately. Graph reconciliation's own
+A public **inline** function, `demo::process`, calls the helper — but only
+on the **new** side of this fixture, deliberately. It's inline (rather than
+an ordinary out-of-line exported function) for a separate reason a further
+review round caught: `demo::process`'s own body must actually be compiled
+into consumer code for its internal call to genuinely count as
+public-facing — an ordinary out-of-line public function's internal calls
+are compiled into the *library's* binary only, never into any consumer's
+(see `source_graph.is_consumer_compiled_public_entry`'s docstring and its
+real callers, e.g. `post_processing_reachability.MarkReachability`). An
+inline caller's body is emitted into every consumer TU that includes the
+header, so its call is consumer-visible under any reasonable reachability
+notion — sidestepping that question rather than resting this case's
+ground truth on which reachability predicate a given detector happens to
+use. Graph reconciliation's own
 public-reachability gate (`graph_reconcile._public_reachable_ids`) still
 needs *some* live path from a public entry to the helper on at least one
 side, or it suppresses the `declaration_moved` finding entirely as a purely
@@ -66,7 +78,7 @@ correct canonical answer, carried entirely by the single RISK-tier L5
 
 | v1 (conceptual) | v2 (conceptual) |
 |------|------|
-| `// include/demo/api.h`<br>`void process() { /* does not call helper yet */ }`<br><br>`// include/demo/detail_v1.h`<br>`namespace detail { void helper(int); }` | `// include/demo/api.h`<br>`void process() { detail::helper(1L); }`<br><br>`// include/demo/detail_v2.h`<br>`namespace detail { void helper(long); }` |
+| `// include/demo/api.h`<br>`inline void process() { /* does not call helper yet */ }`<br><br>`// include/demo/detail_v1.h`<br>`namespace detail { void helper(int); }` | `// include/demo/api.h`<br>`inline void process() { detail::helper(1L); }`<br><br>`// include/demo/detail_v2.h`<br>`namespace detail { void helper(long); }` |
 
 This case ships a hand-built pair of evidence-model fixtures (`old.json` /
 `new.json`, `SourceGraphSummary` objects) instead of compiled `v1`/`v2`

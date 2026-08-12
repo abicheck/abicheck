@@ -37,3 +37,19 @@
   the reconciliation finding from being suppressed, without asserting a
   spurious new dependency. `case196` now reproduces a single RISK-tier L5
   `declaration_moved` finding.
+- **A third review round caught that the load-bearing dependency edge was
+  fabricated after `build_source_graph()` already returned**, leaving the
+  committed fixture's `graph_id`/`coverage.call_edges` inconsistent with its
+  own serialized edges. Fixed by feeding the edge through
+  `SourceAbiSurface.source_edges` (the real L4 wire format
+  `build_source_graph()`'s own `fold_source_edges()` folds), and fixed the
+  README's v1/v2 diff table, which still showed the caller invoking the
+  helper on both sides.
+- **A fourth review round caught that the public caller was an ordinary
+  out-of-line function**, whose internal calls are compiled into the
+  library's own binary only, never into a consumer's — risking a
+  production false positive in `graph_reconcile`'s public-reachability
+  gate. Fixed by making the caller inline (`SourceAbiSurface.
+  reachable_inline_bodies`), so its call is genuinely consumer-visible
+  under any reachability notion, independent of which predicate a given
+  detector uses.

@@ -36,24 +36,6 @@
       "attrs": {},
       "confidence": "unknown",
       "conflicts": [],
-      "dst": "decl://_ZN4demo7processEv",
-      "edge": "SOURCE_DECLARES",
-      "facts": [
-        {
-          "attrs": {},
-          "confidence": "unknown",
-          "producer": "source_abi"
-        }
-      ],
-      "occurrences": [],
-      "provenance": "source_abi",
-      "resolved": {},
-      "src": "header://include/demo/api.h"
-    },
-    {
-      "attrs": {},
-      "confidence": "unknown",
-      "conflicts": [],
       "dst": "decl://_ZN4demo6detail6helperEl",
       "edge": "SOURCE_DECLARES",
       "facts": [
@@ -67,6 +49,24 @@
       "provenance": "source_abi",
       "resolved": {},
       "src": "header://include/demo/detail_v2.h"
+    },
+    {
+      "attrs": {},
+      "confidence": "unknown",
+      "conflicts": [],
+      "dst": "decl://_ZN4demo7processEv",
+      "edge": "SOURCE_DECLARES",
+      "facts": [
+        {
+          "attrs": {},
+          "confidence": "unknown",
+          "producer": "source_abi"
+        }
+      ],
+      "occurrences": [],
+      "provenance": "source_abi",
+      "resolved": {},
+      "src": "header://include/demo/api.h"
     },
     {
       "attrs": {},
@@ -140,58 +140,6 @@
       "attrs": {
         "consumer_compiled_body": false,
         "decl_kind": "function",
-        "visibility": "public_header"
-      },
-      "confidence": "unknown",
-      "conflicts": [],
-      "facts": [
-        {
-          "attrs": {
-            "consumer_compiled_body": false,
-            "decl_kind": "function",
-            "visibility": "public_header"
-          },
-          "confidence": "unknown",
-          "producer": "source_abi"
-        }
-      ],
-      "id": "decl://_ZN4demo7processEv",
-      "kind": "source_decl",
-      "label": "demo::process",
-      "provenance": "source_abi",
-      "resolved": {
-        "consumer_compiled_body": false,
-        "decl_kind": "function",
-        "visibility": "public_header"
-      }
-    },
-    {
-      "attrs": {
-        "origin": "UNKNOWN"
-      },
-      "confidence": "unknown",
-      "conflicts": [],
-      "facts": [
-        {
-          "attrs": {
-            "origin": "UNKNOWN"
-          },
-          "confidence": "unknown",
-          "producer": "source_abi"
-        }
-      ],
-      "id": "header://include/demo/api.h",
-      "kind": "header",
-      "label": "include/demo/api.h",
-      "provenance": "source_abi",
-      "resolved": {
-        "origin": "UNKNOWN"
-      }
-    },
-    {
-      "attrs": {
-        "consumer_compiled_body": false,
-        "decl_kind": "function",
         "visibility": "private_header"
       },
       "confidence": "unknown",
@@ -235,6 +183,58 @@
       "id": "header://include/demo/detail_v2.h",
       "kind": "header",
       "label": "include/demo/detail_v2.h",
+      "provenance": "source_abi",
+      "resolved": {
+        "origin": "UNKNOWN"
+      }
+    },
+    {
+      "attrs": {
+        "consumer_compiled_body": true,
+        "decl_kind": "function",
+        "visibility": "public_header"
+      },
+      "confidence": "unknown",
+      "conflicts": [],
+      "facts": [
+        {
+          "attrs": {
+            "consumer_compiled_body": true,
+            "decl_kind": "function",
+            "visibility": "public_header"
+          },
+          "confidence": "unknown",
+          "producer": "source_abi"
+        }
+      ],
+      "id": "decl://_ZN4demo7processEv",
+      "kind": "source_decl",
+      "label": "demo::process",
+      "provenance": "source_abi",
+      "resolved": {
+        "consumer_compiled_body": true,
+        "decl_kind": "function",
+        "visibility": "public_header"
+      }
+    },
+    {
+      "attrs": {
+        "origin": "UNKNOWN"
+      },
+      "confidence": "unknown",
+      "conflicts": [],
+      "facts": [
+        {
+          "attrs": {
+            "origin": "UNKNOWN"
+          },
+          "confidence": "unknown",
+          "producer": "source_abi"
+        }
+      ],
+      "id": "header://include/demo/api.h",
+      "kind": "header",
+      "label": "include/demo/api.h",
       "provenance": "source_abi",
       "resolved": {
         "origin": "UNKNOWN"

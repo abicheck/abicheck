@@ -492,6 +492,25 @@ def build_cases() -> dict[str, tuple[str, dict[str, Any], dict[str, Any]]]:
     # end-to-end compare() of this exact scenario has no BREAKING/API_BREAK
     # finding to contradict -- only the two RISK-tier L5 findings this
     # fixture reproduces.
+    # The caller is deliberately INLINE (fed via reachable_inline_bodies,
+    # not reachable_declarations): build_source_graph() stamps a real
+    # attrs["consumer_compiled_body"] on every node from which list of a
+    # SourceAbiSurface it came from, and graph_reconcile._public_reachable_
+    # ids's walk mirrors source_graph_findings._internal_dependency_
+    # findings's own dependency-edge closure (is_public_dependency_node) --
+    # which does not itself require consumer_compiled_body. An earlier
+    # version of this fixture placed the caller in reachable_declarations
+    # (an ordinary out-of-line function), which a review round correctly
+    # flagged: an ordinary out-of-line public function's own internal calls
+    # are compiled into the LIBRARY's binary only, never into any
+    # consumer's (see is_consumer_compiled_public_entry's docstring and its
+    # real callers -- post_processing_reachability.MarkReachability,
+    # internal_leak.py's leak-path walk), so seeding this scenario from a
+    # non-consumer-compiled caller risked cataloging a production false
+    # positive as canonical ground truth. An inline caller's body IS
+    # compiled into every consumer TU that includes the header, so its
+    # internal call is genuinely consumer-visible under either predicate,
+    # sidestepping the question of which one graph_reconcile "should" use.
     def _pub_caller() -> SourceEntity:
         return SourceEntity(
             id="demo::process",
@@ -517,8 +536,8 @@ def build_cases() -> dict[str, tuple[str, dict[str, Any], dict[str, Any]]]:
     )
     l5j_old_surface = SourceAbiSurface(
         library="libdemo.so",
+        reachable_inline_bodies=[_pub_caller()],
         reachable_declarations=[
-            _pub_caller(),
             _helper_entity("_ZN4demo6detail6helperEi", "include/demo/detail_v1.h"),
         ],
     )
@@ -546,8 +565,8 @@ def build_cases() -> dict[str, tuple[str, dict[str, Any], dict[str, Any]]]:
     # helper's own signature and header change.
     l5j_new_surface = SourceAbiSurface(
         library="libdemo.so",
+        reachable_inline_bodies=[_pub_caller()],
         reachable_declarations=[
-            _pub_caller(),
             _helper_entity("_ZN4demo6detail6helperEl", "include/demo/detail_v2.h"),
         ],
         source_edges=[
