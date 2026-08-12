@@ -99,21 +99,58 @@ def test_requires_at_least_two_sizes():
 
 
 def test_repeats_use_median_not_mean_or_min():
-    """A single high outlier among repeats must not dominate the estimate
-    the way a mean would, and the median must not optimistically pick the
-    minimum either."""
-    calls: dict[int, int] = {500: 0, 900: 0, 1400: 0, 2000: 0}
+    """Median-of-3 must recover the true exponent even with an outlier
+    present, in a fixture that would *actually* fail under mean or min
+    aggregation instead -- not one where all three aggregators happen to
+    agree (a constant-multiplier or negligible outlier changes a mean's
+    fitted *intercept*, not its slope, so a naive fixture can pass under
+    mean/min/median alike without exercising the median requirement at
+    all; caught by review on the first version of this test)."""
+    sizes = (500, 900, 1400, 2000)
+
+    def true_value(n: int) -> float:
+        return 0.001 * n  # exponent 1
+
+    def outlier(n: int) -> float:
+        # Quadratic (exponent 2) and strictly below true_value(n) at every
+        # tested size: never the sorted-middle element against two equal
+        # true_value(n) samples (so it can't become the median regardless
+        # of magnitude), but large enough -- and differently-shaped enough
+        # -- to visibly bend both a mean (true_value*2/3 plus a growing,
+        # not-negligible third term) and a min (which would just report the
+        # outlier outright) away from true_value's own exponent of 1.
+        return 4e-7 * n**2
+
+    assert all(outlier(n) < true_value(n) for n in sizes), (
+        "fixture precondition: outlier must never be the largest sample, "
+        "or median would stop recovering true_value exactly"
+    )
+
+    calls: dict[int, int] = dict.fromkeys(sizes, 0)
 
     def fn(n: int) -> float:
         calls[n] += 1
-        # Every call returns the same "true" value except one outlier per
-        # size that would drag a mean far off (but not a median of 3).
-        base = 0.001 * n
-        if calls[n] == 2:
-            return base * 100
-        return base
+        # Two of three repeats are the true value, so the median always
+        # recovers it exactly regardless of the outlier's magnitude; the
+        # third repeat is the outlier.
+        return outlier(n) if calls[n] == 2 else true_value(n)
 
-    exponent = measure_scaling_exponent(fn, (500, 900, 1400, 2000), repeats=3)
-    # True exponent is 1.0; a mean-based estimate polluted by the 100x
-    # outlier on every size would not land anywhere near this.
+    exponent = measure_scaling_exponent(fn, sizes, repeats=3)
     assert exponent == pytest.approx(1.0, abs=1e-6)
+
+    # Prove this fixture actually distinguishes the aggregators -- computed
+    # independently via the same least-squares formula the helper uses, not
+    # by calling the (median-only) helper again.
+    def _fit(vals: list[float]) -> float:
+        xs = [math.log(n) for n in sizes]
+        ys = [math.log(v) for v in vals]
+        mean_x = sum(xs) / len(xs)
+        mean_y = sum(ys) / len(ys)
+        num = sum((x - mean_x) * (y - mean_y) for x, y in zip(xs, ys))
+        den = sum((x - mean_x) ** 2 for x in xs)
+        return num / den
+
+    mean_exponent = _fit([(2 * true_value(n) + outlier(n)) / 3 for n in sizes])
+    min_exponent = _fit([min(true_value(n), outlier(n)) for n in sizes])
+    assert abs(mean_exponent - 1.0) > 0.1, "fixture doesn't actually distinguish mean"
+    assert abs(min_exponent - 1.0) > 0.1, "fixture doesn't actually distinguish min"
