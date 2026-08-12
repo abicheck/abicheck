@@ -470,6 +470,38 @@ jobs:
           fi
 
           # compute_content_digest()/recompute_content_digest_from_disk()
+          # hash artifacts[] content alone -- neither reads project_ref
+          # either. This run's own fresh manifest is explicitly stamped
+          # with $RELEASE_TAG as its project_ref (this job's "Dump
+          # baseline-set" step, project-ref input), and a real consumer
+          # supplying that tag through resolve-baseline's own
+          # expected-project-ref rejects any asset whose manifest disagrees
+          # as wrong_project_ref -- so an existing asset published under a
+          # DIFFERENT project_ref (a stale/mismatched republish, or a
+          # legacy manifest with none recorded) must never be treated as a
+          # safe retry purely because its content happens to match, the
+          # identical reasoning the profile-identity check above already
+          # applies to a different field (Codex review).
+          existing_project_ref=$(python3 -c '
+          import json
+          import sys
+          from pathlib import Path
+
+          manifest = json.loads(
+              (Path(sys.argv[1]) / "manifest.json").read_text(encoding="utf-8")
+          )
+          print(manifest.get("project_ref") or "")
+          ' .existing-asset/extracted)
+
+          echo "new project_ref:      $RELEASE_TAG"
+          echo "existing project_ref: $existing_project_ref"
+
+          if [[ -z "$existing_project_ref" || "$existing_project_ref" != "$RELEASE_TAG" ]]; then
+            echo "::error::$ASSET_NAME already exists on release $RELEASE_TAG but its manifest.json declares a DIFFERENT (or missing) project_ref ('$existing_project_ref') -- a real consumer supplying '$RELEASE_TAG' as resolve-baseline's expected-project-ref would reject this asset as wrong_project_ref regardless of what the content digest says, so this is never a safe retry. Delete the existing asset explicitly ('gh release delete-asset $RELEASE_TAG $ASSET_NAME --repo $REPO --yes') and re-run, or publish under a new release tag." >&2
+            exit 1
+          fi
+
+          # compute_content_digest()/recompute_content_digest_from_disk()
           # hash artifacts[] content alone -- neither reads
           # manifest_version/snapshot_schema, so an existing asset with an
           # absent/unsupported manifest_version OR a snapshot_schema newer

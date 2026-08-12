@@ -1438,6 +1438,256 @@ gh() {{
         assert "safe re-run" not in result.stdout
 
 
+class TestUploadReleaseAssetRejectsMismatchedProjectRef:
+    """Regression (Codex review, P2): compute_content_digest()/
+    recompute_content_digest_from_disk() hash artifacts[] content alone --
+    neither reads project_ref. An existing asset published under a
+    DIFFERENT (or missing) project_ref than this run's own $RELEASE_TAG,
+    but the SAME profile and library content, could therefore still reach
+    a matching content digest and take this step's safe-retry no-op path.
+    A real consumer supplying $RELEASE_TAG as resolve-baseline's own
+    expected-project-ref would reject that asset outright as
+    wrong_project_ref -- the step now checks project_ref against
+    $RELEASE_TAG before ever reaching the content-digest comparison, the
+    same "identity field first" pattern the profile check already uses.
+    """
+
+    def _upload_step_script(self) -> str:
+        data = _load(PUBLISH_BASELINE)
+        steps = _steps(data["jobs"]["publish"])
+        step = next(
+            s for s in steps if s.get("name", "").startswith("Upload release asset")
+        )
+        return step["run"]
+
+    @_WINDOWS_PYTHON3_SKIP
+    def test_different_project_ref_is_rejected_even_with_matching_content(
+        self, tmp_path: Path
+    ) -> None:
+        import importlib.util
+        import json
+        import shutil
+        import subprocess
+        import tarfile
+        import tempfile
+
+        src_root = (
+            Path(__file__).resolve().parents[1]
+            / "actions"
+            / "baseline"
+            / "build_manifest.py"
+        )
+        module_dir = tmp_path / ".publish-baseline-src" / "actions" / "baseline"
+        module_dir.mkdir(parents=True)
+        shutil.copy(src_root, module_dir / "build_manifest.py")
+
+        module_spec = importlib.util.spec_from_file_location(
+            "test_build_manifest_module_bad_project_ref", src_root
+        )
+        assert module_spec is not None and module_spec.loader is not None
+        build_manifest = importlib.util.module_from_spec(module_spec)
+        module_spec.loader.exec_module(build_manifest)
+
+        snapshot = {"schema_version": 9, "functions": [], "types": []}
+        snapshot_hash = build_manifest.compute_snapshot_content_hash(snapshot)
+        artifacts = [
+            {
+                "library": "libfoo",
+                "artifact": "build/libfoo.so",
+                "snapshot": "libfoo.abicheck.json",
+                "sha256": snapshot_hash,
+            }
+        ]
+        # A stale project_ref ("v0.9.0") from an earlier release run, while
+        # this run publishes to "v1.0.0" -- same profile and content as
+        # the fresh run, so the profile/schema guards and the
+        # content-digest comparison alone would all classify this as a
+        # safe retry.
+        existing_manifest = {
+            "manifest_version": 1,
+            "project_ref": "v0.9.0",
+            "profile": "linux-x86_64-gcc13-release",
+            "snapshot_schema": None,
+            "fact_set": None,
+            "artifacts": artifacts,
+        }
+        new_manifest = {**existing_manifest, "project_ref": "v1.0.0"}
+        new_content_digest = build_manifest.compute_content_digest(new_manifest)
+
+        asset_src = tmp_path / "asset-src"
+        asset_src.mkdir()
+        (asset_src / "manifest.json").write_text(
+            json.dumps(existing_manifest), encoding="utf-8"
+        )
+        (asset_src / "libfoo.abicheck.json").write_text(
+            json.dumps(snapshot), encoding="utf-8"
+        )
+        asset_name = "abicheck-baseline-bad-project-ref.tar"
+        archive_path = tmp_path / asset_name
+        with tarfile.open(archive_path, "w") as tf:
+            tf.add(asset_src, arcname=".")
+
+        gh_stub = f"""
+gh() {{
+  if [[ "$1" == "release" && "$2" == "view" ]]; then
+    echo '{{"assets": [{{"name": "{asset_name}", "apiUrl": "https://api.example/asset"}}]}}'
+    return 0
+  fi
+  if [[ "$1" == "api" ]]; then
+    cat "{archive_path.as_posix()}"
+    return 0
+  fi
+  echo "unexpected gh invocation: $*" >&2
+  return 1
+}}
+"""
+        script = gh_stub + "\n" + self._upload_step_script()
+
+        env = os.environ.copy()
+        env.update(
+            {
+                "GH_TOKEN": "fake-token",
+                "RELEASE_TAG": "v1.0.0",
+                "ASSET_NAME": asset_name,
+                "REPO": "abicheck/abicheck",
+                "NEW_CONTENT_DIGEST": new_content_digest,
+                "NEW_PROFILE": new_manifest["profile"],
+                "PYTHONPATH": str(Path(__file__).resolve().parents[1]),
+            }
+        )
+
+        fd, path = tempfile.mkstemp(suffix=".sh")
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8", newline="\n") as fh:
+                fh.write(script)
+            result = subprocess.run(
+                [_bash_executable(), path],
+                capture_output=True,
+                text=True,
+                env=env,
+                cwd=tmp_path,
+                check=False,
+            )
+        finally:
+            os.unlink(path)
+
+        assert result.returncode == 1, result.stdout + result.stderr
+        assert "wrong_project_ref" in (result.stdout + result.stderr)
+        assert "safe re-run" not in result.stdout
+
+    @_WINDOWS_PYTHON3_SKIP
+    def test_missing_project_ref_is_rejected_even_with_matching_content(
+        self, tmp_path: Path
+    ) -> None:
+        import importlib.util
+        import json
+        import shutil
+        import subprocess
+        import tarfile
+        import tempfile
+
+        src_root = (
+            Path(__file__).resolve().parents[1]
+            / "actions"
+            / "baseline"
+            / "build_manifest.py"
+        )
+        module_dir = tmp_path / ".publish-baseline-src" / "actions" / "baseline"
+        module_dir.mkdir(parents=True)
+        shutil.copy(src_root, module_dir / "build_manifest.py")
+
+        module_spec = importlib.util.spec_from_file_location(
+            "test_build_manifest_module_missing_project_ref", src_root
+        )
+        assert module_spec is not None and module_spec.loader is not None
+        build_manifest = importlib.util.module_from_spec(module_spec)
+        module_spec.loader.exec_module(build_manifest)
+
+        snapshot = {"schema_version": 9, "functions": [], "types": []}
+        snapshot_hash = build_manifest.compute_snapshot_content_hash(snapshot)
+        artifacts = [
+            {
+                "library": "libfoo",
+                "artifact": "build/libfoo.so",
+                "snapshot": "libfoo.abicheck.json",
+                "sha256": snapshot_hash,
+            }
+        ]
+        # No "project_ref" key at all -- a legacy/malformed manifest, the
+        # same class of gap the missing-profile regression covers for that
+        # field.
+        existing_manifest = {
+            "manifest_version": 1,
+            "profile": "linux-x86_64-gcc13-release",
+            "snapshot_schema": None,
+            "fact_set": None,
+            "artifacts": artifacts,
+        }
+        new_manifest = {**existing_manifest, "project_ref": "v1.0.0"}
+        new_content_digest = build_manifest.compute_content_digest(new_manifest)
+
+        asset_src = tmp_path / "asset-src"
+        asset_src.mkdir()
+        (asset_src / "manifest.json").write_text(
+            json.dumps(existing_manifest), encoding="utf-8"
+        )
+        (asset_src / "libfoo.abicheck.json").write_text(
+            json.dumps(snapshot), encoding="utf-8"
+        )
+        asset_name = "abicheck-baseline-no-project-ref.tar"
+        archive_path = tmp_path / asset_name
+        with tarfile.open(archive_path, "w") as tf:
+            tf.add(asset_src, arcname=".")
+
+        gh_stub = f"""
+gh() {{
+  if [[ "$1" == "release" && "$2" == "view" ]]; then
+    echo '{{"assets": [{{"name": "{asset_name}", "apiUrl": "https://api.example/asset"}}]}}'
+    return 0
+  fi
+  if [[ "$1" == "api" ]]; then
+    cat "{archive_path.as_posix()}"
+    return 0
+  fi
+  echo "unexpected gh invocation: $*" >&2
+  return 1
+}}
+"""
+        script = gh_stub + "\n" + self._upload_step_script()
+
+        env = os.environ.copy()
+        env.update(
+            {
+                "GH_TOKEN": "fake-token",
+                "RELEASE_TAG": "v1.0.0",
+                "ASSET_NAME": asset_name,
+                "REPO": "abicheck/abicheck",
+                "NEW_CONTENT_DIGEST": new_content_digest,
+                "NEW_PROFILE": new_manifest["profile"],
+                "PYTHONPATH": str(Path(__file__).resolve().parents[1]),
+            }
+        )
+
+        fd, path = tempfile.mkstemp(suffix=".sh")
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8", newline="\n") as fh:
+                fh.write(script)
+            result = subprocess.run(
+                [_bash_executable(), path],
+                capture_output=True,
+                text=True,
+                env=env,
+                cwd=tmp_path,
+                check=False,
+            )
+        finally:
+            os.unlink(path)
+
+        assert result.returncode == 1, result.stdout + result.stderr
+        assert "wrong_project_ref" in (result.stdout + result.stderr)
+        assert "safe re-run" not in result.stdout
+
+
 class TestUploadReleaseAssetRejectsCorruptedExistingContent:
     """Regression (Codex review, P2): the safe-retry digest comparison used
     to trust the existing asset's manifest.json declared sha256/

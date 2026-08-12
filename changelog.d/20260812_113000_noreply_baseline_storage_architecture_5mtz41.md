@@ -27,3 +27,11 @@ A new changelog fragment. See changelog.d/README.md for the workflow.
   filename, so an asset name like `baseline#debug.tar.zst` would package
   correctly here but then fail `publish-baseline.yml`'s first-time-publish
   upload outright.
+- **`publish-baseline.yml`'s "Upload release asset" step** now also
+  validates an existing asset's manifest `project_ref` against the
+  current run's `RELEASE_TAG` before accepting a matching content digest
+  as a safe retry — an existing asset published under a different (or
+  missing) `project_ref`, but otherwise-matching profile and content,
+  previously passed as a safe no-op even though a real consumer
+  supplying that tag as `resolve-baseline`'s `expected-project-ref`
+  would reject it as `wrong_project_ref`.

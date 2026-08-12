@@ -82,6 +82,17 @@ name: Protect committed ABI baseline
 
 on:
   pull_request:
+    # `labeled`/`unlabeled`, not just the default `opened`/`synchronize`/
+    # `reopened` -- this check's whole approval/revocation flow depends on
+    # `bypass-label`, and a label-only event carries the SAME head commit
+    # as the run that just failed. Without these two types, adding
+    # `baseline-refresh` after a failed check starts no new run at all
+    # (even a manual rerun of the old job replays its ORIGINAL event
+    # payload, so `github.event.pull_request.labels` still reads
+    # pre-label); removing the label afterward is the same gap in
+    # reverse, leaving a stale success as the required check for an
+    # unchanged head SHA.
+    types: [opened, synchronize, reopened, labeled, unlabeled]
     paths:
       - 'abi/**'
 
