@@ -36,13 +36,13 @@ Requires ``g++`` on Linux (gcc/g++ produce Mach-O/PE elsewhere).
 
 from __future__ import annotations
 
-import math
 import subprocess
 import sys
 import time
 from pathlib import Path
 
 import pytest
+from _perf_scaling import measure_scaling_exponent
 
 pytestmark = [
     pytest.mark.integration,
@@ -55,6 +55,7 @@ pytestmark = [
 
 def _require_tool(name: str) -> None:
     import shutil
+
     if shutil.which(name) is None:
         pytest.skip(f"{name} not found in PATH")
 
@@ -87,7 +88,7 @@ def _compile_multi_cu_lib(tmp_path: Path, label: str, n_cus: int) -> Path:
         cpp = src_dir / f"cu{i}.cpp"
         cpp.write_text(
             f'#include "shared.h"\n'
-            f"extern \"C\" int use_{i}(void) {{\n"
+            f'extern "C" int use_{i}(void) {{\n'
             f"    scale::Box<int> b;\n"
             f"    b.value = {i};\n"
             f"    b.history.push_back({i});\n"
@@ -102,7 +103,9 @@ def _compile_multi_cu_lib(tmp_path: Path, label: str, n_cus: int) -> Path:
         r = subprocess.run(
             ["g++", "-shared", "-fPIC", "-g", "-Og", "-o", str(so_file)]
             + [str(c) for c in cpp_files],
-            capture_output=True, text=True, timeout=60,
+            capture_output=True,
+            text=True,
+            timeout=60,
         )
     except subprocess.TimeoutExpired:
         pytest.skip("g++ compilation timed out after 60s")
@@ -138,7 +141,9 @@ def test_session_reuse_faster_than_independent_opens(tmp_path: Path) -> None:
     t0 = time.perf_counter()
     dwarf_meta = parse_dwarf_metadata(so)
     dwarf_adv = parse_advanced_dwarf(so)
-    legacy_snap = build_snapshot_from_dwarf(so, elf_meta, dwarf_meta, dwarf_adv, version="legacy")
+    legacy_snap = build_snapshot_from_dwarf(
+        so, elf_meta, dwarf_meta, dwarf_adv, version="legacy"
+    )
     legacy_elapsed = max(time.perf_counter() - t0, 1e-4)
 
     # Current production path: one shared DwarfSession across all three passes.
@@ -168,7 +173,9 @@ def test_session_reuse_faster_than_independent_opens(tmp_path: Path) -> None:
     )
 
 
-def test_dwarf_only_dump_scaling_with_cu_count_stays_subquadratic(tmp_path: Path) -> None:
+def test_dwarf_only_dump_scaling_with_cu_count_stays_subquadratic(
+    tmp_path: Path,
+) -> None:
     """The production dwarf_only dump() path must not go quadratic as the
     number of compilation units grows — guards against a hidden O(n^2) in the
     session/cache path itself (e.g. a per-CU cache lookup that degrades),
@@ -178,17 +185,23 @@ def test_dwarf_only_dump_scaling_with_cu_count_stays_subquadratic(tmp_path: Path
     _require_tool("g++")
     from abicheck.dumper import dump
 
-    timings: list[tuple[int, float]] = []
-    for n_cus in (8, 32):
-        so = _compile_multi_cu_lib(tmp_path, f"scale{n_cus}", n_cus=n_cus)
+    n_cus_values = (8, 16, 32)
+    compiled: dict[int, Path] = {}
+
+    def _measure(n_cus: int) -> float:
+        so = compiled.get(n_cus)
+        if so is None:
+            so = _compile_multi_cu_lib(tmp_path, f"scale{n_cus}", n_cus=n_cus)
+            compiled[n_cus] = so
         start = time.perf_counter()
         snap = dump(so, [], dwarf_only=True)
         elapsed = max(time.perf_counter() - start, 1e-3)
-        timings.append((n_cus, elapsed))
         assert snap.functions, f"expected exported functions at n_cus={n_cus}"
+        return elapsed
 
-    (n1, t1), (n2, t2) = timings
-    exponent = math.log(t2 / t1) / math.log(n2 / n1)
+    # Three CU counts, median-of-3 per count, least-squares exponent (see
+    # ``_perf_scaling.py``) instead of one pair and one timing each.
+    exponent = measure_scaling_exponent(_measure, n_cus_values)
     # True quadratic would be ~2.0; matches the generous bound used by the
     # sibling single-CU scaling test to avoid flaking on shared CI runners.
     assert exponent < 1.9, (

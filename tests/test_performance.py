@@ -10,6 +10,7 @@ import json
 import time
 
 import pytest
+from _perf_scaling import measure_scaling_exponent
 
 from abicheck.checker import Change, ChangeKind, DiffResult, Verdict, compare
 from abicheck.html_report import generate_html_report
@@ -401,17 +402,19 @@ class TestTypeChurnScaling:
         assert len(result.changes) > 0
 
     def test_type_churn_scaling_stays_subquadratic(self) -> None:
-        import math
+        # Pre-build the snapshot pair per size once; only `compare()` itself
+        # is inside the timed/repeated measurement.
+        snapshots = {n: _build_type_churn(n) for n in (500, 1000, 2000)}
 
-        timings: list[tuple[int, float]] = []
-        for n in (1000, 2000):
-            old, new = _build_type_churn(n)
+        def _measure(n: int) -> float:
+            old, new = snapshots[n]
             start = time.monotonic()
             compare(old, new)
-            timings.append((n, max(time.monotonic() - start, 1e-3)))
+            return max(time.monotonic() - start, 1e-3)
 
-        (n1, t1), (n2, t2) = timings
-        exponent = math.log(t2 / t1) / math.log(n2 / n1)
+        # Three sizes, median-of-3 per size, least-squares exponent (see
+        # ``_perf_scaling.py``) instead of one size pair and one timing each.
+        exponent = measure_scaling_exponent(_measure, tuple(snapshots))
         # True quadratic would be ~2.0; current behaviour is ~1.3. A regression
         # to genuine O(n^2) (exponent >= 1.9) should fail this guard.
         assert exponent < 1.9, (
