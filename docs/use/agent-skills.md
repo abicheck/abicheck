@@ -27,11 +27,12 @@ the portfolio is shaped this way.
 > **Requires unreleased abicheck 0.6.x to run.** You can install these
 > skills (copying a directory works regardless of your abicheck version)
 > against the latest published release, **0.5.0** — but each skill checks
-> the installed abicheck version as its own first step and refuses to run
+> the installed abicheck version against its own declared range —
+> `>=0.6.0,<0.7.0` for every skill published today — and refuses to run
 > rather than fail partway through, since several commands/options it
 > drives postdate 0.5.0 (see "Prerequisites" below). If `pip show abicheck`
-> / `pyproject.toml`'s `version` isn't `0.6.0` or later yet, an installed
-> skill will decline to execute until it is.
+> / `pyproject.toml`'s `version` isn't inside that `0.6.x` range, an
+> installed skill will decline to execute.
 
 **Portfolio status (2026-08-11):** none of the four skills has measured
 evidence yet that it improves agent behavior over a well-documented CLI

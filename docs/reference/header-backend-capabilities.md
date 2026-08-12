@@ -20,17 +20,18 @@ one backend selector, plus a merge of the two:
 | `castxml` (default) | CastXML's XML dump, produced by its own bundled real compiler | The default. It is the only backend that computes record layout on its own. |
 | `clang` | `clang -ast-dump=json`, parsed by `dumper_clang.py` | A host with clang but no CastXML, or headers CastXML chokes on. |
 | `hybrid` | Both, merged castxml-first with per-fact provenance | Recovering facts each backend alone gets wrong — notably CastXML's synthesized constructor/destructor keys. |
-| `auto` | Resolves to `castxml` (or the `ABICHECK_AST_FRONTEND` pin) and never silently switches producer; it falls back to `clang` for a recognized toolchain-version mismatch or direct-include-guard failure only when you opt in with `--allow-ast-frontend-fallback` (or `ABICHECK_ALLOW_AST_FALLBACK=1`) | The usual choice when you don't care, as long as CastXML is installed — with no opt-in and no CastXML at all, it fails asking you to install one or pick `clang` explicitly. |
+| `auto` | Resolves to `castxml` (or the `ABICHECK_AST_FRONTEND` pin) and never silently switches producer; it falls back to `clang` for a recognized toolchain-version mismatch, an unsupported CastXML release, or a direct-include-guard failure only when you opt in with `--allow-ast-frontend-fallback` (or `ABICHECK_ALLOW_AST_FALLBACK=1`) | The usual choice when you don't care, as long as CastXML is installed — with no opt-in and no CastXML at all, it fails asking you to install one or pick `clang` explicitly. |
 
 > **Exception: `--frontend-context device`.** CastXML has no SYCL/DPC++
 > host/device context concept, so a non-`host` `--frontend-context` under
-> an **unpinned** `auto` (no `--ast-frontend` flag, no `ABICHECK_AST_FRONTEND`
-> env var) skips CastXML and routes straight to `clang` — no
-> `--allow-ast-frontend-fallback` opt-in needed, since this isn't the
-> toolchain-error fallback above, it's `auto` recognizing CastXML can't
-> satisfy the request at all. An **explicit** `--ast-frontend castxml`, or
-> `auto` **pinned** to castxml via `ABICHECK_AST_FRONTEND=castxml`, is
-> rejected outright instead with a non-`host` context (`--ast-frontend clang`
+> `auto` **not pinned to castxml** — whether that's `--ast-frontend auto`
+> spelled out, or no `--ast-frontend` flag at all — skips CastXML and
+> routes straight to `clang`, no `--allow-ast-frontend-fallback` opt-in
+> needed, since this isn't the toolchain-error fallback above, it's `auto`
+> recognizing CastXML can't satisfy the request at all. An **explicit**
+> `--ast-frontend castxml`, or `auto` **pinned** to castxml via
+> `ABICHECK_AST_FRONTEND=castxml`, is rejected outright instead with a
+> non-`host` context (`--ast-frontend clang`
 > is required) — an env pin is honored the same as an explicit flag, not
 > silently overridden by the device request. See ADR-050 D5.
 
