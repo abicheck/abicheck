@@ -30,6 +30,7 @@ from .checker_policy import (
     BREAKING_KINDS,
     ChangeKind,
     ReachabilityState,
+    Verdict,
 )
 from .checker_types import Change
 
@@ -1600,13 +1601,16 @@ class SuppressionList:
         *,
         near_expiry_days: int = 30,
         breaking_kinds: frozenset[ChangeKind] | None = None,
+        policy_file: object | None = None,
     ) -> SuppressionAudit:
         """Audit suppression rules against a set of changes.
 
         Returns a :class:`SuppressionAudit` with:
         - ``stale_rules``: suppressions that matched zero changes (misconfigured?)
         - ``high_risk_matches``: suppressions that matched a change breaking
-          under *breaking_kinds*
+          under *breaking_kinds* (or, when *policy_file* carries a matching
+          ``reclassify:`` rule for that change, under that rule's own
+          resolution instead -- see below)
         - ``expired_rules``: rules past their expiry date
         - ``near_expiry_rules``: rules expiring within *near_expiry_days*
         - ``match_counts``: per-rule match count
@@ -1619,6 +1623,18 @@ class SuppressionList:
         kind away from it, and this audit's "high risk" classification should
         match the verdict the user's own comparison actually produced, not
         the static default.
+
+        *policy_file* is optional and defaults to ``None`` (unchanged prior
+        behavior for every existing caller that doesn't pass it). When given
+        and it carries one or more ``reclassify:`` rules (A: selector-scoped
+        reclassification), a change matching one is classified by that
+        rule's own resolution instead of *breaking_kinds* membership --
+        *breaking_kinds* is a kind-wide set and cannot express a
+        selector-scoped promotion/demotion at all (Codex review: a
+        `reclassify:` rule promoting one specific normally-compatible
+        finding to ``break`` was invisible to this audit, since the change's
+        *kind* was never in any breaking set; a suppression matching that
+        specific finding was silently under-reported as safe).
         """
         if near_expiry_days < 0:
             raise ValueError("near_expiry_days must be non-negative")
@@ -1627,15 +1643,27 @@ class SuppressionList:
         effective_breaking_kinds = (
             BREAKING_KINDS if breaking_kinds is None else breaking_kinds
         )
+        reclassify_rules = getattr(policy_file, "reclassify", None) or []
 
         match_counts: dict[int, int] = {i: 0 for i in range(len(self._suppressions))}
         high_risk: list[tuple[Suppression, Change]] = []
 
         for c in changes:
+            if reclassify_rules:
+                from .reclassify import first_matching_reclassify_verdict
+
+                reclass_v = first_matching_reclassify_verdict(reclassify_rules, c, today)
+            else:
+                reclass_v = None
+            is_breaking = (
+                reclass_v == Verdict.BREAKING
+                if reclass_v is not None
+                else c.kind in effective_breaking_kinds
+            )
             for i, s in enumerate(self._suppressions):
                 if s.matches(c, today=today):
                     match_counts[i] += 1
-                    if c.kind in effective_breaking_kinds:
+                    if is_breaking:
                         high_risk.append((s, c))
 
         stale = [

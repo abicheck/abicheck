@@ -228,6 +228,16 @@ class ReclassifyRule:
                 bits.append(f"{field_name}={val!r}")
         if self.reason:
             bits.append(f"reason={self.reason!r}")
+        # Codex review: the Markdown/HTML report renderers call describe()
+        # to disclose an active rule, but a rule with no other reason to
+        # mention it (or with a label alongside a reason) was silently
+        # missing its own expiry -- a reader of those two formats had no
+        # way to tell when a temporary waiver stops applying. to_report_dict()
+        # already included both; describe() should too.
+        if self.label:
+            bits.append(f"label={self.label!r}")
+        if self.expires is not None:
+            bits.append(f"expires={self.expires.isoformat()!r}")
         return "reclassify(" + ", ".join(bits) + ")"
 
     def to_report_dict(self) -> dict[str, str]:

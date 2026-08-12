@@ -50,11 +50,15 @@ A new changelog fragment. See changelog.d/README.md for the workflow.
   out of the compatible kind set entirely — the scoped rule's own
   resolution now wins the addition/quality split too, not just the
   verdict. Active `reclassify:` rules are now disclosed in the standard
-  JSON report's new `policy_reclassify` key (`report_schema_version` 2.29,
+  JSON report's new `policy_reclassify` key (`report_schema_version` 2.30,
   additive), alongside the existing `policy_overrides`/`policy_file` keys —
   previously an ordinary comparison reclassifying a finding left no trace
   of the active rule anywhere in the standard report. The same disclosure
   now also appears in the Markdown (`**Policy reclassify**`), HTML
   (`<tr><th>Policy reclassify</th>...`), and SARIF (`policyReclassify` run
   property) report formats, mirroring their existing `overrides:`
-  disclosure.
+  disclosure. `--audit-suppressions`' `SuppressionList.audit()` gained an
+  optional `policy_file` parameter: a `reclassify:` rule promoting a
+  normally-compatible finding to `break` for one specific symbol is now
+  correctly flagged as a high-risk suppression match, which a kind-wide
+  `breaking_kinds` set alone could never express.

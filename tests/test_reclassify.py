@@ -643,6 +643,26 @@ def test_reclassify_disclosed_in_html_report(tmp_path: Path) -> None:
     assert "func_visibility_changed" in html_out
 
 
+def test_reclassify_rule_describe_includes_expiry_and_label() -> None:
+    """Codex review: describe() (what the Markdown/HTML renderers actually
+    call) previously stopped after `reason`, silently omitting `expires`
+    and `label` -- a reader of those two formats had no way to tell when a
+    temporary waiver stops applying. to_report_dict() already included both;
+    describe() must match."""
+    from datetime import date
+
+    rule = ReclassifyRule(
+        to_verdict=Verdict.COMPATIBLE_WITH_RISK,
+        to="risk",
+        symbol="foo",
+        label="workaround",
+        expires=date(2027, 1, 1),
+    )
+    text = rule.describe()
+    assert "label='workaround'" in text
+    assert "expires='2027-01-01'" in text
+
+
 def test_reclassify_disclosed_in_sarif_report(tmp_path: Path) -> None:
     from abicheck.sarif import to_sarif
 
@@ -669,3 +689,85 @@ def test_reclassify_absent_from_sarif_without_any_configured_rule() -> None:
     diff = DiffResult(changes=[change], old_version="1", new_version="2", library="l")
     props = to_sarif(diff)["runs"][0]["properties"]
     assert "policyReclassify" not in props
+
+
+# --- --audit-suppressions (SuppressionList.audit's policy_file param) ------
+
+
+def test_audit_flags_a_reclassify_promoted_finding_as_high_risk(
+    tmp_path: Path,
+) -> None:
+    """Codex review: a `reclassify:` rule promoting one normally-compatible
+    finding to `break` isn't expressible in `effective_breaking_kinds` (a
+    kind-wide set) -- SuppressionList.audit() must classify a matching
+    change by the rule's own resolution instead of falling back to (silently
+    absent) kind-set membership."""
+    from abicheck.suppression import Suppression, SuppressionList
+
+    p = tmp_path / "policy.yaml"
+    p.write_text(
+        """
+reclassify:
+  - kind: func_added
+    symbol: foo
+    to: break
+""".strip(),
+        encoding="utf-8",
+    )
+    pf = PolicyFile.load(p)
+    sup = Suppression(symbol="foo")
+    supl = SuppressionList([sup])
+    change = _change(ChangeKind.FUNC_ADDED, "foo")
+
+    # Without policy_file: func_added isn't in the (empty, for this test)
+    # breaking set, so the match isn't flagged high-risk.
+    audit_without = supl.audit([change], breaking_kinds=frozenset())
+    assert audit_without.high_risk_matches == []
+
+    # With policy_file: the reclassify rule's own `to: break` resolution
+    # wins, even though func_added is still absent from breaking_kinds.
+    audit_with = supl.audit([change], breaking_kinds=frozenset(), policy_file=pf)
+    assert len(audit_with.high_risk_matches) == 1
+    assert audit_with.high_risk_matches[0] == (sup, change)
+
+
+def test_audit_reclassify_demotion_is_not_high_risk(tmp_path: Path) -> None:
+    """The inverse: a `reclassify:` rule demoting a normally-breaking kind
+    to `ignore` for one symbol must NOT be reported as high-risk for that
+    symbol, even though the kind is still in breaking_kinds."""
+    from abicheck.suppression import Suppression, SuppressionList
+
+    p = tmp_path / "policy.yaml"
+    p.write_text(
+        """
+reclassify:
+  - kind: func_removed
+    symbol: foo
+    to: ignore
+""".strip(),
+        encoding="utf-8",
+    )
+    pf = PolicyFile.load(p)
+    sup = Suppression(symbol="foo")
+    supl = SuppressionList([sup])
+    change = _change(ChangeKind.FUNC_REMOVED, "foo")
+
+    audit = supl.audit(
+        [change], breaking_kinds=frozenset({ChangeKind.FUNC_REMOVED}), policy_file=pf
+    )
+    assert audit.high_risk_matches == []
+
+
+def test_audit_without_policy_file_is_unchanged() -> None:
+    """No policy_file passed at all => identical to the pre-existing
+    behavior (kind-set membership only)."""
+    from abicheck.suppression import Suppression, SuppressionList
+
+    sup = Suppression(symbol="foo")
+    supl = SuppressionList([sup])
+    change = _change(ChangeKind.FUNC_REMOVED, "foo")
+
+    audit = supl.audit(
+        [change], breaking_kinds=frozenset({ChangeKind.FUNC_REMOVED})
+    )
+    assert len(audit.high_risk_matches) == 1
