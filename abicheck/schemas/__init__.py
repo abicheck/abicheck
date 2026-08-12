@@ -346,7 +346,21 @@ from typing import Any
 #:       produced it) needs no change. Bumped rather than left silent because
 #:       the field's schema description named one specific producer/kind
 #:       pairing, which a strict consumer could have relied on.
-REPORT_SCHEMA_VERSION = "2.28"
+#: 2.29 — G29 Phase 6 follow-up: wires the already-implemented
+#:       ``RootCauseCorrelator`` (``abicheck.impact.correlation.
+#:       correlate_root_causes``) into the JSON/SARIF ``impact_assessment``
+#:       surface. Adds ``change.impact_assessment.root_cause_evidence``
+#:       (this finding's own evidence rank plus the whole correlator
+#:       group's ``strongest_evidence_level``/``evidence_levels``), present
+#:       only for a finding that is a member of one of the correlator's
+#:       multi-piece groups -- the four load-failure kinds named in that
+#:       module's docstring -- and, under ``--report-mode root-cause``,
+#:       ``root_causes[].strongest_evidence_level``/``evidence_levels`` for
+#:       the same groups. Purely additive: absent for every other finding
+#:       and group, unconditional on report_mode (mirroring root_cause_id/
+#:       impact_group_id's own precedent), and never affects ``verdict``,
+#:       ``severity``, or any exit code.
+REPORT_SCHEMA_VERSION = "2.29"
 
 #: SemVer-style (MAJOR.MINOR) version of the ``scan`` JSON output, emitted as
 #: ``scan_schema_version`` at the top level of both public scan dict shapes:

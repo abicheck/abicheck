@@ -1830,11 +1830,157 @@ stronger tier (`appcompat._attach_consumer_impact` enriching a shared
 `FUNC_REMOVED` in place), downgraded when an `INTERNAL_SYMBOL_REQUIRED_BY_
 PUBLIC_API` finding's own proof path is `internal_leak`'s
 `"overapprox: "`-prefixed over-approximation of a virtual/function-pointer
-dispatch target. **Still open**: wiring its output
-into the JSON/SARIF `root_cause_id`/`impact_group_id` surface (today those
-are still `reporter_markdown`'s independent `caused_by_type`-only grouping,
-per `ImpactAssessment`'s own docstring) and the eight new detector/overlay
-`ChangeKind`s below.
+dispatch target. **Wired into JSON/SARIF (this pass)**: every finding that
+is a member of one of the correlator's multi-piece groups now carries
+`impact_assessment.root_cause_evidence` (`evidence_level` for this finding,
+`strongest_evidence_level`/`evidence_levels` for the whole group), and JSON
+`--report-mode root-cause`'s `root_causes[]` groups gain the same
+`strongest_evidence_level`/`evidence_levels` fields — computed via a new
+`reporter_markdown.root_cause_evidence_lookup_for_changes`, threaded through
+`reporter.py`/`sarif.py` alongside the existing `root_cause`/
+`impact_root_cause` plumbing (schema 2.29). Deliberately conservative: this
+*annotates* the existing `root_cause_id`/`impact_group_id` grouping (still
+`reporter_markdown`'s independent `caused_by_type`-else-`symbol` rule,
+unchanged) with the correlator's evidence ranking rather than replacing that
+grouping's identity scheme or making `impact_group_id` diverge from
+`root_cause_id` — the correlator's own `root_cause_id` already hashes the
+identical key, so no re-keying was needed, and every existing
+`root_cause_id`/`impact_group_id` value for every pre-existing report is
+byte-for-byte unchanged. **Still open**: the eight new detector/overlay
+`ChangeKind`s below (a materially larger, differently-shaped follow-up —
+new producers, new example pairs, new FP-rate corpus cases — deliberately
+not attempted in the same pass as the wiring above), and `impact_group_id`
+actually diverging from `root_cause_id` by re-bucketing findings through the
+correlator's own groups rather than only annotating the existing ones.
+
+**The wiring above needed three follow-up review rounds to land correctly**
+(all Codex, same PR): (1) the per-finding lookups were built from `changes`
+alone, so a finding correlating only via a scoped-only
+(`--used-by`/`--required-symbol`) sibling got no evidence at all —
+`RootCauseCorrelator` needs the real sibling `Change` object, not just its
+`caused_by_type` string, to recognize a pair as a group; (2) the
+`root_causes[]` group-level rollup matched a report group against a
+correlator group by `root_cause_id` **equality**, which is wrong whenever
+the two grouping schemes disagree on membership — a bare-symbol pair
+sharing no `caused_by_type` (`--used-by --verify-runtime`'s real shape) is
+one correlator group but two singleton report groups, so the hashes never
+matched even though each finding's own per-finding evidence already showed
+membership; fixed by folding each group's own members' already-correct
+evidence directly instead of re-deriving membership by id; (3) the same gap
+existed a layer up, in `cli_compare_fold.py`'s own `--report-mode
+root-cause` fold-in (`_add_entries_to_root_causes`), which appends a
+scoped-only entry to an existing-or-new group *after* the JSON serializer
+already built it, but never recomputed that group's own evidence summary
+afterward. Worth recording as its own lesson before attempting any of the
+eight new detectors below: a naive `root_cause_id`-equality join between
+two independently-computed groupings is not safe by default whenever either
+grouping has its own fallback/singleton rule — the correlator's grouping is
+strictly *coarser* than the report's in exactly the no-`caused_by_type`
+case, and nothing about that asymmetry is visible from either grouping's
+own code without deliberately tracing a bare-symbol, no-`caused_by_type`
+input through both.
+
+**A related, adjacent gap was found (not fixed) while scoping
+`GRAPH_COVERAGE_INSUFFICIENT_FOR_SUPPRESSION`'s "generalizes
+`SUPPRESSION_REACHABILITY_UNKNOWN`" description above, and is worth
+recording before anyone else picks that item up.** `Suppression.
+_passes_reachability_gate` (`suppression.py`) has *two* reachability modes
+whose behavior on a graph-coverage gap differs, and only one of them has a
+diagnostic today. `reachability: "proven-unreachable-only"` treats
+`Change.reachability_state == UNKNOWN` as a **withheld match** unless
+`allow_unknown_reachability: true` — this is exactly what
+`SUPPRESSION_REACHABILITY_UNKNOWN` reports. `reachability:
+"unreachable-only"` (a different, valid value) instead gates on
+`not change.public_reachable` — and `Change.public_reachable` defaults to
+`False` the same way whether it was *proven* `False` or simply never
+examined (`UNKNOWN` reachability with insufficient graph coverage), so a
+`reachability: "unreachable-only"` rule can **silently succeed** at
+suppressing a change graph coverage never actually cleared, with no
+diagnostic at all — a real gap, structurally similar to the one
+`SUPPRESSION_REACHABILITY_UNKNOWN` closed for the other mode, but on the
+*opposite* failure direction (this one risks a false negative — silently
+accepting a suppression that should have been withheld — rather than a
+false positive). A single `GRAPH_COVERAGE_INSUFFICIENT_FOR_SUPPRESSION`
+`ChangeKind` that literally "generalizes" the existing case (by simply
+reusing its detection path under a new name) would not close this gap; closing
+it for real needs either extending `unreachable-only`'s own gate to
+distinguish proven-`False` from `UNKNOWN` (a semantic change to a suppression
+mode real policy files already rely on — needs its own compatibility
+analysis, not a drive-by) or a second, independently-designed diagnostic
+covering this mode specifically. Not attempted here — flagged rather than
+guessed at, per this file's own "known gaps over risky reactive patches"
+convention.
+
+**Two more of the eight, investigated (not implemented) in this same pass —
+both turn out to be a scoping question first, not an extraction gap:**
+
+- **`CONSUMER_IMPACT_PATH_CONFIRMED`.** `appcompat.py`'s consumer-overlay
+  pipeline (`_has_impact_evidence`, `_enrich_covered_changes`,
+  `_merge_consumer_impact_paths`) already computes and surfaces exactly this
+  information — a confirmed consumer→symbol proof path — today, as an
+  in-place mutation of the *existing* `Change`'s `impact_assessment` fields
+  (`reachability_kind`, `reachability_state`, the proof-path plumbing this
+  plan's Phase 3/4 sections already document as DONE), not as a standalone
+  finding. Minting a *new* `ChangeKind` for the same fact would mean either
+  (a) a second, parallel representation of information a report already
+  carries once (the two-representations-of-one-fact drift this repo's own
+  `docs/AGENTS.md` governing rule and `change_registry.py`'s "one
+  `ChangeKindMeta` entry" convention both exist to prevent), or (b)
+  redefining what the overlay does — attaching a *new* raw finding instead
+  of annotating an existing one — which is a real design change to
+  `appcompat.py`'s enrichment contract, not a new-detector addition. The
+  table entry above ("impact overlay on an existing raw break, not a new raw
+  break") already states this outcome as the intent; what's newly confirmed
+  is that the current code already delivers it, so there may be nothing left
+  to build here beyond documentation — worth a maintainer decision on
+  whether to close this row entirely rather than implement it.
+- **`USE_CASE_IMPACT_CONFIRMED`.** `abicheck/impact/use_cases.py`'s own
+  module docstring is explicit that this is deferred pending new CLI
+  surface: `explain_use_case_impact()` exists and is wired only through
+  `project validate-use-cases --against-new` (an opt-in diagnostic command),
+  not through `compare`'s own report pipeline. Surfacing this as a
+  `compare`-time `ChangeKind` needs a real design decision this plan has not
+  made — a new `compare --use-cases <manifest>` flag (or equivalent),
+  `REPORT_SCHEMA_VERSION` bump, and new FP-gate examples proving a use case
+  that doesn't reach the changed branch stays compatible (this is exactly
+  `case203` below) — not a drive-by extension of the existing
+  `project`-group command. Per this file's own root-command admission bar
+  (`AGENTS.md` "Adding a new top-level command"), this also needs to clear
+  that bar or land as a `compare` option instead; not attempted here.
+
+**A fourth item was scoped for implementation attempt in this pass
+(`PUBLIC_VIRTUAL_DISPATCH_SET_CHANGED`) and deliberately not attempted,
+based on evidence rather than a guess.** `abicheck/buildsource/
+virtual_dispatch_graph.py` already emits the two graph facts a comparison
+detector would need (`VIRTUAL_CALL_MAY_DISPATCH_TO`,
+`TYPE_HAS_VTABLE`) — the raw data exists. What stopped the attempt is this
+same plan's own recorded history for *that exact module* and its three
+siblings (`callback_graph.py`, `macro_graph.py`, `template_graph.py`,
+directly above and below this entry): each required double-digit rounds of
+Codex review to reach its current DONE/PARTIAL state, and the findings in
+those rounds were not stylistic — coverage-stamping bugs that made a
+degraded extraction silently read as complete, propagation bugs that lost a
+graph fact between fold and report, and at least one review round finding a
+correctness bug in a *previous* review round's own fix. A new detector
+consuming `VIRTUAL_CALL_MAY_DISPATCH_TO`/`TYPE_HAS_VTABLE` inherits every
+one of those failure modes by construction (comparing two runs' worth of
+already-fact-checked-fragile graph output, across old/new coverage that can
+differ), plus its own new one: this plan's explicit constraint that "a
+possible-target-set change must never read as a confirmed break" (echoed
+in `resolution` always being `"overapprox"` in the two Part A/B functions'
+own docstrings) means the comparison logic itself — not just the extraction
+— has to get old-vs-new overapprox-set diffing right without silently
+producing a false `BREAKING` the first time a target set merely reorders or
+a base's coverage degrades between runs. Building and shipping that
+correctly, with its own FP-rate corpus cases (`case197` below) and without
+a live oneAPI/multi-round-Codex-review cycle available in this session, is
+not achievable to the correctness bar this codebase's own `AGENTS.md`
+"Known gaps over risky reactive patches" convention sets — recorded here as
+a scoped, concrete blocker (not "too hard, unspecified") for whoever picks
+this row up next: start from `virtual_dispatch_graph.py`'s own two
+functions, budget for the same class of review-round findings this plan's
+Phase 5 section already itemizes for the identical module, and do not skip
+straight to a detector without first re-reading that history.
 
 New examples (each needs a negative twin, per the review):
 
@@ -1877,7 +2023,7 @@ abicheck/internal_leak.py   # TraversalPolicy + effect_transitions (Phase 2 D5, 
 abicheck/impact/
     model.py           # ImpactAssessment, GraphProofPath, FindingDecision (Phase 3 slices 1/7, DONE — ADR-052)
     engine.py           # assess_change(...) (Phase 3 slices 1/7, DONE — ADR-052)
-    correlation.py       # RootCauseCorrelator (Phase 6, DONE — correlate_root_causes/RootCauseGroup; report-surface wiring still open)
+    correlation.py       # RootCauseCorrelator (Phase 6, DONE — correlate_root_causes/RootCauseGroup; wired into JSON/SARIF root_cause_evidence, schema 2.29)
     root_causes.py
     consumer_graph.py    # Phase 4 slice 1, DONE — ADR-057 (consumer graph + the source join)
     use_cases.py         # Phase 4 slice 2, DONE — ADR-057 amendment (manifest + use_case/test_case graph join; trace ingestion still not started)

@@ -377,6 +377,31 @@
             "items": {
               "$ref": "#/$defs/change"
             }
+          },
+          "strongest_evidence_level": {
+            "type": "string",
+            "description": "G29 Phase 6 follow-up (schema 2.29): present only when this group is also a RootCauseCorrelator group (see change.impact_assessment.root_cause_evidence) -- the group's most-trustworthy evidence level.",
+            "enum": [
+              "artifact_proven",
+              "call_graph_overapprox",
+              "call_graph_proven",
+              "consumer_proven",
+              "runtime_proven"
+            ]
+          },
+          "evidence_levels": {
+            "type": "array",
+            "description": "G29 Phase 6 follow-up (schema 2.29): present iff strongest_evidence_level is -- this group's distinct evidence levels, weakest first.",
+            "items": {
+              "type": "string",
+              "enum": [
+                "artifact_proven",
+                "call_graph_overapprox",
+                "call_graph_proven",
+                "consumer_proven",
+                "runtime_proven"
+              ]
+            }
           }
         }
       }
@@ -1294,6 +1319,45 @@
             "impact_group_id": {
               "type": "string",
               "description": "G29 Phase 3 follow-up (ADR-052, schema 2.19): currently always identical to root_cause_id -- a placeholder alias until Phase 6's RootCauseCorrelator gives it independent meaning (e.g. bucketing several distinct root causes under one broader consumer-visible event). Present iff root_cause_id is."
+            },
+            "root_cause_evidence": {
+              "type": "object",
+              "description": "G29 Phase 6 follow-up (schema 2.29): this finding's own entry from the RootCauseCorrelator (abicheck.impact.correlation.correlate_root_causes) -- present only when this finding is a member of one of that composer's multi-piece groups (the four load-failure kinds: func_removed, internal_symbol_required_by_public_api, consumer_required_symbol_removed, consumer_runtime_load_failed, correlated by shared symbol identity). evidence_level is this finding's own rank; strongest_evidence_level/evidence_levels describe the whole group. Unconditional on report_mode, same as root_cause_id/impact_group_id above.",
+              "properties": {
+                "evidence_level": {
+                  "type": "string",
+                  "enum": [
+                    "artifact_proven",
+                    "call_graph_overapprox",
+                    "call_graph_proven",
+                    "consumer_proven",
+                    "runtime_proven"
+                  ]
+                },
+                "strongest_evidence_level": {
+                  "type": "string",
+                  "enum": [
+                    "artifact_proven",
+                    "call_graph_overapprox",
+                    "call_graph_proven",
+                    "consumer_proven",
+                    "runtime_proven"
+                  ]
+                },
+                "evidence_levels": {
+                  "type": "array",
+                  "items": {
+                    "type": "string",
+                    "enum": [
+                      "artifact_proven",
+                      "call_graph_overapprox",
+                      "call_graph_proven",
+                      "consumer_proven",
+                      "runtime_proven"
+                    ]
+                  }
+                }
+              }
             },
             "proof_path": {
               "type": "object",

@@ -1148,6 +1148,69 @@ class TestImpactAssessmentRootCause:
         assert full_ids == rc_ids
 
 
+class TestImpactAssessmentRootCauseEvidence:
+    """``impactAssessment.root_cause_evidence`` (G29 Phase 6 follow-up):
+    wiring RootCauseCorrelator's evidence-ranked groups into SARIF."""
+
+    def _correlated_result(self) -> object:
+        root = Change(
+            ChangeKind.FUNC_REMOVED,
+            "ns::internal::helper",
+            "helper removed",
+        )
+        overlay = Change(
+            ChangeKind.INTERNAL_SYMBOL_REQUIRED_BY_PUBLIC_API,
+            "pub_entry",
+            "required",
+            caused_by_type="ns::internal::helper",
+        )
+        return _make_result([root, overlay], verdict=Verdict.BREAKING)
+
+    def test_uncorrelated_finding_has_no_root_cause_evidence(self) -> None:
+        r = _make_result([_breaking_change()], verdict=Verdict.BREAKING)
+        doc = to_sarif(r)
+        props = doc["runs"][0]["results"][0]["properties"]
+        assessment = props.get("impactAssessment", {})
+        assert "root_cause_evidence" not in assessment
+
+    def test_correlated_findings_carry_evidence_summary(self) -> None:
+        r = self._correlated_result()
+        doc = to_sarif(r)
+        results = doc["runs"][0]["results"]
+        evidences = [
+            res["properties"]["impactAssessment"]["root_cause_evidence"]
+            for res in results
+        ]
+        for evidence in evidences:
+            assert evidence["strongest_evidence_level"] == "call_graph_proven"
+            assert evidence["evidence_levels"] == [
+                "artifact_proven",
+                "call_graph_proven",
+            ]
+        assert {e["evidence_level"] for e in evidences} == {
+            "artifact_proven",
+            "call_graph_proven",
+        }
+
+    def test_root_cause_evidence_unconditional_on_report_mode(self) -> None:
+        # Same evidence in both full and root-cause report modes -- unlike
+        # properties.rootCauseId (exclusive to root-cause mode),
+        # impactAssessment.root_cause_evidence is unconditional, mirroring
+        # root_cause_id/impact_group_id's own precedent.
+        r = self._correlated_result()
+        full_doc = to_sarif(r)
+        rc_doc = to_sarif(r, report_mode="root-cause")
+        full_evidence = [
+            res["properties"]["impactAssessment"]["root_cause_evidence"]
+            for res in full_doc["runs"][0]["results"]
+        ]
+        rc_evidence = [
+            res["properties"]["impactAssessment"]["root_cause_evidence"]
+            for res in rc_doc["runs"][0]["results"]
+        ]
+        assert full_evidence == rc_evidence
+
+
 class TestNotComparable:
     """ADR-050 D2 -- the comparability-gate hard-fail path has no DiffResult
     at all, so it gets its own dedicated renderer instead of to_sarif."""

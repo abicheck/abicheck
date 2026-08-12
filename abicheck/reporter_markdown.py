@@ -803,6 +803,48 @@ def root_cause_lookup_for_changes(
     return lookup
 
 
+def root_cause_evidence_lookup_for_changes(
+    changes: list[Change],
+) -> dict[str, dict[str, object]]:
+    """``finding_id -> root_cause_evidence`` for every change that is a
+    member of a G29 Phase 6 ``RootCauseCorrelator`` group (G29 Phase 6
+    follow-up: wiring the correlator's output into the JSON/SARIF
+    ``impact_assessment`` surface).
+
+    Deliberately independent of :func:`root_cause_lookup_for_changes` above:
+    that function's ``root_cause_id``/``root_cause_display`` grouping covers
+    *any* two findings sharing a ``caused_by_type``/``symbol``, for every
+    ``ChangeKind``; :func:`~abicheck.impact.correlation.correlate_root_causes`
+    covers only the four load-failure kinds its own module docstring names
+    (``FUNC_REMOVED``/``INTERNAL_SYMBOL_REQUIRED_BY_PUBLIC_API``/
+    ``CONSUMER_REQUIRED_SYMBOL_REMOVED``/``CONSUMER_RUNTIME_LOAD_FAILED``),
+    ranked by evidence strength, and drops a symbol with only one correlated
+    piece. Built directly from the actual ``Change`` objects the correlator
+    grouped — not by matching root-cause ids after the fact — so this stays
+    correct independent of whether the two functions' grouping keys happen
+    to agree for a given finding.
+
+    Scoped to *changes* only: unlike ``root_cause_lookup_for_changes``, this
+    has no ``extra_causes`` parameter, so a correlated sibling that exists
+    only as a scoped-only (``--used-by``/``--required-symbol``) finding
+    appended to a report after this runs is not seen — deliberately left for
+    a follow-up, mirroring this module's own "Deliberately not implemented
+    this slice" precedent rather than growing this helper's contract
+    unverified.
+    """
+    from .impact.correlation import correlate_root_causes
+
+    lookup: dict[str, dict[str, object]] = {}
+    for group in correlate_root_causes(changes):
+        for member_change, level in group.members:
+            lookup[_finding_id(member_change)] = {
+                "evidence_level": level,
+                "strongest_evidence_level": group.strongest_evidence_level,
+                "evidence_levels": list(group.evidence_levels),
+            }
+    return lookup
+
+
 def _resolve_scoped_gate_findings(
     result: DiffResult,
     severity_config: SeverityConfig | None,
