@@ -101,6 +101,18 @@ class TestBuildManifestBasics:
         assert manifest["profile"] == "linux-x86_64"
         assert [a["library"] for a in manifest["artifacts"]] == ["libfoo", "libbar"]
         assert all(a["sha256"] for a in manifest["artifacts"])
+        # baseline_generation defaults to None when the caller doesn't
+        # pass one -- absence, not "generation 0".
+        assert manifest["baseline_generation"] is None
+
+    def test_baseline_generation_is_recorded_when_given(self, tmp_path: Path) -> None:
+        out = tmp_path
+        _write_snapshot(out / "libfoo.abicheck.json", library="libfoo")
+        entries = [{"name": "libfoo", "artifact": "build/libfoo.so"}]
+        manifest = build_manifest_module.build_manifest(
+            out, "v1.0.0", "linux-x86_64", entries, None, baseline_generation=3
+        )
+        assert manifest["baseline_generation"] == 3
 
     def test_missing_snapshot_raises(self, tmp_path: Path) -> None:
         entries = [{"name": "libfoo", "artifact": "build/libfoo.so"}]
@@ -572,6 +584,59 @@ class TestFreshness:
         assert manifest["freshness"]["refresh_required"] is True
         assert any("profile" in r for r in manifest["freshness"]["reasons"])
 
+    def test_baseline_generation_bump_requires_refresh(self, tmp_path: Path) -> None:
+        # A scanner-generation bump is its own refresh reason, independent
+        # of schema/fact_set/profile -- e.g. a normalization-recipe fix
+        # that doesn't touch either.
+        _write_snapshot(
+            tmp_path / "libfoo.abicheck.json", library="libfoo", schema_version=9
+        )
+        entries = [{"name": "libfoo", "artifact": "a.so"}]
+        previous_path = tmp_path / "previous.json"
+        previous_path.write_text(
+            json.dumps(
+                {
+                    "manifest_version": 1,
+                    "project_ref": "",
+                    "profile": "",
+                    "snapshot_schema": 9,
+                    "fact_set": None,
+                    "baseline_generation": 2,
+                    "artifacts": [{"library": "libfoo"}],
+                }
+            )
+        )
+        manifest = build_manifest_module.build_manifest(
+            tmp_path, "", "", entries, previous_path, baseline_generation=3
+        )
+        assert manifest["freshness"]["refresh_required"] is True
+        assert any("baseline_generation" in r for r in manifest["freshness"]["reasons"])
+
+    def test_baseline_generation_absent_on_both_sides_is_not_stale(
+        self, tmp_path: Path
+    ) -> None:
+        _write_snapshot(
+            tmp_path / "libfoo.abicheck.json", library="libfoo", schema_version=9
+        )
+        entries = [{"name": "libfoo", "artifact": "a.so"}]
+        previous_path = tmp_path / "previous.json"
+        previous_path.write_text(
+            json.dumps(
+                {
+                    "manifest_version": 1,
+                    "project_ref": "",
+                    "profile": "",
+                    "snapshot_schema": 9,
+                    "fact_set": None,
+                    "artifacts": [{"library": "libfoo"}],
+                }
+            )
+        )
+        manifest = build_manifest_module.build_manifest(
+            tmp_path, "", "", entries, previous_path
+        )
+        assert manifest["freshness"]["refresh_required"] is False
+
     def test_fact_set_change_requires_refresh(self, tmp_path: Path) -> None:
         _write_snapshot(
             tmp_path / "libfoo.abicheck.json",
@@ -674,6 +739,104 @@ class TestMainCli:
         assert "library-count=1" in out
         assert "refresh-required=false" in out
         assert "content-digest=" in out
+
+    def test_main_baseline_generation_flag_is_recorded(
+        self, tmp_path: Path, capsys
+    ) -> None:
+        _write_snapshot(
+            tmp_path / "libfoo.abicheck.json", library="libfoo", schema_version=9
+        )
+        libraries = json.dumps([{"name": "libfoo", "artifact": "a.so"}])
+        manifest_out = tmp_path / "manifest.json"
+        rc = build_manifest_module.main(
+            [
+                "--output-dir",
+                str(tmp_path),
+                "--profile",
+                "linux",
+                "--libraries",
+                libraries,
+                "--manifest-out",
+                str(manifest_out),
+                "--baseline-generation",
+                "3",
+            ]
+        )
+        assert rc == 0
+        written = json.loads(manifest_out.read_text())
+        assert written["baseline_generation"] == 3
+
+    def test_main_baseline_generation_omitted_is_none(
+        self, tmp_path: Path, capsys
+    ) -> None:
+        _write_snapshot(
+            tmp_path / "libfoo.abicheck.json", library="libfoo", schema_version=9
+        )
+        libraries = json.dumps([{"name": "libfoo", "artifact": "a.so"}])
+        manifest_out = tmp_path / "manifest.json"
+        rc = build_manifest_module.main(
+            [
+                "--output-dir",
+                str(tmp_path),
+                "--profile",
+                "linux",
+                "--libraries",
+                libraries,
+                "--manifest-out",
+                str(manifest_out),
+            ]
+        )
+        assert rc == 0
+        written = json.loads(manifest_out.read_text())
+        assert written["baseline_generation"] is None
+
+    def test_main_baseline_generation_not_an_integer_fails(
+        self, tmp_path: Path, capsys
+    ) -> None:
+        _write_snapshot(
+            tmp_path / "libfoo.abicheck.json", library="libfoo", schema_version=9
+        )
+        libraries = json.dumps([{"name": "libfoo", "artifact": "a.so"}])
+        manifest_out = tmp_path / "manifest.json"
+        with pytest.raises(SystemExit, match="not an integer"):
+            build_manifest_module.main(
+                [
+                    "--output-dir",
+                    str(tmp_path),
+                    "--profile",
+                    "linux",
+                    "--libraries",
+                    libraries,
+                    "--manifest-out",
+                    str(manifest_out),
+                    "--baseline-generation",
+                    "not-a-number",
+                ]
+            )
+
+    def test_main_baseline_generation_negative_fails(
+        self, tmp_path: Path, capsys
+    ) -> None:
+        _write_snapshot(
+            tmp_path / "libfoo.abicheck.json", library="libfoo", schema_version=9
+        )
+        libraries = json.dumps([{"name": "libfoo", "artifact": "a.so"}])
+        manifest_out = tmp_path / "manifest.json"
+        with pytest.raises(SystemExit, match="must not be negative"):
+            build_manifest_module.main(
+                [
+                    "--output-dir",
+                    str(tmp_path),
+                    "--profile",
+                    "linux",
+                    "--libraries",
+                    libraries,
+                    "--manifest-out",
+                    str(manifest_out),
+                    "--baseline-generation",
+                    "-1",
+                ]
+            )
 
     def test_sha256_stable_when_only_created_at_changes(self, tmp_path: Path) -> None:
         # Regression (Codex review): the per-artifact sha256 used to be a raw

@@ -18,6 +18,7 @@ PROJECT_REF="${INPUT_PROJECT_REF:-}"
 PROFILE="${INPUT_PROFILE:-}"
 BUILD_INFO="${INPUT_BUILD_INFO:-}"
 DEPTH="${INPUT_DEPTH:-}"
+BASELINE_GENERATION="${INPUT_BASELINE_GENERATION:-}"
 PREVIOUS_MANIFEST="${INPUT_PREVIOUS_MANIFEST:-}"
 VALIDATION="${INPUT_VALIDATION:-strict}"
 SNAPSHOT_COMPRESSION="${INPUT_SNAPSHOT_COMPRESSION:-none}"
@@ -31,6 +32,11 @@ _fail() {
 case "$VALIDATION" in
   strict | none) ;;
   *) _fail "validation '$VALIDATION' is not recognized. Use 'strict' or 'none'." ;;
+esac
+
+case "$BASELINE_GENERATION" in
+  '' | [0-9]*) ;;
+  *) _fail "baseline-generation '$BASELINE_GENERATION' is not a non-negative integer." ;;
 esac
 
 # ADR-059: the canonical storage suffix implied by snapshot-compression --
@@ -220,6 +226,7 @@ MANIFEST_ARGS=(
   --profile "$PROFILE"
   --libraries "$LIBRARIES_JSON"
   --manifest-out "$MANIFEST_PATH"
+  --baseline-generation "$BASELINE_GENERATION"
 )
 [[ -n "$PREVIOUS_MANIFEST" ]] && MANIFEST_ARGS+=(--previous-manifest "$PREVIOUS_MANIFEST")
 

@@ -26,7 +26,7 @@ This module is the shared reader/resolver ``actions/resolve-baseline`` uses
 plan's "extract a shared helper rather than duplicating the schema/digest-
 check code" note): parse a baseline-set directory's ``manifest.json`` and
 resolve ``channel × target/bundle × profile`` down to one of ADR-047 §6's
-five typed failure outcomes, or success — **never** a compatibility verdict.
+seven typed failure outcomes, or success — **never** a compatibility verdict.
 
 Reads ``manifest.json``'s raw JSON directly with defensive ``.get()`` access,
 mirroring ``actions/baseline/build_manifest.py``'s own reading philosophy for
@@ -194,10 +194,25 @@ class ResolveOutcome:
     #: undetectable: every other check here (schema, profile, digests) can
     #: pass on a baseline-set that is simply the wrong *commit*.
     WRONG_PROJECT_REF = "wrong_project_ref"
+    #: The staged baseline-set's own ``manifest.json`` ``baseline_generation``
+    #: does not match what the caller *expected* it to be
+    #: (``resolve-baseline``'s optional ``expected-baseline-generation``
+    #: input). Distinct from ``STALE_SCHEMA``/``WRONG_PROJECT_REF``: a
+    #: baseline can carry the identical ``snapshot_schema`` and
+    #: ``project_ref`` while still having been produced by an incompatible
+    #: scanner *epoch* -- e.g. a normalization/hash-recipe fix, or a
+    #: previously-unreliable fact that a newer extractor now populates
+    #: correctly, neither of which necessarily bumps the schema version.
+    #: ``baseline_generation`` is a caller-assigned identity (never derived
+    #: from the installed abicheck package version) for exactly that class
+    #: of change -- see ``actions/baseline/build_manifest.py``'s own
+    #: ``baseline_generation`` docstring and docs/use/baseline-management.md
+    #: #scanner-upgrades-and-baseline-generations.
+    STALE_GENERATION = "stale_generation"
 
 
 #: Every outcome value :func:`resolve_target`/:func:`resolve_bundle` can
-#: return — the seven branches of ADR-047 §6's table (six failure rows plus
+#: return — the eight branches of ADR-047 §6's table (seven failure rows plus
 #: the resolved/success case).
 ALL_OUTCOMES = frozenset(
     {
@@ -208,6 +223,7 @@ ALL_OUTCOMES = frozenset(
         ResolveOutcome.STALE_SCHEMA,
         ResolveOutcome.INCOMPATIBLE_EVIDENCE,
         ResolveOutcome.WRONG_PROJECT_REF,
+        ResolveOutcome.STALE_GENERATION,
     }
 )
 
@@ -268,6 +284,12 @@ class BaselineManifest:
     profile: str = ""
     snapshot_schema: int | None = None
     fact_set: dict[str, Any] | None = None
+    #: Caller-assigned scanner-compatibility generation
+    #: (``actions/baseline/build_manifest.py``'s ``--baseline-generation``) --
+    #: ``None`` when the producing baseline-set run never declared one (an
+    #: older manifest, or a caller not tracking generations), which is never
+    #: compared against an expectation (see :func:`_schema_and_profile_check`).
+    baseline_generation: int | None = None
     artifacts: list[BaselineArtifact] = field(default_factory=list)
 
     def artifact_for(self, library: str) -> BaselineArtifact | None:
@@ -334,6 +356,7 @@ def load_baseline_manifest(baseline_dir: Path | str) -> BaselineManifest | None:
     manifest_version = data.get("manifest_version")
     snapshot_schema = data.get("snapshot_schema")
     fact_set = data.get("fact_set")
+    baseline_generation = data.get("baseline_generation")
     return BaselineManifest(
         manifest_version=manifest_version
         if isinstance(manifest_version, int)
@@ -342,6 +365,9 @@ def load_baseline_manifest(baseline_dir: Path | str) -> BaselineManifest | None:
         profile=str(data.get("profile") or ""),
         snapshot_schema=snapshot_schema if isinstance(snapshot_schema, int) else None,
         fact_set=fact_set if isinstance(fact_set, dict) else None,
+        baseline_generation=baseline_generation
+        if isinstance(baseline_generation, int)
+        else None,
         artifacts=artifacts,
     )
 
@@ -557,9 +583,11 @@ def _schema_and_profile_check(
     manifest_path: str,
     *,
     expected_project_ref: str = "",
+    expected_baseline_generation: int | None = None,
 ) -> ResolveResult | None:
-    """Shared ``stale_schema``/``wrong_profile``/``wrong_project_ref`` checks
-    for target and bundle resolution -- returns ``None`` when all pass.
+    """Shared ``stale_schema``/``wrong_profile``/``wrong_project_ref``/
+    ``stale_generation`` checks for target and bundle resolution -- returns
+    ``None`` when all pass.
 
     ``expected_project_ref``, when non-empty, is compared *exactly* against
     the manifest's own ``project_ref`` -- an empty string (the default)
@@ -567,6 +595,12 @@ def _schema_and_profile_check(
     resolved by tag/asset selection rather than a Git ref) or resolved the
     physical baseline-path by some means already scoped to the right ref, so
     this check is opt-in, not implicitly derived from anything else here.
+
+    ``expected_baseline_generation``, when not ``None``, is compared
+    *exactly* against the manifest's own ``baseline_generation`` -- ``None``
+    (the default) means the caller isn't tracking scanner-compatibility
+    generations for this check, so it is opt-in the same way
+    ``expected_project_ref`` is.
     """
     if manifest.manifest_version not in SUPPORTED_MANIFEST_VERSIONS:
         return ResolveResult(
@@ -611,6 +645,26 @@ def _schema_and_profile_check(
                 "is newer than this checkout's installed reader supports "
                 f"(up to schema_version {serialization.SCHEMA_VERSION}) -- "
                 "upgrade abicheck before resolving against this baseline-set."
+            ),
+            manifest_path=manifest_path,
+        )
+    if (
+        expected_baseline_generation is not None
+        and manifest.baseline_generation != expected_baseline_generation
+    ):
+        return ResolveResult(
+            outcome=ResolveOutcome.STALE_GENERATION,
+            message=(
+                f"baseline-set's baseline_generation is "
+                f"{manifest.baseline_generation!r}, not the expected "
+                f"{expected_baseline_generation!r} -- this baseline-set was "
+                "produced by a different scanner-compatibility generation "
+                "(a normalization/hash-recipe change, a previously-"
+                "unreliable fact a newer extractor now populates, or "
+                "similar) than this check requires, even though its "
+                "snapshot_schema/profile may be unchanged. Regenerate the "
+                "baseline-set with the current scanner generation before "
+                "comparing against it."
             ),
             manifest_path=manifest_path,
         )
@@ -860,6 +914,7 @@ def resolve_target(
     required: bool = True,
     candidate_evidence_producer: dict[str, Any] | None = None,
     expected_project_ref: str = "",
+    expected_baseline_generation: int | None = None,
 ) -> ResolveResult:
     """Resolve ``channel × target × profile`` (ADR-047 §6) to one snapshot.
 
@@ -870,6 +925,9 @@ def resolve_target(
     directory. ``expected_project_ref``, when non-empty, additionally
     requires the resolved baseline-set's own recorded ``project_ref`` to
     match exactly -- see :data:`ResolveOutcome.WRONG_PROJECT_REF`.
+    ``expected_baseline_generation``, when not ``None``, additionally
+    requires the resolved baseline-set's own recorded ``baseline_generation``
+    to match exactly -- see :data:`ResolveOutcome.STALE_GENERATION`.
     """
     baseline_dir = Path(baseline_dir)
     manifest, failure = _load_manifest_or_result(baseline_dir, required)
@@ -883,6 +941,7 @@ def resolve_target(
         profile,
         manifest_path,
         expected_project_ref=expected_project_ref,
+        expected_baseline_generation=expected_baseline_generation,
     )
     if schema_or_profile_failure is not None:
         return schema_or_profile_failure
@@ -974,6 +1033,7 @@ def resolve_bundle(
     required: bool = True,
     candidate_evidence_producer: dict[str, Any] | None = None,
     expected_project_ref: str = "",
+    expected_baseline_generation: int | None = None,
 ) -> ResolveResult:
     """Resolve ``channel × bundle × profile`` (ADR-047 §6/§8 S14 correction).
 
@@ -985,8 +1045,8 @@ def resolve_bundle(
     instead. Every listed *member* must have one, or the whole bundle
     resolution reports ``ambiguous`` — a partially-staged bundle baseline
     would otherwise silently produce a bundle report missing one member's
-    old-side data. ``expected_project_ref`` has the same meaning as
-    :func:`resolve_target`'s.
+    old-side data. ``expected_project_ref``/``expected_baseline_generation``
+    have the same meaning as :func:`resolve_target`'s.
     """
     baseline_dir = Path(baseline_dir)
     manifest, failure = _load_manifest_or_result(baseline_dir, required)
@@ -1000,6 +1060,7 @@ def resolve_bundle(
         profile,
         manifest_path,
         expected_project_ref=expected_project_ref,
+        expected_baseline_generation=expected_baseline_generation,
     )
     if schema_or_profile_failure is not None:
         return schema_or_profile_failure

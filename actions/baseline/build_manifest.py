@@ -158,6 +158,7 @@ def build_manifest(
     profile: str,
     entries: list[dict[str, Any]],
     previous_manifest_path: Path | None,
+    baseline_generation: int | None = None,
 ) -> dict[str, Any]:
     artifacts = []
     schema_versions: set[int] = set()
@@ -329,6 +330,21 @@ def build_manifest(
         "profile": profile,
         "snapshot_schema": max(schema_versions) if schema_versions else None,
         "fact_set": fact_set_out,
+        # ADR-047's "baseline lifecycle" gap: a package-version bump (e.g.
+        # abicheck 0.5.0 -> 0.5.1) must NOT by itself invalidate a baseline
+        # -- most scanner changes (report format, policy/severity, a new
+        # detector over already-collected facts) don't change what a
+        # snapshot's own facts *mean*. `baseline_generation` is a
+        # deliberately separate, caller-assigned identity (never derived
+        # from the installed abicheck version) for the subset of upgrades
+        # that DO invalidate one: a fixed/newly-extracted fact, a changed
+        # normalization/hash recipe, or a schema bump. None (the default)
+        # means the caller isn't tracking generations for this baseline-set
+        # -- absence is not "generation 0", and is never compared against an
+        # expectation (see resolve-baseline's own expected-baseline-
+        # generation input). See docs/use/baseline-management.md#scanner-
+        # upgrades-and-baseline-generations.
+        "baseline_generation": baseline_generation,
         "artifacts": artifacts,
     }
     manifest["freshness"] = _compute_freshness(manifest, previous_manifest_path)
@@ -374,6 +390,20 @@ def _compute_freshness(
     if previous.get("snapshot_schema") != manifest["snapshot_schema"]:
         reasons.append(
             f"snapshot_schema {previous.get('snapshot_schema')} -> {manifest['snapshot_schema']}"
+        )
+    # A generation change is a caller-declared "this is a deliberately new
+    # scanner epoch" signal -- always a refresh reason when both manifests
+    # declare one, even if it happens to coincide with an unchanged schema/
+    # fact_set (e.g. a normalization-recipe fix that doesn't bump either).
+    # A manifest that never declared a generation (None on either side) has
+    # nothing to compare, same as the other optional identity fields above.
+    if (
+        previous.get("baseline_generation") is not None
+        or manifest["baseline_generation"] is not None
+    ) and previous.get("baseline_generation") != manifest["baseline_generation"]:
+        reasons.append(
+            f"baseline_generation {previous.get('baseline_generation')} -> "
+            f"{manifest['baseline_generation']}"
         )
     if previous.get("fact_set") != manifest["fact_set"]:
         reasons.append(f"fact_set {previous.get('fact_set')} -> {manifest['fact_set']}")
@@ -604,11 +634,38 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument("--previous-manifest", default=None, type=Path)
     parser.add_argument("--manifest-out", required=True, type=Path)
+    parser.add_argument(
+        "--baseline-generation",
+        default="",
+        help=(
+            "Scanner-compatibility generation to record in the manifest "
+            "(a non-negative integer), or empty (default) to leave it "
+            "unset. See build_manifest()'s own baseline_generation docstring."
+        ),
+    )
     args = parser.parse_args(argv)
+
+    baseline_generation: int | None = None
+    if args.baseline_generation:
+        try:
+            baseline_generation = int(args.baseline_generation)
+        except ValueError:
+            raise SystemExit(
+                f"--baseline-generation {args.baseline_generation!r} is not an integer."
+            ) from None
+        if baseline_generation < 0:
+            raise SystemExit(
+                f"--baseline-generation {baseline_generation!r} must not be negative."
+            )
 
     entries = json.loads(args.libraries)
     manifest = build_manifest(
-        args.output_dir, args.project_ref, args.profile, entries, args.previous_manifest
+        args.output_dir,
+        args.project_ref,
+        args.profile,
+        entries,
+        args.previous_manifest,
+        baseline_generation=baseline_generation,
     )
     args.manifest_out.write_text(
         json.dumps(manifest, indent=2) + "\n", encoding="utf-8"

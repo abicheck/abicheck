@@ -100,6 +100,15 @@ inputs:
       rather than a Git ref. Ignored when baseline-channel is 'none'.
     required: false
     default: ''
+  expected-baseline-generation:
+    description: >
+      Forwarded to resolve-baseline's expected-baseline-generation input --
+      require the resolved baseline-set's manifest.json baseline_generation
+      to match this value exactly, failing closed with the
+      stale_generation outcome otherwise. Omit (default) to skip the check.
+      Ignored when baseline-channel is 'none'.
+    required: false
+    default: ''
   requested-depth:
     description: 'Evidence-depth this check asks for: binary, headers, build, or source (ADR-047 §7).'
     required: true
@@ -289,7 +298,7 @@ inputs:
 
 outputs:
   outcome:
-    description: 'resolve-baseline outcome (resolved, not_found, ambiguous, wrong_profile, stale_schema, incompatible_evidence, wrong_project_ref), or "skipped" when baseline-channel is none.'
+    description: 'resolve-baseline outcome (resolved, not_found, ambiguous, wrong_profile, stale_schema, incompatible_evidence, wrong_project_ref, stale_generation), or "skipped" when baseline-channel is none.'
     value: ${{ steps.finalize.outputs.outcome }}
   check-id:
     description: "This check's full identity: target@profile#baseline_channel@requested_depth."
@@ -428,6 +437,7 @@ runs:
         required: ${{ inputs.baseline-required }}
         candidate-build-output: ${{ inputs.candidate-build-output }}
         expected-project-ref: ${{ inputs.expected-project-ref }}
+        expected-baseline-generation: ${{ inputs.expected-baseline-generation }}
         python-version: ${{ inputs.python-version }}
 
     # ── Evidence collection (ADR-047 §4's collect-facts composition note: ──

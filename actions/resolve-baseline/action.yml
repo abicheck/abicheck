@@ -3,9 +3,9 @@ description: >-
   Resolve one check's baseline: channel x target/bundle x profile against an
   already-staged baseline-set, returning one of ADR-047 Section 6's typed
   outcomes (resolved, not_found, ambiguous, wrong_profile, stale_schema,
-  incompatible_evidence, wrong_project_ref) -- never a compatibility
-  verdict, and never silently degraded to "no baseline = compatible."
-  Read-only: this Action never fetches, commits, or pushes.
+  incompatible_evidence, wrong_project_ref, stale_generation) -- never a
+  compatibility verdict, and never silently degraded to "no baseline =
+  compatible." Read-only: this Action never fetches, commits, or pushes.
 
 branding:
   icon: 'target'
@@ -94,6 +94,23 @@ inputs:
       an exact-ref-scoped means.
     required: false
     default: ''
+  expected-baseline-generation:
+    description: >
+      Require the resolved baseline-set's manifest.json baseline_generation
+      (actions/baseline's own baseline-generation input, a caller-assigned
+      scanner-compatibility identity -- see
+      docs/use/baseline-management.md#scanner-upgrades-and-baseline-generations)
+      to match this value exactly, or the stale_generation outcome is
+      returned instead of resolved. A baseline-set can pass every other
+      check here (schema, profile, project_ref, digests) while still having
+      been produced by an incompatible scanner epoch -- a normalization/
+      hash-recipe fix, or a previously-unreliable fact a newer extractor now
+      populates, neither of which necessarily bumps snapshot_schema. Omit
+      (default) to skip this check -- appropriate for a baseline-set that
+      isn't tracking generations, or a workflow that only pins abicheck's
+      package version directly.
+    required: false
+    default: ''
   python-version:
     description: 'Python version for setup-python.'
     required: false
@@ -101,7 +118,7 @@ inputs:
 
 outputs:
   outcome:
-    description: 'resolved | not_found | ambiguous | wrong_profile | stale_schema | incompatible_evidence | wrong_project_ref.'
+    description: 'resolved | not_found | ambiguous | wrong_profile | stale_schema | incompatible_evidence | wrong_project_ref | stale_generation.'
     value: ${{ steps.resolve.outputs.outcome }}
   bootstrap:
     description: "'true' when outcome is not_found and required was 'false' (advisory, non-fatal). 'false' otherwise."
@@ -151,5 +168,6 @@ runs:
         INPUT_REQUIRED: ${{ inputs.required }}
         INPUT_CANDIDATE_BUILD_OUTPUT: ${{ inputs.candidate-build-output }}
         INPUT_EXPECTED_PROJECT_REF: ${{ inputs.expected-project-ref }}
+        INPUT_EXPECTED_BASELINE_GENERATION: ${{ inputs.expected-baseline-generation }}
         ACTION_PATH: ${{ github.action_path }}
       run: bash "${{ github.action_path }}/run.sh"

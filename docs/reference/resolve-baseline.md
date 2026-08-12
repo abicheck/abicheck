@@ -62,12 +62,13 @@ storage-backend table) — `actions/cache`, `actions/download-artifact`, or
 | `required` | no | `true` | `true` — no baseline set yet is a hard failure. `false` — explicit bootstrap opt-in (e.g. the very first `release-contract` publish); no baseline set yet resolves as an advisory `not_found`/bootstrap pass. |
 | `candidate-build-output` | no | `''` | Path to the candidate build's `build-output.json`, read only for its `evidence_producer` block, feeding the `incompatible_evidence` check. Omit to skip that check. |
 | `expected-project-ref` | no | `''` | Require the resolved baseline-set's `manifest.json` `project_ref` to match this value exactly, or `wrong_project_ref` is returned instead of `resolved`. Pass e.g. `github.event.pull_request.base.sha` when staging `accepted-main` for a PR gate — see [Known gap: `accepted-main` restore-by-prefix](#known-gap-accepted-main-restore-by-prefix-can-resolve-the-wrong-commit) below. Omit to skip this check (appropriate for `release-contract`, resolved by tag/asset selection rather than a Git ref). |
+| `expected-baseline-generation` | no | `''` | Require the resolved baseline-set's `manifest.json` `baseline_generation` (a caller-assigned scanner-compatibility identity, `actions/baseline`'s own `baseline-generation` input — see [baseline-management.md](../use/baseline-management.md#scanner-upgrades-and-baseline-generations)) to match this value exactly, or `stale_generation` is returned instead of `resolved`. Unlike `expected-project-ref`, this check is not scoped to any one channel — a `release-contract` baseline can be just as stale a generation as an `accepted-main` one. Omit to skip this check. |
 
 ## Outputs
 
 | Output | Meaning |
 |--------|---------|
-| `outcome` | `resolved` \| `not_found` \| `ambiguous` \| `wrong_profile` \| `stale_schema` \| `incompatible_evidence` \| `wrong_project_ref`. |
+| `outcome` | `resolved` \| `not_found` \| `ambiguous` \| `wrong_profile` \| `stale_schema` \| `incompatible_evidence` \| `wrong_project_ref` \| `stale_generation`. |
 | `bootstrap` | `'true'` only when `outcome: not_found` and `required: 'false'`. |
 | `channel` | Echoes the `channel` input. |
 | `manifest-path` | Path to the resolved baseline-set's `manifest.json`, when one was found. |
@@ -91,6 +92,7 @@ caller explicitly opts in with `required: false`:
 | `stale_schema` | `1` | `manifest.json`'s `manifest_version` is newer/older than this resolver understands. |
 | `incompatible_evidence` | `1` | The baseline's recorded evidence producer (`wrapper`/`clang-plugin`/`replay`) disagrees with the candidate's, per `candidate-build-output`'s `evidence_producer` block — an infrastructure mismatch, not an ABI finding. |
 | `wrong_project_ref` | `1` | `expected-project-ref` was given and the baseline-set's `manifest.json` `project_ref` doesn't match it exactly — the staged `baseline-path` resolved to a baseline-set built from the wrong commit/tag. |
+| `stale_generation` | `1` | `expected-baseline-generation` was given and the baseline-set's `manifest.json` `baseline_generation` doesn't match it exactly — this baseline-set was produced by a different scanner-compatibility generation, even though its `snapshot_schema`/`profile`/`project_ref` may be unchanged. |
 | `resolved` | `0` | Success. |
 
 ## Bundle-scoped resolution (S14)

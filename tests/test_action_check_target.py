@@ -723,6 +723,33 @@ class TestFinalizeOperationalError:
             }
         ]
 
+    def test_stale_generation_resolve_outcome_is_recognized(
+        self, tmp_path: Path
+    ) -> None:
+        # Same regression shape as wrong_project_ref above, for the newer
+        # stale_generation outcome (scanner-compatibility generation
+        # mismatch, actions/resolve-baseline's expected-baseline-generation).
+        result, outputs = _run_finalize(
+            {
+                **_BASE_IDENTITY,
+                "RESOLVE_RAN": "true",
+                "RESOLVE_OUTCOME": "stale_generation",
+                "RESOLVE_MESSAGE": "baseline built by a different scanner generation.",
+                "ANALYSIS_RAN": "false",
+            },
+            tmp_path,
+        )
+        assert result.returncode == 1, result.stderr
+        assert outputs["outcome"] == "stale_generation"
+        assert outputs["verdict"] == "ERROR"
+        report = json.loads((tmp_path / outputs["report-path"]).read_text())
+        assert report["operational_errors"] == [
+            {
+                "kind": "stale_generation",
+                "message": "baseline built by a different scanner generation.",
+            }
+        ]
+
     def test_analysis_never_producing_a_report_is_an_operational_error(
         self, tmp_path: Path
     ) -> None:

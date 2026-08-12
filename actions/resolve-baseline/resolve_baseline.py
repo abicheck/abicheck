@@ -110,7 +110,26 @@ def main(argv: list[str] | None = None) -> int:
         "(P0: catches an accepted-main cache restore-keys prefix match "
         "landing on the wrong commit).",
     )
+    parser.add_argument(
+        "--expected-baseline-generation",
+        default="",
+        help="Require the resolved baseline-set's manifest.json "
+        "baseline_generation to match exactly (a non-negative integer), or "
+        "empty to skip the stale_generation check.",
+    )
     args = parser.parse_args(argv)
+
+    expected_baseline_generation: int | None = None
+    if args.expected_baseline_generation:
+        try:
+            expected_baseline_generation = int(args.expected_baseline_generation)
+        except ValueError:
+            print(
+                "::error::--expected-baseline-generation "
+                f"{args.expected_baseline_generation!r} is not an integer.",
+                file=sys.stderr,
+            )
+            return _EXIT_USAGE_ERROR
 
     candidate_evidence_producer = None
     if args.candidate_evidence_producer:
@@ -139,6 +158,7 @@ def main(argv: list[str] | None = None) -> int:
             required=required,
             candidate_evidence_producer=candidate_evidence_producer,
             expected_project_ref=args.expected_project_ref,
+            expected_baseline_generation=expected_baseline_generation,
         )
     else:
         try:
@@ -160,6 +180,7 @@ def main(argv: list[str] | None = None) -> int:
             required=required,
             candidate_evidence_producer=candidate_evidence_producer,
             expected_project_ref=args.expected_project_ref,
+            expected_baseline_generation=expected_baseline_generation,
         )
 
     output_status = _print_outputs(result)

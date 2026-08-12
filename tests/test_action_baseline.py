@@ -136,6 +136,17 @@ class TestValidationInputRejected:
         assert result.returncode == 1
         assert "not recognized" in result.stdout
 
+    def test_non_integer_baseline_generation_fails(self, tmp_path: Path) -> None:
+        result, _ = _run_action(
+            {
+                "INPUT_LIBRARIES": json.dumps([{"name": "foo", "artifact": "a.so"}]),
+                "INPUT_BASELINE_GENERATION": "bogus",
+            },
+            tmp_path,
+        )
+        assert result.returncode == 1
+        assert "not a non-negative integer" in result.stdout
+
 
 @pytest.mark.skipif(not RUN_SH.is_file(), reason="actions/baseline/run.sh not found")
 class TestLibrariesJsonValidation:

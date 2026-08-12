@@ -55,6 +55,20 @@ inputs:
   depth:
     description: 'Evidence depth passed to every dump call (binary, headers, build, or source). Omit for the CLI default.'
     required: false
+  baseline-generation:
+    description: >
+      Scanner-compatibility generation to record in the manifest (a
+      non-negative integer) -- a caller-assigned identity for the subset of
+      abicheck upgrades that actually invalidate a baseline (a fixed or
+      newly-extracted fact, a changed normalization/hash recipe, a schema
+      bump), distinct from the installed abicheck *version* (which also
+      changes for report-format/policy/detector-only upgrades that don't
+      need a new baseline). Omit to leave it unset (baseline_generation:
+      null in the manifest -- generation drift is then never checked by
+      resolve-baseline's expected-baseline-generation input). See
+      docs/use/baseline-management.md#scanner-upgrades-and-baseline-generations.
+    required: false
+    default: ''
   previous-manifest:
     description: >
       Path to a previous manifest.json to diff against for the
@@ -111,9 +125,9 @@ outputs:
     description: >
       'true' when previous-manifest was given and this run's manifest
       differs from it in a way that means old comparisons against it are
-      no longer trustworthy (snapshot_schema, fact_set identity, or the
-      library set changed). 'false' when no previous-manifest was given,
-      or none of those changed.
+      no longer trustworthy (snapshot_schema, baseline_generation,
+      fact_set identity, or the library set changed). 'false' when no
+      previous-manifest was given, or none of those changed.
     value: ${{ steps.run-baseline.outputs.refresh-required }}
   refresh-reasons:
     description: 'Semicolon-separated human-readable reasons refresh-required is true. Empty otherwise.'
@@ -146,6 +160,7 @@ runs:
         INPUT_PROFILE: ${{ inputs.profile }}
         INPUT_BUILD_INFO: ${{ inputs.build-info }}
         INPUT_DEPTH: ${{ inputs.depth }}
+        INPUT_BASELINE_GENERATION: ${{ inputs.baseline-generation }}
         INPUT_PREVIOUS_MANIFEST: ${{ inputs.previous-manifest }}
         INPUT_VALIDATION: ${{ inputs.validation }}
         INPUT_SNAPSHOT_COMPRESSION: ${{ inputs.snapshot-compression }}
