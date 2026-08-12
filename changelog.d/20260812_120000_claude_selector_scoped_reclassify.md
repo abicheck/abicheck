@@ -43,4 +43,10 @@ A new changelog fragment. See changelog.d/README.md for the workflow.
   `policy_file` parameter, threaded through
   `cli_scan_baseline._blocking_compatible_changes`) instead of silently
   omitting it — the gate/exit-code computation was already correct, only
-  the itemized report was missing the symbol.
+  the itemized report was missing the symbol. A `reclassify:` rule
+  downgrading one addition-kind finding to `ignore` now correctly lands in
+  the `addition` severity bucket rather than `quality_issues`, even when a
+  kind-global `overrides:` entry for the same kind would otherwise move it
+  out of the compatible kind set entirely — the scoped rule's own
+  resolution now wins the addition/quality split too, not just the
+  verdict.

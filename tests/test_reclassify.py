@@ -475,3 +475,53 @@ reclassify:
 
     blocked = _blocking_compatible_changes(diff, {"quality_issues"})
     assert blocked == [reclassified]
+
+
+def test_reclassify_wins_addition_bucket_over_a_kind_global_override(
+    tmp_path: Path,
+) -> None:
+    """A `reclassify:` rule downgrading one ADDITION_KINDS finding to
+    `ignore` must land in the `addition` category, not `quality_issues` --
+    even when a kind-global `overrides:` entry for the same kind would
+    otherwise move it out of the compatible kind set entirely (Codex
+    review: `func_added` overridden to `break` globally, with a scoped
+    `reclassify:` rule bringing one specific symbol back to `ignore` --
+    `quality_issues=error`/`addition=info` must exit 0, not 1)."""
+    from abicheck.severity import (
+        PRESET_DEFAULT,
+        IssueCategory,
+        SeverityConfig,
+        SeverityLevel,
+        classify_effective_change,
+        compute_exit_code,
+    )
+
+    p = tmp_path / "policy.yaml"
+    p.write_text(
+        """
+overrides:
+  func_added: break
+reclassify:
+  - kind: func_added
+    symbol: foo
+    to: ignore
+""".strip(),
+        encoding="utf-8",
+    )
+    pf = PolicyFile.load(p)
+    scoped = _change(ChangeKind.FUNC_ADDED, "foo")
+    unscoped = _change(ChangeKind.FUNC_ADDED, "bar")
+
+    assert classify_effective_change(scoped, policy_file=pf) == IssueCategory.ADDITION
+    # An unrelated func_added symbol still falls through to the (broader)
+    # override -- BREAKING, not silently granted the same leniency.
+    assert (
+        classify_effective_change(unscoped, policy_file=pf)
+        == IssueCategory.ABI_BREAKING
+    )
+
+    cfg = SeverityConfig(
+        quality_issues=SeverityLevel.ERROR, addition=SeverityLevel.INFO
+    )
+    assert compute_exit_code([scoped], cfg, policy_file=pf) == 0
+    assert compute_exit_code([scoped], PRESET_DEFAULT, policy_file=pf) == 0

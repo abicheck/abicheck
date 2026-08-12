@@ -311,6 +311,32 @@ def effective_verdict_for_change(
     return effective_category(change, *sets)
 
 
+def _reclassify_resolved_to_compatible(change: HasKind, policy_file: object | None) -> bool:
+    """True if a selector-scoped `reclassify:` rule -- not a kind-global
+    `overrides:` entry or the base policy -- is what produced this change's
+    COMPATIBLE verdict.
+
+    Used only to widen the ADDITION-vs-QUALITY_ISSUES gate below (Codex
+    review): ``sets[2]`` there is whatever *kind-global* ``kind_sets`` the
+    caller supplied (typically ``DiffResult._effective_kind_sets()``, which
+    bakes in ``overrides:`` but has no notion of a selector-scoped rule at
+    all). A `reclassify:` rule reclassifying one specific addition-kind
+    finding to `ignore` -- even under a kind-global `overrides:
+    {func_added: break}` that would otherwise move `func_added` out of
+    ``sets[2]`` entirely -- is exactly the case that check cannot see: the
+    verdict already correctly resolved to COMPATIBLE (`reclassify:` outranks
+    `overrides:`, see `effective_verdict_for_change`), but the addition/
+    quality split would still read the *overridden* kind set and miscount
+    it as `quality_issues`.
+    """
+    if policy_file is None:
+        return False
+    rules = getattr(policy_file, "reclassify", None)
+    if not rules:
+        return False
+    return first_matching_reclassify_verdict(rules, change) == Verdict.COMPATIBLE
+
+
 def classify_effective_change(
     change: HasKind,
     *,
@@ -330,8 +356,14 @@ def classify_effective_change(
     # COMPATIBLE (and the unreachable NO_CHANGE — effective_category only ever
     # returns BREAKING/API_BREAK/RISK/COMPATIBLE): an addition keeps its
     # ADDITION bucket; everything else (including a demoted break, or a
-    # hypothetical NO_CHANGE) is a quality issue, never an addition.
-    if change.kind in ADDITION_KINDS and change.kind in sets[2]:
+    # hypothetical NO_CHANGE) is a quality issue, never an addition. A
+    # reclassify: rule's own COMPATIBLE resolution counts as "in sets[2]"
+    # even when a kind-global override moved this kind out of it (see
+    # _reclassify_resolved_to_compatible).
+    if change.kind in ADDITION_KINDS and (
+        change.kind in sets[2]
+        or _reclassify_resolved_to_compatible(change, policy_file)
+    ):
         return IssueCategory.ADDITION
     return IssueCategory.QUALITY_ISSUES
 
