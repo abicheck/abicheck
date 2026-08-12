@@ -691,7 +691,7 @@ match/no-match is auditable from `scan --against` too.
 
 ```json
 {
-  "scan_schema_version": "1.10",
+  "scan_schema_version": "1.11",
   "diff": {
     "breaking": 25,
     "findings": ["... 20 entries ..."],
