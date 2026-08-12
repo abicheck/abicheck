@@ -219,6 +219,25 @@ class TestPublishBaselineSelfCheckout:
         dump_step = next(s for s in steps if s.get("name") == "Dump baseline-set")
         assert dump_step["uses"] == "./.publish-baseline-src/actions/baseline"
 
+    def test_package_step_delegates_to_stage_baseline_action(self) -> None:
+        # The archive-suffix-dispatch logic (tar --zstd/.gz/.tgz/.tar) lives
+        # in exactly one place -- actions/stage-baseline -- not duplicated
+        # as inline bash here, so a fix there (a new supported extension,
+        # say) reaches every caller, including an external one that isn't
+        # this workflow.
+        data = _load(PUBLISH_BASELINE)
+        steps = _steps(data["jobs"]["publish"])
+        package_step = next(s for s in steps if s.get("name") == "Package baseline-set")
+        assert package_step["uses"] == "./.publish-baseline-src/actions/stage-baseline"
+        assert package_step["with"]["baseline-path"] == (
+            "${{ steps.baseline.outputs.baseline-path }}"
+        )
+        assert package_step["with"]["asset-name-template"] == (
+            "${{ inputs.asset-name-template }}"
+        )
+        assert package_step["with"]["profile"] == "${{ matrix.profile_id }}"
+        assert "run" not in package_step
+
 
 class TestUpdateMainBaselineSelfCheckout:
     def test_identity_captured_before_the_nested_checkout(self) -> None:

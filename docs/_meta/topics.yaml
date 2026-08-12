@@ -133,6 +133,7 @@ topics:
     fact_sources:
       - abicheck/buildsource/baseline_set.py
       - actions/resolve-baseline/action.yml
+      - actions/stage-baseline/action.yml
       - .github/workflows/publish-baseline.yml
       - .github/workflows/update-main-baseline.yml
       - .github/workflows/protect-committed-baseline.yml

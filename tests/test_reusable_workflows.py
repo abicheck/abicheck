@@ -97,6 +97,25 @@ class TestCheckSingleMirrorsCheckTargetInputs:
             "${{ inputs.dependency-source }}"
         )
 
+    def test_expected_project_ref_is_accepted_and_forwarded(self) -> None:
+        # Regression (Codex review): check-target's expected-project-ref
+        # input (the accepted-main wrong-commit guard) was unreachable
+        # from check-single.yml -- it declared no such input and forwarded
+        # nothing, so an accepted-main PR gate built on this reusable
+        # workflow (not the bare Action) had no way to opt into the guard.
+        data = _load(CHECK_SINGLE)
+        inputs = data[True]["workflow_call"]["inputs"]
+        assert inputs["expected-project-ref"]["type"] == "string"
+        assert inputs["expected-project-ref"]["default"] == ""
+        run_step = next(
+            s
+            for s in _steps(data["jobs"]["check"])
+            if s.get("name") == "Run check-target"
+        )
+        assert run_step["with"]["expected-project-ref"] == (
+            "${{ inputs.expected-project-ref }}"
+        )
+
 
 class TestCheckSingleSelfCheckout:
     """Mirrors check-target/action.yml's own "Capture this Action's
@@ -833,6 +852,21 @@ class TestBaselineRequiredAndCandidateBuildOutputForwarded:
         run_step = next(s for s in steps if s.get("name") == "Run check-target")
         assert run_step["with"]["candidate-build-output"] == (
             "${{ steps.candidate.outputs.build-output }}"
+        )
+
+    def test_run_check_target_forwards_expected_project_ref(self) -> None:
+        # Regression (Codex review): check-target's own
+        # expected-project-ref input (the accepted-main wrong-commit
+        # guard) was unreachable from this composed workflow -- it
+        # declared no such input and forwarded nothing, so a caller
+        # relying on check-project.yml (not the bare Action) had no way to
+        # opt into the guard at all.
+        data = _load(CHECK_PROJECT)
+        assert "expected-project-ref" in data[True]["workflow_call"]["inputs"]
+        steps = _steps(data["jobs"]["check"])
+        run_step = next(s for s in steps if s.get("name") == "Run check-target")
+        assert run_step["with"]["expected-project-ref"] == (
+            "${{ inputs.expected-project-ref }}"
         )
 
     def test_run_check_target_prefers_per_cell_compile_overlay_over_global_inputs(

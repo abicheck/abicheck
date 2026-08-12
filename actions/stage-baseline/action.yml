@@ -1,0 +1,72 @@
+name: 'abicheck stage-baseline'
+description: >-
+  Package a baseline-set directory (as produced by the `abicheck baseline`
+  Action -- one snapshot file per library plus manifest.json) into a single
+  distributable archive, named and encoded per a caller-supplied
+  asset-name-template. Read-only over its input: this Action never commits,
+  pushes, or uploads -- publishing the resulting archive (a GitHub Release
+  asset, a workflow artifact, an external object store, ...) is the calling
+  workflow's job, same division of responsibility as `abicheck baseline`
+  itself and `resolve-baseline`.
+
+  Exists so a caller that wants to publish a baseline-set through its own
+  storage backend (not this repository's own publish-baseline.yml
+  release-contract flow) doesn't have to hand-roll the archive-suffix
+  dispatch itself -- `publish-baseline.yml` calls this exact Action for its
+  own "Package baseline-set" step, so there is one implementation, not two
+  that can drift apart.
+
+branding:
+  icon: 'package'
+  color: 'blue'
+
+inputs:
+  baseline-path:
+    description: >
+      Directory containing a baseline-set's manifest.json plus per-library
+      snapshots (and binaries/ for a bundle-scoped baseline) -- typically
+      the `abicheck baseline` Action's own `baseline-path` output.
+    required: true
+  asset-name-template:
+    description: >
+      Archive filename to produce; "{profile}" is replaced with the
+      profile input's value. The archive encoding is chosen from this
+      name's own extension -- '.tar.zst' (zstd, requires a `tar` build
+      with zstd support, e.g. GNU tar >= 1.31), '.tar.gz'/'.tgz' (gzip), or
+      plain '.tar' (uncompressed). Any other extension is a hard usage
+      error: a consumer (root action.yml's baseline-set fallback,
+      resolve-baseline) picks its extractor from this exact suffix, so an
+      unrecognized one would silently produce an asset nothing downstream
+      can extract.
+    required: false
+    default: 'abicheck-baseline-{profile}.tar.zst'
+  profile:
+    description: >
+      Substituted for "{profile}" in asset-name-template. Should match the
+      `profile` this baseline-set's manifest.json itself records (the
+      `abicheck baseline` Action's own `profile` input) -- a mismatch is
+      not validated here, but a downstream consumer comparing against the
+      manifest's own `profile` field (e.g. a release-publishing workflow's
+      cross-profile collision guard) may reject it.
+    required: false
+    default: ''
+
+outputs:
+  asset-name:
+    description: 'The resolved archive filename (asset-name-template with {profile} substituted).'
+    value: ${{ steps.package.outputs.asset-name }}
+  archive-path:
+    description: 'Path to the archive this Action wrote, relative to the workspace (same as asset-name -- the archive is written to the current working directory).'
+    value: ${{ steps.package.outputs.asset-name }}
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Package baseline-set
+      id: package
+      shell: bash
+      env:
+        BASELINE_PATH: ${{ inputs.baseline-path }}
+        ASSET_NAME_TEMPLATE: ${{ inputs.asset-name-template }}
+        PROFILE: ${{ inputs.profile }}
+      run: bash "${{ github.action_path }}/run.sh"

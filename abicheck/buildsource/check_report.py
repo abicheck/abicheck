@@ -62,6 +62,7 @@ from typing import Any
 
 from ..checker_types import validate_check_id, validate_evidence_depth
 from ..schemas import REPORT_SCHEMA_VERSION, SCAN_SCHEMA_VERSION
+from .baseline_set import ALL_OUTCOMES, ResolveOutcome
 
 #: Safe identifier charset shared by every ``check_id`` component (ADR-047
 #: §7's delimiter-unambiguity fix) -- target/bundle names, profile ids, and
@@ -95,12 +96,17 @@ OPERATIONAL_ERROR_VERDICT = "ERROR"
 #: never opens a coverage gap.
 BOOTSTRAP_VERDICT = "NO_BASELINE"
 
-#: ``resolve-baseline``'s five failure outcomes (ADR-047 §6) that are never
-#: a compatibility verdict -- distinct from ``not_found`` + bootstrap, which
-#: is an advisory pass, not a failure.
-RESOLVE_FAILURE_OUTCOMES = frozenset(
-    {"not_found", "ambiguous", "wrong_profile", "stale_schema", "incompatible_evidence"}
-)
+#: ``resolve-baseline``'s failure outcomes (ADR-047 §6, plus
+#: ``wrong_project_ref``) that are never a compatibility verdict -- distinct
+#: from ``not_found`` + bootstrap, which is an advisory pass, not a failure.
+#: Derived from :data:`abicheck.buildsource.baseline_set.ALL_OUTCOMES`
+#: (the canonical outcome registry) rather than hand-duplicated, so a new
+#: outcome added there can never silently fall out of sync with what
+#: ``check-target`` recognizes as an operational failure here (Codex
+#: review -- ``wrong_project_ref`` itself was missing from this set,
+#: which made a real ``check-target`` propagation of that outcome fall
+#: through to a usage error instead of a structured ``ERROR`` report).
+RESOLVE_FAILURE_OUTCOMES = ALL_OUTCOMES - {ResolveOutcome.RESOLVED}
 
 GATE_MODES = ("local", "deferred", "advisory")
 
