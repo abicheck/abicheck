@@ -1,0 +1,233 @@
+# Copyright 2026 Nikolay Petrov
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+"""Selector-scoped reclassification — the third policy-file primitive.
+
+Two rule forms already exist for steering a verdict, each half-right for a
+project that needs the other half:
+
+- ``suppression.py``'s ``Suppression`` — a rich per-symbol/pattern/namespace
+  selector grammar, but its only action is *deleting* the finding.
+- ``policy_file.py``'s ``overrides:`` block — keeps the finding and changes
+  its verdict, but is keyed by ``ChangeKind`` alone, with no selector: the
+  override applies to every symbol of that kind, project-wide.
+
+Neither combination lets a project say "every ``func_visibility_changed`` on
+*this* symbol family is a known, accepted risk — not a suppression, still
+worth seeing, just not BREAKING." A COMDAT-inline-heavy library (oneDAL is
+the motivating case) can have dozens of such symbols; downgrading the whole
+kind globally via ``overrides:`` would also downgrade a genuine visibility
+regression on an unrelated symbol, and suppressing the finding outright
+throws away evidence a reviewer may still want to see.
+
+``ReclassifyRule`` is that third form: the same selector grammar
+:class:`~abicheck.suppression.Suppression` already implements (``symbol``/
+``symbol_pattern``/``type_pattern``/``member_name``/``namespace``/
+``entity_namespace``/``cause_namespace``/``source_location``/
+``change_kind``/``expires``), with ``to:`` instead of deletion. Reuses
+:class:`~abicheck.suppression.Suppression` itself for selector matching
+(via the public :meth:`~abicheck.suppression.Suppression.selector_matches`)
+rather than re-implementing the glob/regex machinery a second time --
+deliberately bypassing that class's reachability / ``allow_public_break``
+gates, since those exist to guard against a rule *hiding* evidence, which
+does not apply here: a reclassified finding stays in the report, just at a
+different verdict.
+
+Loaded as an optional ``reclassify:`` block in a ``--policy-file`` document,
+parsed by :mod:`abicheck.policy_file` (which owns the ``to:`` severity
+vocabulary via ``parse_severity_value``, the same ``break``/``warn``/
+``risk``/``ignore`` spellings ``overrides:`` already uses) and consulted by
+:meth:`abicheck.policy_file.PolicyFile.compute_verdict` ahead of the
+kind-global ``overrides:`` entry for the same kind, since a rule scoped to a
+selector is strictly more specific than one scoped to a bare kind. Format
+example::
+
+    reclassify:
+      - kind: func_visibility_changed
+        symbol_pattern: "_ZN6oneapi3dal.*"
+        to: risk
+        reason: "COMDAT-inline demotions; consumers already embed their own copy"
+
+Deliberately never imports :mod:`abicheck.suppression`/
+:mod:`abicheck.checker_types` at module (or ``TYPE_CHECKING``) scope, even
+though it uses :class:`~abicheck.suppression.Suppression` at runtime and
+type-annotates against ``Change``. ``checker_types.py`` imports ``PolicyFile``
+from ``policy_file.py``, and ``policy_file.py`` is this module's own caller
+-- a static edge to either module here would close that loop into a real
+import cycle (``policy_file -> reclassify -> suppression -> checker_types ->
+policy_file``), which ``scripts/check_ai_readiness.py``'s ``import-cycle-
+growth`` gate treats as SCC growth regardless of whether the importing
+statement is function-local (its cycle detector walks the whole AST, not
+just module scope). Resolving ``Suppression`` via ``importlib.import_module``
+at call time (mirroring the lazy ``__getattr__`` shim in
+``cli_buildsource.py``, a runtime call rather than a static import edge) is
+the sanctioned way around that per CLAUDE.md "What NOT to do" -- extending
+``IMPORT_CYCLE_ALLOWLIST`` instead would paper over a real, growing SCC.
+``change``/``Change`` parameters are typed ``Any`` for the same reason.
+"""
+
+from __future__ import annotations
+
+import importlib
+from dataclasses import dataclass, field
+from datetime import date
+from typing import Any
+
+from .checker_policy import Verdict
+
+
+def _suppression_cls() -> Any:
+    """Resolve :class:`abicheck.suppression.Suppression` at call time --
+    see the module docstring for why this can't be a static import."""
+    return importlib.import_module("abicheck.suppression").Suppression
+
+
+#: YAML keys accepted in one ``reclassify:`` entry. ``kind`` is this rule
+#: form's own spelling of ``Suppression.change_kind`` (matching the shape of
+#: the user-facing example this module's docstring documents), not a second,
+#: independent selector.
+RECLASSIFY_KNOWN_KEYS: frozenset[str] = frozenset(
+    {
+        "kind",
+        "symbol",
+        "symbol_pattern",
+        "type_pattern",
+        "member_name",
+        "namespace",
+        "entity_namespace",
+        "cause_namespace",
+        "source_location",
+        "to",
+        "reason",
+        "label",
+        "expires",
+    }
+)
+
+
+@dataclass
+class ReclassifyRule:
+    """One selector-scoped reclassification rule.
+
+    Attributes:
+        to_verdict: The verdict this rule forces when its selectors match —
+            already resolved from the raw ``to:`` spelling by the loader
+            (:func:`abicheck.policy_file.parse_severity_value`), so this
+            class carries no severity vocabulary of its own.
+        to: The raw ``to:`` spelling as written in the policy file, kept
+            only for :meth:`describe`/audit output.
+        symbol, symbol_pattern, type_pattern, member_name, namespace,
+        entity_namespace, cause_namespace, source_location, change_kind,
+        expires: Same selector grammar and semantics as the identically
+            named :class:`~abicheck.suppression.Suppression` fields —
+            see that class's docstrings for each. At least one selector
+            is required, enforced by the same validation
+            :class:`Suppression` already performs.
+        reason: Optional human-readable justification, for audit output.
+        label: Optional grouping tag, mirroring
+            :attr:`Suppression.label`.
+    """
+
+    to_verdict: Verdict
+    to: str = ""
+    symbol: str | None = None
+    symbol_pattern: str | None = None
+    type_pattern: str | None = None
+    member_name: str | None = None
+    namespace: str | None = None
+    entity_namespace: str | None = None
+    cause_namespace: str | None = None
+    source_location: str | None = None
+    change_kind: str | None = None
+    reason: str | None = None
+    label: str | None = None
+    expires: date | None = None
+    #: Built at construction time and reused for every :meth:`matches` call
+    #: rather than re-validated/re-compiled per call — mirrors how
+    #: :class:`~abicheck.suppression.Suppression` itself eagerly compiles its
+    #: own patterns. Typed ``Any`` (really a ``Suppression`` instance) --
+    #: see the module docstring.
+    _selector: Any = field(init=False, repr=False)
+
+    def __post_init__(self) -> None:
+        # Delegates all selector validation (mutual exclusivity, unknown
+        # change_kind, malformed glob/regex, "at least one selector") to
+        # Suppression's own __post_init__ -- a ValueError raised there
+        # propagates unchanged to this rule's own construction, so a
+        # ReclassifyRule can never exist with an invalid selector any more
+        # than a Suppression can.
+        self._selector = _suppression_cls()(
+            symbol=self.symbol,
+            symbol_pattern=self.symbol_pattern,
+            type_pattern=self.type_pattern,
+            member_name=self.member_name,
+            namespace=self.namespace,
+            entity_namespace=self.entity_namespace,
+            cause_namespace=self.cause_namespace,
+            source_location=self.source_location,
+            change_kind=self.change_kind,
+            expires=self.expires,
+        )
+
+    def matches(self, change: Any, today: date | None = None) -> bool:
+        """Return True if this rule's selectors match *change* (an
+        :class:`abicheck.checker_types.Change`; typed ``Any`` -- see the
+        module docstring).
+
+        Expired rules (past ``expires``) never match, same as
+        :class:`Suppression`. Deliberately consults only the selector
+        grammar -- see the module docstring for why the reachability /
+        ``allow_public_break`` gates :class:`Suppression` layers on top
+        don't apply to reclassification.
+        """
+        return bool(self._selector.selector_matches(change, today))
+
+    def describe(self) -> str:
+        """One-line human-readable summary, for policy audit output."""
+        bits = [f"to={self.to or self.to_verdict.value}"]
+        for field_name in (
+            "change_kind",
+            "symbol",
+            "symbol_pattern",
+            "type_pattern",
+            "member_name",
+            "namespace",
+            "entity_namespace",
+            "cause_namespace",
+            "source_location",
+        ):
+            val = getattr(self, field_name)
+            if val is not None:
+                bits.append(f"{field_name}={val!r}")
+        if self.reason:
+            bits.append(f"reason={self.reason!r}")
+        return "reclassify(" + ", ".join(bits) + ")"
+
+
+def first_matching_reclassify_verdict(
+    rules: list[ReclassifyRule], change: Any, today: date | None = None
+) -> Verdict | None:
+    """Return the ``to_verdict`` of the first rule in *rules* matching
+    *change*, or ``None`` if none match.
+
+    First-match-wins, in file order — unlike suppression (where every
+    matching rule has the identical effect, "delete"), two reclassify rules
+    can disagree about *what* verdict to apply to the same change, so rule
+    order is meaningful. Documented in ``policy_file.py``'s ``reclassify:``
+    format and enforced here as the one place this resolution happens.
+    """
+    for rule in rules:
+        if rule.matches(change, today):
+            return rule.to_verdict
+    return None

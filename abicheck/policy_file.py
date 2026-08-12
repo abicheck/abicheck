@@ -37,6 +37,17 @@ Format example (``my_policy.yaml``)::
       param_renamed:         ignore
       calling_convention_changed: warn
 
+    # Optional: selector-scoped reclassification (see reclassify.py). Unlike
+    # `overrides:` above, each rule is scoped to a symbol/pattern/namespace
+    # selector -- same grammar as suppress:'s Suppression rules -- instead of
+    # applying to every symbol of that kind project-wide. Unlike suppress:,
+    # the finding is kept (reclassified), never deleted.
+    reclassify:
+      - kind: func_visibility_changed
+        symbol_pattern: "_ZN6oneapi3dal.*"
+        to: risk
+        reason: "COMDAT-inline demotions; consumers already embed their own copy"
+
 Usage::
 
     abicheck compare old.json new.json --policy-file my_policy.yaml
@@ -56,6 +67,7 @@ import contextvars
 import hashlib
 import threading
 from dataclasses import dataclass, field
+from datetime import date
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -68,8 +80,16 @@ from .checker_policy import (
 )
 from .errors import PolicyError
 
+# NOTE: `.reclassify` is deliberately imported lazily (function-local) below,
+# never at module top level. `reclassify.py` imports `.suppression`, which
+# imports `.checker_types`, which imports `PolicyFile` from *this* module --
+# a top-level import here would complete that cycle. This mirrors the
+# existing convention every `SuppressionList` consumer in this codebase
+# already follows for the same reason (see e.g. `checker.py`, `service.py`).
 if TYPE_CHECKING:
     from collections.abc import Iterator
+
+    from .reclassify import ReclassifyRule
 
 # Severity name -> Verdict mapping
 _SEVERITY_MAP: dict[str, Verdict] = {
@@ -246,6 +266,92 @@ def _parse_overrides(overrides_raw: Any, path: Path) -> dict[ChangeKind, Verdict
     return overrides
 
 
+def _parse_reclassify_expires(raw: Any, path: Path, index: int) -> date | None:
+    """Parse one ``reclassify[i].expires`` value (ISO 8601 string, or a
+    YAML-native date PyYAML already decoded)."""
+    if raw is None:
+        return None
+    if isinstance(raw, date):
+        return raw
+    if isinstance(raw, str):
+        try:
+            return date.fromisoformat(raw)
+        except ValueError as e:
+            raise PolicyError(
+                f"reclassify[{index}].expires in {path}: invalid date {raw!r} "
+                "(expected ISO 8601, e.g. 2026-06-01)"
+            ) from e
+    raise PolicyError(
+        f"reclassify[{index}].expires in {path}: must be a date, got "
+        + type(raw).__name__
+    )
+
+
+def _parse_reclassify(raw: Any, path: Path) -> list[ReclassifyRule]:
+    """Validate and parse the ``reclassify:`` block (A: selector-scoped
+    reclassification) into a list of :class:`ReclassifyRule`.
+
+    Unlike ``overrides:`` (keyed by ``ChangeKind`` alone), each entry here
+    carries the same selector grammar :mod:`abicheck.suppression` already
+    implements, plus a required ``to:`` severity -- see
+    ``abicheck/reclassify.py``'s module docstring.
+    """
+    from .reclassify import RECLASSIFY_KNOWN_KEYS, ReclassifyRule
+
+    if not isinstance(raw, list):
+        raise PolicyError(
+            "'reclassify' must be a YAML list of rules, got " + type(raw).__name__
+        )
+
+    rules: list[ReclassifyRule] = []
+    for i, entry in enumerate(raw):
+        if not isinstance(entry, dict):
+            raise PolicyError(
+                f"reclassify[{i}] in {path}: must be a YAML mapping, got "
+                + type(entry).__name__
+            )
+        unknown = set(entry) - RECLASSIFY_KNOWN_KEYS
+        if unknown:
+            raise PolicyError(
+                f"reclassify[{i}] in {path}: unknown key(s) {sorted(unknown)}. "
+                f"Valid keys: {sorted(RECLASSIFY_KNOWN_KEYS)}"
+            )
+        if "to" not in entry:
+            raise PolicyError(f"reclassify[{i}] in {path}: missing required 'to' field")
+        to_raw = entry["to"]
+        to_verdict = parse_severity_value(to_raw)
+        if to_verdict is None:
+            raise PolicyError(
+                f"reclassify[{i}] in {path}: invalid 'to' value {to_raw!r}. "
+                "Valid values: break, warn, risk, ignore"
+            )
+        kind = entry.get("kind")
+        if kind is not None and not isinstance(kind, str):
+            raise PolicyError(f"reclassify[{i}].kind in {path}: must be a string")
+
+        try:
+            rule = ReclassifyRule(
+                to_verdict=to_verdict,
+                to=str(to_raw),
+                symbol=entry.get("symbol"),
+                symbol_pattern=entry.get("symbol_pattern"),
+                type_pattern=entry.get("type_pattern"),
+                member_name=entry.get("member_name"),
+                namespace=entry.get("namespace"),
+                entity_namespace=entry.get("entity_namespace"),
+                cause_namespace=entry.get("cause_namespace"),
+                source_location=entry.get("source_location"),
+                change_kind=kind,
+                reason=entry.get("reason"),
+                label=entry.get("label"),
+                expires=_parse_reclassify_expires(entry.get("expires"), path, i),
+            )
+        except ValueError as e:
+            raise PolicyError(f"reclassify[{i}] in {path}: {e}") from e
+        rules.append(rule)
+    return rules
+
+
 def _parse_frozen_namespaces(frozen_raw: Any) -> list[str]:
     """Validate and parse the ``frozen_namespaces`` list of glob patterns."""
     if not isinstance(frozen_raw, list):
@@ -321,16 +427,24 @@ def _resolve_change_verdict(
     api_break: frozenset[Any],
     compatible: frozenset[Any],
     risk: frozenset[Any],
+    reclassify: list[ReclassifyRule] | None = None,
 ) -> Verdict:
     """Resolve the effective verdict for a single *change* object.
 
     Priority order (highest first):
     1. ``change.effective_verdict`` — ADR-025 / ADR-033 D7 modulation (frozen-
        namespace floor still applied).
-    2. ``overrides[kind]`` — per-kind policy override (frozen-namespace floor
+    2. ``reclassify:`` — the first selector-scoped rule (in file order) whose
+       selectors match this change (frozen-namespace floor still applied).
+       Consulted ahead of the kind-global ``overrides:`` entry for the same
+       kind since a rule scoped to a selector is strictly more specific than
+       one scoped to a bare kind (see ``abicheck/reclassify.py``).
+    3. ``overrides[kind]`` — per-kind policy override (frozen-namespace floor
        still applied; downgrades on frozen symbols are silently rejected).
-    3. Base policy verdict.
+    4. Base policy verdict.
     """
+    from .reclassify import first_matching_reclassify_verdict
+
     kind = change.kind
     fnv = getattr(change, "frozen_namespace_violation", None)
     frozen = isinstance(fnv, str) and bool(fnv)
@@ -343,6 +457,13 @@ def _resolve_change_verdict(
         return eff
 
     base_v = compute_verdict([change], policy=base_policy)
+
+    reclass_v = first_matching_reclassify_verdict(reclassify or [], change)
+    if reclass_v is not None:
+        if frozen and _VERDICT_ORDER.index(reclass_v) < _VERDICT_ORDER.index(base_v):
+            return base_v
+        return reclass_v
+
     if kind in overrides:
         override_v = overrides[kind]
         if frozen and _VERDICT_ORDER.index(override_v) < _VERDICT_ORDER.index(base_v):
@@ -389,6 +510,13 @@ class PolicyFile:
 
     base_policy: str = "strict_abi"
     overrides: dict[ChangeKind, Verdict] = field(default_factory=dict)
+    # A: selector-scoped reclassification (abicheck/reclassify.py) — the
+    # third policy-file primitive, between overrides: (kind-global, no
+    # selector) and suppress: (selector-scoped, but deletes the finding).
+    # Consulted ahead of `overrides[kind]` for the same kind in
+    # `compute_verdict`/`_resolve_change_verdict`, since a selector-scoped
+    # rule is strictly more specific than a bare-kind one.
+    reclassify: list[ReclassifyRule] = field(default_factory=list)
     source_path: Path | None = None
     #: sha256 of the exact raw bytes :meth:`load` read, when it loaded this
     #: document from a file. Captured at parse time on purpose: a consumer
@@ -482,6 +610,7 @@ class PolicyFile:
 
         base_policy = _parse_base_policy(raw)
         overrides = _parse_overrides(raw.get("overrides", {}), path)
+        reclassify = _parse_reclassify(raw.get("reclassify", []), path)
         frozen_namespaces = _parse_frozen_namespaces(raw.get("frozen_namespaces", []))
         internal_namespaces = _parse_internal_namespaces(raw.get("internal_namespaces", []))
         source_only, build_drift, graph_risk, require_evidence = _parse_evidence_policy(
@@ -491,6 +620,7 @@ class PolicyFile:
         return cls(
             base_policy=base_policy,
             overrides=overrides,
+            reclassify=reclassify,
             source_path=path,
             source_sha256=digest,
             frozen_namespaces=frozen_namespaces,
@@ -542,7 +672,8 @@ class PolicyFile:
 
         verdicts = [
             _resolve_change_verdict(
-                change, self.base_policy, self.overrides, _b, _a, _c, _r
+                change, self.base_policy, self.overrides, _b, _a, _c, _r,
+                self.reclassify,
             )
             for change in changes
         ]
@@ -562,6 +693,10 @@ class PolicyFile:
                 lines.append(f"  {kind.value}: {sev}")
         else:
             lines.append("overrides: (none)")
+        if self.reclassify:
+            lines.append("reclassify:")
+            for rule in self.reclassify:
+                lines.append(f"  {rule.describe()}")
         return "\n".join(lines)
 
     def validate_overrides(self) -> list[str]:

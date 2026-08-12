@@ -1212,6 +1212,20 @@ class Suppression:
             return False
         return self._passes_reachability_gate(change) and self._passes_public_break_gate(change)
 
+    def selector_matches(self, change: Change, today: date | None = None) -> bool:
+        """Return True if this rule's selectors alone match *change*.
+
+        Public alias for :meth:`_selector_match`, deliberately skipping the
+        reachability / ``allow_public_break`` gates :meth:`matches` applies
+        on top. Those gates exist to guard against a suppression rule
+        *hiding* a finding it never should have — a concern that doesn't
+        apply to a consumer that keeps the finding visible and only changes
+        its verdict (``abicheck/reclassify.py``'s ``ReclassifyRule``, which
+        reuses this class purely for its selector grammar rather than
+        re-implementing the glob/regex machinery a second time).
+        """
+        return self._selector_match(change, today)
+
     def would_withhold(self, change: Change, today: date | None = None) -> bool:
         """True if this rule's selectors match *change*, *change* is a
         public-reachable ``BREAKING``/``API_BREAK`` finding, and the
