@@ -2191,12 +2191,31 @@ Once a root command genuinely clears the bar above, pick the right home:
   constants in the reporting library's own dump. The same castxml
   behavior duplicates other declaration kinds too, with two different
   outcomes: 1,477 of 6,009 mangled function names were duplicated the
-  same way, but that half is **not** a live bug — `model.py`'s
-  mangled-name-keyed `function_map`/`variable_map` already collapse a
-  using-shadow function or variable onto its target for free, since a
-  using-declaration doesn't change what a symbol mangles to. A duplicated
-  bare *type* name (`range` alongside `v1::range`) is a **separate,
-  still-open** gap from the type-dedup entry already documented above
+  same way, but that half is **not a *double-reporting* bug** —
+  `model.py`'s mangled-name-keyed `function_map`/`variable_map` already
+  collapse a using-shadow function or variable onto its target for free
+  for the ABI/mangled-symbol question (a using-declaration doesn't change
+  what a symbol mangles to), so this is not a repeat of the constants
+  over-reporting problem above. **It is a separate, undocumented
+  false-negative gap on the source/API side, narrower in scope than the
+  `std::`-specific `STD_REEXPORT_REMOVED` detector below (Codex review,
+  fresh evidence):** because the diff is keyed on the unchanged mangled
+  symbol, a release that removes only the `using` re-export of a
+  library's *own* function or variable — not a `std::` name, which is
+  the one case `STD_REEXPORT_REMOVED` already covers — while keeping the
+  real declaration and its export produces no finding at all, even
+  though a consumer that named the alias-qualified spelling no longer
+  compiles. This is the identical shape of gap the clang-side note below
+  documents for constants (an unchanged underlying identity hides a real,
+  source-visible alias removal), just reached from the opposite side
+  (castxml capturing the alias correctly here, the *diff* layer being the
+  one blind to it) — not attempted in this pass, and would need
+  `detect_std_reexport_removed`'s general shape (matching declared
+  qualified names, not `std::`-specific) extended to a library's own
+  namespaces, which is its own scoped detector design, not a drive-by
+  extension of this entry. A duplicated bare *type* name (`range`
+  alongside `v1::range`) is a **separate, still-open** gap from the
+  type-dedup entry already documented above
   (opaque-type suppression keyed by bare `RecordType.name` colliding
   *across namespaces* on an accidentally-shared bare name) —
   `range`/`v1::range` are two distinct qualified spellings of what may be
