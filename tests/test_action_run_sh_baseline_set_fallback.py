@@ -48,7 +48,13 @@ from pathlib import Path
 import pytest
 
 RUN_SH = Path(__file__).resolve().parents[1] / "action" / "run.sh"
-_START_MARKER = "_baseline_unavailable() {"
+# Starts from _PY_BIN's own resolution, not _baseline_unavailable() -- the
+# baseline-set fallback function now reads $_PY_BIN (resolved once, up
+# front, so it works the same on a Windows runner where only `python`, not
+# `python3`, is on PATH), so the extracted region must include that
+# resolution too, or every test here would see an empty $_PY_BIN that
+# doesn't reflect the real script's behavior.
+_START_MARKER = '_PY_BIN="$(command -v python3'
 _END_MARKER = 'if [[ "$MODE" == "dump" ]]; then'
 
 PROFILE = "linux-x86_64-gcc13-release"
@@ -382,6 +388,59 @@ class TestBaselineSetFallback:
             }
         )
         assert result.returncode == 0, result.stderr
+        assert "libpvxs.abicheck.json" in result.stdout
+
+    def test_extraction_and_resolution_work_when_python3_is_absent(
+        self, tmp_path: Path
+    ) -> None:
+        """Regression (Codex review): the fallback used to hardcode
+        ``python3`` at its three extraction/resolution call sites, so a
+        runner exposing only ``python`` (a real, not hypothetical, Windows
+        Git Bash shape -- see ``docs/reference/publish-baseline.md``'s own
+        sibling ``actions/stage-baseline`` zstd-fallback fix for the
+        identical concern) would fail every otherwise-valid baseline-set
+        fallback with "command not found".
+
+        Simulates that shape without depending on the test runner's own
+        PATH layout: a `command` shell-function override makes
+        ``command -v python3`` fail regardless of what's really installed,
+        while a fabricated ``python`` symlink (built from whatever real
+        interpreter this runner has) proves `_PY_BIN`'s fallback resolution
+        actually gets exercised, not merely defined.
+        """
+        archive = _build_baseline_set_archive(tmp_path)
+        real_python = shutil.which("python3") or shutil.which("python")
+        if real_python is None:
+            pytest.skip("no python interpreter found on this runner")
+        fake_bin = tmp_path / "fake-bin"
+        fake_bin.mkdir()
+        (fake_bin / "python").symlink_to(real_python)
+
+        script = (
+            f'PATH="{fake_bin}:$PATH"\n'
+            "command() {\n"
+            '  if [[ "$1" == "-v" && "$2" == "python3" ]]; then\n'
+            "    return 1\n"
+            "  fi\n"
+            '  builtin command "$@"\n'
+            "}\n"
+            'MODE="${INPUT_MODE:-compare}"\n'
+            'FORCE_AUDIT_ONLY="${INPUT_AUDIT:-false}"\n'
+            + _GH_STUB
+            + _baseline_region()
+            + '\necho "REACHED_END"\n'
+        )
+        env = {
+            **os.environ,
+            "INPUT_MODE": "compare",
+            "INPUT_ABI_BASELINE": "latest-release",
+            "INPUT_BASELINE_PROFILE": PROFILE,
+            "INPUT_BASELINE_TARGET": "libpvxs",
+            "FIXTURE_ARCHIVE": str(archive),
+        }
+        result = _run_bash_script(script, env)
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert "REACHED_END" in result.stdout
         assert "libpvxs.abicheck.json" in result.stdout
 
 

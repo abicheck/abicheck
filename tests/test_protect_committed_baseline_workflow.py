@@ -32,6 +32,7 @@ from __future__ import annotations
 import json
 import os
 import subprocess
+import sys
 from pathlib import Path
 from typing import Any
 
@@ -396,6 +397,17 @@ class TestCheckScriptBehavior:
         assert result.returncode == 1
         assert "baselines/b.json" in result.stdout
 
+    @pytest.mark.skipif(
+        sys.platform == "win32",
+        reason=(
+            "A literal newline is not a legal NTFS filename character -- "
+            "writing this fixture file fails with OSError [Errno 22] on a "
+            "Windows runner (confirmed in CI) before this test's own logic "
+            "ever runs. POSIX filesystems (what this workflow's real "
+            "ubuntu-latest runner uses) allow it, which is the actual "
+            "regression being guarded here."
+        ),
+    )
     def test_protected_path_containing_a_newline_is_still_caught(
         self, tmp_path: Path
     ) -> None:

@@ -108,6 +108,16 @@ CMD=(abicheck)
 
 MODE="${INPUT_MODE:-compare}"
 
+# Resolved once, up front, so every code path below (including the
+# baseline-set fallback further down, which needs it before this script's
+# own later _report_query definition would otherwise provide it) can use
+# it. On a Windows runner, actions/setup-python may expose only
+# python.exe/`python` to Git Bash, not `python3` -- an unconditional
+# `python3` call in a fallback path that only exercises when a release has
+# no single-snapshot asset would otherwise fail with "command not found"
+# on exactly the runners this fallback exists to serve (Codex review).
+_PY_BIN="$(command -v python3 || command -v python || true)"
+
 # ---------------------------------------------------------------------------
 # Back-compat aliases: `estimate`/`audit` (pre-dry-run/scan-reshape inputs,
 # Codex review). Removing these outright (rather than keeping them as
@@ -201,6 +211,10 @@ _try_baseline_set_fallback() {
     _baseline_unavailable "baseline-profile is set (${INPUT_BASELINE_PROFILE}) but baseline-target is not -- both are required to resolve one target's snapshot from a release-contract baseline-set archive."
     return 1
   fi
+  if [[ -z "$_PY_BIN" ]]; then
+    _baseline_unavailable "neither 'python3' nor 'python' is available on PATH -- cannot extract or resolve a release-contract baseline-set archive."
+    return 1
+  fi
   # NOTE: the default is intentionally NOT embedded as
   # "${INPUT_BASELINE_ASSET_NAME_TEMPLATE:-abicheck-baseline-{profile}.tar.zst}"
   # -- bash's ${VAR:-default} parses the default text looking for its own
@@ -242,7 +256,7 @@ _try_baseline_set_fallback() {
   # extraction safety here.
   case "$asset_name" in
     *.tar.zst)
-      python3 -c '
+      "$_PY_BIN" -c '
 import sys
 from pathlib import Path
 from abicheck.package import TarExtractor
@@ -252,7 +266,7 @@ TarExtractor._safe_extract_zst_tar(Path(sys.argv[1]), Path(sys.argv[2]))
         || { _baseline_unavailable "failed to extract baseline-set archive '$asset_name' (.tar.zst) -- it is truncated or corrupted, or this runner has neither a 'zstd' command-line tool nor the Python 'zstandard' package available."; return 1; }
       ;;
     *.tar.gz | *.tgz | *.tar)
-      python3 -c '
+      "$_PY_BIN" -c '
 import sys
 from pathlib import Path
 from abicheck.package import TarExtractor
@@ -281,7 +295,7 @@ TarExtractor._safe_extract(Path(sys.argv[1]), Path(sys.argv[2]))
   fi
 
   local resolve_output
-  resolve_output=$(python3 -c '
+  resolve_output=$("$_PY_BIN" -c '
 import sys
 from abicheck.buildsource.baseline_set import resolve_target
 
@@ -1040,7 +1054,11 @@ _json_report_src() {
 # The two modes nest the ledger differently and BOTH reach here: `compare`
 # writes it at the top level, while `ScanOutcome.to_dict()` puts the
 # comparison summary under `diff`. Each query below looks in both.
-_PY_BIN="$(command -v python3 || command -v python || true)"
+#
+# _PY_BIN itself is resolved once, near the top of this script (before
+# MODE's dry-run/back-compat block) -- not here -- so the baseline-set
+# fallback (which runs long before this function is ever reached) can use
+# the same resolved interpreter too.
 _report_query() {
   # $1 = report path, $2 = query name. Prints nothing when the report cannot
   # be read or parsed, which every caller treats as "cannot tell" rather than
