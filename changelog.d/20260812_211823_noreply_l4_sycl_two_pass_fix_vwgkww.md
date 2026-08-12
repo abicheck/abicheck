@@ -34,6 +34,12 @@ A new changelog fragment. See changelog.d/README.md for the workflow.
   through verbatim via `abi_relevant_flags`) reached a non-Intel invoked
   binary unchanged, hitting the identical "unknown argument" failure
   independent of the insertion-side fix above. `_clang_context_args` now
-  also strips both Intel-only SYCL pass-selector flags from the carried-
-  through flags whenever the invoked binary isn't Intel-family (bumping
-  `CLANG_EXTRACTOR_VERSION` to `0.10`).
+  strips a carried-through `-fsycl-host-only` whenever the invoked binary
+  isn't Intel-family — harmless to drop, since stock clang's bare `-fsycl`
+  already parses fine as one ordinary host-shaped pass. A carried-through
+  `-fsycl-device-only` is handled differently, not stripped: it names a
+  genuinely different (device-side) compilation context, so silently
+  dropping it would replay the TU as ordinary host code and could fabricate
+  false L4 findings rather than honestly degrade coverage — it now raises a
+  clear `SourceExtractionError` for that one translation unit instead
+  (Codex review; bumping `CLANG_EXTRACTOR_VERSION` to `0.10`).

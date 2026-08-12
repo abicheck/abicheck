@@ -132,21 +132,15 @@ from .clang_source_edges import build_source_edges
 #: appends ``-fsycl-host-only`` for a SYCL-enabled Intel oneAPI invocation
 #: (Codex review) -- a pre-0.9 cache entry for the same TU was built without
 #: that flag and must not be reused as-is. 0.10: a real build's own recorded
-#: ``-fsycl-host-only``/``-fsycl-device-only`` (Intel-only SYCL pass-selector
-#: flags carried through via ``abi_relevant_flags``) is now stripped when the
-#: invoked binary isn't Intel-family, closing the same class of "unknown
-#: argument" failure via a different code path than 0.9's own fix.
+#: ``-fsycl-host-only`` (an Intel-only SYCL pass-selector flag carried through
+#: via ``abi_relevant_flags``) is now stripped when the invoked binary isn't
+#: Intel-family, closing the same class of "unknown argument" failure via a
+#: different code path than 0.9's own fix; a recorded ``-fsycl-device-only``
+#: on a non-Intel invoked binary now degrades that one TU (a clear
+#: SourceExtractionError) instead of either failing on the raw "unknown
+#: argument" or silently dropping the selector and replaying it as host code
+#: (Codex review).
 CLANG_EXTRACTOR_VERSION = "0.10"
-
-#: Intel oneAPI SYCL pass-selector flags (``-fsycl-host-only``/
-#: ``-fsycl-device-only``): meaningful ONLY on an Intel oneAPI driver
-#: (:func:`abicheck.dumper_clang._is_intel_sycl_driver`) -- every other
-#: clang-family binary hard-rejects both as "unknown argument". Shared
-#: between the insertion gate (``_needs_sycl_host_only``, which checks
-#: membership to detect an already-pinned pass) and the strip below (which
-#: removes a real build's own recorded use of either flag when the binary
-#: this command will actually run with doesn't understand them).
-_INTEL_ONLY_SYCL_PASS_FLAGS = frozenset({"-fsycl-host-only", "-fsycl-device-only"})
 
 
 @functools.lru_cache(maxsize=8)
@@ -315,19 +309,39 @@ def _clang_context_args(
             if not flag.startswith("-std=")
             and not flag.lower().startswith(("/std:", "-std:"))
         ]
+    if not _is_intel_sycl_driver(clang_bin) and "-fsycl-device-only" in extra:
+        # A real build's own recorded -fsycl-device-only (carried through
+        # above via replay_extra_flags's abi_relevant_flags/argv scan) names
+        # a SYCL *device*-side compilation pass -- a genuinely different
+        # preprocessor context (__SYCL_DEVICE_ONLY__, device-only code
+        # paths), not merely a flag the invoked binary happens to reject.
+        # Silently dropping it and falling through to an ordinary parse
+        # would "succeed" by stamping source facts for the WRONG
+        # compilation context (host, not device-only) -- worse than the
+        # honest hard failure this flag already produced before this
+        # module ever touched it, since L4 has no device-context
+        # representation to replay it correctly under (Codex review). Fail
+        # this one TU explicitly instead, with a clearer message than the
+        # raw "unknown argument" this would otherwise still hit.
+        raise SourceExtractionError(
+            f"compile unit {compile_unit.source!r} was recorded with "
+            "-fsycl-device-only (a SYCL device-side compilation pass), but "
+            f"the binary this command will actually run with ({clang_bin!r}) "
+            "is not an Intel oneAPI DPC++/C++ driver and cannot honor it. "
+            "L4 source-ABI replay has no device-context representation, so "
+            "this translation unit degrades to partial coverage rather "
+            "than being silently replayed as ordinary host code -- pass "
+            "--gcc-path pointing at the real icx/icpx/dpcpp driver to "
+            "extract it."
+        )
     if not _is_intel_sycl_driver(clang_bin):
-        # A real build's own recorded -fsycl-host-only/-fsycl-device-only
-        # (carried through above via replay_extra_flags's abi_relevant_flags/
-        # argv scan) is just as Intel-only as the flag WE would otherwise
-        # append below -- every non-Intel clang-family binary hard-rejects
-        # both the same way. Strip them so a TU whose real build already
-        # pinned a single SYCL pass explicitly still replays under a
-        # non-Intel invoked binary instead of failing on "unknown argument"
-        # via this different code path (Codex review: caught by the
-        # generalized Hypothesis property test below, not the original
-        # report -- a bare -fsycl is deliberately left alone, since stock
-        # clang parses that one fine as an ordinary single pass).
-        extra = [flag for flag in extra if flag not in _INTEL_ONLY_SYCL_PASS_FLAGS]
+        # -fsycl-host-only, unlike -fsycl-device-only above, is safe to
+        # drop rather than fail on: without it, stock clang's bare -fsycl
+        # already parses fine as one ordinary (host-shaped) pass (see this
+        # function's own docstring), so removing just the pass-selector
+        # flag a non-Intel binary would otherwise hard-reject changes
+        # nothing about which compilation context gets replayed.
+        extra = [flag for flag in extra if flag != "-fsycl-host-only"]
     if _needs_sycl_host_only(clang_bin, [*cmd, *extra]):
         extra = [*extra, "-fsycl-host-only"]
     cmd += extra

@@ -820,6 +820,43 @@ class TestSyclHostOnlyGatedOnInvokedBinary:
         assert cmd[0] == "clang"
         assert "-fsycl-host-only" not in cmd
 
+    def test_host_only_stripped_but_device_only_degrades_instead_of_replaying_as_host(
+        self,
+    ) -> None:
+        """``-fsycl-host-only`` and ``-fsycl-device-only`` look symmetric but
+        are NOT: dropping the former changes nothing (stock clang's bare
+        ``-fsycl`` already parses as one ordinary host-shaped pass), while
+        dropping the latter would silently replay a device-only TU as
+        ordinary host code -- a different compilation context, not just a
+        missing selector flag. A recorded ``-fsycl-device-only`` on a
+        non-Intel invoked binary must raise instead of fabricating host
+        facts for it (Codex review)."""
+        host_only_cu = _cu(
+            argv=["icpx", "-fsycl", "-fsycl-host-only", "-c", "foo.cpp"],
+            abi_relevant_flags=["-fsycl", "-fsycl-host-only"],
+        )
+        cmd = build_clang_command(host_only_cu, Path("foo.cpp"), clang_bin="clang")
+        assert "-fsycl-host-only" not in cmd
+        assert "-fsycl-device-only" not in cmd
+
+        device_only_cu = _cu(
+            argv=["icpx", "-fsycl", "-fsycl-device-only", "-c", "foo.cpp"],
+            abi_relevant_flags=["-fsycl", "-fsycl-device-only"],
+        )
+        with pytest.raises(SourceExtractionError, match="fsycl-device-only"):
+            build_clang_command(device_only_cu, Path("foo.cpp"), clang_bin="clang")
+        with pytest.raises(SourceExtractionError, match="fsycl-device-only"):
+            build_clang_macro_command(
+                device_only_cu, Path("foo.cpp"), clang_bin="clang"
+            )
+        # An Intel-family invoked binary genuinely understands the flag --
+        # must NOT raise, and must keep it (both are real single-pass pins).
+        intel_cmd = build_clang_command(
+            device_only_cu, Path("foo.cpp"), clang_bin="icpx"
+        )
+        assert "-fsycl-device-only" in intel_cmd
+        assert "-fsycl-host-only" not in intel_cmd
+
     def test_needs_sycl_host_only_is_the_single_l2_l4_source_of_truth(self) -> None:
         """L4's predicate must be the SAME function object the L2 header-AST
         backend uses (``dumper_clang._needs_sycl_host_only``), not an
@@ -839,15 +876,21 @@ class TestSyclHostOnlyGatedOnInvokedBinary:
         generatively rather than against a fixed list of examples: for ANY
         invoked binary name and ANY compile unit (recorded argv[0], SYCL
         flags, pinning), neither ``-fsycl-host-only`` nor
-        ``-fsycl-device-only`` may appear in the built command unless the
-        binary genuinely invoked understands them -- whether abicheck would
-        have appended one itself, or the real build's own recorded argv/
-        abi_relevant_flags already carried one through. That second path is
-        not hypothetical: this exact property test, run against an earlier
-        revision of this fix that only closed the insertion side, found it
-        (a real build recorded as ``icpx -fsycl-host-only``, replayed
-        against a plain ``clang`` invocation, reproduced "unknown
-        argument"). Also fuzzes casing/``.exe`` suffixes and random
+        ``-fsycl-device-only`` may ever appear in a successfully BUILT
+        command unless the binary genuinely invoked understands them --
+        whether abicheck would have appended one itself, or the real
+        build's own recorded argv/abi_relevant_flags already carried one
+        through. That second path is not hypothetical: this exact property
+        test, run against an earlier revision of this fix that only closed
+        the insertion side, found it (a real build recorded as ``icpx
+        -fsycl-host-only``, replayed against a plain ``clang`` invocation,
+        reproduced "unknown argument"). A recorded ``-fsycl-device-only`` on
+        a non-Intel invoked binary is a NAMES-A-DIFFERENT-COMPILATION-
+        CONTEXT case, not a plain unsupported-flag case (Codex review): it
+        must degrade that TU (``SourceExtractionError``) rather than
+        silently drop the selector and replay it as ordinary host code, so
+        this property checks for the raise in that one case instead of a
+        clean command. Also fuzzes casing/``.exe`` suffixes and random
         recorded-argv0/flag noise, so a future regression shaped differently
         from any single hand-picked example still falls out of this
         property rather than needing its own new example test."""
@@ -893,10 +936,15 @@ class TestSyclHostOnlyGatedOnInvokedBinary:
                 "dpcpp",
                 "dpcpp-cl",
             }
-            for cmd in (
-                build_clang_command(cu, Path("foo.cpp"), clang_bin=invoked),
-                build_clang_macro_command(cu, Path("foo.cpp"), clang_bin=invoked),
-            ):
+            device_only_on_non_intel = (
+                not invoked_is_intel and "-fsycl-device-only" in flags
+            )
+            for builder in (build_clang_command, build_clang_macro_command):
+                if device_only_on_non_intel:
+                    with pytest.raises(SourceExtractionError):
+                        builder(cu, Path("foo.cpp"), clang_bin=invoked)
+                    continue
+                cmd = builder(cu, Path("foo.cpp"), clang_bin=invoked)
                 assert cmd[0] == invoked
                 pinned = {"-fsycl-host-only", "-fsycl-device-only"} & set(cmd)
                 if pinned:
