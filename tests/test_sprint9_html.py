@@ -703,6 +703,31 @@ def test_gate_card_absent_from_abicc_compatible_layout() -> None:
     assert "CI Gate" not in out
 
 
+def test_correlated_change_kind_rendered_in_abicc_compatible_layout() -> None:
+    # Codex review, fresh evidence: the ABICC-compatible layout
+    # (compat_html=True) has its own separate _compat_changes_table
+    # rendering, distinct from the default layout's _changes_table -- the
+    # "See also" note must reach it too.
+    from abicheck.checker import Change, ChangeKind, DiffResult, Verdict
+
+    c = Change(
+        ChangeKind.LAYOUT_UNVERIFIABLE,
+        "Foo",
+        "layout evidence unverifiable",
+        correlated_change_kind=ChangeKind.TYPE_VTABLE_CHANGED.value,
+    )
+    result = DiffResult(
+        old_version="1.0",
+        new_version="2.0",
+        library="libtest.so",
+        changes=[c],
+        verdict=Verdict.COMPATIBLE_WITH_RISK,
+    )
+    out = generate_html_report(result, compat_html=True)
+    assert "type_vtable_changed" in out
+    assert "See also" in out
+
+
 def test_scoped_verdict_box_absent_when_no_scoping() -> None:
     r = _result(verdict="BREAKING")
     out = generate_html_report(r)

@@ -1257,16 +1257,19 @@ def _vtable_transition_rests_on_unresolved_evidence(
       nothing. This is the one case sharing ``LAYOUT_UNVERIFIABLE``'s own
       evidence gap, and the only one a caller should treat as demotable.
 
-    Used by ``_diff_type_vtable`` to scope its ``effective_verdict``
-    demotion precisely: co-occurrence with an unrelated
-    ``LAYOUT_UNVERIFIABLE`` finding on a *different* same-named type (a
-    real risk when correlating by bare ``Change.symbol`` alone, since two
-    distinct records can share a leaf name in different namespaces -- Codex
-    review) is not a reason to demote a genuinely-evidenced vtable change,
-    and neither is any of the three real-signal branches above (Codex
-    review: an unconditional demotion on any co-occurring
-    ``LAYOUT_UNVERIFIABLE`` wrongly downgraded a real reorder/replace with
-    both sides populated).
+    Used by ``_diff_type_vtable`` to scope its correlation marker
+    (``Change.vtable_covers_unverifiable_layout_gap``) precisely; the
+    finding's own severity is never changed (an earlier design that demoted
+    it via ``effective_verdict`` was reverted as unsafe -- see AGENTS.md's
+    "Findings emitted from absent evidence" entry). Co-occurrence with an
+    unrelated ``LAYOUT_UNVERIFIABLE`` finding on a *different* same-named
+    type (a real risk when correlating by bare ``Change.symbol`` alone,
+    since two distinct records can share a leaf name in different
+    namespaces -- Codex review) is not a reason to mark a
+    genuinely-evidenced vtable change, and neither is any of the three
+    real-signal branches above (Codex review: an earlier revision of this
+    marker fired on any co-occurring ``LAYOUT_UNVERIFIABLE`` regardless,
+    wrongly tagging a real reorder/replace with both sides populated).
     """
     if t_old.vtable and t_new.vtable:
         return False
@@ -1304,25 +1307,20 @@ def _layout_evidence_is_unverifiable(
     asymmetric-evidence condition holds for this *exact*, already
     type-matched ``RecordType`` pair.
 
-    Reuses ``diff_layout._has_layout_descriptor`` rather than re-deriving
-    it, and is consulted with the identical ``t_old``/``t_new`` objects
-    ``diff_layout.py``'s own detector sees for this type -- so there is no
-    separate symbol-name correlation step (bare ``Change.symbol`` equality
-    across two independently-emitted findings) that a same-named-but-
-    different type could defeat.
+    Delegates to ``diff_layout._layout_evidence_asymmetric`` -- the exact
+    predicate ``_check_layout_unverifiable`` itself evaluates -- rather than
+    a hand-duplicated copy, so the two can never silently drift apart
+    (Codex review). Consulted with the identical ``t_old``/``t_new``
+    objects ``diff_layout.py``'s own detector sees for this type -- so
+    there is no separate symbol-name correlation step (bare
+    ``Change.symbol`` equality across two independently-emitted findings)
+    that a same-named-but-different type could defeat.
     """
-    from .diff_layout import _has_layout_descriptor
+    from .diff_layout import _layout_evidence_asymmetric
 
-    old_has = t_old.size_bits is not None or _has_layout_descriptor(
-        t_old, vtable_facts_reliable=vtable_facts_reliable
+    return _layout_evidence_asymmetric(
+        t_old, t_new, vtable_facts_reliable=vtable_facts_reliable
     )
-    new_has = t_new.size_bits is not None or _has_layout_descriptor(
-        t_new, vtable_facts_reliable=vtable_facts_reliable
-    )
-    descriptor_in_play = _has_layout_descriptor(
-        t_old, vtable_facts_reliable=vtable_facts_reliable
-    ) or _has_layout_descriptor(t_new, vtable_facts_reliable=vtable_facts_reliable)
-    return descriptor_in_play and old_has != new_has
 
 
 def _owned_virtual_signatures(name: str, funcs: Mapping[str, Function]) -> set[str]:

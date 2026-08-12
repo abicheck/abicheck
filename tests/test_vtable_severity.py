@@ -1092,6 +1092,9 @@ class TestLayoutUnverifiableCorrelatedWithVtableChanged:
             quality_issues=SeverityLevel.INFO,
             addition=SeverityLevel.INFO,
         )
+        kinds = {c.kind for c in result.changes}
+        assert ChangeKind.LAYOUT_UNVERIFIABLE in kinds
+        assert ChangeKind.TYPE_VTABLE_CHANGED in kinds
         exit_code = compute_exit_code(
             result.changes,
             cfg,
@@ -1099,7 +1102,11 @@ class TestLayoutUnverifiableCorrelatedWithVtableChanged:
             kind_sets=result._effective_kind_sets(),
             policy_file=result.policy_file,
         )
-        assert exit_code != 0
+        # abi_breaking is INFO, so TYPE_VTABLE_CHANGED contributes 0; the
+        # exact code (2) must come from LAYOUT_UNVERIFIABLE's own
+        # potential_breaking category, not merely "some" nonzero code that
+        # could also be explained by an unrelated finding (Codex review).
+        assert exit_code == 2
 
     def test_correlation_survives_covering_finding_demoted_as_unreachable_internal(
         self,
@@ -1146,6 +1153,17 @@ class TestLayoutUnverifiableCorrelatedWithVtableChanged:
         out_of_surface_kinds = {c.kind for c in result.out_of_surface_changes}
         assert ChangeKind.TYPE_VTABLE_CHANGED in out_of_surface_kinds
         assert ChangeKind.LAYOUT_UNVERIFIABLE in out_of_surface_kinds
+        # The correlation itself must also survive the demotion, matching
+        # this test's own name (Codex review, fresh evidence: the name
+        # promised a correlation assertion the body never made).
+        layout_change = next(
+            c
+            for c in result.out_of_surface_changes
+            if c.kind == ChangeKind.LAYOUT_UNVERIFIABLE
+        )
+        assert (
+            layout_change.correlated_change_kind == ChangeKind.TYPE_VTABLE_CHANGED.value
+        )
 
     def test_correlation_reaches_cached_impact_assessment(self) -> None:
         """Codex review, fresh evidence: when a configured suppression

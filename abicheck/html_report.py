@@ -382,6 +382,17 @@ def _compat_changes_table(items: list[object], show_severity: bool = False) -> s
         old_val = h(str(getattr(ch, "old_value", "") or ""))
         new_val = h(str(getattr(ch, "new_value", "") or ""))
         sev_cell = f"<td>{severity(ks)}</td>" if show_severity else ""
+        # Cross-detector correlation (e.g. LAYOUT_UNVERIFIABLE annotated by
+        # post_processing.AnnotateLayoutUnverifiableCoveredByVtableChanged) --
+        # this ABICC-compatible table has its own separate rendering from
+        # _changes_table above, so it needs the same note added here too
+        # (Codex review, fresh evidence).
+        correlated = getattr(ch, "correlated_change_kind", None)
+        if correlated:
+            desc += (
+                f"<div style='font-size:0.82em; color:#999; margin-top:2px;'>"
+                f"🔗 See also: <code>{h(str(correlated))}</code></div>"
+            )
         rows.append(
             f"<tr><td class='sym'>{sym}</td><td>{h(ks)}</td>"
             f"{sev_cell}<td>{desc}</td><td>{old_val}</td><td>{new_val}</td></tr>"
