@@ -39,6 +39,22 @@ header, so its call is consumer-visible under any reasonable reachability
 notion — sidestepping that question rather than resting this case's ground
 truth on which reachability predicate a given detector happens to use.
 
+`demo::detail::helper` is deliberately **inline too** — a further review
+round caught a real linkability gap in an earlier version of this fixture:
+since `demo::process`'s body (including its call to `detail::helper`) is
+emitted into *every consumer's own* translation unit, an ordinary
+out-of-line, non-exported `detail::helper` would leave that
+consumer-emitted call as an unresolved external symbol reference — a real
+link failure for any actual consumer, not a purely internal, risk-only
+change. Making `detail::helper` inline too (an entirely ordinary
+header-only-library pattern: a private "detail" header providing an inline
+implementation, transitively included by the public header) means its own
+body is *also* emitted into that same consumer TU, so the call resolves
+locally with no external symbol needed at all — a real consumer program
+built against this exact scenario links and runs cleanly, which is what
+makes `COMPATIBLE_WITH_RISK` genuinely correct rather than a modeling
+artifact.
+
 Both fixture surfaces also carry a `coverage.fact_set`/`fact_family_states`
 rollup naming the one `source_edges` producer whose coverage genuinely
 matches a full, unfiltered call/type-graph replay
@@ -85,7 +101,7 @@ this fixture reproduces.
 
 | v1 (conceptual) | v2 (conceptual) |
 |------|------|
-| `// include/demo/api.h`<br>`inline void process() { /* does not call helper yet */ }`<br><br>`// include/demo/detail_v1.h`<br>`namespace detail { void helper(int); }` | `// include/demo/api.h`<br>`inline void process() { detail::helper(1L); }`<br><br>`// include/demo/detail_v2.h`<br>`namespace detail { void helper(long); }` |
+| `// include/demo/api.h`<br>`#include "demo/detail_v1.h"`<br>`inline void process() { /* does not call helper yet */ }`<br><br>`// include/demo/detail_v1.h`<br>`namespace detail { inline void helper(int) { /* ... */ } }` | `// include/demo/api.h`<br>`#include "demo/detail_v2.h"`<br>`inline void process() { detail::helper(1L); }`<br><br>`// include/demo/detail_v2.h`<br>`namespace detail { inline void helper(long) { /* ... */ } }` |
 
 This case ships a hand-built pair of evidence-model fixtures (`old.json` /
 `new.json`, `SourceGraphSummary` objects) instead of compiled `v1`/`v2`
@@ -164,8 +180,10 @@ credits as newly reached.
 ## Runtime failure demonstration
 
 There's no `app.c` here and no crash to demonstrate — `demo::detail::helper`
-is never exported, so no consumer binary links against it directly and no
-real binary-level break exists to demonstrate. The real-world scenario is a
+is never exported as a symbol, and (being inline itself) resolves entirely
+within each consumer's own translation unit, so no consumer binary ever
+references it as an external symbol and no real binary-level break exists
+to demonstrate. The real-world scenario is a
 CI job that runs abicheck with `--sources`/`--build-info` evidence across
 two releases and posts the findings to a PR: without reconciliation, a
 reviewer sees an unexplained "`demo::detail::helper` removed,

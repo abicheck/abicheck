@@ -80,3 +80,18 @@
   hand-setting the flag. `public_api_internal_dependency_added` still
   fires, now genuinely earned through the production coverage-propagation
   path this fixture is meant to exercise.
+- **A seventh review round (CodeRabbit) caught a real linkability gap**:
+  `demo::process` being inline (fourth round's fix) means its body —
+  including its call to `detail::helper` — is emitted into every
+  *consumer's own* translation unit, not just the library's. An ordinary
+  out-of-line, non-exported `detail::helper` would leave that
+  consumer-emitted call as an unresolved external symbol reference at link
+  time — a real, consumer-visible link failure, not the purely internal,
+  risk-only change this case's canonical verdict claims. Fixed by making
+  `detail::helper` inline too (an ordinary header-only-library pattern: a
+  private "detail" header providing an inline implementation, transitively
+  included by the public header), so its own body is also emitted into the
+  same consumer TU and the call resolves entirely locally with no external
+  symbol needed — a real consumer program built against this exact
+  scenario now genuinely links and runs cleanly, which is what makes
+  `COMPATIBLE_WITH_RISK` correct rather than a modeling artifact.

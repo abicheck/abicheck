@@ -522,6 +522,21 @@ def build_cases() -> dict[str, tuple[str, dict[str, Any], dict[str, Any]]]:
             source_location=_loc("include/demo/api.h", 1),
         )
 
+    # The helper is deliberately INLINE too (CodeRabbit review, fresh
+    # evidence): demo::process is itself inline, so its body -- including
+    # its call to detail::helper -- is emitted into every CONSUMER'S own
+    # translation unit, not just the library's. If detail::helper were an
+    # ordinary out-of-line, non-exported declaration (this fixture's
+    # earlier shape), that consumer-emitted call would be an unresolved
+    # external symbol reference at link time -- a real, consumer-visible
+    # link failure, not a purely-internal, risk-only refactor. Making
+    # detail::helper inline too (a private "detail" header providing an
+    # inline implementation, transitively included by the public header --
+    # an entirely ordinary header-only-library pattern) means its own body
+    # is ALSO emitted into that same consumer TU, so the call resolves
+    # locally with no external symbol needed at all: COMPATIBLE_WITH_RISK
+    # is genuinely correct because a real consumer program built against
+    # this exact scenario links and runs cleanly.
     def _helper_entity(mangled: str, path: str) -> SourceEntity:
         return SourceEntity(
             id="demo::detail::helper",
@@ -553,8 +568,8 @@ def build_cases() -> dict[str, tuple[str, dict[str, Any], dict[str, Any]]]:
     _FULL_WALK_PRODUCER = "abicheck-cc-clang-extractor"
     l5j_old_surface = SourceAbiSurface(
         library="libdemo.so",
-        reachable_inline_bodies=[_pub_caller()],
-        reachable_declarations=[
+        reachable_inline_bodies=[
+            _pub_caller(),
             _helper_entity("_ZN4demo6detail6helperEi", "include/demo/detail_v1.h"),
         ],
         coverage={
@@ -586,8 +601,8 @@ def build_cases() -> dict[str, tuple[str, dict[str, Any], dict[str, Any]]]:
     # helper's own signature and header change.
     l5j_new_surface = SourceAbiSurface(
         library="libdemo.so",
-        reachable_inline_bodies=[_pub_caller()],
-        reachable_declarations=[
+        reachable_inline_bodies=[
+            _pub_caller(),
             _helper_entity("_ZN4demo6detail6helperEl", "include/demo/detail_v2.h"),
         ],
         source_edges=[
