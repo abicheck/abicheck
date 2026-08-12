@@ -1306,3 +1306,103 @@ class TestContractEvaluationFields:
         assert "contractEvidenceRefs" not in props
         assert props["compatibilityEvaluationStatus"] == "EVALUATED"
         assert props["compatibilityDecision"] is None
+
+
+class TestSuppressionsArray:
+    """ "Reporting must survive suppression": a suppressed finding must still
+    appear in SARIF, via the standard `suppressions` array (§3.27.24), with
+    rule provenance -- not just a bare `properties.suppressedCount` integer."""
+
+    def _make_result_with_suppressed(self, suppressed: list[Change]) -> DiffResult:
+        return DiffResult(
+            old_version="1.0",
+            new_version="2.0",
+            library="libfoo.so.1",
+            changes=[],
+            verdict=Verdict.COMPATIBLE,
+            suppressed_changes=suppressed,
+        )
+
+    def test_suppressed_change_appears_in_results(self) -> None:
+        suppressed = Change(
+            kind=ChangeKind.FUNC_REMOVED,
+            symbol="_Z3foov",
+            description="Function foo() removed",
+            suppression_rule="intentional",
+        )
+        doc = to_sarif(self._make_result_with_suppressed([suppressed]))
+        results = doc["runs"][0]["results"]
+        assert len(results) == 1
+        assert results[0]["ruleId"] == "func_removed"
+
+    def test_suppressed_result_carries_suppressions_array(self) -> None:
+        suppressed = Change(
+            kind=ChangeKind.FUNC_REMOVED,
+            symbol="_Z3foov",
+            description="Function foo() removed",
+            suppression_rule="intentional",
+        )
+        doc = to_sarif(self._make_result_with_suppressed([suppressed]))
+        result = doc["runs"][0]["results"][0]
+        assert result["suppressions"] == [
+            {
+                "kind": "external",
+                "justification": "suppressed by --suppress rule: intentional",
+            }
+        ]
+
+    def test_unsuppressed_result_carries_no_suppressions_key(self) -> None:
+        doc = to_sarif(_make_result([_breaking_change()]))
+        assert "suppressions" not in doc["runs"][0]["results"][0]
+
+    def test_suppressed_change_registers_its_rule(self) -> None:
+        """A suppressed-only rule id must still register in tool.driver.rules,
+        or a SARIF consumer resolving by rule id finds nothing for it."""
+        suppressed = Change(
+            kind=ChangeKind.TYPE_REMOVED,
+            symbol="Foo",
+            description="Type Foo removed",
+            suppression_rule="r1",
+        )
+        doc = to_sarif(self._make_result_with_suppressed([suppressed]))
+        rule_ids = {r["id"] for r in doc["runs"][0]["tool"]["driver"]["rules"]}
+        assert "type_removed" in rule_ids
+
+    def test_suppressed_change_reuses_an_already_registered_rule(self) -> None:
+        """A suppressed change sharing its kind with an active (unsuppressed)
+        finding must not register a second, duplicate rule entry."""
+        active = _breaking_change()  # func_removed
+        suppressed = Change(
+            kind=ChangeKind.FUNC_REMOVED,
+            symbol="_Z3barv",
+            description="Function bar() removed",
+            suppression_rule="r1",
+        )
+        result = DiffResult(
+            old_version="1.0",
+            new_version="2.0",
+            library="libfoo.so.1",
+            changes=[active],
+            verdict=Verdict.BREAKING,
+            suppressed_changes=[suppressed],
+        )
+        doc = to_sarif(result)
+        rules = [
+            r
+            for r in doc["runs"][0]["tool"]["driver"]["rules"]
+            if r["id"] == "func_removed"
+        ]
+        assert len(rules) == 1
+        assert len(doc["runs"][0]["results"]) == 2
+
+    def test_missing_rule_label_still_states_a_justification(self) -> None:
+        suppressed = Change(
+            kind=ChangeKind.FUNC_REMOVED,
+            symbol="_Z3foov",
+            description="Function foo() removed",
+        )
+        doc = to_sarif(self._make_result_with_suppressed([suppressed]))
+        result = doc["runs"][0]["results"][0]
+        assert result["suppressions"][0]["justification"] == (
+            "suppressed by --suppress rule"
+        )

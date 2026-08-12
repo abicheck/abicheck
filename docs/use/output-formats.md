@@ -673,6 +673,15 @@ schema 1.10, also `findings_truncated_kinds`/`suppressed_truncated_kinds` — a
 truncated diff (which kinds dominate) is visible without rerunning at a
 higher cap. Both maps are absent when nothing was truncated.
 
+Each entry in `suppressed` also carries `suppression_rule` (which
+`--suppress` rule matched it) and `pre_suppression_bucket` (the
+`breaking`/`api_break`/`risk`/`compatible` bucket the finding would have
+counted as had `--suppress` not withheld it) — a suppressed finding's report
+entry always says more than "suppressed", so a reader can tell a suppressed
+ABI break apart from a suppressed cosmetic note. `scan --against --format
+text` prints the same information: an always-present `suppressed=N` count in
+the "Baseline comparison" line, and `--show-suppressed` itemizes each one.
+
 ```json
 {
   "scan_schema_version": "1.10",
@@ -904,6 +913,29 @@ jobs:
   }]
 }
 ```
+
+### Suppressed findings
+
+A `--suppress`-silenced finding still appears in SARIF `results` — dropping
+it would leave zero trace of what was withheld — but is marked via the
+standard SARIF `suppressions` property (spec §3.27.24) instead of the plain
+result levels used above, so a conformant consumer (GitHub Code Scanning
+included) knows to keep it out of the default active-alerts view while still
+recording it:
+
+```json
+{
+  "ruleId": "func_removed",
+  "level": "error",
+  "message": { "text": "Function foo() removed" },
+  "suppressions": [
+    { "kind": "external", "justification": "suppressed by --suppress rule: intentional" }
+  ]
+}
+```
+
+`properties.suppressedCount` at the run level still reports the total, for a
+consumer that only wants the count.
 
 ---
 

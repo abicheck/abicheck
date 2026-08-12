@@ -831,6 +831,41 @@ def to_sarif(
             )
         )
 
+    # "Reporting must survive suppression": a `--suppress` rule silences a
+    # finding's contribution to the verdict/exit code, but a SARIF consumer
+    # (e.g. GitHub code scanning) must still be able to see *what* was
+    # withheld and *why* -- SARIF 2.1.0's own mechanism for exactly this is
+    # the per-result `suppressions` array (§3.27.24: "used to suppress
+    # results that would otherwise be reported"), which every conformant
+    # consumer already knows to hide from the default active-alerts view
+    # without abicheck reinventing that convention as an ad-hoc property.
+    # Previously suppressed findings were dropped from `results` entirely and
+    # only a bare `properties.suppressedCount` integer survived -- no rule
+    # provenance, no way to tell an ABI break apart from a cosmetic note
+    # among the suppressed set. Registered through the same `_result_for`
+    # every other finding uses, so a suppressed result carries the identical
+    # properties (reachability, evidence, contract decision, ...) as an
+    # unsuppressed one -- only the `suppressions` array and its provenance
+    # are new. Not run through `show_only`/root-cause grouping: those are
+    # display filters for the *active* result set, and a suppressed finding
+    # is definitionally outside it.
+    for change in result.suppressed_changes:
+        rule_id = change.kind.value
+        if rule_id not in rules_seen:
+            rules_seen[rule_id] = _rule_for(change.kind)
+        suppressed_result = _result_for(change, result, severity_config)
+        suppressed_result["suppressions"] = [
+            {
+                "kind": "external",
+                "justification": (
+                    f"suppressed by --suppress rule: {change.suppression_rule}"
+                    if change.suppression_rule
+                    else "suppressed by --suppress rule"
+                ),
+            }
+        ]
+        sarif_results.append(suppressed_result)
+
     for change in scoped_only_changes:
         rule_id = change.kind.value
         if rule_id not in rules_seen:
