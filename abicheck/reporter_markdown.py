@@ -1894,6 +1894,22 @@ def _suppress_dangling_correlation_notes(changes: Sequence[Change]) -> list[Chan
 
             c2 = copy.copy(c)
             c2.correlated_change_kind = None
+            # A shallow copy shares the *same* impact_assessment object as
+            # the original -- when a reachability-aware suppression made
+            # MarkReachability cache one (impact.engine.assess_change()
+            # prefers a cached assessment's own correlated_change_kind over
+            # the flat field once one exists), clearing only the flat field
+            # above leaves this copy's nested JSON/SARIF impact_assessment
+            # block still publishing the stale reference (Codex review,
+            # fresh evidence). ImpactAssessment is frozen, so replace it
+            # with a corrected copy on c2 -- never mutate the cached object
+            # in place, which would also corrupt the *original* c's cache.
+            if c2.impact_assessment is not None:
+                import dataclasses
+
+                c2.impact_assessment = dataclasses.replace(
+                    c2.impact_assessment, correlated_change_kind=None
+                )
             result.append(c2)
         else:
             result.append(c)

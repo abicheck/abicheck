@@ -1172,6 +1172,51 @@ class TestMarkdownReporter:
             layout_change.correlated_change_kind == ChangeKind.TYPE_VTABLE_CHANGED.value
         )
 
+    def test_json_filtered_cached_impact_assessment_also_cleared(self):
+        """When a reachability-aware suppression caused MarkReachability to
+        cache the finding's whole ImpactAssessment, assess_change() prefers
+        that cache's own correlated_change_kind over the flat field --
+        clearing only the flat field on a --show-only-filtered copy leaves
+        the shared, un-copied impact_assessment object still carrying the
+        stale reference, so the filtered JSON's nested impact_assessment
+        block kept publishing it even though the top-level field was
+        correctly cleared (Codex review, fresh evidence)."""
+        from abicheck.impact.model import ImpactAssessment
+
+        layout_change = Change(
+            ChangeKind.LAYOUT_UNVERIFIABLE,
+            "Foo",
+            "layout evidence unverifiable",
+            qualified_name="Foo",
+            correlated_change_kind=ChangeKind.TYPE_VTABLE_CHANGED.value,
+            impact_assessment=ImpactAssessment(
+                correlated_change_kind=ChangeKind.TYPE_VTABLE_CHANGED.value
+            ),
+        )
+        vtable_change = Change(
+            ChangeKind.TYPE_VTABLE_CHANGED,
+            "Foo",
+            "vtable changed",
+            qualified_name="Foo",
+        )
+        r = _result(Verdict.BREAKING, [layout_change, vtable_change])
+
+        d_filtered = json.loads(to_json(r, show_only="risk"))
+        layout_entry = next(
+            c for c in d_filtered["changes"] if c["kind"] == "layout_unverifiable"
+        )
+        assert "correlated_change_kind" not in layout_entry
+        assert (
+            layout_entry.get("impact_assessment", {}).get("correlated_change_kind")
+            is None
+        )
+
+        # The original Change's cached impact_assessment is never mutated.
+        assert (
+            layout_change.impact_assessment.correlated_change_kind
+            == ChangeKind.TYPE_VTABLE_CHANGED.value
+        )
+
 
 # ---------------------------------------------------------------------------
 # Severity-aware reporter output
