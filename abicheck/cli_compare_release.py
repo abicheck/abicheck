@@ -1287,102 +1287,109 @@ def compare_release_cmd(
             detect_extractor,
         )
 
-    # Validate suppression file early (before per-library loop)
-    _validate_suppression_early(
-        suppress, policy, policy_file_path, strict_suppressions, require_justification
-    )
+    # dedup_validate_overrides_warnings(): this whole release run reloads
+    # the same --policy-file several times over -- the early strict-
+    # suppression validation just below, the per-library fan-out, and (when
+    # a probe matrix is given) the matrix-result path all load it
+    # independently, so without this a single risky override would log its
+    # validate_overrides() warning once per load instead of once for the
+    # whole run (Codex review). Only dedupes within this process -- `--jobs
+    # N>1` dispatches per-library work to a ProcessPoolExecutor, which this
+    # context can't reach; see the context manager's own docstring.
+    from .policy_file import dedup_validate_overrides_warnings
 
-    try:
-        (
-            old_debug_dir,
-            new_debug_dir,
-            old_h,
-            new_h,
-            old_inc,
-            new_inc,
-            old_map,
-            new_map,
-            warning_msgs,
-            matched_keys,
-            removed_keys,
-            added_keys,
-        ) = _prepare_compare_release_inputs(
-            old_dir,
-            new_dir,
-            debug_info1,
-            debug_info2,
-            devel_pkg1,
-            devel_pkg2,
-            include_private_dso,
-            dso_only,
-            headers,
-            old_headers_only,
-            new_headers_only,
-            includes,
-            old_includes_only,
-            new_includes_only,
-            _do_extract,
-            discover_shared_libraries,
-            is_package,
-            _is_elf_shared_object,
+    with dedup_validate_overrides_warnings():
+        # Validate suppression file early (before per-library loop)
+        _validate_suppression_early(
+            suppress, policy, policy_file_path, strict_suppressions, require_justification
         )
 
-        if fmt != "json":
-            for msg in warning_msgs:
-                click.echo(msg, err=True)
+        try:
+            (
+                old_debug_dir,
+                new_debug_dir,
+                old_h,
+                new_h,
+                old_inc,
+                new_inc,
+                old_map,
+                new_map,
+                warning_msgs,
+                matched_keys,
+                removed_keys,
+                added_keys,
+            ) = _prepare_compare_release_inputs(
+                old_dir,
+                new_dir,
+                debug_info1,
+                debug_info2,
+                devel_pkg1,
+                devel_pkg2,
+                include_private_dso,
+                dso_only,
+                headers,
+                old_headers_only,
+                new_headers_only,
+                includes,
+                old_includes_only,
+                new_includes_only,
+                _do_extract,
+                discover_shared_libraries,
+                is_package,
+                _is_elf_shared_object,
+            )
 
-        if output_dir:
-            output_dir.mkdir(parents=True, exist_ok=True)
+            if fmt != "json":
+                for msg in warning_msgs:
+                    click.echo(msg, err=True)
 
-        # Resolved before the compare pass (its inputs are plain CLI values, no
-        # dependency on compare results) so --annotate's GitHub annotations —
-        # collected inside _compare_release_libraries, same pass as the
-        # per-library JUnit re-run — reflect the same severity-aware gate as
-        # the exit code below, instead of the legacy kind-set mapping. Returns
-        # None when no --severity-* option was supplied, or when compare's
-        # resolved config pins the legacy scheme for set inputs.
-        severity_config = _resolve_release_severity_config(
-            severity_preset,
-            severity_abi_breaking,
-            severity_potential_breaking,
-            severity_quality_issues,
-            severity_addition,
-        )
-        if release_exit_code_scheme == "severity" and severity_config is None:
-            # The resolved scheme is "severity" (e.g. .abicheck.yml's
-            # exit_code_scheme: severity with no severity: block at all) but
-            # no --severity-* flag was ever set, so the raw-args resolution
-            # above returned None. The single-file compare path never hits
-            # this: its resolved_cfg.severity is unconditionally populated
-            # (defaulting to PRESET_DEFAULT) and only *gated* by scheme, not
-            # re-derived from raw flags. Mirror that here — including
-            # reassigning severity_preset so the two downstream helpers below
-            # that independently re-resolve from these same raw args
-            # (_compute_release_severity_exit_code, _fold_release_global_severity)
-            # agree with it, instead of also silently resolving None and
-            # falling back to the legacy verdict-based exit (Codex review on
-            # #549).
-            from .severity import PRESET_DEFAULT
+            if output_dir:
+                output_dir.mkdir(parents=True, exist_ok=True)
 
-            severity_config = PRESET_DEFAULT
-            severity_preset = "default"
-        if release_exit_code_scheme == "legacy":
-            severity_config = None
+            # Resolved before the compare pass (its inputs are plain CLI values, no
+            # dependency on compare results) so --annotate's GitHub annotations —
+            # collected inside _compare_release_libraries, same pass as the
+            # per-library JUnit re-run — reflect the same severity-aware gate as
+            # the exit code below, instead of the legacy kind-set mapping. Returns
+            # None when no --severity-* option was supplied, or when compare's
+            # resolved config pins the legacy scheme for set inputs.
+            severity_config = _resolve_release_severity_config(
+                severity_preset,
+                severity_abi_breaking,
+                severity_potential_breaking,
+                severity_quality_issues,
+                severity_addition,
+            )
+            if release_exit_code_scheme == "severity" and severity_config is None:
+                # The resolved scheme is "severity" (e.g. .abicheck.yml's
+                # exit_code_scheme: severity with no severity: block at all) but
+                # no --severity-* flag was ever set, so the raw-args resolution
+                # above returned None. The single-file compare path never hits
+                # this: its resolved_cfg.severity is unconditionally populated
+                # (defaulting to PRESET_DEFAULT) and only *gated* by scheme, not
+                # re-derived from raw flags. Mirror that here — including
+                # reassigning severity_preset so the two downstream helpers below
+                # that independently re-resolve from these same raw args
+                # (_compute_release_severity_exit_code, _fold_release_global_severity)
+                # agree with it, instead of also silently resolving None and
+                # falling back to the legacy verdict-based exit (Codex review on
+                # #549).
+                from .severity import PRESET_DEFAULT
 
-        # JUnit still re-runs pairs in _collect_release_extras because it
-        # needs old AbiSnapshot too. Bundle analysis reuses the
-        # _diff_result stashed in each library entry from the first pass.
-        #
-        # dedup_policy_override_warnings(): this fan-out reloads the same
-        # --policy-file once per library (plus again for JUnit's re-run), so
-        # without this a single risky override would log its
-        # validate_overrides() warning once per library instead of once for
-        # the whole release (Codex review). Only dedupes within this process
-        # -- `--jobs N>1` dispatches libraries to a ProcessPoolExecutor, which
-        # this context can't reach; see the context manager's own docstring.
-        from . import service
+                severity_config = PRESET_DEFAULT
+                severity_preset = "default"
+            if release_exit_code_scheme == "legacy":
+                severity_config = None
 
-        with service.dedup_policy_override_warnings():
+            # JUnit still re-runs pairs in _collect_release_extras because it
+            # needs old AbiSnapshot too. Bundle analysis reuses the
+            # _diff_result stashed in each library entry from the first pass.
+            #
+            # This fan-out (plus JUnit's re-run inside it) reloads the same
+            # --policy-file once per library; the enclosing
+            # dedup_validate_overrides_warnings() scope above is what keeps a
+            # single risky override from logging its validate_overrides()
+            # warning once per library (Codex review).
             library_results, worst_verdict, diff_pairs = _compare_release_libraries(
                 matched_keys,
                 old_map,
@@ -1412,109 +1419,109 @@ def compare_release_cmd(
                 contract_mode=contract_mode,
             )
 
-        # ADR-049 Phase 7's orthogonal contract-coverage floor, aggregated
-        # across every library with max() -- one library's incomplete
-        # evidence must still raise the release's exit code, the same rule
-        # contract_coverage_exit.fold_coverage_exit applies to a single pair.
-        # `0` (the default fold value) when --contract-evaluation was never
-        # given, or every library's own selected domain closed cleanly.
-        contract_coverage_exit_contribution = max(
-            (
-                contribution
-                for entry in library_results
-                if isinstance(entry, dict)
-                and isinstance(
-                    contribution := entry.get("contract_coverage_exit_contribution", 0),
-                    int,
-                )
-            ),
-            default=0,
-        )
-
-        # Compute the severity-aware exit code while per-library DiffResults
-        # are still stashed (before _strip_diff_results_and_adjust_verdict).
-        severity_exit_code = (
-            None
-            if release_exit_code_scheme == "legacy"
-            else _compute_release_severity_exit_code(
-                library_results,
-                severity_preset,
-                severity_abi_breaking,
-                severity_potential_breaking,
-                severity_quality_issues,
-                severity_addition,
+            # ADR-049 Phase 7's orthogonal contract-coverage floor, aggregated
+            # across every library with max() -- one library's incomplete
+            # evidence must still raise the release's exit code, the same rule
+            # contract_coverage_exit.fold_coverage_exit applies to a single pair.
+            # `0` (the default fold value) when --contract-evaluation was never
+            # given, or every library's own selected domain closed cleanly.
+            contract_coverage_exit_contribution = max(
+                (
+                    contribution
+                    for entry in library_results
+                    if isinstance(entry, dict)
+                    and isinstance(
+                        contribution := entry.get("contract_coverage_exit_contribution", 0),
+                        int,
+                    )
+                ),
+                default=0,
             )
-        )
 
-        bundle_result: BundleDiffResult | None = None
-        if not no_bundle_analysis:
-            bundle_result, worst_verdict = _collect_bundle_result(
+            # Compute the severity-aware exit code while per-library DiffResults
+            # are still stashed (before _strip_diff_results_and_adjust_verdict).
+            severity_exit_code = (
+                None
+                if release_exit_code_scheme == "legacy"
+                else _compute_release_severity_exit_code(
+                    library_results,
+                    severity_preset,
+                    severity_abi_breaking,
+                    severity_potential_breaking,
+                    severity_quality_issues,
+                    severity_addition,
+                )
+            )
+
+            bundle_result: BundleDiffResult | None = None
+            if not no_bundle_analysis:
+                bundle_result, worst_verdict = _collect_bundle_result(
+                    library_results,
+                    old_map,
+                    new_map,
+                    worst_verdict,
+                    manifest_path=manifest_path,
+                    bundle_system_providers=bundle_system_providers,
+                    bundle_cohorts=bundle_cohorts,
+                )
+
+            # Strip _diff_result from entries and bump verdict for removed libraries.
+            worst_verdict = _strip_diff_results_and_adjust_verdict(
+                library_results, removed_keys, worst_verdict, severity_config
+            )
+
+            # Build-configuration matrix findings (G2: probe -> compare-release).
+            # These are release-global, not per-library, so they fold into the
+            # worst-of verdict and surface as their own report section.
+            matrix_result, worst_verdict = _collect_matrix_result(
+                probe_matrix_old,
+                probe_matrix_new,
+                policy,
+                worst_verdict,
+                suppress=suppress,
+                policy_file_path=policy_file_path,
+                old_version=old_version,
+                new_version=new_version,
+            )
+
+            # Fold release-global bundle/matrix findings into the severity exit so a
+            # clean-per-library release with a bundle/matrix break is not masked.
+            if severity_exit_code is not None:
+                severity_exit_code = _fold_release_global_severity(
+                    severity_exit_code,
+                    bundle_result,
+                    matrix_result,
+                    severity_preset,
+                    severity_abi_breaking,
+                    severity_potential_breaking,
+                    severity_quality_issues,
+                    severity_addition,
+                )
+
+            _finalize_release_output(
+                fmt,
+                worst_verdict,
+                old_dir,
+                new_dir,
                 library_results,
+                removed_keys,
+                added_keys,
                 old_map,
                 new_map,
-                worst_verdict,
-                manifest_path=manifest_path,
-                bundle_system_providers=bundle_system_providers,
-                bundle_cohorts=bundle_cohorts,
-            )
-
-        # Strip _diff_result from entries and bump verdict for removed libraries.
-        worst_verdict = _strip_diff_results_and_adjust_verdict(
-            library_results, removed_keys, worst_verdict, severity_config
-        )
-
-        # Build-configuration matrix findings (G2: probe -> compare-release).
-        # These are release-global, not per-library, so they fold into the
-        # worst-of verdict and surface as their own report section.
-        matrix_result, worst_verdict = _collect_matrix_result(
-            probe_matrix_old,
-            probe_matrix_new,
-            policy,
-            worst_verdict,
-            suppress=suppress,
-            policy_file_path=policy_file_path,
-            old_version=old_version,
-            new_version=new_version,
-        )
-
-        # Fold release-global bundle/matrix findings into the severity exit so a
-        # clean-per-library release with a bundle/matrix break is not masked.
-        if severity_exit_code is not None:
-            severity_exit_code = _fold_release_global_severity(
-                severity_exit_code,
+                warning_msgs,
+                diff_pairs,
                 bundle_result,
-                matrix_result,
-                severity_preset,
-                severity_abi_breaking,
-                severity_potential_breaking,
-                severity_quality_issues,
-                severity_addition,
+                output,
+                output_dir,
+                annotate,
+                fail_on_removed,
+                matrix_result=matrix_result,
+                severity_exit_code=severity_exit_code,
+                severity_config=severity_config,
+                contract_coverage_exit_contribution=contract_coverage_exit_contribution,
             )
-
-        _finalize_release_output(
-            fmt,
-            worst_verdict,
-            old_dir,
-            new_dir,
-            library_results,
-            removed_keys,
-            added_keys,
-            old_map,
-            new_map,
-            warning_msgs,
-            diff_pairs,
-            bundle_result,
-            output,
-            output_dir,
-            annotate,
-            fail_on_removed,
-            matrix_result=matrix_result,
-            severity_exit_code=severity_exit_code,
-            severity_config=severity_config,
-            contract_coverage_exit_contribution=contract_coverage_exit_contribution,
-        )
-    finally:
-        _cleanup_temp_dirs(_temp_dir_paths, keep_extracted)
+        finally:
+            _cleanup_temp_dirs(_temp_dir_paths, keep_extracted)
 
 
 def _prepare_compare_release_inputs(

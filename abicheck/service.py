@@ -24,8 +24,6 @@ Provides framework-agnostic functions for the core abicheck operations:
 
 from __future__ import annotations
 
-import contextlib
-import contextvars
 import functools
 import hashlib
 import importlib as _importlib
@@ -33,6 +31,7 @@ import logging
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+from . import policy_file as _policy_file
 from .api_types import (
     CompareRequest,
     CompareResult,
@@ -81,7 +80,7 @@ _try_header_scoped_dump: Callable[..., tuple[AbiSnapshot | None, str | None]] = 
 del _service_header_scoped
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Iterator
+    from collections.abc import Callable
 
     from .checker_types import Change
     from .dump_manifest import DumpManifest
@@ -93,43 +92,17 @@ if TYPE_CHECKING:
 
 _logger = logging.getLogger(__name__)
 
-# Codex review, PR #730: `compare-release`'s sequential per-library fan-out
-# (and its JUnit re-collection pass) calls `load_suppression_and_policy()`
-# once per library, reloading and re-validating the *same* `--policy-file`
-# each time -- so a single risky override would otherwise log the identical
-# warning once per library, flooding stderr for a large release. Scoped via
-# a `ContextVar` (default `None` = "always warn", the pre-existing behaviour
-# for every caller that never enters `dedup_policy_override_warnings()`) so
-# an unrelated single-shot caller -- a plain `compare`, `scan --against`, or
-# a direct Python API `run_compare` call -- is completely unaffected.
-#
-# This only dedupes within one OS process: `compare-release --jobs N>1`
-# dispatches libraries across a `ProcessPoolExecutor`, and a `ContextVar` set
-# in the parent process is not visible to those worker processes, so the
-# parallel path still warns once per library. That's an accepted, narrower
-# gap (parallel workers already can't share any other in-process state
-# either) rather than a reason to withhold the fix for the default
-# sequential (`--jobs 1`) path.
-_policy_warning_dedup_var: contextvars.ContextVar[set[tuple[str, str]] | None] = (
-    contextvars.ContextVar("_policy_warning_dedup_var", default=None)
-)
-
-
-@contextlib.contextmanager
-def dedup_policy_override_warnings() -> Iterator[None]:
-    """Scope repeated ``load_suppression_and_policy()`` calls to warn once.
-
-    Within this context, a ``validate_overrides()`` warning is logged the
-    first time a given (policy-file content, warning text) pair is seen and
-    silently skipped on every later call for the same pair -- see the
-    module-level ``_policy_warning_dedup_var`` docstring above for why this
-    exists and what it does not cover.
-    """
-    token = _policy_warning_dedup_var.set(set())
-    try:
-        yield
-    finally:
-        _policy_warning_dedup_var.reset(token)
+# Codex review, PR #730: re-exported so an existing `service.
+# dedup_policy_override_warnings()` caller (and this module's own tests)
+# keep working. The dedup state itself lives in `policy_file.py` -- the leaf
+# module both this loader and `cli_params._load_suppression_and_policy` share
+# -- specifically so *one* scope dedupes a warning repeated across both
+# loaders, not just repeated calls to this one. See
+# `policy_file.dedup_validate_overrides_warnings`'s own docstring for what
+# this does and does not cover (in particular: `compare-release --jobs N>1`'s
+# `ProcessPoolExecutor` workers are a separate process each and don't share
+# this scope).
+dedup_policy_override_warnings = _policy_file.dedup_validate_overrides_warnings
 
 # Magic-byte length for format detection
 _SNIFF_BYTES = 256
@@ -1601,17 +1574,13 @@ def load_suppression_and_policy(
         # release comparison stayed silent (Codex review). Mirrors that same
         # warning here, through the logger this module already uses above.
         #
-        # Deduped via `_policy_warning_dedup_var` when a caller has entered
-        # `dedup_policy_override_warnings()` (see its docstring) -- outside
-        # that scope (the default `None`) every warning is logged every call,
-        # unchanged from before.
-        seen = _policy_warning_dedup_var.get()
-        for warning in pf.validate_overrides():
-            if seen is not None:
-                key = (pf.source_sha256 or str(policy_file_path), warning)
-                if key in seen:
-                    continue
-                seen.add(key)
+        # Routed through `pending_validate_overrides_warnings` (not
+        # `pf.validate_overrides()` directly) so a `dedup_policy_override_
+        # warnings()` scope -- shared with `cli_params._load_suppression_
+        # and_policy`'s identical call -- collapses a warning repeated across
+        # several loads down to one (Codex review); outside any such scope
+        # every warning is logged every call, unchanged from before.
+        for warning in _policy_file.pending_validate_overrides_warnings(pf):
             _logger.warning("%s", warning)
     return suppression, pf
 

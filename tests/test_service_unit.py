@@ -1760,6 +1760,31 @@ class TestLoadSuppressionAndPolicy:
                 load_suppression_and_policy(None, policy_file_path=pf)
         assert caplog.text.count("HIGH RISK") == 2
 
+    def test_dedup_scope_shared_with_cli_params_loader(self, tmp_path, capsys, caplog):
+        """`dedup_policy_override_warnings()` must dedupe across *both*
+        loaders, not just repeated `service.load_suppression_and_policy()`
+        calls -- `compare-release` also loads through `cli_params.
+        _load_suppression_and_policy` (its early strict-suppression
+        validation and probe-matrix paths), and a scope covering only one
+        loader would still let the same warning through twice (Codex
+        review: fresh evidence on the follow-up commit)."""
+        import logging
+
+        from abicheck.cli_params import _load_suppression_and_policy
+
+        pf = tmp_path / "policy.yaml"
+        pf.write_text("base_policy: strict_abi\noverrides:\n  func_removed: ignore\n")
+        with caplog.at_level(logging.WARNING, logger="abicheck.service"):
+            with dedup_policy_override_warnings():
+                _load_suppression_and_policy(None, "strict_abi", pf)  # click.echo
+                load_suppression_and_policy(None, policy_file_path=pf)  # logger
+                load_suppression_and_policy(None, policy_file_path=pf)  # logger
+        # The CLI-level loader's warning is the first one seen in the shared
+        # scope, so it "wins" -- both later service-level loads are deduped
+        # against it and log nothing further.
+        assert "HIGH RISK" in capsys.readouterr().err
+        assert "HIGH RISK" not in caplog.text
+
 
 # ── run_compare() ───────────────────────────────────────────────────────────
 

@@ -51,10 +51,12 @@ Notes:
 
 from __future__ import annotations
 
+import contextlib
+import contextvars
 import hashlib
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from .checker_policy import (
     VALID_BASE_POLICIES,
@@ -64,6 +66,9 @@ from .checker_policy import (
     policy_kind_sets,
 )
 from .errors import PolicyError
+
+if TYPE_CHECKING:
+    from collections.abc import Iterator
 
 # Severity name -> Verdict mapping
 _SEVERITY_MAP: dict[str, Verdict] = {
@@ -610,3 +615,76 @@ class PolicyFile:
                     f"verify this is intentional."
                 )
         return warnings
+
+
+# ── validate_overrides() warning dedup (Codex review, PR #730) ──────────────
+#
+# A single `--policy-file` can be loaded several times over the course of one
+# CLI invocation -- notably `compare-release`, whose per-library fan-out
+# reloads it once per library (plus again for JUnit's re-run), and whose
+# strict-suppression-early-validation and probe-matrix paths each load it
+# again on top of that, through *two different* call sites
+# (`cli_params._load_suppression_and_policy`, which warns via `click.echo`,
+# and `service.load_suppression_and_policy`, which warns via the logger).
+# Without deduplication a single risky override logs the identical warning
+# once per load, flooding stderr for a large release.
+#
+# Lives here, in the leaf module both loaders already import, rather than in
+# either `cli_params.py` or `service.py`, so the *same* dedup scope covers
+# both call sites uniformly -- a fix that lived in only one of them would
+# still leave the other's warnings undeduplicated.
+_warning_dedup_var: contextvars.ContextVar[set[tuple[str, str]] | None] = (
+    contextvars.ContextVar("_policy_override_warning_dedup", default=None)
+)
+
+
+@contextlib.contextmanager
+def dedup_validate_overrides_warnings() -> Iterator[None]:
+    """Scope repeated ``validate_overrides()`` loads to warn at most once.
+
+    Within this context, a given (policy-file content, warning text) pair is
+    returned by :func:`pending_validate_overrides_warnings` the first time it
+    is seen and omitted on every later call for the same pair, regardless of
+    which loader (`cli_params._load_suppression_and_policy` or
+    `service.load_suppression_and_policy`) made the call. Outside any such
+    scope (the default), every call returns every warning every time --
+    unchanged behaviour for a single-shot caller such as a plain `compare`,
+    `scan --against`, or a direct Python API `run_compare` call, none of
+    which ever enter this scope.
+
+    Only dedupes within one OS process: a `ContextVar` set here is not
+    visible to a separate process (e.g. `compare-release --jobs N>1`'s
+    `ProcessPoolExecutor` workers), which is an accepted, narrower gap rather
+    than a reason to withhold the fix for the default sequential path.
+    """
+    token = _warning_dedup_var.set(set())
+    try:
+        yield
+    finally:
+        _warning_dedup_var.reset(token)
+
+
+def pending_validate_overrides_warnings(pf: PolicyFile) -> list[str]:
+    """Return *pf*'s :meth:`~PolicyFile.validate_overrides` warnings not yet
+    surfaced in the current :func:`dedup_validate_overrides_warnings` scope
+    (or all of them, unfiltered, outside any such scope), recording whichever
+    are returned as seen. Both `cli_params._load_suppression_and_policy` and
+    `service.load_suppression_and_policy` call this instead of
+    `pf.validate_overrides()` directly, so the same warning is never surfaced
+    twice within one dedup scope no matter which loader reloaded the file.
+    """
+    warnings = pf.validate_overrides()
+    if not warnings:
+        return warnings
+    seen = _warning_dedup_var.get()
+    if seen is None:
+        return warnings
+    key_base = pf.source_sha256 or str(pf.source_path)
+    fresh = []
+    for warning in warnings:
+        key = (key_base, warning)
+        if key in seen:
+            continue
+        seen.add(key)
+        fresh.append(warning)
+    return fresh
