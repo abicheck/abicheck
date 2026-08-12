@@ -1727,6 +1727,31 @@ def test_emit_strips_launcher_before_resolving_clang_bin(
     assert captured["clang_bin"] == "clang++"
 
 
+def test_emit_skips_ccache_config_overrides_before_resolving_clang_bin(
+    tmp_path: Path, monkeypatch
+) -> None:
+    # ccache's own documented invocation form, `ccache KEY=VALUE ... compiler
+    # [compiler options]` (ccache manual, "Configuration" section), prefixes
+    # the real compiler with bare KEY=VALUE config-override tokens — those
+    # must be skipped too, not just the launcher name itself.
+    captured: dict = {}
+
+    def _fake_select(extractor, **kw):
+        captured.update(kw)
+        return None, None
+
+    monkeypatch.setattr(
+        "abicheck.buildsource.source_extractors.resolver.select_source_backend",
+        _fake_select,
+    )
+    emit_facts_for_command(
+        ["ccache", "compiler_check=content", "icpx", "-c", "src/foo.cpp"],
+        tmp_path,
+        inputs_dir=tmp_path / "pk",
+    )
+    assert captured["clang_bin"] == "icpx"
+
+
 def test_emit_keeps_default_clang_bin_for_non_clang_family_compiler(
     tmp_path: Path, monkeypatch
 ) -> None:

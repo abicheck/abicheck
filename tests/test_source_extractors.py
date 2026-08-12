@@ -1572,3 +1572,53 @@ def test_castxml_parse_public_typedefs_scopes_to_public_headers() -> None:
     tds = parser.parse_public_typedefs()
     assert tds == {"handle_t": "int"}
     assert parser.parse_public_typedef_headers()["handle_t"] == "/inc/api.h"
+
+
+# -- strip_launchers (ADR-030 D2 shared argv helper) --------------------------
+
+
+def test_strip_launchers_drops_bare_launcher() -> None:
+    from abicheck.buildsource.source_extractors._argv import strip_launchers
+
+    assert strip_launchers(["ccache", "clang++", "-c", "foo.cpp"]) == [
+        "clang++", "-c", "foo.cpp",
+    ]
+
+
+def test_strip_launchers_skips_ccache_config_overrides() -> None:
+    # ccache's own documented invocation form: `ccache KEY=VALUE ... compiler
+    # [compiler options]` (ccache manual, "Configuration" section) — a bare
+    # KEY=VALUE token here is a per-invocation config override, not the
+    # compiler, and must be skipped too.
+    from abicheck.buildsource.source_extractors._argv import strip_launchers
+
+    assert strip_launchers(
+        ["ccache", "compiler_check=content", "icpx", "-c", "foo.cpp"]
+    ) == ["icpx", "-c", "foo.cpp"]
+    assert strip_launchers(
+        [
+            "ccache",
+            "debug=true",
+            'compiler_check="%compiler% --version"',
+            "gcc",
+            "-c",
+            "foo.c",
+        ]
+    ) == ["gcc", "-c", "foo.c"]
+
+
+def test_strip_launchers_chained_launchers_with_config_overrides() -> None:
+    from abicheck.buildsource.source_extractors._argv import strip_launchers
+
+    assert strip_launchers(
+        ["ccache", "compiler_check=content", "distcc", "gcc", "-c", "foo.c"]
+    ) == ["gcc", "-c", "foo.c"]
+
+
+def test_strip_launchers_no_config_overrides_for_non_launcher_command() -> None:
+    # A KEY=VALUE-looking token that never follows a recognized launcher name
+    # must not be treated as a config override.
+    from abicheck.buildsource.source_extractors._argv import strip_launchers
+
+    argv = ["FOO=bar", "gcc", "-c", "foo.c"]
+    assert strip_launchers(argv) == argv
