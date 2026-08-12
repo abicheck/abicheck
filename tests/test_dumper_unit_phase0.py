@@ -152,3 +152,25 @@ def test_cache_key_changes_with_inputs(tmp_path: Path) -> None:
 
     # Determinism: same inputs → same key
     assert k1 == _cache_key([h1], [inc], compiler="c++")
+
+
+def test_castxml_type_alignment_preserves_typedef_align() -> None:
+    root = Element("GCC_XML")
+    SubElement(root, "FundamentalType", id="t_int", name="int", align="32")
+    SubElement(root, "Typedef", id="td_over", name="over", type="t_int", align="128")
+    SubElement(root, "Variable", id="v1", name="g", mangled="g", type="td_over")
+
+    parser = _CastxmlParser(root, exported_dynamic=set(), exported_static={"g"})
+
+    assert parser._type_alignment_bits("td_over") == 128
+    assert parser.parse_variables()[0].alignment_bits == 128
+
+
+def test_castxml_type_alignment_falls_through_unaligned_typedef() -> None:
+    root = Element("GCC_XML")
+    SubElement(root, "FundamentalType", id="t_int", name="int", align="32")
+    SubElement(root, "Typedef", id="td_plain", name="plain", type="t_int")
+
+    parser = _CastxmlParser(root, exported_dynamic=set(), exported_static=set())
+
+    assert parser._type_alignment_bits("td_plain") == 32

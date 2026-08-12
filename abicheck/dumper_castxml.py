@@ -503,8 +503,8 @@ class _CastxmlParser:
         Distinct from a Variable's own ``align`` attribute (an *explicit*
         alignas/``__attribute__((aligned))`` override on the declaration —
         see ``parse_variables``): this walks through cv-qualifiers, typedefs,
-        elaborated-type wrappers, and array types to the underlying type node
-        and reads its own ``align``, which castxml always populates with the
+        elaborated-type wrappers, and array types to the nearest type node
+        with its own ``align`` and reads that value, which castxml populates with the
         compiler's actual computed alignment (the same attribute
         ``_build_record_type`` already trusts unconditionally for
         structs/unions/classes). ``ArrayType`` carries no ``align``/``size``
@@ -524,9 +524,12 @@ class _CastxmlParser:
         el = self._resolve(id_)
         if el is None:
             return None
+        align = self._optional_int_attr(el, "align")
+        if align is not None:
+            return align
         if el.tag in ("CvQualifiedType", "Typedef", "ElaboratedType", "ArrayType"):
             return self._type_alignment_bits(el.get("type", ""), depth + 1)
-        return self._optional_int_attr(el, "align")
+        return None
 
     def _resolve_cv_restrict(self, id_: str, depth: int = 0) -> tuple[bool, bool, bool]:
         """Whether *id_*'s own (top-level) qualification is const/volatile/restrict.
