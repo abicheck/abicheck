@@ -1827,6 +1827,43 @@ class TestContractEvaluationProperties:
         assert props["abicheck.correlated_change_kind"] == "type_vtable_changed"
         assert props["abicheck.contract_relevance"] == "IN_CONTRACT"
 
+    def test_correlated_change_kind_reaches_a_secondary_same_symbol_change(
+        self,
+    ) -> None:
+        # Codex review, fresh evidence: the ordinary pairing shares one
+        # symbol -- TYPE_VTABLE_CHANGED (first, becomes the primary testcase
+        # entry via _partition_changes) and the correlated LAYOUT_UNVERIFIABLE
+        # (second, an "extra" change on the same testcase). Before this fix,
+        # _append_extra_failures only ever added <failure> elements for a
+        # secondary change and never called _add_correlation_property, so the
+        # motivating comparison emitted no abicheck.correlated_change_kind
+        # property at all.
+        vtable_change = Change(
+            ChangeKind.TYPE_VTABLE_CHANGED,
+            "Foo",
+            "vtable changed",
+            vtable_covers_unverifiable_layout_gap=True,
+        )
+        layout_change = Change(
+            ChangeKind.LAYOUT_UNVERIFIABLE,
+            "Foo",
+            "layout evidence unverifiable",
+            correlated_change_kind=ChangeKind.TYPE_VTABLE_CHANGED.value,
+        )
+        r = _make_result([vtable_change, layout_change], verdict=Verdict.BREAKING)
+        xml_str = to_junit_xml(r)
+        root = _parse(xml_str)
+        tc = root.find("testsuite/testcase[@name='Foo']")
+        properties_blocks = tc.findall("properties")
+        assert len(properties_blocks) == 1
+        props = {p.get("name"): p.get("value") for p in properties_blocks[0]}
+        assert props["abicheck.correlated_change_kind"] == "type_vtable_changed"
+        # A non-failing secondary change (e.g. under a severity scheme that
+        # demotes layout_unverifiable) must still get its correlation
+        # recorded -- the property write and the <failure> decision are
+        # independent.
+        assert tc.find("failure") is not None  # the primary (vtable) failure
+
     def test_stamped_finding_without_optional_fields_omits_them(self) -> None:
         # contract_reason_code/contract_assurance/contract_evidence_refs are
         # independent optional fields -- a finding can have a stamped

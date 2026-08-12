@@ -425,13 +425,34 @@ def _append_extra_failures(
     relevant_ids: frozenset[str] | None = None,
     root_cause_lookup: dict[str, tuple[str, str]] | None = None,
 ) -> None:
-    """Append extra ``<failure>`` children to already-existing testcases.
+    """Append extra ``<failure>`` children -- and, regardless of pass/fail,
+    a secondary change's ``correlated_change_kind`` -- to already-existing
+    testcases.
 
     Handles symbols that have more than one change (e.g. multiple changes
-    to the same symbol).  For each extra failing change, find the existing
-    ``<testcase>`` with the matching name and attach a new ``<failure>``.
+    to the same symbol). For each extra change, find the existing
+    ``<testcase>`` with the matching name; a failing one also gets a new
+    ``<failure>`` child.
+
+    Only ``_add_correlation_property`` is called here, not
+    ``_add_contract_properties`` -- unlike the correlation flag (one bit of
+    "this testcase has a paired finding", correct to merge into the shared
+    block), ``_add_contract_properties`` renders a *whole per-change*
+    contract decision (relevance/reason_code/assurance/gate_contribution)
+    into flat, unprefixed property names. Two changes on the same symbol can
+    each carry an independently-stamped, genuinely different decision under
+    ``--contract-evaluation``; naively adding a second call here would either
+    duplicate the ``<properties>`` block (the exact bug just fixed for
+    correlation) or, if merged into one block, silently overwrite the
+    primary change's contract properties with the secondary's -- a data-loss
+    bug, not a fix. That gap is real but pre-existing and out of scope here:
+    it needs its own design (e.g. a per-change key prefix) before more
+    call sites route through it, not a drive-by symmetrical extension of
+    this correlation fix (Codex review only reported the correlation half;
+    fixing it alone is what's verified below).
     """
     for c in extra_changes:
+        _add_correlation_property_if_testcase_found(ts, c)
         if _is_failure(
             c, result, kind_sets, severity_config, relevant_ids=relevant_ids
         ):
@@ -446,6 +467,25 @@ def _append_extra_failures(
                         root_cause_lookup=root_cause_lookup,
                     )
                     break
+
+
+def _add_correlation_property_if_testcase_found(ts: ET.Element, change: Change) -> None:
+    """Find the ``<testcase>`` matching *change*'s symbol among *ts*'s
+    children and call :func:`_add_correlation_property` on it.
+
+    A small lookup wrapper rather than inlining the loop at both call sites
+    in :func:`_append_extra_failures` above (one for the correlation
+    property, one for the conditional ``<failure>``) -- the two must run
+    independently (a non-failing secondary change still needs its
+    correlation recorded), so they cannot share one ``for tc in ts`` loop
+    the way the pre-existing failure-only loop did.
+    """
+    if not change.correlated_change_kind:
+        return
+    for tc in ts:
+        if tc.get("name") == change.symbol:
+            _add_correlation_property(tc, change)
+            return
 
 
 def _build_testsuite(
