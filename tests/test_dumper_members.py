@@ -393,13 +393,16 @@ class TestConstantExtraction:
         # castxml emit a *second* <Variable> for the using-declaration --
         # `detail::v1::cpu_feature_map` (the real declaration) and
         # `detail::cpu_feature_map` (the re-export), same value, two
-        # different qualified-name keys. Only the version-stripped alias
-        # spelling -- the one a consumer of the `using` re-export actually
-        # writes -- survives; the versioned original is dropped.
+        # different qualified-name keys. Only the version-qualified
+        # original -- the real declaration's own full name -- survives; the
+        # version-stripped alias is dropped (see
+        # `dedup_versioned_namespace_alias_items`'s own docstring for why
+        # this direction, not the reverse, is what keeps a diff stable
+        # across a release that adds/removes only the re-export).
         p = _make_parser(_USING_REEXPORT_CONST_XML, public_header_paths=["test.h"])
         consts = p.parse_constants()
-        assert consts["detail::cpu_feature_map"] == "42"
-        assert "detail::v1::cpu_feature_map" not in consts
+        assert consts["detail::v1::cpu_feature_map"] == "42"
+        assert "detail::cpu_feature_map" not in consts
 
     def test_differing_values_are_not_merged_as_an_alias(self) -> None:
         # Safety gate: two constants whose names merely *look* like a
@@ -427,8 +430,41 @@ class TestConstantExtraction:
         # maps must never disagree, including after this dedup.
         p = _make_parser(_USING_REEXPORT_CONST_XML, public_header_paths=["test.h"])
         headers = p.parse_constant_headers()
-        assert "detail::cpu_feature_map" in headers
-        assert "detail::v1::cpu_feature_map" not in headers
+        assert "detail::v1::cpu_feature_map" in headers
+        assert "detail::cpu_feature_map" not in headers
+
+    def test_adding_or_removing_only_the_reexport_produces_no_key_diff(self) -> None:
+        # Regression (Codex review, P1): the earlier revision of this fix
+        # kept the alias and dropped the versioned original, which meant a
+        # snapshot WITHOUT the `using` re-export kept `detail::v1::x` while
+        # a snapshot WITH it collapsed down to `detail::x` instead -- two
+        # different surviving keys for one unchanged declaration, which
+        # `_diff_constants` read as a spurious `CONSTANT_REMOVED` +
+        # `CONSTANT_ADDED` pair. Both sides here must resolve to the exact
+        # same key set so that adding/removing only the re-export is
+        # invisible to a key-set diff.
+        before_xml = """<?xml version="1.0"?>
+<CastXML>
+  <Variable id="_20" name="x" type="_6" init="42" context="_3" file="f1" line="1"/>
+  <FundamentalType id="_6" name="const int" size="32"/>
+  <Namespace id="_1" name="::"/>
+  <Namespace id="_2" name="detail" context="_1"/>
+  <Namespace id="_3" name="v1" context="_2"/>
+  <File id="f1" name="test.h"/>
+</CastXML>"""
+        after_xml = """<?xml version="1.0"?>
+<CastXML>
+  <Variable id="_20" name="x" type="_6" init="42" context="_3" file="f1" line="1"/>
+  <Variable id="_21" name="x" type="_6" init="42" context="_2" file="f1" line="2"/>
+  <FundamentalType id="_6" name="const int" size="32"/>
+  <Namespace id="_1" name="::"/>
+  <Namespace id="_2" name="detail" context="_1"/>
+  <Namespace id="_3" name="v1" context="_2"/>
+  <File id="f1" name="test.h"/>
+</CastXML>"""
+        before = _make_parser(before_xml, public_header_paths=["test.h"]).parse_constants()
+        after = _make_parser(after_xml, public_header_paths=["test.h"]).parse_constants()
+        assert before == after == {"detail::v1::x": "42"}
 
 
 def test_default_argument_value_is_parsed() -> None:

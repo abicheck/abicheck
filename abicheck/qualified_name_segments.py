@@ -58,7 +58,19 @@ using-declaration cannot legally re-export a constant under a different
 value, so within one snapshot this combination can only misfire on two
 genuinely distinct declarations that coincidentally share both a
 version-alias-shaped name pair and an identical value -- a materially
-narrower coincidence than the bare value equality rejected above.
+narrower coincidence than the bare value equality rejected above, and an
+accepted residual risk documented on the function itself (Codex review,
+P2) rather than eliminated, since doing so needs real using-shadow/target
+evidence no header-AST producer available here exposes.
+
+It always keeps the version-*qualified* spelling and drops the
+version-*stripped* alias, never the reverse (Codex review, P1: an earlier
+revision kept the shorter alias instead, which silently manufactured a
+``CONSTANT_REMOVED``/``CONSTANT_ADDED`` pair whenever a release added or
+removed only the ``using`` re-export while the real declaration was
+unchanged -- see the function's own docstring for why keeping the
+canonical spelling is the direction that stays diff-invariant across that
+transition).
 """
 
 from __future__ import annotations
@@ -178,13 +190,52 @@ def dedup_versioned_namespace_alias_items(
     merge already rejected for cross-snapshot comparison.
 
     For every item whose qualified name strips one versioned-inline-namespace
-    segment (:func:`version_strip_segments`), if the stripped spelling is
-    ALSO present in *items* with an identical value, the versioned original
-    is dropped and only the shorter, version-stripped alias -- the spelling
-    a consumer of the ``using`` re-export actually writes -- is kept.
+    segment (:func:`version_strip_segments`), if the stripped (alias)
+    spelling is ALSO present in *items* with an identical value, the
+    version-*stripped* alias is dropped and only the version-*qualified*
+    original -- the real declaration's own full name -- is kept.
+
+    This direction (drop the alias, keep the qualified original) is
+    deliberate and load-bearing, not a style choice (Codex review, P1: an
+    earlier revision did the reverse). ``AbiSnapshot.constants`` is built
+    independently per side of a comparison, so whether a given side's item
+    list even contains the alias spelling depends only on whether *that
+    side's* headers happened to declare the ``using`` re-export -- a
+    release can add or remove just the re-export while the real declaration
+    is completely unchanged. Keeping the version-stripped alias (the
+    earlier, wrong direction) meant a side WITHOUT the re-export kept its
+    one qualified key while a side WITH it collapsed down to the alias key
+    instead -- two different surviving keys for the unchanged declaration,
+    which ``_diff_constants`` then read as a spurious
+    ``CONSTANT_REMOVED``/``CONSTANT_ADDED`` pair. Keeping the qualified
+    spelling instead is invariant to whether either side happens to carry
+    the alias: a side with the re-export collapses down to the SAME key a
+    side without it already used, so adding or removing only the re-export
+    produces no key-set difference at all. The trade-off this accepts is the
+    complementary one already documented for the direct-clang backend in
+    ``AGENTS.md``'s Known gaps -- the re-export's own addition/removal goes
+    undetected -- rather than a new, castxml-only failure mode of fabricated
+    add/remove noise.
+
     Returns *items* unchanged (same list identity not guaranteed, but same
     contents) when no such pair exists, which is the overwhelmingly common
     case: most versioned-namespace declarations have no re-export at all.
+
+    **Accepted residual risk (Codex review, P2):** the gate is name-shape
+    plus value-equality, not proven using-shadow/target identity -- no
+    header-AST producer available here exposes that relationship. Two
+    genuinely independent declarations that happen to form a
+    version-alias-shaped name pair AND happen to share a value at the
+    moment of extraction (e.g. an unrelated top-level ``x`` and a nested
+    ``v1::x`` that both currently equal the same literal) will merge, and a
+    later, independent change to the dropped one can then read as an
+    ``ADDED`` instead of a ``CHANGED``. This is the same class of
+    accepted, documented limitation as ``diff_symbols._diff_constants``'s
+    own value-fingerprint caveat and `_type_index_items`'s structural-
+    identity caveat -- narrower here than either (it requires the
+    coincidence to hold at extraction time, not just eventually), but not
+    eliminated, since doing so needs real identity evidence this module
+    does not have.
     """
     by_name = {name: value for name, value, _header in items}
     drop: set[str] = set()
@@ -197,7 +248,7 @@ def dedup_versioned_namespace_alias_items(
             continue
         alias_value = by_name.get(stripped_name)
         if alias_value is not None and alias_value == value:
-            drop.add(name)
+            drop.add(stripped_name)
     if not drop:
         return items
     return [item for item in items if item[0] not in drop]

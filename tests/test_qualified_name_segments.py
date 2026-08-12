@@ -24,15 +24,37 @@ from abicheck.qualified_name_segments import dedup_versioned_namespace_alias_ite
 
 
 class TestDedupVersionedNamespaceAliasItems:
-    def test_alias_pair_with_matching_value_collapses_to_the_stripped_name(
+    def test_alias_pair_with_matching_value_collapses_to_the_qualified_name(
         self,
     ) -> None:
+        # The version-*qualified* original survives; the version-*stripped*
+        # alias is dropped -- not the reverse (Codex review, P1: keeping the
+        # alias instead made a diff unstable across a release that adds or
+        # removes only the `using` re-export -- see the function's own
+        # docstring).
         items = [
             ("detail::v1::x", "42", "a.h"),
             ("detail::x", "42", "a.h"),
         ]
         result = dedup_versioned_namespace_alias_items(items)
-        assert result == [("detail::x", "42", "a.h")]
+        assert result == [("detail::v1::x", "42", "a.h")]
+
+    def test_dedup_is_invariant_to_whether_the_alias_is_present(self) -> None:
+        # The load-bearing property this direction buys (Codex review, P1):
+        # a side without the re-export and a side with it must resolve to
+        # the exact same surviving key, so adding/removing only the
+        # `using` re-export produces no key-set difference for
+        # `_diff_constants` to (mis)read as CONSTANT_REMOVED/CONSTANT_ADDED.
+        without_reexport = [("detail::v1::x", "42", "a.h")]
+        with_reexport = [
+            ("detail::v1::x", "42", "a.h"),
+            ("detail::x", "42", "a.h"),
+        ]
+        assert (
+            dedup_versioned_namespace_alias_items(without_reexport)
+            == dedup_versioned_namespace_alias_items(with_reexport)
+            == [("detail::v1::x", "42", "a.h")]
+        )
 
     def test_differing_values_are_not_merged(self) -> None:
         # A using-declaration can never legally re-export a constant under a
@@ -61,6 +83,24 @@ class TestDedupVersionedNamespaceAliasItems:
         result = dedup_versioned_namespace_alias_items(items)
         assert result == items
 
+    def test_accepted_residual_risk_two_independent_declarations_can_coincide(
+        self,
+    ) -> None:
+        # Documents, rather than "fixes", the accepted residual risk this
+        # function's own docstring names (Codex review, P2): two genuinely
+        # independent declarations that merely *look* like a
+        # version-alias pair and happen to share a value at extraction time
+        # are indistinguishable from a real alias pair with the evidence
+        # available here (name shape + value equality, not proven
+        # using-shadow/target identity). This pins the current, documented
+        # behavior so a future change doesn't silently alter it.
+        items = [
+            ("detail::v1::x", "42", "a.h"),  # a real, independent declaration
+            ("detail::x", "42", "a.h"),  # an unrelated declaration, same value
+        ]
+        result = dedup_versioned_namespace_alias_items(items)
+        assert result == [("detail::v1::x", "42", "a.h")]
+
     def test_unrelated_items_are_unaffected(self) -> None:
         items = [("a::b", "1", "x.h"), ("c::d", "2", "y.h")]
         result = dedup_versioned_namespace_alias_items(items)
@@ -70,8 +110,8 @@ class TestDedupVersionedNamespaceAliasItems:
         forward = [("detail::v1::x", "42", "a.h"), ("detail::x", "42", "a.h")]
         backward = [("detail::x", "42", "a.h"), ("detail::v1::x", "42", "a.h")]
         assert dedup_versioned_namespace_alias_items(forward) == [
-            ("detail::x", "42", "a.h")
+            ("detail::v1::x", "42", "a.h")
         ]
         assert dedup_versioned_namespace_alias_items(backward) == [
-            ("detail::x", "42", "a.h")
+            ("detail::v1::x", "42", "a.h")
         ]

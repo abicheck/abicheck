@@ -2204,33 +2204,73 @@ Once a root command genuinely clears the bar above, pick the right home:
   identity, not `AbiSnapshot.constants`), not attempted here.
 
   **Fixed**: `qualified_name_segments.dedup_versioned_namespace_alias_items()`
-  collapses the versioned spelling onto its version-stripped alias within
-  one already-collected `_iter_public_constants()` item list, gated on
-  BOTH (1) the two qualified names differing by exactly one
+  collapses the version-stripped alias onto its version-*qualified*
+  original within one already-collected `_iter_public_constants()` item
+  list, gated on BOTH (1) the two qualified names differing by exactly one
   versioned-inline-namespace *segment* (`version_strip_segments` — the
   same, already-trusted structural check `diff_namespaces.py` already
   relies on for its own alias merging, which by construction never
   matches a declaration's own leaf name) AND (2) the two values being
   byte-identical. This is deliberately **not** the plain value-equality
   merge this same module's own docstring already rejected after three
-  review rounds (P1): that heuristic had no name evidence at all and ran
+  review rounds: that heuristic had no name evidence at all and ran
   *across* two different snapshots being compared, so it could merge
   unrelated same-valued declarations that never even coexist together.
   This fix is narrower on every axis — same-snapshot only, and gated on a
-  real structural name relationship in addition to value equality — so it
-  can only misfire on two genuinely distinct declarations that
-  coincidentally share both a version-alias-shaped qualified-name pair
-  and an identical value within the same extraction pass, a materially
-  narrower coincidence than bare value equality alone. Keeps the
-  version-stripped (shorter) spelling — the one a consumer of the `using`
-  re-export actually writes. See
-  `tests/test_qualified_name_segments.py` and
-  `TestConstantExtraction.test_using_reexported_constant_is_deduplicated`
-  (`tests/test_dumper_members.py`) for the regression coverage, including
-  the safety-gate cases (differing values never merge; a versioned
-  constant with no re-export keeps its full name; a leaf name shaped like
-  a version segment, e.g. a constant literally named `v1`, is never
-  stripped).
+  real structural name relationship in addition to value equality.
+
+  **Which spelling survives is load-bearing, not a style choice, and was
+  wrong in an earlier revision of this same fix (Codex review, P1, fresh
+  evidence).** The first version of this fix kept the shorter,
+  version-stripped alias and dropped the qualified original — reasoned as
+  "the spelling a consumer of the `using` re-export actually writes" — and
+  that direction actively fabricated findings: `AbiSnapshot.constants` is
+  built independently per side of a comparison, so whether a given side's
+  item list contains the alias at all depends only on whether *that
+  side's* headers declared the `using` re-export. A release that adds or
+  removes only the re-export (the real declaration unchanged) went from
+  one snapshot keeping `detail::v1::x` (no alias present, nothing to
+  strip) to the other collapsing down to `detail::x` instead — two
+  different surviving keys for one unchanged declaration, which
+  `_diff_constants` read as a spurious `CONSTANT_REMOVED` +
+  `CONSTANT_ADDED` pair, i.e. this fix's first revision manufactured
+  exactly the kind of double-reporting it was written to eliminate, just
+  shaped as add/remove instead of a duplicated `CONSTANT_CHANGED`. Fixed
+  by reversing the direction: always keep the version-*qualified*
+  spelling and drop the alias. This is invariant to whether either side
+  happens to carry the re-export — a side with it collapses down to the
+  SAME key a side without it already used — so adding/removing only the
+  re-export now produces no key-set difference at all. The accepted
+  trade-off is the same shape as the already-documented direct-clang gap
+  below (the re-export's own addition/removal goes undetected), not a new
+  castxml-only failure mode.
+
+  **Accepted residual risk (Codex review, P2), not eliminated.** The gate
+  is name-shape plus value-equality, not proven using-shadow/target
+  identity — no header-AST producer available here exposes that
+  relationship. Two genuinely independent declarations that happen to
+  form a version-alias-shaped name pair AND happen to share a value at
+  the moment of extraction (e.g. an unrelated top-level `x` and a nested
+  `v1::x` that both currently equal the same literal) will still merge,
+  and a later, independent change to the dropped one can then read as a
+  `CONSTANT_ADDED` instead of a `CONSTANT_CHANGED`. This is the same
+  class of accepted, documented limitation as `_diff_constants`'s own
+  value-fingerprint caveat and `_type_index_items`'s structural-identity
+  caveat referenced above — narrower here (it requires the coincidence to
+  hold at extraction time, not just eventually) but not closed, since
+  doing so needs real identity evidence this module does not have. See
+  `tests/test_qualified_name_segments.py` (including
+  `test_accepted_residual_risk_two_independent_declarations_can_coincide`,
+  which pins this behavior rather than hiding it) and
+  `TestConstantExtraction` in `tests/test_dumper_members.py` — in
+  particular `test_using_reexported_constant_is_deduplicated` and
+  `test_adding_or_removing_only_the_reexport_produces_no_key_diff` (the P1
+  regression, asserting both a with-re-export and a without-re-export
+  extraction resolve to the identical key set) — for the full regression
+  coverage, including the other safety-gate cases (differing values never
+  merge; a versioned constant with no re-export keeps its full name; a
+  leaf name shaped like a version segment, e.g. a constant literally named
+  `v1`, is never stripped).
 
   **Still open, deliberately not attempted in this same pass: the
   complementary clang-side false negative.** Verified directly against
