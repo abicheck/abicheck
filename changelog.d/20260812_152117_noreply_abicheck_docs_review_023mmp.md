@@ -4,8 +4,12 @@
   The `--header` help text (and generated `docs/reference/cli-reference.md`)
   no longer claims a headerless native binary "falls back to symbols-only
   mode" — without headers abicheck actually uses whatever debug info is
-  available first (DWARF on ELF, PDB on PE), only degrading to symbols-only
-  when neither headers nor debug info are present. `README.md`,
+  available first (DWARF on ELF, PDB on PE), only degrading further to L0
+  binary-metadata analysis (exported symbols plus platform-specific facts —
+  SONAME/dependencies/rpaths on ELF, machine type/imports/delay-load/
+  hardening on PE, install name/dependencies/rpaths on Mach-O — never a
+  bare symbol list) when neither headers nor debug info are present.
+  `README.md`,
   `docs/start/getting-started.md`, and `docs/learn/architecture.md` no
   longer claim DWARF debug-info cross-check on macOS — abicheck has no
   Mach-O DWARF/debug-map reader, so a headerless Mach-O input's own

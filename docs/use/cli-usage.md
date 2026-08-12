@@ -107,15 +107,13 @@ abicheck dump libfoo.so.2 -H include/v2/foo.h --version 2.0 -o libfoo-2.0.json
 abicheck compare libfoo-1.0.json libfoo-2.0.json
 ```
 
-If headers are not provided, `compare` uses whatever debug info is available
-instead — DWARF on ELF, PDB on PE — falling back further to L0
-binary-metadata analysis (exported symbols plus platform-specific facts —
-SONAME/dependencies/rpaths on ELF, machine type/imports/delay-load/hardening
-on PE, install name/dependencies/rpaths on Mach-O — never a bare symbol
-list) only when neither headers nor debug info are present. Only the ELF
-path prints an explicit no-headers warning today; PE and Mach-O degrade the
-same way without one. Less evidence means a weaker analysis that may miss
-signature/type-level ABI breaks; see
+A JSON snapshot's evidence is fixed at `dump` time: `compare` loads it
+verbatim, so passing `-H` at `dump` time (as above) means `compare` sees
+the same full header-AST evidence either side captured, with no headers
+flag of its own to pass and no re-resolution against DWARF/PDB/binary
+metadata happening at compare time. The no-headers fallback described
+above only applies when a *native binary* (`.so`/`.dll`/`.dylib`) is
+compared directly with no `-H`; see
 [Evidence & Detectability](../learn/evidence-and-detectability.md).
 
 > **Going beyond a plain `.so` + headers?** C vs C++ mode, cross-compilation,
