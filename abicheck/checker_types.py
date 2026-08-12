@@ -359,10 +359,13 @@ class Change:
     # every other kind, and None here too when the symbol's binding was never
     # captured (non-ELF platform, older snapshot, ELF metadata without a
     # matching .dynsym entry). Exists so a suppression rule's ``binding:``
-    # selector (suppression.py) can tell a WEAK COMDAT demotion — every
-    # consumer already has its own copy, per the linkage-blind-removal
-    # analysis in AGENTS.md — apart from a GLOBAL/STRONG export's removal,
-    # which always breaks every consumer. Deliberately a plain string, not
+    # selector (suppression.py) can narrow a removal rule to the common
+    # WEAK-COMDAT-inline case. Provider-side evidence only, NOT proof of
+    # safety: it names the *library's own build*'s linkage, not whether
+    # every consumer already carries its own copy — see AGENTS.md's
+    # "Linkage-blind removal" entry (the extern-template counterexample) and
+    # Suppression.binding's own docstring, which carries the full caveat.
+    # Deliberately a plain string, not
     # the ``SymbolBinding`` enum itself: mirrors ``old_value``/``new_value``
     # and every other string-typed selector-facing field already on this
     # class, and keeps ``model.py``'s ``elf_metadata`` dependency from

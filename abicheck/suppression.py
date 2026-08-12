@@ -970,26 +970,6 @@ class Suppression:
     :attr:`entity_namespace` — a public symbol's finding whose *cause* happens
     to be internal must not be suppressible by a rule aimed at hiding
     internal-namespace churn on the *symbol itself*."""
-    binding: str | None = None
-    """``"global" | "weak" | "local" | "unique" | "other"`` — the removed
-    symbol's ELF linkage (``Change.symbol_binding``, from
-    ``Function.elf_binding``/``Variable.elf_binding``). Only ever set on a
-    ``FUNC_REMOVED``/``FUNC_REMOVED_ELF_ONLY``/``VAR_REMOVED`` finding; a
-    rule combining this with any other ``change_kind`` never matches.
-    Conjunctive with every other selector (AND semantics), like
-    :attr:`member_name` — combine with :attr:`symbol_pattern` or
-    :attr:`namespace` to scope it. The intended use is narrowing a broad
-    removal rule to WEAK-linkage-only: a ``WEAK`` COMDAT definition (an
-    in-class-defined/``inline`` member) has every consumer already carrying
-    its own copy, so losing it from one library build is rarely a real
-    break, unlike a ``GLOBAL``/STRONG export's removal — see
-    ``Change.symbol_binding``'s docstring and AGENTS.md's "Linkage-blind
-    removal" entry. Example: ``symbol_pattern: ".*", change_kind:
-    func_removed, binding: weak`` tolerates weak demotions while a separate,
-    binding-less rule still catches (i.e. does not suppress) a STRONG
-    removal on the same symbol set. Never matches a change whose binding was
-    not captured (``Change.symbol_binding is None``) — see
-    :func:`_matches_binding`."""
     reachability: str | None = None
     """``"unreachable-only" | "any" | "public-only" | "proven-unreachable-only"``
     — gates whether this rule may match a change flagged
@@ -1023,6 +1003,46 @@ class Suppression:
     expires: date | None = None
     """Optional expiry date (ISO 8601). After this date, the suppression is inactive
     and a warning is emitted. Format: ``expires: 2026-06-01``."""
+    # Appended after every pre-existing positional field, and kw_only (Codex
+    # review, fresh evidence): Suppression is constructible directly by a
+    # programmatic caller (not just via SuppressionList.load's YAML path,
+    # which always passes every field by keyword — see that call site), and
+    # inserting a field earlier in the list would have silently reassigned
+    # every positional argument from that point on for such a caller (e.g. a
+    # value previously meant for `reachability` becoming `binding` instead).
+    # Same "public-API dataclass, append-and-kw_only" convention as
+    # Change.symbol_binding/Change.vtable_covers_unverifiable_layout_gap and
+    # AbiSnapshot's own PR #582 fix — see those fields' docstrings.
+    binding: str | None = field(default=None, kw_only=True)
+    """``"global" | "weak" | "local" | "unique" | "other"`` — the removed
+    symbol's ELF linkage (``Change.symbol_binding``, from
+    ``Function.elf_binding``/``Variable.elf_binding``). Only ever set on a
+    ``FUNC_REMOVED``/``FUNC_REMOVED_ELF_ONLY``/``VAR_REMOVED`` finding; a
+    rule combining this with any other ``change_kind`` never matches.
+    Conjunctive with every other selector (AND semantics), like
+    :attr:`member_name` — combine with :attr:`symbol_pattern` or
+    :attr:`namespace` to scope it. Never matches a change whose binding was
+    not captured (``Change.symbol_binding is None``) — see
+    :func:`_matches_binding`.
+
+    **Provider-side evidence only — not proof a removal is safe.** ``WEAK``
+    linkage tells you the *library's own build* used vague/COMDAT linkage
+    for this symbol; it does not by itself tell you every *consumer* already
+    holds its own copy. AGENTS.md's "Linkage-blind removal" entry records
+    the concrete counterexample this codebase already had to unlearn twice:
+    a public header carrying ``extern template struct Box<int>;`` tells
+    consumer TUs *not* to instantiate, while the library's own explicit
+    instantiation still emits a ``WEAK``/COMDAT definition — so a consumer
+    can hold an undefined reference to a symbol this repo's own model would
+    still report as ``WEAK``. A ``binding: weak`` rule narrows a removal
+    finding to the *common* WEAK-COMDAT-inline case (every consumer already
+    emitted its own copy); it is not, on its own, sufficient justification
+    for suppression — confirm the removed symbol is not also documented
+    `extern template`/explicit-instantiation surface (or otherwise known to
+    have real out-of-library callers relying on the library's definition)
+    before relying on this selector alone. A separate, binding-less rule
+    still catches (does not suppress) a ``GLOBAL``/STRONG removal on the
+    same symbol set."""
     _compiled_pattern: re.Pattern[str] | None = field(default=None, init=False, repr=False)
     _compiled_type_pattern: re.Pattern[str] | None = field(default=None, init=False, repr=False)
     _compiled_member_pattern: re.Pattern[str] | None = field(default=None, init=False, repr=False)
