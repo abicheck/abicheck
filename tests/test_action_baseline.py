@@ -147,6 +147,24 @@ class TestValidationInputRejected:
         assert result.returncode == 1
         assert "not a non-negative integer" in result.stdout
 
+    def test_baseline_generation_with_trailing_garbage_fails(
+        self, tmp_path: Path
+    ) -> None:
+        # Regression (CodeRabbit review): the bash case glob `[0-9]*` alone
+        # is not anchored to "only digits" -- it matches any string that
+        # merely STARTS with a digit, so "3x"/"3.0" previously passed this
+        # cheap run.sh-level check and only failed later, more opaquely, in
+        # build_manifest.py's own int() conversion.
+        result, _ = _run_action(
+            {
+                "INPUT_LIBRARIES": json.dumps([{"name": "foo", "artifact": "a.so"}]),
+                "INPUT_BASELINE_GENERATION": "3x",
+            },
+            tmp_path,
+        )
+        assert result.returncode == 1
+        assert "not a non-negative integer" in result.stdout
+
 
 @pytest.mark.skipif(not RUN_SH.is_file(), reason="actions/baseline/run.sh not found")
 class TestLibrariesJsonValidation:

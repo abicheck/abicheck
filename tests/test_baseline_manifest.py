@@ -114,6 +114,40 @@ class TestBuildManifestBasics:
         )
         assert manifest["baseline_generation"] == 3
 
+    def test_build_manifest_rejects_negative_baseline_generation_directly(
+        self, tmp_path: Path
+    ) -> None:
+        # build_manifest() is itself a public, directly-callable function --
+        # main()'s own CLI validation (TestMainCli below) isn't the only
+        # path to it, so the negative/type check must live here too
+        # (CodeRabbit review).
+        out = tmp_path
+        _write_snapshot(out / "libfoo.abicheck.json", library="libfoo")
+        entries = [{"name": "libfoo", "artifact": "build/libfoo.so"}]
+        with pytest.raises(SystemExit, match="non-negative"):
+            build_manifest_module.build_manifest(
+                out, "v1.0.0", "linux-x86_64", entries, None, baseline_generation=-1
+            )
+
+    def test_build_manifest_rejects_bool_baseline_generation_directly(
+        self, tmp_path: Path
+    ) -> None:
+        # bool is an int subclass in Python -- `isinstance(True, int)` is
+        # True -- so a naive type check would silently accept `True` as
+        # generation `1`. type(x) is int is what actually excludes it.
+        out = tmp_path
+        _write_snapshot(out / "libfoo.abicheck.json", library="libfoo")
+        entries = [{"name": "libfoo", "artifact": "build/libfoo.so"}]
+        with pytest.raises(SystemExit, match="non-negative"):
+            build_manifest_module.build_manifest(
+                out,
+                "v1.0.0",
+                "linux-x86_64",
+                entries,
+                None,
+                baseline_generation=True,  # type: ignore[arg-type]
+            )
+
     def test_missing_snapshot_raises(self, tmp_path: Path) -> None:
         entries = [{"name": "libfoo", "artifact": "build/libfoo.so"}]
         with pytest.raises(SystemExit, match="libfoo"):

@@ -357,17 +357,39 @@ def load_baseline_manifest(baseline_dir: Path | str) -> BaselineManifest | None:
     snapshot_schema = data.get("snapshot_schema")
     fact_set = data.get("fact_set")
     baseline_generation = data.get("baseline_generation")
+    # `isinstance(x, int)` alone accepts `True`/`False` too -- `bool` is a
+    # subclass of `int` in Python -- so a hand-authored or corrupted
+    # manifest with e.g. `"baseline_generation": true` would otherwise
+    # parse as the integer `1` and could then coincidentally match a
+    # caller's `expected_baseline_generation=1`, resolving where a real
+    # generation mismatch should fail closed as `stale_generation` (same
+    # risk for `manifest_version`/`snapshot_schema` against
+    # `SUPPORTED_MANIFEST_VERSIONS`/`serialization.SCHEMA_VERSION`; Codex
+    # review flagged `baseline_generation` specifically, fixed here for all
+    # three int-typed fields this function parses).
+    manifest_version = (
+        manifest_version
+        if isinstance(manifest_version, int) and not isinstance(manifest_version, bool)
+        else None
+    )
+    snapshot_schema = (
+        snapshot_schema
+        if isinstance(snapshot_schema, int) and not isinstance(snapshot_schema, bool)
+        else None
+    )
+    baseline_generation = (
+        baseline_generation
+        if isinstance(baseline_generation, int)
+        and not isinstance(baseline_generation, bool)
+        else None
+    )
     return BaselineManifest(
-        manifest_version=manifest_version
-        if isinstance(manifest_version, int)
-        else None,
+        manifest_version=manifest_version,
         project_ref=str(data.get("project_ref") or ""),
         profile=str(data.get("profile") or ""),
-        snapshot_schema=snapshot_schema if isinstance(snapshot_schema, int) else None,
+        snapshot_schema=snapshot_schema,
         fact_set=fact_set if isinstance(fact_set, dict) else None,
-        baseline_generation=baseline_generation
-        if isinstance(baseline_generation, int)
-        else None,
+        baseline_generation=baseline_generation,
         artifacts=artifacts,
     )
 

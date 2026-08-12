@@ -160,6 +160,23 @@ def build_manifest(
     previous_manifest_path: Path | None,
     baseline_generation: int | None = None,
 ) -> dict[str, Any]:
+    # main()'s own --baseline-generation parsing already rejects a
+    # non-integer or negative CLI value before ever calling this function --
+    # but build_manifest() is itself a public, directly-callable/unit-tested
+    # function (tests/test_baseline_manifest.py calls it directly), not only
+    # reachable through main()'s CLI validation. `isinstance(x, int)` alone
+    # would accept `True`/`False` too (bool is an int subclass in Python),
+    # silently recording e.g. `baseline_generation: 1` for a caller that
+    # passed `True` -- reject anything that isn't a genuine non-negative
+    # int, the same domain main() already enforces at the CLI boundary
+    # (CodeRabbit review).
+    if baseline_generation is not None and (
+        type(baseline_generation) is not int or baseline_generation < 0
+    ):
+        raise SystemExit(
+            f"baseline_generation {baseline_generation!r} must be a "
+            "non-negative int (or None)."
+        )
     artifacts = []
     schema_versions: set[int] = set()
     # The full source-fact recipe identity, not just (name, version): two

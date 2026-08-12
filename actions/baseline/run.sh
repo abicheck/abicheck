@@ -35,8 +35,15 @@ case "$VALIDATION" in
 esac
 
 case "$BASELINE_GENERATION" in
-  '' | [0-9]*) ;;
-  *) _fail "baseline-generation '$BASELINE_GENERATION' is not a non-negative integer." ;;
+  '') ;;
+  # `[0-9]*` alone is NOT anchored to "only digits" -- as a bash case glob
+  # it matches any string that merely STARTS with a digit ("3x", "3.0"),
+  # which would then pass this cheap check and only fail later, more
+  # opaquely, in build_manifest.py's own int() conversion (CodeRabbit
+  # review). Reject any value containing a non-digit character first, so
+  # only a value that is ENTIRELY digits reaches the accept arm below.
+  *[!0-9]*) _fail "baseline-generation '$BASELINE_GENERATION' is not a non-negative integer." ;;
+  [0-9]*) ;;
 esac
 
 # ADR-059: the canonical storage suffix implied by snapshot-compression --

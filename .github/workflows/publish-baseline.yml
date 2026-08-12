@@ -601,6 +601,35 @@ jobs:
             exit 1
           fi
 
+          # Same reasoning as existing_fact_set_ok above, for
+          # baseline_generation: compute_content_digest() doesn't read it
+          # either, so a rerun that only changed --baseline-generation (e.g.
+          # rolling that field out onto an already-published asset, or
+          # bumping the generation for a scanner-recipe fix with no
+          # snapshot-content-visible effect) would otherwise reach the
+          # identical content digest and take the safe-retry no-op below,
+          # silently leaving the OLD (or null) generation published -- a
+          # real consumer's expected-baseline-generation check
+          # (resolve-baseline's stale_generation outcome) would then reject
+          # this asset even though the publish step itself reported success
+          # (Codex review).
+          existing_baseline_generation_ok=$(python3 -c '
+          import json
+          import sys
+          from pathlib import Path
+
+          existing_manifest = json.loads(
+              (Path(sys.argv[1]) / "manifest.json").read_text(encoding="utf-8")
+          )
+          new_manifest = json.loads(Path(sys.argv[2]).read_text(encoding="utf-8"))
+          print("true" if existing_manifest.get("baseline_generation") == new_manifest.get("baseline_generation") else "false")
+          ' .existing-asset/extracted "$NEW_MANIFEST_PATH")
+
+          if [[ "$existing_baseline_generation_ok" != "true" ]]; then
+            echo "::error::$ASSET_NAME already exists on release $RELEASE_TAG but its manifest.json declares a DIFFERENT baseline_generation than this run's own freshly-built manifest -- a real consumer's expected-baseline-generation check (resolve-baseline's stale_generation outcome) depends on that field independently of snapshot/binary content, so this is never a safe retry regardless of what the content digest says. Delete the existing asset explicitly ('gh release delete-asset $RELEASE_TAG $ASSET_NAME --repo $REPO --yes') and re-run, or publish under a new release tag." >&2
+            exit 1
+          fi
+
           # compute_content_digest()/recompute_content_digest_from_disk()
           # hash artifacts[] content alone -- neither reads
           # manifest_version/snapshot_schema, so an existing asset with an
