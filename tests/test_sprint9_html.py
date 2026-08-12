@@ -1,5 +1,6 @@
 # pylint: disable=too-many-branches,too-many-statements,too-many-locals,too-many-arguments,too-many-return-statements
 """Sprint 9: Tests for ABICC-compatible HTML report generator."""
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -13,8 +14,15 @@ from abicheck.html_report import generate_html_report, write_html_report
 # Helpers
 # ---------------------------------------------------------------------------
 
-def _ch(kind: str, symbol: str = "foo", desc: str = "", old: str = "", new: str = "",
-        demangled: str = "") -> object:
+
+def _ch(
+    kind: str,
+    symbol: str = "foo",
+    desc: str = "",
+    old: str = "",
+    new: str = "",
+    demangled: str = "",
+) -> object:
     """Minimal Change-like object."""
     from enum import Enum
 
@@ -57,6 +65,7 @@ def _result(
 # Basic structure tests
 # ---------------------------------------------------------------------------
 
+
 def test_html_is_valid_document() -> None:
     r = _result()
     out = generate_html_report(r)
@@ -74,7 +83,9 @@ def test_html_contains_verdict() -> None:
 
 def test_html_contains_library_and_versions() -> None:
     r = _result()
-    out = generate_html_report(r, lib_name="libfoo", old_version="2025.0", new_version="2025.3")
+    out = generate_html_report(
+        r, lib_name="libfoo", old_version="2025.0", new_version="2025.3"
+    )
     assert "libfoo" in out
     assert "2025.0" in out
     assert "2025.3" in out
@@ -82,7 +93,9 @@ def test_html_contains_library_and_versions() -> None:
 
 def test_html_title_contains_versions() -> None:
     r = _result()
-    out = generate_html_report(r, lib_name="libfoo", old_version="1.0", new_version="2.0")
+    out = generate_html_report(
+        r, lib_name="libfoo", old_version="1.0", new_version="2.0"
+    )
     assert "<title>" in out
     assert "1.0" in out
     assert "2.0" in out
@@ -92,6 +105,7 @@ def test_html_title_contains_versions() -> None:
 # BC% calculation
 # ---------------------------------------------------------------------------
 
+
 def test_bc_100_when_no_breaking() -> None:
     r = _result(verdict="COMPATIBLE", changes=[_ch("func_added")])
     out = generate_html_report(r)
@@ -99,7 +113,9 @@ def test_bc_100_when_no_breaking() -> None:
 
 
 def test_bc_0_when_all_breaking_no_symbol_count() -> None:
-    r = _result(verdict="BREAKING", changes=[_ch("func_removed"), _ch("func_removed", "bar")])
+    r = _result(
+        verdict="BREAKING", changes=[_ch("func_removed"), _ch("func_removed", "bar")]
+    )
     out = generate_html_report(r)
     assert "0.0%" in out
 
@@ -120,6 +136,7 @@ def test_bc_no_change_is_100() -> None:
 # ---------------------------------------------------------------------------
 # Sectioned layout
 # ---------------------------------------------------------------------------
+
 
 def test_removed_section_present_when_removals_exist() -> None:
     r = _result(verdict="BREAKING", changes=[_ch("func_removed", "myfunc")])
@@ -159,8 +176,12 @@ def test_policy_demoted_removal_does_not_contradict_compatible_verdict() -> None
     c = Change(ChangeKind.FUNC_REMOVED, "_Z3foov", "removed: foo")
     pf = PolicyFile(overrides={ChangeKind.FUNC_REMOVED: Verdict.COMPATIBLE})
     result = DiffResult(
-        old_version="1.0", new_version="2.0", library="libtest.so",
-        changes=[c], verdict=Verdict.COMPATIBLE, policy_file=pf,
+        old_version="1.0",
+        new_version="2.0",
+        library="libtest.so",
+        changes=[c],
+        verdict=Verdict.COMPATIBLE,
+        policy_file=pf,
     )
     out = generate_html_report(result)
     assert "Compatibility: COMPATIBLE" in out
@@ -173,7 +194,9 @@ def test_policy_demoted_removal_does_not_contradict_compatible_verdict() -> None
     "escalated_verdict",
     ["BREAKING", "API_BREAK", "COMPATIBLE_WITH_RISK"],
 )
-def test_policy_escalated_addition_not_in_green_added_section(escalated_verdict: str) -> None:
+def test_policy_escalated_addition_not_in_green_added_section(
+    escalated_verdict: str,
+) -> None:
     """Codex review on #549 (two rounds): a policy file that escalates an
     inherently additive kind away from COMPATIBLE — to BREAKING, API_BREAK,
     *or* COMPATIBLE_WITH_RISK — must not leave the finding in the green
@@ -190,8 +213,12 @@ def test_policy_escalated_addition_not_in_green_added_section(escalated_verdict:
     c = Change(ChangeKind.FUNC_ADDED, "_Z3barv", "new function: bar")
     pf = PolicyFile(overrides={ChangeKind.FUNC_ADDED: Verdict[escalated_verdict]})
     result = DiffResult(
-        old_version="1.0", new_version="2.0", library="libtest.so",
-        changes=[c], verdict=Verdict[escalated_verdict], policy_file=pf,
+        old_version="1.0",
+        new_version="2.0",
+        library="libtest.so",
+        changes=[c],
+        verdict=Verdict[escalated_verdict],
+        policy_file=pf,
     )
     out = generate_html_report(result)
     assert "id='added'" not in out
@@ -224,6 +251,7 @@ def test_no_change_fallback_message() -> None:
 # Summary table
 # ---------------------------------------------------------------------------
 
+
 def test_summary_table_present() -> None:
     r = _result(changes=[_ch("func_removed"), _ch("func_added")])
     out = generate_html_report(r)
@@ -231,12 +259,14 @@ def test_summary_table_present() -> None:
 
 
 def test_summary_table_categories() -> None:
-    r = _result(changes=[
-        _ch("func_removed"),
-        _ch("type_size_changed"),
-        _ch("enum_member_removed"),
-        _ch("soname_changed"),
-    ])
+    r = _result(
+        changes=[
+            _ch("func_removed"),
+            _ch("type_size_changed"),
+            _ch("enum_member_removed"),
+            _ch("soname_changed"),
+        ]
+    )
     out = generate_html_report(r)
     assert "Functions" in out
     assert "Types" in out
@@ -247,6 +277,7 @@ def test_summary_table_categories() -> None:
 # ---------------------------------------------------------------------------
 # Navigation bar
 # ---------------------------------------------------------------------------
+
 
 def test_nav_links_to_sections() -> None:
     r = _result(changes=[_ch("func_removed"), _ch("func_added")])
@@ -266,6 +297,7 @@ def test_nav_absent_when_no_changes() -> None:
 # Suppressed changes
 # ---------------------------------------------------------------------------
 
+
 def test_suppressed_section_shown() -> None:
     sup = [_ch("func_removed", "hidden_func")]
     r = _result(suppressed=sup, suppressed_count=1)
@@ -284,17 +316,16 @@ def test_suppressed_count_only_shown_when_no_details() -> None:
 # Demangled symbol display
 # ---------------------------------------------------------------------------
 
+
 def test_demangled_symbol_shown_as_text() -> None:
-    ch = _ch("func_removed", symbol="_ZN3FooC1Ev",
-             demangled="Foo::Foo()")
+    ch = _ch("func_removed", symbol="_ZN3FooC1Ev", demangled="Foo::Foo()")
     r = _result(verdict="BREAKING", changes=[ch])
     out = generate_html_report(r)
     assert "Foo::Foo()" in out
 
 
 def test_mangled_symbol_in_tooltip() -> None:
-    ch = _ch("func_removed", symbol="_ZN3FooC1Ev",
-             demangled="Foo::Foo()")
+    ch = _ch("func_removed", symbol="_ZN3FooC1Ev", demangled="Foo::Foo()")
     r = _result(verdict="BREAKING", changes=[ch])
     out = generate_html_report(r)
     assert "_ZN3FooC1Ev" in out  # mangled in abbr title
@@ -303,6 +334,7 @@ def test_mangled_symbol_in_tooltip() -> None:
 # ---------------------------------------------------------------------------
 # XSS safety
 # ---------------------------------------------------------------------------
+
 
 def test_xss_escape_lib_name() -> None:
     r = _result()
@@ -326,7 +358,7 @@ def test_xss_escape_description() -> None:
 
 
 def test_xss_escape_old_value() -> None:
-    ch = _ch("func_params_changed", old='<script>x()</script>', new="int")
+    ch = _ch("func_params_changed", old="<script>x()</script>", new="int")
     r = _result(verdict="BREAKING", changes=[ch])
     out = generate_html_report(r)
     assert "<script>" not in out
@@ -344,6 +376,7 @@ def test_xss_escape_new_value() -> None:
 # write_html_report
 # ---------------------------------------------------------------------------
 
+
 def test_write_creates_dirs_and_file(tmp_path: Path) -> None:
     r = _result()
     out = tmp_path / "deep" / "nested" / "report.html"
@@ -355,8 +388,14 @@ def test_write_creates_dirs_and_file(tmp_path: Path) -> None:
 def test_write_passes_old_symbol_count(tmp_path: Path) -> None:
     r = _result(verdict="BREAKING", changes=[_ch("func_removed")])
     out = tmp_path / "report.html"
-    write_html_report(r, out, lib_name="libfoo", old_version="1.0", new_version="2.0",
-                      old_symbol_count=50)
+    write_html_report(
+        r,
+        out,
+        lib_name="libfoo",
+        old_version="1.0",
+        new_version="2.0",
+        old_symbol_count=50,
+    )
     content = out.read_text()
     assert "98.0%" in content  # (50-1)/50 * 100
 
@@ -364,6 +403,7 @@ def test_write_passes_old_symbol_count(tmp_path: Path) -> None:
 # ---------------------------------------------------------------------------
 # Verdict colours
 # ---------------------------------------------------------------------------
+
 
 def test_breaking_verdict_red_color() -> None:
     r = _result(verdict="BREAKING")
@@ -387,6 +427,7 @@ def test_no_change_verdict_blue_color() -> None:
 # BC% edge cases (review feedback)
 # ---------------------------------------------------------------------------
 
+
 def test_bc_old_symbol_count_zero_uses_legacy_fallback() -> None:
     """old_symbol_count=0 → falls back to change-ratio: 1 breaking / 1 total = 0%."""
     r = _result(verdict="BREAKING", changes=[_ch("func_removed")])
@@ -405,6 +446,7 @@ def test_bc_clamped_to_zero_when_breaking_exceeds_symbol_count() -> None:
 # enum_member_removed is breaking (review feedback)
 # ---------------------------------------------------------------------------
 
+
 def test_enum_member_removed_is_breaking() -> None:
     """enum_member_removed must count as breaking and appear in Removed section."""
     r = _result(verdict="BREAKING", changes=[_ch("enum_member_removed", "MY_VAL")])
@@ -417,6 +459,7 @@ def test_enum_member_removed_is_breaking() -> None:
 
 def test_enum_member_removed_bucket_is_removed() -> None:
     from abicheck.html_report import _change_bucket
+
     ch = _ch("enum_member_removed", "SOME_VAL")
     assert _change_bucket(ch) == "removed"
 
@@ -425,9 +468,11 @@ def test_enum_member_removed_bucket_is_removed() -> None:
 # _BREAKING_KINDS drift guard (review feedback)
 # ---------------------------------------------------------------------------
 
+
 def test_changed_breaking_kinds_subset_of_breaking_kinds() -> None:
     """CHANGED_BREAKING_KINDS must be a strict subset of BREAKING_KINDS."""
     from abicheck.report_classifications import BREAKING_KINDS, CHANGED_BREAKING_KINDS
+
     assert CHANGED_BREAKING_KINDS <= BREAKING_KINDS, (
         "CHANGED_BREAKING_KINDS has entries not in BREAKING_KINDS: "
         f"{CHANGED_BREAKING_KINDS - BREAKING_KINDS}"
@@ -436,12 +481,14 @@ def test_changed_breaking_kinds_subset_of_breaking_kinds() -> None:
 
 def test_removed_kinds_subset_of_breaking_kinds() -> None:
     from abicheck.report_classifications import BREAKING_KINDS, REMOVED_KINDS
+
     assert REMOVED_KINDS <= BREAKING_KINDS
 
 
 # ---------------------------------------------------------------------------
 # Confidence / evidence tiers / policy in HTML report
 # ---------------------------------------------------------------------------
+
 
 def test_confidence_section_present() -> None:
     """HTML report includes Analysis Confidence section."""
@@ -488,14 +535,18 @@ def test_confidence_absent_without_attribute() -> None:
 # severity_config-aware CI Gate card
 # ---------------------------------------------------------------------------
 
+
 def test_no_gate_card_without_severity_config() -> None:
     """Without severity_config, the native report has no CI Gate card at all."""
     from abicheck.checker import Change, ChangeKind, DiffResult, Verdict
 
     c = Change(ChangeKind.FUNC_ADDED, "_Z3newv", "new public function")
     result = DiffResult(
-        old_version="1.0", new_version="2.0", library="libtest.so",
-        changes=[c], verdict=Verdict.COMPATIBLE,
+        old_version="1.0",
+        new_version="2.0",
+        library="libtest.so",
+        changes=[c],
+        verdict=Verdict.COMPATIBLE,
     )
     out = generate_html_report(result)
     assert "CI Gate" not in out
@@ -510,8 +561,11 @@ def test_gate_card_fails_for_addition_promoted_to_error() -> None:
 
     c = Change(ChangeKind.FUNC_ADDED, "_Z3newv", "new public function")
     result = DiffResult(
-        old_version="1.0", new_version="2.0", library="libtest.so",
-        changes=[c], verdict=Verdict.COMPATIBLE,
+        old_version="1.0",
+        new_version="2.0",
+        library="libtest.so",
+        changes=[c],
+        verdict=Verdict.COMPATIBLE,
     )
     cfg = resolve_severity_config("default", addition="error")
     out = generate_html_report(result, severity_config=cfg)
@@ -529,8 +583,11 @@ def test_gate_card_names_blocking_category_for_addition() -> None:
 
     c = Change(ChangeKind.FUNC_ADDED, "_Z3newv", "new public function")
     result = DiffResult(
-        old_version="1.0", new_version="2.0", library="libtest.so",
-        changes=[c], verdict=Verdict.COMPATIBLE,
+        old_version="1.0",
+        new_version="2.0",
+        library="libtest.so",
+        changes=[c],
+        verdict=Verdict.COMPATIBLE,
     )
     cfg = resolve_severity_config("default", addition="error")
     out = generate_html_report(result, severity_config=cfg)
@@ -544,8 +601,11 @@ def test_gate_card_omits_blocking_categories_when_passing() -> None:
 
     c = Change(ChangeKind.FUNC_ADDED, "_Z3newv", "new public function")
     result = DiffResult(
-        old_version="1.0", new_version="2.0", library="libtest.so",
-        changes=[c], verdict=Verdict.COMPATIBLE,
+        old_version="1.0",
+        new_version="2.0",
+        library="libtest.so",
+        changes=[c],
+        verdict=Verdict.COMPATIBLE,
     )
     cfg = resolve_severity_config("default")
     out = generate_html_report(result, severity_config=cfg)
@@ -563,8 +623,11 @@ def test_gate_card_scoped_gate_omits_full_library_blocking_categories() -> None:
 
     c = Change(ChangeKind.FUNC_ADDED, "_Z3newv", "new public function")
     result = DiffResult(
-        old_version="1.0", new_version="2.0", library="libtest.so",
-        changes=[c], verdict=Verdict.COMPATIBLE,
+        old_version="1.0",
+        new_version="2.0",
+        library="libtest.so",
+        changes=[c],
+        verdict=Verdict.COMPATIBLE,
     )
     result.scoped_verdict = Verdict.BREAKING  # type: ignore[attr-defined]
     result.scoped_exit_code = 4  # type: ignore[attr-defined]
@@ -581,8 +644,11 @@ def test_gate_card_passes_when_no_error_level_findings() -> None:
 
     c = Change(ChangeKind.FUNC_ADDED, "_Z3newv", "new public function")
     result = DiffResult(
-        old_version="1.0", new_version="2.0", library="libtest.so",
-        changes=[c], verdict=Verdict.COMPATIBLE,
+        old_version="1.0",
+        new_version="2.0",
+        library="libtest.so",
+        changes=[c],
+        verdict=Verdict.COMPATIBLE,
     )
     cfg = resolve_severity_config("default")
     out = generate_html_report(result, severity_config=cfg)
@@ -603,8 +669,11 @@ def test_gate_card_reflects_scoped_gate_not_full_library() -> None:
 
     c = Change(ChangeKind.FUNC_REMOVED, "_Z3foov", "removed: foo")
     result = DiffResult(
-        old_version="1.0", new_version="2.0", library="libtest.so",
-        changes=[c], verdict=Verdict.BREAKING,
+        old_version="1.0",
+        new_version="2.0",
+        library="libtest.so",
+        changes=[c],
+        verdict=Verdict.BREAKING,
     )
     result.scoped_verdict = Verdict.COMPATIBLE  # type: ignore[attr-defined]
     result.scoped_exit_code = 0  # type: ignore[attr-defined]
@@ -623,8 +692,11 @@ def test_gate_card_absent_from_abicc_compatible_layout() -> None:
 
     c = Change(ChangeKind.FUNC_ADDED, "_Z3newv", "new public function")
     result = DiffResult(
-        old_version="1.0", new_version="2.0", library="libtest.so",
-        changes=[c], verdict=Verdict.COMPATIBLE,
+        old_version="1.0",
+        new_version="2.0",
+        library="libtest.so",
+        changes=[c],
+        verdict=Verdict.COMPATIBLE,
     )
     cfg = resolve_severity_config("default", addition="error")
     out = generate_html_report(result, severity_config=cfg, compat_html=True)
@@ -664,3 +736,22 @@ def test_scoped_verdict_box_states_actual_exit_code_under_severity_scheme() -> N
     out = generate_html_report(r)
     assert "exits 0" in out
     assert "severity exit-code scheme" in out
+
+
+def test_correlated_change_kind_rendered_in_changes_table() -> None:
+    # Cross-detector correlation (e.g. LAYOUT_UNVERIFIABLE annotated by
+    # post_processing.AnnotateLayoutUnverifiableCoveredByVtableChanged) must
+    # reach the HTML report, not just JSON/SARIF (Codex review).
+    ch = _ch("layout_unverifiable", "Foo", "layout evidence unverifiable")
+    ch.correlated_change_kind = "type_vtable_changed"
+    r = _result(verdict="COMPATIBLE_WITH_RISK", changes=[ch])
+    out = generate_html_report(r)
+    assert "type_vtable_changed" in out
+    assert "See also" in out
+
+
+def test_no_correlated_change_kind_text_when_unset() -> None:
+    ch = _ch("layout_unverifiable", "Foo", "layout evidence unverifiable")
+    r = _result(verdict="COMPATIBLE_WITH_RISK", changes=[ch])
+    out = generate_html_report(r)
+    assert "See also" not in out

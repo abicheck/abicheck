@@ -145,7 +145,7 @@ def _symbol_cell(change: object) -> str:
     mangled = h(getattr(change, "symbol", "") or "")
     demangled = h(getattr(change, "demangled_symbol", "") or mangled)
     if demangled and demangled != mangled and mangled:
-        return f"<abbr title=\"{html.escape(mangled, quote=True)}\">{demangled}</abbr>"
+        return f'<abbr title="{html.escape(mangled, quote=True)}">{demangled}</abbr>'
     return demangled or mangled
 
 
@@ -222,6 +222,17 @@ def _changes_table(changes: list[object]) -> str:
             desc_parts.append(
                 f"<div style='font-size:0.82em; color:#6a1b9a; margin-top:2px;'>"
                 f"📜 Contract — {' · '.join(bits)}</div>"
+            )
+        # Cross-detector correlation (e.g. LAYOUT_UNVERIFIABLE annotated by
+        # post_processing.AnnotateLayoutUnverifiableCoveredByVtableChanged as
+        # sharing its evidence gap with a co-reported TYPE_VTABLE_CHANGED) --
+        # only JSON/SARIF rendered this field before (Codex review).
+        correlated = getattr(ch, "correlated_change_kind", None)
+        if correlated:
+            desc_parts.append(
+                f"<div style='font-size:0.82em; color:#999; margin-top:2px;'>"
+                f"🔗 See also: <code>{html.escape(str(correlated))}</code> "
+                f"finding for the same symbol</div>"
             )
         full_desc = "".join(desc_parts)
 
@@ -542,7 +553,9 @@ def _generate_compat_html(
 </div>""")
 
     # Other problems (ELF-layer: soname, symbol versioning, calling convention, etc.)
-    other_all = other_problems["High"] + other_problems["Medium"] + other_problems["Low"]
+    other_all = (
+        other_problems["High"] + other_problems["Medium"] + other_problems["Low"]
+    )
     if other_all:
         sections_html.append(f"""
 <div id='OtherProblems'>
@@ -597,9 +610,11 @@ def _confidence_html(result: object) -> str:
     conf_color = {"high": "#1b5e20", "medium": "#e65100", "low": "#b71c1c"}.get(
         conf_val, "#212121"
     )
-    tier_badges = " ".join(
-        f"<span class='kind-badge'>{h(t)}</span>" for t in tiers
-    ) if tiers else "<em>none</em>"
+    tier_badges = (
+        " ".join(f"<span class='kind-badge'>{h(t)}</span>" for t in tiers)
+        if tiers
+        else "<em>none</em>"
+    )
 
     rows = [
         f"<tr><th>Confidence</th>"
@@ -638,7 +653,11 @@ def _build_impact_html(
     from .checker import _ROOT_TYPE_CHANGE_KINDS
 
     root_entries: list[tuple[str, str, int, int]] = []
-    changes = displayed_changes if displayed_changes is not None else (getattr(result, "changes", []) or [])
+    changes = (
+        displayed_changes
+        if displayed_changes is not None
+        else (getattr(result, "changes", []) or [])
+    )
     for c in changes:
         kind = getattr(c, "kind", None)
         if kind and kind in _ROOT_TYPE_CHANGE_KINDS:
@@ -734,9 +753,7 @@ def _gate_card_html(
             "<code>error</code> still fails CI)."
         )
         gate_blocking_categories = full_gate.blocking_categories
-    gate_fg, gate_bg = (
-        ("#1b5e20", "#e8f5e9") if gate_passed else ("#b71c1c", "#ffebee")
-    )
+    gate_fg, gate_bg = ("#1b5e20", "#e8f5e9") if gate_passed else ("#b71c1c", "#ffebee")
     gate_label = "PASS" if gate_passed else f"FAIL (exit {gate_exit_code})"
     gate_icon = "✅" if gate_passed else "🛑"
     # Names which severity category(ies) actually gated CI — without
@@ -816,6 +833,7 @@ def generate_html_report(
     if show_only:
         from .checker import Change as _Change
         from .reporter import apply_show_only
+
         typed_changes = [c for c in all_changes if isinstance(c, _Change)]
         _kind_sets_fn = getattr(result, "_effective_kind_sets", None)
         filtered = apply_show_only(
@@ -850,13 +868,19 @@ def generate_html_report(
     not_evaluated = [ch for ch in display_changes if not is_evaluated(ch)]
     scored_changes = [ch for ch in display_changes if is_evaluated(ch)]
     removed = [
-        ch for ch in scored_changes if _change_bucket(ch, _effective_verdict_fn) == "removed"
+        ch
+        for ch in scored_changes
+        if _change_bucket(ch, _effective_verdict_fn) == "removed"
     ]
     added = [
-        ch for ch in scored_changes if _change_bucket(ch, _effective_verdict_fn) == "added"
+        ch
+        for ch in scored_changes
+        if _change_bucket(ch, _effective_verdict_fn) == "added"
     ]
     changed = [
-        ch for ch in scored_changes if _change_bucket(ch, _effective_verdict_fn) == "changed"
+        ch
+        for ch in scored_changes
+        if _change_bucket(ch, _effective_verdict_fn) == "changed"
     ]
 
     # Metrics always use the full (unfiltered) change list. policy/kind_sets/
@@ -919,9 +943,7 @@ def generate_html_report(
 
     verdict_icon = _verdict_icon(verdict)
 
-    gate_html = _gate_card_html(
-        result, all_changes, severity_config, h=h
-    )
+    gate_html = _gate_card_html(result, all_changes, severity_config, h=h)
 
     scoped_verdict = getattr(result, "scoped_verdict", None)
     scoped_html = ""
@@ -937,7 +959,9 @@ def generate_html_report(
         # (`_fold_scoped_compat_into_text`) without changing this report's
         # own verdict-box semantics.
         scoped_value = (
-            scoped_verdict.value if hasattr(scoped_verdict, "value") else str(scoped_verdict)
+            scoped_verdict.value
+            if hasattr(scoped_verdict, "value")
+            else str(scoped_verdict)
         )
         scoped_fg, scoped_bg = _VERDICT_STYLE.get(scoped_value, ("#212121", "#f5f5f5"))
         scoped_exit_code = getattr(result, "scoped_exit_code", None)
@@ -981,7 +1005,12 @@ def generate_html_report(
         )
 
     sections = _build_sections_html(
-        removed, changed, added, suppressed, suppressed_count, _section,
+        removed,
+        changed,
+        added,
+        suppressed,
+        suppressed_count,
+        _section,
         not_evaluated=not_evaluated,
         relevance_of=contract_relevance_of,
     )
@@ -1003,7 +1032,9 @@ def generate_html_report(
 
     sections_html = "\n".join(sections)
 
-    symbol_count_note = f" / {old_symbol_count} exported symbols" if old_symbol_count else ""
+    symbol_count_note = (
+        f" / {old_symbol_count} exported symbols" if old_symbol_count else ""
+    )
 
     redundant_count = getattr(result, "redundant_count", 0)
     redundancy_note = ""
@@ -1067,7 +1098,9 @@ def generate_html_report(
 {render_footer("ABICC-compatible report format")}
 """
     return render_document(
-        title=h(title) if title else f"ABI Report: {lib_display} {old_display} → {new_display}",
+        title=h(title)
+        if title
+        else f"ABI Report: {lib_display} {old_display} → {new_display}",
         body=body,
     )
 

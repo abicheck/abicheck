@@ -19,4 +19,7 @@
   stay fully reported in `changes` and independently scored exactly as
   before — nothing is removed or hidden, so every consumer (the legacy
   verdict, a `PolicyFile` override, a severity-scheme exit code) sees the
-  same findings it always did, plus the cross-reference.
+  same findings it always did, plus the cross-reference. The cross-reference
+  is now also rendered in the default markdown, HTML, and JUnit reports
+  (as a "See also" note / `abicheck.correlated_change_kind` JUnit property)
+  — previously only the JSON and SARIF reports surfaced it.

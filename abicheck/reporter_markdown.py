@@ -1274,7 +1274,16 @@ def _build_severity_sections(
             "",
         ]
         for c in risk:
-            lines.append(f"- **{c.kind.value}**: {c.description}")
+            line = f"- **{c.kind.value}**: {c.description}"
+            # Cross-detector correlation (e.g. LAYOUT_UNVERIFIABLE annotated
+            # by post_processing.AnnotateLayoutUnverifiableCoveredByVtable
+            # Changed as sharing its evidence gap with a co-reported
+            # TYPE_VTABLE_CHANGED) -- this section has its own one-line
+            # format rather than routing through _format_change_md, so it
+            # needs the same annotation added separately (Codex review).
+            if c.correlated_change_kind:
+                line += f"\n  > See also: `{c.correlated_change_kind}` finding for the same symbol"
+            lines.append(line)
         lines.append("")
 
     if compatible:
@@ -1567,9 +1576,7 @@ def _markdown_alternate_rendering(
     return None
 
 
-def _markdown_headline_table(
-    result: DiffResult, emoji: str, label: str
-) -> list[str]:
+def _markdown_headline_table(result: DiffResult, emoji: str, label: str) -> list[str]:
     """The report's headline summary table.
 
     ADR-049 D1/D11: when contract evaluation excluded findings from the
@@ -1890,5 +1897,15 @@ def _format_change_md(c: object) -> str:
         reason_code = getattr(c, "contract_reason_code", None)
         contract_assurance = getattr(c, "contract_assurance", None)
         line += f"\n  > Contract: {_contract_decision_text(contract_relevance, reason_code, contract_assurance)}"
+
+    # Cross-detector correlation (e.g. LAYOUT_UNVERIFIABLE annotated by
+    # post_processing.AnnotateLayoutUnverifiableCoveredByVtableChanged as
+    # sharing its evidence gap with a co-reported TYPE_VTABLE_CHANGED). Only
+    # JSON (reporter.py) and SARIF (sarif.py) rendered this field before —
+    # the default `compare --format markdown` report showed the two findings
+    # with no visible link between them (Codex review).
+    correlated = getattr(c, "correlated_change_kind", None)
+    if correlated:
+        line += f"\n  > See also: `{correlated}` finding for the same symbol"
 
     return line
