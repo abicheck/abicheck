@@ -1,0 +1,117 @@
+# Case 196: Internal Dependency Target Moved, Safely Reconciled
+
+**Category:** Risk (Source Graph / Reconciliation) | **Verdict:** 🟡 COMPATIBLE_WITH_RISK
+
+## Verdict and consumer impact
+
+A public struct `demo::Widget` has a private field-type dependency on
+`demo::detail::Helper`. In v2, `Helper` keeps its exact spelling — only its
+declaring header changes, from `detail_v1.h` to `detail_v2.h` (a routine
+header reorganization). Nothing here is a hard break: an internal type
+moving between private headers behind a public struct's field is not itself
+an ABI/API problem. As with [case194](../case194_header_graph_rename_reconciled/README.md)'s
+rename, what matters for a reviewer is *legibility* — without reconciliation,
+the raw graph diff would show an unrelated node removal plus node addition
+sharing the identical name, leaving a reader to infer by hand that they're
+"probably" the same declaration relocated. abicheck's graph reconciliation
+collapses that into one explicit `declaration_moved` finding instead.
+
+## Old/new diff
+
+| v1 (conceptual) | v2 (conceptual) |
+|------|------|
+| `// detail_v1.h`<br>`struct Helper { ... };` | `// detail_v2.h`<br>`struct Helper { ... };` |
+| `struct Widget { detail::Helper h; };` | `struct Widget { detail::Helper h; };` |
+
+This case ships a hand-built pair of evidence-model fixtures (`old.json` /
+`new.json`, `SourceGraphSummary` objects) instead of compiled `v1`/`v2`
+sources. See
+[`scripts/gen_l3l4l5_examples.py`](../../scripts/gen_l3l4l5_examples.py).
+
+## abicheck command
+
+There is no compiled binary or header pair to point `abicheck compare` at —
+the fixture is a raw `SourceGraphSummary`, the same evidence object
+`dump --sources`/`--build-info` would embed inside a real snapshot. The
+reproducible command runs abicheck's source-graph diff function directly:
+
+```bash
+python3 -c "
+import json
+from abicheck.buildsource.source_graph import SourceGraphSummary, diff_source_graph_findings
+old = SourceGraphSummary.from_dict(json.load(open('old.json')))
+new = SourceGraphSummary.from_dict(json.load(open('new.json')))
+for c in diff_source_graph_findings(old, new):
+    print(c.kind.value, c.symbol, c.old_value, '->', c.new_value)
+"
+```
+
+## Expected abicheck finding
+
+```text
+public_api_internal_dependency_added demo::Widget no internal dependency -> reaches 1 internal decl(s)/type(s)
+declaration_moved demo::detail::Helper demo::detail::Helper -> demo::detail::Helper
+```
+
+Verdict: COMPATIBLE_WITH_RISK — the risk finding fires independently of the
+move explanation (reconciliation only explains/localizes; it never
+suppresses an existing finding, ADR-028 D3).
+
+## Minimum evidence
+
+`min_evidence: L5` — reconciling the two nodes as "the same declaration,
+relocated" instead of an unrelated remove+add pair requires the derived
+source graph's canonical-identity/alias matching (G31 Phase B, ADR-048): both
+nodes share the identical qualified name `demo::detail::Helper`. No lower
+evidence tier carries graph node identity at all.
+
+## Why abicheck catches it
+
+`abicheck.buildsource.graph_reconcile` runs canonical-identity and
+graph-reconciliation matching between the old and new source graphs. Here,
+the qualified name is unchanged on both sides, so the *alias* tier resolves
+the match directly (stronger evidence than case194's rename, which needed
+the weakest structural-context tier because its qualified name changed too).
+`graph_reconcile._classify_outcome` then compares each side's declaring file
+(derived from the node's `def_file` attribute): the name held still but the
+file differs, so the outcome is classified `declaration_moved` rather than
+`declaration_renamed`.
+
+## Runtime failure demonstration
+
+There's no `app.c` here and no crash to demonstrate — this is a legibility
+improvement on a non-breaking risk finding, not a hard break. The real-world
+scenario is a CI job that runs abicheck with `--sources`/`--build-info`
+evidence across two releases and posts the findings to a PR: without
+reconciliation, a reviewer sees an unexplained "internal type X removed,
+internal type X added" pair (same name, easy to dismiss as noise, easy to
+miss as a genuine change) and has to manually confirm they're the same
+relocated declaration; with it, the PR comment says outright "Helper moved
+from detail_v1.h to detail_v2.h," cutting review time on every routine
+header reorganization.
+
+## Safe redesign
+
+No fix needed — moving an internal implementation detail to a different
+private header is not itself a break. Keep `demo::Widget`'s field types
+independent of internals whose file layout consumers cannot observe or
+depend on.
+
+**Real-world example:** splitting or consolidating private headers during a
+refactor is routine in large C++ codebases; without a reconciliation step a
+generated changelog or ABI report would otherwise list the moved type as a
+spurious unrelated add/remove pair.
+
+## Cross-tool comparison
+
+`abidiff`/`abi-compliance-checker` operate on compiled binaries and debug
+info; neither has an equivalent to abicheck's source-graph canonical-identity
+and reconciliation machinery, so neither could report this as a move at
+all — at most they'd see nothing (the type is fully internal and outside
+either tool's ABI-surface scope). This finding and its reconciliation are
+unique to abicheck's L5 build-source evidence layer (ADR-048). Contrast with
+[case194](../case194_header_graph_rename_reconciled/README.md) (a rename,
+resolved via the weaker structural-context tier) and
+[case195](../case195_header_graph_ambiguous_rename_not_reconciled/README.md)
+(the deliberate counter-example where reconciliation correctly refuses to
+guess).

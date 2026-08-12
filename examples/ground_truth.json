@@ -3860,6 +3860,26 @@
    "platforms": [
     "linux"
    ]
+  },
+  "case196_header_graph_move_reconciled": {
+   "abi_break": false,
+   "api_break": false,
+   "bad_practice": true,
+   "category": "risk",
+   "description": "A public struct (demo::Widget) has a private field-type target (demo::detail::Helper) that keeps its exact qualified name but moves to a different declaring header (detail_v1.h -> detail_v2.h) in the derived L5 source graph. Unlike case194's rename, the qualified name is unchanged, so G31 Phase B's canonical-identity/graph-reconciliation step (ADR-048) resolves the pair via the stronger alias tier rather than structural context, and -- since the declaring file, not the name, is what differs -- classifies the outcome as declaration_moved rather than declaration_renamed. The public_api_internal_dependency_added risk finding still fires independently on its own evidence, since reconciliation only explains/localizes -- it never suppresses an existing finding (ADR-028 D3).",
+   "expected": "COMPATIBLE_WITH_RISK",
+   "expected_kinds": [
+    "declaration_moved",
+    "public_api_internal_dependency_added"
+   ],
+   "fixtures": [
+    "old.json",
+    "new.json"
+   ],
+   "min_evidence": "L5",
+   "platforms": [
+    "linux"
+   ]
   }
  },
  "version": "4",
