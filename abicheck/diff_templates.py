@@ -555,6 +555,32 @@ def _canonical_identity_name(
     return _qualified_function_name(name, mangled)
 
 
+def _callable_identity_name(
+    name: str, mangled: str, demangled: dict[str, str],
+) -> str:
+    """:func:`_canonical_identity_name`, with any parameter-list signature
+    stripped -- the callable-name portion alone.
+
+    A demangled identity carries its full signature (return type included,
+    for a template instantiation); if that raw form is fed straight into
+    :func:`_looks_like_template_instantiation`/:func:`_strip_template_args`,
+    a plain (non-template) internal function taking a *templated parameter
+    type* (``lib::detail::foo(std::vector<int>)``) is misclassified as a
+    template instantiation itself, because the check only looks for a
+    top-level ``<`` anywhere in the string -- including inside a parameter
+    type it never should have inspected (Codex review, fresh evidence: this
+    module's own ``test_non_template_internal_funcs_ignored`` invariant
+    says such a helper is out of scope, and the unstripped form silently
+    violated it once identity started preferring the demangled form
+    unconditionally). Stripping the signature first restricts template
+    detection to the callable's own name, matching what
+    :func:`_qualified_function_name`'s declared-name path already gave for
+    free (a header-derived declared name never carries a signature to
+    begin with).
+    """
+    return _strip_param_signature(_canonical_identity_name(name, mangled, demangled))
+
+
 def _internal_template_stems(
     funcs: list[Function],
     internal_namespaces: tuple[str, ...],
@@ -563,7 +589,7 @@ def _internal_template_stems(
     """Return template stems that live in one of *internal_namespaces*."""
     out: set[str] = set()
     for f in funcs:
-        qname = _canonical_identity_name(f.name, f.mangled, demangled)
+        qname = _callable_identity_name(f.name, f.mangled, demangled)
         if not _looks_like_template_instantiation(qname):
             continue
         stem = _strip_template_args(qname)
@@ -578,7 +604,7 @@ def _functions_by_stem(
     """Group *funcs* by template-args-stripped stem."""
     out: dict[str, list[Function]] = defaultdict(list)
     for f in funcs:
-        qname = _canonical_identity_name(f.name, f.mangled, demangled)
+        qname = _callable_identity_name(f.name, f.mangled, demangled)
         out[_strip_template_args(qname)].append(f)
     return out
 

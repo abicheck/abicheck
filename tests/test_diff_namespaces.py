@@ -404,6 +404,40 @@ class TestExperimentalRemovedWithoutReplacement:
             for c in changes
         )
 
+    def test_all_collapsed_overloads_must_survive_to_suppress(self) -> None:
+        # Codex review: when neither side's declared name carries a
+        # signature, two overloads sharing one leaf collapse into a
+        # *single* (stable_key, leaf) bucket -- `old_exp` can hold more
+        # than one entry. A single surviving sibling overload's mangled
+        # symbol must not suppress the whole bucket's removal when a
+        # different, genuinely-removed sibling shares it.
+        import abicheck.demangle as dm
+
+        def fake_demangle(mangled_list: list[str]) -> dict[str, str]:
+            sigs = {"_ZM2": "ns::experimental::foo()"}
+            return {m: sigs[m] for m in mangled_list if m in sigs}
+
+        orig = dm.demangle_batch
+        dm.demangle_batch = fake_demangle  # type: ignore[assignment]
+        try:
+            old = _snap(funcs=[
+                _fn("ns::experimental::foo", mangled="_ZM1"),
+                _fn("ns::experimental::foo", mangled="_ZM2"),
+            ])
+            # M1 is genuinely removed. M2 survives, but re-qualified as a
+            # bare name that demangles to a full signature -- landing in a
+            # *different* bucket key than OLD's own (no "()" there), which
+            # is what makes `still_linked` the only remaining signal.
+            new = _snap(funcs=[_fn("foo", mangled="_ZM2")])
+            changes = detect_experimental_namespace_changes(old, new)
+        finally:
+            dm.demangle_batch = orig  # type: ignore[assignment]
+
+        assert any(
+            c.kind == ChangeKind.EXPERIMENTAL_REMOVED_WITHOUT_REPLACEMENT
+            for c in changes
+        )
+
     def test_silent_function_removal(self) -> None:
         old = _snap(funcs=[_fn("ns::experimental::bar")])
         new = _snap(funcs=[])

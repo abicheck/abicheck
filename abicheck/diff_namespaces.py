@@ -534,7 +534,21 @@ def _findings_for(
         # compares equal on its trailing "()" alone (Codex review, fresh
         # evidence).
         old_stable_key_for_compat = _strip_param_signature(stable_key)
-        still_linked = any(
+        # `all(...)`, not `any(...)` (Codex review, fresh evidence): a bucket
+        # can hold *multiple* overloads that share one declared name and
+        # therefore one (stable_key, leaf) key when neither side demangles
+        # (header-derived Function.name carries no parameter list at all,
+        # so two overloads with different mangled symbols collapse into one
+        # `old_exp` list). `any(...)` would let a single surviving sibling
+        # overload's mangled symbol suppress the *whole* bucket's removal,
+        # silently hiding a genuinely removed sibling overload. Requiring
+        # every entry to independently correlate to a survivor still
+        # suppresses correctly for the common single-overload case (`all`
+        # over one element is `any` over one element) while never masking a
+        # real removal sitting alongside an unrelated survivor. `old_exp` is
+        # already known non-empty here (the `if not old_exp: continue`
+        # guard above), so `all(...)` over it is never vacuously true.
+        still_linked = all(
             mangled and any(
                 _stable_keys_compatible(old_stable_key_for_compat, new_stable_key)
                 for new_stable_key in new_mangled_stable_keys.get(mangled, ())

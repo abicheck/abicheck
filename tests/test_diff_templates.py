@@ -519,6 +519,36 @@ class TestInternalTemplateLeaks:
         new = _snap(funcs=[])
         assert detect_internal_template_leaks(old, new) == []
 
+    def test_non_template_func_with_templated_param_type_ignored(self) -> None:
+        # Codex review: a demangled identity carries its *full signature*,
+        # including parameter types. `_looks_like_template_instantiation`
+        # only checks for a top-level "<" anywhere in the string -- so a
+        # plain (non-template) internal function taking a templated
+        # parameter type (`lib::__detail::plain_helper(std::vector<int>)`)
+        # was misclassified as a template instantiation itself, purely
+        # because its own *parameter type* happens to be one. This must
+        # stay out of scope, same as test_non_template_internal_funcs_ignored
+        # above -- a plain function's removal is `func_removed`'s job, not
+        # this detector's.
+        import abicheck.demangle as dm
+
+        def fake_demangle(mangled_list: list[str]) -> dict[str, str]:
+            sigs = {
+                "_Zph1": "lib::__detail::plain_helper(std::vector<int>)",
+            }
+            return {m: sigs[m] for m in mangled_list if m in sigs}
+
+        orig = dm.demangle_batch
+        dm.demangle_batch = fake_demangle  # type: ignore[assignment]
+        try:
+            old = _snap(funcs=[_fn("plain_helper", mangled="_Zph1")])
+            new = _snap(funcs=[])
+            changes = detect_internal_template_leaks(old, new)
+        finally:
+            dm.demangle_batch = orig  # type: ignore[assignment]
+
+        assert changes == []
+
     def test_purely_additive_instantiation_set_does_not_fire(self) -> None:
         # Reported bug: an internal-namespace template that only gained new
         # instantiations (every existing one is still there, unchanged) does
