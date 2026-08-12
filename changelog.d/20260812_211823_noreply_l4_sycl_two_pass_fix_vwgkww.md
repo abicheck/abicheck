@@ -33,13 +33,22 @@ A new changelog fragment. See changelog.d/README.md for the workflow.
   build's own recorded `-fsycl-host-only`/`-fsycl-device-only` (carried
   through verbatim via `abi_relevant_flags`) reached a non-Intel invoked
   binary unchanged, hitting the identical "unknown argument" failure
-  independent of the insertion-side fix above. `_clang_context_args` now
-  strips a carried-through `-fsycl-host-only` whenever the invoked binary
-  isn't Intel-family — harmless to drop, since stock clang's bare `-fsycl`
-  already parses fine as one ordinary host-shaped pass. A carried-through
-  `-fsycl-device-only` is handled differently, not stripped: it names a
-  genuinely different (device-side) compilation context, so silently
-  dropping it would replay the TU as ordinary host code and could fabricate
-  false L4 findings rather than honestly degrade coverage — it now raises a
-  clear `SourceExtractionError` for that one translation unit instead
-  (Codex review; bumping `CLANG_EXTRACTOR_VERSION` to `0.10`).
+  independent of the insertion-side fix above. A first pass at closing this
+  stripped a carried-through `-fsycl-host-only` (on the assumption it was
+  harmless to drop, since stock clang's bare `-fsycl` "parses fine as one
+  ordinary pass") while raising `SourceExtractionError` only for
+  `-fsycl-device-only`. A second Codex review round caught that assumption
+  itself was wrong: verified empirically against a real clang install, bare
+  `-fsycl` with no selector defines `__SYCL_DEVICE_ONLY__` — i.e. it
+  compiles as **device** context by default, not host — so dropping just
+  `-fsycl-host-only` silently replayed an explicitly host-pinned TU as
+  device code, the identical misrepresentation risk already recognized for
+  `-fsycl-device-only`. Both Intel-only pass-selector flags are now handled
+  identically: a recorded `-fsycl-host-only` OR `-fsycl-device-only` on a
+  non-Intel invoked binary raises a clear `SourceExtractionError` for that
+  one translation unit (degrading it to partial coverage) instead of ever
+  replaying it under a different compilation context than the one actually
+  recorded. A bare, unselected `-fsycl` (no explicit pin either way) is
+  deliberately left untouched, matching the L2 backend's own established
+  accepted approximation for that ambiguous shape. Bumps
+  `CLANG_EXTRACTOR_VERSION` to `0.11`.

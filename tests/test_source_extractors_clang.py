@@ -21,6 +21,7 @@ the fast lane; the end-to-end clang run is marked ``integration``.
 from __future__ import annotations
 
 import os
+import re
 import textwrap
 from pathlib import Path
 
@@ -820,42 +821,50 @@ class TestSyclHostOnlyGatedOnInvokedBinary:
         assert cmd[0] == "clang"
         assert "-fsycl-host-only" not in cmd
 
-    def test_host_only_stripped_but_device_only_degrades_instead_of_replaying_as_host(
-        self,
+    @pytest.mark.parametrize("pin", ("-fsycl-host-only", "-fsycl-device-only"))
+    def test_explicitly_pinned_pass_degrades_on_non_intel_instead_of_reinterpreting(
+        self, pin: str
     ) -> None:
-        """``-fsycl-host-only`` and ``-fsycl-device-only`` look symmetric but
-        are NOT: dropping the former changes nothing (stock clang's bare
-        ``-fsycl`` already parses as one ordinary host-shaped pass), while
-        dropping the latter would silently replay a device-only TU as
-        ordinary host code -- a different compilation context, not just a
-        missing selector flag. A recorded ``-fsycl-device-only`` on a
-        non-Intel invoked binary must raise instead of fabricating host
-        facts for it (Codex review)."""
-        host_only_cu = _cu(
-            argv=["icpx", "-fsycl", "-fsycl-host-only", "-c", "foo.cpp"],
-            abi_relevant_flags=["-fsycl", "-fsycl-host-only"],
+        """``-fsycl-host-only`` and ``-fsycl-device-only`` look symmetric and
+        MUST be treated symmetrically: an earlier revision of this fix
+        silently dropped ``-fsycl-host-only`` on the (wrong) assumption that
+        stock clang's bare ``-fsycl`` already parses as an ordinary,
+        roughly-host-shaped pass. Confirmed empirically against a real
+        clang install that this is false: bare ``-fsycl`` with NO selector
+        defines ``__SYCL_DEVICE_ONLY__`` (device context by default), so
+        dropping just ``-fsycl-host-only`` silently replayed an explicitly
+        HOST-pinned TU as device code -- the identical misrepresentation
+        risk already recognized for ``-fsycl-device-only`` (Codex review,
+        second round). Both selectors now raise identically for a non-Intel
+        invoked binary rather than ever guessing which context to
+        (mis)represent."""
+        cu = _cu(
+            argv=["icpx", "-fsycl", pin, "-c", "foo.cpp"],
+            abi_relevant_flags=["-fsycl", pin],
         )
-        cmd = build_clang_command(host_only_cu, Path("foo.cpp"), clang_bin="clang")
+        with pytest.raises(SourceExtractionError, match=re.escape(pin)):
+            build_clang_command(cu, Path("foo.cpp"), clang_bin="clang")
+        with pytest.raises(SourceExtractionError, match=re.escape(pin)):
+            build_clang_macro_command(cu, Path("foo.cpp"), clang_bin="clang")
+        # An Intel-family invoked binary genuinely understands the flag --
+        # must NOT raise, and must keep it (a real, honorable single-pass pin).
+        intel_cmd = build_clang_command(cu, Path("foo.cpp"), clang_bin="icpx")
+        assert pin in intel_cmd
+
+    def test_bare_unselected_sycl_flag_is_left_alone_on_non_intel_binary(self) -> None:
+        """A bare, unselected ``-fsycl`` (no explicit host/device pin either
+        way) is deliberately NOT treated as a degrade-worthy mismatch --
+        matching the L2 header-AST backend's own established "accepted
+        approximation" for this ambiguous shape (there is no explicit,
+        recorded intent this replay would be contradicting)."""
+        cu = _cu(
+            argv=["icpx", "-fsycl", "-c", "foo.cpp"],
+            abi_relevant_flags=["-fsycl"],
+        )
+        cmd = build_clang_command(cu, Path("foo.cpp"), clang_bin="clang")
+        assert "-fsycl" in cmd
         assert "-fsycl-host-only" not in cmd
         assert "-fsycl-device-only" not in cmd
-
-        device_only_cu = _cu(
-            argv=["icpx", "-fsycl", "-fsycl-device-only", "-c", "foo.cpp"],
-            abi_relevant_flags=["-fsycl", "-fsycl-device-only"],
-        )
-        with pytest.raises(SourceExtractionError, match="fsycl-device-only"):
-            build_clang_command(device_only_cu, Path("foo.cpp"), clang_bin="clang")
-        with pytest.raises(SourceExtractionError, match="fsycl-device-only"):
-            build_clang_macro_command(
-                device_only_cu, Path("foo.cpp"), clang_bin="clang"
-            )
-        # An Intel-family invoked binary genuinely understands the flag --
-        # must NOT raise, and must keep it (both are real single-pass pins).
-        intel_cmd = build_clang_command(
-            device_only_cu, Path("foo.cpp"), clang_bin="icpx"
-        )
-        assert "-fsycl-device-only" in intel_cmd
-        assert "-fsycl-host-only" not in intel_cmd
 
     def test_needs_sycl_host_only_is_the_single_l2_l4_source_of_truth(self) -> None:
         """L4's predicate must be the SAME function object the L2 header-AST
@@ -884,13 +893,21 @@ class TestSyclHostOnlyGatedOnInvokedBinary:
         test, run against an earlier revision of this fix that only closed
         the insertion side, found it (a real build recorded as ``icpx
         -fsycl-host-only``, replayed against a plain ``clang`` invocation,
-        reproduced "unknown argument"). A recorded ``-fsycl-device-only`` on
-        a non-Intel invoked binary is a NAMES-A-DIFFERENT-COMPILATION-
-        CONTEXT case, not a plain unsupported-flag case (Codex review): it
-        must degrade that TU (``SourceExtractionError``) rather than
-        silently drop the selector and replay it as ordinary host code, so
-        this property checks for the raise in that one case instead of a
-        clean command. Also fuzzes casing/``.exe`` suffixes and random
+        reproduced "unknown argument"). A recorded explicit pass selector
+        (either one) on a non-Intel invoked binary is a NAMES-A-DIFFERENT-
+        COMPILATION-CONTEXT case, not a plain unsupported-flag case (Codex
+        review, two rounds -- the first fix treated the two selectors
+        asymmetrically, silently dropping ``-fsycl-host-only`` on the
+        mistaken assumption that stock clang's bare ``-fsycl`` is
+        host-shaped; confirmed empirically against a real clang install
+        that it is device-shaped by default instead): it must degrade that
+        TU (``SourceExtractionError``) rather than silently drop the
+        selector and replay it under a DIFFERENT context than the one
+        actually recorded, so this property checks for the raise in
+        EITHER pinned case, symmetrically, instead of a clean command. A
+        bare, unselected ``-fsycl`` stays a clean (non-raising) command,
+        matching the L2 backend's own accepted approximation for that
+        ambiguous shape. Also fuzzes casing/``.exe`` suffixes and random
         recorded-argv0/flag noise, so a future regression shaped differently
         from any single hand-picked example still falls out of this
         property rather than needing its own new example test."""
@@ -918,6 +935,7 @@ class TestSyclHostOnlyGatedOnInvokedBinary:
         sycl_flag = st.sampled_from(
             ["-fsycl", "-fno-sycl", "-fsycl-host-only", "-fsycl-device-only"]
         )
+        _PASS_SELECTORS = {"-fsycl-host-only", "-fsycl-device-only"}
 
         @given(
             invoked=binary_name,
@@ -936,17 +954,17 @@ class TestSyclHostOnlyGatedOnInvokedBinary:
                 "dpcpp",
                 "dpcpp-cl",
             }
-            device_only_on_non_intel = (
-                not invoked_is_intel and "-fsycl-device-only" in flags
+            pinned_on_non_intel = not invoked_is_intel and (
+                _PASS_SELECTORS & set(flags)
             )
             for builder in (build_clang_command, build_clang_macro_command):
-                if device_only_on_non_intel:
+                if pinned_on_non_intel:
                     with pytest.raises(SourceExtractionError):
                         builder(cu, Path("foo.cpp"), clang_bin=invoked)
                     continue
                 cmd = builder(cu, Path("foo.cpp"), clang_bin=invoked)
                 assert cmd[0] == invoked
-                pinned = {"-fsycl-host-only", "-fsycl-device-only"} & set(cmd)
+                pinned = _PASS_SELECTORS & set(cmd)
                 if pinned:
                     assert invoked_is_intel, (
                         f"{pinned} reached a non-Intel invoked binary {invoked!r} "
