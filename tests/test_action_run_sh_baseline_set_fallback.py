@@ -45,6 +45,7 @@ import json
 import os
 import shutil
 import subprocess
+import sys
 import tarfile
 import tempfile
 from pathlib import Path
@@ -429,6 +430,18 @@ class TestBaselineSetFallback:
         assert result.returncode == 0, result.stderr
         assert "libpvxs.abicheck.json" in result.stdout
 
+    @pytest.mark.skipif(
+        sys.platform == "win32",
+        reason=(
+            "This test builds a `python` symlink via Path.symlink_to() to "
+            "simulate a python3-less PATH -- creating a symlink on Windows "
+            "needs Developer Mode or an elevated process (raises OSError "
+            "otherwise), a privilege this test has no need to require just "
+            "to exercise a fallback that already has its own dedicated "
+            "coverage of the real Windows shape via the win32-only "
+            "`only 'python' on PATH` runners this whole PR targets."
+        ),
+    )
     def test_extraction_and_resolution_work_when_python3_is_absent(
         self, tmp_path: Path
     ) -> None:
