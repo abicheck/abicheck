@@ -178,9 +178,24 @@ def _fold_generation(key_prefix: str, generation: int | None) -> str:
     "Compute cache key" step's bash exactly (``[[ -n "$BASELINE_GENERATION"
     ]] && KEY_PREFIX="${KEY_PREFIX}-g${BASELINE_GENERATION}"``), or a
     consumer computing an expected key/restore-prefix from this pure-Python
-    mirror would silently disagree with what that workflow actually wrote."""
+    mirror would silently disagree with what that workflow actually wrote.
+
+    Raises ``ValueError`` for anything other than ``None`` or a genuine
+    non-negative ``int`` -- the producer side (``actions/baseline/
+    build_manifest.py``, the bash step above) can never actually publish a
+    ``True``/negative generation, so a caller passing one here would
+    silently compute a namespace (``"p-gTrue-..."``, ``"p-g-1-..."``) no
+    real cache entry can ever occupy, instead of getting a usage error
+    (Codex review; mirrors the same validation
+    ``baseline_set._schema_and_profile_check`` applies to
+    ``expected_baseline_generation``).
+    """
     if generation is None:
         return key_prefix
+    if type(generation) is not int or generation < 0:
+        raise ValueError(
+            f"generation {generation!r} must be a non-negative int (or None)."
+        )
     return f"{key_prefix}-g{generation}"
 
 

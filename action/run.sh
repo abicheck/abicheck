@@ -368,14 +368,26 @@ TarExtractor._safe_extract(Path(sys.argv[1]), Path(sys.argv[2]))
 import sys
 from abicheck.buildsource.baseline_set import resolve_target
 
-result = resolve_target(sys.argv[1], target=sys.argv[2], profile=sys.argv[3], required=True)
+# argv[4] (INPUT_BASELINE_GENERATION) is already validated as empty-or-
+# entirely-digits by the caller before this fallback is ever reached, so
+# int() here cannot raise -- expected_baseline_generation=None (the
+# resolve_target default) when unset, meaning this consumer has no
+# generation expectation, same as expected_project_ref="" above it.
+expected_generation = int(sys.argv[4]) if sys.argv[4] else None
+result = resolve_target(
+    sys.argv[1],
+    target=sys.argv[2],
+    profile=sys.argv[3],
+    required=True,
+    expected_baseline_generation=expected_generation,
+)
 snapshot_path = result.snapshot_path
 if not snapshot_path:
     snapshot_path = ""
 print("outcome=" + result.outcome)
 print("message=" + result.message)
 print("snapshot_path=" + snapshot_path)
-' "$manifest_root" "$baseline_target" "$INPUT_BASELINE_PROFILE")
+' "$manifest_root" "$baseline_target" "$INPUT_BASELINE_PROFILE" "${INPUT_BASELINE_GENERATION:-}")
   local resolve_outcome resolve_message resolve_snapshot
   resolve_outcome=$(printf '%s\n' "$resolve_output" | sed -n 's/^outcome=//p')
   resolve_message=$(printf '%s\n' "$resolve_output" | sed -n 's/^message=//p')
@@ -418,6 +430,22 @@ if [[ ( -n "${INPUT_BASELINE_PROFILE:-}" || -n "${INPUT_BASELINE_TARGET:-}" ) &&
   echo "::error::baseline-profile/baseline-target are set but abi-baseline is not -- the release-contract baseline-set fallback is only reached while resolving abi-baseline (a release tag or 'latest-release'), so without it these inputs can never trigger a fetch."
   exit 1
 fi
+# Same "entirely digits, or empty" check actions/baseline/run.sh applies to
+# its own baseline-generation input -- [0-9]* alone is not anchored to
+# "only digits" as a bash case glob (it matches any string that merely
+# STARTS with a digit, e.g. "3x"), and resolve_target()'s own
+# expected_baseline_generation now raises ValueError for anything that
+# isn't a genuine non-negative int, which would otherwise surface as an
+# uncaught Python traceback from _try_baseline_set_fallback's inline
+# script instead of this Action's own typed error message.
+case "${INPUT_BASELINE_GENERATION:-}" in
+  '') ;;
+  *[!0-9]*)
+    echo "::error::baseline-generation '${INPUT_BASELINE_GENERATION}' is not a non-negative integer."
+    exit 1
+    ;;
+  [0-9]*) ;;
+esac
 
 if [[ -n "$ABI_BASELINE" \
    && ( "$MODE" == "compare" || "$MODE" == "scan" ) \

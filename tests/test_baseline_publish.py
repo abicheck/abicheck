@@ -22,6 +22,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+
 from abicheck.buildsource.baseline_publish import (
     DEFAULT_ACCEPTED_MAIN_KEY_PREFIX,
     accepted_main_cache_key,
@@ -260,3 +262,27 @@ class TestAcceptedMainCacheKeys:
             key_prefix, profile_id, generation=3
         )
         assert not g2_key.startswith(g3_prefix)
+
+    def test_bool_generation_is_rejected(self) -> None:
+        # bool is an int subclass in Python, and the producer side can
+        # never actually publish a True/False generation -- reject it
+        # rather than silently computing an unusable "p-gTrue-..." key.
+        with pytest.raises(ValueError, match="non-negative int"):
+            accepted_main_cache_key(
+                "p",
+                "prof",
+                "sha1",
+                generation=True,  # type: ignore[arg-type]
+            )
+        with pytest.raises(ValueError, match="non-negative int"):
+            accepted_main_cache_restore_prefix(
+                "p",
+                "prof",
+                generation=False,  # type: ignore[arg-type]
+            )
+
+    def test_negative_generation_is_rejected(self) -> None:
+        with pytest.raises(ValueError, match="non-negative int"):
+            accepted_main_cache_key("p", "prof", "sha1", generation=-1)
+        with pytest.raises(ValueError, match="non-negative int"):
+            accepted_main_cache_restore_prefix("p", "prof", generation=-1)

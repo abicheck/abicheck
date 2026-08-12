@@ -111,7 +111,11 @@ def _make_tar_zst(archive_path: Path, src_dir: Path) -> None:
 
 
 def _build_baseline_set_archive(
-    tmp_path: Path, *, target: str = "libpvxs", profile: str = PROFILE
+    tmp_path: Path,
+    *,
+    target: str = "libpvxs",
+    profile: str = PROFILE,
+    baseline_generation: int | None = None,
 ) -> Path:
     src_dir = tmp_path / "baseline-set-src"
     src_dir.mkdir()
@@ -121,6 +125,7 @@ def _build_baseline_set_archive(
         "profile": profile,
         "snapshot_schema": None,
         "fact_set": None,
+        "baseline_generation": baseline_generation,
         "artifacts": [
             {
                 "library": target,
@@ -421,6 +426,59 @@ class TestBaselineSetFallback:
         assert result.returncode == 1
         assert "outcome: wrong_profile" in result.stdout + result.stderr
         assert "REACHED_END" not in result.stdout
+
+    def test_stale_generation_reports_typed_failure(self, tmp_path: Path) -> None:
+        # Regression (Codex review): the resolved asset's FILENAME matching
+        # baseline-asset-name-template's {generation} placeholder is not
+        # itself proof the manifest INSIDE it actually carries that
+        # generation -- a custom publisher, a stale release, or a hand-
+        # authored asset could name a generation-2 (or ungenerationed)
+        # manifest as a generation-3 archive. The manifest stays the
+        # authoritative identity: resolve_target()'s own
+        # expected_baseline_generation check must still run here, not just
+        # at check-target/resolve-baseline.
+        archive = _build_baseline_set_archive(tmp_path, baseline_generation=2)
+        result = self._run(
+            {
+                "INPUT_MODE": "compare",
+                "INPUT_ABI_BASELINE": "latest-release",
+                "INPUT_BASELINE_PROFILE": PROFILE,
+                "INPUT_BASELINE_TARGET": "libpvxs",
+                "INPUT_BASELINE_GENERATION": "3",
+                "FIXTURE_ARCHIVE": str(archive),
+            }
+        )
+        assert result.returncode == 1
+        assert "outcome: stale_generation" in result.stdout + result.stderr
+        assert "REACHED_END" not in result.stdout
+
+    def test_matching_generation_resolves(self, tmp_path: Path) -> None:
+        archive = _build_baseline_set_archive(tmp_path, baseline_generation=3)
+        result = self._run(
+            {
+                "INPUT_MODE": "compare",
+                "INPUT_ABI_BASELINE": "latest-release",
+                "INPUT_BASELINE_PROFILE": PROFILE,
+                "INPUT_BASELINE_TARGET": "libpvxs",
+                "INPUT_BASELINE_GENERATION": "3",
+                "FIXTURE_ARCHIVE": str(archive),
+            }
+        )
+        assert result.returncode == 0, result.stderr
+        assert "REACHED_END" in result.stdout
+
+    def test_invalid_baseline_generation_is_a_usage_error(self, tmp_path: Path) -> None:
+        result = self._run(
+            {
+                "INPUT_MODE": "compare",
+                "INPUT_ABI_BASELINE": "latest-release",
+                "INPUT_BASELINE_PROFILE": PROFILE,
+                "INPUT_BASELINE_TARGET": "libpvxs",
+                "INPUT_BASELINE_GENERATION": "3x",
+            }
+        )
+        assert result.returncode == 1
+        assert "not a non-negative integer" in result.stdout + result.stderr
 
     def test_ampersand_in_profile_is_substituted_literally(
         self, tmp_path: Path
