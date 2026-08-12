@@ -1193,7 +1193,7 @@
         },
         "correlated_change_kind": {
           "type": "string",
-          "description": "ADR-041 P0 roadmap item 2: for a public_api_internal_dependency_added finding correlated with the same public entry's own body/type-hash change this version, the correlated finding's ChangeKind value (e.g. 'inline_body_changed') \u2014 the structured sibling to the correlation already carried in the description prose."
+          "description": "The ChangeKind value of a related finding this one shares a cross-reference with \u2014 the structured sibling to a correlation already described in the description prose. Two independent producers set it: (1) ADR-041 P0 roadmap item 2, for a public_api_internal_dependency_added finding correlated with the same public entry's own body/type-hash change this version (e.g. 'inline_body_changed'); (2) schema 2.28, for a layout_unverifiable finding sharing the identical asymmetric-layout-evidence gap as a co-reported type_vtable_changed finding on the same type (always 'type_vtable_changed' in that case). Consumers should treat the value as an opaque ChangeKind slug naming the correlated finding, not assume a specific kind pairing."
         },
         "reviewer_action": {
           "type": "string",

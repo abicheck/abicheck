@@ -48,7 +48,7 @@ from typing import TYPE_CHECKING, cast
 from .checker_policy import ChangeKind, Verdict
 from .checker_types import Change, DiffResult
 from .contract_gating import is_evaluated
-from .reporter import _finding_id, apply_show_only
+from .reporter import _finding_id, _suppress_dangling_correlation_notes, apply_show_only
 from .reporter_markdown import _root_cause_key_and_display
 
 if TYPE_CHECKING:
@@ -360,7 +360,9 @@ def _count_failures(
     """Count distinct symbols that have at least one failing change."""
     symbols_with_failure: set[str] = set()
     for c in changes:
-        if _is_failure(c, result, kind_sets, severity_config, relevant_ids=relevant_ids):
+        if _is_failure(
+            c, result, kind_sets, severity_config, relevant_ids=relevant_ids
+        ):
             symbols_with_failure.add(c.symbol)
     return len(symbols_with_failure)
 
@@ -423,14 +425,37 @@ def _append_extra_failures(
     relevant_ids: frozenset[str] | None = None,
     root_cause_lookup: dict[str, tuple[str, str]] | None = None,
 ) -> None:
-    """Append extra ``<failure>`` children to already-existing testcases.
+    """Append extra ``<failure>`` children -- and, regardless of pass/fail,
+    a secondary change's ``correlated_change_kind`` -- to already-existing
+    testcases.
 
     Handles symbols that have more than one change (e.g. multiple changes
-    to the same symbol).  For each extra failing change, find the existing
-    ``<testcase>`` with the matching name and attach a new ``<failure>``.
+    to the same symbol). For each extra change, find the existing
+    ``<testcase>`` with the matching name; a failing one also gets a new
+    ``<failure>`` child.
+
+    Only ``_add_correlation_property`` is called here, not
+    ``_add_contract_properties`` -- unlike the correlation flag (one bit of
+    "this testcase has a paired finding", correct to merge into the shared
+    block), ``_add_contract_properties`` renders a *whole per-change*
+    contract decision (relevance/reason_code/assurance/gate_contribution)
+    into flat, unprefixed property names. Two changes on the same symbol can
+    each carry an independently-stamped, genuinely different decision under
+    ``--contract-evaluation``; naively adding a second call here would either
+    duplicate the ``<properties>`` block (the exact bug just fixed for
+    correlation) or, if merged into one block, silently overwrite the
+    primary change's contract properties with the secondary's -- a data-loss
+    bug, not a fix. That gap is real but pre-existing and out of scope here:
+    it needs its own design (e.g. a per-change key prefix) before more
+    call sites route through it, not a drive-by symmetrical extension of
+    this correlation fix (Codex review only reported the correlation half;
+    fixing it alone is what's verified below).
     """
     for c in extra_changes:
-        if _is_failure(c, result, kind_sets, severity_config, relevant_ids=relevant_ids):
+        _add_correlation_property_if_testcase_found(ts, c)
+        if _is_failure(
+            c, result, kind_sets, severity_config, relevant_ids=relevant_ids
+        ):
             for tc in ts:
                 if tc.get("name") == c.symbol:
                     _add_failure(
@@ -442,6 +467,25 @@ def _append_extra_failures(
                         root_cause_lookup=root_cause_lookup,
                     )
                     break
+
+
+def _add_correlation_property_if_testcase_found(ts: ET.Element, change: Change) -> None:
+    """Find the ``<testcase>`` matching *change*'s symbol among *ts*'s
+    children and call :func:`_add_correlation_property` on it.
+
+    A small lookup wrapper rather than inlining the loop at both call sites
+    in :func:`_append_extra_failures` above (one for the correlation
+    property, one for the conditional ``<failure>``) -- the two must run
+    independently (a non-failing secondary change still needs its
+    correlation recorded), so they cannot share one ``for tc in ts`` loop
+    the way the pre-existing failure-only loop did.
+    """
+    if not change.correlated_change_kind:
+        return
+    for tc in ts:
+        if tc.get("name") == change.symbol:
+            _add_correlation_property(tc, change)
+            return
 
 
 def _build_testsuite(
@@ -480,6 +524,7 @@ def _build_testsuite(
             kind_sets=result._effective_kind_sets(),
             policy_file=result.policy_file,
         )
+        changes = _suppress_dangling_correlation_notes(changes)
 
     change_by_symbol, extra_changes = _partition_changes(changes)
     all_symbols = _collect_all_symbols(old_snapshot, show_only, change_by_symbol)
@@ -521,7 +566,9 @@ def _build_testsuite(
         show_only_severities = ShowOnlyFilter.parse(show_only).severities
         if show_only_severities and missing_severity_label not in show_only_severities:
             missing_labels = ()
-    total = (len(all_symbols) if all_symbols else len(change_by_symbol)) + len(missing_labels)
+    total = (len(all_symbols) if all_symbols else len(change_by_symbol)) + len(
+        missing_labels
+    )
     if missing_blocks:
         failure_count += len(missing_labels)
 
@@ -575,8 +622,11 @@ def _build_testsuite(
 
 
 def _emit_missing_contract_testcases(
-    ts: ET.Element, missing_labels: tuple[str, ...], gate_scope: str | None,
-    *, blocks: bool = True,
+    ts: ET.Element,
+    missing_labels: tuple[str, ...],
+    gate_scope: str | None,
+    *,
+    blocks: bool = True,
     root_cause_lookup: dict[str, tuple[str, str]] | None = None,
 ) -> None:
     """Emit a ``<testcase>`` per missing required symbol/version/entrypoint.
@@ -594,14 +644,19 @@ def _emit_missing_contract_testcases(
     still visible in the report, but only fails when the gate itself
     considers it blocking.
     """
-    classname = "used_by_contract" if gate_scope == "used_by" else "required_symbol_contract"
+    classname = (
+        "used_by_contract" if gate_scope == "used_by" else "required_symbol_contract"
+    )
     for label in missing_labels:
         tc = ET.SubElement(ts, "testcase")
         tc.set("name", label)
         tc.set("classname", classname)
         if blocks:
             fail = ET.SubElement(tc, "failure")
-            fail.set("message", f"Required symbol/version '{label}' is missing from the new library.")
+            fail.set(
+                "message",
+                f"Required symbol/version '{label}' is missing from the new library.",
+            )
             fail.set("type", "MISSING_CONTRACT_MEMBER")
             if root_cause_lookup is not None:
                 entry = root_cause_lookup.get(label)
@@ -638,7 +693,9 @@ def _add_scoped_properties(ts: ET.Element, result: DiffResult) -> None:
     # Back-compat alias for the property's original name.
     _prop("abicheck.scoped_verdict", scoped_verdict.value)
     relevant_ids = getattr(result, "scoped_relevant_finding_ids", None) or frozenset()
-    relevant_in_changes = sum(1 for c in result.changes if _finding_id(c) in relevant_ids)
+    relevant_in_changes = sum(
+        1 for c in result.changes if _finding_id(c) in relevant_ids
+    )
     # Scoped-only changes and missing-contract members are relevant by
     # construction and never in result.changes, so they count toward
     # relevant_finding_count but not unrelated_finding_count, which only
@@ -648,7 +705,10 @@ def _add_scoped_properties(ts: ET.Element, result: DiffResult) -> None:
     missing_count = len(getattr(result, "scoped_missing_labels", ()) or ())
     relevant_count = relevant_in_changes + scoped_only_count + missing_count
     _prop("abicheck.relevant_finding_count", str(relevant_count))
-    _prop("abicheck.unrelated_finding_count", str(len(result.changes) - relevant_in_changes))
+    _prop(
+        "abicheck.unrelated_finding_count",
+        str(len(result.changes) - relevant_in_changes),
+    )
     scoped_exit_code = getattr(result, "scoped_exit_code", None)
     scoped_exit_code_scheme = getattr(result, "scoped_exit_code_scheme", None)
     if scoped_exit_code is not None:
@@ -678,14 +738,23 @@ def _maybe_add_failure(
     relevant_ids: frozenset[str] | None = None,
     root_cause_lookup: dict[str, tuple[str, str]] | None = None,
 ) -> None:
-    """Add a ``<failure>`` child to *tc* if the change is a failure, and a
-    ``<properties>`` block with ADR-049's per-finding contract decision
-    (CLI-audit P1) regardless of pass/fail.
+    """Add a ``<failure>`` child to *tc* if the change is a failure, and
+    ``<properties>`` blocks with ADR-049's per-finding contract decision
+    (CLI-audit P1) and any cross-detector correlation, regardless of
+    pass/fail.
     """
     _add_contract_properties(tc, change, result, severity_config)
-    if _is_failure(change, result, kind_sets, severity_config, relevant_ids=relevant_ids):
+    _add_correlation_property(tc, change)
+    if _is_failure(
+        change, result, kind_sets, severity_config, relevant_ids=relevant_ids
+    ):
         _add_failure(
-            tc, change, result, kind_sets, severity_config, root_cause_lookup=root_cause_lookup
+            tc,
+            change,
+            result,
+            kind_sets,
+            severity_config,
+            root_cause_lookup=root_cause_lookup,
         )
 
 
@@ -747,6 +816,58 @@ def _add_contract_properties(
         _prop(
             "abicheck.contract_evidence_refs", ",".join(change.contract_evidence_refs)
         )
+
+
+def _add_correlation_property(tc: ET.Element, change: Change) -> None:
+    """Append a ``abicheck.correlated_change_kind`` ``<property>`` recording
+    ``Change.correlated_change_kind`` when set (e.g. a ``LAYOUT_UNVERIFIABLE``
+    finding annotated by
+    ``post_processing.AnnotateLayoutUnverifiableCoveredByVtableChanged`` as
+    sharing its evidence gap with a co-reported ``TYPE_VTABLE_CHANGED``).
+
+    Deliberately independent of ``--contract-evaluation``, unlike
+    ``_add_contract_properties`` above -- this correlation is stamped on
+    every run, not only under contract evaluation, so gating it the same way
+    would silently drop it on the default path. Before this, only JSON
+    (reporter.py) and SARIF (sarif.py) rendered this field (Codex review).
+
+    Must always run *after* ``_add_contract_properties`` and reuse whatever
+    ``<properties>`` element it already appended, rather than creating a
+    second sibling one -- a testcase carries at most one ``<properties>``
+    block by JUnit convention, and every consumer (including this repo's
+    own tests) looks it up via a single ``tc.find("properties")``, which
+    only ever sees the first match (Codex review, fresh evidence: this
+    silently dropped the correlation whenever contract evaluation had
+    already stamped the same testcase).
+
+    When creating a fresh ``<properties>`` element (none already present),
+    it is inserted as *tc*'s first child rather than appended at the end.
+    For a *secondary* same-symbol change (``_append_extra_failures``), the
+    primary change's own ``<failure>`` child may already be present on
+    *tc* by the time this runs -- appending here would then produce
+    ``<testcase><failure/><properties/></testcase>``, which schema-
+    validating JUnit consumers reject or ignore, since the JUnit XSD
+    requires ``<properties>`` (if present) before any
+    ``<failure>``/``<error>``/``<skipped>`` result element (Codex review,
+    fresh evidence).
+    """
+    if not change.correlated_change_kind:
+        return
+    # Reuse the <properties> block _add_contract_properties may have already
+    # appended (under --contract-evaluation) rather than creating a second
+    # sibling element -- JUnit consumers, including this repo's own tests,
+    # look up a testcase's properties via `tc.find("properties")`, which
+    # only ever sees the first such element (Codex review).
+    props = tc.find("properties")
+    if props is None:
+        # tc.insert(0, ...), not ET.SubElement (which would append after any
+        # <failure> a primary change already added) -- see this function's
+        # own docstring for why ordering matters here.
+        props = ET.Element("properties")
+        tc.insert(0, props)
+    p = ET.SubElement(props, "property")
+    p.set("name", "abicheck.correlated_change_kind")
+    p.set("value", change.correlated_change_kind)
 
 
 def _add_failure(

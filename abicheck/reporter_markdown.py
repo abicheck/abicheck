@@ -43,6 +43,9 @@ from .checker_policy import (
 )
 from .contract_gating import is_evaluated
 from .finding_identity import missing_contract_kind, report_finding_id
+from .report_correlation import (
+    _suppress_dangling_correlation_notes as _suppress_dangling_correlation_notes,
+)
 from .report_summary import build_summary, surface_breakdown
 from .semver import recommend_release
 
@@ -1274,7 +1277,7 @@ def _build_severity_sections(
             "",
         ]
         for c in risk:
-            lines.append(f"- **{c.kind.value}**: {c.description}")
+            lines.append(_format_change_md_oneline(c))
         lines.append("")
 
     if compatible:
@@ -1286,7 +1289,7 @@ def _build_severity_sections(
             sev_label = _section_severity_label(severity_config, "quality_issues")
             lines += [f"## {_QUALITY_ICON} Quality Issues{sev_label}", ""]
             for c in quality:
-                lines.append(f"- **{c.kind.value}**: {c.description}")
+                lines.append(_format_change_md_oneline(c))
             lines.append("")
         if additions_list:
             sev_label = _section_severity_label(severity_config, "addition")
@@ -1336,7 +1339,7 @@ def _build_not_evaluated_section(not_evaluated: list[Change]) -> list[str]:
         reason = getattr(c, "contract_reason_code", None)
         label = getattr(relevance, "value", None) or "UNKNOWN"
         suffix = f" ({reason})" if reason else ""
-        lines.append(f"- **{c.kind.value}**: {c.description}")
+        lines.append(_format_change_md_oneline(c))
         lines.append(f"  > Contract: {label}{suffix}")
     lines.append("")
     return lines
@@ -1567,9 +1570,7 @@ def _markdown_alternate_rendering(
     return None
 
 
-def _markdown_headline_table(
-    result: DiffResult, emoji: str, label: str
-) -> list[str]:
+def _markdown_headline_table(result: DiffResult, emoji: str, label: str) -> list[str]:
     """The report's headline summary table.
 
     ADR-049 D1/D11: when contract evaluation excluded findings from the
@@ -1650,6 +1651,10 @@ def to_markdown(
             kind_sets=result._effective_kind_sets(),
             policy_file=result.policy_file,
         )
+        # A filter can keep a finding while dropping the co-reported one its
+        # own correlated_change_kind names -- clear the now-dangling note
+        # rather than reference a finding this view no longer shows.
+        changes = _suppress_dangling_correlation_notes(changes)
 
     # Build the render-ready view once (C2/ADR-036): canonical verdict-axis
     # classification + summary in one place, shared across formats.
@@ -1814,6 +1819,10 @@ def _view_preamble(
             f"> Filtered by: `--show-only {show_only}` ({len(changes)} of {len(result.changes)} changes shown)"
         )
         lines.append("")
+        # A filter can keep a finding while dropping the co-reported one its
+        # own correlated_change_kind names -- clear the now-dangling note
+        # rather than reference a finding this view no longer shows.
+        changes = _suppress_dangling_correlation_notes(changes)
 
     return lines, changes
 
@@ -1834,6 +1843,30 @@ def _append_recommendation_section(lines: list[str], result: DiffResult) -> None
         f"{rec.rationale}",
         "",
     ]
+
+
+def _format_change_md_oneline(c: object) -> str:
+    """Format a single change as a bare ``- **kind**: description`` line, plus
+    a "See also" correlation note when ``correlated_change_kind`` is set.
+
+    Used by the sections (Deployment Risk, Quality Issues, Not Evaluated)
+    that deliberately render a change as a single terse line rather than
+    routing through the fuller :func:`_format_change_md` (impact/affected-
+    symbols/contract detail) -- but the cross-detector correlation must
+    still reach every section a correlated finding (currently only
+    ``LAYOUT_UNVERIFIABLE``) can land in, or a policy/contract
+    configuration that routes it into one of these terse sections silently
+    drops the "See also" note the fuller formatter carries (Codex review,
+    fresh evidence).
+    """
+    kind = getattr(c, "kind", None)
+    kind_val = kind.value if kind else ""
+    desc = getattr(c, "description", "")
+    line = f"- **{kind_val}**: {desc}"
+    correlated = getattr(c, "correlated_change_kind", None)
+    if correlated:
+        line += f"\n  > See also: `{correlated}` finding for the same symbol"
+    return line
 
 
 def _format_change_md(c: object) -> str:
@@ -1890,5 +1923,15 @@ def _format_change_md(c: object) -> str:
         reason_code = getattr(c, "contract_reason_code", None)
         contract_assurance = getattr(c, "contract_assurance", None)
         line += f"\n  > Contract: {_contract_decision_text(contract_relevance, reason_code, contract_assurance)}"
+
+    # Cross-detector correlation (e.g. LAYOUT_UNVERIFIABLE annotated by
+    # post_processing.AnnotateLayoutUnverifiableCoveredByVtableChanged as
+    # sharing its evidence gap with a co-reported TYPE_VTABLE_CHANGED). Only
+    # JSON (reporter.py) and SARIF (sarif.py) rendered this field before —
+    # the default `compare --format markdown` report showed the two findings
+    # with no visible link between them (Codex review).
+    correlated = getattr(c, "correlated_change_kind", None)
+    if correlated:
+        line += f"\n  > See also: `{correlated}` finding for the same symbol"
 
     return line

@@ -39,6 +39,7 @@ This file has three layers, weakest-to-strongest:
    models. (Real *binaries* are covered by
    ``test_detector_properties_integration.py``.)
 """
+
 from __future__ import annotations
 
 import glob
@@ -126,7 +127,9 @@ def _record(draw: st.DrawFn) -> RecordType:
         name=draw(_ident),
         kind=draw(st.sampled_from(["struct", "class", "union"])),
         size_bits=draw(st.sampled_from([0, 32, 64, 128, 256])),
-        fields=draw(st.lists(st.builds(TypeField, name=_ident, type=_types), max_size=4)),
+        fields=draw(
+            st.lists(st.builds(TypeField, name=_ident, type=_types), max_size=4)
+        ),
         vtable=draw(st.lists(_ident, max_size=3)),
     )
 
@@ -316,7 +319,9 @@ def _ambiguous_bare_name_enum_pair(draw: st.DrawFn) -> tuple[AbiSnapshot, AbiSna
     ns_a, ns_b = "nsA", "nsB"
 
     def _member() -> st.SearchStrategy[EnumMember]:
-        return st.builds(EnumMember, name=_ident, value=st.integers(min_value=0, max_value=10))
+        return st.builds(
+            EnumMember, name=_ident, value=st.integers(min_value=0, max_value=10)
+        )
 
     def _variant(qualified: str) -> EnumType:
         return EnumType(
@@ -377,19 +382,28 @@ def _context(draw: st.DrawFn) -> dict:
     with a mutation's target identifiers."""
     n = draw(st.integers(0, 3))
     funcs = [
-        Function(name=f"{CTX_PREFIX}f{i}", mangled=f"_Z{CTX_PREFIX}f{i}v",
-                 return_type=draw(_types), visibility=Visibility.PUBLIC)
+        Function(
+            name=f"{CTX_PREFIX}f{i}",
+            mangled=f"_Z{CTX_PREFIX}f{i}v",
+            return_type=draw(_types),
+            visibility=Visibility.PUBLIC,
+        )
         for i in range(n)
     ]
     types = [
-        RecordType(name=f"{CTX_PREFIX}T{i}", kind="struct",
-                   size_bits=draw(st.sampled_from([32, 64, 128])))
+        RecordType(
+            name=f"{CTX_PREFIX}T{i}",
+            kind="struct",
+            size_bits=draw(st.sampled_from([32, 64, 128])),
+        )
         for i in range(draw(st.integers(0, 2)))
     ]
     return {"functions": funcs, "types": types}
 
 
-@given(context=_context(), idx=st.integers(0, len(MUTATIONS) - 1), tag=st.integers(0, 9999))
+@given(
+    context=_context(), idx=st.integers(0, len(MUTATIONS) - 1), tag=st.integers(0, 9999)
+)
 @_HSETTINGS
 def test_known_mutation_yields_expected_kind_and_verdict(
     context: dict, idx: int, tag: int
@@ -421,7 +435,9 @@ def test_known_mutation_yields_expected_kind_and_verdict(
     assert not offenders, f"context symbols spuriously flagged: {offenders}"
 
 
-@given(context=_context(), idx=st.integers(0, len(MUTATIONS) - 1), tag=st.integers(0, 9999))
+@given(
+    context=_context(), idx=st.integers(0, len(MUTATIONS) - 1), tag=st.integers(0, 9999)
+)
 @_HSETTINGS
 def test_known_mutation_is_direction_symmetric(
     context: dict, idx: int, tag: int
@@ -527,12 +543,18 @@ def _vtable_capture_pair(draw: st.DrawFn) -> tuple[AbiSnapshot, AbiSnapshot]:
     vbases = draw(st.lists(_ident, max_size=2, unique=True))
     slots = draw(st.lists(_ident, min_size=1, max_size=4, unique=True))
     captured = RecordType(
-        name=name, kind="class", size_bits=size,
-        vtable=list(slots), virtual_bases=list(vbases),
+        name=name,
+        kind="class",
+        size_bits=size,
+        vtable=list(slots),
+        virtual_bases=list(vbases),
     )
     missing = RecordType(
-        name=name, kind="class", size_bits=size,
-        vtable=[], virtual_bases=list(vbases),
+        name=name,
+        kind="class",
+        size_bits=size,
+        vtable=[],
+        virtual_bases=list(vbases),
     )
     old, new = (missing, captured) if draw(st.booleans()) else (captured, missing)
     return (
@@ -568,11 +590,20 @@ def _became_polymorphic_pair(draw: st.DrawFn) -> tuple[AbiSnapshot, AbiSnapshot]
     growth = draw(st.sampled_from([32, 64]))
     slots = draw(st.lists(_ident, min_size=1, max_size=4, unique=True))
     return (
-        AbiSnapshot(library="l", version="1", types=[
-            RecordType(name=name, kind="class", size_bits=size, vtable=[])]),
-        AbiSnapshot(library="l", version="2", types=[
-            RecordType(name=name, kind="class", size_bits=size + growth,
-                       vtable=list(slots))]),
+        AbiSnapshot(
+            library="l",
+            version="1",
+            types=[RecordType(name=name, kind="class", size_bits=size, vtable=[])],
+        ),
+        AbiSnapshot(
+            library="l",
+            version="2",
+            types=[
+                RecordType(
+                    name=name, kind="class", size_bits=size + growth, vtable=list(slots)
+                )
+            ],
+        ),
     )
 
 
@@ -596,10 +627,16 @@ def _both_captured_vtable_pair(draw: st.DrawFn) -> tuple[AbiSnapshot, AbiSnapsho
     b = draw(st.lists(_ident, min_size=1, max_size=3, unique=True))
     assume(a != b)
     return (
-        AbiSnapshot(library="l", version="1", types=[
-            RecordType(name=name, kind="class", size_bits=size, vtable=a)]),
-        AbiSnapshot(library="l", version="2", types=[
-            RecordType(name=name, kind="class", size_bits=size, vtable=b)]),
+        AbiSnapshot(
+            library="l",
+            version="1",
+            types=[RecordType(name=name, kind="class", size_bits=size, vtable=a)],
+        ),
+        AbiSnapshot(
+            library="l",
+            version="2",
+            types=[RecordType(name=name, kind="class", size_bits=size, vtable=b)],
+        ),
     )
 
 
@@ -622,3 +659,106 @@ def test_both_sides_captured_still_diffs_normally(
     if ChangeKind.TYPE_VTABLE_CHANGED not in kinds:
         # The only sanctioned reason to stay silent here.
         assert len(old.types[0].vtable) == len(new.types[0].vtable)
+
+
+# --- Cross-detector evidence-gap consistency (generalized, not example-shaped)
+#
+# diff_types._vtable_transition_is_evidenced and
+# diff_layout._check_layout_unverifiable both key off the identical "one side
+# has real layout evidence, the other has none" condition. TYPE_VTABLE_CHANGED
+# is deliberately kept BREAKING for it (see the evidence-absence properties
+# above); LAYOUT_UNVERIFIABLE reports the same gap as calm, non-escalating
+# RISK. Landing on the same type in the same report read as two detectors
+# disagreeing about one piece of evidence -- these state the fix's invariant
+# over *arbitrary* generated classes rather than the hand-picked examples in
+# test_vtable_severity.py: whenever both conditions hold for the same type,
+# LAYOUT_UNVERIFIABLE stays a fully reported top-level finding (never folded
+# out of `changes`, never altered) and is additionally annotated with
+# `correlated_change_kind == "type_vtable_changed"`, and TYPE_VTABLE_CHANGED's
+# own severity is never touched by the annotation. An earlier design folded
+# the redundant finding into `redundant_changes` instead -- reverted because
+# whether that removal was "safe" depended on configuration chosen after
+# compare() already returned (a PolicyFile override, a severity-scheme exit
+# code, a later pipeline step), which no compare()-time removal decision can
+# ever get right for every consumer (see AGENTS.md's "Findings emitted from
+# absent evidence" entry).
+
+
+@st.composite
+def _ambiguous_vtable_with_layout_gap_pair(
+    draw: st.DrawFn,
+) -> tuple[AbiSnapshot, AbiSnapshot]:
+    """A class whose vtable transition rests on unresolved evidence (unknown
+    ``size_bits`` on either side, no other independent signal) AND whose
+    layout descriptor is asymmetric (present on exactly one side) -- the
+    exact evidence-gap shape ``AnnotateLayoutUnverifiableCoveredByVtableChanged``
+    exists to cross-reference.
+
+    Varies which layout-descriptor field carries the asymmetric evidence
+    (``base_offsets``/``data_size_bits``/``vptr_offset_bits``) and which side
+    (old/new) has it, so the property isn't pinned to one hand-picked shape.
+    """
+    name = draw(_ident)
+    # old_slots is always empty: _vtable_transition_rests_on_unresolved_evidence's
+    # first branch ("both vtables populated -> real evidence, not this case")
+    # must never trigger here, or the property's premise (this finding is the
+    # ambiguous one) no longer holds for that generated example.
+    old_slots: list[str] = []
+    new_slots = draw(st.lists(_ident, min_size=1, max_size=3, unique=True))
+    descriptor_field = draw(
+        st.sampled_from(["base_offsets", "data_size_bits", "vptr_offset_bits"])
+    )
+    descriptor_on_new = draw(st.booleans())
+
+    def _descriptor_kwargs(has_descriptor: bool) -> dict[str, object]:
+        if not has_descriptor:
+            return {}
+        if descriptor_field == "base_offsets":
+            return {"base_offsets": {"Base": 0}}
+        if descriptor_field == "data_size_bits":
+            return {"data_size_bits": 8}
+        return {"vptr_offset_bits": 0}
+
+    old_rec = RecordType(
+        name=name,
+        kind="class",
+        vtable=list(old_slots),
+        size_bits=None,
+        **_descriptor_kwargs(not descriptor_on_new),
+    )
+    new_rec = RecordType(
+        name=name,
+        kind="class",
+        vtable=list(new_slots),
+        size_bits=None,
+        **_descriptor_kwargs(descriptor_on_new),
+    )
+    return (
+        AbiSnapshot(library="l", version="1", types=[old_rec]),
+        AbiSnapshot(library="l", version="2", types=[new_rec]),
+    )
+
+
+@given(pair=_ambiguous_vtable_with_layout_gap_pair())
+@_HSETTINGS
+def test_layout_unverifiable_always_correlated_when_vtable_change_shares_its_gap(
+    pair: tuple[AbiSnapshot, AbiSnapshot],
+) -> None:
+    """The general form of the fix: TYPE_VTABLE_CHANGED stays BREAKING and
+    visible; the co-occurring LAYOUT_UNVERIFIABLE for the identical gap also
+    stays fully visible in `changes` (never folded into redundant_changes,
+    never dropped), annotated with a cross-reference back to the covering
+    finding -- across arbitrarily generated classes and descriptor shapes,
+    not just the hand-picked examples in test_vtable_severity.py."""
+    old, new = pair
+    result = compare(old, new)
+    changes_by_kind = {c.kind: c for c in result.changes}
+    assert ChangeKind.TYPE_VTABLE_CHANGED in changes_by_kind
+    assert result.verdict == Verdict.BREAKING
+    assert ChangeKind.LAYOUT_UNVERIFIABLE in changes_by_kind
+
+    redundant_kinds = {c.kind for c in result.redundant_changes}
+    assert ChangeKind.LAYOUT_UNVERIFIABLE not in redundant_kinds
+
+    layout_change = changes_by_kind[ChangeKind.LAYOUT_UNVERIFIABLE]
+    assert layout_change.correlated_change_kind == ChangeKind.TYPE_VTABLE_CHANGED.value

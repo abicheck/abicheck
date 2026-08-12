@@ -4,6 +4,7 @@ Unit tests for the ``junit_report`` module, plus CLI integration tests that
 exercise the full ``abicheck compare --format junit`` pipeline using JSON
 snapshot files.
 """
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -24,6 +25,7 @@ from abicheck.serialization import snapshot_to_json
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 def _make_result(
     changes: list[Change],
@@ -79,6 +81,7 @@ def _write_snapshot(path: Path, snap: AbiSnapshot) -> Path:
 # Schema structure tests
 # ---------------------------------------------------------------------------
 
+
 class TestJUnitSchema:
     def test_top_level_element(self) -> None:
         xml = to_junit_xml(_make_result([]))
@@ -108,6 +111,7 @@ class TestJUnitSchema:
 # No changes → all pass
 # ---------------------------------------------------------------------------
 
+
 class TestNoChanges:
     def test_no_changes_no_snapshot(self) -> None:
         xml = to_junit_xml(
@@ -118,10 +122,12 @@ class TestNoChanges:
         assert root.get("failures") == "0"
 
     def test_no_changes_with_snapshot(self) -> None:
-        snap = _make_snapshot(functions=[
-            Function(name="foo::bar", mangled="_ZN3foo3barEv", return_type="void"),
-            Function(name="foo::baz", mangled="_ZN3foo3bazEi", return_type="int"),
-        ])
+        snap = _make_snapshot(
+            functions=[
+                Function(name="foo::bar", mangled="_ZN3foo3barEv", return_type="void"),
+                Function(name="foo::baz", mangled="_ZN3foo3bazEi", return_type="int"),
+            ]
+        )
         result = _make_result([], verdict=Verdict.NO_CHANGE)
         xml = to_junit_xml(result, snap)
         root = _parse(xml)
@@ -136,6 +142,7 @@ class TestNoChanges:
 # ---------------------------------------------------------------------------
 # Breaking changes → failures
 # ---------------------------------------------------------------------------
+
 
 class TestBreakingChanges:
     def test_func_removed_is_failure(self) -> None:
@@ -233,6 +240,7 @@ class TestBreakingChanges:
 # COMPATIBLE_WITH_RISK handling
 # ---------------------------------------------------------------------------
 
+
 class TestCompatibleWithRisk:
     def test_risk_change_default_severity_passes(self) -> None:
         """COMPATIBLE_WITH_RISK changes with severity 'warning' should pass."""
@@ -314,14 +322,21 @@ class TestCompatibleWithRisk:
 # Suppressed changes → pass
 # ---------------------------------------------------------------------------
 
+
 class TestSuppressedChanges:
     def test_suppressed_symbols_appear_as_passing(self) -> None:
         """Symbols that were suppressed (not in changes list) should still
         appear as passing test cases when the old snapshot is provided."""
-        snap = _make_snapshot(functions=[
-            Function(name="foo::bar", mangled="_ZN3foo3barEv", return_type="void"),
-            Function(name="foo::suppressed", mangled="_ZN3foo10suppressedEv", return_type="void"),
-        ])
+        snap = _make_snapshot(
+            functions=[
+                Function(name="foo::bar", mangled="_ZN3foo3barEv", return_type="void"),
+                Function(
+                    name="foo::suppressed",
+                    mangled="_ZN3foo10suppressedEv",
+                    return_type="void",
+                ),
+            ]
+        )
         # Only one change — the suppressed one is not in the changes list
         changes = [
             Change(
@@ -345,6 +360,7 @@ class TestSuppressedChanges:
 # ---------------------------------------------------------------------------
 # XML escaping of C++ mangled names with templates
 # ---------------------------------------------------------------------------
+
 
 class TestXmlEscaping:
     def test_template_symbol_escaping(self) -> None:
@@ -376,7 +392,12 @@ class TestXmlEscaping:
         root = _parse(xml)
         fail = root.find(".//failure")
         import xml.etree.ElementTree
-        assert "std::vector<int>" in fail.text or "std::vector&lt;int&gt;" in xml.etree.ElementTree.tostring(fail, encoding="unicode")
+
+        assert (
+            "std::vector<int>" in fail.text
+            or "std::vector&lt;int&gt;"
+            in xml.etree.ElementTree.tostring(fail, encoding="unicode")
+        )
 
     def test_ampersand_in_symbol(self) -> None:
         """Symbol names or descriptions containing & must be escaped."""
@@ -396,6 +417,7 @@ class TestXmlEscaping:
 # ---------------------------------------------------------------------------
 # Edge cases
 # ---------------------------------------------------------------------------
+
 
 class TestEdgeCases:
     def test_empty_description_uses_kind(self) -> None:
@@ -423,8 +445,13 @@ class TestEdgeCases:
     def test_old_value_is_empty_string(self) -> None:
         """Empty string old_value should still emit the (? → new) line (is not None)."""
         changes = [
-            Change(kind=ChangeKind.FUNC_RETURN_CHANGED, symbol="f",
-                   description="changed", old_value="", new_value="int"),
+            Change(
+                kind=ChangeKind.FUNC_RETURN_CHANGED,
+                symbol="f",
+                description="changed",
+                old_value="",
+                new_value="int",
+            ),
         ]
         xml = to_junit_xml(_make_result(changes))
         root = _parse(xml)
@@ -434,10 +461,18 @@ class TestEdgeCases:
     def test_multiple_changes_same_symbol(self) -> None:
         """Multiple breaking changes on the same symbol produce multiple <failure> children."""
         changes = [
-            Change(kind=ChangeKind.FUNC_RETURN_CHANGED, symbol="f",
-                   description="return type changed", old_value="int", new_value="long"),
-            Change(kind=ChangeKind.FUNC_PARAMS_CHANGED, symbol="f",
-                   description="parameter count changed"),
+            Change(
+                kind=ChangeKind.FUNC_RETURN_CHANGED,
+                symbol="f",
+                description="return type changed",
+                old_value="int",
+                new_value="long",
+            ),
+            Change(
+                kind=ChangeKind.FUNC_PARAMS_CHANGED,
+                symbol="f",
+                description="parameter count changed",
+            ),
         ]
         xml = to_junit_xml(_make_result(changes))
         root = _parse(xml)
@@ -452,6 +487,7 @@ class TestEdgeCases:
 # ---------------------------------------------------------------------------
 # Failure attributes
 # ---------------------------------------------------------------------------
+
 
 class TestFailureAttributes:
     def test_failure_message_format(self) -> None:
@@ -490,6 +526,7 @@ class TestFailureAttributes:
 # Classname grouping
 # ---------------------------------------------------------------------------
 
+
 class TestClassnameGrouping:
     def test_function_classname(self) -> None:
         changes = [Change(kind=ChangeKind.FUNC_REMOVED, symbol="f", description="")]
@@ -504,19 +541,25 @@ class TestClassnameGrouping:
         assert root.find(".//testcase").get("classname") == "variables"
 
     def test_type_classname(self) -> None:
-        changes = [Change(kind=ChangeKind.TYPE_SIZE_CHANGED, symbol="T", description="")]
+        changes = [
+            Change(kind=ChangeKind.TYPE_SIZE_CHANGED, symbol="T", description="")
+        ]
         xml = to_junit_xml(_make_result(changes))
         root = _parse(xml)
         assert root.find(".//testcase").get("classname") == "types"
 
     def test_enum_classname(self) -> None:
-        changes = [Change(kind=ChangeKind.ENUM_MEMBER_REMOVED, symbol="E", description="")]
+        changes = [
+            Change(kind=ChangeKind.ENUM_MEMBER_REMOVED, symbol="E", description="")
+        ]
         xml = to_junit_xml(_make_result(changes))
         root = _parse(xml)
         assert root.find(".//testcase").get("classname") == "enums"
 
     def test_elf_metadata_classname(self) -> None:
-        changes = [Change(kind=ChangeKind.SONAME_CHANGED, symbol="soname", description="")]
+        changes = [
+            Change(kind=ChangeKind.SONAME_CHANGED, symbol="soname", description="")
+        ]
         xml = to_junit_xml(_make_result(changes))
         root = _parse(xml)
         assert root.find(".//testcase").get("classname") == "metadata"
@@ -525,6 +568,7 @@ class TestClassnameGrouping:
 # ---------------------------------------------------------------------------
 # Multi-suite (compare-release)
 # ---------------------------------------------------------------------------
+
 
 class TestMultiSuite:
     def test_multiple_testsuites(self) -> None:
@@ -571,6 +615,7 @@ class TestMultiSuite:
 # With full snapshot — pass rate
 # ---------------------------------------------------------------------------
 
+
 class TestWithSnapshot:
     def test_pass_rate_includes_all_symbols(self) -> None:
         """Total test count includes unchanged symbols from old snapshot."""
@@ -598,20 +643,27 @@ class TestWithSnapshot:
     def test_snapshot_with_variables_and_enums(self) -> None:
         """Snapshot containing variables and enums — all appear as testcases."""
         from abicheck.model import Visibility
+
         snap = _make_snapshot(
             functions=[
                 Function(name="f1", mangled="f1", return_type="void"),
             ],
             variables=[
-                Variable(name="g_count", mangled="g_count", type="int",
-                         visibility=Visibility.PUBLIC),
+                Variable(
+                    name="g_count",
+                    mangled="g_count",
+                    type="int",
+                    visibility=Visibility.PUBLIC,
+                ),
             ],
             enums=[
                 EnumType(name="Color", members=[]),
             ],
         )
         changes = [
-            Change(kind=ChangeKind.VAR_REMOVED, symbol="g_count", description="removed"),
+            Change(
+                kind=ChangeKind.VAR_REMOVED, symbol="g_count", description="removed"
+            ),
         ]
         result = _make_result(changes)
         xml = to_junit_xml(result, snap)
@@ -654,13 +706,19 @@ class TestWithSnapshot:
 # Valid XML output
 # ---------------------------------------------------------------------------
 
+
 class TestValidXml:
     def test_output_is_valid_xml(self) -> None:
         """Output must be parseable XML."""
         changes = [
             Change(kind=ChangeKind.FUNC_REMOVED, symbol="sym1", description="desc"),
-            Change(kind=ChangeKind.TYPE_SIZE_CHANGED, symbol="T1", description="size",
-                   old_value="8", new_value="16"),
+            Change(
+                kind=ChangeKind.TYPE_SIZE_CHANGED,
+                symbol="T1",
+                description="size",
+                old_value="8",
+                new_value="16",
+            ),
             Change(kind=ChangeKind.FUNC_ADDED, symbol="sym2", description="added"),
         ]
         xml = to_junit_xml(_make_result(changes))
@@ -673,14 +731,15 @@ class TestValidXml:
 # show_only filter
 # ---------------------------------------------------------------------------
 
+
 class TestShowOnly:
     def test_show_only_breaking_filters_compatible(self) -> None:
         """--show-only breaking hides compatible additions."""
         changes = [
-            Change(kind=ChangeKind.FUNC_REMOVED, symbol="old_func",
-                   description="removed"),
-            Change(kind=ChangeKind.FUNC_ADDED, symbol="new_func",
-                   description="added"),
+            Change(
+                kind=ChangeKind.FUNC_REMOVED, symbol="old_func", description="removed"
+            ),
+            Change(kind=ChangeKind.FUNC_ADDED, symbol="new_func", description="added"),
         ]
         result = _make_result(changes)
         xml = to_junit_xml(result, show_only="breaking")
@@ -695,10 +754,14 @@ class TestShowOnly:
     def test_show_only_functions_filters_types(self) -> None:
         """--show-only functions hides type changes."""
         changes = [
-            Change(kind=ChangeKind.FUNC_REMOVED, symbol="f1",
-                   description="removed"),
-            Change(kind=ChangeKind.TYPE_SIZE_CHANGED, symbol="MyStruct",
-                   description="size changed", old_value="8", new_value="16"),
+            Change(kind=ChangeKind.FUNC_REMOVED, symbol="f1", description="removed"),
+            Change(
+                kind=ChangeKind.TYPE_SIZE_CHANGED,
+                symbol="MyStruct",
+                description="size changed",
+                old_value="8",
+                new_value="16",
+            ),
         ]
         result = _make_result(changes)
         xml = to_junit_xml(result, show_only="functions")
@@ -712,10 +775,10 @@ class TestShowOnly:
         """show_only works with to_junit_xml_multi."""
         r1 = _make_result(
             [
-                Change(kind=ChangeKind.FUNC_REMOVED, symbol="f1",
-                       description="removed"),
-                Change(kind=ChangeKind.FUNC_ADDED, symbol="f2",
-                       description="added"),
+                Change(
+                    kind=ChangeKind.FUNC_REMOVED, symbol="f1", description="removed"
+                ),
+                Change(kind=ChangeKind.FUNC_ADDED, symbol="f2", description="added"),
             ],
             library="libfoo.so.1",
         )
@@ -730,17 +793,20 @@ class TestShowOnly:
 # failure_count correctness with extra_changes
 # ---------------------------------------------------------------------------
 
+
 class TestFailureCountCorrectness:
     def test_failure_count_when_first_change_is_compatible(self) -> None:
         """failure_count must count symbols with ANY failing change,
         even when the first change per symbol is compatible."""
         changes = [
             # First change for symbol "f" is compatible (addition)
-            Change(kind=ChangeKind.FUNC_ADDED, symbol="f",
-                   description="added"),
+            Change(kind=ChangeKind.FUNC_ADDED, symbol="f", description="added"),
             # Second change for symbol "f" is breaking
-            Change(kind=ChangeKind.FUNC_RETURN_CHANGED, symbol="f",
-                   description="return type changed"),
+            Change(
+                kind=ChangeKind.FUNC_RETURN_CHANGED,
+                symbol="f",
+                description="return type changed",
+            ),
         ]
         xml = to_junit_xml(_make_result(changes))
         root = _parse(xml)
@@ -752,6 +818,7 @@ class TestFailureCountCorrectness:
 # ---------------------------------------------------------------------------
 # show_only + snapshot interaction
 # ---------------------------------------------------------------------------
+
 
 class TestShowOnlyWithSnapshot:
     def test_show_only_excludes_unchanged_snapshot_symbols(self) -> None:
@@ -765,8 +832,9 @@ class TestShowOnlyWithSnapshot:
             ],
         )
         changes = [
-            Change(kind=ChangeKind.FUNC_REMOVED, symbol="removed",
-                   description="removed"),
+            Change(
+                kind=ChangeKind.FUNC_REMOVED, symbol="removed", description="removed"
+            ),
         ]
         result = _make_result(changes)
         xml = to_junit_xml(result, snap, show_only="breaking")
@@ -784,6 +852,7 @@ class TestShowOnlyWithSnapshot:
 # severity_config propagation
 # ---------------------------------------------------------------------------
 
+
 class TestSeverityConfig:
     def test_severity_config_escalates_addition_to_failure(self) -> None:
         """When severity_config marks additions as 'error', they become
@@ -797,8 +866,7 @@ class TestSeverityConfig:
             addition=SeverityLevel.ERROR,
         )
         changes = [
-            Change(kind=ChangeKind.FUNC_ADDED, symbol="f",
-                   description="added"),
+            Change(kind=ChangeKind.FUNC_ADDED, symbol="f", description="added"),
         ]
         result = _make_result(changes, verdict=Verdict.COMPATIBLE)
         xml = to_junit_xml(result, severity_config=config)
@@ -843,8 +911,7 @@ class TestSeverityConfig:
         # Note: _is_failure always returns True for breaking_set regardless of
         # severity_config. This test verifies that contract.
         changes = [
-            Change(kind=ChangeKind.FUNC_REMOVED, symbol="f",
-                   description="removed"),
+            Change(kind=ChangeKind.FUNC_REMOVED, symbol="f", description="removed"),
         ]
         result = _make_result(changes)
         xml = to_junit_xml(result)
@@ -905,10 +972,13 @@ class TestSeverityConfig:
         from abicheck.severity import resolve_severity_config
 
         api_break = Change(
-            kind=ChangeKind.ENUM_MEMBER_RENAMED, symbol="E", description="renamed",
+            kind=ChangeKind.ENUM_MEMBER_RENAMED,
+            symbol="E",
+            description="renamed",
         )
         risk = Change(
-            kind=ChangeKind.SYMBOL_VERSION_REQUIRED_ADDED, symbol="f",
+            kind=ChangeKind.SYMBOL_VERSION_REQUIRED_ADDED,
+            symbol="f",
             description="version req added",
         )
         cfg = resolve_severity_config("default", potential_breaking="error")
@@ -952,7 +1022,8 @@ class TestSeverityConfig:
         from abicheck.severity import resolve_severity_config
 
         c = Change(
-            kind=ChangeKind.SYMBOL_VERSION_REQUIRED_ADDED, symbol="f",
+            kind=ChangeKind.SYMBOL_VERSION_REQUIRED_ADDED,
+            symbol="f",
             description="version req added",
         )
         c.effective_verdict = Verdict.API_BREAK
@@ -967,12 +1038,12 @@ class TestSeverityConfig:
 # Error libraries in multi-suite
 # ---------------------------------------------------------------------------
 
+
 class TestErrorLibraries:
     def test_error_library_appears_as_error_testsuite(self) -> None:
         """Failed compare-release pairs should produce <error> testcases."""
         r1 = _make_result(
-            [Change(kind=ChangeKind.FUNC_REMOVED, symbol="f1",
-                    description="removed")],
+            [Change(kind=ChangeKind.FUNC_REMOVED, symbol="f1", description="removed")],
             library="libfoo.so.1",
         )
         error_libs = [
@@ -1023,12 +1094,16 @@ class TestJUnitCLICompare:
         _write_snapshot(tmp_path / "new.json", new)
 
         runner = CliRunner()
-        result = runner.invoke(main, [
-            "compare",
-            str(tmp_path / "old.json"),
-            str(tmp_path / "new.json"),
-            "--format", "junit",
-        ])
+        result = runner.invoke(
+            main,
+            [
+                "compare",
+                str(tmp_path / "old.json"),
+                str(tmp_path / "new.json"),
+                "--format",
+                "junit",
+            ],
+        )
         assert result.exit_code == 0, result.output
         root = xml_fromstring(result.output)
         assert root.tag == "testsuites"
@@ -1040,23 +1115,33 @@ class TestJUnitCLICompare:
         """Removing a function → JUnit XML with failure, exit code 4."""
         from abicheck.cli import main
 
-        old = self._snap("1.0", [
-            Function(name="foo", mangled="_Z3foov", return_type="int"),
-            Function(name="bar", mangled="_Z3barv", return_type="void"),
-        ])
-        new = self._snap("2.0", [
-            Function(name="foo", mangled="_Z3foov", return_type="int"),
-        ])
+        old = self._snap(
+            "1.0",
+            [
+                Function(name="foo", mangled="_Z3foov", return_type="int"),
+                Function(name="bar", mangled="_Z3barv", return_type="void"),
+            ],
+        )
+        new = self._snap(
+            "2.0",
+            [
+                Function(name="foo", mangled="_Z3foov", return_type="int"),
+            ],
+        )
         _write_snapshot(tmp_path / "old.json", old)
         _write_snapshot(tmp_path / "new.json", new)
 
         runner = CliRunner()
-        result = runner.invoke(main, [
-            "compare",
-            str(tmp_path / "old.json"),
-            str(tmp_path / "new.json"),
-            "--format", "junit",
-        ])
+        result = runner.invoke(
+            main,
+            [
+                "compare",
+                str(tmp_path / "old.json"),
+                str(tmp_path / "new.json"),
+                "--format",
+                "junit",
+            ],
+        )
         assert result.exit_code == 4  # BREAKING
         root = xml_fromstring(result.output)
         assert root.get("failures") == "1"
@@ -1068,23 +1153,33 @@ class TestJUnitCLICompare:
         """Adding a function → JUnit XML with zero failures, exit code 0."""
         from abicheck.cli import main
 
-        old = self._snap("1.0", [
-            Function(name="foo", mangled="_Z3foov", return_type="int"),
-        ])
-        new = self._snap("2.0", [
-            Function(name="foo", mangled="_Z3foov", return_type="int"),
-            Function(name="bar", mangled="_Z3barv", return_type="void"),
-        ])
+        old = self._snap(
+            "1.0",
+            [
+                Function(name="foo", mangled="_Z3foov", return_type="int"),
+            ],
+        )
+        new = self._snap(
+            "2.0",
+            [
+                Function(name="foo", mangled="_Z3foov", return_type="int"),
+                Function(name="bar", mangled="_Z3barv", return_type="void"),
+            ],
+        )
         _write_snapshot(tmp_path / "old.json", old)
         _write_snapshot(tmp_path / "new.json", new)
 
         runner = CliRunner()
-        result = runner.invoke(main, [
-            "compare",
-            str(tmp_path / "old.json"),
-            str(tmp_path / "new.json"),
-            "--format", "junit",
-        ])
+        result = runner.invoke(
+            main,
+            [
+                "compare",
+                str(tmp_path / "old.json"),
+                str(tmp_path / "new.json"),
+                "--format",
+                "junit",
+            ],
+        )
         assert result.exit_code == 0
         root = xml_fromstring(result.output)
         assert root.get("failures") == "0"
@@ -1104,13 +1199,18 @@ class TestJUnitCLICompare:
         out_path = tmp_path / "results.xml"
 
         runner = CliRunner()
-        result = runner.invoke(main, [
-            "compare",
-            str(tmp_path / "old.json"),
-            str(tmp_path / "new.json"),
-            "--format", "junit",
-            "-o", str(out_path),
-        ])
+        result = runner.invoke(
+            main,
+            [
+                "compare",
+                str(tmp_path / "old.json"),
+                str(tmp_path / "new.json"),
+                "--format",
+                "junit",
+                "-o",
+                str(out_path),
+            ],
+        )
         assert result.exit_code == 0, result.output
         assert out_path.exists()
         content = out_path.read_text(encoding="utf-8")
@@ -1121,13 +1221,19 @@ class TestJUnitCLICompare:
         """Suppressed changes should not appear as failures in JUnit output."""
         from abicheck.cli import main
 
-        old = self._snap("1.0", [
-            Function(name="foo", mangled="_Z3foov", return_type="int"),
-            Function(name="bar", mangled="_Z3barv", return_type="void"),
-        ])
-        new = self._snap("2.0", [
-            Function(name="foo", mangled="_Z3foov", return_type="int"),
-        ])
+        old = self._snap(
+            "1.0",
+            [
+                Function(name="foo", mangled="_Z3foov", return_type="int"),
+                Function(name="bar", mangled="_Z3barv", return_type="void"),
+            ],
+        )
+        new = self._snap(
+            "2.0",
+            [
+                Function(name="foo", mangled="_Z3foov", return_type="int"),
+            ],
+        )
         _write_snapshot(tmp_path / "old.json", old)
         _write_snapshot(tmp_path / "new.json", new)
 
@@ -1144,14 +1250,20 @@ class TestJUnitCLICompare:
 
         out_path = tmp_path / "results.xml"
         runner = CliRunner()
-        result = runner.invoke(main, [
-            "compare",
-            str(tmp_path / "old.json"),
-            str(tmp_path / "new.json"),
-            "--format", "junit",
-            "--suppress", str(supp_path),
-            "-o", str(out_path),
-        ])
+        result = runner.invoke(
+            main,
+            [
+                "compare",
+                str(tmp_path / "old.json"),
+                str(tmp_path / "new.json"),
+                "--format",
+                "junit",
+                "--suppress",
+                str(supp_path),
+                "-o",
+                str(out_path),
+            ],
+        )
         # With suppression, verdict may be NO_CHANGE or COMPATIBLE
         assert result.exit_code == 0, result.output
         content = out_path.read_text(encoding="utf-8")
@@ -1162,22 +1274,32 @@ class TestJUnitCLICompare:
         """Return type change → JUnit failure with old/new values."""
         from abicheck.cli import main
 
-        old = self._snap("1.0", [
-            Function(name="getval", mangled="_Z6getvalv", return_type="int"),
-        ])
-        new = self._snap("2.0", [
-            Function(name="getval", mangled="_Z6getvalv", return_type="long"),
-        ])
+        old = self._snap(
+            "1.0",
+            [
+                Function(name="getval", mangled="_Z6getvalv", return_type="int"),
+            ],
+        )
+        new = self._snap(
+            "2.0",
+            [
+                Function(name="getval", mangled="_Z6getvalv", return_type="long"),
+            ],
+        )
         _write_snapshot(tmp_path / "old.json", old)
         _write_snapshot(tmp_path / "new.json", new)
 
         runner = CliRunner()
-        result = runner.invoke(main, [
-            "compare",
-            str(tmp_path / "old.json"),
-            str(tmp_path / "new.json"),
-            "--format", "junit",
-        ])
+        result = runner.invoke(
+            main,
+            [
+                "compare",
+                str(tmp_path / "old.json"),
+                str(tmp_path / "new.json"),
+                "--format",
+                "junit",
+            ],
+        )
         assert result.exit_code == 4  # BREAKING
         root = xml_fromstring(result.output)
         fail = root.find(".//failure")
@@ -1188,24 +1310,34 @@ class TestJUnitCLICompare:
         """Mix of additions, removals, and unchanged → correct counts."""
         from abicheck.cli import main
 
-        old = self._snap("1.0", [
-            Function(name="keep", mangled="_Z4keepv", return_type="void"),
-            Function(name="remove", mangled="_Z6removev", return_type="void"),
-        ])
-        new = self._snap("2.0", [
-            Function(name="keep", mangled="_Z4keepv", return_type="void"),
-            Function(name="added", mangled="_Z5addedv", return_type="void"),
-        ])
+        old = self._snap(
+            "1.0",
+            [
+                Function(name="keep", mangled="_Z4keepv", return_type="void"),
+                Function(name="remove", mangled="_Z6removev", return_type="void"),
+            ],
+        )
+        new = self._snap(
+            "2.0",
+            [
+                Function(name="keep", mangled="_Z4keepv", return_type="void"),
+                Function(name="added", mangled="_Z5addedv", return_type="void"),
+            ],
+        )
         _write_snapshot(tmp_path / "old.json", old)
         _write_snapshot(tmp_path / "new.json", new)
 
         runner = CliRunner()
-        result = runner.invoke(main, [
-            "compare",
-            str(tmp_path / "old.json"),
-            str(tmp_path / "new.json"),
-            "--format", "junit",
-        ])
+        result = runner.invoke(
+            main,
+            [
+                "compare",
+                str(tmp_path / "old.json"),
+                str(tmp_path / "new.json"),
+                "--format",
+                "junit",
+            ],
+        )
         root = xml_fromstring(result.output)
         ts = root.find("testsuite")
         # Exactly one function was removed
@@ -1215,24 +1347,35 @@ class TestJUnitCLICompare:
         """Different policy can reclassify changes, reflected in JUnit."""
         from abicheck.cli import main
 
-        old = self._snap("1.0", [
-            Function(name="foo", mangled="_Z3foov", return_type="int"),
-        ])
-        new = self._snap("2.0", [
-            Function(name="foo", mangled="_Z3foov", return_type="int"),
-            Function(name="bar", mangled="_Z3barv", return_type="void"),
-        ])
+        old = self._snap(
+            "1.0",
+            [
+                Function(name="foo", mangled="_Z3foov", return_type="int"),
+            ],
+        )
+        new = self._snap(
+            "2.0",
+            [
+                Function(name="foo", mangled="_Z3foov", return_type="int"),
+                Function(name="bar", mangled="_Z3barv", return_type="void"),
+            ],
+        )
         _write_snapshot(tmp_path / "old.json", old)
         _write_snapshot(tmp_path / "new.json", new)
 
         runner = CliRunner()
-        result = runner.invoke(main, [
-            "compare",
-            str(tmp_path / "old.json"),
-            str(tmp_path / "new.json"),
-            "--format", "junit",
-            "--policy", "sdk_vendor",
-        ])
+        result = runner.invoke(
+            main,
+            [
+                "compare",
+                str(tmp_path / "old.json"),
+                str(tmp_path / "new.json"),
+                "--format",
+                "junit",
+                "--policy",
+                "sdk_vendor",
+            ],
+        )
         assert result.exit_code == 0
         root = xml_fromstring(result.output)
         assert root.get("failures") == "0"
@@ -1241,25 +1384,36 @@ class TestJUnitCLICompare:
         """--show-only breaking with --format junit filters to breaking only."""
         from abicheck.cli import main
 
-        old = self._snap("1.0", [
-            Function(name="foo", mangled="_Z3foov", return_type="int"),
-            Function(name="bar", mangled="_Z3barv", return_type="void"),
-        ])
-        new = self._snap("2.0", [
-            Function(name="foo", mangled="_Z3foov", return_type="int"),
-            Function(name="baz", mangled="_Z3bazv", return_type="void"),
-        ])
+        old = self._snap(
+            "1.0",
+            [
+                Function(name="foo", mangled="_Z3foov", return_type="int"),
+                Function(name="bar", mangled="_Z3barv", return_type="void"),
+            ],
+        )
+        new = self._snap(
+            "2.0",
+            [
+                Function(name="foo", mangled="_Z3foov", return_type="int"),
+                Function(name="baz", mangled="_Z3bazv", return_type="void"),
+            ],
+        )
         _write_snapshot(tmp_path / "old.json", old)
         _write_snapshot(tmp_path / "new.json", new)
 
         runner = CliRunner()
-        result = runner.invoke(main, [
-            "compare",
-            str(tmp_path / "old.json"),
-            str(tmp_path / "new.json"),
-            "--format", "junit",
-            "--show-only", "breaking",
-        ])
+        result = runner.invoke(
+            main,
+            [
+                "compare",
+                str(tmp_path / "old.json"),
+                str(tmp_path / "new.json"),
+                "--format",
+                "junit",
+                "--show-only",
+                "breaking",
+            ],
+        )
         assert result.exit_code == 4  # BREAKING
         root = xml_fromstring(result.output)
         ts = root.find("testsuite")
@@ -1281,13 +1435,17 @@ class TestJUnitCLICompare:
         _write_snapshot(tmp_path / "new.json", new)
 
         runner = CliRunner()
-        result = runner.invoke(main, [
-            "compare",
-            str(tmp_path / "old.json"),
-            str(tmp_path / "new.json"),
-            "--format", "junit",
-            "--stat",
-        ])
+        result = runner.invoke(
+            main,
+            [
+                "compare",
+                str(tmp_path / "old.json"),
+                str(tmp_path / "new.json"),
+                "--format",
+                "junit",
+                "--stat",
+            ],
+        )
         assert result.exit_code == 0, result.output
         root = xml_fromstring(result.output)
         assert root.tag == "testsuites"
@@ -1297,10 +1455,16 @@ class TestJUnitCLICompare:
         from abicheck.cli import main
 
         runner = CliRunner()
-        result = runner.invoke(main, [
-            "compare", "/nonexistent/old.json", "/nonexistent/new.json",
-            "--format", "junit",
-        ])
+        result = runner.invoke(
+            main,
+            [
+                "compare",
+                "/nonexistent/old.json",
+                "/nonexistent/new.json",
+                "--format",
+                "junit",
+            ],
+        )
         # Should fail on missing file, NOT on unrecognized format
         assert "Unsupported output format" not in (result.output or "")
 
@@ -1309,24 +1473,42 @@ class TestJUnitCLICompare:
         from abicheck.cli import main
         from abicheck.model import Param
 
-        old = self._snap("1.0", [
-            Function(name="bar<int>", mangled="_Z3barIiEvT_", return_type="void",
-                     params=[Param(name="x", type="int")]),
-        ])
-        new = self._snap("2.0", [
-            Function(name="bar<int>", mangled="_Z3barIiEvT_", return_type="void",
-                     params=[Param(name="x", type="long")]),
-        ])
+        old = self._snap(
+            "1.0",
+            [
+                Function(
+                    name="bar<int>",
+                    mangled="_Z3barIiEvT_",
+                    return_type="void",
+                    params=[Param(name="x", type="int")],
+                ),
+            ],
+        )
+        new = self._snap(
+            "2.0",
+            [
+                Function(
+                    name="bar<int>",
+                    mangled="_Z3barIiEvT_",
+                    return_type="void",
+                    params=[Param(name="x", type="long")],
+                ),
+            ],
+        )
         _write_snapshot(tmp_path / "old.json", old)
         _write_snapshot(tmp_path / "new.json", new)
 
         runner = CliRunner()
-        result = runner.invoke(main, [
-            "compare",
-            str(tmp_path / "old.json"),
-            str(tmp_path / "new.json"),
-            "--format", "junit",
-        ])
+        result = runner.invoke(
+            main,
+            [
+                "compare",
+                str(tmp_path / "old.json"),
+                str(tmp_path / "new.json"),
+                "--format",
+                "junit",
+            ],
+        )
         # Must parse as valid XML regardless of exit code
         root = xml_fromstring(result.output)
         assert root.tag == "testsuites"
@@ -1356,9 +1538,7 @@ class TestScopedProperties:
         xml_str = to_junit_xml(r)
         root = _parse(xml_str)
         ts = root.find("testsuite")
-        props = {
-            p.get("name"): p.get("value") for p in ts.find("properties")
-        }
+        props = {p.get("name"): p.get("value") for p in ts.find("properties")}
         assert props["abicheck.gate_scope"] == "used_by"
         assert props["abicheck.gate_verdict"] == "COMPATIBLE"
         assert props["abicheck.full_library_verdict"] == "BREAKING"
@@ -1371,9 +1551,7 @@ class TestScopedProperties:
         xml_str = to_junit_xml(r)
         root = _parse(xml_str)
         ts = root.find("testsuite")
-        props = {
-            p.get("name"): p.get("value") for p in ts.find("properties")
-        }
+        props = {p.get("name"): p.get("value") for p in ts.find("properties")}
         assert props["abicheck.required_symbol_contract_verdict"] == "BREAKING"
 
     def test_gate_exit_code_follows_severity_scheme(self) -> None:
@@ -1387,9 +1565,7 @@ class TestScopedProperties:
         xml_str = to_junit_xml(r)
         root = _parse(xml_str)
         ts = root.find("testsuite")
-        props = {
-            p.get("name"): p.get("value") for p in ts.find("properties")
-        }
+        props = {p.get("name"): p.get("value") for p in ts.find("properties")}
         assert props["abicheck.gate_exit_code"] == "0"
         assert props["abicheck.gate_exit_code_scheme"] == "severity"
 
@@ -1501,7 +1677,8 @@ class TestScopedProperties:
             kind=ChangeKind.PE_ORDINAL_RETARGETED,
             symbol="ordinal:5",
             description="ordinal 5 retargeted",
-            old_value="OldFunc", new_value="NewFunc",
+            old_value="OldFunc",
+            new_value="NewFunc",
         )
         r = _make_result([], verdict=Verdict.COMPATIBLE)
         r.scoped_verdict = Verdict.BREAKING  # type: ignore[attr-defined]
@@ -1592,6 +1769,159 @@ class TestContractEvaluationProperties:
         root = _parse(xml_str)
         tc = root.find("testsuite/testcase[@name='_Z3foov']")
         assert tc.find("properties") is None
+
+    def test_correlated_change_kind_reaches_properties(self) -> None:
+        # Cross-detector correlation (e.g. LAYOUT_UNVERIFIABLE annotated by
+        # post_processing.AnnotateLayoutUnverifiableCoveredByVtableChanged)
+        # must reach JUnit's properties, not just JSON/SARIF (Codex review) --
+        # and unlike contract properties, it must appear on every run, not
+        # only under --contract-evaluation.
+        change = Change(
+            ChangeKind.LAYOUT_UNVERIFIABLE,
+            "Foo",
+            "layout evidence unverifiable",
+            correlated_change_kind=ChangeKind.TYPE_VTABLE_CHANGED.value,
+        )
+        r = _make_result([change], verdict=Verdict.COMPATIBLE_WITH_RISK)
+        xml_str = to_junit_xml(r)
+        root = _parse(xml_str)
+        tc = root.find("testsuite/testcase[@name='Foo']")
+        props = {p.get("name"): p.get("value") for p in tc.find("properties")}
+        assert props["abicheck.correlated_change_kind"] == "type_vtable_changed"
+
+    def test_no_correlated_change_kind_property_when_unset(self) -> None:
+        change = Change(
+            ChangeKind.LAYOUT_UNVERIFIABLE, "Foo", "layout evidence unverifiable"
+        )
+        r = _make_result([change], verdict=Verdict.COMPATIBLE_WITH_RISK)
+        xml_str = to_junit_xml(r)
+        root = _parse(xml_str)
+        tc = root.find("testsuite/testcase[@name='Foo']")
+        assert tc.find("properties") is None
+
+    def test_correlation_property_absent_when_show_only_filters_out_the_target(
+        self,
+    ) -> None:
+        """``--show-only`` can keep a LAYOUT_UNVERIFIABLE (risk) finding
+        while filtering out the co-reported TYPE_VTABLE_CHANGED (breaking)
+        its correlated_change_kind names — the JUnit
+        ``abicheck.correlated_change_kind`` property must not reference a
+        finding this filtered view no longer includes (Codex review, fresh
+        evidence: a fix scoped only to markdown left JUnit with the
+        identical gap)."""
+        layout_change = Change(
+            ChangeKind.LAYOUT_UNVERIFIABLE,
+            "Foo",
+            "layout evidence unverifiable",
+            qualified_name="Foo",
+            correlated_change_kind=ChangeKind.TYPE_VTABLE_CHANGED.value,
+        )
+        vtable_change = Change(
+            ChangeKind.TYPE_VTABLE_CHANGED,
+            "Foo",
+            "vtable changed",
+            qualified_name="Foo",
+        )
+        r = _make_result([layout_change, vtable_change])
+
+        xml_full = to_junit_xml(r)
+        root_full = _parse(xml_full)
+        tc_full = root_full.find("testsuite/testcase[@name='Foo']")
+        props_full = {p.get("name"): p.get("value") for p in tc_full.find("properties")}
+        assert props_full["abicheck.correlated_change_kind"] == "type_vtable_changed"
+
+        xml_filtered = to_junit_xml(r, show_only="risk")
+        root_filtered = _parse(xml_filtered)
+        names_filtered = {
+            tc.get("name") for tc in root_filtered.findall("testsuite/testcase")
+        }
+        assert "Foo" in names_filtered
+        tc_filtered = root_filtered.find("testsuite/testcase[@name='Foo']")
+        properties_filtered = tc_filtered.find("properties")
+        if properties_filtered is not None:
+            props_filtered = {
+                p.get("name"): p.get("value") for p in properties_filtered
+            }
+            assert "abicheck.correlated_change_kind" not in props_filtered
+
+        # The original Change object is never mutated by the filtered render.
+        assert (
+            layout_change.correlated_change_kind == ChangeKind.TYPE_VTABLE_CHANGED.value
+        )
+
+    def test_correlated_change_kind_merges_into_existing_contract_properties(
+        self,
+    ) -> None:
+        # Codex review, fresh evidence: a testcase already carrying contract
+        # properties (--contract-evaluation) must not get a *second* sibling
+        # <properties> element for the correlation -- `tc.find("properties")`
+        # (the lookup every consumer, including this repo's own tests, uses)
+        # only ever sees the first one, so a second element silently hid the
+        # correlation whenever both were stamped on the same testcase.
+        from abicheck.contract_relevance_types import ContractRelevance
+
+        change = Change(
+            ChangeKind.LAYOUT_UNVERIFIABLE,
+            "Foo",
+            "layout evidence unverifiable",
+            contract_relevance=ContractRelevance.IN_CONTRACT,
+            correlated_change_kind=ChangeKind.TYPE_VTABLE_CHANGED.value,
+        )
+        r = _make_result([change], verdict=Verdict.COMPATIBLE_WITH_RISK)
+        xml_str = to_junit_xml(r)
+        root = _parse(xml_str)
+        tc = root.find("testsuite/testcase[@name='Foo']")
+        properties_blocks = tc.findall("properties")
+        assert len(properties_blocks) == 1
+        props = {p.get("name"): p.get("value") for p in properties_blocks[0]}
+        assert props["abicheck.correlated_change_kind"] == "type_vtable_changed"
+        assert props["abicheck.contract_relevance"] == "IN_CONTRACT"
+
+    def test_correlated_change_kind_reaches_a_secondary_same_symbol_change(
+        self,
+    ) -> None:
+        # Codex review, fresh evidence: the ordinary pairing shares one
+        # symbol -- TYPE_VTABLE_CHANGED (first, becomes the primary testcase
+        # entry via _partition_changes) and the correlated LAYOUT_UNVERIFIABLE
+        # (second, an "extra" change on the same testcase). Before this fix,
+        # _append_extra_failures only ever added <failure> elements for a
+        # secondary change and never called _add_correlation_property, so the
+        # motivating comparison emitted no abicheck.correlated_change_kind
+        # property at all.
+        vtable_change = Change(
+            ChangeKind.TYPE_VTABLE_CHANGED,
+            "Foo",
+            "vtable changed",
+            vtable_covers_unverifiable_layout_gap=True,
+        )
+        layout_change = Change(
+            ChangeKind.LAYOUT_UNVERIFIABLE,
+            "Foo",
+            "layout evidence unverifiable",
+            correlated_change_kind=ChangeKind.TYPE_VTABLE_CHANGED.value,
+        )
+        r = _make_result([vtable_change, layout_change], verdict=Verdict.BREAKING)
+        xml_str = to_junit_xml(r)
+        root = _parse(xml_str)
+        tc = root.find("testsuite/testcase[@name='Foo']")
+        properties_blocks = tc.findall("properties")
+        assert len(properties_blocks) == 1
+        props = {p.get("name"): p.get("value") for p in properties_blocks[0]}
+        assert props["abicheck.correlated_change_kind"] == "type_vtable_changed"
+        # A non-failing secondary change (e.g. under a severity scheme that
+        # demotes layout_unverifiable) must still get its correlation
+        # recorded -- the property write and the <failure> decision are
+        # independent.
+        assert tc.find("failure") is not None  # the primary (vtable) failure
+        # Codex review, fresh evidence: the primary (vtable) change's own
+        # <failure> is appended to *tc* before this secondary change's
+        # <properties> block is created (_emit_testcases runs before
+        # _append_extra_failures) -- schema-validating JUnit consumers
+        # expect <properties>, if present, before any <failure>/<error>/
+        # <skipped> result element, so the new block must be inserted first
+        # rather than appended after the existing failure.
+        child_tags = [child.tag for child in tc]
+        assert child_tags.index("properties") < child_tags.index("failure")
 
     def test_stamped_finding_without_optional_fields_omits_them(self) -> None:
         # contract_reason_code/contract_assurance/contract_evidence_refs are

@@ -333,7 +333,20 @@ from typing import Any
 #:       contributes to ``verdict``, ``severity``, or the exit code, and the
 #:       four ``summary`` counts are over the evaluated findings only. Absent,
 #:       and bit-for-bit unchanged, for a run that did not opt in.
-REPORT_SCHEMA_VERSION = "2.27"
+#: 2.28 — ``correlated_change_kind`` (already-published since ADR-041, one
+#:       producer: ``public_api_internal_dependency_added``) gains a second,
+#:       independent producer: a ``layout_unverifiable`` finding that shares
+#:       the identical asymmetric-layout-evidence gap as a co-reported
+#:       ``type_vtable_changed`` finding on the same type is now also
+#:       annotated with it (always the literal string
+#:       ``"type_vtable_changed"`` for this producer). Purely additive --
+#:       the field's shape and existing ``public_api_internal_dependency_added``
+#:       meaning are unchanged, and a consumer already reading it as an
+#:       opaque ``ChangeKind`` slug (rather than assuming which kind pairing
+#:       produced it) needs no change. Bumped rather than left silent because
+#:       the field's schema description named one specific producer/kind
+#:       pairing, which a strict consumer could have relied on.
+REPORT_SCHEMA_VERSION = "2.28"
 
 #: SemVer-style (MAJOR.MINOR) version of the ``scan`` JSON output, emitted as
 #: ``scan_schema_version`` at the top level of both public scan dict shapes:

@@ -50,7 +50,11 @@ from abicheck.contract_relevance_types import CompatibilityEvaluationStatus
 from abicheck.finding_identity import missing_contract_kind
 from abicheck.impact import assess_change
 from abicheck.report_model import VERDICT_TO_SARIF_LEVEL as _VERDICT_TO_SARIF_LEVEL
-from abicheck.reporter import _finding_id, apply_show_only
+from abicheck.reporter import (
+    _finding_id,
+    _suppress_dangling_correlation_notes,
+    apply_show_only,
+)
 from abicheck.reporter_markdown import (
     ShowOnlyFilter,
     _root_cause_key_and_display,
@@ -425,9 +429,7 @@ def _result_for(
     # never opted into --contract-evaluation, which is what keeps this
     # unconditional call inert for every pre-existing SARIF report.
     relevance = contract_relevance_of(change)
-    properties.update(
-        _contract_properties(change, relevance, result, severity_config)
-    )
+    properties.update(_contract_properties(change, relevance, result, severity_config))
 
     level = _severity(change, result, severity_config)
     # ADR-049 D1/D9: compatibility policy did not score this finding, so it
@@ -713,6 +715,7 @@ def to_sarif(
             kind_sets=result._effective_kind_sets(),
             policy_file=result.policy_file,
         )
+        changes = _suppress_dangling_correlation_notes(changes)
 
     # Collect unique rules used
     rules_seen: dict[str, dict[str, Any]] = {}

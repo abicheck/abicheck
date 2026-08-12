@@ -41,8 +41,6 @@ if TYPE_CHECKING:
     from .suppression import Suppression, SuppressionList
 
 
-
-
 class PipelineStep(Protocol):
     """Protocol for a single post-processing step."""
 
@@ -175,6 +173,103 @@ class DowngradeOpaqueTypeChanges:
         from .diff_filtering import _downgrade_opaque_type_changes
 
         return _downgrade_opaque_type_changes(changes, ctx.old, ctx.new)
+
+
+class AnnotateLayoutUnverifiableCoveredByVtableChanged:
+    """Cross-reference a ``LAYOUT_UNVERIFIABLE`` finding with a
+    ``TYPE_VTABLE_CHANGED`` on the *exact same type* that reports the
+    identical asymmetric-evidence gap — never removing either finding from
+    ``changes``.
+
+    ``diff_types._vtable_transition_is_evidenced`` and
+    ``diff_layout._check_layout_unverifiable`` both key off the same "one
+    side has real layout evidence, the other has none" condition. The
+    vtable detector correctly stays BREAKING for it (an unknown size
+    "corroborates nothing but also refutes nothing", so the finding must be
+    kept — see AGENTS.md's "Findings emitted from absent evidence" entry for
+    why demoting it is unsafe: a real removal of a class's last virtual
+    method, with the new side's debug info happening not to cover it, is
+    indistinguishable from this same gap). The layout detector reports the
+    identical gap as calm, non-escalating ``LAYOUT_UNVERIFIABLE`` RISK. Both
+    are individually correct, but landing on the same type in the same
+    report reads as two detectors disagreeing about one piece of evidence
+    (reproducible with zero real ABI change — scanning a binary against a
+    dump of itself).
+
+    This step deliberately does **not** try to resolve that presentation
+    problem by removing either finding from the scored set — three earlier
+    revisions did (first demoting ``TYPE_VTABLE_CHANGED``, then folding
+    ``LAYOUT_UNVERIFIABLE`` into ``ctx.redundant`` unconditionally, then
+    only when policy-subsumed), and each was independently shown unsafe by
+    review (see AGENTS.md's own account of all of these). The last and
+    decisive one (Codex review, fresh evidence): the fold's "is the
+    covering finding severe enough to make this one redundant" comparison
+    was made against the *policy verdict* axis (BREAKING/API_BREAK/RISK/
+    COMPATIBLE), but ``DiffResult.changes`` is separately gated by the
+    *severity-scheme* axis (``SeverityConfig``: abi_breaking/
+    potential_breaking/quality_issues/addition, each independently
+    error/warning/info) — and that axis is chosen by a caller entirely
+    *after* ``compare()`` returns (``cli.py``'s ``--severity-preset``/
+    ``--severity-*`` flags, applied to an already-built ``DiffResult``).
+    No decision made inside ``compare()`` can be correct for a
+    configuration ``compare()`` never sees: a policy-unconfigured run with
+    ``abi_breaking=info``/``potential_breaking=error`` reproduces the exact
+    same "the gate misses the finding" bug with **no policy override
+    involved at all**, which the previous, policy-axis-only fold check had
+    no way to detect. Once two independent axes (policy *and* severity
+    config) can each defeat a fold decided at ``compare()``-time, and each
+    was found only by discovering the previous fix's blind spot, there is
+    no principled reason to believe a third axis (a future gate mechanism)
+    won't do the same. The only fix immune to *every* current and future
+    consumer of ``DiffResult.changes`` is to never remove information from
+    it for this reason at all.
+
+    So instead: both findings stay exactly where the detectors put them,
+    contributing independently and correctly to every verdict, severity,
+    JSON, SARIF, and release-bundle computation exactly as if this step did
+    not exist. The only change is ``Change.correlated_change_kind`` — set on
+    the ``LAYOUT_UNVERIFIABLE`` finding to ``"type_vtable_changed"`` — the
+    same generic cross-reference field ADR-041 already uses for a different
+    finding pair, so a JSON/SARIF consumer (``reporter.py``/``sarif.py``
+    already serialize it) can render "see also" instead of two
+    unexplained, seemingly-contradictory findings, without this codebase
+    ever having to correctly anticipate what a downstream consumer will
+    do with the list.
+
+    Correlated via ``Change.qualified_name`` (the type's real, namespaced
+    identity — both producers set it for exactly this purpose), not the
+    bare ``Change.symbol`` two distinct same-named records in different
+    namespaces could share; and gated on the dedicated
+    ``Change.vtable_covers_unverifiable_layout_gap`` marker (not
+    ``modulation_reason`` — see that field's own docstring for why
+    overloading the modulation audit trail here would be wrong), so a
+    co-occurring but independently-evidenced ``TYPE_VTABLE_CHANGED`` (a
+    real reorder, a real size delta, a real virtual-base change) is never
+    cross-referenced as if it shared the same evidence gap.
+    """
+
+    name = "annotate_layout_unverifiable_covered_by_vtable_changed"
+
+    def run(self, changes: list[Change], ctx: PipelineContext) -> list[Change]:
+        from .checker_policy import ChangeKind
+
+        covered_types = {
+            c.qualified_name
+            for c in changes
+            if c.kind == ChangeKind.TYPE_VTABLE_CHANGED
+            and c.vtable_covers_unverifiable_layout_gap
+            and c.qualified_name
+        }
+        if not covered_types:
+            return changes
+        for c in changes:
+            if (
+                c.kind == ChangeKind.LAYOUT_UNVERIFIABLE
+                and c.qualified_name in covered_types
+                and not c.correlated_change_kind
+            ):
+                c.correlated_change_kind = ChangeKind.TYPE_VTABLE_CHANGED.value
+        return changes
 
 
 class EnrichSourceLocations:
@@ -456,10 +551,6 @@ class DemoteOffPythonSurface:
         return kept
 
 
-
-
-
-
 class ApplySuppression:
     """Apply user-provided suppression rules.
 
@@ -542,7 +633,9 @@ def _build_suppression_overreach_change(change: Change, rule: Suppression) -> Ch
     )
 
 
-def _build_suppression_unknown_reachability_change(change: Change, rule: Suppression) -> Change:
+def _build_suppression_unknown_reachability_change(
+    change: Change, rule: Suppression
+) -> Change:
     """Build the ``SUPPRESSION_REACHABILITY_UNKNOWN`` diagnostic for *change*.
 
     impact-analysis-layer P0 slice. *rule* is the suppression whose selectors
@@ -723,6 +816,70 @@ class SuppressRenamedPairs:
                     continue
             kept.append(c)
         return kept
+
+
+class ClearOrphanedVtableGapCorrelation:
+    """Clear ``Change.correlated_change_kind`` on a ``LAYOUT_UNVERIFIABLE``
+    finding whose covering ``TYPE_VTABLE_CHANGED`` no longer survives in
+    ``changes`` by the time suppression has run.
+
+    ``AnnotateLayoutUnverifiableCoveredByVtableChanged`` above runs early —
+    deliberately *before* ``ApplySuppression`` (see that step's own
+    docstring for why it must also run before ``MarkReachability``,
+    two steps earlier). A suppression rule can target only the covering
+    ``TYPE_VTABLE_CHANGED`` (e.g. an ``allow_public_break`` waiver on that
+    one finding) without touching the co-reported ``LAYOUT_UNVERIFIABLE`` —
+    when that happens, the earlier annotation is left pointing at a finding
+    ``ApplySuppression`` already moved out of ``changes`` into
+    ``ctx.suppressed``. Left uncorrected, JSON/SARIF would keep publishing
+    a "see also: type_vtable_changed" reference to a finding the same
+    report never actually shows, and Markdown/HTML would render a "See
+    also" note pointing at nothing (Codex review, fresh evidence).
+
+    Runs *after* ``ApplySuppression``/``SuppressRenamedPairs`` so it sees
+    the settled post-suppression ``changes`` list, and *never* re-sets a
+    correlation that wasn't already there — only clears one whose covering
+    finding has since vanished. A ``LAYOUT_UNVERIFIABLE`` finding that is
+    itself suppressed needs no handling here: it left ``changes`` along
+    with its (now-irrelevant) correlation.
+
+    Also updates a cached ``Change.impact_assessment`` (set by
+    ``MarkReachability``, two steps before the original annotation, when a
+    configured suppression needs reachability evidence) to keep it in sync
+    with the cleared flat field — ``impact.engine.assess_change()`` prefers
+    a cached assessment's own ``correlated_change_kind`` over the flat
+    field once one exists, so leaving the cache untouched here would
+    resurrect the exact dangling reference this step exists to remove, just
+    inside the unified ``impact_assessment`` object instead of the
+    top-level field.
+    """
+
+    name = "clear_orphaned_vtable_gap_correlation"
+
+    def run(self, changes: list[Change], ctx: PipelineContext) -> list[Change]:
+        import dataclasses
+
+        from .checker_policy import ChangeKind
+
+        surviving_covering_types = {
+            c.qualified_name
+            for c in changes
+            if c.kind == ChangeKind.TYPE_VTABLE_CHANGED
+            and c.vtable_covers_unverifiable_layout_gap
+            and c.qualified_name
+        }
+        for c in changes:
+            if (
+                c.kind == ChangeKind.LAYOUT_UNVERIFIABLE
+                and c.correlated_change_kind == ChangeKind.TYPE_VTABLE_CHANGED.value
+                and c.qualified_name not in surviving_covering_types
+            ):
+                c.correlated_change_kind = None
+                if c.impact_assessment is not None:
+                    c.impact_assessment = dataclasses.replace(
+                        c.impact_assessment, correlated_change_kind=None
+                    )
+        return changes
 
 
 class FilterRedundant:
@@ -906,7 +1063,9 @@ class DetectTemplatePatterns:
             detect_template_patterns,
         )
 
-        namespaces = self._namespaces or ctx.internal_namespaces or _INTERNAL_TEMPLATE_NAMESPACES
+        namespaces = (
+            self._namespaces or ctx.internal_namespaces or _INTERNAL_TEMPLATE_NAMESPACES
+        )
         new_findings = detect_template_patterns(ctx.old, ctx.new, namespaces)
         if not new_findings:
             return changes
@@ -970,7 +1129,9 @@ class DetectInternalLeaks:
             detect_internal_leaks,
         )
 
-        namespaces = self._namespaces or ctx.internal_namespaces or DEFAULT_INTERNAL_NAMESPACES
+        namespaces = (
+            self._namespaces or ctx.internal_namespaces or DEFAULT_INTERNAL_NAMESPACES
+        )
         extra = detect_internal_leaks(changes, ctx.old, ctx.new, namespaces)
         # ADR-044 P1 items 1-2: the call-graph analogue, for a triggering
         # change with no layout/type-graph evidence at all (see
@@ -1027,7 +1188,9 @@ class DemoteUnreachableInternalChurn:
         )
         from .surface import REASON_PRIVATE_INTERNAL_UNREACHABLE
 
-        namespaces = self._namespaces or ctx.internal_namespaces or DEFAULT_INTERNAL_NAMESPACES
+        namespaces = (
+            self._namespaces or ctx.internal_namespaces or DEFAULT_INTERNAL_NAMESPACES
+        )
         frozen = list(ctx.frozen_namespaces)
 
         def _is_frozen(type_name: str) -> bool:
@@ -1380,12 +1543,39 @@ DEFAULT_PIPELINE = PostProcessingPipeline(
         # resolved C-header surface (ctx.surf_new) and defer to it; otherwise it
         # uses the recovered Python API as the extension's public-contract oracle.
         DemoteOffPythonSurface(),
+        # Reads markers TYPE_VTABLE_CHANGED set at emission time (diff_types.py)
+        # to cross-reference a LAYOUT_UNVERIFIABLE finding covering the identical
+        # evidence gap via Change.correlated_change_kind. Never removes anything
+        # from `changes` (see the step's own docstring for why an earlier,
+        # removal-based design was unsafe), so its position relative to
+        # scoping/suppression/FilterRedundant is not load-bearing the way a
+        # filtering step's would be -- kept here simply to run once both
+        # findings are guaranteed to exist in `changes` (i.e. after scoping
+        # has settled which findings are even still present).
+        #
+        # Must run *before* MarkReachability, though (Codex review, fresh
+        # evidence): that step caches each tagged change's whole
+        # ImpactAssessment via impact.engine.assess_change(), and
+        # assess_change() itself prefers a cached assessment's own
+        # correlated_change_kind over the flat Change field once one exists
+        # (impact/engine.py's own documented contract for reusing a cached
+        # assessment). Running this step after MarkReachability would let it
+        # set the flat field on a change whose impact_assessment was already
+        # cached with correlated_change_kind=None -- silently stale for every
+        # consumer of that unified object (JSON/SARIF's impact_assessment
+        # block) even though the flat top-level field is correct.
+        AnnotateLayoutUnverifiableCoveredByVtableChanged(),
         # ADR-044 D1: must run before ApplySuppression so a broad suppression
         # rule can see whether the change it is about to remove is part of the
         # effective public ABI.
         MarkReachability(),
         ApplySuppression(),
         SuppressRenamedPairs(),
+        # Runs immediately after suppression settles `changes` so it sees
+        # the final post-suppression set -- see its own docstring for why a
+        # suppression targeting only the covering TYPE_VTABLE_CHANGED would
+        # otherwise leave the earlier annotation dangling.
+        ClearOrphanedVtableGapCorrelation(),
         FilterRedundant(),
         EnrichAffectedSymbols(),
         AttributeStdlibEmbedding(),
