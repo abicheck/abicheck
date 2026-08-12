@@ -196,6 +196,48 @@ reclassify:
     assert effective_verdict_for_change(change, policy_file=pf) == Verdict.BREAKING
 
 
+def test_policy_file_keeps_existing_positional_field_order() -> None:
+    """PolicyFile is public API constructed positionally by external callers
+    -- `reclassify` must not shift `source_path` (or anything after it) out
+    of its pre-existing positional slot."""
+    from abicheck.policy_file import PolicyFile as PF
+
+    pf = PF("strict_abi", {}, Path("/tmp/x.yaml"))
+    assert pf.base_policy == "strict_abi"
+    assert pf.overrides == {}
+    assert pf.source_path == Path("/tmp/x.yaml")
+    assert pf.reclassify == []
+
+
+def test_reclassify_expires_normalizes_a_yaml_datetime(tmp_path: Path) -> None:
+    """An unquoted YAML timestamp (`2020-08-12T00:00:00`) decodes as a
+    `datetime`, not a `date` -- must be normalized to `.date()` so
+    `Suppression.is_expired()`'s `date.today() > self.expires` comparison
+    doesn't crash with `TypeError: can't compare datetime.date to
+    datetime.datetime`."""
+    from datetime import date
+
+    p = tmp_path / "policy.yaml"
+    p.write_text(
+        """
+reclassify:
+  - kind: func_removed
+    symbol: foo
+    to: ignore
+    expires: 2020-08-12T00:00:00
+""".strip(),
+        encoding="utf-8",
+    )
+    pf = PolicyFile.load(p)
+    assert pf.reclassify[0].expires == date(2020, 8, 12)
+    assert pf.reclassify[0].matches(
+        _change(ChangeKind.FUNC_REMOVED, "foo"), today=date(2020, 1, 1)
+    ), "before expiry, the rule should still match"
+    assert not pf.reclassify[0].matches(
+        _change(ChangeKind.FUNC_REMOVED, "foo"), today=date(2026, 1, 1)
+    ), "past-expiry rule should stop matching (not crash)"
+
+
 def test_reclassify_respects_frozen_namespace_floor(tmp_path: Path) -> None:
     """A reclassify rule downgrading a change on a frozen namespace is
     silently rejected, exactly like a kind-global override already is."""

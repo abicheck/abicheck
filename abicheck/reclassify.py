@@ -75,6 +75,22 @@ at call time (mirroring the lazy ``__getattr__`` shim in
 the sanctioned way around that per CLAUDE.md "What NOT to do" -- extending
 ``IMPORT_CYCLE_ALLOWLIST`` instead would paper over a real, growing SCC.
 ``change``/``Change`` parameters are typed ``Any`` for the same reason.
+
+**Known gap, deliberately not closed here (Codex review, P2):**
+``contract_pipeline.ContractEvaluationStage.build_context()`` -- the ADR-049
+Phase 4 persisted-context assembly under ``compare --contract-evaluation`` --
+folds ``policy_file.overrides`` into the receipt's
+``CompatibilityPolicyConfig`` but does not yet do the same for
+``policy_file.reclassify``. A finding's ``compatibility_decision`` is
+computed correctly either way (``ContractEvaluationStage.classify()`` calls
+the same ``severity.effective_verdict_for_change`` this module is wired
+into), but the *audit receipt* -- the JSON/replay record of what actually
+scored the run -- doesn't yet record which reclassify rule, reason, or
+expiry decided it. Closing this needs the resolved reclassify list threaded
+through ``CompatibilityPolicyConfig``, its JSON serialization (a real
+schema-version concern -- see ``contract_context_io.py``), and
+``contract_replay.py``'s policy-independent replay evaluator -- a scoped,
+independently-verified follow-up, not a same-PR extension of this change.
 """
 
 from __future__ import annotations

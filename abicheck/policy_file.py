@@ -67,7 +67,7 @@ import contextvars
 import hashlib
 import threading
 from dataclasses import dataclass, field
-from datetime import date
+from datetime import date, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -268,9 +268,21 @@ def _parse_overrides(overrides_raw: Any, path: Path) -> dict[ChangeKind, Verdict
 
 def _parse_reclassify_expires(raw: Any, path: Path, index: int) -> date | None:
     """Parse one ``reclassify[i].expires`` value (ISO 8601 string, or a
-    YAML-native date PyYAML already decoded)."""
+    YAML-native date/datetime PyYAML already decoded).
+
+    Checks ``datetime`` before ``date`` (Codex review): a ``datetime`` is
+    itself a ``date`` subclass, so an unquoted YAML timestamp like
+    ``2026-08-12T00:00:00`` -- which PyYAML decodes as a ``datetime``, not a
+    ``date`` -- would otherwise pass the ``isinstance(raw, date)`` branch
+    unnormalized and later crash ``Suppression.is_expired()``'s ``date.today()
+    > self.expires`` comparison (``TypeError``: can't compare ``date`` and
+    ``datetime``). Normalized to ``.date()`` here, mirroring
+    ``suppression.py``'s ``_parse_expires`` handling of the identical case.
+    """
     if raw is None:
         return None
+    if isinstance(raw, datetime):
+        return raw.date()
     if isinstance(raw, date):
         return raw
     if isinstance(raw, str):
@@ -553,7 +565,20 @@ class PolicyFile:
     # Consulted ahead of `overrides[kind]` for the same kind in
     # `compute_verdict`/`_resolve_change_verdict`, since a selector-scoped
     # rule is strictly more specific than a bare-kind one.
-    reclassify: list[ReclassifyRule] = field(default_factory=list)
+    #
+    # `kw_only=True` (Codex review): PolicyFile is public API (constructed
+    # positionally by external callers, e.g. `PolicyFile(base, overrides,
+    # source_path)`), and every field from here on was already assigned a
+    # position before this one existed. Inserting an ordinary positional
+    # field here would silently reinterpret every existing positional
+    # caller's `source_path` argument (and everything after it) as this
+    # field instead -- the exact `Change`-dataclass field-ordering mistake
+    # this repo's own AGENTS.md already documents and reverted once. A
+    # `kw_only` field is excluded from the positional section of the
+    # generated `__init__` regardless of where it's declared, so every
+    # existing positional call keeps binding to the exact fields it always
+    # did.
+    reclassify: list[ReclassifyRule] = field(default_factory=list, kw_only=True)
     source_path: Path | None = None
     #: sha256 of the exact raw bytes :meth:`load` read, when it loaded this
     #: document from a file. Captured at parse time on purpose: a consumer

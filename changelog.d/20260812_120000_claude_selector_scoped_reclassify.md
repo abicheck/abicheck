@@ -32,4 +32,9 @@ A new changelog fragment. See changelog.d/README.md for the workflow.
   ignore` reclassification can't still fail a severity-gated run through
   the other path. A non-string selector value (e.g. `symbol_pattern: 42`)
   is now a hard `PolicyError` at load time instead of an uncaught
-  `TypeError` or a rule that silently never matches.
+  `TypeError` or a rule that silently never matches. `reclassify:`'s
+  `expires` now normalizes an unquoted YAML timestamp (decoded by PyYAML as
+  a `datetime`) to a `date`, matching `suppress:`'s existing handling.
+  `PolicyFile`'s new `reclassify` field is keyword-only, so an external
+  caller constructing `PolicyFile(base, overrides, source_path)`
+  positionally is unaffected.
