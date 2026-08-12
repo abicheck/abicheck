@@ -743,6 +743,7 @@ class TestUploadReleaseAssetRetryDispatchesBySuffix:
         build_manifest = importlib.util.module_from_spec(module_spec)
         module_spec.loader.exec_module(build_manifest)
         compute_content_digest = build_manifest.compute_content_digest
+        compute_snapshot_content_hash = build_manifest.compute_snapshot_content_hash
 
         # Real build_manifest.py at the exact relative path the script
         # loads it from (cwd-relative ".publish-baseline-src/...", matching
@@ -757,6 +758,16 @@ class TestUploadReleaseAssetRetryDispatchesBySuffix:
         module_dir.mkdir(parents=True)
         shutil.copy(src_root, module_dir / "build_manifest.py")
 
+        # A real snapshot dict, not just a declared digest string --
+        # recompute_content_digest_from_disk() now reads the ACTUAL
+        # extracted snapshot bytes for the existing-asset comparison
+        # (Codex review), so the manifest's declared sha256 must genuinely
+        # match what compute_snapshot_content_hash() computes from this
+        # exact snapshot content, the same way build_manifest.py's own
+        # main() derives it from a real dump.
+        snapshot = {"schema_version": 9, "functions": [], "types": []}
+        snapshot_hash = compute_snapshot_content_hash(snapshot)
+
         manifest = {
             "manifest_version": 1,
             "project_ref": "v1.0.0",
@@ -768,7 +779,7 @@ class TestUploadReleaseAssetRetryDispatchesBySuffix:
                     "library": "libfoo",
                     "artifact": "build/libfoo.so",
                     "snapshot": "libfoo.abicheck.json",
-                    "sha256": "a" * 64,
+                    "sha256": snapshot_hash,
                 }
             ],
         }
@@ -780,6 +791,9 @@ class TestUploadReleaseAssetRetryDispatchesBySuffix:
         asset_src = tmp_path / "asset-src"
         asset_src.mkdir()
         (asset_src / "manifest.json").write_text(json.dumps(manifest), encoding="utf-8")
+        (asset_src / "libfoo.abicheck.json").write_text(
+            json.dumps(snapshot), encoding="utf-8"
+        )
         asset_name = "abicheck-baseline-linux-x86_64-gcc13-release.tar.gz"
         archive_path = tmp_path / asset_name
         with tarfile.open(archive_path, "w:gz") as tf:
@@ -856,33 +870,12 @@ class TestUploadReleaseAssetRejectsCrossProfileCollision:
         return step["run"]
 
     def test_same_content_different_profile_is_rejected(self, tmp_path: Path) -> None:
+        import importlib.util
         import json
         import shutil
         import subprocess
         import tarfile
         import tempfile
-
-        # Two manifests with IDENTICAL artifact lists (so
-        # compute_content_digest() agrees) but different `profile` --
-        # exactly the collision an asset-name-template without {profile}
-        # can cause across a multi-profile matrix.
-        artifacts = [
-            {
-                "library": "libfoo",
-                "artifact": "build/libfoo.so",
-                "snapshot": "libfoo.abicheck.json",
-                "sha256": "a" * 64,
-            }
-        ]
-        existing_manifest = {
-            "manifest_version": 1,
-            "project_ref": "v1.0.0",
-            "profile": "linux-x86_64-gcc13-release",
-            "snapshot_schema": None,
-            "fact_set": None,
-            "artifacts": artifacts,
-        }
-        new_manifest = {**existing_manifest, "profile": "linux-aarch64-gcc13-release"}
 
         src_root = (
             Path(__file__).resolve().parents[1]
@@ -894,20 +887,53 @@ class TestUploadReleaseAssetRejectsCrossProfileCollision:
         module_dir.mkdir(parents=True)
         shutil.copy(src_root, module_dir / "build_manifest.py")
 
-        import importlib.util
-
         module_spec = importlib.util.spec_from_file_location(
             "test_build_manifest_module_2", src_root
         )
         assert module_spec is not None and module_spec.loader is not None
         build_manifest = importlib.util.module_from_spec(module_spec)
         module_spec.loader.exec_module(build_manifest)
+
+        # A real snapshot dict, not just a declared digest string --
+        # recompute_content_digest_from_disk() now reads the ACTUAL
+        # extracted snapshot bytes for the existing-asset comparison
+        # (Codex review), so this fixture needs a real, hash-consistent
+        # snapshot file for that recomputation to succeed at all (the
+        # profile-mismatch rejection this test is about happens AFTER
+        # that recomputation in the real script).
+        snapshot = {"schema_version": 9, "functions": [], "types": []}
+        snapshot_hash = build_manifest.compute_snapshot_content_hash(snapshot)
+
+        # Two manifests with IDENTICAL artifact lists (so
+        # compute_content_digest() agrees) but different `profile` --
+        # exactly the collision an asset-name-template without {profile}
+        # can cause across a multi-profile matrix.
+        artifacts = [
+            {
+                "library": "libfoo",
+                "artifact": "build/libfoo.so",
+                "snapshot": "libfoo.abicheck.json",
+                "sha256": snapshot_hash,
+            }
+        ]
+        existing_manifest = {
+            "manifest_version": 1,
+            "project_ref": "v1.0.0",
+            "profile": "linux-x86_64-gcc13-release",
+            "snapshot_schema": None,
+            "fact_set": None,
+            "artifacts": artifacts,
+        }
+        new_manifest = {**existing_manifest, "profile": "linux-aarch64-gcc13-release"}
         new_content_digest = build_manifest.compute_content_digest(new_manifest)
 
         asset_src = tmp_path / "asset-src"
         asset_src.mkdir()
         (asset_src / "manifest.json").write_text(
             json.dumps(existing_manifest), encoding="utf-8"
+        )
+        (asset_src / "libfoo.abicheck.json").write_text(
+            json.dumps(snapshot), encoding="utf-8"
         )
         asset_name = "abicheck-baseline-shared-name.tar"
         archive_path = tmp_path / asset_name
@@ -959,8 +985,281 @@ gh() {{
             os.unlink(path)
 
         assert result.returncode == 1, result.stdout + result.stderr
-        assert "DIFFERENT profile" in (result.stdout + result.stderr)
+        assert "DIFFERENT (or missing) profile" in (result.stdout + result.stderr)
         # Must fail on the profile mismatch, never reach (or pass) the
         # content-digest comparison -- the whole point is that identical
         # content must NOT be treated as a safe retry across profiles.
+        assert "safe re-run" not in result.stdout
+
+
+class TestUploadReleaseAssetRejectsMissingProfile:
+    """Regression (Codex review, P2): the profile-identity guard above only
+    fired when the existing manifest's ``profile`` was NONEMPTY and
+    different -- an existing manifest with an empty/absent ``profile``
+    field (a real possibility, since ``actions/baseline``'s own ``profile``
+    input is optional) skipped the check entirely, letting matching library
+    digests alone classify an otherwise-unverifiable asset as a safe retry.
+    The check now requires the existing profile to be nonempty AND equal.
+    """
+
+    def _upload_step_script(self) -> str:
+        data = _load(PUBLISH_BASELINE)
+        steps = _steps(data["jobs"]["publish"])
+        step = next(
+            s for s in steps if s.get("name", "").startswith("Upload release asset")
+        )
+        return step["run"]
+
+    def test_existing_manifest_with_no_profile_is_rejected(
+        self, tmp_path: Path
+    ) -> None:
+        import importlib.util
+        import json
+        import shutil
+        import subprocess
+        import tarfile
+        import tempfile
+
+        src_root = (
+            Path(__file__).resolve().parents[1]
+            / "actions"
+            / "baseline"
+            / "build_manifest.py"
+        )
+        module_dir = tmp_path / ".publish-baseline-src" / "actions" / "baseline"
+        module_dir.mkdir(parents=True)
+        shutil.copy(src_root, module_dir / "build_manifest.py")
+
+        module_spec = importlib.util.spec_from_file_location(
+            "test_build_manifest_module_missing_profile", src_root
+        )
+        assert module_spec is not None and module_spec.loader is not None
+        build_manifest = importlib.util.module_from_spec(module_spec)
+        module_spec.loader.exec_module(build_manifest)
+
+        snapshot = {"schema_version": 9, "functions": [], "types": []}
+        snapshot_hash = build_manifest.compute_snapshot_content_hash(snapshot)
+        artifacts = [
+            {
+                "library": "libfoo",
+                "artifact": "build/libfoo.so",
+                "snapshot": "libfoo.abicheck.json",
+                "sha256": snapshot_hash,
+            }
+        ]
+        # No "profile" key at all -- the legacy/malformed case this
+        # regression targets.
+        existing_manifest = {
+            "manifest_version": 1,
+            "project_ref": "v1.0.0",
+            "snapshot_schema": None,
+            "fact_set": None,
+            "artifacts": artifacts,
+        }
+        new_manifest = {**existing_manifest, "profile": "linux-x86_64-gcc13-release"}
+        new_content_digest = build_manifest.compute_content_digest(new_manifest)
+
+        asset_src = tmp_path / "asset-src"
+        asset_src.mkdir()
+        (asset_src / "manifest.json").write_text(
+            json.dumps(existing_manifest), encoding="utf-8"
+        )
+        (asset_src / "libfoo.abicheck.json").write_text(
+            json.dumps(snapshot), encoding="utf-8"
+        )
+        asset_name = "abicheck-baseline-no-profile.tar"
+        archive_path = tmp_path / asset_name
+        with tarfile.open(archive_path, "w") as tf:
+            tf.add(asset_src, arcname=".")
+
+        gh_stub = f"""
+gh() {{
+  if [[ "$1" == "release" && "$2" == "view" ]]; then
+    echo '{{"assets": [{{"name": "{asset_name}", "apiUrl": "https://api.example/asset"}}]}}'
+    return 0
+  fi
+  if [[ "$1" == "api" ]]; then
+    cat "{archive_path.as_posix()}"
+    return 0
+  fi
+  echo "unexpected gh invocation: $*" >&2
+  return 1
+}}
+"""
+        script = gh_stub + "\n" + self._upload_step_script()
+
+        env = os.environ.copy()
+        env.update(
+            {
+                "GH_TOKEN": "fake-token",
+                "RELEASE_TAG": "v1.0.0",
+                "ASSET_NAME": asset_name,
+                "REPO": "abicheck/abicheck",
+                "NEW_CONTENT_DIGEST": new_content_digest,
+                "NEW_PROFILE": new_manifest["profile"],
+                "PYTHONPATH": str(Path(__file__).resolve().parents[1]),
+            }
+        )
+
+        fd, path = tempfile.mkstemp(suffix=".sh")
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8", newline="\n") as fh:
+                fh.write(script)
+            result = subprocess.run(
+                [_bash_executable(), path],
+                capture_output=True,
+                text=True,
+                env=env,
+                cwd=tmp_path,
+                check=False,
+            )
+        finally:
+            os.unlink(path)
+
+        assert result.returncode == 1, result.stdout + result.stderr
+        assert "DIFFERENT (or missing) profile" in (result.stdout + result.stderr)
+        assert "safe re-run" not in result.stdout
+
+
+class TestUploadReleaseAssetRejectsCorruptedExistingContent:
+    """Regression (Codex review, P2): the safe-retry digest comparison used
+    to trust the existing asset's manifest.json declared sha256/
+    binary_sha256 fields alone -- an existing asset whose manifest.json was
+    hand-edited (or otherwise corrupted after upload) so its DECLARED
+    digest matched a fresh run's real digest would pass as a safe retry
+    even though its ACTUAL extracted snapshot bytes differ from what the
+    manifest claims. The digest is now recomputed from the real extracted
+    bytes (``recompute_content_digest_from_disk``), so a declared-vs-actual
+    mismatch is now caught as a genuine content difference.
+    """
+
+    def _upload_step_script(self) -> str:
+        data = _load(PUBLISH_BASELINE)
+        steps = _steps(data["jobs"]["publish"])
+        step = next(
+            s for s in steps if s.get("name", "").startswith("Upload release asset")
+        )
+        return step["run"]
+
+    def test_declared_digest_matching_but_real_bytes_differing_is_rejected(
+        self, tmp_path: Path
+    ) -> None:
+        import importlib.util
+        import json
+        import shutil
+        import subprocess
+        import tarfile
+        import tempfile
+
+        src_root = (
+            Path(__file__).resolve().parents[1]
+            / "actions"
+            / "baseline"
+            / "build_manifest.py"
+        )
+        module_dir = tmp_path / ".publish-baseline-src" / "actions" / "baseline"
+        module_dir.mkdir(parents=True)
+        shutil.copy(src_root, module_dir / "build_manifest.py")
+
+        module_spec = importlib.util.spec_from_file_location(
+            "test_build_manifest_module_corrupted", src_root
+        )
+        assert module_spec is not None and module_spec.loader is not None
+        build_manifest = importlib.util.module_from_spec(module_spec)
+        module_spec.loader.exec_module(build_manifest)
+
+        # The manifest's DECLARED sha256 is computed from `real_snapshot`,
+        # matching what a fresh run of the SAME content would compute --
+        # but the actual bytes written into the archive are
+        # `corrupted_snapshot`, simulating a manually-edited or corrupted
+        # existing asset whose manifest.json lies about its own content.
+        real_snapshot = {"schema_version": 9, "functions": [], "types": []}
+        corrupted_snapshot = {
+            "schema_version": 9,
+            "functions": [{"name": "injected_function"}],
+            "types": [],
+        }
+        declared_hash = build_manifest.compute_snapshot_content_hash(real_snapshot)
+
+        artifacts = [
+            {
+                "library": "libfoo",
+                "artifact": "build/libfoo.so",
+                "snapshot": "libfoo.abicheck.json",
+                "sha256": declared_hash,
+            }
+        ]
+        existing_manifest = {
+            "manifest_version": 1,
+            "project_ref": "v1.0.0",
+            "profile": "linux-x86_64-gcc13-release",
+            "snapshot_schema": None,
+            "fact_set": None,
+            "artifacts": artifacts,
+        }
+        # The "new" run's own real, self-consistent digest (as if this
+        # release had never been tampered with).
+        new_content_digest = build_manifest.compute_content_digest(existing_manifest)
+
+        asset_src = tmp_path / "asset-src"
+        asset_src.mkdir()
+        (asset_src / "manifest.json").write_text(
+            json.dumps(existing_manifest), encoding="utf-8"
+        )
+        # The corrupted bytes, not the ones the declared hash was computed
+        # from.
+        (asset_src / "libfoo.abicheck.json").write_text(
+            json.dumps(corrupted_snapshot), encoding="utf-8"
+        )
+        asset_name = "abicheck-baseline-corrupted.tar"
+        archive_path = tmp_path / asset_name
+        with tarfile.open(archive_path, "w") as tf:
+            tf.add(asset_src, arcname=".")
+
+        gh_stub = f"""
+gh() {{
+  if [[ "$1" == "release" && "$2" == "view" ]]; then
+    echo '{{"assets": [{{"name": "{asset_name}", "apiUrl": "https://api.example/asset"}}]}}'
+    return 0
+  fi
+  if [[ "$1" == "api" ]]; then
+    cat "{archive_path.as_posix()}"
+    return 0
+  fi
+  echo "unexpected gh invocation: $*" >&2
+  return 1
+}}
+"""
+        script = gh_stub + "\n" + self._upload_step_script()
+
+        env = os.environ.copy()
+        env.update(
+            {
+                "GH_TOKEN": "fake-token",
+                "RELEASE_TAG": "v1.0.0",
+                "ASSET_NAME": asset_name,
+                "REPO": "abicheck/abicheck",
+                "NEW_CONTENT_DIGEST": new_content_digest,
+                "NEW_PROFILE": existing_manifest["profile"],
+                "PYTHONPATH": str(Path(__file__).resolve().parents[1]),
+            }
+        )
+
+        fd, path = tempfile.mkstemp(suffix=".sh")
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8", newline="\n") as fh:
+                fh.write(script)
+            result = subprocess.run(
+                [_bash_executable(), path],
+                capture_output=True,
+                text=True,
+                env=env,
+                cwd=tmp_path,
+                check=False,
+            )
+        finally:
+            os.unlink(path)
+
+        assert result.returncode == 1, result.stdout + result.stderr
+        assert "DIFFERENT content" in (result.stdout + result.stderr)
         assert "safe re-run" not in result.stdout

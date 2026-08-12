@@ -418,7 +418,13 @@ jobs:
               )
               sys.exit(1)
           manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
-          print(module.compute_content_digest(manifest))
+          # Recomputed from the ACTUAL extracted snapshot/binary bytes, not
+          # from the manifest own declared sha256/binary_sha256 fields --
+          # a manually-edited or otherwise-corrupted existing asset could
+          # carry declared digests that happen to match a fresh run real
+          # digest even though its actual content differs, which a
+          # declared-digest-only comparison could not catch (Codex review).
+          print(module.recompute_content_digest_from_disk(manifest, Path(sys.argv[1])))
           ' .existing-asset/extracted)
 
           # compute_content_digest() deliberately excludes `profile` (it
@@ -450,8 +456,16 @@ jobs:
           echo "new profile:      $NEW_PROFILE"
           echo "existing profile: $existing_profile"
 
-          if [[ -n "$existing_profile" && "$existing_profile" != "$NEW_PROFILE" ]]; then
-            echo "::error::$ASSET_NAME already exists on release $RELEASE_TAG but was published for a DIFFERENT profile ('$existing_profile', this run is '$NEW_PROFILE') -- asset-name-template resolved to the same name for two distinct profiles, so this is never a safe retry regardless of content. Include '{profile}' in asset-name-template so each profile in a multi-profile matrix gets its own asset name." >&2
+          # Requires existing_profile to be NONEMPTY *and* equal -- not
+          # merely "not-provably-different" -- so an existing manifest
+          # with an empty/absent profile field (a valid possibility, since
+          # actions/baseline's own profile input is optional) fails closed
+          # instead of skipping this check entirely. compute_content_digest()
+          # deliberately excludes profile, so without this an unverifiable
+          # legacy/malformed asset could pass as a safe retry purely on
+          # matching library digests (Codex review).
+          if [[ "$existing_profile" != "$NEW_PROFILE" ]]; then
+            echo "::error::$ASSET_NAME already exists on release $RELEASE_TAG but was published for a DIFFERENT (or missing) profile ('$existing_profile', this run is '$NEW_PROFILE') -- asset-name-template resolved to the same name for two distinct profiles, or the existing asset's manifest has no profile recorded at all, so this is never a safe retry regardless of content. Include '{profile}' in asset-name-template so each profile in a multi-profile matrix gets its own asset name." >&2
             exit 1
           fi
 

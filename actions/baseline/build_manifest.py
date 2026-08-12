@@ -448,6 +448,70 @@ def compute_content_digest(manifest: dict[str, Any]) -> str:
     ).hexdigest()
 
 
+def recompute_content_digest_from_disk(
+    manifest: dict[str, Any], base_dir: Path
+) -> str:
+    """:func:`compute_content_digest`, but sourcing each artifact's
+    sha256/binary_sha256 from the ACTUAL bytes on disk under *base_dir*,
+    never from *manifest*'s own declared fields.
+
+    A safe-retry check that trusts declared digests alone cannot tell
+    "identical content" apart from "identical, but wrong, CLAIMS about the
+    content" -- an already-published asset whose manifest.json was hand-
+    edited, or whose archive member bytes were otherwise corrupted after
+    upload, could carry a declared sha256 that still matches a fresh run's
+    real digest even though its actual snapshot/binary bytes differ. That
+    asset would then pass ``publish-baseline.yml``'s safe-retry comparison
+    even though ``resolve_target()``/``resolve_bundle()`` will later
+    reject its real member digests when a consumer tries to use it (Codex
+    review). Recomputing from disk here closes that gap: this run's own
+    manifest (produced by :func:`main` from bytes it just read) is
+    unaffected either way, since its declared digests already come from
+    the same computation this function repeats -- this exists specifically
+    for verifying an EXISTING, previously-published asset's manifest.json
+    against the archive it actually shipped with.
+
+    Raises (loudly, not silently) when a referenced snapshot/binary file
+    is missing from *base_dir* -- an existing asset this broken is not a
+    case ``compute_content_digest`` can meaningfully compare against
+    either way, and failing here surfaces that as an actionable error
+    rather than a wrong digest.
+    """
+    recomputed_artifacts: list[dict[str, Any]] = []
+    for artifact in manifest.get("artifacts", []):
+        library = artifact.get("library", "<unknown>")
+        snapshot_name = artifact.get("snapshot")
+        if not snapshot_name:
+            raise SystemExit(
+                f"existing asset's manifest entry for library {library!r} "
+                "has no 'snapshot' filename -- cannot verify its real "
+                "content."
+            )
+        snapshot_path = base_dir / snapshot_name
+        if not snapshot_path.is_file():
+            raise SystemExit(
+                f"existing asset's manifest declares snapshot "
+                f"{snapshot_name!r} for library {library!r}, but no such "
+                "file exists in the extracted archive."
+            )
+        meta = _read_snapshot_meta(snapshot_path)
+        row: dict[str, Any] = {"library": library, "sha256": meta["sha256"]}
+
+        binary_rel = artifact.get("binary")
+        if binary_rel:
+            binary_path = base_dir / binary_rel
+            if not binary_path.is_file():
+                raise SystemExit(
+                    f"existing asset's manifest declares a staged binary "
+                    f"{binary_rel!r} for library {library!r}, but no such "
+                    "file exists in the extracted archive."
+                )
+            row["binary_sha256"] = _file_sha256(binary_path)
+        recomputed_artifacts.append(row)
+
+    return compute_content_digest({"artifacts": recomputed_artifacts})
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--output-dir", required=True, type=Path)
