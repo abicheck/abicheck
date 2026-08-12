@@ -1152,6 +1152,50 @@ def test_suppressed_and_reclassified_notes_combine():
     assert "1 finding reclassified by `--policy-file`" in body
 
 
+def test_reclassified_count_recognizes_a_selector_scoped_reclassify_rule():
+    """Codex review: a finding downgraded by a selector-scoped `reclassify:`
+    rule (reporter.py's per-change `reclassified_by` marker,
+    report_schema_version 2.31) previously bypassed this count and the PR
+    comment's disclosure entirely, since only the kind-keyed
+    `policy_overrides` map was recognized -- a `func_removed` reclassified to
+    `ignore` for one symbol read as an unremarked safe change."""
+    report = _compare_report(
+        [
+            {
+                "kind": "func_removed",
+                "symbol": "foo_init",
+                "description": "removed",
+                "severity": "compatible",
+                "reclassified_by": "COMDAT-inline demotions",
+            },
+        ]
+    )
+    model = build_model(report)
+    assert model.reclassified_count == 1
+    body = render_comment(model, sha="cafe1234")
+    assert "1 finding reclassified by `--policy-file`" in body
+
+
+def test_reclassified_count_does_not_double_count_a_change_in_both_mechanisms():
+    """A change carrying `reclassified_by` was, by construction, decided by
+    the `reclassify:` rule (consulted ahead of `overrides:`), so it must not
+    also be counted against a same-kind `policy_overrides` entry."""
+    report = _compare_report(
+        [
+            {
+                "kind": "func_removed",
+                "symbol": "foo_init",
+                "description": "removed",
+                "severity": "compatible",
+                "reclassified_by": "COMDAT-inline demotions",
+            },
+        ]
+    )
+    report["policy_overrides"] = {"func_removed": "COMPATIBLE_WITH_RISK"}
+    model = build_model(report)
+    assert model.reclassified_count == 1
+
+
 def test_pipe_characters_escaped_in_cells():
     report = _compare_report(
         [

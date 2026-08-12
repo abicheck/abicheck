@@ -207,7 +207,12 @@ want to see).
 - Active `reclassify:` rules are listed in the standard JSON report's
   `policy_reclassify` key, alongside `policy_overrides`, so a reclassified
   finding's report always carries a trace of the policy that steered it
-  (`report_schema_version` 2.30+).
+  (`report_schema_version` 2.30+). A finding whose effective verdict was
+  actually decided by a selector-scoped rule (not a same-kind `overrides:`
+  entry) additionally carries its own `change.reclassified_by` field, naming
+  the deciding rule's `label`/`reason`/`to` (`report_schema_version` 2.31+) —
+  consumers like the PR-comment renderer use this to disclose the
+  reclassification per-finding, not just as part of the active rule list.
 
 ### Evidence-aware controls (`evidence_policy`)
 

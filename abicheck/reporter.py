@@ -1034,13 +1034,14 @@ def _add_policy_overrides(d: dict[str, object], result: DiffResult) -> None:
 
     ``policy_reclassify`` (report_schema_version 2.30) lists the *active
     rule set* -- the same level of audit detail ``policy_overrides`` already
-    gives for kind-global overrides -- not a per-finding "which rule fired"
-    attribution (see ``abicheck/schemas/__init__.py``'s 2.30 history entry
-    for why that's a separately tracked follow-up, Codex review: an ordinary
-    comparison reclassifying a finding previously had no trace of the active
-    rule anywhere in the standard report). Each rule's dict comes from
-    ``ReclassifyRule.to_report_dict()`` -- shared with ``sarif.py``'s
-    ``policyReclassify`` so the two can't drift on field set/spelling.
+    gives for kind-global overrides. The per-finding "which rule fired"
+    attribution 2.30's own history entry originally deferred is a separate
+    field, ``change.reclassified_by`` (report_schema_version 2.31, stamped in
+    ``_change_to_dict`` via ``severity.reclassify_rule_for_change`` -- see
+    ``abicheck/schemas/__init__.py``'s 2.31 history entry). Each rule's dict
+    here comes from ``ReclassifyRule.to_report_dict()`` -- shared with
+    ``sarif.py``'s ``policyReclassify`` so the two can't drift on field
+    set/spelling.
     """
     if result.policy_file and result.policy_file.overrides:
         d["policy_overrides"] = {
@@ -1504,8 +1505,9 @@ def _change_to_dict(
     means the legacy verdict-based scheme, not "no gate".
     """
     kind = getattr(c, "kind", None)
+    reclassified_by: str | None = None
     if isinstance(kind, ChangeKind) and kind_sets:
-        from .severity import effective_verdict_for_change
+        from .severity import effective_verdict_for_change, reclassify_rule_for_change
 
         verdict = effective_verdict_for_change(
             cast(HasKind, c),
@@ -1514,6 +1516,20 @@ def _change_to_dict(
             policy_file=policy_file,
         )
         severity = _VERDICT_TO_SEVERITY_LABEL.get(verdict, "unknown")
+        # Selector-scoped `reclassify:` disclosure (Codex review): a
+        # kind-global `overrides:` entry is already visible on the report as
+        # `policy_overrides` and countable by kind alone
+        # (`pr_comment._reclassified_count`), but a `reclassify:` rule is
+        # selector-scoped -- there is no single kind to look up, so without a
+        # per-change marker a JSON consumer (or a report renderer) has no way
+        # to tell *this* finding was reclassified at all. Stamped only when
+        # the matching rule actually decided the verdict (not shadowed by a
+        # higher-priority effective_verdict or blocked by the
+        # frozen-namespace floor) -- see reclassify_rule_for_change's own
+        # docstring.
+        rule = reclassify_rule_for_change(cast(HasKind, c), policy_file)
+        if rule is not None:
+            reclassified_by = rule.label or rule.reason or rule.to
     elif kind:
         severity = _kind_to_severity(kind, policy)
     else:
@@ -1529,6 +1545,8 @@ def _change_to_dict(
         "new_value": getattr(c, "new_value", None),
         "severity": severity,
     }
+    if reclassified_by:
+        d["reclassified_by"] = reclassified_by
     if isinstance(kind, ChangeKind):
         d["operation"] = operation_for_kind(kind.value)
         d["finding_id"] = _finding_id(c)

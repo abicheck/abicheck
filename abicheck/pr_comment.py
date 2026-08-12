@@ -311,22 +311,42 @@ def _suppressed_count(report: dict[str, object]) -> int:
 
 
 def _reclassified_count(report: dict[str, object]) -> int:
-    """The number of ``changes`` whose kind was moved to a different verdict
-    bucket by a ``--policy-file`` override (``reporter._add_policy_overrides``'s
-    ``policy_overrides`` map: ``ChangeKind`` value -> overridden ``Verdict``).
+    """The number of ``changes`` whose verdict was moved to a different
+    bucket by a ``--policy-file`` reclassification -- either a kind-global
+    ``overrides:`` entry (``reporter._add_policy_overrides``'s
+    ``policy_overrides`` map: ``ChangeKind`` value -> overridden ``Verdict``)
+    or a selector-scoped ``reclassify:`` rule (``reporter._change_to_dict``'s
+    per-change ``reclassified_by`` marker).
 
-    ``0`` for a report without any overrides, which is every run that didn't
-    pass ``--policy-file``.
+    Counts each matching change once even if both mechanisms could apply --
+    a change carrying ``reclassified_by`` was, by construction, decided by
+    the ``reclassify:`` rule (:func:`abicheck.severity.
+    reclassify_rule_for_change` is consulted ahead of ``overrides:``, same
+    precedence as the run's own verdict), so it isn't double-counted against
+    ``policy_overrides`` too even when its kind also appears there (Codex
+    review: a selector-scoped rule silently bypassed this count and the "🔀
+    N findings reclassified" PR-comment notice entirely, since only the
+    kind-keyed ``overrides:`` map was recognized here -- a `func_removed`
+    downgraded to `ignore` by a `reclassify:` rule read as an unremarked
+    "safe" change).
+
+    ``0`` for a report with neither, which is every run that didn't pass
+    ``--policy-file``.
     """
     overrides = report.get("policy_overrides")
     changes = report.get("changes")
-    if not isinstance(overrides, dict) or not overrides or not isinstance(changes, list):
+    if not isinstance(changes, list):
         return 0
-    return sum(
-        1
-        for c in changes
-        if isinstance(c, dict) and str(c.get("kind", "")) in overrides
-    )
+    overrides_dict = overrides if isinstance(overrides, dict) else {}
+    count = 0
+    for c in changes:
+        if not isinstance(c, dict):
+            continue
+        if c.get("reclassified_by"):
+            count += 1
+        elif overrides_dict and str(c.get("kind", "")) in overrides_dict:
+            count += 1
+    return count
 
 
 def _breaking_categories(findings: list[Finding]) -> frozenset[str]:

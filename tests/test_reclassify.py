@@ -1169,3 +1169,198 @@ def test_audit_honors_custom_base_policy_for_a_non_matching_finding(
     # plugin_abi downgrades this kind to COMPATIBLE -- never high-risk.
     audit = supl.audit([change], policy_file=pf)
     assert audit.high_risk_matches == []
+
+
+# --- severity.reclassify_rule_for_change / reporter's reclassified_by -----
+#
+# Codex review: cli_pr_comment's `pr_comment._reclassified_count()` only
+# recognized the kind-global `policy_overrides` map, so a finding downgraded
+# by a selector-scoped `reclassify:` rule bypassed the PR comment's "🔀 N
+# findings reclassified" disclosure entirely -- it read as an unremarked
+# safe change. Fixed with a per-change `reclassified_by` field
+# (report_schema_version 2.31), stamped by `severity.
+# reclassify_rule_for_change` -- the deciding rule, honoring the same
+# precedence `effective_verdict_for_change` already uses (not shadowed by a
+# pipeline `effective_verdict`, not blocked by the frozen-namespace floor).
+
+
+def test_reclassify_rule_for_change_returns_the_deciding_rule(tmp_path: Path) -> None:
+    from abicheck.severity import reclassify_rule_for_change
+
+    p = tmp_path / "policy.yaml"
+    p.write_text(
+        """
+reclassify:
+  - kind: func_removed
+    symbol: foo
+    to: ignore
+    label: comdat-inline
+""".strip(),
+        encoding="utf-8",
+    )
+    pf = PolicyFile.load(p)
+    change = _change(ChangeKind.FUNC_REMOVED, "foo")
+    rule = reclassify_rule_for_change(change, pf)
+    assert rule is not None
+    assert rule.label == "comdat-inline"
+
+
+def test_reclassify_rule_for_change_none_when_no_rule_matches(tmp_path: Path) -> None:
+    from abicheck.severity import reclassify_rule_for_change
+
+    p = tmp_path / "policy.yaml"
+    p.write_text(
+        """
+reclassify:
+  - kind: func_removed
+    symbol: bar
+    to: ignore
+""".strip(),
+        encoding="utf-8",
+    )
+    pf = PolicyFile.load(p)
+    change = _change(ChangeKind.FUNC_REMOVED, "foo")
+    assert reclassify_rule_for_change(change, pf) is None
+
+
+def test_reclassify_rule_for_change_none_without_a_policy_file() -> None:
+    from abicheck.severity import reclassify_rule_for_change
+
+    change = _change(ChangeKind.FUNC_REMOVED, "foo")
+    assert reclassify_rule_for_change(change, None) is None
+
+
+def test_reclassify_rule_for_change_shadowed_by_effective_verdict(
+    tmp_path: Path,
+) -> None:
+    """A matching rule that's shadowed by a higher-priority pipeline
+    effective_verdict didn't actually decide the change's verdict, so it
+    isn't "the reclassifying rule" for disclosure purposes."""
+    from abicheck.severity import reclassify_rule_for_change
+
+    p = tmp_path / "policy.yaml"
+    p.write_text(
+        """
+reclassify:
+  - kind: func_removed
+    symbol: foo
+    to: ignore
+""".strip(),
+        encoding="utf-8",
+    )
+    pf = PolicyFile.load(p)
+    change = _change(
+        ChangeKind.FUNC_REMOVED, "foo", effective_verdict=Verdict.BREAKING
+    )
+    assert reclassify_rule_for_change(change, pf) is None
+
+
+def test_reclassify_rule_for_change_blocked_by_frozen_namespace_floor(
+    tmp_path: Path,
+) -> None:
+    """A matching rule blocked by the frozen-namespace verdict floor didn't
+    actually decide the change's verdict either -- verified by deliberately
+    reverting the frozen-namespace guard and confirming this test fails."""
+    from abicheck.severity import reclassify_rule_for_change
+
+    p = tmp_path / "policy.yaml"
+    p.write_text(
+        """
+reclassify:
+  - kind: func_removed
+    symbol: foo
+    to: ignore
+""".strip(),
+        encoding="utf-8",
+    )
+    pf = PolicyFile.load(p)
+    change = _change(
+        ChangeKind.FUNC_REMOVED,
+        "foo",
+        frozen_namespace_violation="detail.*",
+    )
+    assert reclassify_rule_for_change(change, pf) is None
+
+
+def test_reclassified_by_stamped_in_the_standard_report(tmp_path: Path) -> None:
+    """The JSON report's `changes[].reclassified_by` field names the
+    deciding rule, mirroring reporter.py's `policy_reclassify` (the active
+    rule set) with per-finding attribution."""
+    import json
+
+    from abicheck.checker_types import DiffResult
+    from abicheck.reporter import to_json
+    from abicheck.schemas import REPORT_SCHEMA_VERSION
+
+    p = tmp_path / "policy.yaml"
+    p.write_text(
+        """
+reclassify:
+  - kind: func_removed
+    symbol: foo
+    to: ignore
+    reason: "COMDAT-inline demotions"
+""".strip(),
+        encoding="utf-8",
+    )
+    pf = PolicyFile.load(p)
+    change = _change(ChangeKind.FUNC_REMOVED, "foo")
+    diff = DiffResult(
+        changes=[change], old_version="1", new_version="2", library="l",
+        policy_file=pf,
+    )
+
+    d = json.loads(to_json(diff))
+    assert d["report_schema_version"] == REPORT_SCHEMA_VERSION
+    assert d["changes"][0]["reclassified_by"] == "COMDAT-inline demotions"
+
+
+def test_reclassified_by_absent_when_no_rule_matches(tmp_path: Path) -> None:
+    import json
+
+    from abicheck.checker_types import DiffResult
+    from abicheck.reporter import to_json
+
+    p = tmp_path / "policy.yaml"
+    p.write_text(
+        """
+reclassify:
+  - kind: func_removed
+    symbol: bar
+    to: ignore
+""".strip(),
+        encoding="utf-8",
+    )
+    pf = PolicyFile.load(p)
+    change = _change(ChangeKind.FUNC_REMOVED, "foo")
+    diff = DiffResult(
+        changes=[change], old_version="1", new_version="2", library="l",
+        policy_file=pf,
+    )
+
+    d = json.loads(to_json(diff))
+    assert "reclassified_by" not in d["changes"][0]
+
+
+def test_reclassified_by_absent_for_a_kind_global_override(tmp_path: Path) -> None:
+    """A change decided by a kind-global `overrides:` entry (not a
+    `reclassify:` rule) doesn't carry `reclassified_by` -- that field
+    attributes only to a selector-scoped rule; `overrides:`'s own audit
+    trail is `policy_overrides`, already keyed by kind."""
+    import json
+
+    from abicheck.checker_types import DiffResult
+    from abicheck.reporter import to_json
+
+    p = tmp_path / "policy.yaml"
+    p.write_text("overrides:\n  func_removed: ignore\n", encoding="utf-8")
+    pf = PolicyFile.load(p)
+    change = _change(ChangeKind.FUNC_REMOVED, "foo")
+    diff = DiffResult(
+        changes=[change], old_version="1", new_version="2", library="l",
+        policy_file=pf,
+    )
+
+    d = json.loads(to_json(diff))
+    assert "reclassified_by" not in d["changes"][0]
+    assert d["policy_overrides"] == {"func_removed": "COMPATIBLE"}

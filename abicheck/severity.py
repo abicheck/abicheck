@@ -61,7 +61,7 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import date
 from enum import Enum
-from typing import cast
+from typing import Any, cast
 
 from .checker_policy import (
     ADDITION_KINDS,
@@ -328,6 +328,55 @@ def effective_verdict_for_change(
     # computed as `_resolve_kind_sets(policy, kind_sets)` -- identical to
     # what this line used to recompute.
     return effective_category(change, *base_sets)
+
+
+def reclassify_rule_for_change(
+    change: HasKind, policy_file: object | None, today: date | None = None
+) -> Any | None:
+    """Return the ``ReclassifyRule`` that actually decided *change*'s
+    effective verdict, or ``None`` if no rule did.
+
+    Mirrors :func:`effective_verdict_for_change`'s own precedence exactly: a
+    rule that *matches* but is shadowed by a higher-priority
+    ``effective_verdict`` (an ADR-027 pipeline modulation) or blocked by the
+    frozen-namespace verdict floor did not actually decide the change's
+    verdict, so it is not "the reclassifying rule" for disclosure purposes
+    even though :meth:`~abicheck.reclassify.ReclassifyRule.matches` would say
+    yes.
+
+    Used by ``reporter.py`` to stamp a per-change ``reclassified_by`` field
+    on the JSON report (Codex review: ``cli_pr_comment``'s
+    ``pr_comment._reclassified_count()`` only recognized the kind-global
+    ``policy_overrides`` map, so a PR comment silently omitted the
+    "reclassified by --policy-file" notice for a finding downgraded by a
+    selector-scoped ``reclassify:`` rule instead). Computing this from the
+    real ``Change`` object here -- rather than having ``pr_comment.py``
+    reimplement selector matching against the JSON report alone -- is
+    deliberate: a JSON-serialized change doesn't carry every selector field a
+    rule can match on (``type_pattern``/``member_name``/``namespace``/
+    ``entity_namespace``/``cause_namespace`` have no JSON counterpart), so a
+    JSON-only reimplementation could not be sound.
+    """
+    if isinstance(getattr(change, "effective_verdict", None), Verdict):
+        return None
+    rules = (
+        getattr(policy_file, "reclassify", None) if policy_file is not None else None
+    )
+    if not rules:
+        return None
+    for rule in rules:
+        if rule.matches(change, today):
+            base_policy = getattr(policy_file, "base_policy", None)
+            base_sets = _resolve_kind_sets(base_policy, None)
+            base_v = effective_category(change, *base_sets)
+            reclass_v = rule.to_verdict
+            if (
+                _has_frozen_namespace_violation(change)
+                and _VERDICT_ORDER.index(reclass_v) < _VERDICT_ORDER.index(base_v)
+            ):
+                return None
+            return rule
+    return None
 
 
 def _reclassify_resolved_to_compatible(

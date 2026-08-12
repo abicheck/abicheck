@@ -1244,6 +1244,10 @@
           "type": "string",
           "description": "The ChangeKind value of a related finding this one shares a cross-reference with \u2014 the structured sibling to a correlation already described in the description prose. Two independent producers set it: (1) ADR-041 P0 roadmap item 2, for a public_api_internal_dependency_added finding correlated with the same public entry's own body/type-hash change this version (e.g. 'inline_body_changed'); (2) schema 2.28, for a layout_unverifiable finding sharing the identical asymmetric-layout-evidence gap as a co-reported type_vtable_changed finding on the same type (always 'type_vtable_changed' in that case). Consumers should treat the value as an opaque ChangeKind slug naming the correlated finding, not assume a specific kind pairing."
         },
+        "reclassified_by": {
+          "type": "string",
+          "description": "Schema 2.31: present only when a selector-scoped `--policy-file` `reclassify:` rule (not a kind-global `overrides:` entry) actually decided this finding's effective verdict \u2014 the deciding rule's own `label`, or `reason`, or `to` spelling (first one set). See `policy_reclassify` for the full active rule set this attributes back to."
+        },
         "reviewer_action": {
           "type": "string",
           "description": "Finer-grained reviewer guidance, present only when recommended_action is 'no_action_required' (a COMPATIBLE addition). recommended_action alone only answers whether the old binary consumer needs to do anything (no); this answers whether a human reviewing the change has anything to check.",

@@ -92,4 +92,16 @@ A new changelog fragment. See changelog.d/README.md for the workflow.
   `policy_file`'s own `base_policy` (e.g. `plugin_abi`) instead of silently
   falling back to `strict_abi`'s kind sets — surfaced by
   `--audit-suppressions`' new `policy_file`-aware high-risk classification
-  calling this resolver with only `policy_file=` set.
+  calling this resolver with only `policy_file=` set. Each `change` entry in
+  the standard JSON report now carries an optional `reclassified_by` field
+  (`report_schema_version` 2.31) naming the specific `reclassify:` rule
+  (`label`/`reason`/`to`, first one set) that actually decided that
+  finding's verdict, via the new `severity.reclassify_rule_for_change` —
+  previously only the run-level `policy_reclassify` active-rule-set listing
+  existed, with no per-finding attribution. `cli_pr_comment`'s sticky
+  PR-comment renderer now recognizes it too: a finding downgraded by a
+  selector-scoped `reclassify:` rule previously bypassed the "🔀 N findings
+  reclassified by `--policy-file`" notice entirely, since
+  `pr_comment._reclassified_count()` only recognized the kind-keyed
+  `policy_overrides` map — a `func_removed` reclassified to `ignore` for one
+  symbol read as an unremarked "safe" change in the PR comment.
