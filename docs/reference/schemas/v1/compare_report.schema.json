@@ -896,7 +896,11 @@
         "type": "object",
         "required": ["to"],
         "properties": {
-          "to": { "type": "string" },
+          "to": {
+            "type": "string",
+            "description": "ReclassifyRule.to_report_dict()'s `to` key is `to_verdict.value` (the resolved Verdict, not the raw `break`/`warn`/`risk`/`ignore` YAML spelling) -- one of these four.",
+            "enum": ["BREAKING", "API_BREAK", "COMPATIBLE_WITH_RISK", "COMPATIBLE"]
+          },
           "kind": { "type": "string" },
           "symbol": { "type": "string" },
           "symbol_pattern": { "type": "string" },
@@ -1246,7 +1250,7 @@
         },
         "reclassified_by": {
           "type": "string",
-          "description": "Schema 2.31: present only when a selector-scoped `--policy-file` `reclassify:` rule (not a kind-global `overrides:` entry) actually decided this finding's effective verdict \u2014 the deciding rule's own `label`, or `reason`, or `to` spelling (first one set). See `policy_reclassify` for the full active rule set this attributes back to."
+          "description": "Schema 2.31: present only when a selector-scoped `--policy-file` `reclassify:` rule (not a kind-global `overrides:` entry) actually decided this finding's effective verdict \u2014 the deciding rule's own `label`, or `reason`, or the applied verdict value (first one set). See `policy_reclassify` for the full active rule set this attributes back to."
         },
         "reviewer_action": {
           "type": "string",

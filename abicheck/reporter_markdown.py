@@ -1821,7 +1821,10 @@ def _append_policy_section(lines: list[str], result: DiffResult) -> None:
 
         active = active_reclassify_rules(result.policy_file.reclassify)
         if active:
-            rules = "; ".join(rule.describe() for rule in active)
+            # CodeRabbit review: code-span-wrap describe()'s raw selector
+            # text (e.g. `_ZN6oneapi3dal.*`) -- unescaped, `_`/`*` read as
+            # Markdown emphasis, same as `Policy overrides` above already does.
+            rules = "; ".join(f"`{rule.describe()}`" for rule in active)
             lines.append(f"> **Policy reclassify**: {rules}")
     lines.append("")
 

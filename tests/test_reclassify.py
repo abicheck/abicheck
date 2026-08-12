@@ -754,6 +754,23 @@ def test_reclassify_disclosed_in_markdown_report(tmp_path: Path) -> None:
     assert "COMDAT-inline demotions" in md
 
 
+def test_reclassify_markdown_disclosure_is_code_span_wrapped(
+    tmp_path: Path,
+) -> None:
+    """CodeRabbit review: describe() returns raw selector text (e.g.
+    `symbol_pattern='_ZN6oneapi3dal.*'`) -- unescaped, Markdown reads `_`/`*`
+    as emphasis markers, which can mangle a mangled-name selector's
+    rendering. Must be code-span-wrapped, same as the `Policy overrides`
+    line already wraps its own values."""
+    from abicheck.reporter_markdown import to_markdown
+
+    diff = _reclassify_diff_and_policy_path(tmp_path)
+    md = to_markdown(diff)
+    line = next(ln for ln in md.splitlines() if "Policy reclassify" in ln)
+    assert "`reclassify(to=risk" in line
+    assert line.rstrip().endswith("`")
+
+
 def test_reclassify_disclosed_in_html_report(tmp_path: Path) -> None:
     from abicheck.html_report import generate_html_report
 
@@ -1624,3 +1641,100 @@ def test_reclassified_by_falls_back_to_to_verdict_for_a_directly_constructed_rul
 
     d = json.loads(to_json(diff))
     assert d["changes"][0]["reclassified_by"] == "COMPATIBLE"
+
+
+def test_reclassified_by_and_policy_reclassify_present_in_leaf_mode(
+    tmp_path: Path,
+) -> None:
+    """Codex review: `--report-mode leaf` builds its own leaf-entry dict
+    (`_leaf_entry`, for root TYPE_* kinds) rather than routing through
+    `_change_to_dict`, and never called `_add_policy_overrides` at all --
+    both `changes[].reclassified_by` and the run-level `policy_reclassify`
+    key were silently absent from leaf-mode output even though the
+    identical comparison's full-mode report carried both. `type_size_changed`
+    is a root TYPE_* kind (`_ROOT_TYPE_CHANGE_KINDS`), so it's built by
+    `_leaf_entry`, not `_change_to_dict`, exercising the leaf-only path."""
+    import json
+
+    from abicheck.checker_types import DiffResult
+    from abicheck.reporter import to_json
+
+    p = tmp_path / "policy.yaml"
+    p.write_text(
+        """
+reclassify:
+  - kind: type_size_changed
+    symbol: foo
+    to: risk
+    reason: "COMDAT-inline demotions"
+""".strip(),
+        encoding="utf-8",
+    )
+    pf = PolicyFile.load(p)
+    change = _change(ChangeKind.TYPE_SIZE_CHANGED, "foo")
+    diff = DiffResult(
+        changes=[change], old_version="1", new_version="2", library="l",
+        policy_file=pf,
+    )
+
+    d = json.loads(to_json(diff, report_mode="leaf"))
+    assert d["leaf_changes"][0]["reclassified_by"] == "COMDAT-inline demotions"
+    assert d["changes"][0]["reclassified_by"] == "COMDAT-inline demotions"
+    assert d["policy_reclassify"] == [
+        {
+            "to": "COMPATIBLE_WITH_RISK",
+            "kind": "type_size_changed",
+            "symbol": "foo",
+            "reason": "COMDAT-inline demotions",
+        }
+    ]
+
+
+# --- policy_reclassify[].to schema enum (CodeRabbit review) ----------------
+
+
+def test_policy_reclassify_to_field_validates_against_the_published_schema(
+    tmp_path: Path,
+) -> None:
+    """CodeRabbit review: `ReclassifyRule.to_report_dict()`'s `to` key is
+    `to_verdict.value` (a resolved Verdict spelling like
+    `COMPATIBLE_WITH_RISK`), not the raw `break`/`warn`/`risk`/`ignore` YAML
+    spelling -- the schema's `to` enum must match what's actually emitted,
+    not the YAML vocabulary. Skips cleanly if `jsonschema` isn't installed,
+    matching this repo's existing schema-validation test convention."""
+    import json
+
+    pytest.importorskip("jsonschema")
+    import jsonschema
+
+    from abicheck.checker_types import DiffResult
+    from abicheck.reporter import to_json
+
+    p = tmp_path / "policy.yaml"
+    p.write_text(
+        """
+reclassify:
+  - kind: func_visibility_changed
+    symbol: foo
+    to: risk
+""".strip(),
+        encoding="utf-8",
+    )
+    pf = PolicyFile.load(p)
+    change = _change(ChangeKind.FUNC_VISIBILITY_CHANGED, "foo")
+    diff = DiffResult(
+        changes=[change], old_version="1", new_version="2", library="l",
+        policy_file=pf,
+    )
+    report = json.loads(to_json(diff))
+    assert report["policy_reclassify"][0]["to"] == "COMPATIBLE_WITH_RISK"
+
+    schema = json.loads(
+        Path("abicheck/schemas/compare_report.schema.json").read_text()
+    )
+    jsonschema.Draft202012Validator.check_schema(schema)
+    to_schema = schema["properties"]["policy_reclassify"]["items"]["properties"]["to"]
+    validator = jsonschema.Draft202012Validator(to_schema)
+    validator.validate(report["policy_reclassify"][0]["to"])
+    with pytest.raises(jsonschema.exceptions.ValidationError):
+        validator.validate("risk")  # the raw YAML spelling, not the schema's

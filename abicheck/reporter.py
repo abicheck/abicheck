@@ -439,6 +439,12 @@ def _to_json_leaf(
             eff = getattr(c, "effective_verdict", None)
             if isinstance(eff, Verdict):
                 entry["effective_verdict"] = eff.value
+        # Same "leaf mode duplicates the full-mode builder" gap as the rest
+        # of this function (Codex review) -- shares _change_to_dict's own
+        # helper so the two entry builders can't drift on this field.
+        _reclassified_by = _reclassified_by_for_change(c, result.policy_file)
+        if _reclassified_by:
+            entry["reclassified_by"] = _reclassified_by
         # ADR-044 P1 item 4: same structured reachability fields
         # _change_to_dict adds for non-type changes — a root TYPE_* change is
         # exactly the category the layout-reachability walk tags most often.
@@ -556,6 +562,9 @@ def _to_json_leaf(
     _add_surface_scope(d, result)
     _add_reconciled(d, result)
     _add_contract_context(d, result)
+    # Codex review: full/root-cause mode call this; leaf mode never did,
+    # silently dropping policy_overrides/policy_reclassify here.
+    _add_policy_overrides(d, result)
     scope = _scope_dict(result)
     if scope is not None:
         d["scope"] = scope
@@ -1455,6 +1464,22 @@ def _change_reachability_fields(c: Any) -> dict[str, Any]:
     return out
 
 
+def _reclassified_by_for_change(c: object, policy_file: object | None) -> str | None:
+    """``reclassified_by`` audit value for *c*, or ``None`` -- shared by
+    :func:`_change_to_dict` and leaf mode's ``_leaf_entry`` (Codex review)
+    so the two entry builders can't drift on this field. Falls back to
+    ``rule.to_verdict.value`` rather than ``rule.to``, since a directly-
+    constructed ``ReclassifyRule`` could leave the latter empty/mismatched
+    -- see ``severity.reclassify_rule_for_change`` for the full precedence.
+    """
+    from .severity import reclassify_rule_for_change
+
+    rule = reclassify_rule_for_change(cast(HasKind, c), policy_file)
+    if rule is None:
+        return None
+    return cast(str, rule.label or rule.reason or rule.to_verdict.value)
+
+
 def _change_to_dict(
     c: object,
     *,
@@ -1507,7 +1532,7 @@ def _change_to_dict(
     kind = getattr(c, "kind", None)
     reclassified_by: str | None = None
     if isinstance(kind, ChangeKind) and kind_sets:
-        from .severity import effective_verdict_for_change, reclassify_rule_for_change
+        from .severity import effective_verdict_for_change
 
         verdict = effective_verdict_for_change(
             cast(HasKind, c),
@@ -1516,31 +1541,9 @@ def _change_to_dict(
             policy_file=policy_file,
         )
         severity = _VERDICT_TO_SEVERITY_LABEL.get(verdict, "unknown")
-        # Selector-scoped `reclassify:` disclosure (Codex review): a
-        # kind-global `overrides:` entry is already visible on the report as
-        # `policy_overrides` and countable by kind alone
-        # (`pr_comment._reclassified_count`), but a `reclassify:` rule is
-        # selector-scoped -- there is no single kind to look up, so without a
-        # per-change marker a JSON consumer (or a report renderer) has no way
-        # to tell *this* finding was reclassified at all. Stamped only when
-        # the matching rule actually decided the verdict (not shadowed by a
-        # higher-priority effective_verdict or blocked by the
-        # frozen-namespace floor) -- see reclassify_rule_for_change's own
-        # docstring.
-        rule = reclassify_rule_for_change(cast(HasKind, c), policy_file)
-        if rule is not None:
-            # `rule.to` is the raw `to:` spelling as loaded from YAML --
-            # always consistent with `rule.to_verdict` for a policy-file-
-            # loaded rule (the loader resolves one from the other), but a
-            # Python caller constructing ReclassifyRule directly can supply
-            # a `to_verdict` with no `to` at all (silently dropping this
-            # disclosure -- `to` defaults to `""`), or, worse, a `to` that
-            # doesn't actually match `to_verdict` (mislabeling the audit
-            # trail, e.g. a `to_verdict=BREAKING` promotion reported as
-            # "ignore"). Falling back to `rule.to_verdict.value` instead of
-            # `rule.to` guarantees this is always non-empty and always
-            # reflects the verdict that was actually applied (Codex review).
-            reclassified_by = rule.label or rule.reason or rule.to_verdict.value
+        # Per-change reclassify: disclosure (Codex review) -- see
+        # _reclassified_by_for_change's own docstring.
+        reclassified_by = _reclassified_by_for_change(c, policy_file)
     elif kind:
         severity = _kind_to_severity(kind, policy)
     else:

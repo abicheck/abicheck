@@ -159,4 +159,25 @@ A new changelog fragment. See changelog.d/README.md for the workflow.
   blocked, bypassing `overrides:` entirely; when that raw base verdict
   differs from what `overrides:` would have given absent the rule, the rule
   genuinely changed the outcome (just not to the verdict it asked for) and
-  must still be disclosed.
+  must still be disclosed. `--report-mode leaf`'s JSON output now carries
+  both the run-level `policy_reclassify` key and each root TYPE_* finding's
+  `reclassified_by` attribution — leaf mode built its own entry dict
+  (`_leaf_entry`) instead of routing through `_change_to_dict`, and never
+  called `_add_policy_overrides` at all, so both were silently absent even
+  though the identical comparison's full/root-cause-mode report carried
+  them. The two entry builders now share one helper
+  (`_reclassified_by_for_change`) so they can't drift on this field again.
+  The Markdown `Policy reclassify` line now code-span-wraps each rule's
+  `describe()` text, matching the existing `Policy overrides` line — an
+  unwrapped mangled-name selector (e.g. `symbol_pattern:
+  "_ZN6oneapi3dal.*"`) could otherwise have its `_`/`*` characters read as
+  Markdown emphasis markers. The JSON schema's `policy_reclassify[].to`
+  field now correctly documents and enforces the four values
+  `ReclassifyRule.to_report_dict()` actually emits (`BREAKING`/
+  `API_BREAK`/`COMPATIBLE_WITH_RISK`/`COMPATIBLE`, i.e. the resolved
+  `Verdict`) rather than being unconstrained — it never accepted the raw
+  YAML `break`/`warn`/`risk`/`ignore` spelling in the first place, since
+  that field always serializes the resolved verdict. `report_schema_version`
+  2.30's own changelog/docstring history entry now lists `label` alongside
+  `kind`/`to`/`reason`/`expires` in `policy_reclassify`'s field set,
+  matching what `to_report_dict()` and both schema files already emit.

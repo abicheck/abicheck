@@ -364,7 +364,8 @@ from typing import Any
 #:       reclassification, ``abicheck/reclassify.py``): when the active
 #:       policy file carries one or more ``reclassify:`` rules, each is
 #:       listed (``kind``, whichever selector fields it set, ``to``,
-#:       ``reason``, ``expires``) alongside the existing ``policy_overrides``/
+#:       ``reason``, ``label``, ``expires``) alongside the existing
+#:       ``policy_overrides``/
 #:       ``policy_file`` keys (Codex review: an ordinary comparison
 #:       reclassifying a finding had no trace of the active rule anywhere in
 #:       the standard report). Lists the *active rule set*, matching the
