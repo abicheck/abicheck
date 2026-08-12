@@ -287,6 +287,39 @@ def _parse_reclassify_expires(raw: Any, path: Path, index: int) -> date | None:
     )
 
 
+#: reclassify[i] keys whose value must be a string when present -- every
+#: selector plus the free-text `reason`/`label` fields. `kind`/`to`/`expires`
+#: have their own dedicated, differently-shaped validation below and are
+#: deliberately not in this set.
+_RECLASSIFY_STRING_FIELDS: tuple[str, ...] = (
+    "symbol", "symbol_pattern", "type_pattern", "member_name", "namespace",
+    "entity_namespace", "cause_namespace", "source_location", "reason",
+    "label",
+)
+
+
+def _require_reclassify_string_field(
+    entry: dict[str, Any], key: str, index: int, path: Path
+) -> str | None:
+    """Validate one optional string-valued ``reclassify[i]`` field.
+
+    Codex review: a non-string value here (e.g. a bare YAML ``42``) either
+    crashes with an uncaught ``TypeError`` deep inside ``re.compile``/
+    ``fnmatch.translate`` (``symbol_pattern``/``type_pattern``/every
+    ``namespace`` variant) or loads silently and simply never matches
+    (``symbol``, compared via ``==`` against the always-string
+    ``change.symbol``) -- neither is the hard, up-front ``PolicyError`` this
+    module's other selector validation already gives every other bad value.
+    """
+    val = entry.get(key)
+    if val is None or isinstance(val, str):
+        return val
+    raise PolicyError(
+        f"reclassify[{index}].{key} in {path}: must be a string, got "
+        + type(val).__name__
+    )
+
+
 def _parse_reclassify(raw: Any, path: Path) -> list[ReclassifyRule]:
     """Validate and parse the ``reclassify:`` block (A: selector-scoped
     reclassification) into a list of :class:`ReclassifyRule`.
@@ -328,22 +361,26 @@ def _parse_reclassify(raw: Any, path: Path) -> list[ReclassifyRule]:
         kind = entry.get("kind")
         if kind is not None and not isinstance(kind, str):
             raise PolicyError(f"reclassify[{i}].kind in {path}: must be a string")
+        string_fields = {
+            key: _require_reclassify_string_field(entry, key, i, path)
+            for key in _RECLASSIFY_STRING_FIELDS
+        }
 
         try:
             rule = ReclassifyRule(
                 to_verdict=to_verdict,
                 to=str(to_raw),
-                symbol=entry.get("symbol"),
-                symbol_pattern=entry.get("symbol_pattern"),
-                type_pattern=entry.get("type_pattern"),
-                member_name=entry.get("member_name"),
-                namespace=entry.get("namespace"),
-                entity_namespace=entry.get("entity_namespace"),
-                cause_namespace=entry.get("cause_namespace"),
-                source_location=entry.get("source_location"),
+                symbol=string_fields["symbol"],
+                symbol_pattern=string_fields["symbol_pattern"],
+                type_pattern=string_fields["type_pattern"],
+                member_name=string_fields["member_name"],
+                namespace=string_fields["namespace"],
+                entity_namespace=string_fields["entity_namespace"],
+                cause_namespace=string_fields["cause_namespace"],
+                source_location=string_fields["source_location"],
                 change_kind=kind,
-                reason=entry.get("reason"),
-                label=entry.get("label"),
+                reason=string_fields["reason"],
+                label=string_fields["label"],
                 expires=_parse_reclassify_expires(entry.get("expires"), path, i),
             )
         except ValueError as e:

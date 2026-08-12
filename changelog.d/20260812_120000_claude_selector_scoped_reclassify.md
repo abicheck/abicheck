@@ -24,4 +24,12 @@ A new changelog fragment. See changelog.d/README.md for the workflow.
   `overrides:` entry for the same kind (a selector-scoped rule is strictly
   more specific), and still respects the existing frozen-namespace verdict
   floor. See `abicheck/reclassify.py`'s module docstring and
-  `policy_file.py`'s format example.
+  `policy_file.py`'s format example. Consulted by the shared per-finding
+  severity resolver (`severity.effective_verdict_for_change`, and
+  everything built on it — `IssueCategory` buckets, JSON/HTML/SARIF
+  severity labels, severity-based exit codes), not just
+  `PolicyFile.compute_verdict`'s legacy verdict, so a `to: risk`/`to:
+  ignore` reclassification can't still fail a severity-gated run through
+  the other path. A non-string selector value (e.g. `symbol_pattern: 42`)
+  is now a hard `PolicyError` at load time instead of an uncaught
+  `TypeError` or a rule that silently never matches.

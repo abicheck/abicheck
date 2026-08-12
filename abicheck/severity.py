@@ -76,6 +76,7 @@ from .checker_policy import (
 )
 from .contract_gating import is_evaluated
 from .errors import PolicyError
+from .reclassify import first_matching_reclassify_verdict
 
 
 def gate_eligible_changes(changes: Sequence[HasKind]) -> list[HasKind]:
@@ -258,6 +259,27 @@ def effective_verdict_for_change(
         ):
             return raw_v
         return eff
+
+    # A: selector-scoped reclassification (abicheck/reclassify.py) --
+    # consulted ahead of the kind-global `overrides` below, mirroring
+    # PolicyFile._resolve_change_verdict's own priority order exactly, so
+    # this per-finding resolver (severity/category buckets, JSON/HTML/SARIF
+    # labels, severity-based gating) agrees with the legacy verdict
+    # PolicyFile.compute_verdict already computes instead of silently
+    # re-deriving a different answer for the same change.
+    reclassify_rules = (
+        getattr(policy_file, "reclassify", None) if policy_file is not None else None
+    )
+    if reclassify_rules:
+        reclass_v = first_matching_reclassify_verdict(reclassify_rules, change)
+        if reclass_v is not None:
+            base_v = effective_category(change, *base_sets)
+            if (
+                _has_frozen_namespace_violation(change)
+                and _VERDICT_ORDER.index(reclass_v) < _VERDICT_ORDER.index(base_v)
+            ):
+                return base_v
+            return reclass_v
 
     overrides = (
         getattr(policy_file, "overrides", None)

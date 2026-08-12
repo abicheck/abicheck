@@ -16,6 +16,13 @@ from abicheck.checker_types import Change
 from abicheck.errors import PolicyError
 from abicheck.policy_file import PolicyFile
 from abicheck.reclassify import ReclassifyRule, first_matching_reclassify_verdict
+from abicheck.severity import (
+    PRESET_DEFAULT,
+    IssueCategory,
+    classify_effective_change,
+    compute_exit_code,
+    effective_verdict_for_change,
+)
 
 
 def _change(kind: ChangeKind, symbol: str, **kwargs) -> Change:
@@ -138,6 +145,57 @@ reclassify:
     assert pf.compute_verdict([other]) == Verdict.API_BREAK
 
 
+def test_reclassify_is_honored_by_the_shared_severity_resolver(tmp_path: Path) -> None:
+    """`severity.effective_verdict_for_change` (and everything built on it --
+    IssueCategory buckets, JSON/HTML/SARIF severity labels, severity-based
+    exit codes) must agree with `PolicyFile.compute_verdict` for a
+    reclassified finding, not silently re-derive the pre-reclassify kind
+    category on its own independent code path."""
+    p = tmp_path / "policy.yaml"
+    p.write_text(
+        """
+reclassify:
+  - kind: func_visibility_changed
+    symbol_pattern: "_ZN6oneapi3dal.*"
+    to: risk
+""".strip(),
+        encoding="utf-8",
+    )
+    pf = PolicyFile.load(p)
+    matched = _change(ChangeKind.FUNC_VISIBILITY_CHANGED, "_ZN6oneapi3dal3fooEv")
+    unmatched = _change(ChangeKind.FUNC_VISIBILITY_CHANGED, "_ZN3foo3barEv")
+
+    assert pf.compute_verdict([matched]) == Verdict.COMPATIBLE_WITH_RISK
+    assert effective_verdict_for_change(matched, policy_file=pf) == Verdict.COMPATIBLE_WITH_RISK
+    assert classify_effective_change(matched, policy_file=pf) == IssueCategory.POTENTIAL_BREAKING
+    assert compute_exit_code([matched], PRESET_DEFAULT, policy_file=pf) == 0
+
+    assert pf.compute_verdict([unmatched]) == Verdict.BREAKING
+    assert effective_verdict_for_change(unmatched, policy_file=pf) == Verdict.BREAKING
+    assert classify_effective_change(unmatched, policy_file=pf) == IssueCategory.ABI_BREAKING
+    assert compute_exit_code([unmatched], PRESET_DEFAULT, policy_file=pf) == 4
+
+
+def test_reclassify_via_severity_resolver_respects_frozen_namespace_floor(
+    tmp_path: Path,
+) -> None:
+    p = tmp_path / "policy.yaml"
+    p.write_text(
+        """
+reclassify:
+  - kind: func_removed
+    symbol: "frozen_symbol"
+    to: ignore
+""".strip(),
+        encoding="utf-8",
+    )
+    pf = PolicyFile.load(p)
+    change = _change(
+        ChangeKind.FUNC_REMOVED, "frozen_symbol", frozen_namespace_violation="ns::**"
+    )
+    assert effective_verdict_for_change(change, policy_file=pf) == Verdict.BREAKING
+
+
 def test_reclassify_respects_frozen_namespace_floor(tmp_path: Path) -> None:
     """A reclassify rule downgrading a change on a frozen namespace is
     silently rejected, exactly like a kind-global override already is."""
@@ -249,6 +307,42 @@ reclassify:
         encoding="utf-8",
     )
     with pytest.raises(PolicyError, match="must be a YAML mapping"):
+        PolicyFile.load(p)
+
+
+@pytest.mark.parametrize(
+    "field",
+    [
+        "symbol",
+        "symbol_pattern",
+        "type_pattern",
+        "member_name",
+        "namespace",
+        "entity_namespace",
+        "cause_namespace",
+        "source_location",
+        "reason",
+        "label",
+    ],
+)
+def test_reclassify_non_string_selector_field_is_a_hard_error(
+    field: str, tmp_path: Path
+) -> None:
+    """A non-string selector value must fail loading up front -- not crash
+    with an uncaught TypeError deep in re.compile/fnmatch (symbol_pattern,
+    type_pattern, every namespace variant) and not load silently as a rule
+    that can never match (symbol, compared via `==`)."""
+    p = tmp_path / "policy.yaml"
+    p.write_text(
+        f"""
+reclassify:
+  - kind: func_removed
+    {field}: 42
+    to: ignore
+""".strip(),
+        encoding="utf-8",
+    )
+    with pytest.raises(PolicyError, match=f"{field}.*must be a string"):
         PolicyFile.load(p)
 
 
