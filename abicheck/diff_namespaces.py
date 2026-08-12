@@ -186,30 +186,32 @@ def _qualified_function_name(
 
 
 def _split_experimental(
-    qnames: list[str],
+    entries: list[tuple[str, str]],
     experimental_namespaces: tuple[str, ...],
-) -> tuple[list[str], list[str]]:
-    """Split *qnames* into ``(experimental, stable)`` by namespace match."""
+) -> tuple[list[tuple[str, str]], list[tuple[str, str]]]:
+    """Split ``(qname, mangled)`` *entries* into ``(experimental, stable)``
+    by namespace match on the qname half."""
     exp = [
-        q for q in qnames
-        if any(s in experimental_namespaces for s in _segments(q))
+        e for e in entries
+        if any(s in experimental_namespaces for s in _segments(e[0]))
     ]
-    stable = [q for q in qnames if q not in exp]
+    stable = [e for e in entries if e not in exp]
     return exp, stable
 
 
 def _index_funcs_by_stable_key(
     snap: AbiSnapshot,
     experimental_namespaces: tuple[str, ...],
-) -> dict[tuple[str, str], list[str]]:
-    """Index public functions by ``(stripped_qualified_name, leaf)``.
+) -> dict[tuple[str, str], list[tuple[str, str]]]:
+    """Index public functions by ``(stripped_qualified_name, leaf)`` ->
+    ``[(qname, mangled), ...]``.
 
     Only public functions are indexed so internal helpers in
     ``experimental::`` don't get reported.
     """
     from .model import Visibility
     demangled = _batch_demangle_public(snap)
-    out: dict[tuple[str, str], list[str]] = {}
+    out: dict[tuple[str, str], list[tuple[str, str]]] = {}
     for f in snap.functions:
         if f.visibility != Visibility.PUBLIC:
             continue
@@ -222,22 +224,138 @@ def _index_funcs_by_stable_key(
         # signature stripped, since `_segments()` doesn't track `(`/`)`
         # depth and would otherwise split inside a namespace-qualified
         # parameter type.
+        #
+        # Deliberately uses the declared-name-first `_qualified_function_name`
+        # here, NOT `_canonical_identity_name`: this index's bucket key
+        # decides whether a declaration counts as "experimental" at all, and
+        # that classification must come from the *declared* name -- a using-
+        # declaration/re-export can legitimately alias a symbol whose
+        # demangled name never mentions the experimental namespace at all
+        # (the same declared-vs-underlying divergence
+        # `detect_std_reexport_removed` is built on), so overriding here
+        # would silently defeat both EXPERIMENTAL_GRADUATED and
+        # EXPERIMENTAL_REMOVED_WITHOUT_REPLACEMENT for that shape (Codex
+        # review finding). `f.mangled` is carried alongside qname instead, so
+        # `_findings_for` can independently confirm a would-be "removed"
+        # symbol didn't merely get re-bucketed by dumper-qualification drift
+        # (the original reported false positive) without touching namespace
+        # classification.
         qname = _qualified_function_name(f.name, f.mangled, demangled)
         leaf_segs = _segments(_strip_param_signature(qname))
         if not leaf_segs:
             continue
         leaf = leaf_segs[-1]
         stripped, _ = _strip_experimental(qname, experimental_namespaces)
-        out.setdefault((stripped, leaf), []).append(qname)
+        out.setdefault((stripped, leaf), []).append((qname, f.mangled))
     return out
+
+
+def _mangled_stable_keys(
+    index: dict[tuple[str, str], list[tuple[str, str]]],
+) -> dict[str, set[str]]:
+    """Flatten an ``_index_funcs_by_stable_key`` result into
+    ``{mangled: {stable_key, ...}, ...}``, for :func:`_findings_for`'s
+    removal-suppression check.
+
+    A first attempt at this scoped the check to ``(mangled, leaf)`` pairs
+    alone -- but *leaf* (the last "::"-segment) can coincide by pure
+    accident between two genuinely different declarations, e.g. an alias
+    ``api::experimental::sort`` and an unrelated ``detail::sort`` that
+    merely happens to share both the leaf ``sort`` and, through some other
+    aliasing, the same mangled symbol (Codex review, fresh evidence): under
+    a leaf-only check, deleting only the experimental alias would be
+    wrongly suppressed because ``detail::sort`` (a completely different
+    declaration) still satisfies ``(mangled, "sort")``. This function
+    instead reports the full ``stable_key`` (already stripped of any
+    experimental segment) per mangled symbol, so :func:`_findings_for` can
+    additionally check that the surviving declaration's *whole* qualified
+    path -- not just its leaf -- is plausibly a differently-qualified
+    spelling of the one being evaluated (see
+    :func:`_stable_keys_compatible`).
+
+    Each ``stable_key`` is signature-stripped before being recorded (Codex
+    review, fresh evidence): ``_index_funcs_by_stable_key``'s own
+    ``stripped`` deliberately keeps a demangled entry's parameter list --
+    that's what lets two overloads at the same key legitimately map to
+    *different* bucket entries there. But a bare-named declaration
+    demangles to a full signature (``"ns::check_ranges()"``) while an
+    already-qualified declared name on the other snapshot side never
+    carries one (``"check_ranges"``), so comparing those two raw
+    stable-keys directly always mismatches on the trailing ``"()"`` alone
+    -- the exact false-negative this suppression check exists to close,
+    reappearing through a different door. Stripped here rather than at the
+    source in ``_index_funcs_by_stable_key``, so the *primary* bucket key
+    (and therefore per-overload matching) is untouched; only this
+    secondary compatibility signal needs the params gone.
+    """
+    out: dict[str, set[str]] = {}
+    for (stable_key, _leaf), entries in index.items():
+        stripped_key = _strip_param_signature(stable_key)
+        for _, mangled in entries:
+            if mangled:
+                out.setdefault(mangled, set()).add(stripped_key)
+    return out
+
+
+def _stable_keys_compatible(a: str, b: str) -> bool:
+    """Whether stable-keys *a* and *b* could be two different-completeness
+    spellings of the same declaration path, rather than two genuinely
+    different declarations that merely share a trailing segment.
+
+    True when the shorter key's own ``"::"``-segments equal the same
+    number of *trailing* segments of the longer key -- i.e. one is a
+    (possibly bare) suffix of the other (``"check_ranges"`` vs.
+    ``"oneapi::dal::detail::check_ranges"``; ``"ns::check_ranges"`` vs.
+    ``"check_ranges"``). Two keys that both carry multiple segments but
+    diverge anywhere in that trailing run (``"api::sort"`` vs.
+    ``"detail::sort"``) are *not* compatible -- deliberately: when a
+    dumper backend under-qualifies a name it drops a *prefix*, never
+    replaces an inner segment, so a genuine mismatch there means these are
+    two different declarations, not two spellings of one.
+
+    **Residual, deliberately-accepted gap** (Codex review, fresh evidence):
+    when the shorter key is *bare* (a single segment, identical to the
+    leaf itself -- e.g. an alias declared with no namespace context beyond
+    the experimental marker, ``experimental::sort`` stripping to bare
+    ``"sort"``), this reduces to plain leaf matching, and a genuinely
+    unrelated declaration that happens to share both that leaf and (via
+    some other aliasing) the removed alias's mangled symbol
+    (``experimental::sort`` vs. an unrelated ``detail::sort``) is wrongly
+    treated as compatible, suppressing a real removal. There is no further
+    string-only signal available to break this tie: a dumper backend
+    under-qualifying a name and a coincidental same-leaf collision produce
+    *the exact same bare stable-key*, and the two fixes are in direct
+    tension -- requiring more than one segment before allowing suppression
+    closes this gap but reopens the original reported bug for every alias
+    declared with no namespace context beyond ``experimental::`` itself
+    (also a real, and more common, shape). This function resolves that
+    tension in favor of the originally reported, verified false-positive
+    (the far more common shape in practice: a genuinely-unqualified
+    top-level experimental alias whose target happens to share a leaf
+    *and* be reachable via the identical mangled symbol is a narrow,
+    largely theoretical construction). Closing it for real needs evidence
+    this module does not have access to -- e.g. a per-declaration source
+    location correlated against the target's own definition site -- not a
+    cleverer string comparison.
+    """
+    segs_a, segs_b = _segments(a), _segments(b)
+    if not segs_a or not segs_b:
+        return False
+    n = min(len(segs_a), len(segs_b))
+    return segs_a[-n:] == segs_b[-n:]
 
 
 def _index_types_by_stable_key(
     snap: AbiSnapshot,
     experimental_namespaces: tuple[str, ...],
-) -> dict[tuple[str, str], list[str]]:
-    """Index types by ``(stripped_qualified_name, leaf)``."""
-    out: dict[tuple[str, str], list[str]] = {}
+) -> dict[tuple[str, str], list[tuple[str, str]]]:
+    """Index types by ``(stripped_qualified_name, leaf)`` -> ``[(qname, ""), ...]``.
+
+    ``RecordType`` has no mangled symbol, so the second element of each pair
+    is always ``""`` — kept only so this shares :func:`_split_experimental`'s
+    pair-based shape with :func:`_index_funcs_by_stable_key`.
+    """
+    out: dict[tuple[str, str], list[tuple[str, str]]] = {}
     for t in snap.types:
         qname = t.name
         segs = _segments(qname)
@@ -245,7 +363,7 @@ def _index_types_by_stable_key(
             continue
         leaf = segs[-1]
         stripped, _ = _strip_experimental(qname, experimental_namespaces)
-        out.setdefault((stripped, leaf), []).append(qname)
+        out.setdefault((stripped, leaf), []).append((qname, ""))
     return out
 
 
@@ -268,31 +386,42 @@ def _origin_by_name(types: list[RecordType]) -> dict[str, ScopeOrigin]:
 
 
 def _classify_experimental_event(
-    old_exp: list[str],
-    old_stable: list[str],
-    new_exp: list[str],
-    new_stable: list[str],
+    old_exp: list[tuple[str, str]],
+    old_stable: list[tuple[str, str]],
+    new_exp: list[tuple[str, str]],
+    new_stable: list[tuple[str, str]],
+    *,
+    still_linked: bool = False,
 ) -> str | None:
     """Return ``"graduated"``, ``"removed"``, or ``None`` for a key pair.
 
     Graduation requires an experimental presence in old AND a new stable
     twin that did not exist before. Removal requires no replacement on
     either side. Everything else is silent.
+
+    *still_linked* — resolved by the caller via mangled-symbol lookup,
+    ``False`` for the type-sourced path (``RecordType`` has no mangled
+    symbol) — suppresses a would-be "removed" classification: dumper
+    backends can populate ``Function.name`` with different qualification
+    for the identical linked symbol across snapshot sides, which can
+    change this key's bucket without the symbol actually disappearing. A
+    real removal is never linked in ``new`` at all, so this never masks a
+    genuine break (Codex review finding).
     """
     if not old_exp:
         return None
     if new_exp and new_stable and not old_stable:
         return "graduated"
     if not new_exp and not new_stable and not old_stable:
-        return "removed"
+        return None if still_linked else "removed"
     return None
 
 
 def _emit_experimental_change(
     event: str,
     leaf: str,
-    old_exp: list[str],
-    new_stable: list[str],
+    old_exp: list[tuple[str, str]],
+    new_stable: list[tuple[str, str]],
     kind_label: str,
     *,
     old_origins: dict[str, ScopeOrigin] | None,
@@ -323,9 +452,9 @@ def _emit_experimental_change(
     """
     from .model import ScopeOrigin
 
-    old_q = old_exp[0]
+    old_q = old_exp[0][0]
     if event == "graduated":
-        new_q = new_stable[0]
+        new_q = new_stable[0][0]
         subject_is_public = (
             new_origins is None or new_origins.get(new_q) == ScopeOrigin.PUBLIC_HEADER
         )
@@ -364,8 +493,8 @@ def _emit_experimental_change(
 
 
 def _findings_for(
-    old_index: dict[tuple[str, str], list[str]],
-    new_index: dict[tuple[str, str], list[str]],
+    old_index: dict[tuple[str, str], list[tuple[str, str]]],
+    new_index: dict[tuple[str, str], list[tuple[str, str]]],
     experimental_namespaces: tuple[str, ...],
     kind_label: str,
     *,
@@ -378,17 +507,56 @@ def _findings_for(
     (always reliably public) or a ``{qualified_name: ScopeOrigin}`` map for
     the type-sourced path (public only when ``ScopeOrigin.PUBLIC_HEADER``).
     """
+    # Every stable_key still present anywhere in `new_index`, per mangled
+    # symbol (function-sourced path only -- always empty for the
+    # type-sourced path, since `_index_types_by_stable_key` carries
+    # mangled=""). Confirms a would-be "removed" declaration's underlying
+    # symbol is genuinely gone under a *compatible* spelling of its own
+    # qualified path, rather than merely re-bucketed by a declared-name
+    # qualification change between snapshot sides (see
+    # :func:`_classify_experimental_event`/:func:`_mangled_stable_keys`/
+    # :func:`_stable_keys_compatible`).
+    new_mangled_stable_keys = _mangled_stable_keys(new_index)
     out: list[Change] = []
-    for (stable_key, leaf), qnames in old_index.items():
-        old_exp, old_stable = _split_experimental(qnames, experimental_namespaces)
+    for (stable_key, leaf), entries in old_index.items():
+        old_exp, old_stable = _split_experimental(entries, experimental_namespaces)
         if not old_exp:
             continue
-        new_qnames = new_index.get((stable_key, leaf), [])
+        new_entries = new_index.get((stable_key, leaf), [])
         new_exp, new_stable = _split_experimental(
-            new_qnames, experimental_namespaces,
+            new_entries, experimental_namespaces,
+        )
+        # `stable_key` here is the primary bucket key and may carry a
+        # demangled entry's parameter list (see `_index_funcs_by_stable_key`);
+        # strip it before comparing against `_mangled_stable_keys`'s own
+        # already-signature-stripped values, or a bare-vs-qualified pair
+        # that demangles to a full signature on one side alone never
+        # compares equal on its trailing "()" alone (Codex review, fresh
+        # evidence).
+        old_stable_key_for_compat = _strip_param_signature(stable_key)
+        # `all(...)`, not `any(...)` (Codex review, fresh evidence): a bucket
+        # can hold *multiple* overloads that share one declared name and
+        # therefore one (stable_key, leaf) key when neither side demangles
+        # (header-derived Function.name carries no parameter list at all,
+        # so two overloads with different mangled symbols collapse into one
+        # `old_exp` list). `any(...)` would let a single surviving sibling
+        # overload's mangled symbol suppress the *whole* bucket's removal,
+        # silently hiding a genuinely removed sibling overload. Requiring
+        # every entry to independently correlate to a survivor still
+        # suppresses correctly for the common single-overload case (`all`
+        # over one element is `any` over one element) while never masking a
+        # real removal sitting alongside an unrelated survivor. `old_exp` is
+        # already known non-empty here (the `if not old_exp: continue`
+        # guard above), so `all(...)` over it is never vacuously true.
+        still_linked = all(
+            mangled and any(
+                _stable_keys_compatible(old_stable_key_for_compat, new_stable_key)
+                for new_stable_key in new_mangled_stable_keys.get(mangled, ())
+            )
+            for _, mangled in old_exp
         )
         event = _classify_experimental_event(
-            old_exp, old_stable, new_exp, new_stable,
+            old_exp, old_stable, new_exp, new_stable, still_linked=still_linked,
         )
         if event is None:
             continue
