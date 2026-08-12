@@ -116,6 +116,9 @@ EVIDENCE_CASES: dict[str, EvidenceSpec] = {
     "case195_header_graph_ambiguous_rename_not_reconciled": EvidenceSpec(
         "graph/source_graph_summary.json", "--sources"
     ),
+    "case196_header_graph_move_reconciled": EvidenceSpec(
+        "graph/source_graph_summary.json", "--sources"
+    ),
 }
 
 PYTHON_CASE = "case163_python_kwarg_renamed"
