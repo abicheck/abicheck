@@ -67,4 +67,11 @@ A new changelog fragment. See changelog.d/README.md for the workflow.
   already uses, rather than a standalone `reclassify:` check -- so a
   pipeline-set `effective_verdict` modulation and the frozen-namespace
   verdict floor are honored with the correct precedence too, not just
-  `reclassify:` in isolation.
+  `reclassify:` in isolation. `ReclassifyRule(to_verdict=...)` now rejects
+  `NO_CHANGE` (only `break`/`warn`/`risk`/`ignore`'s four real verdicts are
+  valid reclassification targets — `NO_CHANGE` would make a matching change
+  disappear from every verdict bucket). An expired `reclassify:` rule is no
+  longer disclosed as "active" in the JSON/Markdown/HTML/SARIF reports
+  (`policy_reclassify`/`policyReclassify`/etc.) — it can never actually
+  match, so listing it there previously claimed a downgrade was in effect
+  when it no longer was.

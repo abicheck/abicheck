@@ -63,6 +63,17 @@ def test_reclassify_rule_rejects_unknown_change_kind() -> None:
         )
 
 
+def test_reclassify_rule_rejects_no_change_as_a_target_verdict() -> None:
+    """Codex review: a directly-constructed ReclassifyRule(to_verdict=
+    Verdict.NO_CHANGE, ...) would make a matching real change disappear from
+    every one of DiffResult.breaking/source_breaks/risk/compatible -- a
+    silently passing result that conceals a real change, not a lenient
+    reclassification. The public `to:` YAML vocabulary (break/warn/risk/
+    ignore) can never produce this, but the class itself is public API."""
+    with pytest.raises(ValueError, match="Invalid to_verdict"):
+        ReclassifyRule(to_verdict=Verdict.NO_CHANGE, to="none", symbol="foo")
+
+
 def test_reclassify_rule_expires() -> None:
     from datetime import date
 
@@ -535,7 +546,7 @@ def test_active_reclassify_rules_are_disclosed_in_the_standard_report(
 ) -> None:
     """Codex review: an ordinary comparison reclassifying a finding had no
     trace of the active `reclassify:` rule anywhere in the standard JSON
-    report. `policy_reclassify` (report_schema_version 2.29) now lists the
+    report. `policy_reclassify` (report_schema_version 2.30) now lists the
     active rule set, mirroring the existing `policy_overrides` disclosure."""
     import json
 
@@ -578,7 +589,7 @@ reclassify:
 
 def test_policy_reclassify_absent_without_any_configured_rule(tmp_path: Path) -> None:
     """No `reclassify:` rule => no `policy_reclassify` key at all, keeping
-    every pre-existing report byte-identical (schema 2.29's own
+    every pre-existing report byte-identical (schema 2.30's own
     additive-change guarantee)."""
     import json
 
@@ -689,6 +700,79 @@ def test_reclassify_absent_from_sarif_without_any_configured_rule() -> None:
     diff = DiffResult(changes=[change], old_version="1", new_version="2", library="l")
     props = to_sarif(diff)["runs"][0]["properties"]
     assert "policyReclassify" not in props
+
+
+def _expired_reclassify_diff(tmp_path: Path):
+    from abicheck.checker_types import DiffResult
+
+    p = tmp_path / "policy.yaml"
+    p.write_text(
+        """
+reclassify:
+  - kind: func_removed
+    symbol: foo
+    to: ignore
+    expires: 2020-01-01
+""".strip(),
+        encoding="utf-8",
+    )
+    pf = PolicyFile.load(p)
+    change = _change(ChangeKind.FUNC_REMOVED, "foo")
+    return DiffResult(
+        changes=[change], old_version="1", new_version="2", library="l",
+        policy_file=pf,
+    )
+
+
+def test_expired_reclassify_rule_absent_from_json_report(tmp_path: Path) -> None:
+    """Codex review: an expired rule -- which ReclassifyRule.matches() would
+    already refuse to apply -- must not be disclosed as though it were
+    still active."""
+    import json
+
+    from abicheck.reporter import to_json
+
+    diff = _expired_reclassify_diff(tmp_path)
+    d = json.loads(to_json(diff))
+    assert "policy_reclassify" not in d
+
+
+def test_expired_reclassify_rule_absent_from_markdown_report(tmp_path: Path) -> None:
+    from abicheck.reporter_markdown import to_markdown
+
+    diff = _expired_reclassify_diff(tmp_path)
+    assert "Policy reclassify" not in to_markdown(diff)
+
+
+def test_expired_reclassify_rule_absent_from_html_report(tmp_path: Path) -> None:
+    from abicheck.html_report import generate_html_report
+
+    diff = _expired_reclassify_diff(tmp_path)
+    assert "Policy reclassify" not in generate_html_report(diff)
+
+
+def test_expired_reclassify_rule_absent_from_sarif_report(tmp_path: Path) -> None:
+    from abicheck.sarif import to_sarif
+
+    diff = _expired_reclassify_diff(tmp_path)
+    props = to_sarif(diff)["runs"][0]["properties"]
+    assert "policyReclassify" not in props
+
+
+def test_active_reclassify_rules_filters_expired() -> None:
+    from datetime import date
+
+    from abicheck.reclassify import active_reclassify_rules
+
+    active = ReclassifyRule(to_verdict=Verdict.COMPATIBLE, to="ignore", symbol="a")
+    expired = ReclassifyRule(
+        to_verdict=Verdict.COMPATIBLE,
+        to="ignore",
+        symbol="b",
+        expires=date(2020, 1, 1),
+    )
+    result = active_reclassify_rules([active, expired], today=date(2026, 1, 1))
+    assert result == [active]
 
 
 # --- --audit-suppressions (SuppressionList.audit's policy_file param) ------

@@ -891,7 +891,7 @@
     },
     "policy_reclassify": {
       "type": "array",
-      "description": "Active reclassify: rules from the policy file (report_schema_version 2.29), when any are configured -- the same audit-detail level policy_overrides already gives for kind-global overrides, listing the rule set rather than a per-finding \"which rule fired\" attribution. Selector fields present depend on which selector the rule used (see abicheck/reclassify.py).",
+      "description": "Active reclassify: rules from the policy file (report_schema_version 2.30), when any are configured -- the same audit-detail level policy_overrides already gives for kind-global overrides, listing the rule set rather than a per-finding \"which rule fired\" attribution. Selector fields present depend on which selector the rule used (see abicheck/reclassify.py).",
       "items": {
         "type": "object",
         "required": ["to"],

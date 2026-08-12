@@ -102,6 +102,21 @@ from typing import Any
 
 from .checker_policy import Verdict
 
+#: The four verdicts a `to:` value is allowed to resolve to -- the exact set
+#: `policy_file.parse_severity_value`'s `break`/`warn`/`risk`/`ignore`
+#: vocabulary maps onto. `NO_CHANGE` is excluded: a `ReclassifyRule`
+#: constructed directly in Python (bypassing that parser -- this class is
+#: public API) with `to_verdict=Verdict.NO_CHANGE` would make a matching
+#: real change disappear from every one of `DiffResult.breaking`/
+#: `source_breaks`/`risk`/`compatible` (Codex review) -- a silently
+#: passing result that conceals a real change, not a lenient reclassification.
+_VALID_RECLASSIFY_VERDICTS: frozenset[Verdict] = frozenset({
+    Verdict.BREAKING,
+    Verdict.API_BREAK,
+    Verdict.COMPATIBLE_WITH_RISK,
+    Verdict.COMPATIBLE,
+})
+
 
 def _suppression_cls() -> Any:
     """Resolve :class:`abicheck.suppression.Suppression` at call time --
@@ -177,6 +192,11 @@ class ReclassifyRule:
     _selector: Any = field(init=False, repr=False)
 
     def __post_init__(self) -> None:
+        if self.to_verdict not in _VALID_RECLASSIFY_VERDICTS:
+            raise ValueError(
+                f"Invalid to_verdict {self.to_verdict!r}. Valid values: "
+                f"{sorted(v.value for v in _VALID_RECLASSIFY_VERDICTS)}"
+            )
         # Delegates all selector validation (mutual exclusivity, unknown
         # change_kind, malformed glob/regex, "at least one selector") to
         # Suppression's own __post_init__ -- a ValueError raised there
@@ -208,6 +228,18 @@ class ReclassifyRule:
         don't apply to reclassification.
         """
         return bool(self._selector.selector_matches(change, today))
+
+    def is_expired(self, today: date | None = None) -> bool:
+        """Return True if this rule has passed its ``expires`` date.
+
+        ``None`` when unset, same as :meth:`Suppression.is_expired`. Used by
+        the report renderers (``reporter.py``'s ``policy_reclassify``,
+        ``reporter_markdown.py``, ``html_report.py``, ``sarif.py``) to
+        exclude an expired rule from the *active* rule set they disclose --
+        listing an expired rule there would claim a downgrade is in effect
+        when :meth:`matches` would actually already refuse to apply it.
+        """
+        return bool(self._selector.is_expired(today))
 
     def describe(self) -> str:
         """One-line human-readable summary, for policy audit output."""
@@ -287,3 +319,18 @@ def first_matching_reclassify_verdict(
         if rule.matches(change, today):
             return rule.to_verdict
     return None
+
+
+def active_reclassify_rules(
+    rules: list[ReclassifyRule], today: date | None = None
+) -> list[ReclassifyRule]:
+    """Return the subset of *rules* not yet past their ``expires`` date.
+
+    Every report renderer disclosing the *active* rule set (``reporter.py``'s
+    ``policy_reclassify``, ``reporter_markdown.py``, ``html_report.py``,
+    ``sarif.py``) filters through this rather than listing every configured
+    rule verbatim (Codex review) -- an expired rule can never actually match
+    (:meth:`ReclassifyRule.matches`), so disclosing it as active claims a
+    downgrade is in effect when it no longer is.
+    """
+    return [r for r in rules if not r.is_expired(today)]

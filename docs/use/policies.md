@@ -207,7 +207,7 @@ want to see).
 - Active `reclassify:` rules are listed in the standard JSON report's
   `policy_reclassify` key, alongside `policy_overrides`, so a reclassified
   finding's report always carries a trace of the policy that steered it
-  (`report_schema_version` 2.29+).
+  (`report_schema_version` 2.30+).
 
 ### Evidence-aware controls (`evidence_policy`)
 

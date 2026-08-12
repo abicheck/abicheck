@@ -1032,10 +1032,10 @@ def _add_policy_overrides(d: dict[str, object], result: DiffResult) -> None:
     """Add policy file overrides/reclassify rules (custom re-classifications)
     when present.
 
-    ``policy_reclassify`` (report_schema_version 2.29) lists the *active
+    ``policy_reclassify`` (report_schema_version 2.30) lists the *active
     rule set* -- the same level of audit detail ``policy_overrides`` already
     gives for kind-global overrides -- not a per-finding "which rule fired"
-    attribution (see ``abicheck/schemas/__init__.py``'s 2.29 history entry
+    attribution (see ``abicheck/schemas/__init__.py``'s 2.30 history entry
     for why that's a separately tracked follow-up, Codex review: an ordinary
     comparison reclassifying a finding previously had no trace of the active
     rule anywhere in the standard report). Each rule's dict comes from
@@ -1050,11 +1050,13 @@ def _add_policy_overrides(d: dict[str, object], result: DiffResult) -> None:
         if result.policy_file.source_path:
             d["policy_file"] = str(result.policy_file.source_path)
     if result.policy_file and result.policy_file.reclassify:
-        d["policy_reclassify"] = [
-            rule.to_report_dict() for rule in result.policy_file.reclassify
-        ]
-        if result.policy_file.source_path:
-            d["policy_file"] = str(result.policy_file.source_path)
+        from .reclassify import active_reclassify_rules
+
+        active = active_reclassify_rules(result.policy_file.reclassify)
+        if active:
+            d["policy_reclassify"] = [rule.to_report_dict() for rule in active]
+            if result.policy_file.source_path:
+                d["policy_file"] = str(result.policy_file.source_path)
 
 
 def _add_changes_block(
