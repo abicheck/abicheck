@@ -65,6 +65,19 @@ of).
 No outputs — this workflow either passes (job succeeds) or fails (job
 exits 1 with an `::error::` naming every protected file the PR touched).
 
+**`.github/workflows/**` is always protected too, independent of
+`protected-paths`.** This workflow's own `protected-paths`/`bypass-label`
+configuration is supplied by the *calling* workflow file, and for an
+ordinary `pull_request` trigger (this workflow's own required, fork-safe
+trigger) that file is read from the PR's own head commit — so a PR that
+edits the calling workflow (e.g. narrowing `protected-paths` to a glob
+that no longer matches, or removing this check's invocation entirely)
+could otherwise silently defeat this whole protection in the same change
+that touches the committed baseline. A change under `.github/workflows/`
+therefore always counts as a hit, uses the same `bypass-label` gate, and
+gets its own dedicated error message distinguishing it from an ordinary
+`protected-paths` hit.
+
 ## Fork safety
 
 Runs entirely on an ordinary `pull_request` trigger: read-only

@@ -131,8 +131,13 @@ case "$asset_name" in
     # `zstandard` package (already an abicheck core dependency, so it's
     # present on any runner abicheck itself installed onto -- and cheap to
     # install standalone otherwise) when the `zstd` CLI isn't available,
-    # rather than requiring an undeclared runner prerequisite.
-    if command -v zstd >/dev/null 2>&1 && _tar_zstd_works; then
+    # rather than requiring an undeclared runner prerequisite. Gated on
+    # _tar_zstd_works alone, not also `command -v zstd` -- a tar build
+    # with zstd support linked in directly needs no standalone zstd CLI
+    # on PATH at all, and _tar_zstd_works's own real trial archive already
+    # proves the whole path works regardless of which way tar gets its
+    # zstd support (CodeRabbit review).
+    if _tar_zstd_works; then
       tar --zstd -cf "$_staging_dir/archive" -C "$BASELINE_PATH" .
     else
       echo "::notice::'zstd'/'tar --zstd' not usable on this runner -- falling back to Python's zstandard package to build $asset_name." >&2

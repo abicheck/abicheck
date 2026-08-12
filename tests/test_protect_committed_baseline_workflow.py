@@ -256,6 +256,97 @@ class TestCheckScriptBehavior:
         assert result.returncode == 0, result.stdout + result.stderr
         assert "::notice::" in result.stdout
 
+    def test_workflow_file_change_is_protected_even_outside_protected_paths(
+        self, tmp_path: Path
+    ) -> None:
+        # Regression (Codex review, P1): this reusable workflow's own
+        # protected-paths/bypass-label configuration is supplied by the
+        # CALLING workflow file, and for an ordinary pull_request trigger
+        # that file is read from the PR's own head commit -- so a PR could
+        # otherwise edit the calling workflow (e.g. narrowing
+        # protected-paths to a glob that no longer matches) AND the
+        # committed baseline in the same change, defeating this check
+        # entirely. A change under .github/workflows/ is now ALWAYS
+        # protected, independent of what protected-paths names.
+        repo = tmp_path / "repo"
+        _init_repo(repo)
+        (repo / "abi").mkdir()
+        (repo / "abi" / "libfoo.abicheck.json").write_text("old", encoding="utf-8")
+        (repo / ".github" / "workflows").mkdir(parents=True)
+        (repo / ".github" / "workflows" / "check-pr.yml").write_text(
+            "old", encoding="utf-8"
+        )
+        base_sha = _commit_all(repo, "base")
+
+        # Only the workflow file changes -- protected-paths ("abi/**")
+        # doesn't even mention .github/workflows/, so this must be caught
+        # by the always-on workflow-file guard alone.
+        (repo / ".github" / "workflows" / "check-pr.yml").write_text(
+            "new", encoding="utf-8"
+        )
+        head_sha = _commit_all(repo, "reconfigure the calling workflow")
+
+        result = self._run(
+            repo, base_sha=base_sha, head_sha=head_sha, protected_paths="abi/**"
+        )
+        assert result.returncode == 1
+        assert ".github/workflows/check-pr.yml" in result.stdout
+        assert "own protected-paths/bypass-label" in result.stdout
+
+    def test_workflow_file_and_baseline_change_together_is_protected(
+        self, tmp_path: Path
+    ) -> None:
+        repo = tmp_path / "repo"
+        _init_repo(repo)
+        (repo / "abi").mkdir()
+        (repo / "abi" / "libfoo.abicheck.json").write_text("old", encoding="utf-8")
+        (repo / ".github" / "workflows").mkdir(parents=True)
+        (repo / ".github" / "workflows" / "check-pr.yml").write_text(
+            "old", encoding="utf-8"
+        )
+        base_sha = _commit_all(repo, "base")
+
+        (repo / "abi" / "libfoo.abicheck.json").write_text("new", encoding="utf-8")
+        (repo / ".github" / "workflows" / "check-pr.yml").write_text(
+            "new", encoding="utf-8"
+        )
+        head_sha = _commit_all(repo, "reconfigure the workflow and the baseline")
+
+        result = self._run(
+            repo, base_sha=base_sha, head_sha=head_sha, protected_paths="abi/**"
+        )
+        assert result.returncode == 1
+        assert "abi/libfoo.abicheck.json" in result.stdout
+        assert ".github/workflows/check-pr.yml" in result.stdout
+        assert "doubly suspicious" in result.stdout
+
+    def test_bypass_label_also_covers_a_workflow_file_change(
+        self, tmp_path: Path
+    ) -> None:
+        repo = tmp_path / "repo"
+        _init_repo(repo)
+        (repo / ".github" / "workflows").mkdir(parents=True)
+        (repo / ".github" / "workflows" / "check-pr.yml").write_text(
+            "old", encoding="utf-8"
+        )
+        base_sha = _commit_all(repo, "base")
+
+        (repo / ".github" / "workflows" / "check-pr.yml").write_text(
+            "new", encoding="utf-8"
+        )
+        head_sha = _commit_all(repo, "workflow change")
+
+        result = self._run(
+            repo,
+            base_sha=base_sha,
+            head_sha=head_sha,
+            protected_paths="abi/**",
+            bypass_label="baseline-refresh",
+            pr_labels=["baseline-refresh"],
+        )
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert "::notice::" in result.stdout
+
     def test_a_lone_star_does_not_cross_a_path_separator(self, tmp_path: Path) -> None:
         repo = tmp_path / "repo"
         _init_repo(repo)

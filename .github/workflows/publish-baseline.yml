@@ -673,7 +673,7 @@ jobs:
           ' .existing-asset/extracted)
 
           if [[ "$existing_schema_ok" != "true" ]]; then
-            echo "::error::$ASSET_NAME already exists on release $RELEASE_TAG but its manifest.json declares a manifest_version or snapshot_schema this resolver doesn't understand -- a real consumer (resolve_target()/resolve_bundle()) would reject it as stale_schema regardless of what the content digest says, so this is never a safe retry. Delete the existing asset explicitly ('gh release delete-asset $RELEASE_TAG $ASSET_NAME --repo $REPO --yes') and re-run, or publish under a new release tag." >&2
+            echo "::error::$ASSET_NAME already exists on release $RELEASE_TAG but its manifest_version, its manifest-level snapshot_schema, or one of its snapshot files' own schema_version declares a schema this resolver doesn't understand -- a real consumer (resolve_target()/resolve_bundle()) would reject it as stale_schema regardless of what the content digest says, so this is never a safe retry. Delete the existing asset explicitly ('gh release delete-asset $RELEASE_TAG $ASSET_NAME --repo $REPO --yes') and re-run, or publish under a new release tag." >&2
             exit 1
           fi
 

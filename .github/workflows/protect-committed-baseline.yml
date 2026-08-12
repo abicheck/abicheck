@@ -175,41 +175,102 @@ jobs:
                   for path in changed_fh.read().split(b"\0")
                   if path
               ]
-          hits = sorted(
+
+          # ALWAYS protects .github/workflows/** too, independent of (and in
+          # addition to) protected-paths -- this reusable workflow's own
+          # protected-paths/bypass-label inputs are supplied by the CALLING
+          # workflow file, and for an ordinary `pull_request` trigger (this
+          # workflow's own documented, required fork-safe trigger -- see
+          # "Fork safety" above), the calling workflow file is read from the
+          # PR's OWN head commit, not the base branch. Without this, a PR
+          # could edit both the calling workflow (narrowing protected-paths
+          # to a glob that no longer matches, or dropping bypass-label
+          # enforcement entirely) AND the committed baseline in the SAME
+          # change -- this check would then see zero hits against the
+          # PR-supplied (already-tampered) glob and pass, recreating the
+          # exact self-approval gap this whole workflow exists to close
+          # (Codex review). A caller-configured protected-paths entry
+          # already covering .github/workflows/** is not double-counted --
+          # WORKFLOW_GUARD_PATTERN only contributes a path not already
+          # matched by the caller's own patterns, so the messaging below
+          # stays accurate about which rule actually caught which file.
+          WORKFLOW_GUARD_PATTERN = ".github/workflows/**"
+          configured_hits = sorted(
               {path for path in changed if any(matches(path, pat) for pat in patterns)}
           )
+          workflow_hits = sorted(
+              {
+                  path
+                  for path in changed
+                  if matches(path, WORKFLOW_GUARD_PATTERN)
+                  and path not in configured_hits
+              }
+          )
+          hits = sorted(set(configured_hits) | set(workflow_hits))
           if not hits:
-              print("No protected baseline files were touched by this PR.")
+              print("No protected baseline files or workflow files were touched by this PR.")
               sys.exit(0)
 
           bypass_label = os.environ.get("BYPASS_LABEL", "")
           pr_labels = set(json.loads(os.environ.get("PR_LABELS_JSON") or "[]"))
           if bypass_label and bypass_label in pr_labels:
               print(
-                  f"::notice::this PR modifies protected baseline file(s) "
+                  f"::notice::this PR modifies protected file(s) "
                   f"({', '.join(hits)}), but carries the '{bypass_label}' "
                   "bypass label -- treating this as an explicitly reviewed, "
-                  "human-approved baseline refresh."
+                  "human-approved change."
               )
               sys.exit(0)
 
           hint = (
               f" Add the '{bypass_label}' label if this is a genuine, "
-              "reviewed baseline refresh."
+              "reviewed change."
               if bypass_label
               else ""
           )
-          print(
-              "::error::this PR modifies "
-              f"{len(hits)} protected committed-baseline file(s): "
-              f"{', '.join(hits)}. An ordinary PR that both changes the "
-              "compared binary/headers AND updates the baseline it is "
-              "compared against can silently approve itself -- a real "
-              "incompatible change and its own baseline update land "
-              "together, so the comparison never actually detects it. "
-              "Refresh the baseline through a dedicated trusted workflow "
-              "(a push-triggered update, never a PR diff) instead."
-              + hint
-          )
+          if configured_hits and workflow_hits:
+              print(
+                  "::error::this PR modifies both "
+                  f"{len(configured_hits)} protected committed-baseline "
+                  f"file(s) ({', '.join(configured_hits)}) AND "
+                  f"{len(workflow_hits)} workflow file(s) under "
+                  f".github/workflows/ ({', '.join(workflow_hits)}). An "
+                  "ordinary PR that both changes the compared binary/"
+                  "headers AND updates the baseline it is compared against "
+                  "can silently approve itself; touching a workflow file in "
+                  "the SAME PR is doubly suspicious, since this reusable "
+                  "workflow's own protected-paths/bypass-label "
+                  "configuration lives in the calling workflow file. "
+                  "Refresh the baseline through a dedicated trusted "
+                  "workflow (a push-triggered update, never a PR diff) "
+                  "instead." + hint
+              )
+          elif workflow_hits:
+              print(
+                  "::error::this PR modifies "
+                  f"{len(workflow_hits)} workflow file(s) under "
+                  f".github/workflows/: {', '.join(workflow_hits)}. This "
+                  "reusable workflow's own protected-paths/bypass-label "
+                  "configuration is supplied by the calling workflow file, "
+                  "and for an ordinary pull_request trigger that file is "
+                  "read from the PR's own head commit -- so a PR editing it "
+                  "could otherwise silently narrow protected-paths or "
+                  "disable this check entirely. Workflow-file changes are "
+                  "therefore always protected, independent of "
+                  "protected-paths." + hint
+              )
+          else:
+              print(
+                  "::error::this PR modifies "
+                  f"{len(configured_hits)} protected committed-baseline "
+                  f"file(s): {', '.join(configured_hits)}. An ordinary PR "
+                  "that both changes the compared binary/headers AND "
+                  "updates the baseline it is compared against can "
+                  "silently approve itself -- a real incompatible change "
+                  "and its own baseline update land together, so the "
+                  "comparison never actually detects it. Refresh the "
+                  "baseline through a dedicated trusted workflow (a "
+                  "push-triggered update, never a PR diff) instead." + hint
+              )
           sys.exit(1)
           PYEOF
