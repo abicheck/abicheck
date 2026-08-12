@@ -301,6 +301,17 @@ fi
 if [[ -n "$_BASELINE_PROFILE" && -z "$_BASELINE_TARGET" ]]; then
   _fail "baseline-profile is set ('$_BASELINE_PROFILE') but baseline-target is not -- both are required to resolve one target's snapshot from a release-contract baseline-set archive."
 fi
+if [[ -n "$_BASELINE_TARGET" && -z "$_BASELINE_PROFILE" ]]; then
+  _fail "baseline-target is set ('$_BASELINE_TARGET') but baseline-profile is not -- both are required to resolve one target's snapshot from a release-contract baseline-set archive."
+fi
+# run.sh only ever reaches _try_baseline_set_fallback from inside its
+# `-n "$ABI_BASELINE"` fetch block -- baseline-profile/baseline-target set
+# without abi-baseline can never trigger a fetch at all, silently falling
+# through to whatever old-library/against the caller separately supplied
+# instead (Codex review).
+if [[ ( -n "$_BASELINE_PROFILE" || -n "$_BASELINE_TARGET" ) && -z "$_ABI_BASELINE" ]]; then
+  _fail "baseline-profile/baseline-target are set but abi-baseline is not -- the release-contract baseline-set fallback is only reached while resolving abi-baseline (a release tag or 'latest-release'), so without it these inputs can never trigger a fetch."
+fi
 
 # public-header-dir: dump and scan modes only (the CLI's own
 # --public-header-dir flag exists on those two subcommands only; compare has

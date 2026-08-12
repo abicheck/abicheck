@@ -348,6 +348,7 @@ jobs:
           ASSET_NAME: ${{ steps.package.outputs.asset-name }}
           REPO: ${{ github.repository }}
           NEW_CONTENT_DIGEST: ${{ steps.baseline.outputs.content-digest }}
+          NEW_PROFILE: ${{ matrix.profile_id }}
         run: |
           set -euo pipefail
 
@@ -434,6 +435,40 @@ jobs:
           manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
           print(module.compute_content_digest(manifest))
           ' .existing-asset/extracted)
+
+          # compute_content_digest() deliberately excludes `profile` (it
+          # hashes library/snapshot/binary content, not build-profile
+          # identity -- see its own docstring), so it alone cannot tell two
+          # DIFFERENT profiles' baseline-sets apart when they happen to
+          # produce identical library/snapshot/binary digests. That
+          # collision is reachable in practice: a caller whose
+          # asset-name-template omits `{profile}` for a multi-profile
+          # matrix has every profile's job target the SAME asset name, and
+          # this step would then treat a later profile's upload as a "safe
+          # retry" of an earlier, DIFFERENT profile's already-published
+          # asset purely because their content happened to match --
+          # silently discarding that profile's own baseline forever (Codex
+          # review). Checked as an independent, profile-identity gate
+          # BEFORE the content-digest comparison: a profile mismatch is
+          # never a safe retry regardless of what the content digests say.
+          existing_profile=$(python3 -c '
+          import json
+          import sys
+          from pathlib import Path
+
+          manifest = json.loads(
+              (Path(sys.argv[1]) / "manifest.json").read_text(encoding="utf-8")
+          )
+          print(manifest.get("profile") or "")
+          ' .existing-asset/extracted)
+
+          echo "new profile:      $NEW_PROFILE"
+          echo "existing profile: $existing_profile"
+
+          if [[ -n "$existing_profile" && "$existing_profile" != "$NEW_PROFILE" ]]; then
+            echo "::error::$ASSET_NAME already exists on release $RELEASE_TAG but was published for a DIFFERENT profile ('$existing_profile', this run is '$NEW_PROFILE') -- asset-name-template resolved to the same name for two distinct profiles, so this is never a safe retry regardless of content. Include '{profile}' in asset-name-template so each profile in a multi-profile matrix gets its own asset name." >&2
+            exit 1
+          fi
 
           echo "new:      $NEW_CONTENT_DIGEST"
           echo "existing: $existing_content_digest"

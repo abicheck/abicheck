@@ -684,6 +684,7 @@ gh() {{
                 "ASSET_NAME": asset_name,
                 "REPO": "abicheck/abicheck",
                 "NEW_CONTENT_DIGEST": content_digest,
+                "NEW_PROFILE": manifest["profile"],
                 "PYTHONPATH": str(Path(__file__).resolve().parents[1]),
             }
         )
@@ -705,3 +706,136 @@ gh() {{
 
         assert result.returncode == 0, result.stdout + result.stderr
         assert "safe re-run" in result.stdout
+
+
+class TestUploadReleaseAssetRejectsCrossProfileCollision:
+    """Regression (Codex review, P1): ``compute_content_digest()``
+    deliberately excludes ``profile`` -- it hashes library/snapshot/binary
+    content, not build-profile identity. When a caller's
+    ``asset-name-template`` omits ``{profile}`` for a multi-profile matrix,
+    every profile's job targets the SAME asset name; if two profiles happen
+    to produce identical content digests, the old logic would treat a
+    later profile's upload as a safe retry of an earlier, DIFFERENT
+    profile's already-published asset -- silently discarding that
+    profile's own baseline. The profile identity is now checked
+    independently, before the content-digest comparison, and never treated
+    as a safe retry regardless of what the digests say.
+    """
+
+    def _upload_step_script(self) -> str:
+        data = _load(PUBLISH_BASELINE)
+        steps = _steps(data["jobs"]["publish"])
+        step = next(
+            s for s in steps if s.get("name", "").startswith("Upload release asset")
+        )
+        return step["run"]
+
+    def test_same_content_different_profile_is_rejected(self, tmp_path: Path) -> None:
+        import json
+        import shutil
+        import subprocess
+        import tarfile
+        import tempfile
+
+        # Two manifests with IDENTICAL artifact lists (so
+        # compute_content_digest() agrees) but different `profile` --
+        # exactly the collision an asset-name-template without {profile}
+        # can cause across a multi-profile matrix.
+        artifacts = [
+            {
+                "library": "libfoo",
+                "artifact": "build/libfoo.so",
+                "snapshot": "libfoo.abicheck.json",
+                "sha256": "a" * 64,
+            }
+        ]
+        existing_manifest = {
+            "manifest_version": 1,
+            "project_ref": "v1.0.0",
+            "profile": "linux-x86_64-gcc13-release",
+            "snapshot_schema": None,
+            "fact_set": None,
+            "artifacts": artifacts,
+        }
+        new_manifest = {**existing_manifest, "profile": "linux-aarch64-gcc13-release"}
+
+        src_root = (
+            Path(__file__).resolve().parents[1]
+            / "actions"
+            / "baseline"
+            / "build_manifest.py"
+        )
+        module_dir = tmp_path / ".publish-baseline-src" / "actions" / "baseline"
+        module_dir.mkdir(parents=True)
+        shutil.copy(src_root, module_dir / "build_manifest.py")
+
+        import importlib.util
+
+        module_spec = importlib.util.spec_from_file_location(
+            "test_build_manifest_module_2", src_root
+        )
+        assert module_spec is not None and module_spec.loader is not None
+        build_manifest = importlib.util.module_from_spec(module_spec)
+        module_spec.loader.exec_module(build_manifest)
+        new_content_digest = build_manifest.compute_content_digest(new_manifest)
+
+        asset_src = tmp_path / "asset-src"
+        asset_src.mkdir()
+        (asset_src / "manifest.json").write_text(
+            json.dumps(existing_manifest), encoding="utf-8"
+        )
+        asset_name = "abicheck-baseline-shared-name.tar"
+        archive_path = tmp_path / asset_name
+        with tarfile.open(archive_path, "w") as tf:
+            tf.add(asset_src, arcname=".")
+
+        gh_stub = f"""
+gh() {{
+  if [[ "$1" == "release" && "$2" == "view" ]]; then
+    echo '{{"assets": [{{"name": "{asset_name}", "apiUrl": "https://api.example/asset"}}]}}'
+    return 0
+  fi
+  if [[ "$1" == "api" ]]; then
+    cat "{archive_path.as_posix()}"
+    return 0
+  fi
+  echo "unexpected gh invocation: $*" >&2
+  return 1
+}}
+"""
+        script = gh_stub + "\n" + self._upload_step_script()
+
+        env = os.environ.copy()
+        env.update(
+            {
+                "GH_TOKEN": "fake-token",
+                "RELEASE_TAG": "v1.0.0",
+                "ASSET_NAME": asset_name,
+                "REPO": "abicheck/abicheck",
+                "NEW_CONTENT_DIGEST": new_content_digest,
+                "NEW_PROFILE": new_manifest["profile"],
+                "PYTHONPATH": str(Path(__file__).resolve().parents[1]),
+            }
+        )
+
+        fd, path = tempfile.mkstemp(suffix=".sh")
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8", newline="\n") as fh:
+                fh.write(script)
+            result = subprocess.run(
+                [_bash_executable(), path],
+                capture_output=True,
+                text=True,
+                env=env,
+                cwd=tmp_path,
+                check=False,
+            )
+        finally:
+            os.unlink(path)
+
+        assert result.returncode == 1, result.stdout + result.stderr
+        assert "DIFFERENT profile" in (result.stdout + result.stderr)
+        # Must fail on the profile mismatch, never reach (or pass) the
+        # content-digest comparison -- the whole point is that identical
+        # content must NOT be treated as a safe retry across profiles.
+        assert "safe re-run" not in result.stdout
