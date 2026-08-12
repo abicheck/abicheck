@@ -204,8 +204,11 @@ When debug info is available in the binary:
 - Detects calling convention and frame register changes
 
 abicheck has no Mach-O debug-map/DWARF reader today — a headerless macOS
-`.dylib` scan is always L0 (exports + load-command metadata) only, even when
-the binary carries debug info. See [Platform Support](../reference/platforms.md)
+`.dylib`'s own binary/debug-info evidence is always L0 (exports +
+load-command metadata) only, even when the binary carries debug info; this
+is about the L0/L1 binary-evidence layers specifically, not the whole scan
+— `--sources`/`--build-info` can still attach L3–L5 build/source evidence
+independently of the platform. See [Platform Support](../reference/platforms.md)
 for the full per-platform breakdown.
 
 **PDB** (Windows `.dll` — via built-in PDB parser):

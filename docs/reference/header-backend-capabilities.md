@@ -22,12 +22,15 @@ one backend selector, plus a merge of the two:
 
 > **Exception: `--frontend-context device`.** CastXML has no SYCL/DPC++
 > host/device context concept, so a non-`host` `--frontend-context` under
-> `auto` skips CastXML and routes straight to `clang` — no
+> an **unpinned** `auto` (no `--ast-frontend` flag, no `ABICHECK_AST_FRONTEND`
+> env var) skips CastXML and routes straight to `clang` — no
 > `--allow-ast-frontend-fallback` opt-in needed, since this isn't the
 > toolchain-error fallback above, it's `auto` recognizing CastXML can't
-> satisfy the request at all. An **explicit** `--ast-frontend castxml` with
-> a non-`host` context is rejected outright instead (`--ast-frontend clang`
-> is required). See ADR-050 D5.
+> satisfy the request at all. An **explicit** `--ast-frontend castxml`, or
+> `auto` **pinned** to castxml via `ABICHECK_AST_FRONTEND=castxml`, is
+> rejected outright instead with a non-`host` context (`--ast-frontend clang`
+> is required) — an env pin is honored the same as an explicit flag, not
+> silently overridden by the device request. See ADR-050 D5.
 
 The two parsers produce the **same** `AbiSnapshot` fields, but not the same
 *values* for every field — and a comparison that mixes producers is a real,
