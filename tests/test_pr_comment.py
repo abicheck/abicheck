@@ -141,6 +141,126 @@ def test_compare_detail_text_renders_value_delta():
     assert "16 → 24" in size_change.detail
 
 
+def test_evidence_coverage_finding_excluded_from_compatibility_buckets():
+    # layer_coverage_asymmetric is a comparison-quality signal, not a
+    # compatibility finding — it must not land in breaking/review/safe, and
+    # must not itself count toward `counts`.
+    report = _compare_report(
+        [
+            {
+                "kind": "layer_coverage_asymmetric",
+                "symbol": "evidence:coverage",
+                "description": "Base was analyzed with evidence the target lacks (DWARF).",
+                "severity": "risk",
+            },
+        ]
+    )
+    model = build_model(report)
+    assert model.counts == (0, 0, 0)
+    assert len(model.incomplete) == 1
+    assert model.incomplete[0].kind == "layer_coverage_asymmetric"
+    # Friendlier symbol label, not the raw internal marker.
+    assert model.incomplete[0].symbol == "Evidence coverage"
+    assert model.total_changes == 1
+    assert model.incomplete_blocking is False
+
+
+def test_evidence_required_missing_is_always_blocking():
+    report = _compare_report(
+        [
+            {
+                "kind": "evidence_required_missing",
+                "symbol": "evidence:required",
+                "description": "Policy requires source ABI evidence, none collected.",
+                "severity": "api_break",
+            },
+        ]
+    )
+    model = build_model(report)
+    assert model.counts == (0, 0, 0)
+    assert len(model.incomplete) == 1
+    assert model.incomplete_blocking is True
+
+
+def test_layer_coverage_asymmetric_blocking_when_potential_breaking_gated():
+    report = _compare_report(
+        [
+            {
+                "kind": "layer_coverage_asymmetric",
+                "symbol": "evidence:coverage",
+                "description": "Base was analyzed with evidence the target lacks.",
+                "severity": "risk",
+            },
+        ]
+    )
+    report["severity"] = {"config": {"potential_breaking": "error"}}
+    model = build_model(report)
+    assert model.incomplete_blocking is True
+
+
+def test_render_header_analysis_incomplete_not_worded_as_review():
+    report = _compare_report(
+        [
+            {
+                "kind": "layer_coverage_asymmetric",
+                "symbol": "evidence:coverage",
+                "description": "Base was analyzed with evidence the target lacks.",
+                "severity": "risk",
+            },
+        ]
+    )
+    body = render_comment(build_model(report), sha="deadbeef")
+    assert "Analysis coverage reduced" in body
+    assert "Review recommended" not in body
+    assert "🛑 Analysis incomplete" in body
+
+
+def test_render_header_source_analysis_incomplete_when_blocking():
+    report = _compare_report(
+        [
+            {
+                "kind": "evidence_required_missing",
+                "symbol": "evidence:required",
+                "description": "Policy requires source ABI evidence, none collected.",
+                "severity": "api_break",
+            },
+        ]
+    )
+    body = render_comment(build_model(report), sha="deadbeef")
+    assert "Source analysis incomplete" in body
+    assert "🛑" in body
+    assert "Review recommended" not in body
+
+
+def test_real_breaking_finding_wins_headline_over_incomplete():
+    # A genuine ABI break must never be hidden behind an "analysis
+    # incomplete" headline — the incomplete bucket still renders its own
+    # section and a note, but the headline stays "ABI BREAKING".
+    report = _compare_report(
+        [
+            {
+                "kind": "func_removed",
+                "symbol": "foo_init",
+                "description": "removed",
+                "severity": "breaking",
+            },
+            {
+                "kind": "layer_coverage_asymmetric",
+                "symbol": "evidence:coverage",
+                "description": "Base was analyzed with evidence the target lacks.",
+                "severity": "risk",
+            },
+        ]
+    )
+    model = build_model(report)
+    assert model.counts == (1, 0, 0)
+    assert len(model.incomplete) == 1
+    body = render_comment(model, sha="deadbeef")
+    assert "ABI BREAKING" in body
+    assert "🛑 Analysis incomplete" in body
+    assert "analysis-coverage finding" in body  # the note pointing at the section
+
+
 def test_used_by_scoped_compatible_overrides_breaking_headline():
     # ADR-043 `compare --used-by`: the full library still has breaking
     # changes (unrelated to the app), but the scoped verdict is COMPATIBLE —

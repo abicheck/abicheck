@@ -18,8 +18,8 @@ Renders a single, updatable PR comment from an abicheck JSON report
 (``compare``, ``compare-release`` or ``appcompat`` mode). The comment is a
 *content* channel and is independent of the check's red/green gate: ABI/API
 breaks turn the step red via exit codes (see ``action/run.sh``), while this
-comment groups every finding into three buckets so a reviewer sees, in one
-place:
+comment groups every finding into three compatibility buckets so a reviewer
+sees, in one place:
 
 * **Breaking** — clear ABI breaks (and gated source breaks);
 * **Needs review** — source breaks / risk a human should sign off on;
@@ -44,6 +44,23 @@ they only say "ABI BREAKING" when the bucket actually holds a genuine
 ``abi_breaking``/``potential_breaking`` finding, and say "blocked by policy"
 instead when every member is a gate-promoted COMPATIBLE finding.
 
+**A fourth, orthogonal bucket — "analysis incomplete" — never joins the three
+compatibility buckets above.** ``layer_coverage_asymmetric`` and
+``evidence_required_missing`` (see :data:`_EVIDENCE_KIND_VALUES`) are not
+claims about the API/ABI at all: they say the *comparison itself* ran with
+degraded or missing evidence, so some real changes may be undetectable. The
+severity field the checker stamps on them (``risk``/``api_break``, so the
+underlying finding still sorts correctly everywhere else that reads
+``severity``) is an artifact of reusing the ``Verdict`` enum for gating, not a
+compatibility verdict — folding them into "Needs review" is exactly the bug
+this split fixes: a clean, implementation-only PR with zero API changes but
+one coverage gap used to render the same generic "⚠️ Review recommended"
+headline as a PR with a genuine, risky source-API change, giving a reviewer no
+way to tell "something in this diff might be unsafe" apart from "we couldn't
+fully check this diff." They render in their own "🛑 Analysis incomplete"
+section with a headline that says so explicitly, and never contribute to the
+Breaking/Needs review/Safe counts.
+
 The body carries a hidden HTML :data:`MARKER` so the action can find and
 update the same comment across runs, and surfaces the scanned commit SHA in
 both the header and the footer.
@@ -62,6 +79,27 @@ from .checker_policy import ADDITION_KINDS
 # that don't end in "_added" (e.g. type_field_added_compatible,
 # experimental_graduated) are classified correctly.
 _ADDITION_KIND_VALUES = frozenset(k.value for k in ADDITION_KINDS)
+
+# Kind value strings that mean "this comparison's own evidence was degraded
+# or incomplete" rather than "this is a compatibility finding" — see the
+# module docstring's "analysis incomplete" bucket. `layer_coverage_asymmetric`
+# is an advisory RISK finding (the base was scanned with evidence the target
+# lacks); `evidence_required_missing` is a hard, policy-driven failure
+# (ADR-033 D7: a declared-mandatory evidence layer is absent). Both describe
+# the *comparison's* coverage, never a change to the library's own API/ABI, so
+# neither belongs in the Breaking/Needs review/Safe compatibility buckets.
+_EVIDENCE_KIND_VALUES = frozenset(
+    {"layer_coverage_asymmetric", "evidence_required_missing"}
+)
+
+# Friendlier symbol labels for the evidence-incomplete kinds above — their
+# real "symbol" is an internal marker (e.g. "evidence:coverage"), not
+# something naming a change in the library's surface, so showing it verbatim
+# in the Symbol column reads as internal-tool noise to a maintainer.
+_EVIDENCE_SYMBOL_LABEL = {
+    "layer_coverage_asymmetric": "Evidence coverage",
+    "evidence_required_missing": "Required evidence",
+}
 
 # Hidden marker used to find-and-update the sticky comment across runs.
 MARKER = "<!-- abicheck-sticky-report -->"
@@ -138,6 +176,12 @@ class Finding:
     # correctly: a risk finding promoted by `potential_breaking: error` is
     # not a "source API break" (Codex review, PR #595).
     severity: str = ""
+    # Remediation text ("how to fix"), sourced verbatim from the report's own
+    # `impact` field (`change_registry.py`'s `impact=` on the matching
+    # `ChangeKindMeta` entry) when present. Rendered only for the "analysis
+    # incomplete" bucket today (see module docstring) — every evidence-kind
+    # entry already carries one.
+    impact: str = ""
 
 
 @dataclass
@@ -156,6 +200,18 @@ class CommentModel:
     breaking: list[Finding] = field(default_factory=list)
     review: list[Finding] = field(default_factory=list)
     safe: list[Finding] = field(default_factory=list)
+    # Findings whose kind is in `_EVIDENCE_KIND_VALUES` — degraded/missing
+    # comparison evidence, never a compatibility claim (see module docstring).
+    # Deliberately excluded from `breaking`/`review`/`safe` and from
+    # `counts`, so it can never masquerade as a compatibility bucket; folded
+    # into `total_changes` separately so `should_post("changes")` still fires
+    # on a report that carries only this.
+    incomplete: list[Finding] = field(default_factory=list)
+    # Whether the incomplete bucket represents a hard evidence-policy failure
+    # (`evidence_required_missing`, or `layer_coverage_asymmetric` gated to
+    # `error` by `potential_breaking`) rather than a softer advisory notice —
+    # drives the headline's emoji/wording (see `_header`).
+    incomplete_blocking: bool = False
     # Severity-config categories ("abi_breaking" / "potential_breaking" /
     # "addition" / "quality_issues") responsible for a non-empty Breaking
     # bucket. Populated alongside `breaking` in every mode (see
@@ -206,9 +262,11 @@ class CommentModel:
 
     @property
     def total_changes(self) -> int:
-        """Total number of changes across all three buckets."""
+        """Total number of changes across all three compatibility buckets,
+        plus the analysis-incomplete bucket (so `should_post("changes")`
+        still fires on a report that carries only a coverage gap)."""
         b, r, s = self.counts
-        return b + r + s
+        return b + r + s + len(self.incomplete)
 
 
 # ---------------------------------------------------------------------------
@@ -261,10 +319,11 @@ def _bucket_changes(
     changes: object,
     gate_api_break: bool = False,
     levels: dict[str, str] | None = None,
-) -> tuple[list[Finding], list[Finding], list[Finding]]:
+) -> tuple[list[Finding], list[Finding], list[Finding], list[Finding]]:
     breaking: list[Finding] = []
     review: list[Finding] = []
     safe: list[Finding] = []
+    incomplete: list[Finding] = []
     target = {"breaking": breaking, "review": review, "safe": safe}
     levels = levels or {}
     if isinstance(changes, list):
@@ -273,6 +332,24 @@ def _bucket_changes(
                 continue
             sev = str(c.get("severity", "unknown"))
             kind = str(c.get("kind", ""))
+            # Evidence-quality findings never enter the compatibility buckets
+            # (see `_EVIDENCE_KIND_VALUES`/module docstring) — pulled out
+            # ahead of the severity-bucket/gate logic below, which is about
+            # compatibility gating and does not apply to them.
+            if kind in _EVIDENCE_KIND_VALUES:
+                loc = c.get("source_location")
+                symbol = _EVIDENCE_SYMBOL_LABEL.get(kind, str(c.get("symbol", "")))
+                incomplete.append(
+                    Finding(
+                        kind=kind,
+                        symbol=symbol,
+                        detail=_detail_text(c),
+                        location=str(loc) if loc else None,
+                        severity=sev,
+                        impact=str(c.get("impact", "") or ""),
+                    )
+                )
+                continue
             bucket = _SEVERITY_BUCKET.get(sev, "review")
             # fail-on-api-break turns the check red on API breaks (only) …
             if gate_api_break and sev == "api_break":
@@ -292,7 +369,29 @@ def _bucket_changes(
                     severity=sev,
                 )
             )
-    return breaking, review, safe
+    return breaking, review, safe, incomplete
+
+
+def _incomplete_is_blocking(
+    findings: list[Finding], levels: dict[str, str] | None
+) -> bool:
+    """Whether the analysis-incomplete bucket represents a hard failure.
+
+    ``evidence_required_missing`` always fails the run outright (ADR-033 D7,
+    a structural policy check outside this module's control — not something
+    the severity config gates). ``layer_coverage_asymmetric`` alone is only
+    advisory unless the report's own severity config promotes
+    ``potential_breaking`` to ``error`` (the knob its underlying ``risk``
+    severity would otherwise be gated by).
+    """
+    kinds = {f.kind for f in findings}
+    if "evidence_required_missing" in kinds:
+        return True
+    if "layer_coverage_asymmetric" in kinds and (levels or {}).get(
+        "potential_breaking"
+    ) == "error":
+        return True
+    return False
 
 
 def _suppressed_count(report: dict[str, object]) -> int:
@@ -368,8 +467,9 @@ def _breaking_severities(findings: list[Finding]) -> frozenset[str]:
 def _from_compare(
     report: dict[str, object], gate_api_break: bool = False
 ) -> CommentModel:
-    breaking, review, safe = _bucket_changes(
-        report.get("changes"), gate_api_break, _severity_levels(report)
+    levels = _severity_levels(report)
+    breaking, review, safe, incomplete = _bucket_changes(
+        report.get("changes"), gate_api_break, levels
     )
     # ADR-043 `compare --used-by`/`--required-symbol(s)`: the JSON report
     # overwrites `verdict` with the scoped result and adds `full_verdict` plus
@@ -391,6 +491,8 @@ def _from_compare(
         breaking=breaking,
         review=review,
         safe=safe,
+        incomplete=incomplete,
+        incomplete_blocking=_incomplete_is_blocking(incomplete, levels),
         breaking_categories=_breaking_categories(breaking),
         breaking_severities=_breaking_severities(breaking),
         scoped_verdict=scoped_verdict,
@@ -413,8 +515,9 @@ def _from_compare(
 def _from_appcompat(
     report: dict[str, object], gate_api_break: bool = False
 ) -> CommentModel:
-    breaking, review, safe = _bucket_changes(
-        report.get("relevant_changes"), gate_api_break, _severity_levels(report)
+    levels = _severity_levels(report)
+    breaking, review, safe, incomplete = _bucket_changes(
+        report.get("relevant_changes"), gate_api_break, levels
     )
     missing = report.get("missing_symbols")
     if isinstance(missing, list):
@@ -451,6 +554,8 @@ def _from_appcompat(
         breaking=breaking,
         review=review,
         safe=safe,
+        incomplete=incomplete,
+        incomplete_blocking=_incomplete_is_blocking(incomplete, levels),
         breaking_categories=_breaking_categories(breaking),
         breaking_severities=_breaking_severities(breaking),
     )
@@ -802,6 +907,15 @@ def _header(model: CommentModel) -> tuple[str, str]:
         # happen — every mode populates breaking_categories) — fall back to
         # the conservative default rather than under-stating a red check.
         return "❌", "ABI BREAKING"
+    if model.incomplete:
+        # Degraded/missing comparison evidence is not a compatibility claim
+        # (see module docstring) — say so explicitly rather than folding it
+        # into the generic "Review recommended" wording, which would read as
+        # "this PR changed the API in a way that needs a human look," not
+        # "we couldn't fully check this PR."
+        if model.incomplete_blocking:
+            return "🛑", "Source analysis incomplete"
+        return "⚠️", "Analysis coverage reduced"
     if r:
         return "⚠️", "Review recommended"
     if s:
@@ -960,6 +1074,12 @@ def _header_block(model: CommentModel, short_sha: str) -> list[str]:
     context = (
         f"{head_ref} vs `{model.old_label}` · `{model.policy}` · `{model.subject}`"
     )
+    counts_line = f"**{b} breaking** · {r} needs review · {s} safe"
+    # The incomplete count is a distinct axis (analysis quality, not
+    # compatibility — see module docstring) and only shown when non-zero, so
+    # every existing report's summary line is unchanged.
+    if model.incomplete:
+        counts_line += f" · {len(model.incomplete)} analysis incomplete"
     return [
         MARKER,
         "",
@@ -967,7 +1087,7 @@ def _header_block(model: CommentModel, short_sha: str) -> list[str]:
         "",
         context,
         "",
-        f"**{b} breaking** · {r} needs review · {s} safe",
+        counts_line,
         "",
     ]
 
@@ -1085,6 +1205,24 @@ def _gate_note(model: CommentModel) -> list[str]:
     ]
 
 
+def _incomplete_note(model: CommentModel) -> list[str]:
+    """Explain the analysis-incomplete bucket when it did *not* win the
+    headline (a genuine breaking finding took priority — see `_header`), so a
+    reviewer looking at an "ABI BREAKING" headline still learns the analysis
+    itself was also degraded, rather than discovering it only in the
+    collapsed details section below.
+    """
+    if not model.incomplete or not model.breaking:
+        return []
+    n = len(model.incomplete)
+    word = "finding" if n == 1 else "findings"
+    return [
+        f"> 🛑 {n} analysis-coverage {word} below — some real changes may not "
+        f"be detectable with the evidence this comparison had available.",
+        "",
+    ]
+
+
 def _body_sections(model: CommentModel, detail: str) -> list[str]:
     if model.mode == "release":
         return _release_table(model, detail)
@@ -1096,6 +1234,12 @@ def _body_sections(model: CommentModel, detail: str) -> list[str]:
     )
     out = _findings_table(
         breaking_title, model.breaking, detail, open_default=bool(model.breaking)
+    )
+    out += _findings_table(
+        "🛑 Analysis incomplete",
+        model.incomplete,
+        detail,
+        open_default=(not model.breaking and bool(model.incomplete)),
     )
     out += _findings_table(
         "⚠️ Needs review",
@@ -1149,6 +1293,7 @@ def _render_body(
         lines += [note, ""]
     lines += _library_notes(model)
     lines += _gate_note(model)
+    lines += _incomplete_note(model)
     lines += _scoped_notes(model)
     lines += _suppression_note(model)
     if detail != "summary":

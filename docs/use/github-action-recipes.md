@@ -439,6 +439,14 @@ changes the check's red/green state, which is still driven by `fail-on-breaking`
 breaks, risk, additions) surface as a green check with a `⚠️ Review recommended`
 comment, while real ABI breaks turn the check red **and** post a `❌` comment.
 
+A fourth, separate **🛑 Analysis incomplete** section — degraded or missing
+comparison evidence (e.g. the baseline was scanned with debug info or build
+context the candidate lacks) — never mixes into those three sections, and
+never drives a `⚠️ Review recommended` headline: that finding isn't a claim
+about the API/ABI at all, so the comment says "Source analysis incomplete" or
+"Analysis coverage reduced" instead, so a reviewer can tell "this PR's
+comparison had a coverage gap" apart from "this PR made a risky API change."
+
 ```yaml
 permissions:
   contents: read
