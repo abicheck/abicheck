@@ -50,6 +50,7 @@ maintenance cost, not preemptively.
 from __future__ import annotations
 
 import os
+import shutil
 import sys
 from pathlib import Path
 from typing import Any
@@ -99,6 +100,15 @@ _WINDOWS_PYTHON3_SKIP = pytest.mark.skipif(
     ),
 )
 
+#: The extracted step pipes `gh release view --json assets` output through a
+#: real `jq` invocation (CodeRabbit nitpick) -- GitHub-hosted runners ship
+#: `jq`, but a local/self-hosted run without it would otherwise fail every
+#: class here with an unrelated "command not found" instead of skipping.
+_JQ_REQUIRED = pytest.mark.skipif(
+    shutil.which("jq") is None,
+    reason="the extracted step pipes `gh release view --json assets` output through real `jq`",
+)
+
 
 class TestUploadReleaseAssetRetryDispatchesBySuffix:
     """Regression (Codex review): the "Upload release asset" step's safe-
@@ -129,6 +139,7 @@ class TestUploadReleaseAssetRetryDispatchesBySuffix:
         return step["run"]
 
     @_WINDOWS_PYTHON3_SKIP
+    @_JQ_REQUIRED
     def test_identical_tar_gz_content_is_a_safe_retry(self, tmp_path: Path) -> None:
         import importlib.util
         import json
@@ -275,6 +286,7 @@ class TestUploadReleaseAssetRejectsCrossProfileCollision:
         return step["run"]
 
     @_WINDOWS_PYTHON3_SKIP
+    @_JQ_REQUIRED
     def test_same_content_different_profile_is_rejected(self, tmp_path: Path) -> None:
         import importlib.util
         import json
@@ -417,6 +429,7 @@ class TestUploadReleaseAssetRejectsMissingProfile:
         return step["run"]
 
     @_WINDOWS_PYTHON3_SKIP
+    @_JQ_REQUIRED
     def test_existing_manifest_with_no_profile_is_rejected(
         self, tmp_path: Path
     ) -> None:
@@ -551,6 +564,7 @@ class TestUploadReleaseAssetRejectsUnsupportedManifestVersion:
         return step["run"]
 
     @_WINDOWS_PYTHON3_SKIP
+    @_JQ_REQUIRED
     def test_unsupported_manifest_version_is_rejected_even_with_matching_content(
         self, tmp_path: Path
     ) -> None:
@@ -686,6 +700,7 @@ class TestUploadReleaseAssetRejectsUnsupportedSnapshotSchema:
         return step["run"]
 
     @_WINDOWS_PYTHON3_SKIP
+    @_JQ_REQUIRED
     def test_snapshot_schema_newer_than_installed_reader_is_rejected(
         self, tmp_path: Path
     ) -> None:
@@ -805,6 +820,276 @@ gh() {{
         assert "stale_schema" in (result.stdout + result.stderr)
         assert "safe re-run" not in result.stdout
 
+    @_WINDOWS_PYTHON3_SKIP
+    @_JQ_REQUIRED
+    def test_per_snapshot_schema_version_newer_than_installed_reader_is_rejected(
+        self, tmp_path: Path
+    ) -> None:
+        """Regression (Codex review, third round): the manifest-level
+        ``snapshot_schema`` check alone is not the whole story -- the real
+        resolver (``_snapshot_digest_issue()`` in
+        ``abicheck/buildsource/baseline_set.py``) ALSO reads each
+        individual snapshot file's OWN ``schema_version``, since an
+        older/hand-authored manifest with no aggregate ``snapshot_schema``
+        has nothing for that first check to compare, while the snapshot
+        file itself always carries one. This existing asset omits
+        ``snapshot_schema`` entirely but its one snapshot file's own
+        ``schema_version`` is newer than this checkout's installed
+        reader -- matching profile and content, so every other guard
+        would classify it as a safe retry.
+        """
+        import importlib.util
+        import json
+        import shutil
+        import subprocess
+        import tarfile
+        import tempfile
+
+        from abicheck import serialization
+
+        src_root = (
+            Path(__file__).resolve().parents[1]
+            / "actions"
+            / "baseline"
+            / "build_manifest.py"
+        )
+        module_dir = tmp_path / ".publish-baseline-src" / "actions" / "baseline"
+        module_dir.mkdir(parents=True)
+        shutil.copy(src_root, module_dir / "build_manifest.py")
+
+        module_spec = importlib.util.spec_from_file_location(
+            "test_build_manifest_module_bad_per_snapshot_schema", src_root
+        )
+        assert module_spec is not None and module_spec.loader is not None
+        build_manifest = importlib.util.module_from_spec(module_spec)
+        module_spec.loader.exec_module(build_manifest)
+
+        # The snapshot file's own schema_version is newer than this
+        # checkout supports -- content hash is computed from the SAME
+        # dict, so the fresh run's manifest (using an otherwise-identical
+        # snapshot at the CURRENT schema) still reaches a matching digest.
+        bad_snapshot = {
+            "schema_version": serialization.SCHEMA_VERSION + 1,
+            "functions": [],
+            "types": [],
+        }
+        good_snapshot = {
+            "schema_version": serialization.SCHEMA_VERSION,
+            "functions": [],
+            "types": [],
+        }
+        bad_hash = build_manifest.compute_snapshot_content_hash(bad_snapshot)
+        good_hash = build_manifest.compute_snapshot_content_hash(good_snapshot)
+
+        existing_manifest = {
+            "manifest_version": 1,
+            "project_ref": "v1.0.0",
+            "profile": "linux-x86_64-gcc13-release",
+            "snapshot_schema": None,  # legacy/absent -- nothing to compare here
+            "fact_set": None,
+            "artifacts": [
+                {
+                    "library": "libfoo",
+                    "artifact": "build/libfoo.so",
+                    "snapshot": "libfoo.abicheck.json",
+                    "sha256": bad_hash,
+                }
+            ],
+        }
+        new_manifest = {
+            **existing_manifest,
+            "artifacts": [
+                {
+                    "library": "libfoo",
+                    "artifact": "build/libfoo.so",
+                    "snapshot": "libfoo.abicheck.json",
+                    "sha256": good_hash,
+                }
+            ],
+        }
+        new_content_digest = build_manifest.compute_content_digest(new_manifest)
+
+        asset_src = tmp_path / "asset-src"
+        asset_src.mkdir()
+        (asset_src / "manifest.json").write_text(
+            json.dumps(existing_manifest), encoding="utf-8"
+        )
+        (asset_src / "libfoo.abicheck.json").write_text(
+            json.dumps(bad_snapshot), encoding="utf-8"
+        )
+        asset_name = "abicheck-baseline-bad-per-snapshot-schema.tar"
+        archive_path = tmp_path / asset_name
+        with tarfile.open(archive_path, "w") as tf:
+            tf.add(asset_src, arcname=".")
+
+        gh_stub = f"""
+gh() {{
+  if [[ "$1" == "release" && "$2" == "view" ]]; then
+    echo '{{"assets": [{{"name": "{asset_name}", "apiUrl": "https://api.example/asset"}}]}}'
+    return 0
+  fi
+  if [[ "$1" == "api" ]]; then
+    cat "{archive_path.as_posix()}"
+    return 0
+  fi
+  echo "unexpected gh invocation: $*" >&2
+  return 1
+}}
+"""
+        script = gh_stub + "\n" + self._upload_step_script()
+
+        env = os.environ.copy()
+        env.update(
+            {
+                "GH_TOKEN": "fake-token",
+                "RELEASE_TAG": "v1.0.0",
+                "ASSET_NAME": asset_name,
+                "REPO": "abicheck/abicheck",
+                "NEW_CONTENT_DIGEST": new_content_digest,
+                "NEW_PROFILE": new_manifest["profile"],
+                "PYTHONPATH": str(Path(__file__).resolve().parents[1]),
+            }
+        )
+
+        fd, path = tempfile.mkstemp(suffix=".sh")
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8", newline="\n") as fh:
+                fh.write(script)
+            result = subprocess.run(
+                [_bash_executable(), path],
+                capture_output=True,
+                text=True,
+                env=env,
+                cwd=tmp_path,
+                check=False,
+            )
+        finally:
+            os.unlink(path)
+
+        assert result.returncode == 1, result.stdout + result.stderr
+        assert "stale_schema" in (result.stdout + result.stderr)
+        assert "safe re-run" not in result.stdout
+
+    @_WINDOWS_PYTHON3_SKIP
+    @_JQ_REQUIRED
+    def test_non_integer_snapshot_schema_is_rejected_not_a_crash(
+        self, tmp_path: Path
+    ) -> None:
+        """Regression (Codex review, third round): a malformed, non-integer
+        ``snapshot_schema`` (e.g. a string) used to reach a bare ``>``
+        comparison, raising ``TypeError`` -- which, under this script's own
+        ``set -euo pipefail``, aborted the whole step with a raw Python
+        traceback instead of this check's own actionable ``::error::``
+        message. Explicit ``isinstance`` validation now makes this a clean
+        rejection instead of a crash.
+        """
+        import importlib.util
+        import json
+        import shutil
+        import subprocess
+        import tarfile
+        import tempfile
+
+        src_root = (
+            Path(__file__).resolve().parents[1]
+            / "actions"
+            / "baseline"
+            / "build_manifest.py"
+        )
+        module_dir = tmp_path / ".publish-baseline-src" / "actions" / "baseline"
+        module_dir.mkdir(parents=True)
+        shutil.copy(src_root, module_dir / "build_manifest.py")
+
+        module_spec = importlib.util.spec_from_file_location(
+            "test_build_manifest_module_non_int_snapshot_schema", src_root
+        )
+        assert module_spec is not None and module_spec.loader is not None
+        build_manifest = importlib.util.module_from_spec(module_spec)
+        module_spec.loader.exec_module(build_manifest)
+
+        snapshot = {"schema_version": 9, "functions": [], "types": []}
+        snapshot_hash = build_manifest.compute_snapshot_content_hash(snapshot)
+        artifacts = [
+            {
+                "library": "libfoo",
+                "artifact": "build/libfoo.so",
+                "snapshot": "libfoo.abicheck.json",
+                "sha256": snapshot_hash,
+            }
+        ]
+        existing_manifest = {
+            "manifest_version": 1,
+            "project_ref": "v1.0.0",
+            "profile": "linux-x86_64-gcc13-release",
+            "snapshot_schema": "not-a-number",
+            "fact_set": None,
+            "artifacts": artifacts,
+        }
+        new_manifest = {**existing_manifest, "snapshot_schema": None}
+        new_content_digest = build_manifest.compute_content_digest(new_manifest)
+
+        asset_src = tmp_path / "asset-src"
+        asset_src.mkdir()
+        (asset_src / "manifest.json").write_text(
+            json.dumps(existing_manifest), encoding="utf-8"
+        )
+        (asset_src / "libfoo.abicheck.json").write_text(
+            json.dumps(snapshot), encoding="utf-8"
+        )
+        asset_name = "abicheck-baseline-non-int-snapshot-schema.tar"
+        archive_path = tmp_path / asset_name
+        with tarfile.open(archive_path, "w") as tf:
+            tf.add(asset_src, arcname=".")
+
+        gh_stub = f"""
+gh() {{
+  if [[ "$1" == "release" && "$2" == "view" ]]; then
+    echo '{{"assets": [{{"name": "{asset_name}", "apiUrl": "https://api.example/asset"}}]}}'
+    return 0
+  fi
+  if [[ "$1" == "api" ]]; then
+    cat "{archive_path.as_posix()}"
+    return 0
+  fi
+  echo "unexpected gh invocation: $*" >&2
+  return 1
+}}
+"""
+        script = gh_stub + "\n" + self._upload_step_script()
+
+        env = os.environ.copy()
+        env.update(
+            {
+                "GH_TOKEN": "fake-token",
+                "RELEASE_TAG": "v1.0.0",
+                "ASSET_NAME": asset_name,
+                "REPO": "abicheck/abicheck",
+                "NEW_CONTENT_DIGEST": new_content_digest,
+                "NEW_PROFILE": new_manifest["profile"],
+                "PYTHONPATH": str(Path(__file__).resolve().parents[1]),
+            }
+        )
+
+        fd, path = tempfile.mkstemp(suffix=".sh")
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8", newline="\n") as fh:
+                fh.write(script)
+            result = subprocess.run(
+                [_bash_executable(), path],
+                capture_output=True,
+                text=True,
+                env=env,
+                cwd=tmp_path,
+                check=False,
+            )
+        finally:
+            os.unlink(path)
+
+        assert result.returncode == 1, result.stdout + result.stderr
+        assert "Traceback" not in (result.stdout + result.stderr)
+        assert "stale_schema" in (result.stdout + result.stderr)
+        assert "safe re-run" not in result.stdout
+
 
 class TestUploadReleaseAssetRejectsMismatchedProjectRef:
     """Regression (Codex review, P2): compute_content_digest()/
@@ -829,6 +1114,7 @@ class TestUploadReleaseAssetRejectsMismatchedProjectRef:
         return step["run"]
 
     @_WINDOWS_PYTHON3_SKIP
+    @_JQ_REQUIRED
     def test_different_project_ref_is_rejected_even_with_matching_content(
         self, tmp_path: Path
     ) -> None:
@@ -944,6 +1230,7 @@ gh() {{
         assert "safe re-run" not in result.stdout
 
     @_WINDOWS_PYTHON3_SKIP
+    @_JQ_REQUIRED
     def test_missing_project_ref_is_rejected_even_with_matching_content(
         self, tmp_path: Path
     ) -> None:
@@ -1079,6 +1366,7 @@ class TestUploadReleaseAssetHandlesLeadingDashAssetName:
         return step["run"]
 
     @_WINDOWS_PYTHON3_SKIP
+    @_JQ_REQUIRED
     def test_leading_dash_asset_name_is_uploaded_via_a_relative_path(
         self, tmp_path: Path
     ) -> None:
@@ -1150,6 +1438,147 @@ gh() {{
         assert args[1] == f"./{asset_name}"
 
 
+class TestUploadReleaseAssetRejectsSymlinkContainingExistingAsset:
+    """Regression (Codex review, P2): ``TarExtractor``'s own member
+    validation rejects a symlink escaping the extraction root, but not an
+    IN-ROOT symlink (one whose target stays inside the extracted
+    directory) -- so a real symlink can land here and be silently
+    followed by the digest computation, letting an existing asset with
+    identical content reach the safe-retry success path.
+    ``actions/resolve-baseline/run.sh``'s own extraction path rejects ANY
+    symlink at all (a baseline-set has no legitimate reason to contain
+    one), so an asset that passes this step's check but would be
+    rejected by the canonical resolver could be reported as successfully
+    published while remaining unusable to a real consumer. This step now
+    applies the identical no-symlink structural check before accepting
+    the existing asset as a safe retry.
+    """
+
+    def _upload_step_script(self) -> str:
+        data = _load(PUBLISH_BASELINE)
+        steps = _steps(data["jobs"]["publish"])
+        step = next(
+            s for s in steps if s.get("name", "").startswith("Upload release asset")
+        )
+        return step["run"]
+
+    @_WINDOWS_PYTHON3_SKIP
+    @_JQ_REQUIRED
+    def test_in_root_symlink_is_rejected_even_with_matching_content(
+        self, tmp_path: Path
+    ) -> None:
+        import importlib.util
+        import json
+        import shutil
+        import subprocess
+        import tarfile
+        import tempfile
+
+        src_root = (
+            Path(__file__).resolve().parents[1]
+            / "actions"
+            / "baseline"
+            / "build_manifest.py"
+        )
+        module_dir = tmp_path / ".publish-baseline-src" / "actions" / "baseline"
+        module_dir.mkdir(parents=True)
+        shutil.copy(src_root, module_dir / "build_manifest.py")
+
+        module_spec = importlib.util.spec_from_file_location(
+            "test_build_manifest_module_symlink", src_root
+        )
+        assert module_spec is not None and module_spec.loader is not None
+        build_manifest = importlib.util.module_from_spec(module_spec)
+        module_spec.loader.exec_module(build_manifest)
+
+        snapshot = {"schema_version": 9, "functions": [], "types": []}
+        snapshot_hash = build_manifest.compute_snapshot_content_hash(snapshot)
+        artifacts = [
+            {
+                "library": "libfoo",
+                "artifact": "build/libfoo.so",
+                "snapshot": "libfoo.abicheck.json",
+                "sha256": snapshot_hash,
+            }
+        ]
+        manifest = {
+            "manifest_version": 1,
+            "project_ref": "v1.0.0",
+            "profile": "linux-x86_64-gcc13-release",
+            "snapshot_schema": None,
+            "fact_set": None,
+            "artifacts": artifacts,
+        }
+        new_content_digest = build_manifest.compute_content_digest(manifest)
+
+        asset_src = tmp_path / "asset-src"
+        asset_src.mkdir()
+        (asset_src / "manifest.json").write_text(json.dumps(manifest), encoding="utf-8")
+        (asset_src / "libfoo.abicheck.json").write_text(
+            json.dumps(snapshot), encoding="utf-8"
+        )
+
+        asset_name = "abicheck-baseline-symlink.tar"
+        archive_path = tmp_path / asset_name
+        with tarfile.open(archive_path, "w") as tf:
+            tf.add(asset_src, arcname=".")
+            # An in-root symlink -- its target stays inside the archive
+            # (never escapes), so TarExtractor's own path-traversal guard
+            # doesn't reject it.
+            link_info = tarfile.TarInfo(name="./libfoo.abicheck.json.link")
+            link_info.type = tarfile.SYMTYPE
+            link_info.linkname = "libfoo.abicheck.json"
+            tf.addfile(link_info)
+
+        gh_stub = f"""
+gh() {{
+  if [[ "$1" == "release" && "$2" == "view" ]]; then
+    echo '{{"assets": [{{"name": "{asset_name}", "apiUrl": "https://api.example/asset"}}]}}'
+    return 0
+  fi
+  if [[ "$1" == "api" ]]; then
+    cat "{archive_path.as_posix()}"
+    return 0
+  fi
+  echo "unexpected gh invocation: $*" >&2
+  return 1
+}}
+"""
+        script = gh_stub + "\n" + self._upload_step_script()
+
+        env = os.environ.copy()
+        env.update(
+            {
+                "GH_TOKEN": "fake-token",
+                "RELEASE_TAG": "v1.0.0",
+                "ASSET_NAME": asset_name,
+                "REPO": "abicheck/abicheck",
+                "NEW_CONTENT_DIGEST": new_content_digest,
+                "NEW_PROFILE": manifest["profile"],
+                "PYTHONPATH": str(Path(__file__).resolve().parents[1]),
+            }
+        )
+
+        fd, path = tempfile.mkstemp(suffix=".sh")
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8", newline="\n") as fh:
+                fh.write(script)
+            result = subprocess.run(
+                [_bash_executable(), path],
+                capture_output=True,
+                text=True,
+                env=env,
+                cwd=tmp_path,
+                check=False,
+            )
+        finally:
+            os.unlink(path)
+
+        assert result.returncode == 1, result.stdout + result.stderr
+        assert "symlink" in (result.stdout + result.stderr)
+        assert "safe re-run" not in result.stdout
+
+
 class TestUploadReleaseAssetRejectsCorruptedExistingContent:
     """Regression (Codex review, P2): the safe-retry digest comparison used
     to trust the existing asset's manifest.json declared sha256/
@@ -1171,6 +1600,7 @@ class TestUploadReleaseAssetRejectsCorruptedExistingContent:
         return step["run"]
 
     @_WINDOWS_PYTHON3_SKIP
+    @_JQ_REQUIRED
     def test_declared_digest_matching_but_real_bytes_differing_is_rejected(
         self, tmp_path: Path
     ) -> None:
@@ -1320,6 +1750,7 @@ class TestUploadReleaseAssetRejectsGenuinelyDifferentContent:
         return step["run"]
 
     @_WINDOWS_PYTHON3_SKIP
+    @_JQ_REQUIRED
     def test_self_consistent_but_genuinely_different_content_is_rejected(
         self, tmp_path: Path
     ) -> None:

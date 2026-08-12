@@ -21,6 +21,26 @@
 # supported extension) reaches every caller at once.
 set -euo pipefail
 
+# `command -v zstd` alone doesn't prove `tar --zstd` actually works --
+# some tar builds (a BSD/older tar without the zstd filter compiled in)
+# reject `--zstd` as an unrecognized option even with a standalone zstd
+# CLI present on PATH, which would otherwise fail the fast path outright
+# before the Python fallback ever gets a chance to run (CodeRabbit
+# nitpick). A real trial archive, not just `tar --zstd --help` (whose
+# exit behavior for an unrecognized option varies across tar
+# implementations), is the only reliable proof.
+_tar_zstd_works() {
+  local probe_dir
+  probe_dir="$(mktemp -d)"
+  printf 'x' > "$probe_dir/f"
+  local ok=1
+  if tar --zstd -cf "$probe_dir/out.tar.zst" -C "$probe_dir" f >/dev/null 2>&1; then
+    ok=0
+  fi
+  rm -rf "$probe_dir"
+  return "$ok"
+}
+
 if [[ -z "${BASELINE_PATH:-}" ]]; then
   echo "::error::baseline-path is required." >&2
   exit 1
@@ -92,10 +112,10 @@ case "$asset_name" in
     # present on any runner abicheck itself installed onto -- and cheap to
     # install standalone otherwise) when the `zstd` CLI isn't available,
     # rather than requiring an undeclared runner prerequisite.
-    if command -v zstd >/dev/null 2>&1; then
+    if command -v zstd >/dev/null 2>&1 && _tar_zstd_works; then
       tar --zstd -cf "$asset_name" -C "$BASELINE_PATH" .
     else
-      echo "::notice::'zstd' executable not found on PATH -- falling back to Python's zstandard package to build $asset_name." >&2
+      echo "::notice::'zstd'/'tar --zstd' not usable on this runner -- falling back to Python's zstandard package to build $asset_name." >&2
       # Resolved explicitly rather than assuming a bare `python3` --
       # Git Bash on Windows only ever resolves `python` on a stock CPython
       # layout (the same gap this repo's own reusable-workflow tests

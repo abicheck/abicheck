@@ -326,6 +326,24 @@ jobs:
       # baseline needs a human decision (a new release tag, or explicit
       # `gh release delete-asset` + re-run), not a silent workflow-level
       # clobber.
+      #
+      # Known gap, deliberately not fixed here (Codex review): two
+      # concurrent runs for the same tag/profile can both observe
+      # existing_url as empty (neither has published yet), race to the
+      # plain `gh release upload` below, and the LOSER's upload fails
+      # outright (gh itself rejects a duplicate-name asset without
+      # --clobber) instead of falling through to the safe-retry
+      # verification path. This is a real robustness gap, but the failure
+      # mode is SAFE, not silent: the loser's job fails loudly, and simply
+      # re-running it resolves cleanly (the asset now exists, so the
+      # normalized-digest retry path applies as designed). Closing it
+      # properly means catching the specific "duplicate asset name" gh
+      # failure, refetching `existing_url`, and re-entering the retry
+      # verification code below -- a real structural change to a step
+      # already carrying five independent safety checks, not a one-line
+      # fix, and not attempted reactively under review pressure per this
+      # repo's own "known gaps over risky reactive patches" convention
+      # (AGENTS.md).
       - name: Upload release asset (fails closed on an immutability violation)
         env:
           GH_TOKEN: ${{ secrets.github-token != '' && secrets.github-token || secrets.GITHUB_TOKEN }}
@@ -405,6 +423,25 @@ jobs:
 
           TarExtractor().extract(Path(sys.argv[1]), Path(sys.argv[2]))
           ' "$existing_download" .existing-asset/extracted
+
+          # TarExtractor's own member validation rejects a symlink escaping
+          # the extraction root, but not an IN-ROOT symlink (one whose
+          # target stays inside .existing-asset/extracted) -- so a real
+          # symlink can still land here and be silently followed by the
+          # digest computation below. actions/resolve-baseline/run.sh's own
+          # extraction path rejects ANY symlink at all (a baseline-set has
+          # no legitimate reason to contain one), so an existing asset that
+          # passes here but would be rejected there could reach this step's
+          # safe-retry success while remaining an asset the canonical
+          # resolver can never actually consume (Codex review). Same
+          # command-substitution-not-piped-into-grep shape as
+          # resolve-baseline's own check, for the identical SIGPIPE/
+          # pipefail reason documented there.
+          existing_symlinks=$(find .existing-asset/extracted -type l)
+          if [[ -n "$existing_symlinks" ]]; then
+            echo "::error::$ASSET_NAME already exists on release $RELEASE_TAG, but its archive contains a symlink -- baseline-set archives must contain only plain files/directories (the same structural rule actions/resolve-baseline enforces), so this is never a safe retry regardless of content. Delete the existing asset explicitly ('gh release delete-asset $RELEASE_TAG $ASSET_NAME --repo $REPO --yes') and re-run, or publish under a new release tag." >&2
+            exit 1
+          fi
 
           existing_content_digest=$(python3 -c '
           import importlib.util
@@ -522,12 +559,27 @@ jobs:
           # resolve_target()/resolve_bundle() (the real consumers,
           # abicheck/buildsource/baseline_set.py) would reject outright as
           # stale_schema -- this workflow would report success having left
-          # an unusable asset behind (Codex review, two rounds: the first
-          # covered manifest_version, the second found the SEPARATE
-          # snapshot_schema check resolve_target()/resolve_bundle() also
-          # apply). Checked against the SAME SUPPORTED_MANIFEST_VERSIONS/
-          # serialization.SCHEMA_VERSION a real consumer uses, not a
-          # hand-duplicated copy of either.
+          # an unusable asset behind (Codex review, three rounds: the
+          # first covered manifest_version; the second found the SEPARATE
+          # manifest-level snapshot_schema check
+          # resolve_target()/resolve_bundle() also apply
+          # (_schema_and_profile_check); the third found that isn't the
+          # ONLY schema check the real resolver runs --
+          # _snapshot_digest_issue() separately reads each individual
+          # snapshot file's OWN schema_version field, since an older/
+          # hand-authored manifest with no aggregate snapshot_schema has
+          # nothing for that first check to compare, but every snapshot
+          # file still carries its own schema_version; without checking
+          # each one here too, a forward-schema snapshot under such a
+          # manifest would pass this gate and only fail resolution later,
+          # opaquely). Checked against the SAME
+          # SUPPORTED_MANIFEST_VERSIONS/serialization.SCHEMA_VERSION a
+          # real consumer uses, not a hand-duplicated copy of either --
+          # and explicitly type-checked (isinstance(..., int)) rather than
+          # comparing directly, so a malformed non-integer schema field
+          # prints "false" instead of raising (which, under this script's
+          # own `set -euo pipefail`, would abort the whole step with a raw
+          # traceback instead of this check's own actionable error).
           existing_schema_ok=$(python3 -c '
           import json
           import sys
@@ -535,17 +587,46 @@ jobs:
 
           from abicheck import serialization
           from abicheck.buildsource.baseline_set import SUPPORTED_MANIFEST_VERSIONS
+          from abicheck.snapshot_io import read_snapshot_bytes
 
-          manifest = json.loads(
-              (Path(sys.argv[1]) / "manifest.json").read_text(encoding="utf-8")
-          )
+          base_dir = Path(sys.argv[1])
+          manifest = json.loads((base_dir / "manifest.json").read_text(encoding="utf-8"))
+
           if manifest.get("manifest_version") not in SUPPORTED_MANIFEST_VERSIONS:
               print("false")
               sys.exit(0)
+
           snapshot_schema = manifest.get("snapshot_schema")
-          if snapshot_schema is not None and snapshot_schema > serialization.SCHEMA_VERSION:
-              print("false")
-              sys.exit(0)
+          if snapshot_schema is not None:
+              if not isinstance(snapshot_schema, int) or isinstance(snapshot_schema, bool):
+                  print("false")
+                  sys.exit(0)
+              if snapshot_schema > serialization.SCHEMA_VERSION:
+                  print("false")
+                  sys.exit(0)
+
+          for artifact in manifest.get("artifacts", []):
+              snapshot_name = artifact.get("snapshot")
+              if not snapshot_name:
+                  continue
+              snapshot_path = base_dir / snapshot_name
+              if not snapshot_path.is_file():
+                  continue
+              try:
+                  raw = json.loads(read_snapshot_bytes(snapshot_path).decode("utf-8"))
+              except Exception:
+                  continue
+              if not isinstance(raw, dict):
+                  continue
+              raw_schema_version = raw.get("schema_version")
+              if (
+                  isinstance(raw_schema_version, int)
+                  and not isinstance(raw_schema_version, bool)
+                  and raw_schema_version > serialization.SCHEMA_VERSION
+              ):
+                  print("false")
+                  sys.exit(0)
+
           print("true")
           ' .existing-asset/extracted)
 
