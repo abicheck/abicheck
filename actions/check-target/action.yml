@@ -84,6 +84,22 @@ inputs:
       that check. Ignored when baseline-channel is 'none'.
     required: false
     default: ''
+  expected-project-ref:
+    description: >
+      Forwarded to resolve-baseline's expected-project-ref input --
+      require the resolved baseline-set's manifest.json project_ref to
+      match this value exactly, failing closed with the wrong_project_ref
+      outcome otherwise. Exists for an accepted-main PR gate built on this
+      Action: pass the PR's base SHA (e.g.
+      github.event.pull_request.base.sha) so a baseline-path staged via an
+      Actions-cache restore-keys *prefix* match can't silently resolve to
+      a newer default-branch commit than the PR actually compares against
+      (see resolve-baseline's own input for the full rationale). Omit
+      (default) to skip the check -- unchanged behavior, correct for
+      release-contract and any channel resolved by tag/asset selection
+      rather than a Git ref. Ignored when baseline-channel is 'none'.
+    required: false
+    default: ''
   requested-depth:
     description: 'Evidence-depth this check asks for: binary, headers, build, or source (ADR-047 §7).'
     required: true
@@ -273,7 +289,7 @@ inputs:
 
 outputs:
   outcome:
-    description: 'resolve-baseline outcome (resolved, not_found, ambiguous, wrong_profile, stale_schema, incompatible_evidence), or "skipped" when baseline-channel is none.'
+    description: 'resolve-baseline outcome (resolved, not_found, ambiguous, wrong_profile, stale_schema, incompatible_evidence, wrong_project_ref), or "skipped" when baseline-channel is none.'
     value: ${{ steps.finalize.outputs.outcome }}
   check-id:
     description: "This check's full identity: target@profile#baseline_channel@requested_depth."
@@ -411,6 +427,7 @@ runs:
         profile: ${{ inputs.profile }}
         required: ${{ inputs.baseline-required }}
         candidate-build-output: ${{ inputs.candidate-build-output }}
+        expected-project-ref: ${{ inputs.expected-project-ref }}
         python-version: ${{ inputs.python-version }}
 
     # ── Evidence collection (ADR-047 §4's collect-facts composition note: ──

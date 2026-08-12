@@ -3,9 +3,9 @@ description: >-
   Resolve one check's baseline: channel x target/bundle x profile against an
   already-staged baseline-set, returning one of ADR-047 Section 6's typed
   outcomes (resolved, not_found, ambiguous, wrong_profile, stale_schema,
-  incompatible_evidence) -- never a compatibility verdict, and never
-  silently degraded to "no baseline = compatible." Read-only: this Action
-  never fetches, commits, or pushes.
+  incompatible_evidence, wrong_project_ref) -- never a compatibility
+  verdict, and never silently degraded to "no baseline = compatible."
+  Read-only: this Action never fetches, commits, or pushes.
 
 branding:
   icon: 'target'
@@ -77,6 +77,23 @@ inputs:
       candidate's). Omit to skip that check.
     required: false
     default: ''
+  expected-project-ref:
+    description: >
+      Require the resolved baseline-set's manifest.json project_ref to
+      match this value exactly, or the wrong_project_ref outcome is
+      returned instead of resolved. Exists for the accepted-main channel:
+      a caller that staged baseline-path via an Actions-cache restore-keys
+      *prefix* match (rather than an exact key) can silently land on a
+      newer default-branch commit than the PR's own base SHA -- every
+      other check here (schema, profile, digests) can pass on a
+      baseline-set built from the wrong commit. Pass e.g.
+      github.event.pull_request.base.sha for a PR gate against
+      accepted-main. Omit (default) to skip this check -- appropriate for
+      release-contract, which is resolved by tag/asset selection rather
+      than a Git ref, or when the caller already staged baseline-path by
+      an exact-ref-scoped means.
+    required: false
+    default: ''
   python-version:
     description: 'Python version for setup-python.'
     required: false
@@ -84,7 +101,7 @@ inputs:
 
 outputs:
   outcome:
-    description: 'resolved | not_found | ambiguous | wrong_profile | stale_schema | incompatible_evidence.'
+    description: 'resolved | not_found | ambiguous | wrong_profile | stale_schema | incompatible_evidence | wrong_project_ref.'
     value: ${{ steps.resolve.outputs.outcome }}
   bootstrap:
     description: "'true' when outcome is not_found and required was 'false' (advisory, non-fatal). 'false' otherwise."
@@ -133,5 +150,6 @@ runs:
         INPUT_PROFILE: ${{ inputs.profile }}
         INPUT_REQUIRED: ${{ inputs.required }}
         INPUT_CANDIDATE_BUILD_OUTPUT: ${{ inputs.candidate-build-output }}
+        INPUT_EXPECTED_PROJECT_REF: ${{ inputs.expected-project-ref }}
         ACTION_PATH: ${{ github.action_path }}
       run: bash "${{ github.action_path }}/run.sh"

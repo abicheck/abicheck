@@ -111,21 +111,75 @@ Reusable workflow (`workflow_call`); wire it to a `release: types:
 |-------|---------|---------|
 | `build-output-artifact-prefix` | `abicheck-build-` | Each contract profile's build-output.json is downloaded from `<this><profile-id>`. |
 | `release-tag` | `github.ref_name` | Release tag to publish assets to; also recorded as each baseline-set's `project-ref`. |
-| `asset-name-template` | `abicheck-baseline-{profile}.tar.zst` | Release asset filename; `{profile}` is replaced per profile. |
+| `asset-name-template` | `abicheck-baseline-{profile}.tar.zst` | Release asset filename; `{profile}` is replaced per profile. **Include `{profile}` when a run has more than one contract profile** — omitting it makes every profile in the matrix target the same asset name, and the retry-identity check below rejects (rather than silently discards) a genuine collision between two different profiles. |
 | `build-info` | `''` | Path to a shared build/source facts pack, relative to the downloaded build-output artifact. |
 | `depth` | `''` | Evidence depth passed to every dump call. |
 | `validation` | `strict` | Forwarded to `actions/baseline`'s `validation` input. |
-| `snapshot-compression` | `none` | Forwarded to `actions/baseline`'s `snapshot-compression` input (ADR-059) — independent of this workflow's own `tar --zstd` packaging of the *whole* baseline-set directory; see [Storing Baselines](../use/baseline-storage.md#compressing-stored-snapshots). |
+| `snapshot-compression` | `none` | Forwarded to `actions/baseline`'s `snapshot-compression` input (ADR-059) — independent of this workflow's own archive packaging of the *whole* baseline-set directory (encoding chosen from `asset-name-template`'s extension, via [`actions/stage-baseline`](#actionsstage-baseline)); see [Storing Baselines](../use/baseline-storage.md#compressing-stored-snapshots). |
 
 Secret: `github-token` (optional) — falls back to the job's own
 `GITHUB_TOKEN` (`permissions: contents: write` on the `publish` job).
 
 For every discovered contract profile: downloads that profile's
 build-output artifact, derives `libraries` from it, dumps the baseline-set
-via `actions/baseline`, packages it as `<asset-name>` (`tar --zstd`), and
-uploads it to `release-tag`'s release via `gh release upload --clobber` — a
-re-run may overwrite this profile's own previously uploaded asset, scoped to
-this one release, not a rewrite of history.
+via `actions/baseline`, packages it as `<asset-name>` via
+[`actions/stage-baseline`](#actionsstage-baseline) (encoding chosen from
+the asset name's own extension — `.tar.zst`/`.tar.gz`/`.tgz`/`.tar`), and
+uploads it to `release-tag`'s release. **This upload step fails closed on an
+immutability violation, it does not `--clobber`:** if no asset of this name
+exists yet, it uploads plainly; if one already exists, its manifest.json is
+downloaded and checked in two steps. First, a **profile-identity check**:
+the existing asset's own `profile` field must match this run's profile, or
+the upload fails immediately regardless of content — `compute_content_digest()`
+(next paragraph) deliberately excludes `profile`, so without this check two
+different profiles that happen to produce identical library/snapshot/binary
+content (or a template missing `{profile}` routing two profiles to the same
+asset name) could otherwise have one profile's baseline silently discarded
+as a "safe retry" of the other's. Second, once the profile matches, the
+manifest is compared against this run's own baseline-set by *normalized*
+content digest (`actions/baseline/build_manifest.py`'s `compute_content_digest()`
+— library names + per-snapshot and per-staged-binary digests, deliberately
+excluding volatile fields like `created_at` and the archive's own filesystem
+metadata, both of which differ on every run even when the underlying
+baseline-set is logically identical). Matching digests are treated as a safe
+retry (e.g. after a transient failure) and no re-upload happens; a differing
+digest hard-fails rather than silently replacing a published
+`release-contract` asset — `release-contract` is documented (ADR-047 §10)
+as immutable once published, and a re-run silently overwriting it would
+mean an already-resolved consumer's "compatible with v1.0.0" comparison
+quietly stopped meaning what it said. To genuinely change a
+release-contract baseline-set, delete the existing asset explicitly
+(`gh release delete-asset <tag> <asset-name>`) and re-run, or publish under
+a new release tag.
+
+### `actions/stage-baseline`
+
+A small composite Action factored out of `publish-baseline.yml`'s own
+packaging step: given a baseline-set directory (`actions/baseline`'s
+`baseline-path` output) and an `asset-name-template`, it produces a single
+archive named and encoded per that template's own extension. Exists so a
+caller publishing a baseline-set through a *different* storage backend
+(not this repository's release-contract flow — a different Action, a
+different CI system, an internal artifact store) doesn't have to
+re-implement the suffix-dispatch logic; `publish-baseline.yml` itself calls
+this Action rather than keeping an inline copy, so there is one
+implementation, not two that can silently drift apart.
+
+| Input | Default | Meaning |
+|-------|---------|---------|
+| `baseline-path` | *(required)* | Directory containing `manifest.json` plus per-library snapshots. |
+| `asset-name-template` | `abicheck-baseline-{profile}.tar.zst` | Archive filename; `{profile}` is replaced with the `profile` input. The extension selects the encoding — `.tar.zst` (zstd), `.tar.gz`/`.tgz` (gzip), or `.tar` (uncompressed); anything else is a hard usage error. |
+| `profile` | `''` | Substituted for `{profile}`. |
+
+Outputs `asset-name` (the resolved filename) and `archive-path` (identical
+to `asset-name` — the archive is written to the current working
+directory). Read-only over its input: it never commits, pushes, or
+uploads the archive it produces.
+
+See [Storing Baselines](../use/baseline-storage.md) for the narrative
+picture of where a staged archive fits among abicheck's baseline-storage
+backends — this page documents `actions/stage-baseline` itself as a fact
+source, not the concepts around it.
 
 ## `update-main-baseline.yml`
 
@@ -173,6 +227,22 @@ can hit an entry that commit already wrote, falling through to
 correctly either way (a hit on this run's own previously written entry is
 still the newest matching entry), so this doesn't affect correctness, only
 the "always a miss" framing above.
+
+**`restore-keys` prefix matching is for freshness comparison, not for a PR
+gate.** The prefix restore above resolves to whichever entry is *newest*
+under the profile's prefix, regardless of which commit wrote it — correct
+for `update-main-baseline.yml`'s own "what changed since the last
+`accepted-main` snapshot" freshness diff, but wrong for a PR asking "did
+this PR introduce a break relative to *its own base commit*": if `main` has
+advanced past the PR's base SHA since the PR branched, a prefix restore
+silently compares the PR against a baseline built from a commit its branch
+history never contained. A PR gate must restore the **exact** key for
+`github.event.pull_request.base.sha` (no `restore-keys` fallback), and pass
+that same SHA as `resolve-baseline`'s `expected-project-ref` input so a
+restore that somehow still lands on the wrong commit is caught as
+`wrong_project_ref` rather than silently resolving — see
+[resolve-baseline's own "Known gap" section](resolve-baseline.md#known-gap-accepted-main-restore-by-prefix-can-resolve-the-wrong-commit)
+for the full recipe.
 
 ### Known gap: nothing restores `accepted-main` from cache yet
 

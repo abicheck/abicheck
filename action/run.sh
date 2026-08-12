@@ -108,6 +108,16 @@ CMD=(abicheck)
 
 MODE="${INPUT_MODE:-compare}"
 
+# Resolved once, up front, so every code path below (including the
+# baseline-set fallback further down, which needs it before this script's
+# own later _report_query definition would otherwise provide it) can use
+# it. On a Windows runner, actions/setup-python may expose only
+# python.exe/`python` to Git Bash, not `python3` -- an unconditional
+# `python3` call in a fallback path that only exercises when a release has
+# no single-snapshot asset would otherwise fail with "command not found"
+# on exactly the runners this fallback exists to serve (Codex review).
+_PY_BIN="$(command -v python3 || command -v python || true)"
+
 # ---------------------------------------------------------------------------
 # Back-compat aliases: `estimate`/`audit` (pre-dry-run/scan-reshape inputs,
 # Codex review). Removing these outright (rather than keeping them as
@@ -125,6 +135,29 @@ if [[ "$MODE" == "scan" && "${INPUT_ESTIMATE:-false}" == "true" ]]; then
   INPUT_DRY_RUN="true"
 fi
 FORCE_AUDIT_ONLY="${INPUT_AUDIT:-false}"
+
+# Replaces every literal (non-glob) occurrence of $2 in $1 with $3, via
+# prefix/suffix parameter-expansion pattern REMOVAL (`%%`/`#`) plus plain
+# string concatenation for the inserted text -- NOT
+# `${haystack//$needle/$replacement}`'s replacement-TEXT position, whose
+# '&' Bash 5.2 default `patsub_replacement` shopt gives the special
+# "insert the matched pattern text" meaning (like sed's `&` backreference,
+# reproduced directly against real Bash 5.2.21). A baseline-profile
+# containing a literal '&' (e.g. "linux&asan") would otherwise silently
+# expand to "...linux{profile}asan..." instead of the literal string on
+# Bash 5.2+, while resolving correctly on Bash 3.2 (macOS stock, no such
+# interpretation) -- the SAME template/profile pair resolving to two
+# DIFFERENT asset names purely depending on which runner published vs.
+# consumed it (Codex review). `%%`/`#` pattern-removal carries no such
+# special-character semantics in either position.
+_substitute_literal() {
+  local haystack="$1" needle="$2" replacement="$3" result=""
+  while [[ "$haystack" == *"$needle"* ]]; do
+    result+="${haystack%%"$needle"*}$replacement"
+    haystack="${haystack#*"$needle"}"
+  done
+  printf '%s' "$result$haystack"
+}
 
 # ---------------------------------------------------------------------------
 # Baseline auto-fetch: resolve INPUT_ABI_BASELINE → INPUT_OLD_LIBRARY
@@ -150,7 +183,241 @@ _baseline_unavailable() {
   exit 1
 }
 
+# ---------------------------------------------------------------------------
+# Baseline-set fallback: when no single *.abicheck.json asset was found on
+# the release, but baseline-profile was given, try a release-contract
+# baseline-set archive instead (abicheck-baseline-<profile>.tar.zst,
+# published by publish-baseline.yml -- see docs/reference/publish-baseline.md).
+# This is the "single-snapshot and baseline-set protocols" unification: the
+# original abi-baseline contract (one *.abicheck.json[.gz|.zst] asset) still
+# works completely unchanged and takes priority when present; this fallback
+# only ever runs when that search found nothing.
+#
+# Sets BASELINE_FILE (a script-global, matching the surrounding block's
+# style) on success. On any failure, routes through _baseline_unavailable
+# (dry-run-tolerant: warns and returns rather than exiting) and leaves
+# BASELINE_FILE empty. Reads $ABI_BASELINE/$_GH_REPO_FLAG from the enclosing
+# scope, same as the single-snapshot search above it.
+# ---------------------------------------------------------------------------
+_try_baseline_set_fallback() {
+  local baseline_target="${INPUT_BASELINE_TARGET:-}"
+  if [[ -z "$baseline_target" ]]; then
+    _baseline_unavailable "baseline-profile is set (${INPUT_BASELINE_PROFILE}) but baseline-target is not -- both are required to resolve one target's snapshot from a release-contract baseline-set archive."
+    return 1
+  fi
+  if [[ -z "$_PY_BIN" ]]; then
+    _baseline_unavailable "neither 'python3' nor 'python' is available on PATH -- cannot extract or resolve a release-contract baseline-set archive."
+    return 1
+  fi
+  # NOTE: the default is intentionally NOT embedded as
+  # "${INPUT_BASELINE_ASSET_NAME_TEMPLATE:-abicheck-baseline-{profile}.tar.zst}"
+  # -- bash's ${VAR:-default} parses the default text looking for its own
+  # closing '}', and a literal, unescaped '}' inside that text (from
+  # "{profile}") terminates the expansion early, silently mangling the
+  # result to "abicheck-baseline-{profile.tar.zst}" (reproduced directly;
+  # caught by this function's own tests). Computing the default separately
+  # avoids the parse ambiguity entirely.
+  local asset_template="${INPUT_BASELINE_ASSET_NAME_TEMPLATE:-}"
+  if [[ -z "$asset_template" ]]; then
+    asset_template='abicheck-baseline-{profile}.tar.zst'
+  fi
+  local asset_name
+  asset_name="$(_substitute_literal "$asset_template" '{profile}' "$INPUT_BASELINE_PROFILE")"
+
+  # NOT `gh release download --pattern`: that flag is a glob (Go's
+  # filepath.Match), not a literal-filename lookup -- a custom
+  # baseline-asset-name-template containing a glob metacharacter ('*',
+  # '?', '[', ']') would otherwise silently fail to match its own asset,
+  # or (worse) match an unrelated one. An earlier fix backslash-escaped
+  # those characters before use as --pattern, but that is *itself* wrong
+  # on a Windows runner: Go's path/filepath.Match disables escaping on
+  # Windows entirely (backslash is the OS path separator there instead),
+  # so the escaped pattern would fail to match on exactly the runners the
+  # earlier fix's own sibling ($_PY_BIN resolution, above) exists to
+  # support (Codex review). Exact-name lookup through the release API
+  # sidesteps glob semantics -- and therefore this whole platform split --
+  # entirely: list the release's real assets and match $asset_name as a
+  # literal string, the same technique publish-baseline.yml's own "Upload
+  # release asset" step already uses for the identical "does this exact
+  # asset already exist" question. Python, not jq, for the JSON parse --
+  # this composite Action installs no jq (self-hosted runners need not
+  # have it either; see $_PY_BIN's own "Python, not jq" precedent further
+  # down this file).
+  echo "::group::Fetch release-contract baseline-set '$asset_name'"
+  local set_download_dir="$BASELINE_DIR/baseline-set-download"
+  mkdir -p "$set_download_dir"
+  local assets_json=""
+  if [[ "$ABI_BASELINE" == "latest-release" ]]; then
+    assets_json=$(gh release view ${_GH_REPO_FLAG[@]+"${_GH_REPO_FLAG[@]}"} --json assets 2>/dev/null) || assets_json=""
+  else
+    assets_json=$(gh release view "$ABI_BASELINE" ${_GH_REPO_FLAG[@]+"${_GH_REPO_FLAG[@]}"} --json assets 2>/dev/null) || assets_json=""
+  fi
+  local existing_url=""
+  if [[ -n "$assets_json" ]]; then
+    existing_url=$(printf '%s' "$assets_json" | "$_PY_BIN" -c '
+import json
+import sys
+
+name = sys.argv[1]
+try:
+    data = json.load(sys.stdin)
+except Exception:
+    sys.exit(0)
+for asset in data.get("assets") or []:
+    if asset.get("name") == name:
+        print(asset.get("apiUrl") or "")
+        break
+' "$asset_name")
+  fi
+
+  # A fixed, platform-safe local filename, NOT "$set_download_dir/$asset_name"
+  # -- $asset_name is only guaranteed to be a legal filename on whatever
+  # platform PUBLISHED it. A documented literal metacharacter in a custom
+  # baseline-asset-name-template (e.g. '?', which the exact-name lookup
+  # above deliberately no longer forbids -- see this function's own comment
+  # on why it stopped rejecting glob metacharacters) is legal on a Linux
+  # publisher's filesystem but reserved on NTFS, so a Windows consumer's
+  # `>` redirection into a same-named local file would fail outright even
+  # though the exact-name lookup itself succeeded (Codex review). The
+  # archive's real encoding is still selected from $asset_name's own
+  # suffix (the case dispatch below), never from this local filename.
+  local archive_path="$set_download_dir/downloaded-baseline-set"
+  if [[ -n "$existing_url" ]]; then
+    # .apiUrl (the authenticated REST API asset endpoint), not .url (the
+    # unauthenticated browser-download URL) -- mirrors publish-baseline.yml's
+    # own identical download step and its own reasoning for why (a private
+    # caller repository's browser-download URL doesn't reliably work through
+    # `gh api`).
+    gh api "$existing_url" -H 'Accept: application/octet-stream' > "$archive_path" 2>/dev/null \
+      || rm -f "$archive_path"
+  fi
+  echo "::endgroup::"
+
+  if [[ ! -f "$archive_path" ]]; then
+    _baseline_unavailable "No *.abicheck.json baseline asset, and no baseline-set archive '$asset_name' either, found in the release. Publish a single *.abicheck.json[.gz|.zst] snapshot asset (abi-baseline's original single-library contract), or a release-contract baseline-set archive whose name matches baseline-asset-name-template ('$asset_template')."
+    return 1
+  fi
+
+  local extracted_dir="$BASELINE_DIR/baseline-set-extracted"
+  mkdir -p "$extracted_dir"
+  # Delegates to abicheck.package.TarExtractor's own safe extraction (member
+  # validation: rejects path traversal, symlink escapes, device/FIFO
+  # entries) -- the same extractor actions/resolve-baseline/run.sh uses for
+  # an identically-shaped baseline-set archive, rather than reimplementing
+  # extraction safety here.
+  case "$asset_name" in
+    *.tar.zst)
+      "$_PY_BIN" -c '
+import sys
+from pathlib import Path
+from abicheck.package import TarExtractor
+
+TarExtractor._safe_extract_zst_tar(Path(sys.argv[1]), Path(sys.argv[2]))
+' "$archive_path" "$extracted_dir" \
+        || { _baseline_unavailable "failed to extract baseline-set archive '$asset_name' (.tar.zst) -- it is truncated or corrupted, or this runner has neither a 'zstd' command-line tool nor the Python 'zstandard' package available."; return 1; }
+      ;;
+    *.tar.gz | *.tgz | *.tar)
+      "$_PY_BIN" -c '
+import sys
+from pathlib import Path
+from abicheck.package import TarExtractor
+
+TarExtractor._safe_extract(Path(sys.argv[1]), Path(sys.argv[2]))
+' "$archive_path" "$extracted_dir" \
+        || { _baseline_unavailable "failed to extract baseline-set archive '$asset_name' -- it is truncated or corrupted, or contains a disallowed member (path traversal, a symlink escaping the extraction root, or a device/FIFO entry)."; return 1; }
+      ;;
+    *)
+      _baseline_unavailable "baseline-set archive '$asset_name' is not a recognized archive format (.tar.zst/.tar.gz/.tgz/.tar)."
+      return 1
+      ;;
+  esac
+
+  # Reject any symlink the archive planted -- TarExtractor's own member
+  # validation only rejects a symlink escaping the extraction root, not one
+  # that stays inside it, but actions/resolve-baseline/run.sh (the canonical
+  # baseline-set consumer) rejects ANY symlink at all, since a baseline-set
+  # has no legitimate reason to contain one. Without this, the same archive
+  # could be silently accepted here (root Action fallback) while
+  # check-target/resolve-baseline would reject it as ambiguous -- two
+  # consumers of the identical unified baseline-set protocol disagreeing on
+  # whether the same archive is usable (Codex review). Command substitution,
+  # not piped into `grep -q`, for the same SIGPIPE/pipefail-misreport reason
+  # documented at resolve-baseline/run.sh's own identical check.
+  _symlinks=$(find "$extracted_dir" -type l)
+  if [[ -n "$_symlinks" ]]; then
+    _baseline_unavailable "baseline-set archive '$asset_name' contains a symlink, which is not supported -- baseline-set archives must contain only plain files/directories."
+    return 1
+  fi
+
+  # An archive may contain one nested directory (the profile-named dir it
+  # was built from) rather than manifest.json at its root -- mirrors
+  # actions/resolve-baseline/run.sh's identical single-subdirectory descent.
+  local manifest_root="$extracted_dir"
+  if [[ ! -f "$manifest_root/manifest.json" ]]; then
+    local subdirs=()
+    while IFS= read -r -d '' d; do subdirs+=("$d"); done \
+      < <(find "$extracted_dir" -mindepth 1 -maxdepth 1 -type d -print0)
+    if [[ ${#subdirs[@]} -eq 1 && -f "${subdirs[0]}/manifest.json" ]]; then
+      manifest_root="${subdirs[0]}"
+    fi
+  fi
+
+  local resolve_output
+  resolve_output=$("$_PY_BIN" -c '
+import sys
+from abicheck.buildsource.baseline_set import resolve_target
+
+result = resolve_target(sys.argv[1], target=sys.argv[2], profile=sys.argv[3], required=True)
+snapshot_path = result.snapshot_path
+if not snapshot_path:
+    snapshot_path = ""
+print("outcome=" + result.outcome)
+print("message=" + result.message)
+print("snapshot_path=" + snapshot_path)
+' "$manifest_root" "$baseline_target" "$INPUT_BASELINE_PROFILE")
+  local resolve_outcome resolve_message resolve_snapshot
+  resolve_outcome=$(printf '%s\n' "$resolve_output" | sed -n 's/^outcome=//p')
+  resolve_message=$(printf '%s\n' "$resolve_output" | sed -n 's/^message=//p')
+  resolve_snapshot=$(printf '%s\n' "$resolve_output" | sed -n 's/^snapshot_path=//p')
+
+  if [[ "$resolve_outcome" == "resolved" && -n "$resolve_snapshot" ]]; then
+    BASELINE_FILE="$resolve_snapshot"
+    echo "Resolved target '$baseline_target' at profile '$INPUT_BASELINE_PROFILE' from baseline-set archive '$asset_name'."
+    return 0
+  fi
+  _baseline_unavailable "could not resolve target '$baseline_target' at profile '$INPUT_BASELINE_PROFILE' from baseline-set archive '$asset_name' (outcome: $resolve_outcome): $resolve_message"
+  return 1
+}
+
+# Fail-fast pairing check for baseline-profile/baseline-target/abi-baseline,
+# re-checked here for anyone invoking run.sh directly (e.g. tests) without
+# validate-inputs.sh's own copy of this exact check -- AGENTS.md's "keep
+# validate-inputs.sh and run.sh in sync" convention. Unpaired without this:
+# baseline-target set but baseline-profile is not (_try_baseline_set_fallback
+# below only checks this from INSIDE its own body, reached only via the
+# BASELINE_FILES elif below, which keys off baseline-profile alone -- a
+# baseline-target set alone never even calls that function to hit its own
+# check); or baseline-profile/baseline-target set but abi-baseline is not
+# (the whole auto-fetch block below, and therefore
+# _try_baseline_set_fallback, only ever runs inside the `-n "$ABI_BASELINE"`
+# gate immediately following this check -- without abi-baseline, a fetch is
+# never even attempted). Either shape silently discards baseline-target
+# instead of erroring, letting a separately-supplied old-library/against run
+# in its place (Codex review).
 ABI_BASELINE="${INPUT_ABI_BASELINE:-}"
+if [[ -n "${INPUT_BASELINE_PROFILE:-}" && -z "${INPUT_BASELINE_TARGET:-}" ]]; then
+  echo "::error::baseline-profile is set ('${INPUT_BASELINE_PROFILE}') but baseline-target is not -- both are required to resolve one target's snapshot from a release-contract baseline-set archive."
+  exit 1
+fi
+if [[ -n "${INPUT_BASELINE_TARGET:-}" && -z "${INPUT_BASELINE_PROFILE:-}" ]]; then
+  echo "::error::baseline-target is set ('${INPUT_BASELINE_TARGET}') but baseline-profile is not -- both are required to resolve one target's snapshot from a release-contract baseline-set archive."
+  exit 1
+fi
+if [[ ( -n "${INPUT_BASELINE_PROFILE:-}" || -n "${INPUT_BASELINE_TARGET:-}" ) && -z "$ABI_BASELINE" ]]; then
+  echo "::error::baseline-profile/baseline-target are set but abi-baseline is not -- the release-contract baseline-set fallback is only reached while resolving abi-baseline (a release tag or 'latest-release'), so without it these inputs can never trigger a fetch."
+  exit 1
+fi
+
 if [[ -n "$ABI_BASELINE" \
    && ( "$MODE" == "compare" || "$MODE" == "scan" ) \
    && ! ( "$MODE" == "scan" && "$FORCE_AUDIT_ONLY" == "true" ) ]]; then
@@ -192,14 +459,26 @@ if [[ -n "$ABI_BASELINE" \
       # add_flag()'s callers already guard against elsewhere in this file
       # (Codex review).
       if ! gh release download ${_GH_REPO_FLAG[@]+"${_GH_REPO_FLAG[@]}"} "${_ABI_JSON_PATTERNS[@]}" -D "$BASELINE_DIR"; then
-        _baseline_unavailable "No ABI baseline found in latest release. Run 'abicheck dump path/to/libfoo.so -o libfoo.abicheck.json' in your release workflow and upload the resulting *.abicheck.json (or compressed .abicheck.json.gz/.abicheck.json.zst) file as a release asset."
+        # Don't fail immediately when baseline-profile is set -- this release
+        # may instead publish a release-contract baseline-set archive
+        # (abicheck-baseline-<profile>.tar.zst) rather than a single
+        # *.abicheck.json asset; fall through to the BASELINE_FILES check
+        # below, which finds nothing here and routes into
+        # _try_baseline_set_fallback instead of erroring on this search
+        # alone.
+        if [[ -z "${INPUT_BASELINE_PROFILE:-}" ]]; then
+          _baseline_unavailable "No ABI baseline found in latest release. Run 'abicheck dump path/to/libfoo.so -o libfoo.abicheck.json' in your release workflow and upload the resulting *.abicheck.json (or compressed .abicheck.json.gz/.abicheck.json.zst) file as a release asset."
+        fi
       fi
       echo "::endgroup::"
     else
       # Treat as a tag name
       echo "::group::Fetch ABI baseline from release $ABI_BASELINE"
       if ! gh release download "$ABI_BASELINE" ${_GH_REPO_FLAG[@]+"${_GH_REPO_FLAG[@]}"} "${_ABI_JSON_PATTERNS[@]}" -D "$BASELINE_DIR"; then
-        _baseline_unavailable "No ABI baseline found in release '$ABI_BASELINE'. Ensure the release has a *.abicheck.json (or compressed .abicheck.json.gz/.abicheck.json.zst) asset."
+        # See the latest-release branch's identical comment above.
+        if [[ -z "${INPUT_BASELINE_PROFILE:-}" ]]; then
+          _baseline_unavailable "No ABI baseline found in release '$ABI_BASELINE'. Ensure the release has a *.abicheck.json (or compressed .abicheck.json.gz/.abicheck.json.zst) asset."
+        fi
       fi
       echo "::endgroup::"
     fi
@@ -217,8 +496,13 @@ if [[ -n "$ABI_BASELINE" \
     done <<< "$(find "$BASELINE_DIR" \( -name '*.abicheck.json' -o -name '*.abicheck.json.gz' -o -name '*.abicheck.json.zst' \) 2>/dev/null)"
     if [[ ${#BASELINE_FILES[@]} -eq 1 ]]; then
       BASELINE_FILE="${BASELINE_FILES[0]}"
+    elif [[ ${#BASELINE_FILES[@]} -eq 0 && -n "${INPUT_BASELINE_PROFILE:-}" ]]; then
+      # No single-snapshot asset -- try a release-contract baseline-set
+      # archive instead (unifies the two release-baseline protocols; see
+      # _try_baseline_set_fallback's own comment above).
+      _try_baseline_set_fallback || true
     elif [[ ${#BASELINE_FILES[@]} -eq 0 ]]; then
-      _baseline_unavailable "No *.abicheck.json (or compressed .abicheck.json.gz/.abicheck.json.zst) file found after download."
+      _baseline_unavailable "No *.abicheck.json (or compressed .abicheck.json.gz/.abicheck.json.zst) file found after download. If this release instead publishes a release-contract baseline-set archive (abicheck-baseline-<profile>.tar.zst), set baseline-profile and baseline-target to fetch from it."
     else
       _baseline_unavailable "Multiple *.abicheck.json assets found (${BASELINE_FILES[*]}); ambiguous which is the baseline. Publish exactly one *.abicheck.json asset per release, or pass abi-baseline a direct file path instead."
     fi
@@ -866,7 +1150,11 @@ _json_report_src() {
 # The two modes nest the ledger differently and BOTH reach here: `compare`
 # writes it at the top level, while `ScanOutcome.to_dict()` puts the
 # comparison summary under `diff`. Each query below looks in both.
-_PY_BIN="$(command -v python3 || command -v python || true)"
+#
+# _PY_BIN itself is resolved once, near the top of this script (before
+# MODE's dry-run/back-compat block) -- not here -- so the baseline-set
+# fallback (which runs long before this function is ever reached) can use
+# the same resolved interpreter too.
 _report_query() {
   # $1 = report path, $2 = query name. Prints nothing when the report cannot
   # be read or parsed, which every caller treats as "cannot tell" rather than

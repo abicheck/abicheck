@@ -181,10 +181,23 @@ class ResolveOutcome:
     WRONG_PROFILE = "wrong_profile"
     STALE_SCHEMA = "stale_schema"
     INCOMPATIBLE_EVIDENCE = "incompatible_evidence"
+    #: The staged baseline-set's own ``manifest.json`` ``project_ref`` does
+    #: not match what the caller *expected* it to be (``resolve-baseline``'s
+    #: optional ``expected-project-ref`` input). Exists specifically for the
+    #: ``accepted-main`` channel: GitHub Actions cache's ``restore-keys``
+    #: prefix match resolves to the *newest* entry under a profile's prefix
+    #: regardless of which commit wrote it, so a PR gate that restored by
+    #: prefix (rather than an exact key) could otherwise silently compare
+    #: against a baseline built from a LATER default-branch commit than its
+    #: own PR base SHA -- comparing across two different Git histories
+    #: instead of the PR's actual base. Without this check that mismatch was
+    #: undetectable: every other check here (schema, profile, digests) can
+    #: pass on a baseline-set that is simply the wrong *commit*.
+    WRONG_PROJECT_REF = "wrong_project_ref"
 
 
 #: Every outcome value :func:`resolve_target`/:func:`resolve_bundle` can
-#: return — the six branches of ADR-047 §6's table (five failure rows plus
+#: return — the seven branches of ADR-047 §6's table (six failure rows plus
 #: the resolved/success case).
 ALL_OUTCOMES = frozenset(
     {
@@ -194,6 +207,7 @@ ALL_OUTCOMES = frozenset(
         ResolveOutcome.WRONG_PROFILE,
         ResolveOutcome.STALE_SCHEMA,
         ResolveOutcome.INCOMPATIBLE_EVIDENCE,
+        ResolveOutcome.WRONG_PROJECT_REF,
     }
 )
 
@@ -538,10 +552,22 @@ def _evidence_incompatibility(
 
 
 def _schema_and_profile_check(
-    manifest: BaselineManifest, profile: str, manifest_path: str
+    manifest: BaselineManifest,
+    profile: str,
+    manifest_path: str,
+    *,
+    expected_project_ref: str = "",
 ) -> ResolveResult | None:
-    """Shared ``stale_schema``/``wrong_profile`` checks for target and bundle
-    resolution -- returns ``None`` when both pass."""
+    """Shared ``stale_schema``/``wrong_profile``/``wrong_project_ref`` checks
+    for target and bundle resolution -- returns ``None`` when all pass.
+
+    ``expected_project_ref``, when non-empty, is compared *exactly* against
+    the manifest's own ``project_ref`` -- an empty string (the default)
+    means the caller either has no expectation (``release-contract``,
+    resolved by tag/asset selection rather than a Git ref) or resolved the
+    physical baseline-path by some means already scoped to the right ref, so
+    this check is opt-in, not implicitly derived from anything else here.
+    """
     if manifest.manifest_version not in SUPPORTED_MANIFEST_VERSIONS:
         return ResolveResult(
             outcome=ResolveOutcome.STALE_SCHEMA,
@@ -585,6 +611,20 @@ def _schema_and_profile_check(
                 "is newer than this checkout's installed reader supports "
                 f"(up to schema_version {serialization.SCHEMA_VERSION}) -- "
                 "upgrade abicheck before resolving against this baseline-set."
+            ),
+            manifest_path=manifest_path,
+        )
+    if expected_project_ref and manifest.project_ref != expected_project_ref:
+        return ResolveResult(
+            outcome=ResolveOutcome.WRONG_PROJECT_REF,
+            message=(
+                f"baseline-set's project_ref is {manifest.project_ref!r}, "
+                f"not the expected {expected_project_ref!r} -- the staged "
+                "baseline-path resolved to a baseline-set built from a "
+                "different commit/tag than this check requires (e.g. an "
+                "Actions-cache restore-keys prefix match landing on a "
+                "newer default-branch commit than a PR's own base SHA). "
+                "Never silently compare against the wrong project ref."
             ),
             manifest_path=manifest_path,
         )
@@ -819,6 +859,7 @@ def resolve_target(
     profile: str,
     required: bool = True,
     candidate_evidence_producer: dict[str, Any] | None = None,
+    expected_project_ref: str = "",
 ) -> ResolveResult:
     """Resolve ``channel × target × profile`` (ADR-047 §6) to one snapshot.
 
@@ -826,7 +867,9 @@ def resolve_target(
     caller already selected the right physical ``baseline_dir`` for the
     requested channel (see ``actions/resolve-baseline/action.yml``'s
     ``baseline-path`` input doc) — this function only resolves *within* that
-    directory.
+    directory. ``expected_project_ref``, when non-empty, additionally
+    requires the resolved baseline-set's own recorded ``project_ref`` to
+    match exactly -- see :data:`ResolveOutcome.WRONG_PROJECT_REF`.
     """
     baseline_dir = Path(baseline_dir)
     manifest, failure = _load_manifest_or_result(baseline_dir, required)
@@ -836,7 +879,10 @@ def resolve_target(
     manifest_path = str(baseline_dir / BASELINE_MANIFEST_FILENAME)
 
     schema_or_profile_failure = _schema_and_profile_check(
-        manifest, profile, manifest_path
+        manifest,
+        profile,
+        manifest_path,
+        expected_project_ref=expected_project_ref,
     )
     if schema_or_profile_failure is not None:
         return schema_or_profile_failure
@@ -927,6 +973,7 @@ def resolve_bundle(
     profile: str,
     required: bool = True,
     candidate_evidence_producer: dict[str, Any] | None = None,
+    expected_project_ref: str = "",
 ) -> ResolveResult:
     """Resolve ``channel × bundle × profile`` (ADR-047 §6/§8 S14 correction).
 
@@ -938,7 +985,8 @@ def resolve_bundle(
     instead. Every listed *member* must have one, or the whole bundle
     resolution reports ``ambiguous`` — a partially-staged bundle baseline
     would otherwise silently produce a bundle report missing one member's
-    old-side data.
+    old-side data. ``expected_project_ref`` has the same meaning as
+    :func:`resolve_target`'s.
     """
     baseline_dir = Path(baseline_dir)
     manifest, failure = _load_manifest_or_result(baseline_dir, required)
@@ -948,7 +996,10 @@ def resolve_bundle(
     manifest_path = str(baseline_dir / BASELINE_MANIFEST_FILENAME)
 
     schema_or_profile_failure = _schema_and_profile_check(
-        manifest, profile, manifest_path
+        manifest,
+        profile,
+        manifest_path,
+        expected_project_ref=expected_project_ref,
     )
     if schema_or_profile_failure is not None:
         return schema_or_profile_failure

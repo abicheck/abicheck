@@ -390,6 +390,208 @@ def _compute_freshness(
     return {"refresh_required": bool(reasons), "reasons": reasons}
 
 
+def compute_content_digest(manifest: dict[str, Any]) -> str:
+    """The normalized "did anything really change" digest -- library name +
+    snapshot sha256 + (when staged, G30 P1.6/ADR-047 §8 S14) staged-binary
+    sha256, sorted by library, matches action.yml's documented contract
+    ("library names + per-file digests").
+
+    Deliberately excludes every other manifest field, most importantly
+    ``created_at``: ``dumper.py`` auto-stamps a fresh one on every dump
+    call, so hashing the full artifact list (as an earlier version did)
+    made the digest change on every run even when every snapshot's actual
+    content was identical, defeating its purpose as a change signal
+    (CodeRabbit review). Sorted by library so the digest is independent of
+    entry/matrix order too.
+
+    ``binary_sha256`` -- the staged ELF binary's own digest, present only
+    for a bundle member with ``stage_binary: true`` -- is included
+    alongside ``sha256`` (the snapshot's digest), not folded into it or
+    left out: a rebuilt binary with unchanged ABI (a code-only or
+    reproducibility-only change) has identical snapshot content but
+    different binary bytes, and bundle resolution (``resolve_bundle()`` in
+    ``abicheck/buildsource/baseline_set.py``) consumes that staged binary
+    directly, not the snapshot -- omitting it would let a rerun with a
+    genuinely different binary be treated as a safe identical-content retry
+    and silently keep the STALE binary published (Codex review). Omitted
+    from the hashed row entirely (not hashed as ``None``/``""``) when a
+    library has no staged binary, so a manifest schema predating G30 P1.6
+    (no ``binary_sha256`` field at all) still reproduces the same digest a
+    reader of that older schema would compute.
+
+    A standalone function (not inlined in ``main()``) so a caller outside
+    this script's own CLI invocation -- e.g. ``publish-baseline.yml``'s
+    release-asset upload step, comparing a freshly-dumped baseline-set's
+    digest against an already-published one's -- computes the identical
+    normalized digest from a manifest dict, rather than re-deriving the
+    formula and risking drift from this one (Codex review: a byte-for-byte
+    comparison of the packaged archive would almost always report
+    "different content" for a logically-identical retry, since both the
+    stamped timestamps and the tar archive's own filesystem metadata vary
+    run to run).
+    """
+
+    def _row(a: dict[str, Any]) -> dict[str, Any]:
+        row = {"library": a["library"], "sha256": a["sha256"]}
+        if a.get("binary_sha256"):
+            row["binary_sha256"] = a["binary_sha256"]
+        return row
+
+    return hashlib.sha256(
+        json.dumps(
+            sorted(
+                (_row(a) for a in manifest["artifacts"]),
+                key=lambda a: a["library"],
+            ),
+            sort_keys=True,
+        ).encode("utf-8")
+    ).hexdigest()
+
+
+def _resolve_under_base_dir(base_dir: Path, rel: str) -> Path | None:
+    """Resolve *rel* under *base_dir*, refusing an absolute path or an
+    escape (e.g. ``"../../.abicheck-baseline/libfoo.abicheck.json"``) --
+    ``None`` if refused.
+
+    *rel* comes from an EXISTING (previously-published) asset's
+    ``manifest.json``, which is untrusted content restored from that
+    archive -- a broken or maliciously-crafted asset containing no
+    snapshot of its own could otherwise point ``snapshot``/``binary`` at a
+    path outside the extracted archive (e.g. this SAME publish job's own
+    fresh baseline directory, which exists on disk at the same time),
+    hashing THAT file instead and coincidentally matching
+    ``NEW_CONTENT_DIGEST`` -- taking the safe-retry exit for a broken
+    asset that a real consumer's ``resolve_target()``/``resolve_bundle()``
+    (``_resolve_under_baseline_dir`` there) would later reject outright
+    (Codex review). Standalone, not imported from
+    ``abicheck.buildsource.baseline_set``: this module is deliberately
+    dependency-free of the ``abicheck`` package (see this file's own
+    top-of-module docstring), so the identical containment check is
+    re-implemented here rather than imported across that boundary.
+    """
+    if Path(rel).is_absolute():
+        return None
+    candidate = (base_dir / rel).resolve()
+    root_resolved = base_dir.resolve()
+    if candidate != root_resolved and not candidate.is_relative_to(root_resolved):
+        return None
+    return base_dir / rel
+
+
+def recompute_content_digest_from_disk(manifest: dict[str, Any], base_dir: Path) -> str:
+    """:func:`compute_content_digest`, but sourcing each artifact's
+    sha256/binary_sha256 from the ACTUAL bytes on disk under *base_dir*,
+    never from *manifest*'s own declared fields.
+
+    A safe-retry check that trusts declared digests alone cannot tell
+    "identical content" apart from "identical, but wrong, CLAIMS about the
+    content" -- an already-published asset whose manifest.json was hand-
+    edited, or whose archive member bytes were otherwise corrupted after
+    upload, could carry a declared sha256 that still matches a fresh run's
+    real digest even though its actual snapshot/binary bytes differ. That
+    asset would then pass ``publish-baseline.yml``'s safe-retry comparison
+    even though ``resolve_target()``/``resolve_bundle()`` will later
+    reject its real member digests when a consumer tries to use it (Codex
+    review). Recomputing from disk here closes that gap: this run's own
+    manifest (produced by :func:`main` from bytes it just read) is
+    unaffected either way, since its declared digests already come from
+    the same computation this function repeats -- this exists specifically
+    for verifying an EXISTING, previously-published asset's manifest.json
+    against the archive it actually shipped with.
+
+    Raises (loudly, not silently) when a referenced snapshot/binary file
+    is missing from *base_dir* -- an existing asset this broken is not a
+    case ``compute_content_digest`` can meaningfully compare against
+    either way, and failing here surfaces that as an actionable error
+    rather than a wrong digest.
+    """
+    recomputed_artifacts: list[dict[str, Any]] = []
+    for artifact in manifest.get("artifacts", []):
+        library = artifact.get("library", "<unknown>")
+        snapshot_name = artifact.get("snapshot")
+        if not snapshot_name:
+            raise SystemExit(
+                f"existing asset's manifest entry for library {library!r} "
+                "has no 'snapshot' filename -- cannot verify its real "
+                "content."
+            )
+        snapshot_path = _resolve_under_base_dir(base_dir, snapshot_name)
+        if snapshot_path is None:
+            raise SystemExit(
+                f"existing asset's manifest declares snapshot "
+                f"{snapshot_name!r} for library {library!r}, which is an "
+                "absolute path or escapes the extracted archive -- "
+                "refusing to hash a file outside it."
+            )
+        if not snapshot_path.is_file():
+            raise SystemExit(
+                f"existing asset's manifest declares snapshot "
+                f"{snapshot_name!r} for library {library!r}, but no such "
+                "file exists in the extracted archive."
+            )
+        meta = _read_snapshot_meta(snapshot_path)
+        # Validated against the manifest's OWN declared value, not merely
+        # recomputed and trusted on its own: if the real bytes match a
+        # fresh run (this function's whole reason for existing) but the
+        # ALREADY-PUBLISHED manifest.json's own declared sha256 is stale
+        # or corrupted, silently substituting the recomputed value here
+        # would report "identical content" and let publish-baseline.yml
+        # skip re-uploading -- leaving that self-inconsistent manifest.json
+        # published. A real consumer later resolving this exact asset
+        # (resolve_target()/resolve_bundle()'s own _snapshot_digest_issue/
+        # _binary_digest_issue checks) verifies bytes against THAT
+        # declared field, not this function's recomputed one, and would
+        # then reject a baseline this function just called a safe retry
+        # (Codex review). A mismatch here means the published asset needs
+        # a real fix (re-upload or explicit deletion), not a silent skip.
+        declared_sha256 = artifact.get("sha256")
+        if declared_sha256 and declared_sha256 != meta["sha256"]:
+            raise SystemExit(
+                f"existing asset's manifest declares sha256 "
+                f"{declared_sha256!r} for library {library!r}, but the "
+                f"snapshot's actual content hashes to {meta['sha256']!r} "
+                "-- the published manifest.json is self-inconsistent with "
+                "the archive it shipped with (stale or corrupted "
+                "declaration). This is not a safe retry regardless of "
+                "what the overall content digest says."
+            )
+        row: dict[str, Any] = {"library": library, "sha256": meta["sha256"]}
+
+        binary_rel = artifact.get("binary")
+        if binary_rel:
+            binary_path = _resolve_under_base_dir(base_dir, binary_rel)
+            if binary_path is None:
+                raise SystemExit(
+                    f"existing asset's manifest declares a staged binary "
+                    f"{binary_rel!r} for library {library!r}, which is an "
+                    "absolute path or escapes the extracted archive -- "
+                    "refusing to hash a file outside it."
+                )
+            if not binary_path.is_file():
+                raise SystemExit(
+                    f"existing asset's manifest declares a staged binary "
+                    f"{binary_rel!r} for library {library!r}, but no such "
+                    "file exists in the extracted archive."
+                )
+            binary_sha256 = _file_sha256(binary_path)
+            declared_binary_sha256 = artifact.get("binary_sha256")
+            if declared_binary_sha256 and declared_binary_sha256 != binary_sha256:
+                raise SystemExit(
+                    f"existing asset's manifest declares binary_sha256 "
+                    f"{declared_binary_sha256!r} for library {library!r}, "
+                    f"but the staged binary's actual content hashes to "
+                    f"{binary_sha256!r} -- the published manifest.json is "
+                    "self-inconsistent with the archive it shipped with "
+                    "(stale or corrupted declaration). This is not a safe "
+                    "retry regardless of what the overall content digest "
+                    "says."
+                )
+            row["binary_sha256"] = binary_sha256
+        recomputed_artifacts.append(row)
+
+    return compute_content_digest({"artifacts": recomputed_artifacts})
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--output-dir", required=True, type=Path)
@@ -412,26 +614,7 @@ def main(argv: list[str] | None = None) -> int:
         json.dumps(manifest, indent=2) + "\n", encoding="utf-8"
     )
 
-    # Only library name + snapshot sha256, sorted by library -- matches
-    # action.yml's documented contract ("library names + per-file digests").
-    # Hashing the full artifact list (as before) pulled in created_at, which
-    # dumper.py auto-stamps fresh on every dump call, so the digest changed
-    # on every run even when every snapshot's actual content was identical,
-    # defeating its purpose as a "did anything really change" signal
-    # (CodeRabbit review). Sorted by library so digest is independent of
-    # entry/matrix order too.
-    content_digest = hashlib.sha256(
-        json.dumps(
-            sorted(
-                (
-                    {"library": a["library"], "sha256": a["sha256"]}
-                    for a in manifest["artifacts"]
-                ),
-                key=lambda a: a["library"],
-            ),
-            sort_keys=True,
-        ).encode("utf-8")
-    ).hexdigest()
+    content_digest = compute_content_digest(manifest)
 
     # key=value lines on stdout -- the caller (run.sh) forwards these to
     # GITHUB_OUTPUT rather than this script writing there directly, so it

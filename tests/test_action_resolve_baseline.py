@@ -137,6 +137,48 @@ def _target_artifact(name: str) -> dict:
 
 
 @pytest.mark.skipif(
+    not (ACTION_DIR / "action.yml").is_file(),
+    reason="actions/resolve-baseline/action.yml not found",
+)
+def test_every_declared_input_is_forwarded_to_run_sh_as_an_env_var() -> None:
+    """Every ``action.yml`` input must be forwarded to ``run.sh`` as its
+    ``INPUT_<UPPER_SNAKE_CASE>`` env var in the composite step -- run.sh
+    itself only ever reads ``INPUT_*``, so a declared input the composite
+    step's own ``env:`` block forgets to wire through is silently ignored
+    by the *published* Action even when every test that invokes ``run.sh``
+    directly (setting the env var by hand, bypassing action.yml entirely)
+    still passes (Codex review: exactly this gap on `expected-project-ref`).
+    """
+    import yaml
+
+    # python-version is consumed by the earlier "Set up Python" step
+    # (actions/setup-python's own `python-version` input), never by run.sh
+    # -- it has no INPUT_PYTHON_VERSION to forward.
+    _NOT_FORWARDED_TO_RUN_SH = {"python-version"}
+
+    action = yaml.safe_load((ACTION_DIR / "action.yml").read_text(encoding="utf-8"))
+    declared_inputs = set(action.get("inputs", {}) or {}) - _NOT_FORWARDED_TO_RUN_SH
+    resolve_step = next(
+        step
+        for step in action["runs"]["steps"]
+        if step.get("id") == "resolve" or step.get("name") == "Resolve baseline"
+    )
+    env = resolve_step.get("env", {}) or {}
+    forwarded = {
+        key[len("INPUT_") :].lower().replace("_", "-")
+        for key in env
+        if key.startswith("INPUT_")
+    }
+    missing = declared_inputs - forwarded
+    assert not missing, (
+        f"action.yml declares input(s) {sorted(missing)} that the "
+        "'Resolve baseline' composite step's env: block never forwards as "
+        "INPUT_<NAME> -- run.sh will always see this input's default/empty "
+        "value regardless of what a caller passes."
+    )
+
+
+@pytest.mark.skipif(
     not RUN_SH.is_file(), reason="actions/resolve-baseline/run.sh not found"
 )
 class TestInputValidation:
@@ -300,6 +342,44 @@ class TestFailureTaxonomy:
         )
         assert result.returncode == 1
         assert outputs.get("outcome") == "wrong_profile"
+
+    def test_wrong_project_ref(self, tmp_path: Path) -> None:
+        # _write_manifest stamps project_ref="v1.0.0" -- an expected-project-ref
+        # naming a different commit/tag must not silently resolve (P0: the
+        # accepted-main restore-keys-prefix-lands-on-the-wrong-commit gap).
+        baseline_dir = tmp_path / "baseline"
+        _write_manifest(baseline_dir, artifacts=[_target_artifact("libpvxs")])
+        (baseline_dir / "libpvxs.abicheck.json").write_text("{}", encoding="utf-8")
+        result, outputs = _run_action(
+            {
+                "INPUT_BASELINE_PATH": str(baseline_dir),
+                "INPUT_CHANNEL": "accepted-main",
+                "INPUT_TARGET": "libpvxs",
+                "INPUT_PROFILE": PROFILE,
+                "INPUT_EXPECTED_PROJECT_REF": "deadbeef",
+            },
+            tmp_path,
+        )
+        assert result.returncode == 1
+        assert outputs.get("outcome") == "wrong_project_ref"
+        assert "deadbeef" in outputs.get("message", "")
+
+    def test_matching_project_ref_resolves(self, tmp_path: Path) -> None:
+        baseline_dir = tmp_path / "baseline"
+        _write_manifest(baseline_dir, artifacts=[_target_artifact("libpvxs")])
+        (baseline_dir / "libpvxs.abicheck.json").write_text("{}", encoding="utf-8")
+        result, outputs = _run_action(
+            {
+                "INPUT_BASELINE_PATH": str(baseline_dir),
+                "INPUT_CHANNEL": "accepted-main",
+                "INPUT_TARGET": "libpvxs",
+                "INPUT_PROFILE": PROFILE,
+                "INPUT_EXPECTED_PROJECT_REF": "v1.0.0",
+            },
+            tmp_path,
+        )
+        assert result.returncode == 0
+        assert outputs.get("outcome") == "resolved"
 
     def test_stale_schema(self, tmp_path: Path) -> None:
         baseline_dir = tmp_path / "baseline"

@@ -278,6 +278,41 @@ if [[ -n "$_ABI_BASELINE" && "$MODE" != "compare" && "$MODE" != "scan" ]]; then
   _warn "abi-baseline is set but has no effect: it only applies to mode: compare or mode: scan (mode is '$MODE')."
 fi
 
+# baseline-profile/baseline-target: the release-contract baseline-set
+# fallback for abi-baseline (only consulted when the release has no single
+# *.abicheck.json asset) -- same mode scope as abi-baseline itself, plus a
+# fail-fast pairing check so a caller who set one without the other finds
+# out before any dependency install, not partway through the baseline
+# fetch in run.sh (which enforces the identical pairing again at fetch time,
+# since a direct run.sh invocation, e.g. in tests, bypasses this script).
+_BASELINE_PROFILE="${INPUT_BASELINE_PROFILE:-}"
+_BASELINE_TARGET="${INPUT_BASELINE_TARGET:-}"
+_BASELINE_ASSET_NAME_TEMPLATE="${INPUT_BASELINE_ASSET_NAME_TEMPLATE:-}"
+# Scope check keys off baseline-profile/baseline-target only, not
+# baseline-asset-name-template: action.yml forwards that input's own
+# manifest default ('abicheck-baseline-{profile}.tar.zst') unconditionally,
+# so it's non-empty on every invocation regardless of whether the caller
+# asked for the baseline-set fallback at all -- including it here warned on
+# every ordinary dump/appcompat/deps-* run (Codex review).
+if [[ ( -n "$_BASELINE_PROFILE" || -n "$_BASELINE_TARGET" ) \
+   && "$MODE" != "compare" && "$MODE" != "scan" ]]; then
+  _warn "baseline-profile/baseline-target/baseline-asset-name-template are set but have no effect: they only apply to mode: compare or mode: scan (mode is '$MODE')."
+fi
+if [[ -n "$_BASELINE_PROFILE" && -z "$_BASELINE_TARGET" ]]; then
+  _fail "baseline-profile is set ('$_BASELINE_PROFILE') but baseline-target is not -- both are required to resolve one target's snapshot from a release-contract baseline-set archive."
+fi
+if [[ -n "$_BASELINE_TARGET" && -z "$_BASELINE_PROFILE" ]]; then
+  _fail "baseline-target is set ('$_BASELINE_TARGET') but baseline-profile is not -- both are required to resolve one target's snapshot from a release-contract baseline-set archive."
+fi
+# run.sh only ever reaches _try_baseline_set_fallback from inside its
+# `-n "$ABI_BASELINE"` fetch block -- baseline-profile/baseline-target set
+# without abi-baseline can never trigger a fetch at all, silently falling
+# through to whatever old-library/against the caller separately supplied
+# instead (Codex review).
+if [[ ( -n "$_BASELINE_PROFILE" || -n "$_BASELINE_TARGET" ) && -z "$_ABI_BASELINE" ]]; then
+  _fail "baseline-profile/baseline-target are set but abi-baseline is not -- the release-contract baseline-set fallback is only reached while resolving abi-baseline (a release tag or 'latest-release'), so without it these inputs can never trigger a fetch."
+fi
+
 # public-header-dir: dump and scan modes only (the CLI's own
 # --public-header-dir flag exists on those two subcommands only; compare has
 # no equivalent). run.sh's compare/deps-tree/deps-compare branches never

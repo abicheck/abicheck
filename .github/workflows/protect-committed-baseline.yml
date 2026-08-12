@@ -1,0 +1,327 @@
+name: 'abicheck protect-committed-baseline'
+
+# G30 P1 (baseline-storage architecture review): closes the "a PR can
+# silently approve itself" gap a committed `accepted-main`/moving-channel
+# baseline is exposed to. A workflow like:
+#
+#   old-library: abi/libfoo.abicheck.json
+#
+# resolves that path from the PR's own *working tree* -- if the same PR
+# also updates abi/libfoo.abicheck.json to match its new binary, the
+# comparison silently passes regardless of what actually changed, because
+# it never reads the file's content as of the PR's base commit. This
+# reusable workflow is the trusted gate that closes it: an ordinary
+# pull_request that touches a configured baseline path fails the check
+# unless it carries `bypass-label` -- forcing a genuine baseline refresh
+# through explicit human review (the label) or a dedicated trusted
+# workflow (update-main-baseline.yml/publish-baseline.yml, which push
+# directly rather than going through a fork-writable PR diff at all).
+#
+# Fork-safe by construction: runs on an ordinary `pull_request` trigger
+# only (read-only `contents`/`pull-requests` permissions, the default
+# GITHUB_TOKEN) -- never wire this reusable workflow into a
+# `pull_request_target` caller, which would hand a fork PR's own workflow
+# changes elevated permissions for no benefit this check needs (ADR-047
+# §12 already states the same rule for the baseline-publishing workflows).
+#
+# Known, ACKNOWLEDGED residual gap, deliberately not fixed here (Codex
+# review, second round, after the .github/workflows/** guard above was
+# added): that guard closes "a PR reconfigures protected-paths/
+# bypass-label while ALSO calling this reusable workflow" -- it does NOT
+# close "a PR removes the calling job/step that invokes this workflow
+# entirely, or replaces it with an unrelated job that trivially succeeds
+# under the SAME required-check name". Both are the same underlying,
+# structural limitation of GitHub's "required status check, matched by
+# name" model: for an ordinary `pull_request` trigger, the CALLING
+# workflow file itself (which decides whether/how this reusable workflow
+# is even invoked) is read from the PR's own head commit, and a check's
+# identity to branch-protection is its NAME, not which workflow file (or
+# whether any workflow at all) actually produced it. No logic inside a
+# `workflow_call` reusable workflow -- this one included -- can observe or
+# prevent the calling workflow choosing not to invoke it. Closing this
+# fully needs a mechanism the CALLING repository controls, sourced from a
+# ref a PR cannot rewrite:
+#   - GitHub Repository Rulesets' "Require workflows to pass" pins a
+#     required workflow to a specific FILE PATH *and ref* (the default
+#     branch, not the PR head) -- unlike a bare required-status-check
+#     name, a PR cannot satisfy it by simply not invoking (or renaming)
+#     the workflow, since the ruleset itself names which workflow file
+#     must run. This is the recommended mitigation; see this workflow's
+#     own reference doc.
+#   - The alternative, `pull_request_target` (reading the calling workflow
+#     from the base branch), is deliberately rejected here: it would hand
+#     a fork PR's own workflow/code changes elevated permissions for no
+#     benefit this specific check needs, the same ADR-047 §12 rule cited
+#     above.
+# A single reusable workflow answering "does this PR touch a protected
+# path" cannot also answer "was I actually invoked" -- that second
+# question is inherently the calling repository's own branch-protection
+# configuration to answer, not this workflow's.
+
+on:
+  workflow_call:
+    inputs:
+      protected-paths:
+        description: >-
+          Newline-separated glob patterns naming committed baseline files
+          this check protects, e.g. "abi/**" or "baselines/*/*.abicheck.json".
+          "**" matches zero or more path segments (crosses "/"); a lone "*"
+          matches within one path segment only (never crosses "/"); "?"
+          matches one character (never "/").
+        type: string
+        required: true
+      bypass-label:
+        description: >-
+          A PR label that opts a specific PR out of this check (e.g. for an
+          explicitly reviewed, human-approved manual baseline refresh).
+          Empty (the default) disables the bypass entirely -- every PR
+          touching a protected path fails unconditionally.
+        type: string
+        default: ''
+      base-sha:
+        description: >-
+          Overrides the PR base SHA used for the diff. Defaults to
+          github.event.pull_request.base.sha -- set this only when calling
+          from a non-pull_request-triggered context.
+        type: string
+        default: ''
+      head-sha:
+        description: >-
+          Overrides the PR head SHA used for the diff. Defaults to
+          github.event.pull_request.head.sha.
+        type: string
+        default: ''
+
+jobs:
+  check:
+    name: 'Protect committed baseline'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      pull-requests: read
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10  # v6
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Check whether this PR modifies a protected baseline path
+        shell: bash
+        env:
+          PROTECTED_PATHS: ${{ inputs.protected-paths }}
+          BYPASS_LABEL: ${{ inputs.bypass-label }}
+          BASE_SHA: ${{ inputs.base-sha != '' && inputs.base-sha || github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ inputs.head-sha != '' && inputs.head-sha || github.event.pull_request.head.sha }}
+          PR_LABELS_JSON: ${{ toJSON(github.event.pull_request.labels.*.name) }}
+        run: |
+          set -euo pipefail
+
+          if [[ -z "$BASE_SHA" || -z "$HEAD_SHA" ]]; then
+            echo "::error::base-sha/head-sha could not be resolved -- this reusable workflow must be called from a pull_request-triggered workflow (github.event.pull_request must be set), or base-sha/head-sha passed explicitly."
+            exit 1
+          fi
+
+          echo "::group::Diff $BASE_SHA...$HEAD_SHA"
+          # --no-renames: with rename detection on, a protected file renamed
+          # to an unprotected path can show up as only its destination path
+          # (the source path -- the one that actually matches a protected
+          # glob -- never appears), letting a changed protected file evade
+          # this check entirely. Listing both the old and new path for every
+          # touched file closes that gap.
+          #
+          # -z (NUL-delimited), written to a temp file rather than captured
+          # into an environment variable: `git diff --name-only`'s ordinary
+          # newline-delimited output C-quotes any pathname containing a
+          # control character (a literal newline, tab, or quote), so the
+          # matcher below would see a quoted string instead of the real
+          # pathname and silently fail to match a protected file whose name
+          # contains one -- and an env var can't hold arbitrary bytes (a
+          # NUL byte) even if it could. A temp file sidesteps both (Codex
+          # review).
+          changed_files_file="$(mktemp)"
+          trap 'rm -f "$changed_files_file"' EXIT
+          git diff --no-renames --name-only -z "$BASE_SHA...$HEAD_SHA" > "$changed_files_file"
+          tr '\0' '\n' < "$changed_files_file"
+          echo "::endgroup::"
+
+          CHANGED_FILES_FILE="$changed_files_file" python3 - <<'PYEOF'
+          import json
+          import os
+          import re
+          import sys
+
+
+          def glob_to_regex(pattern: str) -> str:
+              """Translate a "**"-aware glob into an anchored regex. "**"
+              matches zero or more path segments (crosses "/"); a lone "*"
+              matches within one path segment only (never crosses "/");
+              "?" matches one character (never "/"). Everything else is a
+              literal."""
+              out = ["^"]
+              i, n = 0, len(pattern)
+              while i < n:
+                  c = pattern[i]
+                  if pattern[i : i + 2] == "**":
+                      i += 2
+                      if i < n and pattern[i] == "/":
+                          # "**/" means "zero or more COMPLETE path
+                          # segments" -- NOT ".*" followed by an optional
+                          # "/", which also matches a PARTIAL segment (the
+                          # ".*" can consume e.g. "not" out of
+                          # "notmanifest.json" and the optional "/" then
+                          # matches zero times, so
+                          # "baselines/**/manifest.json" wrongly matched
+                          # "baselines/notmanifest.json" too -- a real
+                          # false positive this required check would have
+                          # reported (Codex review). "(?:[^/]+/)*" only
+                          # ever consumes whole "segment/" units, so it
+                          # can never stop mid-segment.
+                          out.append("(?:[^/]+/)*")
+                          i += 1
+                      else:
+                          # A bare trailing "**" (not followed by "/") is
+                          # unchanged -- e.g. "abi/**" must still match
+                          # "abi/" plus anything nested under it,
+                          # including further "/"-separated segments.
+                          out.append(".*")
+                      continue
+                  if c == "*":
+                      out.append("[^/]*")
+                      i += 1
+                      continue
+                  if c == "?":
+                      out.append("[^/]")
+                      i += 1
+                      continue
+                  out.append(re.escape(c))
+                  i += 1
+              out.append("$")
+              return "".join(out)
+
+
+          def matches(path: str, pattern: str) -> bool:
+              # re.DOTALL: a pathname CAN legally contain a literal newline
+              # (confirmed: git tracks and diffs one fine) -- "**"'s ".*"
+              # translation must be able to consume that character too, or
+              # a protected path containing one would never match even
+              # once the real (not C-quoted) bytes are correctly parsed.
+              return (
+                  re.match(glob_to_regex(pattern), path, re.DOTALL) is not None
+              )
+
+
+          patterns = [
+              line.strip()
+              for line in os.environ.get("PROTECTED_PATHS", "").splitlines()
+              if line.strip()
+          ]
+          if not patterns:
+              print("::error::protected-paths resolved to no patterns -- refusing to run a check that would protect nothing.")
+              sys.exit(1)
+
+          with open(os.environ["CHANGED_FILES_FILE"], "rb") as changed_fh:
+              changed = [
+                  path.decode("utf-8", "surrogateescape")
+                  for path in changed_fh.read().split(b"\0")
+                  if path
+              ]
+
+          # ALWAYS protects .github/workflows/** too, independent of (and in
+          # addition to) protected-paths -- this reusable workflow's own
+          # protected-paths/bypass-label inputs are supplied by the CALLING
+          # workflow file, and for an ordinary `pull_request` trigger (this
+          # workflow's own documented, required fork-safe trigger -- see
+          # "Fork safety" above), the calling workflow file is read from the
+          # PR's OWN head commit, not the base branch. Without this, a PR
+          # could edit both the calling workflow (narrowing protected-paths
+          # to a glob that no longer matches, or dropping bypass-label
+          # enforcement entirely) AND the committed baseline in the SAME
+          # change -- this check would then see zero hits against the
+          # PR-supplied (already-tampered) glob and pass, recreating the
+          # exact self-approval gap this whole workflow exists to close
+          # (Codex review). A caller-configured protected-paths entry
+          # already covering .github/workflows/** is not double-counted --
+          # WORKFLOW_GUARD_PATTERN only contributes a path not already
+          # matched by the caller's own patterns, so the messaging below
+          # stays accurate about which rule actually caught which file.
+          WORKFLOW_GUARD_PATTERN = ".github/workflows/**"
+          configured_hits = sorted(
+              {path for path in changed if any(matches(path, pat) for pat in patterns)}
+          )
+          workflow_hits = sorted(
+              {
+                  path
+                  for path in changed
+                  if matches(path, WORKFLOW_GUARD_PATTERN)
+                  and path not in configured_hits
+              }
+          )
+          hits = sorted(set(configured_hits) | set(workflow_hits))
+          if not hits:
+              print("No protected baseline files or workflow files were touched by this PR.")
+              sys.exit(0)
+
+          bypass_label = os.environ.get("BYPASS_LABEL", "")
+          pr_labels = set(json.loads(os.environ.get("PR_LABELS_JSON") or "[]"))
+          if bypass_label and bypass_label in pr_labels:
+              print(
+                  f"::notice::this PR modifies protected file(s) "
+                  f"({', '.join(hits)}), but carries the '{bypass_label}' "
+                  "bypass label -- treating this as an explicitly reviewed, "
+                  "human-approved change."
+              )
+              sys.exit(0)
+
+          hint = (
+              f" Add the '{bypass_label}' label if this is a genuine, "
+              "reviewed change."
+              if bypass_label
+              else ""
+          )
+          if configured_hits and workflow_hits:
+              print(
+                  "::error::this PR modifies both "
+                  f"{len(configured_hits)} protected committed-baseline "
+                  f"file(s) ({', '.join(configured_hits)}) AND "
+                  f"{len(workflow_hits)} workflow file(s) under "
+                  f".github/workflows/ ({', '.join(workflow_hits)}). An "
+                  "ordinary PR that both changes the compared binary/"
+                  "headers AND updates the baseline it is compared against "
+                  "can silently approve itself; touching a workflow file in "
+                  "the SAME PR is doubly suspicious, since this reusable "
+                  "workflow's own protected-paths/bypass-label "
+                  "configuration lives in the calling workflow file. "
+                  "Refresh the baseline through a dedicated trusted "
+                  "workflow (a push-triggered update, never a PR diff) "
+                  "instead." + hint
+              )
+          elif workflow_hits:
+              print(
+                  "::error::this PR modifies "
+                  f"{len(workflow_hits)} workflow file(s) under "
+                  f".github/workflows/: {', '.join(workflow_hits)}. This "
+                  "reusable workflow's own protected-paths/bypass-label "
+                  "configuration is supplied by the calling workflow file, "
+                  "and for an ordinary pull_request trigger that file is "
+                  "read from the PR's own head commit -- so a PR editing it "
+                  "could otherwise silently narrow protected-paths or "
+                  "disable this check entirely. Workflow-file changes are "
+                  "therefore always protected, independent of "
+                  "protected-paths." + hint
+              )
+          else:
+              print(
+                  "::error::this PR modifies "
+                  f"{len(configured_hits)} protected committed-baseline "
+                  f"file(s): {', '.join(configured_hits)}. An ordinary PR "
+                  "that both changes the compared binary/headers AND "
+                  "updates the baseline it is compared against can "
+                  "silently approve itself -- a real incompatible change "
+                  "and its own baseline update land together, so the "
+                  "comparison never actually detects it. Refresh the "
+                  "baseline through a dedicated trusted workflow (a "
+                  "push-triggered update, never a PR diff) instead." + hint
+              )
+          sys.exit(1)
+          PYEOF

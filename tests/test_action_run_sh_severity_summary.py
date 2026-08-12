@@ -25,10 +25,12 @@ $VERDICT in ... esac`` block from ``run.sh`` (the same "parse the real file,
 don't hand-copy it" discipline as ``test_action_run_sh_summary.py``) so a
 future edit to the real logic is exercised here too.
 """
+
 from __future__ import annotations
 
 import json
 import os
+import re
 import shutil
 import subprocess
 import tempfile
@@ -46,11 +48,25 @@ _END_MARKER = "    esac"
 #: extracted with it, from the first one to the first mode dispatch below them.
 _HELPERS_START = "_json_report_src() {"
 _HELPERS_END = 'if [[ "$MODE" == "deps-compare" ]]; then'
+#: `_report_query` (one of the helpers above) reads `$_PY_BIN`, which is now
+#: resolved once near the top of run.sh -- well before `_HELPERS_START` --
+#: rather than immediately above `_report_query`'s own definition (moved
+#: there so the baseline-set fallback, which runs even earlier, can use the
+#: same resolved interpreter too). Extracted separately via regex, not
+#: hand-copied, so a future edit to this line is still exercised here
+#: rather than silently drifting from the real file: without it, $_PY_BIN
+#: is empty in the assembled test script, `_report_query` answers nothing
+#: for every lookup, and every case branch below silently takes its
+#: "no report available" fallback -- the identical vacuous-pass failure
+#: mode `_HELPERS_START`'s own docstring already warns about.
+_PY_BIN_LINE = re.compile(r"^_PY_BIN=.*$", re.MULTILINE)
 
 
 def _verdict_case_region() -> str:
     """The Job Summary's ``case $VERDICT in ... esac`` block and its helpers."""
     text = RUN_SH.read_text(encoding="utf-8")
+    py_bin_match = _PY_BIN_LINE.search(text)
+    assert py_bin_match, "_PY_BIN resolution line not found in run.sh"
     helpers_start = text.index(_HELPERS_START)
     helpers = text[helpers_start : text.index(_HELPERS_END, helpers_start)]
     # A renamed helper would otherwise silently restore the vacuous state
@@ -59,7 +75,7 @@ def _verdict_case_region() -> str:
     assert "_json_report_src()" in helpers and "_severity_gate_exit()" in helpers
     start = text.index(_START_MARKER)
     end = text.index(_END_MARKER, start) + len(_END_MARKER)
-    return helpers + "\n" + text[start:end]
+    return py_bin_match.group(0) + "\n" + helpers + "\n" + text[start:end]
 
 
 def _bash_executable() -> str:
@@ -84,7 +100,11 @@ def _bash_executable() -> str:
 def _run(env_overrides: dict[str, str]) -> str:
     """Run the extracted VERDICT-case snippet, return its stdout."""
     with tempfile.NamedTemporaryFile(
-        "w", suffix=".sh", delete=False, encoding="utf-8", newline="\n",
+        "w",
+        suffix=".sh",
+        delete=False,
+        encoding="utf-8",
+        newline="\n",
     ) as f:
         f.write(_verdict_case_region())
         script_path = f.name
@@ -93,7 +113,10 @@ def _run(env_overrides: dict[str, str]) -> str:
     try:
         result = subprocess.run(
             [_bash_executable(), script_path],
-            capture_output=True, text=True, encoding="utf-8", env=env,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            env=env,
         )
     finally:
         os.unlink(script_path)
@@ -218,7 +241,9 @@ class TestSeverityErrorSummaryLine:
 
     def test_falls_back_when_blocking_categories_empty(self, tmp_path) -> None:
         report = tmp_path / "report.json"
-        report.write_text(json.dumps({"severity": {"blocking_categories": []}}), encoding="utf-8")
+        report.write_text(
+            json.dumps({"severity": {"blocking_categories": []}}), encoding="utf-8"
+        )
         out = _run(
             {
                 "VERDICT": "SEVERITY_ERROR",
@@ -230,5 +255,7 @@ class TestSeverityErrorSummaryLine:
         assert "Severity-level issue detected" in out
 
     def test_other_verdicts_unaffected(self) -> None:
-        out = _run({"VERDICT": "COMPATIBLE", "FORMAT": "markdown", "ABICHECK_EXIT": "0"})
+        out = _run(
+            {"VERDICT": "COMPATIBLE", "FORMAT": "markdown", "ABICHECK_EXIT": "0"}
+        )
         assert "No binary ABI break detected" in out

@@ -1085,6 +1085,180 @@ class TestMainCli:
         digest2 = self._run_main_and_get_content_digest(tmp_path, libraries, capsys)
         assert digest1 != digest2
 
+    def test_compute_content_digest_is_stable_across_differing_created_at(
+        self,
+    ) -> None:
+        # Direct unit test of the extracted compute_content_digest()
+        # function (Codex review, PR #726): a consumer comparing a freshly
+        # dumped baseline-set's digest against an already-published one's
+        # own manifest.json (publish-baseline.yml's release-asset upload
+        # step) must see the SAME digest for the same artifacts[] content
+        # even though every dump stamps a fresh created_at -- otherwise the
+        # "safe identical-content retry" path could never actually trigger.
+        manifest_a = {
+            "manifest_version": 1,
+            "created_at": "2026-08-11T00:00:00Z",
+            "artifacts": [{"library": "libfoo", "sha256": "aaa"}],
+        }
+        manifest_b = {
+            "manifest_version": 1,
+            "created_at": "2026-08-11T23:59:59Z",
+            "artifacts": [{"library": "libfoo", "sha256": "aaa"}],
+        }
+        assert build_manifest_module.compute_content_digest(
+            manifest_a
+        ) == build_manifest_module.compute_content_digest(manifest_b)
+
+    def test_compute_content_digest_changes_with_a_different_sha256(self) -> None:
+        manifest_a = {"artifacts": [{"library": "libfoo", "sha256": "aaa"}]}
+        manifest_b = {"artifacts": [{"library": "libfoo", "sha256": "bbb"}]}
+        assert build_manifest_module.compute_content_digest(
+            manifest_a
+        ) != build_manifest_module.compute_content_digest(manifest_b)
+
+    def test_compute_content_digest_changes_with_a_different_staged_binary(
+        self,
+    ) -> None:
+        # Codex review, PR #726: a bundle member's staged ELF binary
+        # (binary_sha256, G30 P1.6/ADR-047 §8 S14) can change bytes-for-
+        # bytes (a code-only or reproducibility-only rebuild) with the
+        # library's *snapshot* content -- and therefore "sha256" --
+        # completely unchanged. resolve_bundle() consumes the staged
+        # binary directly, so the digest must be sensitive to it too, or a
+        # rerun that genuinely republished a different binary would be
+        # (wrongly) treated as a safe identical-content retry and the
+        # stale binary would stay published.
+        manifest_a = {
+            "artifacts": [
+                {"library": "libfoo", "sha256": "aaa", "binary_sha256": "bin1"}
+            ]
+        }
+        manifest_b = {
+            "artifacts": [
+                {"library": "libfoo", "sha256": "aaa", "binary_sha256": "bin2"}
+            ]
+        }
+        assert build_manifest_module.compute_content_digest(
+            manifest_a
+        ) != build_manifest_module.compute_content_digest(manifest_b)
+
+    def test_compute_content_digest_stable_when_neither_manifest_has_binary_sha256(
+        self,
+    ) -> None:
+        # A manifest schema predating G30 P1.6 (no binary_sha256 field at
+        # all) must still reproduce the same digest an equivalent manifest
+        # with an explicit-but-absent field would.
+        manifest_a = {"artifacts": [{"library": "libfoo", "sha256": "aaa"}]}
+        manifest_b = {
+            "artifacts": [{"library": "libfoo", "sha256": "aaa", "binary_sha256": ""}]
+        }
+        assert build_manifest_module.compute_content_digest(
+            manifest_a
+        ) == build_manifest_module.compute_content_digest(manifest_b)
+
+
+class TestRecomputeContentDigestFromDiskRefusesEscapes:
+    """Regression (Codex review, PR #726): an EXISTING (previously-
+    published) asset's manifest.json is untrusted content restored from
+    that archive -- a broken or malicious one naming an absolute path or a
+    ``"../"``-escaping ``snapshot``/``binary`` could otherwise point
+    outside the extracted archive (e.g. at this same publish job's own
+    fresh baseline directory, which exists on disk at the same time),
+    hashing THAT file instead and coincidentally matching
+    ``NEW_CONTENT_DIGEST`` -- taking the safe-retry exit for a broken
+    asset a real consumer's ``resolve_target()``/``resolve_bundle()``
+    would later reject outright. ``recompute_content_digest_from_disk``
+    never performed the resolver's own containment check
+    (``_resolve_under_baseline_dir`` in
+    ``abicheck/buildsource/baseline_set.py``); ``_resolve_under_base_dir``
+    is this module's own standalone re-implementation of the identical
+    guard (this file is deliberately dependency-free of the ``abicheck``
+    package)."""
+
+    def test_snapshot_path_escaping_base_dir_is_refused(self, tmp_path: Path) -> None:
+        base_dir = tmp_path / "extracted"
+        base_dir.mkdir()
+        # A real file OUTSIDE base_dir -- the "this run's own fresh
+        # baseline directory" scenario the docstring above describes.
+        outside = tmp_path / "outside.abicheck.json"
+        outside.write_text("{}", encoding="utf-8")
+
+        manifest = {
+            "artifacts": [
+                {
+                    "library": "libfoo",
+                    "snapshot": "../outside.abicheck.json",
+                    "sha256": "",
+                }
+            ]
+        }
+        with pytest.raises(SystemExit, match="escapes the extracted archive"):
+            build_manifest_module.recompute_content_digest_from_disk(manifest, base_dir)
+
+    def test_snapshot_path_absolute_is_refused(self, tmp_path: Path) -> None:
+        base_dir = tmp_path / "extracted"
+        base_dir.mkdir()
+        outside = tmp_path / "outside.abicheck.json"
+        outside.write_text("{}", encoding="utf-8")
+
+        manifest = {
+            "artifacts": [{"library": "libfoo", "snapshot": str(outside), "sha256": ""}]
+        }
+        with pytest.raises(SystemExit, match="escapes the extracted archive"):
+            build_manifest_module.recompute_content_digest_from_disk(manifest, base_dir)
+
+    def test_binary_path_escaping_base_dir_is_refused(self, tmp_path: Path) -> None:
+        base_dir = tmp_path / "extracted"
+        base_dir.mkdir()
+        _write_snapshot(base_dir / "libfoo.abicheck.json", library="libfoo")
+        outside_binary = tmp_path / "outside.so"
+        outside_binary.write_bytes(b"ELF")
+
+        manifest = {
+            "artifacts": [
+                {
+                    "library": "libfoo",
+                    "snapshot": "libfoo.abicheck.json",
+                    "sha256": "",
+                    "binary": "../outside.so",
+                    "binary_sha256": "",
+                }
+            ]
+        }
+        with pytest.raises(SystemExit, match="escapes the extracted archive"):
+            build_manifest_module.recompute_content_digest_from_disk(manifest, base_dir)
+
+    def test_ordinary_relative_paths_still_resolve_and_hash_correctly(
+        self, tmp_path: Path
+    ) -> None:
+        # The containment check must not reject a perfectly ordinary
+        # within-archive relative path.
+        from abicheck.buildsource.baseline_set import compute_snapshot_content_hash
+
+        base_dir = tmp_path / "extracted"
+        base_dir.mkdir()
+        snapshot_path = base_dir / "libfoo.abicheck.json"
+        _write_snapshot(snapshot_path, library="libfoo")
+        real_sha256 = compute_snapshot_content_hash(
+            json.loads(snapshot_path.read_text(encoding="utf-8"))
+        )
+
+        manifest = {
+            "artifacts": [
+                {
+                    "library": "libfoo",
+                    "snapshot": "libfoo.abicheck.json",
+                    "sha256": real_sha256,
+                }
+            ]
+        }
+        digest = build_manifest_module.recompute_content_digest_from_disk(
+            manifest, base_dir
+        )
+        assert digest == build_manifest_module.compute_content_digest(
+            {"artifacts": [{"library": "libfoo", "sha256": real_sha256}]}
+        )
+
 
 class TestStageBinary:
     """G30 P1.6 (ADR-047 §6/§8 S14 correction): a ``stage_binary: true``

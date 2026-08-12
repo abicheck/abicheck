@@ -53,6 +53,10 @@ on:
         description: 'Path to the candidate build''s build-output.json, for resolve-baseline''s incompatible_evidence check.'
         type: string
         default: ''
+      expected-project-ref:
+        description: 'Forwarded to check-target''s expected-project-ref input -- require the resolved baseline-set''s manifest.json project_ref to match this value exactly (e.g. github.event.pull_request.base.sha for an accepted-main PR gate), failing closed with wrong_project_ref otherwise. Omit to skip the check.'
+        type: string
+        default: ''
 
       # ── Optional artifact staging ───────────────────────────────────────
       # Unlike actions/check-target itself (a composite Action a caller can
@@ -452,6 +456,7 @@ jobs:
           baseline-path: ${{ inputs.baseline-path }}
           baseline-required: ${{ inputs.baseline-required }}
           candidate-build-output: ${{ inputs.candidate-build-output }}
+          expected-project-ref: ${{ inputs.expected-project-ref }}
           requested-depth: ${{ inputs.requested-depth }}
           gate-mode: ${{ inputs.gate-mode }}
           project: ${{ inputs.project != '' && inputs.project || github.repository }}

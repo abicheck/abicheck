@@ -97,6 +97,25 @@ class TestCheckSingleMirrorsCheckTargetInputs:
             "${{ inputs.dependency-source }}"
         )
 
+    def test_expected_project_ref_is_accepted_and_forwarded(self) -> None:
+        # Regression (Codex review): check-target's expected-project-ref
+        # input (the accepted-main wrong-commit guard) was unreachable
+        # from check-single.yml -- it declared no such input and forwarded
+        # nothing, so an accepted-main PR gate built on this reusable
+        # workflow (not the bare Action) had no way to opt into the guard.
+        data = _load(CHECK_SINGLE)
+        inputs = data[True]["workflow_call"]["inputs"]
+        assert inputs["expected-project-ref"]["type"] == "string"
+        assert inputs["expected-project-ref"]["default"] == ""
+        run_step = next(
+            s
+            for s in _steps(data["jobs"]["check"])
+            if s.get("name") == "Run check-target"
+        )
+        assert run_step["with"]["expected-project-ref"] == (
+            "${{ inputs.expected-project-ref }}"
+        )
+
 
 class TestCheckSingleSelfCheckout:
     """Mirrors check-target/action.yml's own "Capture this Action's
@@ -835,6 +854,40 @@ class TestBaselineRequiredAndCandidateBuildOutputForwarded:
             "${{ steps.candidate.outputs.build-output }}"
         )
 
+    def test_run_check_target_forwards_expected_project_ref(self) -> None:
+        # Regression (Codex review): check-target's own
+        # expected-project-ref input (the accepted-main wrong-commit
+        # guard) was unreachable from this composed workflow -- it
+        # declared no such input and forwarded nothing, so a caller
+        # relying on check-project.yml (not the bare Action) had no way to
+        # opt into the guard at all.
+        data = _load(CHECK_PROJECT)
+        assert "expected-project-ref" in data[True]["workflow_call"]["inputs"]
+        steps = _steps(data["jobs"]["check"])
+        run_step = next(s for s in steps if s.get("name") == "Run check-target")
+        assert run_step["with"]["expected-project-ref"] == (
+            "${{ matrix.baseline_channel == 'accepted-main' && "
+            "inputs.expected-project-ref || '' }}"
+        )
+
+    def test_expected_project_ref_forwarding_is_scoped_to_accepted_main(
+        self,
+    ) -> None:
+        # Second-round regression (Codex review): forwarding
+        # expected-project-ref UNCONDITIONALLY to every cell breaks a
+        # mixed-channel project matrix -- a release-contract cell's
+        # manifest records a release tag, not a Git ref, so an unscoped
+        # forward would make every release-contract cell fail closed on a
+        # project_ref it was never going to match. Pins the exact
+        # per-channel ternary rather than only checking it mentions the
+        # input at all.
+        data = _load(CHECK_PROJECT)
+        steps = _steps(data["jobs"]["check"])
+        run_step = next(s for s in steps if s.get("name") == "Run check-target")
+        expr = run_step["with"]["expected-project-ref"]
+        assert "matrix.baseline_channel == 'accepted-main'" in expr
+        assert "inputs.expected-project-ref" in expr
+
     def test_run_check_target_prefers_per_cell_compile_overlay_over_global_inputs(
         self,
     ) -> None:
@@ -1352,8 +1405,11 @@ class TestScheduleCheckProjectFailurePathDispatcher:
         assert "gh run list --repo" in run_steps
         assert "FIXTURE_SHA" in run_steps
         assert "gh run view" in run_steps
-        assert '--json status --jq .status' in run_steps
-        assert 'status = "completed"' in run_steps or '"$status" = "completed"' in run_steps
+        assert "--json status --jq .status" in run_steps
+        assert (
+            'status = "completed"' in run_steps
+            or '"$status" = "completed"' in run_steps
+        )
 
     def test_dispatcher_gates_on_the_verify_job_conclusion_not_the_run_conclusion(
         self,
@@ -1388,8 +1444,12 @@ class TestScheduleCheckProjectFailurePathDispatcher:
         run_steps = " ".join(s.get("run", "") for s in _steps(job))
 
         fixture_data = _load(TEST_CHECK_PROJECT_FAILURE_PATH)
-        stage_timeout = fixture_data["jobs"]["test-check-project-stage"]["timeout-minutes"]
-        verify_timeout = fixture_data["jobs"]["test-check-project-verify"]["timeout-minutes"]
+        stage_timeout = fixture_data["jobs"]["test-check-project-stage"][
+            "timeout-minutes"
+        ]
+        verify_timeout = fixture_data["jobs"]["test-check-project-verify"][
+            "timeout-minutes"
+        ]
 
         check_project_data = _load(CHECK_PROJECT)
         sequential_timeout = sum(
@@ -1436,7 +1496,9 @@ class TestScheduleCheckProjectFailurePathDispatcher:
         data = _load(SCHEDULE_CHECK_PROJECT_FAILURE_PATH)
         job = data["jobs"]["dispatch"]
         checkout_step = next(
-            s for s in _steps(job) if str(s.get("uses", "")).startswith("actions/checkout@")
+            s
+            for s in _steps(job)
+            if str(s.get("uses", "")).startswith("actions/checkout@")
         )
         assert checkout_step["uses"] != "actions/checkout@v6"
         # Full commit SHA, not a floating tag -- matches the pin already

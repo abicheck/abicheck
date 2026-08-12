@@ -692,6 +692,37 @@ class TestFinalizeOperationalError:
         ]
         assert "severity" not in report
 
+    def test_wrong_project_ref_resolve_outcome_is_recognized(
+        self, tmp_path: Path
+    ) -> None:
+        # Regression (Codex review): RESOLVE_FAILURE_OUTCOMES previously
+        # hand-duplicated resolve-baseline's outcome vocabulary and had
+        # fallen out of sync -- wrong_project_ref (added for the
+        # accepted-main wrong-commit guard) was missing from it, so
+        # propagating this exact outcome through check-target produced a
+        # usage error (exit 64, no report) instead of a structured
+        # operational-error report.
+        result, outputs = _run_finalize(
+            {
+                **_BASE_IDENTITY,
+                "RESOLVE_RAN": "true",
+                "RESOLVE_OUTCOME": "wrong_project_ref",
+                "RESOLVE_MESSAGE": "baseline built from a different commit than expected.",
+                "ANALYSIS_RAN": "false",
+            },
+            tmp_path,
+        )
+        assert result.returncode == 1, result.stderr
+        assert outputs["outcome"] == "wrong_project_ref"
+        assert outputs["verdict"] == "ERROR"
+        report = json.loads((tmp_path / outputs["report-path"]).read_text())
+        assert report["operational_errors"] == [
+            {
+                "kind": "wrong_project_ref",
+                "message": "baseline built from a different commit than expected.",
+            }
+        ]
+
     def test_analysis_never_producing_a_report_is_an_operational_error(
         self, tmp_path: Path
     ) -> None:
@@ -1039,3 +1070,33 @@ class TestReplaySourcesForwardedWithDefault:
         assert self._resolve("./mysrc", "replay") == "./mysrc"
         assert self._resolve("./mysrc", "wrapper") == "./mysrc"
         assert self._resolve("./mysrc", "") == "./mysrc"
+
+
+class TestExpectedProjectRefForwardedToResolveBaseline:
+    """Regression (Codex review, P1): check-target declared no
+    expected-project-ref input at all and never forwarded one to its
+    nested resolve-baseline step -- an accepted-main PR gate built on the
+    composed check-target path (not a bare, hand-rolled resolve-baseline
+    step) had no way to reach the wrong-commit guard, the exact scenario
+    that input exists to fail closed on.
+    """
+
+    def test_action_yml_declares_the_input(self) -> None:
+        import yaml
+
+        action_yml = ACTION_DIR / "action.yml"
+        data = yaml.safe_load(action_yml.read_text(encoding="utf-8"))
+        assert "expected-project-ref" in data["inputs"]
+        assert data["inputs"]["expected-project-ref"]["required"] is False
+        assert data["inputs"]["expected-project-ref"]["default"] == ""
+
+    def test_resolve_step_forwards_it(self) -> None:
+        import yaml
+
+        action_yml = ACTION_DIR / "action.yml"
+        data = yaml.safe_load(action_yml.read_text(encoding="utf-8"))
+        steps = data["runs"]["steps"]
+        resolve_step = next(s for s in steps if s.get("name") == "Resolve baseline")
+        assert resolve_step["with"]["expected-project-ref"] == (
+            "${{ inputs.expected-project-ref }}"
+        )

@@ -313,6 +313,46 @@ def test_resolve_target_wrong_profile(tmp_path: Path) -> None:
     assert result.outcome == ResolveOutcome.WRONG_PROFILE
 
 
+def test_resolve_target_wrong_project_ref(tmp_path: Path) -> None:
+    # _write_manifest stamps project_ref="v1.0.0" -- a caller expecting a
+    # different commit/tag (e.g. a PR's own base SHA) must not silently
+    # resolve against it.
+    _write_manifest(tmp_path, artifacts=[_target_artifact("libpvxs")])
+    (tmp_path / "libpvxs.abicheck.json").write_text("{}", encoding="utf-8")
+    result = resolve_target(
+        tmp_path,
+        target="libpvxs",
+        profile=PROFILE,
+        required=True,
+        expected_project_ref="deadbeef",
+    )
+    assert result.outcome == ResolveOutcome.WRONG_PROJECT_REF
+    assert "deadbeef" in result.message
+    assert "v1.0.0" in result.message
+
+
+def test_resolve_target_matching_project_ref_resolves(tmp_path: Path) -> None:
+    _write_manifest(tmp_path, artifacts=[_target_artifact("libpvxs")])
+    (tmp_path / "libpvxs.abicheck.json").write_text("{}", encoding="utf-8")
+    result = resolve_target(
+        tmp_path,
+        target="libpvxs",
+        profile=PROFILE,
+        required=True,
+        expected_project_ref="v1.0.0",
+    )
+    assert result.outcome == ResolveOutcome.RESOLVED
+
+
+def test_resolve_target_no_expected_project_ref_skips_the_check(tmp_path: Path) -> None:
+    # Empty expected_project_ref (the default) means "no expectation" --
+    # never a wrong_project_ref regardless of what the manifest records.
+    _write_manifest(tmp_path, artifacts=[_target_artifact("libpvxs")])
+    (tmp_path / "libpvxs.abicheck.json").write_text("{}", encoding="utf-8")
+    result = resolve_target(tmp_path, target="libpvxs", profile=PROFILE, required=True)
+    assert result.outcome == ResolveOutcome.RESOLVED
+
+
 def test_resolve_target_ambiguous_target_missing_from_set(tmp_path: Path) -> None:
     _write_manifest(tmp_path, artifacts=[_target_artifact("libpvxsIoc")])
     result = resolve_target(tmp_path, target="libpvxs", profile=PROFILE, required=True)
@@ -950,6 +990,19 @@ def test_resolve_bundle_wrong_profile(tmp_path: Path) -> None:
         required=True,
     )
     assert result.outcome == ResolveOutcome.WRONG_PROFILE
+
+
+def test_resolve_bundle_wrong_project_ref(tmp_path: Path) -> None:
+    _write_manifest(tmp_path)
+    result = resolve_bundle(
+        tmp_path,
+        bundle="pvxs-release",
+        members=["libpvxs", "libpvxsIoc"],
+        profile=PROFILE,
+        required=True,
+        expected_project_ref="deadbeef",
+    )
+    assert result.outcome == ResolveOutcome.WRONG_PROJECT_REF
 
 
 def test_resolve_bundle_ambiguous_when_member_has_no_binary_field(

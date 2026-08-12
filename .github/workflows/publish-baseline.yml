@@ -280,28 +280,411 @@ jobs:
           python-version: ${{ inputs.python-version }}
           install-deps: ${{ inputs.install-deps }}
 
+      # Packages according to the resolved asset name's OWN extension, not
+      # unconditional zstd -- a caller customizing asset-name-template away
+      # from the default (e.g. to ".tar.gz") must get an archive whose
+      # bytes actually match that extension. Root action.yml's own
+      # baseline-set fallback (action/run.sh's _try_baseline_set_fallback)
+      # picks its extractor by this same asset name's suffix, so an
+      # unconditional zstd here would silently produce a ".tar.gz"-named
+      # file containing zstd bytes, which that consumer would then fail to
+      # gunzip (Codex review). Delegates to actions/stage-baseline instead
+      # of keeping its own copy of this suffix-dispatch logic, so an
+      # external caller of that Action (not just this workflow) gets the
+      # identical, single-source-of-truth behavior.
       - name: Package baseline-set
         id: package
-        shell: bash
-        env:
-          ASSET_NAME_TEMPLATE: ${{ inputs.asset-name-template }}
-          PROFILE_ID: ${{ matrix.profile_id }}
-          BASELINE_PATH: ${{ steps.baseline.outputs.baseline-path }}
-        run: |
-          set -euo pipefail
-          asset_name="${ASSET_NAME_TEMPLATE//\{profile\}/$PROFILE_ID}"
-          tar --zstd -cf "$asset_name" -C "$BASELINE_PATH" .
-          echo "asset-name=$asset_name" >> "$GITHUB_OUTPUT"
+        uses: ./.publish-baseline-src/actions/stage-baseline
+        with:
+          baseline-path: ${{ steps.baseline.outputs.baseline-path }}
+          asset-name-template: ${{ inputs.asset-name-template }}
+          profile: ${{ matrix.profile_id }}
 
-      # --clobber lets a re-run overwrite this profile's own previously
-      # uploaded asset (e.g. retrying after a transient failure) without
-      # first deleting it by hand -- scoped to this one release's own
-      # assets, not a rewrite of a published archive's history.
-      - name: Upload release asset
+      # `release-contract` is documented (ADR-047 §10, publish-baseline.md)
+      # as an IMMUTABLE channel -- "compatible with what we actually shipped
+      # as v1.0.0" only holds if that asset can never quietly change out
+      # from under a consumer. A bare `--clobber` contradicts that: any
+      # re-run of this workflow against an already-published release (a
+      # manual workflow_dispatch retry, a re-tagged/re-triggered release
+      # event) would silently replace the asset with whatever this run just
+      # built, with no record that a "same-tag" baseline-set is no longer
+      # the one earlier consumers resolved against.
+      #
+      # This step therefore uploads plainly (no --clobber) when no asset of
+      # this name exists yet -- the ordinary first-publish and same-content-
+      # retry-after-a-transient-failure cases. When an asset of this name
+      # DOES already exist, it is fetched and compared against what this run
+      # just built by NORMALIZED content digest (library + snapshot sha256
+      # pairs), not raw archive bytes -- every dump stamps a fresh
+      # created_at and the tar archive itself carries filesystem metadata,
+      # so a byte-for-byte comparison would almost always report "different
+      # content" even for a logically-identical retry. Identical normalized
+      # content is a safe no-op (the exact "retry after infra flakiness"
+      # case --clobber existed for, without ever actually replacing a
+      # differing artifact), and differing content is a hard failure --
+      # overwriting a published release-contract asset with a different
+      # baseline needs a human decision (a new release tag, or explicit
+      # `gh release delete-asset` + re-run), not a silent workflow-level
+      # clobber.
+      #
+      # Known gap, deliberately not fixed here (Codex review): two
+      # concurrent runs for the same tag/profile can both observe
+      # existing_url as empty (neither has published yet), race to the
+      # plain `gh release upload` below, and the LOSER's upload fails
+      # outright (gh itself rejects a duplicate-name asset without
+      # --clobber) instead of falling through to the safe-retry
+      # verification path. This is a real robustness gap, but the failure
+      # mode is SAFE, not silent: the loser's job fails loudly, and simply
+      # re-running it resolves cleanly (the asset now exists, so the
+      # normalized-digest retry path applies as designed). Closing it
+      # properly means catching the specific "duplicate asset name" gh
+      # failure, refetching `existing_url`, and re-entering the retry
+      # verification code below -- a real structural change to a step
+      # already carrying five independent safety checks, not a one-line
+      # fix, and not attempted reactively under review pressure per this
+      # repo's own "known gaps over risky reactive patches" convention
+      # (AGENTS.md).
+      - name: Upload release asset (fails closed on an immutability violation)
         env:
           GH_TOKEN: ${{ secrets.github-token != '' && secrets.github-token || secrets.GITHUB_TOKEN }}
           RELEASE_TAG: ${{ inputs.release-tag != '' && inputs.release-tag || github.ref_name }}
           ASSET_NAME: ${{ steps.package.outputs.asset-name }}
+          REPO: ${{ github.repository }}
+          NEW_CONTENT_DIGEST: ${{ steps.baseline.outputs.content-digest }}
+          NEW_PROFILE: ${{ matrix.profile_id }}
+          NEW_MANIFEST_PATH: ${{ steps.baseline.outputs.manifest-path }}
         run: |
           set -euo pipefail
-          gh release upload "$RELEASE_TAG" "$ASSET_NAME" --clobber --repo "${{ github.repository }}"
+
+          # NOTE: `gh`'s own `--jq` flag takes exactly one expression argument
+          # -- it is not `jq` itself, so `--jq --arg name ... 'EXPR'` fails
+          # with "accepts at most 1 arg(s)" (Codex review, verified against
+          # gh 2.96.0). Piping the raw --json output into a real `jq`
+          # invocation (which does support --arg) avoids that entirely.
+          assets_json=$(gh release view "$RELEASE_TAG" --repo "$REPO" --json assets 2>/dev/null) || assets_json=""
+          existing_url=""
+          if [[ -n "$assets_json" ]]; then
+            # .apiUrl (the authenticated REST API asset endpoint,
+            # api.github.com/repos/.../releases/assets/<id>), not .url (the
+            # unauthenticated browser-download URL) -- the download below
+            # goes through `gh api ... -H 'Accept: application/octet-stream'`,
+            # which needs the API endpoint to authenticate; the browser URL
+            # doesn't reliably work there, especially for a private caller
+            # repository (Codex review, verified against gh 2.96.0's `gh api`
+            # contract).
+            existing_url=$(printf '%s' "$assets_json" \
+              | jq -r --arg name "$ASSET_NAME" '.assets[] | select(.name == $name) | .apiUrl')
+          fi
+
+          if [[ -z "$existing_url" ]]; then
+            # "./$ASSET_NAME", not a bare "$ASSET_NAME" -- gh's own arg
+            # parser treats a leading '-' as a flag, not part of a
+            # filename (confirmed against real gh 2.96.0:
+            # `gh release upload dummy --nightly.tar.gz` exits "unknown
+            # flag" rather than uploading a file by that name). A custom
+            # asset-name-template resolving to a name starting with '-'
+            # (e.g. "--nightly.tar.gz") packages and stages just fine in
+            # actions/stage-baseline -- '-' is a perfectly legal leading
+            # filename character on every real filesystem -- but this
+            # first-time-publish upload would otherwise always fail
+            # (Codex review).
+            gh release upload "$RELEASE_TAG" "./$ASSET_NAME" --repo "$REPO"
+            echo "::notice::published new release-contract asset $ASSET_NAME on $RELEASE_TAG."
+            exit 0
+          fi
+
+          echo "::group::Asset $ASSET_NAME already exists on $RELEASE_TAG -- verifying content before deciding whether this is a safe retry"
+          # Compare NORMALIZED content digests (library name + snapshot
+          # sha256 pairs -- actions/baseline/build_manifest.py's own
+          # compute_content_digest(), the same formula behind this job's
+          # `steps.baseline.outputs.content-digest`), not raw archive bytes:
+          # dumper.py stamps a fresh created_at into every manifest/snapshot
+          # on every run, and the tar archive itself carries filesystem
+          # metadata, so a byte-for-byte comparison would almost always
+          # report "different content" even for a genuine, logically-
+          # identical retry -- permanently defeating the safe-retry path and
+          # directing every rerun at the destructive delete-asset recovery
+          # instead (Codex review).
+          mkdir -p .existing-asset/extracted
+          # Download to a file named exactly like the real asset (same
+          # suffix) and let TarExtractor.extract() dispatch on that name --
+          # hardcoding a `.tar.zst` download name here, independent of
+          # $ASSET_NAME's actual extension, made a `.tar.gz`/`.tgz`/`.tar`
+          # asset-name-template fail this comparison outright (it would
+          # always be re-extracted as zstd), so a legitimate identical retry
+          # under a non-default template could never reach the safe no-op
+          # path and always hit the immutability error instead (Codex
+          # review).
+          existing_download=".existing-asset/$ASSET_NAME"
+          gh api "$existing_url" -H 'Accept: application/octet-stream' > "$existing_download"
+          python3 -c '
+          import sys
+          from pathlib import Path
+          from abicheck.package import TarExtractor
+
+          TarExtractor().extract(Path(sys.argv[1]), Path(sys.argv[2]))
+          ' "$existing_download" .existing-asset/extracted
+
+          # TarExtractor's own member validation rejects a symlink escaping
+          # the extraction root, but not an IN-ROOT symlink (one whose
+          # target stays inside .existing-asset/extracted) -- so a real
+          # symlink can still land here and be silently followed by the
+          # digest computation below. actions/resolve-baseline/run.sh's own
+          # extraction path rejects ANY symlink at all (a baseline-set has
+          # no legitimate reason to contain one), so an existing asset that
+          # passes here but would be rejected there could reach this step's
+          # safe-retry success while remaining an asset the canonical
+          # resolver can never actually consume (Codex review). Same
+          # command-substitution-not-piped-into-grep shape as
+          # resolve-baseline's own check, for the identical SIGPIPE/
+          # pipefail reason documented there.
+          existing_symlinks=$(find .existing-asset/extracted -type l)
+          if [[ -n "$existing_symlinks" ]]; then
+            echo "::error::$ASSET_NAME already exists on release $RELEASE_TAG, but its archive contains a symlink -- baseline-set archives must contain only plain files/directories (the same structural rule actions/resolve-baseline enforces), so this is never a safe retry regardless of content. Delete the existing asset explicitly ('gh release delete-asset $RELEASE_TAG $ASSET_NAME --repo $REPO --yes') and re-run, or publish under a new release tag." >&2
+            exit 1
+          fi
+
+          existing_content_digest=$(python3 -c '
+          import importlib.util
+          import json
+          import sys
+          from pathlib import Path
+
+          spec = importlib.util.spec_from_file_location(
+              "baseline_build_manifest",
+              Path(".publish-baseline-src/actions/baseline/build_manifest.py"),
+          )
+          module = importlib.util.module_from_spec(spec)
+          spec.loader.exec_module(module)
+
+          manifest_path = Path(sys.argv[1]) / "manifest.json"
+          if not manifest_path.is_file():
+              print(
+                  "::error::existing release asset has no manifest.json at "
+                  "its root after extraction -- cannot verify its content, "
+                  "refusing to treat this as a safe retry.",
+                  file=sys.stderr,
+              )
+              sys.exit(1)
+          manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+          # Recomputed from the ACTUAL extracted snapshot/binary bytes, not
+          # from the manifest own declared sha256/binary_sha256 fields --
+          # a manually-edited or otherwise-corrupted existing asset could
+          # carry declared digests that happen to match a fresh run real
+          # digest even though its actual content differs, which a
+          # declared-digest-only comparison could not catch (Codex review).
+          print(module.recompute_content_digest_from_disk(manifest, Path(sys.argv[1])))
+          ' .existing-asset/extracted)
+
+          # compute_content_digest() deliberately excludes `profile` (it
+          # hashes library/snapshot/binary content, not build-profile
+          # identity -- see its own docstring), so it alone cannot tell two
+          # DIFFERENT profiles' baseline-sets apart when they happen to
+          # produce identical library/snapshot/binary digests. That
+          # collision is reachable in practice: a caller whose
+          # asset-name-template omits `{profile}` for a multi-profile
+          # matrix has every profile's job target the SAME asset name, and
+          # this step would then treat a later profile's upload as a "safe
+          # retry" of an earlier, DIFFERENT profile's already-published
+          # asset purely because their content happened to match --
+          # silently discarding that profile's own baseline forever (Codex
+          # review). Checked as an independent, profile-identity gate
+          # BEFORE the content-digest comparison: a profile mismatch is
+          # never a safe retry regardless of what the content digests say.
+          existing_profile=$(python3 -c '
+          import json
+          import sys
+          from pathlib import Path
+
+          manifest = json.loads(
+              (Path(sys.argv[1]) / "manifest.json").read_text(encoding="utf-8")
+          )
+          print(manifest.get("profile") or "")
+          ' .existing-asset/extracted)
+
+          echo "new profile:      $NEW_PROFILE"
+          echo "existing profile: $existing_profile"
+
+          # Requires existing_profile to be NONEMPTY *and* equal -- not
+          # merely "not-provably-different" -- so an existing manifest
+          # with an empty/absent profile field (a valid possibility, since
+          # actions/baseline's own profile input is optional) fails closed
+          # instead of skipping this check entirely. compute_content_digest()
+          # deliberately excludes profile, so without this an unverifiable
+          # legacy/malformed asset could pass as a safe retry purely on
+          # matching library digests (Codex review).
+          if [[ -z "$existing_profile" || -z "$NEW_PROFILE" || "$existing_profile" != "$NEW_PROFILE" ]]; then
+            echo "::error::$ASSET_NAME already exists on release $RELEASE_TAG but was published for a DIFFERENT (or missing) profile ('$existing_profile', this run is '$NEW_PROFILE') -- asset-name-template resolved to the same name for two distinct profiles, or the existing asset's manifest has no profile recorded at all, so this is never a safe retry regardless of content. Include '{profile}' in asset-name-template so each profile in a multi-profile matrix gets its own asset name." >&2
+            exit 1
+          fi
+
+          # compute_content_digest()/recompute_content_digest_from_disk()
+          # hash artifacts[] content alone -- neither reads project_ref
+          # either. This run's own fresh manifest is explicitly stamped
+          # with $RELEASE_TAG as its project_ref (this job's "Dump
+          # baseline-set" step, project-ref input), and a real consumer
+          # supplying that tag through resolve-baseline's own
+          # expected-project-ref rejects any asset whose manifest disagrees
+          # as wrong_project_ref -- so an existing asset published under a
+          # DIFFERENT project_ref (a stale/mismatched republish, or a
+          # legacy manifest with none recorded) must never be treated as a
+          # safe retry purely because its content happens to match, the
+          # identical reasoning the profile-identity check above already
+          # applies to a different field (Codex review).
+          existing_project_ref=$(python3 -c '
+          import json
+          import sys
+          from pathlib import Path
+
+          manifest = json.loads(
+              (Path(sys.argv[1]) / "manifest.json").read_text(encoding="utf-8")
+          )
+          print(manifest.get("project_ref") or "")
+          ' .existing-asset/extracted)
+
+          echo "new project_ref:      $RELEASE_TAG"
+          echo "existing project_ref: $existing_project_ref"
+
+          if [[ -z "$existing_project_ref" || "$existing_project_ref" != "$RELEASE_TAG" ]]; then
+            echo "::error::$ASSET_NAME already exists on release $RELEASE_TAG but its manifest.json declares a DIFFERENT (or missing) project_ref ('$existing_project_ref') -- a real consumer supplying '$RELEASE_TAG' as resolve-baseline's expected-project-ref would reject this asset as wrong_project_ref regardless of what the content digest says, so this is never a safe retry. Delete the existing asset explicitly ('gh release delete-asset $RELEASE_TAG $ASSET_NAME --repo $REPO --yes') and re-run, or publish under a new release tag." >&2
+            exit 1
+          fi
+
+          # compute_content_digest()/recompute_content_digest_from_disk()
+          # hash artifacts[] content alone -- neither reads fact_set either
+          # (actions/baseline/build_manifest.py's own
+          # compute_content_digest() docstring: "deliberately excludes
+          # every other manifest field"), so an existing asset whose
+          # manifest.json declares a DIFFERENT (or edited/corrupted)
+          # fact_set can still reach a matching content digest and this
+          # branch's safe-retry no-op even though a real consumer's
+          # _evidence_incompatibility() check
+          # (abicheck/buildsource/baseline_set.py) compares fact_set.producer
+          # against a candidate build's own evidence_producer.kind
+          # independently of snapshot/binary content -- so the retained,
+          # untouched asset could reject a compatible candidate as
+          # incompatible_evidence, or accept an incompatible one, in a way
+          # THIS run's own freshly-built manifest would not have. Compared
+          # by plain equality against the LOCAL manifest this same job just
+          # built (steps.baseline.outputs.manifest-path, before packaging)
+          # -- the identical check
+          # actions/baseline/build_manifest.py's own `_compute_freshness()`
+          # already applies for its analogous previous-manifest comparison
+          # (`previous.get("fact_set") != manifest["fact_set"]`), reused
+          # here rather than re-derived, since fact_set is a small,
+          # deterministic dict with no created_at-shaped volatile field of
+          # its own (Codex review).
+          existing_fact_set_ok=$(python3 -c '
+          import json
+          import sys
+          from pathlib import Path
+
+          existing_manifest = json.loads(
+              (Path(sys.argv[1]) / "manifest.json").read_text(encoding="utf-8")
+          )
+          new_manifest = json.loads(Path(sys.argv[2]).read_text(encoding="utf-8"))
+          print("true" if existing_manifest.get("fact_set") == new_manifest.get("fact_set") else "false")
+          ' .existing-asset/extracted "$NEW_MANIFEST_PATH")
+
+          if [[ "$existing_fact_set_ok" != "true" ]]; then
+            echo "::error::$ASSET_NAME already exists on release $RELEASE_TAG but its manifest.json declares a DIFFERENT fact_set (evidence-producer identity) than this run's own freshly-built manifest -- a real consumer's incompatible-evidence check (abicheck/buildsource/baseline_set.py's _evidence_incompatibility()) depends on that field independently of snapshot/binary content, so this is never a safe retry regardless of what the content digest says. Delete the existing asset explicitly ('gh release delete-asset $RELEASE_TAG $ASSET_NAME --repo $REPO --yes') and re-run, or publish under a new release tag." >&2
+            exit 1
+          fi
+
+          # compute_content_digest()/recompute_content_digest_from_disk()
+          # hash artifacts[] content alone -- neither reads
+          # manifest_version/snapshot_schema, so an existing asset with an
+          # absent/unsupported manifest_version OR a snapshot_schema newer
+          # than this checkout's installed reader can still reach a
+          # matching content digest and this branch's safe-retry no-op.
+          # That asset stays published in a state
+          # resolve_target()/resolve_bundle() (the real consumers,
+          # abicheck/buildsource/baseline_set.py) would reject outright as
+          # stale_schema -- this workflow would report success having left
+          # an unusable asset behind (Codex review, three rounds: the
+          # first covered manifest_version; the second found the SEPARATE
+          # manifest-level snapshot_schema check
+          # resolve_target()/resolve_bundle() also apply
+          # (_schema_and_profile_check); the third found that isn't the
+          # ONLY schema check the real resolver runs --
+          # _snapshot_digest_issue() separately reads each individual
+          # snapshot file's OWN schema_version field, since an older/
+          # hand-authored manifest with no aggregate snapshot_schema has
+          # nothing for that first check to compare, but every snapshot
+          # file still carries its own schema_version; without checking
+          # each one here too, a forward-schema snapshot under such a
+          # manifest would pass this gate and only fail resolution later,
+          # opaquely). Checked against the SAME
+          # SUPPORTED_MANIFEST_VERSIONS/serialization.SCHEMA_VERSION a
+          # real consumer uses, not a hand-duplicated copy of either --
+          # and explicitly type-checked (isinstance(..., int)) rather than
+          # comparing directly, so a malformed non-integer schema field
+          # prints "false" instead of raising (which, under this script's
+          # own `set -euo pipefail`, would abort the whole step with a raw
+          # traceback instead of this check's own actionable error).
+          existing_schema_ok=$(python3 -c '
+          import json
+          import sys
+          from pathlib import Path
+
+          from abicheck import serialization
+          from abicheck.buildsource.baseline_set import SUPPORTED_MANIFEST_VERSIONS
+          from abicheck.snapshot_io import read_snapshot_bytes
+
+          base_dir = Path(sys.argv[1])
+          manifest = json.loads((base_dir / "manifest.json").read_text(encoding="utf-8"))
+
+          if manifest.get("manifest_version") not in SUPPORTED_MANIFEST_VERSIONS:
+              print("false")
+              sys.exit(0)
+
+          snapshot_schema = manifest.get("snapshot_schema")
+          if snapshot_schema is not None:
+              if not isinstance(snapshot_schema, int) or isinstance(snapshot_schema, bool):
+                  print("false")
+                  sys.exit(0)
+              if snapshot_schema > serialization.SCHEMA_VERSION:
+                  print("false")
+                  sys.exit(0)
+
+          for artifact in manifest.get("artifacts", []):
+              snapshot_name = artifact.get("snapshot")
+              if not snapshot_name:
+                  continue
+              snapshot_path = base_dir / snapshot_name
+              if not snapshot_path.is_file():
+                  continue
+              try:
+                  raw = json.loads(read_snapshot_bytes(snapshot_path).decode("utf-8"))
+              except Exception:
+                  continue
+              if not isinstance(raw, dict):
+                  continue
+              raw_schema_version = raw.get("schema_version")
+              if (
+                  isinstance(raw_schema_version, int)
+                  and not isinstance(raw_schema_version, bool)
+                  and raw_schema_version > serialization.SCHEMA_VERSION
+              ):
+                  print("false")
+                  sys.exit(0)
+
+          print("true")
+          ' .existing-asset/extracted)
+
+          if [[ "$existing_schema_ok" != "true" ]]; then
+            echo "::error::$ASSET_NAME already exists on release $RELEASE_TAG but its manifest_version, its manifest-level snapshot_schema, or one of its snapshot files' own schema_version declares a schema this resolver doesn't understand -- a real consumer (resolve_target()/resolve_bundle()) would reject it as stale_schema regardless of what the content digest says, so this is never a safe retry. Delete the existing asset explicitly ('gh release delete-asset $RELEASE_TAG $ASSET_NAME --repo $REPO --yes') and re-run, or publish under a new release tag." >&2
+            exit 1
+          fi
+
+          echo "new:      $NEW_CONTENT_DIGEST"
+          echo "existing: $existing_content_digest"
+          echo "::endgroup::"
+
+          if [[ "$NEW_CONTENT_DIGEST" == "$existing_content_digest" ]]; then
+            echo "::notice::$ASSET_NAME already published on $RELEASE_TAG with identical (normalized) content -- treating this as a safe re-run, not re-uploading."
+            exit 0
+          fi
+
+          echo "::error::$ASSET_NAME already exists on release $RELEASE_TAG with DIFFERENT content (normalized content-digest $existing_content_digest, this run built $NEW_CONTENT_DIGEST). release-contract assets are documented as immutable once published -- refusing to silently overwrite it. If this release-contract baseline-set genuinely needs to change, delete the existing asset explicitly first ('gh release delete-asset $RELEASE_TAG $ASSET_NAME --repo $REPO --yes') and re-run, or publish under a new release tag." >&2
+          exit 1

@@ -1149,3 +1149,112 @@ class TestClassifierParityWithRunSh:
             f"run.sh and validate-inputs.sh disagree on {kind} ({path}): "
             f"run.sh={run_sh_verdict} validate-inputs.sh={validate_sh_verdict}"
         )
+
+
+@pytest.mark.skipif(
+    not VALIDATE_SH.is_file(), reason="action/validate-inputs.sh not found"
+)
+class TestBaselineAssetNameTemplateScopeWarning:
+    # Regression for a false-positive warning (Codex review): action.yml
+    # forwards baseline-asset-name-template's own manifest default
+    # ('abicheck-baseline-{profile}.tar.zst') unconditionally, so it is
+    # non-empty on every single invocation -- including every ordinary
+    # dump/appcompat/deps-* run that never asked for the baseline-set
+    # feature at all. The scope check must key off baseline-profile/
+    # baseline-target (which have no default and are genuinely only set
+    # when a caller opts in), not the template input's presence.
+
+    def test_default_template_alone_is_silent_outside_compare_and_scan(
+        self,
+    ) -> None:
+        result = _run_validate(
+            {
+                "INPUT_MODE": "dump",
+                "INPUT_NEW_LIBRARY": "x.so",
+                "INPUT_BASELINE_ASSET_NAME_TEMPLATE": (
+                    "abicheck-baseline-{profile}.tar.zst"
+                ),
+            }
+        )
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert "baseline-profile/baseline-target" not in (result.stdout + result.stderr)
+
+    def test_baseline_profile_outside_compare_and_scan_still_warns(
+        self,
+    ) -> None:
+        result = _run_validate(
+            {
+                "INPUT_MODE": "dump",
+                "INPUT_NEW_LIBRARY": "x.so",
+                "INPUT_BASELINE_PROFILE": "release",
+                "INPUT_BASELINE_TARGET": "libfoo",
+                "INPUT_ABI_BASELINE": "latest-release",
+            }
+        )
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert "baseline-profile/baseline-target" in (result.stdout + result.stderr)
+
+
+@pytest.mark.skipif(
+    not VALIDATE_SH.is_file(), reason="action/validate-inputs.sh not found"
+)
+class TestBaselineProfileRequiresAbiBaseline:
+    # Regression (Codex review): run.sh only ever reaches
+    # _try_baseline_set_fallback from inside its `-n "$ABI_BASELINE"` fetch
+    # block -- baseline-profile/baseline-target set without abi-baseline
+    # can never trigger a fetch at all, silently falling through to
+    # whatever old-library/against the caller separately supplied instead.
+
+    def test_profile_and_target_without_abi_baseline_fails(self) -> None:
+        result = _run_validate(
+            {
+                "INPUT_MODE": "compare",
+                "INPUT_OLD_LIBRARY": "old.so",
+                "INPUT_NEW_LIBRARY": "new.so",
+                "INPUT_BASELINE_PROFILE": "release",
+                "INPUT_BASELINE_TARGET": "libfoo",
+            }
+        )
+        assert result.returncode == 1
+        assert "abi-baseline is not" in (result.stdout + result.stderr)
+
+    def test_target_without_abi_baseline_fails(self) -> None:
+        result = _run_validate(
+            {
+                "INPUT_MODE": "scan",
+                "INPUT_NEW_LIBRARY": "new.so",
+                "INPUT_BASELINE_PROFILE": "release",
+                "INPUT_BASELINE_TARGET": "libfoo",
+            }
+        )
+        assert result.returncode == 1
+        assert "abi-baseline is not" in (result.stdout + result.stderr)
+
+    def test_profile_target_and_abi_baseline_together_passes(self) -> None:
+        result = _run_validate(
+            {
+                "INPUT_MODE": "compare",
+                "INPUT_OLD_LIBRARY": "old.so",
+                "INPUT_NEW_LIBRARY": "new.so",
+                "INPUT_BASELINE_PROFILE": "release",
+                "INPUT_BASELINE_TARGET": "libfoo",
+                "INPUT_ABI_BASELINE": "latest-release",
+            }
+        )
+        assert result.returncode == 0, result.stdout + result.stderr
+
+    def test_target_without_profile_still_fails_pairing_check(self) -> None:
+        # Pre-existing pairing check (profile requires target); this class
+        # adds the mirror direction (target requires profile) plus the new
+        # abi-baseline requirement -- confirm both fire independently.
+        result = _run_validate(
+            {
+                "INPUT_MODE": "compare",
+                "INPUT_OLD_LIBRARY": "old.so",
+                "INPUT_NEW_LIBRARY": "new.so",
+                "INPUT_BASELINE_TARGET": "libfoo",
+                "INPUT_ABI_BASELINE": "latest-release",
+            }
+        )
+        assert result.returncode == 1
+        assert "baseline-profile is not" in (result.stdout + result.stderr)

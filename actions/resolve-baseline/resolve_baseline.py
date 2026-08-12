@@ -102,6 +102,14 @@ def main(argv: list[str] | None = None) -> int:
         help='JSON object {"kind", "tool", "version"}, or empty to skip the '
         "incompatible_evidence check",
     )
+    parser.add_argument(
+        "--expected-project-ref",
+        default="",
+        help="Require the resolved baseline-set's manifest.json project_ref "
+        "to match exactly, or empty to skip the wrong_project_ref check "
+        "(P0: catches an accepted-main cache restore-keys prefix match "
+        "landing on the wrong commit).",
+    )
     args = parser.parse_args(argv)
 
     candidate_evidence_producer = None
@@ -130,6 +138,7 @@ def main(argv: list[str] | None = None) -> int:
             profile=args.profile,
             required=required,
             candidate_evidence_producer=candidate_evidence_producer,
+            expected_project_ref=args.expected_project_ref,
         )
     else:
         try:
@@ -150,6 +159,7 @@ def main(argv: list[str] | None = None) -> int:
             profile=args.profile,
             required=required,
             candidate_evidence_producer=candidate_evidence_producer,
+            expected_project_ref=args.expected_project_ref,
         )
 
     output_status = _print_outputs(result)

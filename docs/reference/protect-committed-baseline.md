@@ -1,0 +1,175 @@
+---
+doc_type: reference
+audience:
+  - ci-owner
+  - library-maintainer
+level: intermediate
+summarizes:
+  - baseline-storage-backends
+lifecycle: active
+generated: false
+---
+
+# `protect-committed-baseline.yml` Reference
+
+A `workflow_call` reusable workflow that closes a specific self-approval gap
+in a *committed* baseline: an ordinary PR that both changes the compared
+binary/headers **and** updates the baseline file it's compared against can
+make an incompatible change look compatible, because the comparison never
+reads the baseline as it stood at the PR's base commit — it reads whatever
+the PR's own working tree has, which the same PR just edited.
+
+## The gap this closes
+
+```yaml
+- name: ABI compatibility check
+  uses: abicheck/abicheck@v0.5.0
+  with:
+    old-library: abi/libfoo.abicheck.json
+    new-library: build/libfoo.so
+```
+
+`old-library: abi/libfoo.abicheck.json` resolves that path from whatever is
+checked out — on a PR run, that's the PR's own head commit. If the PR also
+updates `abi/libfoo.abicheck.json` to match the (possibly incompatible) new
+binary, the comparison silently passes, because it never diffs against the
+file's content at the PR's *base* commit.
+
+Two independent fixes address this, and they compose:
+
+1. **Read the baseline from the base commit, not the working tree** — see
+   [Storing Baselines](../use/baseline-storage.md)'s recipe using
+   `git show "${{ github.event.pull_request.base.sha }}:path"`. This is
+   correct by construction: the baseline file the comparison reads can never
+   be the one the PR itself just wrote.
+2. **This workflow** — a defense-in-depth trusted gate for a project that
+   hasn't (yet, or ever) adopted recipe 1: an ordinary PR that touches a
+   configured baseline path fails outright, forcing a genuine refresh
+   through a dedicated trusted (push-triggered, not PR-diff-triggered)
+   workflow, or an explicit human-reviewed bypass label.
+
+Use either independently, or both together (recipe 1 removes the risk
+entirely; this workflow catches it even for a baseline path recipe 1
+wasn't applied to, or a workflow this project doesn't control the source
+of).
+
+## Inputs
+
+| Input | Required | Default | Meaning |
+|-------|----------|---------|---------|
+| `protected-paths` | yes | — | Newline-separated glob patterns naming committed baseline files, e.g. `abi/**` or `baselines/*/*.abicheck.json`. `**` matches zero or more path segments (crosses `/`); a lone `*` matches within one path segment only (never crosses `/`); `?` matches one character (never `/`). |
+| `bypass-label` | no | `''` | A PR label that opts a specific PR out of this check (e.g. for an explicitly reviewed, human-approved manual baseline refresh). Empty (default) disables the bypass entirely — every PR touching a protected path fails unconditionally. |
+| `base-sha` | no | `github.event.pull_request.base.sha` | Override for a non-`pull_request`-triggered caller. |
+| `head-sha` | no | `github.event.pull_request.head.sha` | Override for a non-`pull_request`-triggered caller. |
+
+No outputs — this workflow either passes (job succeeds) or fails (job
+exits 1 with an `::error::` naming every protected file the PR touched).
+
+**`.github/workflows/**` is always protected too, independent of
+`protected-paths`.** This workflow's own `protected-paths`/`bypass-label`
+configuration is supplied by the *calling* workflow file, and for an
+ordinary `pull_request` trigger (this workflow's own required, fork-safe
+trigger) that file is read from the PR's own head commit — so a PR that
+edits the calling workflow (e.g. narrowing `protected-paths` to a glob
+that no longer matches, or removing this check's invocation entirely)
+could otherwise silently defeat this whole protection in the same change
+that touches the committed baseline. A change under `.github/workflows/`
+therefore always counts as a hit, uses the same `bypass-label` gate, and
+gets its own dedicated error message distinguishing it from an ordinary
+`protected-paths` hit.
+
+## Fork safety
+
+Runs entirely on an ordinary `pull_request` trigger: read-only
+`contents: read`/`pull-requests: read` permissions, the default
+`GITHUB_TOKEN`. **Never** wire this into a `pull_request_target` caller —
+that would hand a fork PR's own workflow changes elevated permissions for
+no benefit this check needs, the same rule
+[ADR-047 §12](../contribute/adr/047-github-actions-integration-model.md)
+already states for the baseline-publishing workflows.
+
+## Residual gap: pin this check with a Ruleset, not just branch protection
+
+The `.github/workflows/**` guard above closes "a PR reconfigures
+`protected-paths`/`bypass-label` while *also* calling this reusable
+workflow" — it does **not** close "a PR removes the calling job/step
+that invokes this workflow entirely, or replaces it with an unrelated job
+that trivially succeeds under the same required-check name". Both are the
+same underlying, structural limitation of GitHub's "required status
+check, matched by name" model: for an ordinary `pull_request` trigger,
+the *calling* workflow file — which decides whether/how this reusable
+workflow is even invoked — is read from the PR's own head commit, and a
+check's identity to branch protection is its *name*, not which workflow
+file (or whether any workflow at all) actually produced it. No logic
+inside a `workflow_call` reusable workflow, this one included, can
+observe or prevent the calling workflow choosing not to invoke it.
+
+Closing this fully needs a mechanism the *calling repository* controls,
+sourced from a ref a PR cannot rewrite — plain branch-protection "required
+status checks" (matched by name alone) is not sufficient:
+
+- **[GitHub Repository Rulesets](https://docs.github.com/en/repositories/configuring-branches-and-merges-in-your-repository/managing-rulesets/available-rules-for-rulesets#require-workflows-to-pass-before-merging)'s
+  "Require workflows to pass before merging"** pins a required workflow to
+  a specific *file path and ref* (the default branch, not the PR head) —
+  unlike a bare required-status-check name, a PR cannot satisfy it by
+  simply not invoking (or renaming) the workflow, since the ruleset
+  itself names which workflow file must run. **This is the recommended
+  mitigation** for a repository adopting this check.
+- `pull_request_target` (reading the calling workflow from the base
+  branch) is deliberately rejected — see "Fork safety" above — since it
+  would hand a fork PR's own workflow/code changes elevated permissions
+  for no benefit this specific check needs.
+
+A single reusable workflow answering "does this PR touch a protected
+path" cannot also answer "was I actually invoked" — that second question
+is inherently the calling repository's own branch-protection/Ruleset
+configuration to answer, not this workflow's.
+
+## Example
+
+```yaml
+name: Protect committed ABI baseline
+
+on:
+  pull_request:
+    # `labeled`/`unlabeled`, not just the default `opened`/`synchronize`/
+    # `reopened` -- this check's whole approval/revocation flow depends on
+    # `bypass-label`, and a label-only event carries the SAME head commit
+    # as the run that just failed. Without these two types, adding
+    # `baseline-refresh` after a failed check starts no new run at all
+    # (even a manual rerun of the old job replays its ORIGINAL event
+    # payload, so `github.event.pull_request.labels` still reads
+    # pre-label); removing the label afterward is the same gap in
+    # reverse, leaving a stale success as the required check for an
+    # unchanged head SHA.
+    types: [opened, synchronize, reopened, labeled, unlabeled]
+    paths:
+      - 'abi/**'
+
+permissions:
+  contents: read
+  pull-requests: read
+
+jobs:
+  protect-baseline:
+    uses: abicheck/abicheck/.github/workflows/protect-committed-baseline.yml@<PINNED_COMMIT_OR_RELEASE>
+    with:
+      protected-paths: |
+        abi/**
+      bypass-label: baseline-refresh
+```
+
+A maintainer doing a genuine, reviewed baseline refresh in a normal PR adds
+the `baseline-refresh` label before merging; every other PR touching
+`abi/**` fails until the change is reverted or the baseline update is moved
+to a dedicated trusted workflow.
+
+## See also
+
+- [Storing Baselines](../use/baseline-storage.md) — the base-commit-read
+  recipe (fix 1 above), and the `abi-baseline`/baseline-set-archive fetch
+  recipes this workflow complements.
+- [Resolving Baselines](resolve-baseline.md) — the canonical reference for
+  how a baseline (committed file, release asset, or baseline-set archive) is
+  located and validated in the first place; this workflow only protects the
+  committed-file case from silent self-approval once resolved.
