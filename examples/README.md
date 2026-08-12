@@ -169,7 +169,7 @@ the way it previously did (stale at a 169-case catalog for several releases).
   needs a real compilable `v1`/`v2` pair; of the catalog's L3/L4/L5 cases, only 7
   are `single-library`-owned (`case98`, `case105`, `case122`, `case130`-`case133`)
   and all 7 are in `BUILD_SOURCE_PROOF_CASES` (plus `case01`/`case04`/`case129` as
-  L0/L1 regression smoke for the variant itself). The other 14 L3-L5 cases are
+  L0/L1 regression smoke for the variant itself). The other 15 L3-L5 cases are
   `g20`/`l3l4l5`/`reconcile`-owned: they ship committed snapshot fixtures instead
   of compilable sources by design (some, like `case160`-`162`'s L5 source-graph
   deltas, can't be derived deterministically from a real build) and are proven by
