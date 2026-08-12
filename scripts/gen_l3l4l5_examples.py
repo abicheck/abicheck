@@ -544,13 +544,21 @@ def build_cases() -> dict[str, tuple[str, dict[str, Any], dict[str, Any]]]:
     # same release the helper's own signature and header change.
     l5j_old_graph = build_source_graph(l5j_build, l5j_old_surface)
     l5j_new_graph = build_source_graph(l5j_build, l5j_new_surface)
-    l5j_new_graph.edges.append(
+    # add_edge() (not a raw .edges.append()) so the edge is deduped/resolved
+    # the same way the real fold's own edges are; finalize() afterward so
+    # graph_id and the coverage counts (coverage.call_edges) are recomputed
+    # against the graph's true final edge set, not stale as of the fold's
+    # own internal finalize() call before this edge existed (Codex review,
+    # fresh evidence — the committed graph_id/coverage previously silently
+    # disagreed with the actual serialized edges).
+    l5j_new_graph.add_edge(
         GraphEdge(
             src="decl://_ZN4demo7processEv",
             dst="decl://_ZN4demo6detail6helperEl",
             kind="DECL_CALLS_DECL",
         )
     )
+    l5j_new_graph.finalize()
     cases["case196_header_graph_move_reconciled"] = (
         "L5",
         l5j_old_graph.to_dict(),

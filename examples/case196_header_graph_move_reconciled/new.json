@@ -2,11 +2,12 @@
   "coverage": {
     "binary_symbol_mappings": 0,
     "call_edges": {
-      "collected": false,
-      "count": 0
+      "collected": true,
+      "count": 1
     },
     "compile_units": 0,
     "edge_kinds": {
+      "DECL_CALLS_DECL": 1,
       "SOURCE_DECLARES": 2
     },
     "include_edges": {
@@ -73,7 +74,13 @@
       "conflicts": [],
       "dst": "decl://_ZN4demo6detail6helperEl",
       "edge": "DECL_CALLS_DECL",
-      "facts": [],
+      "facts": [
+        {
+          "attrs": {},
+          "confidence": "unknown",
+          "producer": ""
+        }
+      ],
       "occurrences": [],
       "provenance": "",
       "resolved": {},
@@ -82,7 +89,7 @@
   ],
   "external_graph_refs": [],
   "extractor_passes": {},
-  "graph_id": "sha256:eb39d61732e89abc1309a64d0573f6b73f0aa7de0214f9b7bbfa08f948940e79",
+  "graph_id": "sha256:5bf14253dad821e86480ced87838d0cd19e9fc21c031c01c2359ddc7a6755e14",
   "indexes": {
     "by_binary_symbol": {},
     "by_file": {},
