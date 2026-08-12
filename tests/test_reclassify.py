@@ -1359,6 +1359,48 @@ reclassify:
     assert reclassify_rule_for_change(change, pf) is None
 
 
+def test_reclassify_rule_for_change_attributes_a_blocked_rule_that_still_changed_the_outcome(
+    tmp_path: Path,
+) -> None:
+    """Codex review (third round on the same frozen-floor interaction): a
+    matching reclassify rule blocked by the frozen-namespace floor still
+    changed the effective outcome if the floor-clamped result (base_v)
+    differs from what overrides: alone would have produced (next_priority_v).
+    `func_noexcept_removed` is a RISK kind (base verdict
+    COMPATIBLE_WITH_RISK under strict_abi); `overrides: ... to: break`
+    (BREAKING) makes next_priority_v BREAKING, and `reclassify: ... to:
+    ignore` (COMPATIBLE) on a frozen-namespace finding is blocked back to
+    base_v (COMPATIBLE_WITH_RISK) -- BREAKING != COMPATIBLE_WITH_RISK, so
+    the rule genuinely changed the outcome (from BREAKING to
+    COMPATIBLE_WITH_RISK) even though it didn't get the verdict it asked
+    for, and must still be attributed. Verified by deliberately reverting
+    to the previous "blocked == always no-op" logic and confirming this
+    test fails."""
+    from abicheck.severity import reclassify_rule_for_change
+
+    p = tmp_path / "policy.yaml"
+    p.write_text(
+        """
+overrides:
+  func_noexcept_removed: break
+reclassify:
+  - kind: func_noexcept_removed
+    symbol: foo
+    to: ignore
+""".strip(),
+        encoding="utf-8",
+    )
+    pf = PolicyFile.load(p)
+    change = _change(
+        ChangeKind.FUNC_NOEXCEPT_REMOVED,
+        "foo",
+        frozen_namespace_violation="detail.*",
+    )
+    rule = reclassify_rule_for_change(change, pf)
+    assert rule is not None
+    assert rule.to_verdict == Verdict.COMPATIBLE
+
+
 def test_reclassify_rule_for_change_none_when_no_rule_matches(tmp_path: Path) -> None:
     from abicheck.severity import reclassify_rule_for_change
 

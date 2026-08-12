@@ -408,12 +408,29 @@ def reclassify_rule_for_change(
     for rule in rules:
         if rule.matches(change, today):
             reclass_v = rule.to_verdict
-            if reclass_v == next_priority_v:
-                return None
-            if (
-                _has_frozen_namespace_violation(change)
-                and _VERDICT_ORDER.index(reclass_v) < _VERDICT_ORDER.index(base_v)
-            ):
+            # The verdict this matching rule *actually* produces, applying
+            # the identical frozen-namespace floor
+            # effective_verdict_for_change's own reclassify branch applies:
+            # when reclass_v is blocked, that branch returns base_v directly
+            # -- it never falls through to consult overrides:, even though
+            # overrides: would have applied had no reclassify rule matched
+            # at all (Codex review, third round: a blocked rule was
+            # previously always read as a no-op, but the real effective
+            # verdict it produces -- base_v -- can still differ from
+            # next_priority_v, e.g. a global `overrides: ... to: break` with
+            # a frozen-namespace `reclassify: ... to: ignore` blocked back
+            # to a weaker base_v than the override would have given: the
+            # rule genuinely changed the outcome from what overrides: alone
+            # would have produced, just not to the verdict it asked for).
+            effective_v = (
+                base_v
+                if (
+                    _has_frozen_namespace_violation(change)
+                    and _VERDICT_ORDER.index(reclass_v) < _VERDICT_ORDER.index(base_v)
+                )
+                else reclass_v
+            )
+            if effective_v == next_priority_v:
                 return None
             return rule
     return None

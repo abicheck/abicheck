@@ -150,3 +150,13 @@ A new changelog fragment. See changelog.d/README.md for the workflow.
   and `docs/reference/cli-reference.md`), the Python API's
   `checker.compare(policy_file=...)` docstring, and
   `docs/reference/config-file.md`'s policy-file schema summary table.
+  `reclassify_rule_for_change` now correctly attributes a rule that's
+  blocked by the frozen-namespace floor but still changed the effective
+  outcome from what `overrides:` alone would have produced — previously a
+  blocked rule was unconditionally treated as a no-op, but
+  `effective_verdict_for_change`'s own reclassify branch returns the base
+  policy's raw verdict (not the override's) when a matching rule is
+  blocked, bypassing `overrides:` entirely; when that raw base verdict
+  differs from what `overrides:` would have given absent the rule, the rule
+  genuinely changed the outcome (just not to the verdict it asked for) and
+  must still be disclosed.
