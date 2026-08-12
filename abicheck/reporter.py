@@ -978,15 +978,8 @@ def _suppressed_change_entry(
     entry["reachability_state"] = assessment.reachability_state.value
     if assessment.has_signal():
         entry["impact_assessment"] = assessment.to_dict()
-    # ELF symbol linkage of a removed symbol (Change.symbol_binding) --
-    # this is the one call site for the *suppressed*-changes array, a
-    # separate projector from _change_annotation_fields's kept-changes
-    # one; a binding-scoped suppression's audit trail needs the same
-    # field here too, or a reader can't see why the rule matched
-    # (Codex review, fresh evidence).
-    binding = getattr(c, "symbol_binding", None)
-    if binding:
-        entry["symbol_binding"] = binding
+    if getattr(c, "symbol_binding", None):
+        entry["symbol_binding"] = c.symbol_binding
     # ADR-049 Phase 3 (Codex review, fresh evidence): suppression is a
     # display/gate decision, not a reason to erase the contract-relevance
     # decision checker._apply_contract_evaluation_shadow already stamped on
@@ -1434,17 +1427,8 @@ def _change_annotation_fields(c: Any) -> dict[str, Any]:
     correlated = getattr(c, "correlated_change_kind", None)
     if correlated:
         out["correlated_change_kind"] = correlated
-    # ELF symbol linkage of a removed symbol (Change.symbol_binding) --
-    # "global"/"weak"/"local"/"unique"/"other" on FUNC_REMOVED/
-    # FUNC_REMOVED_ELF_ONLY/VAR_REMOVED/FUNC_DELETED_ELF_FALLBACK, None
-    # otherwise or when not captured. Without this, weak-COMDAT and
-    # strong-export removals were indistinguishable in the primary
-    # machine-integration output (JSON/SARIF), even though the new
-    # `binding:` suppression selector can already tell them apart at
-    # match time (Codex review).
-    binding = getattr(c, "symbol_binding", None)
-    if binding:
-        out["symbol_binding"] = binding
+    if getattr(c, "symbol_binding", None):
+        out["symbol_binding"] = c.symbol_binding
     return out
 
 
