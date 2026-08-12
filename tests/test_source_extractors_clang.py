@@ -677,6 +677,49 @@ def test_build_command_carries_sycl_language_mode() -> None:
     assert "-fsycl" in cmd
 
 
+def test_build_command_collapses_sycl_to_host_only_pass() -> None:
+    """A real build's own recorded ``-fsycl`` on an Intel oneAPI driver makes
+    the driver run a device pass AND a host pass, each emitting a full JSON
+    document to the same stdout stream -- breaking the single-document JSON
+    reader (``Extra data`` at the host/device split, reported against a real
+    2.8GB -fsycl oneDAL TU). ``-fsycl-host-only`` must be appended so the
+    reconstructed command emits exactly one document, mirroring the identical
+    fix already shipped for the L2 header-AST backend."""
+    cu = _cu(
+        argv=["icpx", "-fsycl", "-c", "foo.cpp"],
+        abi_relevant_flags=["-fsycl"],
+    )
+    ast_cmd = build_clang_command(cu, Path("foo.cpp"), clang_bin="icpx")
+    assert "-fsycl-host-only" in ast_cmd
+    macro_cmd = build_clang_macro_command(cu, Path("foo.cpp"), clang_bin="icpx")
+    assert "-fsycl-host-only" in macro_cmd
+
+
+def test_build_command_sycl_host_only_skipped_for_non_intel_driver() -> None:
+    """Stock upstream clang hard-rejects ``-fsycl-host-only`` ("unknown
+    argument") -- appending it unconditionally for any clang-family binary
+    would turn a working ``--gcc-path clang`` + ``-fsycl`` replay into a
+    guaranteed failure."""
+    cu = _cu(
+        argv=["clang++", "-fsycl", "-c", "foo.cpp"],
+        abi_relevant_flags=["-fsycl"],
+    )
+    cmd = build_clang_command(cu, Path("foo.cpp"), clang_bin="clang++")
+    assert "-fsycl-host-only" not in cmd
+
+
+def test_build_command_sycl_host_only_skipped_when_already_pinned() -> None:
+    """A caller that already pinned a single pass explicitly must not get a
+    redundant/conflicting second one appended."""
+    cu = _cu(
+        argv=["icpx", "-fsycl", "-fsycl-device-only", "-c", "foo.cpp"],
+        abi_relevant_flags=["-fsycl", "-fsycl-device-only"],
+    )
+    cmd = build_clang_command(cu, Path("foo.cpp"), clang_bin="icpx")
+    assert "-fsycl-host-only" not in cmd
+    assert cmd.count("-fsycl-device-only") == 1
+
+
 # -- source_abi_from_clang_ast (pure, D4) ------------------------------------
 
 
@@ -2447,6 +2490,20 @@ def test_extract_rechecks_deadline_after_loading_ast(monkeypatch) -> None:  # ty
 def test_extract_invalid_json_raises(monkeypatch) -> None:  # type: ignore[no-untyped-def]
     extractor = _patch_run(monkeypatch, lambda cmd, **kw: _emit_ast(kw, "{not json"))
     with pytest.raises(SourceExtractionError, match="not valid JSON"):
+        extractor.extract(_cu(), public_header_roots=["include/foo.h"])
+
+
+def test_extract_two_document_json_raises_actionable_hint(monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    """A flag combination this codebase doesn't already collapse to a single
+    pass (unlikely once ``-fsycl-host-only`` is appended for the Intel-driver
+    case, but not provably exhaustive over every offload flag) still hits
+    ``json.load``'s "Extra data" error on a two-document stream. The message
+    must name the actual cause instead of a bare byte-offset."""
+    import json
+
+    payload = json.dumps(_ast()) + json.dumps(_ast())
+    extractor = _patch_run(monkeypatch, lambda cmd, **kw: _emit_ast(kw, payload))
+    with pytest.raises(SourceExtractionError, match="more than one JSON document"):
         extractor.extract(_cu(), public_header_roots=["include/foo.h"])
 
 

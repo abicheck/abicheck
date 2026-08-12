@@ -61,6 +61,7 @@ from pathlib import Path
 from typing import Any
 
 from ... import deadline
+from ...dumper_clang import _needs_sycl_host_only
 from ...header_conditionals import _include_guard_macro, _strip_comments
 from ..build_evidence import CompileUnit
 from ..model import LayerConfidence
@@ -224,6 +225,25 @@ def _clang_context_args(
     Mirrors the compile unit's language standard, defines/undefines, include and
     system-include paths, sysroot, target triple, and ABI-relevant flags, so both
     the AST pass and the macro pass parse the same TU the real build compiled.
+
+    A real build's own recorded ``-fsycl`` (carried through via
+    ``replay_extra_flags``'s ``ABI_RELEVANT_FLAG_PREFIXES``) makes Intel's
+    oneAPI DPC++/C++ driver (icx/icpx/dpcpp[-cl]) run *two* separate ``-cc1``
+    passes for one compile — a SYCL device-side pass and a host-side pass,
+    each writing a complete document to the same stdout stream back-to-back
+    with no separator, which breaks both the AST pass's single-document JSON
+    reader and the macro pass's single-stream text reader. Mirrors the fix
+    already shipped for the L2 header-AST backend
+    (``dumper_ast_config._build_clang_header_command`` /
+    ``dumper_clang._needs_sycl_host_only``): append ``-fsycl-host-only`` here
+    too, collapsing the compile back to the single host-side pass that
+    actually links into the scanned binary — the device pass describes
+    SPIR-V kernel code that never becomes part of the host ``.so``'s
+    exported symbols, so L4 replay has no use for it either way. A no-op for
+    any non-Intel driver, or when the caller's own flags already pin a
+    single pass (``-fsycl-host-only``/``-fsycl-device-only``) or explicitly
+    disable SYCL (``-fno-sycl`` last-flag-wins) — see
+    ``_needs_sycl_host_only``'s own docstring for the full precedence.
     """
     cc_bin = pick_compiler_binary(compile_unit, compiler_binary)
     msvc = is_msvc_mode(cc_bin)
@@ -264,6 +284,8 @@ def _clang_context_args(
             if not flag.startswith("-std=")
             and not flag.lower().startswith(("/std:", "-std:"))
         ]
+    if _needs_sycl_host_only(cc_bin, [*cmd, *extra]):
+        extra = [*extra, "-fsycl-host-only"]
     cmd += extra
     return cmd, msvc
 
@@ -317,54 +339,6 @@ def build_clang_macro_command(
     else:
         preprocess = ["-E", "-dD"]
     return [clang_bin, *cmd, *preprocess, "-ferror-limit=0", str(source)]
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
 
 class _ClassifyContext:
@@ -1441,8 +1415,29 @@ class ClangSourceExtractor:
                 with open(ast_path, "rb") as fh:  # bytes: json detects encoding
                     ast_root = json.load(fh)
             except ValueError as exc:
+                # "Extra data" means a second top-level JSON value follows the
+                # first — some other flag not already collapsed to a single
+                # pass above (`_clang_context_args`'s `-fsycl-host-only`
+                # insertion) made this compile emit more than one document to
+                # the same stdout stream (e.g. an OpenMP/CUDA offload target
+                # flag, or a non-Intel SYCL-capable driver this codebase
+                # doesn't yet special-case) — name the likely cause here
+                # rather than a bare byte-offset, mirroring the identical hint
+                # `dumper_clang_errors._parse_clang_ast_result` gives the L2
+                # header-AST backend for the same failure shape.
+                hint = ""
+                if isinstance(exc, json.JSONDecodeError) and exc.msg == "Extra data":
+                    hint = (
+                        " -- this looks like more than one JSON document on "
+                        "stdout, which happens when a compiler flag makes "
+                        "clang run multiple -cc1 passes for one compile (e.g. "
+                        "an unpinned SYCL/OpenMP/CUDA offload flag); pin a "
+                        "single compilation pass (e.g. -fsycl-host-only) in "
+                        "the build's own recorded flags"
+                    )
                 raise SourceExtractionError(
-                    f"clang AST for {compile_unit.source} was not valid JSON: {exc}"
+                    f"clang AST for {compile_unit.source} was not valid JSON: "
+                    f"{exc}{hint}"
                 ) from exc
         finally:
             ast_path.unlink(missing_ok=True)
