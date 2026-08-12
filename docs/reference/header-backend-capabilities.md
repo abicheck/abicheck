@@ -36,8 +36,11 @@ one backend selector, plus a merge of the two:
 > `ABICHECK_AST_FRONTEND=castxml` (an env pin is honored the same as an
 > explicit flag, not silently overridden by the device request), and
 > `hybrid` — explicit or `auto` pinned via `ABICHECK_AST_FRONTEND=hybrid`
-> — all reject a non-`host` context (`--ast-frontend clang` is the only
-> way to satisfy it). See ADR-050 D5.
+> — all reject a non-`host` context. Explicit `--ast-frontend clang`
+> satisfies it directly, and so does `auto` pinned to clang via
+> `ABICHECK_AST_FRONTEND=clang` — resolving to `clang` either way skips
+> the castxml/hybrid rejection paths entirely, the same as picking clang
+> outright. See ADR-050 D5.
 
 The two parsers produce the **same** `AbiSnapshot` fields, but not the same
 *values* for every field — and a comparison that mixes producers is a real,
