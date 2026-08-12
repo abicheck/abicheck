@@ -200,6 +200,8 @@ class TestUploadReleaseAssetRetryDispatchesBySuffix:
             ],
         }
         content_digest = compute_content_digest(manifest)
+        new_manifest_path = tmp_path / "new-manifest.json"
+        new_manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
 
         # Build the "existing" asset as a real .tar.gz -- not .tar.zst --
         # so this test actually exercises the suffix-dispatch fix rather
@@ -240,6 +242,7 @@ gh() {{
                 "REPO": "abicheck/abicheck",
                 "NEW_CONTENT_DIGEST": content_digest,
                 "NEW_PROFILE": manifest["profile"],
+                "NEW_MANIFEST_PATH": str(new_manifest_path),
                 "PYTHONPATH": str(Path(__file__).resolve().parents[1]),
             }
         )
@@ -616,6 +619,8 @@ class TestUploadReleaseAssetRejectsUnsupportedManifestVersion:
         }
         new_manifest = {**existing_manifest, "manifest_version": 1}
         new_content_digest = build_manifest.compute_content_digest(new_manifest)
+        new_manifest_path = tmp_path / "new-manifest.json"
+        new_manifest_path.write_text(json.dumps(new_manifest), encoding="utf-8")
 
         asset_src = tmp_path / "asset-src"
         asset_src.mkdir()
@@ -655,6 +660,7 @@ gh() {{
                 "REPO": "abicheck/abicheck",
                 "NEW_CONTENT_DIGEST": new_content_digest,
                 "NEW_PROFILE": new_manifest["profile"],
+                "NEW_MANIFEST_PATH": str(new_manifest_path),
                 "PYTHONPATH": str(Path(__file__).resolve().parents[1]),
             }
         )
@@ -758,6 +764,8 @@ class TestUploadReleaseAssetRejectsUnsupportedSnapshotSchema:
             "snapshot_schema": serialization.SCHEMA_VERSION,
         }
         new_content_digest = build_manifest.compute_content_digest(new_manifest)
+        new_manifest_path = tmp_path / "new-manifest.json"
+        new_manifest_path.write_text(json.dumps(new_manifest), encoding="utf-8")
 
         asset_src = tmp_path / "asset-src"
         asset_src.mkdir()
@@ -797,6 +805,7 @@ gh() {{
                 "REPO": "abicheck/abicheck",
                 "NEW_CONTENT_DIGEST": new_content_digest,
                 "NEW_PROFILE": new_manifest["profile"],
+                "NEW_MANIFEST_PATH": str(new_manifest_path),
                 "PYTHONPATH": str(Path(__file__).resolve().parents[1]),
             }
         )
@@ -908,6 +917,8 @@ gh() {{
             ],
         }
         new_content_digest = build_manifest.compute_content_digest(new_manifest)
+        new_manifest_path = tmp_path / "new-manifest.json"
+        new_manifest_path.write_text(json.dumps(new_manifest), encoding="utf-8")
 
         asset_src = tmp_path / "asset-src"
         asset_src.mkdir()
@@ -947,6 +958,7 @@ gh() {{
                 "REPO": "abicheck/abicheck",
                 "NEW_CONTENT_DIGEST": new_content_digest,
                 "NEW_PROFILE": new_manifest["profile"],
+                "NEW_MANIFEST_PATH": str(new_manifest_path),
                 "PYTHONPATH": str(Path(__file__).resolve().parents[1]),
             }
         )
@@ -1027,6 +1039,8 @@ gh() {{
         }
         new_manifest = {**existing_manifest, "snapshot_schema": None}
         new_content_digest = build_manifest.compute_content_digest(new_manifest)
+        new_manifest_path = tmp_path / "new-manifest.json"
+        new_manifest_path.write_text(json.dumps(new_manifest), encoding="utf-8")
 
         asset_src = tmp_path / "asset-src"
         asset_src.mkdir()
@@ -1066,6 +1080,7 @@ gh() {{
                 "REPO": "abicheck/abicheck",
                 "NEW_CONTENT_DIGEST": new_content_digest,
                 "NEW_PROFILE": new_manifest["profile"],
+                "NEW_MANIFEST_PATH": str(new_manifest_path),
                 "PYTHONPATH": str(Path(__file__).resolve().parents[1]),
             }
         )
@@ -1810,6 +1825,8 @@ class TestUploadReleaseAssetRejectsGenuinelyDifferentContent:
             "artifacts": [{**existing_manifest["artifacts"][0], "sha256": new_hash}],
         }
         new_content_digest = build_manifest.compute_content_digest(new_manifest)
+        new_manifest_path = tmp_path / "new-manifest.json"
+        new_manifest_path.write_text(json.dumps(new_manifest), encoding="utf-8")
 
         asset_src = tmp_path / "asset-src"
         asset_src.mkdir()
@@ -1849,6 +1866,7 @@ gh() {{
                 "REPO": "abicheck/abicheck",
                 "NEW_CONTENT_DIGEST": new_content_digest,
                 "NEW_PROFILE": existing_manifest["profile"],
+                "NEW_MANIFEST_PATH": str(new_manifest_path),
                 "PYTHONPATH": str(Path(__file__).resolve().parents[1]),
             }
         )

@@ -277,14 +277,30 @@ class TestStageBaseline:
         # aborted the whole step (never writing the `asset-name` output)
         # even though the archive itself was built successfully.
         import shutil
+        import sys
 
         baseline_dir = _make_baseline_dir(tmp_path)
         scratch_bin = tmp_path / "no-zstd-bin"
         scratch_bin.mkdir()
-        for tool in ("bash", "tar", "python3", "pip", "sh", "env", "gzip", "rm"):
+        for tool in ("bash", "tar", "pip", "sh", "env", "gzip", "rm"):
             resolved = shutil.which(tool)
             if resolved is not None:
                 (scratch_bin / tool).symlink_to(resolved)
+        # "python3" is symlinked to sys.executable specifically, NOT
+        # whatever shutil.which("python3") happens to resolve on PATH --
+        # this test only cares about exercising the `rm` cleanup bug, and
+        # a PATH-resolved python3 is not guaranteed to be the SAME
+        # interpreter running this test suite (e.g. a distinct python3
+        # shim on a Windows runner), which can make the script's own
+        # `import zstandard` probe fail and fall through to a real `pip
+        # install` -- flaky/networking-dependent and irrelevant to the bug
+        # under test. sys.executable is guaranteed to already have
+        # zstandard importable (a core dependency; see pyproject.toml),
+        # so the fallback's `import zstandard` check always succeeds
+        # without ever needing to install anything.
+        python3_link = scratch_bin / "python3"
+        if not python3_link.exists():
+            python3_link.symlink_to(sys.executable)
         assert not (scratch_bin / "zstd").exists()
 
         result, outputs = _run_action(

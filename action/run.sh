@@ -308,6 +308,23 @@ TarExtractor._safe_extract(Path(sys.argv[1]), Path(sys.argv[2]))
       ;;
   esac
 
+  # Reject any symlink the archive planted -- TarExtractor's own member
+  # validation only rejects a symlink escaping the extraction root, not one
+  # that stays inside it, but actions/resolve-baseline/run.sh (the canonical
+  # baseline-set consumer) rejects ANY symlink at all, since a baseline-set
+  # has no legitimate reason to contain one. Without this, the same archive
+  # could be silently accepted here (root Action fallback) while
+  # check-target/resolve-baseline would reject it as ambiguous -- two
+  # consumers of the identical unified baseline-set protocol disagreeing on
+  # whether the same archive is usable (Codex review). Command substitution,
+  # not piped into `grep -q`, for the same SIGPIPE/pipefail-misreport reason
+  # documented at resolve-baseline/run.sh's own identical check.
+  _symlinks=$(find "$extracted_dir" -type l)
+  if [[ -n "$_symlinks" ]]; then
+    _baseline_unavailable "baseline-set archive '$asset_name' contains a symlink, which is not supported -- baseline-set archives must contain only plain files/directories."
+    return 1
+  fi
+
   # An archive may contain one nested directory (the profile-named dir it
   # was built from) rather than manifest.json at its root -- mirrors
   # actions/resolve-baseline/run.sh's identical single-subdirectory descent.

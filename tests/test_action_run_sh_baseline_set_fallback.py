@@ -446,6 +446,73 @@ class TestBaselineSetFallback:
     @pytest.mark.skipif(
         sys.platform == "win32",
         reason=(
+            "This test builds an in-archive symlink via tarfile.TarInfo's "
+            "SYMTYPE, which extracts to a real filesystem symlink -- "
+            "creating one needs Developer Mode or an elevated process on "
+            "Windows (raises OSError otherwise), a privilege this test has "
+            "no need to require."
+        ),
+    )
+    def test_symlink_in_archive_is_rejected(self, tmp_path: Path) -> None:
+        # Regression (Codex review, P2): TarExtractor's own member
+        # validation only rejects a symlink escaping the extraction root,
+        # not one that stays inside it -- so a real in-root symlink could
+        # previously be silently followed by resolve_target() here, even
+        # though actions/resolve-baseline/run.sh (the canonical baseline-set
+        # consumer) rejects ANY symlink at all. The same archive could then
+        # be accepted by this root Action's fallback while being rejected
+        # as ambiguous through check-target/resolve-baseline -- two
+        # consumers of the identical unified baseline-set protocol
+        # disagreeing on whether the same archive is usable.
+        target = "libpvxs"
+        src_dir = tmp_path / "baseline-set-src"
+        src_dir.mkdir()
+        manifest = {
+            "manifest_version": 1,
+            "project_ref": "v1.0.0",
+            "profile": PROFILE,
+            "snapshot_schema": None,
+            "fact_set": None,
+            "artifacts": [
+                {
+                    "library": target,
+                    "artifact": f"build/{target}.so",
+                    "snapshot": f"{target}.abicheck.json",
+                    "sha256": "",
+                }
+            ],
+        }
+        (src_dir / "manifest.json").write_text(json.dumps(manifest), encoding="utf-8")
+        (src_dir / f"{target}.abicheck.json").write_text("{}", encoding="utf-8")
+
+        archive_path = tmp_path / "fixture-baseline-set-symlink.tar"
+        with tarfile.open(archive_path, "w") as tf:
+            tf.add(src_dir, arcname=".")
+            # An in-root symlink -- its target stays inside the archive
+            # (never escapes), so TarExtractor's own path-traversal guard
+            # doesn't reject it.
+            link_info = tarfile.TarInfo(name=f"./{target}.abicheck.json.link")
+            link_info.type = tarfile.SYMTYPE
+            link_info.linkname = f"{target}.abicheck.json"
+            tf.addfile(link_info)
+
+        result = self._run(
+            {
+                "INPUT_MODE": "compare",
+                "INPUT_ABI_BASELINE": "latest-release",
+                "INPUT_BASELINE_PROFILE": PROFILE,
+                "INPUT_BASELINE_TARGET": target,
+                "INPUT_BASELINE_ASSET_NAME_TEMPLATE": "abicheck-baseline-{profile}.tar",
+                "FIXTURE_ARCHIVE": str(archive_path),
+            }
+        )
+        assert result.returncode == 1
+        assert "symlink" in result.stdout + result.stderr
+        assert "REACHED_END" not in result.stdout
+
+    @pytest.mark.skipif(
+        sys.platform == "win32",
+        reason=(
             "This test builds a `python` symlink via Path.symlink_to() to "
             "simulate a python3-less PATH -- creating a symlink on Windows "
             "needs Developer Mode or an elevated process (raises OSError "

@@ -352,6 +352,7 @@ jobs:
           REPO: ${{ github.repository }}
           NEW_CONTENT_DIGEST: ${{ steps.baseline.outputs.content-digest }}
           NEW_PROFILE: ${{ matrix.profile_id }}
+          NEW_MANIFEST_PATH: ${{ steps.baseline.outputs.manifest-path }}
         run: |
           set -euo pipefail
 
@@ -546,6 +547,47 @@ jobs:
 
           if [[ -z "$existing_project_ref" || "$existing_project_ref" != "$RELEASE_TAG" ]]; then
             echo "::error::$ASSET_NAME already exists on release $RELEASE_TAG but its manifest.json declares a DIFFERENT (or missing) project_ref ('$existing_project_ref') -- a real consumer supplying '$RELEASE_TAG' as resolve-baseline's expected-project-ref would reject this asset as wrong_project_ref regardless of what the content digest says, so this is never a safe retry. Delete the existing asset explicitly ('gh release delete-asset $RELEASE_TAG $ASSET_NAME --repo $REPO --yes') and re-run, or publish under a new release tag." >&2
+            exit 1
+          fi
+
+          # compute_content_digest()/recompute_content_digest_from_disk()
+          # hash artifacts[] content alone -- neither reads fact_set either
+          # (actions/baseline/build_manifest.py's own
+          # compute_content_digest() docstring: "deliberately excludes
+          # every other manifest field"), so an existing asset whose
+          # manifest.json declares a DIFFERENT (or edited/corrupted)
+          # fact_set can still reach a matching content digest and this
+          # branch's safe-retry no-op even though a real consumer's
+          # _evidence_incompatibility() check
+          # (abicheck/buildsource/baseline_set.py) compares fact_set.producer
+          # against a candidate build's own evidence_producer.kind
+          # independently of snapshot/binary content -- so the retained,
+          # untouched asset could reject a compatible candidate as
+          # incompatible_evidence, or accept an incompatible one, in a way
+          # THIS run's own freshly-built manifest would not have. Compared
+          # by plain equality against the LOCAL manifest this same job just
+          # built (steps.baseline.outputs.manifest-path, before packaging)
+          # -- the identical check
+          # actions/baseline/build_manifest.py's own `_compute_freshness()`
+          # already applies for its analogous previous-manifest comparison
+          # (`previous.get("fact_set") != manifest["fact_set"]`), reused
+          # here rather than re-derived, since fact_set is a small,
+          # deterministic dict with no created_at-shaped volatile field of
+          # its own (Codex review).
+          existing_fact_set_ok=$(python3 -c '
+          import json
+          import sys
+          from pathlib import Path
+
+          existing_manifest = json.loads(
+              (Path(sys.argv[1]) / "manifest.json").read_text(encoding="utf-8")
+          )
+          new_manifest = json.loads(Path(sys.argv[2]).read_text(encoding="utf-8"))
+          print("true" if existing_manifest.get("fact_set") == new_manifest.get("fact_set") else "false")
+          ' .existing-asset/extracted "$NEW_MANIFEST_PATH")
+
+          if [[ "$existing_fact_set_ok" != "true" ]]; then
+            echo "::error::$ASSET_NAME already exists on release $RELEASE_TAG but its manifest.json declares a DIFFERENT fact_set (evidence-producer identity) than this run's own freshly-built manifest -- a real consumer's incompatible-evidence check (abicheck/buildsource/baseline_set.py's _evidence_incompatibility()) depends on that field independently of snapshot/binary content, so this is never a safe retry regardless of what the content digest says. Delete the existing asset explicitly ('gh release delete-asset $RELEASE_TAG $ASSET_NAME --repo $REPO --yes') and re-run, or publish under a new release tag." >&2
             exit 1
           fi
 
