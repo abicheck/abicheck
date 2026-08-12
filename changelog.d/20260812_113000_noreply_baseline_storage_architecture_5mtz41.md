@@ -21,3 +21,9 @@ A new changelog fragment. See changelog.d/README.md for the workflow.
   than this checkout's installed reader, but otherwise-matching profile
   and content, previously passed as a safe no-op even though a real
   consumer would reject it as `stale_schema`.
+- **`actions/stage-baseline/run.sh`'s asset-name validation** now also
+  rejects a literal `#` character — `gh release upload` treats anything
+  after a `#` in a file argument as a display label, not part of the
+  filename, so an asset name like `baseline#debug.tar.zst` would package
+  correctly here but then fail `publish-baseline.yml`'s first-time-publish
+  upload outright.

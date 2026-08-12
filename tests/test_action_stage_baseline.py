@@ -349,6 +349,30 @@ class TestStageBaseline:
         assert "path separator" in (result.stdout + result.stderr)
         assert "asset-name" not in outputs
 
+    def test_hash_character_in_resolved_name_is_rejected(self, tmp_path: Path) -> None:
+        # Regression (Codex review, third round): `gh release upload`
+        # treats anything after a literal '#' in a file argument as a
+        # DISPLAY LABEL, not part of the filename (documented `gh release
+        # upload --help` syntax, `<file>#<label>`). An asset name like
+        # "baseline#debug.tar.zst" would package and stage just fine here
+        # -- '#' is a perfectly legal filename character on every real
+        # filesystem -- but publish-baseline.yml's own first-time-publish
+        # `gh release upload` call would then try to upload a nonexistent
+        # local file named just "baseline" and fail outright.
+        baseline_dir = _make_baseline_dir(tmp_path)
+        result, outputs = _run_action(
+            {
+                "BASELINE_PATH": str(baseline_dir),
+                "ASSET_NAME_TEMPLATE": "baseline#{profile}.tar",
+                "PROFILE": "debug",
+            },
+            tmp_path,
+        )
+        assert result.returncode == 1
+        assert "'#'" in (result.stdout + result.stderr)
+        assert "asset-name" not in outputs
+        assert not (tmp_path / "baseline#debug.tar").exists()
+
     def test_missing_baseline_path_fails(self, tmp_path: Path) -> None:
         result, _ = _run_action({}, tmp_path)
         assert result.returncode == 1

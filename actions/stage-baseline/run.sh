@@ -61,10 +61,19 @@ asset_name="${asset_template//\{profile\}/${PROFILE:-}}"
 # and let the native `tar`/Python fallback below write the archive outside
 # the intended working directory; a drive-qualified prefix ("C:...") is
 # rejected the same way for the identical reason (Codex review, second
-# round).
+# round). '#' is rejected too, for a reason specific to this asset's real
+# consumer rather than this step itself: `gh release upload` treats
+# anything after a literal '#' in a file argument as a DISPLAY LABEL, not
+# part of the filename (documented `gh release upload --help` syntax,
+# `<file>#<label>`) -- an asset name like "baseline#debug.tar.zst" would
+# package and stage just fine here, but publish-baseline.yml's own
+# first-time-publish `gh release upload "$RELEASE_TAG" "$ASSET_NAME"`
+# call would then try to upload a nonexistent local file named just
+# "baseline", stripped of everything from '#' onward, and fail outright
+# (Codex review, third round).
 case "$asset_name" in
-  *$'\n'* | *$'\r'* | */* | *\\* | [A-Za-z]:*)
-    echo "::error::asset-name-template resolved to a value containing a newline, carriage return, path separator ('/' or '\\'), or a drive-qualified prefix -- refusing to create an archive or write a GITHUB_OUTPUT line from it." >&2
+  *$'\n'* | *$'\r'* | */* | *\\* | [A-Za-z]:* | *'#'*)
+    echo "::error::asset-name-template resolved to a value containing a newline, carriage return, path separator ('/' or '\\'), a drive-qualified prefix, or '#' (which 'gh release upload' parses as a display-label separator, not a literal filename character) -- refusing to create an archive or write a GITHUB_OUTPUT line from it." >&2
     exit 1
     ;;
 esac
