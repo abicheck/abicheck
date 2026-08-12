@@ -487,10 +487,12 @@ class TestCtorDtorReconciliation:
         assert reconciled.elf_binding == SymbolBinding.WEAK
         assert reconciled.elf_visibility == ElfVisibility.DEFAULT
 
-    def test_ordinary_function_elf_binding_is_not_touched_by_backfill(self):
-        # No key rewrite involved -- both sides already agree, so castxml's
-        # own (correctly None) value must not be silently overwritten by an
-        # unrelated clang-side value for the same real key.
+    def test_ordinary_function_elf_binding_backfills_from_clang(self):
+        # No key rewrite involved -- both sides already independently look up
+        # the identical real key, so backfilling castxml's own None from
+        # clang here is correct and safe: there is no producer disagreement
+        # to lose (CodeRabbit review: the previous name/comments read as if
+        # this asserted the *opposite*, that backfill must NOT apply here).
         from abicheck.elf_metadata import SymbolBinding
 
         castxml_fn = Function(name="f", mangled="_Z1fv", return_type="void")
@@ -506,10 +508,6 @@ class TestCtorDtorReconciliation:
 
         reconciled = merged.func_by_mangled("_Z1fv")
         assert reconciled is not None
-        # castxml's own None backfills from clang here too (Codex review's
-        # fix is unconditional on "own value is None", not scoped to
-        # rewritten keys) -- this is correct: it's the exact same real key
-        # on both sides, so there is no producer disagreement to lose.
         assert reconciled.elf_binding == SymbolBinding.GLOBAL
 
     def test_constructor_with_comma_in_single_param_type_still_matches(self):

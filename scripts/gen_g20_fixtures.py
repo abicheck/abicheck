@@ -49,6 +49,7 @@ from abicheck.buildsource.source_graph import (  # noqa: E402
     GraphNode,
     SourceGraphSummary,
 )
+from abicheck.dumper_elf_symbols import _populate_elf_visibility  # noqa: E402
 from abicheck.elf_metadata import ElfMetadata, ElfSymbol  # noqa: E402
 from abicheck.model import (  # noqa: E402
     AbiSnapshot,
@@ -69,6 +70,24 @@ def _snap(**kw) -> AbiSnapshot:
 
 def _elf(*syms: ElfSymbol, **kw) -> ElfMetadata:
     return ElfMetadata(symbols=list(syms), **kw)
+
+
+def _to_dict_with_elf_facts(snap: AbiSnapshot) -> object:
+    """Serialize *snap*, first backfilling elf_visibility/elf_binding from its
+    own ``elf.symbols`` the same way a real dump would (Codex/CodeRabbit
+    review, fresh evidence).
+
+    These fixtures are hand-built ``AbiSnapshot``s, not real dumps, so
+    ``dumper_elf_symbols._populate_elf_visibility`` never ran over them --
+    several cases' ``ElfSymbol`` entries carry a real (default GLOBAL)
+    ``binding``, but the corresponding ``Function``/``Variable`` objects were
+    left with ``elf_binding=None``, an internally-inconsistent fixture a real
+    dump could never produce. Mutates *snap* in place (safe: each builder
+    constructs and returns a fresh snapshot, never reused afterward) and
+    returns the usual ``snapshot_to_dict`` result.
+    """
+    _populate_elf_visibility(snap)
+    return snapshot_to_dict(snap)
 
 
 # ── case143: accidental export (exported_not_public) ─────────────────────────
@@ -382,7 +401,7 @@ def main(argv: Iterable[str] | None = None) -> int:
         FIXTURES,
         examples_dir=EXAMPLES,
         root=ROOT,
-        to_dict=snapshot_to_dict,
+        to_dict=_to_dict_with_elf_facts,
         check=args.check,
         label="G20 fixtures",
         regen_command="python scripts/gen_g20_fixtures.py",

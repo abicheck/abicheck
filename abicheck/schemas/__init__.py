@@ -390,7 +390,18 @@ from typing import Any
 #:       absent for every change not actually decided by a ``reclassify:``
 #:       rule, which is every report without one, and never affects
 #:       ``verdict``, ``severity``, or any exit code.
-REPORT_SCHEMA_VERSION = "2.31"
+#: 2.32 — added the optional per-finding ``symbol_binding`` key: the removed
+#:       symbol's ELF linkage (``"global"``/``"weak"``/``"local"``/
+#:       ``"unique"``/``"other"``), present only on ``func_removed``/
+#:       ``func_removed_elf_only``/``var_removed``/``func_deleted_elf_fallback``
+#:       findings whose binding was captured. Lets a JSON/SARIF consumer tell
+#:       a WEAK-COMDAT removal apart from a GLOBAL/strong export's removal —
+#:       the structured counterpart to the new ``binding:`` suppression
+#:       selector (see ``suppression.py``'s ``Suppression.binding``).
+#:       Additive optional key (Codex review; renumbered from a conflicting
+#:       2.29/2.30 when the PR #735/#733 rebase claimed those versions
+#:       first).
+REPORT_SCHEMA_VERSION = "2.32"
 
 #: SemVer-style (MAJOR.MINOR) version of the ``scan`` JSON output, emitted as
 #: ``scan_schema_version`` at the top level of both public scan dict shapes:

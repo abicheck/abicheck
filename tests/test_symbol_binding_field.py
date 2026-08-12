@@ -19,6 +19,8 @@ Suppression's ``binding`` selector.
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 
 from abicheck.checker_policy import ChangeKind
@@ -234,7 +236,7 @@ class TestSuppressionBindingSelector:
 
 
 class TestSuppressionYamlLoading:
-    def test_binding_key_loads_from_yaml(self, tmp_path) -> None:
+    def test_binding_key_loads_from_yaml(self, tmp_path: Path) -> None:
         from abicheck.suppression import SuppressionList
 
         p = tmp_path / "suppressions.yml"
@@ -249,7 +251,7 @@ class TestSuppressionYamlLoading:
         loaded = SuppressionList.load(p)
         assert loaded._suppressions[0].binding == "weak"
 
-    def test_unknown_key_still_rejected(self, tmp_path) -> None:
+    def test_unknown_key_still_rejected(self, tmp_path: Path) -> None:
         from abicheck.suppression import SuppressionList
 
         p = tmp_path / "suppressions.yml"
