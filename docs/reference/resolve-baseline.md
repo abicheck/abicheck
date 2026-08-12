@@ -1,3 +1,15 @@
+---
+doc_type: reference
+audience:
+  - ci-owner
+  - library-maintainer
+level: intermediate
+summarizes:
+  - baseline-storage-backends
+lifecycle: active
+generated: false
+---
+
 # `resolve-baseline` Action Reference
 
 `actions/resolve-baseline` resolves one check's baseline — `channel × target
@@ -177,3 +189,10 @@ committed baseline read via `git show base_sha:path`, or `release-contract`)
     old-library: ${{ steps.baseline.outputs.snapshot-path }}
     new-library: build/lib/libpvxs.so
 ```
+
+## See also
+
+- [Storing Baselines](../use/baseline-storage.md) — the narrative guide to
+  each storage backend (GitHub Releases, Git-committed files, Actions
+  Cache, an external artifact store) this Action resolves *from*; this page
+  covers only the resolution Action's own input/output/outcome contract.

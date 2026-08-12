@@ -4,6 +4,8 @@ audience:
   - library-maintainer
   - ci-owner
 level: beginner
+canonical_for:
+  - baseline-storage-backends
 summarizes:
   - baseline-lifecycle
   - snapshot-storage-compression
