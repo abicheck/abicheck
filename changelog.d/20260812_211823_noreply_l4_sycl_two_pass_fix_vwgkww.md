@@ -70,4 +70,10 @@ A new changelog fragment. See changelog.d/README.md for the workflow.
   survives in the real build's own order and multiplicity — the same class
   of fix applies to any other toggle-style flag pair sharing one spelling
   (`-fexceptions`/`-fno-exceptions`, …), not just `-fsycl`/`-fno-sycl`.
-  Bumps `CLANG_EXTRACTOR_VERSION` to `0.12`.
+  This shared carry-through helper is also used by the castxml extractor's
+  `build_castxml_command` (via its own `_replay_extra_flags` alias), so a
+  persisted baseline produced under the old, deduplicating recipe and a
+  fresh castxml extraction now advertise DIFFERENT producer versions rather
+  than being silently treated as comparable (Codex review). Bumps
+  `CLANG_EXTRACTOR_VERSION` to `0.12` and `CASTXML_EXTRACTOR_VERSION` to
+  `0.3`.

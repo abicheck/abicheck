@@ -62,8 +62,16 @@ from .base import SourceExtractionError, assemble_source_tu
 #: snapshot -- the same parser started extracting ``EnumType.underlying_type``
 #: for real (previously always the dataclass default ``"int"``), so an
 #: upgrading user's warm per-TU cache would keep replaying the old default
-#: without this bump.
-CASTXML_EXTRACTOR_VERSION = "0.2"
+#: without this bump. 0.3 (Codex review): ``_argv._carry_abi_relevant_flags``
+#: (shared with the clang extractor via ``build_castxml_command``'s own
+#: ``_replay_extra_flags`` call) no longer dedups a repeated flag WITHIN
+#: ``abi_relevant_flags`` itself -- a real, layered build config recording a
+#: toggle-style flag pair more than once (e.g. ``-fexceptions
+#: -fno-exceptions -fexceptions``) previously had every repeat past the
+#: first collapsed away, corrupting the real last-flag-wins state this
+#: extractor replays; bumped so a pre-0.3 cached/persisted entry for the
+#: same TU is never treated as comparable to a fresh, correctly-replayed one.
+CASTXML_EXTRACTOR_VERSION = "0.3"
 
 #: Backwards-compatible aliases — the compile-context → argv helpers now live in
 #: the shared ``_argv`` module (reused by the clang backend, phase 5) but are
