@@ -64,6 +64,26 @@ graph nodes):
   the probing side. Recorded, but produces NO match — the pair stays a true
   add + true remove in the flat diff, at reduced confidence.
 - **true add / true remove** — no candidate at all.
+
+**Known gap: ``OUTCOME_MOVED`` cannot currently be produced by any real
+producer.** Every graph-node-id constructor across ``abicheck/buildsource/``
+(``header_graph.py``'s ``_decl_identity``, ``source_graph.py``'s
+``_type_node_id``/``_decl_node_id``/``function_decl_identity``, and every
+downstream caller) keys a node's id purely off its mangled or qualified
+name, never a declaring file path -- so a real declaration that keeps its
+exact name but moves to a different header gets the SAME node id on both
+sides of a real comparison and never reaches this module as a removed+added
+pair at all. This function's own logic and the ``moved and not renamed``
+branch of :func:`_classify_outcome` are still correct and exercised at the
+unit level (see ``tests/test_graph_reconcile.py``'s
+``test_move_reconciles_when_file_changes_but_name_does_not``, which
+constructs its own artificially-distinct node ids the same way a pure-logic
+unit test is allowed to) -- there is simply no live code path that feeds it
+a genuinely producer-emitted move today. See
+``docs/contribute/plans/g31-header-graph-default-on-followup.md``'s "Known
+gap" note under Phase B for the investigation and what closing it for real
+would need (a producer-side node-id/attribute signal that's actually
+file-sensitive).
 """
 
 from __future__ import annotations
@@ -240,7 +260,9 @@ def _neighbor_identity(node: GraphNode) -> str:
     available, so the tuple this feeds is never actually empty.
     """
     if node.kind in _FILE_LIKE_KINDS:
-        path = str(node.attrs.get("def_file") or node.attrs.get("file") or node.label or "")
+        path = str(
+            node.attrs.get("def_file") or node.attrs.get("file") or node.label or ""
+        )
         return f"{node.kind}:{_project_relative_path(path)}" if path else node.kind
     ident = resolve_identity_for_node(node)
     if ident.qualified_name:
