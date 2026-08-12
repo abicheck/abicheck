@@ -504,6 +504,34 @@ class TestBaselineLibrariesDerivation:
                 == "${{ inputs.baseline-generation }}"
             )
 
+    def test_generator_provenance_forwarded_from_captured_identity(self) -> None:
+        # Regression (Codex review): actions/baseline's generator-git-sha/
+        # generator-action-ref inputs were added but neither reusable
+        # producer workflow forwarded them, even though both already
+        # capture their own exact resolved identity (repository/ref) in the
+        # "Capture this reusable workflow's identity" step for the nested
+        # checkout just above -- so every baseline published through the
+        # primary workflows recorded generator.version only, never the
+        # exact commit/ref that actually produced it.
+        for path, job_name in (
+            (PUBLISH_BASELINE, "publish"),
+            (UPDATE_MAIN_BASELINE, "refresh"),
+        ):
+            data = _load(path)
+            steps = _steps(data["jobs"][job_name])
+            assert any(
+                s.get("name") == "Capture this reusable workflow's identity"
+                for s in steps
+            )
+            dump_step = next(s for s in steps if s.get("name") == "Dump baseline-set")
+            assert (
+                dump_step["with"]["generator-git-sha"]
+                == "${{ steps.identity.outputs.ref }}"
+            )
+            assert (
+                dump_step["with"]["generator-action-ref"] == "${{ job.workflow_ref }}"
+            )
+
 
 class TestBaselineRotationFixture:
     """The plan's own P1.6 item requires a fixture asserting two consecutive

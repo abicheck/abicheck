@@ -632,7 +632,24 @@ def _schema_and_profile_check(
     (the default) means the caller isn't tracking scanner-compatibility
     generations for this check, so it is opt-in the same way
     ``expected_project_ref`` is.
+
+    Raises ``ValueError`` if ``expected_baseline_generation`` is neither
+    ``None`` nor a genuine non-negative ``int`` -- ``resolve_baseline.py``'s
+    own CLI wrapper already rejects a malformed ``--expected-baseline-
+    generation`` before ever reaching this function, but
+    :func:`resolve_target`/:func:`resolve_bundle` are themselves the real,
+    directly-callable Python resolution boundary, and `bool` is an `int`
+    subclass in Python -- a caller passing `True` would otherwise silently
+    compare equal to a real generation `1` (Codex review).
     """
+    if expected_baseline_generation is not None and (
+        type(expected_baseline_generation) is not int
+        or expected_baseline_generation < 0
+    ):
+        raise ValueError(
+            f"expected_baseline_generation {expected_baseline_generation!r} "
+            "must be a non-negative int (or None)."
+        )
     if manifest.manifest_version not in SUPPORTED_MANIFEST_VERSIONS:
         return ResolveResult(
             outcome=ResolveOutcome.STALE_SCHEMA,

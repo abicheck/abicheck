@@ -472,6 +472,58 @@ def test_resolve_target_no_expected_project_ref_skips_the_check(tmp_path: Path) 
     assert result.outcome == ResolveOutcome.RESOLVED
 
 
+def test_resolve_target_rejects_bool_expected_baseline_generation(
+    tmp_path: Path,
+) -> None:
+    # resolve_target()/resolve_bundle() are the real, directly-callable
+    # Python resolution boundary -- resolve_baseline.py's own CLI wrapper
+    # validates before ever reaching here, but a direct caller passing
+    # True (an int subclass in Python) must not silently compare equal to
+    # a real generation 1 (Codex review).
+    _write_manifest(
+        tmp_path, baseline_generation=1, artifacts=[_target_artifact("libpvxs")]
+    )
+    (tmp_path / "libpvxs.abicheck.json").write_text("{}", encoding="utf-8")
+    with pytest.raises(ValueError, match="non-negative int"):
+        resolve_target(
+            tmp_path,
+            target="libpvxs",
+            profile=PROFILE,
+            required=True,
+            expected_baseline_generation=True,  # type: ignore[arg-type]
+        )
+
+
+def test_resolve_target_rejects_negative_expected_baseline_generation(
+    tmp_path: Path,
+) -> None:
+    _write_manifest(tmp_path, artifacts=[_target_artifact("libpvxs")])
+    (tmp_path / "libpvxs.abicheck.json").write_text("{}", encoding="utf-8")
+    with pytest.raises(ValueError, match="non-negative int"):
+        resolve_target(
+            tmp_path,
+            target="libpvxs",
+            profile=PROFILE,
+            required=True,
+            expected_baseline_generation=-1,
+        )
+
+
+def test_resolve_bundle_rejects_bool_expected_baseline_generation(
+    tmp_path: Path,
+) -> None:
+    _write_manifest(tmp_path, baseline_generation=1)
+    with pytest.raises(ValueError, match="non-negative int"):
+        resolve_bundle(
+            tmp_path,
+            bundle="pvxs-release",
+            members=["libpvxs", "libpvxsIoc"],
+            profile=PROFILE,
+            required=True,
+            expected_baseline_generation=True,  # type: ignore[arg-type]
+        )
+
+
 def test_resolve_target_stale_generation(tmp_path: Path) -> None:
     # A baseline-set produced by an older scanner-compatibility generation
     # must not silently resolve for a check pinned to a newer one, even
