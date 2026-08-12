@@ -1096,7 +1096,18 @@ class Suppression:
                 f"Invalid reachability {self.reachability!r}. "
                 f"Valid values: {sorted(_VALID_REACHABILITY)}"
             )
-        if self.binding is not None and self.binding not in _VALID_BINDING:
+        if self.binding is not None and (
+            # isinstance check first (Codex review, fresh evidence): a YAML
+            # value the dataclass's own `str | None` annotation doesn't
+            # enforce at runtime -- a list (`binding: [weak]`) or mapping --
+            # is unhashable, so `not in` on the frozenset below would raise
+            # TypeError instead of this constructor's documented ValueError
+            # contract, escaping SuppressionList.load's/the CLI's/the
+            # service layer's ValueError-only handling as an internal
+            # exception rather than a normal invalid-config error.
+            not isinstance(self.binding, str)
+            or self.binding not in _VALID_BINDING
+        ):
             raise ValueError(
                 f"Invalid binding {self.binding!r}. "
                 f"Valid values: {sorted(_VALID_BINDING)}"

@@ -218,6 +218,15 @@ class TestSuppressionBindingSelector:
         with pytest.raises(ValueError, match="Invalid binding"):
             Suppression(symbol="_Z1fv", binding="bogus", reason="x")
 
+    def test_non_string_binding_raises_value_error_not_type_error(self) -> None:
+        # Regression (Codex review, fresh evidence): a YAML value the
+        # `str | None` annotation doesn't enforce at runtime (e.g. a list
+        # from `binding: [weak]`) must not escape as an unhandled TypeError
+        # from the frozenset membership check -- SuppressionList.load/the
+        # CLI/the service layer only translate ValueError.
+        with pytest.raises(ValueError, match="Invalid binding"):
+            Suppression(symbol="_Z1fv", binding=["weak"], reason="x")
+
     def test_no_binding_selector_is_unaffected(self) -> None:
         sup = Suppression(symbol="_Z1fv", reason="unrelated")
         assert sup.matches(self._make_change("global"))
