@@ -155,6 +155,24 @@ def test_isolated_module_runner_enables_user_site_for_system_site_venv(
 # --- profile shape -----------------------------------------------------
 
 
+def test_python_tool_steps_use_isolated_module_lookup() -> None:
+    """Tool steps must not let repository-root modules shadow installed tools."""
+    for step_name in {
+        "lint",
+        "fmt-check",
+        "typecheck",
+        "unit-fast",
+        "unit-pr",
+        "docs-build",
+        "integration",
+        "libabigail-parity",
+        "abicc-parity",
+        "slow",
+    }:
+        cmd = _step(step_name).cmd
+        assert cmd[:3] == (sys.executable, "-I", "-m"), step_name
+
+
 def test_pr_profile_is_superset_of_fast_checks() -> None:
     """Every check-type step in `fast` (lint/fmt-check/typecheck) also runs
     under `pr` — `pr` must not be a weaker gate than the everyday inner loop."""
