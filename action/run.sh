@@ -150,6 +150,132 @@ _baseline_unavailable() {
   exit 1
 }
 
+# ---------------------------------------------------------------------------
+# Baseline-set fallback: when no single *.abicheck.json asset was found on
+# the release, but baseline-profile was given, try a release-contract
+# baseline-set archive instead (abicheck-baseline-<profile>.tar.zst,
+# published by publish-baseline.yml -- see docs/reference/publish-baseline.md).
+# This is the "single-snapshot and baseline-set protocols" unification: the
+# original abi-baseline contract (one *.abicheck.json[.gz|.zst] asset) still
+# works completely unchanged and takes priority when present; this fallback
+# only ever runs when that search found nothing.
+#
+# Sets BASELINE_FILE (a script-global, matching the surrounding block's
+# style) on success. On any failure, routes through _baseline_unavailable
+# (dry-run-tolerant: warns and returns rather than exiting) and leaves
+# BASELINE_FILE empty. Reads $ABI_BASELINE/$_GH_REPO_FLAG from the enclosing
+# scope, same as the single-snapshot search above it.
+# ---------------------------------------------------------------------------
+_try_baseline_set_fallback() {
+  local baseline_target="${INPUT_BASELINE_TARGET:-}"
+  if [[ -z "$baseline_target" ]]; then
+    _baseline_unavailable "baseline-profile is set (${INPUT_BASELINE_PROFILE}) but baseline-target is not -- both are required to resolve one target's snapshot from a release-contract baseline-set archive."
+    return 1
+  fi
+  # NOTE: the default is intentionally NOT embedded as
+  # "${INPUT_BASELINE_ASSET_NAME_TEMPLATE:-abicheck-baseline-{profile}.tar.zst}"
+  # -- bash's ${VAR:-default} parses the default text looking for its own
+  # closing '}', and a literal, unescaped '}' inside that text (from
+  # "{profile}") terminates the expansion early, silently mangling the
+  # result to "abicheck-baseline-{profile.tar.zst}" (reproduced directly;
+  # caught by this function's own tests). Computing the default separately
+  # avoids the parse ambiguity entirely.
+  local asset_template="${INPUT_BASELINE_ASSET_NAME_TEMPLATE:-}"
+  if [[ -z "$asset_template" ]]; then
+    asset_template='abicheck-baseline-{profile}.tar.zst'
+  fi
+  local asset_name="${asset_template//\{profile\}/$INPUT_BASELINE_PROFILE}"
+
+  echo "::group::Fetch release-contract baseline-set '$asset_name'"
+  local set_download_dir="$BASELINE_DIR/baseline-set-download"
+  mkdir -p "$set_download_dir"
+  if [[ "$ABI_BASELINE" == "latest-release" ]]; then
+    gh release download ${_GH_REPO_FLAG[@]+"${_GH_REPO_FLAG[@]}"} --pattern "$asset_name" -D "$set_download_dir" || true
+  else
+    gh release download "$ABI_BASELINE" ${_GH_REPO_FLAG[@]+"${_GH_REPO_FLAG[@]}"} --pattern "$asset_name" -D "$set_download_dir" || true
+  fi
+  echo "::endgroup::"
+
+  local archive_path="$set_download_dir/$asset_name"
+  if [[ ! -f "$archive_path" ]]; then
+    _baseline_unavailable "No *.abicheck.json baseline asset, and no baseline-set archive '$asset_name' either, found in the release. Publish a single *.abicheck.json[.gz|.zst] snapshot asset (abi-baseline's original single-library contract), or a release-contract baseline-set archive whose name matches baseline-asset-name-template ('$asset_template')."
+    return 1
+  fi
+
+  local extracted_dir="$BASELINE_DIR/baseline-set-extracted"
+  mkdir -p "$extracted_dir"
+  # Delegates to abicheck.package.TarExtractor's own safe extraction (member
+  # validation: rejects path traversal, symlink escapes, device/FIFO
+  # entries) -- the same extractor actions/resolve-baseline/run.sh uses for
+  # an identically-shaped baseline-set archive, rather than reimplementing
+  # extraction safety here.
+  case "$asset_name" in
+    *.tar.zst)
+      python3 -c '
+import sys
+from pathlib import Path
+from abicheck.package import TarExtractor
+
+TarExtractor._safe_extract_zst_tar(Path(sys.argv[1]), Path(sys.argv[2]))
+' "$archive_path" "$extracted_dir" \
+        || { _baseline_unavailable "failed to extract baseline-set archive '$asset_name' (.tar.zst) -- it is truncated or corrupted, or this runner has neither a 'zstd' command-line tool nor the Python 'zstandard' package available."; return 1; }
+      ;;
+    *.tar.gz | *.tgz | *.tar)
+      python3 -c '
+import sys
+from pathlib import Path
+from abicheck.package import TarExtractor
+
+TarExtractor._safe_extract(Path(sys.argv[1]), Path(sys.argv[2]))
+' "$archive_path" "$extracted_dir" \
+        || { _baseline_unavailable "failed to extract baseline-set archive '$asset_name' -- it is truncated or corrupted, or contains a disallowed member (path traversal, a symlink escaping the extraction root, or a device/FIFO entry)."; return 1; }
+      ;;
+    *)
+      _baseline_unavailable "baseline-set archive '$asset_name' is not a recognized archive format (.tar.zst/.tar.gz/.tgz/.tar)."
+      return 1
+      ;;
+  esac
+
+  # An archive may contain one nested directory (the profile-named dir it
+  # was built from) rather than manifest.json at its root -- mirrors
+  # actions/resolve-baseline/run.sh's identical single-subdirectory descent.
+  local manifest_root="$extracted_dir"
+  if [[ ! -f "$manifest_root/manifest.json" ]]; then
+    local subdirs=()
+    while IFS= read -r -d '' d; do subdirs+=("$d"); done \
+      < <(find "$extracted_dir" -mindepth 1 -maxdepth 1 -type d -print0)
+    if [[ ${#subdirs[@]} -eq 1 && -f "${subdirs[0]}/manifest.json" ]]; then
+      manifest_root="${subdirs[0]}"
+    fi
+  fi
+
+  local resolve_output
+  resolve_output=$(python3 -c '
+import sys
+from abicheck.buildsource.baseline_set import resolve_target
+
+result = resolve_target(sys.argv[1], target=sys.argv[2], profile=sys.argv[3], required=True)
+snapshot_path = result.snapshot_path
+if not snapshot_path:
+    snapshot_path = ""
+print("outcome=" + result.outcome)
+print("message=" + result.message)
+print("snapshot_path=" + snapshot_path)
+' "$manifest_root" "$baseline_target" "$INPUT_BASELINE_PROFILE")
+  local resolve_outcome resolve_message resolve_snapshot
+  resolve_outcome=$(printf '%s\n' "$resolve_output" | sed -n 's/^outcome=//p')
+  resolve_message=$(printf '%s\n' "$resolve_output" | sed -n 's/^message=//p')
+  resolve_snapshot=$(printf '%s\n' "$resolve_output" | sed -n 's/^snapshot_path=//p')
+
+  if [[ "$resolve_outcome" == "resolved" && -n "$resolve_snapshot" ]]; then
+    BASELINE_FILE="$resolve_snapshot"
+    echo "Resolved target '$baseline_target' at profile '$INPUT_BASELINE_PROFILE' from baseline-set archive '$asset_name'."
+    return 0
+  fi
+  _baseline_unavailable "could not resolve target '$baseline_target' at profile '$INPUT_BASELINE_PROFILE' from baseline-set archive '$asset_name' (outcome: $resolve_outcome): $resolve_message"
+  return 1
+}
+
 ABI_BASELINE="${INPUT_ABI_BASELINE:-}"
 if [[ -n "$ABI_BASELINE" \
    && ( "$MODE" == "compare" || "$MODE" == "scan" ) \
@@ -192,14 +318,26 @@ if [[ -n "$ABI_BASELINE" \
       # add_flag()'s callers already guard against elsewhere in this file
       # (Codex review).
       if ! gh release download ${_GH_REPO_FLAG[@]+"${_GH_REPO_FLAG[@]}"} "${_ABI_JSON_PATTERNS[@]}" -D "$BASELINE_DIR"; then
-        _baseline_unavailable "No ABI baseline found in latest release. Run 'abicheck dump path/to/libfoo.so -o libfoo.abicheck.json' in your release workflow and upload the resulting *.abicheck.json (or compressed .abicheck.json.gz/.abicheck.json.zst) file as a release asset."
+        # Don't fail immediately when baseline-profile is set -- this release
+        # may instead publish a release-contract baseline-set archive
+        # (abicheck-baseline-<profile>.tar.zst) rather than a single
+        # *.abicheck.json asset; fall through to the BASELINE_FILES check
+        # below, which finds nothing here and routes into
+        # _try_baseline_set_fallback instead of erroring on this search
+        # alone.
+        if [[ -z "${INPUT_BASELINE_PROFILE:-}" ]]; then
+          _baseline_unavailable "No ABI baseline found in latest release. Run 'abicheck dump path/to/libfoo.so -o libfoo.abicheck.json' in your release workflow and upload the resulting *.abicheck.json (or compressed .abicheck.json.gz/.abicheck.json.zst) file as a release asset."
+        fi
       fi
       echo "::endgroup::"
     else
       # Treat as a tag name
       echo "::group::Fetch ABI baseline from release $ABI_BASELINE"
       if ! gh release download "$ABI_BASELINE" ${_GH_REPO_FLAG[@]+"${_GH_REPO_FLAG[@]}"} "${_ABI_JSON_PATTERNS[@]}" -D "$BASELINE_DIR"; then
-        _baseline_unavailable "No ABI baseline found in release '$ABI_BASELINE'. Ensure the release has a *.abicheck.json (or compressed .abicheck.json.gz/.abicheck.json.zst) asset."
+        # See the latest-release branch's identical comment above.
+        if [[ -z "${INPUT_BASELINE_PROFILE:-}" ]]; then
+          _baseline_unavailable "No ABI baseline found in release '$ABI_BASELINE'. Ensure the release has a *.abicheck.json (or compressed .abicheck.json.gz/.abicheck.json.zst) asset."
+        fi
       fi
       echo "::endgroup::"
     fi
@@ -217,8 +355,13 @@ if [[ -n "$ABI_BASELINE" \
     done <<< "$(find "$BASELINE_DIR" \( -name '*.abicheck.json' -o -name '*.abicheck.json.gz' -o -name '*.abicheck.json.zst' \) 2>/dev/null)"
     if [[ ${#BASELINE_FILES[@]} -eq 1 ]]; then
       BASELINE_FILE="${BASELINE_FILES[0]}"
+    elif [[ ${#BASELINE_FILES[@]} -eq 0 && -n "${INPUT_BASELINE_PROFILE:-}" ]]; then
+      # No single-snapshot asset -- try a release-contract baseline-set
+      # archive instead (unifies the two release-baseline protocols; see
+      # _try_baseline_set_fallback's own comment above).
+      _try_baseline_set_fallback || true
     elif [[ ${#BASELINE_FILES[@]} -eq 0 ]]; then
-      _baseline_unavailable "No *.abicheck.json (or compressed .abicheck.json.gz/.abicheck.json.zst) file found after download."
+      _baseline_unavailable "No *.abicheck.json (or compressed .abicheck.json.gz/.abicheck.json.zst) file found after download. If this release instead publishes a release-contract baseline-set archive (abicheck-baseline-<profile>.tar.zst), set baseline-profile and baseline-target to fetch from it."
     else
       _baseline_unavailable "Multiple *.abicheck.json assets found (${BASELINE_FILES[*]}); ambiguous which is the baseline. Publish exactly one *.abicheck.json asset per release, or pass abi-baseline a direct file path instead."
     fi

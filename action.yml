@@ -400,8 +400,41 @@ inputs:
       Values: "latest-release" fetches *.abicheck.json from the latest GitHub Release;
       a tag name (e.g. "v2.0.0") fetches from that release; a file path uses the
       file directly. Requires GITHUB_TOKEN with contents:read permission.
-      Overrides old-library (compare) / against (scan) when set.
+      Overrides old-library (compare) / against (scan) when set. When the
+      resolved release has no single *.abicheck.json[.gz|.zst] asset, set
+      baseline-profile and baseline-target to instead fetch a
+      release-contract baseline-set archive (abicheck-baseline-<profile>
+      .tar.zst, published by publish-baseline.yml -- see
+      docs/reference/publish-baseline.md); the single-snapshot search
+      always takes priority when both exist.
     required: false
+  baseline-profile:
+    description: >
+      Selects which contract profile's baseline-set to fetch when
+      abi-baseline resolves to a release-contract baseline-set archive
+      (docs/reference/publish-baseline.md) rather than a single
+      *.abicheck.json asset. Requires baseline-target to also be set. Omit
+      when the release publishes a single-snapshot asset (abi-baseline's
+      original, unchanged contract) -- this input is only consulted as a
+      fallback when that search finds nothing.
+    required: false
+  baseline-target:
+    description: >
+      The target/library id (the baseline-set manifest.json's "library"
+      field, matching the name passed to actions/baseline's `libraries`
+      input when the baseline-set was published) to resolve from the
+      baseline-set archive selected by baseline-profile. Required when
+      baseline-profile is set.
+    required: false
+  baseline-asset-name-template:
+    description: >
+      Release asset filename template for the baseline-set archive
+      fetched via baseline-profile; "{profile}" is replaced with
+      baseline-profile's value. Must match the asset-name-template the
+      publishing workflow (publish-baseline.yml, or a custom equivalent)
+      used.
+    required: false
+    default: 'abicheck-baseline-{profile}.tar.zst'
 
   # ── Output & policy ─────────────────────────────────────────────────────────
   format:
@@ -667,6 +700,9 @@ runs:
         INPUT_FAIL_ON_REMOVED_LIBRARY: ${{ inputs.fail-on-removed-library }}
         INPUT_JOBS: ${{ inputs.jobs }}
         INPUT_ABI_BASELINE: ${{ inputs.abi-baseline }}
+        INPUT_BASELINE_PROFILE: ${{ inputs.baseline-profile }}
+        INPUT_BASELINE_TARGET: ${{ inputs.baseline-target }}
+        INPUT_BASELINE_ASSET_NAME_TEMPLATE: ${{ inputs.baseline-asset-name-template }}
         INPUT_ESTIMATE: ${{ inputs.estimate }}
         INPUT_AUDIT: ${{ inputs.audit }}
         INPUT_USED_BY: ${{ inputs.used-by }}
@@ -833,6 +869,9 @@ runs:
         INPUT_SEVERITY_ADDITION: ${{ inputs.severity-addition }}
         INPUT_EXTRA_ARGS: ${{ inputs.extra-args }}
         INPUT_ABI_BASELINE: ${{ inputs.abi-baseline }}
+        INPUT_BASELINE_PROFILE: ${{ inputs.baseline-profile }}
+        INPUT_BASELINE_TARGET: ${{ inputs.baseline-target }}
+        INPUT_BASELINE_ASSET_NAME_TEMPLATE: ${{ inputs.baseline-asset-name-template }}
         INPUT_JOBS: ${{ inputs.jobs }}
         INPUT_ADD_JOB_SUMMARY: ${{ inputs.add-job-summary }}
         INPUT_DEBUG_INFO1: ${{ inputs.debug-info1 }}

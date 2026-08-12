@@ -278,6 +278,24 @@ if [[ -n "$_ABI_BASELINE" && "$MODE" != "compare" && "$MODE" != "scan" ]]; then
   _warn "abi-baseline is set but has no effect: it only applies to mode: compare or mode: scan (mode is '$MODE')."
 fi
 
+# baseline-profile/baseline-target: the release-contract baseline-set
+# fallback for abi-baseline (only consulted when the release has no single
+# *.abicheck.json asset) -- same mode scope as abi-baseline itself, plus a
+# fail-fast pairing check so a caller who set one without the other finds
+# out before any dependency install, not partway through the baseline
+# fetch in run.sh (which enforces the identical pairing again at fetch time,
+# since a direct run.sh invocation, e.g. in tests, bypasses this script).
+_BASELINE_PROFILE="${INPUT_BASELINE_PROFILE:-}"
+_BASELINE_TARGET="${INPUT_BASELINE_TARGET:-}"
+_BASELINE_ASSET_NAME_TEMPLATE="${INPUT_BASELINE_ASSET_NAME_TEMPLATE:-}"
+if [[ ( -n "$_BASELINE_PROFILE" || -n "$_BASELINE_TARGET" || -n "$_BASELINE_ASSET_NAME_TEMPLATE" ) \
+   && "$MODE" != "compare" && "$MODE" != "scan" ]]; then
+  _warn "baseline-profile/baseline-target/baseline-asset-name-template are set but have no effect: they only apply to mode: compare or mode: scan (mode is '$MODE')."
+fi
+if [[ -n "$_BASELINE_PROFILE" && -z "$_BASELINE_TARGET" ]]; then
+  _fail "baseline-profile is set ('$_BASELINE_PROFILE') but baseline-target is not -- both are required to resolve one target's snapshot from a release-contract baseline-set archive."
+fi
+
 # public-header-dir: dump and scan modes only (the CLI's own
 # --public-header-dir flag exists on those two subcommands only; compare has
 # no equivalent). run.sh's compare/deps-tree/deps-compare branches never

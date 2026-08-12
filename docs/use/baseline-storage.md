@@ -125,6 +125,39 @@ abicheck dump libfoo.so -H include/foo.h \
 gh release upload v2.0.0 libfoo-2.0.0.abicheck.json --clobber
 ```
 
+### `abi-baseline` also understands a release-contract baseline-set archive
+
+`abi-baseline` always searches for a single `*.abicheck.json[.gz|.zst]`
+asset first — the recipe above, unchanged. When a release instead publishes
+a `publish-baseline.yml`-produced baseline-set archive (one
+`abicheck-baseline-<profile>.tar.zst` per contract profile, holding several
+libraries' snapshots plus a `manifest.json` — see the
+[`publish-baseline`/`update-main-baseline` reference](../reference/publish-baseline.md))
+and that search finds nothing, set `baseline-profile` and `baseline-target`
+to fetch the target's snapshot out of the archive instead:
+
+```yaml
+      - name: ABI compatibility check
+        uses: abicheck/abicheck@v0.5.0
+        with:
+          abi-baseline: latest-release
+          baseline-profile: linux-x86_64-gcc13-release
+          baseline-target: libfoo
+          new-library: build/libfoo.so
+          new-header: include/foo.h
+```
+
+This is the same [`resolve_target()`](../reference/resolve-baseline.md)
+resolver `actions/resolve-baseline` uses, so a `wrong_profile`/`stale_schema`
+mismatch is reported the same way. Unlike `resolve-baseline` (which resolves
+against an already-staged baseline-path the caller downloaded itself), this
+fallback does the GitHub Release download and archive extraction inline,
+mirroring `abi-baseline`'s own existing single-snapshot fetch — no separate
+staging step needed. `baseline-asset-name-template` (default
+`abicheck-baseline-{profile}.tar.zst`) only needs setting if the publishing
+workflow customized `publish-baseline.yml`'s own `asset-name-template` input
+away from its default.
+
 ## Recipe A2: Multi-Library Releases — the `baseline` Action (a generator, not a registry)
 
 Recipe A above dumps one library. A release with several libraries needs one
