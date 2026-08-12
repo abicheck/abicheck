@@ -471,30 +471,43 @@ jobs:
 
           # compute_content_digest()/recompute_content_digest_from_disk()
           # hash artifacts[] content alone -- neither reads
-          # manifest_version, so an existing asset with an absent or
-          # unsupported schema can still reach a matching content digest
-          # and this branch's safe-retry no-op. That asset stays published
-          # in a state resolve_target()/resolve_bundle() (the real
-          # consumers, abicheck/buildsource/baseline_set.py) would reject
-          # outright as stale_schema -- this workflow would report success
-          # having left an unusable asset behind (Codex review). Checked
-          # against the SAME SUPPORTED_MANIFEST_VERSIONS a real consumer
-          # uses, not a hand-duplicated copy of the version set.
-          existing_manifest_version_ok=$(python3 -c '
+          # manifest_version/snapshot_schema, so an existing asset with an
+          # absent/unsupported manifest_version OR a snapshot_schema newer
+          # than this checkout's installed reader can still reach a
+          # matching content digest and this branch's safe-retry no-op.
+          # That asset stays published in a state
+          # resolve_target()/resolve_bundle() (the real consumers,
+          # abicheck/buildsource/baseline_set.py) would reject outright as
+          # stale_schema -- this workflow would report success having left
+          # an unusable asset behind (Codex review, two rounds: the first
+          # covered manifest_version, the second found the SEPARATE
+          # snapshot_schema check resolve_target()/resolve_bundle() also
+          # apply). Checked against the SAME SUPPORTED_MANIFEST_VERSIONS/
+          # serialization.SCHEMA_VERSION a real consumer uses, not a
+          # hand-duplicated copy of either.
+          existing_schema_ok=$(python3 -c '
           import json
           import sys
           from pathlib import Path
 
+          from abicheck import serialization
           from abicheck.buildsource.baseline_set import SUPPORTED_MANIFEST_VERSIONS
 
           manifest = json.loads(
               (Path(sys.argv[1]) / "manifest.json").read_text(encoding="utf-8")
           )
-          print("true" if manifest.get("manifest_version") in SUPPORTED_MANIFEST_VERSIONS else "false")
+          if manifest.get("manifest_version") not in SUPPORTED_MANIFEST_VERSIONS:
+              print("false")
+              sys.exit(0)
+          snapshot_schema = manifest.get("snapshot_schema")
+          if snapshot_schema is not None and snapshot_schema > serialization.SCHEMA_VERSION:
+              print("false")
+              sys.exit(0)
+          print("true")
           ' .existing-asset/extracted)
 
-          if [[ "$existing_manifest_version_ok" != "true" ]]; then
-            echo "::error::$ASSET_NAME already exists on release $RELEASE_TAG but its manifest.json declares a manifest_version this resolver doesn't understand -- a real consumer (resolve_target()/resolve_bundle()) would reject it as stale_schema regardless of what the content digest says, so this is never a safe retry. Delete the existing asset explicitly ('gh release delete-asset $RELEASE_TAG $ASSET_NAME --repo $REPO --yes') and re-run, or publish under a new release tag." >&2
+          if [[ "$existing_schema_ok" != "true" ]]; then
+            echo "::error::$ASSET_NAME already exists on release $RELEASE_TAG but its manifest.json declares a manifest_version or snapshot_schema this resolver doesn't understand -- a real consumer (resolve_target()/resolve_bundle()) would reject it as stale_schema regardless of what the content digest says, so this is never a safe retry. Delete the existing asset explicitly ('gh release delete-asset $RELEASE_TAG $ASSET_NAME --repo $REPO --yes') and re-run, or publish under a new release tag." >&2
             exit 1
           fi
 
