@@ -227,3 +227,54 @@ generation:
    together — a scanner upgrade with no matching generation bump for a
    baseline-affecting change is the state `expected-baseline-generation`
    exists to catch, not something to leave implicit.
+
+**The PR that upgrades the scanner itself needs two CI lanes, briefly.**
+An ordinary PR's `check-project`/`check-single` gate compares the
+candidate against `accepted-main`'s *existing* baseline-generation — but
+the one PR that bumps the scanner pin (or otherwise causes a
+`baseline_generation` bump) would otherwise compare a new-generation
+candidate against an old-generation baseline, mixing scanner drift into
+the verdict. Run that PR through two lanes instead of one, both driven off
+the same `check-project.yml`/`check-single.yml` inputs:
+
+- **Lane A (binding)** — unchanged: `baseline-channel: accepted-main`,
+  no `expected-baseline-generation` override, gates the PR exactly like
+  any other PR against whatever generation is currently accepted.
+- **Lane B (shadow, informational only)** — a second job in the same
+  workflow matrix that dumps a *fresh* baseline for the PR's own base
+  commit with the new scanner (e.g. `actions/baseline` with
+  `project-ref: ${{ github.event.pull_request.base.sha }}` run in this
+  same job, or `resolve-baseline`'s `expected-project-ref` pinned to that
+  exact SHA if a pre-staged new-generation baseline-set already exists),
+  then compares the candidate against *that* instead of the stale
+  accepted-main entry. Mark this job `continue-on-error: true` (or run it
+  under `gate-mode: advisory`, see [CI Gating](ci-gating.md)) — it exists
+  for the reviewer to read the scanner-drift diff before merge, not to
+  block the PR.
+
+After merge, `update-main-baseline.yml` runs on the new `main` SHA with
+the new scanner pin and writes the new-generation entry; Lane B becomes
+unnecessary for every PR after that one, since Lane A now compares against
+the new generation like any other PR.
+
+**Storing more than one generation side by side.** Whichever storage
+backend you use (see [Storing Baselines](baseline-storage.md)), a scanner
+upgrade means publishing the new generation *next to* the old one, not
+overwriting it — the recommended flow above's step 3. `{generation}` in
+`actions/stage-baseline`'s `asset-name-template` templates this for a
+release-asset backend directly (e.g.
+`abicheck-baseline-g{generation}-{profile}.tar.zst`); for a
+git-committed baseline directory, the same idea without any template
+mechanism needed:
+
+```text
+abi/
+  g2/
+    linux-x86_64-gcc14/
+  g3/
+    linux-x86_64-gcc14/
+  active-generation.txt   # e.g. "g3" -- what current CI compares against
+```
+
+Flip `active-generation.txt` (and the scanner pin) together, in one
+trusted commit/PR — never separately, per the ordering rule above.
