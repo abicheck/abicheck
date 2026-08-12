@@ -324,3 +324,19 @@ class TestReportSerialization:
 
         entries = _baseline_finding_dicts([self._change(None)], "breaking")
         assert "symbol_binding" not in entries[0]
+
+    def test_suppressed_change_entry_includes_symbol_binding(self) -> None:
+        # A separate projector from _change_annotation_fields, used for
+        # suppression.suppressed_changes[] -- the audit trail for *why* a
+        # binding-scoped rule matched needs the field too (Codex review,
+        # fresh evidence, schema 2.31).
+        from abicheck.reporter import _suppressed_change_entry
+
+        entry = _suppressed_change_entry(self._change("weak"))
+        assert entry["symbol_binding"] == "weak"
+
+    def test_suppressed_change_entry_omits_symbol_binding_when_unset(self) -> None:
+        from abicheck.reporter import _suppressed_change_entry
+
+        entry = _suppressed_change_entry(self._change(None))
+        assert "symbol_binding" not in entry

@@ -458,6 +458,9 @@
               },
               "impact_assessment": {
                 "$ref": "#/$defs/change/properties/impact_assessment"
+              },
+              "symbol_binding": {
+                "$ref": "#/$defs/change/properties/symbol_binding"
               }
             }
           }

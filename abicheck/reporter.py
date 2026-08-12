@@ -978,6 +978,15 @@ def _suppressed_change_entry(
     entry["reachability_state"] = assessment.reachability_state.value
     if assessment.has_signal():
         entry["impact_assessment"] = assessment.to_dict()
+    # ELF symbol linkage of a removed symbol (Change.symbol_binding) --
+    # this is the one call site for the *suppressed*-changes array, a
+    # separate projector from _change_annotation_fields's kept-changes
+    # one; a binding-scoped suppression's audit trail needs the same
+    # field here too, or a reader can't see why the rule matched
+    # (Codex review, fresh evidence).
+    binding = getattr(c, "symbol_binding", None)
+    if binding:
+        entry["symbol_binding"] = binding
     # ADR-049 Phase 3 (Codex review, fresh evidence): suppression is a
     # display/gate decision, not a reason to erase the contract-relevance
     # decision checker._apply_contract_evaluation_shadow already stamped on

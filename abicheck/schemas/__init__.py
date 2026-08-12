@@ -401,7 +401,14 @@ from typing import Any
 #:       Additive optional key (Codex review; renumbered from a conflicting
 #:       2.29/2.30 when the PR #735/#733 rebase claimed those versions
 #:       first).
-REPORT_SCHEMA_VERSION = "2.32"
+#: 2.33 — the same optional ``symbol_binding`` key (see 2.32) is now also
+#:       propagated onto ``suppression.suppressed_changes[]`` entries, not
+#:       just the top-level ``changes[]``/``root_causes[]`` array -- a
+#:       separate projector (``reporter._suppressed_change_entry``) that
+#:       the 2.32 fix didn't reach, so a binding-scoped suppression's audit
+#:       trail couldn't show why it matched. Additive optional key (Codex
+#:       review, fresh evidence).
+REPORT_SCHEMA_VERSION = "2.33"
 
 #: SemVer-style (MAJOR.MINOR) version of the ``scan`` JSON output, emitted as
 #: ``scan_schema_version`` at the top level of both public scan dict shapes:
