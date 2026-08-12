@@ -478,6 +478,52 @@ Knobs and the reasoning behind them (`abicheck/buildsource/source_replay.py`):
   serial, so the dependency digest is **memoized per replay pass** — a public
   header included by N TUs is hashed once, not N times.
 
+### S2 preprocessor pre-scan performance (`scan --depth build`)
+
+`scan`'s S2 preprocessor pre-scan (ADR-035 D2, `buildsource/preprocessor_scan.py`)
+is the conditional tier that runs once L3 build evidence is available: per-TU
+ABI-macro-value capture (`clang -E -dM`) and public-header-leak detection
+(`clang -M`). It is advisory-only (never a verdict on its own), but on a
+real-world build it dominated `scan --depth build`'s wall time: a reported
+4-minute-to-20-minute jump on a library with ~2000 translation units, ~920s
+spent in this tier alone — one *serial* `clang -E -dM` invocation per compile
+unit, with no cap and no dedup, even though L3 ingestion itself (`bazel
+aquery`) cost only single-digit seconds.
+
+Two fixes, both semantics-preserving for the ABI-macro-value/leak facts this
+tier reports:
+
+- **Dedup by compile context.** The curated ABI-macro list
+  (`_GLIBCXX_USE_CXX11_ABI`, `NDEBUG`, `_ITERATOR_DEBUG_LEVEL`, …) is almost
+  always driven by command-line/predefined macros (`-D`/`-std`/`--target`/…),
+  not by a TU's own source text, so `capture_macros` now probes each
+  **distinct (language, cwd, flag-set) signature once** and fans the result
+  out to every compile unit sharing it — a build with thousands of TUs
+  sharing a handful of distinct compile contexts pays a handful of probes,
+  not thousands. (Accepted approximation, same class as this tier's other
+  advisory-only tradeoffs: a TU that `#define`s one of the curated macros
+  itself, overriding its own command-line value, is invisible to this dedup.)
+- **Parallel probing.** Each probe is one I/O-bound `clang -E`/`-M` subprocess
+  wait — unlike L4's AST parse, it is not GIL- or RAM-heavy — so probes run
+  concurrently via a thread pool.
+
+Knobs (`abicheck/buildsource/preprocessor_scan.py`), mirroring the L4
+conventions above:
+
+- **`ABICHECK_PREPROCESSOR_SCAN_JOBS`** — worker count for the probe pool.
+  Auto = one worker per distinct probe, capped by the same
+  `max(8, 2×cpu_count)` ceiling L4 uses. Set `=1` to force serial
+  (determinism).
+- **`ABICHECK_PREPROCESSOR_SCAN_MAX_PROBES`** (default 512) — caps the number
+  of *distinct* compile-context probes attempted, bounding worst-case cost on
+  a build with an unusually large number of distinct contexts. Truncation is
+  reported in the scan's diagnostics and folded into the S2 coverage row's
+  detail — never silent (this file's "no silent caps" convention).
+- **`ABICHECK_PREPROCESSOR_SCAN`** (default on) — set `=0` to skip the S2
+  tier entirely while keeping L3 for the other tiers. Reported as an honest
+  `not_collected` coverage row, the same as a missing compile DB or missing
+  `clang` — never silently counted as clean.
+
 ### Why not precompiled headers (PCH) / modules?
 
 A natural idea to cut the repeated per-TU header parse is a PCH over the public

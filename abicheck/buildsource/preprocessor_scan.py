@@ -43,24 +43,133 @@ is absent — exactly like :mod:`include_graph` and the L4 extractors.
 
 from __future__ import annotations
 
+import logging
 import os
 import re
 import shutil
 import subprocess  # noqa: S404 - preprocessor scan shells out to clang (never shell=True)
+import threading
+from collections.abc import Callable
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import PurePosixPath
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, Any, TypeVar, cast
 
-from .. import deadline
+from .. import deadline, process_resources
 from .model import CoverageStatus, LayerConfidence, LayerCoverage
 
 if TYPE_CHECKING:
-    from .build_evidence import BuildEvidence
+    from .build_evidence import BuildEvidence, CompileUnit
+
+_log = logging.getLogger(__name__)
+
+_ProbeItem = TypeVar("_ProbeItem")
 
 #: Preprocessor-scan fact-schema version. Independent of every other buildsource
 #: schema version (see ``buildsource/CLAUDE.md`` "Versioning").
 PREPROCESSOR_SCAN_VERSION: int = 1
+
+
+# ---------------------------------------------------------------------------
+# perf controls (P0 follow-up — see AGENTS.md "Known gaps": oneDAL --depth
+# build scan time 4m -> 20m, almost entirely this module's serial, un-deduped
+# per-TU ``clang -E -dM`` fan-out)
+# ---------------------------------------------------------------------------
+#
+# Two independent, additive optimizations, both semantics-preserving for the
+# ABI-macro-value/leak facts this module reports:
+#
+# 1. **Dedup by compile context.** The curated ABI-macro list
+#    (``_ABI_MACRO_NAMES``) is overwhelmingly command-line/predefined —
+#    driven by ``-D``/``-std``/``--target``/... flags, not by a TU's own
+#    source text — so two compile units sharing the identical (language, cwd,
+#    flag-set) signature produce the identical ``-dM`` dump for those macros.
+#    ``capture_macros`` therefore probes each distinct signature **once** and
+#    fans the result out to every compile unit sharing it, rather than
+#    invoking clang per TU. This is the "scope to changed/representative
+#    TUs" fix: on a real build, thousands of TUs collapse to a handful of
+#    distinct compile contexts. (Accepted approximation: a TU that
+#    ``#define``s one of the curated macros itself, overriding its own
+#    command-line/predefined value, is invisible to this dedup — the same
+#    class of approximation this module's docstring already accepts for the
+#    D2 tier being advisory-only.)
+# 2. **Parallel probing.** Each probe is one ``clang -E -dM``/``-M``
+#    subprocess wait — I/O-bound, not CPU/RAM-heavy like L4's AST parse — so
+#    probes run concurrently via a thread pool, sized by
+#    :func:`_preprocessor_scan_jobs` (env-tunable, mirrors
+#    ``source_replay.py``'s ``ABICHECK_L4_JOBS`` convention).
+#
+# A third, explicit control caps the number of *distinct* probes attempted
+# (``ABICHECK_PREPROCESSOR_SCAN_MAX_PROBES``) so a build with an unusually
+# large number of distinct compile contexts still bounds worst-case cost;
+# any truncation is reported in ``diagnostics`` rather than silently
+# dropped (AGENTS.md "No silent caps"). A fourth control disables the S2
+# tier outright (``ABICHECK_PREPROCESSOR_SCAN=0``) for a caller that wants
+# to keep L3 but skip this advisory-only, compiler-shelling-out tier
+# entirely — reported as a normal ``ran=False``/``skipped_reason`` coverage
+# row, same as "no compile units"/"no clang" (never silently counted clean).
+
+
+def preprocessor_scan_enabled() -> bool:
+    """Whether the S2 tier should run at all (``ABICHECK_PREPROCESSOR_SCAN``).
+
+    Defaults on. Set to ``0``/``false``/``no``/``off`` to skip S2 entirely
+    (e.g. to keep L3 build evidence for other tiers without paying this
+    tier's compiler-shell-out cost) — the coverage row reports why, exactly
+    like a missing compile DB or missing ``clang`` does.
+    """
+    raw = os.environ.get("ABICHECK_PREPROCESSOR_SCAN", "").strip().lower()
+    return raw not in ("0", "false", "no", "off")
+
+
+def _preprocessor_scan_jobs(n_items: int) -> int:
+    """Worker count for parallel S2 probing.
+
+    ``ABICHECK_PREPROCESSOR_SCAN_JOBS`` overrides (``1`` forces serial —
+    useful for deterministic tests); otherwise one worker per distinct probe,
+    capped by :func:`process_resources.jobs_ceiling` (the same
+    ``max(8, 2*cpu)`` ceiling ``source_replay.py``'s L4 pool uses). No RAM
+    clamp: unlike L4's AST parse, a ``clang -E -dM``/``-M`` probe's memory
+    footprint is negligible.
+    """
+    if n_items <= 1:
+        return 1
+    ceiling = process_resources.jobs_ceiling()
+    env = os.environ.get("ABICHECK_PREPROCESSOR_SCAN_JOBS", "").strip()
+    if env:
+        try:
+            requested = int(env)
+        except ValueError:
+            requested = 0
+        if requested > 0:
+            if requested > ceiling:
+                _log.warning(
+                    "ABICHECK_PREPROCESSOR_SCAN_JOBS=%d exceeds the "
+                    "oversubscription ceiling (%d); clamping",
+                    requested,
+                    ceiling,
+                )
+            return max(1, min(requested, ceiling))
+    return max(1, min(n_items, ceiling))
+
+
+#: Default cap on the number of *distinct* compile-context probes attempted
+#: per ``capture_macros``/``capture_header_includes`` call.
+_DEFAULT_MAX_PROBES = 512
+
+
+def _preprocessor_scan_max_probes() -> int:
+    """Max distinct probes attempted (``ABICHECK_PREPROCESSOR_SCAN_MAX_PROBES``)."""
+    env = os.environ.get("ABICHECK_PREPROCESSOR_SCAN_MAX_PROBES", "").strip()
+    if env:
+        try:
+            value = int(env)
+        except ValueError:
+            value = 0
+        if value > 0:
+            return value
+    return _DEFAULT_MAX_PROBES
 
 
 # ---------------------------------------------------------------------------
@@ -282,8 +391,9 @@ class PreprocessorScanResult:
     skipped_reason: str = ""
     tus_scanned: int = 0
     headers_scanned: int = 0
-    attempted: int = 0  # total clang -E invocations attempted
+    attempted: int = 0  # total clang -E invocations attempted (post-dedup)
     succeeded: int = 0  # invocations that returned usable output
+    probes_truncated: int = 0  # distinct compile-context probes skipped (cap)
     diagnostics: list[str] = field(default_factory=list)
     abi_macros: dict[str, dict[str, str]] = field(
         default_factory=dict
@@ -333,6 +443,11 @@ class PreprocessorScanResult:
         )
         if status is CoverageStatus.PARTIAL:
             detail += f"; {self.attempted - self.succeeded} clang run(s) failed"
+        if self.probes_truncated:
+            detail += (
+                f"; {self.probes_truncated} distinct compile-context probe(s) "
+                "skipped (ABICHECK_PREPROCESSOR_SCAN_MAX_PROBES)"
+            )
         return LayerCoverage(
             layer="preprocessor_scan",
             status=status,
@@ -349,6 +464,7 @@ class PreprocessorScanResult:
             "headers_scanned": self.headers_scanned,
             "attempted": self.attempted,
             "succeeded": self.succeeded,
+            "probes_truncated": self.probes_truncated,
             "all_failed": self.all_failed,
             "divergences": [d.to_dict() for d in self.divergences],
             "leaks": [leak.to_dict() for leak in self.leaks],
@@ -430,6 +546,10 @@ class ClangPreprocessorExtractor:
     diagnostics: list[str] = field(default_factory=list)
     runs_attempted: int = 0
     runs_ok: int = 0
+    #: Distinct compile-context probes skipped by the
+    #: ``ABICHECK_PREPROCESSOR_SCAN_MAX_PROBES`` cap (never silent — folded
+    #: into the coverage detail by ``PreprocessorScanResult.coverage()``).
+    probes_truncated: int = 0
     #: Set once an active scan --budget deadline is found already exhausted
     #: (P0 SVS follow-up). Read by capture_macros/capture_header_includes to
     #: stop iterating the remaining compile units/headers instead of calling
@@ -437,19 +557,35 @@ class ClangPreprocessorExtractor:
     #: cheap either way, but this keeps a large compile DB's degraded run from
     #: piling up a diagnostic per skipped unit.
     deadline_exhausted: bool = False
+    #: Guards ``runs_attempted``/``runs_ok`` (plain ``+= 1`` on an instance
+    #: attribute is not atomic — a thread switch between the read and the
+    #: write would lose an increment) now that ``_run`` can be invoked
+    #: concurrently from ``_run_probes``' thread pool. ``diagnostics.append``
+    #: and ``deadline_exhausted = True`` need no lock: CPython's GIL makes a
+    #: single ``list.append``/attribute-store atomic on its own.
+    _counter_lock: threading.Lock = field(
+        default_factory=threading.Lock, compare=False, repr=False
+    )
 
     def available(self) -> bool:
         return shutil.which(self.clang_bin) is not None
 
     def capture_macros(self, build: BuildEvidence) -> dict[str, dict[str, str]]:
-        """Return ``{compile_unit_id: {abi_macro: value}}`` via ``clang -E -dM``."""
+        """Return ``{compile_unit_id: {abi_macro: value}}`` via ``clang -E -dM``.
+
+        Probes are **deduplicated by compile context** (language, cwd, flag
+        set) and run **in parallel** — see the module-level "perf controls"
+        docstring above for why this is safe for the curated ABI-macro list.
+        One probe's result is fanned out to every compile unit sharing its
+        signature.
+        """
         from .include_graph import _lang_flag, depfile_args_from_argv
         from .source_extractors._argv import unredact_home
 
-        out: dict[str, dict[str, str]] = {}
+        groups: dict[tuple[Any, ...], list[CompileUnit]] = {}
+        commands: dict[tuple[Any, ...], tuple[list[str], str | None, str]] = {}
+        order: list[tuple[Any, ...]] = []
         for cu in build.compile_units:
-            if self.deadline_exhausted:
-                break
             if not cu.source:
                 continue
             argv = (
@@ -459,21 +595,66 @@ class ClangPreprocessorExtractor:
             )
             if not argv:
                 argv = [cu.source]
-            cmd = [
-                self.clang_bin,
-                "-E",
-                "-dM",
-                *_lang_flag(cu.language),
-                *(unredact_home(a) for a in argv),
-            ]
+            argv = [unredact_home(a) for a in argv]
             cwd = unredact_home(cu.directory) if cu.directory else None
-            text = self._run(cmd, cwd, cu.id)
+            sig = (cu.language, cwd, tuple(_context_flags(argv)))
+            groups.setdefault(sig, []).append(cu)
+            if sig not in commands:
+                order.append(sig)
+                cmd = [self.clang_bin, "-E", "-dM", *_lang_flag(cu.language), *argv]
+                commands[sig] = (cmd, cwd, cu.id)
+
+        max_probes = _preprocessor_scan_max_probes()
+        if len(order) > max_probes:
+            self.probes_truncated = len(order) - max_probes
+            order = order[:max_probes]
+            self.diagnostics.append(
+                f"preprocessor macro scan capped at {max_probes} distinct "
+                f"compile context(s); {self.probes_truncated} skipped "
+                "(set ABICHECK_PREPROCESSOR_SCAN_MAX_PROBES to raise)"
+            )
+
+        def _probe(sig: tuple[Any, ...]) -> tuple[tuple[Any, ...], str | None]:
+            if self.deadline_exhausted:
+                return sig, None
+            cmd, cwd, label = commands[sig]
+            return sig, self._run(cmd, cwd, label)
+
+        out: dict[str, dict[str, str]] = {}
+        for sig, text in self._run_probes(order, _probe):
             if text is None:
                 continue
             abi = select_abi_macros(parse_defined_macros(text))
-            if abi:
+            if not abi:
+                continue
+            for cu in groups[sig]:
                 out[cu.id] = abi
         return out
+
+    def _run_probes(
+        self,
+        items: list[_ProbeItem],
+        probe: Callable[[_ProbeItem], tuple[_ProbeItem, str | None]],
+    ) -> list[tuple[_ProbeItem, str | None]]:
+        """Run ``probe`` over ``items``, in parallel when there's more than one.
+
+        Each probe is an independent, I/O-bound ``clang -E`` subprocess wait —
+        the active scan deadline is captured once here and re-established
+        inside each worker (``contextvars`` don't cross a
+        ``ThreadPoolExecutor`` boundary, same reasoning as
+        ``source_replay._deadline_bound_worker``).
+        """
+        jobs = _preprocessor_scan_jobs(len(items))
+        if jobs <= 1 or len(items) <= 1:
+            return [probe(item) for item in items]
+        deadline_ts = deadline.current_deadline_ts()
+
+        def _bound(item: _ProbeItem) -> tuple[_ProbeItem, str | None]:
+            with deadline.with_deadline_ts(deadline_ts):
+                return probe(item)
+
+        with ThreadPoolExecutor(max_workers=jobs) as pool:
+            return list(pool.map(_bound, items))
 
     def _run(self, cmd: list[str], cwd: str | None, unit: str) -> str | None:
         # P0 follow-up: bound by the active scan --budget deadline (not just a
@@ -484,7 +665,8 @@ class ClangPreprocessorExtractor:
         # advisory (ADR-028 D3): losing macro/leak coverage for the remaining
         # compile units on a tight budget is acceptable, silently hanging or
         # orphaning a clang process is not.
-        self.runs_attempted += 1
+        with self._counter_lock:
+            self.runs_attempted += 1
         probe_timeout = 120.0
         scan_remaining = deadline.remaining()
         bound_by_scan_deadline = (
@@ -539,7 +721,8 @@ class ClangPreprocessorExtractor:
                 f"{proc.stderr.strip()[:200] or 'no output'}"
             )
             return None
-        self.runs_ok += 1
+        with self._counter_lock:
+            self.runs_ok += 1
         return cast("str", proc.stdout)
 
     def capture_header_includes(
@@ -567,16 +750,16 @@ class ClangPreprocessorExtractor:
         from .source_extractors._argv import unredact_home
 
         run_cwd = unredact_home(cwd) if cwd else None
-        out: dict[str, list[str]] = {}
-        for hdr in public_headers:
+        headers = [h for h in public_headers if h]
+
+        def _probe(hdr: str) -> tuple[str, str | None]:
             if self.deadline_exhausted:
-                break
-            if not hdr:
-                continue
-            # The include context (-I flags) is relative to the build dir (run_cwd),
-            # but the header path is relative to the process cwd the user invoked
-            # from — so make it absolute before changing cwd, else clang looks for
-            # it under the build dir and finds nothing (Codex review).
+                return hdr, None
+            # The include context (-I flags) is relative to the build dir
+            # (run_cwd), but the header path is relative to the process cwd
+            # the user invoked from — so make it absolute before changing
+            # cwd, else clang looks for it under the build dir and finds
+            # nothing (Codex review).
             header_arg = os.path.abspath(unredact_home(hdr))
             cmd = [
                 self.clang_bin,
@@ -585,7 +768,10 @@ class ClangPreprocessorExtractor:
                 *(unredact_home(a) for a in context_argv),
                 header_arg,
             ]
-            text = self._run(cmd, run_cwd, hdr)
+            return hdr, self._run(cmd, run_cwd, hdr)
+
+        out: dict[str, list[str]] = {}
+        for hdr, text in self._run_probes(headers, _probe):
             if text and text.strip():
                 out[hdr] = parse_depfile(text)
         return out
@@ -627,6 +813,11 @@ def run_preprocessor_scan(
             "preprocessor has compile context)"
         )
         return result
+    if not preprocessor_scan_enabled():
+        result.skipped_reason = (
+            "S2 preprocessor pre-scan disabled (ABICHECK_PREPROCESSOR_SCAN=0)"
+        )
+        return result
     extractor = ClangPreprocessorExtractor(clang_bin=clang_bin)
     if not extractor.available():
         result.skipped_reason = (
@@ -658,6 +849,7 @@ def run_preprocessor_scan(
     # otherwise read as a clean scan (Codex review).
     result.attempted = extractor.runs_attempted
     result.succeeded = extractor.runs_ok
+    result.probes_truncated = extractor.probes_truncated
     result.diagnostics = list(extractor.diagnostics)
     result.ran = True
     return result

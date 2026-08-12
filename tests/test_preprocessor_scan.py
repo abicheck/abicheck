@@ -381,12 +381,17 @@ def test_deadline_exceeded_degrades_to_diagnostic_not_crash(monkeypatch) -> None
 
 
 def test_capture_macros_stops_after_deadline_exhausted(monkeypatch) -> None:
-    # Once the budget is gone, capture_macros must stop iterating the
-    # remaining compile units rather than calling _run() (and hitting the
-    # same DeadlineExceeded) for every one of them.
+    # Once the budget is gone, capture_macros must stop probing remaining
+    # compile contexts rather than calling _run() (and hitting the same
+    # DeadlineExceeded) for every one of them. Each unit here shares the
+    # same (language, cwd, flags) signature — an empty argv after the
+    # source token is stripped — so they dedup into a single probe anyway;
+    # forcing serial jobs (ABICHECK_PREPROCESSOR_SCAN_JOBS=1) keeps the
+    # assertion deterministic regardless of that dedup detail.
     from abicheck import deadline
     from abicheck.buildsource import build_evidence as be, preprocessor_scan as ps
 
+    monkeypatch.setenv("ABICHECK_PREPROCESSOR_SCAN_JOBS", "1")
     build = be.BuildEvidence(
         compile_units=[
             be.CompileUnit(
@@ -416,10 +421,12 @@ def test_capture_macros_stops_after_deadline_exhausted(monkeypatch) -> None:
 
 def test_capture_header_includes_stops_after_deadline_exhausted(monkeypatch) -> None:
     # Same stop-early contract as capture_macros, for the sibling per-header
-    # -M depfile pass.
+    # -M depfile pass. Forced serial (ABICHECK_PREPROCESSOR_SCAN_JOBS=1) so
+    # the "exactly one attempt" assertion isn't racing a thread pool.
     from abicheck import deadline
     from abicheck.buildsource import preprocessor_scan as ps
 
+    monkeypatch.setenv("ABICHECK_PREPROCESSOR_SCAN_JOBS", "1")
     calls = {"n": 0}
 
     def _raise_once(cmd, **kwargs):
@@ -632,3 +639,201 @@ def test_scan_engine_clang_bin_excludes_cl_style_drivers() -> None:
         )
         == "clang++"
     )
+
+
+# ── perf controls: dedup / parallel jobs / probe cap / disable knob ──────────
+
+
+def test_capture_macros_dedups_identical_compile_contexts(monkeypatch) -> None:
+    # Compile units sharing the same (language, cwd, flags) signature must
+    # collapse into ONE clang -E -dM probe, fanned out to every unit in the
+    # group — the fix for oneDAL's --depth build scan cost (AGENTS.md
+    # "Known gaps"): thousands of TUs sharing a build-wide flag set no
+    # longer pay one subprocess each.
+    import abicheck.buildsource.build_evidence as be
+    import abicheck.buildsource.preprocessor_scan as ps
+
+    monkeypatch.setenv("ABICHECK_PREPROCESSOR_SCAN_JOBS", "1")
+    build = be.BuildEvidence(
+        compile_units=[
+            be.CompileUnit(
+                id=f"cu://{i}",
+                source=f"src/{i}.cpp",
+                language="CXX",
+                directory="/work/build",
+                argv=["clang++", "-c", f"src/{i}.cpp", "-Iinclude", "-DNDEBUG=1"],
+            )
+            for i in range(50)
+        ]
+    )
+    probes = {"n": 0}
+
+    def _fake_run(self, cmd, cwd, unit):
+        probes["n"] += 1
+        return "#define NDEBUG 1\n"
+
+    monkeypatch.setattr(ps.ClangPreprocessorExtractor, "_run", _fake_run)
+    out = ps.ClangPreprocessorExtractor().capture_macros(build)
+
+    assert probes["n"] == 1, f"expected one deduped probe, got {probes['n']}"
+    assert len(out) == 50
+    assert all(v == {"NDEBUG": "1"} for v in out.values())
+
+
+def test_capture_macros_probes_each_distinct_compile_context(monkeypatch) -> None:
+    # Two genuinely different flag sets must each get their own probe.
+    import abicheck.buildsource.build_evidence as be
+    import abicheck.buildsource.preprocessor_scan as ps
+
+    monkeypatch.setenv("ABICHECK_PREPROCESSOR_SCAN_JOBS", "1")
+    build = be.BuildEvidence(
+        compile_units=[
+            be.CompileUnit(
+                id="cu://a",
+                source="a.cpp",
+                language="CXX",
+                argv=["clang++", "-c", "a.cpp", "-DNDEBUG=1"],
+            ),
+            be.CompileUnit(
+                id="cu://b",
+                source="b.cpp",
+                language="CXX",
+                argv=["clang++", "-c", "b.cpp", "-UNDEBUG"],
+            ),
+        ]
+    )
+    seen_cmds: list[list[str]] = []
+
+    def _fake_run(self, cmd, cwd, unit):
+        seen_cmds.append(list(cmd))
+        return "#define NDEBUG 1\n" if "-DNDEBUG=1" in cmd else "#define NDEBUG 0\n"
+
+    monkeypatch.setattr(ps.ClangPreprocessorExtractor, "_run", _fake_run)
+    out = ps.ClangPreprocessorExtractor().capture_macros(build)
+
+    assert len(seen_cmds) == 2
+    assert out["cu://a"] == {"NDEBUG": "1"}
+    assert out["cu://b"] == {"NDEBUG": "0"}
+
+
+def test_preprocessor_scan_jobs_env_override(monkeypatch) -> None:
+    from abicheck.buildsource import preprocessor_scan as ps
+
+    monkeypatch.delenv("ABICHECK_PREPROCESSOR_SCAN_JOBS", raising=False)
+    assert ps._preprocessor_scan_jobs(1) == 1
+    assert ps._preprocessor_scan_jobs(0) == 1
+
+    monkeypatch.setenv("ABICHECK_PREPROCESSOR_SCAN_JOBS", "1")
+    assert ps._preprocessor_scan_jobs(20) == 1
+
+    monkeypatch.setenv("ABICHECK_PREPROCESSOR_SCAN_JOBS", "not-a-number")
+    assert ps._preprocessor_scan_jobs(20) >= 1  # falls back to auto, never crashes
+
+    monkeypatch.setenv("ABICHECK_PREPROCESSOR_SCAN_JOBS", "4")
+    assert ps._preprocessor_scan_jobs(20) == 4
+
+
+def test_capture_macros_respects_max_probes_cap(monkeypatch) -> None:
+    # A build with many DISTINCT compile contexts still bounds worst-case
+    # cost; the truncation is reported, never silent (AGENTS.md "No silent
+    # caps").
+    import abicheck.buildsource.build_evidence as be
+    import abicheck.buildsource.preprocessor_scan as ps
+
+    monkeypatch.setenv("ABICHECK_PREPROCESSOR_SCAN_JOBS", "1")
+    monkeypatch.setenv("ABICHECK_PREPROCESSOR_SCAN_MAX_PROBES", "3")
+    build = be.BuildEvidence(
+        compile_units=[
+            be.CompileUnit(
+                id=f"cu://{i}",
+                source=f"{i}.cpp",
+                language="CXX",
+                argv=["clang++", "-c", f"{i}.cpp", f"-DTAG={i}"],
+            )
+            for i in range(10)
+        ]
+    )
+
+    def _fake_run(self, cmd, cwd, unit):
+        return "#define NDEBUG 1\n"
+
+    monkeypatch.setattr(ps.ClangPreprocessorExtractor, "_run", _fake_run)
+    ex = ps.ClangPreprocessorExtractor()
+    out = ex.capture_macros(build)
+
+    assert len(out) == 3  # only the first 3 distinct contexts were probed
+    assert ex.probes_truncated == 7
+    assert any("capped at 3" in d for d in ex.diagnostics)
+
+
+def test_run_preprocessor_scan_disabled_via_env(monkeypatch) -> None:
+    from abicheck.buildsource import build_evidence as be
+
+    monkeypatch.setenv("ABICHECK_PREPROCESSOR_SCAN", "0")
+    build = be.BuildEvidence(
+        compile_units=[
+            be.CompileUnit(id="cu://a", source="a.cpp", language="CXX", argv=["a.cpp"])
+        ]
+    )
+    result = run_preprocessor_scan(build, [])
+    assert result.ran is False
+    assert "ABICHECK_PREPROCESSOR_SCAN=0" in result.skipped_reason
+    cov = result.coverage()
+    assert cov.status.value == "not_collected"
+
+
+def test_capture_macros_parallel_probe_counts_are_race_free(monkeypatch) -> None:
+    # Distinct compile contexts probed via the real thread pool (no
+    # ABICHECK_PREPROCESSOR_SCAN_JOBS=1 override here), through the REAL
+    # ``_run`` (only ``deadline.run_bounded`` — the actual subprocess call —
+    # is faked) so its runs_attempted/runs_ok increments genuinely race
+    # across threads. Regression guard for the non-atomic ``+= 1`` a naive
+    # parallel refactor would introduce.
+    import time
+
+    import abicheck.buildsource.build_evidence as be
+    import abicheck.buildsource.preprocessor_scan as ps
+    from abicheck import deadline
+
+    monkeypatch.setenv("ABICHECK_PREPROCESSOR_SCAN_JOBS", "8")
+    n = 40
+    build = be.BuildEvidence(
+        compile_units=[
+            be.CompileUnit(
+                id=f"cu://{i}",
+                source=f"{i}.cpp",
+                language="CXX",
+                argv=["clang++", "-c", f"{i}.cpp", f"-DTAG={i}"],
+            )
+            for i in range(n)
+        ]
+    )
+
+    class _P:
+        stdout = "#define NDEBUG 1\n"
+        stderr = ""
+        returncode = 0
+
+    def _fake_run_bounded(cmd, **kwargs):
+        time.sleep(0.001)  # encourage real thread interleaving
+        return _P()
+
+    monkeypatch.setattr(deadline, "run_bounded", _fake_run_bounded)
+    ex = ps.ClangPreprocessorExtractor()
+    out = ex.capture_macros(build)
+
+    assert len(out) == n
+    assert ex.runs_attempted == n
+    assert ex.runs_ok == n
+
+
+def test_preprocessor_scan_enabled_default_and_falsy_values(monkeypatch) -> None:
+    from abicheck.buildsource import preprocessor_scan as ps
+
+    monkeypatch.delenv("ABICHECK_PREPROCESSOR_SCAN", raising=False)
+    assert ps.preprocessor_scan_enabled() is True
+    for falsy in ("0", "false", "no", "off", "FALSE", "Off"):
+        monkeypatch.setenv("ABICHECK_PREPROCESSOR_SCAN", falsy)
+        assert ps.preprocessor_scan_enabled() is False
+    monkeypatch.setenv("ABICHECK_PREPROCESSOR_SCAN", "1")
+    assert ps.preprocessor_scan_enabled() is True
