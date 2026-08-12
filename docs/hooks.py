@@ -62,10 +62,14 @@ def _latest_published_version(repo_root: Path) -> str:
         facts = json.loads(facts_path.read_text(encoding="utf-8"))
     except (OSError, ValueError) as exc:
         raise ReleaseFactError(f"{facts_path} is unreadable/malformed: {exc}") from exc
+    if not isinstance(facts, dict):
+        raise ReleaseFactError(f"{facts_path} must contain a JSON object")
     value = facts.get("latest_release")
-    if not value:
-        raise ReleaseFactError(f"{facts_path} has no (or an empty) latest_release field")
-    return str(value)
+    if not isinstance(value, str) or not value.strip():
+        raise ReleaseFactError(
+            f"{facts_path} has no valid non-empty string latest_release field"
+        )
+    return value.strip()
 
 
 #: Cached by `on_config`, read by `on_page_markdown` -- so a page can embed

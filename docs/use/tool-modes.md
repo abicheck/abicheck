@@ -30,7 +30,7 @@ external-tool names match ABICC's official documentation.
 
 | Mode | What it is | Compiler needed? | Debug info needed? | Headers needed? |
 |------|------------|:----------------:|:------------------:|:---------------:|
-| **abicheck (native, default)** | abicheck's own pipeline, which adapts to the evidence you give it: binary metadata (L0) + DWARF/PDB layout (L1) + header AST via castxml (L2), optionally + build context (L3) / source replay (L4) — see [modes by source](#abicheck-native-modes-by-evidence-source-l0l4) | ⚠️ for headers only (castxml; GCC/Clang/MSVC) | optional (improves accuracy) | recommended (falls back to DWARF/PDB if present, else symbols-only) |
+| **abicheck (native, default)** | abicheck's own pipeline, which adapts to the evidence you give it: binary metadata (L0) + DWARF/BTF/CTF (ELF) or PDB (PE) layout (L1) + header AST via castxml/clang (L2), optionally + build context (L3) / source replay (L4) — see [modes by source](#abicheck-native-modes-by-evidence-source-l0l4) | ⚠️ for headers only (castxml/clang; GCC/Clang/MSVC) | optional (improves accuracy) | recommended (falls back to L1 debug info if present, else L0 binary-metadata analysis) |
 | abidiff + headers | `abidiff` (libabigail) | ❌ | optional (improves accuracy) | ✅ always |
 | ABICC+headers (ABICC Usage #2) | Original / headers mode | ✅ **GCC only** | ❌ | ✅ |
 | ABICC+dump (ABICC Usage #1) | abi-dumper / binary mode | ❌ | ✅ (`-g -Og`) | ❌ (optional) |

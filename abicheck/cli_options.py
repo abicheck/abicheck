@@ -296,7 +296,7 @@ def two_sided_input_options(func: F) -> F:
         "one side with an 'old='/'new=' prefix, repeating the flag per side "
         "(e.g. --header old=v1/foo.h --header new=v2/foo.h). Repeatable (ADR-040). "
         "Recommended for full ABI analysis; without headers, abicheck uses whatever "
-        "artifact evidence is available instead (ELF may add DWARF, PE may add PDB, "
+        "artifact evidence is available instead (ELF may add DWARF/BTF/CTF, PE may add PDB, "
         "Mach-O stays limited to binary metadata: exports plus load-command facts "
         "like install name, dependencies, and rpaths) but has no header AST or "
         "public-surface scoping. "
@@ -741,7 +741,9 @@ def compile_context_options(func: F) -> F:
         "--frontend-context (SYCL/DPC++), which an auto resolving to plain "
         "castxml (no pin) routes to clang since castxml can't satisfy it at "
         "all (a castxml- or hybrid-pinned auto still rejects it, since "
-        "hybrid has no device concept either). "
+        "hybrid has no device concept either; an explicit clang, or auto "
+        "pinned to clang via ABICHECK_AST_FRONTEND=clang, satisfies it "
+        "directly). "
         "Env: ABICHECK_AST_FRONTEND.",
     )(func)
     return func

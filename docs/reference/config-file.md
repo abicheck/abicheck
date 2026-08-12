@@ -82,7 +82,15 @@ at explicitly could otherwise silently break an unrelated invocation just
 by existing somewhere upward of the working directory. See
 [Build-context capture](../use/dump-compare-flags.md#build-context-capture-compile_commandsjson-evidence-layer-l3)
 for that path in detail. Don't assume this leniency extends to the rest of
-the file's blocks — it's specific to that one loader.
+the file's blocks — it's specific to that one loader, and only when it's
+the only one invoked: a `dump`/`compare` run with `--sources`/`--build-info`
+also goes through `cli_buildsource.embed_build_source()`'s own, separate
+config resolution (L3/L4/L5 evidence collection, not the L2 compile
+context), and *that* one raises a hard `click.UsageError` on a parse
+failure unconditionally — explicit `--config` or auto-discovered alike,
+same as the project-config rule above. Passing `--sources` therefore loses
+the auto-discovered warn-and-continue leniency even for a run that would
+otherwise get it through `merge_compile_config()` alone.
 
 There is no longer an `init`/`config` scaffolding or diagnostic command
 (`abicheck init`, `config validate`, `config show-effective` are all gone —
