@@ -41,4 +41,15 @@
   contract, unchanged) — so the two id schemes never matched even though
   each finding's own per-finding evidence already showed group membership.
   Fixed by folding each report group's already-correct member-level
-  evidence directly, rather than re-deriving group membership by id.
+  evidence directly, rather than re-deriving group membership by id. A
+  third, related gap: `cli_compare_fold.py`'s own `--report-mode root-cause`
+  fold-in (`_add_entries_to_root_causes`) appends a scoped-only finding's
+  entry to an existing or brand-new `root_causes[]` group *after* the JSON
+  serializer already built its groups, but never recomputed that group's
+  own `strongest_evidence_level`/`evidence_levels` afterward — fixed by
+  recomputing every touched group's evidence summary from *all* its
+  findings (pre-existing and newly-folded-in alike) each time the fold-in
+  runs. The evidence-folding helpers moved to a new leaf module,
+  `abicheck/root_cause_evidence.py` (AI-readiness file-size cap — this
+  follow-up's additions pushed `reporter.py` to 2046 lines, over the
+  2000-line hard cap).

@@ -89,6 +89,13 @@ from .reporter_markdown import (
     to_review_digest as to_review_digest,
     to_stat as to_stat,
 )
+from .root_cause_evidence import (
+    entry_root_cause_evidence,
+    fold_evidence_summaries,
+    root_cause_group_evidence,
+    scoped_only_changes_filtered,
+    scoped_only_evidence_lookup,
+)
 from .schemas import REPORT_SCHEMA_VERSION
 from .semver import recommend_release
 
@@ -373,7 +380,7 @@ def _to_json_leaf(
     _rc_lookup = root_cause_lookup_for_changes(
         changes, extra_causes=_scoped_only_extra_causes(result, show_only)
     )
-    _rc_evidence = _scoped_only_evidence_lookup(result, changes, show_only)
+    _rc_evidence = scoped_only_evidence_lookup(result, changes, show_only)
 
     effective_policy = result.policy or "strict_abi"
     eff_sets = result._effective_kind_sets()
@@ -564,6 +571,15 @@ def _add_entries_to_root_causes(
     scoped-gate entries computed after :func:`_to_json_root_cause` already
     grouped ``result.changes`` (else they'd sit in ``changes[]`` but never in
     ``root_causes``). No-op if *d* has no ``root_causes`` list.
+
+    Each touched group's ``strongest_evidence_level``/``evidence_levels``
+    (G29 Phase 6, Codex review) is recomputed from *all* its findings --
+    pre-existing and newly folded-in alike -- every time a group is touched,
+    via :func:`~abicheck.root_cause_evidence.fold_evidence_summaries` over each finding's own
+    ``impact_assessment.root_cause_evidence``. Without this, a scoped-only
+    entry folded into an existing (or brand-new) group here never
+    contributed its own evidence to the group summary at all, unlike a
+    group :func:`_to_json_root_cause` builds entirely from ``changes``.
     """
     root_causes = d.get("root_causes")
     if not isinstance(root_causes, list):
@@ -573,6 +589,7 @@ def _add_entries_to_root_causes(
         for group in root_causes
         if isinstance(group, dict)
     }
+    touched: set[str] = set()
     for key, root_display, entry in keyed_entries:
         root_cause_id = hashlib.sha256(key.encode("utf-8")).hexdigest()[:16]
         group = by_id.get(root_cause_id)
@@ -587,25 +604,18 @@ def _add_entries_to_root_causes(
             by_id[root_cause_id] = group
         group["findings"].append(entry)
         group["finding_count"] = len(group["findings"])
-    d["root_cause_count"] = len(root_causes)
-
-
-def _scoped_only_changes_filtered(
-    result: DiffResult, show_only: str | None
-) -> list[Change]:
-    """``result.scoped_only_changes``, filtered by ``--show-only`` the same
-    way ``changes`` already is -- shared by every caller below so the two
-    never filter differently (Codex review)."""
-    scoped_only = list(getattr(result, "scoped_only_changes", ()) or ())
-    if show_only and scoped_only:
-        scoped_only = apply_show_only(
-            scoped_only,
-            show_only,
-            policy=result.policy,
-            kind_sets=result._effective_kind_sets(),
-            policy_file=result.policy_file,
+        touched.add(root_cause_id)
+    for root_cause_id in touched:
+        group = by_id[root_cause_id]
+        evidence = fold_evidence_summaries(
+            entry_root_cause_evidence(f)
+            for f in group["findings"]
+            if isinstance(f, dict)
         )
-    return scoped_only
+        if evidence is not None:
+            group["strongest_evidence_level"] = evidence["strongest_evidence_level"]
+            group["evidence_levels"] = evidence["evidence_levels"]
+    d["root_cause_count"] = len(root_causes)
 
 
 def _scoped_only_extra_causes(
@@ -622,72 +632,8 @@ def _scoped_only_extra_causes(
     ``sarif.to_sarif``/``junit_report._build_testsuite``'s identical,
     single-pass fold.
     """
-    scoped_only = _scoped_only_changes_filtered(result, show_only)
+    scoped_only = scoped_only_changes_filtered(result, show_only)
     return frozenset(c.caused_by_type for c in scoped_only if c.caused_by_type)
-
-
-def _scoped_only_evidence_lookup(
-    result: DiffResult, changes: list[Change], show_only: str | None
-) -> dict[str, dict[str, object]]:
-    """``finding_id -> root_cause_evidence`` for *changes* plus *result*'s
-    filtered ``scoped_only_changes`` (G29 Phase 6, Codex review).
-
-    A finding correlating only via a scoped-only sibling needs that sibling
-    in the same :func:`~abicheck.impact.correlation.correlate_root_causes`
-    call to be recognized -- a lookup over *changes* alone under-correlates,
-    unlike ``sarif.to_sarif``'s identical combined computation. Shared by a
-    caller rendering only ``changes`` and ``cli_compare_fold.py``'s later
-    scoped-only fold-in.
-    """
-    scoped_only = _scoped_only_changes_filtered(result, show_only)
-    return root_cause_evidence_lookup_for_changes(changes + scoped_only)
-
-
-def _root_cause_group_evidence(
-    group_changes: list[Change], rc_evidence: dict[str, dict[str, object]]
-) -> dict[str, object] | None:
-    """Fold a ``root_causes[]`` group's members' own ``root_cause_evidence``
-    into one group-level summary (G29 Phase 6, Codex review).
-
-    Deliberately doesn't match a correlator group by ``root_cause_id``
-    equality: the two grouping schemes disagree for a bare-symbol pair
-    sharing no ``caused_by_type`` (report grouping keeps each its own
-    singleton; the correlator's ``caused_by_type or symbol`` key merges them
-    -- reproduced by a ``FUNC_REMOVED``/scoped-only
-    ``CONSUMER_RUNTIME_LOAD_FAILED`` pair, ``--used-by --verify-runtime``'s
-    real shape), so the hashes never match even though both findings are one
-    correlator group. Folding each member's own already-correct evidence
-    instead sidesteps the mismatch: every member of one group carries an
-    identical summary by construction, so this is a no-op re-derivation in
-    the common case. ``None`` when no member has any evidence.
-    """
-    from .impact.correlation import EVIDENCE_RANK
-
-    strongest: str | None = None
-    levels: set[str] = set()
-    found = False
-    for c in group_changes:
-        member_evidence = rc_evidence.get(_finding_id(c))
-        if member_evidence is None:
-            continue
-        found = True
-        member_levels = member_evidence.get("evidence_levels") or ()
-        levels.update(str(level) for level in cast(Sequence[object], member_levels))
-        member_strongest = member_evidence.get("strongest_evidence_level")
-        if member_strongest is not None and (
-            strongest is None
-            or EVIDENCE_RANK.get(str(member_strongest), -1)
-            > EVIDENCE_RANK.get(strongest, -1)
-        ):
-            strongest = str(member_strongest)
-    if not found:
-        return None
-    return {
-        "strongest_evidence_level": strongest,
-        "evidence_levels": sorted(
-            levels, key=lambda level: EVIDENCE_RANK.get(level, -1)
-        ),
-    }
 
 
 def _to_json_root_cause(
@@ -709,7 +655,7 @@ def _to_json_root_cause(
     `RootCauseCorrelator`'s own (G29 Phase 6), whose evidence-ranked groups
     each `root_causes[]` entry additionally annotates with
     ``strongest_evidence_level``/``evidence_levels`` (see
-    :func:`_root_cause_group_evidence`) without adopting its id scheme.
+    :func:`~abicheck.root_cause_evidence.root_cause_group_evidence`) without adopting its id scheme.
     """
     changes = list(result.changes)
     if show_only:
@@ -741,7 +687,7 @@ def _to_json_root_cause(
     # mode provides it, `_to_json_leaf` included) and `root_causes[].findings`
     # never drift from each other.
     _rc_lookup = root_cause_lookup_for_changes(changes, extra_causes=extra_causes)
-    _rc_evidence = _scoped_only_evidence_lookup(result, changes, show_only)
+    _rc_evidence = scoped_only_evidence_lookup(result, changes, show_only)
     entry_by_id = {
         id(c): _change_to_dict(
             c,
@@ -767,7 +713,7 @@ def _to_json_root_cause(
             "finding_count": len(group_changes),
             "findings": [entry_by_id[id(c)] for c in group_changes],
         }
-        group_evidence = _root_cause_group_evidence(group_changes, _rc_evidence)
+        group_evidence = root_cause_group_evidence(group_changes, _rc_evidence)
         if group_evidence is not None:
             entry["strongest_evidence_level"] = group_evidence[
                 "strongest_evidence_level"
@@ -1110,13 +1056,13 @@ def _add_changes_block(
     a scoped-only overlay silently lost its ``impact_assessment.root_cause_id``,
     disagreeing with root-cause mode, SARIF, and JUnit. ``root_cause_evidence``
     (G29 Phase 6, Codex review) gets the same treatment via
-    :func:`_scoped_only_evidence_lookup`, correlating against the real
+    :func:`~abicheck.root_cause_evidence.scoped_only_evidence_lookup`, correlating against the real
     scoped-only ``Change`` objects rather than just their ``caused_by_type``.
     """
     _rc_lookup = root_cause_lookup_for_changes(
         changes, extra_causes=_scoped_only_extra_causes(result, show_only)
     )
-    _rc_evidence = _scoped_only_evidence_lookup(result, changes, show_only)
+    _rc_evidence = scoped_only_evidence_lookup(result, changes, show_only)
     d["changes"] = [
         _change_to_dict(
             c,
