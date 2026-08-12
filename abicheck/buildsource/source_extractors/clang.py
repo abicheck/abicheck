@@ -128,8 +128,11 @@ from .clang_source_edges import build_source_edges
 #: clang extractor schema/behaviour version, recorded in the dump provenance and
 #: folded into the per-TU cache key (ADR-030 D8). Bump on ANY recipe change so a
 #: stale ``--cache-dir`` never reuses an old dump. 0.8: also folds in the
-#: resolved compiler override (Codex review).
-CLANG_EXTRACTOR_VERSION = "0.8"
+#: resolved compiler override (Codex review). 0.9: the reconstructed command now
+#: appends ``-fsycl-host-only`` for a SYCL-enabled Intel oneAPI invocation
+#: (Codex review) -- a pre-0.9 cache entry for the same TU was built without
+#: that flag and must not be reused as-is.
+CLANG_EXTRACTOR_VERSION = "0.9"
 
 
 @functools.lru_cache(maxsize=8)
