@@ -329,6 +329,41 @@ class TestJsonReport:
         for label in audit["stale_rules"]:
             assert "reachability=" in label
 
+    def test_label_includes_binding_selector(self, tmp_path):
+        # Regression (Codex review, fresh evidence): two rules sharing every
+        # other selector but differing by `binding` (e.g. weak vs. global)
+        # match disjoint findings and must not render identically.
+        old_p, new_p = _write_pair(tmp_path)
+        suppress = _write_suppression(
+            tmp_path,
+            "version: 1\n"
+            "suppressions:\n"
+            "  - symbol: never_matches_anything\n"
+            "    change_kind: func_removed\n"
+            "    binding: weak\n"
+            "  - symbol: never_matches_anything\n"
+            "    change_kind: func_removed\n"
+            "    binding: global\n",
+        )
+        result = CliRunner().invoke(
+            main,
+            [
+                "compare", str(old_p), str(new_p),
+                "--suppress", str(suppress), "--audit-suppressions",
+                "--format", "json",
+            ],
+        )
+        assert result.exit_code == 4, result.output
+        payload = json.loads(result.stdout)
+        audit = payload["suppression_audit"]
+        assert audit["total_rules"] == 2
+        assert len(audit["stale_rules"]) == 2
+        assert len(set(audit["stale_rules"])) == 2, (
+            "rules differing only by binding must not render identically"
+        )
+        for label in audit["stale_rules"]:
+            assert "binding=" in label
+
     def test_label_includes_expires_date(self, tmp_path):
         # Regression (Codex review, fresh evidence): two otherwise-identical
         # rules (same symbol and label) differing only by their `expires`

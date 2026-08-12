@@ -749,6 +749,12 @@ def _suppression_rule_label(rule: Any, index: int) -> str:
             "namespace",
             "entity_namespace",
             "cause_namespace",
+            # Symbol-linkage selector (Codex review, fresh evidence): two
+            # rules sharing every other selector but differing on `binding`
+            # (e.g. one `weak`, one `global`) match disjoint findings and
+            # must not render identically -- same reasoning as every other
+            # selector in this tuple.
+            "binding",
             # ADR-044 D2 reachability gates (Codex review, fresh evidence):
             # these affect which findings a rule matches exactly like the
             # selectors above -- two rules sharing every selector but
