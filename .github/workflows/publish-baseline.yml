@@ -358,7 +358,18 @@ jobs:
           fi
 
           if [[ -z "$existing_url" ]]; then
-            gh release upload "$RELEASE_TAG" "$ASSET_NAME" --repo "$REPO"
+            # "./$ASSET_NAME", not a bare "$ASSET_NAME" -- gh's own arg
+            # parser treats a leading '-' as a flag, not part of a
+            # filename (confirmed against real gh 2.96.0:
+            # `gh release upload dummy --nightly.tar.gz` exits "unknown
+            # flag" rather than uploading a file by that name). A custom
+            # asset-name-template resolving to a name starting with '-'
+            # (e.g. "--nightly.tar.gz") packages and stages just fine in
+            # actions/stage-baseline -- '-' is a perfectly legal leading
+            # filename character on every real filesystem -- but this
+            # first-time-publish upload would otherwise always fail
+            # (Codex review).
+            gh release upload "$RELEASE_TAG" "./$ASSET_NAME" --repo "$REPO"
             echo "::notice::published new release-contract asset $ASSET_NAME on $RELEASE_TAG."
             exit 0
           fi

@@ -35,3 +35,9 @@ A new changelog fragment. See changelog.d/README.md for the workflow.
   previously passed as a safe no-op even though a real consumer
   supplying that tag as `resolve-baseline`'s `expected-project-ref`
   would reject it as `wrong_project_ref`.
+- **`publish-baseline.yml`'s first-time-publish `gh release upload` call**
+  now passes the asset file as `./$ASSET_NAME` instead of a bare
+  `$ASSET_NAME` — `gh`'s own arg parser treats a leading `-` in a file
+  argument as a flag, not part of the filename, so a resolved asset name
+  starting with `-` (e.g. `--nightly.tar.gz`) packaged correctly but
+  always failed this upload.
