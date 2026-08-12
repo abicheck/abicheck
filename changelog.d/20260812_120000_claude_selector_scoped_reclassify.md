@@ -105,3 +105,10 @@ A new changelog fragment. See changelog.d/README.md for the workflow.
   `pr_comment._reclassified_count()` only recognized the kind-keyed
   `policy_overrides` map — a `func_removed` reclassified to `ignore` for one
   symbol read as an unremarked "safe" change in the PR comment.
+  `reclassify_rule_for_change`/`reclassified_by` no longer stamp a matching
+  rule whose `to:` merely restates the verdict that would already apply
+  without it (e.g. `func_removed` reclassified `to: break` under
+  `strict_abi`, where `func_removed` is already BREAKING) — only a rule that
+  actually changes the verdict from what the next-priority path (a same-kind
+  `overrides:` entry, or the base policy) would produce counts as a real
+  reclassification.

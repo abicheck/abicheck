@@ -1205,6 +1205,82 @@ reclassify:
     assert rule.label == "comdat-inline"
 
 
+def test_reclassify_rule_for_change_none_for_a_no_op_rule(tmp_path: Path) -> None:
+    """Codex review: a matching rule whose `to:` merely restates the verdict
+    the finding already has (func_removed, already BREAKING under
+    strict_abi, reclassified `to: break`) isn't a real reclassification --
+    stamping `reclassified_by` for it would make the PR comment falsely
+    report a downgrade that never happened. Verified by deliberately
+    reverting the no-op check and confirming this test fails."""
+    from abicheck.severity import reclassify_rule_for_change
+
+    p = tmp_path / "policy.yaml"
+    p.write_text(
+        """
+reclassify:
+  - kind: func_removed
+    symbol: foo
+    to: break
+""".strip(),
+        encoding="utf-8",
+    )
+    pf = PolicyFile.load(p)
+    change = _change(ChangeKind.FUNC_REMOVED, "foo")
+    assert reclassify_rule_for_change(change, pf) is None
+
+
+def test_reclassify_rule_for_change_none_for_a_no_op_rule_restating_an_override(
+    tmp_path: Path,
+) -> None:
+    """The no-op comparison is against whichever verdict would apply next in
+    precedence -- a same-kind `overrides:` entry when one exists, not always
+    the base policy's own verdict."""
+    from abicheck.severity import reclassify_rule_for_change
+
+    p = tmp_path / "policy.yaml"
+    p.write_text(
+        """
+overrides:
+  func_removed: risk
+reclassify:
+  - kind: func_removed
+    symbol: foo
+    to: risk
+""".strip(),
+        encoding="utf-8",
+    )
+    pf = PolicyFile.load(p)
+    change = _change(ChangeKind.FUNC_REMOVED, "foo")
+    assert reclassify_rule_for_change(change, pf) is None
+
+
+def test_reclassify_rule_for_change_not_none_when_it_actually_changes_the_verdict(
+    tmp_path: Path,
+) -> None:
+    """Sanity check alongside the two no-op tests above: a rule that *does*
+    change the verdict from what the override/base-policy path would
+    produce is still correctly recognized as deciding."""
+    from abicheck.severity import reclassify_rule_for_change
+
+    p = tmp_path / "policy.yaml"
+    p.write_text(
+        """
+overrides:
+  func_removed: risk
+reclassify:
+  - kind: func_removed
+    symbol: foo
+    to: warn
+""".strip(),
+        encoding="utf-8",
+    )
+    pf = PolicyFile.load(p)
+    change = _change(ChangeKind.FUNC_REMOVED, "foo")
+    rule = reclassify_rule_for_change(change, pf)
+    assert rule is not None
+    assert rule.to_verdict == Verdict.API_BREAK
+
+
 def test_reclassify_rule_for_change_none_when_no_rule_matches(tmp_path: Path) -> None:
     from abicheck.severity import reclassify_rule_for_change
 
@@ -1364,3 +1440,35 @@ def test_reclassified_by_absent_for_a_kind_global_override(tmp_path: Path) -> No
     d = json.loads(to_json(diff))
     assert "reclassified_by" not in d["changes"][0]
     assert d["policy_overrides"] == {"func_removed": "COMPATIBLE"}
+
+
+def test_reclassified_by_absent_for_a_no_op_reclassify_rule(tmp_path: Path) -> None:
+    """Codex review: a matching `reclassify:` rule whose `to:` merely
+    restates the finding's already-BREAKING verdict (`func_removed`, `to:
+    break`) is not a real reclassification -- stamping `reclassified_by` for
+    it would make the JSON report (and the PR comment reading it) falsely
+    claim a downgrade that never happened."""
+    import json
+
+    from abicheck.checker_types import DiffResult
+    from abicheck.reporter import to_json
+
+    p = tmp_path / "policy.yaml"
+    p.write_text(
+        """
+reclassify:
+  - kind: func_removed
+    symbol: foo
+    to: break
+""".strip(),
+        encoding="utf-8",
+    )
+    pf = PolicyFile.load(p)
+    change = _change(ChangeKind.FUNC_REMOVED, "foo")
+    diff = DiffResult(
+        changes=[change], old_version="1", new_version="2", library="l",
+        policy_file=pf,
+    )
+
+    d = json.loads(to_json(diff))
+    assert "reclassified_by" not in d["changes"][0]

@@ -356,6 +356,15 @@ def reclassify_rule_for_change(
     rule can match on (``type_pattern``/``member_name``/``namespace``/
     ``entity_namespace``/``cause_namespace`` have no JSON counterpart), so a
     JSON-only reimplementation could not be sound.
+
+    A matching rule whose ``to_verdict`` merely *restates* the verdict the
+    next-priority path (a same-kind ``overrides:`` entry, or the base policy)
+    would already have produced is a no-op, not a reclassification -- e.g.
+    ``func_removed: to: break`` under ``strict_abi``, where ``func_removed``
+    is already BREAKING (Codex review: a matching-but-no-op rule was still
+    stamping ``reclassified_by``, making the PR comment falsely report a
+    downgrade that never happened). Only a rule that actually *changes* the
+    verdict from what would apply in its absence counts as deciding it.
     """
     if isinstance(getattr(change, "effective_verdict", None), Verdict):
         return None
@@ -364,12 +373,26 @@ def reclassify_rule_for_change(
     )
     if not rules:
         return None
+    base_policy = getattr(policy_file, "base_policy", None)
+    base_sets = _resolve_kind_sets(base_policy, None)
+    base_v = effective_category(change, *base_sets)
+    overrides = (
+        getattr(policy_file, "overrides", None) if policy_file is not None else None
+    )
+    kind = change.kind
+    # The verdict that would apply if *this* reclassify rule didn't exist --
+    # the next step down the same precedence chain effective_verdict_for_change
+    # walks (a same-kind overrides: entry, else the base policy's own
+    # verdict) -- so a rule that merely restates it is recognized as a no-op
+    # regardless of which of the two it happens to restate.
+    next_priority_v = (
+        cast(Verdict, overrides[kind]) if overrides and kind in overrides else base_v
+    )
     for rule in rules:
         if rule.matches(change, today):
-            base_policy = getattr(policy_file, "base_policy", None)
-            base_sets = _resolve_kind_sets(base_policy, None)
-            base_v = effective_category(change, *base_sets)
             reclass_v = rule.to_verdict
+            if reclass_v == next_priority_v:
+                return None
             if (
                 _has_frozen_namespace_violation(change)
                 and _VERDICT_ORDER.index(reclass_v) < _VERDICT_ORDER.index(base_v)
