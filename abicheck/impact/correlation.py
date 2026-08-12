@@ -110,11 +110,16 @@ EVIDENCE_LEVEL_BY_KIND: dict[ChangeKind, str] = {
 }
 
 #: Rank order for every evidence level this module can produce, weakest
-#: first — used only to pick a group's
-#: :attr:`RootCauseGroup.strongest_evidence_level` and to order
-#: :attr:`RootCauseGroup.evidence_levels`; not exposed as a standalone
-#: numeric score since the levels themselves are the stable, documented
-#: vocabulary. ``"call_graph_overapprox"`` is not one of
+#: first — used to pick a group's :attr:`RootCauseGroup.strongest_evidence_level`
+#: and to order :attr:`RootCauseGroup.evidence_levels`. Public (G29 Phase 6
+#: follow-up) so a caller folding several already-computed per-finding
+#: ``root_cause_evidence`` values back into one group-level summary (e.g.
+#: ``reporter._to_json_root_cause``'s ``root_causes[]`` rollup, when a
+#: report-level group and a correlator group disagree on membership — see
+#: that function's own docstring) can rank them the same way this module
+#: does, without duplicating the order. The levels themselves stay the
+#: stable, documented vocabulary; this is only their sort key.
+#: ``"call_graph_overapprox"`` is not one of
 #: :data:`EVIDENCE_LEVEL_BY_KIND`'s values — it's a per-``Change`` downgrade
 #: :func:`_evidence_level_for` applies, so it can't be derived from that
 #: dict's values the way the other four levels could; ranked below
@@ -122,7 +127,7 @@ EVIDENCE_LEVEL_BY_KIND: dict[ChangeKind, str] = {
 #: than an exact one) but above ``"artifact_proven"`` (it still proves *some*
 #: reachability path exists, which a bare export-table removal says nothing
 #: about).
-_EVIDENCE_RANK = {
+EVIDENCE_RANK = {
     "artifact_proven": 0,
     "call_graph_overapprox": 1,
     "call_graph_proven": 2,
@@ -150,7 +155,7 @@ class RootCauseGroup:
     def evidence_levels(self) -> tuple[str, ...]:
         """This group's distinct evidence levels, weakest first."""
         seen = {level for _, level in self.members}
-        return tuple(sorted(seen, key=lambda level: _EVIDENCE_RANK.get(level, -1)))
+        return tuple(sorted(seen, key=lambda level: EVIDENCE_RANK.get(level, -1)))
 
     @property
     def strongest_evidence_level(self) -> str | None:
@@ -160,7 +165,7 @@ class RootCauseGroup:
             return None
         return max(
             (level for _, level in self.members),
-            key=lambda level: _EVIDENCE_RANK.get(level, -1),
+            key=lambda level: EVIDENCE_RANK.get(level, -1),
         )
 
     def to_dict(self) -> dict[str, object]:
@@ -217,7 +222,7 @@ def _evidence_level_for(change: Change) -> str:
         base = "call_graph_overapprox"
     if (
         change.reachability_kind == "consumer_proven"
-        and _EVIDENCE_RANK["consumer_proven"] > _EVIDENCE_RANK[base]
+        and EVIDENCE_RANK["consumer_proven"] > EVIDENCE_RANK[base]
     ):
         return "consumer_proven"
     return base

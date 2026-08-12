@@ -19,3 +19,26 @@
   pre-existing `root_cause_id`/`impact_group_id` value is unchanged — this
   annotates the existing grouping with evidence strength rather than
   changing how findings are grouped.
+
+### Fixed
+
+- **`root_cause_evidence` now correlates across `--used-by`/`--required-symbol`
+  scoped-only findings, and `root_causes[]` group-level evidence no longer
+  drops for a bare-symbol pair** (review findings on the entry above). A
+  regular finding whose only correlation signal was a scoped-only sibling
+  (e.g. a `FUNC_REMOVED`/`CONSUMER_REQUIRED_SYMBOL_REMOVED` pair split across
+  `changes` and `scoped_only_changes`) previously got no evidence at all —
+  `RootCauseCorrelator` needs the real sibling `Change` object, not just its
+  `caused_by_type` string, to recognize the pair as a group. Separately, a
+  `root_causes[]` group's own `strongest_evidence_level`/`evidence_levels`
+  were matched against the correlator's groups by `root_cause_id` equality,
+  which silently missed a case the report's own grouping and the
+  correlator's grouping disagree on: two correlator-eligible findings
+  sharing a bare symbol with *neither* carrying `caused_by_type` (e.g.
+  `--used-by --verify-runtime`'s `FUNC_REMOVED`/`CONSUMER_RUNTIME_LOAD_FAILED`
+  pair) are one correlator group but two separate singleton report groups
+  (`root_cause_id`'s own "only `caused_by_type` correlates findings"
+  contract, unchanged) — so the two id schemes never matched even though
+  each finding's own per-finding evidence already showed group membership.
+  Fixed by folding each report group's already-correct member-level
+  evidence directly, rather than re-deriving group membership by id.
