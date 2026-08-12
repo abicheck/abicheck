@@ -25,8 +25,8 @@ the compound, *reachable* shape a real move-plus-signature-change release
 takes, not the unreachable pure-move shape an earlier attempt at this case
 mistakenly modeled).
 
-A public **inline** function, `demo::process`, calls the helper — but only
-on the **new** side of this fixture, deliberately. It's inline (rather than
+A public **inline** function, `demo::process`, genuinely starts calling the
+helper — only on the **new** side of this fixture. It's inline (rather than
 an ordinary out-of-line exported function) for a separate reason a further
 review round caught: `demo::process`'s own body must actually be compiled
 into consumer code for its internal call to genuinely count as
@@ -36,30 +36,31 @@ are compiled into the *library's* binary only, never into any consumer's
 real callers, e.g. `post_processing_reachability.MarkReachability`). An
 inline caller's body is emitted into every consumer TU that includes the
 header, so its call is consumer-visible under any reasonable reachability
-notion — sidestepping that question rather than resting this case's
-ground truth on which reachability predicate a given detector happens to
-use. Graph reconciliation's own
-public-reachability gate (`graph_reconcile._public_reachable_ids`) still
-needs *some* live path from a public entry to the helper on at least one
-side, or it suppresses the `declaration_moved` finding entirely as a purely
-internal, never-publicly-reached refactor. But
-`source_graph_findings._internal_dependency_findings` (the detector behind
-`public_api_internal_dependency_added`) compares raw target node ids across
-versions rather than reconciled identities — a review round caught that
-adding the same call edge to *both* sides, pointing at the helper's two
-different per-version mangled-name ids, would make that detector's "no
-internal dependency → reaches 1" finding text literally false (the
-dependency would already have existed in old, just under a different raw
-id) as well as inflate this case's expected findings with an artifact
-rather than a genuinely new dependency. Restricting the call edge to the new
-side avoids both problems: `demo::process`'s edge satisfies the
-reachability gate (so `declaration_moved` still fires) without asserting a
-public dependency that isn't genuinely new — and, since
-`_internal_dependency_findings` requires both sides to carry dependency-edge
-coverage before crediting anything as "newly reached" (an evidence-poor
-side can't make a pre-existing edge look invented), no
-`public_api_internal_dependency_added` finding is produced here at all: this
-case reproduces `declaration_moved` alone.
+notion — sidestepping that question rather than resting this case's ground
+truth on which reachability predicate a given detector happens to use.
+
+Both fixture graphs also mark their call-graph extractor pass as having
+run (`SourceGraphSummary.extractor_passes["call_graph"] = True`) — a review
+round caught that without this, `source_graph_findings.
+_dependency_kinds_covered` reads a hand-built graph's absent
+`DECL_CALLS_DECL` edges as "the pass never ran" (no signal either way), not
+"ran, confirmed zero calls", so the whole comparison would silently decline
+rather than credit a genuinely new dependency. With both sides marked, the
+old side's zero calls is a **confirmed** zero, and the new side's one call
+is a **genuinely new** dependency — not an artifact of the same target
+under two different raw ids (the shape an earlier review round correctly
+rejected for the *reverse* case, where the identical call edge existed on
+both sides pointing at the helper's two different per-version mangled-name
+ids). `source_graph_findings._internal_dependency_findings` (the
+`public_api_internal_dependency_added` producer, demonstrated in
+[case160](../case160_public_api_internal_dep_added/README.md)) therefore
+correctly fires here, alongside `graph_reconcile`'s own
+`declaration_moved` on the helper — the same `demo::process` →
+`demo::detail::helper` edge does both jobs at once: it satisfies
+`graph_reconcile._public_reachable_ids`'s gate (a purely-internal,
+never-publicly-reached rename/move would otherwise be suppressed rather
+than reported as RISK), and it is itself the genuinely-new public-to-internal
+dependency the second finding names.
 
 The helper is deliberately **private** — a review round on an earlier
 version of this case caught that a *public* function's mangled-name-moving
@@ -71,8 +72,8 @@ describes: cataloging a scenario that genuinely breaks the ABI as
 confined to a `private_header`-visibility declaration never present in the
 exported symbol table, a real end-to-end `compare()` of this exact scenario
 has nothing BREAKING to contradict — `COMPATIBLE_WITH_RISK` is the genuinely
-correct canonical answer, carried entirely by the single RISK-tier L5
-`declaration_moved` finding this fixture reproduces.
+correct canonical answer, carried entirely by the two RISK-tier L5 findings
+this fixture reproduces.
 
 ## Old/new diff
 
@@ -112,13 +113,14 @@ for c in diff_source_graph_findings(old, new):
 ## Expected abicheck finding
 
 ```text
+public_api_internal_dependency_added demo::process no internal dependency -> reaches 1 internal decl(s)/type(s)
 declaration_moved demo::detail::helper demo::detail::helper -> demo::detail::helper
 ```
 
-Verdict: COMPATIBLE_WITH_RISK — a pure L5-evidence risk annotation. Because
-the identity-perturbing edit lands on a `private_header`-visibility
+Verdict: COMPATIBLE_WITH_RISK — both are pure L5-evidence risk annotations.
+Because the identity-perturbing edit lands on a `private_header`-visibility
 declaration, a real binary comparison of this exact scenario has no
-BREAKING/API_BREAK finding to sit alongside it; reconciliation only
+BREAKING/API_BREAK finding to sit alongside them; reconciliation only
 explains/localizes, it never suppresses or replaces another finding
 (ADR-028 D3).
 
@@ -143,14 +145,15 @@ compares each side's declaring file, recovered from the real
 `SourceLocation`: the name held still but the file differs, so the outcome
 is classified `declaration_moved` rather than `declaration_renamed`. The
 `demo::process` → `demo::detail::helper` `DECL_CALLS_DECL` edge exists only
-in the new graph, purely to satisfy `graph_reconcile._public_reachable_ids`'s
-gate (a purely-internal, never-publicly-reached rename/move is suppressed
-rather than reported as RISK) — with dependency-edge coverage absent on the
-old side, `source_graph_findings._internal_dependency_findings` (the
+in the new graph, and both graphs mark their call-graph pass as confirmed
+(so the old side's absence is a proven zero, not missing evidence): this
+satisfies `graph_reconcile._public_reachable_ids`'s gate (a
+purely-internal, never-publicly-reached rename/move would otherwise be
+suppressed rather than reported as RISK) *and* is itself the genuinely-new
+dependency `source_graph_findings._internal_dependency_findings` (the
 `public_api_internal_dependency_added` producer, demonstrated in
 [case160](../case160_public_api_internal_dep_added/README.md)) correctly
-declines to credit anything as newly reached here, so this case reproduces
-`declaration_moved` alone.
+credits as newly reached.
 
 ## Runtime failure demonstration
 
@@ -163,8 +166,10 @@ reviewer sees an unexplained "`demo::detail::helper` removed,
 `demo::detail::helper` added" pair (same name, different mangled symbol,
 easy to misread as two unrelated internal declarations) and has to manually
 confirm whether it matters; with it, the PR comment notes the pair is the
-same internal declaration, relocated and resignatured — legibility for an
-entirely internal refactor, not a break to chase down.
+same internal declaration, relocated and resignatured, alongside a
+separate note that `demo::process` picked up a new internal dependency in
+the same release — legibility for an entirely internal refactor, not a
+break to chase down.
 
 ## Safe redesign
 

@@ -53,3 +53,17 @@
   reachable_inline_bodies`), so its call is genuinely consumer-visible
   under any reachability notion, independent of which predicate a given
   detector uses.
+- **A fifth review round caught that the second round's fix (restricting
+  the call edge to the new side) had gone one step too conservative**: the
+  hand-built old graph never marked its call-graph extractor pass as having
+  run, so `source_graph_findings._dependency_kinds_covered` read the old
+  side's zero calls as "never collected" rather than "collected, confirmed
+  zero" — silently suppressing a comparison the case's own narrative
+  claims should be confirmed, rather than genuinely earning
+  `public_api_internal_dependency_added`. Fixed by marking
+  `extractor_passes["call_graph"] = True` on both graphs, re-finalizing
+  (`graph_id` is unaffected, since it hashes only nodes/edges). This time
+  `public_api_internal_dependency_added` fires as a genuinely new
+  (confirmed zero → one) dependency, not the raw-node-id artifact the
+  second round's finding was about — `case196` now reproduces both
+  `declaration_moved` and `public_api_internal_dependency_added`.

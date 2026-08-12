@@ -579,6 +579,25 @@ def build_cases() -> dict[str, tuple[str, dict[str, Any], dict[str, Any]]]:
     )
     l5j_old_graph = build_source_graph(l5j_build, l5j_old_surface)
     l5j_new_graph = build_source_graph(l5j_build, l5j_new_surface)
+    # Mark the call-graph pass as having genuinely run (and re-finalize, so
+    # coverage.call_edges reflects it -- graph_id is unaffected, since it
+    # hashes only nodes+edges) on BOTH sides (Codex review, fresh evidence):
+    # without this, source_graph_findings._dependency_kinds_covered reads
+    # the old side's zero DECL_CALLS_DECL edges as "never collected" rather
+    # than "collected, confirmed zero", so _has_internal_reach_coverage
+    # silently declines to compare at all -- the case's own narrative claims
+    # demo::process is CONFIRMED not to have called the helper in the old
+    # release, not merely "no evidence either way", so the fixture should
+    # say so. With both sides marked, the pre-existing zero-vs-one
+    # difference is now a genuinely new dependency (not a raw-node-id
+    # artifact, unlike the shape an earlier review round rejected -- that
+    # one involved the SAME target across versions misread as new; this one
+    # is a real zero-to-one), and public_api_internal_dependency_added
+    # correctly fires alongside declaration_moved.
+    l5j_old_graph.extractor_passes["call_graph"] = True
+    l5j_new_graph.extractor_passes["call_graph"] = True
+    l5j_old_graph.finalize()
+    l5j_new_graph.finalize()
     cases["case196_header_graph_move_reconciled"] = (
         "L5",
         l5j_old_graph.to_dict(),
