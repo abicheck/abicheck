@@ -127,10 +127,13 @@ class TestSerializationRoundTrip:
         # An already-serialized non-None value must be preserved untouched,
         # never recomputed -- even if a differently-keyed elf.symbols entry
         # would otherwise suggest something else (backfill only ever fills
-        # a None).
+        # a None). The elf.symbols binding is deliberately set to a
+        # *different* value here so this test can't pass by coincidence
+        # (CodeRabbit nit).
         snap = _snapshot_with_binding(SymbolBinding.WEAK)
         _populate_elf_visibility(snap)
         d = snapshot_to_dict(snap)
+        d["elf"]["symbols"][0]["binding"] = "global"
         loaded = snapshot_from_dict(d)
         assert loaded.functions[0].elf_binding == SymbolBinding.WEAK
 
@@ -198,11 +201,12 @@ class TestSuppressionBindingSelector:
             symbol_binding=binding,
         )
 
-    def test_binding_selector_matches_weak(self) -> None:
-        sup = Suppression(
-            symbol="_Z1fv", binding="weak", reason="tolerate weak demotions"
-        )
-        assert sup.matches(self._make_change("weak"))
+    @pytest.mark.parametrize("binding", [item.value for item in SymbolBinding])
+    def test_binding_selector_matches_known_binding(self, binding: str) -> None:
+        # Parametrized over every SymbolBinding value, not just "weak"
+        # (CodeRabbit nit).
+        sup = Suppression(symbol="_Z1fv", binding=binding, reason="binding-specific")
+        assert sup.matches(self._make_change(binding))
 
     def test_binding_selector_does_not_match_global(self) -> None:
         sup = Suppression(
