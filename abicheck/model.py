@@ -36,6 +36,18 @@ from .name_classification import (
     is_non_abi_surface_type as is_non_abi_surface_type,
 )
 
+# Symbol *linkage* (GLOBAL/WEAK/LOCAL/UNIQUE/OTHER, from ELF st_info.bind) —
+# reused directly from elf_metadata rather than duplicated as a second
+# model-local enum: elf_metadata.py has no local imports of its own (verified:
+# it imports only stdlib + pyelftools), so importing it here carries no cycle
+# risk, unlike ElfVisibility/Visibility above which predate this and stayed
+# model-local. binder.py separately defines its own, unrelated
+# ``SymbolBinding`` dataclass (a consumer-side *import resolution* record, not
+# a linkage classification) — that module already resolves the name collision
+# via ``as ElfSymbolBinding``; nothing here needs the same aliasing since this
+# module never imports binder.py.
+from .elf_metadata import SymbolBinding as SymbolBinding
+
 if TYPE_CHECKING:
     from .build_mode import BuildMode
     from .buildsource.model import BuildSourceRef
@@ -251,6 +263,23 @@ class Function:
     # silently rebind existing positional-constructor arguments instead of
     # failing).
     hidden_friend_owner: str | None = None
+    # ELF symbol *linkage* (st_info.bind — GLOBAL/WEAK/LOCAL/UNIQUE/OTHER),
+    # populated from .dynsym the same way elf_visibility is (see
+    # dumper_elf_symbols._populate_elf_visibility). None on a non-ELF
+    # platform, an older snapshot predating this field, or a declaration with
+    # no matching exported symbol (e.g. a public header-only inline that
+    # never made it into the dynamic symbol table). Distinguishes a WEAK
+    # COMDAT definition (an in-class-defined/`inline` member every consumer
+    # already emits its own copy of — losing it from one library build is
+    # rarely a real break) from a GLOBAL/STRONG export (the sole definition;
+    # losing it always breaks every consumer) on an otherwise-identical
+    # FUNC_REMOVED finding, which neither `visibility` nor `is_inline` alone
+    # can do (see AGENTS.md's "Linkage-blind removal" entry for why a
+    # heavier removal-severity *demotion* keyed off this same fact was
+    # attempted and reverted — this field only makes the fact visible on the
+    # model and matchable by a suppression selector, it does not itself
+    # change any verdict).
+    elf_binding: SymbolBinding | None = None
 
 
 @dataclass
@@ -274,6 +303,9 @@ class Variable:
     alignment_bits: int | None = None
     # See Function.deprecated for the message-string convention.
     deprecated: str | None = None
+    # See Function.elf_binding for the ELF-linkage rationale; same population
+    # path (dumper_elf_symbols._populate_elf_visibility).
+    elf_binding: SymbolBinding | None = None
 
 
 @dataclass

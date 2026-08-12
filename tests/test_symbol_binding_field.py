@@ -1,0 +1,179 @@
+# Copyright 2026 Nikolay Petrov
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+"""Tests for ELF symbol *binding* (linkage) as a model field + suppression
+selector: Function/Variable.elf_binding, Change.symbol_binding, and
+Suppression's ``binding`` selector.
+"""
+
+from __future__ import annotations
+
+import pytest
+
+from abicheck.checker_policy import ChangeKind
+from abicheck.diff_symbols import _check_removed_function, _var_removed
+from abicheck.dumper_elf_symbols import _populate_elf_visibility
+from abicheck.elf_metadata import ElfMetadata, ElfSymbol, SymbolBinding
+from abicheck.model import AbiSnapshot, Function, Variable
+from abicheck.serialization import snapshot_from_dict, snapshot_to_dict
+from abicheck.suppression import Suppression
+
+
+def _snapshot_with_binding(func_binding: SymbolBinding) -> AbiSnapshot:
+    func = Function(name="f", mangled="_Z1fv", return_type="void")
+    var = Variable(name="g", mangled="g", type="int")
+    elf = ElfMetadata(
+        symbols=[
+            ElfSymbol(name="_Z1fv", binding=func_binding),
+            ElfSymbol(name="g", binding=func_binding),
+        ]
+    )
+    return AbiSnapshot(
+        library="lib.so", version="1.0", functions=[func], variables=[var], elf=elf
+    )
+
+
+class TestModelPopulation:
+    def test_populate_elf_visibility_sets_binding_on_functions_and_variables(self) -> None:
+        snap = _snapshot_with_binding(SymbolBinding.WEAK)
+        _populate_elf_visibility(snap)
+        assert snap.functions[0].elf_binding == SymbolBinding.WEAK
+        assert snap.variables[0].elf_binding == SymbolBinding.WEAK
+
+    def test_populate_elf_visibility_global_binding(self) -> None:
+        snap = _snapshot_with_binding(SymbolBinding.GLOBAL)
+        _populate_elf_visibility(snap)
+        assert snap.functions[0].elf_binding == SymbolBinding.GLOBAL
+
+    def test_no_elf_metadata_leaves_binding_none(self) -> None:
+        func = Function(name="f", mangled="_Z1fv", return_type="void")
+        snap = AbiSnapshot(library="lib.so", version="1.0", functions=[func], elf=None)
+        _populate_elf_visibility(snap)
+        assert snap.functions[0].elf_binding is None
+
+    def test_no_matching_symbol_leaves_binding_none(self) -> None:
+        func = Function(name="f", mangled="_Z1fv", return_type="void")
+        elf = ElfMetadata(symbols=[])
+        snap = AbiSnapshot(library="lib.so", version="1.0", functions=[func], elf=elf)
+        _populate_elf_visibility(snap)
+        assert snap.functions[0].elf_binding is None
+
+
+class TestSerializationRoundTrip:
+    def test_elf_binding_round_trips(self) -> None:
+        snap = _snapshot_with_binding(SymbolBinding.WEAK)
+        _populate_elf_visibility(snap)
+        d = snapshot_to_dict(snap)
+        loaded = snapshot_from_dict(d)
+        assert loaded.functions[0].elf_binding == SymbolBinding.WEAK
+        assert loaded.variables[0].elf_binding == SymbolBinding.WEAK
+
+    def test_missing_elf_binding_key_loads_as_none(self) -> None:
+        # Simulates an older snapshot predating this field.
+        snap = _snapshot_with_binding(SymbolBinding.GLOBAL)
+        _populate_elf_visibility(snap)
+        d = snapshot_to_dict(snap)
+        for f in d["functions"]:
+            f.pop("elf_binding", None)
+        for v in d["variables"]:
+            v.pop("elf_binding", None)
+        loaded = snapshot_from_dict(d)
+        assert loaded.functions[0].elf_binding is None
+        assert loaded.variables[0].elf_binding is None
+
+
+class TestChangeSymbolBindingStamp:
+    def test_func_removed_stamps_symbol_binding(self) -> None:
+        f_old = Function(
+            name="f", mangled="_Z1fv", return_type="void", elf_binding=SymbolBinding.WEAK
+        )
+        change = _check_removed_function("_Z1fv", f_old, {}, elf_only_mode=False)
+        assert change.kind == ChangeKind.FUNC_REMOVED
+        assert change.symbol_binding == "weak"
+
+    def test_func_removed_no_binding_captured_is_none(self) -> None:
+        f_old = Function(name="f", mangled="_Z1fv", return_type="void")
+        change = _check_removed_function("_Z1fv", f_old, {}, elf_only_mode=False)
+        assert change.symbol_binding is None
+
+    def test_var_removed_stamps_symbol_binding(self) -> None:
+        v_old = Variable(
+            name="g", mangled="g", type="int", elf_binding=SymbolBinding.GLOBAL
+        )
+        changes = _var_removed("g", v_old)
+        assert changes[0].symbol_binding == "global"
+
+
+class TestSuppressionBindingSelector:
+    def _make_change(self, binding: str | None) -> object:
+        from abicheck.checker_types import Change
+
+        return Change(
+            kind=ChangeKind.FUNC_REMOVED,
+            symbol="_Z1fv",
+            description="removed",
+            symbol_binding=binding,
+        )
+
+    def test_binding_selector_matches_weak(self) -> None:
+        sup = Suppression(symbol="_Z1fv", binding="weak", reason="tolerate weak demotions")
+        assert sup.matches(self._make_change("weak"))
+
+    def test_binding_selector_does_not_match_global(self) -> None:
+        sup = Suppression(symbol="_Z1fv", binding="weak", reason="tolerate weak demotions")
+        assert not sup.matches(self._make_change("global"))
+
+    def test_binding_selector_does_not_match_unknown_binding(self) -> None:
+        sup = Suppression(symbol="_Z1fv", binding="weak", reason="tolerate weak demotions")
+        assert not sup.matches(self._make_change(None))
+
+    def test_invalid_binding_value_rejected(self) -> None:
+        with pytest.raises(ValueError, match="Invalid binding"):
+            Suppression(symbol="_Z1fv", binding="bogus", reason="x")
+
+    def test_no_binding_selector_is_unaffected(self) -> None:
+        sup = Suppression(symbol="_Z1fv", reason="unrelated")
+        assert sup.matches(self._make_change("global"))
+        assert sup.matches(self._make_change("weak"))
+
+
+class TestSuppressionYamlLoading:
+    def test_binding_key_loads_from_yaml(self, tmp_path) -> None:
+        from abicheck.suppression import SuppressionList
+
+        p = tmp_path / "suppressions.yml"
+        p.write_text(
+            "version: 1\n"
+            "suppressions:\n"
+            "  - symbol: \"_Z1fv\"\n"
+            "    change_kind: func_removed\n"
+            "    binding: weak\n"
+            "    reason: \"weak COMDAT demotion, every consumer has its own copy\"\n"
+        )
+        loaded = SuppressionList.load(p)
+        assert loaded._suppressions[0].binding == "weak"
+
+    def test_unknown_key_still_rejected(self, tmp_path) -> None:
+        from abicheck.suppression import SuppressionList
+
+        p = tmp_path / "suppressions.yml"
+        p.write_text(
+            "version: 1\n"
+            "suppressions:\n"
+            "  - symbol: \"_Z1fv\"\n"
+            "    bindingx: weak\n"
+            "    reason: \"typo'd key\"\n"
+        )
+        with pytest.raises(ValueError, match="unknown key"):
+            SuppressionList.load(p)

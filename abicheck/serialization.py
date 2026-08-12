@@ -40,6 +40,7 @@ from .model import (
     ParamKind,
     RecordType,
     ScopeOrigin,
+    SymbolBinding,
     TypeField,
     Variable,
     Visibility,
@@ -879,6 +880,12 @@ def snapshot_from_dict(d: dict[str, Any]) -> AbiSnapshot:
             elf_visibility=ElfVisibility(f["elf_visibility"])
             if f.get("elf_visibility")
             else None,
+            # Missing on an older snapshot (predates this field) → None,
+            # same "not captured" default every other ELF-derived fact here
+            # uses.
+            elf_binding=SymbolBinding(f["elf_binding"])
+            if f.get("elf_binding")
+            else None,
             ref_qualifier=f.get("ref_qualifier", ""),
             # Tri-state: a missing key (older snapshot) loads as None,
             # which suppresses CTOR_EXPLICIT_ADDED/_REMOVED in the diff
@@ -922,6 +929,9 @@ def snapshot_from_dict(d: dict[str, Any]) -> AbiSnapshot:
             origin=_scope_origin_or_unknown(v.get("origin")),
             alignment_bits=v.get("alignment_bits"),
             deprecated=v.get("deprecated"),
+            elf_binding=SymbolBinding(v["elf_binding"])
+            if v.get("elf_binding")
+            else None,
         )
         for v in d.get("variables", [])
     ]

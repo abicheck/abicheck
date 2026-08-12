@@ -44,7 +44,13 @@ _ELF_VIS_MAP: dict[str, ElfVisibility] = {
 
 
 def _populate_elf_visibility(snap: AbiSnapshot) -> None:
-    """Populate elf_visibility on Function/Variable from ELF metadata symbols."""
+    """Populate elf_visibility/elf_binding on Function/Variable from ELF metadata symbols.
+
+    ``elf_binding`` is ``elf_sym.binding`` unchanged — unlike
+    ``elf_visibility`` it needs no ``_ELF_VIS_MAP``-style translation, since
+    ``ElfSymbol.binding`` is already the same ``elf_metadata.SymbolBinding``
+    enum ``model.py`` re-exports and stores it as.
+    """
     if snap.elf is None:
         return
     sym_map = snap.elf.symbol_map
@@ -52,10 +58,12 @@ def _populate_elf_visibility(snap: AbiSnapshot) -> None:
         elf_sym = sym_map.get(func.mangled)
         if elf_sym is not None:
             func.elf_visibility = _ELF_VIS_MAP.get(elf_sym.visibility)
+            func.elf_binding = elf_sym.binding
     for var in snap.variables:
         elf_sym = sym_map.get(var.mangled)
         if elf_sym is not None:
             var.elf_visibility = _ELF_VIS_MAP.get(elf_sym.visibility)
+            var.elf_binding = elf_sym.binding
 
 
 def _elf_classify_symbols(

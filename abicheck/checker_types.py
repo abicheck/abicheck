@@ -352,6 +352,25 @@ class Change:
     # ``AbiSnapshot``'s identical per-field fix in PR #582 exactly (that
     # precedent predates this dataclass's own instance of the same bug).
     vtable_covers_unverifiable_layout_gap: bool = field(default=False, kw_only=True)
+    # ELF symbol linkage (Function.elf_binding / Variable.elf_binding's value
+    # string — "global"/"weak"/"local"/"unique"/"other") of the removed
+    # symbol, stamped by diff_symbols._check_removed_function/_var_removed on
+    # FUNC_REMOVED/FUNC_REMOVED_ELF_ONLY/VAR_REMOVED findings only. None for
+    # every other kind, and None here too when the symbol's binding was never
+    # captured (non-ELF platform, older snapshot, ELF metadata without a
+    # matching .dynsym entry). Exists so a suppression rule's ``binding:``
+    # selector (suppression.py) can tell a WEAK COMDAT demotion — every
+    # consumer already has its own copy, per the linkage-blind-removal
+    # analysis in AGENTS.md — apart from a GLOBAL/STRONG export's removal,
+    # which always breaks every consumer. Deliberately a plain string, not
+    # the ``SymbolBinding`` enum itself: mirrors ``old_value``/``new_value``
+    # and every other string-typed selector-facing field already on this
+    # class, and keeps ``model.py``'s ``elf_metadata`` dependency from
+    # leaking into this dataclass's own import surface. Same
+    # ``field(kw_only=True)``-appended-last convention as
+    # ``vtable_covers_unverifiable_layout_gap`` immediately above, for the
+    # identical reason (Change is public API; see that field's own comment).
+    symbol_binding: str | None = field(default=None, kw_only=True)
 
 
 @dataclass
