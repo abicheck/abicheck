@@ -479,7 +479,7 @@ inputs:
     required: false
     default: 'strict_abi'
   policy-file:
-    description: 'Path to a YAML policy file with per-kind verdict overrides.'
+    description: 'Path to a YAML policy file with per-kind (overrides:) or selector-scoped (reclassify:) verdict re-classification.'
     required: false
   suppress:
     description: 'Path to a YAML suppression file to filter known/intentional changes.'

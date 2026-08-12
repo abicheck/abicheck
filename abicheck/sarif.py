@@ -719,6 +719,15 @@ def to_sarif(
     """
     tool_version = _tool_version()
 
+    # Codex review: filtered so an expired rule -- which ReclassifyRule.
+    # matches() would already refuse to apply -- isn't disclosed in
+    # policyReclassify below as though it were still in effect.
+    _active_reclassify_rules: list[Any] = []
+    if result.policy_file and result.policy_file.reclassify:
+        from .reclassify import active_reclassify_rules
+
+        _active_reclassify_rules = active_reclassify_rules(result.policy_file.reclassify)
+
     changes = list(result.changes)
     if show_only:
         changes = apply_show_only(
@@ -1097,6 +1106,20 @@ def to_sarif(
                             }
                         }
                         if result.policy_file and result.policy_file.overrides
+                        else {}
+                    ),
+                    # Codex review: mirrors reporter.py's JSON
+                    # `policy_reclassify` (report_schema_version 2.30) --
+                    # the active reclassify: rule set, via the same
+                    # ReclassifyRule.to_report_dict() so the two can't drift.
+                    **(
+                        {
+                            "policyReclassify": [
+                                rule.to_report_dict()
+                                for rule in _active_reclassify_rules
+                            ]
+                        }
+                        if _active_reclassify_rules
                         else {}
                     ),
                     # ADR-024 §D4/D5: header-scope ledger. Out-of-surface

@@ -360,7 +360,37 @@ from typing import Any
 #:       and group, unconditional on report_mode (mirroring root_cause_id/
 #:       impact_group_id's own precedent), and never affects ``verdict``,
 #:       ``severity``, or any exit code.
-REPORT_SCHEMA_VERSION = "2.29"
+#: 2.30 — new optional ``policy_reclassify`` array (A: selector-scoped
+#:       reclassification, ``abicheck/reclassify.py``): when the active
+#:       policy file carries one or more ``reclassify:`` rules, each is
+#:       listed (``kind``, whichever selector fields it set, ``to``,
+#:       ``reason``, ``label``, ``expires``) alongside the existing
+#:       ``policy_overrides``/
+#:       ``policy_file`` keys (Codex review: an ordinary comparison
+#:       reclassifying a finding had no trace of the active rule anywhere in
+#:       the standard report). Lists the *active rule set*, matching the
+#:       level of detail ``policy_overrides`` already provides for kind-
+#:       global overrides -- not a per-finding "which rule fired" attribution
+#:       (that needs a new per-``Change`` field and is tracked separately as
+#:       a deliberately deferred follow-up, same as the ``--contract-
+#:       evaluation`` receipt gap). Absent, and the report byte-identical,
+#:       when no ``reclassify:`` rule is configured.
+#: 2.31 — the per-``Change`` ``reclassified_by`` field 2.30's own note
+#:       tracked as a deferred follow-up (Codex review, PR #733): a
+#:       ``change`` entry now carries ``reclassified_by`` (the deciding
+#:       ``reclassify:`` rule's ``label``/``reason``/``to`` spelling, first
+#:       one set) when a selector-scoped rule -- not a kind-global
+#:       ``overrides:`` entry -- actually decided its effective verdict
+#:       (:func:`abicheck.severity.reclassify_rule_for_change`). Motivated by
+#:       ``cli_pr_comment``: its ``_reclassified_count()`` only recognized
+#:       ``policy_overrides``' kind-keyed map, so a finding downgraded by a
+#:       selector-scoped rule silently bypassed the PR comment's "🔀 N
+#:       findings reclassified by --policy-file" disclosure and read as an
+#:       unremarked safe change. Purely additive and per-finding-opt-in:
+#:       absent for every change not actually decided by a ``reclassify:``
+#:       rule, which is every report without one, and never affects
+#:       ``verdict``, ``severity``, or any exit code.
+REPORT_SCHEMA_VERSION = "2.31"
 
 #: SemVer-style (MAJOR.MINOR) version of the ``scan`` JSON output, emitted as
 #: ``scan_schema_version`` at the top level of both public scan dict shapes:

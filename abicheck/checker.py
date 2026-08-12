@@ -762,7 +762,8 @@ def compare(
             Available: "strict_abi" (default), "sdk_vendor", "plugin_abi".
             Ignored when *policy_file* is provided.
         policy_file: Optional :class:`~abicheck.policy_file.PolicyFile` instance
-            for user-defined per-kind verdict overrides.  When provided,
+            for user-defined per-kind (``overrides:``) or selector-scoped
+            (``reclassify:``) verdict re-classification.  When provided,
             *policy* is used only as the ``base_policy`` fallback inside the
             file (i.e. the file's own ``base_policy`` field takes precedence).
         env_matrix: Optional declared deployment constraints (ADR-020b). When

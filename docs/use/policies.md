@@ -170,6 +170,50 @@ Semantics:
 
 If both `--policy` and `--policy-file` are provided, `--policy-file` wins.
 
+### Selector-scoped reclassification (`reclassify`)
+
+`overrides` above changes a verdict for every symbol of a given `ChangeKind`,
+project-wide. [Suppressions](suppressions.md) can target one symbol/pattern/
+namespace, but only by deleting the finding. `reclassify` is the third
+option: the same selector grammar suppression rules use — `symbol`,
+`symbol_pattern`, `type_pattern`, `member_name`, `namespace`,
+`entity_namespace`, `cause_namespace`, `source_location`, `expires` — plus a
+required `to`, applied instead of deleting the finding:
+
+```yaml
+reclassify:
+  - kind: func_visibility_changed
+    symbol_pattern: "_ZN6oneapi3dal.*"
+    to: risk   # break|warn|risk|ignore, same vocabulary as overrides
+    reason: "COMDAT-inline demotions; consumers already embed their own copy"
+```
+
+Use this when a whole symbol family shares a known, accepted cause (e.g.
+dozens of COMDAT-inline visibility demotions in a template-heavy library)
+that you don't want to downgrade project-wide (too broad — `overrides`)
+or hide entirely (`suppress` — loses the evidence a reviewer may still
+want to see).
+
+- `kind` is this block's spelling of the selector's `change_kind`.
+- Rules are evaluated in file order; the **first** matching rule wins, since
+  (unlike suppression, where every match has the same effect) two rules can
+  disagree about which verdict to apply to the same finding.
+- A `reclassify` match takes priority over a same-kind `overrides` entry
+  (more specific wins), but a pipeline-computed `effective_verdict` (pattern
+  modulation) and the frozen-namespace verdict floor still take precedence
+  over both — see [ci-gating.md](ci-gating.md) for the full classification
+  order.
+- At least one selector is required, same as a suppression rule.
+- Active `reclassify:` rules are listed in the standard JSON report's
+  `policy_reclassify` key, alongside `policy_overrides`, so a reclassified
+  finding's report always carries a trace of the policy that steered it
+  (`report_schema_version` 2.30+). A finding whose effective verdict was
+  actually decided by a selector-scoped rule (not a same-kind `overrides:`
+  entry) additionally carries its own `change.reclassified_by` field, naming
+  the deciding rule's `label`/`reason`/`to` (`report_schema_version` 2.31+) —
+  consumers like the PR-comment renderer use this to disclose the
+  reclassification per-finding, not just as part of the active rule list.
+
 ### Evidence-aware controls (`evidence_policy`)
 
 When a compare also carries build/source evidence (build-info / source packs,

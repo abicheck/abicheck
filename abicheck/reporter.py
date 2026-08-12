@@ -439,6 +439,12 @@ def _to_json_leaf(
             eff = getattr(c, "effective_verdict", None)
             if isinstance(eff, Verdict):
                 entry["effective_verdict"] = eff.value
+        # Same "leaf mode duplicates the full-mode builder" gap as the rest
+        # of this function (Codex review) -- shares _change_to_dict's own
+        # helper so the two entry builders can't drift on this field.
+        _reclassified_by = _reclassified_by_for_change(c, result.policy_file)
+        if _reclassified_by:
+            entry["reclassified_by"] = _reclassified_by
         # ADR-044 P1 item 4: same structured reachability fields
         # _change_to_dict adds for non-type changes — a root TYPE_* change is
         # exactly the category the layout-reachability walk tags most often.
@@ -556,6 +562,9 @@ def _to_json_leaf(
     _add_surface_scope(d, result)
     _add_reconciled(d, result)
     _add_contract_context(d, result)
+    # Codex review: full/root-cause mode call this; leaf mode never did,
+    # silently dropping policy_overrides/policy_reclassify here.
+    _add_policy_overrides(d, result)
     scope = _scope_dict(result)
     if scope is not None:
         d["scope"] = scope
@@ -1029,7 +1038,20 @@ def _add_confidence_evidence(d: dict[str, object], result: DiffResult) -> None:
 
 
 def _add_policy_overrides(d: dict[str, object], result: DiffResult) -> None:
-    """Add policy file overrides (custom re-classifications) when present."""
+    """Add policy file overrides/reclassify rules (custom re-classifications)
+    when present.
+
+    ``policy_reclassify`` (report_schema_version 2.30) lists the *active
+    rule set* -- the same level of audit detail ``policy_overrides`` already
+    gives for kind-global overrides. The per-finding "which rule fired"
+    attribution 2.30's own history entry originally deferred is a separate
+    field, ``change.reclassified_by`` (report_schema_version 2.31, stamped in
+    ``_change_to_dict`` via ``severity.reclassify_rule_for_change`` -- see
+    ``abicheck/schemas/__init__.py``'s 2.31 history entry). Each rule's dict
+    here comes from ``ReclassifyRule.to_report_dict()`` -- shared with
+    ``sarif.py``'s ``policyReclassify`` so the two can't drift on field
+    set/spelling.
+    """
     if result.policy_file and result.policy_file.overrides:
         d["policy_overrides"] = {
             kind.value: verdict.value
@@ -1037,6 +1059,14 @@ def _add_policy_overrides(d: dict[str, object], result: DiffResult) -> None:
         }
         if result.policy_file.source_path:
             d["policy_file"] = str(result.policy_file.source_path)
+    if result.policy_file and result.policy_file.reclassify:
+        from .reclassify import active_reclassify_rules
+
+        active = active_reclassify_rules(result.policy_file.reclassify)
+        if active:
+            d["policy_reclassify"] = [rule.to_report_dict() for rule in active]
+            if result.policy_file.source_path:
+                d["policy_file"] = str(result.policy_file.source_path)
 
 
 def _add_changes_block(
@@ -1434,6 +1464,22 @@ def _change_reachability_fields(c: Any) -> dict[str, Any]:
     return out
 
 
+def _reclassified_by_for_change(c: object, policy_file: object | None) -> str | None:
+    """``reclassified_by`` audit value for *c*, or ``None`` -- shared by
+    :func:`_change_to_dict` and leaf mode's ``_leaf_entry`` (Codex review)
+    so the two entry builders can't drift on this field. Falls back to
+    ``rule.to_verdict.value`` rather than ``rule.to``, since a directly-
+    constructed ``ReclassifyRule`` could leave the latter empty/mismatched
+    -- see ``severity.reclassify_rule_for_change`` for the full precedence.
+    """
+    from .severity import reclassify_rule_for_change
+
+    rule = reclassify_rule_for_change(cast(HasKind, c), policy_file)
+    if rule is None:
+        return None
+    return cast(str, rule.label or rule.reason or rule.to_verdict.value)
+
+
 def _change_to_dict(
     c: object,
     *,
@@ -1484,6 +1530,7 @@ def _change_to_dict(
     means the legacy verdict-based scheme, not "no gate".
     """
     kind = getattr(c, "kind", None)
+    reclassified_by: str | None = None
     if isinstance(kind, ChangeKind) and kind_sets:
         from .severity import effective_verdict_for_change
 
@@ -1494,6 +1541,9 @@ def _change_to_dict(
             policy_file=policy_file,
         )
         severity = _VERDICT_TO_SEVERITY_LABEL.get(verdict, "unknown")
+        # Per-change reclassify: disclosure (Codex review) -- see
+        # _reclassified_by_for_change's own docstring.
+        reclassified_by = _reclassified_by_for_change(c, policy_file)
     elif kind:
         severity = _kind_to_severity(kind, policy)
     else:
@@ -1509,6 +1559,8 @@ def _change_to_dict(
         "new_value": getattr(c, "new_value", None),
         "severity": severity,
     }
+    if reclassified_by:
+        d["reclassified_by"] = reclassified_by
     if isinstance(kind, ChangeKind):
         d["operation"] = operation_for_kind(kind.value)
         d["finding_id"] = _finding_id(c)

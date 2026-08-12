@@ -195,6 +195,7 @@ topics:
     fact_sources:
       - abicheck/policy_file.py
       - abicheck/checker_policy.py
+      - abicheck/reclassify.py
 
   # ADR-049's effective compatibility configuration: the resolved object, its
   # field-level precedence, and the pack-manifest format. Distinct from

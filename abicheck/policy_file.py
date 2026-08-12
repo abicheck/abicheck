@@ -37,6 +37,17 @@ Format example (``my_policy.yaml``)::
       param_renamed:         ignore
       calling_convention_changed: warn
 
+    # Optional: selector-scoped reclassification (see reclassify.py). Unlike
+    # `overrides:` above, each rule is scoped to a symbol/pattern/namespace
+    # selector -- same grammar as suppress:'s Suppression rules -- instead of
+    # applying to every symbol of that kind project-wide. Unlike suppress:,
+    # the finding is kept (reclassified), never deleted.
+    reclassify:
+      - kind: func_visibility_changed
+        symbol_pattern: "_ZN6oneapi3dal.*"
+        to: risk
+        reason: "COMDAT-inline demotions; consumers already embed their own copy"
+
 Usage::
 
     abicheck compare old.json new.json --policy-file my_policy.yaml
@@ -56,6 +67,7 @@ import contextvars
 import hashlib
 import threading
 from dataclasses import dataclass, field
+from datetime import date, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -68,8 +80,16 @@ from .checker_policy import (
 )
 from .errors import PolicyError
 
+# NOTE: `.reclassify` is deliberately imported lazily (function-local) below,
+# never at module top level. `reclassify.py` imports `.suppression`, which
+# imports `.checker_types`, which imports `PolicyFile` from *this* module --
+# a top-level import here would complete that cycle. This mirrors the
+# existing convention every `SuppressionList` consumer in this codebase
+# already follows for the same reason (see e.g. `checker.py`, `service.py`).
 if TYPE_CHECKING:
     from collections.abc import Iterator
+
+    from .reclassify import ReclassifyRule
 
 # Severity name -> Verdict mapping
 _SEVERITY_MAP: dict[str, Verdict] = {
@@ -246,6 +266,141 @@ def _parse_overrides(overrides_raw: Any, path: Path) -> dict[ChangeKind, Verdict
     return overrides
 
 
+def _parse_reclassify_expires(raw: Any, path: Path, index: int) -> date | None:
+    """Parse one ``reclassify[i].expires`` value (ISO 8601 string, or a
+    YAML-native date/datetime PyYAML already decoded).
+
+    Checks ``datetime`` before ``date`` (Codex review): a ``datetime`` is
+    itself a ``date`` subclass, so an unquoted YAML timestamp like
+    ``2026-08-12T00:00:00`` -- which PyYAML decodes as a ``datetime``, not a
+    ``date`` -- would otherwise pass the ``isinstance(raw, date)`` branch
+    unnormalized and later crash ``Suppression.is_expired()``'s ``date.today()
+    > self.expires`` comparison (``TypeError``: can't compare ``date`` and
+    ``datetime``). Normalized to ``.date()`` here, mirroring
+    ``suppression.py``'s ``_parse_expires`` handling of the identical case.
+    """
+    if raw is None:
+        return None
+    if isinstance(raw, datetime):
+        return raw.date()
+    if isinstance(raw, date):
+        return raw
+    if isinstance(raw, str):
+        try:
+            return date.fromisoformat(raw)
+        except ValueError as e:
+            raise PolicyError(
+                f"reclassify[{index}].expires in {path}: invalid date {raw!r} "
+                "(expected ISO 8601, e.g. 2026-06-01)"
+            ) from e
+    raise PolicyError(
+        f"reclassify[{index}].expires in {path}: must be a date, got "
+        + type(raw).__name__
+    )
+
+
+#: reclassify[i] keys whose value must be a string when present -- every
+#: selector plus the free-text `reason`/`label` fields. `kind`/`to`/`expires`
+#: have their own dedicated, differently-shaped validation below and are
+#: deliberately not in this set.
+_RECLASSIFY_STRING_FIELDS: tuple[str, ...] = (
+    "symbol", "symbol_pattern", "type_pattern", "member_name", "namespace",
+    "entity_namespace", "cause_namespace", "source_location", "reason",
+    "label",
+)
+
+
+def _require_reclassify_string_field(
+    entry: dict[str, Any], key: str, index: int, path: Path
+) -> str | None:
+    """Validate one optional string-valued ``reclassify[i]`` field.
+
+    Codex review: a non-string value here (e.g. a bare YAML ``42``) either
+    crashes with an uncaught ``TypeError`` deep inside ``re.compile``/
+    ``fnmatch.translate`` (``symbol_pattern``/``type_pattern``/every
+    ``namespace`` variant) or loads silently and simply never matches
+    (``symbol``, compared via ``==`` against the always-string
+    ``change.symbol``) -- neither is the hard, up-front ``PolicyError`` this
+    module's other selector validation already gives every other bad value.
+    """
+    val = entry.get(key)
+    if val is None or isinstance(val, str):
+        return val
+    raise PolicyError(
+        f"reclassify[{index}].{key} in {path}: must be a string, got "
+        + type(val).__name__
+    )
+
+
+def _parse_reclassify(raw: Any, path: Path) -> list[ReclassifyRule]:
+    """Validate and parse the ``reclassify:`` block (A: selector-scoped
+    reclassification) into a list of :class:`ReclassifyRule`.
+
+    Unlike ``overrides:`` (keyed by ``ChangeKind`` alone), each entry here
+    carries the same selector grammar :mod:`abicheck.suppression` already
+    implements, plus a required ``to:`` severity -- see
+    ``abicheck/reclassify.py``'s module docstring.
+    """
+    from .reclassify import RECLASSIFY_KNOWN_KEYS, ReclassifyRule
+
+    if not isinstance(raw, list):
+        raise PolicyError(
+            "'reclassify' must be a YAML list of rules, got " + type(raw).__name__
+        )
+
+    rules: list[ReclassifyRule] = []
+    for i, entry in enumerate(raw):
+        if not isinstance(entry, dict):
+            raise PolicyError(
+                f"reclassify[{i}] in {path}: must be a YAML mapping, got "
+                + type(entry).__name__
+            )
+        unknown = set(entry) - RECLASSIFY_KNOWN_KEYS
+        if unknown:
+            raise PolicyError(
+                f"reclassify[{i}] in {path}: unknown key(s) {sorted(unknown)}. "
+                f"Valid keys: {sorted(RECLASSIFY_KNOWN_KEYS)}"
+            )
+        if "to" not in entry:
+            raise PolicyError(f"reclassify[{i}] in {path}: missing required 'to' field")
+        to_raw = entry["to"]
+        to_verdict = parse_severity_value(to_raw)
+        if to_verdict is None:
+            raise PolicyError(
+                f"reclassify[{i}] in {path}: invalid 'to' value {to_raw!r}. "
+                "Valid values: break, warn, risk, ignore"
+            )
+        kind = entry.get("kind")
+        if kind is not None and not isinstance(kind, str):
+            raise PolicyError(f"reclassify[{i}].kind in {path}: must be a string")
+        string_fields = {
+            key: _require_reclassify_string_field(entry, key, i, path)
+            for key in _RECLASSIFY_STRING_FIELDS
+        }
+
+        try:
+            rule = ReclassifyRule(
+                to_verdict=to_verdict,
+                to=str(to_raw),
+                symbol=string_fields["symbol"],
+                symbol_pattern=string_fields["symbol_pattern"],
+                type_pattern=string_fields["type_pattern"],
+                member_name=string_fields["member_name"],
+                namespace=string_fields["namespace"],
+                entity_namespace=string_fields["entity_namespace"],
+                cause_namespace=string_fields["cause_namespace"],
+                source_location=string_fields["source_location"],
+                change_kind=kind,
+                reason=string_fields["reason"],
+                label=string_fields["label"],
+                expires=_parse_reclassify_expires(entry.get("expires"), path, i),
+            )
+        except ValueError as e:
+            raise PolicyError(f"reclassify[{i}] in {path}: {e}") from e
+        rules.append(rule)
+    return rules
+
+
 def _parse_frozen_namespaces(frozen_raw: Any) -> list[str]:
     """Validate and parse the ``frozen_namespaces`` list of glob patterns."""
     if not isinstance(frozen_raw, list):
@@ -321,16 +476,24 @@ def _resolve_change_verdict(
     api_break: frozenset[Any],
     compatible: frozenset[Any],
     risk: frozenset[Any],
+    reclassify: list[ReclassifyRule] | None = None,
 ) -> Verdict:
     """Resolve the effective verdict for a single *change* object.
 
     Priority order (highest first):
     1. ``change.effective_verdict`` — ADR-025 / ADR-033 D7 modulation (frozen-
        namespace floor still applied).
-    2. ``overrides[kind]`` — per-kind policy override (frozen-namespace floor
+    2. ``reclassify:`` — the first selector-scoped rule (in file order) whose
+       selectors match this change (frozen-namespace floor still applied).
+       Consulted ahead of the kind-global ``overrides:`` entry for the same
+       kind since a rule scoped to a selector is strictly more specific than
+       one scoped to a bare kind (see ``abicheck/reclassify.py``).
+    3. ``overrides[kind]`` — per-kind policy override (frozen-namespace floor
        still applied; downgrades on frozen symbols are silently rejected).
-    3. Base policy verdict.
+    4. Base policy verdict.
     """
+    from .reclassify import first_matching_reclassify_verdict
+
     kind = change.kind
     fnv = getattr(change, "frozen_namespace_violation", None)
     frozen = isinstance(fnv, str) and bool(fnv)
@@ -343,6 +506,13 @@ def _resolve_change_verdict(
         return eff
 
     base_v = compute_verdict([change], policy=base_policy)
+
+    reclass_v = first_matching_reclassify_verdict(reclassify or [], change)
+    if reclass_v is not None:
+        if frozen and _VERDICT_ORDER.index(reclass_v) < _VERDICT_ORDER.index(base_v):
+            return base_v
+        return reclass_v
+
     if kind in overrides:
         override_v = overrides[kind]
         if frozen and _VERDICT_ORDER.index(override_v) < _VERDICT_ORDER.index(base_v):
@@ -389,6 +559,26 @@ class PolicyFile:
 
     base_policy: str = "strict_abi"
     overrides: dict[ChangeKind, Verdict] = field(default_factory=dict)
+    # A: selector-scoped reclassification (abicheck/reclassify.py) — the
+    # third policy-file primitive, between overrides: (kind-global, no
+    # selector) and suppress: (selector-scoped, but deletes the finding).
+    # Consulted ahead of `overrides[kind]` for the same kind in
+    # `compute_verdict`/`_resolve_change_verdict`, since a selector-scoped
+    # rule is strictly more specific than a bare-kind one.
+    #
+    # `kw_only=True` (Codex review): PolicyFile is public API (constructed
+    # positionally by external callers, e.g. `PolicyFile(base, overrides,
+    # source_path)`), and every field from here on was already assigned a
+    # position before this one existed. Inserting an ordinary positional
+    # field here would silently reinterpret every existing positional
+    # caller's `source_path` argument (and everything after it) as this
+    # field instead -- the exact `Change`-dataclass field-ordering mistake
+    # this repo's own AGENTS.md already documents and reverted once. A
+    # `kw_only` field is excluded from the positional section of the
+    # generated `__init__` regardless of where it's declared, so every
+    # existing positional call keeps binding to the exact fields it always
+    # did.
+    reclassify: list[ReclassifyRule] = field(default_factory=list, kw_only=True)
     source_path: Path | None = None
     #: sha256 of the exact raw bytes :meth:`load` read, when it loaded this
     #: document from a file. Captured at parse time on purpose: a consumer
@@ -482,6 +672,7 @@ class PolicyFile:
 
         base_policy = _parse_base_policy(raw)
         overrides = _parse_overrides(raw.get("overrides", {}), path)
+        reclassify = _parse_reclassify(raw.get("reclassify", []), path)
         frozen_namespaces = _parse_frozen_namespaces(raw.get("frozen_namespaces", []))
         internal_namespaces = _parse_internal_namespaces(raw.get("internal_namespaces", []))
         source_only, build_drift, graph_risk, require_evidence = _parse_evidence_policy(
@@ -491,6 +682,7 @@ class PolicyFile:
         return cls(
             base_policy=base_policy,
             overrides=overrides,
+            reclassify=reclassify,
             source_path=path,
             source_sha256=digest,
             frozen_namespaces=frozen_namespaces,
@@ -542,7 +734,8 @@ class PolicyFile:
 
         verdicts = [
             _resolve_change_verdict(
-                change, self.base_policy, self.overrides, _b, _a, _c, _r
+                change, self.base_policy, self.overrides, _b, _a, _c, _r,
+                self.reclassify,
             )
             for change in changes
         ]
@@ -562,6 +755,10 @@ class PolicyFile:
                 lines.append(f"  {kind.value}: {sev}")
         else:
             lines.append("overrides: (none)")
+        if self.reclassify:
+            lines.append("reclassify:")
+            for rule in self.reclassify:
+                lines.append(f"  {rule.describe()}")
         return "\n".join(lines)
 
     def validate_overrides(self) -> list[str]:
@@ -614,6 +811,86 @@ class PolicyFile:
                 warnings.append(
                     f"'{kind.value}' (BREAKING) downgraded to 'ignore' — "
                     f"verify this is intentional."
+                )
+
+        # A: selector-scoped reclassification (Codex review) -- a
+        # `reclassify:` rule downgrading a critical/breaking kind is exactly
+        # the mistake this check exists to catch, whether it's expressed as
+        # a kind-global `overrides:` entry or a selector-scoped one; a rule
+        # bypassing the CLI's HIGH RISK diagnostic purely by being
+        # selector-scoped instead of global would make the new primitive a
+        # blind spot for the same safety check. A rule that names a
+        # `change_kind` is checked against that kind's own base verdict
+        # below, same as `overrides:`. A rule scoped purely by symbol/pattern
+        # with no kind filter applies to whichever kind a matching finding
+        # happens to carry, so there's no single `base_verdict` to compare
+        # against -- that shape gets its own, more conservative check inside
+        # the loop instead of being silently skipped (a second Codex review
+        # round: skipping it entirely left a kind-unscoped 'ignore'/'risk'
+        # rule with no safety diagnostic at all, even though it's the
+        # widest-blast-radius shape a reclassify rule can take).
+        slug_to_kind = {k.value: k for k in ChangeKind}
+        for rule in self.reclassify:
+            if rule.change_kind is None:
+                # A kind-unscoped rule (selector fields only, e.g. `symbol:`/
+                # `symbol_pattern:` with no `kind:`) applies to *whichever*
+                # kind a matching finding happens to carry, including a
+                # critical one like `func_removed` (Codex review) -- there is
+                # no single `base_verdict` to compare against the way the
+                # kind-scoped branch below does, so this can't reproduce the
+                # exact "downgraded from this base policy's own verdict for
+                # that kind" check. But a rule downgrading to 'ignore'/'risk'
+                # with no kind filter at all is inherently the widest,
+                # riskiest shape a reclassify rule can take -- it silences
+                # every kind a matching symbol/pattern could ever produce,
+                # critical kinds included -- so it's warned unconditionally
+                # rather than silently skipped, same spirit as the kind-scoped
+                # HIGH RISK/RISK diagnostics just phrased for the unknown-kind
+                # case.
+                if rule.to_verdict == Verdict.COMPATIBLE:
+                    warnings.append(
+                        f"HIGH RISK: reclassify rule downgrades to 'ignore' "
+                        f"with no 'kind:' filter ({rule.describe()}) — this "
+                        f"silences every finding kind a matching symbol "
+                        f"produces, including critical breaking kinds like "
+                        f"'func_removed'. Add a 'kind:' filter to scope this "
+                        f"rule, or verify this is intentional."
+                    )
+                elif rule.to_verdict == Verdict.COMPATIBLE_WITH_RISK:
+                    warnings.append(
+                        f"RISK: reclassify rule downgrades to 'risk' with no "
+                        f"'kind:' filter ({rule.describe()}) — this affects "
+                        f"every finding kind a matching symbol produces, "
+                        f"including critical breaking kinds. Add a 'kind:' "
+                        f"filter to scope this rule, or verify this is "
+                        f"intentional."
+                    )
+                continue
+            kind = slug_to_kind[rule.change_kind]  # already validated at load time
+            verdict = rule.to_verdict
+            base_verdict = _raw_verdict_for_kind(
+                kind, base_breaking, base_api_break, base_compatible, base_risk
+            )
+            if _VERDICT_ORDER.index(verdict) >= _VERDICT_ORDER.index(base_verdict):
+                continue
+            selector = rule.describe()
+            if kind in _CRITICAL_BREAKING_KINDS:
+                if verdict == Verdict.COMPATIBLE:
+                    warnings.append(
+                        f"HIGH RISK: '{kind.value}' reclassified to 'ignore' "
+                        f"({selector}) — this is almost certainly a mistake. "
+                        f"This kind causes hard crashes when the ABI changes."
+                    )
+                elif verdict == Verdict.COMPATIBLE_WITH_RISK:
+                    warnings.append(
+                        f"RISK: '{kind.value}' reclassified to 'risk' "
+                        f"({selector}) — this kind usually causes binary "
+                        f"incompatibility. Consider keeping it as 'break'."
+                    )
+            elif kind in base_breaking and verdict == Verdict.COMPATIBLE:
+                warnings.append(
+                    f"'{kind.value}' (BREAKING) reclassified to 'ignore' "
+                    f"({selector}) — verify this is intentional."
                 )
         return warnings
 

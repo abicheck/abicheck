@@ -1008,6 +1008,11 @@ def _attach_suppression_audit(result: Any, suppression: Any) -> None:
         + list(result.suppressed_changes)
         + list(getattr(result, "scoped_only_changes", ()) or ()),
         breaking_kinds=effective_breaking_kinds,
+        # Codex review: a selector-scoped `reclassify:` rule isn't
+        # expressible in effective_breaking_kinds at all (that's a
+        # kind-wide set); pass the policy file through so `audit()` can
+        # classify a reclassified finding by its own rule's resolution.
+        policy_file=getattr(result, "policy_file", None),
     )
 
 

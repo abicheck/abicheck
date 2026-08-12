@@ -1809,6 +1809,23 @@ def _append_policy_section(lines: list[str], result: DiffResult) -> None:
             for kind, severity in result.policy_file.overrides.items()
         )
         lines.append(f"> **Policy overrides**: {overrides}")
+    if result.policy_file and result.policy_file.reclassify:
+        # Codex review: mirrors the JSON `policy_reclassify` disclosure
+        # (reporter.py's `_add_policy_overrides`) -- the active rule set,
+        # not a per-finding "which rule fired" attribution (see that
+        # function's docstring / schema 2.30 history entry). Filtered
+        # through active_reclassify_rules so an expired rule -- which
+        # ReclassifyRule.matches() would already refuse to apply -- isn't
+        # disclosed as though it were still in effect.
+        from .reclassify import active_reclassify_rules
+
+        active = active_reclassify_rules(result.policy_file.reclassify)
+        if active:
+            # CodeRabbit review: code-span-wrap describe()'s raw selector
+            # text (e.g. `_ZN6oneapi3dal.*`) -- unescaped, `_`/`*` read as
+            # Markdown emphasis, same as `Policy overrides` above already does.
+            rules = "; ".join(f"`{rule.describe()}`" for rule in active)
+            lines.append(f"> **Policy reclassify**: {rules}")
     lines.append("")
 
 

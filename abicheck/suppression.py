@@ -30,6 +30,7 @@ from .checker_policy import (
     BREAKING_KINDS,
     ChangeKind,
     ReachabilityState,
+    Verdict,
 )
 from .checker_types import Change
 
@@ -1212,6 +1213,20 @@ class Suppression:
             return False
         return self._passes_reachability_gate(change) and self._passes_public_break_gate(change)
 
+    def selector_matches(self, change: Change, today: date | None = None) -> bool:
+        """Return True if this rule's selectors alone match *change*.
+
+        Public alias for :meth:`_selector_match`, deliberately skipping the
+        reachability / ``allow_public_break`` gates :meth:`matches` applies
+        on top. Those gates exist to guard against a suppression rule
+        *hiding* a finding it never should have — a concern that doesn't
+        apply to a consumer that keeps the finding visible and only changes
+        its verdict (``abicheck/reclassify.py``'s ``ReclassifyRule``, which
+        reuses this class purely for its selector grammar rather than
+        re-implementing the glob/regex machinery a second time).
+        """
+        return self._selector_match(change, today)
+
     def would_withhold(self, change: Change, today: date | None = None) -> bool:
         """True if this rule's selectors match *change*, *change* is a
         public-reachable ``BREAKING``/``API_BREAK`` finding, and the
@@ -1586,25 +1601,45 @@ class SuppressionList:
         *,
         near_expiry_days: int = 30,
         breaking_kinds: frozenset[ChangeKind] | None = None,
+        policy_file: object | None = None,
     ) -> SuppressionAudit:
         """Audit suppression rules against a set of changes.
 
         Returns a :class:`SuppressionAudit` with:
         - ``stale_rules``: suppressions that matched zero changes (misconfigured?)
-        - ``high_risk_matches``: suppressions that matched a change breaking
-          under *breaking_kinds*
+        - ``high_risk_matches``: suppressions that matched a change classified
+          as ``BREAKING`` -- via *breaking_kinds* membership, or, when
+          *policy_file* is given, via the same per-finding resolver
+          (:func:`abicheck.severity.effective_verdict_for_change`) the
+          comparison's own verdict/severity/exit-code already went through
+          (see below)
         - ``expired_rules``: rules past their expiry date
         - ``near_expiry_rules``: rules expiring within *near_expiry_days*
         - ``match_counts``: per-rule match count
 
-        *breaking_kinds* defaults to the built-in :data:`BREAKING_KINDS`, but
-        a caller running under an active ``--policy-file`` should pass its
-        effective, override-applied breaking set (e.g.
-        ``result._effective_kind_sets()[0]``) instead -- a policy can promote
-        a normally-API_BREAK kind to BREAKING or demote a normally-BREAKING
-        kind away from it, and this audit's "high risk" classification should
-        match the verdict the user's own comparison actually produced, not
-        the static default.
+        *breaking_kinds* defaults to the built-in :data:`BREAKING_KINDS`; it's
+        only consulted when *policy_file* is ``None`` (see below) -- a caller
+        that has a real ``PolicyFile`` should pass it instead of just its
+        derived breaking set.
+
+        *policy_file* is optional and defaults to ``None`` (unchanged prior
+        behavior for every existing caller that doesn't pass it, using
+        *breaking_kinds* alone). When given, each change's "high risk"
+        classification is instead decided by
+        :func:`abicheck.severity.effective_verdict_for_change` -- the same
+        resolver ``PolicyFile.compute_verdict``/``classify_effective_change``
+        already use -- rather than *breaking_kinds* membership. A bare
+        kind-wide set cannot express what that resolver's own precedence
+        chain (a pipeline ``effective_verdict`` modulation, then a
+        selector-scoped ``reclassify:`` rule, then a kind-global
+        ``overrides:`` entry, then the base policy, each still subject to
+        the frozen-namespace verdict floor) actually decided for one
+        specific change (Codex review, two rounds: a `reclassify:` rule
+        promoting one specific normally-compatible finding to ``break`` was
+        invisible to a *breaking_kinds*-only check at all; a naive
+        reclassify-only check that bypassed ``effective_verdict``
+        precedence and the frozen-namespace floor was itself still wrong in
+        the opposite direction).
         """
         if near_expiry_days < 0:
             raise ValueError("near_expiry_days must be non-negative")
@@ -1618,10 +1653,32 @@ class SuppressionList:
         high_risk: list[tuple[Suppression, Change]] = []
 
         for c in changes:
+            if policy_file is not None:
+                # Delegate to the shared per-finding resolver rather than
+                # re-checking `reclassify:` alone (Codex review, fresh
+                # evidence): a bare reclassify-only check bypasses both
+                # `change.effective_verdict`'s own precedence (a pipeline
+                # modulation must win outright, matching/overriding
+                # `reclassify:` the same way effective_verdict_for_change's
+                # own topmost branch does) and the frozen-namespace floor (a
+                # `reclassify:`/override resolution below a frozen symbol's
+                # base-policy verdict is rejected there, not honored). Using
+                # the same resolver as PolicyFile.compute_verdict/
+                # classify_effective_change means this audit's "high risk"
+                # classification can never disagree with the verdict the
+                # comparison itself actually produced.
+                from .severity import effective_verdict_for_change
+
+                is_breaking = (
+                    effective_verdict_for_change(c, policy_file=policy_file, today=today)
+                    == Verdict.BREAKING
+                )
+            else:
+                is_breaking = c.kind in effective_breaking_kinds
             for i, s in enumerate(self._suppressions):
                 if s.matches(c, today=today):
                     match_counts[i] += 1
-                    if c.kind in effective_breaking_kinds:
+                    if is_breaking:
                         high_risk.append((s, c))
 
         stale = [
