@@ -51,10 +51,13 @@ Notes:
 
 from __future__ import annotations
 
+import contextlib
+import contextvars
 import hashlib
+import threading
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from .checker_policy import (
     VALID_BASE_POLICIES,
@@ -64,6 +67,9 @@ from .checker_policy import (
     policy_kind_sets,
 )
 from .errors import PolicyError
+
+if TYPE_CHECKING:
+    from collections.abc import Iterator
 
 # Severity name -> Verdict mapping
 _SEVERITY_MAP: dict[str, Verdict] = {
@@ -567,13 +573,30 @@ class PolicyFile:
         - Downgrading known-dangerous BREAKING kinds to COMPATIBLE
           (e.g., func_removed → ignore).  These almost certainly mask real breaks.
         - Downgrading BREAKING to COMPATIBLE_WITH_RISK for critical kinds.
+
+        An override is only ever flagged relative to *this* base policy's own
+        verdict for that kind (via ``_raw_verdict_for_kind``), not merely
+        because the kind is in ``_CRITICAL_BREAKING_KINDS``: some critical
+        kinds (``soname_changed``) are already COMPATIBLE_WITH_RISK under
+        e.g. ``strict_abi``, so an override that merely restates that verdict
+        (``soname_changed: risk``) is not a downgrade and must not warn (Codex
+        review) — only an override that is strictly *weaker* than the base
+        policy's own verdict for that kind is a real downgrade.
         """
-        # Derive breaking kinds from the configured base policy so that
-        # policy-specific sets (e.g. plugin_abi) are correctly flagged.
-        base_breaking, _, _, _ = policy_kind_sets(self.base_policy)
+        # Derive the base policy's own kind sets so that policy-specific sets
+        # (e.g. plugin_abi) are correctly flagged, both for the breaking-kind
+        # check below and for the per-kind base verdict comparison above.
+        base_breaking, base_api_break, base_compatible, base_risk = policy_kind_sets(
+            self.base_policy
+        )
 
         warnings: list[str] = []
         for kind, verdict in self.overrides.items():
+            base_verdict = _raw_verdict_for_kind(
+                kind, base_breaking, base_api_break, base_compatible, base_risk
+            )
+            if _VERDICT_ORDER.index(verdict) >= _VERDICT_ORDER.index(base_verdict):
+                continue  # not a downgrade from this base policy's own verdict
             if kind in _CRITICAL_BREAKING_KINDS:
                 if verdict == Verdict.COMPATIBLE:
                     warnings.append(
@@ -593,3 +616,95 @@ class PolicyFile:
                     f"verify this is intentional."
                 )
         return warnings
+
+
+# ── validate_overrides() warning dedup (Codex review, PR #730) ──────────────
+#
+# A single `--policy-file` can be loaded several times over the course of one
+# CLI invocation -- notably `compare-release`, whose per-library fan-out
+# reloads it once per library (plus again for JUnit's re-run), and whose
+# strict-suppression-early-validation and probe-matrix paths each load it
+# again on top of that, through *two different* call sites
+# (`cli_params._load_suppression_and_policy`, which warns via `click.echo`,
+# and `service.load_suppression_and_policy`, which warns via the logger).
+# Without deduplication a single risky override logs the identical warning
+# once per load, flooding stderr for a large release.
+#
+# Lives here, in the leaf module both loaders already import, rather than in
+# either `cli_params.py` or `service.py`, so the *same* dedup scope covers
+# both call sites uniformly -- a fix that lived in only one of them would
+# still leave the other's warnings undeduplicated.
+_warning_dedup_var: contextvars.ContextVar[set[tuple[str, str]] | None] = (
+    contextvars.ContextVar("_policy_override_warning_dedup", default=None)
+)
+# Guards the check-then-add on `_warning_dedup_var`'s set below. The GIL
+# makes each individual `set` op atomic, but "is this key already present,
+# and if not add it" is two ops -- without this lock, two worker threads
+# racing to be first past `dedup_validate_overrides_warnings()`'s ``set()``
+# (`compare-release`'s ThreadPoolExecutor fan-out, both starting on the
+# first, identical policy-file load) can both observe "not yet seen" and
+# both emit, reproducing the exact flooding this whole mechanism exists to
+# prevent. One process-wide lock is deliberately simple: the critical
+# section is a handful of dict/set ops per warning, never I/O, so contention
+# cost is negligible next to correctness (confirmed by a real intermittent
+# test failure under `ThreadPoolExecutor` before this lock was added).
+_warning_dedup_lock = threading.Lock()
+
+
+@contextlib.contextmanager
+def dedup_validate_overrides_warnings() -> Iterator[None]:
+    """Scope repeated ``validate_overrides()`` loads to warn at most once.
+
+    Within this context, a given (policy-file content, warning text) pair is
+    returned by :func:`pending_validate_overrides_warnings` the first time it
+    is seen and omitted on every later call for the same pair, regardless of
+    which loader (`cli_params._load_suppression_and_policy` or
+    `service.load_suppression_and_policy`) made the call. Outside any such
+    scope (the default), every call returns every warning every time --
+    unchanged behaviour for a single-shot caller such as a plain `compare`,
+    `scan --against`, or a direct Python API `run_compare` call, none of
+    which ever enter this scope.
+
+    Only dedupes within one OS process: a `ContextVar` set here is not
+    automatically visible to a *different* process, so a caller that forks
+    or spawns a subprocess to do its per-library work would need to
+    propagate this scope itself (nothing in this codebase currently does).
+    `compare-release`'s own parallel fan-out uses a `ThreadPoolExecutor`
+    (real OS threads, not separate processes) precisely so this scope
+    *can* reach it -- see `cli_compare_release._compare_release_parallel`'s
+    own docstring for how it explicitly propagates a `contextvars.Context`
+    copy into each worker thread, since `ThreadPoolExecutor` does not do
+    that automatically either.
+    """
+    token = _warning_dedup_var.set(set())
+    try:
+        yield
+    finally:
+        _warning_dedup_var.reset(token)
+
+
+def pending_validate_overrides_warnings(pf: PolicyFile) -> list[str]:
+    """Return *pf*'s :meth:`~PolicyFile.validate_overrides` warnings not yet
+    surfaced in the current :func:`dedup_validate_overrides_warnings` scope
+    (or all of them, unfiltered, outside any such scope), recording whichever
+    are returned as seen. Both `cli_params._load_suppression_and_policy` and
+    `service.load_suppression_and_policy` call this instead of
+    `pf.validate_overrides()` directly, so the same warning is never surfaced
+    twice within one dedup scope no matter which loader reloaded the file.
+    """
+    warnings = pf.validate_overrides()
+    if not warnings:
+        return warnings
+    seen = _warning_dedup_var.get()
+    if seen is None:
+        return warnings
+    key_base = pf.source_sha256 or str(pf.source_path)
+    fresh = []
+    with _warning_dedup_lock:
+        for warning in warnings:
+            key = (key_base, warning)
+            if key in seen:
+                continue
+            seen.add(key)
+            fresh.append(warning)
+    return fresh
