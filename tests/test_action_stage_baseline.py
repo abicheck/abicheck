@@ -306,6 +306,49 @@ class TestStageBaseline:
         assert "path separator" in (result.stdout + result.stderr)
         assert "asset-name" not in outputs
 
+    def test_windows_backslash_in_resolved_name_is_rejected(
+        self, tmp_path: Path
+    ) -> None:
+        # Regression (Codex review, second round): the original guard only
+        # rejected '/', not '\' -- on a Windows Git Bash runner, '\' is the
+        # OS path separator, so a resolved name like "..\outside.tar.zst"
+        # would previously pass this check and let the native tar/Python
+        # fallback write the archive outside the intended working
+        # directory.
+        baseline_dir = _make_baseline_dir(tmp_path)
+        result, outputs = _run_action(
+            {
+                "BASELINE_PATH": str(baseline_dir),
+                "ASSET_NAME_TEMPLATE": "..\\escaped-{profile}.tar",
+                "PROFILE": "x",
+            },
+            tmp_path,
+        )
+        assert result.returncode == 1
+        assert "path separator" in (result.stdout + result.stderr)
+        assert "asset-name" not in outputs
+        assert not (tmp_path.parent / "escaped-x.tar").exists()
+
+    def test_windows_drive_qualified_resolved_name_is_rejected(
+        self, tmp_path: Path
+    ) -> None:
+        # Regression (Codex review, second round): a drive-qualified prefix
+        # ("C:...") is an absolute path on Windows even with no explicit
+        # separator character immediately after the drive letter -- rejected
+        # for the identical reason a leading '/' already is.
+        baseline_dir = _make_baseline_dir(tmp_path)
+        result, outputs = _run_action(
+            {
+                "BASELINE_PATH": str(baseline_dir),
+                "ASSET_NAME_TEMPLATE": "C:evil-{profile}.tar",
+                "PROFILE": "x",
+            },
+            tmp_path,
+        )
+        assert result.returncode == 1
+        assert "path separator" in (result.stdout + result.stderr)
+        assert "asset-name" not in outputs
+
     def test_missing_baseline_path_fails(self, tmp_path: Path) -> None:
         result, _ = _run_action({}, tmp_path)
         assert result.returncode == 1

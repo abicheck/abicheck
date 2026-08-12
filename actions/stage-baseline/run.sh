@@ -55,10 +55,16 @@ asset_name="${asset_template//\{profile\}/${PROFILE:-}}"
 # "x"$'\n'"asset-name=other.tar.zst" overriding this step's own declared
 # output). Also rejects a path separator: asset_name is meant to be a bare
 # filename written into the current working directory, never a path
-# escaping it (Codex review).
+# escaping it (Codex review). Both '/' AND '\' are rejected, not just '/'
+# -- on a Windows Git Bash runner, `\` is the OS path separator, so a
+# resolved name like "..\outside.tar.zst" would otherwise pass this guard
+# and let the native `tar`/Python fallback below write the archive outside
+# the intended working directory; a drive-qualified prefix ("C:...") is
+# rejected the same way for the identical reason (Codex review, second
+# round).
 case "$asset_name" in
-  *$'\n'* | *$'\r'* | */*)
-    echo "::error::asset-name-template resolved to a value containing a newline, carriage return, or path separator -- refusing to create an archive or write a GITHUB_OUTPUT line from it." >&2
+  *$'\n'* | *$'\r'* | */* | *\\* | [A-Za-z]:*)
+    echo "::error::asset-name-template resolved to a value containing a newline, carriage return, path separator ('/' or '\\'), or a drive-qualified prefix -- refusing to create an archive or write a GITHUB_OUTPUT line from it." >&2
     exit 1
     ;;
 esac

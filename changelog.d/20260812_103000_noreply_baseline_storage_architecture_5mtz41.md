@@ -14,12 +14,6 @@ A new changelog fragment. See changelog.d/README.md for the workflow.
   name contains one. The glob-to-regex translator's `"**"` segment also
   now matches an embedded newline (`re.DOTALL`), which the temp-file fix
   alone was not sufficient for.
-- **`action/run.sh`'s baseline-set archive fallback** now escapes glob
-  metacharacters (`*`, `?`, `[`, `]`, `\`) in the resolved asset name
-  before passing it to `gh release download --pattern` — that flag treats
-  its argument as a glob, not a literal filename, so a custom
-  `baseline-asset-name-template` containing one of these characters would
-  previously fail to match its own asset.
 - **`actions/stage-baseline/run.sh`'s zstd Python fallback** now resolves
   `python3`/`python` portably (mirroring the existing convention in
   `action/run.sh`'s own fallback) and reports an actionable error when
@@ -29,17 +23,3 @@ A new changelog fragment. See changelog.d/README.md for the workflow.
   treats an empty resolved profile on either side as a mismatch, closing
   a latent gap where two independently-empty profile strings would
   otherwise compare equal.
-
-### Docs
-
-- Fixed a YAML folded-scalar line break inside a filename token in
-  `action.yml`'s `abi-baseline` input description (rendered as a spurious
-  inserted space in generated docs) and regenerated
-  `docs/reference/github-action-inputs.md` from it.
-- Updated `docs/reference/resolve-baseline.md`'s worked examples to pin
-  the current commit SHA (the previous placeholder predated
-  `expected-project-ref` support).
-- Linked `docs/reference/publish-baseline.md`'s `actions/stage-baseline`
-  section back to `docs/use/baseline-storage.md`, its registered
-  canonical owner, and fixed a stale `tar --zstd` mention in the
-  `snapshot-compression` input's description.
