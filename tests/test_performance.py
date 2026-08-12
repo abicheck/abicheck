@@ -403,8 +403,11 @@ class TestTypeChurnScaling:
 
     def test_type_churn_scaling_stays_subquadratic(self) -> None:
         # Pre-build the snapshot pair per size once; only `compare()` itself
-        # is inside the timed/repeated measurement.
-        snapshots = {n: _build_type_churn(n) for n in (500, 1000, 2000)}
+        # is inside the timed/repeated measurement. Deliberately *not* evenly
+        # log-spaced (see _perf_scaling.py's docstring) -- a plain doubling
+        # progression makes the middle point(s) contribute nothing to the
+        # least-squares slope.
+        snapshots = {n: _build_type_churn(n) for n in (500, 900, 1400, 2000)}
 
         def _measure(n: int) -> float:
             old, new = snapshots[n]
@@ -412,7 +415,7 @@ class TestTypeChurnScaling:
             compare(old, new)
             return max(time.monotonic() - start, 1e-3)
 
-        # Three sizes, median-of-3 per size, least-squares exponent (see
+        # Four sizes, median-of-3 per size, least-squares exponent (see
         # ``_perf_scaling.py``) instead of one size pair and one timing each.
         exponent = measure_scaling_exponent(_measure, tuple(snapshots))
         # True quadratic would be ~2.0; current behaviour is ~1.3. A regression

@@ -61,12 +61,15 @@ def _compile_so(src: str, path: Path, *, debug: bool = False) -> None:
 def test_elf_parse_scaling_stays_subquadratic(tmp_path: Path) -> None:
     """Parsing a 4x-larger symbol table must not take ~16x longer.
 
-    Three sizes, median-of-3 per size, least-squares exponent (see
+    Four sizes, median-of-3 per size, least-squares exponent (see
     ``_perf_scaling.py``) instead of one size pair and one timing each — a
     single noisy tick on either end of a two-point ratio used to be able to
     fail this outright.
     """
-    sizes = (500, 1000, 2000)
+    # Deliberately *not* evenly log-spaced (see _perf_scaling.py's docstring)
+    # -- a plain doubling progression makes the middle point(s) contribute
+    # nothing to the least-squares slope.
+    sizes = (500, 900, 1400, 2000)
     compiled: dict[int, Path] = {}
 
     def _measure(n: int) -> float:
@@ -98,7 +101,10 @@ def test_dwarf_parse_scaling_stays_subquadratic(tmp_path: Path) -> None:
     library dump time — against an O(n^2) regression in the DIE walk. Same
     median-of-repeats/least-squares measurement as the ELF test above.
     """
-    sizes = (500, 1000, 2000)
+    # Deliberately *not* evenly log-spaced (see _perf_scaling.py's docstring)
+    # -- a plain doubling progression makes the middle point(s) contribute
+    # nothing to the least-squares slope.
+    sizes = (500, 900, 1400, 2000)
     compiled: dict[int, Path] = {}
 
     def _measure(n: int) -> float:

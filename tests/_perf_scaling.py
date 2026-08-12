@@ -49,10 +49,21 @@ def measure_scaling_exponent(
     per-call regression, and not the mean, which lets a single stalled
     scheduler tick dominate a small sample). The exponent is then the slope
     of an ordinary least-squares fit of ``log(elapsed)`` against ``log(n)``
-    over all ``sizes`` -- with 3+ sizes this is materially less sensitive to
-    any one size's noise than a two-point ratio, since a single outlier only
-    pulls the fitted line, it doesn't solely determine it the way it does
-    when there are only two points to begin with.
+    over all ``sizes``.
+
+    **``sizes`` must not be evenly spaced in log-space** (a plain geometric
+    progression like ``(500, 1000, 2000)`` is exactly that). OLS slope is
+    ``sum((x - mean_x) * (y - mean_y)) / sum((x - mean_x) ** 2)``; for an odd
+    count of log-evenly-spaced points, the middle point's ``x`` *equals*
+    ``mean_x`` exactly, so its ``(x - mean_x)`` term is zero and it drops out
+    of both sums regardless of its own timing -- the fit silently collapses
+    to the two endpoints' ratio, the exact single-sample sensitivity this
+    helper exists to avoid (confirmed empirically: three evenly log-spaced
+    points reproduce the endpoint-only slope to the last bit; caught by
+    review before this shipped). Callers must pick sizes with irregular
+    log-spacing (this module raises if they don't) -- an easy way is a
+    non-doubling step size, e.g. ``(500, 900, 1400, 2000)`` rather than
+    ``(500, 1000, 2000, 4000)``.
     """
     if len(sizes) < 2:
         raise ValueError("need at least two sizes to estimate a scaling exponent")
@@ -62,6 +73,16 @@ def measure_scaling_exponent(
         points.append((math.log(n), math.log(statistics.median(samples))))
     mean_x = sum(x for x, _ in points) / len(points)
     mean_y = sum(y for _, y in points) / len(points)
+    if len(points) > 2:
+        for x, _ in points:
+            if math.isclose(x, mean_x, rel_tol=1e-9, abs_tol=1e-9):
+                raise ValueError(
+                    f"sizes={sizes!r} are evenly spaced in log-space: a point "
+                    "sits exactly at the mean, so it contributes nothing to "
+                    "the least-squares slope and the fit silently degrades "
+                    "to a two-point ratio -- pick irregularly log-spaced "
+                    "sizes instead (see this function's docstring)"
+                )
     numerator = sum((x - mean_x) * (y - mean_y) for x, y in points)
     denominator = sum((x - mean_x) ** 2 for x, _ in points)
     if denominator == 0:

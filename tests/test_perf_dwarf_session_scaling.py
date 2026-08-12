@@ -185,7 +185,10 @@ def test_dwarf_only_dump_scaling_with_cu_count_stays_subquadratic(
     _require_tool("g++")
     from abicheck.dumper import dump
 
-    n_cus_values = (8, 16, 32)
+    # Deliberately *not* evenly log-spaced (see _perf_scaling.py's docstring)
+    # -- a plain doubling progression makes the middle point(s) contribute
+    # nothing to the least-squares slope.
+    n_cus_values = (8, 12, 20, 32)
     compiled: dict[int, Path] = {}
 
     def _measure(n_cus: int) -> float:
@@ -199,7 +202,7 @@ def test_dwarf_only_dump_scaling_with_cu_count_stays_subquadratic(
         assert snap.functions, f"expected exported functions at n_cus={n_cus}"
         return elapsed
 
-    # Three CU counts, median-of-3 per count, least-squares exponent (see
+    # Four CU counts, median-of-3 per count, least-squares exponent (see
     # ``_perf_scaling.py``) instead of one pair and one timing each.
     exponent = measure_scaling_exponent(_measure, n_cus_values)
     # True quadratic would be ~2.0; matches the generous bound used by the
