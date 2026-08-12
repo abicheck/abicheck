@@ -58,17 +58,24 @@ YAML file is also a hard error. On the CLI, any of these surfaces as a usage
 error (exit `64`; see [Exit Codes](exit-codes.md)) — the run never proceeds
 on a config abicheck could not fully validate.
 
-This "hard error" rule is for a config supplied **explicitly** via
-`--config`/`--build-config`. An **auto-discovered** `.abicheck.yml` (the
-"Discovery" table above) that fails to parse is deliberately *not*
-fail-loud the same way: it prints a warning and the run continues with the
-CLI's own compile context only, since a config the user never pointed at
-explicitly could otherwise silently break an unrelated invocation just by
-existing somewhere upward of the working directory. See
+This "hard error" rule applies unconditionally to `compare`'s own project
+config — severity, scope, policy, and the `targets:`/`bundles:`/`profiles:`/
+`baseline:` block above — whether the file came from an explicit `--config`
+or was auto-discovered by walking up from the current directory: a parse
+failure always raises a usage error (exit `64`), never a warn-and-continue.
+
+A *separate* load of the same `.abicheck.yml` — the `compile:` block shared
+by `compare`/`dump`/`scan`'s L2 compile context (`gcc-path`, includes,
+sysroot, …), resolved by `merge_compile_config()` in `cli_options.py` — does
+distinguish explicit from auto-discovered: an explicit `--config`/
+`--build-config` that fails to parse still fails loudly, but an
+**auto-discovered** file that fails only prints a warning and continues
+with the CLI's own compile context, since a config the user never pointed
+at explicitly could otherwise silently break an unrelated invocation just
+by existing somewhere upward of the working directory. See
 [Build-context capture](../use/dump-compare-flags.md#build-context-capture-compile_commandsjson-evidence-layer-l3)
-for that path in detail. Both rules are enforced by the same
-`merge_compile_config()` in `cli_options.py`, branching on whether the
-config path came from an explicit flag.
+for that path in detail. Don't assume this leniency extends to the rest of
+the file's blocks — it's specific to that one loader.
 
 There is no longer an `init`/`config` scaffolding or diagnostic command
 (`abicheck init`, `config validate`, `config show-effective` are all gone —

@@ -20,6 +20,15 @@ one backend selector, plus a merge of the two:
 | `hybrid` | Both, merged castxml-first with per-fact provenance | Recovering facts each backend alone gets wrong — notably CastXML's synthesized constructor/destructor keys. |
 | `auto` | Resolves to `castxml` (or the `ABICHECK_AST_FRONTEND` pin) and never silently switches producer; it falls back to `clang` for a recognized toolchain-version mismatch or direct-include-guard failure only when you opt in with `--allow-ast-frontend-fallback` (or `ABICHECK_ALLOW_AST_FALLBACK=1`) | The usual choice when you don't care, as long as CastXML is installed — with no opt-in and no CastXML at all, it fails asking you to install one or pick `clang` explicitly. |
 
+> **Exception: `--frontend-context device`.** CastXML has no SYCL/DPC++
+> host/device context concept, so a non-`host` `--frontend-context` under
+> `auto` skips CastXML and routes straight to `clang` — no
+> `--allow-ast-frontend-fallback` opt-in needed, since this isn't the
+> toolchain-error fallback above, it's `auto` recognizing CastXML can't
+> satisfy the request at all. An **explicit** `--ast-frontend castxml` with
+> a non-`host` context is rejected outright instead (`--ast-frontend clang`
+> is required). See ADR-050 D5.
+
 The two parsers produce the **same** `AbiSnapshot` fields, but not the same
 *values* for every field — and a comparison that mixes producers is a real,
 supported scenario (a persisted baseline dumped on one host, compared on
