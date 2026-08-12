@@ -88,6 +88,43 @@ no benefit this check needs, the same rule
 [ADR-047 §12](../contribute/adr/047-github-actions-integration-model.md)
 already states for the baseline-publishing workflows.
 
+## Residual gap: pin this check with a Ruleset, not just branch protection
+
+The `.github/workflows/**` guard above closes "a PR reconfigures
+`protected-paths`/`bypass-label` while *also* calling this reusable
+workflow" — it does **not** close "a PR removes the calling job/step
+that invokes this workflow entirely, or replaces it with an unrelated job
+that trivially succeeds under the same required-check name". Both are the
+same underlying, structural limitation of GitHub's "required status
+check, matched by name" model: for an ordinary `pull_request` trigger,
+the *calling* workflow file — which decides whether/how this reusable
+workflow is even invoked — is read from the PR's own head commit, and a
+check's identity to branch protection is its *name*, not which workflow
+file (or whether any workflow at all) actually produced it. No logic
+inside a `workflow_call` reusable workflow, this one included, can
+observe or prevent the calling workflow choosing not to invoke it.
+
+Closing this fully needs a mechanism the *calling repository* controls,
+sourced from a ref a PR cannot rewrite — plain branch-protection "required
+status checks" (matched by name alone) is not sufficient:
+
+- **[GitHub Repository Rulesets](https://docs.github.com/en/repositories/configuring-branches-and-merges-in-your-repository/managing-rulesets/available-rules-for-rulesets#require-workflows-to-pass-before-merging)'s
+  "Require workflows to pass before merging"** pins a required workflow to
+  a specific *file path and ref* (the default branch, not the PR head) —
+  unlike a bare required-status-check name, a PR cannot satisfy it by
+  simply not invoking (or renaming) the workflow, since the ruleset
+  itself names which workflow file must run. **This is the recommended
+  mitigation** for a repository adopting this check.
+- `pull_request_target` (reading the calling workflow from the base
+  branch) is deliberately rejected — see "Fork safety" above — since it
+  would hand a fork PR's own workflow/code changes elevated permissions
+  for no benefit this specific check needs.
+
+A single reusable workflow answering "does this PR touch a protected
+path" cannot also answer "was I actually invoked" — that second question
+is inherently the calling repository's own branch-protection/Ruleset
+configuration to answer, not this workflow's.
+
 ## Example
 
 ```yaml

@@ -23,6 +23,40 @@ name: 'abicheck protect-committed-baseline'
 # `pull_request_target` caller, which would hand a fork PR's own workflow
 # changes elevated permissions for no benefit this check needs (ADR-047
 # §12 already states the same rule for the baseline-publishing workflows).
+#
+# Known, ACKNOWLEDGED residual gap, deliberately not fixed here (Codex
+# review, second round, after the .github/workflows/** guard above was
+# added): that guard closes "a PR reconfigures protected-paths/
+# bypass-label while ALSO calling this reusable workflow" -- it does NOT
+# close "a PR removes the calling job/step that invokes this workflow
+# entirely, or replaces it with an unrelated job that trivially succeeds
+# under the SAME required-check name". Both are the same underlying,
+# structural limitation of GitHub's "required status check, matched by
+# name" model: for an ordinary `pull_request` trigger, the CALLING
+# workflow file itself (which decides whether/how this reusable workflow
+# is even invoked) is read from the PR's own head commit, and a check's
+# identity to branch-protection is its NAME, not which workflow file (or
+# whether any workflow at all) actually produced it. No logic inside a
+# `workflow_call` reusable workflow -- this one included -- can observe or
+# prevent the calling workflow choosing not to invoke it. Closing this
+# fully needs a mechanism the CALLING repository controls, sourced from a
+# ref a PR cannot rewrite:
+#   - GitHub Repository Rulesets' "Require workflows to pass" pins a
+#     required workflow to a specific FILE PATH *and ref* (the default
+#     branch, not the PR head) -- unlike a bare required-status-check
+#     name, a PR cannot satisfy it by simply not invoking (or renaming)
+#     the workflow, since the ruleset itself names which workflow file
+#     must run. This is the recommended mitigation; see this workflow's
+#     own reference doc.
+#   - The alternative, `pull_request_target` (reading the calling workflow
+#     from the base branch), is deliberately rejected here: it would hand
+#     a fork PR's own workflow/code changes elevated permissions for no
+#     benefit this specific check needs, the same ADR-047 §12 rule cited
+#     above.
+# A single reusable workflow answering "does this PR touch a protected
+# path" cannot also answer "was I actually invoked" -- that second
+# question is inherently the calling repository's own branch-protection
+# configuration to answer, not this workflow's.
 
 on:
   workflow_call:

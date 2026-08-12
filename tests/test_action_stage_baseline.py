@@ -471,6 +471,44 @@ class TestStageBaseline:
         # all, so this warning must never appear post-fix.
         assert "archive cannot contain itself" not in (result.stdout + result.stderr)
 
+    def test_repeated_invocation_does_not_nest_the_previous_archive(
+        self, tmp_path: Path
+    ) -> None:
+        # Regression (Codex review, P2): staging the new output externally
+        # only prevents self-inclusion of the file THIS run is currently
+        # writing -- it does nothing about a DIFFERENT, already-on-disk
+        # file left behind by an EARLIER invocation. When baseline-path is
+        # the working directory itself, a leftover archive from a prior
+        # run is an ordinary member of baseline-path as far as
+        # `tar -C "$BASELINE_PATH" .` is concerned, so a second invocation
+        # would silently package the first archive INTO the second one --
+        # and repeated invocations keep nesting/growing it further.
+        (tmp_path / "manifest.json").write_text('{"profile": "p"}', encoding="utf-8")
+        (tmp_path / "libfoo.abicheck.json").write_text("{}", encoding="utf-8")
+
+        env = {
+            "BASELINE_PATH": str(tmp_path),
+            "ASSET_NAME_TEMPLATE": "out-{profile}.tar",
+            "PROFILE": "p1",
+        }
+        first, _ = _run_action(env, tmp_path)
+        assert first.returncode == 0, first.stdout + first.stderr
+        archive_path = tmp_path / "out-p1.tar"
+        assert archive_path.is_file()
+        with tarfile.open(archive_path, "r:") as tf:
+            first_names = {Path(m.name).name for m in tf.getmembers()}
+        assert "out-p1.tar" not in first_names
+
+        # Second invocation against the SAME working directory, which now
+        # already contains the first run's own output archive.
+        second, _ = _run_action(env, tmp_path)
+        assert second.returncode == 0, second.stdout + second.stderr
+        with tarfile.open(archive_path, "r:") as tf:
+            second_names = {Path(m.name).name for m in tf.getmembers()}
+        assert "manifest.json" in second_names
+        assert "libfoo.abicheck.json" in second_names
+        assert "out-p1.tar" not in second_names
+
     def test_tmpdir_inside_baseline_path_falls_back_to_plain_tmp(
         self, tmp_path: Path
     ) -> None:

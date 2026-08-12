@@ -106,6 +106,19 @@ class TestStructure:
         bypass = data[True]["workflow_call"]["inputs"]["bypass-label"]
         assert bypass["default"] == ""
 
+    def test_residual_ruleset_gap_is_documented(self) -> None:
+        # Pins the presence of the "known, acknowledged residual gap"
+        # comment (Codex review, second round): the .github/workflows/**
+        # guard closes "reconfigure protected-paths while still calling
+        # this workflow", but nothing inside a workflow_call reusable
+        # workflow can observe or prevent the CALLING workflow choosing
+        # not to invoke it at all -- that needs a Ruleset the calling
+        # repository controls. A silent removal of this documentation
+        # would leave a real, structural limitation unexplained.
+        text = WORKFLOW_PATH.read_text(encoding="utf-8")
+        assert "Require workflows to pass" in text
+        assert "Rulesets" in text
+
 
 def _bash_executable() -> str:
     if os.name != "nt":

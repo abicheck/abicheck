@@ -126,6 +126,20 @@ case "$asset_name" in
     ;;
 esac
 
+# Remove a pre-existing "./$asset_name" (a leftover from a PRIOR
+# invocation of this same Action against the same baseline-path/cwd)
+# before archiving, not just after -- staging the new output externally
+# only prevents self-inclusion of the file THIS run is currently writing;
+# it does nothing about a DIFFERENT, already-on-disk file left behind by
+# an earlier run. When baseline-path is (or contains) the current working
+# directory, that leftover archive is an ordinary member of baseline-path
+# as far as `tar -C "$BASELINE_PATH" .` is concerned, and would silently
+# be packaged INTO the new archive -- worse, it keeps nesting/growing on
+# every repeated invocation (Codex review). Safe to remove unconditionally
+# regardless of whether it's actually under baseline-path: this step's
+# whole job is to overwrite it with a freshly-built replacement anyway.
+rm -f "./$asset_name"
+
 # Every archive is built in a staging directory OUTSIDE $BASELINE_PATH,
 # then moved into place as the final $asset_name -- building it directly
 # at "$asset_name" (implicitly the current working directory) is only
