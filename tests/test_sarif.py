@@ -1148,6 +1148,69 @@ class TestImpactAssessmentRootCause:
         assert full_ids == rc_ids
 
 
+class TestImpactAssessmentRootCauseEvidence:
+    """``impactAssessment.root_cause_evidence`` (G29 Phase 6 follow-up):
+    wiring RootCauseCorrelator's evidence-ranked groups into SARIF."""
+
+    def _correlated_result(self) -> object:
+        root = Change(
+            ChangeKind.FUNC_REMOVED,
+            "ns::internal::helper",
+            "helper removed",
+        )
+        overlay = Change(
+            ChangeKind.INTERNAL_SYMBOL_REQUIRED_BY_PUBLIC_API,
+            "pub_entry",
+            "required",
+            caused_by_type="ns::internal::helper",
+        )
+        return _make_result([root, overlay], verdict=Verdict.BREAKING)
+
+    def test_uncorrelated_finding_has_no_root_cause_evidence(self) -> None:
+        r = _make_result([_breaking_change()], verdict=Verdict.BREAKING)
+        doc = to_sarif(r)
+        props = doc["runs"][0]["results"][0]["properties"]
+        assessment = props.get("impactAssessment", {})
+        assert "root_cause_evidence" not in assessment
+
+    def test_correlated_findings_carry_evidence_summary(self) -> None:
+        r = self._correlated_result()
+        doc = to_sarif(r)
+        results = doc["runs"][0]["results"]
+        evidences = [
+            res["properties"]["impactAssessment"]["root_cause_evidence"]
+            for res in results
+        ]
+        for evidence in evidences:
+            assert evidence["strongest_evidence_level"] == "call_graph_proven"
+            assert evidence["evidence_levels"] == [
+                "artifact_proven",
+                "call_graph_proven",
+            ]
+        assert {e["evidence_level"] for e in evidences} == {
+            "artifact_proven",
+            "call_graph_proven",
+        }
+
+    def test_root_cause_evidence_unconditional_on_report_mode(self) -> None:
+        # Same evidence in both full and root-cause report modes -- unlike
+        # properties.rootCauseId (exclusive to root-cause mode),
+        # impactAssessment.root_cause_evidence is unconditional, mirroring
+        # root_cause_id/impact_group_id's own precedent.
+        r = self._correlated_result()
+        full_doc = to_sarif(r)
+        rc_doc = to_sarif(r, report_mode="root-cause")
+        full_evidence = [
+            res["properties"]["impactAssessment"]["root_cause_evidence"]
+            for res in full_doc["runs"][0]["results"]
+        ]
+        rc_evidence = [
+            res["properties"]["impactAssessment"]["root_cause_evidence"]
+            for res in rc_doc["runs"][0]["results"]
+        ]
+        assert full_evidence == rc_evidence
+
+
 class TestNotComparable:
     """ADR-050 D2 -- the comparability-gate hard-fail path has no DiffResult
     at all, so it gets its own dedicated renderer instead of to_sarif."""
@@ -1243,3 +1306,103 @@ class TestContractEvaluationFields:
         assert "contractEvidenceRefs" not in props
         assert props["compatibilityEvaluationStatus"] == "EVALUATED"
         assert props["compatibilityDecision"] is None
+
+
+class TestSuppressionsArray:
+    """ "Reporting must survive suppression": a suppressed finding must still
+    appear in SARIF, via the standard `suppressions` array (§3.27.24), with
+    rule provenance -- not just a bare `properties.suppressedCount` integer."""
+
+    def _make_result_with_suppressed(self, suppressed: list[Change]) -> DiffResult:
+        return DiffResult(
+            old_version="1.0",
+            new_version="2.0",
+            library="libfoo.so.1",
+            changes=[],
+            verdict=Verdict.COMPATIBLE,
+            suppressed_changes=suppressed,
+        )
+
+    def test_suppressed_change_appears_in_results(self) -> None:
+        suppressed = Change(
+            kind=ChangeKind.FUNC_REMOVED,
+            symbol="_Z3foov",
+            description="Function foo() removed",
+            suppression_rule="intentional",
+        )
+        doc = to_sarif(self._make_result_with_suppressed([suppressed]))
+        results = doc["runs"][0]["results"]
+        assert len(results) == 1
+        assert results[0]["ruleId"] == "func_removed"
+
+    def test_suppressed_result_carries_suppressions_array(self) -> None:
+        suppressed = Change(
+            kind=ChangeKind.FUNC_REMOVED,
+            symbol="_Z3foov",
+            description="Function foo() removed",
+            suppression_rule="intentional",
+        )
+        doc = to_sarif(self._make_result_with_suppressed([suppressed]))
+        result = doc["runs"][0]["results"][0]
+        assert result["suppressions"] == [
+            {
+                "kind": "external",
+                "justification": "suppressed by --suppress rule: intentional",
+            }
+        ]
+
+    def test_unsuppressed_result_carries_no_suppressions_key(self) -> None:
+        doc = to_sarif(_make_result([_breaking_change()]))
+        assert "suppressions" not in doc["runs"][0]["results"][0]
+
+    def test_suppressed_change_registers_its_rule(self) -> None:
+        """A suppressed-only rule id must still register in tool.driver.rules,
+        or a SARIF consumer resolving by rule id finds nothing for it."""
+        suppressed = Change(
+            kind=ChangeKind.TYPE_REMOVED,
+            symbol="Foo",
+            description="Type Foo removed",
+            suppression_rule="r1",
+        )
+        doc = to_sarif(self._make_result_with_suppressed([suppressed]))
+        rule_ids = {r["id"] for r in doc["runs"][0]["tool"]["driver"]["rules"]}
+        assert "type_removed" in rule_ids
+
+    def test_suppressed_change_reuses_an_already_registered_rule(self) -> None:
+        """A suppressed change sharing its kind with an active (unsuppressed)
+        finding must not register a second, duplicate rule entry."""
+        active = _breaking_change()  # func_removed
+        suppressed = Change(
+            kind=ChangeKind.FUNC_REMOVED,
+            symbol="_Z3barv",
+            description="Function bar() removed",
+            suppression_rule="r1",
+        )
+        result = DiffResult(
+            old_version="1.0",
+            new_version="2.0",
+            library="libfoo.so.1",
+            changes=[active],
+            verdict=Verdict.BREAKING,
+            suppressed_changes=[suppressed],
+        )
+        doc = to_sarif(result)
+        rules = [
+            r
+            for r in doc["runs"][0]["tool"]["driver"]["rules"]
+            if r["id"] == "func_removed"
+        ]
+        assert len(rules) == 1
+        assert len(doc["runs"][0]["results"]) == 2
+
+    def test_missing_rule_label_still_states_a_justification(self) -> None:
+        suppressed = Change(
+            kind=ChangeKind.FUNC_REMOVED,
+            symbol="_Z3foov",
+            description="Function foo() removed",
+        )
+        doc = to_sarif(self._make_result_with_suppressed([suppressed]))
+        result = doc["runs"][0]["results"][0]
+        assert result["suppressions"][0]["justification"] == (
+            "suppressed by --suppress rule"
+        )

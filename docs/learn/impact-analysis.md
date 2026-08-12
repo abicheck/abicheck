@@ -115,8 +115,22 @@ independently-nullable keys:
   an uncorrelated singleton finding, so a plain finding's
   `impact_assessment` doesn't balloon with a root cause naming nothing but
   itself. `impact_group_id` is currently always identical to
-  `root_cause_id` — a placeholder alias until Phase 6's
-  `RootCauseCorrelator` gives it independent meaning.
+  `root_cause_id` — a placeholder alias until a future revision gives it
+  independent meaning.
+- `root_cause_evidence` (G29 Phase 6) is this finding's own entry from the
+  `RootCauseCorrelator` (`abicheck.impact.correlation.correlate_root_causes`)
+  — present only when this finding is a member of one of that composer's
+  multi-piece groups: the four load-failure kinds (a symbol vanishing from
+  the export table, an internal dependency of a public entry point, a real
+  consumer's own unresolved import, and that consumer actually failing to
+  load), correlated by shared symbol identity and ranked by evidence
+  strength (`artifact_proven` → `call_graph_overapprox` → `call_graph_proven`
+  → `consumer_proven` → `runtime_proven`). `evidence_level` is this
+  finding's own rank; `strongest_evidence_level`/`evidence_levels` describe
+  the whole correlated group, so a consumer can tell "this piece alone is
+  only artifact-proven, but the group as a whole also has consumer proof"
+  without re-running the correlator itself. Unconditional on `report_mode`,
+  same as `root_cause_id`/`impact_group_id`.
 
 `impact_assessment` intentionally duplicates data already published at the
 top level — it exists so a consumer can query one object instead of several
@@ -156,6 +170,14 @@ assumptions. `root_cause_id` is a stable hash of the grouping key, so it is
 consistent across JSON/markdown/SARIF/JUnit for the same underlying report —
 none of the four formats can disagree about which findings share a root
 cause.
+
+When a `root_causes[]` group is also one of the `RootCauseCorrelator`'s own
+multi-piece groups (see `root_cause_evidence` above), the group entry gains
+`strongest_evidence_level`/`evidence_levels` — the group-level counterpart
+of each member finding's own `impact_assessment.root_cause_evidence`.
+Absent for a group `--report-mode root-cause` groups by the broader
+`caused_by_type`/`symbol` rule but that the narrower, four-kind correlator
+doesn't cover.
 
 JUnit's own `<testcase>` groups by *symbol*, not by finding
 (`_partition_changes`), so a symbol with more than one change gets multiple
@@ -215,8 +237,12 @@ being wired through the impact layer are the remainder of G29 Phase 4. `root_cau
 but `impact_group_id` is currently only ever an alias of `root_cause_id` —
 distinguishing them (e.g. bucketing several distinct root causes that share
 one broader consumer-visible event under one group while keeping their own
-individual root-cause identities) needs the full root-cause correlator (G29
-Phase 6). Computing `root_cause_id` needs whole-`DiffResult` context (which
+individual root-cause identities) is still open; the `RootCauseCorrelator`
+(G29 Phase 6) that would drive that distinction is implemented and now wired
+into the report surface as `root_cause_evidence` (documented above), but it
+doesn't yet feed `impact_group_id` itself — that would need the correlator's
+groups to actually re-bucket findings rather than only annotate them, a
+distinct follow-up. Computing `root_cause_id` needs whole-`DiffResult` context (which
 findings elsewhere reference this one) that a single finding's read view
 can't see on its own — the caller resolves it per report/scope
 (`reporter_markdown.root_cause_lookup_for_changes`) and passes it in; see

@@ -389,7 +389,40 @@ def _accumulate_kind_counts(summary: dict[str, Any], field: str, kinds: Any) -> 
         summary[field] = dict(sorted(counter.items()))
 
 
-def _baseline_finding_dicts(changes: list[Any], bucket: str) -> list[dict[str, Any]]:
+def _pre_suppression_bucket(diff: Any, c: Any) -> str | None:
+    """The verdict bucket *c* would have landed in had ``--suppress`` not
+    withheld it, or ``None`` when *diff* can't answer (a lightweight
+    duck-typed stub without ``_effective_verdict_for_change``, used by tests
+    that don't exercise this path).
+
+    Reuses ``DiffResult._effective_verdict_for_change`` -- the exact
+    function ``breaking``/``source_breaks``/``risk``/``compatible`` are each
+    already filtered through -- so a suppressed change's reported bucket can
+    never disagree with what the same change would have counted as had it
+    not been suppressed (policy-file overrides and frozen-namespace guards
+    included).
+    """
+    effective_verdict_for_change = getattr(diff, "_effective_verdict_for_change", None)
+    if effective_verdict_for_change is None:
+        return None
+    from .change_registry_types import Verdict
+
+    verdict = effective_verdict_for_change(c)
+    return {
+        Verdict.BREAKING: "breaking",
+        Verdict.API_BREAK: "api_break",
+        Verdict.COMPATIBLE_WITH_RISK: "risk",
+        Verdict.COMPATIBLE: "compatible",
+        Verdict.NO_CHANGE: "compatible",
+    }.get(verdict)
+
+
+def _baseline_finding_dicts(
+    changes: list[Any],
+    bucket: str,
+    *,
+    pre_suppression_bucket_of: Any = None,
+) -> list[dict[str, Any]]:
     """Project *changes* (one verdict bucket) into small, renderable dicts.
 
     Reads only duck-typed attributes (not ``DiffResult`` internals) so this
@@ -418,6 +451,14 @@ def _baseline_finding_dicts(changes: list[Any], bucket: str) -> list[dict[str, A
     carries a decision -- i.e. under ``scan --against --contract-evaluation``
     -- exactly as ``reporter._add_contract_evaluation_fields`` gates them,
     so an ordinary scan's summary is byte-identical to before.
+
+    *pre_suppression_bucket_of*, when given (``bucket == "suppressed"``
+    only), is a callable resolving one change to the verdict bucket
+    ("breaking"/"api_break"/"risk"/"compatible") it would have landed in had
+    ``--suppress`` not withheld it -- "reporting must survive suppression"
+    means a suppressed finding's *entry* must say more than "suppressed";
+    without this a reader could not tell a suppressed ABI break apart from a
+    suppressed cosmetic quality note.
     """
     from .finding_identity import report_finding_id
 
@@ -435,6 +476,8 @@ def _baseline_finding_dicts(changes: list[Any], bucket: str) -> list[dict[str, A
         _add_contract_fields(entry, c)
         if bucket == "suppressed":
             entry["suppression_rule"] = getattr(c, "suppression_rule", None)
+            if pre_suppression_bucket_of is not None:
+                entry["pre_suppression_bucket"] = pre_suppression_bucket_of(c)
         findings.append(entry)
     return findings
 
@@ -680,7 +723,9 @@ def _baseline_summary(diff: Any, max_findings: int | None = None) -> dict[str, A
     if suppressed_changes:
         summary["suppressed_count"] = len(suppressed_changes)
         summary["suppressed"] = _baseline_finding_dicts(
-            suppressed_changes[:cap], "suppressed"
+            suppressed_changes[:cap],
+            "suppressed",
+            pre_suppression_bucket_of=lambda c: _pre_suppression_bucket(diff, c),
         )
         if len(suppressed_changes) > cap:
             summary["suppressed_truncated"] = True

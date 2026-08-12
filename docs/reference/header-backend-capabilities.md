@@ -284,24 +284,32 @@ this" apart from "abicheck saw no change".
   either. DWARF reads the compiler's artificial vptr member and does know the
   primary offset for real; the multiple-inheritance case needs both a model
   field that can hold more than one vptr and the `VTableContext` route above.
-- **`EnumType.underlying_type` on CastXML (and therefore hybrid).** Only the
-  clang backend populates it; a CastXML-parsed enum keeps the model default
-  `int` whatever the header declared. No diff detector reads the field
-  (`enum_underlying_size_changed` is computed from DWARF), but `tu_merge.py`'s
-  ODR-conflict check does — so a multi-TU CastXML dump cannot detect an
-  underlying-type conflict between two declarations of the same enum.
+- **`EnumType.underlying_type` on an unfixed enum, clang backend only.**
+  CastXML (and therefore hybrid, which inherits castxml's real answer here)
+  reads the compiler-picked underlying integer type correctly either way —
+  fixed or implementation-chosen. clang reads the real value only for a
+  *fixed* enum (`enum E : short`); for an unfixed enum it hard-codes `"int"`,
+  since clang's AST JSON exposes no compiler-selected-underlying-type fact
+  for that case at all (Codex review, PR #719 follow-up) — the true value can
+  differ (e.g. `unsigned int`, chosen from the member value range). No diff
+  detector reads the field (`enum_underlying_size_changed` is computed from
+  DWARF), but `tu_merge.py`'s ODR-conflict check does, so a multi-TU
+  `"clang"`-producer dump can still miss an underlying-type conflict on an
+  unfixed enum.
 - **Facts a hybrid merge does not inherit from clang.** A hybrid snapshot is
   castxml-based: only the fields `dumper_hybrid.py` explicitly backfills take
   clang's value. `is_template_pattern`, `has_anonymous_aggregate_fields` and
   `underlying_type` are not on that list, so for a declaration both backends
   saw, clang's answer is dropped. (For a declaration only clang saw, the whole
   entry is appended verbatim and the facts survive.)
-- **Opaque types are absent, not opaque, on the clang backend.** clang's
-  `parse_types` skips every non-definition, so a forward-declared handle type
-  (`struct Session;` with no definition in the public headers) simply does not
-  appear in a clang snapshot, where CastXML emits it with `is_opaque=True`.
-  Comparing across the two producers therefore sees a type that "does not
-  exist" rather than one that is incomplete.
+- **Opaque types — closed.** clang's `parse_types` previously skipped every
+  non-definition record entirely, so a forward-declared handle type
+  (`struct Session;` with no definition in the public headers) was simply
+  absent from a clang snapshot, where CastXML emitted it with
+  `is_opaque=True`. Closed in PR #719: clang now emits an opaque stub for a
+  forward-declaration-only identity too (see the `is_opaque` matrix row
+  above for the exact collapsing rule when both a forward decl and a
+  definition share one identity in the same TU).
 - **All three model fields this section used to flag as "nothing populates"
   now have a producer.** `Param.is_va_list` (schema v23) and
   `Variable.value`/`Variable.access` (schema v24), each closed in a G31

@@ -28,8 +28,13 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
+from abicheck.change_registry_types import Verdict
 from abicheck.checker_policy import ChangeKind
-from abicheck.cli_scan_baseline import _baseline_finding_dicts
+from abicheck.cli_scan_baseline import (
+    _baseline_finding_dicts,
+    _baseline_summary,
+    _pre_suppression_bucket,
+)
 from abicheck.contract_relevance_types import ContractAssurance, ContractRelevance
 
 
@@ -149,3 +154,68 @@ class TestContractFields:
         assert entry["kind"] == "func_removed"
         assert entry["contract_relevance"] == "IN_CONTRACT"
         assert entry["contract_assurance"] == "complete"
+
+
+class TestSuppressionMustSurviveSuppression:
+    """A suppressed finding's JSON entry must say more than "suppressed" —
+    which verdict bucket it would have counted in, so a reader can tell a
+    suppressed ABI break apart from a suppressed cosmetic quality note."""
+
+    def test_pre_suppression_bucket_reads_the_effective_verdict(self):
+        diff = SimpleNamespace(_effective_verdict_for_change=lambda c: Verdict.BREAKING)
+        assert _pre_suppression_bucket(diff, _change()) == "breaking"
+
+    def test_pre_suppression_bucket_maps_every_verdict(self):
+        for verdict, expected in (
+            (Verdict.BREAKING, "breaking"),
+            (Verdict.API_BREAK, "api_break"),
+            (Verdict.COMPATIBLE_WITH_RISK, "risk"),
+            (Verdict.COMPATIBLE, "compatible"),
+            (Verdict.NO_CHANGE, "compatible"),
+        ):
+            diff = SimpleNamespace(_effective_verdict_for_change=lambda c, v=verdict: v)
+            assert _pre_suppression_bucket(diff, _change()) == expected
+
+    def test_pre_suppression_bucket_is_none_for_a_duck_typed_stub(self):
+        """A lightweight `diff` stand-in without the real method degrades to
+        `None` rather than raising -- the same tolerant-stub contract every
+        other `_baseline_finding_dicts` field already honors."""
+        assert _pre_suppression_bucket(SimpleNamespace(), _change()) is None
+
+    def test_baseline_finding_dicts_carries_pre_suppression_bucket(self):
+        (entry,) = _baseline_finding_dicts(
+            [_change(suppression_rule="intentional")],
+            "suppressed",
+            pre_suppression_bucket_of=lambda c: "breaking",
+        )
+        assert entry["pre_suppression_bucket"] == "breaking"
+        assert entry["suppression_rule"] == "intentional"
+
+    def test_baseline_finding_dicts_omits_pre_suppression_bucket_by_default(self):
+        """No regression for every existing caller that doesn't pass the new
+        keyword -- the key stays absent, not `None`."""
+        (entry,) = _baseline_finding_dicts(
+            [_change(suppression_rule="intentional")], "suppressed"
+        )
+        assert "pre_suppression_bucket" not in entry
+
+    def test_baseline_summary_wires_the_bucket_through_end_to_end(self):
+        """`_baseline_summary` is what a real `scan --against --format json`
+        run calls -- confirms the wiring, not just the two halves in
+        isolation."""
+        suppressed = _change(kind=ChangeKind.FUNC_REMOVED, suppression_rule="r1")
+        diff = SimpleNamespace(
+            breaking=[],
+            source_breaks=[],
+            risk=[],
+            compatible=[],
+            not_evaluated=[],
+            detector_results=[],
+            suppressed_changes=[suppressed],
+            _effective_verdict_for_change=lambda c: Verdict.BREAKING,
+        )
+        summary = _baseline_summary(diff)
+        assert summary["suppressed_count"] == 1
+        (entry,) = summary["suppressed"]
+        assert entry["pre_suppression_bucket"] == "breaking"
+        assert entry["suppression_rule"] == "r1"

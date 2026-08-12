@@ -82,11 +82,19 @@ from .reporter_markdown import (
     _to_markdown_root_cause as _to_markdown_root_cause,
     apply_show_only as apply_show_only,
     operation_for_kind as operation_for_kind,
+    root_cause_evidence_lookup_for_changes as root_cause_evidence_lookup_for_changes,
     root_cause_for_change as root_cause_for_change,
     root_cause_lookup_for_changes as root_cause_lookup_for_changes,
     to_markdown as to_markdown,
     to_review_digest as to_review_digest,
     to_stat as to_stat,
+)
+from .root_cause_evidence import (
+    entry_root_cause_evidence,
+    fold_evidence_summaries,
+    root_cause_group_evidence,
+    scoped_only_changes_filtered,
+    scoped_only_evidence_lookup,
 )
 from .schemas import REPORT_SCHEMA_VERSION
 from .semver import recommend_release
@@ -372,6 +380,7 @@ def _to_json_leaf(
     _rc_lookup = root_cause_lookup_for_changes(
         changes, extra_causes=_scoped_only_extra_causes(result, show_only)
     )
+    _rc_evidence = scoped_only_evidence_lookup(result, changes, show_only)
 
     effective_policy = result.policy or "strict_abi"
     eff_sets = result._effective_kind_sets()
@@ -447,7 +456,11 @@ def _to_json_leaf(
         # impact_assessment follow the same precedent so a root TYPE_*
         # change (exactly the category the layout-reachability walk tags
         # most often) doesn't lose them in --report-mode leaf.
-        assessment = assess_change(c, root_cause=_rc_lookup.get(_finding_id(c)))
+        assessment = assess_change(
+            c,
+            root_cause=_rc_lookup.get(_finding_id(c)),
+            root_cause_evidence=_rc_evidence.get(_finding_id(c)),
+        )
         entry["reachability_state"] = assessment.reachability_state.value
         if assessment.has_signal():
             entry["impact_assessment"] = assessment.to_dict()
@@ -490,6 +503,7 @@ def _to_json_leaf(
             policy=effective_policy,
             kind_sets=eff_sets,
             root_cause=_rc_lookup.get(_finding_id(c)),
+            root_cause_evidence=_rc_evidence.get(_finding_id(c)),
             policy_file=result.policy_file,
             evidence_tiers=result.evidence_tiers,
             severity_config=severity_config,
@@ -557,6 +571,15 @@ def _add_entries_to_root_causes(
     scoped-gate entries computed after :func:`_to_json_root_cause` already
     grouped ``result.changes`` (else they'd sit in ``changes[]`` but never in
     ``root_causes``). No-op if *d* has no ``root_causes`` list.
+
+    Each touched group's ``strongest_evidence_level``/``evidence_levels``
+    (G29 Phase 6, Codex review) is recomputed from *all* its findings --
+    pre-existing and newly folded-in alike -- every time a group is touched,
+    via :func:`~abicheck.root_cause_evidence.fold_evidence_summaries` over each finding's own
+    ``impact_assessment.root_cause_evidence``. Without this, a scoped-only
+    entry folded into an existing (or brand-new) group here never
+    contributed its own evidence to the group summary at all, unlike a
+    group :func:`_to_json_root_cause` builds entirely from ``changes``.
     """
     root_causes = d.get("root_causes")
     if not isinstance(root_causes, list):
@@ -566,6 +589,7 @@ def _add_entries_to_root_causes(
         for group in root_causes
         if isinstance(group, dict)
     }
+    touched: set[str] = set()
     for key, root_display, entry in keyed_entries:
         root_cause_id = hashlib.sha256(key.encode("utf-8")).hexdigest()[:16]
         group = by_id.get(root_cause_id)
@@ -580,39 +604,35 @@ def _add_entries_to_root_causes(
             by_id[root_cause_id] = group
         group["findings"].append(entry)
         group["finding_count"] = len(group["findings"])
+        touched.add(root_cause_id)
+    for root_cause_id in touched:
+        group = by_id[root_cause_id]
+        evidence = fold_evidence_summaries(
+            entry_root_cause_evidence(f)
+            for f in group["findings"]
+            if isinstance(f, dict)
+        )
+        if evidence is not None:
+            group["strongest_evidence_level"] = evidence["strongest_evidence_level"]
+            group["evidence_levels"] = evidence["evidence_levels"]
     d["root_cause_count"] = len(root_causes)
 
 
 def _scoped_only_extra_causes(
     result: DiffResult, show_only: str | None
 ) -> frozenset[str]:
-    """``caused_by_type`` values from ``result.scoped_only_changes``, filtered
-    by the same ``--show-only`` as the caller's own ``changes`` list (G29
+    """``caused_by_type`` values from ``result.scoped_only_changes`` (G29
     Phase 3 follow-up, review finding).
 
-    The scoped-gate (``--used-by``/``--required-symbol``) fold-in in
-    ``cli_compare_fold.py`` appends scoped-only changes to a report *after*
-    a JSON serializer has already built its root-cause lookup — without
-    folding their ``caused_by_type`` into the grouping here too, a change in
-    ``changes`` that only correlates via one of those later-appended
-    findings would be locked into its own singleton group, contradicting
-    ``sarif.to_sarif``/``junit_report._build_testsuite``'s identical
-    computation (both already fold this in). Shared by every JSON mode that
-    calls :func:`~abicheck.reporter_markdown.root_cause_lookup_for_changes`
-    — not just ``--report-mode root-cause`` — so a finding's
-    ``impact_assessment.root_cause_id`` can't diverge from its
-    ``root_causes[].root_cause_id``/SARIF/JUnit sibling depending on which
-    report mode rendered it.
+    ``cli_compare_fold.py``'s scoped-gate fold-in appends scoped-only
+    changes *after* a JSON serializer already built its root-cause lookup --
+    folding their ``caused_by_type`` in here too keeps a `changes` entry
+    that only correlates via one of those later-appended findings from
+    being locked into its own singleton group, matching
+    ``sarif.to_sarif``/``junit_report._build_testsuite``'s identical,
+    single-pass fold.
     """
-    scoped_only = list(getattr(result, "scoped_only_changes", ()) or ())
-    if show_only and scoped_only:
-        scoped_only = apply_show_only(
-            scoped_only,
-            show_only,
-            policy=result.policy,
-            kind_sets=result._effective_kind_sets(),
-            policy_file=result.policy_file,
-        )
+    scoped_only = scoped_only_changes_filtered(result, show_only)
     return frozenset(c.caused_by_type for c in scoped_only if c.caused_by_type)
 
 
@@ -630,12 +650,12 @@ def _to_json_root_cause(
     singleton group keyed by its own ``symbol`` -- reusing the existing
     ``caused_by_type`` field ``diff_filtering.py``'s redundancy collapse and
     ``internal_leak.py``'s call-graph-leak overlay already set, rather than
-    requiring new producer wiring. This is a first, JSON-only slice of the
-    plan's root-cause grouping: the full `RootCauseCorrelator` (G29 Phase 6)
-    will additionally correlate across consumer-overlay findings that don't
-    share a `caused_by_type` today; `root_cause_id` here is a stable hash of
-    the grouping key, not the eventual correlator's own identifier scheme
-    (ADR-052, "Deliberately not implemented this slice").
+    requiring new producer wiring. ``root_cause_id`` is a stable hash of this
+    grouping key -- deliberately a different scheme from
+    `RootCauseCorrelator`'s own (G29 Phase 6), whose evidence-ranked groups
+    each `root_causes[]` entry additionally annotates with
+    ``strongest_evidence_level``/``evidence_levels`` (see
+    :func:`~abicheck.root_cause_evidence.root_cause_group_evidence`) without adopting its id scheme.
     """
     changes = list(result.changes)
     if show_only:
@@ -667,6 +687,7 @@ def _to_json_root_cause(
     # mode provides it, `_to_json_leaf` included) and `root_causes[].findings`
     # never drift from each other.
     _rc_lookup = root_cause_lookup_for_changes(changes, extra_causes=extra_causes)
+    _rc_evidence = scoped_only_evidence_lookup(result, changes, show_only)
     entry_by_id = {
         id(c): _change_to_dict(
             c,
@@ -674,6 +695,7 @@ def _to_json_root_cause(
             kind_sets=eff_sets,
             policy_file=result.policy_file,
             root_cause=_rc_lookup.get(_finding_id(c)),
+            root_cause_evidence=_rc_evidence.get(_finding_id(c)),
             evidence_tiers=result.evidence_tiers,
             severity_config=severity_config,
         )
@@ -682,15 +704,22 @@ def _to_json_root_cause(
     entries = [entry_by_id[id(c)] for c in changes]
     grouped = _group_changes_by_root_cause(changes, extra_causes=extra_causes)
 
-    root_causes = [
-        {
-            "root_cause_id": hashlib.sha256(key.encode("utf-8")).hexdigest()[:16],
+    root_causes = []
+    for key, root_display, group_changes in grouped:
+        root_cause_id = hashlib.sha256(key.encode("utf-8")).hexdigest()[:16]
+        entry: dict[str, object] = {
+            "root_cause_id": root_cause_id,
             "root": root_display,
             "finding_count": len(group_changes),
             "findings": [entry_by_id[id(c)] for c in group_changes],
         }
-        for key, root_display, group_changes in grouped
-    ]
+        group_evidence = root_cause_group_evidence(group_changes, _rc_evidence)
+        if group_evidence is not None:
+            entry["strongest_evidence_level"] = group_evidence[
+                "strongest_evidence_level"
+            ]
+            entry["evidence_levels"] = group_evidence["evidence_levels"]
+        root_causes.append(entry)
 
     d = _build_json_base(result)
     _add_abi_surface_breakdown(d, result)
@@ -908,7 +937,10 @@ def _add_show_only_filter(
 
 
 def _suppressed_change_entry(
-    c: Change, *, root_cause: tuple[str, str] | None = None
+    c: Change,
+    *,
+    root_cause: tuple[str, str] | None = None,
+    root_cause_evidence: dict[str, object] | None = None,
 ) -> dict[str, object]:
     """Minimal audit-trail entry for one suppressed change, plus the
     impact-assessment decision it was actually suppressed with (G29 Phase 3
@@ -917,17 +949,23 @@ def _suppressed_change_entry(
     "suppressed"`` was advertised but never actually reachable from
     production reporting).
 
-    ``root_cause`` (G29 Phase 3 follow-up): the caller resolves this from a
-    lookup scoped to ``result.suppressed_changes`` itself -- a suppressed
-    finding's root cause is computed relative to other *suppressed* findings,
-    not folded together with the kept ``changes[]`` list's own grouping.
+    ``root_cause``/``root_cause_evidence`` (G29 Phase 3/6 follow-ups): the
+    caller resolves both from a lookup scoped to ``result.suppressed_changes``
+    itself -- a suppressed finding's root cause is computed relative to other
+    *suppressed* findings, not folded together with the kept ``changes[]``
+    list's own grouping.
     """
     entry: dict[str, object] = {
         "kind": c.kind.value,
         "symbol": c.symbol,
         "description": c.description,
     }
-    assessment = assess_change(c, suppressed=True, root_cause=root_cause)
+    assessment = assess_change(
+        c,
+        suppressed=True,
+        root_cause=root_cause,
+        root_cause_evidence=root_cause_evidence,
+    )
     entry["reachability_state"] = assessment.reachability_state.value
     if assessment.has_signal():
         entry["impact_assessment"] = assessment.to_dict()
@@ -943,11 +981,16 @@ def _suppressed_change_entry(
 def _add_suppression(d: dict[str, object], result: DiffResult) -> None:
     """Add suppression block (file flag, count, suppressed change list)."""
     _rc_lookup = root_cause_lookup_for_changes(result.suppressed_changes)
+    _rc_evidence = root_cause_evidence_lookup_for_changes(result.suppressed_changes)
     d["suppression"] = {
         "file_provided": result.suppression_file_provided,
         "suppressed_count": result.suppressed_count,
         "suppressed_changes": [
-            _suppressed_change_entry(c, root_cause=_rc_lookup.get(_finding_id(c)))
+            _suppressed_change_entry(
+                c,
+                root_cause=_rc_lookup.get(_finding_id(c)),
+                root_cause_evidence=_rc_evidence.get(_finding_id(c)),
+            )
             for c in result.suppressed_changes
         ],
     }
@@ -1010,13 +1053,16 @@ def _add_changes_block(
     *show_only* folds ``result.scoped_only_changes``' ``caused_by_type``
     values into the root-cause grouping the same way ``_to_json_root_cause``
     does (review finding) -- without it, a finding here correlating only via
-    a scoped-only overlay silently lost its
-    ``impact_assessment.root_cause_id``, disagreeing with root-cause mode,
-    SARIF, and JUnit for the identical finding.
+    a scoped-only overlay silently lost its ``impact_assessment.root_cause_id``,
+    disagreeing with root-cause mode, SARIF, and JUnit. ``root_cause_evidence``
+    (G29 Phase 6, Codex review) gets the same treatment via
+    :func:`~abicheck.root_cause_evidence.scoped_only_evidence_lookup`, correlating against the real
+    scoped-only ``Change`` objects rather than just their ``caused_by_type``.
     """
     _rc_lookup = root_cause_lookup_for_changes(
         changes, extra_causes=_scoped_only_extra_causes(result, show_only)
     )
+    _rc_evidence = scoped_only_evidence_lookup(result, changes, show_only)
     d["changes"] = [
         _change_to_dict(
             c,
@@ -1024,6 +1070,7 @@ def _add_changes_block(
             kind_sets=eff_sets,
             policy_file=result.policy_file,
             root_cause=_rc_lookup.get(_finding_id(c)),
+            root_cause_evidence=_rc_evidence.get(_finding_id(c)),
             evidence_tiers=result.evidence_tiers,
             severity_config=severity_config,
         )
@@ -1401,6 +1448,7 @@ def _change_to_dict(
     policy_file: object | None = None,
     evidence_status_override: EvidenceStatus | None = None,
     root_cause: tuple[str, str] | None = None,
+    root_cause_evidence: dict[str, object] | None = None,
     evidence_tiers: Sequence[str] = (),
     severity_config: SeverityConfig | None = None,
 ) -> dict[str, object]:
@@ -1418,7 +1466,10 @@ def _change_to_dict(
     ``impact_assessment.root_cause_id`` is populated. Callers resolve this
     once per report via
     :func:`~abicheck.reporter_markdown.root_cause_lookup_for_changes` rather
-    than recomputing it per change.
+    than recomputing it per change. ``root_cause_evidence`` (G29 Phase 6) is
+    the analogous per-change entry from
+    :func:`~abicheck.impact.correlation.correlate_root_causes`, resolved the
+    same way.
 
     ``evidence_tiers`` is the owning comparison's ``DiffResult.evidence_tiers``
     (P0 evidence-provider audit) — when a caller has it (most do; the
@@ -1492,7 +1543,9 @@ def _change_to_dict(
     # reachability/impact fields above; only emitted when it carries
     # information beyond the all-defaults case, matching this function's own
     # convention of not padding every plain finding with an empty object.
-    assessment = assess_change(c, root_cause=root_cause)
+    assessment = assess_change(
+        c, root_cause=root_cause, root_cause_evidence=root_cause_evidence
+    )
     d["reachability_state"] = assessment.reachability_state.value
     if assessment.has_signal():
         d["impact_assessment"] = assessment.to_dict()
@@ -1656,6 +1709,7 @@ def appcompat_to_json(result: object, indent: int = 2) -> str:
     appcompat_kind_sets = _kind_sets_fn() if callable(_kind_sets_fn) else None
     appcompat_policy_file = getattr(full_diff, "policy_file", None)
     _rc_lookup = root_cause_lookup_for_changes(breaking)
+    _rc_evidence = root_cause_evidence_lookup_for_changes(breaking)
     d["relevant_changes"] = [
         _change_to_dict(
             c,
@@ -1664,6 +1718,7 @@ def appcompat_to_json(result: object, indent: int = 2) -> str:
             policy_file=appcompat_policy_file,
             evidence_status_override=EvidenceStatus.CONSUMER_PROVEN,
             root_cause=_rc_lookup.get(_finding_id(c)),
+            root_cause_evidence=_rc_evidence.get(_finding_id(c)),
         )
         for c in breaking
     ]

@@ -517,6 +517,33 @@ class TestLoadSuppressionAndPolicy:
         assert pf is not None
         assert "is ignored when --policy-file is given" in capsys.readouterr().err
 
+    def test_policy_file_surfaces_validate_overrides_warnings(
+        self, tmp_path: Path, capsys
+    ) -> None:
+        """A risky override (e.g. downgrading func_removed) must be echoed --
+        `PolicyFile.validate_overrides()` previously had no caller, so its
+        warnings never reached a user."""
+        pol = tmp_path / "policy.yaml"
+        pol.write_text(
+            "base_policy: strict_abi\noverrides:\n  func_removed: ignore\n"
+        )
+        _, pf = _load_suppression_and_policy(None, "strict_abi", pol)
+        assert pf is not None
+        err = capsys.readouterr().err
+        assert "HIGH RISK" in err
+        assert "func_removed" in err
+
+    def test_policy_file_no_warnings_for_safe_overrides(
+        self, tmp_path: Path, capsys
+    ) -> None:
+        pol = tmp_path / "policy.yaml"
+        pol.write_text(
+            "base_policy: strict_abi\noverrides:\n  enum_member_renamed: ignore\n"
+        )
+        _, pf = _load_suppression_and_policy(None, "strict_abi", pol)
+        assert pf is not None
+        assert capsys.readouterr().err == ""
+
 
 # ── _load_probe_matrix_changes (cli.py:1112-1117) ─────────────────────────────
 
@@ -1848,6 +1875,94 @@ class TestUsedByScoping:
         assert {f["kind"] for f in group["findings"]} == {
             "func_removed", "pe_ordinal_retargeted",
         }
+
+    def test_json_full_mode_scoped_only_correlator_evidence(
+        self, tmp_path, monkeypatch
+    ) -> None:
+        # G29 Phase 6 follow-up (Codex review): a scoped-only
+        # CONSUMER_REQUIRED_SYMBOL_REMOVED sibling of a real FUNC_REMOVED
+        # change is a genuine RootCauseCorrelator two-piece group -- both the
+        # pre-existing regular `changes[]` entry (root, via
+        # reporter._add_changes_block) and the newly-appended scoped-only
+        # entry (via cli_compare_fold.py's own fold-in) must carry the same
+        # correlator evidence for the same underlying group.
+        from abicheck import dumper as dumper_mod
+
+        old, new = _breaking_pair()  # real diff: "bar"/_Z3barv removed
+        app_path = tmp_path / "app"
+        app_path.write_bytes(b"\x7fELF" + b"\x00" * 200)
+        old_p = tmp_path / "old.so"
+        old_p.write_bytes(b"\x7fELF" + b"\x00" * 200)
+        new_p = tmp_path / "new.so"
+        new_p.write_bytes(b"\x7fELF" + b"\x00" * 200)
+        monkeypatch.setattr(dumper_mod, "dump", MagicMock(side_effect=[old, new]))
+        scoped_only = Change(
+            kind=ChangeKind.CONSUMER_REQUIRED_SYMBOL_REMOVED,
+            symbol="pub_entry",
+            description="required by consumer",
+            caused_by_type="_Z3barv",
+        )
+        res = self._result(verdict=Verdict.BREAKING, breaking_for_app=[scoped_only])
+        self._patch_scope(monkeypatch, res)
+        result = _invoke(
+            "compare", str(old_p), str(new_p), "--used-by", str(app_path),
+            "--format", "json",
+        )
+        assert result.exit_code == 4
+        data = json.loads(result.stdout)
+        entries = {c["kind"]: c for c in data["changes"]}
+        assert set(entries) == {"func_removed", "consumer_required_symbol_removed"}
+        for entry in entries.values():
+            evidence = entry["impact_assessment"]["root_cause_evidence"]
+            assert evidence["strongest_evidence_level"] == "consumer_proven"
+            assert evidence["evidence_levels"] == [
+                "artifact_proven", "consumer_proven",
+            ]
+
+    def test_json_root_cause_mode_scoped_only_bare_symbol_group_evidence(
+        self, tmp_path, monkeypatch
+    ) -> None:
+        # Third Codex review finding: --used-by --verify-runtime's real
+        # shape -- a FUNC_REMOVED and a scoped-only CONSUMER_RUNTIME_LOAD_
+        # FAILED sharing a bare symbol, neither carrying caused_by_type.
+        # RootCauseCorrelator merges them, but _root_cause_key_and_display's
+        # "only caused_by_type correlates findings" contract keeps each its
+        # own singleton --report-mode root-cause group (one built by
+        # _to_json_root_cause before the fold-in, one newly created by
+        # _add_entries_to_root_causes during it). Both singletons must carry
+        # the same group-level evidence their shared correlator group has.
+        from abicheck import dumper as dumper_mod
+
+        old, new = _breaking_pair()  # real diff: "bar"/_Z3barv removed
+        app_path = tmp_path / "app"
+        app_path.write_bytes(b"\x7fELF" + b"\x00" * 200)
+        old_p = tmp_path / "old.so"
+        old_p.write_bytes(b"\x7fELF" + b"\x00" * 200)
+        new_p = tmp_path / "new.so"
+        new_p.write_bytes(b"\x7fELF" + b"\x00" * 200)
+        monkeypatch.setattr(dumper_mod, "dump", MagicMock(side_effect=[old, new]))
+        scoped_only = Change(
+            kind=ChangeKind.CONSUMER_RUNTIME_LOAD_FAILED,
+            symbol="_Z3barv",
+            description="runtime load failed",
+        )
+        res = self._result(verdict=Verdict.BREAKING, breaking_for_app=[scoped_only])
+        self._patch_scope(monkeypatch, res)
+        result = _invoke(
+            "compare", str(old_p), str(new_p), "--used-by", str(app_path),
+            "--format", "json", "--report-mode", "root-cause",
+        )
+        assert result.exit_code == 4
+        data = json.loads(result.stdout)
+        assert data["root_cause_count"] == 2
+        groups = {
+            group["findings"][0]["kind"]: group for group in data["root_causes"]
+        }
+        assert set(groups) == {"func_removed", "consumer_runtime_load_failed"}
+        for group in groups.values():
+            assert group["finding_count"] == 1
+            assert group["strongest_evidence_level"] == "runtime_proven"
+            assert group["evidence_levels"] == ["artifact_proven", "runtime_proven"]
 
     def test_markdown_root_cause_mode_merges_scoped_only_into_existing_group(
         self, tmp_path, monkeypatch

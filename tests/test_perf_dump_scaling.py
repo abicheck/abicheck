@@ -17,13 +17,13 @@ Requires ``gcc`` on Linux (gcc produces Mach-O on macOS, PE on Windows).
 
 from __future__ import annotations
 
-import math
 import subprocess
 import sys
 import time
 from pathlib import Path
 
 import pytest
+from _perf_scaling import measure_scaling_exponent
 
 from abicheck.dwarf_metadata import parse_dwarf_metadata
 from abicheck.elf_metadata import parse_elf_metadata
@@ -59,19 +59,33 @@ def _compile_so(src: str, path: Path, *, debug: bool = False) -> None:
 
 @pytest.mark.integration
 def test_elf_parse_scaling_stays_subquadratic(tmp_path: Path) -> None:
-    """Parsing a 4x-larger symbol table must not take ~16x longer."""
-    timings: list[tuple[int, float]] = []
-    for n in (500, 2000):
-        so = tmp_path / f"lib{n}.so"
-        _compile_so(_gen_source(n), so)
+    """Parsing a 4x-larger symbol table must not take ~16x longer.
+
+    Four sizes, median-of-3 per size, least-squares exponent (see
+    ``_perf_scaling.py``) instead of one size pair and one timing each — a
+    single noisy tick on either end of a two-point ratio used to be able to
+    fail this outright.
+    """
+    # Deliberately *not* evenly log-spaced (see _perf_scaling.py's docstring)
+    # -- a plain doubling progression makes the middle point(s) contribute
+    # nothing to the least-squares slope.
+    sizes = (500, 900, 1400, 2000)
+    compiled: dict[int, Path] = {}
+
+    def _measure(n: int) -> float:
+        so = compiled.get(n)
+        if so is None:
+            so = tmp_path / f"lib{n}.so"
+            _compile_so(_gen_source(n), so)
+            compiled[n] = so
         start = time.monotonic()
         meta = parse_elf_metadata(so)
-        timings.append((n, max(time.monotonic() - start, 1e-3)))
+        elapsed = max(time.monotonic() - start, 1e-3)
         exported = sum(1 for s in meta.symbols if s.name.startswith("func_"))
         assert exported >= n // 2, f"expected ~{n} exports, parsed {exported}"
+        return elapsed
 
-    (n1, t1), (n2, t2) = timings
-    exponent = math.log(t2 / t1) / math.log(n2 / n1)
+    exponent = measure_scaling_exponent(_measure, sizes)
     # True quadratic would be ~2.0; generous bound catches a real regression
     # without flaking on shared CI runners.
     assert exponent < 1.9, (
@@ -84,23 +98,32 @@ def test_dwarf_parse_scaling_stays_subquadratic(tmp_path: Path) -> None:
     """Parsing a 4x-larger DWARF DIE tree must not take ~16x longer.
 
     Guards ``parse_dwarf_metadata`` — the debug-info parse that dominates real
-    library dump time — against an O(n^2) regression in the DIE walk.
+    library dump time — against an O(n^2) regression in the DIE walk. Same
+    median-of-repeats/least-squares measurement as the ELF test above.
     """
-    timings: list[tuple[int, float]] = []
-    for n in (500, 2000):
-        so = tmp_path / f"libdw{n}.so"
-        _compile_so(_gen_dwarf_source(n), so, debug=True)
+    # Deliberately *not* evenly log-spaced (see _perf_scaling.py's docstring)
+    # -- a plain doubling progression makes the middle point(s) contribute
+    # nothing to the least-squares slope.
+    sizes = (500, 900, 1400, 2000)
+    compiled: dict[int, Path] = {}
+
+    def _measure(n: int) -> float:
+        so = compiled.get(n)
+        if so is None:
+            so = tmp_path / f"libdw{n}.so"
+            _compile_so(_gen_dwarf_source(n), so, debug=True)
+            compiled[n] = so
         start = time.monotonic()
         meta = parse_dwarf_metadata(so)
-        timings.append((n, max(time.monotonic() - start, 1e-3)))
+        elapsed = max(time.monotonic() - start, 1e-3)
         # The DWARF parse should recover the per-TU structs (best-effort: skip
         # if this toolchain emitted no usable DWARF rather than asserting a count
         # that depends on the gcc/DWARF version).
         if not meta.structs:
             pytest.skip("no DWARF structs parsed (toolchain emitted no usable DWARF)")
+        return elapsed
 
-    (n1, t1), (n2, t2) = timings
-    exponent = math.log(t2 / t1) / math.log(n2 / n1)
+    exponent = measure_scaling_exponent(_measure, sizes)
     assert exponent < 1.9, (
         f"DWARF parse scaling exponent {exponent:.2f} regressed toward O(n^2)"
     )

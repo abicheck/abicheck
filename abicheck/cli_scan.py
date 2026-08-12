@@ -287,7 +287,7 @@ def _normalize_depth_inputs(
     return (), (), None, None, None
 
 
-def _render_text(out: ScanOutcome) -> str:
+def _render_text(out: ScanOutcome, *, show_suppressed: bool = False) -> str:
     """Render the human-facing scan report by composing its section blocks."""
     lines: list[str] = []
     lines += render_summary_lines(out)
@@ -295,7 +295,7 @@ def _render_text(out: ScanOutcome) -> str:
     lines += render_crosscheck_lines(out)
     lines += render_pattern_lines(out)
     lines += render_preprocessor_lines(out)
-    lines += render_baseline_lines(out)
+    lines += render_baseline_lines(out, show_suppressed=show_suppressed)
     lines += render_verdict_lines(out)
     return "\n".join(lines)
 
@@ -552,12 +552,14 @@ def _scan_pre_coverage_base_exit(outcome: ScanOutcome) -> int:
     return _verdict_exit_code(outcome.verdict)
 
 
-def _emit_scan_report(outcome: ScanOutcome, fmt: str, output: Path | None) -> None:
+def _emit_scan_report(
+    outcome: ScanOutcome, fmt: str, output: Path | None, *, show_suppressed: bool = False
+) -> None:
     """Render the scan outcome, write/echo it, and exit non-zero on a verdict."""
     text = (
         json.dumps(outcome.to_dict(), indent=2)
         if fmt == "json"
-        else _render_text(outcome)
+        else _render_text(outcome, show_suppressed=show_suppressed)
     )
     if output:
         _safe_write_output(output, text)
@@ -1366,6 +1368,17 @@ def _discover_scan_project_config(
     help="Output format.",
 )
 @click.option(
+    "--show-suppressed",
+    "show_suppressed",
+    is_flag=True,
+    default=False,
+    help="With --against and --format text: itemize the suppressed findings "
+    "(kind/symbol/location/rule) below the always-present `suppressed: N` "
+    "count, the same way gating findings are itemized. --format json already "
+    "lists every suppressed finding unconditionally in `diff.suppressed`; "
+    "this flag only changes what the text renderer prints.",
+)
+@click.option(
     "-o",
     "--output",
     type=click.Path(path_type=Path),
@@ -1404,6 +1417,7 @@ def scan_cmd(
     severity_potential_breaking: str | None,
     severity_quality_issues: str | None,
     severity_addition: str | None,
+    show_suppressed: bool,
     exit_code_scheme: str | None,
     strict_suppressions: bool,
     public_symbols: tuple[str, ...],
@@ -1937,4 +1951,4 @@ def scan_cmd(
 
         drain_build_dir_cleanups(build_dir_cleanups)
 
-    _emit_scan_report(core.outcome, fmt, output)
+    _emit_scan_report(core.outcome, fmt, output, show_suppressed=show_suppressed)

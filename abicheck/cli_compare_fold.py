@@ -265,12 +265,38 @@ class _ScopedFold:
             _root_cause_key_and_display,
             root_cause_for_change,
         )
+        from .reporter_markdown import (
+            apply_show_only,
+            root_cause_evidence_lookup_for_changes,
+        )
 
         result = self.result
         severity_config = self.severity_config
         contract_evaluation = self.contract_evaluation
         eff_sets = result._effective_kind_sets()
         scoped_only, missing_labels, blocks, missing_kind = self._scoped_gate_findings()
+        # G29 Phase 6 follow-up (Codex review): the scoped-only entries built
+        # below never routed through _add_changes_block's own evidence
+        # lookup (that ran earlier, over `changes` alone, before this
+        # fold-in even has `scoped_only` in hand) -- correlate over the same
+        # combined set sarif.to_sarif uses (`result.changes` filtered by
+        # --show-only, plus `scoped_only`), so a scoped-only finding that is
+        # itself a RootCauseCorrelator group member (e.g. a
+        # CONSUMER_REQUIRED_SYMBOL_REMOVED sibling of a regular
+        # FUNC_REMOVED) carries the same root_cause_evidence JSON's regular
+        # `changes[]` entries do.
+        primary_changes = list(result.changes)
+        if self.show_only:
+            primary_changes = apply_show_only(
+                primary_changes,
+                self.show_only,
+                policy=result.policy,
+                kind_sets=eff_sets,
+                policy_file=result.policy_file,
+            )
+        rc_evidence = root_cause_evidence_lookup_for_changes(
+            primary_changes + scoped_only
+        )
         # ADR-049 D1: `gate_contribution` is defined as the number that
         # *actually* gated, and under --used-by/--required-symbol the
         # scoped gate is what the run exits on -- this fold is where it
@@ -330,6 +356,7 @@ class _ScopedFold:
                 root_cause=root_cause_for_change(
                     c, referenced_causes=referenced_causes
                 ),
+                root_cause_evidence=rc_evidence.get(_finding_id(c)),
             )
             changes_list.append(entry)
             key, root_display = _root_cause_key_and_display(

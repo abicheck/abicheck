@@ -31,6 +31,7 @@ import logging
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+from . import policy_file as _policy_file
 from .api_types import (
     CompareRequest,
     CompareResult,
@@ -90,6 +91,16 @@ if TYPE_CHECKING:
     from .suppression import SuppressionList
 
 _logger = logging.getLogger(__name__)
+
+# Codex review, PR #730: re-exported so an existing `service.
+# dedup_policy_override_warnings()` caller (and this module's own tests)
+# keep working. The dedup state itself lives in `policy_file.py` -- the leaf
+# module both this loader and `cli_params._load_suppression_and_policy` share
+# -- specifically so *one* scope dedupes a warning repeated across both
+# loaders, not just repeated calls to this one. See
+# `policy_file.dedup_validate_overrides_warnings`'s own docstring for what
+# this does and does not cover.
+dedup_policy_override_warnings = _policy_file.dedup_validate_overrides_warnings
 
 # Magic-byte length for format detection
 _SNIFF_BYTES = 256
@@ -1550,6 +1561,25 @@ def load_suppression_and_policy(
                 "Set base_policy in the YAML file to override the base policy.",
                 policy,
             )
+        # This is the Tier-2 chokepoint every consumer other than the CLI's
+        # own early-validation calls actually loads its policy through --
+        # notably `compare-release`'s real per-library fan-out
+        # (`_run_compare_pair` -> `run_compare` -> `run_compare_request` ->
+        # `classify_compare_pair`), and any direct Python API caller of
+        # `run_compare`/`run_compare_request`. `cli_params.
+        # _load_suppression_and_policy`'s own warning (surfaced via
+        # `click.echo`) does not reach that path, so a risky override in a
+        # release comparison stayed silent (Codex review). Mirrors that same
+        # warning here, through the logger this module already uses above.
+        #
+        # Routed through `pending_validate_overrides_warnings` (not
+        # `pf.validate_overrides()` directly) so a `dedup_policy_override_
+        # warnings()` scope -- shared with `cli_params._load_suppression_
+        # and_policy`'s identical call -- collapses a warning repeated across
+        # several loads down to one (Codex review); outside any such scope
+        # every warning is logged every call, unchanged from before.
+        for warning in _policy_file.pending_validate_overrides_warnings(pf):
+            _logger.warning("%s", warning)
     return suppression, pf
 
 

@@ -323,7 +323,7 @@ def _load_suppression_and_policy(
     plugin command — kept here, next to ``POLICY_FILE_PARAM``, rather than in the
     oversized ``cli.py`` so the cross-command resolution logic has one home.
     """
-    from .policy_file import PolicyFile
+    from .policy_file import PolicyFile, pending_validate_overrides_warnings
     from .suppression import SuppressionList
 
     suppression: SuppressionList | None = None
@@ -376,4 +376,19 @@ def _load_suppression_and_policy(
                 "Set base_policy in the YAML file to override the base policy.",
                 err=True,
             )
+        # A policy override that downgrades a critical or otherwise-BREAKING
+        # kind is exactly the kind of mistake `validate_overrides()` exists to
+        # catch -- but the method was previously dead code, called from
+        # nowhere in the CLI, so nobody ever saw its warnings. Surface them
+        # here, the one place every `--policy-file` consumer (`compare`,
+        # `compare-release`, `scan --against`, `appcompat`) already funnels
+        # through, so a risky override is flagged regardless of which command
+        # loaded it. Routed through `pending_validate_overrides_warnings`
+        # (not `pf.validate_overrides()` directly) so a
+        # `dedup_validate_overrides_warnings()` scope -- e.g. `compare-
+        # release` wrapping its whole run -- collapses a warning repeated
+        # across several loads (here and in `service.
+        # load_suppression_and_policy`) down to one (Codex review).
+        for warning in pending_validate_overrides_warnings(pf):
+            click.echo(f"Warning: {warning}", err=True)
     return suppression, pf

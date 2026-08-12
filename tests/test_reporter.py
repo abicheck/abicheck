@@ -802,6 +802,110 @@ class TestImpactAssessmentRootCause:
             "ns::internal::helper"
         )
 
+    def test_correlates_evidence_via_a_scoped_only_sibling(self):
+        """G29 Phase 6 follow-up (Codex review): a regular finding in
+        result.changes that only correlates via a scoped-only
+        (--used-by/--required-symbol) sibling must still get
+        impact_assessment.root_cause_evidence -- RootCauseCorrelator needs
+        the actual scoped-only Change object, not just its caused_by_type
+        string, to recognize the pair as a multi-piece group."""
+        root = Change(
+            ChangeKind.FUNC_REMOVED,
+            "ns::internal::helper",
+            "helper removed",
+        )
+        scoped_only_overlay = Change(
+            ChangeKind.CONSUMER_REQUIRED_SYMBOL_REMOVED,
+            "pub_entry",
+            "required by consumer",
+            caused_by_type="ns::internal::helper",
+        )
+        r = _result(Verdict.BREAKING, changes=[root])
+        r.scoped_only_changes = (scoped_only_overlay,)  # type: ignore[attr-defined]
+        d = json.loads(to_json(r))  # report_mode defaults to "full"
+        evidence = d["changes"][0]["impact_assessment"]["root_cause_evidence"]
+        assert evidence["strongest_evidence_level"] == "consumer_proven"
+        assert evidence["evidence_levels"] == ["artifact_proven", "consumer_proven"]
+
+    def test_leaf_mode_also_correlates_evidence_via_scoped_only_sibling(self):
+        root = Change(
+            ChangeKind.FUNC_REMOVED,
+            "ns::internal::helper",
+            "helper removed",
+        )
+        scoped_only_overlay = Change(
+            ChangeKind.CONSUMER_REQUIRED_SYMBOL_REMOVED,
+            "pub_entry",
+            "required by consumer",
+            caused_by_type="ns::internal::helper",
+        )
+        r = _result(Verdict.BREAKING, changes=[root])
+        r.scoped_only_changes = (scoped_only_overlay,)  # type: ignore[attr-defined]
+        d = json.loads(to_json(r, report_mode="leaf"))
+        evidence = d["changes"][0]["impact_assessment"]["root_cause_evidence"]
+        assert evidence["strongest_evidence_level"] == "consumer_proven"
+
+    def test_root_cause_mode_group_evidence_via_scoped_only_sibling(self):
+        root = Change(
+            ChangeKind.FUNC_REMOVED,
+            "ns::internal::helper",
+            "helper removed",
+        )
+        scoped_only_overlay = Change(
+            ChangeKind.CONSUMER_REQUIRED_SYMBOL_REMOVED,
+            "pub_entry",
+            "required by consumer",
+            caused_by_type="ns::internal::helper",
+        )
+        r = _result(Verdict.BREAKING, changes=[root])
+        r.scoped_only_changes = (scoped_only_overlay,)  # type: ignore[attr-defined]
+        d = json.loads(to_json(r, report_mode="root-cause"))
+        assert len(d["root_causes"]) == 1
+        group = d["root_causes"][0]
+        assert group["strongest_evidence_level"] == "consumer_proven"
+
+    def test_root_cause_mode_group_evidence_for_bare_symbol_pair(self):
+        """Codex review: --used-by --verify-runtime's real shape -- a
+        FUNC_REMOVED and a CONSUMER_RUNTIME_LOAD_FAILED sharing a bare
+        symbol, neither carrying caused_by_type. RootCauseCorrelator merges
+        them (its own key is `caused_by_type or symbol`), but
+        _root_cause_key_and_display's "only caused_by_type correlates
+        findings" contract keeps each its own singleton report group (two
+        distinct `finding:<id>` keys) -- so matching group-level evidence by
+        root_cause_id equality would miss it entirely, even though each
+        finding's own per-finding root_cause_evidence already (correctly)
+        shows group membership. The group-level rollup must fold from the
+        members' own evidence instead."""
+        removed = Change(
+            ChangeKind.FUNC_REMOVED,
+            "regressed_symbol",
+            "symbol removed",
+        )
+        runtime_failed = Change(
+            ChangeKind.CONSUMER_RUNTIME_LOAD_FAILED,
+            "regressed_symbol",
+            "runtime load failed",
+        )
+        r = _result(Verdict.BREAKING, changes=[removed])
+        r.scoped_only_changes = (runtime_failed,)  # type: ignore[attr-defined]
+        d = json.loads(to_json(r, report_mode="root-cause"))
+        # Two singleton report groups (no caused_by_type link) -- the
+        # deliberate "first-slice" report-grouping contract, unaffected by
+        # this fix.
+        assert d["root_cause_count"] == 1
+        assert len(d["root_causes"][0]["findings"]) == 1
+        group = d["root_causes"][0]
+        assert group["strongest_evidence_level"] == "runtime_proven"
+        assert group["evidence_levels"] == ["artifact_proven", "runtime_proven"]
+        # The finding's own nested evidence already showed this (unaffected
+        # by the bug -- built directly from correlator membership).
+        assert (
+            d["changes"][0]["impact_assessment"]["root_cause_evidence"][
+                "strongest_evidence_level"
+            ]
+            == "runtime_proven"
+        )
+
     def test_matches_root_cause_mode_id(self):
         # Cross-check: the unconditional impact_assessment id must equal
         # --report-mode root-cause's own root_cause_id for the same root.

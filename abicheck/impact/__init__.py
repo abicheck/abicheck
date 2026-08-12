@@ -30,3 +30,14 @@ __all__ = [
     "ProofStep",
     "assess_change",
 ]
+
+# `correlate_root_causes`/`RootCauseGroup` (impact.correlation) are
+# deliberately NOT imported here at module scope: `checker_types.py` imports
+# `abicheck.impact.model.ImpactAssessment` while it is still being defined,
+# and `impact.correlation` imports `checker_types.Change` at its own module
+# scope -- eagerly importing `.correlation` from this package's `__init__`
+# would close that cycle (`checker_types -> impact -> impact.correlation ->
+# checker_types`, the middle module not yet finished initializing). Callers
+# needing the composer import `abicheck.impact.correlation` directly (e.g.
+# `reporter.py`, `reporter_markdown.py`), which is safe once `checker_types`
+# has finished loading.
