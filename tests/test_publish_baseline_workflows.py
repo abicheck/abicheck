@@ -348,6 +348,54 @@ class TestAcceptedMainCacheKeyRotation:
             key_prefix, profile_id
         )
 
+    def test_compute_cache_key_step_folds_generation_matching_the_python_mirror(
+        self, tmp_path: Path
+    ) -> None:
+        # Executes the REAL "Compute cache key" step script (not a
+        # hand-derived string) with BASELINE_GENERATION set, and checks its
+        # actual GITHUB_OUTPUT against accepted_main_cache_key()/
+        # accepted_main_cache_restore_prefix()'s generation-aware mirror --
+        # closes the gap a purely-structural/hand-derived check can't catch
+        # (Codex review: the bash folding logic itself needs to be run, not
+        # just asserted to contain a template string).
+        import subprocess
+
+        data = _load(UPDATE_MAIN_BASELINE)
+        steps = _steps(data["jobs"]["refresh"])
+        step = next(s for s in steps if s.get("name") == "Compute cache key")
+        github_output = tmp_path / "github_output"
+        github_output.write_text("")
+        env = os.environ.copy()
+        env.update(
+            {
+                "KEY_PREFIX": "abicheck-baseline-main",
+                "BASELINE_GENERATION": "3",
+                "PROFILE_ID": "linux-x86_64-gcc",
+                "HEAD_SHA": "deadbeef",
+                "GITHUB_OUTPUT": str(github_output),
+            }
+        )
+        result = subprocess.run(
+            [_bash_executable(), "-c", step["run"]],
+            capture_output=True,
+            text=True,
+            env=env,
+            cwd=tmp_path,
+            check=False,
+        )
+        assert result.returncode == 0, result.stdout + result.stderr
+        outputs = dict(
+            line.split("=", 1)
+            for line in github_output.read_text().splitlines()
+            if "=" in line
+        )
+        assert outputs["cache-key"] == accepted_main_cache_key(
+            "abicheck-baseline-main", "linux-x86_64-gcc", "deadbeef", generation=3
+        )
+        assert outputs["restore-prefix"] == accepted_main_cache_restore_prefix(
+            "abicheck-baseline-main", "linux-x86_64-gcc", generation=3
+        )
+
     def test_restore_step_key_is_this_runs_own_unique_key(self) -> None:
         # `key:` must be THIS run's own (always-unique-by-head-sha) key, not
         # the stable prefix -- so the exact-match lookup always misses and
@@ -475,6 +523,61 @@ class TestBaselineLibrariesDerivation:
             assert (
                 dump_step["with"]["snapshot-compression"]
                 == "${{ inputs.snapshot-compression }}"
+            )
+
+    def test_baseline_generation_input_forwarded_to_baseline_action(self) -> None:
+        # Regression (Codex review): actions/baseline's baseline-generation
+        # input was reachable from the bare Action but not from either
+        # reusable producer workflow -- a caller relying on
+        # publish-baseline.yml/update-main-baseline.yml (not the bare
+        # Action directly) had no way to set it, so every baseline these
+        # workflows publish would always record baseline_generation: null,
+        # silently defeating a consumer's expected-baseline-generation
+        # check (every comparison against it would fail as
+        # stale_generation). Same declare-then-forward shape as
+        # snapshot-compression above.
+        for path, job_name in (
+            (PUBLISH_BASELINE, "publish"),
+            (UPDATE_MAIN_BASELINE, "refresh"),
+        ):
+            data = _load(path)
+            inputs = data[True]["workflow_call"]["inputs"]
+            assert inputs["baseline-generation"]["default"] == ""
+            assert inputs["baseline-generation"]["type"] == "string"
+
+            steps = _steps(data["jobs"][job_name])
+            dump_step = next(s for s in steps if s.get("name") == "Dump baseline-set")
+            assert (
+                dump_step["with"]["baseline-generation"]
+                == "${{ inputs.baseline-generation }}"
+            )
+
+    def test_generator_provenance_forwarded_from_captured_identity(self) -> None:
+        # Regression (Codex review): actions/baseline's generator-git-sha/
+        # generator-action-ref inputs were added but neither reusable
+        # producer workflow forwarded them, even though both already
+        # capture their own exact resolved identity (repository/ref) in the
+        # "Capture this reusable workflow's identity" step for the nested
+        # checkout just above -- so every baseline published through the
+        # primary workflows recorded generator.version only, never the
+        # exact commit/ref that actually produced it.
+        for path, job_name in (
+            (PUBLISH_BASELINE, "publish"),
+            (UPDATE_MAIN_BASELINE, "refresh"),
+        ):
+            data = _load(path)
+            steps = _steps(data["jobs"][job_name])
+            assert any(
+                s.get("name") == "Capture this reusable workflow's identity"
+                for s in steps
+            )
+            dump_step = next(s for s in steps if s.get("name") == "Dump baseline-set")
+            assert (
+                dump_step["with"]["generator-git-sha"]
+                == "${{ steps.identity.outputs.ref }}"
+            )
+            assert (
+                dump_step["with"]["generator-action-ref"] == "${{ job.workflow_ref }}"
             )
 
 

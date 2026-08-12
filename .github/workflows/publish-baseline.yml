@@ -38,7 +38,17 @@ on:
         type: string
         default: ''
       asset-name-template:
-        description: 'GitHub Release asset filename template; "{profile}" is replaced with each contract profile''s id.'
+        description: >-
+          GitHub Release asset filename template; "{profile}" is replaced
+          with each contract profile's id, and "{generation}" (optional)
+          with the baseline-generation input's value -- include it to
+          publish each scanner-compatibility generation as its own,
+          separately-named asset (e.g.
+          'abicheck-baseline-g{generation}-{profile}.tar.zst') rather than
+          overwriting the previous generation's asset under the same name.
+          The default template never references "{generation}", so this is
+          opt-in and doesn't change behavior for a caller not setting
+          baseline-generation.
         type: string
         default: 'abicheck-baseline-{profile}.tar.zst'
       build-info:
@@ -51,6 +61,15 @@ on:
         default: ''
       depth:
         description: 'Evidence depth passed to every dump call (binary, headers, build, or source). Omit for the CLI default.'
+        type: string
+        default: ''
+      baseline-generation:
+        description: >-
+          Forwarded to actions/baseline's baseline-generation input --
+          scanner-compatibility generation to record in every published
+          contract profile's manifest.json (see
+          docs/use/baseline-management.md#scanner-upgrades-and-baseline-generations).
+          Omit to leave it unset.
         type: string
         default: ''
       validation:
@@ -275,6 +294,9 @@ jobs:
           profile: ${{ matrix.profile_id }}
           build-info: ${{ inputs.build-info != '' && format('build-output/{0}/{1}', matrix.profile_id, inputs.build-info) || '' }}
           depth: ${{ inputs.depth }}
+          baseline-generation: ${{ inputs.baseline-generation }}
+          generator-git-sha: ${{ steps.identity.outputs.ref }}
+          generator-action-ref: ${{ job.workflow_ref }}
           validation: ${{ inputs.validation }}
           snapshot-compression: ${{ inputs.snapshot-compression }}
           python-version: ${{ inputs.python-version }}
@@ -299,6 +321,7 @@ jobs:
           baseline-path: ${{ steps.baseline.outputs.baseline-path }}
           asset-name-template: ${{ inputs.asset-name-template }}
           profile: ${{ matrix.profile_id }}
+          generation: ${{ inputs.baseline-generation }}
 
       # `release-contract` is documented (ADR-047 §10, publish-baseline.md)
       # as an IMMUTABLE channel -- "compatible with what we actually shipped
@@ -588,6 +611,52 @@ jobs:
 
           if [[ "$existing_fact_set_ok" != "true" ]]; then
             echo "::error::$ASSET_NAME already exists on release $RELEASE_TAG but its manifest.json declares a DIFFERENT fact_set (evidence-producer identity) than this run's own freshly-built manifest -- a real consumer's incompatible-evidence check (abicheck/buildsource/baseline_set.py's _evidence_incompatibility()) depends on that field independently of snapshot/binary content, so this is never a safe retry regardless of what the content digest says. Delete the existing asset explicitly ('gh release delete-asset $RELEASE_TAG $ASSET_NAME --repo $REPO --yes') and re-run, or publish under a new release tag." >&2
+            exit 1
+          fi
+
+          # Same reasoning as existing_fact_set_ok above, for
+          # baseline_generation: compute_content_digest() doesn't read it
+          # either, so a rerun that only changed --baseline-generation (e.g.
+          # rolling that field out onto an already-published asset, or
+          # bumping the generation for a scanner-recipe fix with no
+          # snapshot-content-visible effect) would otherwise reach the
+          # identical content digest and take the safe-retry no-op below,
+          # silently leaving the OLD (or null) generation published -- a
+          # real consumer's expected-baseline-generation check
+          # (resolve-baseline's stale_generation outcome) would then reject
+          # this asset even though the publish step itself reported success
+          # (Codex review).
+          existing_baseline_generation_ok=$(python3 -c '
+          import json
+          import sys
+          from pathlib import Path
+
+          existing_manifest = json.loads(
+              (Path(sys.argv[1]) / "manifest.json").read_text(encoding="utf-8")
+          )
+          new_manifest = json.loads(Path(sys.argv[2]).read_text(encoding="utf-8"))
+
+          def _real_generation(value):
+              # bool is an int subclass in Python -- plain equality would
+              # let a hand-authored/corrupted "baseline_generation": true
+              # compare equal to a real generation 1 (or false == 0),
+              # reaching this safe-retry branch on a coincidental Python
+              # equality rather than a genuine matching generation. Mirror
+              # the same "only a real non-negative int, else treat as
+              # unset" rule abicheck.buildsource.baseline_set.
+              # load_baseline_manifest() applies when parsing this exact
+              # field (Codex review).
+              if isinstance(value, int) and not isinstance(value, bool) and value >= 0:
+                  return value
+              return None
+
+          existing_generation = _real_generation(existing_manifest.get("baseline_generation"))
+          new_generation = _real_generation(new_manifest.get("baseline_generation"))
+          print("true" if existing_generation == new_generation else "false")
+          ' .existing-asset/extracted "$NEW_MANIFEST_PATH")
+
+          if [[ "$existing_baseline_generation_ok" != "true" ]]; then
+            echo "::error::$ASSET_NAME already exists on release $RELEASE_TAG but its manifest.json declares a DIFFERENT baseline_generation than this run's own freshly-built manifest -- a real consumer's expected-baseline-generation check (resolve-baseline's stale_generation outcome) depends on that field independently of snapshot/binary content, so this is never a safe retry regardless of what the content digest says. Delete the existing asset explicitly ('gh release delete-asset $RELEASE_TAG $ASSET_NAME --repo $REPO --yes') and re-run, or publish under a new release tag." >&2
             exit 1
           fi
 

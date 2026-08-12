@@ -101,6 +101,112 @@ class TestBuildManifestBasics:
         assert manifest["profile"] == "linux-x86_64"
         assert [a["library"] for a in manifest["artifacts"]] == ["libfoo", "libbar"]
         assert all(a["sha256"] for a in manifest["artifacts"])
+        # baseline_generation defaults to None when the caller doesn't
+        # pass one -- absence, not "generation 0".
+        assert manifest["baseline_generation"] is None
+        # generator provenance is always recorded (tool/version), even
+        # with no generator_git_sha/generator_action_ref given.
+        assert manifest["generator"]["tool"] == "abicheck"
+        assert "version" in manifest["generator"]
+        assert "git_sha" not in manifest["generator"]
+        assert "action_ref" not in manifest["generator"]
+
+    def test_generator_git_sha_and_action_ref_recorded_when_given(
+        self, tmp_path: Path
+    ) -> None:
+        out = tmp_path
+        _write_snapshot(out / "libfoo.abicheck.json", library="libfoo")
+        entries = [{"name": "libfoo", "artifact": "build/libfoo.so"}]
+        manifest = build_manifest_module.build_manifest(
+            out,
+            "v1.0.0",
+            "linux-x86_64",
+            entries,
+            None,
+            generator_git_sha="deadbeef",
+            generator_action_ref="v2.0.0",
+        )
+        assert manifest["generator"]["git_sha"] == "deadbeef"
+        assert manifest["generator"]["action_ref"] == "v2.0.0"
+
+    def test_generator_provenance_does_not_affect_freshness(
+        self, tmp_path: Path
+    ) -> None:
+        # generator is purely informational -- a different git_sha/
+        # action_ref/version between two runs must never, by itself,
+        # trigger refresh-required (unlike baseline_generation).
+        _write_snapshot(
+            tmp_path / "libfoo.abicheck.json", library="libfoo", schema_version=9
+        )
+        entries = [{"name": "libfoo", "artifact": "a.so"}]
+        previous_path = tmp_path / "previous.json"
+        previous_path.write_text(
+            json.dumps(
+                {
+                    "manifest_version": 1,
+                    "project_ref": "",
+                    "profile": "",
+                    "snapshot_schema": 9,
+                    "fact_set": None,
+                    "baseline_generation": None,
+                    "generator": {"tool": "abicheck", "version": "0.1.0"},
+                    "artifacts": [{"library": "libfoo"}],
+                }
+            )
+        )
+        manifest = build_manifest_module.build_manifest(
+            tmp_path,
+            "",
+            "",
+            entries,
+            previous_path,
+            generator_git_sha="cafef00d",
+            generator_action_ref="main",
+        )
+        assert manifest["freshness"]["refresh_required"] is False
+
+    def test_baseline_generation_is_recorded_when_given(self, tmp_path: Path) -> None:
+        out = tmp_path
+        _write_snapshot(out / "libfoo.abicheck.json", library="libfoo")
+        entries = [{"name": "libfoo", "artifact": "build/libfoo.so"}]
+        manifest = build_manifest_module.build_manifest(
+            out, "v1.0.0", "linux-x86_64", entries, None, baseline_generation=3
+        )
+        assert manifest["baseline_generation"] == 3
+
+    def test_build_manifest_rejects_negative_baseline_generation_directly(
+        self, tmp_path: Path
+    ) -> None:
+        # build_manifest() is itself a public, directly-callable function --
+        # main()'s own CLI validation (TestMainCli below) isn't the only
+        # path to it, so the negative/type check must live here too
+        # (CodeRabbit review).
+        out = tmp_path
+        _write_snapshot(out / "libfoo.abicheck.json", library="libfoo")
+        entries = [{"name": "libfoo", "artifact": "build/libfoo.so"}]
+        with pytest.raises(SystemExit, match="non-negative"):
+            build_manifest_module.build_manifest(
+                out, "v1.0.0", "linux-x86_64", entries, None, baseline_generation=-1
+            )
+
+    def test_build_manifest_rejects_bool_baseline_generation_directly(
+        self, tmp_path: Path
+    ) -> None:
+        # bool is an int subclass in Python -- `isinstance(True, int)` is
+        # True -- so a naive type check would silently accept `True` as
+        # generation `1`. type(x) is int is what actually excludes it.
+        out = tmp_path
+        _write_snapshot(out / "libfoo.abicheck.json", library="libfoo")
+        entries = [{"name": "libfoo", "artifact": "build/libfoo.so"}]
+        with pytest.raises(SystemExit, match="non-negative"):
+            build_manifest_module.build_manifest(
+                out,
+                "v1.0.0",
+                "linux-x86_64",
+                entries,
+                None,
+                baseline_generation=True,  # type: ignore[arg-type]
+            )
 
     def test_missing_snapshot_raises(self, tmp_path: Path) -> None:
         entries = [{"name": "libfoo", "artifact": "build/libfoo.so"}]
@@ -572,6 +678,93 @@ class TestFreshness:
         assert manifest["freshness"]["refresh_required"] is True
         assert any("profile" in r for r in manifest["freshness"]["reasons"])
 
+    def test_baseline_generation_bump_requires_refresh(self, tmp_path: Path) -> None:
+        # A scanner-generation bump is its own refresh reason, independent
+        # of schema/fact_set/profile -- e.g. a normalization-recipe fix
+        # that doesn't touch either.
+        _write_snapshot(
+            tmp_path / "libfoo.abicheck.json", library="libfoo", schema_version=9
+        )
+        entries = [{"name": "libfoo", "artifact": "a.so"}]
+        previous_path = tmp_path / "previous.json"
+        previous_path.write_text(
+            json.dumps(
+                {
+                    "manifest_version": 1,
+                    "project_ref": "",
+                    "profile": "",
+                    "snapshot_schema": 9,
+                    "fact_set": None,
+                    "baseline_generation": 2,
+                    "artifacts": [{"library": "libfoo"}],
+                }
+            )
+        )
+        manifest = build_manifest_module.build_manifest(
+            tmp_path, "", "", entries, previous_path, baseline_generation=3
+        )
+        assert manifest["freshness"]["refresh_required"] is True
+        assert any("baseline_generation" in r for r in manifest["freshness"]["reasons"])
+
+    def test_baseline_generation_absent_on_both_sides_is_not_stale(
+        self, tmp_path: Path
+    ) -> None:
+        _write_snapshot(
+            tmp_path / "libfoo.abicheck.json", library="libfoo", schema_version=9
+        )
+        entries = [{"name": "libfoo", "artifact": "a.so"}]
+        previous_path = tmp_path / "previous.json"
+        previous_path.write_text(
+            json.dumps(
+                {
+                    "manifest_version": 1,
+                    "project_ref": "",
+                    "profile": "",
+                    "snapshot_schema": 9,
+                    "fact_set": None,
+                    "artifacts": [{"library": "libfoo"}],
+                }
+            )
+        )
+        manifest = build_manifest_module.build_manifest(
+            tmp_path, "", "", entries, previous_path
+        )
+        assert manifest["freshness"]["refresh_required"] is False
+
+    def test_boolean_previous_baseline_generation_still_requires_refresh(
+        self, tmp_path: Path
+    ) -> None:
+        # bool is an int subclass in Python -- a naive `!=` comparison
+        # would let a hand-authored/corrupted previous-manifest's
+        # "baseline_generation": true compare EQUAL to this run's real
+        # generation 1, silently reporting refresh-required=false (Codex
+        # review). A boolean previous value must be normalized to "unset"
+        # (None) before comparing, same as the resolver does when parsing
+        # a real manifest.json.
+        _write_snapshot(
+            tmp_path / "libfoo.abicheck.json", library="libfoo", schema_version=9
+        )
+        entries = [{"name": "libfoo", "artifact": "a.so"}]
+        previous_path = tmp_path / "previous.json"
+        previous_path.write_text(
+            json.dumps(
+                {
+                    "manifest_version": 1,
+                    "project_ref": "",
+                    "profile": "",
+                    "snapshot_schema": 9,
+                    "fact_set": None,
+                    "baseline_generation": True,
+                    "artifacts": [{"library": "libfoo"}],
+                }
+            )
+        )
+        manifest = build_manifest_module.build_manifest(
+            tmp_path, "", "", entries, previous_path, baseline_generation=1
+        )
+        assert manifest["freshness"]["refresh_required"] is True
+        assert any("baseline_generation" in r for r in manifest["freshness"]["reasons"])
+
     def test_fact_set_change_requires_refresh(self, tmp_path: Path) -> None:
         _write_snapshot(
             tmp_path / "libfoo.abicheck.json",
@@ -674,6 +867,132 @@ class TestMainCli:
         assert "library-count=1" in out
         assert "refresh-required=false" in out
         assert "content-digest=" in out
+
+    def test_main_baseline_generation_flag_is_recorded(
+        self, tmp_path: Path, capsys
+    ) -> None:
+        _write_snapshot(
+            tmp_path / "libfoo.abicheck.json", library="libfoo", schema_version=9
+        )
+        libraries = json.dumps([{"name": "libfoo", "artifact": "a.so"}])
+        manifest_out = tmp_path / "manifest.json"
+        rc = build_manifest_module.main(
+            [
+                "--output-dir",
+                str(tmp_path),
+                "--profile",
+                "linux",
+                "--libraries",
+                libraries,
+                "--manifest-out",
+                str(manifest_out),
+                "--baseline-generation",
+                "3",
+            ]
+        )
+        assert rc == 0
+        written = json.loads(manifest_out.read_text())
+        assert written["baseline_generation"] == 3
+
+    def test_main_generator_flags_are_recorded(self, tmp_path: Path, capsys) -> None:
+        _write_snapshot(
+            tmp_path / "libfoo.abicheck.json", library="libfoo", schema_version=9
+        )
+        libraries = json.dumps([{"name": "libfoo", "artifact": "a.so"}])
+        manifest_out = tmp_path / "manifest.json"
+        rc = build_manifest_module.main(
+            [
+                "--output-dir",
+                str(tmp_path),
+                "--profile",
+                "linux",
+                "--libraries",
+                libraries,
+                "--manifest-out",
+                str(manifest_out),
+                "--generator-git-sha",
+                "deadbeef",
+                "--generator-action-ref",
+                "v2.0.0",
+            ]
+        )
+        assert rc == 0
+        written = json.loads(manifest_out.read_text())
+        assert written["generator"]["tool"] == "abicheck"
+        assert written["generator"]["git_sha"] == "deadbeef"
+        assert written["generator"]["action_ref"] == "v2.0.0"
+
+    def test_main_baseline_generation_omitted_is_none(
+        self, tmp_path: Path, capsys
+    ) -> None:
+        _write_snapshot(
+            tmp_path / "libfoo.abicheck.json", library="libfoo", schema_version=9
+        )
+        libraries = json.dumps([{"name": "libfoo", "artifact": "a.so"}])
+        manifest_out = tmp_path / "manifest.json"
+        rc = build_manifest_module.main(
+            [
+                "--output-dir",
+                str(tmp_path),
+                "--profile",
+                "linux",
+                "--libraries",
+                libraries,
+                "--manifest-out",
+                str(manifest_out),
+            ]
+        )
+        assert rc == 0
+        written = json.loads(manifest_out.read_text())
+        assert written["baseline_generation"] is None
+
+    def test_main_baseline_generation_not_an_integer_fails(
+        self, tmp_path: Path, capsys
+    ) -> None:
+        _write_snapshot(
+            tmp_path / "libfoo.abicheck.json", library="libfoo", schema_version=9
+        )
+        libraries = json.dumps([{"name": "libfoo", "artifact": "a.so"}])
+        manifest_out = tmp_path / "manifest.json"
+        with pytest.raises(SystemExit, match="not an integer"):
+            build_manifest_module.main(
+                [
+                    "--output-dir",
+                    str(tmp_path),
+                    "--profile",
+                    "linux",
+                    "--libraries",
+                    libraries,
+                    "--manifest-out",
+                    str(manifest_out),
+                    "--baseline-generation",
+                    "not-a-number",
+                ]
+            )
+
+    def test_main_baseline_generation_negative_fails(
+        self, tmp_path: Path, capsys
+    ) -> None:
+        _write_snapshot(
+            tmp_path / "libfoo.abicheck.json", library="libfoo", schema_version=9
+        )
+        libraries = json.dumps([{"name": "libfoo", "artifact": "a.so"}])
+        manifest_out = tmp_path / "manifest.json"
+        with pytest.raises(SystemExit, match="must not be negative"):
+            build_manifest_module.main(
+                [
+                    "--output-dir",
+                    str(tmp_path),
+                    "--profile",
+                    "linux",
+                    "--libraries",
+                    libraries,
+                    "--manifest-out",
+                    str(manifest_out),
+                    "--baseline-generation",
+                    "-1",
+                ]
+            )
 
     def test_sha256_stable_when_only_created_at_changes(self, tmp_path: Path) -> None:
         # Regression (Codex review): the per-artifact sha256 used to be a raw

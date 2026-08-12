@@ -18,6 +18,9 @@ PROJECT_REF="${INPUT_PROJECT_REF:-}"
 PROFILE="${INPUT_PROFILE:-}"
 BUILD_INFO="${INPUT_BUILD_INFO:-}"
 DEPTH="${INPUT_DEPTH:-}"
+BASELINE_GENERATION="${INPUT_BASELINE_GENERATION:-}"
+GENERATOR_GIT_SHA="${INPUT_GENERATOR_GIT_SHA:-}"
+GENERATOR_ACTION_REF="${INPUT_GENERATOR_ACTION_REF:-}"
 PREVIOUS_MANIFEST="${INPUT_PREVIOUS_MANIFEST:-}"
 VALIDATION="${INPUT_VALIDATION:-strict}"
 SNAPSHOT_COMPRESSION="${INPUT_SNAPSHOT_COMPRESSION:-none}"
@@ -31,6 +34,18 @@ _fail() {
 case "$VALIDATION" in
   strict | none) ;;
   *) _fail "validation '$VALIDATION' is not recognized. Use 'strict' or 'none'." ;;
+esac
+
+case "$BASELINE_GENERATION" in
+  '') ;;
+  # `[0-9]*` alone is NOT anchored to "only digits" -- as a bash case glob
+  # it matches any string that merely STARTS with a digit ("3x", "3.0"),
+  # which would then pass this cheap check and only fail later, more
+  # opaquely, in build_manifest.py's own int() conversion (CodeRabbit
+  # review). Reject any value containing a non-digit character first, so
+  # only a value that is ENTIRELY digits reaches the accept arm below.
+  *[!0-9]*) _fail "baseline-generation '$BASELINE_GENERATION' is not a non-negative integer." ;;
+  [0-9]*) ;;
 esac
 
 # ADR-059: the canonical storage suffix implied by snapshot-compression --
@@ -220,6 +235,9 @@ MANIFEST_ARGS=(
   --profile "$PROFILE"
   --libraries "$LIBRARIES_JSON"
   --manifest-out "$MANIFEST_PATH"
+  --baseline-generation "$BASELINE_GENERATION"
+  --generator-git-sha "$GENERATOR_GIT_SHA"
+  --generator-action-ref "$GENERATOR_ACTION_REF"
 )
 [[ -n "$PREVIOUS_MANIFEST" ]] && MANIFEST_ARGS+=(--previous-manifest "$PREVIOUS_MANIFEST")
 

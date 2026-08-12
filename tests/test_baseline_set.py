@@ -73,6 +73,7 @@ def _write_manifest(
     profile: str = PROFILE,
     snapshot_schema: int | None = 9,
     fact_set: dict | None = None,
+    baseline_generation: int | None = None,
     artifacts: list[dict] | None = None,
 ) -> None:
     baseline_dir.mkdir(parents=True, exist_ok=True)
@@ -82,6 +83,7 @@ def _write_manifest(
         "profile": profile,
         "snapshot_schema": snapshot_schema,
         "fact_set": fact_set,
+        "baseline_generation": baseline_generation,
         "artifacts": artifacts if artifacts is not None else [],
     }
     (baseline_dir / BASELINE_MANIFEST_FILENAME).write_text(
@@ -189,6 +191,123 @@ def test_load_baseline_manifest_round_trip(tmp_path: Path) -> None:
     assert artifact is not None
     assert artifact.snapshot == "libpvxs.abicheck.json"
     assert manifest.artifact_for("nope") is None
+
+
+def test_load_baseline_manifest_baseline_generation_round_trip(tmp_path: Path) -> None:
+    _write_manifest(
+        tmp_path, baseline_generation=3, artifacts=[_target_artifact("libpvxs")]
+    )
+    manifest = load_baseline_manifest(tmp_path)
+    assert manifest is not None
+    assert manifest.baseline_generation == 3
+
+
+def test_load_baseline_manifest_absent_baseline_generation_is_none(
+    tmp_path: Path,
+) -> None:
+    # An older/hand-authored manifest with no baseline_generation key at
+    # all must parse to None, not e.g. 0 -- absence is not "generation 0".
+    baseline_dir = tmp_path
+    baseline_dir.mkdir(parents=True, exist_ok=True)
+    (baseline_dir / BASELINE_MANIFEST_FILENAME).write_text(
+        json.dumps(
+            {
+                "manifest_version": 1,
+                "project_ref": "v1.0.0",
+                "profile": PROFILE,
+                "snapshot_schema": 9,
+                "fact_set": None,
+                "artifacts": [],
+            }
+        ),
+        encoding="utf-8",
+    )
+    manifest = load_baseline_manifest(baseline_dir)
+    assert manifest is not None
+    assert manifest.baseline_generation is None
+
+
+def test_load_baseline_manifest_generator_round_trip(tmp_path: Path) -> None:
+    baseline_dir = tmp_path
+    baseline_dir.mkdir(parents=True, exist_ok=True)
+    (baseline_dir / BASELINE_MANIFEST_FILENAME).write_text(
+        json.dumps(
+            {
+                "manifest_version": 1,
+                "project_ref": "v1.0.0",
+                "profile": PROFILE,
+                "snapshot_schema": 9,
+                "fact_set": None,
+                "generator": {
+                    "tool": "abicheck",
+                    "version": "0.6.0",
+                    "git_sha": "deadbeef",
+                    "action_ref": "v2.0.0",
+                },
+                "artifacts": [],
+            }
+        ),
+        encoding="utf-8",
+    )
+    manifest = load_baseline_manifest(baseline_dir)
+    assert manifest is not None
+    assert manifest.generator == {
+        "tool": "abicheck",
+        "version": "0.6.0",
+        "git_sha": "deadbeef",
+        "action_ref": "v2.0.0",
+    }
+
+
+def test_load_baseline_manifest_absent_generator_is_none(tmp_path: Path) -> None:
+    baseline_dir = tmp_path
+    baseline_dir.mkdir(parents=True, exist_ok=True)
+    (baseline_dir / BASELINE_MANIFEST_FILENAME).write_text(
+        json.dumps(
+            {
+                "manifest_version": 1,
+                "project_ref": "v1.0.0",
+                "profile": PROFILE,
+                "snapshot_schema": 9,
+                "fact_set": None,
+                "artifacts": [],
+            }
+        ),
+        encoding="utf-8",
+    )
+    manifest = load_baseline_manifest(baseline_dir)
+    assert manifest is not None
+    assert manifest.generator is None
+
+
+def test_load_baseline_manifest_bool_baseline_generation_is_none(
+    tmp_path: Path,
+) -> None:
+    # bool is an int subclass in Python -- a naive `isinstance(x, int)`
+    # check accepts True/False too, so a hand-authored or corrupted
+    # manifest with `"baseline_generation": true` would otherwise parse as
+    # the integer 1 and could coincidentally match a caller's
+    # expected_baseline_generation=1, resolving where a real mismatch
+    # should fail closed (Codex review).
+    baseline_dir = tmp_path
+    baseline_dir.mkdir(parents=True, exist_ok=True)
+    (baseline_dir / BASELINE_MANIFEST_FILENAME).write_text(
+        json.dumps(
+            {
+                "manifest_version": 1,
+                "project_ref": "v1.0.0",
+                "profile": PROFILE,
+                "snapshot_schema": 9,
+                "fact_set": None,
+                "baseline_generation": True,
+                "artifacts": [],
+            }
+        ),
+        encoding="utf-8",
+    )
+    manifest = load_baseline_manifest(baseline_dir)
+    assert manifest is not None
+    assert manifest.baseline_generation is None
 
 
 # ── resolve_target ───────────────────────────────────────────────────────
@@ -347,6 +466,155 @@ def test_resolve_target_matching_project_ref_resolves(tmp_path: Path) -> None:
 def test_resolve_target_no_expected_project_ref_skips_the_check(tmp_path: Path) -> None:
     # Empty expected_project_ref (the default) means "no expectation" --
     # never a wrong_project_ref regardless of what the manifest records.
+    _write_manifest(tmp_path, artifacts=[_target_artifact("libpvxs")])
+    (tmp_path / "libpvxs.abicheck.json").write_text("{}", encoding="utf-8")
+    result = resolve_target(tmp_path, target="libpvxs", profile=PROFILE, required=True)
+    assert result.outcome == ResolveOutcome.RESOLVED
+
+
+def test_resolve_target_rejects_bool_expected_baseline_generation(
+    tmp_path: Path,
+) -> None:
+    # resolve_target()/resolve_bundle() are the real, directly-callable
+    # Python resolution boundary -- resolve_baseline.py's own CLI wrapper
+    # validates before ever reaching here, but a direct caller passing
+    # True (an int subclass in Python) must not silently compare equal to
+    # a real generation 1 (Codex review).
+    _write_manifest(
+        tmp_path, baseline_generation=1, artifacts=[_target_artifact("libpvxs")]
+    )
+    (tmp_path / "libpvxs.abicheck.json").write_text("{}", encoding="utf-8")
+    with pytest.raises(ValueError, match="non-negative int"):
+        resolve_target(
+            tmp_path,
+            target="libpvxs",
+            profile=PROFILE,
+            required=True,
+            expected_baseline_generation=True,  # type: ignore[arg-type]
+        )
+
+
+def test_resolve_target_rejects_negative_expected_baseline_generation(
+    tmp_path: Path,
+) -> None:
+    _write_manifest(tmp_path, artifacts=[_target_artifact("libpvxs")])
+    (tmp_path / "libpvxs.abicheck.json").write_text("{}", encoding="utf-8")
+    with pytest.raises(ValueError, match="non-negative int"):
+        resolve_target(
+            tmp_path,
+            target="libpvxs",
+            profile=PROFILE,
+            required=True,
+            expected_baseline_generation=-1,
+        )
+
+
+def test_resolve_bundle_rejects_bool_expected_baseline_generation(
+    tmp_path: Path,
+) -> None:
+    _write_manifest(tmp_path, baseline_generation=1)
+    with pytest.raises(ValueError, match="non-negative int"):
+        resolve_bundle(
+            tmp_path,
+            bundle="pvxs-release",
+            members=["libpvxs", "libpvxsIoc"],
+            profile=PROFILE,
+            required=True,
+            expected_baseline_generation=True,  # type: ignore[arg-type]
+        )
+
+
+def test_resolve_target_stale_generation(tmp_path: Path) -> None:
+    # A baseline-set produced by an older scanner-compatibility generation
+    # must not silently resolve for a check pinned to a newer one, even
+    # though profile/schema/project_ref all otherwise match.
+    _write_manifest(
+        tmp_path, baseline_generation=2, artifacts=[_target_artifact("libpvxs")]
+    )
+    (tmp_path / "libpvxs.abicheck.json").write_text("{}", encoding="utf-8")
+    result = resolve_target(
+        tmp_path,
+        target="libpvxs",
+        profile=PROFILE,
+        required=True,
+        expected_baseline_generation=3,
+    )
+    assert result.outcome == ResolveOutcome.STALE_GENERATION
+    assert "3" in result.message
+    assert "2" in result.message
+
+
+def test_resolve_target_unset_baseline_generation_is_stale_when_expected(
+    tmp_path: Path,
+) -> None:
+    # A manifest that never declared a generation at all (None) is
+    # genuinely different from any real expected generation -- it must
+    # fail closed as stale_generation, not be treated as a wildcard match.
+    _write_manifest(tmp_path, artifacts=[_target_artifact("libpvxs")])
+    (tmp_path / "libpvxs.abicheck.json").write_text("{}", encoding="utf-8")
+    result = resolve_target(
+        tmp_path,
+        target="libpvxs",
+        profile=PROFILE,
+        required=True,
+        expected_baseline_generation=1,
+    )
+    assert result.outcome == ResolveOutcome.STALE_GENERATION
+
+
+def test_resolve_target_bool_baseline_generation_never_matches_int_expectation(
+    tmp_path: Path,
+) -> None:
+    # End-to-end regression for the bool-exclusion fix: a manifest with
+    # "baseline_generation": true (hand-authored or corrupted) must not
+    # coincidentally resolve against expected_baseline_generation=1 just
+    # because True == 1 in Python.
+    baseline_dir = tmp_path
+    baseline_dir.mkdir(parents=True, exist_ok=True)
+    manifest = {
+        "manifest_version": 1,
+        "project_ref": "v1.0.0",
+        "profile": PROFILE,
+        "snapshot_schema": 9,
+        "fact_set": None,
+        "baseline_generation": True,
+        "artifacts": [_target_artifact("libpvxs")],
+    }
+    (baseline_dir / BASELINE_MANIFEST_FILENAME).write_text(
+        json.dumps(manifest), encoding="utf-8"
+    )
+    (baseline_dir / "libpvxs.abicheck.json").write_text("{}", encoding="utf-8")
+    result = resolve_target(
+        baseline_dir,
+        target="libpvxs",
+        profile=PROFILE,
+        required=True,
+        expected_baseline_generation=1,
+    )
+    assert result.outcome == ResolveOutcome.STALE_GENERATION
+
+
+def test_resolve_target_matching_baseline_generation_resolves(tmp_path: Path) -> None:
+    _write_manifest(
+        tmp_path, baseline_generation=3, artifacts=[_target_artifact("libpvxs")]
+    )
+    (tmp_path / "libpvxs.abicheck.json").write_text("{}", encoding="utf-8")
+    result = resolve_target(
+        tmp_path,
+        target="libpvxs",
+        profile=PROFILE,
+        required=True,
+        expected_baseline_generation=3,
+    )
+    assert result.outcome == ResolveOutcome.RESOLVED
+
+
+def test_resolve_target_no_expected_baseline_generation_skips_the_check(
+    tmp_path: Path,
+) -> None:
+    # None (the default) means "no expectation" -- never stale_generation
+    # regardless of what the manifest records, including a manifest that
+    # never declared a generation at all.
     _write_manifest(tmp_path, artifacts=[_target_artifact("libpvxs")])
     (tmp_path / "libpvxs.abicheck.json").write_text("{}", encoding="utf-8")
     result = resolve_target(tmp_path, target="libpvxs", profile=PROFILE, required=True)
@@ -1003,6 +1271,19 @@ def test_resolve_bundle_wrong_project_ref(tmp_path: Path) -> None:
         expected_project_ref="deadbeef",
     )
     assert result.outcome == ResolveOutcome.WRONG_PROJECT_REF
+
+
+def test_resolve_bundle_stale_generation(tmp_path: Path) -> None:
+    _write_manifest(tmp_path, baseline_generation=2)
+    result = resolve_bundle(
+        tmp_path,
+        bundle="pvxs-release",
+        members=["libpvxs", "libpvxsIoc"],
+        profile=PROFILE,
+        required=True,
+        expected_baseline_generation=3,
+    )
+    assert result.outcome == ResolveOutcome.STALE_GENERATION
 
 
 def test_resolve_bundle_ambiguous_when_member_has_no_binary_field(

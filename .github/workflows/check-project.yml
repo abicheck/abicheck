@@ -248,6 +248,20 @@ on:
           cell.
         type: string
         default: ''
+      expected-baseline-generation:
+        description: >
+          Forwarded to check-target's own expected-baseline-generation
+          input for every cell, regardless of baseline-channel -- require
+          each cell's resolved baseline-set manifest.json
+          baseline_generation to match this value exactly, failing closed
+          with stale_generation otherwise. Unlike expected-project-ref
+          (which only makes sense for a Git-ref-scoped channel like
+          accepted-main), a scanner-compatibility generation is a property
+          of the baseline-set itself and applies uniformly across channels
+          -- a release-contract baseline can be just as stale a generation
+          as an accepted-main one. Omit to skip the check on every cell.
+        type: string
+        default: ''
 
     outputs:
       gate-exit-code:
@@ -848,6 +862,7 @@ jobs:
           baseline-required: ${{ matrix.required }}
           candidate-build-output: ${{ steps.candidate.outputs.build-output }}
           expected-project-ref: ${{ matrix.baseline_channel == 'accepted-main' && inputs.expected-project-ref || '' }}
+          expected-baseline-generation: ${{ inputs.expected-baseline-generation }}
           requested-depth: ${{ matrix.requested_depth }}
           gate-mode: ${{ matrix.gate_mode }}
           project: ${{ inputs.project != '' && inputs.project || github.repository }}

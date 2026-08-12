@@ -111,9 +111,10 @@ Reusable workflow (`workflow_call`); wire it to a `release: types:
 |-------|---------|---------|
 | `build-output-artifact-prefix` | `abicheck-build-` | Each contract profile's build-output.json is downloaded from `<this><profile-id>`. |
 | `release-tag` | `github.ref_name` | Release tag to publish assets to; also recorded as each baseline-set's `project-ref`. |
-| `asset-name-template` | `abicheck-baseline-{profile}.tar.zst` | Release asset filename; `{profile}` is replaced per profile. **Include `{profile}` when a run has more than one contract profile** — omitting it makes every profile in the matrix target the same asset name, and the retry-identity check below rejects (rather than silently discards) a genuine collision between two different profiles. |
+| `asset-name-template` | `abicheck-baseline-{profile}.tar.zst` | Release asset filename; `{profile}` is replaced per profile, and `{generation}` (optional) with `baseline-generation`'s value — include it to publish each scanner-compatibility generation as its own asset name rather than overwriting the previous generation's asset (see [Cache key contract](#cache-key-contract-read-before-wiring-a-consumer) below for the accepted-main equivalent, and `docs/use/baseline-management.md`'s "Scanner upgrades and baseline generations"). **Include `{profile}` when a run has more than one contract profile** — omitting it makes every profile in the matrix target the same asset name, and the retry-identity check below rejects (rather than silently discards) a genuine collision between two different profiles. |
 | `build-info` | `''` | Path to a shared build/source facts pack, relative to the downloaded build-output artifact. |
 | `depth` | `''` | Evidence depth passed to every dump call. |
+| `baseline-generation` | `''` | Forwarded to `actions/baseline`'s `baseline-generation` input, and substituted for `{generation}` in `asset-name-template` (see above). Omit to leave the generation unset. |
 | `validation` | `strict` | Forwarded to `actions/baseline`'s `validation` input. |
 | `snapshot-compression` | `none` | Forwarded to `actions/baseline`'s `snapshot-compression` input (ADR-059) — independent of this workflow's own archive packaging of the *whole* baseline-set directory (encoding chosen from `asset-name-template`'s extension, via [`actions/stage-baseline`](#actionsstage-baseline)); see [Storing Baselines](../use/baseline-storage.md#compressing-stored-snapshots). |
 
@@ -168,8 +169,9 @@ implementation, not two that can silently drift apart.
 | Input | Default | Meaning |
 |-------|---------|---------|
 | `baseline-path` | *(required)* | Directory containing `manifest.json` plus per-library snapshots. |
-| `asset-name-template` | `abicheck-baseline-{profile}.tar.zst` | Archive filename; `{profile}` is replaced with the `profile` input. The extension selects the encoding — `.tar.zst` (zstd), `.tar.gz`/`.tgz` (gzip), or `.tar` (uncompressed); anything else is a hard usage error. |
+| `asset-name-template` | `abicheck-baseline-{profile}.tar.zst` | Archive filename; `{profile}` is replaced with the `profile` input, and `{generation}` (optional) with the `generation` input. The extension selects the encoding — `.tar.zst` (zstd), `.tar.gz`/`.tgz` (gzip), or `.tar` (uncompressed); anything else is a hard usage error. |
 | `profile` | `''` | Substituted for `{profile}`. |
+| `generation` | `''` | Substituted for `{generation}` — a no-op unless `asset-name-template` references the placeholder. |
 
 Outputs `asset-name` (the resolved filename) and `archive-path` (identical
 to `asset-name` — the archive is written to the current working
@@ -191,6 +193,7 @@ branch>]` trigger.
 | `build-output-artifact-prefix` | `abicheck-build-` | Same as above. |
 | `key-prefix` | `abicheck-baseline-main` | Actions-cache key prefix (§10). |
 | `head-sha` | `github.sha` | Recorded as `project-ref`; folded into the cache key. |
+| `baseline-generation` | `''` | Forwarded to `actions/baseline`'s `baseline-generation` input, and folded into `key-prefix` as `-g<generation>` (see [Cache key contract](#cache-key-contract-read-before-wiring-a-consumer) below) — two different scanner-compatibility generations never share one cache-key namespace. Omit to leave the generation unset. |
 | `build-info` / `depth` / `validation` / `snapshot-compression` | same as above | |
 
 ### Cache key contract (read before wiring a consumer)
@@ -214,6 +217,27 @@ success failure mode this ADR exists to close.
 `abicheck.buildsource.baseline_publish.accepted_main_cache_key(key_prefix,
 profile_id, head_sha)` / `accepted_main_cache_restore_prefix(key_prefix,
 profile_id)` are this format's pure-Python mirror.
+
+**When `baseline-generation` is set, the key gets an extra segment.**
+`update-main-baseline.yml`'s "Compute cache key" step folds
+`-g<generation>` into the prefix *before* building the key above, so two
+different scanner-compatibility generations (docs/use/baseline-
+management.md#scanner-upgrades-and-baseline-generations) never share one
+cache-key namespace:
+
+```text
+<key-prefix>-g<generation>-<profile-id>-<head-sha>
+```
+
+Both mirror functions accept this as an explicit keyword argument --
+`accepted_main_cache_key(key_prefix, profile_id, head_sha,
+generation=3)` / `accepted_main_cache_restore_prefix(key_prefix,
+profile_id, generation=3)` — rather than requiring a consumer to
+pre-fold `-g3` into `key_prefix` themselves. **A consumer restoring this
+cache (`restore-keys: <key-prefix>-<profile-id>-`) must pass the exact
+same `generation` this workflow was run with**, or the restore misses
+entirely: the un-generation-scoped prefix is a *different* cache-key
+namespace, not a superset of the generation-scoped one.
 
 Each run: computes this run's own key, restores the newest entry matching
 the restore-keys prefix into a freshness-comparison staging directory, dumps

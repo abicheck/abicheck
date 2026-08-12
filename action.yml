@@ -441,11 +441,23 @@ inputs:
     description: >
       Release asset filename template for the baseline-set archive
       fetched via baseline-profile; "{profile}" is replaced with
-      baseline-profile's value. Must match the asset-name-template the
+      baseline-profile's value, and "{generation}" (optional) with
+      baseline-generation's value. Must match the asset-name-template the
       publishing workflow (publish-baseline.yml, or a custom equivalent)
       used.
     required: false
     default: 'abicheck-baseline-{profile}.tar.zst'
+  baseline-generation:
+    description: >
+      Substituted for "{generation}" in baseline-asset-name-template --
+      set this when the publishing workflow's asset-name-template
+      includes "{generation}" (e.g. it published a baseline scoped to a
+      scanner-compatibility generation -- see baseline-management.md's
+      "Scanner upgrades and baseline generations" section). Omit when
+      baseline-asset-name-template doesn't reference "{generation}" at
+      all -- the default template never does, so this input is a no-op
+      unless you opt in by including the placeholder.
+    required: false
 
   # ── Output & policy ─────────────────────────────────────────────────────────
   format:
@@ -714,6 +726,7 @@ runs:
         INPUT_BASELINE_PROFILE: ${{ inputs.baseline-profile }}
         INPUT_BASELINE_TARGET: ${{ inputs.baseline-target }}
         INPUT_BASELINE_ASSET_NAME_TEMPLATE: ${{ inputs.baseline-asset-name-template }}
+        INPUT_BASELINE_GENERATION: ${{ inputs.baseline-generation }}
         INPUT_ESTIMATE: ${{ inputs.estimate }}
         INPUT_AUDIT: ${{ inputs.audit }}
         INPUT_USED_BY: ${{ inputs.used-by }}
@@ -883,6 +896,7 @@ runs:
         INPUT_BASELINE_PROFILE: ${{ inputs.baseline-profile }}
         INPUT_BASELINE_TARGET: ${{ inputs.baseline-target }}
         INPUT_BASELINE_ASSET_NAME_TEMPLATE: ${{ inputs.baseline-asset-name-template }}
+        INPUT_BASELINE_GENERATION: ${{ inputs.baseline-generation }}
         INPUT_JOBS: ${{ inputs.jobs }}
         INPUT_ADD_JOB_SUMMARY: ${{ inputs.add-job-summary }}
         INPUT_DEBUG_INFO1: ${{ inputs.debug-info1 }}

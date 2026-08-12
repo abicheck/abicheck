@@ -46,6 +46,7 @@ from typing import Any
 # dependency on abicheck's AbiSnapshot/schema internals beyond that one pure
 # utility function -- it keeps reading raw JSON directly, per its own
 # docstring above.
+from abicheck import __version__ as _ABICHECK_VERSION
 from abicheck.buildsource.baseline_set import compute_snapshot_content_hash
 
 #: Canonical storage suffixes a dumped snapshot may carry (ADR-059), longest
@@ -158,7 +159,27 @@ def build_manifest(
     profile: str,
     entries: list[dict[str, Any]],
     previous_manifest_path: Path | None,
+    baseline_generation: int | None = None,
+    generator_git_sha: str = "",
+    generator_action_ref: str = "",
 ) -> dict[str, Any]:
+    # main()'s own --baseline-generation parsing already rejects a
+    # non-integer or negative CLI value before ever calling this function --
+    # but build_manifest() is itself a public, directly-callable/unit-tested
+    # function (tests/test_baseline_manifest.py calls it directly), not only
+    # reachable through main()'s CLI validation. `isinstance(x, int)` alone
+    # would accept `True`/`False` too (bool is an int subclass in Python),
+    # silently recording e.g. `baseline_generation: 1` for a caller that
+    # passed `True` -- reject anything that isn't a genuine non-negative
+    # int, the same domain main() already enforces at the CLI boundary
+    # (CodeRabbit review).
+    if baseline_generation is not None and (
+        type(baseline_generation) is not int or baseline_generation < 0
+    ):
+        raise SystemExit(
+            f"baseline_generation {baseline_generation!r} must be a "
+            "non-negative int (or None)."
+        )
     artifacts = []
     schema_versions: set[int] = set()
     # The full source-fact recipe identity, not just (name, version): two
@@ -329,10 +350,52 @@ def build_manifest(
         "profile": profile,
         "snapshot_schema": max(schema_versions) if schema_versions else None,
         "fact_set": fact_set_out,
+        # ADR-047's "baseline lifecycle" gap: a package-version bump (e.g.
+        # abicheck 0.5.0 -> 0.5.1) must NOT by itself invalidate a baseline
+        # -- most scanner changes (report format, policy/severity, a new
+        # detector over already-collected facts) don't change what a
+        # snapshot's own facts *mean*. `baseline_generation` is a
+        # deliberately separate, caller-assigned identity (never derived
+        # from the installed abicheck version) for the subset of upgrades
+        # that DO invalidate one: a fixed/newly-extracted fact, a changed
+        # normalization/hash recipe, or a schema bump. None (the default)
+        # means the caller isn't tracking generations for this baseline-set
+        # -- absence is not "generation 0", and is never compared against an
+        # expectation (see resolve-baseline's own expected-baseline-
+        # generation input). See docs/use/baseline-management.md#scanner-
+        # upgrades-and-baseline-generations.
+        "baseline_generation": baseline_generation,
+        # Generator provenance -- WHICH abicheck build actually produced
+        # this baseline-set, for reproducibility/debugging. Deliberately
+        # separate from baseline_generation above and never fed into
+        # _compute_freshness()/compute_content_digest(): the exact package
+        # version (and, best-effort, the source commit/action ref) is
+        # useful to know but must NOT by itself invalidate a baseline --
+        # most abicheck upgrades (report format, policy/severity, a new
+        # detector over already-collected facts) don't change what a
+        # snapshot's own facts mean, so tying refresh-required to a raw
+        # version bump would force unnecessary rebaselines on every patch
+        # release. `version` is always recorded (the installed abicheck
+        # package version, importlib.metadata); `git_sha`/`action_ref` are
+        # best-effort caller-supplied identifiers (this script has no
+        # reliable way to discover its own hosting repo's commit/ref from
+        # inside a composite Action step) and are omitted when the caller
+        # didn't supply one, matching fact_set's own "only recorded when
+        # present" convention above.
+        "generator": _generator_block(generator_git_sha, generator_action_ref),
         "artifacts": artifacts,
     }
     manifest["freshness"] = _compute_freshness(manifest, previous_manifest_path)
     return manifest
+
+
+def _generator_block(git_sha: str, action_ref: str) -> dict[str, Any]:
+    block: dict[str, Any] = {"tool": "abicheck", "version": _ABICHECK_VERSION}
+    if git_sha:
+        block["git_sha"] = git_sha
+    if action_ref:
+        block["action_ref"] = action_ref
+    return block
 
 
 def _compute_freshness(
@@ -374,6 +437,40 @@ def _compute_freshness(
     if previous.get("snapshot_schema") != manifest["snapshot_schema"]:
         reasons.append(
             f"snapshot_schema {previous.get('snapshot_schema')} -> {manifest['snapshot_schema']}"
+        )
+    # A generation change is a caller-declared "this is a deliberately new
+    # scanner epoch" signal -- always a refresh reason when both manifests
+    # declare one, even if it happens to coincide with an unchanged schema/
+    # fact_set (e.g. a normalization-recipe fix that doesn't bump either).
+    # A manifest that never declared a generation (None on either side) has
+    # nothing to compare, same as the other optional identity fields above.
+    # `manifest["baseline_generation"]` (this run's own, freshly-built
+    # value) is already a real non-negative int or None -- build_manifest()
+    # itself validates that at construction. `previous.get(...)`, read from
+    # a hand-authored or corrupted --previous-manifest file, is NOT
+    # trusted the same way: a naive `!=` comparison would let
+    # "baseline_generation": true compare EQUAL to a real generation `1`
+    # (bool is an int subclass in Python), silently reporting
+    # refresh-required=false for what is actually a stale/malformed
+    # previous generation (Codex review) -- normalize it through the same
+    # rule the resolver applies (abicheck.buildsource.baseline_set.
+    # load_baseline_manifest) before comparing.
+    previous_generation = previous.get("baseline_generation")
+    if (
+        isinstance(previous_generation, int)
+        and not isinstance(previous_generation, bool)
+        and previous_generation >= 0
+    ):
+        normalized_previous_generation: int | None = previous_generation
+    else:
+        normalized_previous_generation = None
+    if (
+        normalized_previous_generation is not None
+        or manifest["baseline_generation"] is not None
+    ) and normalized_previous_generation != manifest["baseline_generation"]:
+        reasons.append(
+            f"baseline_generation {previous_generation!r} -> "
+            f"{manifest['baseline_generation']}"
         )
     if previous.get("fact_set") != manifest["fact_set"]:
         reasons.append(f"fact_set {previous.get('fact_set')} -> {manifest['fact_set']}")
@@ -604,11 +701,53 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument("--previous-manifest", default=None, type=Path)
     parser.add_argument("--manifest-out", required=True, type=Path)
+    parser.add_argument(
+        "--baseline-generation",
+        default="",
+        help=(
+            "Scanner-compatibility generation to record in the manifest "
+            "(a non-negative integer), or empty (default) to leave it "
+            "unset. See build_manifest()'s own baseline_generation docstring."
+        ),
+    )
+    parser.add_argument(
+        "--generator-git-sha",
+        default="",
+        help="Best-effort commit SHA of the abicheck checkout that produced "
+        "this manifest, recorded in generator.git_sha. Omit to leave unset.",
+    )
+    parser.add_argument(
+        "--generator-action-ref",
+        default="",
+        help="Best-effort ref of the actions/baseline invocation that "
+        "produced this manifest, recorded in generator.action_ref. Omit to "
+        "leave unset.",
+    )
     args = parser.parse_args(argv)
+
+    baseline_generation: int | None = None
+    if args.baseline_generation:
+        try:
+            baseline_generation = int(args.baseline_generation)
+        except ValueError:
+            raise SystemExit(
+                f"--baseline-generation {args.baseline_generation!r} is not an integer."
+            ) from None
+        if baseline_generation < 0:
+            raise SystemExit(
+                f"--baseline-generation {baseline_generation!r} must not be negative."
+            )
 
     entries = json.loads(args.libraries)
     manifest = build_manifest(
-        args.output_dir, args.project_ref, args.profile, entries, args.previous_manifest
+        args.output_dir,
+        args.project_ref,
+        args.profile,
+        entries,
+        args.previous_manifest,
+        baseline_generation=baseline_generation,
+        generator_git_sha=args.generator_git_sha,
+        generator_action_ref=args.generator_action_ref,
     )
     args.manifest_out.write_text(
         json.dumps(manifest, indent=2) + "\n", encoding="utf-8"

@@ -55,6 +55,45 @@ inputs:
   depth:
     description: 'Evidence depth passed to every dump call (binary, headers, build, or source). Omit for the CLI default.'
     required: false
+  baseline-generation:
+    description: >
+      Scanner-compatibility generation to record in the manifest (a
+      non-negative integer) -- a caller-assigned identity for the subset of
+      abicheck upgrades that actually invalidate a baseline (a fixed or
+      newly-extracted fact, a changed normalization/hash recipe, a schema
+      bump), distinct from the installed abicheck *version* (which also
+      changes for report-format/policy/detector-only upgrades that don't
+      need a new baseline). Omit to leave it unset (baseline_generation:
+      null in the manifest). Leaving it unset does NOT by itself disable
+      resolve-baseline's stale_generation check -- that check is opt-in on
+      the CONSUMER side (resolve-baseline's own expected-baseline-generation
+      input): if a consumer requires a specific generation while this
+      producer input is left unset, every comparison against this
+      baseline-set fails as stale_generation. Keep both sides in sync -- set
+      this input whenever a consumer is given an expected-baseline-
+      generation to check against. See
+      docs/use/baseline-management.md#scanner-upgrades-and-baseline-generations.
+    required: false
+    default: ''
+  generator-git-sha:
+    description: >
+      Best-effort commit SHA of the abicheck checkout that produced this
+      baseline-set, recorded in manifest.json's generator.git_sha for
+      reproducibility/debugging (e.g. github.sha, when abicheck is
+      vendored/checked out in the same job as this Action). Purely
+      informational: unlike baseline-generation, it is never compared
+      against an expectation and never affects refresh-required. Omit to
+      leave it unset.
+    required: false
+    default: ''
+  generator-action-ref:
+    description: >
+      Best-effort ref of this actions/baseline invocation, recorded in
+      manifest.json's generator.action_ref (e.g. github.action_ref, when
+      available in the calling context). Purely informational, same as
+      generator-git-sha. Omit to leave it unset.
+    required: false
+    default: ''
   previous-manifest:
     description: >
       Path to a previous manifest.json to diff against for the
@@ -111,9 +150,9 @@ outputs:
     description: >
       'true' when previous-manifest was given and this run's manifest
       differs from it in a way that means old comparisons against it are
-      no longer trustworthy (snapshot_schema, fact_set identity, or the
-      library set changed). 'false' when no previous-manifest was given,
-      or none of those changed.
+      no longer trustworthy (snapshot_schema, baseline_generation,
+      fact_set identity, or the library set changed). 'false' when no
+      previous-manifest was given, or none of those changed.
     value: ${{ steps.run-baseline.outputs.refresh-required }}
   refresh-reasons:
     description: 'Semicolon-separated human-readable reasons refresh-required is true. Empty otherwise.'
@@ -146,6 +185,9 @@ runs:
         INPUT_PROFILE: ${{ inputs.profile }}
         INPUT_BUILD_INFO: ${{ inputs.build-info }}
         INPUT_DEPTH: ${{ inputs.depth }}
+        INPUT_BASELINE_GENERATION: ${{ inputs.baseline-generation }}
+        INPUT_GENERATOR_GIT_SHA: ${{ inputs.generator-git-sha }}
+        INPUT_GENERATOR_ACTION_REF: ${{ inputs.generator-action-ref }}
         INPUT_PREVIOUS_MANIFEST: ${{ inputs.previous-manifest }}
         INPUT_VALIDATION: ${{ inputs.validation }}
         INPUT_SNAPSHOT_COMPRESSION: ${{ inputs.snapshot-compression }}

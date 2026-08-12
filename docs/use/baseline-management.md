@@ -138,3 +138,143 @@ facts
 pack](github-action-source-scans.md#recommended-flow-a-multi-library-release-with-one-shared-facts-pack)
 for a concrete per-library baseline-set walkthrough (build once, one facts
 pack, one baseline file per library).
+
+### Scanner upgrades and baseline generations
+
+Upgrading the abicheck version your CI pins is a separate axis from your
+product's own baseline lifecycle above — don't conflate the two. A baseline
+identifies `product state × build profile`; it says nothing about which
+*scanner* extracted it, and the two questions need different answers to
+"does this baseline still need to be regenerated?"
+
+**Most abicheck upgrades don't invalidate an existing baseline.** A report-
+format change, a policy/severity/suppression change, or even a new detector
+running over already-collected facts can all read an old snapshot exactly as
+before — nothing about what the snapshot's own facts *mean* changed. Only a
+narrower class of change genuinely does:
+
+| Change | New baseline needed? |
+|---|---|
+| Report format, SARIF, PR comment, HTML | No — only the presentation changed |
+| Policy/severity/suppression | No — the snapshot's facts are unchanged, only their interpretation |
+| A new detector over already-captured facts | Usually no |
+| A fixed matching/diff algorithm | Usually no, but verify with a shadow run — the verdict can change |
+| A newly-extracted fact | Yes, for full coverage — an old snapshot doesn't physically contain it |
+| A fix to a previously-*wrong* extracted fact | Yes — the old value can't be trusted |
+| A changed normalization/hash recipe | Yes — otherwise scanner drift reads as a product change |
+| A snapshot schema bump | Usually yes |
+| A different compiler/stdlib/target/flags | This is a different build **profile**, not a version bump — see above |
+
+Tying "regenerate the baseline" to the installed abicheck **package**
+version conflates these — a patch release that only touched report
+formatting would force an unnecessary rebaseline, while two package
+versions sharing the same normalization/hash recipe could be compared
+against each other without anyone noticing the recipe itself changed
+underneath. `baseline_generation` is a deliberately separate,
+**caller-assigned** integer for exactly the subset of changes above that
+actually matter:
+
+- `actions/baseline`'s `baseline-generation` input records it in the
+  produced `manifest.json` (`baseline_generation`, next to `profile` and
+  `snapshot_schema`). Bump it only when you make one of the "Yes" changes
+  above — never automatically from the abicheck version string.
+- `actions/resolve-baseline`'s `expected-baseline-generation` input (and
+  `check-target`/`check-project.yml`'s inputs of the same name) requires the
+  resolved baseline-set to carry exactly that generation, failing closed
+  with the `stale_generation` outcome otherwise — see the
+  [resolve-baseline reference](../reference/resolve-baseline.md).
+- A generation bump is also its own `refresh-required` reason from
+  `actions/baseline` when a `previous-manifest` is given, independent of
+  whether `snapshot_schema`/`fact_set`/the library set happened to change
+  too.
+
+**Generator provenance is a separate, purely informational field —
+don't conflate it with `baseline_generation`.** Every manifest also records
+a `generator` block (`{"tool": "abicheck", "version": "0.6.0", ...}`),
+always including the installed abicheck package `version` and, when the
+publishing workflow supplies them (`actions/baseline`'s optional
+`generator-git-sha`/`generator-action-ref` inputs), the exact commit/ref
+that produced the baseline-set — useful for debugging "what actually
+extracted this" without guessing from context. `generator.version` is
+**never** compared by any resolve/freshness check and never triggers
+`refresh-required` on its own: that's precisely `baseline_generation`'s
+job, and it stays a caller-assigned decision, not something derived from a
+version string.
+
+**A baseline can never be upgraded to a new generation by re-saving it** —
+loading an old snapshot with a newer scanner and writing it back out does
+not make the missing/previously-wrong facts appear; the serializer stamps
+the current schema version, but reliability markers for facts the old
+scanner never (or wrongly) captured are preserved rather than silently
+upgraded. A real rebaseline for a scanner-generation bump means re-running
+`dump` against the original artifact (and, for header/build/source-depth
+baselines, the original headers/build inputs) with the new scanner — not
+reprocessing the old baseline file.
+
+**Recommended upgrade flow**, when a scanner change does need a new
+generation:
+
+1. Regenerate baselines for the same product refs the old generation
+   covers, using the new scanner — never mix generations across the two
+   sides of one comparison.
+2. Review the diff between the old- and new-generation baselines for the
+   *same* product ref — that diff is scanner drift, not a product change.
+3. Publish the new generation as a new, immutable artifact (e.g. a
+   differently-named release asset, or a new cache-key prefix) rather than
+   overwriting the old one in place, so in-flight PRs/comparisons against
+   the old generation keep working until they're switched over.
+4. Only then flip the scanner pin and the active `baseline-generation`
+   together — a scanner upgrade with no matching generation bump for a
+   baseline-affecting change is the state `expected-baseline-generation`
+   exists to catch, not something to leave implicit.
+
+**The PR that upgrades the scanner itself needs two CI lanes, briefly.**
+An ordinary PR's `check-project`/`check-single` gate compares the
+candidate against `accepted-main`'s *existing* baseline-generation — but
+the one PR that bumps the scanner pin (or otherwise causes a
+`baseline_generation` bump) would otherwise compare a new-generation
+candidate against an old-generation baseline, mixing scanner drift into
+the verdict. Run that PR through two lanes instead of one, both driven off
+the same `check-project.yml`/`check-single.yml` inputs:
+
+- **Lane A (binding)** — unchanged: `baseline-channel: accepted-main`,
+  no `expected-baseline-generation` override, gates the PR exactly like
+  any other PR against whatever generation is currently accepted.
+- **Lane B (shadow, informational only)** — a second job in the same
+  workflow matrix that dumps a *fresh* baseline for the PR's own base
+  commit with the new scanner (e.g. `actions/baseline` with
+  `project-ref: ${{ github.event.pull_request.base.sha }}` run in this
+  same job, or `resolve-baseline`'s `expected-project-ref` pinned to that
+  exact SHA if a pre-staged new-generation baseline-set already exists),
+  then compares the candidate against *that* instead of the stale
+  accepted-main entry. Mark this job `continue-on-error: true` (or run it
+  under `gate-mode: advisory`, see [CI Gating](ci-gating.md)) — it exists
+  for the reviewer to read the scanner-drift diff before merge, not to
+  block the PR.
+
+After merge, `update-main-baseline.yml` runs on the new `main` SHA with
+the new scanner pin and writes the new-generation entry; Lane B becomes
+unnecessary for every PR after that one, since Lane A now compares against
+the new generation like any other PR.
+
+**Storing more than one generation side by side.** Whichever storage
+backend you use (see [Storing Baselines](baseline-storage.md)), a scanner
+upgrade means publishing the new generation *next to* the old one, not
+overwriting it — the recommended flow above's step 3. `{generation}` in
+`actions/stage-baseline`'s `asset-name-template` templates this for a
+release-asset backend directly (e.g.
+`abicheck-baseline-g{generation}-{profile}.tar.zst`); for a
+git-committed baseline directory, the same idea without any template
+mechanism needed:
+
+```text
+abi/
+  g2/
+    linux-x86_64-gcc14/
+  g3/
+    linux-x86_64-gcc14/
+  active-generation.txt   # e.g. "g3" -- what current CI compares against
+```
+
+Flip `active-generation.txt` (and the scanner pin) together, in one
+trusted commit/PR — never separately, per the ordering rule above.

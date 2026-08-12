@@ -110,7 +110,40 @@ def main(argv: list[str] | None = None) -> int:
         "(P0: catches an accepted-main cache restore-keys prefix match "
         "landing on the wrong commit).",
     )
+    parser.add_argument(
+        "--expected-baseline-generation",
+        default="",
+        help="Require the resolved baseline-set's manifest.json "
+        "baseline_generation to match exactly (a non-negative integer), or "
+        "empty to skip the stale_generation check.",
+    )
     args = parser.parse_args(argv)
+
+    expected_baseline_generation: int | None = None
+    if args.expected_baseline_generation:
+        try:
+            expected_baseline_generation = int(args.expected_baseline_generation)
+        except ValueError:
+            print(
+                "::error::--expected-baseline-generation "
+                f"{args.expected_baseline_generation!r} is not an integer.",
+                file=sys.stderr,
+            )
+            return _EXIT_USAGE_ERROR
+        # A negative value can never match a real manifest's non-negative
+        # baseline_generation (actions/baseline/build_manifest.py rejects a
+        # negative --baseline-generation outright), so it's an invalid
+        # caller input, not a legitimate expectation -- reject it here as a
+        # usage error (exit 64) rather than letting it silently propagate
+        # into a misleading stale_generation *resolution* failure (Codex
+        # review).
+        if expected_baseline_generation < 0:
+            print(
+                "::error::--expected-baseline-generation "
+                f"{expected_baseline_generation!r} must not be negative.",
+                file=sys.stderr,
+            )
+            return _EXIT_USAGE_ERROR
 
     candidate_evidence_producer = None
     if args.candidate_evidence_producer:
@@ -139,6 +172,7 @@ def main(argv: list[str] | None = None) -> int:
             required=required,
             candidate_evidence_producer=candidate_evidence_producer,
             expected_project_ref=args.expected_project_ref,
+            expected_baseline_generation=expected_baseline_generation,
         )
     else:
         try:
@@ -160,6 +194,7 @@ def main(argv: list[str] | None = None) -> int:
             required=required,
             candidate_evidence_producer=candidate_evidence_producer,
             expected_project_ref=args.expected_project_ref,
+            expected_baseline_generation=expected_baseline_generation,
         )
 
     output_status = _print_outputs(result)

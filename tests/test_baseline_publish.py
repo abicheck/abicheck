@@ -22,6 +22,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+
 from abicheck.buildsource.baseline_publish import (
     DEFAULT_ACCEPTED_MAIN_KEY_PREFIX,
     accepted_main_cache_key,
@@ -217,3 +219,70 @@ class TestAcceptedMainCacheKeys:
         assert first != second
         assert first.startswith(prefix)
         assert second.startswith(prefix)
+
+    def test_generation_is_folded_into_the_key(self) -> None:
+        assert (
+            accepted_main_cache_key(
+                "abicheck-baseline-main",
+                "linux-x86_64-gcc",
+                "abc123",
+                generation=3,
+            )
+            == "abicheck-baseline-main-g3-linux-x86_64-gcc-abc123"
+        )
+
+    def test_generation_is_folded_into_the_restore_prefix(self) -> None:
+        assert (
+            accepted_main_cache_restore_prefix(
+                "abicheck-baseline-main", "linux-x86_64-gcc", generation=3
+            )
+            == "abicheck-baseline-main-g3-linux-x86_64-gcc-"
+        )
+
+    def test_no_generation_matches_the_unfolded_key(self) -> None:
+        # generation=None (the default) must be a complete no-op -- byte-
+        # identical to never having passed it at all, so every pre-existing
+        # caller's key format is unaffected.
+        assert accepted_main_cache_key(
+            "abicheck-baseline-main", "linux-x86_64-gcc", "abc123"
+        ) == accepted_main_cache_key(
+            "abicheck-baseline-main",
+            "linux-x86_64-gcc",
+            "abc123",
+            generation=None,
+        )
+
+    def test_different_generations_produce_disjoint_prefixes(self) -> None:
+        # Two different scanner-compatibility generations must never share
+        # one cache-key namespace -- the whole point of folding generation
+        # into the prefix rather than only the head_sha-unique suffix.
+        key_prefix, profile_id = "abicheck-baseline-main", "linux-x86_64-gcc"
+        g2_key = accepted_main_cache_key(key_prefix, profile_id, "sha1", generation=2)
+        g3_prefix = accepted_main_cache_restore_prefix(
+            key_prefix, profile_id, generation=3
+        )
+        assert not g2_key.startswith(g3_prefix)
+
+    def test_bool_generation_is_rejected(self) -> None:
+        # bool is an int subclass in Python, and the producer side can
+        # never actually publish a True/False generation -- reject it
+        # rather than silently computing an unusable "p-gTrue-..." key.
+        with pytest.raises(ValueError, match="non-negative int"):
+            accepted_main_cache_key(
+                "p",
+                "prof",
+                "sha1",
+                generation=True,  # type: ignore[arg-type]
+            )
+        with pytest.raises(ValueError, match="non-negative int"):
+            accepted_main_cache_restore_prefix(
+                "p",
+                "prof",
+                generation=False,  # type: ignore[arg-type]
+            )
+
+    def test_negative_generation_is_rejected(self) -> None:
+        with pytest.raises(ValueError, match="non-negative int"):
+            accepted_main_cache_key("p", "prof", "sha1", generation=-1)
+        with pytest.raises(ValueError, match="non-negative int"):
+            accepted_main_cache_restore_prefix("p", "prof", generation=-1)

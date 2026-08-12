@@ -116,6 +116,20 @@ class TestCheckSingleMirrorsCheckTargetInputs:
             "${{ inputs.expected-project-ref }}"
         )
 
+    def test_expected_baseline_generation_is_accepted_and_forwarded(self) -> None:
+        data = _load(CHECK_SINGLE)
+        inputs = data[True]["workflow_call"]["inputs"]
+        assert inputs["expected-baseline-generation"]["type"] == "string"
+        assert inputs["expected-baseline-generation"]["default"] == ""
+        run_step = next(
+            s
+            for s in _steps(data["jobs"]["check"])
+            if s.get("name") == "Run check-target"
+        )
+        assert run_step["with"]["expected-baseline-generation"] == (
+            "${{ inputs.expected-baseline-generation }}"
+        )
+
 
 class TestCheckSingleSelfCheckout:
     """Mirrors check-target/action.yml's own "Capture this Action's
@@ -887,6 +901,18 @@ class TestBaselineRequiredAndCandidateBuildOutputForwarded:
         expr = run_step["with"]["expected-project-ref"]
         assert "matrix.baseline_channel == 'accepted-main'" in expr
         assert "inputs.expected-project-ref" in expr
+
+    def test_run_check_target_forwards_expected_baseline_generation(self) -> None:
+        # Mirrors test_run_check_target_forwards_expected_project_ref above,
+        # except unscoped: unlike a Git ref, a scanner-compatibility
+        # generation applies uniformly regardless of baseline-channel.
+        data = _load(CHECK_PROJECT)
+        assert "expected-baseline-generation" in data[True]["workflow_call"]["inputs"]
+        steps = _steps(data["jobs"]["check"])
+        run_step = next(s for s in steps if s.get("name") == "Run check-target")
+        assert run_step["with"]["expected-baseline-generation"] == (
+            "${{ inputs.expected-baseline-generation }}"
+        )
 
     def test_run_check_target_prefers_per_cell_compile_overlay_over_global_inputs(
         self,

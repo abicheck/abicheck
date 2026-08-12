@@ -105,6 +105,7 @@ def _write_manifest(
     manifest_version: int | None = 1,
     profile: str = PROFILE,
     fact_set: dict | None = None,
+    baseline_generation: int | None = None,
     artifacts: list[dict] | None = None,
 ) -> None:
     baseline_dir.mkdir(parents=True, exist_ok=True)
@@ -114,6 +115,7 @@ def _write_manifest(
         "profile": profile,
         "snapshot_schema": 9,
         "fact_set": fact_set,
+        "baseline_generation": baseline_generation,
         "artifacts": artifacts if artifacts is not None else [],
     }
     (baseline_dir / "manifest.json").write_text(
@@ -246,6 +248,47 @@ class TestInputValidation:
         assert result.returncode == 1
         assert "must not contain a newline" in result.stdout
 
+    def test_negative_expected_baseline_generation_is_a_usage_error(
+        self, tmp_path: Path
+    ) -> None:
+        # A negative value can never match a real manifest's non-negative
+        # baseline_generation -- an invalid caller input, not a legitimate
+        # expectation, so it must fail as a usage error (exit 64 ->
+        # run.sh's own usage-error branch), not silently propagate into a
+        # misleading stale_generation resolution failure (Codex review).
+        # resolve_baseline.py prints its own ::error:: for this straight to
+        # stderr (run.sh's `$(...)` capture only sees stdout, so its own
+        # wrapping "resolve-baseline usage error: " message on stdout has
+        # no MESSAGE to embed) -- assert on stderr, where the real text is.
+        result, _ = _run_action(
+            {
+                "INPUT_BASELINE_PATH": str(tmp_path),
+                "INPUT_CHANNEL": "accepted-main",
+                "INPUT_PROFILE": PROFILE,
+                "INPUT_TARGET": "libpvxs",
+                "INPUT_EXPECTED_BASELINE_GENERATION": "-1",
+            },
+            tmp_path,
+        )
+        assert result.returncode == 1
+        assert "must not be negative" in result.stderr
+
+    def test_non_integer_expected_baseline_generation_is_a_usage_error(
+        self, tmp_path: Path
+    ) -> None:
+        result, _ = _run_action(
+            {
+                "INPUT_BASELINE_PATH": str(tmp_path),
+                "INPUT_CHANNEL": "accepted-main",
+                "INPUT_PROFILE": PROFILE,
+                "INPUT_TARGET": "libpvxs",
+                "INPUT_EXPECTED_BASELINE_GENERATION": "bogus",
+            },
+            tmp_path,
+        )
+        assert result.returncode == 1
+        assert "not an integer" in result.stderr
+
 
 @pytest.mark.skipif(
     not RUN_SH.is_file(), reason="actions/resolve-baseline/run.sh not found"
@@ -375,6 +418,44 @@ class TestFailureTaxonomy:
                 "INPUT_TARGET": "libpvxs",
                 "INPUT_PROFILE": PROFILE,
                 "INPUT_EXPECTED_PROJECT_REF": "v1.0.0",
+            },
+            tmp_path,
+        )
+        assert result.returncode == 0
+        assert outputs.get("outcome") == "resolved"
+
+    def test_stale_generation(self, tmp_path: Path) -> None:
+        baseline_dir = tmp_path / "baseline"
+        _write_manifest(
+            baseline_dir, baseline_generation=2, artifacts=[_target_artifact("libpvxs")]
+        )
+        (baseline_dir / "libpvxs.abicheck.json").write_text("{}", encoding="utf-8")
+        result, outputs = _run_action(
+            {
+                "INPUT_BASELINE_PATH": str(baseline_dir),
+                "INPUT_CHANNEL": "accepted-main",
+                "INPUT_TARGET": "libpvxs",
+                "INPUT_PROFILE": PROFILE,
+                "INPUT_EXPECTED_BASELINE_GENERATION": "3",
+            },
+            tmp_path,
+        )
+        assert result.returncode == 1
+        assert outputs.get("outcome") == "stale_generation"
+
+    def test_matching_baseline_generation_resolves(self, tmp_path: Path) -> None:
+        baseline_dir = tmp_path / "baseline"
+        _write_manifest(
+            baseline_dir, baseline_generation=3, artifacts=[_target_artifact("libpvxs")]
+        )
+        (baseline_dir / "libpvxs.abicheck.json").write_text("{}", encoding="utf-8")
+        result, outputs = _run_action(
+            {
+                "INPUT_BASELINE_PATH": str(baseline_dir),
+                "INPUT_CHANNEL": "accepted-main",
+                "INPUT_TARGET": "libpvxs",
+                "INPUT_PROFILE": PROFILE,
+                "INPUT_EXPECTED_BASELINE_GENERATION": "3",
             },
             tmp_path,
         )
