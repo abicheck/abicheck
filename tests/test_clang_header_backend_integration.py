@@ -1128,3 +1128,73 @@ def test_clang_backend_resolves_dependent_default_across_legal_redeclaration(
     result = compare(old_snap, new_snap)
     assert ChangeKind.VPTR_INTRODUCED not in {c.kind for c in result.changes}
     assert ChangeKind.TYPE_VTABLE_CHANGED not in {c.kind for c in result.changes}
+
+
+def test_cli_dump_explicit_lang_cpp_forces_cpp_mode_on_ambiguous_header(
+    tmp_path: Path,
+) -> None:
+    """G31 Phase C follow-up (AGENTS.md "dump --lang c++ is silently
+    discarded ..." known gap), end-to-end through the real ``abicheck dump``
+    CLI (not ``dumper.dump()`` directly -- the bug lived in ``cli.py``/
+    ``cli_dump_helpers.py``'s own ``--lang`` handling, one layer above
+    ``dumper.dump()``, so a unit-level call bypassing the CLI cannot
+    reproduce it).
+
+    A plain POD struct (``struct Widget { int x; int y; };``) is valid
+    syntax under both C and C++, so plain auto-detection lands on C mode --
+    which leaves ``is_standard_layout``/``is_trivially_copyable`` (C++-only
+    facts) unpopulated (``None``). An explicit ``--lang c++`` must force C++
+    mode regardless, populating both fields with a real boolean; the default
+    invocation (no ``--lang``) must keep auto-detecting C.
+    """
+    if not (_have("clang") and _have("gcc")):
+        pytest.skip(
+            "clang and gcc are required for the clang L2 backend integration test"
+        )
+    from click.testing import CliRunner
+
+    from abicheck.cli import main
+
+    header = tmp_path / "widget.h"
+    header.write_text("struct Widget { int x; int y; };\n")
+    src = tmp_path / "widget.c"
+    src.write_text('#include "widget.h"\nint use(struct Widget w) { return w.x; }\n')
+    so = tmp_path / "libwidget.so"
+    subprocess.run(
+        ["gcc", "-shared", "-fPIC", "-o", str(so), str(src), f"-I{tmp_path}"],
+        check=True,
+        capture_output=True,
+    )
+
+    runner = CliRunner()
+
+    def _dump(*extra_args: str) -> dict:
+        out = tmp_path / f"out{len(extra_args)}.json"
+        result = runner.invoke(
+            main,
+            [
+                "dump", str(so), "-H", str(header),
+                "--ast-frontend", "clang", "-o", str(out),
+                *extra_args,
+            ],
+        )
+        assert result.exit_code == 0, result.output
+        import json
+
+        return json.loads(out.read_text())
+
+    default_snap = _dump()
+    explicit_snap = _dump("--lang", "c++")
+
+    default_widget = next(t for t in default_snap["types"] if t["name"] == "Widget")
+    explicit_widget = next(t for t in explicit_snap["types"] if t["name"] == "Widget")
+
+    # Auto-detected (no --lang): a plain POD struct with no C++-only syntax
+    # is indistinguishable from C, so these C++-only facts stay unknown.
+    assert default_widget["is_standard_layout"] is None
+    assert default_widget["is_trivially_copyable"] is None
+
+    # Explicit --lang c++ must force C++ mode regardless of auto-detection,
+    # populating both C++-only facts with a real boolean.
+    assert explicit_widget["is_standard_layout"] is True
+    assert explicit_widget["is_trivially_copyable"] is True

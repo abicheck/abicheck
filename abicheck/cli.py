@@ -531,6 +531,22 @@ def dump_cmd(so_path: Path | None, headers: tuple[Path, ...], includes: tuple[Pa
     reject_snapshot_compression_conflict(output, snapshot_compression)
     _setup_verbosity(verbose)
 
+    # G31 Phase C follow-up (AGENTS.md "dump --lang c++ is silently discarded
+    # ..." known gap): --lang carries a Click default of "c++" (LANG_DEFAULT),
+    # so the resolved `lang` string alone can never distinguish a genuinely
+    # explicit `--lang c++`/`cpp` request from the unspecified default -- both
+    # produce the identical value. `perform_elf_dump` (and the ELF header-AST
+    # passes it drives) normalizes a non-"c" `lang` to `None` for the common
+    # default case, to preserve auto-detection -- but that squash previously
+    # discarded an explicit request too, since there was nothing here to tell
+    # the two apart. Resolved once, from Click's own parameter-source
+    # bookkeeping, and threaded through so the primary snapshot pass and the
+    # header-graph pass agree on the same explicit-vs-auto-detected decision.
+    lang_explicit = (
+        click.get_current_context().get_parameter_source("lang")
+        == click.core.ParameterSource.COMMANDLINE
+    )
+
     # ADR-050 D3: parsed before the collect/compile-context resolution below so
     # a bad manifest fails fast, and validated against the *raw* CLI values
     # (headers/public_headers/public_header_dirs haven't been reassigned yet).
@@ -783,6 +799,7 @@ def dump_cmd(so_path: Path | None, headers: tuple[Path, ...], includes: tuple[Pa
         includes=includes,
         version=version,
         lang=lang,
+        lang_explicit=lang_explicit,
         gcc_path=gcc_path,
         gcc_prefix=gcc_prefix,
         effective_gcc_options=effective_gcc_options,

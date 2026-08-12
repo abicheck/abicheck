@@ -903,13 +903,21 @@ def test_perform_elf_dump_attaches_header_graph_by_default(
     service._attach_header_graph (the same wrapper service.run_dump uses for
     `compare`'s implicit-dump path) with the raw headers, the L2-seeded
     includes (see test_perform_elf_dump_header_graph_receives_seeded_includes
-    for the seeded-vs-raw distinction), lang/compile_context/public_headers/
+    for the seeded-vs-raw distinction), compile_context/public_headers/
     public_header_dirs it was given, and writes the wrapper's returned
     (possibly different) snapshot object. compile_context is passed through
     unmodified here because effective_gcc_options (None, no -p/--compile-db
     in this call) already matches compile_context.gcc_options — see
     test_perform_elf_dump_header_graph_gets_compile_db_flags for the case
-    where they differ and a replacement context is built."""
+    where they differ and a replacement context is built.
+
+    ``lang`` here is "c++" with ``lang_explicit`` left at its default
+    (``False``) — i.e. Click's own ``LANG_DEFAULT``, not a genuine
+    ``--lang c++`` from the user (G31 Phase C follow-up). The header-graph
+    attach must therefore receive the same squashed-to-``None`` value the
+    primary snapshot pass uses (auto-detection), not the raw "c++" string —
+    see test_perform_elf_dump_explicit_lang_reaches_header_graph for the
+    explicit-request counterpart."""
     so = tmp_path / "lib.so"
     hdr = tmp_path / "h.h"
     hdr.write_text("struct S { int x; };\n", encoding="utf-8")
@@ -993,11 +1001,89 @@ def test_perform_elf_dump_attaches_header_graph_by_default(
     assert captured["header_graph"] is True
     assert captured["header_graph_includes"] is True
     assert captured["headers"] == [hdr]
-    assert captured["lang"] == "c++"
+    assert captured["lang"] is None
     assert captured["compile_context"] is sentinel_cc
     assert captured["snap"] is plain_snap
     # The wrapper's returned snapshot (not the original) is what gets written.
     assert captured["written_snap"] is graphed_snap
+
+
+def test_perform_elf_dump_explicit_lang_reaches_header_graph(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """G31 Phase C follow-up (AGENTS.md "dump --lang c++ is silently
+    discarded ..." known gap): a genuinely explicit ``--lang c++``
+    (``lang_explicit=True``) must reach BOTH the primary snapshot pass and
+    the header-graph attach as the real "c++" value, not get squashed to
+    ``None`` on the primary pass while only the header-graph pass sees it
+    (the exact divergence the gap named) or vice versa."""
+    so = tmp_path / "lib.so"
+    hdr = tmp_path / "h.h"
+    hdr.write_text("struct S { int x; };\n", encoding="utf-8")
+
+    plain_snap = AbiSnapshot(library="lib.so", version="1.0")
+    captured_dump: dict[str, object] = {}
+
+    def fake_dump(**kwargs):  # noqa: ANN001, ANN003
+        captured_dump["lang"] = kwargs.get("lang")
+        return plain_snap
+
+    monkeypatch.setattr("abicheck.cli_dump_helpers.dump", fake_dump)
+
+    captured_graph: dict[str, object] = {}
+
+    def fake_attach(
+        snap, header_graph, header_graph_includes, headers, includes,
+        lang, compile_context, public_headers, public_header_dirs,
+    ):
+        captured_graph["lang"] = lang
+        return snap
+
+    monkeypatch.setattr("abicheck.service._attach_header_graph", fake_attach)
+
+    events, _stamp, _write, _expand, _populate = _elf_dump_callables()
+
+    from abicheck.service_scan import CompileContext
+
+    perform_elf_dump(
+        so,
+        (hdr,),
+        (),
+        "1.0",
+        "c++",
+        None,
+        None,
+        None,
+        (),
+        None,
+        True,
+        False,
+        None,
+        (),
+        (),
+        None,
+        False,
+        (),
+        "",
+        None,
+        None,
+        False,
+        None,
+        None,
+        None,
+        None,
+        False,
+        "off",
+        _expand,
+        _populate,
+        _stamp,
+        _write,
+        compile_context=CompileContext(),
+        lang_explicit=True,
+    )
+
+    assert captured_dump["lang"] == "c++"
+    assert captured_graph["lang"] == "c++"
 
 
 def test_perform_elf_dump_dwarf_only_does_not_attach_header_graph(

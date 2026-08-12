@@ -851,6 +851,61 @@ Once a root command genuinely clears the bar above, pick the right home:
   the shape of `tests/test_clang_header_backend_integration.py`'s existing
   siblings, verified against a real compiled library with an
   intentionally-C-compatible C++ struct, once the fix itself is designed.
+
+  **Closed for the `abicheck dump` ELF CLI path — scoped narrower than the
+  "resolve `force_cpp` once, upstream of all three call sites" design sketch
+  above (G31 continuation).** Rather than a shared, force_cpp-boolean
+  cache-key contract spanning `cli_dump_helpers.py`, `service.py`'s
+  `_dump_elf`, and `service.py`'s PE/Mach-O `_header_graph_lang`, the actual
+  fix is narrower: only `cli_dump_helpers.py`'s ELF `dump` CLI path had a
+  real *internal* divergence between its own primary pass (squashed) and its
+  own `_attach_header_graph` call (raw, unsquashed) — `service.py`'s
+  `_dump_elf` and its `_header_graph_lang` computation already squash
+  *consistently* with each other (both feed the identical normalized value),
+  so `compare`'s implicit-dump path and the Python `service.run_dump` API
+  were never the site of this specific divergence; PE/Mach-O's own primary
+  pass (`_try_header_scoped_dump`) never squashed at all. What was missing
+  everywhere is the one bit no string-normalization scheme can recover on
+  its own: whether `--lang` was genuinely given on the command line, since
+  Click's own default for `--lang` (`LANG_DEFAULT`, `cli_options.py`) is the
+  identical string `"c++"` a real `--lang c++` produces. `dump_cmd` now
+  resolves this once via Click's own parameter-source tracking
+  (`click.get_current_context().get_parameter_source("lang") ==
+  click.core.ParameterSource.COMMANDLINE`) and threads a new
+  `lang_explicit: bool` keyword parameter through `perform_elf_dump`, which
+  derives one `_effective_lang` (the real `lang` when explicit or `"c"`,
+  else `None`) and passes that identical value to *both* the primary
+  `dump()` call and the `_attach_header_graph` call, instead of the primary
+  pass's own one-off squash and the graph pass's raw pass-through. This also
+  fixes a second, previously-undocumented half of the same divergence in the
+  *other* direction: on a plain default invocation (no `--lang`, still
+  `lang="c++"`), the header-graph pass previously force-parsed C++
+  unconditionally (since a non-empty `lang` was always treated as explicit
+  by `_resolve_force_cpp`), while the primary pass correctly auto-detected —
+  so even a default, no-flags `dump --ast-frontend clang` could already
+  silently disagree with itself between its own primary snapshot and its
+  own embedded header-graph. Verified end-to-end against a real compiled
+  library with an intentionally-C-compatible POD struct (`struct Widget {
+  int x; int y; };`, exactly this entry's own repro shape) through the real
+  `abicheck dump` CLI, not a hand-built AST or `RecordType` — see
+  `tests/test_clang_header_backend_integration.py::
+  test_cli_dump_explicit_lang_cpp_forces_cpp_mode_on_ambiguous_header`.
+  **Still open**: `service.py`'s `_dump_elf`/`_header_graph_lang` pair
+  (`compare`'s implicit-dump path and the Python `service.run_dump`/
+  `DumpRequest` API) and PE/Mach-O's `_header_graph_lang` computation carry
+  the identical explicit-vs-default ambiguity — `run_dump`'s own `lang: str
+  = "c++"` signature can't distinguish an API caller's genuine
+  `lang="c++"` from the default either, so an explicit request through
+  `compare`'s implicit dump or a direct `service.run_dump("c++")`/
+  `DumpRequest(lang="c++")` call is still silently treated as auto-detect on
+  a language-ambiguous header. Closing that needs the wider design this
+  entry originally sketched (a `lang: str | None = None` API default plus a
+  real "auto"/explicit tri-state, which is a public-API shape change
+  needing its own coordinated pass — not a `lang_explicit` bolt-on, since
+  there is no Click parameter-source equivalent to lean on for a direct
+  Python caller) — deliberately not attempted in this pass, consistent with
+  scoping this fix to the one call path where a real, reachable divergence
+  was reproduced end-to-end.
 - **Opaque-type suppression is keyed by bare `RecordType.name`, not a
   qualified identity — pre-existing on both header backends, newly reachable
   on direct-clang by PR #719's opaque-handle-type fix (Codex review,
