@@ -18,4 +18,13 @@ A new changelog fragment. See changelog.d/README.md for the workflow.
   (`dumper_ast_config._build_clang_header_command`). A leftover multi-document
   stream from any other, not-yet-special-cased offload flag now also raises
   an actionable `SourceExtractionError` naming the likely cause instead of a
-  bare byte-offset, matching the L2 backend's own hint.
+  bare byte-offset, matching the L2 backend's own hint. `_clang_context_args`
+  was found to gate that flag on `pick_compiler_binary`'s *emulated* compiler
+  (which falls back to the compile unit's own recorded `argv[0]`) rather than
+  the binary L4 actually invokes (`clang_bin`) — fixed to take `clang_bin`
+  explicitly, and `_argv.pick_compiler_binary`'s docstring now documents the
+  emulated-vs-invoked distinction generally so a future binary-capability-
+  gated flag here doesn't repeat the same mistake; `tests/
+  test_source_extractors_clang.py::TestSyclHostOnlyGatedOnInvokedBinary`
+  sweeps a matrix of invoked/recorded-`argv[0]` combinations as a regression
+  guard for the whole bug class, not just the one reported pair.

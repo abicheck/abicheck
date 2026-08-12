@@ -177,21 +177,47 @@ def basename(path: str) -> str:
 def strip_launchers(argv: list[str]) -> list[str]:
     """Drop leading compiler-launcher tokens (``ccache``/``sccache``/…)."""
     i = 0
-    while i < len(argv) and basename(argv[i]).lower().removesuffix(
-        ".exe"
-    ) in COMPILER_LAUNCHERS:
+    while (
+        i < len(argv)
+        and basename(argv[i]).lower().removesuffix(".exe") in COMPILER_LAUNCHERS
+    ):
         i += 1
     return argv[i:]
 
 
 def pick_compiler_binary(compile_unit: CompileUnit, override: str | None) -> str:
-    """Pick the compiler binary an extractor should emulate for this TU.
+    """Pick the compiler binary an extractor should EMULATE for this TU.
 
     Prefers the compiler actually recorded in the build action (``argv[0]``,
     after unwrapping any launcher) so a clang/clang-cl/cross TU is replayed
     against its real builtin include paths, target defaults, and accepted flags.
     Falls back to g++/gcc by language when no command is available; an explicit
     ``override`` always wins.
+
+    **This is emulation identity, not invocation identity — do not use it to
+    gate whether a flag is safe to append to the command an extractor is
+    about to run.** Without an explicit ``override``, this falls back to the
+    real build's own recorded ``argv[0]`` (e.g. ``icpx``) purely so flag
+    *shape* (MSVC ``/D``/``/I`` vs. GNU ``-D``/``-I``, language-standard
+    spelling, …) matches what the real build used — it says nothing about
+    which binary a given extractor is genuinely going to shell out to. A
+    caller in `castxml.py` passes this value as castxml's own
+    ``--castxml-cc-<id> <path>`` *argument* (castxml itself is invoked, and
+    is explicitly designed to accept an arbitrary compiler identity to
+    emulate), so appending a flag there based on this result is safe by
+    construction. A caller in `clang.py`/`clang_public_roots.py` that
+    instead builds an argv for **this same binary to execute directly**
+    must gate any binary-capability-specific flag (e.g. an Intel-only
+    ``-fsycl-host-only``) on the extractor's own actually-invoked binary
+    (its own ``clang_bin``, distinct from this function's return value)
+    instead — conflating the two let `-fsycl-host-only` get appended to a
+    genuinely stock ``clang`` invocation whenever a SYCL TU's real build
+    happened to use an Intel driver, which stock clang hard-rejects as
+    "unknown argument" (Codex review, `source_extractors/clang.py`'s
+    `_clang_context_args`). See that function's own docstring for the fix
+    and `tests/test_source_extractors_clang.py`'s
+    ``TestSyclHostOnlyGatedOnInvokedBinary`` for the regression matrix any
+    future binary-capability-gated flag addition here should extend.
     """
     if override:
         return override
@@ -267,7 +293,9 @@ def _match_gnu_forced_include(tok: str, argv: list[str], i: int, out: list[str])
     return i
 
 
-def _match_msvc_include_search(tok: str, argv: list[str], i: int, out: list[str]) -> int:
+def _match_msvc_include_search(
+    tok: str, argv: list[str], i: int, out: list[str]
+) -> int:
     """Try to match an MSVC ``/I`` include-search token (MSVC mode only).
 
     Returns the new ``i`` after consumption, or the original ``i`` if no match.
@@ -282,7 +310,9 @@ def _match_msvc_include_search(tok: str, argv: list[str], i: int, out: list[str]
     return i
 
 
-def _match_msvc_forced_include(tok: str, argv: list[str], i: int, out: list[str]) -> int:
+def _match_msvc_forced_include(
+    tok: str, argv: list[str], i: int, out: list[str]
+) -> int:
     """Try to match an MSVC ``/FI`` forced-include token (MSVC mode only).
 
     Returns the new ``i`` after consumption, or the original ``i`` if no match.
@@ -298,9 +328,7 @@ def _match_msvc_forced_include(tok: str, argv: list[str], i: int, out: list[str]
     return i
 
 
-def _scan_argv_for_extra_flags(
-    argv: list[str], cc_id: str, out: list[str]
-) -> None:
+def _scan_argv_for_extra_flags(argv: list[str], cc_id: str, out: list[str]) -> None:
     """Walk ``argv`` and append forced-include / include-search tokens to ``out``.
 
     Handles GNU and (when ``cc_id == "msvc"``) MSVC option families.  Each

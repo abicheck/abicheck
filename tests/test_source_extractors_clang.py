@@ -747,6 +747,91 @@ def test_build_command_sycl_host_only_gated_on_invoked_binary_not_recorded_argv(
     assert "-fsycl-host-only" not in macro_cmd
 
 
+class TestSyclHostOnlyGatedOnInvokedBinary:
+    """Generalized regression matrix for the Codex-flagged P1 above: a
+    binary-capability-gated flag (``-fsycl-host-only``) must depend ONLY on
+    the binary a command will actually be RUN with (``clang_bin``), never on
+    ``pick_compiler_binary``'s *emulated* compiler (``cc_bin``, which falls
+    back to the compile unit's own recorded ``argv[0]`` absent an explicit
+    override -- see ``_argv.pick_compiler_binary``'s own docstring for why
+    the two must never be conflated). The individual example tests above
+    pin the specific reported scenario; this class sweeps a matrix so the
+    SAME class of bug (a future binary-specific flag gated on the wrong one
+    of the two binaries) is caught for any invoked/recorded combination, not
+    just the one pair a hand-picked example happened to cover.
+    """
+
+    #: Clang-family binaries `_is_intel_sycl_driver` recognizes as
+    #: DPC++-capable -- the flag must be appended for every one of these when
+    #: actually invoked, regardless of what the compile unit's own argv[0]
+    #: recorded.
+    _INTEL_DRIVERS = ("icpx", "dpcpp", "dpcpp-cl")
+    #: Non-Intel clang-family (and non-clang) binaries -- none of these
+    #: understand ``-fsycl-host-only``; it must never be appended for any of
+    #: them, regardless of what the compile unit's own argv[0] recorded.
+    _NON_INTEL_DRIVERS = ("clang", "clang++", "clang-cl", "gcc", "g++")
+    #: Swept independently of the invoked binary above -- this is exactly the
+    #: input ``pick_compiler_binary`` falls back to reading when no explicit
+    #: ``compiler_binary`` override is given, and it must have NO bearing on
+    #: the outcome once ``clang_bin`` is passed explicitly.
+    _RECORDED_ARGV0 = ("clang", "icpx", "dpcpp", "gcc", "cl.exe")
+
+    @pytest.mark.parametrize("invoked", _INTEL_DRIVERS)
+    @pytest.mark.parametrize("recorded_argv0", _RECORDED_ARGV0)
+    def test_appended_for_intel_invoked_binary_regardless_of_recorded_argv0(
+        self, invoked: str, recorded_argv0: str
+    ) -> None:
+        cu = _cu(
+            argv=[recorded_argv0, "-fsycl", "-c", "foo.cpp"],
+            abi_relevant_flags=["-fsycl"],
+        )
+        ast_cmd = build_clang_command(cu, Path("foo.cpp"), clang_bin=invoked)
+        assert "-fsycl-host-only" in ast_cmd
+        macro_cmd = build_clang_macro_command(cu, Path("foo.cpp"), clang_bin=invoked)
+        assert "-fsycl-host-only" in macro_cmd
+
+    @pytest.mark.parametrize("invoked", _NON_INTEL_DRIVERS)
+    @pytest.mark.parametrize("recorded_argv0", _RECORDED_ARGV0)
+    def test_skipped_for_non_intel_invoked_binary_regardless_of_recorded_argv0(
+        self, invoked: str, recorded_argv0: str
+    ) -> None:
+        cu = _cu(
+            argv=[recorded_argv0, "-fsycl", "-c", "foo.cpp"],
+            abi_relevant_flags=["-fsycl"],
+        )
+        ast_cmd = build_clang_command(cu, Path("foo.cpp"), clang_bin=invoked)
+        assert "-fsycl-host-only" not in ast_cmd
+        macro_cmd = build_clang_macro_command(cu, Path("foo.cpp"), clang_bin=invoked)
+        assert "-fsycl-host-only" not in macro_cmd
+
+    @pytest.mark.parametrize("recorded_argv0", _RECORDED_ARGV0)
+    def test_skipped_with_no_override_regardless_of_recorded_argv0(
+        self, recorded_argv0: str
+    ) -> None:
+        """The extractor's own real default (no ``--gcc-path``, so
+        ``clang_bin``/``compiler_binary`` are never passed at all) always
+        invokes plain ``"clang"`` -- never Intel-family -- no matter what the
+        compile unit's own build recorded itself as."""
+        cu = _cu(
+            argv=[recorded_argv0, "-fsycl", "-c", "foo.cpp"],
+            abi_relevant_flags=["-fsycl"],
+        )
+        cmd = build_clang_command(cu, Path("foo.cpp"))
+        assert cmd[0] == "clang"
+        assert "-fsycl-host-only" not in cmd
+
+    def test_needs_sycl_host_only_is_the_single_l2_l4_source_of_truth(self) -> None:
+        """L4's predicate must be the SAME function object the L2 header-AST
+        backend uses (``dumper_clang._needs_sycl_host_only``), not an
+        independently reimplemented copy that could silently drift out of
+        sync with the last-flag-wins ``-fsycl``/``-fno-sycl`` scan or the
+        legacy ``dpcpp``/``dpcpp-cl`` SYCL-implied-by-default handling."""
+        from abicheck import dumper_clang
+        from abicheck.buildsource.source_extractors import clang as clang_mod
+
+        assert clang_mod._needs_sycl_host_only is dumper_clang._needs_sycl_host_only
+
+
 # -- source_abi_from_clang_ast (pure, D4) ------------------------------------
 
 
