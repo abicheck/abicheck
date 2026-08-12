@@ -1055,6 +1055,42 @@ class TestMarkdownReporter:
         md = to_markdown(_result(Verdict.COMPATIBLE_WITH_RISK, [c]))
         assert "See also" not in md
 
+    def test_correlated_change_kind_rendered_in_quality_issues_section(self):
+        """A policy override that reclassifies LAYOUT_UNVERIFIABLE as
+        COMPATIBLE routes the finding into the Quality Issues bucket, which
+        has its own bare one-line format — the "See also" note must still
+        reach it (Codex review, fresh evidence)."""
+        c = Change(
+            ChangeKind.LAYOUT_UNVERIFIABLE,
+            "Foo",
+            "layout evidence unverifiable",
+            correlated_change_kind=ChangeKind.TYPE_VTABLE_CHANGED.value,
+            effective_verdict=Verdict.COMPATIBLE,
+        )
+        md = to_markdown(_result(Verdict.COMPATIBLE, [c]))
+        assert "Quality Issues" in md
+        assert "See also" in md
+        assert "type_vtable_changed" in md
+
+    def test_correlated_change_kind_rendered_in_not_evaluated_section(self):
+        """A finding contract evaluation left NOT_EVALUATED routes into the
+        separate "Not Evaluated (Contract)" section, which also has its own
+        bare one-line format — the "See also" note must still reach it
+        (Codex review, fresh evidence)."""
+        from abicheck.contract_relevance_types import CompatibilityEvaluationStatus
+
+        c = Change(
+            ChangeKind.LAYOUT_UNVERIFIABLE,
+            "Foo",
+            "layout evidence unverifiable",
+            correlated_change_kind=ChangeKind.TYPE_VTABLE_CHANGED.value,
+            compatibility_evaluation_status=CompatibilityEvaluationStatus.NOT_EVALUATED,
+        )
+        md = to_markdown(_result(Verdict.NO_CHANGE, [c]))
+        assert "Not Evaluated (Contract)" in md
+        assert "See also" in md
+        assert "type_vtable_changed" in md
+
 
 # ---------------------------------------------------------------------------
 # Severity-aware reporter output

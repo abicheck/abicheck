@@ -1799,6 +1799,34 @@ class TestContractEvaluationProperties:
         tc = root.find("testsuite/testcase[@name='Foo']")
         assert tc.find("properties") is None
 
+    def test_correlated_change_kind_merges_into_existing_contract_properties(
+        self,
+    ) -> None:
+        # Codex review, fresh evidence: a testcase already carrying contract
+        # properties (--contract-evaluation) must not get a *second* sibling
+        # <properties> element for the correlation -- `tc.find("properties")`
+        # (the lookup every consumer, including this repo's own tests, uses)
+        # only ever sees the first one, so a second element silently hid the
+        # correlation whenever both were stamped on the same testcase.
+        from abicheck.contract_relevance_types import ContractRelevance
+
+        change = Change(
+            ChangeKind.LAYOUT_UNVERIFIABLE,
+            "Foo",
+            "layout evidence unverifiable",
+            contract_relevance=ContractRelevance.IN_CONTRACT,
+            correlated_change_kind=ChangeKind.TYPE_VTABLE_CHANGED.value,
+        )
+        r = _make_result([change], verdict=Verdict.COMPATIBLE_WITH_RISK)
+        xml_str = to_junit_xml(r)
+        root = _parse(xml_str)
+        tc = root.find("testsuite/testcase[@name='Foo']")
+        properties_blocks = tc.findall("properties")
+        assert len(properties_blocks) == 1
+        props = {p.get("name"): p.get("value") for p in properties_blocks[0]}
+        assert props["abicheck.correlated_change_kind"] == "type_vtable_changed"
+        assert props["abicheck.contract_relevance"] == "IN_CONTRACT"
+
     def test_stamped_finding_without_optional_fields_omits_them(self) -> None:
         # contract_reason_code/contract_assurance/contract_evidence_refs are
         # independent optional fields -- a finding can have a stamped

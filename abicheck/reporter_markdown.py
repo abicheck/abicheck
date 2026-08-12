@@ -1274,16 +1274,7 @@ def _build_severity_sections(
             "",
         ]
         for c in risk:
-            line = f"- **{c.kind.value}**: {c.description}"
-            # Cross-detector correlation (e.g. LAYOUT_UNVERIFIABLE annotated
-            # by post_processing.AnnotateLayoutUnverifiableCoveredByVtable
-            # Changed as sharing its evidence gap with a co-reported
-            # TYPE_VTABLE_CHANGED) -- this section has its own one-line
-            # format rather than routing through _format_change_md, so it
-            # needs the same annotation added separately (Codex review).
-            if c.correlated_change_kind:
-                line += f"\n  > See also: `{c.correlated_change_kind}` finding for the same symbol"
-            lines.append(line)
+            lines.append(_format_change_md_oneline(c))
         lines.append("")
 
     if compatible:
@@ -1295,7 +1286,7 @@ def _build_severity_sections(
             sev_label = _section_severity_label(severity_config, "quality_issues")
             lines += [f"## {_QUALITY_ICON} Quality Issues{sev_label}", ""]
             for c in quality:
-                lines.append(f"- **{c.kind.value}**: {c.description}")
+                lines.append(_format_change_md_oneline(c))
             lines.append("")
         if additions_list:
             sev_label = _section_severity_label(severity_config, "addition")
@@ -1345,7 +1336,7 @@ def _build_not_evaluated_section(not_evaluated: list[Change]) -> list[str]:
         reason = getattr(c, "contract_reason_code", None)
         label = getattr(relevance, "value", None) or "UNKNOWN"
         suffix = f" ({reason})" if reason else ""
-        lines.append(f"- **{c.kind.value}**: {c.description}")
+        lines.append(_format_change_md_oneline(c))
         lines.append(f"  > Contract: {label}{suffix}")
     lines.append("")
     return lines
@@ -1841,6 +1832,30 @@ def _append_recommendation_section(lines: list[str], result: DiffResult) -> None
         f"{rec.rationale}",
         "",
     ]
+
+
+def _format_change_md_oneline(c: object) -> str:
+    """Format a single change as a bare ``- **kind**: description`` line, plus
+    a "See also" correlation note when ``correlated_change_kind`` is set.
+
+    Used by the sections (Deployment Risk, Quality Issues, Not Evaluated)
+    that deliberately render a change as a single terse line rather than
+    routing through the fuller :func:`_format_change_md` (impact/affected-
+    symbols/contract detail) -- but the cross-detector correlation must
+    still reach every section a correlated finding (currently only
+    ``LAYOUT_UNVERIFIABLE``) can land in, or a policy/contract
+    configuration that routes it into one of these terse sections silently
+    drops the "See also" note the fuller formatter carries (Codex review,
+    fresh evidence).
+    """
+    kind = getattr(c, "kind", None)
+    kind_val = kind.value if kind else ""
+    desc = getattr(c, "description", "")
+    line = f"- **{kind_val}**: {desc}"
+    correlated = getattr(c, "correlated_change_kind", None)
+    if correlated:
+        line += f"\n  > See also: `{correlated}` finding for the same symbol"
+    return line
 
 
 def _format_change_md(c: object) -> str:

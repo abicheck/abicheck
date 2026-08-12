@@ -778,7 +778,7 @@ def _add_contract_properties(
 
 
 def _add_correlation_property(tc: ET.Element, change: Change) -> None:
-    """Append a single ``<properties>`` block recording
+    """Append a ``abicheck.correlated_change_kind`` ``<property>`` recording
     ``Change.correlated_change_kind`` when set (e.g. a ``LAYOUT_UNVERIFIABLE``
     finding annotated by
     ``post_processing.AnnotateLayoutUnverifiableCoveredByVtableChanged`` as
@@ -789,10 +789,26 @@ def _add_correlation_property(tc: ET.Element, change: Change) -> None:
     every run, not only under contract evaluation, so gating it the same way
     would silently drop it on the default path. Before this, only JSON
     (reporter.py) and SARIF (sarif.py) rendered this field (Codex review).
+
+    Must always run *after* ``_add_contract_properties`` and reuse whatever
+    ``<properties>`` element it already appended, rather than creating a
+    second sibling one -- a testcase carries at most one ``<properties>``
+    block by JUnit convention, and every consumer (including this repo's
+    own tests) looks it up via a single ``tc.find("properties")``, which
+    only ever sees the first match (Codex review, fresh evidence: this
+    silently dropped the correlation whenever contract evaluation had
+    already stamped the same testcase).
     """
     if not change.correlated_change_kind:
         return
-    props = ET.SubElement(tc, "properties")
+    # Reuse the <properties> block _add_contract_properties may have already
+    # appended (under --contract-evaluation) rather than creating a second
+    # sibling element -- JUnit consumers, including this repo's own tests,
+    # look up a testcase's properties via `tc.find("properties")`, which
+    # only ever sees the first such element (Codex review).
+    props = tc.find("properties")
+    if props is None:
+        props = ET.SubElement(tc, "properties")
     p = ET.SubElement(props, "property")
     p.set("name", "abicheck.correlated_change_kind")
     p.set("value", change.correlated_change_kind)
