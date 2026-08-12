@@ -346,19 +346,25 @@ def _detail_text(change: dict[str, object]) -> str:
     return desc
 
 
-#: A GitHub-Actions-style (and equivalent CI) checkout convention doubles the
-#: repo name as its own last path component (`/home/runner/work/<repo>/<repo>/…`).
-#: Recognizing this one, extremely common, unambiguous shape is deliberately
-#: the *only* normalization applied — an earlier revision also tried
-#: stripping whatever leading path segments happened to be common across
-#: every finding in one report, which over-strips whenever several findings
-#: legitimately share a real subdirectory (e.g. two changes in the same
-#: `include/` tree): every row's `path:line` would silently lose that shared
-#: directory context too, not just the CI-specific root. The doubled-segment
-#: pattern has no such failure mode — it only ever matches the runner's own
-#: checkout root, never a directory a maintainer would recognize as part of
-#: their own tree.
-_CI_WORKDIR_RE = re.compile(r"^/.*?/([^/]+)/\1/")
+#: GitHub Actions' own checkout convention doubles the repo name as its own
+#: last path component under a literal `work/` directory
+#: (`/home/runner/work/<repo>/<repo>/…`). Anchored on the literal `work/`
+#: segment (CodeRabbit review: an earlier revision matched *any* doubled
+#: adjacent directory anywhere in an absolute path — `^/.*?/([^/]+)/\1/` —
+#: which strips a genuine repository path like
+#: `/srv/vendor/vendor/include/a.h` down to `include/a.h` too, discarding
+#: real path components that just happen to repeat a directory name; the
+#: comment above this constant claimed the un-anchored pattern "only ever
+#: matches the runner's own checkout root", which was not actually true of
+#: the regex as written). Recognizing this one, specific, unambiguous shape
+#: is deliberately the *only* normalization applied — an earlier revision
+#: also tried stripping whatever leading path segments happened to be
+#: common across every finding in one report, which over-strips whenever
+#: several findings legitimately share a real subdirectory (e.g. two
+#: changes in the same `include/` tree): every row's `path:line` would
+#: silently lose that shared directory context too, not just the
+#: CI-specific root.
+_CI_WORKDIR_RE = re.compile(r"^/.*?/work/([^/]+)/\1/")
 
 
 def _normalize_location(raw: str) -> str:
@@ -496,6 +502,68 @@ def _bucket_changes(
                 )
             )
     return breaking, review, safe, incomplete
+
+
+#: Human-readable labels for a CoverageFailure dict's "provider" field
+#: (`contract_coverage_ledger.py`'s recorded provider names) — used only as
+#: a fallback when a provider name isn't already self-explanatory; every
+#: unrecognized provider still renders (just its raw string), never dropped.
+_CONTRACT_PROVIDER_LABEL = {
+    "public_header": "public header",
+    "export_table": "export table",
+    "post_manifest": "post-build manifest",
+    "forced_public_symbols": "forced-public-symbols overlay",
+}
+
+
+def _contract_coverage_findings(report: dict[str, object]) -> list[Finding]:
+    """Build analysis-incomplete findings from ``report["contract_coverage_
+    failures"]`` (ADR-049 Phase 5's unsuppressible sibling ledger, emitted
+    only under ``compare --contract-evaluation``).
+
+    Codex review: this ledger is deliberately kept *outside*
+    ``DiffResult.changes`` — see ``AGENTS.md``'s own contract_coverage_
+    ledger.py entry ("a `CoverageFailure` is not a `Change`... so
+    `checker._filter_suppressed_changes`... cannot see one") — so a report
+    whose *only* problem is incomplete contract-evidence coverage carries
+    zero entries in ``changes`` even though ``contract_coverage_exit_
+    contribution`` already folded a real gate failure into the exit code.
+    Reading only ``changes`` (this module's original design, before this
+    ledger existed) therefore missed it entirely: under the default
+    ``--on=changes`` policy, `should_post` sees `total_changes == 0` and
+    posts no comment at all — deleting a prior sticky comment if one existed
+    — while under ``--on=always`` it renders the actively misleading "✅ No
+    ABI changes" next to a check that already failed.
+
+    Always ``[]`` for a report that never ran ``--contract-evaluation``
+    (the key is entirely absent then, never an empty list emitted for a
+    different reason — ``reporter.py`` only emits this key when
+    ``result.contract_context`` is not ``None``).
+    """
+    raw = report.get("contract_coverage_failures")
+    if not isinstance(raw, list):
+        return []
+    findings: list[Finding] = []
+    for f in raw:
+        if not isinstance(f, dict):
+            continue
+        provider = str(f.get("provider", "?"))
+        provider_label = _CONTRACT_PROVIDER_LABEL.get(provider, provider)
+        side = str(f.get("side", "?"))
+        mode = str(f.get("mode", "") or "")
+        reason = str(f.get("reason", "") or "")
+        status = str(f.get("status", "") or "")
+        completeness = str(f.get("completeness", "") or "")
+        detail_parts = [p for p in (reason, status, completeness) if p]
+        findings.append(
+            Finding(
+                kind="contract_coverage_failure",
+                symbol=f"Contract evidence: {provider_label} ({side})",
+                detail=" — ".join(detail_parts) if detail_parts else "",
+                location=f"[{mode}]" if mode else None,
+            )
+        )
+    return findings
 
 
 def _incomplete_is_blocking(
@@ -640,6 +708,26 @@ def _from_compare(
     breaking, review, safe, incomplete = _bucket_changes(
         report.get("changes"), gate_api_break, levels
     )
+    # Blocking-ness for the ordinary evidence-kind findings above is
+    # computed BEFORE folding in the contract-coverage ledger below — a
+    # contract_coverage_failure Finding carries no real `severity`, so
+    # running it through _incomplete_is_blocking's severity/category checks
+    # would risk a false match against an unrelated quality_issues: error
+    # config. Its own blocking-ness is exactly
+    # contract_coverage_exit_contribution (see below), nothing else.
+    incomplete_blocking = _incomplete_is_blocking(
+        incomplete, gate_api_break, gate_breaking, levels
+    )
+    # ADR-049 Phase 5's sibling coverage-failure ledger (Codex review) — see
+    # `_contract_coverage_findings`'s own docstring for why `changes` alone
+    # misses this entirely. `contract_coverage_exit_contribution` folds via
+    # `max` into the real exit code with no fail-on-* gate of its own
+    # (AGENTS.md: "no fail-on-* condition at all"), so a nonzero value is
+    # unconditionally blocking, independent of gate_api_break/gate_breaking.
+    incomplete = incomplete + _contract_coverage_findings(report)
+    contract_exit = report.get("contract_coverage_exit_contribution")
+    if isinstance(contract_exit, int) and contract_exit >= 1:
+        incomplete_blocking = True
     # ADR-043 `compare --used-by`/`--required-symbol(s)`: the JSON report
     # overwrites `verdict` with the scoped result and adds `full_verdict` plus
     # `used_by`/`required_symbol_contract` (see cli_compare_helpers's
@@ -661,9 +749,7 @@ def _from_compare(
         review=review,
         safe=safe,
         incomplete=incomplete,
-        incomplete_blocking=_incomplete_is_blocking(
-            incomplete, gate_api_break, gate_breaking, levels
-        ),
+        incomplete_blocking=incomplete_blocking,
         breaking_categories=_breaking_categories(breaking),
         breaking_severities=_breaking_severities(breaking),
         scoped_verdict=scoped_verdict,

@@ -452,10 +452,18 @@ about the API/ABI at all, so the comment says "Source analysis incomplete" or
 "Analysis coverage reduced" instead, so a reviewer can tell "this PR's
 comparison had a coverage gap" apart from "this PR made a risky API change."
 Whether that headline reads as blocking (🛑) or advisory (⚠️) mirrors the
-Action's own gate exactly — a coverage-gap finding is blocking only when its
-severity is gated by `fail-on-api-break`/`fail-on-breaking` the same way any
-other finding of that severity is, never merely because evidence happened to
-be incomplete.
+Action's own gate exactly: an `api_break`/`risk`-severity coverage-gap
+finding is blocking only under `fail-on-api-break`, and a `breaking`-severity
+one only under `fail-on-breaking` — never merely because evidence happened
+to be incomplete. The one exception is a `compatible`-severity finding (e.g.
+`dwarf_info_missing`) whose resolved severity-config category (`addition` or
+`quality_issues`) is set to `error`: that blocks unconditionally, regardless
+of `fail-on-api-break`/`fail-on-breaking`, because it's compare's own
+exit-code-1 `SEVERITY_ERROR` tier, which has no `fail-on-*` gate of its own.
+A `--contract-evaluation` run's own coverage-failure ledger
+(`contract_coverage_failures`) is folded in the same way — its
+`contract_coverage_exit_contribution` is likewise unconditional, with no
+`fail-on-*` flag to disable it.
 
 A breaking/review finding's row also carries, when the report provides them:
 the **demangled C++ signature** as the primary Symbol value (with the raw
