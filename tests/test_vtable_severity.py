@@ -1446,7 +1446,19 @@ class TestLayoutUnverifiableCorrelatedWithVtableChanged:
                     change_kind="type_vtable_changed",
                     allow_public_break=True,
                     reason="waiver on the vtable finding only",
-                )
+                ),
+                # Unrelated broad rule (CodeRabbit review, fresh evidence): the
+                # symbol="Foo" rule above is narrow, so on its own it makes
+                # SuppressionList.needs_reachability_evidence() return False
+                # and MarkReachability.run() short-circuits before caching any
+                # impact_assessment -- leaving the assertion below unreachable
+                # dead code, not a real check. This rule forces the cache to
+                # actually populate, matching test_correlation_reaches_
+                # cached_impact_assessment's own convention.
+                Suppression(
+                    namespace="unrelated::*",
+                    reason="force MarkReachability to cache impact_assessment",
+                ),
             ]
         )
         result = compare(old, new, suppression=suppression)
@@ -1456,5 +1468,5 @@ class TestLayoutUnverifiableCorrelatedWithVtableChanged:
             c for c in result.changes if c.kind == ChangeKind.LAYOUT_UNVERIFIABLE
         )
         assert layout_change.correlated_change_kind is None
-        if layout_change.impact_assessment is not None:
-            assert layout_change.impact_assessment.correlated_change_kind is None
+        assert layout_change.impact_assessment is not None
+        assert layout_change.impact_assessment.correlated_change_kind is None
