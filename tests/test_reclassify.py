@@ -488,6 +488,28 @@ reclassify:
     assert blocked == [reclassified]
 
 
+def _override_adjusted_kind_sets(pf: PolicyFile, *changes):
+    """The real, override-adjusted kind sets a production caller
+    (sarif.py's ``_severity()``, cli_scan_baseline.py's
+    ``_blocking_compatible_changes``) actually passes as *kind_sets* --
+    ``DiffResult._effective_kind_sets()``. A bare
+    ``classify_effective_change(change, policy_file=pf)`` call with no
+    explicit *kind_sets* falls back to the canonical, override-*unaware*
+    default set instead, which never actually exercises "a kind-global
+    override moved this kind out of ``sets[2]``" at all -- exactly the
+    scenario these tests need to be realistic about (Codex review: an
+    earlier version of this test passed regardless of whether the
+    addition/quality-split fix below was even present, for exactly this
+    reason)."""
+    from abicheck.checker_types import DiffResult
+
+    diff = DiffResult(
+        changes=list(changes), old_version="1", new_version="2", library="l",
+        policy_file=pf,
+    )
+    return diff._effective_kind_sets()
+
+
 def test_reclassify_wins_addition_bucket_over_a_kind_global_override(
     tmp_path: Path,
 ) -> None:
@@ -522,20 +544,63 @@ reclassify:
     pf = PolicyFile.load(p)
     scoped = _change(ChangeKind.FUNC_ADDED, "foo")
     unscoped = _change(ChangeKind.FUNC_ADDED, "bar")
+    kind_sets = _override_adjusted_kind_sets(pf, scoped, unscoped)
 
-    assert classify_effective_change(scoped, policy_file=pf) == IssueCategory.ADDITION
+    assert (
+        classify_effective_change(scoped, kind_sets=kind_sets, policy_file=pf)
+        == IssueCategory.ADDITION
+    )
     # An unrelated func_added symbol still falls through to the (broader)
     # override -- BREAKING, not silently granted the same leniency.
     assert (
-        classify_effective_change(unscoped, policy_file=pf)
+        classify_effective_change(unscoped, kind_sets=kind_sets, policy_file=pf)
         == IssueCategory.ABI_BREAKING
     )
 
     cfg = SeverityConfig(
         quality_issues=SeverityLevel.ERROR, addition=SeverityLevel.INFO
     )
-    assert compute_exit_code([scoped], cfg, policy_file=pf) == 0
-    assert compute_exit_code([scoped], PRESET_DEFAULT, policy_file=pf) == 0
+    assert compute_exit_code([scoped], cfg, kind_sets=kind_sets, policy_file=pf) == 0
+    assert (
+        compute_exit_code([scoped], PRESET_DEFAULT, kind_sets=kind_sets, policy_file=pf)
+        == 0
+    )
+
+
+def test_reclassify_addition_bucket_ignores_a_shadowed_rule(tmp_path: Path) -> None:
+    """Codex review, second round: `_reclassify_resolved_to_compatible` must
+    not widen the ADDITION bucket for a rule that merely *matches* -- only
+    for one that actually *decided* the verdict. When
+    `change.effective_verdict` is already set (a pipeline modulation, which
+    outranks `reclassify:` entirely -- see `effective_verdict_for_change`'s
+    own topmost branch), a same-symbol `reclassify:` rule sits shadowed and
+    must not still grant ADDITION leniency: an addition kind globally
+    overridden to `break`, with effective_verdict=COMPATIBLE set by an
+    unrelated mechanism, stays QUALITY_ISSUES."""
+    from abicheck.severity import IssueCategory, classify_effective_change
+
+    p = tmp_path / "policy.yaml"
+    p.write_text(
+        """
+overrides:
+  func_added: break
+reclassify:
+  - kind: func_added
+    symbol: foo
+    to: ignore
+""".strip(),
+        encoding="utf-8",
+    )
+    pf = PolicyFile.load(p)
+    change = _change(
+        ChangeKind.FUNC_ADDED, "foo", effective_verdict=Verdict.COMPATIBLE
+    )
+    kind_sets = _override_adjusted_kind_sets(pf, change)
+
+    assert (
+        classify_effective_change(change, kind_sets=kind_sets, policy_file=pf)
+        == IssueCategory.QUALITY_ISSUES
+    )
 
 
 # --- standard-report disclosure (reporter.py's policy_reclassify key) ------
@@ -916,3 +981,100 @@ reclassify:
 
     audit = supl.audit([change], policy_file=pf)
     assert audit.high_risk_matches == []
+
+
+# --- PolicyFile.validate_overrides() covers reclassify: too ---------------
+
+
+def test_validate_overrides_flags_a_critical_kind_reclassified_to_ignore(
+    tmp_path: Path,
+) -> None:
+    """Codex review: a `reclassify:` rule downgrading a critical/dangerous
+    kind is exactly the mistake this check exists to catch -- it must not
+    bypass the diagnostic purely by being selector-scoped instead of a
+    kind-global `overrides:` entry."""
+    p = tmp_path / "policy.yaml"
+    p.write_text(
+        """
+reclassify:
+  - kind: func_removed
+    symbol: foo
+    to: ignore
+""".strip(),
+        encoding="utf-8",
+    )
+    pf = PolicyFile.load(p)
+    warnings = pf.validate_overrides()
+    assert len(warnings) == 1
+    assert "HIGH RISK" in warnings[0]
+    assert "func_removed" in warnings[0]
+
+
+def test_validate_overrides_flags_a_critical_kind_reclassified_to_risk(
+    tmp_path: Path,
+) -> None:
+    p = tmp_path / "policy.yaml"
+    p.write_text(
+        """
+reclassify:
+  - kind: type_size_changed
+    symbol: foo
+    to: risk
+""".strip(),
+        encoding="utf-8",
+    )
+    pf = PolicyFile.load(p)
+    warnings = pf.validate_overrides()
+    assert len(warnings) == 1
+    assert "RISK" in warnings[0]
+
+
+def test_validate_overrides_flags_a_breaking_kind_reclassified_to_ignore(
+    tmp_path: Path,
+) -> None:
+    p = tmp_path / "policy.yaml"
+    p.write_text(
+        """
+reclassify:
+  - kind: func_virtual_added
+    symbol: foo
+    to: ignore
+""".strip(),
+        encoding="utf-8",
+    )
+    pf = PolicyFile.load(p)
+    warnings = pf.validate_overrides()
+    assert len(warnings) == 1
+    assert "BREAKING" in warnings[0]
+
+
+def test_validate_overrides_safe_reclassify_no_warning(tmp_path: Path) -> None:
+    p = tmp_path / "policy.yaml"
+    p.write_text(
+        """
+reclassify:
+  - kind: enum_member_renamed
+    symbol: foo
+    to: ignore
+""".strip(),
+        encoding="utf-8",
+    )
+    pf = PolicyFile.load(p)
+    assert pf.validate_overrides() == []
+
+
+def test_validate_overrides_skips_a_kindless_reclassify_rule(tmp_path: Path) -> None:
+    """A rule scoped purely by symbol/namespace, with no `kind:` filter, has
+    no single base_verdict to compare against -- skipped, not a crash, and
+    no false "safe" or "risky" claim either way."""
+    p = tmp_path / "policy.yaml"
+    p.write_text(
+        """
+reclassify:
+  - symbol: foo
+    to: ignore
+""".strip(),
+        encoding="utf-8",
+    )
+    pf = PolicyFile.load(p)
+    assert pf.validate_overrides() == []

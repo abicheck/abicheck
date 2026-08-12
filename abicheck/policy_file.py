@@ -812,6 +812,48 @@ class PolicyFile:
                     f"'{kind.value}' (BREAKING) downgraded to 'ignore' — "
                     f"verify this is intentional."
                 )
+
+        # A: selector-scoped reclassification (Codex review) -- a
+        # `reclassify:` rule downgrading a critical/breaking kind is exactly
+        # the mistake this check exists to catch, whether it's expressed as
+        # a kind-global `overrides:` entry or a selector-scoped one; a rule
+        # bypassing the CLI's HIGH RISK diagnostic purely by being
+        # selector-scoped instead of global would make the new primitive a
+        # blind spot for the same safety check. Only a rule that names a
+        # `change_kind` can be checked here -- a rule scoped purely by
+        # symbol/pattern with no kind filter applies to whichever kind a
+        # matching finding happens to carry, and there is no single
+        # `base_verdict` to compare against without one.
+        slug_to_kind = {k.value: k for k in ChangeKind}
+        for rule in self.reclassify:
+            if rule.change_kind is None:
+                continue
+            kind = slug_to_kind[rule.change_kind]  # already validated at load time
+            verdict = rule.to_verdict
+            base_verdict = _raw_verdict_for_kind(
+                kind, base_breaking, base_api_break, base_compatible, base_risk
+            )
+            if _VERDICT_ORDER.index(verdict) >= _VERDICT_ORDER.index(base_verdict):
+                continue
+            selector = rule.describe()
+            if kind in _CRITICAL_BREAKING_KINDS:
+                if verdict == Verdict.COMPATIBLE:
+                    warnings.append(
+                        f"HIGH RISK: '{kind.value}' reclassified to 'ignore' "
+                        f"({selector}) — this is almost certainly a mistake. "
+                        f"This kind causes hard crashes when the ABI changes."
+                    )
+                elif verdict == Verdict.COMPATIBLE_WITH_RISK:
+                    warnings.append(
+                        f"RISK: '{kind.value}' reclassified to 'risk' "
+                        f"({selector}) — this kind usually causes binary "
+                        f"incompatibility. Consider keeping it as 'break'."
+                    )
+            elif kind in base_breaking and verdict == Verdict.COMPATIBLE:
+                warnings.append(
+                    f"'{kind.value}' (BREAKING) reclassified to 'ignore' "
+                    f"({selector}) — verify this is intentional."
+                )
         return warnings
 
 

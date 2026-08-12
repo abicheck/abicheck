@@ -74,4 +74,11 @@ A new changelog fragment. See changelog.d/README.md for the workflow.
   longer disclosed as "active" in the JSON/Markdown/HTML/SARIF reports
   (`policy_reclassify`/`policyReclassify`/etc.) — it can never actually
   match, so listing it there previously claimed a downgrade was in effect
-  when it no longer was.
+  when it no longer was. `classify_effective_change`'s addition/quality
+  split no longer widens the `addition` bucket for a `reclassify:` rule
+  that merely *matches* a finding but was shadowed by a higher-priority
+  `effective_verdict` (a pipeline modulation) that actually decided the
+  verdict. `PolicyFile.validate_overrides()` now also flags a `reclassify:`
+  rule downgrading a critical/breaking kind (the same `HIGH RISK`/`RISK`/
+  plain downgrade diagnostics `overrides:` already gets) — previously a
+  selector-scoped downgrade could bypass that safety check entirely.

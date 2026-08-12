@@ -338,7 +338,19 @@ def _reclassify_resolved_to_compatible(
     `overrides:`, see `effective_verdict_for_change`), but the addition/
     quality split would still read the *overridden* kind set and miscount
     it as `quality_issues`.
+
+    Must agree with `effective_verdict_for_change`'s own precedence, not
+    just "does some rule happen to match and resolve to COMPATIBLE" (Codex
+    review, fresh evidence): when `change.effective_verdict` is already set,
+    that value wins outright and `reclassify:` is never even consulted to
+    produce the verdict -- a *matching* rule sitting shadowed behind it must
+    not still be treated as "the reclassification that won" here, or an
+    addition kind globally overridden to `break` could get waved into
+    ADDITION merely because an irrelevant reclassify: rule happens to name
+    the same symbol.
     """
+    if isinstance(getattr(change, "effective_verdict", None), Verdict):
+        return False
     if policy_file is None:
         return False
     rules = getattr(policy_file, "reclassify", None)
