@@ -406,8 +406,15 @@ class TestTypeChurnScaling:
         # is inside the timed/repeated measurement. Deliberately *not* evenly
         # log-spaced (see _perf_scaling.py's docstring) -- a plain doubling
         # progression makes the middle point(s) contribute nothing to the
-        # least-squares slope.
-        snapshots = {n: _build_type_churn(n) for n in (500, 900, 1400, 2000)}
+        # least-squares slope. Floor kept at the original test's 1000, not
+        # lowered to 500: fixed per-call `compare()` overhead (C + a*n^2)
+        # flattens the *apparent* exponent at small n, so including a
+        # smaller size measurably dilutes sensitivity to a real quadratic
+        # regression (Codex review: verified numerically that a synthetic
+        # C + a*n^2 regression fits to ~1.88 -- under this test's own 1.9
+        # ceiling -- with a 500-inclusive sweep, against ~1.95 -- correctly
+        # over it -- with the original 1000-floor sweep).
+        snapshots = {n: _build_type_churn(n) for n in (1000, 1300, 1650, 2000)}
 
         def _measure(n: int) -> float:
             old, new = snapshots[n]
@@ -422,6 +429,34 @@ class TestTypeChurnScaling:
         # to genuine O(n^2) (exponent >= 1.9) should fail this guard.
         assert exponent < 1.9, (
             f"compare scaling exponent {exponent:.2f} regressed toward O(n^2)"
+        )
+
+    def test_scaling_sizes_still_catch_a_synthetic_quadratic_regression(self) -> None:
+        """Regression guard for the guard: pin the sensitivity argument in
+        the comment above with an executable check, so a future change back
+        to a smaller-inclusive sweep (e.g. re-adding 500) is caught here
+        directly rather than only by comment (Codex review, fresh evidence).
+
+        Models fixed-overhead-plus-quadratic ``compare()`` cost as
+        ``C + a*n**2`` with ``C`` set to the same proportion of ``a*1000**2``
+        used to verify this sizing choice, and asserts the *current* size
+        sweep still fits that synthetic regression above the 1.9 ceiling --
+        i.e. this test would actually fail if the regression it exists to
+        catch really happened.
+        """
+        sizes = (1000, 1300, 1650, 2000)
+        a = 1.0
+        c = 0.05 * a * 1000**2
+
+        def synthetic_regressed_cost(n: int) -> float:
+            return c + a * n**2
+
+        exponent = measure_scaling_exponent(synthetic_regressed_cost, sizes, repeats=1)
+        assert exponent >= 1.9, (
+            f"the current size sweep {sizes} fits a synthetic C + a*n^2 "
+            f"regression to exponent {exponent:.3f}, under the 1.9 ceiling "
+            "the real test asserts against -- it would silently pass a real "
+            "quadratic regression"
         )
 
 
