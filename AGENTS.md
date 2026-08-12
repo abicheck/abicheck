@@ -2203,25 +2203,42 @@ Once a root command genuinely clears the bar above, pick the right home:
   mechanism this entry is about, not the cross-namespace-collision fix
   already scoped there.
 
-  **Confirmed independently, and it narrows the blast radius
-  considerably: this reproduces on castxml only, not on the direct-clang
-  L2 backend.** Verified directly against real Clang 18
-  (`-Xclang -ast-dump=json`) on a minimal repro of the same shape (a
-  namespace-scope `constexpr` re-exported into an enclosing namespace via
-  `using`): Clang's AST represents the using-declaration as a `UsingDecl`
-  node carrying the qualified target name (`v1::cpu_feature_map`) but no
-  `init`/value of its own, immediately followed by an **implicit**,
-  **unnamed** `UsingShadowDecl` (`"isImplicit": true`, no `name` key at
-  all — confirmed by inspecting the emitted JSON directly, not inferred).
-  `dumper_clang.py`'s `_categorize()` has no branch matching either
-  `UsingDecl` or `UsingShadowDecl` — its `VarDecl` branch requires both
-  `kind == "VarDecl"` and a non-empty `name`, neither of which either
-  using-related node satisfies — so both are silently dropped and the
-  direct-clang backend never emits the duplicate. Not verified against a
-  live castxml run (no castxml binary available in this environment to
-  reproduce the XML shape directly) — the castxml-side mechanism above is
-  taken from the original report, not independently re-derived from
-  castxml's own output.
+  **Confirmed independently that the duplicate-entry shape is castxml-only
+  — but the direct-clang L2 backend is not clean either, it just fails in
+  the opposite direction (Codex review, fresh evidence).** Verified
+  directly against real Clang 18 (`-Xclang -ast-dump=json`) on a minimal
+  repro of the same shape (a namespace-scope `constexpr` re-exported into
+  an enclosing namespace via `using`): Clang's AST represents the
+  using-declaration as a `UsingDecl` node carrying the qualified target
+  name (`v1::cpu_feature_map`) but no `init`/value of its own, immediately
+  followed by an **implicit**, **unnamed** `UsingShadowDecl`
+  (`"isImplicit": true`, no `name` key at all — confirmed by inspecting
+  the emitted JSON directly, not inferred). `dumper_clang.py`'s
+  `_categorize()` has no branch matching either `UsingDecl` or
+  `UsingShadowDecl` — its `VarDecl` branch requires both `kind ==
+  "VarDecl"` and a non-empty `name`, neither of which either using-related
+  node satisfies — so both are silently dropped and the direct-clang
+  backend never emits the duplicate. Not verified against a live castxml
+  run (no castxml binary available in this environment to reproduce the
+  XML shape directly) — the castxml-side mechanism above is taken from the
+  original report, not independently re-derived from castxml's own
+  output.
+
+  This is *complementary* missing coverage, not a clean bill of health for
+  Clang: because the re-exported spelling never enters `AbiSnapshot.
+  constants` at all on that backend, a release that removes only the
+  `using v1::cpu_feature_map;` re-export while keeping the real
+  `v1::cpu_feature_map` definition breaks every consumer of the re-exported
+  spelling, but both the old and new Clang-derived snapshots contain only
+  the one underlying key — `_diff_constants()` has nothing to compare and
+  emits no `CONSTANT_REMOVED`, a silent false negative. Castxml's two
+  qualified keys, over-reporting as they are for the case this entry is
+  about, would at least detect that removal correctly. So the two backends
+  fail in opposite directions on the same underlying gap (no alias-identity
+  evidence for constants) — over-reporting on castxml, under-reporting on
+  clang — and any eventual fix (value-based or identity-based) must
+  preserve the alias spelling as its own comparable entity for add/remove
+  detection, not just collapse the duplicate down to one key.
 
   **Not fixed here.** A correct fix needs proven identity between the two
   entries, not name-based merging, for the same reason the
