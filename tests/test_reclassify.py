@@ -1078,3 +1078,48 @@ reclassify:
     )
     pf = PolicyFile.load(p)
     assert pf.validate_overrides() == []
+
+
+# --- effective_verdict_for_change's final fallback honors base_policy -----
+
+
+def test_effective_verdict_for_change_honors_custom_base_policy_with_no_match(
+    tmp_path: Path,
+) -> None:
+    """Codex review: for a policy_file whose base_policy isn't strict_abi
+    (e.g. plugin_abi), a finding with no effective_verdict/reclassify:/
+    overrides: match must fall back to *that* base policy's own kind sets,
+    not silently re-derive strict_abi's. Concrete repro: plugin_abi
+    downgrades calling_convention_changed from BREAKING (strict_abi) to
+    COMPATIBLE -- a bug here reads as BREAKING regardless of the policy
+    file's own base_policy. Pre-existing in effective_verdict_for_change's
+    final fallback line, surfaced by SuppressionList.audit()'s new
+    policy_file=-only call path (this PR) since no earlier caller passed
+    policy_file without also passing a matching kind_sets/policy."""
+    from abicheck.severity import effective_verdict_for_change
+
+    p = tmp_path / "policy.yaml"
+    p.write_text("base_policy: plugin_abi\n", encoding="utf-8")
+    pf = PolicyFile.load(p)
+    change = _change(ChangeKind.CALLING_CONVENTION_CHANGED, "foo")
+
+    assert effective_verdict_for_change(change, policy_file=pf) == Verdict.COMPATIBLE
+
+
+def test_audit_honors_custom_base_policy_for_a_non_matching_finding(
+    tmp_path: Path,
+) -> None:
+    """Same bug, exercised through the actual --audit-suppressions call
+    path this PR added (SuppressionList.audit(..., policy_file=pf))."""
+    from abicheck.suppression import Suppression, SuppressionList
+
+    p = tmp_path / "policy.yaml"
+    p.write_text("base_policy: plugin_abi\n", encoding="utf-8")
+    pf = PolicyFile.load(p)
+    sup = Suppression(symbol="foo")
+    supl = SuppressionList([sup])
+    change = _change(ChangeKind.CALLING_CONVENTION_CHANGED, "foo")
+
+    # plugin_abi downgrades this kind to COMPATIBLE -- never high-risk.
+    audit = supl.audit([change], policy_file=pf)
+    assert audit.high_risk_matches == []

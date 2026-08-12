@@ -315,8 +315,19 @@ def effective_verdict_for_change(
         ):
             return base_v
         return override_v
-    sets = _resolve_kind_sets(policy, kind_sets)
-    return effective_category(change, *sets)
+    # Reuses `base_sets` (already computed above from `policy_file.
+    # base_policy` when a policy_file is given) rather than recomputing from
+    # the outer `policy`/`kind_sets` parameters directly (Codex review,
+    # pre-existing bug surfaced by suppression.py's audit() calling this
+    # with only `policy_file=` set, no `policy=`/`kind_sets=`): for a
+    # policy_file whose base_policy isn't strict_abi (e.g. plugin_abi), a
+    # finding with no effective_verdict/reclassify/override match fell all
+    # the way back to strict_abi's own kind sets, silently ignoring the
+    # policy file's own base policy. For the no-policy_file case this is a
+    # pure simplification, not a behavior change: base_sets there is already
+    # computed as `_resolve_kind_sets(policy, kind_sets)` -- identical to
+    # what this line used to recompute.
+    return effective_category(change, *base_sets)
 
 
 def _reclassify_resolved_to_compatible(
