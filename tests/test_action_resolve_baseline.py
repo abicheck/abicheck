@@ -248,6 +248,47 @@ class TestInputValidation:
         assert result.returncode == 1
         assert "must not contain a newline" in result.stdout
 
+    def test_negative_expected_baseline_generation_is_a_usage_error(
+        self, tmp_path: Path
+    ) -> None:
+        # A negative value can never match a real manifest's non-negative
+        # baseline_generation -- an invalid caller input, not a legitimate
+        # expectation, so it must fail as a usage error (exit 64 ->
+        # run.sh's own usage-error branch), not silently propagate into a
+        # misleading stale_generation resolution failure (Codex review).
+        # resolve_baseline.py prints its own ::error:: for this straight to
+        # stderr (run.sh's `$(...)` capture only sees stdout, so its own
+        # wrapping "resolve-baseline usage error: " message on stdout has
+        # no MESSAGE to embed) -- assert on stderr, where the real text is.
+        result, _ = _run_action(
+            {
+                "INPUT_BASELINE_PATH": str(tmp_path),
+                "INPUT_CHANNEL": "accepted-main",
+                "INPUT_PROFILE": PROFILE,
+                "INPUT_TARGET": "libpvxs",
+                "INPUT_EXPECTED_BASELINE_GENERATION": "-1",
+            },
+            tmp_path,
+        )
+        assert result.returncode == 1
+        assert "must not be negative" in result.stderr
+
+    def test_non_integer_expected_baseline_generation_is_a_usage_error(
+        self, tmp_path: Path
+    ) -> None:
+        result, _ = _run_action(
+            {
+                "INPUT_BASELINE_PATH": str(tmp_path),
+                "INPUT_CHANNEL": "accepted-main",
+                "INPUT_PROFILE": PROFILE,
+                "INPUT_TARGET": "libpvxs",
+                "INPUT_EXPECTED_BASELINE_GENERATION": "bogus",
+            },
+            tmp_path,
+        )
+        assert result.returncode == 1
+        assert "not an integer" in result.stderr
+
 
 @pytest.mark.skipif(
     not RUN_SH.is_file(), reason="actions/resolve-baseline/run.sh not found"

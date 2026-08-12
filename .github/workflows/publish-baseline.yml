@@ -53,6 +53,15 @@ on:
         description: 'Evidence depth passed to every dump call (binary, headers, build, or source). Omit for the CLI default.'
         type: string
         default: ''
+      baseline-generation:
+        description: >-
+          Forwarded to actions/baseline's baseline-generation input --
+          scanner-compatibility generation to record in every published
+          contract profile's manifest.json (see
+          docs/use/baseline-management.md#scanner-upgrades-and-baseline-generations).
+          Omit to leave it unset.
+        type: string
+        default: ''
       validation:
         description: 'Forwarded to actions/baseline''s validation input (strict or none).'
         type: string
@@ -275,6 +284,7 @@ jobs:
           profile: ${{ matrix.profile_id }}
           build-info: ${{ inputs.build-info != '' && format('build-output/{0}/{1}', matrix.profile_id, inputs.build-info) || '' }}
           depth: ${{ inputs.depth }}
+          baseline-generation: ${{ inputs.baseline-generation }}
           validation: ${{ inputs.validation }}
           snapshot-compression: ${{ inputs.snapshot-compression }}
           python-version: ${{ inputs.python-version }}

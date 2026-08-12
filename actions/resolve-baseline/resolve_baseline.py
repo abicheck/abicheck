@@ -130,6 +130,20 @@ def main(argv: list[str] | None = None) -> int:
                 file=sys.stderr,
             )
             return _EXIT_USAGE_ERROR
+        # A negative value can never match a real manifest's non-negative
+        # baseline_generation (actions/baseline/build_manifest.py rejects a
+        # negative --baseline-generation outright), so it's an invalid
+        # caller input, not a legitimate expectation -- reject it here as a
+        # usage error (exit 64) rather than letting it silently propagate
+        # into a misleading stale_generation *resolution* failure (Codex
+        # review).
+        if expected_baseline_generation < 0:
+            print(
+                "::error::--expected-baseline-generation "
+                f"{expected_baseline_generation!r} must not be negative.",
+                file=sys.stderr,
+            )
+            return _EXIT_USAGE_ERROR
 
     candidate_evidence_producer = None
     if args.candidate_evidence_producer:

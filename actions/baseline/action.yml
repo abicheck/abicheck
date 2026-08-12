@@ -64,8 +64,14 @@ inputs:
       bump), distinct from the installed abicheck *version* (which also
       changes for report-format/policy/detector-only upgrades that don't
       need a new baseline). Omit to leave it unset (baseline_generation:
-      null in the manifest -- generation drift is then never checked by
-      resolve-baseline's expected-baseline-generation input). See
+      null in the manifest). Leaving it unset does NOT by itself disable
+      resolve-baseline's stale_generation check -- that check is opt-in on
+      the CONSUMER side (resolve-baseline's own expected-baseline-generation
+      input): if a consumer requires a specific generation while this
+      producer input is left unset, every comparison against this
+      baseline-set fails as stale_generation. Keep both sides in sync -- set
+      this input whenever a consumer is given an expected-baseline-
+      generation to check against. See
       docs/use/baseline-management.md#scanner-upgrades-and-baseline-generations.
     required: false
     default: ''

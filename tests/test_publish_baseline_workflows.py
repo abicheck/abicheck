@@ -477,6 +477,33 @@ class TestBaselineLibrariesDerivation:
                 == "${{ inputs.snapshot-compression }}"
             )
 
+    def test_baseline_generation_input_forwarded_to_baseline_action(self) -> None:
+        # Regression (Codex review): actions/baseline's baseline-generation
+        # input was reachable from the bare Action but not from either
+        # reusable producer workflow -- a caller relying on
+        # publish-baseline.yml/update-main-baseline.yml (not the bare
+        # Action directly) had no way to set it, so every baseline these
+        # workflows publish would always record baseline_generation: null,
+        # silently defeating a consumer's expected-baseline-generation
+        # check (every comparison against it would fail as
+        # stale_generation). Same declare-then-forward shape as
+        # snapshot-compression above.
+        for path, job_name in (
+            (PUBLISH_BASELINE, "publish"),
+            (UPDATE_MAIN_BASELINE, "refresh"),
+        ):
+            data = _load(path)
+            inputs = data[True]["workflow_call"]["inputs"]
+            assert inputs["baseline-generation"]["default"] == ""
+            assert inputs["baseline-generation"]["type"] == "string"
+
+            steps = _steps(data["jobs"][job_name])
+            dump_step = next(s for s in steps if s.get("name") == "Dump baseline-set")
+            assert (
+                dump_step["with"]["baseline-generation"]
+                == "${{ inputs.baseline-generation }}"
+            )
+
 
 class TestBaselineRotationFixture:
     """The plan's own P1.6 item requires a fixture asserting two consecutive
