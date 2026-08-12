@@ -117,6 +117,21 @@ _VALID_RECLASSIFY_VERDICTS: frozenset[Verdict] = frozenset({
     Verdict.COMPATIBLE,
 })
 
+#: The canonical ``to:`` spelling for each valid reclassify verdict --
+#: policy_file.py's `_SEVERITY_MAP` (``break``/``warn``/``risk``/``ignore``)
+#: read in reverse. Duplicated here rather than imported (a static import of
+#: policy_file.py would close the exact import cycle the module docstring
+#: describes) -- this is the whole vocabulary, four entries, and stable by
+#: construction (`_VALID_RECLASSIFY_VERDICTS` names the same four verdicts).
+#: Used by `ReclassifyRule.__post_init__` to canonicalize `self.to` so it can
+#: never disagree with `self.to_verdict` (Codex review).
+_CANONICAL_TO_SPELLING: dict[Verdict, str] = {
+    Verdict.BREAKING: "break",
+    Verdict.API_BREAK: "warn",
+    Verdict.COMPATIBLE_WITH_RISK: "risk",
+    Verdict.COMPATIBLE: "ignore",
+}
+
 
 def _suppression_cls() -> Any:
     """Resolve :class:`abicheck.suppression.Suppression` at call time --
@@ -156,8 +171,14 @@ class ReclassifyRule:
             already resolved from the raw ``to:`` spelling by the loader
             (:func:`abicheck.policy_file.parse_severity_value`), so this
             class carries no severity vocabulary of its own.
-        to: The raw ``to:`` spelling as written in the policy file, kept
-            only for :meth:`describe`/audit output.
+        to: The ``to:`` spelling, for :meth:`describe`/:meth:`to_report_dict`
+            audit output. Canonicalized in ``__post_init__`` to always match
+            ``to_verdict`` (see there) -- for a policy-file-loaded rule this
+            is simply the value the loader already passed in (the loader
+            derives ``to_verdict`` from this same spelling, so they already
+            agree); a directly-constructed rule (a public API surface) that
+            passes an inconsistent or omitted ``to`` gets it overwritten with
+            the canonical spelling for its ``to_verdict`` instead.
         symbol, symbol_pattern, type_pattern, member_name, namespace,
         entity_namespace, cause_namespace, source_location, change_kind,
         expires: Same selector grammar and semantics as the identically
@@ -197,6 +218,18 @@ class ReclassifyRule:
                 f"Invalid to_verdict {self.to_verdict!r}. Valid values: "
                 f"{sorted(v.value for v in _VALID_RECLASSIFY_VERDICTS)}"
             )
+        # Canonicalize `to` from `to_verdict` rather than trusting a caller-
+        # supplied spelling (Codex review, second round on the same audit-
+        # trail concern -- the earlier fix only patched reporter.py's own
+        # reclassified_by fallback; describe() still reads self.to directly,
+        # so Markdown/HTML disclosure could still misdescribe a directly-
+        # constructed rule whose `to` disagreed with, or omitted,
+        # `to_verdict`). This is a no-op for every policy-file-loaded rule:
+        # the loader always derives to_verdict FROM this same spelling, so
+        # they already agree and this simply reassigns the same string.
+        # `to_verdict` is the single source of truth; `to` is always its
+        # derived display spelling.
+        self.to = _CANONICAL_TO_SPELLING[self.to_verdict]
         # A datetime is itself a date subclass, so a Python caller
         # constructing this rule directly with expires=datetime(...) would
         # otherwise pass isinstance(expires, date) unnormalized and later

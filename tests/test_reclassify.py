@@ -271,6 +271,28 @@ def test_reclassify_rule_direct_construction_normalizes_a_datetime_expires() -> 
     ), "past-expiry rule should stop matching (not crash)"
 
 
+def test_reclassify_rule_canonicalizes_to_from_to_verdict() -> None:
+    """Codex review (second round on the same audit-trail concern): a
+    directly-constructed rule's `to` is canonicalized from `to_verdict` in
+    `__post_init__`, not trusted verbatim -- so `describe()` (used by the
+    Markdown/HTML renderers) can never disagree with the verdict the rule
+    actually applies, even when a caller supplies an inconsistent or omitted
+    `to`. Verified by deliberately reverting the canonicalization and
+    confirming this test fails."""
+    # Inconsistent `to` -- the rule still promotes to BREAKING (to_verdict is
+    # authoritative for matching/severity), but a naive `self.to` echo would
+    # have described it as "ignore".
+    rule = ReclassifyRule(to_verdict=Verdict.BREAKING, to="ignore", symbol="foo")
+    assert rule.to == "break"
+    assert "to=break" in rule.describe()
+    assert "to=ignore" not in rule.describe()
+
+    # Omitted `to` (the dataclass default "") is likewise canonicalized.
+    rule2 = ReclassifyRule(to_verdict=Verdict.COMPATIBLE_WITH_RISK, symbol="foo")
+    assert rule2.to == "risk"
+    assert "to=risk" in rule2.describe()
+
+
 def test_reclassify_respects_frozen_namespace_floor(tmp_path: Path) -> None:
     """A reclassify rule downgrading a change on a frozen namespace is
     silently rejected, exactly like a kind-global override already is."""

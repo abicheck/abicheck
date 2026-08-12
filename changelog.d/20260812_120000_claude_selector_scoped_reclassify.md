@@ -133,4 +133,13 @@ A new changelog fragment. See changelog.d/README.md for the workflow.
   actually match `to_verdict` could mislabel the audit trail (e.g. a real
   `to_verdict=BREAKING` promotion reported as `"ignore"`); deriving from the
   resolved verdict itself guarantees the disclosure is always present and
-  always accurate.
+  always accurate. `ReclassifyRule.__post_init__` now canonicalizes `to`
+  from `to_verdict` directly, closing the same class of bug at its root:
+  the earlier fix only patched `reporter.py`'s own `reclassified_by`
+  fallback, but `describe()` (used by the Markdown/HTML report renderers)
+  still read `self.to` verbatim, so a directly-constructed rule with an
+  inconsistent or omitted `to` still misdescribed itself there. `to_verdict`
+  is now the single source of truth; `to` is always its derived canonical
+  spelling (`break`/`warn`/`risk`/`ignore`) — a no-op for every
+  policy-file-loaded rule, since the loader already derives one from the
+  other.
