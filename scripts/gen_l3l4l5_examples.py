@@ -522,43 +522,44 @@ def build_cases() -> dict[str, tuple[str, dict[str, Any], dict[str, Any]]]:
             _helper_entity("_ZN4demo6detail6helperEi", "include/demo/detail_v1.h"),
         ],
     )
+    # The demo::process -> demo::detail::helper call relationship is
+    # deliberately fed as a SourceAbiSurface.source_edges row (the same L4
+    # wire format a real Clang-plugin/replay extractor emits) rather than
+    # appended onto the graph after the fact -- routing it through
+    # build_source_graph()'s own fold_source_edges() call (Codex review,
+    # fresh evidence) so this fixture actually exercises the real
+    # producer/fold path it claims to, gets real "source_edges" provenance
+    # stamped, and can't silently stay green if that fold regresses.
+    # Present on the NEW side only (not old): dependency reachability
+    # (source_graph_findings._internal_dependency_findings) compares raw
+    # target node ids across versions, not reconciled identities, so an
+    # edge present on BOTH sides pointing at the helper's two different
+    # per-version mangled-name node ids would make the "no internal
+    # dependency -> reaches 1" finding text literally false (the
+    # dependency would already have existed in old, just under a
+    # different raw id) -- a real detector limitation caught by an
+    # earlier review round (dependency reachability doesn't consult
+    # graph_reconcile's pairing). Restricting the edge to the new side
+    # only makes the scenario, and the finding text, both literally true:
+    # demo::process starts depending on the (already-existing-but-
+    # previously-unreached) private helper in the same release the
+    # helper's own signature and header change.
     l5j_new_surface = SourceAbiSurface(
         library="libdemo.so",
         reachable_declarations=[
             _pub_caller(),
             _helper_entity("_ZN4demo6detail6helperEl", "include/demo/detail_v2.h"),
         ],
+        source_edges=[
+            {
+                "edge": "DECL_CALLS_DECL",
+                "src": "_ZN4demo7processEv",
+                "dst": "_ZN4demo6detail6helperEl",
+            }
+        ],
     )
-    # The DECL_CALLS_DECL edge is deliberately added on the NEW side only
-    # (not old): dependency reachability (source_graph_findings.
-    # _internal_dependency_findings) compares raw target node ids across
-    # versions, not reconciled identities, so an edge present on BOTH sides
-    # pointing at the helper's two different per-version mangled-name node
-    # ids would make the "no internal dependency -> reaches 1" finding text
-    # literally false (the dependency already existed in old, just under a
-    # different raw id) -- a real detector limitation caught by review
-    # (dependency reachability doesn't consult graph_reconcile's pairing).
-    # Restricting the edge to the new side only makes the scenario, and the
-    # finding text, both literally true: demo::process starts depending on
-    # the (already-existing-but-previously-unreached) private helper in the
-    # same release the helper's own signature and header change.
     l5j_old_graph = build_source_graph(l5j_build, l5j_old_surface)
     l5j_new_graph = build_source_graph(l5j_build, l5j_new_surface)
-    # add_edge() (not a raw .edges.append()) so the edge is deduped/resolved
-    # the same way the real fold's own edges are; finalize() afterward so
-    # graph_id and the coverage counts (coverage.call_edges) are recomputed
-    # against the graph's true final edge set, not stale as of the fold's
-    # own internal finalize() call before this edge existed (Codex review,
-    # fresh evidence — the committed graph_id/coverage previously silently
-    # disagreed with the actual serialized edges).
-    l5j_new_graph.add_edge(
-        GraphEdge(
-            src="decl://_ZN4demo7processEv",
-            dst="decl://_ZN4demo6detail6helperEl",
-            kind="DECL_CALLS_DECL",
-        )
-    )
-    l5j_new_graph.finalize()
     cases["case196_header_graph_move_reconciled"] = (
         "L5",
         l5j_old_graph.to_dict(),

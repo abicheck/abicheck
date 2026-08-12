@@ -76,7 +76,7 @@ correct canonical answer, carried entirely by the single RISK-tier L5
 
 | v1 (conceptual) | v2 (conceptual) |
 |------|------|
-| `// include/demo/api.h`<br>`void process() { detail::helper(1); }`<br><br>`// include/demo/detail_v1.h`<br>`namespace detail { void helper(int); }` | `// include/demo/api.h`<br>`void process() { detail::helper(1L); }`<br><br>`// include/demo/detail_v2.h`<br>`namespace detail { void helper(long); }` |
+| `// include/demo/api.h`<br>`void process() { /* does not call helper yet */ }`<br><br>`// include/demo/detail_v1.h`<br>`namespace detail { void helper(int); }` | `// include/demo/api.h`<br>`void process() { detail::helper(1L); }`<br><br>`// include/demo/detail_v2.h`<br>`namespace detail { void helper(long); }` |
 
 This case ships a hand-built pair of evidence-model fixtures (`old.json` /
 `new.json`, `SourceGraphSummary` objects) instead of compiled `v1`/`v2`

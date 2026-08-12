@@ -78,11 +78,11 @@
         {
           "attrs": {},
           "confidence": "unknown",
-          "producer": ""
+          "producer": "source_edges"
         }
       ],
       "occurrences": [],
-      "provenance": "",
+      "provenance": "source_edges",
       "resolved": {},
       "src": "decl://_ZN4demo7processEv"
     }
