@@ -43,6 +43,9 @@ from .checker_policy import (
 )
 from .contract_gating import is_evaluated
 from .finding_identity import missing_contract_kind, report_finding_id
+from .report_correlation import (
+    _suppress_dangling_correlation_notes as _suppress_dangling_correlation_notes,
+)
 from .report_summary import build_summary, surface_breakdown
 from .semver import recommend_release
 
@@ -1840,80 +1843,6 @@ def _append_recommendation_section(lines: list[str], result: DiffResult) -> None
         f"{rec.rationale}",
         "",
     ]
-
-
-def _suppress_dangling_correlation_notes(changes: Sequence[Change]) -> list[Change]:
-    """Rendering-local view of *changes* with ``Change.correlated_change_kind``
-    cleared on any change whose named target is not itself present in
-    *changes*.
-
-    ``--show-only`` can keep a ``LAYOUT_UNVERIFIABLE`` finding while
-    filtering out the co-reported ``TYPE_VTABLE_CHANGED`` its
-    ``correlated_change_kind`` names -- rendering "See also:
-    type_vtable_changed finding for the same symbol" with nothing in the
-    *visible* report to actually see (Codex review, fresh evidence). Same
-    shape of gap for the older ADR-041 pairing
-    (``PUBLIC_API_INTERNAL_DEPENDENCY_ADDED`` <-> an
-    ``inline_body_changed``/``template_body_changed``/
-    ``public_typedef_target_changed`` on the same public entry), so this
-    checks both identity keys the two pairings correlate by --
-    ``qualified_name`` (the vtable/layout pairing) and ``symbol`` (the
-    ADR-041 pairing) -- rather than hard-coding one.
-
-    Defined here (reporter_markdown.py) but re-exported by ``reporter.py``
-    and called by every format that independently applies ``--show-only``
-    to its own filtered ``changes`` list before rendering
-    ``correlated_change_kind`` -- JSON/root-cause-JSON (``reporter.py``),
-    SARIF (``sarif.py``), the HTML report (``html_report.py``), and JUnit
-    XML (``junit_report.py``), in addition to markdown's own three views
-    (default/leaf/root-cause). A gap first fixed only in markdown left the
-    other four formats independently able to render the same dangling
-    reference (Codex review, fresh evidence: caught one commit after the
-    markdown-only fix landed).
-
-    Never mutates the original ``Change`` objects (shared across every
-    format, each of which applies its own filter, if any, independently);
-    only a shallow copy handed to the calling renderer is touched, and only
-    its ``correlated_change_kind`` field. Never changes a finding's
-    presence, kind, or severity -- purely a display-time fix for what would
-    otherwise be a dangling cross-reference.
-    """
-    present_by_qualified_name = {
-        (c.qualified_name, c.kind.value) for c in changes if c.qualified_name
-    }
-    present_by_symbol = {(c.symbol, c.kind.value) for c in changes}
-
-    result: list[Change] = []
-    for c in changes:
-        correlated = getattr(c, "correlated_change_kind", None)
-        if correlated and not (
-            (c.qualified_name, correlated) in present_by_qualified_name
-            or (c.symbol, correlated) in present_by_symbol
-        ):
-            import copy
-
-            c2 = copy.copy(c)
-            c2.correlated_change_kind = None
-            # A shallow copy shares the *same* impact_assessment object as
-            # the original -- when a reachability-aware suppression made
-            # MarkReachability cache one (impact.engine.assess_change()
-            # prefers a cached assessment's own correlated_change_kind over
-            # the flat field once one exists), clearing only the flat field
-            # above leaves this copy's nested JSON/SARIF impact_assessment
-            # block still publishing the stale reference (Codex review,
-            # fresh evidence). ImpactAssessment is frozen, so replace it
-            # with a corrected copy on c2 -- never mutate the cached object
-            # in place, which would also corrupt the *original* c's cache.
-            if c2.impact_assessment is not None:
-                import dataclasses
-
-                c2.impact_assessment = dataclasses.replace(
-                    c2.impact_assessment, correlated_change_kind=None
-                )
-            result.append(c2)
-        else:
-            result.append(c)
-    return result
 
 
 def _format_change_md_oneline(c: object) -> str:
