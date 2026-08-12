@@ -464,3 +464,44 @@ def test_render_baseline_lines_notes_truncation() -> None:
     )
     text = "\n".join(render_baseline_lines(out))
     assert "additional findings omitted" in text
+
+
+def _suppressed_diff_summary() -> dict:
+    return {
+        "breaking": 0,
+        "api_break": 0,
+        "risk": 0,
+        "compatible": 0,
+        "suppressed_count": 1,
+        "suppressed": [
+            {
+                "bucket": "suppressed",
+                "kind": "func_removed",
+                "symbol": "_Z3foov",
+                "description": "Public function removed: foo",
+                "source_location": "foo.h:42",
+                "suppression_rule": "intentional",
+                "pre_suppression_bucket": "breaking",
+            }
+        ],
+    }
+
+
+def test_render_baseline_lines_always_shows_suppressed_count() -> None:
+    """A suppressed finding must leave a trace even without --show-suppressed."""
+    out = SimpleNamespace(diff_summary=_suppressed_diff_summary())
+    text = "\n".join(render_baseline_lines(out))
+    assert "suppressed=1" in text
+    # Not itemized without the flag.
+    assert "_Z3foov" not in text
+    assert "--show-suppressed to itemize" in text
+
+
+def test_render_baseline_lines_show_suppressed_itemizes() -> None:
+    out = SimpleNamespace(diff_summary=_suppressed_diff_summary())
+    text = "\n".join(render_baseline_lines(out, show_suppressed=True))
+    assert "suppressed=1" in text
+    assert "_Z3foov" in text
+    assert "foo.h:42" in text
+    assert "rule: intentional" in text
+    assert "breaking → suppressed" in text

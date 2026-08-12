@@ -324,12 +324,24 @@ def render_preprocessor_lines(out: Any) -> list[str]:
     return lines
 
 
-def render_baseline_lines(out: Any) -> list[str]:
+def render_baseline_lines(out: Any, *, show_suppressed: bool = False) -> list[str]:
     """The baseline comparison summary block (empty without a baseline diff).
 
     Beyond the counts, lists the actual findings (kind/symbol/location) the
     baseline compare produced — a bare "breaking=1" count is not actionable
     without naming what broke (see ``_run_baseline_compare``'s ``findings``).
+
+    Suppression must survive suppression: the counts line always includes
+    ``suppressed=N`` when ``--suppress`` removed anything (a suppressed
+    finding is a report-suppression decision, not silence -- a reviewer who
+    never passes ``--show-suppressed`` should still see *that* something was
+    withheld, even without the itemized list). ``--show-suppressed`` (*
+    *show_suppressed*) additionally itemizes each one the same way the
+    gating findings above are itemized, tagged with its
+    ``pre_suppression_bucket`` (what it would have counted as) and the
+    ``--suppress`` rule that matched it -- ``--format json``'s ``diff.
+    suppressed[]`` already carries this unconditionally; this only changes
+    what the text renderer prints.
     """
     if out.diff_summary is None:
         return []
@@ -339,14 +351,16 @@ def render_baseline_lines(out: Any) -> list[str]:
         # {"reason": ...} here, not the normal breaking/api_break/risk/
         # compatible shape below.
         return ["", "Baseline comparison", f"  not comparable: {out.diff_summary['reason']}"]
-    lines = [
-        "",
-        "Baseline comparison",
+    counts_line = (
         f"  breaking={out.diff_summary['breaking']} "
         f"api_break={out.diff_summary['api_break']} "
         f"risk={out.diff_summary['risk']} "
-        f"compatible={out.diff_summary['compatible']}",
-    ]
+        f"compatible={out.diff_summary['compatible']}"
+    )
+    suppressed_count = out.diff_summary.get("suppressed_count", 0)
+    if suppressed_count:
+        counts_line += f" suppressed={suppressed_count}"
+    lines = ["", "Baseline comparison", counts_line]
     for f in out.diff_summary.get("findings", []):
         loc = f" ({f['source_location']})" if f.get("source_location") else ""
         symbol = f.get("symbol") or "?"
@@ -355,6 +369,24 @@ def render_baseline_lines(out: Any) -> list[str]:
         lines.append(
             "    … additional findings omitted; rerun `compare` for the full list"
         )
+    if suppressed_count and show_suppressed:
+        lines.append("  Suppressed findings:")
+        for f in out.diff_summary.get("suppressed", []):
+            loc = f" ({f['source_location']})" if f.get("source_location") else ""
+            symbol = f.get("symbol") or "?"
+            bucket = f.get("pre_suppression_bucket") or "?"
+            rule = f.get("suppression_rule") or "?"
+            lines.append(
+                f"    [{bucket} → suppressed] {f['kind']}: {symbol}{loc} "
+                f"(rule: {rule})"
+            )
+        if out.diff_summary.get("suppressed_truncated"):
+            lines.append(
+                "    … additional suppressed findings omitted; rerun with "
+                "--format json for the full list"
+            )
+    elif suppressed_count:
+        lines.append("  (pass --show-suppressed to itemize)")
     lines.extend(_severity_gate_lines(out.diff_summary))
     return lines
 

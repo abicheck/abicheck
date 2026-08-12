@@ -1101,6 +1101,47 @@ def test_release_render_lists_removed_libraries():
     assert "Per-library results (2)" in body
 
 
+def test_suppressed_count_rendered_in_comment():
+    """"Reporting must survive suppression": the comment must say *that*
+    findings were withheld, not just show the post-suppression buckets."""
+    report = _compare_report()
+    report["suppression"] = {"file_provided": True, "suppressed_count": 3}
+    model = build_model(report)
+    assert model.suppressed_count == 3
+    body = render_comment(model, sha="cafe1234")
+    assert "3 findings suppressed by `--suppress`" in body
+
+
+def test_suppressed_count_singular_wording():
+    report = _compare_report()
+    report["suppression"] = {"file_provided": True, "suppressed_count": 1}
+    body = render_comment(build_model(report), sha="cafe1234")
+    assert "1 finding suppressed by `--suppress`" in body
+
+
+def test_no_suppression_note_without_a_suppress_file():
+    body = render_comment(build_model(_compare_report()), sha="cafe1234")
+    assert "suppressed by" not in body
+
+
+def test_reclassified_count_rendered_in_comment():
+    report = _compare_report()
+    report["policy_overrides"] = {"func_removed": "COMPATIBLE_WITH_RISK"}
+    model = build_model(report)
+    assert model.reclassified_count == 1
+    body = render_comment(model, sha="cafe1234")
+    assert "1 finding reclassified by `--policy-file`" in body
+
+
+def test_suppressed_and_reclassified_notes_combine():
+    report = _compare_report()
+    report["suppression"] = {"file_provided": True, "suppressed_count": 2}
+    report["policy_overrides"] = {"func_removed": "COMPATIBLE_WITH_RISK"}
+    body = render_comment(build_model(report), sha="cafe1234")
+    assert "2 findings suppressed by `--suppress`" in body
+    assert "1 finding reclassified by `--policy-file`" in body
+
+
 def test_pipe_characters_escaped_in_cells():
     report = _compare_report(
         [

@@ -184,6 +184,14 @@ class CommentModel:
     full_verdict: str | None = None
     used_by_summaries: list[dict[str, object]] = field(default_factory=list)
     required_symbol_summary: dict[str, object] | None = None
+    # "Reporting must survive suppression": how many findings a `--suppress`
+    # rule removed from `changes` before this comment ever saw them, and how
+    # many carry a `policy_overrides`-reclassified verdict (a custom
+    # `--policy-file` re-classification moving a kind to a different verdict
+    # bucket than its built-in default) — both silent otherwise, since
+    # neither shows up in the three buckets above by construction.
+    suppressed_count: int = 0
+    reclassified_count: int = 0
 
     @property
     def counts(self) -> tuple[int, int, int]:
@@ -287,6 +295,40 @@ def _bucket_changes(
     return breaking, review, safe
 
 
+def _suppressed_count(report: dict[str, object]) -> int:
+    """The number of findings a ``--suppress`` rule removed from ``changes``.
+
+    Reads ``reporter._add_suppression``'s ``suppression`` block
+    (``suppression.suppressed_count``) -- ``0`` (not an error) for a report
+    without it, which is every run that didn't pass ``--suppress``.
+    """
+    suppression = report.get("suppression")
+    if isinstance(suppression, dict):
+        count = suppression.get("suppressed_count")
+        if isinstance(count, int):
+            return count
+    return 0
+
+
+def _reclassified_count(report: dict[str, object]) -> int:
+    """The number of ``changes`` whose kind was moved to a different verdict
+    bucket by a ``--policy-file`` override (``reporter._add_policy_overrides``'s
+    ``policy_overrides`` map: ``ChangeKind`` value -> overridden ``Verdict``).
+
+    ``0`` for a report without any overrides, which is every run that didn't
+    pass ``--policy-file``.
+    """
+    overrides = report.get("policy_overrides")
+    changes = report.get("changes")
+    if not isinstance(overrides, dict) or not overrides or not isinstance(changes, list):
+        return 0
+    return sum(
+        1
+        for c in changes
+        if isinstance(c, dict) and str(c.get("kind", "")) in overrides
+    )
+
+
 def _breaking_categories(findings: list[Finding]) -> frozenset[str]:
     """The set of severity-config categories present in a Breaking bucket."""
     return frozenset(f.category for f in findings if f.category)
@@ -343,6 +385,8 @@ def _from_compare(
             if isinstance(required_symbol_contract, dict)
             else None
         ),
+        suppressed_count=_suppressed_count(report),
+        reclassified_count=_reclassified_count(report),
     )
 
 
@@ -919,6 +963,25 @@ def _library_notes(model: CommentModel) -> list[str]:
     return out
 
 
+def _suppression_note(model: CommentModel) -> list[str]:
+    """"Reporting must survive suppression": a reviewer must see *that*
+    findings were withheld/reclassified, not just the post-suppression
+    buckets above (which, for a fully-suppressed diff, could otherwise read
+    as "no ABI changes at all")."""
+    parts: list[str] = []
+    if model.suppressed_count:
+        n = model.suppressed_count
+        parts.append(f"🔇 {n} finding{'s' if n != 1 else ''} suppressed by `--suppress`")
+    if model.reclassified_count:
+        n = model.reclassified_count
+        parts.append(
+            f"🔀 {n} finding{'s' if n != 1 else ''} reclassified by `--policy-file`"
+        )
+    if not parts:
+        return []
+    return [f"> ℹ️ {' · '.join(parts)} — see the full JSON report for details.", ""]
+
+
 def _scoped_notes(model: CommentModel) -> list[str]:
     """`compare --used-by`/`--required-symbol(s)` scoping banner + summary.
 
@@ -1067,6 +1130,7 @@ def _render_body(
     lines += _library_notes(model)
     lines += _gate_note(model)
     lines += _scoped_notes(model)
+    lines += _suppression_note(model)
     if detail != "summary":
         lines += _body_sections(model, detail)
     lines += _footer_block(ts, run_label, short_sha, report_url)
