@@ -97,7 +97,7 @@ from __future__ import annotations
 
 import importlib
 from dataclasses import dataclass, field
-from datetime import date
+from datetime import date, datetime
 from typing import Any
 
 from .checker_policy import Verdict
@@ -197,6 +197,18 @@ class ReclassifyRule:
                 f"Invalid to_verdict {self.to_verdict!r}. Valid values: "
                 f"{sorted(v.value for v in _VALID_RECLASSIFY_VERDICTS)}"
             )
+        # A datetime is itself a date subclass, so a Python caller
+        # constructing this rule directly with expires=datetime(...) would
+        # otherwise pass isinstance(expires, date) unnormalized and later
+        # crash Suppression.is_expired()'s `date.today() > self.expires`
+        # comparison (TypeError: can't compare date and datetime) -- the
+        # same YAML-unquoted-timestamp case policy_file.py's
+        # _parse_reclassify_expires already normalizes for the loader path,
+        # applied here too so direct construction (a public API surface,
+        # not just the policy-file loader) doesn't crash on the identical
+        # input shape (Codex review).
+        if isinstance(self.expires, datetime):
+            self.expires = self.expires.date()
         # Delegates all selector validation (mutual exclusivity, unknown
         # change_kind, malformed glob/regex, "at least one selector") to
         # Suppression's own __post_init__ -- a ValueError raised there

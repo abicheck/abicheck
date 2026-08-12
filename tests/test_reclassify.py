@@ -249,6 +249,28 @@ reclassify:
     ), "past-expiry rule should stop matching (not crash)"
 
 
+def test_reclassify_rule_direct_construction_normalizes_a_datetime_expires() -> None:
+    """Codex review: only the policy-file loader (`_parse_reclassify_expires`)
+    normalized a `datetime` expires to `.date()` -- a Python caller
+    constructing `ReclassifyRule` directly with `expires=datetime(...)` (a
+    `datetime` is itself a `date` subclass, so the type annotation accepts
+    it) hit the identical `TypeError` crash on `is_expired()`/`matches()`.
+    Verified by deliberately reverting the __post_init__ normalization and
+    confirming this test fails with a raised TypeError."""
+    from datetime import date, datetime
+
+    rule = ReclassifyRule(
+        to_verdict=Verdict.COMPATIBLE,
+        to="ignore",
+        symbol="foo",
+        expires=datetime(2020, 8, 12, 0, 0, 0),
+    )
+    assert rule.expires == date(2020, 8, 12)
+    assert not rule.matches(
+        _change(ChangeKind.FUNC_REMOVED, "foo"), today=date(2026, 1, 1)
+    ), "past-expiry rule should stop matching (not crash)"
+
+
 def test_reclassify_respects_frozen_namespace_floor(tmp_path: Path) -> None:
     """A reclassify rule downgrading a change on a frozen namespace is
     silently rejected, exactly like a kind-global override already is."""
@@ -1506,3 +1528,35 @@ reclassify:
 
     d = json.loads(to_json(diff))
     assert "reclassified_by" not in d["changes"][0]
+
+
+def test_reclassified_by_falls_back_to_to_verdict_for_a_directly_constructed_rule() -> (
+    None
+):
+    """Codex review: a Python caller constructing `ReclassifyRule` directly
+    with only `to_verdict` set (`to` defaults to `""`) previously stamped no
+    `reclassified_by` at all -- `rule.label or rule.reason or rule.to`
+    fell through to the empty string. Worse, a `to` that doesn't actually
+    match `to_verdict` would mislabel the audit trail. Falling back to
+    `rule.to_verdict.value` instead of the raw, caller-supplied `to`
+    guarantees the disclosure is always present and always reflects the
+    verdict that was actually applied."""
+    import json
+
+    from abicheck.checker_types import DiffResult
+    from abicheck.reporter import to_json
+
+    # `to=""` (the dataclass default) -- as a direct Python construction
+    # would leave it if the caller only set to_verdict.
+    rule = ReclassifyRule(
+        to_verdict=Verdict.COMPATIBLE, symbol="foo", change_kind="func_removed"
+    )
+    pf = PolicyFile(base_policy="strict_abi", overrides={}, reclassify=[rule])
+    change = _change(ChangeKind.FUNC_REMOVED, "foo")
+    diff = DiffResult(
+        changes=[change], old_version="1", new_version="2", library="l",
+        policy_file=pf,
+    )
+
+    d = json.loads(to_json(diff))
+    assert d["changes"][0]["reclassified_by"] == "COMPATIBLE"

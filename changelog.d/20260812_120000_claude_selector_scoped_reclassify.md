@@ -118,4 +118,19 @@ A new changelog fragment. See changelog.d/README.md for the workflow.
   clamps back to BREAKING via the floor with no reclassify rule involved at
   all, so comparing against the raw (unclamped) override value instead would
   have made the rule read as deciding a verdict that was already going to be
-  BREAKING regardless.
+  BREAKING regardless. `ReclassifyRule`'s `__post_init__` now normalizes a
+  `datetime` `expires` (a `datetime` is itself a `date` subclass, so the
+  type annotation accepted one) to `.date()`, same as `policy_file.py`'s
+  loader already does for an unquoted YAML timestamp — previously only the
+  loader path was normalized, and a Python caller constructing
+  `ReclassifyRule` directly with `expires=datetime(...)` (a public API
+  surface, not just the policy-file loader) crashed with `TypeError: can't
+  compare date and datetime` the first time the rule was matched or its
+  expiry checked. The `reclassified_by` fallback now derives from
+  `rule.to_verdict.value` instead of the raw, caller-supplied `rule.to` —
+  previously a directly-constructed rule with only `to_verdict` set (`to`
+  defaulting to `""`) silently stamped nothing, and a `to` that didn't
+  actually match `to_verdict` could mislabel the audit trail (e.g. a real
+  `to_verdict=BREAKING` promotion reported as `"ignore"`); deriving from the
+  resolved verdict itself guarantees the disclosure is always present and
+  always accurate.

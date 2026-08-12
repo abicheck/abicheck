@@ -1529,7 +1529,18 @@ def _change_to_dict(
         # docstring.
         rule = reclassify_rule_for_change(cast(HasKind, c), policy_file)
         if rule is not None:
-            reclassified_by = rule.label or rule.reason or rule.to
+            # `rule.to` is the raw `to:` spelling as loaded from YAML --
+            # always consistent with `rule.to_verdict` for a policy-file-
+            # loaded rule (the loader resolves one from the other), but a
+            # Python caller constructing ReclassifyRule directly can supply
+            # a `to_verdict` with no `to` at all (silently dropping this
+            # disclosure -- `to` defaults to `""`), or, worse, a `to` that
+            # doesn't actually match `to_verdict` (mislabeling the audit
+            # trail, e.g. a `to_verdict=BREAKING` promotion reported as
+            # "ignore"). Falling back to `rule.to_verdict.value` instead of
+            # `rule.to` guarantees this is always non-empty and always
+            # reflects the verdict that was actually applied (Codex review).
+            reclassified_by = rule.label or rule.reason or rule.to_verdict.value
     elif kind:
         severity = _kind_to_severity(kind, policy)
     else:
