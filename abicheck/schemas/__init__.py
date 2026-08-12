@@ -360,7 +360,21 @@ from typing import Any
 #:       and group, unconditional on report_mode (mirroring root_cause_id/
 #:       impact_group_id's own precedent), and never affects ``verdict``,
 #:       ``severity``, or any exit code.
-REPORT_SCHEMA_VERSION = "2.29"
+#: 2.30 — new optional ``policy_reclassify`` array (A: selector-scoped
+#:       reclassification, ``abicheck/reclassify.py``): when the active
+#:       policy file carries one or more ``reclassify:`` rules, each is
+#:       listed (``kind``, whichever selector fields it set, ``to``,
+#:       ``reason``, ``expires``) alongside the existing ``policy_overrides``/
+#:       ``policy_file`` keys (Codex review: an ordinary comparison
+#:       reclassifying a finding had no trace of the active rule anywhere in
+#:       the standard report). Lists the *active rule set*, matching the
+#:       level of detail ``policy_overrides`` already provides for kind-
+#:       global overrides -- not a per-finding "which rule fired" attribution
+#:       (that needs a new per-``Change`` field and is tracked separately as
+#:       a deliberately deferred follow-up, same as the ``--contract-
+#:       evaluation`` receipt gap). Absent, and the report byte-identical,
+#:       when no ``reclassify:`` rule is configured.
+REPORT_SCHEMA_VERSION = "2.30"
 
 #: SemVer-style (MAJOR.MINOR) version of the ``scan`` JSON output, emitted as
 #: ``scan_schema_version`` at the top level of both public scan dict shapes:

@@ -525,3 +525,75 @@ reclassify:
     )
     assert compute_exit_code([scoped], cfg, policy_file=pf) == 0
     assert compute_exit_code([scoped], PRESET_DEFAULT, policy_file=pf) == 0
+
+
+# --- standard-report disclosure (reporter.py's policy_reclassify key) ------
+
+
+def test_active_reclassify_rules_are_disclosed_in_the_standard_report(
+    tmp_path: Path,
+) -> None:
+    """Codex review: an ordinary comparison reclassifying a finding had no
+    trace of the active `reclassify:` rule anywhere in the standard JSON
+    report. `policy_reclassify` (report_schema_version 2.29) now lists the
+    active rule set, mirroring the existing `policy_overrides` disclosure."""
+    import json
+
+    from abicheck.checker_types import DiffResult
+    from abicheck.reporter import to_json
+    from abicheck.schemas import REPORT_SCHEMA_VERSION
+
+    p = tmp_path / "policy.yaml"
+    p.write_text(
+        """
+reclassify:
+  - kind: func_visibility_changed
+    symbol_pattern: "_ZN6oneapi3dal.*"
+    to: risk
+    reason: "COMDAT-inline demotions"
+    expires: 2027-01-01
+""".strip(),
+        encoding="utf-8",
+    )
+    pf = PolicyFile.load(p)
+    change = _change(ChangeKind.FUNC_VISIBILITY_CHANGED, "_ZN6oneapi3dal3fooEv")
+    diff = DiffResult(
+        changes=[change], old_version="1", new_version="2", library="l",
+        policy_file=pf,
+    )
+
+    d = json.loads(to_json(diff))
+    assert d["report_schema_version"] == REPORT_SCHEMA_VERSION
+    assert d["policy_file"] == str(p)
+    assert d["policy_reclassify"] == [
+        {
+            "to": "COMPATIBLE_WITH_RISK",
+            "kind": "func_visibility_changed",
+            "symbol_pattern": "_ZN6oneapi3dal.*",
+            "reason": "COMDAT-inline demotions",
+            "expires": "2027-01-01",
+        }
+    ]
+
+
+def test_policy_reclassify_absent_without_any_configured_rule(tmp_path: Path) -> None:
+    """No `reclassify:` rule => no `policy_reclassify` key at all, keeping
+    every pre-existing report byte-identical (schema 2.29's own
+    additive-change guarantee)."""
+    import json
+
+    from abicheck.checker_types import DiffResult
+    from abicheck.reporter import to_json
+
+    p = tmp_path / "policy.yaml"
+    p.write_text("overrides:\n  enum_member_renamed: ignore\n", encoding="utf-8")
+    pf = PolicyFile.load(p)
+    change = _change(ChangeKind.ENUM_MEMBER_RENAMED, "foo")
+    diff = DiffResult(
+        changes=[change], old_version="1", new_version="2", library="l",
+        policy_file=pf,
+    )
+
+    d = json.loads(to_json(diff))
+    assert "policy_reclassify" not in d
+    assert d["policy_overrides"] == {"enum_member_renamed": "COMPATIBLE"}

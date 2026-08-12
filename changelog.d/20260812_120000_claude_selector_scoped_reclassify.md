@@ -49,4 +49,8 @@ A new changelog fragment. See changelog.d/README.md for the workflow.
   kind-global `overrides:` entry for the same kind would otherwise move it
   out of the compatible kind set entirely — the scoped rule's own
   resolution now wins the addition/quality split too, not just the
-  verdict.
+  verdict. Active `reclassify:` rules are now disclosed in the standard
+  JSON report's new `policy_reclassify` key (`report_schema_version` 2.29,
+  additive), alongside the existing `policy_overrides`/`policy_file` keys —
+  previously an ordinary comparison reclassifying a finding left no trace
+  of the active rule anywhere in the standard report.

@@ -204,6 +204,10 @@ want to see).
   over both — see [ci-gating.md](ci-gating.md) for the full classification
   order.
 - At least one selector is required, same as a suppression rule.
+- Active `reclassify:` rules are listed in the standard JSON report's
+  `policy_reclassify` key, alongside `policy_overrides`, so a reclassified
+  finding's report always carries a trace of the policy that steered it
+  (`report_schema_version` 2.29+).
 
 ### Evidence-aware controls (`evidence_policy`)
 
