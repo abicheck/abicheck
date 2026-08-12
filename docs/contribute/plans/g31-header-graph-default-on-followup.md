@@ -197,12 +197,38 @@ call relationship as newly added. Fixed by restricting the call edge to the
 **new** side only, which still satisfies the reachability gate (only one
 side needs the edge) without asserting a spurious new dependency; the
 detector's own coverage gate then declines to credit anything as newly
-reached when the old side carries no dependency-edge coverage at all. With
-the identity-perturbing edit confined to a never-exported private
-declaration, `COMPATIBLE_WITH_RISK` (backed by the single RISK-tier L5
-`declaration_moved` finding) is the genuinely correct canonical verdict — a
-real end-to-end comparison of this exact scenario has nothing BREAKING to
-contradict it.
+reached when the old side carries no dependency-edge coverage at all — the
+state as of the fourth review round, where `declaration_moved` was the
+fixture's sole finding.
+
+A fifth review round found that restricting coverage to the new side was
+itself a fixture artifact, not a faithful real-world scenario: a real
+`collect_inline_pack()`/`fold_call_graph()` run certifies `call_graph`
+coverage identically on *both* sides of an ordinary comparison, so an
+old-side coverage gap this fixture had to manufacture by hand doesn't occur
+in practice, and it was suppressing the very `public_api_internal_dependency_
+added` finding this case exists to demonstrate. Fixed by adding the matching
+old-side call edge too — now genuinely resolvable to distinct per-version
+node ids without the raw-node-id-artifact problem the fourth round found,
+because both sides carry real, independently-derived coverage rather than
+one side's coverage being suppressed as a workaround. A sixth review round
+then found the fifth round's coverage fix was itself hand-forced (setting
+`extractor_passes["call_graph"] = "full"` directly) rather than earned
+through the real production path; fixed by routing both sides through
+`mark_source_edges_extractor_coverage()`, the same helper a real
+`collect_inline_pack()` run uses to certify coverage, so the fixture's
+coverage state is produced identically to how a real run would produce it.
+With the identity-perturbing edit confined to a never-exported private
+declaration, and both sides' dependency-edge coverage genuinely certified,
+the fixture now emits **two** findings through the real pipeline:
+`declaration_moved` (RISK-tier L5, from the header move) and
+`public_api_internal_dependency_added` (RISK-tier L5, from the public
+caller's now-newly-visible dependency on the moved private helper).
+`COMPATIBLE_WITH_RISK` — backed by both findings together, matching
+`ground_truth.json`'s `expected_kinds: ["declaration_moved",
+"public_api_internal_dependency_added"]` — is the genuinely correct
+canonical verdict; a real end-to-end comparison of this exact scenario has
+nothing BREAKING to contradict it.
 `case196_header_graph_move_reconciled` now ships built exactly this way
 (real dataclasses → real fold → real diff, not hand-assembled
 `GraphNode`/`GraphEdge` objects), closing the example gap correctly.
