@@ -436,12 +436,18 @@ class PreprocessorScanResult:
         status = CoverageStatus.PRESENT
         if self.attempted and self.succeeded < self.attempted:
             status = CoverageStatus.PARTIAL
+        if self.probes_truncated:
+            # A capped scan never inspected some distinct compile contexts
+            # (capture_macros) or public headers (capture_header_includes) at
+            # all -- their macro values/divergences/leaks are unknown, not
+            # absent, so this is not a clean PRESENT row (Codex review).
+            status = CoverageStatus.PARTIAL
         detail = (
             f"preprocessor scan (S2), {self.tus_scanned} TU(s), "
             f"{self.headers_scanned} public header(s), "
             f"{len(self.divergences)} macro divergence(s), {len(self.leaks)} leak(s)"
         )
-        if status is CoverageStatus.PARTIAL:
+        if self.attempted and self.succeeded < self.attempted:
             detail += f"; {self.attempted - self.succeeded} clang run(s) failed"
         if self.probes_truncated:
             detail += (
@@ -597,7 +603,19 @@ class ClangPreprocessorExtractor:
                 argv = [cu.source]
             argv = [unredact_home(a) for a in argv]
             cwd = unredact_home(cu.directory) if cu.directory else None
-            sig = (cu.language, cwd, tuple(_context_flags(argv)))
+            # Strip only the TU's OWN source token, not every source-looking
+            # one (unlike _context_flags, built for the header-context path
+            # where the whole argv is flags-only). A flag operand that
+            # happens to end in a source extension -- e.g. ``-include
+            # config_a.c`` -- must survive into the signature: two units
+            # differing only in that operand are NOT the same compile
+            # context and must not be dedup-merged (Codex review).
+            source_token = unredact_home(cu.source)
+            sig = (
+                cu.language,
+                cwd,
+                tuple(a for a in argv if a != source_token),
+            )
             groups.setdefault(sig, []).append(cu)
             if sig not in commands:
                 order.append(sig)
@@ -606,11 +624,12 @@ class ClangPreprocessorExtractor:
 
         max_probes = _preprocessor_scan_max_probes()
         if len(order) > max_probes:
-            self.probes_truncated = len(order) - max_probes
+            truncated = len(order) - max_probes
+            self.probes_truncated += truncated
             order = order[:max_probes]
             self.diagnostics.append(
                 f"preprocessor macro scan capped at {max_probes} distinct "
-                f"compile context(s); {self.probes_truncated} skipped "
+                f"compile context(s); {truncated} skipped "
                 "(set ABICHECK_PREPROCESSOR_SCAN_MAX_PROBES to raise)"
             )
 
@@ -751,6 +770,17 @@ class ClangPreprocessorExtractor:
 
         run_cwd = unredact_home(cwd) if cwd else None
         headers = [h for h in public_headers if h]
+
+        max_probes = _preprocessor_scan_max_probes()
+        if len(headers) > max_probes:
+            truncated = len(headers) - max_probes
+            self.probes_truncated += truncated
+            headers = headers[:max_probes]
+            self.diagnostics.append(
+                f"preprocessor header-leak scan capped at {max_probes} "
+                f"public header(s); {truncated} skipped "
+                "(set ABICHECK_PREPROCESSOR_SCAN_MAX_PROBES to raise)"
+            )
 
         def _probe(hdr: str) -> tuple[str, str | None]:
             if self.deadline_exhausted:

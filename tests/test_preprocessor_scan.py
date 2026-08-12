@@ -766,6 +766,142 @@ def test_capture_macros_respects_max_probes_cap(monkeypatch) -> None:
     assert any("capped at 3" in d for d in ex.diagnostics)
 
 
+def test_capture_header_includes_respects_max_probes_cap(monkeypatch) -> None:
+    # Codex review: the probe cap must also bound capture_header_includes
+    # (the clang -M half of the pre-scan), not only capture_macros -- else
+    # a project with hundreds/thousands of public headers still reproduces
+    # the excessive scan time this cap exists to prevent.
+    from abicheck.buildsource import preprocessor_scan as ps
+
+    monkeypatch.setenv("ABICHECK_PREPROCESSOR_SCAN_JOBS", "1")
+    monkeypatch.setenv("ABICHECK_PREPROCESSOR_SCAN_MAX_PROBES", "3")
+    headers = [f"include/h{i}.h" for i in range(10)]
+
+    def _fake_run(self, cmd, cwd, unit):
+        return "h.o: h.h\n"
+
+    monkeypatch.setattr(ps.ClangPreprocessorExtractor, "_run", _fake_run)
+    ex = ps.ClangPreprocessorExtractor()
+    out = ex.capture_header_includes(headers, ["-Iinclude"])
+
+    assert len(out) == 3
+    assert ex.probes_truncated == 7
+    assert any("capped at 3" in d for d in ex.diagnostics)
+
+
+def test_capture_macros_and_header_includes_truncation_accumulates(
+    monkeypatch,
+) -> None:
+    # A single extractor instance used for both passes (run_preprocessor_scan's
+    # shape) must accumulate truncation from both, not overwrite one with the
+    # other.
+    import abicheck.buildsource.build_evidence as be
+    import abicheck.buildsource.preprocessor_scan as ps
+
+    monkeypatch.setenv("ABICHECK_PREPROCESSOR_SCAN_JOBS", "1")
+    monkeypatch.setenv("ABICHECK_PREPROCESSOR_SCAN_MAX_PROBES", "2")
+    build = be.BuildEvidence(
+        compile_units=[
+            be.CompileUnit(
+                id=f"cu://{i}",
+                source=f"{i}.cpp",
+                language="CXX",
+                argv=["clang++", "-c", f"{i}.cpp", f"-DTAG={i}"],
+            )
+            for i in range(5)
+        ]
+    )
+
+    def _fake_run(self, cmd, cwd, unit):
+        return "#define NDEBUG 1\n"
+
+    monkeypatch.setattr(ps.ClangPreprocessorExtractor, "_run", _fake_run)
+    ex = ps.ClangPreprocessorExtractor()
+    ex.capture_macros(build)  # 5 distinct contexts, cap 2 -> truncates 3
+    ex.capture_header_includes([f"h{i}.h" for i in range(5)], [])  # truncates 3 more
+
+    assert ex.probes_truncated == 6
+
+
+def test_coverage_downgrades_to_partial_when_probes_truncated(monkeypatch) -> None:
+    # Codex review: a capped scan never inspected some distinct compile
+    # contexts / public headers at all -- their macro values/divergences/
+    # leaks are genuinely unknown, not absent, so the coverage row must not
+    # read as a clean PRESENT even when every ATTEMPTED probe succeeded.
+    from abicheck.buildsource import build_evidence as be, preprocessor_scan as ps
+
+    monkeypatch.setenv("ABICHECK_PREPROCESSOR_SCAN_JOBS", "1")
+    monkeypatch.setenv("ABICHECK_PREPROCESSOR_SCAN_MAX_PROBES", "1")
+    build = be.BuildEvidence(
+        compile_units=[
+            be.CompileUnit(
+                id=f"cu://{i}",
+                source=f"{i}.cpp",
+                language="CXX",
+                argv=["clang++", "-c", f"{i}.cpp", f"-DTAG={i}"],
+            )
+            for i in range(3)
+        ]
+    )
+
+    def _fake_run(self, cmd, cwd, unit):
+        return "#define NDEBUG 1\n"
+
+    monkeypatch.setattr(ps.ClangPreprocessorExtractor, "available", lambda self: True)
+    monkeypatch.setattr(ps.ClangPreprocessorExtractor, "_run", _fake_run)
+    result = ps.run_preprocessor_scan(build, [], clang_bin="clang++")
+
+    assert result.probes_truncated == 2
+    assert result.attempted == result.succeeded  # every attempted probe "succeeded"
+    cov = result.coverage()
+    assert cov.status.value == "partial"
+    assert "compile-context probe(s) skipped" in cov.detail
+    # Must not misreport a failed-run count that never happened.
+    assert "0 clang run(s) failed" not in cov.detail
+
+
+def test_capture_macros_dedup_key_preserves_source_looking_flag_operand(
+    monkeypatch,
+) -> None:
+    # Codex review: a flag operand that happens to end in a source extension
+    # (e.g. `-include config_a.c`) must survive into the dedup signature --
+    # only the TU's OWN source token is stripped. Two units differing only in
+    # that operand are genuinely different compile contexts and must not be
+    # merged (which would silently hide a real per-TU macro divergence).
+    import abicheck.buildsource.build_evidence as be
+    import abicheck.buildsource.preprocessor_scan as ps
+
+    monkeypatch.setenv("ABICHECK_PREPROCESSOR_SCAN_JOBS", "1")
+    build = be.BuildEvidence(
+        compile_units=[
+            be.CompileUnit(
+                id="cu://a",
+                source="a.cpp",
+                language="CXX",
+                argv=["clang++", "-c", "a.cpp", "-include", "config_a.c"],
+            ),
+            be.CompileUnit(
+                id="cu://b",
+                source="b.cpp",
+                language="CXX",
+                argv=["clang++", "-c", "b.cpp", "-include", "config_b.c"],
+            ),
+        ]
+    )
+    seen_cmds: list[list[str]] = []
+
+    def _fake_run(self, cmd, cwd, unit):
+        seen_cmds.append(list(cmd))
+        return "#define NDEBUG 1\n" if "config_a.c" in cmd else "#define NDEBUG 0\n"
+
+    monkeypatch.setattr(ps.ClangPreprocessorExtractor, "_run", _fake_run)
+    out = ps.ClangPreprocessorExtractor().capture_macros(build)
+
+    assert len(seen_cmds) == 2  # NOT deduped into one probe
+    assert out["cu://a"] == {"NDEBUG": "1"}
+    assert out["cu://b"] == {"NDEBUG": "0"}
+
+
 def test_run_preprocessor_scan_disabled_via_env(monkeypatch) -> None:
     from abicheck.buildsource import build_evidence as be
 
