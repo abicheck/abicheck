@@ -36,6 +36,7 @@ from __future__ import annotations
 
 import os
 import subprocess
+import tempfile
 from pathlib import Path
 
 RUN_SH = Path(__file__).resolve().parents[1] / "action" / "run.sh"
@@ -73,6 +74,35 @@ def _bash_executable() -> str:
 _FAILING_GH_STUB = "gh() { return 1; }\n"
 
 
+def _run_bash_script(
+    script: str, env: dict[str, str]
+) -> subprocess.CompletedProcess[str]:
+    """Run *script* via a temp file, not ``bash -c "<script>"``.
+
+    The extracted ``_baseline_region()`` has grown past several KB (G30's
+    release-contract baseline-set fallback added its own function to the
+    same region) -- large enough that Windows' Git-Bash `-c` argument
+    passing truncates it mid-parse, surfacing as a bash "unexpected end of
+    file" syntax error purely from where the string got cut, not a real
+    syntax error in the script itself (confirmed: identical content passed
+    via a file runs cleanly). A temp-file invocation has no such
+    command-line-length ceiling on any platform.
+    """
+    fd, path = tempfile.mkstemp(suffix=".sh")
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8", newline="\n") as fh:
+            fh.write(script)
+        return subprocess.run(
+            [_bash_executable(), path],
+            capture_output=True,
+            text=True,
+            env=env,
+            check=False,
+        )
+    finally:
+        os.unlink(path)
+
+
 class TestDryRunToleratesUnavailableBaseline:
     def _run(
         self,
@@ -92,13 +122,7 @@ class TestDryRunToleratesUnavailableBaseline:
             'AGAINST=${INPUT_AGAINST:-}"\n'
         )
         env = {**os.environ, **env_extra}
-        return subprocess.run(
-            [_bash_executable(), "-c", script],
-            capture_output=True,
-            text=True,
-            env=env,
-            check=False,
-        )
+        return _run_bash_script(script, env)
 
     def test_non_dry_run_still_fails_hard_on_unavailable_baseline(self) -> None:
         """Baseline gate for real invocations is unchanged: still exit 1."""
@@ -183,13 +207,7 @@ class TestAuditSkipsBaselineFetch:
             + '\necho "REACHED_END AGAINST=${INPUT_AGAINST:-}"\n'
         )
         env = {**os.environ, **env_extra, "GH_CALLED_MARKER": str(marker)}
-        return subprocess.run(
-            [_bash_executable(), "-c", script],
-            capture_output=True,
-            text=True,
-            env=env,
-            check=False,
-        )
+        return _run_bash_script(script, env)
 
     def test_audit_true_skips_baseline_fetch_entirely(self, tmp_path: Path) -> None:
         """Regression (Codex + CodeRabbit review): audit: true discards
@@ -246,13 +264,7 @@ class TestGhReleaseDownloadRepoFlag:
             "}\n" + _baseline_region() + '\necho "REACHED_END"\n'
         )
         env = {**os.environ, **env_extra, "GH_ARGV_FILE": str(argv_file)}
-        return subprocess.run(
-            [_bash_executable(), "-c", script],
-            capture_output=True,
-            text=True,
-            env=env,
-            check=False,
-        )
+        return _run_bash_script(script, env)
 
     def test_latest_release_passes_repo_flag(self, tmp_path: Path) -> None:
         argv_file = tmp_path / "gh_argv"
@@ -307,13 +319,7 @@ class TestGhReleaseDownloadRepoFlag:
                 "GH_ARGV_FILE": str(argv_file),
             }
         )
-        result = subprocess.run(
-            [_bash_executable(), "-c", script],
-            capture_output=True,
-            text=True,
-            env=env,
-            check=False,
-        )
+        result = _run_bash_script(script, env)
         assert result.returncode == 0, result.stderr
         argv = argv_file.read_text(encoding="utf-8").splitlines()
         assert "-R" not in argv, argv
@@ -333,13 +339,7 @@ class TestAmbiguousBaselineAssets:
             "INPUT_MODE": "compare",
             "INPUT_ABI_BASELINE": "latest-release",
         }
-        return subprocess.run(
-            [_bash_executable(), "-c", script],
-            capture_output=True,
-            text=True,
-            env=env,
-            check=False,
-        )
+        return _run_bash_script(script, env)
 
     def test_single_asset_still_resolves(self) -> None:
         """Sanity: the ordinary one-asset case still works after switching
@@ -389,13 +389,7 @@ class TestCompressedBaselineAssets:
             "INPUT_ABI_BASELINE": "latest-release",
             "GH_ARGV_FILE": str(argv_file),
         }
-        return subprocess.run(
-            [_bash_executable(), "-c", script],
-            capture_output=True,
-            text=True,
-            env=env,
-            check=False,
-        )
+        return _run_bash_script(script, env)
 
     def test_all_three_pattern_flags_passed(self, tmp_path: Path) -> None:
         argv_file = tmp_path / "gh_argv"

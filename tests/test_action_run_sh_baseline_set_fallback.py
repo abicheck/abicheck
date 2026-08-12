@@ -41,6 +41,7 @@ import os
 import shutil
 import subprocess
 import tarfile
+import tempfile
 from pathlib import Path
 
 import pytest
@@ -151,6 +152,35 @@ gh() {
 """
 
 
+def _run_bash_script(
+    script: str, env: dict[str, str]
+) -> subprocess.CompletedProcess[str]:
+    """Run *script* via a temp file, not ``bash -c "<script>"``.
+
+    The extracted ``_baseline_region()`` is now large enough (this
+    fallback's own function included) that Windows' Git-Bash ``-c``
+    argument passing truncates it mid-parse, surfacing as a bash
+    "unexpected end of file" syntax error purely from where the string got
+    cut, not a real syntax error in the script itself (confirmed: identical
+    content passed via a file runs cleanly). A temp-file invocation has no
+    such command-line-length ceiling on any platform. Mirrors
+    ``test_action_run_sh_dry_run_baseline.py``'s identical helper.
+    """
+    fd, path = tempfile.mkstemp(suffix=".sh")
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8", newline="\n") as fh:
+            fh.write(script)
+        return subprocess.run(
+            [_bash_executable(), path],
+            capture_output=True,
+            text=True,
+            env=env,
+            check=False,
+        )
+    finally:
+        os.unlink(path)
+
+
 @pytest.mark.skipif(not RUN_SH.is_file(), reason="action/run.sh not found")
 class TestBaselineSetFallback:
     def _run(self, env_extra: dict[str, str]) -> subprocess.CompletedProcess[str]:
@@ -163,13 +193,7 @@ class TestBaselineSetFallback:
             'AGAINST=${INPUT_AGAINST:-}"\n'
         )
         env = {**os.environ, **env_extra}
-        return subprocess.run(
-            [_bash_executable(), "-c", script],
-            capture_output=True,
-            text=True,
-            env=env,
-            check=False,
-        )
+        return _run_bash_script(script, env)
 
     def test_resolves_from_baseline_set_when_no_single_snapshot_asset(
         self, tmp_path: Path
@@ -238,13 +262,7 @@ class TestBaselineSetFallback:
             # No FIXTURE_ARCHIVE -- if the fallback were mistakenly
             # attempted anyway it would find nothing and fail loudly.
         }
-        result = subprocess.run(
-            [_bash_executable(), "-c", script],
-            capture_output=True,
-            text=True,
-            env=env,
-            check=False,
-        )
+        result = _run_bash_script(script, env)
         assert result.returncode == 0, result.stderr
         assert "libpvxs.abicheck.json" in result.stdout
 
