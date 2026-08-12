@@ -33,21 +33,39 @@ from pathlib import Path
 from typing import Any
 
 
+class ReleaseFactError(Exception):
+    """Raised when ``repo_facts.json``'s ``latest_release`` can't be read.
+
+    The banner exists specifically to prevent the site from silently
+    misstating release state, so a missing/malformed fact must fail the
+    build loudly -- `.github/workflows/pages.yml` runs `mkdocs build
+    --strict` directly, and a silent "unknown"/"vunknown" fallback would
+    still deploy, publishing exactly the kind of release-boundary
+    misinformation this mechanism was built to close (Codex review,
+    fresh evidence).
+    """
+
+
 def _latest_published_version(repo_root: Path) -> str:
     """``repo_facts.json``'s ``latest_release`` -- the maintained fact owner
     for "the version actually published", not ``project_version`` (which
     tracks the in-tree ``pyproject.toml`` version and can be bumped ahead
     of the release that makes it real).
+
+    Raises :class:`ReleaseFactError` rather than degrading to a placeholder
+    -- see that class's docstring for why.
     """
     facts_path = repo_root / "repo_facts.json"
     if not facts_path.is_file():
-        return "unknown"
+        raise ReleaseFactError(f"{facts_path} not found -- can't stamp the docs banner")
     try:
         facts = json.loads(facts_path.read_text(encoding="utf-8"))
-    except (OSError, ValueError):
-        return "unknown"
+    except (OSError, ValueError) as exc:
+        raise ReleaseFactError(f"{facts_path} is unreadable/malformed: {exc}") from exc
     value = facts.get("latest_release")
-    return str(value) if value else "unknown"
+    if not value:
+        raise ReleaseFactError(f"{facts_path} has no (or an empty) latest_release field")
+    return str(value)
 
 
 #: Cached by `on_config`, read by `on_page_markdown` -- so a page can embed
