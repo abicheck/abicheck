@@ -290,6 +290,13 @@ class BaselineManifest:
     #: older manifest, or a caller not tracking generations), which is never
     #: compared against an expectation (see :func:`_schema_and_profile_check`).
     baseline_generation: int | None = None
+    #: Generator provenance (``actions/baseline/build_manifest.py``'s
+    #: ``{"tool", "version", "git_sha"?, "action_ref"?}`` block) -- purely
+    #: informational (reproducibility/debugging), never consulted by any
+    #: resolve/freshness check: unlike ``baseline_generation``, a differing
+    #: ``version`` between two manifests is not itself evidence of a stale
+    #: baseline. ``None`` for an older manifest that predates this field.
+    generator: dict[str, Any] | None = None
     artifacts: list[BaselineArtifact] = field(default_factory=list)
 
     def artifact_for(self, library: str) -> BaselineArtifact | None:
@@ -383,6 +390,7 @@ def load_baseline_manifest(baseline_dir: Path | str) -> BaselineManifest | None:
         and not isinstance(baseline_generation, bool)
         else None
     )
+    generator = data.get("generator")
     return BaselineManifest(
         manifest_version=manifest_version,
         project_ref=str(data.get("project_ref") or ""),
@@ -390,6 +398,7 @@ def load_baseline_manifest(baseline_dir: Path | str) -> BaselineManifest | None:
         snapshot_schema=snapshot_schema,
         fact_set=fact_set if isinstance(fact_set, dict) else None,
         baseline_generation=baseline_generation,
+        generator=generator if isinstance(generator, dict) else None,
         artifacts=artifacts,
     )
 

@@ -188,6 +188,19 @@ actually matter:
   whether `snapshot_schema`/`fact_set`/the library set happened to change
   too.
 
+**Generator provenance is a separate, purely informational field —
+don't conflate it with `baseline_generation`.** Every manifest also records
+a `generator` block (`{"tool": "abicheck", "version": "0.6.0", ...}`),
+always including the installed abicheck package `version` and, when the
+publishing workflow supplies them (`actions/baseline`'s optional
+`generator-git-sha`/`generator-action-ref` inputs), the exact commit/ref
+that produced the baseline-set — useful for debugging "what actually
+extracted this" without guessing from context. `generator.version` is
+**never** compared by any resolve/freshness check and never triggers
+`refresh-required` on its own: that's precisely `baseline_generation`'s
+job, and it stays a caller-assigned decision, not something derived from a
+version string.
+
 **A baseline can never be upgraded to a new generation by re-saving it** —
 loading an old snapshot with a newer scanner and writing it back out does
 not make the missing/previously-wrong facts appear; the serializer stamps

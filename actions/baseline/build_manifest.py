@@ -46,6 +46,7 @@ from typing import Any
 # dependency on abicheck's AbiSnapshot/schema internals beyond that one pure
 # utility function -- it keeps reading raw JSON directly, per its own
 # docstring above.
+from abicheck import __version__ as _ABICHECK_VERSION
 from abicheck.buildsource.baseline_set import compute_snapshot_content_hash
 
 #: Canonical storage suffixes a dumped snapshot may carry (ADR-059), longest
@@ -159,6 +160,8 @@ def build_manifest(
     entries: list[dict[str, Any]],
     previous_manifest_path: Path | None,
     baseline_generation: int | None = None,
+    generator_git_sha: str = "",
+    generator_action_ref: str = "",
 ) -> dict[str, Any]:
     # main()'s own --baseline-generation parsing already rejects a
     # non-integer or negative CLI value before ever calling this function --
@@ -362,10 +365,37 @@ def build_manifest(
         # generation input). See docs/use/baseline-management.md#scanner-
         # upgrades-and-baseline-generations.
         "baseline_generation": baseline_generation,
+        # Generator provenance -- WHICH abicheck build actually produced
+        # this baseline-set, for reproducibility/debugging. Deliberately
+        # separate from baseline_generation above and never fed into
+        # _compute_freshness()/compute_content_digest(): the exact package
+        # version (and, best-effort, the source commit/action ref) is
+        # useful to know but must NOT by itself invalidate a baseline --
+        # most abicheck upgrades (report format, policy/severity, a new
+        # detector over already-collected facts) don't change what a
+        # snapshot's own facts mean, so tying refresh-required to a raw
+        # version bump would force unnecessary rebaselines on every patch
+        # release. `version` is always recorded (the installed abicheck
+        # package version, importlib.metadata); `git_sha`/`action_ref` are
+        # best-effort caller-supplied identifiers (this script has no
+        # reliable way to discover its own hosting repo's commit/ref from
+        # inside a composite Action step) and are omitted when the caller
+        # didn't supply one, matching fact_set's own "only recorded when
+        # present" convention above.
+        "generator": _generator_block(generator_git_sha, generator_action_ref),
         "artifacts": artifacts,
     }
     manifest["freshness"] = _compute_freshness(manifest, previous_manifest_path)
     return manifest
+
+
+def _generator_block(git_sha: str, action_ref: str) -> dict[str, Any]:
+    block: dict[str, Any] = {"tool": "abicheck", "version": _ABICHECK_VERSION}
+    if git_sha:
+        block["git_sha"] = git_sha
+    if action_ref:
+        block["action_ref"] = action_ref
+    return block
 
 
 def _compute_freshness(
@@ -660,6 +690,19 @@ def main(argv: list[str] | None = None) -> int:
             "unset. See build_manifest()'s own baseline_generation docstring."
         ),
     )
+    parser.add_argument(
+        "--generator-git-sha",
+        default="",
+        help="Best-effort commit SHA of the abicheck checkout that produced "
+        "this manifest, recorded in generator.git_sha. Omit to leave unset.",
+    )
+    parser.add_argument(
+        "--generator-action-ref",
+        default="",
+        help="Best-effort ref of the actions/baseline invocation that "
+        "produced this manifest, recorded in generator.action_ref. Omit to "
+        "leave unset.",
+    )
     args = parser.parse_args(argv)
 
     baseline_generation: int | None = None
@@ -683,6 +726,8 @@ def main(argv: list[str] | None = None) -> int:
         entries,
         args.previous_manifest,
         baseline_generation=baseline_generation,
+        generator_git_sha=args.generator_git_sha,
+        generator_action_ref=args.generator_action_ref,
     )
     args.manifest_out.write_text(
         json.dumps(manifest, indent=2) + "\n", encoding="utf-8"

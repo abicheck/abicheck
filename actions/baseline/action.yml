@@ -75,6 +75,25 @@ inputs:
       docs/use/baseline-management.md#scanner-upgrades-and-baseline-generations.
     required: false
     default: ''
+  generator-git-sha:
+    description: >
+      Best-effort commit SHA of the abicheck checkout that produced this
+      baseline-set, recorded in manifest.json's generator.git_sha for
+      reproducibility/debugging (e.g. github.sha, when abicheck is
+      vendored/checked out in the same job as this Action). Purely
+      informational: unlike baseline-generation, it is never compared
+      against an expectation and never affects refresh-required. Omit to
+      leave it unset.
+    required: false
+    default: ''
+  generator-action-ref:
+    description: >
+      Best-effort ref of this actions/baseline invocation, recorded in
+      manifest.json's generator.action_ref (e.g. github.action_ref, when
+      available in the calling context). Purely informational, same as
+      generator-git-sha. Omit to leave it unset.
+    required: false
+    default: ''
   previous-manifest:
     description: >
       Path to a previous manifest.json to diff against for the
@@ -167,6 +186,8 @@ runs:
         INPUT_BUILD_INFO: ${{ inputs.build-info }}
         INPUT_DEPTH: ${{ inputs.depth }}
         INPUT_BASELINE_GENERATION: ${{ inputs.baseline-generation }}
+        INPUT_GENERATOR_GIT_SHA: ${{ inputs.generator-git-sha }}
+        INPUT_GENERATOR_ACTION_REF: ${{ inputs.generator-action-ref }}
         INPUT_PREVIOUS_MANIFEST: ${{ inputs.previous-manifest }}
         INPUT_VALIDATION: ${{ inputs.validation }}
         INPUT_SNAPSHOT_COMPRESSION: ${{ inputs.snapshot-compression }}

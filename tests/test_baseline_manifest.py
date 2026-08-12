@@ -104,6 +104,66 @@ class TestBuildManifestBasics:
         # baseline_generation defaults to None when the caller doesn't
         # pass one -- absence, not "generation 0".
         assert manifest["baseline_generation"] is None
+        # generator provenance is always recorded (tool/version), even
+        # with no generator_git_sha/generator_action_ref given.
+        assert manifest["generator"]["tool"] == "abicheck"
+        assert "version" in manifest["generator"]
+        assert "git_sha" not in manifest["generator"]
+        assert "action_ref" not in manifest["generator"]
+
+    def test_generator_git_sha_and_action_ref_recorded_when_given(
+        self, tmp_path: Path
+    ) -> None:
+        out = tmp_path
+        _write_snapshot(out / "libfoo.abicheck.json", library="libfoo")
+        entries = [{"name": "libfoo", "artifact": "build/libfoo.so"}]
+        manifest = build_manifest_module.build_manifest(
+            out,
+            "v1.0.0",
+            "linux-x86_64",
+            entries,
+            None,
+            generator_git_sha="deadbeef",
+            generator_action_ref="v2.0.0",
+        )
+        assert manifest["generator"]["git_sha"] == "deadbeef"
+        assert manifest["generator"]["action_ref"] == "v2.0.0"
+
+    def test_generator_provenance_does_not_affect_freshness(
+        self, tmp_path: Path
+    ) -> None:
+        # generator is purely informational -- a different git_sha/
+        # action_ref/version between two runs must never, by itself,
+        # trigger refresh-required (unlike baseline_generation).
+        _write_snapshot(
+            tmp_path / "libfoo.abicheck.json", library="libfoo", schema_version=9
+        )
+        entries = [{"name": "libfoo", "artifact": "a.so"}]
+        previous_path = tmp_path / "previous.json"
+        previous_path.write_text(
+            json.dumps(
+                {
+                    "manifest_version": 1,
+                    "project_ref": "",
+                    "profile": "",
+                    "snapshot_schema": 9,
+                    "fact_set": None,
+                    "baseline_generation": None,
+                    "generator": {"tool": "abicheck", "version": "0.1.0"},
+                    "artifacts": [{"library": "libfoo"}],
+                }
+            )
+        )
+        manifest = build_manifest_module.build_manifest(
+            tmp_path,
+            "",
+            "",
+            entries,
+            previous_path,
+            generator_git_sha="cafef00d",
+            generator_action_ref="main",
+        )
+        assert manifest["freshness"]["refresh_required"] is False
 
     def test_baseline_generation_is_recorded_when_given(self, tmp_path: Path) -> None:
         out = tmp_path
@@ -799,6 +859,34 @@ class TestMainCli:
         assert rc == 0
         written = json.loads(manifest_out.read_text())
         assert written["baseline_generation"] == 3
+
+    def test_main_generator_flags_are_recorded(self, tmp_path: Path, capsys) -> None:
+        _write_snapshot(
+            tmp_path / "libfoo.abicheck.json", library="libfoo", schema_version=9
+        )
+        libraries = json.dumps([{"name": "libfoo", "artifact": "a.so"}])
+        manifest_out = tmp_path / "manifest.json"
+        rc = build_manifest_module.main(
+            [
+                "--output-dir",
+                str(tmp_path),
+                "--profile",
+                "linux",
+                "--libraries",
+                libraries,
+                "--manifest-out",
+                str(manifest_out),
+                "--generator-git-sha",
+                "deadbeef",
+                "--generator-action-ref",
+                "v2.0.0",
+            ]
+        )
+        assert rc == 0
+        written = json.loads(manifest_out.read_text())
+        assert written["generator"]["tool"] == "abicheck"
+        assert written["generator"]["git_sha"] == "deadbeef"
+        assert written["generator"]["action_ref"] == "v2.0.0"
 
     def test_main_baseline_generation_omitted_is_none(
         self, tmp_path: Path, capsys

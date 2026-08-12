@@ -622,7 +622,24 @@ jobs:
               (Path(sys.argv[1]) / "manifest.json").read_text(encoding="utf-8")
           )
           new_manifest = json.loads(Path(sys.argv[2]).read_text(encoding="utf-8"))
-          print("true" if existing_manifest.get("baseline_generation") == new_manifest.get("baseline_generation") else "false")
+
+          def _real_generation(value):
+              # bool is an int subclass in Python -- plain equality would
+              # let a hand-authored/corrupted "baseline_generation": true
+              # compare equal to a real generation 1 (or false == 0),
+              # reaching this safe-retry branch on a coincidental Python
+              # equality rather than a genuine matching generation. Mirror
+              # the same "only a real non-negative int, else treat as
+              # unset" rule abicheck.buildsource.baseline_set.
+              # load_baseline_manifest() applies when parsing this exact
+              # field (Codex review).
+              if isinstance(value, int) and not isinstance(value, bool) and value >= 0:
+                  return value
+              return None
+
+          existing_generation = _real_generation(existing_manifest.get("baseline_generation"))
+          new_generation = _real_generation(new_manifest.get("baseline_generation"))
+          print("true" if existing_generation == new_generation else "false")
           ' .existing-asset/extracted "$NEW_MANIFEST_PATH")
 
           if [[ "$existing_baseline_generation_ok" != "true" ]]; then

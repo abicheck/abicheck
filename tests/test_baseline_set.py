@@ -227,6 +227,59 @@ def test_load_baseline_manifest_absent_baseline_generation_is_none(
     assert manifest.baseline_generation is None
 
 
+def test_load_baseline_manifest_generator_round_trip(tmp_path: Path) -> None:
+    baseline_dir = tmp_path
+    baseline_dir.mkdir(parents=True, exist_ok=True)
+    (baseline_dir / BASELINE_MANIFEST_FILENAME).write_text(
+        json.dumps(
+            {
+                "manifest_version": 1,
+                "project_ref": "v1.0.0",
+                "profile": PROFILE,
+                "snapshot_schema": 9,
+                "fact_set": None,
+                "generator": {
+                    "tool": "abicheck",
+                    "version": "0.6.0",
+                    "git_sha": "deadbeef",
+                    "action_ref": "v2.0.0",
+                },
+                "artifacts": [],
+            }
+        ),
+        encoding="utf-8",
+    )
+    manifest = load_baseline_manifest(baseline_dir)
+    assert manifest is not None
+    assert manifest.generator == {
+        "tool": "abicheck",
+        "version": "0.6.0",
+        "git_sha": "deadbeef",
+        "action_ref": "v2.0.0",
+    }
+
+
+def test_load_baseline_manifest_absent_generator_is_none(tmp_path: Path) -> None:
+    baseline_dir = tmp_path
+    baseline_dir.mkdir(parents=True, exist_ok=True)
+    (baseline_dir / BASELINE_MANIFEST_FILENAME).write_text(
+        json.dumps(
+            {
+                "manifest_version": 1,
+                "project_ref": "v1.0.0",
+                "profile": PROFILE,
+                "snapshot_schema": 9,
+                "fact_set": None,
+                "artifacts": [],
+            }
+        ),
+        encoding="utf-8",
+    )
+    manifest = load_baseline_manifest(baseline_dir)
+    assert manifest is not None
+    assert manifest.generator is None
+
+
 def test_load_baseline_manifest_bool_baseline_generation_is_none(
     tmp_path: Path,
 ) -> None:

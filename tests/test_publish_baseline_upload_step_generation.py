@@ -259,3 +259,33 @@ gh() {{
 
         assert result.returncode == 0, result.stdout + result.stderr
         assert "safe re-run" in result.stdout
+
+    @_WINDOWS_PYTHON3_SKIP
+    @_JQ_REQUIRED
+    def test_boolean_generation_is_not_coincidentally_equal_to_matching_int(
+        self, tmp_path: Path
+    ) -> None:
+        # bool is an int subclass in Python -- plain `==` would let a
+        # hand-authored/corrupted "baseline_generation": true compare equal
+        # to a real generation 1, reaching the safe-retry branch on a
+        # coincidental Python equality rather than a genuine match (Codex
+        # review). A boolean generation must be treated as unset (None),
+        # which is NOT equal to the new manifest's real generation 1 here
+        # -- so this must be rejected, the same as any other mismatch.
+        existing_manifest = {
+            "manifest_version": 1,
+            "project_ref": "v1.0.0",
+            "profile": "linux-x86_64-gcc13-release",
+            "snapshot_schema": None,
+            "fact_set": None,
+            "baseline_generation": True,
+        }
+        new_manifest = {**existing_manifest, "baseline_generation": 1}
+
+        result = self._run_step(
+            tmp_path, existing_manifest=existing_manifest, new_manifest=new_manifest
+        )
+
+        assert result.returncode == 1, result.stdout + result.stderr
+        assert "DIFFERENT baseline_generation" in (result.stdout + result.stderr)
+        assert "safe re-run" not in result.stdout
