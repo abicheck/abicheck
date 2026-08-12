@@ -755,6 +755,71 @@ Once a root command genuinely clears the bar above, pick the right home:
 
 ## Known gaps — acknowledged remaining work
 
+- **`dump --lang c++` is silently discarded on the primary clang header-AST
+  pass for a language-ambiguous header, diverging from `_attach_header_graph`'s
+  own pass on the identical headers — investigated, not fixed (G31 Phase C
+  castxml-installation pass, fresh evidence, reproduced end-to-end).**
+  `cli_dump_helpers.py`'s ELF `dump` path (and `service.py`'s two mirrors,
+  `_dump_elf`/PE-Mach-O's `_header_graph_lang`) all normalize the caller's
+  `lang` to `lang if lang == "c" else None` before calling `dumper.dump()` —
+  deliberately, per their own comment: "every format's own main pass
+  normalizes `lang` to only ever force a language explicitly requested,
+  letting auto-detection run otherwise (including for the default 'c++')",
+  so `_attach_header_graph`'s own `_clang_header_dump` call computes the
+  *identical* cache key and hits the in-process AST memo instead of paying a
+  second clang invocation. That assumption — "an explicit `--lang c++` and
+  auto-detection converge on the same result anyway, so unifying their cache
+  keys is free" — is false whenever the header itself is language-ambiguous:
+  `_resolve_force_cpp`'s auto-detection (`_detect_cpp_headers`/
+  `_detect_cpp20_headers`/an explicit `-std=c++NN`) requires the header to
+  contain *some* C++-only syntax, but a plain POD struct with no such syntax
+  (`struct Widget { int x; int y; };` — ordinary, real C++ code, e.g. a
+  value/DTO type) compiles as valid C too and auto-detects as C. Reproduced
+  end-to-end: `abicheck dump lib.so -H widget.h --ast-frontend clang --lang
+  c++` silently parses `widget.h` in **C mode** for the primary snapshot
+  (confirmed via the raw clang AST: a plain `RecordDecl`, not
+  `CXXRecordDecl`, no `definitionData` at all) — with no error, warning, or
+  any user-visible sign the explicit `--lang c++` was overridden — while the
+  *same* `dump`'s internal `_attach_header_graph` pass, reached through a
+  different `lang` derivation one call removed
+  (`abicheck/service.py:1281`/`abicheck/service.py:608`'s ELF branch shares
+  the identical `lang if lang == "c" else None` squash, so it too loses the
+  signal — the divergence traced here is specifically the ELF `_dump_elf`
+  helper's own second, ADR-050/G31-era call site,
+  `abicheck/cli_dump_helpers.py:1717`, versus `_clang_header_dump`'s
+  documented "an explicit `--lang c++`/`cpp` always wins" contract at the
+  function it's calling into — the squash happens one layer *above* that
+  contract, defeating it before it ever runs). Concrete, silent correctness
+  cost: `RecordType.is_standard_layout`/`is_trivially_copyable` (and any
+  other clang-only, C++-semantic-only fact — `_clang_record_type_traits`
+  itself documents "a plain C `RecordDecl`... genuinely absent", the correct
+  behavior *for C mode*, just not the mode the user asked for) silently read
+  `None` instead of a real value for a header that would parse identically
+  either way *except* for these C++-only facts, with the user's own explicit
+  override having no effect. **Not fixed here**: the squashing is not an
+  oversight — it is a deliberate, twice-Codex-reviewed cache/memo-consistency
+  design (see `abicheck/service.py:608`'s own comment) that this finding does
+  not invalidate for the *common* case (a header with real C++ syntax
+  auto-detects as C++ regardless, so squashing costs nothing there) — only
+  for the specific, real, silently-wrong case: an explicit `--lang c++` on a
+  syntactically-ambiguous header. A correct fix needs the squash itself to
+  stop conflating "auto-detect, and it happens to reach the same verdict as
+  the default" with "explicitly override, must not be silently downgraded to
+  a guess" — e.g. resolving `force_cpp` once, upstream of all three call
+  sites and their `_attach_header_graph` mirrors, and threading the
+  *resolved* boolean (or an unsquashed `lang` plus a corrected memo key that
+  hashes the resolved language rather than the raw flag) through consistently
+  — a change to a shared cache-key contract three call sites and two
+  Codex-reviewed comments currently rely on, not a one-line fix at any single
+  site. No test in the repository currently exercises this path: every
+  existing `is_standard_layout`/`is_trivially_copyable` regression test
+  (`tests/test_dumper_clang.py::test_parse_types_populates_standard_layout_and_trivially_copyable`,
+  `tests/test_diff_layout.py`) hand-builds the parsed AST or `RecordType`
+  directly, bypassing `dumper.dump()`'s CLI-level `--lang` resolution
+  entirely — closing this gap should add an end-to-end regression case in
+  the shape of `tests/test_clang_header_backend_integration.py`'s existing
+  siblings, verified against a real compiled library with an
+  intentionally-C-compatible C++ struct, once the fix itself is designed.
 - **Opaque-type suppression is keyed by bare `RecordType.name`, not a
   qualified identity — pre-existing on both header backends, newly reachable
   on direct-clang by PR #719's opaque-handle-type fix (Codex review,
