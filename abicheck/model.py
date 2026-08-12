@@ -269,17 +269,24 @@ class Function:
     # platform, an older snapshot predating this field, or a declaration with
     # no matching exported symbol (e.g. a public header-only inline that
     # never made it into the dynamic symbol table). Distinguishes a WEAK
-    # COMDAT definition (an in-class-defined/`inline` member every consumer
-    # already emits its own copy of — losing it from one library build is
-    # rarely a real break) from a GLOBAL/STRONG export (the sole definition;
-    # losing it always breaks every consumer) on an otherwise-identical
-    # FUNC_REMOVED finding, which neither `visibility` nor `is_inline` alone
-    # can do (see AGENTS.md's "Linkage-blind removal" entry for why a
-    # heavier removal-severity *demotion* keyed off this same fact was
-    # attempted and reverted — this field only makes the fact visible on the
-    # model and matchable by a suppression selector, it does not itself
-    # change any verdict). Known gap, same as elf_visibility: a symbol-
-    # versioned bare name with mixed bindings across versions (e.g. a GLOBAL
+    # COMDAT definition (e.g. an in-class-defined/`inline` member) from a
+    # GLOBAL/STRONG export on an otherwise-identical FUNC_REMOVED finding,
+    # which neither `visibility` nor `is_inline` alone can do — but this is
+    # PROVIDER-SIDE evidence only, about the *library's own build*, not a
+    # guarantee about consumers: a WEAK/COMDAT symbol does not by itself mean
+    # every consumer already carries its own copy (a public `extern template`
+    # declaration is the documented counterexample — the consumer TU
+    # deliberately does *not* instantiate, while the library's own explicit
+    # instantiation still emits a WEAK/COMDAT definition, so the consumer can
+    # hold an undefined reference to a symbol this field still reports as
+    # WEAK). See AGENTS.md's "Linkage-blind removal" entry for why a heavier
+    # removal-severity *demotion* keyed off this same fact was attempted and
+    # reverted for exactly this reason — this field only makes the fact
+    # visible on the model and matchable by a suppression selector, it does
+    # not itself change any verdict, and a suppression author must not treat
+    # WEAK alone as sufficient justification (see Suppression.binding's own
+    # docstring for the full caveat). Known gap, same as elf_visibility: a
+    # symbol-versioned bare name with mixed bindings across versions (e.g. a GLOBAL
     # old-ABI @V1 and a WEAK default @@V2) collapses to whichever entry
     # elf.symbol_map's last-write-wins dict happens to keep — see AGENTS.md's
     # dedicated entry for this field.

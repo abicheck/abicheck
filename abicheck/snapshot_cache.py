@@ -45,7 +45,7 @@ MAX_ENTRIES: int = 100
 #: key invalidates all previously-cached entries on upgrade rather than risk
 #: serving a stale snapshot computed by an older, behaviorally-different
 #: abicheck version.
-_SNAPSHOT_CACHE_VERSION: str = "15"
+_SNAPSHOT_CACHE_VERSION: str = "16"
 # v2: castxml's CvQualifiedType type-name spelling changed for a
 # volatile-qualified pointer/reference VALUE (now a suffix, "T * volatile",
 # matching clang's own convention, rather than always a prefix) -- an
@@ -200,6 +200,18 @@ _SNAPSHOT_CACHE_VERSION: str = "15"
 # entry happened to expire or was manually cleared -- not just a wrong
 # value, an entity that used to not exist in the snapshot at all. Bumped so
 # the upgrade forces re-extraction instead.
+#
+# v16 (symbol-binding model field, Codex review): ``dumper_elf_symbols.
+# _populate_elf_visibility`` started also populating ``Function.elf_binding``/
+# ``Variable.elf_binding`` from the same unconditional ``.dynsym`` symbol-map
+# pass that already populates ``elf_visibility`` -- reached by every ELF
+# dump, not gated behind any opt-in flag. Without this bump, an upgrading
+# user's warm whole-snapshot cache entry (headers/includes/version/lang/
+# ``extra`` all unchanged) would keep replaying the old snapshot with every
+# function/variable's ``elf_binding`` still ``None``, silently making a new
+# ``binding:`` suppression selector never match until the entry happened to
+# expire or was manually cleared. Bumped so the upgrade forces re-extraction
+# instead.
 
 
 def _get_cache_dir() -> Path:
