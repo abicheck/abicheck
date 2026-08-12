@@ -819,14 +819,52 @@ class PolicyFile:
         # a kind-global `overrides:` entry or a selector-scoped one; a rule
         # bypassing the CLI's HIGH RISK diagnostic purely by being
         # selector-scoped instead of global would make the new primitive a
-        # blind spot for the same safety check. Only a rule that names a
-        # `change_kind` can be checked here -- a rule scoped purely by
-        # symbol/pattern with no kind filter applies to whichever kind a
-        # matching finding happens to carry, and there is no single
-        # `base_verdict` to compare against without one.
+        # blind spot for the same safety check. A rule that names a
+        # `change_kind` is checked against that kind's own base verdict
+        # below, same as `overrides:`. A rule scoped purely by symbol/pattern
+        # with no kind filter applies to whichever kind a matching finding
+        # happens to carry, so there's no single `base_verdict` to compare
+        # against -- that shape gets its own, more conservative check inside
+        # the loop instead of being silently skipped (a second Codex review
+        # round: skipping it entirely left a kind-unscoped 'ignore'/'risk'
+        # rule with no safety diagnostic at all, even though it's the
+        # widest-blast-radius shape a reclassify rule can take).
         slug_to_kind = {k.value: k for k in ChangeKind}
         for rule in self.reclassify:
             if rule.change_kind is None:
+                # A kind-unscoped rule (selector fields only, e.g. `symbol:`/
+                # `symbol_pattern:` with no `kind:`) applies to *whichever*
+                # kind a matching finding happens to carry, including a
+                # critical one like `func_removed` (Codex review) -- there is
+                # no single `base_verdict` to compare against the way the
+                # kind-scoped branch below does, so this can't reproduce the
+                # exact "downgraded from this base policy's own verdict for
+                # that kind" check. But a rule downgrading to 'ignore'/'risk'
+                # with no kind filter at all is inherently the widest,
+                # riskiest shape a reclassify rule can take -- it silences
+                # every kind a matching symbol/pattern could ever produce,
+                # critical kinds included -- so it's warned unconditionally
+                # rather than silently skipped, same spirit as the kind-scoped
+                # HIGH RISK/RISK diagnostics just phrased for the unknown-kind
+                # case.
+                if rule.to_verdict == Verdict.COMPATIBLE:
+                    warnings.append(
+                        f"HIGH RISK: reclassify rule downgrades to 'ignore' "
+                        f"with no 'kind:' filter ({rule.describe()}) — this "
+                        f"silences every finding kind a matching symbol "
+                        f"produces, including critical breaking kinds like "
+                        f"'func_removed'. Add a 'kind:' filter to scope this "
+                        f"rule, or verify this is intentional."
+                    )
+                elif rule.to_verdict == Verdict.COMPATIBLE_WITH_RISK:
+                    warnings.append(
+                        f"RISK: reclassify rule downgrades to 'risk' with no "
+                        f"'kind:' filter ({rule.describe()}) — this affects "
+                        f"every finding kind a matching symbol produces, "
+                        f"including critical breaking kinds. Add a 'kind:' "
+                        f"filter to scope this rule, or verify this is "
+                        f"intentional."
+                    )
                 continue
             kind = slug_to_kind[rule.change_kind]  # already validated at load time
             verdict = rule.to_verdict

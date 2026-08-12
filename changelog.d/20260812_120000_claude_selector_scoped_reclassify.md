@@ -81,4 +81,15 @@ A new changelog fragment. See changelog.d/README.md for the workflow.
   verdict. `PolicyFile.validate_overrides()` now also flags a `reclassify:`
   rule downgrading a critical/breaking kind (the same `HIGH RISK`/`RISK`/
   plain downgrade diagnostics `overrides:` already gets) — previously a
-  selector-scoped downgrade could bypass that safety check entirely.
+  selector-scoped downgrade could bypass that safety check entirely. A
+  `reclassify:` rule with no `kind:` filter (selector fields only, so it
+  applies to whichever kind a matching finding happens to carry) is now
+  conservatively flagged too when it downgrades to `risk`/`ignore` — it's
+  the widest-blast-radius shape a rule can take, since it can silence a
+  critical kind like `func_removed` on a matching symbol with no per-kind
+  diagnostic possible; previously it was silently skipped entirely.
+  `effective_verdict_for_change`'s no-match fallback now honors a given
+  `policy_file`'s own `base_policy` (e.g. `plugin_abi`) instead of silently
+  falling back to `strict_abi`'s kind sets — surfaced by
+  `--audit-suppressions`' new `policy_file`-aware high-risk classification
+  calling this resolver with only `policy_file=` set.

@@ -1063,16 +1063,62 @@ reclassify:
     assert pf.validate_overrides() == []
 
 
-def test_validate_overrides_skips_a_kindless_reclassify_rule(tmp_path: Path) -> None:
-    """A rule scoped purely by symbol/namespace, with no `kind:` filter, has
-    no single base_verdict to compare against -- skipped, not a crash, and
-    no false "safe" or "risky" claim either way."""
+def test_validate_overrides_flags_a_kindless_reclassify_rule_downgraded_to_ignore(
+    tmp_path: Path,
+) -> None:
+    """Codex review (second round): a rule scoped purely by symbol/namespace,
+    with no `kind:` filter, has no single base_verdict to compare against the
+    way a kind-scoped rule does -- but silently skipping it entirely left the
+    widest-blast-radius shape of reclassify rule (matches every kind a
+    symbol/pattern could ever produce, including func_removed) with no
+    safety diagnostic at all. It's now warned unconditionally rather than
+    silently skipped."""
     p = tmp_path / "policy.yaml"
     p.write_text(
         """
 reclassify:
   - symbol: foo
     to: ignore
+""".strip(),
+        encoding="utf-8",
+    )
+    pf = PolicyFile.load(p)
+    warnings = pf.validate_overrides()
+    assert len(warnings) == 1
+    assert "HIGH RISK" in warnings[0]
+    assert "no 'kind:' filter" in warnings[0]
+
+
+def test_validate_overrides_flags_a_kindless_reclassify_rule_downgraded_to_risk(
+    tmp_path: Path,
+) -> None:
+    p = tmp_path / "policy.yaml"
+    p.write_text(
+        """
+reclassify:
+  - symbol: foo
+    to: risk
+""".strip(),
+        encoding="utf-8",
+    )
+    pf = PolicyFile.load(p)
+    warnings = pf.validate_overrides()
+    assert len(warnings) == 1
+    assert "RISK" in warnings[0]
+    assert "no 'kind:' filter" in warnings[0]
+
+
+def test_validate_overrides_kindless_reclassify_rule_to_warn_is_not_flagged(
+    tmp_path: Path,
+) -> None:
+    """A kindless rule reclassifying to 'break'/'warn' isn't a downgrade at
+    all -- only 'ignore'/'risk' targets warrant the conservative warning."""
+    p = tmp_path / "policy.yaml"
+    p.write_text(
+        """
+reclassify:
+  - symbol: foo
+    to: warn
 """.strip(),
         encoding="utf-8",
     )
