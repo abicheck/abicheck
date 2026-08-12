@@ -52,20 +52,6 @@ from .policy_file import PolicyFile
 # old alias IS retained the alias-change is compatible and must survive.
 SYMBOL_VERSION_ALIAS_NOT_RETAINED_MARKER = "old version NOT retained as alias"
 
-# Change.caused_by_type prefix marking a redundant finding that must NOT
-# contribute to verdict computation via ``checker.compare``'s
-# ``verdict_redundant`` — the same exclusion the "rename:" prefix already
-# gets there, for the identical reason: a stronger, already-scored finding
-# (here, TYPE_VTABLE_CHANGED BREAKING) fully subsumes this one, so counting
-# both would let the redundant advisory's RISK contribution survive even
-# when a policy override/suppression targeting the covering finding has
-# already resolved it — silently resurrecting the exact "two detectors
-# disagreeing about one piece of evidence" confusion this whole mechanism
-# exists to remove. Shared between the producer
-# (``post_processing.SuppressLayoutUnverifiableCoveredByVtableChanged``) and
-# the consumer (``checker.compare``'s ``verdict_redundant`` filter).
-VTABLE_COVERS_UNVERIFIABLE_LAYOUT_GAP_PREFIX = "vtable_covers_unverifiable_layout_gap:"
-
 # The public evidence-depth ladder (ADR-043 D2/ADR-047 §7): exactly the four
 # user-facing rungs, matching the public CLI's ``--depth`` and
 # ``abicheck/mcp_server.py``'s own ``_PUBLIC_DEPTHS`` (kept as a separate,
@@ -332,15 +318,19 @@ class Change:
     # when it rests on the identical asymmetric-layout-evidence gap
     # LAYOUT_UNVERIFIABLE (diff_layout.py) reports for the same type. Purely
     # an internal cross-detector correlation key for
-    # post_processing.SuppressLayoutUnverifiableCoveredByVtableChanged to
-    # fold the now-redundant LAYOUT_UNVERIFIABLE advisory into
-    # ``redundant_changes`` — deliberately NOT ``modulation_reason``/
-    # ``modulation_rule`` (Codex review): this finding's own severity is
-    # never touched, so tagging it as a "modulation" would be a false audit
-    # entry (a public field reporters and ``impact.engine.assess_change()``
-    # expose as a real verdict-modulation reason code) for a finding whose
-    # verdict never changed. ``None`` for every ordinary TYPE_VTABLE_CHANGED
-    # and every other finding kind.
+    # post_processing.AnnotateLayoutUnverifiableCoveredByVtableChanged, which
+    # sets the co-located LAYOUT_UNVERIFIABLE finding's own
+    # ``correlated_change_kind`` from it — deliberately NOT
+    # ``modulation_reason``/``modulation_rule`` (Codex review): this finding's
+    # own severity is never touched, so tagging it as a "modulation" would be
+    # a false audit entry (a public field reporters and
+    # ``impact.engine.assess_change()`` expose as a real verdict-modulation
+    # reason code) for a finding whose verdict never changed. Also
+    # deliberately never used to *remove* either finding from ``changes``
+    # (three earlier revisions tried variants of that and each was found
+    # unsafe by review — see AGENTS.md's "Findings emitted from absent
+    # evidence" entry for the full account). ``False`` for every ordinary
+    # TYPE_VTABLE_CHANGED and every other finding kind.
     #
     # ``field(kw_only=True)``, per-field rather than the ``dataclasses.
     # KW_ONLY`` sentinel (Codex review, fresh evidence): ``Change`` is

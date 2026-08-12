@@ -1156,89 +1156,114 @@ Once a root command genuinely clears the bar above, pick the right home:
   including the Hypothesis properties this entry already describes — is
   scoped to one detector's own correctness in isolation, never to whether
   two detectors' outputs are mutually *legible* when they land on the same
-  subject. Fixed by `post_processing.
-  SuppressLayoutUnverifiableCoveredByVtableChanged`
-  (`checker_types.VTABLE_COVERS_UNVERIFIABLE_LAYOUT_GAP_PREFIX`,
-  `Change.vtable_covers_unverifiable_layout_gap`): never demotes the
-  BREAKING finding (the reasoning above is exactly why that direction is
-  unsafe — a real last-virtual-method removal with a new-side capture gap
-  is indistinguishable from this same evidence gap, so softening it risks
-  a false negative), and instead folds the now-redundant
-  `LAYOUT_UNVERIFIABLE` advisory into `redundant_changes` once a
-  `TYPE_VTABLE_CHANGED` already reports the identical gap for the identical
-  type. The shape worth reusing for a *future* pair of detectors that key
-  off the same evidence gap: (1) correlate by the type's real qualified
-  identity, never the bare `Change.symbol` two distinct same-named records
-  in different namespaces can share; (2) gate the correlation on a
-  dedicated internal marker recording *why* the stronger finding was kept,
-  not on its mere co-occurrence — an independently-evidenced instance of
-  the stronger kind (a real reorder, a real size delta, a real
-  virtual-base change) must never trigger the fold; (3) never reuse
-  `Change.modulation_reason`/`modulation_rule` for internal correlation —
-  those are a public, report-facing audit trail for an actual verdict
-  override, and tagging an unmodulated finding with them is a false audit
-  entry a downstream consumer (a reporter, `impact.engine.assess_change()`)
-  would read as real; (4) run the fold *after* `FilterNonPublicSurface`/
-  `DemoteOffPythonSurface`/`ApplySuppression` have independently settled
-  both findings, not before — folding earlier both hides the redundant
-  finding from a suppression rule that targets it directly and lets it
-  outlive its covering finding's later exclusion as out-of-public-surface,
-  since `ctx.redundant` (unlike `ctx.out_of_surface`) still contributes to
-  `verdict_redundant` by default; (5) tag the folded finding's
-  `caused_by_type` with a dedicated prefix and extend `checker.compare`'s
-  `verdict_redundant` exclusion to match it, mirroring the existing
-  `"rename:"` exclusion `SuppressRenamedPairs` relies on for the identical
-  reason — otherwise the folded advisory keeps contributing to the verdict
-  even after a policy override or suppression on the covering finding has
-  resolved it, silently resurrecting the exact contradiction this fix
-  exists to remove. Every one of these five was its own review-caught
-  regression on the fix's own PR (five rounds, in order: an unconditional
-  demotion of the BREAKING finding; the same demotion applied even when the
-  vtable change was independently evidenced; the same demotion applied even
-  when a virtual-base change was independently evidenced; the wrong
-  pipeline ordering; the `modulation_reason` misuse; the verdict-inclusion
-  gap) — worth recording together rather than only as scattered commit
-  messages, since a future detector pair hitting the identical evidence-gap
-  shape should be able to read this list once instead of rediscovering each
-  point independently. Regression coverage: `tests/test_vtable_severity.py`
-  (six hand-picked example cases covering each of the five points above)
-  and a generalized Hypothesis property,
-  `test_layout_unverifiable_always_folded_when_vtable_change_shares_its_gap`
-  in `tests/test_detector_properties.py`, checking the fold holds over
-  arbitrarily generated classes and evidence-descriptor shapes rather than
-  only the hand-picked examples.
+  subject.
 
-  **A whole-class structural fix for the field-ordering half of the
-  above was attempted and reverted — the in-repo audit that justified it
-  was the wrong audit.** The field-ordering bug (found twice now: first on
-  `AbiSnapshot` in PR #582, again on `Change.
-  vtable_covers_unverifiable_layout_gap` in the same PR that introduced
-  it) was first "fixed" by making `Change` keyword-only from `old_value`
-  onward via the `dataclasses.KW_ONLY` sentinel, on the strength of an
-  AST-parse of every `Change(...)` call site in this repo confirming every
-  positional call anywhere passes exactly the three required leading
-  fields and never more. That audit answers the wrong question for a type
-  this codebase itself documents as public API
-  (`checker_types.py`'s own module docstring; CLAUDE.md: "changing their
-  public surface is a breaking change to the Python API — coordinate it"):
-  it proves this repo's own call sites are safe, and says nothing about an
-  external consumer who previously called `Change(kind, symbol,
-  description, old_value, new_value, ...)` positionally — for whom the
-  whole-class sentinel is exactly the same breaking shift the fix exists
-  to prevent, just moved to a boundary this repo cannot see or test
+  **The fix went through four designs before landing, and the last pivot is
+  the one worth reading closely — it generalizes past this one pair of
+  detectors.** (1) Demoting `TYPE_VTABLE_CHANGED` was tried first and
+  rejected immediately: a real last-virtual-method removal with a new-side
+  capture gap is indistinguishable from this same evidence gap, so
+  softening its severity risks a false negative on a genuine break. (2)
+  Folding the now-redundant `LAYOUT_UNVERIFIABLE` finding into
+  `redundant_changes` unconditionally was tried next, and review found four
+  real defects in it in turn: correlating on bare `Change.symbol` (two
+  distinct same-named records in different namespaces can share it, so
+  fold on `qualified_name`); folding on mere co-occurrence rather than a
+  marker recording *why* the stronger finding was kept (an
+  independently-evidenced `TYPE_VTABLE_CHANGED` — a real reorder, a real
+  size delta, a real virtual-base change — must never trigger the fold);
+  reusing `Change.modulation_reason`/`modulation_rule` for internal
+  signaling (those are a public, report-facing audit trail for an actual
+  verdict override — tagging an unmodulated finding with them is a false
+  audit entry a downstream consumer would read as real); and running the
+  fold *before* `FilterNonPublicSurface`/`ApplySuppression` had settled
+  both findings, which both hid the redundant finding from a suppression
+  rule targeting it directly and let it outlive its covering finding's
+  later exclusion. (3) Fixing all four and gating the fold on a
+  policy-resolved-verdict subsumption check (`checker.
+  _vtable_gap_finding_is_verdict_subsumed`) closed the `PolicyFile`-override
+  case, but review found the fix was still solving the wrong layer: **the
+  severity-scheme axis (`severity.SeverityConfig` — `abi_breaking`/
+  `potential_breaking`/etc., each independently `error`/`warning`/`info`)
+  is chosen by the CLI/reporter caller entirely *after* `compare()`
+  returns, so no compare()-time decision to remove a finding from
+  `changes` can ever be correct for it.** Concretely: a caller configuring
+  `abi_breaking=info` / `potential_breaking=error` wants
+  `LAYOUT_UNVERIFIABLE`'s error-level contribution to reach
+  `severity.compute_exit_code`, but that function reads `result.changes`
+  directly — if the fold already removed the finding because the
+  *policy* axis (a completely orthogonal gate, resolved before
+  `compare()` returns) ranked the covering `TYPE_VTABLE_CHANGED` as more
+  severe, the severity axis never gets a chance to see it, and this
+  reproduces with **zero policy override involved** (Codex review, fresh
+  evidence). The same review round also found the fold's pipeline
+  ordering relative to `DemoteUnreachableInternalChurn` (which runs later,
+  to demote a confirmed-unreachable internal-namespace type) could orphan
+  an already-made fold decision when the covering finding was itself
+  demoted afterward. (4) **The only structurally-safe fix was to stop
+  removing information from `changes` for this reason at all.**
+  `post_processing.AnnotateLayoutUnverifiableCoveredByVtableChanged`
+  leaves both findings exactly where they always were and only sets the
+  already-existing, generic `Change.correlated_change_kind` field (reused
+  from its original ADR-041 purpose, not a new one) on the redundant
+  `LAYOUT_UNVERIFIABLE` finding, pointing at `"type_vtable_changed"`.
+  `Change.vtable_covers_unverifiable_layout_gap` (set in
+  `diff_types._diff_type_vtable`) still records which `TYPE_VTABLE_CHANGED`
+  findings rest purely on the ambiguous evidence gap versus real,
+  independent evidence — that detection logic is exactly what survived all
+  four designs unchanged; only the *action* taken on it changed. This
+  design is immune by construction to every one of the defects above and
+  to any future one shaped like them, because nothing is ever hidden from
+  a consumer that reads `changes` — there is no "was this the right time
+  to remove it" question left to get wrong. **The general principle this
+  leaves behind: never remove a finding from a shared, multiply-consumed
+  list (`DiffResult.changes`) to resolve what is fundamentally a
+  *presentation* problem (two findings reading as contradictory) when that
+  list has independent downstream consumers — a legacy verdict, a
+  policy-file override, a severity-scheme exit code, a future pipeline
+  step — that this fix cannot fully enumerate and whose configuration is
+  chosen after the removal decision was made. Annotate; never remove.**
+  Regression coverage: `tests/test_vtable_severity.py`'s
+  `TestLayoutUnverifiableCorrelatedWithVtableChanged` (hand-picked example
+  cases, including one exercising the severity-axis gap directly via
+  `severity.compute_exit_code`) and a generalized Hypothesis property,
+  `test_layout_unverifiable_always_correlated_when_vtable_change_shares_its_gap`
+  in `tests/test_detector_properties.py`, checking the annotation holds
+  over arbitrarily generated classes and evidence-descriptor shapes.
+
+  **A whole-class structural fix was attempted mid-way through the fold
+  design (2) above, for the field-ordering half of it, and reverted — the
+  in-repo audit that justified it was the wrong audit.** (This sub-entry
+  predates the pivot to design (4) and is kept because the lesson is
+  independent of which design won.) The field-ordering bug (found twice
+  now: first on `AbiSnapshot` in PR #582, again on the new `Change` field
+  this fix originally added mid-list) was first "fixed" by making `Change`
+  keyword-only from `old_value` onward via the `dataclasses.KW_ONLY`
+  sentinel, on the strength of an AST-parse of every `Change(...)` call
+  site in this repo confirming every positional call anywhere passes
+  exactly the three required leading fields and never more. That audit
+  answers the wrong question for a type this codebase itself documents as
+  public API (`checker_types.py`'s own module docstring; CLAUDE.md:
+  "changing their public surface is a breaking change to the Python API —
+  coordinate it"): it proves this repo's own call sites are safe, and says
+  nothing about an external consumer who previously called `Change(kind,
+  symbol, description, old_value, new_value, ...)` positionally — for whom
+  the whole-class sentinel is exactly the same breaking shift the fix
+  exists to prevent, just moved to a boundary this repo cannot see or test
   (Codex review, fresh evidence). Reverted in favor of the same per-field
   `field(kw_only=True)` PR #582 already used for `AbiSnapshot`, applied
-  only to the one new field and appended at the true end of the dataclass
-  (not mid-list) so every pre-existing field's position — and therefore
-  every pre-existing positional caller's behavior, in or out of this repo
-  — is completely unchanged. The lesson generalizes beyond this one field:
-  for a type documented as public API, "no in-repo caller breaks" is not
-  the bar: prefer the narrowest change that cannot break a caller this
-  repo cannot see, even when a broader structural fix looks more
-  complete. The `KW_ONLY` sentinel is still the right tool for a
-  genuinely *internal* dataclass with no external-construction contract
-  (nothing here argues against it in general) — the mistake was applying
-  it to one that has such a contract without checking for one first.
+  only to the one new field (`vtable_covers_unverifiable_layout_gap`) and
+  appended at the true end of the dataclass (not mid-list) so every
+  pre-existing field's position — and therefore every pre-existing
+  positional caller's behavior, in or out of this repo — is completely
+  unchanged. The lesson generalizes beyond this one field: for a type
+  documented as public API, "no in-repo caller breaks" is not the bar:
+  prefer the narrowest change that cannot break a caller this repo cannot
+  see, even when a broader structural fix looks more complete. The
+  `KW_ONLY` sentinel is still the right tool for a genuinely *internal*
+  dataclass with no external-construction contract (nothing here argues
+  against it in general) — the mistake was applying it to one that has
+  such a contract without checking for one first.
 
 - **Evidence-provider model — investigated, found not to reproduce as
   described; no fix applied.** A status-review follow-up asked whether

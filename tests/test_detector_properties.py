@@ -670,12 +670,18 @@ def test_both_sides_captured_still_diffs_normally(
 # above); LAYOUT_UNVERIFIABLE reports the same gap as calm, non-escalating
 # RISK. Landing on the same type in the same report read as two detectors
 # disagreeing about one piece of evidence -- these state the fix's invariant
-# over *arbitrary* generated classes rather than the six hand-picked examples
-# in test_vtable_severity.py: whenever both conditions hold for the same
-# type, the redundant LAYOUT_UNVERIFIABLE is always folded into
-# redundant_changes (never silently dropped, never left duplicating the
-# BREAKING finding in `changes`), and TYPE_VTABLE_CHANGED's own severity is
-# never touched by the fold.
+# over *arbitrary* generated classes rather than the hand-picked examples in
+# test_vtable_severity.py: whenever both conditions hold for the same type,
+# LAYOUT_UNVERIFIABLE stays a fully reported top-level finding (never folded
+# out of `changes`, never altered) and is additionally annotated with
+# `correlated_change_kind == "type_vtable_changed"`, and TYPE_VTABLE_CHANGED's
+# own severity is never touched by the annotation. An earlier design folded
+# the redundant finding into `redundant_changes` instead -- reverted because
+# whether that removal was "safe" depended on configuration chosen after
+# compare() already returned (a PolicyFile override, a severity-scheme exit
+# code, a later pipeline step), which no compare()-time removal decision can
+# ever get right for every consumer (see AGENTS.md's "Findings emitted from
+# absent evidence" entry).
 
 
 @st.composite
@@ -685,8 +691,8 @@ def _ambiguous_vtable_with_layout_gap_pair(
     """A class whose vtable transition rests on unresolved evidence (unknown
     ``size_bits`` on either side, no other independent signal) AND whose
     layout descriptor is asymmetric (present on exactly one side) -- the
-    exact evidence-gap shape ``SuppressLayoutUnverifiableCoveredByVtableChanged``
-    exists to fold.
+    exact evidence-gap shape ``AnnotateLayoutUnverifiableCoveredByVtableChanged``
+    exists to cross-reference.
 
     Varies which layout-descriptor field carries the asymmetric evidence
     (``base_offsets``/``data_size_bits``/``vptr_offset_bits``) and which side
@@ -735,20 +741,24 @@ def _ambiguous_vtable_with_layout_gap_pair(
 
 @given(pair=_ambiguous_vtable_with_layout_gap_pair())
 @_HSETTINGS
-def test_layout_unverifiable_always_folded_when_vtable_change_shares_its_gap(
+def test_layout_unverifiable_always_correlated_when_vtable_change_shares_its_gap(
     pair: tuple[AbiSnapshot, AbiSnapshot],
 ) -> None:
     """The general form of the fix: TYPE_VTABLE_CHANGED stays BREAKING and
-    visible; the co-occurring LAYOUT_UNVERIFIABLE for the identical gap is
-    always folded into redundant_changes, never left duplicating it in
-    `changes` -- across arbitrarily generated classes and descriptor shapes,
+    visible; the co-occurring LAYOUT_UNVERIFIABLE for the identical gap also
+    stays fully visible in `changes` (never folded into redundant_changes,
+    never dropped), annotated with a cross-reference back to the covering
+    finding -- across arbitrarily generated classes and descriptor shapes,
     not just the hand-picked examples in test_vtable_severity.py."""
     old, new = pair
     result = compare(old, new)
-    kinds = {c.kind for c in result.changes}
-    assert ChangeKind.TYPE_VTABLE_CHANGED in kinds
+    changes_by_kind = {c.kind: c for c in result.changes}
+    assert ChangeKind.TYPE_VTABLE_CHANGED in changes_by_kind
     assert result.verdict == Verdict.BREAKING
-    assert ChangeKind.LAYOUT_UNVERIFIABLE not in kinds
+    assert ChangeKind.LAYOUT_UNVERIFIABLE in changes_by_kind
 
     redundant_kinds = {c.kind for c in result.redundant_changes}
-    assert ChangeKind.LAYOUT_UNVERIFIABLE in redundant_kinds
+    assert ChangeKind.LAYOUT_UNVERIFIABLE not in redundant_kinds
+
+    layout_change = changes_by_kind[ChangeKind.LAYOUT_UNVERIFIABLE]
+    assert layout_change.correlated_change_kind == ChangeKind.TYPE_VTABLE_CHANGED.value

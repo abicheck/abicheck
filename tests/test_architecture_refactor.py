@@ -272,7 +272,7 @@ class TestPostProcessingPipeline:
             "mark_reachability",
             "apply_suppression",
             "suppress_renamed_pairs",
-            "suppress_layout_unverifiable_covered_by_vtable_changed",
+            "annotate_layout_unverifiable_covered_by_vtable_changed",
             "filter_redundant",
             "enrich_affected_symbols",
             "attribute_stdlib_embedding",

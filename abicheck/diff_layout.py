@@ -321,7 +321,8 @@ def _check_layout_unverifiable(
                 # Precise type identity (not the bare ``symbol`` two distinct
                 # same-named records in different namespaces would share) --
                 # lets diff_types.py's TYPE_VTABLE_CHANGED-covers-this-gap
-                # redundancy check (SuppressLayoutUnverifiableCoveredByVtableChanged)
+                # cross-reference check
+                # (post_processing.AnnotateLayoutUnverifiableCoveredByVtableChanged)
                 # correlate against the *exact* RecordType this finding is
                 # about, rather than a same-named-but-different one.
                 qualified_name=new_rec.qualified_name or new_rec.name,

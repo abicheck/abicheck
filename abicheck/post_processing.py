@@ -38,7 +38,6 @@ from .post_processing_reachability import MarkReachability as MarkReachability
 if TYPE_CHECKING:
     from .checker_types import Change
     from .model import AbiSnapshot
-    from .policy_file import PolicyFile
     from .suppression import Suppression, SuppressionList
 
 
@@ -176,10 +175,11 @@ class DowngradeOpaqueTypeChanges:
         return _downgrade_opaque_type_changes(changes, ctx.old, ctx.new)
 
 
-class SuppressLayoutUnverifiableCoveredByVtableChanged:
-    """Fold a ``LAYOUT_UNVERIFIABLE`` finding into ``ctx.redundant`` when a
-    ``TYPE_VTABLE_CHANGED`` on the *exact same type* already reports the
-    identical asymmetric-evidence gap.
+class AnnotateLayoutUnverifiableCoveredByVtableChanged:
+    """Cross-reference a ``LAYOUT_UNVERIFIABLE`` finding with a
+    ``TYPE_VTABLE_CHANGED`` on the *exact same type* that reports the
+    identical asymmetric-evidence gap — never removing either finding from
+    ``changes``.
 
     ``diff_types._vtable_transition_is_evidenced`` and
     ``diff_layout._check_layout_unverifiable`` both key off the same "one
@@ -196,13 +196,45 @@ class SuppressLayoutUnverifiableCoveredByVtableChanged:
     (reproducible with zero real ABI change — scanning a binary against a
     dump of itself).
 
-    Since the BREAKING finding already reports this exact gap for this
-    exact type, the RISK advisory adds no new information — it is folded
-    away as redundant (``ctx.redundant``, the same bucket
-    ``FilterRedundant`` already uses for a derived finding subsumed by its
-    root), never dropped silently. This never touches ``TYPE_VTABLE_CHANGED``
-    itself, so a genuine break can never be masked by this step — it can
-    only ever remove a duplicate advisory.
+    This step deliberately does **not** try to resolve that presentation
+    problem by removing either finding from the scored set — three earlier
+    revisions did (first demoting ``TYPE_VTABLE_CHANGED``, then folding
+    ``LAYOUT_UNVERIFIABLE`` into ``ctx.redundant`` unconditionally, then
+    only when policy-subsumed), and each was independently shown unsafe by
+    review (see AGENTS.md's own account of all of these). The last and
+    decisive one (Codex review, fresh evidence): the fold's "is the
+    covering finding severe enough to make this one redundant" comparison
+    was made against the *policy verdict* axis (BREAKING/API_BREAK/RISK/
+    COMPATIBLE), but ``DiffResult.changes`` is separately gated by the
+    *severity-scheme* axis (``SeverityConfig``: abi_breaking/
+    potential_breaking/quality_issues/addition, each independently
+    error/warning/info) — and that axis is chosen by a caller entirely
+    *after* ``compare()`` returns (``cli.py``'s ``--severity-preset``/
+    ``--severity-*`` flags, applied to an already-built ``DiffResult``).
+    No decision made inside ``compare()`` can be correct for a
+    configuration ``compare()`` never sees: a policy-unconfigured run with
+    ``abi_breaking=info``/``potential_breaking=error`` reproduces the exact
+    same "the gate misses the finding" bug with **no policy override
+    involved at all**, which the previous, policy-axis-only fold check had
+    no way to detect. Once two independent axes (policy *and* severity
+    config) can each defeat a fold decided at ``compare()``-time, and each
+    was found only by discovering the previous fix's blind spot, there is
+    no principled reason to believe a third axis (a future gate mechanism)
+    won't do the same. The only fix immune to *every* current and future
+    consumer of ``DiffResult.changes`` is to never remove information from
+    it for this reason at all.
+
+    So instead: both findings stay exactly where the detectors put them,
+    contributing independently and correctly to every verdict, severity,
+    JSON, SARIF, and release-bundle computation exactly as if this step did
+    not exist. The only change is ``Change.correlated_change_kind`` — set on
+    the ``LAYOUT_UNVERIFIABLE`` finding to ``"type_vtable_changed"`` — the
+    same generic cross-reference field ADR-041 already uses for a different
+    finding pair, so a JSON/SARIF consumer (``reporter.py``/``sarif.py``
+    already serialize it) can render "see also" instead of two
+    unexplained, seemingly-contradictory findings, without this codebase
+    ever having to correctly anticipate what a downstream consumer will
+    do with the list.
 
     Correlated via ``Change.qualified_name`` (the type's real, namespaced
     identity — both producers set it for exactly this purpose), not the
@@ -210,97 +242,34 @@ class SuppressLayoutUnverifiableCoveredByVtableChanged:
     namespaces could share; and gated on the dedicated
     ``Change.vtable_covers_unverifiable_layout_gap`` marker (not
     ``modulation_reason`` — see that field's own docstring for why
-    overloading the modulation audit trail here would be wrong, Codex
-    review), so a co-occurring but independently-evidenced
-    ``TYPE_VTABLE_CHANGED`` (a real reorder, a real size delta, a real
-    virtual-base change) never triggers this fold.
-
-    Runs immediately before ``FilterRedundant``, *after* surface scoping
-    (``FilterNonPublicSurface``/``DemoteOffPythonSurface``) and
-    ``ApplySuppression`` have both already settled independently for each
-    finding (Codex review): running earlier would let this step remove a
-    ``LAYOUT_UNVERIFIABLE`` finding from ``changes`` before those steps ever
-    see it, which (a) hides it from a suppression rule that targets
-    ``layout_unverifiable`` directly — it would never be evaluated at all —
-    and (b) means a ``TYPE_VTABLE_CHANGED`` later excluded as
-    out-of-public-surface no longer prevents its now-orphaned
-    ``LAYOUT_UNVERIFIABLE`` from still contributing to the verdict via
-    ``ctx.redundant`` (unlike ``ctx.out_of_surface``, which does not; a
-    ``checker.compare``-level check still guards the reverse ordering
-    problem where ``DemoteUnreachableInternalChurn``, which runs even later,
-    demotes the covering finding *after* this step already folded its pair —
-    see ``checker._vtable_gap_finding_is_verdict_subsumed``'s own docstring).
-
-    The fold itself only happens when the covering finding's own
-    *policy-resolved* verdict (``ctx.policy``/``ctx.policy_file``, resolved
-    right here rather than deferred) is at least as severe as the redundant
-    finding's own would be (Codex review, fresh evidence) — otherwise it is
-    left untouched in ``changes``. This is deliberately decided *before* the
-    finding leaves ``changes``, not after: an earlier revision computed this
-    same comparison only in ``checker.compare()``, after unconditionally
-    folding first, which correctly fixed the legacy ``DiffResult.verdict``
-    but left every *other* consumer of ``DiffResult.changes`` blind to a
-    non-subsumed finding — the severity-scheme exit code
-    (``severity.compute_exit_code``, called with ``result.changes`` at
-    several call sites in ``cli.py``/``cli_compare_release_helpers.py``/
-    ``cli_helpers_compare.py``/``reporter_markdown.py``) and the JSON/SARIF
-    severity gate (``reporter._build_severity_json``,
-    ``sarif._severity_gate_properties``) all read ``DiffResult.changes``
-    directly and never saw the finding once it moved to
-    ``redundant_changes``, regardless of what the legacy verdict said.
-    Deciding here instead means a non-subsumed finding is simply never
-    removed from ``changes`` — every consumer of that one canonical list
-    sees it, with nothing to special-case downstream.
-
-    ``caused_by_type`` is tagged with the
-    ``VTABLE_COVERS_UNVERIFIABLE_LAYOUT_GAP_PREFIX`` marker on a finding that
-    *is* folded, so ``checker.compare``'s ``verdict_redundant`` filter can
-    still recognize and exclude it from legacy-verdict computation —
-    mirroring the ``"rename:"`` exclusion ``SuppressRenamedPairs`` already
-    relies on for the identical reason. By the time that check runs, folding
-    already guarantees subsumption, so it only needs to additionally guard
-    the ``DemoteUnreachableInternalChurn`` ordering case above — it no
-    longer re-derives the policy comparison itself.
+    overloading the modulation audit trail here would be wrong), so a
+    co-occurring but independently-evidenced ``TYPE_VTABLE_CHANGED`` (a
+    real reorder, a real size delta, a real virtual-base change) is never
+    cross-referenced as if it shared the same evidence gap.
     """
 
-    name = "suppress_layout_unverifiable_covered_by_vtable_changed"
+    name = "annotate_layout_unverifiable_covered_by_vtable_changed"
 
     def run(self, changes: list[Change], ctx: PipelineContext) -> list[Change]:
-        from .checker_policy import ChangeKind, Verdict, compute_verdict
-        from .checker_types import VTABLE_COVERS_UNVERIFIABLE_LAYOUT_GAP_PREFIX
-        from .policy_file import _VERDICT_ORDER
+        from .checker_policy import ChangeKind
 
-        def _resolved_verdict(change: Change) -> Verdict:
-            if ctx.policy_file is not None:
-                return ctx.policy_file.compute_verdict([change])
-            return compute_verdict([change], policy=ctx.policy)
-
-        covering_by_type: dict[str, Change] = {
-            c.qualified_name: c
+        covered_types = {
+            c.qualified_name
             for c in changes
             if c.kind == ChangeKind.TYPE_VTABLE_CHANGED
             and c.vtable_covers_unverifiable_layout_gap
             and c.qualified_name
         }
-        if not covering_by_type:
+        if not covered_types:
             return changes
-        kept: list[Change] = []
         for c in changes:
-            covering = (
-                covering_by_type.get(c.qualified_name or "")
-                if c.kind == ChangeKind.LAYOUT_UNVERIFIABLE
-                else None
-            )
-            if covering is not None and _VERDICT_ORDER.index(
-                _resolved_verdict(covering)
-            ) >= _VERDICT_ORDER.index(_resolved_verdict(c)):
-                c.caused_by_type = (
-                    f"{VTABLE_COVERS_UNVERIFIABLE_LAYOUT_GAP_PREFIX}{c.qualified_name}"
-                )
-                ctx.redundant.append(c)
-                continue
-            kept.append(c)
-        return kept
+            if (
+                c.kind == ChangeKind.LAYOUT_UNVERIFIABLE
+                and c.qualified_name in covered_types
+                and not c.correlated_change_kind
+            ):
+                c.correlated_change_kind = ChangeKind.TYPE_VTABLE_CHANGED.value
+        return changes
 
 
 class EnrichSourceLocations:
@@ -1445,11 +1414,6 @@ class PostProcessingPipeline:
         # for scope_to_public_surface would instead bind `True` here and
         # leave scoping disabled, with no error).
         internal_namespaces: tuple[str, ...] | None = None,
-        # Same append-only rule (Codex review, fresh evidence): see
-        # PipelineContext.policy's own docstring for why
-        # SuppressLayoutUnverifiableCoveredByVtableChanged needs these.
-        policy: str = "strict_abi",
-        policy_file: PolicyFile | None = None,
     ) -> PipelineContext:
         """Run all steps, returning the final PipelineContext."""
         ctx = PipelineContext(
@@ -1462,8 +1426,6 @@ class PostProcessingPipeline:
             force_public_symbols=set(force_public_symbols or set()),
             collapse_versioned_symbols=collapse_versioned_symbols,
             public_surface_allowlist=public_surface_allowlist,
-            policy=policy,
-            policy_file=policy_file,
         )
         # ``FilterRedundant`` sets ``ctx.kept = kept`` — an *aliasing* contract,
         # not a snapshot: every step from that point on is required to either
@@ -1524,13 +1486,14 @@ DEFAULT_PIPELINE = PostProcessingPipeline(
         ApplySuppression(),
         SuppressRenamedPairs(),
         # Reads markers TYPE_VTABLE_CHANGED set at emission time (diff_types.py)
-        # to fold a redundant LAYOUT_UNVERIFIABLE finding covering the identical
-        # evidence gap into ctx.redundant. Deliberately runs here -- after surface
-        # scoping and suppression have already independently settled both
-        # findings (Codex review; see the step's own docstring) -- and still
-        # before FilterRedundant engages the ctx.kept aliasing contract, so
-        # returning a new filtered list here is safe.
-        SuppressLayoutUnverifiableCoveredByVtableChanged(),
+        # to cross-reference a LAYOUT_UNVERIFIABLE finding covering the identical
+        # evidence gap via Change.correlated_change_kind. Never removes anything
+        # from `changes` (see the step's own docstring for why an earlier,
+        # removal-based design was unsafe), so its position relative to
+        # scoping/suppression/FilterRedundant is not load-bearing the way a
+        # filtering step's would be -- kept here simply to run once both
+        # findings are guaranteed to exist in `changes`.
+        AnnotateLayoutUnverifiableCoveredByVtableChanged(),
         FilterRedundant(),
         EnrichAffectedSymbols(),
         AttributeStdlibEmbedding(),

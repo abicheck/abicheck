@@ -38,7 +38,6 @@ from .checker_policy import ChangeKind
 if TYPE_CHECKING:
     from .checker_types import Change
     from .model import AbiSnapshot
-    from .policy_file import PolicyFile
     from .suppression import SuppressionList
     from .surface import PublicSurface
 
@@ -104,24 +103,6 @@ class PipelineContext:
     # SONAME change. The late SONAME policy should not call that bump
     # unnecessary after this step has moved the matched removals out of kept.
     versioned_scheme_soname_relink_required: bool = False
-    # Threaded from checker.compare()'s own `policy`/`policy_file` parameters
-    # (Codex review, fresh evidence) so a pipeline step can resolve a
-    # finding's *policy-aware* severity without waiting for compare()'s own
-    # post-pipeline verdict computation. Needed specifically by
-    # SuppressLayoutUnverifiableCoveredByVtableChanged: folding a
-    # LAYOUT_UNVERIFIABLE finding out of `changes` is only safe when the
-    # covering TYPE_VTABLE_CHANGED's own resolved severity actually subsumes
-    # it -- deciding that *after* the fold (as an earlier revision did) left
-    # every exit-code/gate consumer that reads `DiffResult.changes` directly
-    # (there are several beyond the legacy verdict: the severity-scheme exit
-    # code, the JSON/SARIF severity gate, release-bundle gating) unable to
-    # see a non-subsumed finding at all, since it had already been moved out
-    # of `changes` into `redundant_changes` before any of them ran. Deciding
-    # at fold time instead means a non-subsumed finding is simply never
-    # removed from `changes` in the first place -- every consumer of that one
-    # canonical list sees it, with nothing to special-case.
-    policy: str = "strict_abi"
-    policy_file: PolicyFile | None = None
 
 
 # diff_types.py builds ENUM_MEMBER_*/ENUM_LAST_MEMBER_VALUE_CHANGED's symbol

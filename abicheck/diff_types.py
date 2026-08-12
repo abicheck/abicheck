@@ -1437,14 +1437,16 @@ def _diff_type_vtable(
     # ``modulation_reason``/``modulation_rule``, which are a public,
     # report-facing audit trail for an actual verdict override that did not
     # happen here; Codex review) so a post-processing step
-    # (``post_processing.SuppressLayoutUnverifiableCoveredByVtableChanged``)
-    # can recognize that THIS type's LAYOUT_UNVERIFIABLE finding is
-    # redundant -- fully subsumed by this stronger, already-BREAKING
-    # finding for the exact same evidence gap -- and fold it away as
-    # redundant rather than reporting the same gap twice at two different
-    # (and, before this fix, contradictory-looking) severities. Removing the
-    # redundant advisory can never turn a real break into a non-break, since
-    # it never touches a BREAKING finding's severity.
+    # (``post_processing.AnnotateLayoutUnverifiableCoveredByVtableChanged``)
+    # can recognize that THIS type's LAYOUT_UNVERIFIABLE finding shares the
+    # exact same evidence gap and cross-reference it via
+    # ``Change.correlated_change_kind`` -- rather than reporting the same
+    # gap twice at two different (and, before this fix, contradictory-
+    # looking) severities with no link between them. Both findings stay
+    # fully reported; nothing is ever removed from ``changes`` for this
+    # reason (an earlier fold-based design was reverted -- see AGENTS.md's
+    # "Findings emitted from absent evidence" entry for why a compare()-time
+    # removal here can never be correct for every downstream consumer).
     if _vtable_transition_rests_on_unresolved_evidence(
         name, t_old, t_new, old_funcs, new_funcs
     ) and _layout_evidence_is_unverifiable(

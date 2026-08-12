@@ -36,7 +36,6 @@ from .checker_policy import (
     compute_verdict,
 )
 from .checker_types import (  # noqa: F401
-    VTABLE_COVERS_UNVERIFIABLE_LAYOUT_GAP_PREFIX,
     Change,
     DetectorSpec,
     DiffResult,
@@ -162,55 +161,6 @@ _SOURCE_BREAK_KINDS = _API_BREAK_KINDS
 
 # _DetectorSpec is now DetectorSpec in checker_types; keep alias for internal use.
 _DetectorSpec = DetectorSpec
-
-
-def _vtable_gap_finding_is_verdict_subsumed(
-    redundant_change: Change,
-    kept: list[Change],
-    out_of_surface: list[Change],
-) -> bool:
-    """True iff *redundant_change* (a ``LAYOUT_UNVERIFIABLE`` folded by
-    ``SuppressLayoutUnverifiableCoveredByVtableChanged``) may safely be
-    excluded from ``verdict_redundant``.
-
-    The policy-severity comparison this used to make itself now happens
-    *before* the fold, inside ``SuppressLayoutUnverifiableCoveredByVtableChanged``
-    (Codex review, fresh evidence): folding only ever happens when the
-    covering finding's resolved verdict already subsumes this one, so by
-    construction, if the covering ``TYPE_VTABLE_CHANGED`` is still present in
-    ``kept`` here, subsumption already holds and there is nothing left to
-    recompute. See that step's own docstring for why deciding earlier,
-    rather than after the fold as an earlier revision of this function did,
-    matters: several exit-code/gate consumers besides the legacy verdict
-    read ``DiffResult.changes`` directly and never saw a non-subsumed
-    finding once it had already been moved to ``redundant_changes``.
-
-    What *does* still need checking here is a second, independent way the
-    covering finding can stop counting: ``SuppressLayoutUnverifiableCoveredByVtableChanged``
-    runs before ``DetectInternalLeaks``/``DemoteUnreachableInternalChurn``,
-    so a covering ``TYPE_VTABLE_CHANGED`` on a confirmed-unreachable internal
-    type can itself be demoted to ``out_of_surface`` *after* the fold already
-    happened. An out-of-surface finding contributes nothing to the verdict by
-    design -- so the paired ``LAYOUT_UNVERIFIABLE`` about the exact same type
-    must be excluded too, unconditionally, rather than silently resurrecting
-    a verdict contribution for a type already proven outside the public
-    surface.
-    """
-    tag = (redundant_change.caused_by_type or "")[
-        len(VTABLE_COVERS_UNVERIFIABLE_LAYOUT_GAP_PREFIX) :
-    ]
-
-    def _is_covering(c: Change) -> bool:
-        return c.kind is ChangeKind.TYPE_VTABLE_CHANGED and c.qualified_name == tag
-
-    if any(_is_covering(c) for c in kept):
-        return True
-    if any(_is_covering(c) for c in out_of_surface):
-        return True
-    # The covering finding is missing from both buckets for some other,
-    # genuinely unexpected reason -- stay conservative and count the
-    # redundant finding rather than silently dropping real signal.
-    return False
 
 
 def _compute_verdict_for(
@@ -509,7 +459,6 @@ def _run_post_processing(
     force_public_symbols: set[str] | None,
     collapse_versioned_symbols: bool,
     public_surface_allowlist: set[str] | None = None,
-    policy: str = "strict_abi",
 ) -> tuple[
     list[Change],
     list[Change],
@@ -540,8 +489,6 @@ def _run_post_processing(
         force_public_symbols=force_public_symbols,
         collapse_versioned_symbols=collapse_versioned_symbols,
         public_surface_allowlist=public_surface_allowlist,
-        policy=policy,
-        policy_file=policy_file,
     )
     # scoping is "resolved" unless it was requested and had to fall back to the
     # full export table (issue #235: an unconfirmed scope must not read as a
@@ -947,7 +894,6 @@ def compare(
         force_public_symbols,
         collapse_versioned_symbols,
         public_surface_allowlist=public_surface_allowlist,
-        policy=policy,
     )
 
     # ADR-049 D9 — contract relevance is classified *before* compatibility
@@ -986,26 +932,8 @@ def compare(
     # drive the verdict; counting the redundant FUNC_REMOVED would re-escalate
     # the downgraded rename back to BREAKING. They stay in redundant_changes
     # for audit (--show-redundant); they just don't drive the verdict.
-    #
-    # vtable_covers_unverifiable_layout_gap: a *conditional* exclusion, for a
-    # LAYOUT_UNVERIFIABLE finding SuppressLayoutUnverifiableCoveredByVtableChanged
-    # folded away as subsumed by a co-located TYPE_VTABLE_CHANGED. The policy
-    # comparison that makes the fold safe already happened before the fold
-    # (inside that pipeline step, so every DiffResult.changes-reading
-    # consumer -- not just this legacy verdict -- sees a non-subsumed finding
-    # correctly); what's left to check here is only the narrower
-    # DemoteUnreachableInternalChurn ordering case
-    # _vtable_gap_finding_is_verdict_subsumed's own docstring describes.
     verdict_redundant = [
-        c
-        for c in redundant
-        if not (c.caused_by_type or "").startswith("rename:")
-        and not (
-            (c.caused_by_type or "").startswith(
-                VTABLE_COVERS_UNVERIFIABLE_LAYOUT_GAP_PREFIX
-            )
-            and _vtable_gap_finding_is_verdict_subsumed(c, kept, out_of_surface)
-        )
+        c for c in redundant if not (c.caused_by_type or "").startswith("rename:")
     ]
 
     # ADR-039 — build-context reconciliation. Opt-in: when enabled and the

@@ -13,7 +13,6 @@ from abicheck.checker import ChangeKind, Verdict, compare
 from abicheck.checker_policy import BREAKING_KINDS
 from abicheck.diff_cxx_rules import _owner_descends_from, vtable_slot_is_override_reuse
 from abicheck.model import AbiSnapshot, Function, Param, RecordType
-from abicheck.policy_file import PolicyFile
 
 
 def _snap(**kwargs: object) -> AbiSnapshot:
@@ -696,33 +695,45 @@ class TestClangVtableFactsReliabilityGate:
         assert ChangeKind.LAYOUT_UNVERIFIABLE not in kinds
 
 
-class TestLayoutUnverifiableSuppressedByVtableChanged:
-    """One evidence gap must not be reported at two different (and, before
-    this fix, contradictory-looking) severities for the *same* type
+class TestLayoutUnverifiableCorrelatedWithVtableChanged:
+    """One evidence gap must not be reported at two different (and,
+    read in isolation, contradictory-looking) severities for the *same*
+    type with no cross-reference between them
     (``diff_types._vtable_transition_rests_on_unresolved_evidence`` +
     ``_layout_evidence_is_unverifiable`` +
-    ``post_processing.SuppressLayoutUnverifiableCoveredByVtableChanged``).
+    ``post_processing.AnnotateLayoutUnverifiableCoveredByVtableChanged``).
 
     ``_vtable_transition_is_evidenced`` (diff_types.py) treats an unknown
     ``size_bits`` on either side as "keep the finding" (BREAKING), while
     ``_check_layout_unverifiable`` (diff_layout.py) treats the identical
-    asymmetric-evidence condition as calm, non-escalating RISK. TYPE_VTABLE_
-    CHANGED always stays BREAKING — demoting it would risk hiding a real
-    last-virtual-method removal indistinguishable from this same evidence
-    gap (Codex review) — so instead, when both fire on the same type for
-    the same reason, the redundant LAYOUT_UNVERIFIABLE advisory is folded
-    into ``redundant_changes`` rather than reported twice. Correlation uses
-    the exact type-matched RecordType pair via ``qualified_name``, never a
-    same-named-but-different type.
+    asymmetric-evidence condition as calm, non-escalating RISK. Both
+    findings always stay fully reported and independently scored —
+    earlier designs tried demoting TYPE_VTABLE_CHANGED (unsafe: it can
+    hide a real last-virtual-method removal indistinguishable from this
+    same evidence gap) and folding LAYOUT_UNVERIFIABLE out of
+    ``result.changes`` into ``redundant_changes`` (unsafe for a reason
+    that generalizes: whether the fold reads as "safe" depends on
+    downstream configuration — a `PolicyFile` override, a severity-scheme
+    exit-code caller, a later pipeline step like
+    ``DemoteUnreachableInternalChurn`` — chosen *after* ``compare()``
+    already decided to remove the finding, so no compare()-time removal
+    decision can ever be correct for every consumer). Instead, when both
+    fire on the same type for the same evidence gap, the redundant
+    LAYOUT_UNVERIFIABLE finding is *annotated* (``correlated_change_kind``
+    set to ``"type_vtable_changed"``) rather than hidden or altered —
+    every existing consumer that reads ``result.changes`` sees exactly
+    what it always saw, plus one extra cross-reference field. Correlation
+    uses the exact type-matched RecordType pair via ``qualified_name``,
+    never a same-named-but-different type.
     """
 
-    def test_layout_unverifiable_suppressed_when_vtable_changed_covers_same_gap(
+    def test_layout_unverifiable_correlated_when_vtable_changed_covers_same_gap(
         self,
     ) -> None:
         """A type with asymmetric layout evidence and a differing vtable list
-        emits TYPE_VTABLE_CHANGED (BREAKING); the co-occurring
-        LAYOUT_UNVERIFIABLE for the same gap is folded into redundant_changes
-        rather than also reported as a top-level finding."""
+        emits TYPE_VTABLE_CHANGED (BREAKING) and LAYOUT_UNVERIFIABLE (RISK);
+        both remain top-level findings, and the redundant LAYOUT_UNVERIFIABLE
+        is annotated with a cross-reference to the covering finding."""
         old = _snap(
             types=[
                 RecordType(
@@ -749,7 +760,7 @@ class TestLayoutUnverifiableSuppressedByVtableChanged:
         )
         result = compare(old, new)
         changes_by_kind = {c.kind: c for c in result.changes}
-        assert ChangeKind.LAYOUT_UNVERIFIABLE not in changes_by_kind
+        assert ChangeKind.LAYOUT_UNVERIFIABLE in changes_by_kind
         assert ChangeKind.TYPE_VTABLE_CHANGED in changes_by_kind
 
         vtable_change = changes_by_kind[ChangeKind.TYPE_VTABLE_CHANGED]
@@ -759,8 +770,14 @@ class TestLayoutUnverifiableSuppressedByVtableChanged:
         assert vtable_change.qualified_name == "Foo"
         assert result.verdict == Verdict.BREAKING
 
+        layout_change = changes_by_kind[ChangeKind.LAYOUT_UNVERIFIABLE]
+        assert (
+            layout_change.correlated_change_kind == ChangeKind.TYPE_VTABLE_CHANGED.value
+        )
+
+        # Nothing is ever removed from result.changes for this reason.
         redundant_kinds = {c.kind for c in result.redundant_changes}
-        assert ChangeKind.LAYOUT_UNVERIFIABLE in redundant_kinds
+        assert ChangeKind.LAYOUT_UNVERIFIABLE not in redundant_kinds
 
     def test_vtable_changed_stays_breaking_without_layout_unverifiable(self) -> None:
         """No matching LAYOUT_UNVERIFIABLE for the type → TYPE_VTABLE_CHANGED
@@ -796,7 +813,7 @@ class TestLayoutUnverifiableSuppressedByVtableChanged:
     def test_both_sides_populated_vtable_change_not_tagged(self) -> None:
         """A real reorder (both vtable lists populated on the SAME type that
         also carries an unrelated LAYOUT_UNVERIFIABLE finding) must stay
-        BREAKING, and the LAYOUT_UNVERIFIABLE finding must NOT be suppressed
+        BREAKING, and the LAYOUT_UNVERIFIABLE finding must NOT be correlated
         — real evidence never triggers this correlation just because the
         same type also has an unresolved-size gap elsewhere (Codex review,
         P1)."""
@@ -820,7 +837,7 @@ class TestLayoutUnverifiableSuppressedByVtableChanged:
                     # Populates the layout descriptor on the new side only, so
                     # LAYOUT_UNVERIFIABLE fires for this same type too — but the
                     # vtable reorder itself rests on real (both-populated) evidence,
-                    # not the unresolved-size gap, so it must not be tagged/folded.
+                    # not the unresolved-size gap, so it must not be tagged.
                     base_offsets={"Base": 0},
                 )
             ]
@@ -833,11 +850,15 @@ class TestLayoutUnverifiableSuppressedByVtableChanged:
         assert vtable_change.modulation_reason is None
         assert vtable_change.vtable_covers_unverifiable_layout_gap is False
         assert result.verdict == Verdict.BREAKING
+        assert (
+            changes_by_kind[ChangeKind.LAYOUT_UNVERIFIABLE].correlated_change_kind
+            is None
+        )
 
     def test_virtual_base_change_not_tagged_even_with_unknown_size(self) -> None:
         """A genuine virtual-base addition is real, independent evidence —
         the co-occurring LAYOUT_UNVERIFIABLE for the same type must not be
-        suppressed just because size_bits also happens to be unknown
+        correlated just because size_bits also happens to be unknown
         (Codex review, P2 follow-up)."""
         old = _snap(
             types=[
@@ -872,11 +893,15 @@ class TestLayoutUnverifiableSuppressedByVtableChanged:
         assert vtable_change.modulation_reason is None
         assert vtable_change.vtable_covers_unverifiable_layout_gap is False
         assert result.verdict == Verdict.BREAKING
+        assert (
+            changes_by_kind[ChangeKind.LAYOUT_UNVERIFIABLE].correlated_change_kind
+            is None
+        )
 
-    def test_bare_name_collision_does_not_cross_suppress(self) -> None:
+    def test_bare_name_collision_does_not_cross_correlate(self) -> None:
         """Two distinct types sharing only a bare leaf name in different
         namespaces must not correlate: ``ns2::Foo``'s ambiguous vtable gap
-        must not suppress ``ns1::Foo``'s unrelated, real LAYOUT_UNVERIFIABLE
+        must not tag ``ns1::Foo``'s unrelated, real LAYOUT_UNVERIFIABLE
         finding (Codex review, P2)."""
         old = _snap(
             types=[
@@ -905,8 +930,8 @@ class TestLayoutUnverifiableSuppressedByVtableChanged:
                     vtable=["_ZN3ns13Foo1fEv"],
                     size_bits=None,
                     # ns1::Foo's own unrelated asymmetric-evidence gap — must
-                    # stay reported, not be suppressed by ns2::Foo's ambiguous
-                    # vtable transition below.
+                    # stay reported and uncorrelated, not tagged by ns2::Foo's
+                    # ambiguous vtable transition below.
                     base_offsets={"Base": 0},
                 ),
                 RecordType(
@@ -920,66 +945,31 @@ class TestLayoutUnverifiableSuppressedByVtableChanged:
             ]
         )
         result = compare(old, new)
-        layout_findings = [
-            c for c in result.changes if c.kind == ChangeKind.LAYOUT_UNVERIFIABLE
-        ]
-        assert any(c.qualified_name == "ns1::Foo" for c in layout_findings)
+        layout_findings = {
+            c.qualified_name: c
+            for c in result.changes
+            if c.kind == ChangeKind.LAYOUT_UNVERIFIABLE
+        }
+        # AbiSnapshot's type index is first-wins by bare name (a documented,
+        # unrelated sharp edge — see model.py's "Duplicate type names"
+        # warning), so only ns1::Foo is actually processed here. What this
+        # test guards is narrower and still real: ns1::Foo's own finding
+        # must stay uncorrelated rather than picking up a stray tag from
+        # ns2::Foo's identically-named but distinct RecordType.
+        assert "ns1::Foo" in layout_findings
+        assert layout_findings["ns1::Foo"].correlated_change_kind is None
 
-    def test_folded_finding_excluded_from_verdict_when_both_kinds_overridden(
-        self,
-    ) -> None:
-        """The folded LAYOUT_UNVERIFIABLE must not resurrect a RISK verdict
-        once a policy override has downgraded BOTH the covering
-        TYPE_VTABLE_CHANGED and LAYOUT_UNVERIFIABLE itself to compatible — the
-        user has explicitly said neither kind should drive the verdict, so
-        the fold's "fully subsumed" premise still holds under this policy."""
-        old = _snap(
-            types=[
-                RecordType(
-                    name="Foo",
-                    kind="class",
-                    vtable=[],
-                    size_bits=None,
-                )
-            ]
-        )
-        new = _snap(
-            types=[
-                RecordType(
-                    name="Foo",
-                    kind="class",
-                    vtable=["_ZN3Foo1fEv"],
-                    size_bits=None,
-                    base_offsets={"Base": 0},
-                )
-            ]
-        )
-        pf = PolicyFile(
-            base_policy="strict_abi",
-            overrides={
-                ChangeKind.TYPE_VTABLE_CHANGED: Verdict.COMPATIBLE,
-                ChangeKind.LAYOUT_UNVERIFIABLE: Verdict.COMPATIBLE,
-            },
-        )
-        result = compare(old, new, policy_file=pf)
-        assert result.verdict == Verdict.COMPATIBLE
-        redundant_kinds = {c.kind for c in result.redundant_changes}
-        assert ChangeKind.LAYOUT_UNVERIFIABLE in redundant_kinds
+    def test_correlation_independent_of_policy_override(self) -> None:
+        """The annotation is set purely from the two detectors' own evidence
+        — it must not depend on, or be defeated/created by, a PolicyFile
+        override of either kind's verdict. This is the exact class of bug
+        the fold-based design could not avoid (Codex review): a compare()-
+        time decision to *remove* a finding could be made wrong by
+        configuration chosen after compare() returns, while a decision that
+        only *annotates* a finding that stays in ``result.changes`` cannot,
+        since every consumer still sees the finding either way."""
+        from abicheck.policy_file import PolicyFile
 
-    def test_folded_finding_still_counts_when_only_vtable_change_overridden(
-        self,
-    ) -> None:
-        """The inverse of the above, and the exact scenario Codex review
-        flagged: overriding ONLY the covering TYPE_VTABLE_CHANGED to
-        compatible, while LAYOUT_UNVERIFIABLE keeps its own RISK default,
-        must NOT silently drop LAYOUT_UNVERIFIABLE's own policy-resolved
-        contribution. The subsumption check now runs *before* the fold
-        (Codex review), so a non-subsumed LAYOUT_UNVERIFIABLE is simply
-        never folded in the first place — it stays a normal, visible
-        top-level finding in ``result.changes`` rather than moving through
-        ``redundant_changes``, which is what keeps every exit-code/gate
-        consumer that reads ``result.changes`` directly (not just the
-        legacy verdict) able to see it."""
         old = _snap(
             types=[
                 RecordType(
@@ -1006,19 +996,26 @@ class TestLayoutUnverifiableSuppressedByVtableChanged:
             overrides={ChangeKind.TYPE_VTABLE_CHANGED: Verdict.COMPATIBLE},
         )
         result = compare(old, new, policy_file=pf)
+        # The policy override changes the *verdict* contribution, but both
+        # findings stay fully present and the annotation is unaffected.
         assert result.verdict == Verdict.COMPATIBLE_WITH_RISK
-        changes_kinds = {c.kind for c in result.changes}
-        assert ChangeKind.LAYOUT_UNVERIFIABLE in changes_kinds
-        redundant_kinds = {c.kind for c in result.redundant_changes}
-        assert ChangeKind.LAYOUT_UNVERIFIABLE not in redundant_kinds
+        changes_by_kind = {c.kind: c for c in result.changes}
+        assert ChangeKind.LAYOUT_UNVERIFIABLE in changes_by_kind
+        assert ChangeKind.TYPE_VTABLE_CHANGED in changes_by_kind
+        assert (
+            changes_by_kind[ChangeKind.LAYOUT_UNVERIFIABLE].correlated_change_kind
+            == ChangeKind.TYPE_VTABLE_CHANGED.value
+        )
 
-    def test_non_subsumed_finding_reaches_the_severity_exit_code_gate(self) -> None:
+    def test_severity_exit_code_gate_sees_both_findings(self) -> None:
         """End-to-end regression for the exact gap Codex review found: the
         severity-scheme exit code (``severity.compute_exit_code``) is a
-        *separate* consumer from the legacy verdict, and reads
-        ``result.changes`` directly — several CLI/reporter call sites do the
-        same. A non-subsumed LAYOUT_UNVERIFIABLE must be visible to it, not
-        just to ``result.verdict``."""
+        *separate* consumer from the legacy verdict, chosen entirely after
+        ``compare()`` returns, and reads ``result.changes`` directly. Since
+        neither finding is ever removed from ``changes``, an
+        ``abi_breaking=info`` / ``potential_breaking=error`` severity
+        configuration still sees LAYOUT_UNVERIFIABLE's own error-level
+        contribution regardless of how TYPE_VTABLE_CHANGED is configured."""
         from abicheck.severity import SeverityConfig, SeverityLevel, compute_exit_code
 
         old = _snap(
@@ -1042,11 +1039,7 @@ class TestLayoutUnverifiableSuppressedByVtableChanged:
                 )
             ]
         )
-        pf = PolicyFile(
-            base_policy="strict_abi",
-            overrides={ChangeKind.TYPE_VTABLE_CHANGED: Verdict.COMPATIBLE},
-        )
-        result = compare(old, new, policy_file=pf)
+        result = compare(old, new)
         cfg = SeverityConfig(
             abi_breaking=SeverityLevel.INFO,
             potential_breaking=SeverityLevel.ERROR,
@@ -1062,18 +1055,18 @@ class TestLayoutUnverifiableSuppressedByVtableChanged:
         )
         assert exit_code != 0
 
-    def test_folded_finding_excluded_when_covering_demoted_as_unreachable_internal(
+    def test_correlation_survives_covering_finding_demoted_as_unreachable_internal(
         self,
     ) -> None:
         """When the covering TYPE_VTABLE_CHANGED is itself later demoted to
         out-of-surface by DemoteUnreachableInternalChurn (a confirmed-private
-        internal-namespace type with no public leak path), the folded
-        LAYOUT_UNVERIFIABLE must not resurrect a RISK verdict for a type
-        already proven outside the public surface (Codex review): the fold
-        step runs before DetectInternalLeaks/DemoteUnreachableInternalChurn,
-        so by the time the covering finding is demoted, LAYOUT_UNVERIFIABLE
-        has already left `changes` and never gets a chance to be
-        independently demoted alongside it."""
+        internal-namespace type with no public leak path), LAYOUT_UNVERIFIABLE
+        for the same type is independently demoted alongside it — both
+        findings are ordinary members of ``changes`` right up until that
+        later pipeline step runs, so there is no fold-ordering hazard to
+        guard against anymore (contrast with the earlier fold-based design,
+        where the fold ran before this demotion step and could orphan the
+        decision — Codex review)."""
         old = _snap(
             types=[
                 RecordType(
@@ -1097,18 +1090,13 @@ class TestLayoutUnverifiableSuppressedByVtableChanged:
         )
         # No public function/type references ns::detail::Foo anywhere, so
         # DetectInternalLeaks finds no leak path and
-        # DemoteUnreachableInternalChurn demotes the covering
-        # TYPE_VTABLE_CHANGED to out_of_surface.
+        # DemoteUnreachableInternalChurn demotes both findings to
+        # out_of_surface.
         result = compare(old, new)
         assert result.verdict != Verdict.BREAKING
         assert result.verdict != Verdict.COMPATIBLE_WITH_RISK
         assert result.verdict == Verdict.NO_CHANGE
         assert not result.changes
-        vtable_out_of_surface = [
-            c
-            for c in result.out_of_surface_changes
-            if c.kind == ChangeKind.TYPE_VTABLE_CHANGED
-        ]
-        assert vtable_out_of_surface, (
-            "covering finding must be demoted for this test to be meaningful"
-        )
+        out_of_surface_kinds = {c.kind for c in result.out_of_surface_changes}
+        assert ChangeKind.TYPE_VTABLE_CHANGED in out_of_surface_kinds
+        assert ChangeKind.LAYOUT_UNVERIFIABLE in out_of_surface_kinds

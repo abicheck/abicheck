@@ -1,8 +1,8 @@
 ### Fixed
 
-- **`LAYOUT_UNVERIFIABLE` no longer duplicates a `TYPE_VTABLE_CHANGED`
-  already reporting the identical evidence gap for the same type.**
-  `_vtable_transition_is_evidenced` (`diff_types.py`) and the
+- **`LAYOUT_UNVERIFIABLE` no longer reads as contradicting a
+  `TYPE_VTABLE_CHANGED` reporting the identical evidence gap for the same
+  type.** `_vtable_transition_is_evidenced` (`diff_types.py`) and the
   `LAYOUT_UNVERIFIABLE` detector (`diff_layout.py`) both key off the same
   "one side has real layout evidence, the other has none" condition —
   `TYPE_VTABLE_CHANGED` correctly stays BREAKING for it (an unknown size
@@ -12,8 +12,11 @@
   two detectors disagreeing about one piece of evidence — reproducible
   with zero real ABI change (comparing a binary against a dump of itself).
   A new post-processing step,
-  `suppress_layout_unverifiable_covered_by_vtable_changed`, folds the
-  redundant `LAYOUT_UNVERIFIABLE` advisory into `redundant_changes`
-  whenever a `TYPE_VTABLE_CHANGED` already reports the same gap for the
-  exact same type — `TYPE_VTABLE_CHANGED`'s own severity is never touched,
-  so a genuine ABI break can never be masked by this change.
+  `annotate_layout_unverifiable_covered_by_vtable_changed`, cross-references
+  the two: when a `TYPE_VTABLE_CHANGED` already reports the same gap for
+  the exact same type, the redundant `LAYOUT_UNVERIFIABLE` finding's
+  `correlated_change_kind` is set to `type_vtable_changed`. Both findings
+  stay fully reported in `changes` and independently scored exactly as
+  before — nothing is removed or hidden, so every consumer (the legacy
+  verdict, a `PolicyFile` override, a severity-scheme exit code) sees the
+  same findings it always did, plus the cross-reference.
