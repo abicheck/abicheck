@@ -1853,6 +1853,64 @@ not attempted in the same pass as the wiring above), and `impact_group_id`
 actually diverging from `root_cause_id` by re-bucketing findings through the
 correlator's own groups rather than only annotating the existing ones.
 
+**The wiring above needed three follow-up review rounds to land correctly**
+(all Codex, same PR): (1) the per-finding lookups were built from `changes`
+alone, so a finding correlating only via a scoped-only
+(`--used-by`/`--required-symbol`) sibling got no evidence at all —
+`RootCauseCorrelator` needs the real sibling `Change` object, not just its
+`caused_by_type` string, to recognize a pair as a group; (2) the
+`root_causes[]` group-level rollup matched a report group against a
+correlator group by `root_cause_id` **equality**, which is wrong whenever
+the two grouping schemes disagree on membership — a bare-symbol pair
+sharing no `caused_by_type` (`--used-by --verify-runtime`'s real shape) is
+one correlator group but two singleton report groups, so the hashes never
+matched even though each finding's own per-finding evidence already showed
+membership; fixed by folding each group's own members' already-correct
+evidence directly instead of re-deriving membership by id; (3) the same gap
+existed a layer up, in `cli_compare_fold.py`'s own `--report-mode
+root-cause` fold-in (`_add_entries_to_root_causes`), which appends a
+scoped-only entry to an existing-or-new group *after* the JSON serializer
+already built it, but never recomputed that group's own evidence summary
+afterward. Worth recording as its own lesson before attempting any of the
+eight new detectors below: a naive `root_cause_id`-equality join between
+two independently-computed groupings is not safe by default whenever either
+grouping has its own fallback/singleton rule — the correlator's grouping is
+strictly *coarser* than the report's in exactly the no-`caused_by_type`
+case, and nothing about that asymmetry is visible from either grouping's
+own code without deliberately tracing a bare-symbol, no-`caused_by_type`
+input through both.
+
+**A related, adjacent gap was found (not fixed) while scoping
+`GRAPH_COVERAGE_INSUFFICIENT_FOR_SUPPRESSION`'s "generalizes
+`SUPPRESSION_REACHABILITY_UNKNOWN`" description above, and is worth
+recording before anyone else picks that item up.** `Suppression.
+_passes_reachability_gate` (`suppression.py`) has *two* reachability modes
+whose behavior on a graph-coverage gap differs, and only one of them has a
+diagnostic today. `reachability: "proven-unreachable-only"` treats
+`Change.reachability_state == UNKNOWN` as a **withheld match** unless
+`allow_unknown_reachability: true` — this is exactly what
+`SUPPRESSION_REACHABILITY_UNKNOWN` reports. `reachability:
+"unreachable-only"` (a different, valid value) instead gates on
+`not change.public_reachable` — and `Change.public_reachable` defaults to
+`False` the same way whether it was *proven* `False` or simply never
+examined (`UNKNOWN` reachability with insufficient graph coverage), so a
+`reachability: "unreachable-only"` rule can **silently succeed** at
+suppressing a change graph coverage never actually cleared, with no
+diagnostic at all — a real gap, structurally similar to the one
+`SUPPRESSION_REACHABILITY_UNKNOWN` closed for the other mode, but on the
+*opposite* failure direction (this one risks a false negative — silently
+accepting a suppression that should have been withheld — rather than a
+false positive). A single `GRAPH_COVERAGE_INSUFFICIENT_FOR_SUPPRESSION`
+`ChangeKind` that literally "generalizes" the existing case (by simply
+reusing its detection path under a new name) would not close this gap; closing
+it for real needs either extending `unreachable-only`'s own gate to
+distinguish proven-`False` from `UNKNOWN` (a semantic change to a suppression
+mode real policy files already rely on — needs its own compatibility
+analysis, not a drive-by) or a second, independently-designed diagnostic
+covering this mode specifically. Not attempted here — flagged rather than
+guessed at, per this file's own "known gaps over risky reactive patches"
+convention.
+
 New examples (each needs a negative twin, per the review):
 
 | Case | Scenario |
