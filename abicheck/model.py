@@ -21,18 +21,6 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import TYPE_CHECKING
 
-# Symbol *linkage* (GLOBAL/WEAK/LOCAL/UNIQUE/OTHER, from ELF st_info.bind) —
-# reused directly from elf_metadata rather than duplicated as a second
-# model-local enum: elf_metadata.py has no local imports of its own (verified:
-# it imports only stdlib + pyelftools), so importing it here carries no cycle
-# risk, unlike ElfVisibility/Visibility above which predate this and stayed
-# model-local. binder.py separately defines its own, unrelated
-# ``SymbolBinding`` dataclass (a consumer-side *import resolution* record, not
-# a linkage classification) — that module already resolves the name collision
-# via ``as ElfSymbolBinding``; nothing here needs the same aliasing since this
-# module never imports binder.py.
-from .elf_metadata import SymbolBinding as SymbolBinding
-
 # Re-export the name-classification predicates (moved to name_classification in
 # C10) under their historical names. Redundant ``as`` aliases are the explicit
 # re-export idiom mypy recognises, so ``from .model import is_non_abi_surface_type``
@@ -47,6 +35,18 @@ from .name_classification import (
     is_cxx_runtime_library as is_cxx_runtime_library,
     is_non_abi_surface_type as is_non_abi_surface_type,
 )
+
+# Symbol *linkage* (GLOBAL/WEAK/LOCAL/UNIQUE/OTHER, from ELF st_info.bind) —
+# reused directly from elf_metadata rather than duplicated as a second
+# model-local enum: elf_metadata.py has no local imports of its own (verified:
+# it imports only stdlib + pyelftools), so importing it here carries no cycle
+# risk, unlike ElfVisibility/Visibility above which predate this and stayed
+# model-local. binder.py separately defines its own, unrelated
+# ``SymbolBinding`` dataclass (a consumer-side *import resolution* record, not
+# a linkage classification) — that module already resolves the name collision
+# via ``as ElfSymbolBinding``; nothing here needs the same aliasing since this
+# module never imports binder.py.
+from .elf_metadata import SymbolBinding as SymbolBinding
 
 if TYPE_CHECKING:
     from .build_mode import BuildMode
