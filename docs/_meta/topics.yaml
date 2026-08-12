@@ -94,6 +94,7 @@ topics:
       - .github/workflows/check-single.yml
       - .github/workflows/publish-baseline.yml
       - .github/workflows/update-main-baseline.yml
+      - action.yml
     task_pages:
       - use/create-baseline.md
       - use/baseline-storage.md

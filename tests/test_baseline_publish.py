@@ -217,3 +217,46 @@ class TestAcceptedMainCacheKeys:
         assert first != second
         assert first.startswith(prefix)
         assert second.startswith(prefix)
+
+    def test_generation_is_folded_into_the_key(self) -> None:
+        assert (
+            accepted_main_cache_key(
+                "abicheck-baseline-main",
+                "linux-x86_64-gcc",
+                "abc123",
+                generation=3,
+            )
+            == "abicheck-baseline-main-g3-linux-x86_64-gcc-abc123"
+        )
+
+    def test_generation_is_folded_into_the_restore_prefix(self) -> None:
+        assert (
+            accepted_main_cache_restore_prefix(
+                "abicheck-baseline-main", "linux-x86_64-gcc", generation=3
+            )
+            == "abicheck-baseline-main-g3-linux-x86_64-gcc-"
+        )
+
+    def test_no_generation_matches_the_unfolded_key(self) -> None:
+        # generation=None (the default) must be a complete no-op -- byte-
+        # identical to never having passed it at all, so every pre-existing
+        # caller's key format is unaffected.
+        assert accepted_main_cache_key(
+            "abicheck-baseline-main", "linux-x86_64-gcc", "abc123"
+        ) == accepted_main_cache_key(
+            "abicheck-baseline-main",
+            "linux-x86_64-gcc",
+            "abc123",
+            generation=None,
+        )
+
+    def test_different_generations_produce_disjoint_prefixes(self) -> None:
+        # Two different scanner-compatibility generations must never share
+        # one cache-key namespace -- the whole point of folding generation
+        # into the prefix rather than only the head_sha-unique suffix.
+        key_prefix, profile_id = "abicheck-baseline-main", "linux-x86_64-gcc"
+        g2_key = accepted_main_cache_key(key_prefix, profile_id, "sha1", generation=2)
+        g3_prefix = accepted_main_cache_restore_prefix(
+            key_prefix, profile_id, generation=3
+        )
+        assert not g2_key.startswith(g3_prefix)

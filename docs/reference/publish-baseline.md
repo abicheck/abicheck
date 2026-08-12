@@ -215,6 +215,27 @@ success failure mode this ADR exists to close.
 profile_id, head_sha)` / `accepted_main_cache_restore_prefix(key_prefix,
 profile_id)` are this format's pure-Python mirror.
 
+**When `baseline-generation` is set, the key gets an extra segment.**
+`update-main-baseline.yml`'s "Compute cache key" step folds
+`-g<generation>` into the prefix *before* building the key above, so two
+different scanner-compatibility generations (docs/use/baseline-
+management.md#scanner-upgrades-and-baseline-generations) never share one
+cache-key namespace:
+
+```text
+<key-prefix>-g<generation>-<profile-id>-<head-sha>
+```
+
+Both mirror functions accept this as an explicit keyword argument --
+`accepted_main_cache_key(key_prefix, profile_id, head_sha,
+generation=3)` / `accepted_main_cache_restore_prefix(key_prefix,
+profile_id, generation=3)` — rather than requiring a consumer to
+pre-fold `-g3` into `key_prefix` themselves. **A consumer restoring this
+cache (`restore-keys: <key-prefix>-<profile-id>-`) must pass the exact
+same `generation` this workflow was run with**, or the restore misses
+entirely: the un-generation-scoped prefix is a *different* cache-key
+namespace, not a superset of the generation-scoped one.
+
 Each run: computes this run's own key, restores the newest entry matching
 the restore-keys prefix into a freshness-comparison staging directory, dumps
 the new baseline-set with `--previous-manifest` pointed at that restored

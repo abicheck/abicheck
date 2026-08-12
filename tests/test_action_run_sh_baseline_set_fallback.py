@@ -188,14 +188,15 @@ gh() {
 
 
 def _resolved_asset_name(env: dict[str, str]) -> str:
-    """Mirrors run.sh's own asset_name computation (template + profile),
-    so a fixture's advertised asset name always matches what the real
-    script will actually look up."""
+    """Mirrors run.sh's own asset_name computation (template + profile +
+    generation), so a fixture's advertised asset name always matches what
+    the real script will actually look up."""
     template = env.get("INPUT_BASELINE_ASSET_NAME_TEMPLATE") or ""
     if not template:
         template = "abicheck-baseline-{profile}.tar.zst"
     profile = env.get("INPUT_BASELINE_PROFILE", "")
-    return template.replace("{profile}", profile)
+    generation = env.get("INPUT_BASELINE_GENERATION", "")
+    return template.replace("{profile}", profile).replace("{generation}", generation)
 
 
 def _run_bash_script(
@@ -506,6 +507,54 @@ class TestBaselineSetFallback:
                 "INPUT_BASELINE_PROFILE": PROFILE,
                 "INPUT_BASELINE_TARGET": "libpvxs",
                 "INPUT_BASELINE_ASSET_NAME_TEMPLATE": "custom-{profile}-baseline.tar.zst",
+                "FIXTURE_ARCHIVE": str(archive_path),
+            }
+        )
+        assert result.returncode == 0, result.stderr
+        assert "libpvxs.abicheck.json" in result.stdout
+
+    def test_generation_placeholder_is_substituted(self, tmp_path: Path) -> None:
+        # Regression (Codex review): actions/stage-baseline's
+        # {generation} template opt-in (for publishing a scanner-
+        # compatibility-generation-scoped baseline-set archive, see
+        # docs/use/baseline-management.md#scanner-upgrades-and-baseline-
+        # generations) only reached the PRODUCER side -- this consumer-
+        # side fallback substituted {profile} but left a literal
+        # "{generation}" in its exact-name lookup, so a caller following
+        # the documented recipe on both sides could never actually
+        # resolve the asset this Action's own baseline-generation input
+        # was added to name.
+        src_dir = tmp_path / "baseline-set-src"
+        src_dir.mkdir()
+        manifest = {
+            "manifest_version": 1,
+            "project_ref": "v1.0.0",
+            "profile": PROFILE,
+            "snapshot_schema": None,
+            "fact_set": None,
+            "baseline_generation": 3,
+            "artifacts": [
+                {
+                    "library": "libpvxs",
+                    "artifact": "build/libpvxs.so",
+                    "snapshot": "libpvxs.abicheck.json",
+                    "sha256": "",
+                }
+            ],
+        }
+        (src_dir / "manifest.json").write_text(json.dumps(manifest), encoding="utf-8")
+        (src_dir / "libpvxs.abicheck.json").write_text("{}", encoding="utf-8")
+        archive_path = tmp_path / f"abicheck-baseline-g3-{PROFILE}.tar.zst"
+        _make_tar_zst(archive_path, src_dir)
+
+        result = self._run(
+            {
+                "INPUT_MODE": "compare",
+                "INPUT_ABI_BASELINE": "latest-release",
+                "INPUT_BASELINE_PROFILE": PROFILE,
+                "INPUT_BASELINE_TARGET": "libpvxs",
+                "INPUT_BASELINE_ASSET_NAME_TEMPLATE": "abicheck-baseline-g{generation}-{profile}.tar.zst",
+                "INPUT_BASELINE_GENERATION": "3",
                 "FIXTURE_ARCHIVE": str(archive_path),
             }
         )

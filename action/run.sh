@@ -223,6 +223,7 @@ _try_baseline_set_fallback() {
   fi
   local asset_name
   asset_name="$(_substitute_literal "$asset_template" '{profile}' "$INPUT_BASELINE_PROFILE")"
+  asset_name="$(_substitute_literal "$asset_name" '{generation}' "${INPUT_BASELINE_GENERATION:-}")"
 
   # NOT `gh release download --pattern`: that flag is a glob (Go's
   # filepath.Match), not a literal-filename lookup -- a custom

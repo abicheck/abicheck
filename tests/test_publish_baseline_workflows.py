@@ -348,6 +348,54 @@ class TestAcceptedMainCacheKeyRotation:
             key_prefix, profile_id
         )
 
+    def test_compute_cache_key_step_folds_generation_matching_the_python_mirror(
+        self, tmp_path: Path
+    ) -> None:
+        # Executes the REAL "Compute cache key" step script (not a
+        # hand-derived string) with BASELINE_GENERATION set, and checks its
+        # actual GITHUB_OUTPUT against accepted_main_cache_key()/
+        # accepted_main_cache_restore_prefix()'s generation-aware mirror --
+        # closes the gap a purely-structural/hand-derived check can't catch
+        # (Codex review: the bash folding logic itself needs to be run, not
+        # just asserted to contain a template string).
+        import subprocess
+
+        data = _load(UPDATE_MAIN_BASELINE)
+        steps = _steps(data["jobs"]["refresh"])
+        step = next(s for s in steps if s.get("name") == "Compute cache key")
+        github_output = tmp_path / "github_output"
+        github_output.write_text("")
+        env = os.environ.copy()
+        env.update(
+            {
+                "KEY_PREFIX": "abicheck-baseline-main",
+                "BASELINE_GENERATION": "3",
+                "PROFILE_ID": "linux-x86_64-gcc",
+                "HEAD_SHA": "deadbeef",
+                "GITHUB_OUTPUT": str(github_output),
+            }
+        )
+        result = subprocess.run(
+            [_bash_executable(), "-c", step["run"]],
+            capture_output=True,
+            text=True,
+            env=env,
+            cwd=tmp_path,
+            check=False,
+        )
+        assert result.returncode == 0, result.stdout + result.stderr
+        outputs = dict(
+            line.split("=", 1)
+            for line in github_output.read_text().splitlines()
+            if "=" in line
+        )
+        assert outputs["cache-key"] == accepted_main_cache_key(
+            "abicheck-baseline-main", "linux-x86_64-gcc", "deadbeef", generation=3
+        )
+        assert outputs["restore-prefix"] == accepted_main_cache_restore_prefix(
+            "abicheck-baseline-main", "linux-x86_64-gcc", generation=3
+        )
+
     def test_restore_step_key_is_this_runs_own_unique_key(self) -> None:
         # `key:` must be THIS run's own (always-unique-by-head-sha) key, not
         # the stable prefix -- so the exact-match lookup always misses and
