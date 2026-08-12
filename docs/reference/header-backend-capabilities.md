@@ -40,7 +40,12 @@ one backend selector, plus a merge of the two:
 > satisfies it directly, and so does `auto` pinned to clang via
 > `ABICHECK_AST_FRONTEND=clang` — resolving to `clang` either way skips
 > the castxml/hybrid rejection paths entirely, the same as picking clang
-> outright. See ADR-050 D5.
+> outright. On `compare`, the per-side `--old-ast-frontend`/
+> `--new-ast-frontend` overrides count the same way for their own side
+> only: `--old-ast-frontend castxml` pins the old side exactly like a
+> shared `--ast-frontend castxml` would, rejecting a device context on
+> that side even while the new side (left at `auto`, unpinned) routes to
+> clang normally. See ADR-050 D5.
 
 The two parsers produce the **same** `AbiSnapshot` fields, but not the same
 *values* for every field — and a comparison that mixes producers is a real,
