@@ -45,7 +45,9 @@ def _snapshot_with_binding(func_binding: SymbolBinding) -> AbiSnapshot:
 
 
 class TestModelPopulation:
-    def test_populate_elf_visibility_sets_binding_on_functions_and_variables(self) -> None:
+    def test_populate_elf_visibility_sets_binding_on_functions_and_variables(
+        self,
+    ) -> None:
         snap = _snapshot_with_binding(SymbolBinding.WEAK)
         _populate_elf_visibility(snap)
         assert snap.functions[0].elf_binding == SymbolBinding.WEAK
@@ -96,7 +98,10 @@ class TestSerializationRoundTrip:
 class TestChangeSymbolBindingStamp:
     def test_func_removed_stamps_symbol_binding(self) -> None:
         f_old = Function(
-            name="f", mangled="_Z1fv", return_type="void", elf_binding=SymbolBinding.WEAK
+            name="f",
+            mangled="_Z1fv",
+            return_type="void",
+            elf_binding=SymbolBinding.WEAK,
         )
         change = _check_removed_function("_Z1fv", f_old, {}, elf_only_mode=False)
         assert change.kind == ChangeKind.FUNC_REMOVED
@@ -127,15 +132,21 @@ class TestSuppressionBindingSelector:
         )
 
     def test_binding_selector_matches_weak(self) -> None:
-        sup = Suppression(symbol="_Z1fv", binding="weak", reason="tolerate weak demotions")
+        sup = Suppression(
+            symbol="_Z1fv", binding="weak", reason="tolerate weak demotions"
+        )
         assert sup.matches(self._make_change("weak"))
 
     def test_binding_selector_does_not_match_global(self) -> None:
-        sup = Suppression(symbol="_Z1fv", binding="weak", reason="tolerate weak demotions")
+        sup = Suppression(
+            symbol="_Z1fv", binding="weak", reason="tolerate weak demotions"
+        )
         assert not sup.matches(self._make_change("global"))
 
     def test_binding_selector_does_not_match_unknown_binding(self) -> None:
-        sup = Suppression(symbol="_Z1fv", binding="weak", reason="tolerate weak demotions")
+        sup = Suppression(
+            symbol="_Z1fv", binding="weak", reason="tolerate weak demotions"
+        )
         assert not sup.matches(self._make_change(None))
 
     def test_invalid_binding_value_rejected(self) -> None:
@@ -156,10 +167,10 @@ class TestSuppressionYamlLoading:
         p.write_text(
             "version: 1\n"
             "suppressions:\n"
-            "  - symbol: \"_Z1fv\"\n"
+            '  - symbol: "_Z1fv"\n'
             "    change_kind: func_removed\n"
             "    binding: weak\n"
-            "    reason: \"weak COMDAT demotion, every consumer has its own copy\"\n"
+            '    reason: "weak COMDAT demotion, every consumer has its own copy"\n'
         )
         loaded = SuppressionList.load(p)
         assert loaded._suppressions[0].binding == "weak"
@@ -171,9 +182,9 @@ class TestSuppressionYamlLoading:
         p.write_text(
             "version: 1\n"
             "suppressions:\n"
-            "  - symbol: \"_Z1fv\"\n"
+            '  - symbol: "_Z1fv"\n'
             "    bindingx: weak\n"
-            "    reason: \"typo'd key\"\n"
+            '    reason: "typo\'d key"\n'
         )
         with pytest.raises(ValueError, match="unknown key"):
             SuppressionList.load(p)
