@@ -390,14 +390,24 @@ jobs:
           # directing every rerun at the destructive delete-asset recovery
           # instead (Codex review).
           mkdir -p .existing-asset/extracted
-          gh api "$existing_url" -H 'Accept: application/octet-stream' > .existing-asset/existing.tar.zst
+          # Download to a file named exactly like the real asset (same
+          # suffix) and let TarExtractor.extract() dispatch on that name --
+          # hardcoding a `.tar.zst` download name here, independent of
+          # $ASSET_NAME's actual extension, made a `.tar.gz`/`.tgz`/`.tar`
+          # asset-name-template fail this comparison outright (it would
+          # always be re-extracted as zstd), so a legitimate identical retry
+          # under a non-default template could never reach the safe no-op
+          # path and always hit the immutability error instead (Codex
+          # review).
+          existing_download=".existing-asset/$ASSET_NAME"
+          gh api "$existing_url" -H 'Accept: application/octet-stream' > "$existing_download"
           python3 -c '
           import sys
           from pathlib import Path
           from abicheck.package import TarExtractor
 
-          TarExtractor._safe_extract_zst_tar(Path(sys.argv[1]), Path(sys.argv[2]))
-          ' .existing-asset/existing.tar.zst .existing-asset/extracted
+          TarExtractor().extract(Path(sys.argv[1]), Path(sys.argv[2]))
+          ' "$existing_download" .existing-asset/extracted
 
           existing_content_digest=$(python3 -c '
           import importlib.util

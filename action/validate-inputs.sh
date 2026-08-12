@@ -288,7 +288,13 @@ fi
 _BASELINE_PROFILE="${INPUT_BASELINE_PROFILE:-}"
 _BASELINE_TARGET="${INPUT_BASELINE_TARGET:-}"
 _BASELINE_ASSET_NAME_TEMPLATE="${INPUT_BASELINE_ASSET_NAME_TEMPLATE:-}"
-if [[ ( -n "$_BASELINE_PROFILE" || -n "$_BASELINE_TARGET" || -n "$_BASELINE_ASSET_NAME_TEMPLATE" ) \
+# Scope check keys off baseline-profile/baseline-target only, not
+# baseline-asset-name-template: action.yml forwards that input's own
+# manifest default ('abicheck-baseline-{profile}.tar.zst') unconditionally,
+# so it's non-empty on every invocation regardless of whether the caller
+# asked for the baseline-set fallback at all -- including it here warned on
+# every ordinary dump/appcompat/deps-* run (Codex review).
+if [[ ( -n "$_BASELINE_PROFILE" || -n "$_BASELINE_TARGET" ) \
    && "$MODE" != "compare" && "$MODE" != "scan" ]]; then
   _warn "baseline-profile/baseline-target/baseline-asset-name-template are set but have no effect: they only apply to mode: compare or mode: scan (mode is '$MODE')."
 fi

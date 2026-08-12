@@ -31,6 +31,7 @@ pure-Python mirror" risk.
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 from typing import Any
 
@@ -40,6 +41,20 @@ from abicheck.buildsource.baseline_publish import (
     accepted_main_cache_key,
     accepted_main_cache_restore_prefix,
 )
+
+
+def _bash_executable() -> str:
+    if os.name != "nt":
+        return "bash"
+    for candidate in (
+        os.environ.get("GIT_BASH_PATH"),
+        r"C:\Program Files\Git\bin\bash.exe",
+        r"C:\Program Files\Git\usr\bin\bash.exe",
+    ):
+        if candidate and Path(candidate).is_file():
+            return candidate
+    return "bash"
+
 
 WORKFLOWS_DIR = Path(__file__).resolve().parents[1] / ".github" / "workflows"
 PUBLISH_BASELINE = WORKFLOWS_DIR / "publish-baseline.yml"
@@ -554,3 +569,139 @@ class TestBaselineRotationFixture:
         assert "actions/caches" in step["run"]
         assert "$KEY_1" in step["run"]
         assert "$KEY_2" in step["run"]
+
+
+class TestUploadReleaseAssetRetryDispatchesBySuffix:
+    """Regression (Codex review): the "Upload release asset" step's safe-
+    retry comparison used to always download the existing asset to a
+    hardcoded ``.tar.zst`` filename and extract it with
+    ``TarExtractor._safe_extract_zst_tar`` directly, regardless of
+    ``$ASSET_NAME``'s real extension. A non-default
+    ``asset-name-template`` resolving to ``.tar.gz``/``.tgz``/``.tar`` (the
+    "Package baseline-set" step's own sibling fix, same review round, now
+    supports all four) would fail this comparison outright on every retry
+    -- the download would still land in a ``.tar.zst``-named file, and
+    zstd-frame decoding a gzip/plain-tar archive raises, never reaching the
+    content-digest comparison at all.
+
+    Extracts the real step verbatim and executes it against a real
+    ``.tar.gz`` existing asset with a stubbed ``gh``, asserting the safe
+    no-op path (identical content -> exit 0, "safe re-run" notice) is
+    actually reachable for a non-zstd asset name -- not just that the step
+    *parses*.
+    """
+
+    def _upload_step_script(self) -> str:
+        data = _load(PUBLISH_BASELINE)
+        steps = _steps(data["jobs"]["publish"])
+        step = next(
+            s for s in steps if s.get("name", "").startswith("Upload release asset")
+        )
+        return step["run"]
+
+    def test_identical_tar_gz_content_is_a_safe_retry(self, tmp_path: Path) -> None:
+        import importlib.util
+        import json
+        import shutil
+        import subprocess
+        import tarfile
+        import tempfile
+
+        module_spec = importlib.util.spec_from_file_location(
+            "test_build_manifest_module",
+            Path(__file__).resolve().parents[1]
+            / "actions"
+            / "baseline"
+            / "build_manifest.py",
+        )
+        assert module_spec is not None and module_spec.loader is not None
+        build_manifest = importlib.util.module_from_spec(module_spec)
+        module_spec.loader.exec_module(build_manifest)
+        compute_content_digest = build_manifest.compute_content_digest
+
+        # Real build_manifest.py at the exact relative path the script
+        # loads it from (cwd-relative ".publish-baseline-src/...", matching
+        # the "Self-checkout" step's own layout).
+        src_root = (
+            Path(__file__).resolve().parents[1]
+            / "actions"
+            / "baseline"
+            / "build_manifest.py"
+        )
+        module_dir = tmp_path / ".publish-baseline-src" / "actions" / "baseline"
+        module_dir.mkdir(parents=True)
+        shutil.copy(src_root, module_dir / "build_manifest.py")
+
+        manifest = {
+            "manifest_version": 1,
+            "project_ref": "v1.0.0",
+            "profile": "linux-x86_64-gcc13-release",
+            "snapshot_schema": None,
+            "fact_set": None,
+            "artifacts": [
+                {
+                    "library": "libfoo",
+                    "artifact": "build/libfoo.so",
+                    "snapshot": "libfoo.abicheck.json",
+                    "sha256": "a" * 64,
+                }
+            ],
+        }
+        content_digest = compute_content_digest(manifest)
+
+        # Build the "existing" asset as a real .tar.gz -- not .tar.zst --
+        # so this test actually exercises the suffix-dispatch fix rather
+        # than the always-worked default case.
+        asset_src = tmp_path / "asset-src"
+        asset_src.mkdir()
+        (asset_src / "manifest.json").write_text(json.dumps(manifest), encoding="utf-8")
+        asset_name = "abicheck-baseline-linux-x86_64-gcc13-release.tar.gz"
+        archive_path = tmp_path / asset_name
+        with tarfile.open(archive_path, "w:gz") as tf:
+            tf.add(asset_src, arcname=".")
+
+        gh_stub = f"""
+gh() {{
+  if [[ "$1" == "release" && "$2" == "view" ]]; then
+    echo '{{"assets": [{{"name": "{asset_name}", "apiUrl": "https://api.example/asset"}}]}}'
+    return 0
+  fi
+  if [[ "$1" == "api" ]]; then
+    cat "{archive_path.as_posix()}"
+    return 0
+  fi
+  echo "unexpected gh invocation: $*" >&2
+  return 1
+}}
+"""
+        script = gh_stub + "\n" + self._upload_step_script()
+
+        env = os.environ.copy()
+        env.update(
+            {
+                "GH_TOKEN": "fake-token",
+                "RELEASE_TAG": "v1.0.0",
+                "ASSET_NAME": asset_name,
+                "REPO": "abicheck/abicheck",
+                "NEW_CONTENT_DIGEST": content_digest,
+                "PYTHONPATH": str(Path(__file__).resolve().parents[1]),
+            }
+        )
+
+        fd, path = tempfile.mkstemp(suffix=".sh")
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8", newline="\n") as fh:
+                fh.write(script)
+            result = subprocess.run(
+                [_bash_executable(), path],
+                capture_output=True,
+                text=True,
+                env=env,
+                cwd=tmp_path,
+                check=False,
+            )
+        finally:
+            os.unlink(path)
+
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert "safe re-run" in result.stdout

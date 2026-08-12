@@ -1149,3 +1149,46 @@ class TestClassifierParityWithRunSh:
             f"run.sh and validate-inputs.sh disagree on {kind} ({path}): "
             f"run.sh={run_sh_verdict} validate-inputs.sh={validate_sh_verdict}"
         )
+
+
+@pytest.mark.skipif(
+    not VALIDATE_SH.is_file(), reason="action/validate-inputs.sh not found"
+)
+class TestBaselineAssetNameTemplateScopeWarning:
+    # Regression for a false-positive warning (Codex review): action.yml
+    # forwards baseline-asset-name-template's own manifest default
+    # ('abicheck-baseline-{profile}.tar.zst') unconditionally, so it is
+    # non-empty on every single invocation -- including every ordinary
+    # dump/appcompat/deps-* run that never asked for the baseline-set
+    # feature at all. The scope check must key off baseline-profile/
+    # baseline-target (which have no default and are genuinely only set
+    # when a caller opts in), not the template input's presence.
+
+    def test_default_template_alone_is_silent_outside_compare_and_scan(
+        self,
+    ) -> None:
+        result = _run_validate(
+            {
+                "INPUT_MODE": "dump",
+                "INPUT_NEW_LIBRARY": "x.so",
+                "INPUT_BASELINE_ASSET_NAME_TEMPLATE": (
+                    "abicheck-baseline-{profile}.tar.zst"
+                ),
+            }
+        )
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert "baseline-profile/baseline-target" not in (result.stdout + result.stderr)
+
+    def test_baseline_profile_outside_compare_and_scan_still_warns(
+        self,
+    ) -> None:
+        result = _run_validate(
+            {
+                "INPUT_MODE": "dump",
+                "INPUT_NEW_LIBRARY": "x.so",
+                "INPUT_BASELINE_PROFILE": "release",
+                "INPUT_BASELINE_TARGET": "libfoo",
+            }
+        )
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert "baseline-profile/baseline-target" in (result.stdout + result.stderr)
