@@ -1667,12 +1667,117 @@ itself) — not a drive-by extension of an example-catalog PR.
   no second dict *construction* from disk at all, and no dependence on the
   cache key matching) is still open if the memoization's residual cost
   (cache-key recomputation, one dict lookup) ever turns out to matter.
-- Hybrid-backend provenance-tagged merging: extend G28 Phase 3's
-  `--ast-frontend hybrid` per-field provenance model to graph nodes/edges,
-  not just snapshot facts.
-- Header-defined body fingerprints (for detecting a behavior-preserving
-  vs. behavior-changing inline/template body edit, distinct from a
-  signature change).
+- **Hybrid-backend provenance-tagged merging** (finalized scope, not
+  attempted): extend G28 Phase 3's `--ast-frontend hybrid` per-field
+  provenance model (`fact_provenance.py`'s `func_fact_key`/`type_fact_key`/
+  `enum_fact_key`/`field_fact_key` — `"func:<mangled>:<fact>"`-shaped keys
+  mapping to `"castxml"`/`"clang"`) to graph nodes/edges, not just snapshot
+  facts. **Where the gap actually is, confirmed by reading the hybrid path**:
+  under `service.run_dump(header_backend="hybrid")`, the L2 graph is *not*
+  independently built per backend and then merged the way the flat snapshot
+  is — `_attach_header_graph`'s `_skip_header_graph_attach=True` on both
+  recursive castxml/clang sub-dumps means neither one gets its own graph,
+  and the graph is attached exactly once, after the merge, from
+  `header_graph.build_header_only_graph(merged_snapshot, clang_ast_root,
+  ...)`. Two different halves of the resulting graph therefore have two
+  different, currently-untracked provenance stories: (1) `seed_decl()`'s
+  per-node `attrs["visibility"]` comes from `entity.origin` on the *merged*
+  snapshot's `Function`/`Variable` — which is itself the output of G28 Phase
+  3's castxml-primary/clang-backfill merge, i.e. already a per-field
+  provenance decision `fact_provenance.py` recorded, but that record is
+  never carried onto the graph node built from it; (2) every structural
+  edge (`TYPE_INHERITS`/`TYPE_HAS_FIELD_TYPE`/`DECL_HAS_TYPE`/
+  `DECL_CALLS_DECL`/`DECL_REFERENCES_DECL`) comes from `ast_root`, which
+  under hybrid is *always* the clang sub-dump's AST (castxml never builds
+  graph edges at all, hybrid or not — confirmed: no code path calls
+  `build_header_only_graph` with a castxml-sourced AST), so every edge in a
+  hybrid graph is unconditionally clang-only regardless of provenance and
+  needs no new tagging — it's already unambiguous. **The real, scoped fix**
+  is therefore narrower than "provenance-tag the whole graph": only (1)
+  needs new plumbing — `header_graph.seed_decl()`/its type-node sibling
+  would need to read the merged snapshot's own `AbiSnapshot.fact_provenance`
+  map (`model.py`'s `kw_only` field, already populated by
+  `dumper_hybrid.merge_snapshots` and already present on the `merged`
+  snapshot object `_attach_header_graph`'s hybrid call site already passes
+  through — not discarded, just never consulted by `build_header_only_graph`
+  today) and copy the relevant `func_fact_key(mangled, "visibility")`-shaped entry onto
+  `GraphNode.attrs["visibility_provenance"]` (a new, additive attr — never
+  changes an existing attr's meaning) when that node's identity resolves to
+  a fact `fact_provenance` actually tracked. **Consumers, and why this
+  hasn't blocked anything so far**: no current L5 detector reads a
+  per-attr node provenance at all (`is_public_dependency_node`/
+  `is_consumer_compiled_public_entry` key off `visibility`/
+  `consumer_compiled_body` directly, never off where either value came
+  from), so this gap has produced no known incorrect finding — it would
+  only start mattering if a future detector needed to discount/flag a
+  finding resting on a clang-backfilled (vs. castxml-primary) visibility
+  determination specifically, e.g. to surface "this RISK finding's
+  reachability classification rests on a fact clang had to backfill, verify
+  it if that matters for your review" the way `LAYOUT_UNVERIFIABLE`
+  annotates an analogous evidence-absence gap for layout facts (see this
+  same plan's "Findings emitted from absent evidence" AGENTS.md entry for
+  the general pattern). **Files that would change**: `header_graph.py`
+  (`seed_decl`/type-node builders gain an optional `fact_provenance`
+  parameter), `service.py`'s hybrid branch (thread `merge_snapshots`'
+  provenance dict through to the `_attach_header_graph` call instead of
+  discarding it), `graph_facts.py` (no schema change needed — `attrs` is
+  already an open dict). No `SOURCE_GRAPH_VERSION` bump needed unless a new
+  detector starts depending on the new attr's presence for correctness
+  rather than reading it as optional enrichment.
+- **Header-defined body fingerprints** (finalized scope, not attempted):
+  detect a behavior-preserving vs. behavior-changing inline/template body
+  edit in a header, distinct from a signature change — today invisible to
+  every evidence tier below L4 (a signature-unchanged body edit changes no
+  flat snapshot fact and moves no graph node id, so L0-L2 report nothing,
+  and the L2-only header graph carries no body-derived fact at all to
+  report a change in). **This already exists at L4, for the build-integrated
+  path only**: `source_extractors/clang.py`'s per-TU replay computes
+  `SourceEntity.body_hash` via `clang_nodes._subtree_hash()` — an
+  alpha-equivalence-normalized structural fingerprint of a clang AST
+  subtree, already parameter-aware (`_param_ids`) so a body referencing its
+  own parameters normalizes correctly — and `source_diff._diff_inline_bodies()`
+  compares it old-vs-new to emit `inline_body_changed`
+  (never `BREAKING`, per this directory's D3 rule). **The scoped gap**:
+  `header_graph.py`'s L2-only AST walk parses the *identical shape* of
+  `clang -ast-dump=json` tree `source_extractors/clang.py` does (both are
+  `clang -ast-dump=json` over public headers, structurally the same input
+  `_subtree_hash()` already consumes) but never computes or stores a body
+  hash for the inline/template function bodies it already visits when
+  seeding `DECL_CALLS_DECL`/`DECL_REFERENCES_DECL` edges — so the *same*
+  fingerprinting `_subtree_hash()` already provides for L4 could, in
+  principle, be reused verbatim for L2, closing the gap for the common
+  no-build-integration case (any `dump`/`compare` with headers, not just
+  `--sources`/`--build-info`). **Design sketch, not implemented**: (1)
+  `header_graph.seed_decl()` gains a body-hash computation for a
+  `FunctionDecl`/`CXXMethodDecl` node with a real `CompoundStmt` body child
+  (skipping declaration-only/pure-virtual nodes, mirroring
+  `_subtree_hash`'s own `_param_ids`-aware call convention exactly), stored
+  as a new `GraphNode.attrs["body_hash"]`; (2) a new `graph_reconcile`-
+  adjacent or `source_graph_findings`-sibling diff function compares two
+  matched `source_decl` nodes' `body_hash` (matched the same way
+  `diff_source_graph_findings` already matches other node facts — by node
+  id when unchanged, or via `graph_reconcile`'s alias tier when a compound
+  edit also moved the id) and emits a new RISK-tier finding when they
+  differ but the node's own signature-derived facts (mangled name/params)
+  did not — reusing the *existing* `inline_body_changed` `ChangeKind` is
+  the natural choice over minting a new one, provided its
+  `default_verdict`/severity/`min_evidence` in `change_registry.py`
+  tolerate an `L2`-sourced instance alongside its current L4-only
+  producer (needs checking against that entry's own assumptions before
+  reuse — the CLAUDE.md "Adding a new ChangeKind" 4-step procedure applies
+  either way, whether reusing or minting). (3) needs new example-catalog
+  coverage (an L2-only fixture demonstrating the finding) and a
+  `min_evidence` reclassification check (`scripts/evidence_tiers.py`) if
+  `inline_body_changed` is reused, since that registry currently derives
+  its tier from the kind alone, not per-producer. **Deliberately not
+  attempted in this pass**: this is a genuinely new detection capability
+  (new node attr + new diff function + new/reused `ChangeKind` wiring +
+  catalog coverage), not a fix to existing code, and — per this same
+  phase's own repeated lesson from the vptr-offset and case196 fixture
+  work above — a change touching a shared, heavily-reviewed AST-walk
+  function (`header_graph.seed_decl`) deserves its own dedicated
+  implementation-and-review pass rather than a documentation-pass
+  drive-by.
 - Preprocessor/build-context reconciliation: macros, `#ifdef` conditionals,
   and compile-DB flags flowing into the header parse consistently between
   the flat-snapshot pass and the graph pass (today each independently
