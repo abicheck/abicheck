@@ -11,8 +11,10 @@
   (Agent Skills, `--contract` domains, ...) with nothing telling the
   reader they aren't looking at the latest published release -- a
   documentation review's P0.1 finding. `extra.latest_published_version`
-  is stamped by docs/hooks.py:on_config, read straight from
-  pyproject.toml at build time, so this text can't itself go stale.
+  is stamped by docs/hooks.py:on_config, read from repo_facts.json's
+  latest_release at build time (the fact owner for "the version actually
+  published", decoupled from pyproject.toml's own version, which can be
+  bumped ahead of a release), so this text can't itself go stale.
 #}
 {% block announce %}
 <span>
@@ -21,6 +23,8 @@
   <strong>v{{ config.extra.latest_published_version }}</strong> — see
   <a href="{{ 'start/upgrading-to-0.6/' | url }}">Upgrading to 0.6</a> if
   something here doesn't match what you have installed
-  (<code>pip show abicheck</code>).
+  (<code>abicheck --version</code> — the executable actually on
+  <code>PATH</code>, not necessarily what <code>pip show abicheck</code>
+  reports for a different environment).
 </span>
 {% endblock %}

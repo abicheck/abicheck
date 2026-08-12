@@ -37,6 +37,9 @@
   `main`-only features (Agent Skills, `--contract` domains) with no
   indication the reader isn't looking at the latest published release —
   a documentation review's P0.1 finding. `docs/hooks.py` reads
-  `pyproject.toml`'s own `version` at build time and stamps it into a new
-  mkdocs-material announcement bar (`docs/overrides/main.html`) shown on
-  every page, so the banner can't itself go stale between manual updates.
+  `repo_facts.json`'s `latest_release` field at build time — the fact
+  owner this repo already maintains decoupled from `pyproject.toml`'s own
+  `version`, which can be bumped ahead of a release — and stamps it into
+  a new mkdocs-material announcement bar (`docs/overrides/main.html`)
+  shown on every page, so the banner can't itself go stale between manual
+  updates.
