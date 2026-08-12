@@ -59,6 +59,7 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 from dataclasses import dataclass
+from datetime import date
 from enum import Enum
 from typing import cast
 
@@ -246,6 +247,7 @@ def effective_verdict_for_change(
     policy: str | None = None,
     kind_sets: KindSets | None = None,
     policy_file: object | None = None,
+    today: date | None = None,
 ) -> Verdict:
     """Return the effective verdict for one change.
 
@@ -253,6 +255,12 @@ def effective_verdict_for_change(
     verdict bucket. Frozen-namespace violations are deliberately per-change: if
     an override would downgrade a tagged finding below the base-policy verdict,
     the override is ignored for that one finding.
+
+    *today* is forwarded to a matching `reclassify:` rule's own expiry check
+    (:func:`abicheck.reclassify.first_matching_reclassify_verdict`) -- pass a
+    fixed date for a deterministic/testable caller (e.g.
+    ``SuppressionList.audit()``'s own *today* parameter); ``None`` uses the
+    real current date, same as every other caller already relies on.
     """
     kind = change.kind
     base_policy = getattr(policy_file, "base_policy", policy)
@@ -283,7 +291,7 @@ def effective_verdict_for_change(
         getattr(policy_file, "reclassify", None) if policy_file is not None else None
     )
     if reclassify_rules:
-        reclass_v = first_matching_reclassify_verdict(reclassify_rules, change)
+        reclass_v = first_matching_reclassify_verdict(reclassify_rules, change, today)
         if reclass_v is not None:
             base_v = effective_category(change, *base_sets)
             if (
@@ -311,7 +319,9 @@ def effective_verdict_for_change(
     return effective_category(change, *sets)
 
 
-def _reclassify_resolved_to_compatible(change: HasKind, policy_file: object | None) -> bool:
+def _reclassify_resolved_to_compatible(
+    change: HasKind, policy_file: object | None, today: date | None = None
+) -> bool:
     """True if a selector-scoped `reclassify:` rule -- not a kind-global
     `overrides:` entry or the base policy -- is what produced this change's
     COMPATIBLE verdict.
@@ -334,7 +344,7 @@ def _reclassify_resolved_to_compatible(change: HasKind, policy_file: object | No
     rules = getattr(policy_file, "reclassify", None)
     if not rules:
         return False
-    return first_matching_reclassify_verdict(rules, change) == Verdict.COMPATIBLE
+    return first_matching_reclassify_verdict(rules, change, today) == Verdict.COMPATIBLE
 
 
 def classify_effective_change(
@@ -343,11 +353,12 @@ def classify_effective_change(
     policy: str | None = None,
     kind_sets: KindSets | None = None,
     policy_file: object | None = None,
+    today: date | None = None,
 ) -> IssueCategory:
     """Classify one change, preserving per-finding verdict guards."""
     sets = _resolve_kind_sets(policy, kind_sets)
     verdict = effective_verdict_for_change(
-        change, policy=policy, kind_sets=kind_sets, policy_file=policy_file,
+        change, policy=policy, kind_sets=kind_sets, policy_file=policy_file, today=today,
     )
     if verdict == Verdict.BREAKING:
         return IssueCategory.ABI_BREAKING
@@ -362,7 +373,7 @@ def classify_effective_change(
     # _reclassify_resolved_to_compatible).
     if change.kind in ADDITION_KINDS and (
         change.kind in sets[2]
-        or _reclassify_resolved_to_compatible(change, policy_file)
+        or _reclassify_resolved_to_compatible(change, policy_file, today)
     ):
         return IssueCategory.ADDITION
     return IssueCategory.QUALITY_ISSUES

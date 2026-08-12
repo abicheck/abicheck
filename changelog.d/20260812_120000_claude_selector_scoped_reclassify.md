@@ -61,4 +61,10 @@ A new changelog fragment. See changelog.d/README.md for the workflow.
   optional `policy_file` parameter: a `reclassify:` rule promoting a
   normally-compatible finding to `break` for one specific symbol is now
   correctly flagged as a high-risk suppression match, which a kind-wide
-  `breaking_kinds` set alone could never express.
+  `breaking_kinds` set alone could never express. That classification now
+  routes through the same shared per-finding resolver
+  (`severity.effective_verdict_for_change`) the comparison's own verdict
+  already uses, rather than a standalone `reclassify:` check -- so a
+  pipeline-set `effective_verdict` modulation and the frozen-namespace
+  verdict floor are honored with the correct precedence too, not just
+  `reclassify:` in isolation.

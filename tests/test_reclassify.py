@@ -771,3 +771,64 @@ def test_audit_without_policy_file_is_unchanged() -> None:
         [change], breaking_kinds=frozenset({ChangeKind.FUNC_REMOVED})
     )
     assert len(audit.high_risk_matches) == 1
+
+
+def test_audit_reclassify_respects_frozen_namespace_floor(tmp_path: Path) -> None:
+    """Codex review, second round: a naive reclassify-only check in the
+    audit bypassed the frozen-namespace verdict floor. A `to: ignore` rule
+    matching a frozen-namespace change must NOT demote it -- the audit must
+    still flag the suppression as high-risk, via the same shared resolver
+    (severity.effective_verdict_for_change) the comparison's own verdict
+    already went through."""
+    from abicheck.suppression import Suppression, SuppressionList
+
+    p = tmp_path / "policy.yaml"
+    p.write_text(
+        """
+reclassify:
+  - kind: func_removed
+    symbol: foo
+    to: ignore
+""".strip(),
+        encoding="utf-8",
+    )
+    pf = PolicyFile.load(p)
+    sup = Suppression(symbol="foo")
+    supl = SuppressionList([sup])
+    change = _change(
+        ChangeKind.FUNC_REMOVED, "foo", frozen_namespace_violation="ns::**"
+    )
+
+    audit = supl.audit([change], policy_file=pf)
+    assert len(audit.high_risk_matches) == 1
+
+
+def test_audit_reclassify_yields_to_effective_verdict_precedence(
+    tmp_path: Path,
+) -> None:
+    """Codex review, second round: a pipeline-set `effective_verdict`
+    (ADR-025 modulation) must win over a matching `reclassify:` rule in the
+    audit too, exactly like it already does in
+    `severity.effective_verdict_for_change` itself -- not get silently
+    bypassed by a reclassify-only shortcut."""
+    from abicheck.suppression import Suppression, SuppressionList
+
+    p = tmp_path / "policy.yaml"
+    p.write_text(
+        """
+reclassify:
+  - kind: func_removed
+    symbol: foo
+    to: ignore
+""".strip(),
+        encoding="utf-8",
+    )
+    pf = PolicyFile.load(p)
+    sup = Suppression(symbol="foo")
+    supl = SuppressionList([sup])
+    change = _change(
+        ChangeKind.FUNC_REMOVED, "foo", effective_verdict=Verdict.COMPATIBLE
+    )
+
+    audit = supl.audit([change], policy_file=pf)
+    assert audit.high_risk_matches == []
