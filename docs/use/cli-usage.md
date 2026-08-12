@@ -84,8 +84,11 @@ snapshots and ABICC Perl dumps (Data::Dumper `.dump` files) are loaded directly.
 You can mix them freely (see below).
 
 If headers are not provided, `compare` uses whatever debug info is available
-instead — DWARF on ELF, PDB on PE — falling back further to symbols-only
-analysis only when neither headers nor debug info are present. Only the ELF
+instead — DWARF on ELF, PDB on PE — falling back further to L0
+binary-metadata analysis (exported symbols plus platform-specific facts —
+SONAME/dependencies/rpaths on ELF, machine type/imports/delay-load/hardening
+on PE, install name/dependencies/rpaths on Mach-O — never a bare symbol
+list) only when neither headers nor debug info are present. Only the ELF
 path prints an explicit no-headers warning today; PE and Mach-O degrade the
 same way without one. Less evidence means a weaker analysis that may miss
 signature/type-level ABI breaks; see
@@ -105,8 +108,11 @@ abicheck compare libfoo-1.0.json libfoo-2.0.json
 ```
 
 If headers are not provided, `compare` uses whatever debug info is available
-instead — DWARF on ELF, PDB on PE — falling back further to symbols-only
-analysis only when neither headers nor debug info are present. Only the ELF
+instead — DWARF on ELF, PDB on PE — falling back further to L0
+binary-metadata analysis (exported symbols plus platform-specific facts —
+SONAME/dependencies/rpaths on ELF, machine type/imports/delay-load/hardening
+on PE, install name/dependencies/rpaths on Mach-O — never a bare symbol
+list) only when neither headers nor debug info are present. Only the ELF
 path prints an explicit no-headers warning today; PE and Mach-O degrade the
 same way without one. Less evidence means a weaker analysis that may miss
 signature/type-level ABI breaks; see
