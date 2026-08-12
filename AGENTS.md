@@ -2232,12 +2232,20 @@ Once a root command genuinely clears the bar above, pick the right home:
   target name (`v1::cpu_feature_map`) but no `init`/value of its own,
   immediately followed by an **implicit**, **unnamed** `UsingShadowDecl`
   (`"isImplicit": true`, no `name` key at all — confirmed by inspecting
-  the emitted JSON directly, not inferred). `dumper_clang.py`'s
-  `_categorize()` has no branch matching either `UsingDecl` or
-  `UsingShadowDecl` — its `VarDecl` branch requires both `kind ==
-  "VarDecl"` and a non-empty `name`, neither of which either using-related
-  node satisfies — so both are silently dropped and the re-exported
-  spelling never enters `AbiSnapshot.constants` at all on that backend.
+  the emitted JSON directly, not inferred). **That `UsingShadowDecl` node
+  does carry real target identity** — a `target` object with the
+  underlying `VarDecl`'s own `id`, `kind`, `name`, and `type` (confirmed
+  by inspecting the real JSON: `{"id": "0x...", "kind": "UsingShadowDecl",
+  "isImplicit": true, "target": {"id": "0x...", "kind": "VarDecl", "name":
+  "cpu_feature_map", "type": {"qualType": "const int"}}}`) — so this is
+  identity Clang exposes and `dumper_clang.py` simply never reads, not
+  identity Clang lacks (Codex review, fresh evidence; an earlier revision
+  of this entry claimed the latter, which was wrong). `_categorize()` has
+  no branch matching either `UsingDecl` or `UsingShadowDecl` — its
+  `VarDecl` branch requires both `kind == "VarDecl"` and a non-empty
+  `name`, neither of which either using-related node satisfies — so both
+  are silently dropped, `target` included, and the re-exported spelling
+  never enters `AbiSnapshot.constants` at all on that backend.
   This is *complementary* missing coverage, not a clean bill of health:
   a release that removes only the `using v1::cpu_feature_map;` re-export
   while keeping the real `v1::cpu_feature_map` definition breaks every
@@ -2323,9 +2331,7 @@ Once a root command genuinely clears the bar above, pick the right home:
 
   Given round 2 proves no per-snapshot, name-shape-based direction rule
   can be sound, and a genuinely correct fix needs real using-shadow/
-  target identity evidence — which the module's own docstring already
-  states no available header-AST producer exposes for a plain
-  name-keyed mapping like `AbiSnapshot.constants` — continuing to patch
+  target identity evidence rather than name shape — continuing to patch
   the heuristic's direction a third time was exactly the "one more
   counterexample" pattern this file's own linkage-blind-removal and
   type-identity entries above already warn against repeating. Reverted in
@@ -2338,12 +2344,33 @@ Once a root command genuinely clears the bar above, pick the right home:
   original bug is merely noisy while a wrong-direction fabricated
   `CONSTANT_REMOVED` blocks a release for nothing.
 
-  A correct fix needs one of: (a) real using-shadow/target evidence
-  threaded from castxml's XML if it exposes any (unconfirmed — no
-  castxml binary available in this environment to inspect the real
-  output shape for this construct), or (b) a genuinely different
-  architecture that resolves the ambiguity at diff time with both sides'
-  full data available simultaneously (mirroring how `diff_namespaces.py`'s
+  **What "real identity evidence" actually means differs by backend, and
+  the two must not be conflated (Codex review, fresh evidence corrected
+  an earlier draft of this entry that did conflate them).** On
+  direct-clang, the identity evidence demonstrably EXISTS today and is
+  simply unused: `UsingShadowDecl.target` (see above) names the exact
+  underlying `VarDecl` by AST id, so a sound clang-side fix is a real,
+  scoped option — capture the shadow, resolve `target.id` back to the
+  already-visited `VarDecl`, and re-register the alias under the
+  using-declaration's own enclosing-scope name, carrying its target's
+  identity forward rather than guessing from name shape. That is new
+  extraction work (`_categorize()` doesn't currently visit
+  `UsingShadowDecl` at all) and was not attempted in this pass, but it is
+  a materially different, better-founded starting point than the
+  name-shape heuristic this entry's earlier rounds tried and reverted. On
+  castxml, whether an equivalent target back-reference exists in its
+  `<Variable>` XML is genuinely **unknown** — not confirmed absent, not
+  confirmed present — since no castxml binary was available in this
+  environment to inspect real output for this construct; the reported
+  castxml duplication mechanism throughout this entry is taken from the
+  original report, not independently re-derived. A correct, full fix
+  needs one of: (a) the clang-side `target.id` threading described above,
+  landed and verified against the FP-rate/mutation-score gates before
+  trusting it; (b) inspecting real castxml XML for this construct to
+  determine whether it exposes anything equivalent, which this
+  environment cannot do; or (c) a genuinely different architecture that
+  resolves the ambiguity at diff time with both sides' full data available
+  simultaneously (mirroring how `diff_namespaces.py`'s
   `_paired_stable_indices` jointly builds paired OLD/NEW indices for
   functions/types, gated on real identity) rather than destructively
   dropping information from one side's snapshot in isolation — a
