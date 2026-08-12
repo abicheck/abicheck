@@ -404,6 +404,55 @@ class TestCheckScriptBehavior:
         )
         assert result.returncode == 1
 
+    def test_double_star_slash_matches_only_complete_segments(
+        self, tmp_path: Path
+    ) -> None:
+        # Regression (Codex review, P2): "**/" was translated to ".*"
+        # followed by an OPTIONAL "/", which also matches a PARTIAL
+        # segment -- for pattern "baselines/**/manifest.json", the ".*"
+        # could consume "not" out of "notmanifest.json" and the optional
+        # "/" then matched zero times, so this pattern wrongly matched
+        # "baselines/notmanifest.json" too. "**/" must only ever match
+        # zero or more COMPLETE path segments.
+        repo = tmp_path / "repo"
+        _init_repo(repo)
+        (repo / "baselines").mkdir()
+        (repo / "baselines" / "notmanifest.json").write_text("old", encoding="utf-8")
+        base_sha = _commit_all(repo, "base")
+
+        (repo / "baselines" / "notmanifest.json").write_text("new", encoding="utf-8")
+        head_sha = _commit_all(repo, "unrelated file changed")
+
+        result = self._run(
+            repo,
+            base_sha=base_sha,
+            head_sha=head_sha,
+            protected_paths="baselines/**/manifest.json",
+        )
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert "No protected baseline files" in result.stdout
+
+        # A genuine match (a real "manifest.json" at any depth) must
+        # still be caught.
+        (repo / "baselines" / "sub").mkdir()
+        (repo / "baselines" / "sub" / "manifest.json").write_text(
+            "old", encoding="utf-8"
+        )
+        base_sha2 = _commit_all(repo, "add real manifest")
+        (repo / "baselines" / "sub" / "manifest.json").write_text(
+            "new", encoding="utf-8"
+        )
+        head_sha2 = _commit_all(repo, "change real manifest")
+
+        result2 = self._run(
+            repo,
+            base_sha=base_sha2,
+            head_sha=head_sha2,
+            protected_paths="baselines/**/manifest.json",
+        )
+        assert result2.returncode == 1
+        assert "baselines/sub/manifest.json" in result2.stdout
+
     def test_unrelated_directory_sharing_a_leaf_name_is_not_matched(
         self, tmp_path: Path
     ) -> None:

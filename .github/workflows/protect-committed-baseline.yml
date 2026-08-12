@@ -163,11 +163,28 @@ jobs:
               while i < n:
                   c = pattern[i]
                   if pattern[i : i + 2] == "**":
-                      out.append(".*")
                       i += 2
                       if i < n and pattern[i] == "/":
-                          out.append("/?")
+                          # "**/" means "zero or more COMPLETE path
+                          # segments" -- NOT ".*" followed by an optional
+                          # "/", which also matches a PARTIAL segment (the
+                          # ".*" can consume e.g. "not" out of
+                          # "notmanifest.json" and the optional "/" then
+                          # matches zero times, so
+                          # "baselines/**/manifest.json" wrongly matched
+                          # "baselines/notmanifest.json" too -- a real
+                          # false positive this required check would have
+                          # reported (Codex review). "(?:[^/]+/)*" only
+                          # ever consumes whole "segment/" units, so it
+                          # can never stop mid-segment.
+                          out.append("(?:[^/]+/)*")
                           i += 1
+                      else:
+                          # A bare trailing "**" (not followed by "/") is
+                          # unchanged -- e.g. "abi/**" must still match
+                          # "abi/" plus anything nested under it,
+                          # including further "/"-separated segments.
+                          out.append(".*")
                       continue
                   if c == "*":
                       out.append("[^/]*")
