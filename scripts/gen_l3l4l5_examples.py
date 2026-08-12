@@ -60,6 +60,7 @@ from abicheck.buildsource.source_graph import (  # noqa: E402
     GraphEdge,
     GraphNode,
     SourceGraphSummary,
+    build_source_graph,
 )
 
 EXAMPLES = _REPO / "examples"
@@ -455,6 +456,54 @@ def build_cases() -> dict[str, tuple[str, dict[str, Any], dict[str, Any]]]:
             [l5i_parent, l5i_hdr, new_x, new_y],
             [l5i_decl_edge, _field_edge("RawX"), _field_edge("RawY")],
         ),
+    )
+
+    # case196: a public function keeps its exact qualified name but its
+    # parameter type changes (int -> long) in the same release its header is
+    # reorganized (api_v1.h -> api.h). Unlike case194/195 (which hand-build a
+    # GraphNode/GraphEdge pair directly), this fixture is produced by running
+    # REAL SourceEntity/BuildEvidence facts through the actual production
+    # fold (source_graph.build_source_graph) -- the same function dump
+    # --sources/--build-info calls -- so the two resulting node ids are
+    # genuinely distinct for the reason a real extractor would make them
+    # distinct (the signature change moves the Itanium mangled name, which
+    # source_graph.py's node-id scheme keys on), not because this script
+    # invented an artificial suffix. This is deliberately NOT a "pure" move
+    # (an unchanged signature can never change a mangled name, so a pure
+    # move cannot itself perturb node identity -- see graph_reconcile.py's
+    # own "Known gap" note); it's the realistic compound edit that DOES
+    # reach the reconciler: the qualified-name alias tier pairs the two
+    # nodes (same "demo::f"), and since the declaring file also changed,
+    # ADR-048's outcome classification reports declaration_moved. In a real
+    # end-to-end compare() run the signature change would independently
+    # surface as its own (likely BREAKING, since the old mangled symbol
+    # disappears) flat finding -- this L5-only fixture demonstrates just the
+    # reconciliation annotation, matching case194/195's own scope.
+    def _fn_entity(mangled: str, path: str) -> SourceEntity:
+        return SourceEntity(
+            id="demo::f",
+            kind="function",
+            qualified_name="demo::f",
+            mangled_name=mangled,
+            visibility="public_header",
+            source_location=_loc(path, 1),
+        )
+
+    l5j_build = BuildEvidence(
+        targets=[Target(id="libdemo", name="demo", kind=TargetKind.SHARED_LIBRARY)]
+    )
+    l5j_old_surface = SourceAbiSurface(
+        library="libdemo.so",
+        reachable_declarations=[_fn_entity("_ZN4demo1fEi", "include/demo/api_v1.h")],
+    )
+    l5j_new_surface = SourceAbiSurface(
+        library="libdemo.so",
+        reachable_declarations=[_fn_entity("_ZN4demo1fEl", "include/demo/api.h")],
+    )
+    cases["case196_header_graph_move_reconciled"] = (
+        "L5",
+        build_source_graph(l5j_build, l5j_old_surface).to_dict(),
+        build_source_graph(l5j_build, l5j_new_surface).to_dict(),
     )
 
     return cases

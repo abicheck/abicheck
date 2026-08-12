@@ -131,51 +131,60 @@ node/edge identity and merge logic. `abicheck/binder.py`/`abicheck/resolver.py`
 building a second identity-resolution mechanism from scratch.
 `abicheck/demangle.py` — canonical-name derivation for the mangled-name key.
 
-**Known gap: `declaration_moved` has no real-world example, and cannot yet
-get one — attempted, and reverted (Codex review, PR #727).** ADR-048's D2
-(`graph_reconcile.py`) defines three reconciliation outcomes —
-`declaration_renamed`, `declaration_moved`, `declaration_identity_reconciled`
-— but only `declaration_renamed` (case194) and the deliberate
-ambiguous-rename counter-example (case195) ever got example-catalog
-coverage. An attempt to add a `declaration_moved` case (a private field-type
+**`declaration_moved` example coverage — closed, after one wrong attempt
+(Codex review, PR #727).** ADR-048's D2 (`graph_reconcile.py`) defines three
+reconciliation outcomes — `declaration_renamed`, `declaration_moved`,
+`declaration_identity_reconciled` — but only `declaration_renamed` (case194)
+and the deliberate ambiguous-rename counter-example (case195) had
+example-catalog coverage before this pass.
+
+A first attempt built a `declaration_moved` fixture (a private field-type
 target keeping its exact qualified name but moving to a different declaring
-header) built the fixture the same way `tests/test_graph_reconcile.py`'s own
+header) the same way `tests/test_graph_reconcile.py`'s own
 `test_move_reconciles_when_file_changes_but_name_does_not` unit test does:
 two `GraphNode`s with matching `qualified_name` but artificially distinct
 ids (`type://old`/`type://new` in the unit test; `@v1`/`@v2` suffixes in the
-attempted example) so `diff_source_graph`'s node-id diff treats them as a
-removed+added pair for the reconciler to then re-pair via the alias tier.
-
-Review caught that this doesn't reflect anything a **real** `dump --sources`/
-`--build-info` run can currently produce. Every graph-node-id constructor in
-`abicheck/buildsource/` — `header_graph.py`'s `_decl_identity()`/`seed_decl`,
+first attempt) so `diff_source_graph`'s node-id diff treats them as a
+removed+added pair for the reconciler to re-pair via the alias tier. Review
+caught that this doesn't reflect anything a **real** `dump --sources`/
+`--build-info` run can produce: every graph-node-id constructor in
+`abicheck/buildsource/` (`header_graph.py`'s `_decl_identity()`/`seed_decl`,
 `source_graph.py`'s `_type_node_id`/`_decl_node_id`/`function_decl_identity`,
 and every one of their callers in `call_graph.py`/`type_graph.py`/
 `macro_graph.py`/`callback_graph.py`/`override_graph.py`/`template_graph.py`/
-`graph_backends.py` (confirmed by grepping every `_type_node_id`/
-`_decl_node_id`/`_debug_type_node_id` call site) — keys a declaration's or
-type's node id purely off its mangled name or qualified name (falling back
-to a signature hash, never a file path). `_header_node_id(path)` IS
-file-keyed, but `"header"` is deliberately excluded from
-`_RECONCILABLE_KINDS` (file/build/link-graph nodes are structural build
-facts, not "the same entity" candidates — see the module docstring). The
-practical consequence: a real declaration that keeps its exact qualified
-name but moves to a different declaring header gets the **same** node id on
-both sides of a real comparison — it never appears as a removed+added pair
-at all, so `graph_reconcile`'s move-classification branch
-(`_classify_outcome`'s `moved and not renamed` case) never actually runs on
-real input today. The unit test above is a legitimate, narrower thing (it
-tests the classifier's own logic given an already-reconciled pair, the same
-way a pure-function unit test is allowed to construct inputs no real
-producer emits) — but an example-catalog case carries a stronger implicit
-claim (`examples/CLAUDE.md`: reproducible via a real `abicheck` command
-against the case's real fixtures), which this scenario cannot honestly meet
-yet. Reverted rather than shipped with a misleading claim of reachability.
+`graph_backends.py`, confirmed by grepping every `_type_node_id`/
+`_decl_node_id`/`_debug_type_node_id` call site) keys a declaration's or
+type's node id purely off its mangled or qualified name, never a file path
+— so a *pure* move (unchanged signature, only the header changes) gets the
+**same** node id on both sides of a real comparison and never reaches the
+reconciler as a removed+added pair at all. First attempt reverted rather
+than shipped with a misleading claim of reachability.
 
-Closing this needs a real producer-side change first — some node-id (or
-edge/attribute) signal that actually changes when a declaration's file
-does but its identity doesn't — which is its own scoped design (which node
-kinds should be file-sensitive, how that interacts with the existing
+A second review round (same PR) found the corrected "unreachable" framing
+had itself overclaimed: it is only a *pure* move that's unreachable.
+Constructing real `SourceEntity`/`BuildEvidence` facts (a function `demo::f`
+whose parameter type changes `int`→`long` — moving its Itanium mangled name
+— in the same release its header moves) and running them through the
+**actual production fold**, `source_graph.build_source_graph()`, confirmed
+empirically that the qualified-name alias tier pairs the resulting two
+distinct-id nodes, and the file-vs-name comparison in `_classify_outcome`
+correctly reports `declaration_moved` — a compound edit (signature change +
+header move, sharing a qualified name) genuinely reaches this outcome
+through the real pipeline, not through a hand-invented id.
+`case196_header_graph_move_reconciled` now ships built exactly this way
+(real dataclasses → real fold → real diff, not hand-assembled
+`GraphNode`/`GraphEdge` objects), closing the example gap correctly.
+`graph_reconcile.py`'s own module docstring and
+`tests/test_graph_reconcile.py`'s existing unit test are unaffected — the
+unit test's artificial ids are still legitimate for testing the
+classifier's pure logic in isolation.
+
+**What remains genuinely open**: the *pure*-move shape (declaration keeps
+its exact signature, only its header changes) is still unreachable from any
+current real producer — closing that needs a real producer-side change
+(some node-id or edge/attribute signal that changes when a declaration's
+file does but its identity doesn't), which is its own scoped design (which
+node kinds should be file-sensitive, how that interacts with the existing
 alias/structural-context tiers, whether it's a new node attribute compared
 separately from the identity-based node id rather than folded into the id
 itself) — not a drive-by extension of an example-catalog PR.

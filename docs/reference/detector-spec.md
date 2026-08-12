@@ -58,7 +58,7 @@ One row per `ChangeKind` (396 total). Columns fuse the verdict partition (`check
 | `ctor_overload_ambiguity_risk` | risk | `COMPATIBLE_WITH_RISK` | `warning` | L2 | `ctor_overload_ambiguity_risk` | — |
 | `cxx_standard_floor_raised` | api_break | `API_BREAK` | `warning` | unspecified | `cxx_standard_floor_raised` | — |
 | `declaration_identity_reconciled` | risk | `COMPATIBLE_WITH_RISK` | `warning` | L5 | `declaration_identity_reconciled` | — |
-| `declaration_moved` | risk | `COMPATIBLE_WITH_RISK` | `warning` | L5 | `declaration_moved` | — |
+| `declaration_moved` | risk | `COMPATIBLE_WITH_RISK` | `warning` | L5 | `declaration_moved` | [case196](examples/case196_header_graph_move_reconciled.md) |
 | `declaration_renamed` | risk | `COMPATIBLE_WITH_RISK` | `warning` | L5 | `declaration_renamed` | [case194](examples/case194_header_graph_rename_reconciled.md) |
 | `default_argument_changed` | api_break | `API_BREAK` | `warning` | unspecified | `default_argument_changed` | — |
 | `default_template_arg_changed` | breaking | `BREAKING` | `error` | L2 | `default_template_arg_changed` | [case87](examples/case87_default_template_arg_changed.md) |

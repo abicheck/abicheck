@@ -65,25 +65,31 @@ graph nodes):
   add + true remove in the flat diff, at reduced confidence.
 - **true add / true remove** — no candidate at all.
 
-**Known gap: ``OUTCOME_MOVED`` cannot currently be produced by any real
-producer.** Every graph-node-id constructor across ``abicheck/buildsource/``
+**Reachability note: ``OUTCOME_MOVED`` needs a compound edit, not a pure
+move.** Every graph-node-id constructor across ``abicheck/buildsource/``
 (``header_graph.py``'s ``_decl_identity``, ``source_graph.py``'s
 ``_type_node_id``/``_decl_node_id``/``function_decl_identity``, and every
 downstream caller) keys a node's id purely off its mangled or qualified
-name, never a declaring file path -- so a real declaration that keeps its
-exact name but moves to a different header gets the SAME node id on both
-sides of a real comparison and never reaches this module as a removed+added
-pair at all. This function's own logic and the ``moved and not renamed``
-branch of :func:`_classify_outcome` are still correct and exercised at the
-unit level (see ``tests/test_graph_reconcile.py``'s
-``test_move_reconciles_when_file_changes_but_name_does_not``, which
-constructs its own artificially-distinct node ids the same way a pure-logic
-unit test is allowed to) -- there is simply no live code path that feeds it
-a genuinely producer-emitted move today. See
+name, never a declaring file path. A *pure* move (a declaration keeping its
+exact signature but changing only its declaring header) therefore gets the
+SAME node id on both sides of a real comparison and never reaches this
+module as a removed+added pair at all -- an unchanged signature can never
+change a mangled name, so there is no id-level signal for a pure move to
+ride in on. What genuinely does reach this module (verified against the
+real production fold, ``source_graph.build_source_graph``, not a hand-built
+node pair) is a *compound* edit: a declaration whose signature ALSO changes
+(moving its mangled name) in the same release its header moves, while its
+qualified name stays exactly the same -- the qualified-name alias tier
+pairs the two nodes despite the differing ids, and since the declaring file
+differs while the name does not, :func:`_classify_outcome` reports
+``OUTCOME_MOVED``. See ``examples/case196_header_graph_move_reconciled/``
+for a fixture built through the real fold demonstrating exactly this. The
+*pure*-move shape is still unreachable, and closing that specific gap for
+real would need a producer-side node-id/attribute signal that's actually
+file-sensitive (see
 ``docs/contribute/plans/g31-header-graph-default-on-followup.md``'s "Known
-gap" note under Phase B for the investigation and what closing it for real
-would need (a producer-side node-id/attribute signal that's actually
-file-sensitive).
+gap" note under Phase B for the fuller investigation) -- a separate,
+narrower gap from the general outcome's reachability.
 """
 
 from __future__ import annotations

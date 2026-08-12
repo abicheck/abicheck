@@ -3860,6 +3860,25 @@
    "platforms": [
     "linux"
    ]
+  },
+  "case196_header_graph_move_reconciled": {
+   "abi_break": false,
+   "api_break": false,
+   "bad_practice": true,
+   "category": "risk",
+   "description": "A public function (demo::f) keeps its exact qualified name, but its parameter type changes (int -> long, moving its Itanium mangled name) in the same release its declaring header is reorganized (api_v1.h -> api.h), in the derived L5 source graph. Unlike case194 -- a pure rename with an unchanged signature -- this is the realistic compound edit that actually reaches G31 Phase B's graph reconciliation (ADR-048): a pure move alone can never change a node's identity (an unchanged signature can never change a mangled name), so only a move that coincides with an identity-perturbing edit is reachable through the real production fold (source_graph.build_source_graph). The qualified-name alias tier pairs the two nodes, and since the declaring file also changed, the outcome classifies as declaration_moved rather than declaration_renamed. In a real end-to-end compare() run the signature change would independently surface as its own (likely BREAKING) flat finding -- this fixture isolates just the L5 reconciliation annotation, matching case194/195's own scope.",
+   "expected": "COMPATIBLE_WITH_RISK",
+   "expected_kinds": [
+    "declaration_moved"
+   ],
+   "fixtures": [
+    "old.json",
+    "new.json"
+   ],
+   "min_evidence": "L5",
+   "platforms": [
+    "linux"
+   ]
   }
  },
  "version": "4",
