@@ -365,7 +365,35 @@ print("snapshot_path=" + snapshot_path)
   return 1
 }
 
+# Fail-fast pairing check for baseline-profile/baseline-target/abi-baseline,
+# re-checked here for anyone invoking run.sh directly (e.g. tests) without
+# validate-inputs.sh's own copy of this exact check -- AGENTS.md's "keep
+# validate-inputs.sh and run.sh in sync" convention. Unpaired without this:
+# baseline-target set but baseline-profile is not (_try_baseline_set_fallback
+# below only checks this from INSIDE its own body, reached only via the
+# BASELINE_FILES elif below, which keys off baseline-profile alone -- a
+# baseline-target set alone never even calls that function to hit its own
+# check); or baseline-profile/baseline-target set but abi-baseline is not
+# (the whole auto-fetch block below, and therefore
+# _try_baseline_set_fallback, only ever runs inside the `-n "$ABI_BASELINE"`
+# gate immediately following this check -- without abi-baseline, a fetch is
+# never even attempted). Either shape silently discards baseline-target
+# instead of erroring, letting a separately-supplied old-library/against run
+# in its place (Codex review).
 ABI_BASELINE="${INPUT_ABI_BASELINE:-}"
+if [[ -n "${INPUT_BASELINE_PROFILE:-}" && -z "${INPUT_BASELINE_TARGET:-}" ]]; then
+  echo "::error::baseline-profile is set ('${INPUT_BASELINE_PROFILE}') but baseline-target is not -- both are required to resolve one target's snapshot from a release-contract baseline-set archive."
+  exit 1
+fi
+if [[ -n "${INPUT_BASELINE_TARGET:-}" && -z "${INPUT_BASELINE_PROFILE:-}" ]]; then
+  echo "::error::baseline-target is set ('${INPUT_BASELINE_TARGET}') but baseline-profile is not -- both are required to resolve one target's snapshot from a release-contract baseline-set archive."
+  exit 1
+fi
+if [[ ( -n "${INPUT_BASELINE_PROFILE:-}" || -n "${INPUT_BASELINE_TARGET:-}" ) && -z "$ABI_BASELINE" ]]; then
+  echo "::error::baseline-profile/baseline-target are set but abi-baseline is not -- the release-contract baseline-set fallback is only reached while resolving abi-baseline (a release tag or 'latest-release'), so without it these inputs can never trigger a fetch."
+  exit 1
+fi
+
 if [[ -n "$ABI_BASELINE" \
    && ( "$MODE" == "compare" || "$MODE" == "scan" ) \
    && ! ( "$MODE" == "scan" && "$FORCE_AUDIT_ONLY" == "true" ) ]]; then

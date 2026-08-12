@@ -232,7 +232,18 @@ class TestStageBaseline:
         baseline_dir = _make_baseline_dir(tmp_path)
         scratch_bin = tmp_path / "no-zstd-bin"
         scratch_bin.mkdir()
-        for tool in ("bash", "tar", "python3", "pip", "sh", "env", "gzip", "rm"):
+        for tool in (
+            "bash",
+            "tar",
+            "python3",
+            "pip",
+            "sh",
+            "env",
+            "gzip",
+            "rm",
+            "mktemp",
+            "mv",
+        ):
             resolved = shutil.which(tool)
             if resolved is not None:
                 (scratch_bin / tool).symlink_to(resolved)
@@ -262,62 +273,45 @@ class TestStageBaseline:
         assert (extracted / "manifest.json").is_file()
         assert (extracted / "libfoo.abicheck.json").is_file()
 
-    def test_leading_dash_asset_name_python_fallback_cleanup_does_not_fail(
+    def test_leading_dash_asset_name_is_moved_into_place_correctly(
         self, tmp_path: Path
     ) -> None:
         # Regression (Codex review, P2): a custom asset-name-template can
         # legally resolve to a name starting with '-' (a perfectly legal
         # leading filename character on every real filesystem, and not
         # rejected by the newline/CR/path-separator/drive-prefix/'#' guard
-        # above). When the Python zstandard fallback path runs (no usable
-        # `zstd`/`tar --zstd` on this runner), its own cleanup
-        # `rm -f "$asset_name.tmp-payload"` parsed a leading-dash filename
-        # as a run of short options instead of a literal filename, exiting
-        # nonzero -- and under this script's own `set -euo pipefail`, that
-        # aborted the whole step (never writing the `asset-name` output)
-        # even though the archive itself was built successfully.
-        import shutil
-        import sys
-
+        # above). The archive-staging refactor (see
+        # test_baseline_path_is_the_working_directory_itself above) moves
+        # the built archive into place with `mv "$_staging_dir/archive"
+        # "./$asset_name"` -- unprefixed, a leading-dash resolved name
+        # would be parsed by `mv` as a run of short options instead of a
+        # literal filename, exiting nonzero and aborting the whole step
+        # under `set -euo pipefail` even though the archive itself was
+        # already built successfully. Deliberately uses a plain `.tar`
+        # asset name (no zstd/Python fallback dance involved at all) so
+        # this test exercises exactly the `mv` step, not an unrelated
+        # environment dependency (a real `pip install zstandard` network
+        # call previously made an earlier version of this test flaky on a
+        # Windows runner where the resolved `python3` lacked zstandard).
         baseline_dir = _make_baseline_dir(tmp_path)
-        scratch_bin = tmp_path / "no-zstd-bin"
-        scratch_bin.mkdir()
-        for tool in ("bash", "tar", "pip", "sh", "env", "gzip", "rm"):
-            resolved = shutil.which(tool)
-            if resolved is not None:
-                (scratch_bin / tool).symlink_to(resolved)
-        # "python3" is symlinked to sys.executable specifically, NOT
-        # whatever shutil.which("python3") happens to resolve on PATH --
-        # this test only cares about exercising the `rm` cleanup bug, and
-        # a PATH-resolved python3 is not guaranteed to be the SAME
-        # interpreter running this test suite (e.g. a distinct python3
-        # shim on a Windows runner), which can make the script's own
-        # `import zstandard` probe fail and fall through to a real `pip
-        # install` -- flaky/networking-dependent and irrelevant to the bug
-        # under test. sys.executable is guaranteed to already have
-        # zstandard importable (a core dependency; see pyproject.toml),
-        # so the fallback's `import zstandard` check always succeeds
-        # without ever needing to install anything.
-        python3_link = scratch_bin / "python3"
-        if not python3_link.exists():
-            python3_link.symlink_to(sys.executable)
-        assert not (scratch_bin / "zstd").exists()
 
         result, outputs = _run_action(
             {
                 "BASELINE_PATH": str(baseline_dir),
-                "ASSET_NAME_TEMPLATE": "-nightly.tar.zst",
-                "PATH": str(scratch_bin),
+                "ASSET_NAME_TEMPLATE": "-nightly.tar",
             },
             tmp_path,
         )
         assert result.returncode == 0, result.stdout + result.stderr
-        assert outputs.get("asset-name") == "-nightly.tar.zst", (
+        assert outputs.get("asset-name") == "-nightly.tar", (
             result.stdout + result.stderr
         )
-        archive_path = tmp_path / "-nightly.tar.zst"
+        archive_path = tmp_path / "-nightly.tar"
         assert archive_path.is_file()
-        assert not (tmp_path / "-nightly.tar.zst.tmp-payload").exists()
+        with tarfile.open(archive_path, "r:") as tf:
+            names = {Path(m.name).name for m in tf.getmembers()}
+        assert "manifest.json" in names
+        assert "libfoo.abicheck.json" in names
 
     def test_newline_in_resolved_name_is_rejected(self, tmp_path: Path) -> None:
         # Regression (Codex review, P1): a newline embedded in profile (or
@@ -429,6 +423,51 @@ class TestStageBaseline:
         assert "'#'" in (result.stdout + result.stderr)
         assert "asset-name" not in outputs
         assert not (tmp_path / "baseline#debug.tar").exists()
+
+    def test_baseline_path_is_the_working_directory_itself(
+        self, tmp_path: Path
+    ) -> None:
+        # Regression (Codex review, P2): building the archive directly at
+        # "$asset_name" (implicitly the current working directory) while
+        # simultaneously archiving `-C "$BASELINE_PATH" .` is only safe
+        # when BASELINE_PATH is disjoint from cwd. When baseline-path IS
+        # the working directory itself -- a real, reachable caller shape,
+        # e.g. a workflow that runs this Action from inside the very tree
+        # it just checked out the baseline-set into -- GNU tar sees its
+        # own output file appear mid-archive and fails outright ("file
+        # changed as we read it"), aborting an otherwise-valid invocation
+        # under this script's own `set -e`. The archive is now staged
+        # outside BASELINE_PATH and moved into place afterward, so this
+        # works regardless of archive format.
+        (tmp_path / "manifest.json").write_text('{"profile": "p"}', encoding="utf-8")
+        (tmp_path / "libfoo.abicheck.json").write_text("{}", encoding="utf-8")
+
+        result, outputs = _run_action(
+            {
+                "BASELINE_PATH": str(tmp_path),
+                "ASSET_NAME_TEMPLATE": "out-{profile}.tar",
+                "PROFILE": "p1",
+            },
+            tmp_path,
+        )
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert outputs["asset-name"] == "out-p1.tar"
+        archive_path = tmp_path / "out-p1.tar"
+        assert archive_path.is_file()
+        with tarfile.open(archive_path, "r:") as tf:
+            names = {Path(m.name).name for m in tf.getmembers()}
+        assert "manifest.json" in names
+        assert "libfoo.abicheck.json" in names
+        # The archive must not have archived itself.
+        assert "out-p1.tar" not in names
+        # Pre-fix, GNU tar's own self-inclusion detection kicked in and
+        # printed this warning (harmless on this GNU tar version, since it
+        # exits 0 and simply skips the self-referential entry -- but not
+        # every tar implementation is guaranteed to degrade this
+        # gracefully, per Codex's review). Staging outside BASELINE_PATH
+        # means tar's traversal never encounters its own output file at
+        # all, so this warning must never appear post-fix.
+        assert "archive cannot contain itself" not in (result.stdout + result.stderr)
 
     def test_missing_baseline_path_fails(self, tmp_path: Path) -> None:
         result, _ = _run_action({}, tmp_path)

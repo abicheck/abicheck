@@ -339,6 +339,49 @@ class TestBaselineSetFallback:
         assert result.returncode == 1
         assert "baseline-target is not" in result.stdout + result.stderr
 
+    def test_baseline_profile_required_when_baseline_target_set_alone(self) -> None:
+        # Regression (Codex review, P2): baseline-target set WITHOUT
+        # baseline-profile or abi-baseline previously never reached ANY
+        # pairing check at all -- the whole auto-fetch block (and
+        # therefore _try_baseline_set_fallback, whose own inline check
+        # only fires from inside a call this shape never triggers) is
+        # gated on `-n "$ABI_BASELINE"`, so with abi-baseline unset too,
+        # baseline-target was silently discarded and a separately-supplied
+        # old-library/against ran in its place instead of erroring.
+        # validate-inputs.sh already caught this shape (AGENTS.md: "keep
+        # validate-inputs.sh and run.sh in sync"), but a direct run.sh
+        # invocation -- e.g. this repository's own shell tests -- bypasses
+        # that script entirely.
+        result = self._run(
+            {
+                "INPUT_MODE": "compare",
+                "INPUT_BASELINE_TARGET": "libpvxs",
+                # No INPUT_BASELINE_PROFILE, no INPUT_ABI_BASELINE.
+            }
+        )
+        assert result.returncode == 1
+        assert "baseline-profile is not" in result.stdout + result.stderr
+        assert "REACHED_END" not in result.stdout
+
+    def test_baseline_profile_and_target_require_abi_baseline(self) -> None:
+        # Regression (Codex review, P2): baseline-profile AND
+        # baseline-target both set, but abi-baseline is not, previously
+        # skipped the entire auto-fetch block (gated on
+        # `-n "$ABI_BASELINE"`) and therefore never even attempted the
+        # release-contract baseline-set fallback -- both inputs silently
+        # discarded instead of erroring.
+        result = self._run(
+            {
+                "INPUT_MODE": "compare",
+                "INPUT_BASELINE_PROFILE": PROFILE,
+                "INPUT_BASELINE_TARGET": "libpvxs",
+                # No INPUT_ABI_BASELINE.
+            }
+        )
+        assert result.returncode == 1
+        assert "abi-baseline is not" in result.stdout + result.stderr
+        assert "REACHED_END" not in result.stdout
+
     def test_wrong_target_reports_typed_failure(self, tmp_path: Path) -> None:
         archive = _build_baseline_set_archive(tmp_path)
         result = self._run(

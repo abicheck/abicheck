@@ -98,6 +98,26 @@ case "$asset_name" in
     ;;
 esac
 
+# Every archive is built in a staging directory OUTSIDE $BASELINE_PATH,
+# then moved into place as the final $asset_name -- building it directly
+# at "$asset_name" (implicitly the current working directory) is only
+# safe when $BASELINE_PATH is disjoint from cwd. When baseline-path IS the
+# workspace itself, or any directory containing cwd (a real, reachable
+# caller shape -- e.g. a workflow that runs this Action from inside the
+# very tree it just checked out the baseline-set into), `tar -C
+# "$BASELINE_PATH" .` would see its own output file appear mid-archive --
+# GNU tar's own self-inclusion detection degrades this to a harmless
+# skip-with-warning on this repo's tested tar version, but that is not a
+# guaranteed cross-implementation behavior (Codex review), and relying on
+# it would mean this step's stderr always carries a spurious "archive
+# cannot contain itself" notice for this caller shape regardless.
+# `mktemp -d`'s default location (`$TMPDIR`/`/tmp`) is never inside a
+# checked-out workspace, so staging there and moving afterward sidesteps
+# the self-inclusion class of bug entirely, regardless of which archive
+# format is being built.
+_staging_dir="$(mktemp -d)"
+trap 'rm -rf "$_staging_dir"' EXIT
+
 case "$asset_name" in
   *.tar.zst)
     # `tar --zstd` shells out to a separate `zstd` executable (confirmed
@@ -113,7 +133,7 @@ case "$asset_name" in
     # install standalone otherwise) when the `zstd` CLI isn't available,
     # rather than requiring an undeclared runner prerequisite.
     if command -v zstd >/dev/null 2>&1 && _tar_zstd_works; then
-      tar --zstd -cf "$asset_name" -C "$BASELINE_PATH" .
+      tar --zstd -cf "$_staging_dir/archive" -C "$BASELINE_PATH" .
     else
       echo "::notice::'zstd'/'tar --zstd' not usable on this runner -- falling back to Python's zstandard package to build $asset_name." >&2
       # Resolved explicitly rather than assuming a bare `python3` --
@@ -137,7 +157,7 @@ case "$asset_name" in
           exit 1
         fi
       fi
-      tar -cf "$asset_name.tmp-payload" -C "$BASELINE_PATH" .
+      tar -cf "$_staging_dir/payload" -C "$BASELINE_PATH" .
       # Copied in bounded 1 MiB chunks, not a single inp.read() -- a
       # baseline-set archive can approach the multi-gigabyte GitHub
       # Release asset limit documented in docs/use/baseline-storage.md, so
@@ -157,33 +177,27 @@ with open(src, 'rb') as inp, open(dst, 'wb') as out, cctx.stream_writer(out) as 
         if not chunk:
             break
         writer.write(chunk)
-" "$asset_name.tmp-payload" "$asset_name"
-      # "./$asset_name.tmp-payload", not a bare "$asset_name.tmp-payload"
-      # -- rm's own arg parser treats a leading '-' as a run of short
-      # options, not part of a filename (e.g. a resolved
-      # "-nightly.tar.zst.tmp-payload" fails with "rm: invalid option --
-      # 'n'"). A custom asset-name-template resolving to a name starting
-      # with '-' packages fine up to this point -- '-' is a perfectly
-      # legal leading filename character on every real filesystem, and
-      # this script's own newline/CR/path-separator/drive-prefix/'#' guard
-      # above does not reject it -- but this cleanup would otherwise abort
-      # the whole step under `set -euo pipefail` even though the archive
-      # was already built successfully, the same class of gap the upload
-      # step in publish-baseline.yml already guards against for this
-      # supported filename case (Codex review).
-      rm -f "./$asset_name.tmp-payload"
+" "$_staging_dir/payload" "$_staging_dir/archive"
+      rm -f "$_staging_dir/payload"
     fi
     ;;
   *.tar.gz | *.tgz)
-    tar -czf "$asset_name" -C "$BASELINE_PATH" .
+    tar -czf "$_staging_dir/archive" -C "$BASELINE_PATH" .
     ;;
   *.tar)
-    tar -cf "$asset_name" -C "$BASELINE_PATH" .
+    tar -cf "$_staging_dir/archive" -C "$BASELINE_PATH" .
     ;;
   *)
     echo "::error::asset-name-template resolved to '$asset_name', which has no recognized archive extension (.tar.zst/.tar.gz/.tgz/.tar) -- resolve-baseline/root-action.yml's baseline-set consumers pick their extractor from this exact suffix, so an unrecognized one would silently produce an asset nothing downstream can extract." >&2
     exit 1
     ;;
 esac
+
+# "./$asset_name", not a bare "$asset_name" -- mv's own arg parser treats a
+# leading '-' as a flag, not part of a filename, the same leading-dash
+# safety this script's own newline/CR/path-separator/drive-prefix/'#'
+# guard above already lets through as a legal filename (Codex review,
+# same class as the earlier `rm -f "$asset_name.tmp-payload"` fix).
+mv "$_staging_dir/archive" "./$asset_name"
 
 echo "asset-name=$asset_name" >> "$GITHUB_OUTPUT"
