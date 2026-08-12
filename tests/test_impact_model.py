@@ -387,6 +387,49 @@ class TestAssessChange:
         assert assessment.has_signal() is False
 
 
+class TestAssessChangeRootCauseEvidence:
+    """G29 Phase 6 follow-up: wiring RootCauseCorrelator's output into
+    ImpactAssessment.root_cause_evidence."""
+
+    def test_none_by_default(self) -> None:
+        change = _change()
+        assessment = assess_change(change, root_cause=("id", "display"))
+        assert assessment.root_cause_evidence is None
+        assert "root_cause_evidence" not in assessment.to_dict()
+
+    def test_evidence_dict_surfaces_in_to_dict(self) -> None:
+        change = _change()
+        evidence = {
+            "evidence_level": "artifact_proven",
+            "strongest_evidence_level": "consumer_proven",
+            "evidence_levels": ["artifact_proven", "consumer_proven"],
+        }
+        assessment = assess_change(
+            change, root_cause=("id", "display"), root_cause_evidence=evidence
+        )
+        assert assessment.root_cause_evidence == evidence
+        d = assessment.to_dict()
+        assert d["root_cause_evidence"] == evidence
+        # to_dict copies rather than aliasing the caller's dict.
+        assert d["root_cause_evidence"] is not evidence
+
+    def test_evidence_alone_makes_has_signal_true(self) -> None:
+        change = _change()
+        assessment = assess_change(
+            change,
+            root_cause_evidence={"evidence_level": "artifact_proven"},
+        )
+        assert assessment.has_signal() is True
+
+    def test_root_cause_evidence_not_read_from_cache(self) -> None:
+        cached = ImpactAssessment(root_cause_evidence={"evidence_level": "stale"})
+        change = _change(impact_assessment=cached)
+        assessment = assess_change(
+            change, root_cause_evidence={"evidence_level": "fresh"}
+        )
+        assert assessment.root_cause_evidence == {"evidence_level": "fresh"}
+
+
 class TestAssessChangeWithCachedImpactAssessment:
     """ADR-052 D2 follow-up (G29 Phase 3, scoped implementation):
     Change.impact_assessment, when a producer set it directly, supplies
@@ -533,3 +576,70 @@ class TestReporterIntegration:
         assert entry["impact_assessment"]["decision"]["suppression_rule"] == (
             "workaround-123"
         )
+
+
+class TestRootCauseEvidenceReporterIntegration:
+    """G29 Phase 6 follow-up: RootCauseCorrelator's evidence-ranked groups,
+    end to end through reporter.py's JSON output."""
+
+    def _correlated_pair(self) -> tuple[Change, Change]:
+        removed = _change(
+            kind=ChangeKind.FUNC_REMOVED,
+            symbol="internal_helper",
+            description="internal_helper removed",
+        )
+        leaked = _change(
+            kind=ChangeKind.INTERNAL_SYMBOL_REQUIRED_BY_PUBLIC_API,
+            symbol="internal_helper",
+            description="internal_helper required by public entry",
+            caused_by_type="internal_helper",
+        )
+        return removed, leaked
+
+    def test_default_mode_carries_root_cause_evidence(self) -> None:
+        removed, leaked = self._correlated_pair()
+        result = DiffResult(
+            old_version="1.0",
+            new_version="2.0",
+            library="libfoo.so",
+            changes=[removed, leaked],
+        )
+        payload = json.loads(reporter.to_json(result))
+        evidences = [
+            c["impact_assessment"]["root_cause_evidence"] for c in payload["changes"]
+        ]
+        assert len(evidences) == 2
+        for evidence in evidences:
+            assert evidence["strongest_evidence_level"] == "call_graph_proven"
+            assert evidence["evidence_levels"] == [
+                "artifact_proven",
+                "call_graph_proven",
+            ]
+        assert {e["evidence_level"] for e in evidences} == {
+            "artifact_proven",
+            "call_graph_proven",
+        }
+
+    def test_root_cause_mode_groups_carry_evidence_summary(self) -> None:
+        removed, leaked = self._correlated_pair()
+        result = DiffResult(
+            old_version="1.0",
+            new_version="2.0",
+            library="libfoo.so",
+            changes=[removed, leaked],
+        )
+        payload = json.loads(reporter.to_json(result, report_mode="root-cause"))
+        assert len(payload["root_causes"]) == 1
+        group = payload["root_causes"][0]
+        assert group["strongest_evidence_level"] == "call_graph_proven"
+        assert group["evidence_levels"] == ["artifact_proven", "call_graph_proven"]
+
+    def test_uncorrelated_finding_has_no_root_cause_evidence(self) -> None:
+        change = _change(kind=ChangeKind.FUNC_PARAMS_CHANGED, symbol="foo")
+        result = DiffResult(
+            old_version="1.0", new_version="2.0", library="libfoo.so", changes=[change]
+        )
+        payload = json.loads(reporter.to_json(result))
+        entry = payload["changes"][0]
+        assessment = entry.get("impact_assessment", {})
+        assert "root_cause_evidence" not in assessment

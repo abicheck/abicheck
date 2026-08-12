@@ -206,11 +206,25 @@ class ImpactAssessment:
     ``impact_assessment`` doesn't balloon with a rootCauseId that names
     nothing but itself. ``impact_group_id`` is currently always identical to
     ``root_cause_id`` — a placeholder alias, not yet a distinct concept
-    (Phase 6's ``RootCauseCorrelator`` is what would ever make them diverge,
-    e.g. bucketing several distinct root causes that share one broader
-    consumer-visible event under one group while keeping their own
-    individual root-cause identities); see ADR-052's "Deliberately not
-    implemented" section.
+    (a genuine divergence would need bucketing several distinct root causes
+    that share one broader consumer-visible event under one group while
+    keeping their own individual root-cause identities, which no producer
+    does yet); see ADR-052's "Deliberately not implemented" section.
+
+    ``root_cause_evidence`` (G29 Phase 6 follow-up) is this finding's own
+    entry from :func:`~abicheck.impact.correlation.correlate_root_causes`,
+    when *this* finding is a member of one of that composer's multi-piece
+    groups — the four load-failure kinds named in that module's docstring,
+    correlated by shared symbol identity. Unlike ``root_cause_id`` (a bare
+    grouping key shared by *any* two findings with the same
+    ``caused_by_type``/``symbol``, regardless of kind), this field only ever
+    populates for the narrower, ranked-evidence family the correlator
+    covers, and carries this finding's own ``evidence_level`` alongside the
+    whole group's ``strongest_evidence_level``/``evidence_levels`` — so a
+    consumer can tell "this piece is only artifact-proven, but the group as
+    a whole also has consumer proof" without re-running the correlator
+    itself. ``None`` whenever this finding isn't a correlator-group member,
+    which includes every finding of a kind the correlator doesn't cover.
     """
 
     reachability_state: ReachabilityState = ReachabilityState.UNKNOWN
@@ -224,6 +238,7 @@ class ImpactAssessment:
     root_cause_id: str | None = None
     root_cause_display: str | None = None
     impact_group_id: str | None = None
+    root_cause_evidence: dict[str, object] | None = None
 
     def has_signal(self) -> bool:
         """True when this assessment carries information beyond the
@@ -241,6 +256,7 @@ class ImpactAssessment:
             or self.correlated_change_kind is not None
             or self.evidence_category is not None
             or self.root_cause_id is not None
+            or self.root_cause_evidence is not None
         )
 
     def to_dict(self) -> dict[str, object]:
@@ -262,4 +278,6 @@ class ImpactAssessment:
             d["root_cause_id"] = self.root_cause_id
             d["root_cause_display"] = self.root_cause_display
             d["impact_group_id"] = self.impact_group_id
+        if self.root_cause_evidence is not None:
+            d["root_cause_evidence"] = dict(self.root_cause_evidence)
         return d

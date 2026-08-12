@@ -105,6 +105,7 @@ def assess_change(
     *,
     suppressed: bool = False,
     root_cause: tuple[str, str] | None = None,
+    root_cause_evidence: dict[str, object] | None = None,
 ) -> ImpactAssessment:
     """Derive an ``ImpactAssessment`` from *change*'s existing fields.
 
@@ -128,6 +129,16 @@ def assess_change(
     ``root_cause_id``/``root_cause_display``/``impact_group_id`` unset, same
     as any caller that doesn't have whole-result context to offer (e.g. a
     unit test constructing one bare ``Change``).
+
+    *root_cause_evidence* (G29 Phase 6 follow-up), when given, is *change*'s
+    own entry from
+    :func:`~abicheck.impact.correlation.correlate_root_causes` — computed by
+    the caller the same way *root_cause* is (whole-``DiffResult`` context
+    this function doesn't have), via
+    :func:`~abicheck.reporter_markdown.root_cause_evidence_lookup_for_changes`.
+    ``None`` leaves :attr:`~abicheck.impact.model.ImpactAssessment.
+    root_cause_evidence` unset, same as any caller with no correlator
+    context to offer.
 
     ``Change.impact_assessment`` (ADR-052 D2 follow-up, scoped
     implementation), when a producer set it directly, supplies this
@@ -172,6 +183,7 @@ def assess_change(
             root_cause_id=root_cause_id,
             root_cause_display=root_cause_display,
             impact_group_id=root_cause_id,
+            root_cause_evidence=root_cause_evidence,
         )
     return ImpactAssessment(
         reachability_state=getattr(
@@ -187,4 +199,5 @@ def assess_change(
         root_cause_id=root_cause_id,
         root_cause_display=root_cause_display,
         impact_group_id=root_cause_id,
+        root_cause_evidence=root_cause_evidence,
     )

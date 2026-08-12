@@ -58,6 +58,7 @@ from abicheck.reporter import (
 from abicheck.reporter_markdown import (
     ShowOnlyFilter,
     _root_cause_key_and_display,
+    root_cause_evidence_lookup_for_changes,
     root_cause_lookup_for_changes,
 )
 from abicheck.severity import missing_contract_exit_code
@@ -333,6 +334,7 @@ def _result_for(
     evidence_status_override: EvidenceStatus | None = None,
     root_cause: tuple[str, str] | None = None,
     impact_root_cause: tuple[str, str] | None = None,
+    impact_root_cause_evidence: dict[str, object] | None = None,
 ) -> dict[str, Any]:
     """Produce a SARIF result object for a Change.
 
@@ -350,6 +352,13 @@ def _result_for(
     ``rootCause`` fields. Kept as a separate parameter rather than reusing
     *root_cause* so that existing, tested behavior of those top-level
     properties can't shift when this field was added.
+
+    *impact_root_cause_evidence* (G29 Phase 6 follow-up) is *change*'s own
+    entry from :func:`~abicheck.impact.correlation.correlate_root_causes`,
+    resolved once per document via
+    :func:`~abicheck.reporter_markdown.root_cause_evidence_lookup_for_changes`
+    — feeds ``impactAssessment.root_cause_evidence``, unconditionally (any
+    *report_mode*), mirroring *impact_root_cause* above.
 
     *relevant_ids*, when not ``None``, means a ``--used-by``/``--required-symbol``
     gate is active: a change whose :func:`_finding_id` is absent from the set is
@@ -404,7 +413,11 @@ def _result_for(
     # JSON output gained -- reachabilityState always present (the tri-state
     # signal from PR #607, never surfaced in SARIF before this), and the
     # unified impactAssessment object when it carries more than the defaults.
-    assessment = assess_change(change, root_cause=impact_root_cause)
+    assessment = assess_change(
+        change,
+        root_cause=impact_root_cause,
+        root_cause_evidence=impact_root_cause_evidence,
+    )
     properties["reachabilityState"] = assessment.reachability_state.value
     if assessment.has_signal():
         properties["impactAssessment"] = assessment.to_dict()
@@ -767,6 +780,13 @@ def to_sarif(
     # together so a scoped-only change's caused_by_type can still correlate
     # with a regular change, same as referenced_causes above.
     _impact_rc_lookup = root_cause_lookup_for_changes(changes + scoped_only_changes)
+    # G29 Phase 6 follow-up: RootCauseCorrelator's own evidence-ranked
+    # groups, over the same combined change set -- mirrors reporter.py's
+    # JSON wiring so a finding's impactAssessment.root_cause_evidence agrees
+    # across formats.
+    _impact_rc_evidence = root_cause_evidence_lookup_for_changes(
+        changes + scoped_only_changes
+    )
 
     def _root_cause_for(
         caused_by_type: str | None,
@@ -807,6 +827,7 @@ def to_sarif(
                     _finding_id(change),
                 ),
                 impact_root_cause=_impact_rc_lookup.get(_finding_id(change)),
+                impact_root_cause_evidence=_impact_rc_evidence.get(_finding_id(change)),
             )
         )
 
@@ -832,6 +853,7 @@ def to_sarif(
                     _finding_id(change),
                 ),
                 impact_root_cause=_impact_rc_lookup.get(_finding_id(change)),
+                impact_root_cause_evidence=_impact_rc_evidence.get(_finding_id(change)),
             )
         )
 

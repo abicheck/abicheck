@@ -1830,11 +1830,28 @@ stronger tier (`appcompat._attach_consumer_impact` enriching a shared
 `FUNC_REMOVED` in place), downgraded when an `INTERNAL_SYMBOL_REQUIRED_BY_
 PUBLIC_API` finding's own proof path is `internal_leak`'s
 `"overapprox: "`-prefixed over-approximation of a virtual/function-pointer
-dispatch target. **Still open**: wiring its output
-into the JSON/SARIF `root_cause_id`/`impact_group_id` surface (today those
-are still `reporter_markdown`'s independent `caused_by_type`-only grouping,
-per `ImpactAssessment`'s own docstring) and the eight new detector/overlay
-`ChangeKind`s below.
+dispatch target. **Wired into JSON/SARIF (this pass)**: every finding that
+is a member of one of the correlator's multi-piece groups now carries
+`impact_assessment.root_cause_evidence` (`evidence_level` for this finding,
+`strongest_evidence_level`/`evidence_levels` for the whole group), and JSON
+`--report-mode root-cause`'s `root_causes[]` groups gain the same
+`strongest_evidence_level`/`evidence_levels` fields — computed via a new
+`reporter_markdown.root_cause_evidence_lookup_for_changes`, threaded through
+`reporter.py`/`sarif.py` alongside the existing `root_cause`/
+`impact_root_cause` plumbing (schema 2.29). Deliberately conservative: this
+*annotates* the existing `root_cause_id`/`impact_group_id` grouping (still
+`reporter_markdown`'s independent `caused_by_type`-else-`symbol` rule,
+unchanged) with the correlator's evidence ranking rather than replacing that
+grouping's identity scheme or making `impact_group_id` diverge from
+`root_cause_id` — the correlator's own `root_cause_id` already hashes the
+identical key, so no re-keying was needed, and every existing
+`root_cause_id`/`impact_group_id` value for every pre-existing report is
+byte-for-byte unchanged. **Still open**: the eight new detector/overlay
+`ChangeKind`s below (a materially larger, differently-shaped follow-up —
+new producers, new example pairs, new FP-rate corpus cases — deliberately
+not attempted in the same pass as the wiring above), and `impact_group_id`
+actually diverging from `root_cause_id` by re-bucketing findings through the
+correlator's own groups rather than only annotating the existing ones.
 
 New examples (each needs a negative twin, per the review):
 
@@ -1877,7 +1894,7 @@ abicheck/internal_leak.py   # TraversalPolicy + effect_transitions (Phase 2 D5, 
 abicheck/impact/
     model.py           # ImpactAssessment, GraphProofPath, FindingDecision (Phase 3 slices 1/7, DONE — ADR-052)
     engine.py           # assess_change(...) (Phase 3 slices 1/7, DONE — ADR-052)
-    correlation.py       # RootCauseCorrelator (Phase 6, DONE — correlate_root_causes/RootCauseGroup; report-surface wiring still open)
+    correlation.py       # RootCauseCorrelator (Phase 6, DONE — correlate_root_causes/RootCauseGroup; wired into JSON/SARIF root_cause_evidence, schema 2.29)
     root_causes.py
     consumer_graph.py    # Phase 4 slice 1, DONE — ADR-057 (consumer graph + the source join)
     use_cases.py         # Phase 4 slice 2, DONE — ADR-057 amendment (manifest + use_case/test_case graph join; trace ingestion still not started)
