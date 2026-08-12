@@ -1648,6 +1648,10 @@ def to_markdown(
             kind_sets=result._effective_kind_sets(),
             policy_file=result.policy_file,
         )
+        # A filter can keep a finding while dropping the co-reported one its
+        # own correlated_change_kind names -- clear the now-dangling note
+        # rather than reference a finding this view no longer shows.
+        changes = _suppress_dangling_correlation_notes(changes)
 
     # Build the render-ready view once (C2/ADR-036): canonical verdict-axis
     # classification + summary in one place, shared across formats.
@@ -1812,6 +1816,10 @@ def _view_preamble(
             f"> Filtered by: `--show-only {show_only}` ({len(changes)} of {len(result.changes)} changes shown)"
         )
         lines.append("")
+        # A filter can keep a finding while dropping the co-reported one its
+        # own correlated_change_kind names -- clear the now-dangling note
+        # rather than reference a finding this view no longer shows.
+        changes = _suppress_dangling_correlation_notes(changes)
 
     return lines, changes
 
@@ -1832,6 +1840,53 @@ def _append_recommendation_section(lines: list[str], result: DiffResult) -> None
         f"{rec.rationale}",
         "",
     ]
+
+
+def _suppress_dangling_correlation_notes(changes: Sequence[Change]) -> list[Change]:
+    """Rendering-local view of *changes* with ``Change.correlated_change_kind``
+    cleared on any change whose named target is not itself present in
+    *changes*.
+
+    ``--show-only`` (applied upstream of every markdown view, before this
+    point) can keep a ``LAYOUT_UNVERIFIABLE`` finding while filtering out
+    the co-reported ``TYPE_VTABLE_CHANGED`` its ``correlated_change_kind``
+    names -- rendering "See also: type_vtable_changed finding for the same
+    symbol" with nothing in the *visible* report to actually see (Codex
+    review, fresh evidence). Same shape of gap for the older ADR-041
+    pairing (``PUBLIC_API_INTERNAL_DEPENDENCY_ADDED`` <-> an
+    ``inline_body_changed``/``template_body_changed``/
+    ``public_typedef_target_changed`` on the same public entry), so this
+    checks both identity keys the two pairings correlate by --
+    ``qualified_name`` (the vtable/layout pairing) and ``symbol`` (the
+    ADR-041 pairing) -- rather than hard-coding one.
+
+    Never mutates the original ``Change`` objects (shared with every other
+    format -- JSON, SARIF, HTML, JUnit -- which apply their own filters, if
+    any, independently); only a shallow copy handed to *this* renderer is
+    touched, and only its ``correlated_change_kind`` field. Never changes a
+    finding's presence, kind, or severity -- purely a display-time fix for
+    what would otherwise be a dangling cross-reference.
+    """
+    present_by_qualified_name = {
+        (c.qualified_name, c.kind.value) for c in changes if c.qualified_name
+    }
+    present_by_symbol = {(c.symbol, c.kind.value) for c in changes}
+
+    result: list[Change] = []
+    for c in changes:
+        correlated = getattr(c, "correlated_change_kind", None)
+        if correlated and not (
+            (c.qualified_name, correlated) in present_by_qualified_name
+            or (c.symbol, correlated) in present_by_symbol
+        ):
+            import copy
+
+            c2 = copy.copy(c)
+            c2.correlated_change_kind = None
+            result.append(c2)
+        else:
+            result.append(c)
+    return result
 
 
 def _format_change_md_oneline(c: object) -> str:

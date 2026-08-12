@@ -1232,16 +1232,16 @@ def _vtable_transition_is_evidenced(
 
 
 def _vtable_transition_rests_on_unresolved_evidence(
-    name: str,
     t_old: RecordType,
     t_new: RecordType,
     old_funcs: Mapping[str, Function],
     new_funcs: Mapping[str, Function],
 ) -> bool:
-    """True exactly when a kept ``TYPE_VTABLE_CHANGED`` finding for *name*
-    rests on the *same* "one side has no known size" evidence gap
-    ``LAYOUT_UNVERIFIABLE`` (``diff_layout.py``) reports for the same type --
-    as opposed to a real, independently-evidenced signal.
+    """True exactly when a kept ``TYPE_VTABLE_CHANGED`` finding for this
+    already-matched ``RecordType`` pair rests on the *same* "one side has no
+    known size" evidence gap ``LAYOUT_UNVERIFIABLE`` (``diff_layout.py``)
+    reports for the same type -- as opposed to a real, independently-evidenced
+    signal.
 
     Only ever consulted after ``_vtable_transition_is_evidenced`` already
     returned True, so this mirrors that function's own branches to isolate
@@ -1273,9 +1273,9 @@ def _vtable_transition_rests_on_unresolved_evidence(
     """
     if t_old.vtable and t_new.vtable:
         return False
-    if _owned_virtual_signatures(name, old_funcs) != _owned_virtual_signatures(
-        name, new_funcs
-    ):
+    if _owned_virtual_signatures_for_record(
+        t_old, old_funcs
+    ) != _owned_virtual_signatures_for_record(t_new, new_funcs):
         return False
     # A virtual-base change is real, independent evidence regardless of
     # whether size_bits is known on either side (Codex review): it is not
@@ -1362,6 +1362,57 @@ def _owned_virtual_signatures(name: str, funcs: Mapping[str, Function]) -> set[s
         mangled
         for mangled, fn in funcs.items()
         if getattr(fn, "is_virtual", False) and _owns(fn)
+    }
+
+
+def _owned_virtual_signatures_for_record(
+    t: RecordType, funcs: Mapping[str, Function]
+) -> set[str]:
+    """The mangled names of *t*'s own virtual member functions, matched by
+    *t*'s exact qualified identity rather than the bare-leaf suffix matching
+    ``_owned_virtual_signatures`` above uses.
+
+    That function's eager namespace-suffix matching is safe for its own
+    caller (``_vtable_transition_is_evidenced``): over-inclusion just makes
+    the two sides' sets differ, which reads as "real evidence, keep the
+    finding" -- the safe direction for a suppression. It is unsafe here: our
+    caller, ``_vtable_transition_rests_on_unresolved_evidence``, treats
+    "sets differ" as real evidence and *declines to correlate* -- so an
+    unrelated same-leaf-name record in a different namespace (e.g. an
+    unrelated ``ns2::Foo::g`` while scoping ``ns1::Foo``'s own evidence gap)
+    silently makes a genuine ``ns1::Foo`` pair's sets look different and the
+    pair never receives ``correlated_change_kind`` (Codex review, fresh
+    evidence).
+
+    ``owner_class_of`` always returns a *fully* scope-qualified owner when it
+    returns anything at all -- its display-name branch only fires on an
+    already-qualified name, and its mangled-name fallback reconstructs the
+    complete nested-name chain, never a partial one. ``RecordType.
+    qualified_name`` (when set) and ``RecordType.name`` itself (for a
+    DWARF-produced or global-scope record, which already bakes the qualified
+    path into ``name``, or has no namespace to bake in) are exactly as
+    qualified. An earlier revision compared against the *bare* ``name``
+    instead and was reverted for exactly the mismatch that caused (see
+    ``_owned_virtual_signatures``'s own docstring) -- comparing against the
+    qualified spelling here avoids that mismatch without needing suffix
+    matching at all.
+
+    Declining a match is always safe for this caller: it only feeds a
+    cosmetic cross-reference annotation, never a finding's presence or
+    severity. A template specialization whose owner reconstruction falls
+    back to the raw Itanium argument encoding (``BoxIiE``) rather than the
+    spelled ``qualified_name`` (``Box<int>``) simply produces no match here
+    -- the same outcome eager suffix matching already had for that case
+    (neither spelling shares a namespace-suffix with the other), so this is
+    not a new gap.
+    """
+    from .diff_cxx_rules import owner_class_of
+
+    qualified = t.qualified_name or t.name
+    return {
+        mangled
+        for mangled, fn in funcs.items()
+        if getattr(fn, "is_virtual", False) and owner_class_of(fn) == qualified
     }
 
 
@@ -1456,7 +1507,7 @@ def _diff_type_vtable(
     # "Findings emitted from absent evidence" entry for why a compare()-time
     # removal here can never be correct for every downstream consumer).
     if _vtable_transition_rests_on_unresolved_evidence(
-        name, t_old, t_new, old_funcs, new_funcs
+        t_old, t_new, old_funcs, new_funcs
     ) and _layout_evidence_is_unverifiable(
         t_old, t_new, vtable_facts_reliable=vtable_facts_reliable
     ):

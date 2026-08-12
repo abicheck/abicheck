@@ -1056,6 +1056,71 @@ class TestLayoutUnverifiableCorrelatedWithVtableChanged:
         assert "ns1::Foo" in layout_findings
         assert layout_findings["ns1::Foo"].correlated_change_kind is None
 
+    def test_owned_virtual_signature_scoped_to_qualified_owner(self) -> None:
+        """An unrelated virtual method gained by a *different*,
+        same-leaf-name record in another namespace (``ns2::Foo::g`` — never
+        itself processed as a matched ``RecordType`` here, only its function
+        entry exists) must not make the genuinely-evidenced ``ns1::Foo``
+        pair's owned-virtual-signature sets look different.
+
+        Before the fix, ``_owned_virtual_signatures`` matched ownership by
+        eager bare-leaf-suffix expansion against ``t_old.name`` ("Foo"),
+        which carries no namespace — the unrelated ``ns2::Foo::g`` collapsed
+        onto the same bare "Foo" suffix and was folded into the new side's
+        owned-signature set even though ``ns1::Foo`` itself declares no
+        virtuals in either snapshot. old_owned (``{}``) then differed from
+        new_owned (``{"_ZN3ns23Foo1gEv"}``), which read as independent
+        evidence and withheld the correlation (Codex review, fresh
+        evidence). The fix (``_owned_virtual_signatures_for_record``) scopes
+        matching to the exact qualified owner instead, so the unrelated
+        ``ns2::Foo::g`` is correctly excluded and the shared
+        unresolved-evidence gap is still recognized."""
+        old = _snap(
+            types=[
+                RecordType(
+                    name="Foo",
+                    qualified_name="ns1::Foo",
+                    kind="class",
+                    vtable=[],
+                    size_bits=None,
+                )
+            ]
+        )
+        new = _snap(
+            types=[
+                RecordType(
+                    name="Foo",
+                    qualified_name="ns1::Foo",
+                    kind="class",
+                    vtable=["_ZN3ns13Foo1fEv"],
+                    size_bits=None,
+                    # ns1::Foo's own asymmetric-evidence gap — the case this
+                    # correlation exists to catch.
+                    base_offsets={"Base": 0},
+                )
+            ],
+            functions=[
+                # Unrelated: a *different* namespace's same-leaf-name class
+                # gains a virtual method. Must not affect ns1::Foo's own
+                # owned-signature comparison.
+                Function(
+                    name="ns2::Foo::g",
+                    mangled="_ZN3ns23Foo1gEv",
+                    return_type="void",
+                    is_virtual=True,
+                ),
+            ],
+        )
+        result = compare(old, new)
+        changes_by_kind = {c.kind: c for c in result.changes}
+        assert ChangeKind.LAYOUT_UNVERIFIABLE in changes_by_kind
+        vtable_change = changes_by_kind[ChangeKind.TYPE_VTABLE_CHANGED]
+        assert vtable_change.vtable_covers_unverifiable_layout_gap is True
+        assert (
+            changes_by_kind[ChangeKind.LAYOUT_UNVERIFIABLE].correlated_change_kind
+            == ChangeKind.TYPE_VTABLE_CHANGED.value
+        )
+
     def test_correlation_independent_of_policy_override(self) -> None:
         """The annotation is set purely from the two detectors' own evidence
         — it must not depend on, or be defeated/created by, a PolicyFile

@@ -1091,6 +1091,47 @@ class TestMarkdownReporter:
         assert "See also" in md
         assert "type_vtable_changed" in md
 
+    def test_correlation_note_hidden_when_show_only_filters_out_the_target(self):
+        """``--show-only`` can keep a LAYOUT_UNVERIFIABLE (risk) finding
+        while filtering out the co-reported TYPE_VTABLE_CHANGED (breaking)
+        its correlated_change_kind names — the "See also" note must not
+        reference a finding this filtered view no longer shows (Codex
+        review, fresh evidence)."""
+        layout_change = Change(
+            ChangeKind.LAYOUT_UNVERIFIABLE,
+            "Foo",
+            "layout evidence unverifiable",
+            qualified_name="Foo",
+            correlated_change_kind=ChangeKind.TYPE_VTABLE_CHANGED.value,
+        )
+        vtable_change = Change(
+            ChangeKind.TYPE_VTABLE_CHANGED,
+            "Foo",
+            "vtable changed",
+            qualified_name="Foo",
+        )
+        r = _result(Verdict.BREAKING, [layout_change, vtable_change])
+
+        # Unfiltered: both findings visible, the note is shown.
+        md_full = to_markdown(r)
+        assert "See also" in md_full
+
+        # --show-only risk: TYPE_VTABLE_CHANGED (breaking) is filtered out,
+        # so the note referencing it must disappear too.
+        md_filtered = to_markdown(r, show_only="risk")
+        assert "type_vtable_changed" not in md_filtered
+        assert "See also" not in md_filtered
+        # The layout finding itself must still be reported.
+        assert "layout evidence unverifiable" in md_filtered
+
+        # The original Change objects are never mutated by the filtered
+        # render — a later, unfiltered render of the same result must still
+        # show the note.
+        assert (
+            layout_change.correlated_change_kind == ChangeKind.TYPE_VTABLE_CHANGED.value
+        )
+        assert "See also" in to_markdown(r)
+
 
 # ---------------------------------------------------------------------------
 # Severity-aware reporter output
