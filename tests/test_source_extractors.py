@@ -24,12 +24,16 @@ import textwrap
 from pathlib import Path
 
 import pytest
+from hypothesis import given, strategies as st
 
 from abicheck.buildsource.build_evidence import CompileUnit
 from abicheck.buildsource.source_extractors import (
     CASTXML_EXTRACTOR_VERSION,
     CastxmlSourceExtractor,
     build_castxml_command,
+)
+from abicheck.buildsource.source_extractors._argv import (
+    COMPILER_LAUNCHERS as _LAUNCHERS,
 )
 from abicheck.buildsource.source_extractors.base import (
     assemble_source_tu,
@@ -1622,3 +1626,54 @@ def test_strip_launchers_no_config_overrides_for_non_launcher_command() -> None:
 
     argv = ["FOO=bar", "gcc", "-c", "foo.c"]
     assert strip_launchers(argv) == argv
+
+
+# -- strip_launchers property test (generalizes past the hand-picked cases) --
+#
+# Per AGENTS.md's own guidance on reusable primitives: a fixed example list
+# only proves the shapes someone thought to write down. This states the
+# actual contract as an invariant — ANY launcher chain, ANY number of
+# ccache-style config overrides after each launcher, ANY real compiler name
+# that isn't itself launcher-shaped — and searches the input space the way
+# an adversarial reviewer (or a real, unusual build system) would, instead of
+# re-confirming only the specific inputs the fix's own author already
+# thought of.
+
+_IDENTIFIER = st.from_regex(r"[A-Za-z_][A-Za-z0-9_]{0,10}", fullmatch=True)
+#: A ccache-style ``KEY=VALUE`` config-override token.
+_OVERRIDE_TOKEN = st.builds(
+    lambda k, v: f"{k}={v}",
+    _IDENTIFIER,
+    st.text(alphabet=st.characters(blacklist_characters="\x00"), max_size=8),
+)
+_LAUNCHER_NAME = st.sampled_from(sorted(_LAUNCHERS))
+#: A plain token that can never be confused for a launcher name or a
+#: KEY=VALUE override (no ``=`` at all, so the override regex can't match).
+_PLAIN_TOKEN = st.text(
+    alphabet=st.characters(min_codepoint=33, max_codepoint=126, blacklist_characters="="),
+    min_size=1,
+    max_size=10,
+).filter(lambda t: t.lower().removesuffix(".exe") not in _LAUNCHERS)
+
+
+@given(
+    segments=st.lists(
+        st.tuples(_LAUNCHER_NAME, st.lists(_OVERRIDE_TOKEN, max_size=3)), max_size=3
+    ),
+    compiler=_PLAIN_TOKEN,
+    rest=st.lists(st.text(min_size=1, max_size=8), max_size=3),
+)
+@pytest.mark.slow
+def test_strip_launchers_strips_exactly_the_launcher_chain_and_its_overrides(
+    segments: list[tuple[str, list[str]]], compiler: str, rest: list[str]
+) -> None:
+    from abicheck.buildsource.source_extractors._argv import strip_launchers
+
+    argv: list[str] = []
+    for launcher, overrides in segments:
+        argv.append(launcher)
+        argv.extend(overrides)
+    argv.append(compiler)
+    argv.extend(rest)
+
+    assert strip_launchers(argv) == [compiler, *rest]
