@@ -1,4 +1,5 @@
 """Contract tests for the checksum-pinned CastXML Superbuild installer."""
+
 from __future__ import annotations
 
 import os
@@ -69,21 +70,27 @@ def test_linux_workflow_jobs_using_installer_pin_supported_runner() -> None:
                 continue
             runs_on = job.get("runs-on")
             if isinstance(runs_on, str) and "matrix.os" not in runs_on:
-                assert runs_on in {"ubuntu-22.04", "ubuntu-24.04", "ubuntu-24.04-arm"}, (
+                assert runs_on in {
+                    "ubuntu-22.04",
+                    "ubuntu-24.04",
+                    "ubuntu-24.04-arm",
+                }, (
                     path.name,
                     name,
                     runs_on,
                 )
                 continue
             matrix_os = job.get("strategy", {}).get("matrix", {}).get("os", [])
-            linux_runners = [value for value in matrix_os if str(value).startswith("ubuntu")]
+            linux_runners = [
+                value for value in matrix_os if str(value).startswith("ubuntu")
+            ]
             assert linux_runners
             assert set(linux_runners) <= {"ubuntu-22.04", "ubuntu-24.04"}
 
 
 def test_composite_installer_keeps_unsupported_linux_best_effort() -> None:
     text = (ROOT / "action/install-deps.sh").read_text(encoding="utf-8")
-    assert 'packages+=(castxml)' in text
+    assert "packages+=(castxml)" in text
     assert '. "$(dirname "$0")/install-castxml.sh"' in text
     assert "No pinned CastXML Superbuild" in text
 
@@ -96,8 +103,7 @@ def test_composite_installer_uses_distro_castxml_on_unsupported_arch(
     fake_bin.mkdir()
     log = tmp_path / "sudo.log"
     (fake_bin / "uname").write_text(
-        "#!/bin/sh\n"
-        "case \"$1\" in -s) echo Linux ;; -m) echo ppc64le ;; esac\n",
+        '#!/bin/sh\ncase "$1" in -s) echo Linux ;; -m) echo ppc64le ;; esac\n',
         encoding="utf-8",
     )
     (fake_bin / "apt-get").write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
@@ -129,8 +135,7 @@ def test_composite_installer_minimal_ubuntu_remains_warning_only(
     fake_bin.mkdir()
     uname = fake_bin / "uname"
     uname.write_text(
-        "#!/bin/sh\n"
-        "case \"$1\" in -s) echo Linux ;; -m) echo x86_64 ;; esac\n",
+        '#!/bin/sh\ncase "$1" in -s) echo Linux ;; -m) echo x86_64 ;; esac\n',
         encoding="utf-8",
     )
     uname.chmod(0o755)
@@ -148,29 +153,66 @@ def test_composite_installer_minimal_ubuntu_remains_warning_only(
     assert "curl is required" not in result.stderr
 
 
-def test_cached_install_validates_versions_and_persists_path(tmp_path: Path) -> None:
+def test_existing_install_is_replaced_before_version_probe(tmp_path: Path) -> None:
     asset = _host_asset()
     if asset is None:
         pytest.skip("behavioral installer test needs a supported Ubuntu runner")
     castxml = tmp_path / "install" / "v2026.01.30" / asset / "bin" / "castxml"
     castxml.parent.mkdir(parents=True)
+    poison_log = tmp_path / "poison.log"
     castxml.write_text(
         "#!/bin/sh\n"
+        f"printf '%s\\n' poisoned >> {poison_log!s}\n"
         "echo 'castxml version 0.6.20260105-g9864b1e'\n"
         "echo 'clang version 21.1.8'\n",
         encoding="utf-8",
     )
     castxml.chmod(0o755)
+
+    fake_bin = tmp_path / "fake-bin"
+    fake_bin.mkdir()
+    (fake_bin / "curl").write_text(
+        "#!/bin/sh\n"
+        "while [ $# -gt 0 ]; do\n"
+        '  if [ "$1" = --output ]; then shift; output=$1; fi\n'
+        "  shift || exit 0\n"
+        "done\n"
+        'printf archive > "$output"\n',
+        encoding="utf-8",
+    )
+    (fake_bin / "sha256sum").write_text(
+        "#!/bin/sh\ncat >/dev/null\nexit 0\n", encoding="utf-8"
+    )
+    (fake_bin / "tar").write_text(
+        "#!/bin/sh\n"
+        "while [ $# -gt 0 ]; do\n"
+        '  if [ "$1" = -C ]; then shift; dest=$1; fi\n'
+        "  shift || exit 0\n"
+        "done\n"
+        'mkdir -p "$dest/bin"\n'
+        "cat > \"$dest/bin/castxml\" <<'EOF'\n"
+        "#!/bin/sh\n"
+        "echo 'castxml version 0.6.20260105-g9864b1e'\n"
+        "echo 'clang version 21.1.8'\n"
+        "EOF\n"
+        'chmod +x "$dest/bin/castxml"\n',
+        encoding="utf-8",
+    )
+    for command in ("curl", "sha256sum", "tar"):
+        (fake_bin / command).chmod(0o755)
+
     github_path = tmp_path / "github-path"
     env = {
         **os.environ,
         "ABICHECK_CASTXML_INSTALL_ROOT": str(tmp_path / "install"),
         "GITHUB_PATH": str(github_path),
+        "PATH": f"{fake_bin}:{os.environ['PATH']}",
     }
     result = subprocess.run(
         ["bash", str(INSTALLER)], capture_output=True, text=True, env=env, check=False
     )
     assert result.returncode == 0, result.stderr
+    assert not poison_log.exists()
     assert github_path.read_text(encoding="utf-8").strip() == str(castxml.parent)
     assert "Selected CastXML" in result.stdout
 
