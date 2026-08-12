@@ -177,7 +177,17 @@ def accepted_main_cache_key(key_prefix: str, profile_id: str, head_sha: str) -> 
     section 10): ``<key_prefix>-<profile_id>-<head_sha>``. Must be unique on
     every ``update-main-baseline.yml`` run -- a cache key is immutable once
     written, so a caller that reused a stable key across refreshes would
-    silently stop updating after the first write."""
+    silently stop updating after the first write.
+
+    ``key_prefix`` is treated as an opaque string here -- when
+    ``update-main-baseline.yml``'s own ``baseline-generation`` input is set,
+    its "Compute cache key" step folds ``-g<generation>`` into the prefix
+    *before* calling this exact template (see that step's own inline
+    comment), so two different scanner-compatibility generations never share
+    one cache-key namespace. This function needs no separate ``generation``
+    parameter for that -- pass the already-folded prefix (e.g.
+    ``"abicheck-baseline-main-g3"``) to reproduce the identical key.
+    """
     return f"{key_prefix}-{profile_id}-{head_sha}"
 
 
@@ -186,5 +196,6 @@ def accepted_main_cache_restore_prefix(key_prefix: str, profile_id: str) -> str:
     -- or, before that primitive runs, ``update-main-baseline.yml``'s own
     freshness check -- uses to find the *latest* entry
     :func:`accepted_main_cache_key` wrote, regardless of which ``head_sha``
-    it was written under."""
+    it was written under. Same generation-folding note as
+    :func:`accepted_main_cache_key` applies to ``key_prefix`` here."""
     return f"{key_prefix}-{profile_id}-"

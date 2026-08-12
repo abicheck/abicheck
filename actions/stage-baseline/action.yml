@@ -30,14 +30,15 @@ inputs:
   asset-name-template:
     description: >
       Archive filename to produce; "{profile}" is replaced with the
-      profile input's value. The archive encoding is chosen from this
-      name's own extension -- '.tar.zst' (zstd, requires a `tar` build
-      with zstd support, e.g. GNU tar >= 1.31), '.tar.gz'/'.tgz' (gzip), or
-      plain '.tar' (uncompressed). Any other extension is a hard usage
-      error: a consumer (root action.yml's baseline-set fallback,
-      resolve-baseline) picks its extractor from this exact suffix, so an
-      unrecognized one would silently produce an asset nothing downstream
-      can extract.
+      profile input's value, and "{generation}" (optional -- see the
+      generation input below) with the generation input's value. The
+      archive encoding is chosen from this name's own extension --
+      '.tar.zst' (zstd, requires a `tar` build with zstd support, e.g. GNU
+      tar >= 1.31), '.tar.gz'/'.tgz' (gzip), or plain '.tar'
+      (uncompressed). Any other extension is a hard usage error: a
+      consumer (root action.yml's baseline-set fallback, resolve-baseline)
+      picks its extractor from this exact suffix, so an unrecognized one
+      would silently produce an asset nothing downstream can extract.
     required: false
     default: 'abicheck-baseline-{profile}.tar.zst'
   profile:
@@ -48,6 +49,21 @@ inputs:
       not validated here, but a downstream consumer comparing against the
       manifest's own `profile` field (e.g. a release-publishing workflow's
       cross-profile collision guard) may reject it.
+    required: false
+    default: ''
+  generation:
+    description: >
+      Substituted for "{generation}" in asset-name-template -- publishing
+      a new scanner-compatibility generation (docs/use/baseline-
+      management.md#scanner-upgrades-and-baseline-generations) as its own,
+      separately-named archive rather than overwriting the previous
+      generation's asset under the same name. Should match the
+      `baseline_generation` this baseline-set's manifest.json itself
+      records (the `abicheck baseline` Action's own `baseline-generation`
+      input) -- a mismatch is not validated here. Omit (default) if
+      asset-name-template doesn't reference "{generation}" at all -- e.g.
+      the default template never does, so this input is a no-op unless the
+      caller opts in by including the placeholder.
     required: false
     default: ''
 
@@ -69,4 +85,5 @@ runs:
         BASELINE_PATH: ${{ inputs.baseline-path }}
         ASSET_NAME_TEMPLATE: ${{ inputs.asset-name-template }}
         PROFILE: ${{ inputs.profile }}
+        GENERATION: ${{ inputs.generation }}
       run: bash "${{ github.action_path }}/run.sh"

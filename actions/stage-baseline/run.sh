@@ -113,6 +113,7 @@ _substitute_literal() {
   printf '%s' "$result$haystack"
 }
 asset_name="$(_substitute_literal "$asset_template" '{profile}' "${PROFILE:-}")"
+asset_name="$(_substitute_literal "$asset_name" '{generation}' "${GENERATION:-}")"
 
 # Reject a newline/carriage-return in the resolved name BEFORE creating any
 # archive or writing to $GITHUB_OUTPUT -- profile/asset-name-template can

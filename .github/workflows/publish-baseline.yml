@@ -38,7 +38,17 @@ on:
         type: string
         default: ''
       asset-name-template:
-        description: 'GitHub Release asset filename template; "{profile}" is replaced with each contract profile''s id.'
+        description: >-
+          GitHub Release asset filename template; "{profile}" is replaced
+          with each contract profile's id, and "{generation}" (optional)
+          with the baseline-generation input's value -- include it to
+          publish each scanner-compatibility generation as its own,
+          separately-named asset (e.g.
+          'abicheck-baseline-g{generation}-{profile}.tar.zst') rather than
+          overwriting the previous generation's asset under the same name.
+          The default template never references "{generation}", so this is
+          opt-in and doesn't change behavior for a caller not setting
+          baseline-generation.
         type: string
         default: 'abicheck-baseline-{profile}.tar.zst'
       build-info:
@@ -309,6 +319,7 @@ jobs:
           baseline-path: ${{ steps.baseline.outputs.baseline-path }}
           asset-name-template: ${{ inputs.asset-name-template }}
           profile: ${{ matrix.profile_id }}
+          generation: ${{ inputs.baseline-generation }}
 
       # `release-contract` is documented (ADR-047 §10, publish-baseline.md)
       # as an IMMUTABLE channel -- "compatible with what we actually shipped

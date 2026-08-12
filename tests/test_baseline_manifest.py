@@ -731,6 +731,40 @@ class TestFreshness:
         )
         assert manifest["freshness"]["refresh_required"] is False
 
+    def test_boolean_previous_baseline_generation_still_requires_refresh(
+        self, tmp_path: Path
+    ) -> None:
+        # bool is an int subclass in Python -- a naive `!=` comparison
+        # would let a hand-authored/corrupted previous-manifest's
+        # "baseline_generation": true compare EQUAL to this run's real
+        # generation 1, silently reporting refresh-required=false (Codex
+        # review). A boolean previous value must be normalized to "unset"
+        # (None) before comparing, same as the resolver does when parsing
+        # a real manifest.json.
+        _write_snapshot(
+            tmp_path / "libfoo.abicheck.json", library="libfoo", schema_version=9
+        )
+        entries = [{"name": "libfoo", "artifact": "a.so"}]
+        previous_path = tmp_path / "previous.json"
+        previous_path.write_text(
+            json.dumps(
+                {
+                    "manifest_version": 1,
+                    "project_ref": "",
+                    "profile": "",
+                    "snapshot_schema": 9,
+                    "fact_set": None,
+                    "baseline_generation": True,
+                    "artifacts": [{"library": "libfoo"}],
+                }
+            )
+        )
+        manifest = build_manifest_module.build_manifest(
+            tmp_path, "", "", entries, previous_path, baseline_generation=1
+        )
+        assert manifest["freshness"]["refresh_required"] is True
+        assert any("baseline_generation" in r for r in manifest["freshness"]["reasons"])
+
     def test_fact_set_change_requires_refresh(self, tmp_path: Path) -> None:
         _write_snapshot(
             tmp_path / "libfoo.abicheck.json",

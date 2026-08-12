@@ -239,6 +239,42 @@ class TestStageBaseline:
         assert outputs["asset-name"] == "out-linux&asan.tar"
         assert "{profile}" not in outputs["asset-name"]
 
+    def test_generation_placeholder_is_substituted(self, tmp_path: Path) -> None:
+        # A caller publishing a new scanner-compatibility generation as its
+        # own, separately-named archive (docs/use/baseline-management.md
+        # #scanner-upgrades-and-baseline-generations) opts in by including
+        # "{generation}" in asset-name-template.
+        baseline_dir = _make_baseline_dir(tmp_path)
+        result, outputs = _run_action(
+            {
+                "BASELINE_PATH": str(baseline_dir),
+                "ASSET_NAME_TEMPLATE": "abicheck-baseline-g{generation}-{profile}.tar",
+                "PROFILE": "linux-x86_64",
+                "GENERATION": "3",
+            },
+            tmp_path,
+        )
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert outputs["asset-name"] == "abicheck-baseline-g3-linux-x86_64.tar"
+        assert "{generation}" not in outputs["asset-name"]
+
+    def test_generation_placeholder_left_unsubstituted_when_no_generation_given(
+        self, tmp_path: Path
+    ) -> None:
+        # A template referencing "{generation}" without the generation
+        # input set is a caller error (asset name would literally contain
+        # "{generation}") -- not this Action's concern to validate, since
+        # the default template never references it and is a no-op for a
+        # caller not opting into generation-scoped asset names.
+        baseline_dir = _make_baseline_dir(tmp_path)
+        result, outputs = _run_action(
+            {"BASELINE_PATH": str(baseline_dir), "PROFILE": "linux-x86_64"},
+            tmp_path,
+        )
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert "{generation}" not in outputs["asset-name"]
+        assert outputs["asset-name"] == "abicheck-baseline-linux-x86_64.tar.zst"
+
     @pytest.mark.skipif(
         os.name == "nt", reason="PATH-shadowing setup below is POSIX-specific"
     )

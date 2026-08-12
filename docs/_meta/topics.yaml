@@ -83,10 +83,17 @@ topics:
       - abicheck/model.py
       - abicheck/serialization.py
       - abicheck/buildsource/baseline_set.py
+      - abicheck/buildsource/baseline_publish.py
       - actions/baseline/action.yml
       - actions/baseline/build_manifest.py
       - actions/resolve-baseline/action.yml
       - actions/resolve-baseline/resolve_baseline.py
+      - actions/stage-baseline/action.yml
+      - actions/check-target/action.yml
+      - .github/workflows/check-project.yml
+      - .github/workflows/check-single.yml
+      - .github/workflows/publish-baseline.yml
+      - .github/workflows/update-main-baseline.yml
     task_pages:
       - use/create-baseline.md
       - use/baseline-storage.md

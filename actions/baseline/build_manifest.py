@@ -444,12 +444,32 @@ def _compute_freshness(
     # fact_set (e.g. a normalization-recipe fix that doesn't bump either).
     # A manifest that never declared a generation (None on either side) has
     # nothing to compare, same as the other optional identity fields above.
+    # `manifest["baseline_generation"]` (this run's own, freshly-built
+    # value) is already a real non-negative int or None -- build_manifest()
+    # itself validates that at construction. `previous.get(...)`, read from
+    # a hand-authored or corrupted --previous-manifest file, is NOT
+    # trusted the same way: a naive `!=` comparison would let
+    # "baseline_generation": true compare EQUAL to a real generation `1`
+    # (bool is an int subclass in Python), silently reporting
+    # refresh-required=false for what is actually a stale/malformed
+    # previous generation (Codex review) -- normalize it through the same
+    # rule the resolver applies (abicheck.buildsource.baseline_set.
+    # load_baseline_manifest) before comparing.
+    previous_generation = previous.get("baseline_generation")
     if (
-        previous.get("baseline_generation") is not None
+        isinstance(previous_generation, int)
+        and not isinstance(previous_generation, bool)
+        and previous_generation >= 0
+    ):
+        normalized_previous_generation: int | None = previous_generation
+    else:
+        normalized_previous_generation = None
+    if (
+        normalized_previous_generation is not None
         or manifest["baseline_generation"] is not None
-    ) and previous.get("baseline_generation") != manifest["baseline_generation"]:
+    ) and normalized_previous_generation != manifest["baseline_generation"]:
         reasons.append(
-            f"baseline_generation {previous.get('baseline_generation')} -> "
+            f"baseline_generation {previous_generation!r} -> "
             f"{manifest['baseline_generation']}"
         )
     if previous.get("fact_set") != manifest["fact_set"]:

@@ -209,9 +209,27 @@ jobs:
         shell: bash
         env:
           KEY_PREFIX: ${{ inputs.key-prefix }}
+          BASELINE_GENERATION: ${{ inputs.baseline-generation }}
           PROFILE_ID: ${{ matrix.profile_id }}
           HEAD_SHA: ${{ inputs.head-sha != '' && inputs.head-sha || github.sha }}
         run: |
+          # Fold baseline-generation into the key prefix itself, when set --
+          # two DIFFERENT scanner-compatibility generations must never share
+          # one cache-key namespace: without this, a scanner-upgrade PR that
+          # only bumped baseline-generation would still restore-keys-match
+          # the PREVIOUS generation's entries (same key-prefix, same
+          # profile), silently mixing generations in the accepted-main
+          # cache. Mutating KEY_PREFIX itself (not a separate variable)
+          # keeps the interpolation template below byte-identical to before
+          # -- tests/test_reusable_workflows.py's literal-template pin, and
+          # abicheck.buildsource.baseline_publish.accepted_main_cache_key()/
+          # accepted_main_cache_restore_prefix()'s own parity check, both
+          # already treat key_prefix as an opaque string, so this needs no
+          # change on that side either -- see accepted_main_cache_key()'s
+          # docstring.
+          if [[ -n "$BASELINE_GENERATION" ]]; then
+            KEY_PREFIX="${KEY_PREFIX}-g${BASELINE_GENERATION}"
+          fi
           echo "cache-key=${KEY_PREFIX}-${PROFILE_ID}-${HEAD_SHA}" >> "$GITHUB_OUTPUT"
           echo "restore-prefix=${KEY_PREFIX}-${PROFILE_ID}-" >> "$GITHUB_OUTPUT"
 
