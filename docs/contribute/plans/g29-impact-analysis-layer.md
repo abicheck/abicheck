@@ -1911,6 +1911,77 @@ covering this mode specifically. Not attempted here — flagged rather than
 guessed at, per this file's own "known gaps over risky reactive patches"
 convention.
 
+**Two more of the eight, investigated (not implemented) in this same pass —
+both turn out to be a scoping question first, not an extraction gap:**
+
+- **`CONSUMER_IMPACT_PATH_CONFIRMED`.** `appcompat.py`'s consumer-overlay
+  pipeline (`_has_impact_evidence`, `_enrich_covered_changes`,
+  `_merge_consumer_impact_paths`) already computes and surfaces exactly this
+  information — a confirmed consumer→symbol proof path — today, as an
+  in-place mutation of the *existing* `Change`'s `impact_assessment` fields
+  (`reachability_kind`, `reachability_state`, the proof-path plumbing this
+  plan's Phase 3/4 sections already document as DONE), not as a standalone
+  finding. Minting a *new* `ChangeKind` for the same fact would mean either
+  (a) a second, parallel representation of information a report already
+  carries once (the two-representations-of-one-fact drift this repo's own
+  `docs/AGENTS.md` governing rule and `change_registry.py`'s "one
+  `ChangeKindMeta` entry" convention both exist to prevent), or (b)
+  redefining what the overlay does — attaching a *new* raw finding instead
+  of annotating an existing one — which is a real design change to
+  `appcompat.py`'s enrichment contract, not a new-detector addition. The
+  table entry above ("impact overlay on an existing raw break, not a new raw
+  break") already states this outcome as the intent; what's newly confirmed
+  is that the current code already delivers it, so there may be nothing left
+  to build here beyond documentation — worth a maintainer decision on
+  whether to close this row entirely rather than implement it.
+- **`USE_CASE_IMPACT_CONFIRMED`.** `abicheck/impact/use_cases.py`'s own
+  module docstring is explicit that this is deferred pending new CLI
+  surface: `explain_use_case_impact()` exists and is wired only through
+  `project validate-use-cases --against-new` (an opt-in diagnostic command),
+  not through `compare`'s own report pipeline. Surfacing this as a
+  `compare`-time `ChangeKind` needs a real design decision this plan has not
+  made — a new `compare --use-cases <manifest>` flag (or equivalent),
+  `REPORT_SCHEMA_VERSION` bump, and new FP-gate examples proving a use case
+  that doesn't reach the changed branch stays compatible (this is exactly
+  `case203` below) — not a drive-by extension of the existing
+  `project`-group command. Per this file's own root-command admission bar
+  (`AGENTS.md` "Adding a new top-level command"), this also needs to clear
+  that bar or land as a `compare` option instead; not attempted here.
+
+**A fourth item was scoped for implementation attempt in this pass
+(`PUBLIC_VIRTUAL_DISPATCH_SET_CHANGED`) and deliberately not attempted,
+based on evidence rather than a guess.** `abicheck/buildsource/
+virtual_dispatch_graph.py` already emits the two graph facts a comparison
+detector would need (`VIRTUAL_CALL_MAY_DISPATCH_TO`,
+`TYPE_HAS_VTABLE`) — the raw data exists. What stopped the attempt is this
+same plan's own recorded history for *that exact module* and its three
+siblings (`callback_graph.py`, `macro_graph.py`, `template_graph.py`,
+directly above and below this entry): each required double-digit rounds of
+Codex review to reach its current DONE/PARTIAL state, and the findings in
+those rounds were not stylistic — coverage-stamping bugs that made a
+degraded extraction silently read as complete, propagation bugs that lost a
+graph fact between fold and report, and at least one review round finding a
+correctness bug in a *previous* review round's own fix. A new detector
+consuming `VIRTUAL_CALL_MAY_DISPATCH_TO`/`TYPE_HAS_VTABLE` inherits every
+one of those failure modes by construction (comparing two runs' worth of
+already-fact-checked-fragile graph output, across old/new coverage that can
+differ), plus its own new one: this plan's explicit constraint that "a
+possible-target-set change must never read as a confirmed break" (echoed
+in `resolution` always being `"overapprox"` in the two Part A/B functions'
+own docstrings) means the comparison logic itself — not just the extraction
+— has to get old-vs-new overapprox-set diffing right without silently
+producing a false `BREAKING` the first time a target set merely reorders or
+a base's coverage degrades between runs. Building and shipping that
+correctly, with its own FP-rate corpus cases (`case197` below) and without
+a live oneAPI/multi-round-Codex-review cycle available in this session, is
+not achievable to the correctness bar this codebase's own `AGENTS.md`
+"Known gaps over risky reactive patches" convention sets — recorded here as
+a scoped, concrete blocker (not "too hard, unspecified") for whoever picks
+this row up next: start from `virtual_dispatch_graph.py`'s own two
+functions, budget for the same class of review-round findings this plan's
+Phase 5 section already itemizes for the identical module, and do not skip
+straight to a detector without first re-reading that history.
+
 New examples (each needs a negative twin, per the review):
 
 | Case | Scenario |
