@@ -639,6 +639,12 @@ def _confidence_html(result: object) -> str:
             for k, v in policy_file.overrides.items()
         )
         rows.append(f"<tr><th>Policy overrides</th><td>{overrides}</td></tr>")
+    if policy_file and getattr(policy_file, "reclassify", None):
+        # Codex review: mirrors the JSON `policy_reclassify` disclosure
+        # (reporter.py's `_add_policy_overrides`) -- the active rule set,
+        # not a per-finding "which rule fired" attribution.
+        rules = ", ".join(h(rule.describe()) for rule in policy_file.reclassify)
+        rows.append(f"<tr><th>Policy reclassify</th><td>{rules}</td></tr>")
     for w in cov_warns:
         rows.append(f"<tr><th>Coverage gap</th><td>{h(w)}</td></tr>")
 

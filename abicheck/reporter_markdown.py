@@ -1809,6 +1809,13 @@ def _append_policy_section(lines: list[str], result: DiffResult) -> None:
             for kind, severity in result.policy_file.overrides.items()
         )
         lines.append(f"> **Policy overrides**: {overrides}")
+    if result.policy_file and result.policy_file.reclassify:
+        # Codex review: mirrors the JSON `policy_reclassify` disclosure
+        # (reporter.py's `_add_policy_overrides`) -- the active rule set,
+        # not a per-finding "which rule fired" attribution (see that
+        # function's docstring / schema 2.29 history entry).
+        rules = "; ".join(rule.describe() for rule in result.policy_file.reclassify)
+        lines.append(f"> **Policy reclassify**: {rules}")
     lines.append("")
 
 

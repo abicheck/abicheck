@@ -597,3 +597,75 @@ def test_policy_reclassify_absent_without_any_configured_rule(tmp_path: Path) ->
     d = json.loads(to_json(diff))
     assert "policy_reclassify" not in d
     assert d["policy_overrides"] == {"enum_member_renamed": "COMPATIBLE"}
+
+
+def _reclassify_diff_and_policy_path(tmp_path: Path):
+    """Shared fixture for the markdown/HTML/SARIF disclosure tests below."""
+    from abicheck.checker_types import DiffResult
+
+    p = tmp_path / "policy.yaml"
+    p.write_text(
+        """
+reclassify:
+  - kind: func_visibility_changed
+    symbol_pattern: "_ZN6oneapi3dal.*"
+    to: risk
+    reason: "COMDAT-inline demotions"
+""".strip(),
+        encoding="utf-8",
+    )
+    pf = PolicyFile.load(p)
+    change = _change(ChangeKind.FUNC_VISIBILITY_CHANGED, "_ZN6oneapi3dal3fooEv")
+    return DiffResult(
+        changes=[change], old_version="1", new_version="2", library="l",
+        policy_file=pf,
+    )
+
+
+def test_reclassify_disclosed_in_markdown_report(tmp_path: Path) -> None:
+    """Codex review: Markdown must disclose active reclassify: rules the
+    same way it already discloses overrides:."""
+    from abicheck.reporter_markdown import to_markdown
+
+    diff = _reclassify_diff_and_policy_path(tmp_path)
+    md = to_markdown(diff)
+    assert "Policy reclassify" in md
+    assert "func_visibility_changed" in md
+    assert "COMDAT-inline demotions" in md
+
+
+def test_reclassify_disclosed_in_html_report(tmp_path: Path) -> None:
+    from abicheck.html_report import generate_html_report
+
+    diff = _reclassify_diff_and_policy_path(tmp_path)
+    html_out = generate_html_report(diff)
+    assert "Policy reclassify" in html_out
+    assert "func_visibility_changed" in html_out
+
+
+def test_reclassify_disclosed_in_sarif_report(tmp_path: Path) -> None:
+    from abicheck.sarif import to_sarif
+
+    diff = _reclassify_diff_and_policy_path(tmp_path)
+    sarif_out = to_sarif(diff)
+    props = sarif_out["runs"][0]["properties"]
+    assert props["policyReclassify"] == [
+        {
+            "to": "COMPATIBLE_WITH_RISK",
+            "kind": "func_visibility_changed",
+            "symbol_pattern": "_ZN6oneapi3dal.*",
+            "reason": "COMDAT-inline demotions",
+        }
+    ]
+
+
+def test_reclassify_absent_from_sarif_without_any_configured_rule() -> None:
+    """Mirrors the existing policyOverrides absence test -- no reclassify:
+    rule => no policyReclassify key, report byte-identical."""
+    from abicheck.checker_types import DiffResult
+    from abicheck.sarif import to_sarif
+
+    change = _change(ChangeKind.FUNC_REMOVED, "foo")
+    diff = DiffResult(changes=[change], old_version="1", new_version="2", library="l")
+    props = to_sarif(diff)["runs"][0]["properties"]
+    assert "policyReclassify" not in props

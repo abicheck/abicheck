@@ -1099,6 +1099,20 @@ def to_sarif(
                         if result.policy_file and result.policy_file.overrides
                         else {}
                     ),
+                    # Codex review: mirrors reporter.py's JSON
+                    # `policy_reclassify` (report_schema_version 2.29) --
+                    # the active reclassify: rule set, via the same
+                    # ReclassifyRule.to_report_dict() so the two can't drift.
+                    **(
+                        {
+                            "policyReclassify": [
+                                rule.to_report_dict()
+                                for rule in result.policy_file.reclassify
+                            ]
+                        }
+                        if result.policy_file and result.policy_file.reclassify
+                        else {}
+                    ),
                     # ADR-024 §D4/D5: header-scope ledger. Out-of-surface
                     # findings are disclosed here for auditability (never
                     # silently dropped) when --scope-public-headers is active.

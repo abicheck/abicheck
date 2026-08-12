@@ -230,6 +230,36 @@ class ReclassifyRule:
             bits.append(f"reason={self.reason!r}")
         return "reclassify(" + ", ".join(bits) + ")"
 
+    def to_report_dict(self) -> dict[str, str]:
+        """JSON-serializable audit dict for this rule, shared by every report
+        renderer (``reporter.py``'s ``policy_reclassify``, ``sarif.py``'s
+        ``policyReclassify``) so the field set/spelling can't silently drift
+        between them the way two hand-rolled dict-builders eventually would.
+
+        Lists this rule's own configuration -- the *active rule set*, not a
+        per-finding "did this rule fire" attribution (see the module
+        docstring's known-gap note). Keys present depend on which fields the
+        rule actually set; ``to`` is always present.
+        """
+        out: dict[str, str] = {"to": self.to_verdict.value}
+        if self.change_kind is not None:
+            out["kind"] = self.change_kind
+        for field_name in (
+            "symbol", "symbol_pattern", "type_pattern", "member_name",
+            "namespace", "entity_namespace", "cause_namespace",
+            "source_location",
+        ):
+            val = getattr(self, field_name)
+            if val is not None:
+                out[field_name] = val
+        if self.reason:
+            out["reason"] = self.reason
+        if self.label:
+            out["label"] = self.label
+        if self.expires is not None:
+            out["expires"] = self.expires.isoformat()
+        return out
+
 
 def first_matching_reclassify_verdict(
     rules: list[ReclassifyRule], change: Any, today: date | None = None

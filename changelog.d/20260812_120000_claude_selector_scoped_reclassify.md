@@ -53,4 +53,8 @@ A new changelog fragment. See changelog.d/README.md for the workflow.
   JSON report's new `policy_reclassify` key (`report_schema_version` 2.29,
   additive), alongside the existing `policy_overrides`/`policy_file` keys —
   previously an ordinary comparison reclassifying a finding left no trace
-  of the active rule anywhere in the standard report.
+  of the active rule anywhere in the standard report. The same disclosure
+  now also appears in the Markdown (`**Policy reclassify**`), HTML
+  (`<tr><th>Policy reclassify</th>...`), and SARIF (`policyReclassify` run
+  property) report formats, mirroring their existing `overrides:`
+  disclosure.

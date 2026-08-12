@@ -1028,16 +1028,6 @@ def _add_confidence_evidence(d: dict[str, object], result: DiffResult) -> None:
         d["assurance"] = result.assurance
 
 
-#: reclassify[i] selector attributes worth disclosing in the report, in a
-#: stable, deterministic key order. Mirrors abicheck.reclassify's own
-#: RECLASSIFY_KNOWN_KEYS selector subset (kind/to/reason/expires handled
-#: separately below).
-_RECLASSIFY_REPORT_SELECTOR_FIELDS: tuple[str, ...] = (
-    "symbol", "symbol_pattern", "type_pattern", "member_name", "namespace",
-    "entity_namespace", "cause_namespace", "source_location",
-)
-
-
 def _add_policy_overrides(d: dict[str, object], result: DiffResult) -> None:
     """Add policy file overrides/reclassify rules (custom re-classifications)
     when present.
@@ -1048,7 +1038,9 @@ def _add_policy_overrides(d: dict[str, object], result: DiffResult) -> None:
     attribution (see ``abicheck/schemas/__init__.py``'s 2.29 history entry
     for why that's a separately tracked follow-up, Codex review: an ordinary
     comparison reclassifying a finding previously had no trace of the active
-    rule anywhere in the standard report).
+    rule anywhere in the standard report). Each rule's dict comes from
+    ``ReclassifyRule.to_report_dict()`` -- shared with ``sarif.py``'s
+    ``policyReclassify`` so the two can't drift on field set/spelling.
     """
     if result.policy_file and result.policy_file.overrides:
         d["policy_overrides"] = {
@@ -1058,23 +1050,9 @@ def _add_policy_overrides(d: dict[str, object], result: DiffResult) -> None:
         if result.policy_file.source_path:
             d["policy_file"] = str(result.policy_file.source_path)
     if result.policy_file and result.policy_file.reclassify:
-        rules_json: list[dict[str, object]] = []
-        for rule in result.policy_file.reclassify:
-            rule_json: dict[str, object] = {"to": rule.to_verdict.value}
-            if rule.change_kind is not None:
-                rule_json["kind"] = rule.change_kind
-            for field_name in _RECLASSIFY_REPORT_SELECTOR_FIELDS:
-                val = getattr(rule, field_name, None)
-                if val is not None:
-                    rule_json[field_name] = val
-            if rule.reason:
-                rule_json["reason"] = rule.reason
-            if rule.label:
-                rule_json["label"] = rule.label
-            if rule.expires is not None:
-                rule_json["expires"] = rule.expires.isoformat()
-            rules_json.append(rule_json)
-        d["policy_reclassify"] = rules_json
+        d["policy_reclassify"] = [
+            rule.to_report_dict() for rule in result.policy_file.reclassify
+        ]
         if result.policy_file.source_path:
             d["policy_file"] = str(result.policy_file.source_path)
 
