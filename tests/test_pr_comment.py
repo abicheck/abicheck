@@ -1133,6 +1133,16 @@ def test_reclassified_count_rendered_in_comment():
     assert "1 finding reclassified by `--policy-file`" in body
 
 
+def test_reclassified_count_plural_wording():
+    report = _compare_report()
+    report["policy_overrides"] = {
+        "func_removed": "COMPATIBLE_WITH_RISK",
+        "type_size_changed": "COMPATIBLE_WITH_RISK",
+    }
+    body = render_comment(build_model(report), sha="cafe1234")
+    assert "2 findings reclassified by `--policy-file`" in body
+
+
 def test_suppressed_and_reclassified_notes_combine():
     report = _compare_report()
     report["suppression"] = {"file_provided": True, "suppressed_count": 2}

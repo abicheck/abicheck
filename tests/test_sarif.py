@@ -1305,6 +1305,33 @@ class TestSuppressionsArray:
         rule_ids = {r["id"] for r in doc["runs"][0]["tool"]["driver"]["rules"]}
         assert "type_removed" in rule_ids
 
+    def test_suppressed_change_reuses_an_already_registered_rule(self) -> None:
+        """A suppressed change sharing its kind with an active (unsuppressed)
+        finding must not register a second, duplicate rule entry."""
+        active = _breaking_change()  # func_removed
+        suppressed = Change(
+            kind=ChangeKind.FUNC_REMOVED,
+            symbol="_Z3barv",
+            description="Function bar() removed",
+            suppression_rule="r1",
+        )
+        result = DiffResult(
+            old_version="1.0",
+            new_version="2.0",
+            library="libfoo.so.1",
+            changes=[active],
+            verdict=Verdict.BREAKING,
+            suppressed_changes=[suppressed],
+        )
+        doc = to_sarif(result)
+        rules = [
+            r
+            for r in doc["runs"][0]["tool"]["driver"]["rules"]
+            if r["id"] == "func_removed"
+        ]
+        assert len(rules) == 1
+        assert len(doc["runs"][0]["results"]) == 2
+
     def test_missing_rule_label_still_states_a_justification(self) -> None:
         suppressed = Change(
             kind=ChangeKind.FUNC_REMOVED,

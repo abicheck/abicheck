@@ -505,3 +505,11 @@ def test_render_baseline_lines_show_suppressed_itemizes() -> None:
     assert "foo.h:42" in text
     assert "rule: intentional" in text
     assert "breaking → suppressed" in text
+
+
+def test_render_baseline_lines_show_suppressed_notes_truncation() -> None:
+    summary = _suppressed_diff_summary()
+    summary["suppressed_truncated"] = True
+    out = SimpleNamespace(diff_summary=summary)
+    text = "\n".join(render_baseline_lines(out, show_suppressed=True))
+    assert "additional suppressed findings omitted" in text
