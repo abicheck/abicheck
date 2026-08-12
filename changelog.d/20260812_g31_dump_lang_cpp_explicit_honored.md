@@ -1,8 +1,8 @@
 ### Fixed
 
-- **`dump --lang c++`/`cpp` on the direct-clang backend is now honored on
+- **`dump --lang c++` on the direct-clang backend is now honored on
   the primary snapshot pass, not just the header-graph pass** — an
-  explicit `--lang c++`/`cpp` given to `abicheck dump --ast-frontend
+  explicit `--lang c++` given to `abicheck dump --ast-frontend
   clang` used to be silently discarded on a syntactically C-compatible
   header (e.g. a plain POD struct), because Click's own `--lang` default
   is the identical string `"c++"`, so the primary snapshot pass could not

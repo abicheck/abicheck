@@ -534,7 +534,7 @@ def dump_cmd(so_path: Path | None, headers: tuple[Path, ...], includes: tuple[Pa
     # G31 Phase C follow-up (AGENTS.md "dump --lang c++ is silently discarded
     # ..." known gap): --lang carries a Click default of "c++" (LANG_DEFAULT),
     # so the resolved `lang` string alone can never distinguish a genuinely
-    # explicit `--lang c++`/`cpp` request from the unspecified default -- both
+    # explicit `--lang c++` request from the unspecified default -- both
     # produce the identical value. `perform_elf_dump` (and the ELF header-AST
     # passes it drives) normalizes a non-"c" `lang` to `None` for the common
     # default case, to preserve auto-detection -- but that squash previously
