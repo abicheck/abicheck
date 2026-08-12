@@ -1670,3 +1670,79 @@ def test_emit_none_when_no_backend(tmp_path: Path, monkeypatch) -> None:
         ["c++", "-c", "src/foo.cpp"], tmp_path, inputs_dir=tmp_path / "pk"
     )
     assert out is None
+
+
+def test_emit_warns_when_no_backend_resolves(tmp_path: Path, monkeypatch, capsys) -> None:
+    # The old silent-empty behavior (no diagnostic at all) is the bug being
+    # regression-tested here, not just the return value.
+    monkeypatch.setattr(
+        "abicheck.buildsource.source_extractors.resolver.select_source_backend",
+        lambda extractor, **kw: (None, None),
+    )
+    out = emit_facts_for_command(
+        ["icpx", "-c", "src/foo.cpp"], tmp_path, inputs_dir=tmp_path / "pk"
+    )
+    assert out is None
+    assert "no usable source-ABI extractor" in capsys.readouterr().err
+
+
+def test_emit_defaults_clang_bin_to_clang_family_wrapped_compiler(
+    tmp_path: Path, monkeypatch
+) -> None:
+    # An icpx/dpcpp-only image never has a bare "clang" on PATH — the wrapper
+    # must resolve the clang backend against the compiler it is actually
+    # wrapping, not a hardcoded "clang" that silently reads as unavailable.
+    captured: dict = {}
+
+    def _fake_select(extractor, **kw):
+        captured.update(kw)
+        return None, None
+
+    monkeypatch.setattr(
+        "abicheck.buildsource.source_extractors.resolver.select_source_backend",
+        _fake_select,
+    )
+    emit_facts_for_command(
+        ["icpx", "-c", "src/foo.cpp"], tmp_path, inputs_dir=tmp_path / "pk"
+    )
+    assert captured["clang_bin"] == "icpx"
+
+
+def test_emit_strips_launcher_before_resolving_clang_bin(
+    tmp_path: Path, monkeypatch
+) -> None:
+    captured: dict = {}
+
+    def _fake_select(extractor, **kw):
+        captured.update(kw)
+        return None, None
+
+    monkeypatch.setattr(
+        "abicheck.buildsource.source_extractors.resolver.select_source_backend",
+        _fake_select,
+    )
+    emit_facts_for_command(
+        ["ccache", "clang++", "-c", "src/foo.cpp"], tmp_path, inputs_dir=tmp_path / "pk"
+    )
+    assert captured["clang_bin"] == "clang++"
+
+
+def test_emit_keeps_default_clang_bin_for_non_clang_family_compiler(
+    tmp_path: Path, monkeypatch
+) -> None:
+    # A GCC/MSVC wrapped compiler is not itself a clang-compatible driver —
+    # the plain "clang" default (resolved separately on PATH) is unchanged.
+    captured: dict = {}
+
+    def _fake_select(extractor, **kw):
+        captured.update(kw)
+        return None, None
+
+    monkeypatch.setattr(
+        "abicheck.buildsource.source_extractors.resolver.select_source_backend",
+        _fake_select,
+    )
+    emit_facts_for_command(
+        ["g++", "-c", "src/foo.cpp"], tmp_path, inputs_dir=tmp_path / "pk"
+    )
+    assert captured["clang_bin"] == "clang"
