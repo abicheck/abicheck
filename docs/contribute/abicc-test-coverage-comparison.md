@@ -32,7 +32,7 @@
 | **Abicheck covers (has ChangeKind + tests)** | **66/66 (100%)** |
 | Abicheck ChangeKind enum members | **396 change kinds** (this table's per-rule mappings reflect an earlier snapshot) |
 | All ChangeKinds have assertion tests | **Yes** (enforced by `test_changekind_completeness.py`) |
-| Abicheck example cases | 193 total: 159 binary shared-library competitor lanes + 34 dedicated non-.so lanes (including fixture/source-only L2/L5/source cases) |
+| Abicheck example cases | 196 total: 159 binary shared-library competitor lanes + 37 dedicated non-.so lanes (including fixture/source-only L2/L5/source cases) |
 | ABICC scenarios NOT in abicheck | **0** |
 
 ---

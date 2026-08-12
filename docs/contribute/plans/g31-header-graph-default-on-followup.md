@@ -247,6 +247,64 @@ alias/structural-context tiers, whether it's a new node attribute compared
 separately from the identity-based node id rather than folded into the id
 itself) — not a drive-by extension of an example-catalog PR.
 
+**A seventh, deeper finding, investigated and deliberately not attempted
+this pass (Codex review, PR #727, fresh evidence).** `case196`'s own
+`SourceAbiSurface`s are constructed directly by the generator script
+(`_pub_caller()`/`_helper_entity()` fed straight into `SourceAbiSurface(...)`
+and then `build_source_graph()`), not produced by running raw
+`SourceEntity`/`BuildEvidence` facts through `link_source_abi()` — the plan
+text and the generator's own comments describe this as exercising "the
+actual production fold," which is true of `build_source_graph()` itself but
+overstates what feeds it: `link_source_abi()`, the function that actually
+turns per-TU extractor output into a `SourceAbiSurface`, is never called at
+all. That gap is not cosmetic. `link_source_abi()`'s very first filter
+(`_is_public(entity) or entity.qualified_name in forced`, `source_link.py`)
+runs *before* any entity is routed into `reachable_declarations`/
+`reachable_inline_bodies`/etc., and it keys purely on the entity's own
+`visibility`/`api_relevant` — it has no notion of "reachable through a
+public caller's own dependency edge." `demo::detail::helper` carries
+`visibility="private_header"`, so a `link_source_abi()` call over the
+equivalent raw `SourceAbiTu` facts would drop it before it ever reached a
+reachable bucket, on **both** sides — the DECL_CALLS_DECL edge that would
+otherwise justify keeping it (mirroring `public_api_internal_dependency_
+added`'s own "already public via a dependency, not via its own header"
+logic) is consulted by `graph_reconcile`/`source_graph_findings` only
+*after* linking, never by `link_source_abi()` itself. The one existing
+escape hatch, `forced_public`, would route it through — but `forced_public`
+only ever carries a real value from ADR-049's `--contract-evaluation`
+overlays (`contract_pipeline.py`'s `force_public_symbols`); a bare
+`dump --sources`/`--build-info` run (`inline.collect_inline_pack()` →
+`run_source_replay()`) always calls `link_source_abi()` with an empty one.
+So today, a real `dump --sources` run over source code shaped exactly like
+this case's own narrative comments would **not** reproduce this scenario:
+the private helper would be absent from the L4 surface entirely (old side),
+and the graph's `declaration_moved`/`public_api_internal_dependency_added`
+findings this case demonstrates would not fire. Confirmed by reading
+`link_source_abi()`, `source_replay.run_source_replay()`, and
+`inline.collect_inline_pack()` directly; not attempted as a live repro
+build. **Not fixed here.** A correct fix has two independent parts, each
+its own scoped design: (1) `link_source_abi()` would need a second
+admission path — "not directly public, but reachable through an
+already-admitted public entity's own dependency edge" — which means either
+running the reachability walk *before* the visibility filter (a real
+ordering change to a function every other L4/L5 consumer already depends
+on) or accepting a documented two-pass linking model; (2) even with that,
+`case196`'s own scenario needs the DECL_CALLS_DECL fact to exist *before*
+linking (today it's `source_edges`, an L5-shaped fact folded by
+`build_source_graph()` *after* linking, not an L4 input `link_source_abi()`
+consumes at all) — so part (1) alone is not sufficient without also
+deciding how a pre-link reachability signal is supposed to reach
+`link_source_abi()` in the first place. Given this session had already
+produced six review rounds on this exact fixture, an eighth reactive patch
+attempting both of these under continued review pressure was judged a worse
+risk than documenting the gap honestly: the case still correctly exercises
+`build_source_graph()`'s real fold and `graph_reconcile`'s real
+classification logic against a hand-constructed-but-internally-consistent
+`SourceAbiSurface` input — which is a genuine, if narrower, claim than "a
+bare `dump --sources` run over equivalent source reproduces this end to
+end," and the plan's and generator's own claims should be read with that
+narrower scope in mind pending a dedicated follow-up.
+
 ## Phase C — CastXML schema-completeness audit + backend unification
 
 **Problem.** Two independent gaps, related but separable:

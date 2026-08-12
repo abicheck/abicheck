@@ -467,7 +467,14 @@ def build_cases() -> dict[str, tuple[str, dict[str, Any], dict[str, Any]]]:
     # hand-build a GraphNode/GraphEdge pair directly), this fixture is
     # produced by running REAL SourceEntity/BuildEvidence facts through the
     # actual production fold (source_graph.build_source_graph) -- the same
-    # function dump --sources/--build-info calls -- so the two resulting
+    # function dump --sources/--build-info calls. NOTE (Codex review, PR
+    # #727): the SourceAbiSurface below is still hand-constructed, bypassing
+    # source_link.link_source_abi() -- a bare `dump --sources` run cannot
+    # currently reproduce this exact scenario, since link_source_abi()
+    # filters a private-visibility entity out of the surface before any
+    # dependency-edge reachability is considered. See the "seventh finding"
+    # entry in docs/contribute/plans/g31-header-graph-default-on-followup.md
+    # for the full analysis and what a real fix needs. -- so the two resulting
     # node ids are genuinely distinct for the reason a real extractor would
     # make them distinct (the signature change moves the Itanium mangled
     # name, which source_graph.py's node-id scheme keys on), not because
