@@ -1172,6 +1172,55 @@ class TestMarkdownReporter:
             layout_change.correlated_change_kind == ChangeKind.TYPE_VTABLE_CHANGED.value
         )
 
+    def test_correlation_uses_qualified_identity_not_bare_symbol_fallback(self):
+        """A source with ``qualified_name`` set must be matched only by it,
+        never falling back to the bare ``symbol`` too -- an unrelated
+        same-leaf-name record's own surviving finding could otherwise be
+        mistaken for "the same target" the dangling correlation names
+        (Codex review, fresh evidence)."""
+        layout_change = Change(
+            ChangeKind.LAYOUT_UNVERIFIABLE,
+            "Foo",
+            "layout evidence unverifiable",
+            qualified_name="ns1::Foo",
+            correlated_change_kind=ChangeKind.TYPE_VTABLE_CHANGED.value,
+        )
+        # ns1::Foo's own covering finding -- still plain BREAKING, so
+        # --show-only risk below removes it.
+        vtable_change_ns1 = Change(
+            ChangeKind.TYPE_VTABLE_CHANGED,
+            "Foo",
+            "vtable changed",
+            qualified_name="ns1::Foo",
+        )
+        # Unrelated: a different namespace's same-leaf-name class, sharing
+        # the identical bare symbol "Foo" but independently modulated to
+        # COMPATIBLE_WITH_RISK so --show-only risk keeps *it* too.
+        vtable_change_ns2 = Change(
+            ChangeKind.TYPE_VTABLE_CHANGED,
+            "Foo",
+            "vtable changed (unrelated)",
+            qualified_name="ns2::Foo",
+            effective_verdict=Verdict.COMPATIBLE_WITH_RISK,
+        )
+        r = _result(
+            Verdict.BREAKING, [layout_change, vtable_change_ns1, vtable_change_ns2]
+        )
+
+        d_filtered = json.loads(to_json(r, show_only="risk"))
+        descriptions = {c["description"] for c in d_filtered["changes"]}
+        # ns2::Foo's own (unrelated) finding survives the filter...
+        assert "vtable changed (unrelated)" in descriptions
+        # ...but ns1::Foo's own covering finding does not.
+        assert "vtable changed" not in descriptions
+
+        layout_entry = next(
+            c for c in d_filtered["changes"] if c["kind"] == "layout_unverifiable"
+        )
+        # Must be cleared: ns1::Foo's own target is gone, and ns2::Foo's
+        # surviving same-symbol finding must not be mistaken for it.
+        assert "correlated_change_kind" not in layout_entry
+
     def test_json_filtered_cached_impact_assessment_also_cleared(self):
         """When a reachability-aware suppression caused MarkReachability to
         cache the finding's whole ImpactAssessment, assess_change() prefers

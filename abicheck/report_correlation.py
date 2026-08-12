@@ -44,10 +44,15 @@ def _suppress_dangling_correlation_notes(changes: Sequence[Change]) -> list[Chan
     shape of gap for the older ADR-041 pairing
     (``PUBLIC_API_INTERNAL_DEPENDENCY_ADDED`` <-> an
     ``inline_body_changed``/``template_body_changed``/
-    ``public_typedef_target_changed`` on the same public entry), so this
-    checks both identity keys the two pairings correlate by --
-    ``qualified_name`` (the vtable/layout pairing) and ``symbol`` (the
-    ADR-041 pairing) -- rather than hard-coding one.
+    ``public_typedef_target_changed`` on the same public entry), which
+    correlates by ``symbol`` instead (its producer,
+    ``buildsource.source_graph_findings``, never sets ``qualified_name``).
+    A source with ``qualified_name`` set is matched *only* by it, never
+    falling back to ``symbol`` too -- an ``or`` across both would accept an
+    unrelated same-leaf-name record's own surviving finding as "the same
+    target" (e.g. an unrelated ``ns2::Foo``'s own ``TYPE_VTABLE_CHANGED``
+    making ``ns1::Foo``'s dangling reference to its own, filtered-out one
+    read as still present -- Codex review, fresh evidence).
 
     Called by every format that independently applies ``--show-only`` to its
     own filtered ``changes`` list before rendering ``correlated_change_kind``
@@ -81,10 +86,22 @@ def _suppress_dangling_correlation_notes(changes: Sequence[Change]) -> list[Chan
     result: list[Change] = []
     for c in changes:
         correlated = getattr(c, "correlated_change_kind", None)
-        if correlated and not (
-            (c.qualified_name, correlated) in present_by_qualified_name
-            or (c.symbol, correlated) in present_by_symbol
-        ):
+        if c.qualified_name:
+            # A source with a qualified identity (the vtable/layout pairing)
+            # must be matched *only* by it -- falling back to the bare
+            # symbol here would accept an unrelated same-leaf-name record's
+            # own surviving finding as "the same target" (e.g. ns2::Foo's
+            # own TYPE_VTABLE_CHANGED making ns1::Foo's dangling reference
+            # to its own, filtered-out one read as still present -- Codex
+            # review, fresh evidence).
+            visible = (c.qualified_name, correlated) in present_by_qualified_name
+        else:
+            # No qualified identity available (the ADR-041 pairing, whose
+            # producer -- buildsource.source_graph_findings -- never sets
+            # qualified_name) -- symbol is the only identity this source
+            # correlates by, so it's the only one to check.
+            visible = (c.symbol, correlated) in present_by_symbol
+        if correlated and not visible:
             c2 = copy.copy(c)
             c2.correlated_change_kind = None
             if c2.impact_assessment is not None:
