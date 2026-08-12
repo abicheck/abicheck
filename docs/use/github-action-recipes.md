@@ -432,20 +432,37 @@ See [GitHub PR Annotations](annotations.md) for full details.
 ## Sticky PR comment
 
 On `pull_request` runs the action posts a single, self-updating comment that
-groups every finding into **Breaking**, **Needs review**, and **Safe** sections
-and shows the scanned head SHA. It is a *content* channel only — it never
-changes the check's red/green state, which is still driven by `fail-on-breaking`
-/ `fail-on-api-break` / `severity-*`. This means review-needed items (source
-breaks, risk, additions) surface as a green check with a `⚠️ Review recommended`
-comment, while real ABI breaks turn the check red **and** post a `❌` comment.
+groups every finding into **Breaking**, **Needs review**, and **Informational
+findings** (plus its own **➕ Public API additions** table) sections and shows
+the scanned head SHA. It is a *content* channel only — it never changes the
+check's red/green state, which is still driven by `fail-on-breaking` /
+`fail-on-api-break` / `severity-*`. The headline names the actual reason
+instead of a generic verdict wherever the bucket's members agree on one: a
+single-severity Needs-review bucket reads e.g. `⚠️ Source API changed; binary
+ABI unchanged` (source-level only) or `⚠️ Compatibility risk — review
+recommended` (a risk finding), falling back to the generic `⚠️ Review
+recommended` only when the bucket mixes both; real ABI breaks turn the check
+red **and** post a `❌ ABI BREAKING` comment.
 
 A fourth, separate **🛑 Analysis incomplete** section — degraded or missing
 comparison evidence (e.g. the baseline was scanned with debug info or build
-context the candidate lacks) — never mixes into those three sections, and
+context the candidate lacks) — never mixes into those three buckets, and
 never drives a `⚠️ Review recommended` headline: that finding isn't a claim
 about the API/ABI at all, so the comment says "Source analysis incomplete" or
 "Analysis coverage reduced" instead, so a reviewer can tell "this PR's
 comparison had a coverage gap" apart from "this PR made a risky API change."
+Whether that headline reads as blocking (🛑) or advisory (⚠️) mirrors the
+Action's own gate exactly — a coverage-gap finding is blocking only when its
+severity is gated by `fail-on-api-break`/`fail-on-breaking` the same way any
+other finding of that severity is, never merely because evidence happened to
+be incomplete.
+
+A breaking/review finding's row also carries, when the report provides them:
+the **demangled C++ signature** as the primary Symbol value (with the raw
+mangled linker symbol kept alongside as evidence, in full detail — see
+`linker: ...`), a normalized **source location** with CI-runner-specific
+checkout-path noise stripped, and a **Fix:** remediation line drawn from the
+finding's own `impact` field.
 
 ```yaml
 permissions:
@@ -486,10 +503,11 @@ overflow, the detail level is automatically reduced (and, as a last resort, the
 body is truncated), with a link back to the **full report** uploaded as the
 workflow-run artifact so nothing is lost.
 
-"Safe" mirrors whatever the checker already classified as compatible — so
-public-header surface scoping (`--scope-public-headers`) and policy profiles
-(e.g. `sdk_vendor` demoting a removal) flow through automatically; the comment
-never re-classifies anything.
+**Informational findings**/**Public API additions** mirror whatever the
+checker already classified as compatible — so public-header surface scoping
+(`--scope-public-headers`) and policy profiles (e.g. `sdk_vendor` demoting a
+removal) flow through automatically; the comment never re-classifies
+anything.
 
 The comment also tracks the gate: with `fail-on-api-break: true` (which turns
 the check red on source/API breaks), those findings are filed under **Breaking**

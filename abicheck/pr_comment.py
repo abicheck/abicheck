@@ -23,17 +23,19 @@ sees, in one place:
 
 * **Breaking** — clear ABI breaks (and gated source breaks);
 * **Needs review** — source breaks / risk a human should sign off on;
-* **Safe** — compatible changes: new public-API surface and quality findings.
+* **Compatible** — compatible changes: new public-API surface and quality
+  findings.
 
-"Safe" here is a pure mirror of the severity the checker already assigned
-(``severity`` field in the JSON, which honours public-surface scoping and the
-active policy) — this module never re-classifies anything. Within Safe, new
-public-API surface (the ``ADDITION_KINDS`` registry — ``func_added``,
-``type_added``, ``enum_member_added``, etc.) renders as its own "➕ Public API
-additions" table with per-symbol kind/detail/location, separate from the
-generic "✅ Safe" list of quality findings — a reviewer approving a new export
-wants to see what was added, not just a bare count folded in with unrelated
-quality notes.
+The compatible bucket is a pure mirror of the severity the checker already
+assigned (``severity`` field in the JSON, which honours public-surface
+scoping and the active policy) — this module never re-classifies anything.
+Within it, new public-API surface (the ``ADDITION_KINDS`` registry —
+``func_added``, ``type_added``, ``enum_member_added``, etc.) renders as its
+own "➕ Public API additions" table with per-symbol kind/detail/location,
+separate from the generic "ℹ️ Informational findings" list of quality
+findings ("Safe" reads as an absolute guarantee it isn't) — a reviewer
+approving a new export wants to see what was added, not just a bare count
+folded in with unrelated quality notes.
 
 A severity-config category set to ``error`` (e.g. ``severity-addition:
 error``) moves its findings into the Breaking bucket too, since that is what
@@ -72,11 +74,13 @@ both the header and the footer.
 
 from __future__ import annotations
 
+import re
 from collections import OrderedDict
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 
 from .checker_policy import ADDITION_KINDS
+from .demangle import demangle_batch
 
 # Kind value strings that constitute new public-API surface (the severity
 # "addition" category). Sourced from the authoritative ADDITION_KINDS so kinds
@@ -224,10 +228,16 @@ class Finding:
     severity: str = ""
     # Remediation text ("how to fix"), sourced verbatim from the report's own
     # `impact` field (`change_registry.py`'s `impact=` on the matching
-    # `ChangeKindMeta` entry) when present. Rendered only for the "analysis
-    # incomplete" bucket today (see module docstring) — every evidence-kind
-    # entry already carries one.
+    # `ChangeKindMeta` entry) when present. Rendered under the finding's own
+    # row as "**Fix:** ..." (`_flat_row`) whenever non-empty.
     impact: str = ""
+    # The raw Itanium-mangled linker symbol, set only when `symbol` above was
+    # swapped for its demangled form (`_demangle_symbol`) — i.e. `symbol` is
+    # human-readable and this is the "linker evidence" backing it. Empty for
+    # a non-C++ symbol (nothing to demangle) or when demangling was
+    # unavailable, in which case `symbol` is already the raw mangled/plain
+    # name and there is nothing distinct left to show here.
+    mangled: str = ""
 
 
 @dataclass
@@ -335,6 +345,41 @@ def _detail_text(change: dict[str, object]) -> str:
     return desc
 
 
+#: A GitHub-Actions-style (and equivalent CI) checkout convention doubles the
+#: repo name as its own last path component (`/home/runner/work/<repo>/<repo>/…`).
+#: Recognizing this one, extremely common, unambiguous shape is deliberately
+#: the *only* normalization applied — an earlier revision also tried
+#: stripping whatever leading path segments happened to be common across
+#: every finding in one report, which over-strips whenever several findings
+#: legitimately share a real subdirectory (e.g. two changes in the same
+#: `include/` tree): every row's `path:line` would silently lose that shared
+#: directory context too, not just the CI-specific root. The doubled-segment
+#: pattern has no such failure mode — it only ever matches the runner's own
+#: checkout root, never a directory a maintainer would recognize as part of
+#: their own tree.
+_CI_WORKDIR_RE = re.compile(r"^/.*?/([^/]+)/\1/")
+
+
+def _normalize_location(raw: str) -> str:
+    """Normalize a ``path[:line]`` location string for display.
+
+    Strips a CI-runner-specific absolute checkout prefix so the comment
+    shows a repo-relative path (``include/foo.h:10``) instead of e.g.
+    ``/home/runner/work/abicheck/abicheck/include/foo.h:10`` — noise that
+    tells a reviewer nothing they don't already know from the PR itself, and
+    just makes every row harder to scan. A location not matching this one
+    recognized CI-checkout shape is left exactly as the report gave it,
+    rather than guessed at.
+    """
+    path, sep, rest = raw.rpartition(":")
+    if not sep:
+        path, rest = raw, ""
+    match = _CI_WORKDIR_RE.match(path)
+    if match:
+        path = path[match.end() :]
+    return f"{path}:{rest}" if rest else path
+
+
 def _severity_levels(report: dict[str, object]) -> dict[str, str]:
     """Resolved per-category severity levels from the report, or ``{}``.
 
@@ -362,6 +407,26 @@ def _finding_category(severity: str, kind: str) -> str:
     return "quality_issues"
 
 
+def _demangle_symbol(raw: str, demangled_map: dict[str, str]) -> tuple[str, str]:
+    """(display symbol, linker-evidence mangled symbol or "") for one
+    change's raw ``symbol`` field.
+
+    A function/variable change's ``Change.symbol`` is the raw Itanium-
+    mangled linker name (``diff_symbols.py``), unreadable to a maintainer —
+    the demangled signature is what they actually think in. The demangled
+    form becomes the primary display value; the raw mangled name survives on
+    ``Finding.mangled``, rendered as linker evidence (see ``_flat_row``). A
+    non-C++ symbol, or an environment with no demangler available
+    (``demangle_batch`` degrades to an empty map in that case, never
+    raises), leaves *raw* as both the display value and yields no mangled
+    evidence — there's nothing recovered to show separately.
+    """
+    demangled = demangled_map.get(raw)
+    if demangled and demangled != raw:
+        return demangled, raw
+    return raw, ""
+
+
 def _bucket_changes(
     changes: object,
     gate_api_break: bool = False,
@@ -373,6 +438,14 @@ def _bucket_changes(
     incomplete: list[Finding] = []
     target = {"breaking": breaking, "review": review, "safe": safe}
     levels = levels or {}
+    changes_list = changes if isinstance(changes, list) else []
+    # Demangle every symbol up front in one batch (`demangle_batch` forks at
+    # most one `c++filt` process for the whole report, memoised across
+    # symbols already seen elsewhere in this process) rather than once per
+    # finding.
+    demangled_map = demangle_batch(
+        [str(c.get("symbol", "")) for c in changes_list if isinstance(c, dict)]
+    )
     if isinstance(changes, list):
         for c in changes:
             if not isinstance(c, dict):
@@ -391,7 +464,7 @@ def _bucket_changes(
                         kind=kind,
                         symbol=symbol,
                         detail=_detail_text(c),
-                        location=str(loc) if loc else None,
+                        location=_normalize_location(str(loc)) if loc else None,
                         severity=sev,
                         impact=str(c.get("impact", "") or ""),
                     )
@@ -406,68 +479,71 @@ def _bucket_changes(
             if levels.get(category) == "error":
                 bucket = "breaking"
             loc = c.get("source_location")
+            display_symbol, mangled_evidence = _demangle_symbol(
+                str(c.get("symbol", "")), demangled_map
+            )
             target[bucket].append(
                 Finding(
                     kind=kind,
-                    symbol=str(c.get("symbol", "")),
+                    symbol=display_symbol,
                     detail=_detail_text(c),
-                    location=str(loc) if loc else None,
+                    location=_normalize_location(str(loc)) if loc else None,
                     category=category,
                     severity=sev,
+                    impact=str(c.get("impact", "") or ""),
+                    mangled=mangled_evidence,
                 )
             )
     return breaking, review, safe, incomplete
 
 
-def _incomplete_is_blocking(
-    findings: list[Finding],
-    levels: dict[str, str] | None,
-    gate_api_break: bool = False,
-) -> bool:
+def _incomplete_is_blocking(findings: list[Finding], gate_api_break: bool) -> bool:
     """Whether the analysis-incomplete bucket represents a hard failure —
     i.e. whether it actually turns the *Action's* check red, mirroring
-    ``action/run.sh``'s own gate exactly (Codex review: an earlier revision
-    hardcoded ``evidence_required_missing`` as always-blocking on the theory
-    that ADR-033 D7 "fails the run outright" — true of the raw CLI's
-    ``compare`` exit code under the legacy scheme, since an ``API_BREAK``
-    verdict always exits nonzero there, but this module renders the
-    composite Action's *sticky comment*, and ``action/run.sh``'s own gate
-    only turns the check red on an ``API_BREAK`` verdict when
-    ``fail-on-api-break: true`` was actually set — see
-    ``action/run.sh``'s ``INPUT_FAIL_ON_API_BREAK`` check. Hardcoding this
-    kind as always-blocking made the sticky comment disagree with the check
-    it exists to mirror on the Action's own default config).
+    ``action/run.sh``'s own ``compare``-mode gate exactly.
 
-    This defers to each finding's own already-resolved ``severity`` instead
-    of one specific kind's default severity, so a named policy or
-    ``--policy-file`` override that promotes a coverage-gap kind (e.g.
-    ``layer_coverage_asymmetric`` under a ``plugin_abi``-style profile that
-    treats every risk kind as breaking) is honoured too, without
-    re-deriving blocking-ness from one hardcoded kind + one hardcoded level
-    check that would silently disagree with a red exit code the checker
-    already produced for a different reason:
+    Two rounds of Codex review corrected two different overclaims here:
 
-    - ``severity == "breaking"`` always blocks (a policy override already
-      decided this).
-    - ``severity == "api_break"`` (the default for ``evidence_required_missing``)
-      blocks under ``fail-on-api-break`` (mirrors how the module gates every
-      other api_break finding) or when ``potential_breaking`` is configured
-      to ``error``.
-    - ``severity == "risk"`` (the default for ``layer_coverage_asymmetric``
-      and ``source_fact_coverage_incomplete``) blocks only when
-      ``potential_breaking`` is configured to ``error``.
+    1. An earlier revision hardcoded ``evidence_required_missing`` as
+       always-blocking on the theory that ADR-033 D7 "fails the run
+       outright" — true of the raw CLI's ``compare`` exit code under the
+       legacy scheme (an ``API_BREAK`` verdict always exits nonzero there),
+       but this module renders the composite Action's *sticky comment*, and
+       ``action/run.sh``'s own gate only turns the check red on an
+       ``API_BREAK`` verdict when ``fail-on-api-break: true`` was actually
+       set. Fixed by deferring to each finding's own already-resolved
+       ``severity`` instead of one hardcoded kind.
+    2. That fix still let a ``potential_breaking: error`` severity-config
+       alone mark a ``risk``/``api_break`` finding as blocking, without
+       ``gate_api_break`` — reading ``action/run.sh``'s ``scan``-mode branch,
+       which really does have an unconditional severity-gate check
+       independent of ``fail-on-api-break``. But this module only ever
+       targets ``compare``-mode reports (see the module docstring), and
+       ``compare``-mode's own branch in ``action/run.sh`` has **no**
+       equivalent unconditional check for its exit-code-2/4 tiers — every
+       severity-aware exit code the *compare* CLI can produce for a
+       ``potential_breaking``/``abi_breaking`` category (2 or 4) maps to the
+       exact same ``API_BREAK``/``BREAKING`` verdict labels a *plain*
+       finding would, and compare's ``API_BREAK`` label is gated solely by
+       ``fail-on-api-break`` (only exit code 1 — the ``addition``/
+       ``quality_issues`` categories — gets compare's own unconditional
+       ``SEVERITY_ERROR`` gate). So for this module, ``potential_breaking:
+       error`` is not by itself a sufficient blocking signal; only
+       ``gate_api_break`` (``fail-on-api-break: true``) is.
+
+    - ``severity == "breaking"`` always blocks — the checker itself (or a
+      policy override) already decided this is a genuine, gated break.
+    - ``severity in ("api_break", "risk")`` blocks only under
+      ``gate_api_break``, exactly like every other api_break/risk finding
+      this module gates (see ``_bucket_changes``'s ``gate_api_break``
+      handling).
     - ``severity == "compatible"`` (the default for ``dwarf_info_missing``)
       never blocks.
     """
-    levels = levels or {}
     for f in findings:
         if f.severity == "breaking":
             return True
-        if f.severity == "api_break" and (
-            gate_api_break or levels.get("potential_breaking") == "error"
-        ):
-            return True
-        if f.severity == "risk" and levels.get("potential_breaking") == "error":
+        if f.severity in ("api_break", "risk") and gate_api_break:
             return True
     return False
 
@@ -570,7 +646,7 @@ def _from_compare(
         review=review,
         safe=safe,
         incomplete=incomplete,
-        incomplete_blocking=_incomplete_is_blocking(incomplete, levels, gate_api_break),
+        incomplete_blocking=_incomplete_is_blocking(incomplete, gate_api_break),
         breaking_categories=_breaking_categories(breaking),
         breaking_severities=_breaking_severities(breaking),
         scoped_verdict=scoped_verdict,
@@ -599,14 +675,19 @@ def _from_appcompat(
     )
     missing = report.get("missing_symbols")
     if isinstance(missing, list):
+        missing_demangled = demangle_batch([str(sym) for sym in missing])
         for sym in missing:
+            display_symbol, mangled_evidence = _demangle_symbol(
+                str(sym), missing_demangled
+            )
             breaking.append(
                 Finding(
                     kind="symbol_missing",
-                    symbol=str(sym),
+                    symbol=display_symbol,
                     detail="required symbol not provided by new library",
                     category="abi_breaking",
                     severity="breaking",
+                    mangled=mangled_evidence,
                 )
             )
     # A missing required version tag is breaking for the app too (appcompat
@@ -633,7 +714,7 @@ def _from_appcompat(
         review=review,
         safe=safe,
         incomplete=incomplete,
-        incomplete_blocking=_incomplete_is_blocking(incomplete, levels, gate_api_break),
+        incomplete_blocking=_incomplete_is_blocking(incomplete, gate_api_break),
         breaking_categories=_breaking_categories(breaking),
         breaking_severities=_breaking_severities(breaking),
     )
@@ -1000,11 +1081,22 @@ def _header(model: CommentModel) -> tuple[str, str]:
         # `layer_coverage_asymmetric` must not bury a genuine source-API
         # change behind "Analysis coverage reduced". `_incomplete_note`
         # still calls the coverage gap out separately.
+        #
+        # Name the actual reason instead of the generic "Review recommended"
+        # whenever every review-bucket finding agrees on one severity — a
+        # source-level API change (binary ABI unaffected) reads very
+        # differently from a risk finding, and a reviewer shouldn't have to
+        # open the section to tell which one this is.
+        review_sevs = frozenset(f.severity for f in model.review if f.severity)
+        if review_sevs == {"api_break"}:
+            return "⚠️", "Source API changed; binary ABI unchanged"
+        if review_sevs == {"risk"}:
+            return "⚠️", "Compatibility risk — review recommended"
         return "⚠️", "Review recommended"
     if model.incomplete:
         return "⚠️", "Analysis coverage reduced"
     if s:
-        return "✅", "Compatible — safe changes only"
+        return "✅", "No compatibility impact detected"
     return "✅", "No ABI changes"
 
 
@@ -1051,9 +1143,24 @@ def _group_by_api(findings: list[Finding]) -> OrderedDict[str, list[Finding]]:
 
 
 def _flat_row(f: Finding) -> str:
-    """Render one finding as a per-symbol table row."""
+    """Render one finding as a per-symbol table row.
+
+    The Symbol column shows the demangled signature (`_demangle_symbol`)
+    when one was recovered, with the raw mangled linker symbol kept as
+    evidence in the Detail column — a maintainer thinks in the signature,
+    not the mangled name, but the mangled form is still the real linker
+    fact behind a binary-level finding. Full-detail rows also carry
+    remediation guidance ("how to fix") when the report's own `impact`
+    field is present (`change_registry.py`'s per-kind `impact=` template) —
+    a maintainer reading a breaking/review finding needs to know what to
+    *do* about it, not just what changed.
+    """
     loc = f" · `{_esc(f.location)}`" if f.location else ""
     cell = (_esc(f.detail) + loc) if f.detail else _esc(f.location or "—")
+    if f.mangled:
+        cell += f"<br>linker: `{_esc(f.mangled)}`"
+    if f.impact:
+        cell += f"<br>**Fix:** {_esc(f.impact)}"
     return f"| `{_esc(f.kind)}` | `{_esc(f.symbol)}` | {cell} |"
 
 
@@ -1105,7 +1212,14 @@ def _safe_section(findings: list[Finding], detail: str) -> list[str]:
     if not findings:
         return []
     is_open = " open" if detail == "full" else ""
-    out = [f"<details{is_open}><summary>✅ Safe ({len(findings)})</summary>", ""]
+    # "Safe" reads as an absolute guarantee it isn't — these are compatible
+    # quality/behavioral findings (COMPATIBLE_KINDS minus additions, which
+    # get their own "➕ Public API additions" section above), not a claim
+    # that nothing here is worth a look.
+    out = [
+        f"<details{is_open}><summary>ℹ️ Informational findings ({len(findings)})</summary>",
+        "",
+    ]
     if detail == "full":
         out += ["| Change | Symbol | Detail |", "|---|---|---|"]
         for f in findings:
