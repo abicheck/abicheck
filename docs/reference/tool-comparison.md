@@ -370,14 +370,14 @@ derived by
 (`compute_min_evidence()` takes the strongest tier across all `expected_kinds`,
 by design: "the whole break is only fully visible once every contributing
 kind is") and validated by `tests/test_evidence_tiers.py`. Aggregating
-`min_evidence` over the catalog's **182 compare-style cases** (everything
+`min_evidence` over the catalog's **185 compare-style cases** (everything
 except the 11 single-artifact audit/cross-source/BTF checks, which have no
 old-vs-new concept to place on an evidence staircase) yields the cumulative
-minimum-evidence coverage below. One of those 182,
+minimum-evidence coverage below. One of those 185,
 [case111](examples/case111_enumerable_thread_specific_lambda_ambiguity.md),
 has no `min_evidence` at all — it is the one documented detector gap where no
 tier currently reaches the canonical verdict — so it's excluded from the
-181-case denominator rather than miscounted against a tier. Recompute this
+184-case denominator rather than miscounted against a tier. Recompute this
 table directly from `ground_truth.json` any time with:
 
 ```bash
@@ -397,12 +397,12 @@ for tier in ['L0', 'L1', 'L2', 'L3', 'L4', 'L5']:
 
 | Source provided | Layer | Cases first detectable here | Cumulative | Representative cases |
 |-----------------|:-----:|:---------------------------:|:----------:|----------------------|
-| Just the binary | L0 | 64 | **64 / 181 (35%)** | symbol removal ([01](examples/case01_symbol_removal.md)), SONAME ([05](examples/case05_soname.md)), visibility ([06](examples/case06_visibility.md)), symbol-version removed ([65](examples/case65_symbol_version_removed.md)), all 5 bundle cases |
-| + Debug symbols | L1 | 68 | **132 / 181 (73%)** | struct layout ([07](examples/case07_struct_layout.md)), enum value ([08](examples/case08_enum_value_change.md)), vtable ([09](examples/case09_cpp_vtable.md)), calling convention ([64](examples/case64_calling_convention_changed.md)), bitfield ([63](examples/case63_bitfield_changed.md)), toolchain flag drift ([103](examples/case103_toolchain_flag_drift.md)) |
-| + Public headers | L2 | 25 | **157 / 181 (87%)** | access level ([34](examples/case34_access_level.md)), default arg removed ([123](examples/case123_default_argument_removed.md)), class `final` ([125](examples/case125_class_became_final.md)), `detail::` leaks ([74](examples/case74_detail_base_class_changed.md)–[77](examples/case77_detail_templated_base_changed.md)), scoped-internal *no-change* ([118](examples/case118_internal_struct_field_added_scoped.md)–[120](examples/case120_internal_struct_reordered_scoped.md)) |
-| + Build data | L3 | 10 | **167 / 181 (92%)** | build-mode flips: exceptions ([130](examples/case130_exceptions_mode_flip.md)), RTTI ([131](examples/case131_rtti_mode_flip.md)), thread-safe statics ([132](examples/case132_threadsafe_statics_flip.md)), TLS model ([133](examples/case133_tls_model_flip.md)), enum size ([152](examples/case152_enum_size_flag_flip.md)), struct packing ([153](examples/case153_struct_packing_flip.md)), LTO ([154](examples/case154_lto_mode_flip.md)), char signedness ([155](examples/case155_char_signedness_flip.md)), C++ standard floor ([98](examples/case98_cxx_standard_floor_raised.md)) |
-| + Sources | L4 | 5 | **172 / 181 (95%)** | uninstantiated template ([122](examples/case122_template_signature_uninstantiated.md)), public macro removed ([156](examples/case156_public_macro_removed.md)), inline function removed ([157](examples/case157_inline_function_removed.md)), concept tightening ([105](examples/case105_concept_tightening.md)), public typedef removed ([158](examples/case158_public_typedef_removed.md)) |
-| + Source graph | L5 | 9 | **181 / 181 (100%)** | public API internal dependency ([160](examples/case160_public_api_internal_dep_added.md)), target dependency added ([161](examples/case161_target_dependency_added.md)), exported symbol source owner changed ([162](examples/case162_symbol_source_owner_changed.md)), private-field/base/parameter-type leaks ([187](examples/case187_public_struct_private_field_type.md)–[189](examples/case189_public_function_private_parameter_type.md), [191](examples/case191_header_only_graph_field_type.md)), call-graph reachability through suppression ([192](examples/case192_call_graph_break_survives_suppression.md)) |
+| Just the binary | L0 | 64 | **64 / 184 (35%)** | symbol removal ([01](examples/case01_symbol_removal.md)), SONAME ([05](examples/case05_soname.md)), visibility ([06](examples/case06_visibility.md)), symbol-version removed ([65](examples/case65_symbol_version_removed.md)), all 5 bundle cases |
+| + Debug symbols | L1 | 69 | **133 / 184 (72%)** | struct layout ([07](examples/case07_struct_layout.md)), enum value ([08](examples/case08_enum_value_change.md)), vtable ([09](examples/case09_cpp_vtable.md)), calling convention ([64](examples/case64_calling_convention_changed.md)), bitfield ([63](examples/case63_bitfield_changed.md)), toolchain flag drift ([103](examples/case103_toolchain_flag_drift.md)), templated-base `detail::` leak ([77](examples/case77_detail_templated_base_changed.md)) |
+| + Public headers | L2 | 24 | **157 / 184 (85%)** | access level ([34](examples/case34_access_level.md)), default arg removed ([123](examples/case123_default_argument_removed.md)), class `final` ([125](examples/case125_class_became_final.md)), `detail::` leaks ([74](examples/case74_detail_base_class_changed.md)–[76](examples/case76_detail_pimpl_vtable_changed.md)), scoped-internal *no-change* ([118](examples/case118_internal_struct_field_added_scoped.md)–[120](examples/case120_internal_struct_reordered_scoped.md)) |
+| + Build data | L3 | 10 | **167 / 184 (91%)** | build-mode flips: exceptions ([130](examples/case130_exceptions_mode_flip.md)), RTTI ([131](examples/case131_rtti_mode_flip.md)), thread-safe statics ([132](examples/case132_threadsafe_statics_flip.md)), TLS model ([133](examples/case133_tls_model_flip.md)), enum size ([152](examples/case152_enum_size_flag_flip.md)), struct packing ([153](examples/case153_struct_packing_flip.md)), LTO ([154](examples/case154_lto_mode_flip.md)), char signedness ([155](examples/case155_char_signedness_flip.md)), C++ standard floor ([98](examples/case98_cxx_standard_floor_raised.md)) |
+| + Sources | L4 | 5 | **172 / 184 (93%)** | uninstantiated template ([122](examples/case122_template_signature_uninstantiated.md)), public macro removed ([156](examples/case156_public_macro_removed.md)), inline function removed ([157](examples/case157_inline_function_removed.md)), concept tightening ([105](examples/case105_concept_tightening.md)), public typedef removed ([158](examples/case158_public_typedef_removed.md)) |
+| + Source graph | L5 | 12 | **184 / 184 (100%)** | public API internal dependency ([160](examples/case160_public_api_internal_dep_added.md)), target dependency added ([161](examples/case161_target_dependency_added.md)), exported symbol source owner changed ([162](examples/case162_symbol_source_owner_changed.md)), private-field/base/parameter-type leaks ([187](examples/case187_public_struct_private_field_type.md)–[189](examples/case189_public_function_private_parameter_type.md), [191](examples/case191_header_only_graph_field_type.md)), call-graph reachability through suppression ([192](examples/case192_call_graph_break_survives_suppression.md)), reconciled internal-declaration rename/ambiguous-rename/move ([194](examples/case194_header_graph_rename_reconciled.md)–[196](examples/case196_header_graph_move_reconciled.md)) |
 
 > **Why L3 now matters.** Earlier snapshots had no standalone L3-only catalog
 > cases. The current compare-mode catalog includes build-mode flips whose
@@ -422,7 +422,7 @@ for tier in ['L0', 'L1', 'L2', 'L3', 'L4', 'L5']:
 > penalising tier-appropriate variant kinds such as L0's `func_removed_elf_only`).
 >
 > **`L5`'s "first detectable" column is a kind-set floor, not a verdict floor,
-> for 4 of its 9 cases.** `case187`/`188`/`191` land in `L5` here even though
+> for 4 of its 12 cases.** `case187`/`188`/`191` land in `L5` here even though
 > their `BREAKING` verdict is empirically reachable at `L1`, and `case189` at
 > `L0` (verified with `--evidence-tiers --cases case187 case188 case189
 > case191`) — each already fires from a real, artifact-level structural
