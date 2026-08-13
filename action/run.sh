@@ -2105,7 +2105,13 @@ _maybe_post_pr_comment() {
     subject_args=(--subject "$(basename -- "$SCAN_ARTIFACT")")
   fi
 
-  python3 -m abicheck.cli_pr_comment "$PR_JSON" \
+  # Codex review: on a Windows Git Bash runner, `actions/setup-python`
+  # exposes `python`/`python.exe` but not always `python3` -- a hard-coded
+  # `python3` here would silently fail (swallowed by the trailing `|| true`
+  # below), leaving PR_BODY empty and the comment skipped or an existing
+  # sticky one deleted. `$_PY_BIN` is the same resolved interpreter every
+  # other Python invocation in this script already uses.
+  "$_PY_BIN" -m abicheck.cli_pr_comment "$PR_JSON" \
     --sha "${head_sha:-${GITHUB_SHA:-}}" \
     --detail "${INPUT_PR_COMMENT_DETAIL:-standard}" \
     --on "${INPUT_PR_COMMENT_ON:-changes}" \

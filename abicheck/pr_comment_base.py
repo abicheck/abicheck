@@ -194,23 +194,27 @@ class CommentModel:
     # the header for a diff with more real findings than that).
     scan_breaking_total: int | None = None
     scan_review_total: int | None = None
-    # The exact "safe" (additions) total -- `diff["additions"]`'s own cap
-    # (Codex review, follow-up to the two fields above) makes `len(safe)`
-    # under-report a truncated additions list exactly the same way the raw
-    # classified-list lengths did for breaking/review; unlike those two,
-    # there's no scalar count to fall back on (`diff["compatible"]` mixes
-    # additions and quality findings), so `pr_comment_scan.from_scan`
-    # derives this from `diff["additions_total"]` (schema 1.13) instead.
-    # `None` falls back to `len(self.safe)`, same convention as the two
-    # fields above.
+    # The exact "safe" (compatible) total -- `diff["additions"]`'s/
+    # `diff["quality"]`'s own caps (Codex review, follow-up to the two
+    # fields above) make `len(safe)` under-report a truncated list exactly
+    # the same way the raw classified-list lengths did for breaking/review;
+    # unlike those two, `pr_comment_scan.from_scan` derives this from the
+    # exact `diff["compatible"]` scalar minus the severity-promoted
+    # addition/quality category counts, rather than from either itemized
+    # list's own length. An earlier revision derived this from
+    # `diff["additions_total"]` (schema 1.13) alone, which missed every
+    # compatible-but-non-addition ("quality") finding entirely. `None`
+    # falls back to `len(self.safe)`, same convention as the two fields
+    # above.
     scan_safe_total: int | None = None
-    # Whether `diff["findings"]`/`diff["additions"]` were themselves
-    # truncated below the report cap -- surfaced as an explicit note
-    # (`pr_comment_scan.scan_note`) so "showing N of M" is never silent,
-    # even though `scan_breaking_total`/`scan_review_total`/
+    # Whether `diff["findings"]`/`diff["additions"]`/`diff["quality"]` were
+    # themselves truncated below the report cap -- surfaced as an explicit
+    # note (`pr_comment_scan.scan_note`) so "showing N of M" is never
+    # silent, even though `scan_breaking_total`/`scan_review_total`/
     # `scan_safe_total` above keep the header counts exact regardless.
     scan_findings_truncated: bool = False
     scan_additions_truncated: bool = False
+    scan_quality_truncated: bool = False
 
     @property
     def counts(self) -> tuple[int, int, int]:

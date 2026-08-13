@@ -295,6 +295,34 @@ def _addition_finding_dicts(
     return dicts, len(addition_changes) > len(dicts), len(addition_changes)
 
 
+def _quality_finding_dicts(
+    diff: Any, cap: int
+) -> tuple[list[dict[str, Any]], bool, int]:
+    """Always-on itemization of :func:`_addition_finding_dicts`'s complement
+    -- the compatible-but-non-addition subset of ``diff.compatible`` (a
+    quality-category change like ``func_noexcept_added``, or a
+    policy-demoted removal reclassified compatible).
+
+    Codex review, follow-up to the exact-safe-total fix in
+    ``pr_comment_scan.from_scan``: that fix corrected the *count* to read
+    the full ``diff.compatible`` scalar, but a scan whose only compatible
+    findings were quality-shaped still had nothing to itemize -- the
+    header could say "3 safe" with an empty green section and no way to
+    tell a reviewer what those three findings actually were. Mirrors
+    ``_addition_finding_dicts`` exactly (same cap, same ``"compatible"``
+    bucket label, same ``(dicts, truncated, total)`` return shape) with the
+    membership test inverted, capped independently of both the gating
+    findings and the addition findings so neither crowds this one out of
+    the shared report.
+    """
+    quality_changes = [
+        c for c in getattr(diff, "compatible", None) or ()
+        if _change_kind_str(c) not in _ADDITION_KIND_VALUES
+    ]
+    dicts = _baseline_finding_dicts(quality_changes[:cap], "compatible")
+    return dicts, len(quality_changes) > len(dicts), len(quality_changes)
+
+
 def _add_severity_blocking_compatible_findings(
     summary: dict[str, Any], diff: Any, gate: dict[str, Any], max_findings: int | None = None
 ) -> None:
@@ -794,6 +822,17 @@ def _baseline_summary(diff: Any, max_findings: int | None = None) -> dict[str, A
         if additions_truncated:
             summary["additions_truncated"] = True
             summary["additions_total"] = additions_total
+
+    # Always-on itemization of the complementary compatible-but-non-addition
+    # subset (Codex review, follow-up) -- see `_quality_finding_dicts`'s own
+    # docstring for why this exists alongside `additions` rather than
+    # folded into it.
+    quality, quality_truncated, quality_total = _quality_finding_dicts(diff, cap)
+    if quality:
+        summary["quality"] = quality
+        if quality_truncated:
+            summary["quality_truncated"] = True
+            summary["quality_total"] = quality_total
 
     # ADR-049 Phase 5: surface the same suppression audit trail `compare`'s
     # own JSON report already exposes (`DiffResult.suppressed_changes`,

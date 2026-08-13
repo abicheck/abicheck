@@ -1387,7 +1387,8 @@ def _discover_scan_project_config(
     "GitHub Action's own PR-comment renderer uses exactly this to avoid a "
     "second, potentially --depth build/source-expensive scan for the "
     "default --format text invocation). Requires --secondary-output "
-    "(writing two formats to the same stream would be ambiguous).",
+    "(writing two formats to the same stream would be ambiguous). Not "
+    "supported with --artifact-set.",
 )
 @verbose_option
 @compile_context_options  # dump↔scan L2 compile-context parity (ADR-037 D3)

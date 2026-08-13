@@ -129,32 +129,37 @@ def _scan_findings_to_buckets(
     return breaking, review
 
 
-def _scan_additions_to_safe(
-    additions_raw: object,
+def _scan_compatible_list_to_safe(
+    raw: object,
     demangled_map: dict[str, str],
-    addition_promoted: bool = False,
+    *,
+    category: str,
+    promoted: bool = False,
 ) -> list[Finding]:
-    """Classify the always-on ``diff["additions"]`` list (schema 1.13+) into
-    Safe-bucket ``Finding``s, each tagged ``category="addition"`` so they
-    render in the same "➕ Public API additions" section `compare` uses.
+    """Classify one of the two always-on compatible-finding lists (schema
+    1.13+'s ``diff["additions"]`` or ``diff["quality"]``) into Safe-bucket
+    ``Finding``s tagged with the given *category*. Shared by
+    :func:`_scan_additions_to_safe` and :func:`_scan_quality_to_safe`
+    (Codex review: the two lists have an identical shape, differing only in
+    which ``diff.compatible`` subset they itemize and which category the
+    result renders under).
 
-    ``addition_promoted`` (``levels.get("addition") == "error"``, the
-    severity-config promotion that moves *every* addition-category finding
-    to Breaking) short-circuits to an empty list: once that promotion is in
-    effect, every entry in ``diff["additions"]`` is inherently blocking, so
-    none belongs in the green section at all (Codex review, follow-up to an
-    earlier ID-based exclusion: ``diff["findings"]`` is independently capped
-    from ``diff["additions"]``, so a promoted addition dropped by the
-    findings-list cap was never in the exclusion set and still rendered
-    green even though the exact header total already correctly counted it
-    as blocking).
+    ``promoted`` (``levels.get(category-equivalent) == "error"``, the
+    severity-config promotion that moves *every* finding in this category to
+    Breaking) short-circuits to an empty list: once that promotion is in
+    effect, every entry in *raw* is inherently blocking, so none belongs in
+    the green section at all (Codex review, follow-up to an earlier
+    ID-based exclusion: ``diff["findings"]`` is independently capped from
+    this list, so a promoted entry dropped by the findings-list cap was
+    never in the exclusion set and still rendered green even though the
+    exact header total already correctly counted it as blocking).
     """
-    if addition_promoted:
+    if promoted:
         return []
     safe: list[Finding] = []
-    if not isinstance(additions_raw, list):
+    if not isinstance(raw, list):
         return safe
-    for c in additions_raw:
+    for c in raw:
         if not isinstance(c, dict):
             continue
         loc = c.get("source_location")
@@ -167,12 +172,49 @@ def _scan_additions_to_safe(
                 symbol=display_symbol,
                 detail=str(c.get("description", "") or ""),
                 location=_normalize_location(str(loc)) if loc else None,
-                category="addition",
+                category=category,
                 severity="compatible",
                 mangled=mangled_evidence,
             )
         )
     return safe
+
+
+def _scan_additions_to_safe(
+    additions_raw: object,
+    demangled_map: dict[str, str],
+    addition_promoted: bool = False,
+) -> list[Finding]:
+    """Classify the always-on ``diff["additions"]`` list (schema 1.13+) into
+    Safe-bucket ``Finding``s, each tagged ``category="addition"`` so they
+    render in the same "➕ Public API additions" section `compare` uses.
+    """
+    return _scan_compatible_list_to_safe(
+        additions_raw, demangled_map, category="addition", promoted=addition_promoted
+    )
+
+
+def _scan_quality_to_safe(
+    quality_raw: object,
+    demangled_map: dict[str, str],
+    quality_promoted: bool = False,
+) -> list[Finding]:
+    """Classify the always-on ``diff["quality"]`` list (schema 1.13+) --
+    :func:`~abicheck.cli_scan_baseline._quality_finding_dicts`'s
+    complementary itemization of the compatible-but-non-addition subset of
+    ``diff.compatible`` -- into Safe-bucket ``Finding``s tagged
+    ``category="quality_issues"``.
+
+    Codex review, follow-up to the exact-safe-total fix: that fix corrected
+    ``scan_safe_total`` to read the full ``diff.compatible`` scalar, but a
+    scan whose only compatible findings were quality-shaped (e.g. a
+    ``func_noexcept_added`` compatibility improvement, or a policy-demoted
+    removal) still had nothing itemized for the reader to actually review --
+    the header could say "3 safe" next to an empty green section.
+    """
+    return _scan_compatible_list_to_safe(
+        quality_raw, demangled_map, category="quality_issues", promoted=quality_promoted
+    )
 
 
 def _scan_coverage_lines(report: dict[str, object]) -> list[str]:
@@ -349,7 +391,7 @@ def _scan_crosscheck_findings(
     "1" for a kind with 7 real occurrences) -- callers must use this
     function's own returned total, not ``len()`` of the itemized list.
     """
-    from .checker_policy import API_BREAK_KINDS
+    from .checker_policy import API_BREAK_KINDS, RISK_KINDS
 
     crosscheck = report.get("crosscheck")
     counts = crosscheck.get("counts_by_check") if isinstance(crosscheck, dict) else None
@@ -358,6 +400,7 @@ def _scan_crosscheck_findings(
     severities_raw = report.get("crosscheck_severities")
     severities = severities_raw if isinstance(severities_raw, dict) else {}
     api_break_values = {k.value for k in API_BREAK_KINDS}
+    risk_values = {k.value for k in RISK_KINDS}
     findings: list[Finding] = []
     total = 0
     for kind, count in counts.items():
@@ -378,13 +421,35 @@ def _scan_crosscheck_findings(
         detail = f"{count} occurrence(s)"
         if promoted:
             detail += " (--crosscheck promoted to error)"
+        # Codex review: a RISK-tier check (e.g. `identity_collision_detected`)
+        # promoted with `--crosscheck KEY=error` still gates the run
+        # (`scan_engine._crosscheck_severity_exit` deliberately allows even a
+        # RISK check to reach the source-break exit tier), but that gate
+        # promotion doesn't turn the underlying evidence into an actual API
+        # break -- hardcoding `severity="api_break"` here made the sticky
+        # headline claim "Source API break blocks this PR" for what the
+        # scan report itself calls a compatibility risk. Derive the label
+        # from the kind's own `API_BREAK_KINDS`/`RISK_KINDS` membership
+        # instead, so the promoted-but-not-an-API-break case reads
+        # "Compatibility risk blocks this PR" (`pr_comment._header`).
+        if kind in api_break_values:
+            severity = "api_break"
+        elif kind in risk_values:
+            severity = "risk"
+        else:
+            # A cross-check kind outside both sets is unusual (every
+            # ChangeKind belongs to exactly one severity tier), but if it
+            # ever happens, the pre-existing conservative default keeps a
+            # gating finding visible as a break rather than silently
+            # dropping its severity.
+            severity = "api_break"
         findings.append(
             Finding(
                 kind=str(kind),
                 symbol=f"Cross-check: {kind}",
                 detail=detail,
                 category="potential_breaking",
-                severity="api_break",
+                severity=severity,
             )
         )
         total += count
@@ -414,6 +479,7 @@ def from_scan(
     diff_dict = diff if isinstance(diff, dict) else None
     findings_raw: object = None
     additions_raw: object = None
+    quality_raw: object = None
     not_comparable_reason: str | None = None
     audit_only = diff is None
     if isinstance(diff, dict):
@@ -422,6 +488,7 @@ def from_scan(
         else:
             findings_raw = diff.get("findings")
             additions_raw = diff.get("additions")
+            quality_raw = diff.get("quality")
 
     # `_run_baseline_compare`'s own severity-gate block and the
     # contract-coverage ledger both nest inside `report["diff"]`, not at the
@@ -431,7 +498,7 @@ def from_scan(
     # `--contract-evaluation` scan silently lost both signals).
     levels = _severity_levels(diff_dict) if diff_dict is not None else {}
     symbols: list[str] = []
-    for raw in (findings_raw, additions_raw):
+    for raw in (findings_raw, additions_raw, quality_raw):
         if isinstance(raw, list):
             symbols.extend(
                 str(c.get("symbol", "")) for c in raw if isinstance(c, dict)
@@ -442,7 +509,10 @@ def from_scan(
         findings_raw, demangled_map, gate_api_break, levels
     )
     addition_promoted = levels.get("addition") == "error"
-    safe = _scan_additions_to_safe(additions_raw, demangled_map, addition_promoted)
+    quality_promoted = levels.get("quality_issues") == "error"
+    safe = _scan_additions_to_safe(
+        additions_raw, demangled_map, addition_promoted
+    ) + _scan_quality_to_safe(quality_raw, demangled_map, quality_promoted)
 
     # Cross-check is a separate evidence axis from the baseline diff (ADR-035
     # D4) that never nests inside `diff["findings"]`/`diff["additions"]`, so
@@ -532,16 +602,14 @@ def from_scan(
     # both promoted-category counts here yields the exact non-promoted-safe
     # total regardless of finding shape.
     #
-    # Known residual gap, not fixed here: only the addition-shaped subset is
-    # actually itemizable (`diff["additions"]` never carries a non-addition
-    # compatible finding's kind/symbol/location at all -- schema 1.13 has no
-    # field for it), so `len(model.safe)` can be smaller than
-    # `scan_safe_total` even with nothing truncated, and `scan_note` has no
-    # "N more not shown" line to explain it in that shape specifically. A
-    # correct fix needs `cli_scan_baseline.py` to itemize the full
-    # `compatible` bucket (a new schema field/version, its own review), not
-    # a same-round extension of this total. Undercounting the total to zero
-    # -- the actual reported bug -- is closed either way.
+    # This total's itemization is now complete too (Codex review, follow-up):
+    # `diff["quality"]` (`cli_scan_baseline._quality_finding_dicts`)
+    # itemizes exactly the complement `diff["additions"]` leaves out -- the
+    # compatible-but-non-addition subset -- so `model.safe` (built from both
+    # lists, see `_scan_additions_to_safe`/`_scan_quality_to_safe` above) can
+    # only fall short of `scan_safe_total` the same way `additions` already
+    # could: real truncation at the shared report cap, not a whole finding
+    # shape with nothing to show for it.
     scan_safe_total: int | None = None
     if diff_dict is not None:
         raw_compatible = _as_int(diff_dict.get("compatible"))
@@ -583,6 +651,7 @@ def from_scan(
         scan_safe_total=scan_safe_total,
         scan_findings_truncated=bool(diff_dict and diff_dict.get("findings_truncated")),
         scan_additions_truncated=bool(diff_dict and diff_dict.get("additions_truncated")),
+        scan_quality_truncated=bool(diff_dict and diff_dict.get("quality_truncated")),
     )
 
 
@@ -616,12 +685,17 @@ def scan_note(model: CommentModel) -> list[str]:
         out += [f"> 🔎 Scan: {' · '.join(bits)}", ""]
     if model.scan_coverage_lines:
         out += [f"> 📊 Coverage: {', '.join(model.scan_coverage_lines)}", ""]
-    if model.scan_findings_truncated or model.scan_additions_truncated:
+    if (
+        model.scan_findings_truncated
+        or model.scan_additions_truncated
+        or model.scan_quality_truncated
+    ):
         truncated = [
             label
             for label, flag in (
                 ("gating findings", model.scan_findings_truncated),
                 ("additions", model.scan_additions_truncated),
+                ("other compatible findings", model.scan_quality_truncated),
             )
             if flag
         ]

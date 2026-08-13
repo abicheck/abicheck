@@ -616,7 +616,17 @@ REPORT_SCHEMA_VERSION = "2.34"
 #:        fallback regardless. Additive and always present alongside the
 #:        other ``diff`` fields on a real comparison (only absent for the
 #:        ``NOT_COMPARABLE``/audit-only ``diff`` shapes, which never reach
-#:        policy classification at all).
+#:        policy classification at all). The ``diff`` block also gains
+#:        ``quality`` (plus optional ``quality_truncated``/``quality_total``
+#:        fields), ``additions``'s exact complement: the compatible-but-
+#:        non-addition subset of ``diff.compatible`` (a quality-category
+#:        change like ``func_noexcept_added``, or a policy-demoted removal
+#:        reclassified compatible), itemized the same shape and under the
+#:        same cap as ``additions`` (Codex review, follow-up). Without it, a
+#:        scan whose only compatible findings were quality-shaped had an
+#:        exact "N safe" header count (once the count itself was corrected
+#:        to read the full ``diff.compatible`` scalar) with nothing
+#:        itemized underneath it to explain what those N findings were.
 SCAN_SCHEMA_VERSION = "1.13"
 
 _SCHEMA_DIR = Path(__file__).resolve().parent

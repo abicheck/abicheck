@@ -56,7 +56,13 @@ def _mode_gate_fragment() -> str:
     # Close the function (the real one continues past the artifact-set
     # guard; this fragment stops right after its closing `fi`, a complete,
     # balanced sub-body) so it parses as a callable function on its own.
-    return body + "  return 0\n}\n"
+    # The "GATE_PASSED" echo (CodeRabbit review) is emitted only from
+    # *inside* the function, right before its own `return 0` -- unlike the
+    # caller's trailing "REACHED" echo (outside the function, always
+    # printed regardless of what the gate did), this can only appear if
+    # every guard in the fragment above actually let execution fall
+    # through, so a test asserting it can't pass vacuously.
+    return body + '  echo "GATE_PASSED"\n  return 0\n}\n'
 
 
 def _mode_and_verdict_gate_fragment() -> str:
@@ -88,7 +94,14 @@ def _run(mode: str, extra_env: dict[str, str] | None = None) -> subprocess.Compl
     script = _mode_gate_fragment() + '\n_maybe_post_pr_comment\necho "REACHED"\n'
     env = dict(os.environ)
     env["MODE"] = mode
-    env["INPUT_PR_COMMENT"] = env.get("INPUT_PR_COMMENT", "true")
+    # Pinned unconditionally (CodeRabbit review), not inherited from the
+    # caller's environment: an already-exported INPUT_PR_COMMENT=false or
+    # SCAN_ARTIFACT_SET in the test runner's own environment would silently
+    # route these tests through the skip path, and the trailing "REACHED"
+    # echo (outside the function) would still make them look like they
+    # passed. extra_env can still override either, same as before.
+    env["INPUT_PR_COMMENT"] = "true"
+    env["SCAN_ARTIFACT_SET"] = ""
     for k, v in (extra_env or {}).items():
         env[k] = v
     return subprocess.run(
@@ -103,23 +116,24 @@ def _run(mode: str, extra_env: dict[str, str] | None = None) -> subprocess.Compl
 def test_compare_mode_passes_the_gate():
     result = _run("compare")
     assert result.returncode == 0, result.stderr
-    assert "REACHED" in result.stdout
+    assert "GATE_PASSED" in result.stdout
 
 
 def test_scan_mode_passes_the_gate():
     result = _run("scan")
     assert result.returncode == 0, result.stderr
-    assert "REACHED" in result.stdout
+    assert "GATE_PASSED" in result.stdout
 
 
 def test_dump_mode_is_a_no_op():
     # `_maybe_post_pr_comment` returns before the fragment's own trailing
-    # `return 0`/echo — the case statement's `*) return 0 ;;` fires first,
-    # so the caller-visible "REACHED" line still prints (it's outside the
-    # function), but nothing inside the gate ran.
+    # `return 0`/"GATE_PASSED" echo — the case statement's `*) return 0 ;;`
+    # fires first, so the caller-visible "REACHED" line still prints (it's
+    # outside the function), but nothing inside the gate ran.
     result = _run("dump")
     assert result.returncode == 0, result.stderr
     assert "REACHED" in result.stdout
+    assert "GATE_PASSED" not in result.stdout
     assert "skipping PR comment" not in result.stdout
 
 
@@ -128,18 +142,21 @@ def test_scan_artifact_set_is_skipped_with_a_diagnostic():
     assert result.returncode == 0, result.stderr
     assert "no single-artifact JSON shape" in result.stdout
     assert "REACHED" in result.stdout
+    assert "GATE_PASSED" not in result.stdout
 
 
 def test_scan_without_artifact_set_is_not_skipped():
     result = _run("scan", {"SCAN_ARTIFACT_SET": ""})
     assert result.returncode == 0, result.stderr
     assert "no single-artifact JSON shape" not in result.stdout
+    assert "GATE_PASSED" in result.stdout
 
 
 def test_pr_comment_false_disables_every_mode():
     result = _run("scan", {"INPUT_PR_COMMENT": "false"})
     assert result.returncode == 0, result.stderr
     assert "no single-artifact JSON shape" not in result.stdout
+    assert "GATE_PASSED" not in result.stdout
 
 
 def _run_verdict_guards(verdict: str) -> subprocess.CompletedProcess:
@@ -183,3 +200,16 @@ def test_compatible_verdict_passes_the_verdict_guards():
     result = _run_verdict_guards("COMPATIBLE")
     assert result.returncode == 0, result.stderr
     assert "PAST_VERDICT_GUARDS" in result.stdout
+
+
+def test_pr_comment_renderer_uses_resolved_py_bin_not_bare_python3():
+    # Codex review: on a Windows Git Bash runner, actions/setup-python
+    # exposes python/python.exe but not always python3 -- a hard-coded
+    # `python3 -m abicheck.cli_pr_comment` would silently fail (swallowed
+    # by the trailing `|| true`), leaving PR_BODY empty and the comment
+    # skipped or an existing sticky one deleted. Every other Python
+    # invocation in this script already goes through the resolved
+    # $_PY_BIN; the renderer must too.
+    text = RUN_SH.read_text(encoding="utf-8")
+    assert '"$_PY_BIN" -m abicheck.cli_pr_comment' in text
+    assert "python3 -m abicheck.cli_pr_comment" not in text

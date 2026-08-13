@@ -705,6 +705,15 @@ is what lets a `scan --against` PR comment (see the Action's own
 render a green "public API additions" section the same way `compare`'s own
 JSON report already does via its full `changes` list.
 
+The block also carries `quality` (plus optional `quality_truncated`/
+`quality_total`) — `additions`'s exact complement, itemizing the
+compatible-but-non-addition subset of `compatible` (a quality-category
+change like `func_noexcept_added`, or a policy-demoted removal reclassified
+compatible) the same shape and under the same cap as `additions`, so the
+comment's "safe" total (which reads the full `compatible` scalar) always has
+a matching set of itemized rows to show a reviewer, whichever shape those
+findings take.
+
 The block also carries `policy` — the resolved compatibility policy name
 (e.g. `"strict_abi"`) that actually classified these buckets, the same fact
 `compare`'s own top-level JSON report has always carried. Present on any

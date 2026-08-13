@@ -665,6 +665,94 @@ def test_scan_compatible_quality_total_subtracts_promoted_quality_count():
     assert model.counts == (2, 0, 3)
 
 
+def test_scan_quality_findings_itemized_in_safe_section():
+    # Codex review, follow-up: correcting the total wasn't enough on its
+    # own -- a scan whose only compatible findings were quality-shaped
+    # reported an exact "3 safe" header with nothing itemized underneath it
+    # (no rows, even at `detail: full`). `diff.quality` closes that.
+    report = _scan_report(
+        diff={
+            "breaking": 0,
+            "api_break": 0,
+            "risk": 0,
+            "compatible": 2,
+            "quality": [
+                {
+                    "bucket": "compatible",
+                    "kind": "field_became_volatile",
+                    "symbol": "_Zq1v",
+                    "description": "field became volatile",
+                    "finding_id": "q1",
+                },
+                {
+                    "bucket": "compatible",
+                    "kind": "field_became_volatile",
+                    "symbol": "_Zq2v",
+                    "description": "field became volatile",
+                    "finding_id": "q2",
+                },
+            ],
+        },
+    )
+    model = build_model(report)
+    assert model.counts == (0, 0, 2)
+    assert len(model.safe) == 2
+    assert all(f.category == "quality_issues" for f in model.safe)
+    body = render_comment(model, sha="abc1234", detail="full")
+    assert "field_became_volatile" in body
+
+
+def test_scan_quality_promotion_empties_the_quality_section_wholesale():
+    # Mirrors the addition-promotion fix: `quality_issues: error` promotes
+    # every quality-category compatible finding to blocking at once, so
+    # none of them belongs in the green section, regardless of how many of
+    # the promoted findings made it into the (independently capped)
+    # `diff.findings` list.
+    report = _scan_report(
+        verdict="SEVERITY_ERROR",
+        exit_code=1,
+        diff={
+            "breaking": 0,
+            "api_break": 0,
+            "risk": 0,
+            "compatible": 2,
+            "severity": {
+                "config": {"quality_issues": "error"},
+                "categories": {"quality_issues": {"severity": "error", "count": 2}},
+            },
+            "findings": [
+                {
+                    "bucket": "compatible",
+                    "kind": "field_became_volatile",
+                    "symbol": "_Zq1v",
+                    "description": "field became volatile",
+                    "finding_id": "q1",
+                },
+            ],
+            "findings_truncated": True,
+            "quality": [
+                {
+                    "bucket": "compatible",
+                    "kind": "field_became_volatile",
+                    "symbol": "_Zq1v",
+                    "description": "field became volatile",
+                    "finding_id": "q1",
+                },
+                {
+                    "bucket": "compatible",
+                    "kind": "field_became_volatile",
+                    "symbol": "_Zq2v",
+                    "description": "field became volatile",
+                    "finding_id": "q2",
+                },
+            ],
+        },
+    )
+    model = build_model(report)
+    assert model.counts == (2, 0, 0)
+    assert model.safe == []
+
+
 def test_scan_audit_only_surfaces_api_break_crosscheck_findings():
     # Codex review: an audit-only run (no --against) always has diff=None,
     # but scan_engine._audit_exit_code can still publish API_BREAK/exit 2
@@ -696,6 +784,57 @@ def test_scan_audit_only_surfaces_api_break_crosscheck_findings():
     assert should_post(model, "changes")
     body = render_comment(model, sha="abc1234", detail="standard")
     assert "Scan audit — no baseline to compare" not in body
+
+
+def test_scan_promoted_risk_crosscheck_renders_risk_not_api_break_headline():
+    # Codex review: `scan_engine._crosscheck_severity_exit` deliberately
+    # lets even a RISK-tier check (e.g. `identity_collision_detected`)
+    # reach the source-break exit tier once promoted with `--crosscheck
+    # KEY=error` -- but that gate promotion doesn't turn the underlying
+    # evidence into an actual API break. Hardcoding severity="api_break"
+    # for every crosscheck finding made the sticky headline claim
+    # "Source API break blocks this PR" even for a promoted RISK check;
+    # it must read "Compatibility risk blocks this PR" instead.
+    report = _scan_report(
+        verdict="API_BREAK",
+        exit_code=2,
+        diff=None,
+        crosscheck={
+            "version": 1,
+            "findings": 1,
+            "counts_by_check": {"identity_collision_detected": 1},
+            "coverage": [],
+            "providers": {},
+        },
+        crosscheck_severities={"identity_collision_detected": "error"},
+    )
+    model = build_model(report, gate_api_break=True)
+    assert model.breaking[0].severity == "risk"
+    body = render_comment(model, sha="abc1234", detail="standard")
+    assert "Compatibility risk blocks this PR" in body
+    assert "Source API break blocks this PR" not in body
+
+
+def test_scan_promoted_api_break_crosscheck_still_renders_api_break_headline():
+    # A genuinely API_BREAK_KINDS check (header_build_context_mismatch)
+    # promoted the same way must still read as a real API break.
+    report = _scan_report(
+        verdict="API_BREAK",
+        exit_code=2,
+        diff=None,
+        crosscheck={
+            "version": 1,
+            "findings": 1,
+            "counts_by_check": {"header_build_context_mismatch": 1},
+            "coverage": [],
+            "providers": {},
+        },
+        crosscheck_severities={"header_build_context_mismatch": "error"},
+    )
+    model = build_model(report, gate_api_break=True)
+    assert model.breaking[0].severity == "api_break"
+    body = render_comment(model, sha="abc1234", detail="standard")
+    assert "Source API break blocks this PR" in body
 
 
 def test_scan_audit_only_gate_api_break_moves_crosscheck_to_breaking():

@@ -651,7 +651,9 @@ outputs:
       has findings), COVERAGE_INCOMPLETE, API_BREAK, BREAKING,
       NOT_COMPARABLE (with --against, when the candidate and baseline were
       not extracted under a comparable profile/scope contract -- ADR-050
-      D2 -- so no comparison could run at all), BUDGET_OVERFLOW, or ERROR.
+      D2 -- so no comparison could run at all; this verdict fails the step
+      unconditionally, since no fail-on-* input governs a run in which no
+      comparison happened), BUDGET_OVERFLOW, or ERROR.
       For deps-compare: PASS, WARN, FAIL, or ERROR.
       For deps-tree: PASS, FAIL, or ERROR.
       On compare and scan alike, verdict and exit-code are different axes and

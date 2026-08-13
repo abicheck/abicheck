@@ -304,6 +304,9 @@ class TestBaselineSummaryKeysArePinned:
             "additions",
             "additions_truncated",
             "additions_total",
+            "quality",
+            "quality_truncated",
+            "quality_total",
             "policy",
         }
     )
@@ -332,11 +335,19 @@ class TestBaselineSummaryKeysArePinned:
             Change(kind=ChangeKind.FUNC_ADDED, symbol=f"_Za{i:02d}v", description="d")
             for i in range(30)
         ]
+        # A compatible-but-non-addition ("quality") kind, same shape, so
+        # `quality`/`quality_truncated`/`quality_total` are reachable too.
+        quality = [
+            Change(
+                kind=ChangeKind.FIELD_BECAME_VOLATILE, symbol=f"_Zq{i:02d}v", description="d"
+            )
+            for i in range(30)
+        ]
         return types.SimpleNamespace(
             breaking=breaking,
             source_breaks=[],
             risk=[],
-            compatible=additions,
+            compatible=additions + quality,
             not_evaluated=[breaking[0]],
             detector_results=[
                 types.SimpleNamespace(
