@@ -726,6 +726,21 @@ def test_release_contract_coverage_contribution_creates_blocking_incomplete_find
     assert title == "Source analysis incomplete"
 
 
+def test_release_contract_coverage_finding_renders_in_full_detail_body():
+    # Codex review (CLI-audit P2 follow-up): the headline/count alone told a
+    # reviewer *that* something was incomplete, but `_body_sections`'s
+    # release-mode early return skipped `model.incomplete` entirely, so the
+    # actual "Incomplete for: ..." detail naming the affected library was
+    # unreachable in the rendered comment body -- full detail included.
+    report = _release_report()
+    report["libraries"][1]["contract_coverage_exit_contribution"] = 1
+    report["contract_coverage_exit_contribution"] = 1
+    model = build_model(report)
+    body = render_comment(model, sha="x", detail="full")
+    assert "Analysis incomplete" in body
+    assert "Incomplete for: libbar.so.2" in body
+
+
 def test_release_contract_coverage_zero_contribution_is_not_incomplete():
     report = _release_report()
     report["contract_coverage_exit_contribution"] = 0

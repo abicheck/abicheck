@@ -1696,7 +1696,20 @@ def _incomplete_note(model: CommentModel) -> list[str]:
 
 def _body_sections(model: CommentModel, detail: str) -> list[str]:
     if model.mode == "release":
-        return _release_table(model, detail)
+        # Codex review (CLI-audit P2 follow-up): the release path's early
+        # return used to skip `model.incomplete` entirely — the headline and
+        # `_header_block`'s "· N analysis incomplete" count already surfaced
+        # a release-level contract-coverage gap (see `_release_contract_
+        # coverage_findings`), but the actual `Finding.detail` naming which
+        # libraries were affected was unreachable in the rendered body, full
+        # detail included. Same table compare mode uses for its own
+        # incomplete bucket, appended after the per-library results table.
+        return _release_table(model, detail) + _findings_table(
+            "🛑 Analysis incomplete",
+            model.incomplete,
+            detail,
+            open_default=bool(model.incomplete),
+        )
     cats = model.breaking_categories
     breaking_title = (
         "❌ Breaking"
