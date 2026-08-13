@@ -37,17 +37,35 @@ import tempfile
 from pathlib import Path
 
 RUN_SH = Path(__file__).resolve().parents[1] / "action" / "run.sh"
+_JSON_REPORT_SRC_START_MARKER = "_json_report_src() {"
+_JSON_REPORT_SRC_END_MARKER = "\n}\n"
 _FUNCS_START_MARKER = "_can_reuse_primary_json() {"
 _FUNCS_END_MARKER = "_maybe_post_pr_comment() {"
 _FRAGMENT_START_MARKER = 'echo "::group::abicheck PR comment"'
 _FRAGMENT_END_MARKER = '"${PR_CMD_JSON[@]}" >/dev/null 2>/dev/null || true\n  fi'
 
 
+def _json_report_src_region() -> str:
+    """``_json_report_src`` — defined much earlier in run.sh than
+    ``_can_reuse_primary_json``, which now calls it (Codex review: the
+    stdout-JSON case needed this shared resolver instead of re-checking
+    only ``$OUTPUT_FILE``). Extracted separately since it isn't adjacent to
+    the ``_funcs_region`` below."""
+    text = RUN_SH.read_text(encoding="utf-8")
+    start = text.index(_JSON_REPORT_SRC_START_MARKER)
+    end = text.index(_JSON_REPORT_SRC_END_MARKER, start) + len(_JSON_REPORT_SRC_END_MARKER)
+    return text[start:end]
+
+
 def _funcs_region() -> str:
     """``_can_reuse_primary_json``/``_build_json_cmd`` — self-contained,
     balanced function defs, extracted verbatim from run.sh."""
     text = RUN_SH.read_text(encoding="utf-8")
-    return text[text.index(_FUNCS_START_MARKER):text.index(_FUNCS_END_MARKER)]
+    return (
+        _json_report_src_region()
+        + "\n"
+        + text[text.index(_FUNCS_START_MARKER):text.index(_FUNCS_END_MARKER)]
+    )
 
 
 def _fragment_region() -> str:
@@ -175,3 +193,27 @@ CMD=("$TEST_BASH" "$TEST_STUB" compare old.json new.json --show-only added --for
             "TEST_BASH": _bash_executable(),
         })
         assert pr_json.read_text(encoding="utf-8").strip() == "rerun-sentinel"
+
+    def test_reuses_stdout_json_when_no_output_file(self, tmp_path):
+        # Codex review: format: json with no output-file is the CLI's
+        # documented stdout mode -- the primary JSON lands only in
+        # $_STDOUT_JSON_FILE (materialized by run.sh near the top of the
+        # script), never $OUTPUT_FILE. Before this fix, _can_reuse_primary_
+        # json only ever looked at $OUTPUT_FILE, so this shape fell through
+        # to a full rerun despite the JSON already existing on disk.
+        pr_json = tmp_path / "pr.json"
+        pr_json.write_text("", encoding="utf-8")
+        stdout_json = tmp_path / "stdout.json"
+        stdout_json.write_text('{"source": "stdout-json"}', encoding="utf-8")
+        harness = """
+PR_JSON="$TEST_PR_JSON"
+FORMAT=json
+OUTPUT_FILE=
+_STDOUT_JSON_FILE="$TEST_STDOUT_JSON"
+CMD=(abicheck scan liblib.so --format json)
+"""
+        _run(harness, {
+            "TEST_PR_JSON": str(pr_json),
+            "TEST_STDOUT_JSON": str(stdout_json),
+        })
+        assert pr_json.read_text(encoding="utf-8") == '{"source": "stdout-json"}'

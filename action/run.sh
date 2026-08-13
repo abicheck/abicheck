@@ -1946,11 +1946,23 @@ fi
 _can_reuse_primary_json() {
   # Reuse the primary run's output as the comment's JSON report instead of
   # re-running the comparison — but only when it is a faithful, unfiltered
-  # report. It must already be JSON, written to a non-empty file, and free of
-  # display filters (--show-only / --stat) that hide gated changes from the
-  # comment (which _build_json_cmd strips for exactly that reason).
+  # report. It must already be JSON, actually available somewhere
+  # (_json_report_src, defined near the top of the script — it already
+  # falls back from $OUTPUT_FILE through the stdout-mode $_STDOUT_JSON_FILE;
+  # its middle fallback, $PR_JSON, is always empty at this call site, since
+  # the caller only reaches here after its own "already populated" check on
+  # PR_JSON came back empty), and free of display filters (--show-only /
+  # --stat) that hide gated changes from the comment (which _build_json_cmd
+  # strips for exactly that reason).
+  #
+  # Codex review: the stdout-JSON case (format: json, no output-file) used
+  # to fall through this check — it only ever looked at $OUTPUT_FILE, never
+  # the already-materialized $_STDOUT_JSON_FILE — silently re-running the
+  # whole scan/compare a second time just to get JSON that had already been
+  # produced, for scan doubling potentially expensive --depth build/source
+  # work and describing a separate, budget-metered run.
   [[ "${FORMAT:-}" == "json" ]] || return 1
-  [[ -n "${OUTPUT_FILE:-}" && -s "${OUTPUT_FILE:-}" ]] || return 1
+  [[ -n "$(_json_report_src)" ]] || return 1
   local arg
   for arg in ${CMD[@]+"${CMD[@]}"}; do
     case "$arg" in
@@ -2043,7 +2055,7 @@ _maybe_post_pr_comment() {
   elif _can_reuse_primary_json; then
     # The primary run already produced a faithful JSON report — reuse it instead
     # of re-running the whole comparison.
-    cp "$OUTPUT_FILE" "$PR_JSON"
+    cp "$(_json_report_src)" "$PR_JSON"
   else
     _build_json_cmd
     # Re-run for JSON; a non-zero exit here is expected on breaks — the report

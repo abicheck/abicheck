@@ -252,13 +252,11 @@ def _scan_true_counts(
     ``potential_breaking: error`` severity config (api_break + risk ->
     breaking, since that category IS exactly those two raw severities). An
     ``addition``/``quality_issues`` promotion (a *compatible*-bucket finding
-    promoted to blocking) is deliberately not folded in here: the raw
+    promoted to blocking) is deliberately not folded in here -- the raw
     ``compatible`` scalar mixes additions and quality findings with no way
-    to tell them apart from the scalar alone -- but every promoted entry is
-    already included in ``findings`` regardless of the ordinary cap
-    (``cli_scan_baseline._add_severity_blocking_compatible_findings``'s own
-    reserved-floor design), so the classified ``breaking`` list already
-    counts that narrower case correctly without needing this override.
+    to tell them apart -- see :func:`_scan_promoted_compatible_counts`
+    instead, which reads the exact per-category counts the ``severity``
+    block itself already carries.
     """
     if not isinstance(diff, dict):
         return None
@@ -275,6 +273,106 @@ def _scan_true_counts(
         raw_api_break = 0
     review = raw_api_break + raw_risk
     return breaking, review
+
+
+def _scan_promoted_compatible_counts(
+    diff: dict[str, object] | None, levels: dict[str, str]
+) -> tuple[int, int]:
+    """Exact ``(promoted_addition_count, promoted_quality_count)`` for a
+    severity-config-promoted ``compatible`` category, read from
+    ``diff["severity"]["categories"]`` -- unlike counting the classified
+    ``breaking`` list built from ``diff["findings"]``, this is immune to
+    that list's own cap.
+
+    Codex review, follow-up to :func:`_scan_true_counts`: an earlier
+    revision counted ``sum(1 for f in breaking if f.severity ==
+    "compatible")`` on the theory that ``cli_scan_baseline._add_severity_
+    blocking_compatible_findings``'s reserved-floor design guarantees every
+    promoted entry survives the cap -- checking that function again shows
+    the floor guarantees only a *minimum* representation (``max(1, cap //
+    4)``), not completeness, so a diff with more promoted entries than fit
+    in the shared findings budget undercounted both the Breaking total and
+    (by extension) the "safe" total it was subtracted from.
+    ``reporter._build_severity_json``'s ``categories.<name>.count`` is
+    computed from the full, unfiltered change set
+    (``severity.categorize_changes``), so it is exact regardless of any
+    report-level truncation.
+    """
+    if not isinstance(diff, dict):
+        return 0, 0
+    severity = diff.get("severity")
+    categories = severity.get("categories") if isinstance(severity, dict) else None
+    if not isinstance(categories, dict):
+        return 0, 0
+
+    def _category_count(name: str) -> int:
+        entry = categories.get(name)
+        count = entry.get("count") if isinstance(entry, dict) else None
+        return count if isinstance(count, int) else 0
+
+    promoted_addition = _category_count("addition") if levels.get("addition") == "error" else 0
+    promoted_quality = (
+        _category_count("quality_issues") if levels.get("quality_issues") == "error" else 0
+    )
+    return promoted_addition, promoted_quality
+
+
+def _scan_audit_crosscheck_findings(report: dict[str, object]) -> list[Finding]:
+    """Synthetic, count-only ``Finding``s for an audit-only (no ``--against``)
+    scan's cross-check results that actually gated the run -- an
+    ``API_BREAK_KINDS`` finding, or any check the maintainer promoted with
+    ``--crosscheck KEY=error`` (see ``scan_engine._audit_exit_code``/
+    ``_crosscheck_severity_exit``, the only two ways an audit-only scan
+    reaches ``API_BREAK``/exit 2).
+
+    Codex review: an audit-only scan's ``diff`` is always ``None`` (there is
+    no baseline to compare), so before this helper existed
+    :func:`from_scan` populated every compatibility bucket empty regardless
+    of the verdict -- with ``pr-comment-on: changes`` the comment was
+    skipped (or a stale sticky one deleted) even when ``fail-on-api-break``
+    had just turned the check red, and with ``always`` it rendered the
+    green "Scan audit — no baseline to compare" headline right next to it.
+
+    ``CrosscheckResult.to_dict()`` (``report["crosscheck"]``) carries no
+    itemized finding detail (symbol/location) -- only
+    ``counts_by_check`` (``ChangeKind`` value -> count) -- so each kind
+    renders as one aggregate row rather than one row per instance, coarser
+    than compare's own per-symbol findings. Still the difference between an
+    accurate "N cross-check finding(s)" review section and total silence
+    next to a red check.
+    """
+    from .checker_policy import API_BREAK_KINDS
+
+    crosscheck = report.get("crosscheck")
+    counts = crosscheck.get("counts_by_check") if isinstance(crosscheck, dict) else None
+    if not isinstance(counts, dict):
+        return []
+    severities_raw = report.get("crosscheck_severities")
+    severities = severities_raw if isinstance(severities_raw, dict) else {}
+    api_break_values = {k.value for k in API_BREAK_KINDS}
+    findings: list[Finding] = []
+    for kind, count in counts.items():
+        if not isinstance(count, int) or count <= 0:
+            continue
+        promoted = severities.get(kind) == "error"
+        if kind not in api_break_values and not promoted:
+            # Advisory-only (RISK-tier or an un-promoted check): never gates
+            # an audit-only run, so it's not what the reader needs
+            # explained next to the verdict/exit code.
+            continue
+        detail = f"{count} occurrence(s)"
+        if promoted:
+            detail += " (--crosscheck promoted to error)"
+        findings.append(
+            Finding(
+                kind=str(kind),
+                symbol=f"Cross-check: {kind}",
+                detail=detail,
+                category="potential_breaking",
+                severity="api_break",
+            )
+        )
+    return findings
 
 
 def from_scan(
@@ -328,6 +426,19 @@ def from_scan(
         findings_raw, demangled_map, gate_api_break, levels
     )
     safe = _scan_additions_to_safe(additions_raw, demangled_map, promoted_addition_ids)
+    if audit_only:
+        # No `diff` at all to classify -- the only findings an audit-only
+        # run can report are its own cross-check results (see the helper's
+        # own docstring for why this render is coarser than the baseline
+        # case: aggregate counts, not per-symbol rows). --gate-api-break
+        # (fail-on-api-break) moves them to Breaking, mirroring how the
+        # ordinary baseline-comparison path treats an api_break severity
+        # finding under the same flag.
+        audit_findings = _scan_audit_crosscheck_findings(report)
+        if gate_api_break:
+            breaking = breaking + audit_findings
+        else:
+            review = review + audit_findings
 
     incomplete: list[Finding] = []
     incomplete_blocking = False
@@ -352,29 +463,32 @@ def from_scan(
     risk = report.get("risk")
     verdict = report.get("verdict")
     true_counts = _scan_true_counts(diff_dict, gate_api_break, levels)
+    promoted_addition_count, promoted_quality_count = _scan_promoted_compatible_counts(
+        diff_dict, levels
+    )
     if true_counts is not None:
-        # `_scan_true_counts` only folds the two promotions expressible
-        # from the raw breaking/api_break/risk scalars -- an
-        # addition/quality_issues severity-config promotion moves a
-        # *compatible*-severity finding into `breaking` too (see that
-        # function's own docstring), invisible to those scalars entirely.
-        # Every such entry is already in the classified `breaking` list
-        # (the reserved-floor design in `_add_severity_blocking_compatible_
-        # findings` guarantees it survives the cap), so count it directly
-        # from there rather than trying to derive it from `diff["compatible"]`
-        # (which mixes additions and quality findings with no way to split).
-        promoted_compatible = sum(1 for f in breaking if f.severity == "compatible")
-        true_counts = (true_counts[0] + promoted_compatible, true_counts[1])
+        # `_scan_true_counts` only folds the two promotions expressible from
+        # the raw breaking/api_break/risk scalars -- an addition/
+        # quality_issues severity-config promotion moves a *compatible*-
+        # severity finding into `breaking` too, invisible to those scalars
+        # entirely. Uses the exact per-category severity counts (see
+        # `_scan_promoted_compatible_counts`'s own docstring for why the
+        # classified `breaking` list's own length is not a safe substitute).
+        true_counts = (
+            true_counts[0] + promoted_addition_count + promoted_quality_count,
+            true_counts[1],
+        )
 
     # Exact "safe" (additions) total, immune to `diff["additions"]`'s own
     # cap (Codex review, follow-up to the truncated-counts fix above): when
     # additions were themselves truncated, `diff["additions_total"]` is the
     # exact pre-cap count (schema 1.13); otherwise `additions_raw`'s own
     # length already is exact, since it was never capped. Either way,
-    # subtract the addition-shaped promoted entries this function already
-    # excluded from `safe` above (`promoted_addition_ids`), so the header
-    # count and the itemized "Public API additions" section can never
-    # silently disagree about the same policy-promoted change.
+    # subtract the exact count of addition-shaped promoted entries (never
+    # `len(promoted_addition_ids)`, which -- like the classified `breaking`
+    # list above -- only ever sees what fit in the shared findings budget),
+    # so the header count and the itemized "Public API additions" section
+    # can never silently disagree about how many changes were promoted.
     scan_safe_total: int | None = None
     if diff_dict is not None:
         additions_total_raw = diff_dict.get("additions_total")
@@ -383,7 +497,7 @@ def from_scan(
             if isinstance(additions_total_raw, int)
             else len(additions_raw) if isinstance(additions_raw, list) else 0
         )
-        scan_safe_total = max(0, total_additions - len(promoted_addition_ids))
+        scan_safe_total = max(0, total_additions - promoted_addition_count)
 
     return CommentModel(
         mode="scan",

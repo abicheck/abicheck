@@ -244,6 +244,7 @@ def test_scan_severity_gate_reads_from_diff_not_top_level():
             "compatible": 1,
             "severity": {
                 "config": {"potential_breaking": "error", "addition": "error"},
+                "categories": {"addition": {"severity": "error", "count": 1}},
             },
             "findings": [
                 {
@@ -386,7 +387,10 @@ def test_scan_promoted_addition_not_duplicated_in_safe_bucket():
             "api_break": 0,
             "risk": 0,
             "compatible": 1,
-            "severity": {"config": {"addition": "error"}},
+            "severity": {
+                "config": {"addition": "error"},
+                "categories": {"addition": {"severity": "error", "count": 1}},
+            },
             "findings": [
                 {
                     "bucket": "compatible",
@@ -461,7 +465,10 @@ def test_scan_safe_total_subtracts_promoted_additions_from_the_true_total():
             "api_break": 0,
             "risk": 0,
             "compatible": 1,
-            "severity": {"config": {"addition": "error"}},
+            "severity": {
+                "config": {"addition": "error"},
+                "categories": {"addition": {"severity": "error", "count": 1}},
+            },
             "findings": [
                 {
                     "bucket": "compatible",
@@ -499,3 +506,135 @@ def test_scan_safe_total_subtracts_promoted_additions_from_the_true_total():
     model = build_model(report)
     assert model.counts == (1, 0, 2)
     assert len(model.safe) == 2
+
+
+def test_scan_promoted_count_exact_even_when_findings_list_is_capped():
+    # Codex review, follow-up: 25 additions promoted to blocking by
+    # `addition: error`, but the shared `findings` cap only reserves room
+    # for 5 of them (`_add_severity_blocking_compatible_findings`'s
+    # reserved-floor design guarantees a *minimum*, not completeness) --
+    # the exact severity category count (`diff.severity.categories.
+    # addition.count`) must still drive the header, not len(model.breaking).
+    findings = [
+        {
+            "bucket": "compatible",
+            "kind": "func_added",
+            "symbol": f"_Zp{i}v",
+            "description": "added",
+            "finding_id": f"promoted-{i}",
+        }
+        for i in range(5)
+    ]
+    report = _scan_report(
+        verdict="SEVERITY_ERROR",
+        exit_code=1,
+        diff={
+            "breaking": 0,
+            "api_break": 0,
+            "risk": 0,
+            "compatible": 25,
+            "severity": {
+                "config": {"addition": "error"},
+                "categories": {"addition": {"severity": "error", "count": 25}},
+            },
+            "findings": findings,
+            "findings_truncated": True,
+            "additions_truncated": True,
+            "additions_total": 25,
+        },
+    )
+    model = build_model(report)
+    assert model.counts == (25, 0, 0)
+
+
+def test_scan_audit_only_surfaces_api_break_crosscheck_findings():
+    # Codex review: an audit-only run (no --against) always has diff=None,
+    # but scan_engine._audit_exit_code can still publish API_BREAK/exit 2
+    # from an API_BREAK_KINDS cross-check finding -- previously every
+    # bucket stayed empty regardless, so the comment either vanished under
+    # `--on=changes` or rendered the green "Scan audit" headline under
+    # `--on=always` right next to a red (fail-on-api-break) check.
+    report = _scan_report(
+        verdict="API_BREAK",
+        exit_code=2,
+        diff=None,
+        crosscheck={
+            "version": 1,
+            "findings": 3,
+            "counts_by_check": {"header_build_context_mismatch": 3},
+            "coverage": [],
+            "providers": {},
+        },
+        crosscheck_severities={},
+    )
+    model = build_model(report)
+    assert model.scan_audit_only is True
+    assert model.counts == (0, 1, 0)
+    assert model.review[0].kind == "header_build_context_mismatch"
+    assert "3 occurrence" in model.review[0].detail
+    assert should_post(model, "changes")
+    body = render_comment(model, sha="abc1234", detail="standard")
+    assert "Scan audit — no baseline to compare" not in body
+
+
+def test_scan_audit_only_gate_api_break_moves_crosscheck_to_breaking():
+    report = _scan_report(
+        verdict="API_BREAK",
+        exit_code=2,
+        diff=None,
+        crosscheck={
+            "version": 1,
+            "findings": 1,
+            "counts_by_check": {"header_build_context_mismatch": 1},
+            "coverage": [],
+            "providers": {},
+        },
+        crosscheck_severities={},
+    )
+    model = build_model(report, gate_api_break=True)
+    assert model.counts == (1, 0, 0)
+
+
+def test_scan_audit_only_promoted_crosscheck_surfaced():
+    # A RISK-tier check promoted via --crosscheck KEY=error also gates an
+    # audit-only run (scan_engine._crosscheck_severity_exit) -- must be
+    # surfaced the same way an API_BREAK_KINDS finding is.
+    report = _scan_report(
+        verdict="API_BREAK",
+        exit_code=2,
+        diff=None,
+        crosscheck={
+            "version": 1,
+            "findings": 2,
+            "counts_by_check": {"identity_collision_detected": 2},
+            "coverage": [],
+            "providers": {},
+        },
+        crosscheck_severities={"identity_collision_detected": "error"},
+    )
+    model = build_model(report)
+    assert model.counts == (0, 1, 0)
+    assert "promoted to error" in model.review[0].detail
+
+
+def test_scan_audit_only_advisory_crosscheck_not_surfaced():
+    # An un-promoted RISK-tier check never gates an audit-only run and
+    # shouldn't clutter the comment.
+    report = _scan_report(
+        verdict="COMPATIBLE",
+        exit_code=0,
+        diff=None,
+        crosscheck={
+            "version": 1,
+            "findings": 4,
+            "counts_by_check": {"identity_collision_detected": 4},
+            "coverage": [],
+            "providers": {},
+        },
+        crosscheck_severities={},
+    )
+    model = build_model(report)
+    assert model.counts == (0, 0, 0)
+    assert model.scan_audit_only is True
+    body = render_comment(model, sha="abc1234", detail="standard")
+    assert "Scan audit — no baseline to compare" in body

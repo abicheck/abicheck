@@ -24,4 +24,16 @@ it should read in CHANGELOG.md. Delete the other sections.
   from the same scan run without re-running it. The GitHub Action's own
   PR-comment renderer uses this to avoid a second, potentially
   `--depth build/source`-expensive scan when the primary step output stays
-  the documented default `--format text`.
+  the documented default `--format text`, and now also reuses the
+  already-materialized JSON for `--format json` with no `--output` (the
+  CLI's stdout mode) instead of falling through to a rerun there too.
+  A compatible finding promoted to blocking by severity policy (e.g.
+  `--severity-addition error`) no longer renders in both the Breaking
+  and green "Public API additions" sections at once, and the exact
+  promoted/addition totals now come from the severity gate's own
+  per-category counts rather than a possibly report-capped finding list.
+  An audit-only scan (no `--against`) whose cross-check results alone
+  produced `API_BREAK` (or a `--crosscheck KEY=error` promotion) now
+  surfaces those findings in the comment too, instead of silently
+  rendering (or deleting) a green "no baseline to compare" comment next
+  to a red `fail-on-api-break` check.
