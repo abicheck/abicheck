@@ -412,14 +412,35 @@ def _scan_evidence_incomplete_blocking(
     raw-scalar promotion model (the same one :func:`_scan_true_counts`
     already applies):
 
-    - a ``"breaking"``-bucket occurrence always blocks under
-      ``gate_breaking`` (mirrors an ordinary breaking finding -- none of
-      the four evidence kinds default to this bucket today, but a policy
-      override could reclassify one there);
+    Unlike ``compare``, scan's ``action/run.sh`` gate has an *extra*
+    unconditional block for the ``BREAKING``/``API_BREAK`` tiers
+    (``_severity_gate_categories``/``_sev_cats_real``, "an explicitly
+    configured severity block is not subject to a compatibility flag"): once
+    *any* category is genuinely configured ``error`` and that's what
+    produced the exit, the scan step fails regardless of
+    ``fail-on-breaking``/``fail-on-api-break`` -- compare has no such block,
+    which is why its own ``_incomplete_is_blocking`` correctly requires
+    *both* the category and the matching ``fail-on-*`` flag. So, under the
+    severity-aware scheme, each branch below blocks on the resolved category
+    level *alone*:
+
+    - a ``"breaking"``-bucket occurrence (none of the four evidence kinds
+      default here today, but a policy override could reclassify one)
+      blocks under ``gate_breaking`` alone under the *legacy* exit-code
+      scheme; under the severity-aware scheme it blocks whenever
+      ``abi_breaking`` is configured ``error``, independent of
+      ``gate_breaking`` (Codex review, follow-up: an earlier revision
+      applied ``gate_breaking`` unconditionally of scheme/level, which
+      claimed a demoted ``abi_breaking: warning`` finding was blocking an
+      advisory exit-0 run, and separately failed to claim an
+      ``abi_breaking: error`` + ``fail-on-breaking: false`` finding that
+      scan's own unconditional severity-category block does still fail the
+      step on);
     - an ``"api_break"``/``"risk"``-bucket occurrence blocks under a
       ``potential_breaking: error`` severity promotion (folds both,
-      exactly like :func:`_scan_true_counts`'s own promotion), or, under the
-      *legacy* exit-code scheme only, api_break alone under
+      exactly like :func:`_scan_true_counts`'s own promotion, and likewise
+      independent of ``gate_api_break`` for the same reason above), or,
+      under the *legacy* exit-code scheme only, api_break alone under
       ``--gate-api-break``/``fail-on-api-break`` (Codex review, follow-up:
       the severity-aware scheme's ``action/run.sh`` ADVISORY_BREAK keeps the
       real exit at 0 whenever ``potential_breaking`` is left at its
@@ -428,7 +449,10 @@ def _scan_evidence_incomplete_blocking(
       unconditionally, which claimed a promoted evidence-quality finding
       was blocking a run that was, in truth, exiting 0).
     """
-    if evidence_counts.get("breaking", 0) > 0 and gate_breaking:
+    if levels:
+        if levels.get("abi_breaking") == "error" and evidence_counts.get("breaking", 0) > 0:
+            return True
+    elif gate_breaking and evidence_counts.get("breaking", 0) > 0:
         return True
     if levels.get("potential_breaking") == "error":
         return (evidence_counts.get("api_break", 0) + evidence_counts.get("risk", 0)) > 0

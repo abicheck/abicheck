@@ -353,6 +353,81 @@ def test_scan_promoted_evidence_kind_keeps_incomplete_blocking():
     assert "Analysis coverage reduced" not in body
 
 
+def test_scan_evidence_breaking_bucket_not_blocking_when_abi_breaking_demoted():
+    # Codex review: a breaking-bucket evidence-quality finding (reachable
+    # only via a policy override, since none of the four kinds default
+    # there) must follow the resolved `abi_breaking` severity level under
+    # the severity-aware scheme, not `gate_breaking` alone -- `abi_breaking:
+    # warning` demotes this run to an advisory exit 0 (action/run.sh's
+    # ADVISORY_BREAK), regardless of `fail-on-breaking`'s default-true
+    # value, so incomplete_blocking must stay False.
+    report = _scan_report(
+        verdict="COMPATIBLE_WITH_RISK",
+        exit_code=0,
+        diff={
+            "breaking": 1,
+            "api_break": 0,
+            "risk": 0,
+            "compatible": 0,
+            "severity": {
+                "config": {"abi_breaking": "warning"},
+                "categories": {},
+            },
+            "findings": [
+                {
+                    "bucket": "breaking",
+                    "kind": "evidence_required_missing",
+                    "symbol": "evidence:source_abi",
+                    "description": "required evidence layer missing",
+                    "finding_id": "e1",
+                },
+            ],
+        },
+    )
+    model = build_model(report)  # gate_breaking defaults to True
+    assert model.counts == (0, 0, 0)
+    assert len(model.incomplete) == 1
+    assert model.incomplete_blocking is False
+
+
+def test_scan_evidence_breaking_bucket_blocks_unconditionally_when_abi_breaking_error():
+    # The complement: scan's own action/run.sh severity-category block
+    # (`_sev_cats_real`) fails the step unconditionally once a category is
+    # genuinely configured `error` and that's what produced the exit --
+    # unlike compare, which has no such block. `fail-on-breaking: false`
+    # (gate_breaking=False) must not suppress the blocking headline here.
+    report = _scan_report(
+        verdict="SEVERITY_ERROR",
+        exit_code=1,
+        diff={
+            "breaking": 1,
+            "api_break": 0,
+            "risk": 0,
+            "compatible": 0,
+            "severity": {
+                "config": {"abi_breaking": "error"},
+                "categories": {},
+            },
+            "findings": [
+                {
+                    "bucket": "breaking",
+                    "kind": "evidence_required_missing",
+                    "symbol": "evidence:source_abi",
+                    "description": "required evidence layer missing",
+                    "finding_id": "e1",
+                },
+            ],
+        },
+    )
+    model = build_model(report, gate_breaking=False)
+    assert model.counts == (0, 0, 0)
+    assert len(model.incomplete) == 1
+    assert model.incomplete_blocking is True
+    body = render_comment(model, sha="abc1234", detail="standard")
+    assert "Source analysis incomplete" in body
+    assert "Analysis coverage reduced" not in body
+
+
 def test_scan_unpromoted_evidence_kind_is_not_blocking():
     # The complement: an evidence-quality finding that did NOT gate the run
     # (no --gate-api-break, no potential_breaking promotion) stays

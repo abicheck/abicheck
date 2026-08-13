@@ -147,3 +147,15 @@ it should read in CHANGELOG.md. Delete the other sections.
   already used elsewhere for the header's exact totals, so the headline
   ("ABI BREAKING") and gate note no longer contradict the real verdict (and
   no longer render a false "Compatibility: COMPATIBLE" claim next to it).
+- **A breaking-bucket evidence-quality finding's blocking determination now
+  honors the resolved `abi_breaking` severity level, not `fail-on-breaking`
+  alone**: unlike `compare`, `scan`'s own `action/run.sh` gate has an extra
+  unconditional block for a genuinely severity-configured-`error` category
+  (`BREAKING`/`API_BREAK` tiers fail the step regardless of
+  `fail-on-breaking`/`fail-on-api-break` once that's what produced the
+  exit) — so under the severity-aware scheme, an `abi_breaking: warning`
+  finding must not read as blocking just because `fail-on-breaking`
+  defaults to `true`, and an `abi_breaking: error` finding must still read
+  as blocking even with `fail-on-breaking: false`. The `potential_breaking`
+  branch already had this right; the `abi_breaking` branch previously
+  didn't check the resolved level at all.
