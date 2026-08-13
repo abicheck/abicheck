@@ -189,6 +189,74 @@ def test_scan_evidence_quality_finding_routes_to_incomplete_not_review():
     assert model.incomplete[0].symbol == "Source-fact coverage"
     body = render_comment(model, sha="abc1234", detail="standard")
     assert "Compatibility risk blocks this PR" not in body
+    # Codex review, follow-up: the exact review *total* (derived from
+    # diff["risk"]'s raw scalar) must also exclude the evidence-quality
+    # occurrence, not just the itemized list -- otherwise the header still
+    # says "1 needs review" next to an empty Review section.
+    assert model.counts == (0, 0, 0)
+
+
+def test_scan_evidence_kind_excluded_from_exact_totals_when_truncated():
+    # The itemized diff["findings"] list is independently capped from the
+    # raw diff["risk"]/diff["api_break"]/diff["breaking"] scalars -- an
+    # evidence-quality finding cut past that cap is still recorded in
+    # diff["findings_truncated_kinds"] (kind -> cut count, no bucket of its
+    # own), and the exact-total derivation must still exclude it via that
+    # kind's fixed default bucket.
+    report = _scan_report(
+        verdict="COMPATIBLE_WITH_RISK",
+        exit_code=0,
+        diff={
+            "breaking": 0,
+            "api_break": 0,
+            "risk": 1,
+            "compatible": 0,
+            # No "findings" key at all -- the one real risk finding was cut
+            # entirely by the cap, surviving only in the truncation ledger.
+            "findings_truncated": True,
+            "findings_truncated_kinds": {"layer_coverage_asymmetric": 1},
+        },
+    )
+    model = build_model(report)
+    assert model.counts == (0, 0, 0)
+
+
+def test_scan_dwarf_info_missing_routes_to_incomplete_not_safe():
+    # Codex review: dwarf_info_missing is COMPATIBLE by default severity, so
+    # it lands in diff["quality"] (never diff["findings"]) -- an
+    # unconditional append there rendered a scan with missing DWARF info as
+    # a green "No compatibility impact detected" comment instead of
+    # surfacing the coverage gap.
+    report = _scan_report(
+        diff={
+            "breaking": 0,
+            "api_break": 0,
+            "risk": 0,
+            "compatible": 1,
+            "quality": [
+                {
+                    "bucket": "compatible",
+                    "kind": "dwarf_info_missing",
+                    "symbol": "",
+                    "description": "no DWARF debug info",
+                    "finding_id": "d1",
+                },
+            ],
+        },
+    )
+    model = build_model(report)
+    assert model.safe == []
+    assert model.counts == (0, 0, 0)
+    assert len(model.incomplete) == 1
+    assert model.incomplete[0].kind == "dwarf_info_missing"
+    assert model.incomplete[0].symbol == "Debug info coverage"
+    body = render_comment(model, sha="abc1234", detail="standard")
+    # `_header` prioritizes a non-empty `model.incomplete` over the "no
+    # impact"/"no changes" headlines -- before this fix, the entry stayed
+    # in `safe` and `incomplete` was empty, so the header read "No
+    # compatibility impact detected" instead.
+    assert "Analysis coverage reduced" in body
+    assert "No compatibility impact detected" not in body
 
 
 def test_scan_additions_render_as_public_api_additions():

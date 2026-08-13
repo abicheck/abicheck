@@ -40,6 +40,7 @@ from __future__ import annotations
 
 from .demangle import demangle_batch
 from .pr_comment_base import (
+    _EVIDENCE_KIND_DEFAULT_BUCKET,
     _EVIDENCE_KIND_VALUES,
     _SEVERITY_BUCKET,
     CommentModel,
@@ -164,18 +165,24 @@ def _scan_compatible_list_to_safe(
     *,
     category: str,
     promoted: bool = False,
-) -> list[Finding]:
+) -> tuple[list[Finding], list[Finding]]:
     """Classify one of the two always-on compatible-finding lists (schema
-    1.13+'s ``diff["additions"]`` or ``diff["quality"]``) into Safe-bucket
-    ``Finding``s tagged with the given *category*. Shared by
-    :func:`_scan_additions_to_safe` and :func:`_scan_quality_to_safe`
-    (Codex review: the two lists have an identical shape, differing only in
-    which ``diff.compatible`` subset they itemize and which category the
-    result renders under).
+    1.13+'s ``diff["additions"]`` or ``diff["quality"]``) into
+    ``(safe, incomplete)`` -- Safe-bucket ``Finding``s tagged with the given
+    *category*, and evidence-quality entries (``_EVIDENCE_KIND_VALUES``,
+    most notably ``dwarf_info_missing`` -- COMPATIBLE by default severity,
+    so it lands in ``diff.quality``, never ``diff.findings``) pulled out
+    into ``incomplete`` instead (Codex review, follow-up: an unconditional
+    append here rendered a scan with missing DWARF info as a green "No
+    compatibility impact detected" comment rather than surfacing the
+    coverage gap). Shared by :func:`_scan_additions_to_safe` and
+    :func:`_scan_quality_to_safe` (the two lists have an identical shape,
+    differing only in which ``diff.compatible`` subset they itemize and
+    which category the safe result renders under).
 
     ``promoted`` (``levels.get(category-equivalent) == "error"``, the
     severity-config promotion that moves *every* finding in this category to
-    Breaking) short-circuits to an empty list: once that promotion is in
+    Breaking) short-circuits to ``([], [])``: once that promotion is in
     effect, every entry in *raw* is inherently blocking, so none belongs in
     the green section at all (Codex review, follow-up to an earlier
     ID-based exclusion: ``diff["findings"]`` is independently capped from
@@ -184,20 +191,34 @@ def _scan_compatible_list_to_safe(
     exact header total already correctly counted it as blocking).
     """
     if promoted:
-        return []
+        return [], []
     safe: list[Finding] = []
+    incomplete: list[Finding] = []
     if not isinstance(raw, list):
-        return safe
+        return safe, incomplete
     for c in raw:
         if not isinstance(c, dict):
             continue
+        kind = str(c.get("kind", ""))
         loc = c.get("source_location")
+        if kind in _EVIDENCE_KIND_VALUES:
+            symbol = _evidence_symbol_label(kind, str(c.get("symbol", "")))
+            incomplete.append(
+                Finding(
+                    kind=kind,
+                    symbol=symbol,
+                    detail=str(c.get("description", "") or ""),
+                    location=_normalize_location(str(loc)) if loc else None,
+                    severity="compatible",
+                )
+            )
+            continue
         display_symbol, mangled_evidence = _demangle_symbol(
             str(c.get("symbol", "")), demangled_map
         )
         safe.append(
             Finding(
-                kind=str(c.get("kind", "")),
+                kind=kind,
                 symbol=display_symbol,
                 detail=str(c.get("description", "") or ""),
                 location=_normalize_location(str(loc)) if loc else None,
@@ -206,17 +227,19 @@ def _scan_compatible_list_to_safe(
                 mangled=mangled_evidence,
             )
         )
-    return safe
+    return safe, incomplete
 
 
 def _scan_additions_to_safe(
     additions_raw: object,
     demangled_map: dict[str, str],
     addition_promoted: bool = False,
-) -> list[Finding]:
+) -> tuple[list[Finding], list[Finding]]:
     """Classify the always-on ``diff["additions"]`` list (schema 1.13+) into
-    Safe-bucket ``Finding``s, each tagged ``category="addition"`` so they
-    render in the same "➕ Public API additions" section `compare` uses.
+    ``(safe, incomplete)`` -- the Safe-bucket ``Finding``s (each tagged
+    ``category="addition"`` so they render in the same "➕ Public API
+    additions" section `compare` uses) and any evidence-quality entries
+    pulled out instead (see :func:`_scan_compatible_list_to_safe`).
     """
     return _scan_compatible_list_to_safe(
         additions_raw, demangled_map, category="addition", promoted=addition_promoted
@@ -227,12 +250,14 @@ def _scan_quality_to_safe(
     quality_raw: object,
     demangled_map: dict[str, str],
     quality_promoted: bool = False,
-) -> list[Finding]:
+) -> tuple[list[Finding], list[Finding]]:
     """Classify the always-on ``diff["quality"]`` list (schema 1.13+) --
     :func:`~abicheck.cli_scan_baseline._quality_finding_dicts`'s
     complementary itemization of the compatible-but-non-addition subset of
-    ``diff.compatible`` -- into Safe-bucket ``Finding``s tagged
-    ``category="quality_issues"``.
+    ``diff.compatible`` -- into ``(safe, incomplete)``: Safe-bucket
+    ``Finding``s tagged ``category="quality_issues"``, and evidence-quality
+    entries (most notably ``dwarf_info_missing``) pulled out instead (see
+    :func:`_scan_compatible_list_to_safe`).
 
     Codex review, follow-up to the exact-safe-total fix: that fix corrected
     ``scan_safe_total`` to read the full ``diff.compatible`` scalar, but a
@@ -286,10 +311,57 @@ def _as_int(value: object) -> int:
     return 0
 
 
+def _scan_findings_evidence_kind_counts(
+    findings_raw: object, diff: dict[str, object] | None
+) -> dict[str, int]:
+    """Exact count of evidence-quality findings (``_EVIDENCE_KIND_VALUES``)
+    within ``diff["findings"]``'s full (itemized + cap-truncated) scope,
+    bucketed by ``"breaking"``/``"api_break"``/``"risk"`` (Codex review,
+    follow-up to the evidence-routing fix: pulling these findings out of the
+    classified ``breaking``/``review`` *lists* left the *exact scalar*
+    totals -- which read ``diff["breaking"]``/``diff["api_break"]``/
+    ``diff["risk"]`` directly -- still counting them, so a diff whose only
+    finding was, say, a lone ``source_fact_coverage_incomplete`` produced a
+    "0 breaking · 1 needs review" header with an empty itemized Review
+    section).
+
+    The itemized portion uses each finding dict's own real ``bucket`` field.
+    ``diff["findings_truncated_kinds"]`` (``cli_scan_baseline.
+    _accumulate_kind_counts``) is a kind -> cut-count ledger with no bucket
+    of its own, so the truncated portion is attributed to that kind's fixed
+    default bucket (``_EVIDENCE_KIND_DEFAULT_BUCKET``) -- correct unless an
+    unusual policy ``overrides:`` rule reclassified one of these four
+    specific kinds, a narrower assumption than a real per-instance answer
+    but one this module already accepts elsewhere (see
+    :func:`_scan_true_counts`'s own module-wide promotion-folding scope).
+    """
+    counts = {"breaking": 0, "api_break": 0, "risk": 0}
+    if isinstance(findings_raw, list):
+        for c in findings_raw:
+            if not isinstance(c, dict):
+                continue
+            kind = str(c.get("kind", ""))
+            if kind not in _EVIDENCE_KIND_VALUES:
+                continue
+            bucket = str(c.get("bucket", ""))
+            if bucket in counts:
+                counts[bucket] += 1
+    truncated_kinds = diff.get("findings_truncated_kinds") if diff else None
+    if isinstance(truncated_kinds, dict):
+        for kind, cut in truncated_kinds.items():
+            if kind not in _EVIDENCE_KIND_VALUES or not isinstance(cut, int):
+                continue
+            default_bucket = _EVIDENCE_KIND_DEFAULT_BUCKET.get(kind, "")
+            if default_bucket in counts:
+                counts[default_bucket] += cut
+    return counts
+
+
 def _scan_true_counts(
     diff: dict[str, object] | None,
     gate_api_break: bool,
     levels: dict[str, str],
+    evidence_counts: dict[str, int] | None = None,
 ) -> tuple[int, int] | None:
     """Exact (breaking, review) totals from ``diff``'s own scalar counts --
     unlike the classified ``Finding`` lists built from ``diff["findings"]``,
@@ -304,6 +376,13 @@ def _scan_true_counts(
     header was built purely from ``len()`` of the (possibly-truncated)
     classified lists.
 
+    ``evidence_counts`` (Codex review, follow-up --
+    :func:`_scan_findings_evidence_kind_counts`) is subtracted from the raw
+    scalars *before* the promotion logic below runs, so an evidence-quality
+    finding (which the classifier routes to the ``incomplete`` bucket, never
+    ``breaking``/``review``) is excluded from these totals regardless of
+    which bucket a promotion would otherwise have moved its raw count into.
+
     Only the two promotions expressible purely from the scalar totals are
     applied: ``--gate-api-break`` (api_break -> breaking) and a
     ``potential_breaking: error`` severity config (api_break + risk ->
@@ -317,9 +396,10 @@ def _scan_true_counts(
     """
     if not isinstance(diff, dict):
         return None
-    raw_breaking = _as_int(diff.get("breaking"))
-    raw_api_break = _as_int(diff.get("api_break"))
-    raw_risk = _as_int(diff.get("risk"))
+    ev = evidence_counts or {}
+    raw_breaking = _as_int(diff.get("breaking")) - ev.get("breaking", 0)
+    raw_api_break = _as_int(diff.get("api_break")) - ev.get("api_break", 0)
+    raw_risk = _as_int(diff.get("risk")) - ev.get("risk", 0)
     breaking = raw_breaking
     if levels.get("potential_breaking") == "error":
         breaking += raw_api_break + raw_risk
@@ -539,9 +619,14 @@ def from_scan(
     )
     addition_promoted = levels.get("addition") == "error"
     quality_promoted = levels.get("quality_issues") == "error"
-    safe = _scan_additions_to_safe(
+    safe_additions, incomplete_additions = _scan_additions_to_safe(
         additions_raw, demangled_map, addition_promoted
-    ) + _scan_quality_to_safe(quality_raw, demangled_map, quality_promoted)
+    )
+    safe_quality, incomplete_quality = _scan_quality_to_safe(
+        quality_raw, demangled_map, quality_promoted
+    )
+    safe = safe_additions + safe_quality
+    evidence_incomplete = evidence_incomplete + incomplete_additions + incomplete_quality
 
     # Cross-check is a separate evidence axis from the baseline diff (ADR-035
     # D4) that never nests inside `diff["findings"]`/`diff["additions"]`, so
@@ -579,7 +664,8 @@ def from_scan(
 
     risk = report.get("risk")
     verdict = report.get("verdict")
-    true_counts = _scan_true_counts(diff_dict, gate_api_break, levels)
+    evidence_counts = _scan_findings_evidence_kind_counts(findings_raw, diff_dict)
+    true_counts = _scan_true_counts(diff_dict, gate_api_break, levels, evidence_counts)
     promoted_addition_count, promoted_quality_count = _scan_promoted_compatible_counts(
         diff_dict, levels
     )
@@ -639,11 +725,42 @@ def from_scan(
     # only fall short of `scan_safe_total` the same way `additions` already
     # could: real truncation at the shared report cap, not a whole finding
     # shape with nothing to show for it.
+    #
+    # An evidence-quality kind (most notably `dwarf_info_missing`, COMPATIBLE
+    # by default severity) reaches `diff["compatible"]`'s raw scalar too, but
+    # `_scan_additions_to_safe`/`_scan_quality_to_safe` now pull it into
+    # `incomplete` rather than `safe` -- so it must also be excluded here
+    # (Codex review, follow-up), or a scan with missing DWARF info would
+    # still count as "safe" in the exact header total even though it's no
+    # longer itemized under the green section. Guarded on `not
+    # addition_promoted`/`not quality_promoted`: when a category is
+    # promoted, its evidence-kind occurrences are already folded into
+    # `promoted_addition_count`/`promoted_quality_count` (the exact
+    # per-category severity scalar counts every compatible entry in that
+    # category, evidence-shaped or not) -- counting them again here would
+    # double-subtract.
+    evidence_compatible_count = 0
+    if not addition_promoted and isinstance(additions_raw, list):
+        evidence_compatible_count += sum(
+            1
+            for c in additions_raw
+            if isinstance(c, dict) and str(c.get("kind", "")) in _EVIDENCE_KIND_VALUES
+        )
+    if not quality_promoted and isinstance(quality_raw, list):
+        evidence_compatible_count += sum(
+            1
+            for c in quality_raw
+            if isinstance(c, dict) and str(c.get("kind", "")) in _EVIDENCE_KIND_VALUES
+        )
     scan_safe_total: int | None = None
     if diff_dict is not None:
         raw_compatible = _as_int(diff_dict.get("compatible"))
         scan_safe_total = max(
-            0, raw_compatible - promoted_addition_count - promoted_quality_count
+            0,
+            raw_compatible
+            - promoted_addition_count
+            - promoted_quality_count
+            - evidence_compatible_count,
         )
 
     return CommentModel(

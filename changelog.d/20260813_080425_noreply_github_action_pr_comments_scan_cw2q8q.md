@@ -77,8 +77,13 @@ it should read in CHANGELOG.md. Delete the other sections.
   single-artifact `compare`/`scan` run, accumulating indefinitely on a
   persistent self-hosted runner.
 - **A `scan --against` evidence-quality finding** (e.g.
-  `source_fact_coverage_incomplete`, `layer_coverage_asymmetric`) now
-  renders in the comment's "Analysis incomplete" section, matching
-  `compare`'s own report, instead of a misleading "Compatibility risk
-  blocks this PR" headline for what is really a missing-evidence signal
-  rather than a detected API/ABI change.
+  `source_fact_coverage_incomplete`, `layer_coverage_asymmetric`,
+  `dwarf_info_missing`) now renders in the comment's "Analysis incomplete"
+  section, matching `compare`'s own report, instead of a misleading
+  "Compatibility risk blocks this PR" headline (or, for the
+  COMPATIBLE-severity `dwarf_info_missing`, a false-green "No compatibility
+  impact detected") for what is really a missing-evidence signal rather
+  than a detected API/ABI change. The exact header totals now exclude
+  these occurrences too — including ones cut by the report cap and
+  recoverable only from the truncation ledger — so the count never
+  disagrees with what's itemized under Review/Safe.

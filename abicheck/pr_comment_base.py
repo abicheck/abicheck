@@ -34,7 +34,13 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass, field
 
-from .checker_policy import ADDITION_KINDS
+from .checker_policy import (
+    ADDITION_KINDS,
+    API_BREAK_KINDS,
+    BREAKING_KINDS,
+    RISK_KINDS,
+    ChangeKind,
+)
 
 # Kind value strings that constitute new public-API surface (the severity
 # "addition" category). Sourced from the authoritative ADDITION_KINDS so kinds
@@ -369,6 +375,26 @@ def _evidence_symbol_label(kind: str, raw_symbol: str) -> str:
         layer_label = _EVIDENCE_LAYER_LABEL.get(layer_key, layer_key.replace("_", " "))
         return f"Required evidence: {layer_label}"
     return _EVIDENCE_KIND_DEFAULT_LABEL.get(kind, raw_symbol or kind)
+
+
+#: Each evidence-quality kind's fixed default severity bucket, derived from
+#: the same registry membership `BREAKING_KINDS`/`API_BREAK_KINDS`/
+#: `RISK_KINDS`/`COMPATIBLE_KINDS` encode (this module already depends on
+#: `checker_policy` for `ADDITION_KINDS` above) -- used by
+#: `pr_comment_scan._scan_findings_evidence_kind_counts` to attribute a
+#: *truncated* (cap-cut) evidence-kind occurrence to the right raw scalar
+#: when no per-instance `bucket` field survived the cut. `dwarf_info_missing`
+#: resolves to `"compatible"`, since it never reaches `diff["findings"]` at
+#: all (only `diff["compatible"]`/`quality`).
+_EVIDENCE_KIND_DEFAULT_BUCKET = {
+    kind: (
+        "breaking" if ChangeKind(kind) in BREAKING_KINDS
+        else "api_break" if ChangeKind(kind) in API_BREAK_KINDS
+        else "risk" if ChangeKind(kind) in RISK_KINDS
+        else "compatible"
+    )
+    for kind in _EVIDENCE_KIND_VALUES
+}
 
 
 def _finding_category(severity: str, kind: str) -> str:
