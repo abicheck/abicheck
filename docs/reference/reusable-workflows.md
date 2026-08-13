@@ -62,7 +62,6 @@ jobs:
       name: libfoo
       profile: linux-x86_64-gcc13
       baseline-channel: accepted-main
-      baseline-path: ./restored-baseline
       baseline-artifact-name: abicheck-baseline-accepted-main
       requested-depth: headers
       candidate-artifact-name: my-build-output
@@ -73,6 +72,11 @@ jobs:
 are all optional (default empty, meaning "no download, use the path as
 given") — a caller whose `new-library`/`baseline-path`/`candidate-build-output`
 already point at a checked-in fixture doesn't need any of them.
+When `baseline-artifact-name` is set, the workflow downloads it only into its
+private `.check-single-baseline` staging directory and passes that fixed path
+to `check-target`; `baseline-path` is ignored in that mode. This confinement
+prevents a caller-controlled path from deleting or overwriting the workflow's
+self-checkout (including the local Action executed afterward).
 
 ## `check-project.yml`
 
