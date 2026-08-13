@@ -182,27 +182,38 @@ def test_isolated_module_runner_preserves_user_site_without_root_shadowing(
     import subprocess
 
     user_base = tmp_path / "user-base"
-    user_site = (
-        user_base
-        / "lib"
-        / f"python{sys.version_info.major}.{sys.version_info.minor}"
-        / "site-packages"
+    env = {**os.environ, "PYTHONUSERBASE": str(user_base)}
+    user_site_proc = subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            "import site; print(site.getusersitepackages())",
+        ],
+        env=env,
+        capture_output=True,
+        text=True,
+        check=False,
     )
+    assert user_site_proc.returncode == 0, user_site_proc.stderr
+    user_site = Path(user_site_proc.stdout.strip())
     user_site.mkdir(parents=True)
-    (user_site / "verify_runner_probe.py").write_text(
+
+    # pytest is installed in the system site running this test. The user-site
+    # module must retain normal precedence over it, while the checkout cannot.
+    (user_site / "pytest.py").write_text(
         "print('trusted-user-site')\n", encoding="utf-8"
     )
     checkout = tmp_path / "checkout"
     checkout.mkdir()
-    (checkout / "verify_runner_probe.py").write_text(
+    (checkout / "pytest.py").write_text(
         "print('untrusted-checkout')\n", encoding="utf-8"
     )
 
-    cmd = verify._py("verify_runner_probe")
+    cmd = verify._py("pytest")
     proc = subprocess.run(
         cmd,
         cwd=checkout,
-        env={**os.environ, "PYTHONUSERBASE": str(user_base)},
+        env=env,
         capture_output=True,
         text=True,
         check=False,
