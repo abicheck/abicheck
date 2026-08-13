@@ -1408,3 +1408,116 @@ class TestThePromotedCrosscheckNoteNamesItsOwnMechanism:
     ) -> None:
         summary = self._summary(tmp_path, "potential_breaking")
         assert "the severity policy gated this run" in summary, summary
+
+
+class TestCoverageGatedTrustsAReadableZero:
+    """`_coverage_gated()`'s unconditional final check must trust a readable
+    JSON report's own `contract_coverage_exit_contribution: 0` and stop
+    there -- not fall through to grepping stderr for the substring "Contract
+    coverage incomplete", which the notice contains regardless of whether
+    the effect clause reads "Accepted by contract.unresolved: warn" or
+    "Contributes N to..." (Codex review, P1).
+
+    An earlier revision fell through unconditionally whenever the JSON read
+    "0", not only when the JSON was unreadable -- so a `contract.unresolved:
+    warn`-accepted run (report says 0, but the stderr notice still names the
+    axis, worded as accepted) still matched the grep and set `FINAL_EXIT=1`,
+    defeating the acceptance mechanism this feature exists to provide. Real
+    for both compare and scan, since both share `_coverage_gated()`.
+    """
+
+    @staticmethod
+    def _warn_accepted_stderr() -> str:
+        return (
+            "Contract coverage incomplete for the selected --contract "
+            "domain: old/export_table. Accepted by contract.unresolved: "
+            "warn, so it contributes 0 to the exit code (ADR-049 "
+            "contract-coverage axis)."
+        )
+
+    def test_a_warn_accepted_compare_does_not_fail_the_step(
+        self, tmp_path: Path
+    ) -> None:
+        report = {
+            "verdict": "COMPATIBLE",
+            "exit_code": 0,
+            "contract_coverage_exit_contribution": 0,
+            "contract_coverage_failures": [COVERAGE_FAILURE],
+        }
+        bindir = _stub_abicheck(
+            tmp_path,
+            exit_code=0,
+            report=report,
+            stderr=self._warn_accepted_stderr(),
+        )
+        outputs = _run_action(
+            tmp_path,
+            {
+                "INPUT_MODE": "compare",
+                "INPUT_OLD_LIBRARY": _lib(tmp_path, "libold.so"),
+                "INPUT_NEW_LIBRARY": _lib(tmp_path, "libnew.so"),
+                "INPUT_FORMAT": "json",
+                "INPUT_OUTPUT_FILE": str(tmp_path / "report.json"),
+            },
+            bindir,
+        )
+        assert outputs["_exit"] == 0, outputs["_stdout"]
+        assert outputs["verdict"] == "COMPATIBLE", outputs
+
+    def test_a_warn_accepted_scan_does_not_fail_the_step(
+        self, tmp_path: Path
+    ) -> None:
+        report = {
+            "verdict": "COMPATIBLE",
+            "exit_code": 0,
+            "diff": {"verdict": "COMPATIBLE"},
+            "contract_coverage_exit_contribution": 0,
+            "contract_coverage_failures": [COVERAGE_FAILURE],
+        }
+        bindir = _stub_abicheck(
+            tmp_path,
+            exit_code=0,
+            report=report,
+            stderr=self._warn_accepted_stderr(),
+        )
+        outputs = _run_action(
+            tmp_path,
+            {
+                "INPUT_MODE": "scan",
+                "INPUT_NEW_LIBRARY": _lib(tmp_path, "libnew.so"),
+                "INPUT_AGAINST": _lib(tmp_path, "libold.so"),
+                "INPUT_FORMAT": "json",
+                "INPUT_OUTPUT_FILE": str(tmp_path / "report.json"),
+            },
+            bindir,
+        )
+        assert outputs["_exit"] == 0, outputs["_stdout"]
+        assert outputs["verdict"] == "COMPATIBLE", outputs
+
+    def test_an_unreadable_report_still_falls_back_to_the_stderr_notice(
+        self, tmp_path: Path
+    ) -> None:
+        """The genuine "cannot tell" case must keep working: no readable
+        JSON at all still consults stderr, and a real (non-accepted)
+        coverage-only exit 1 with no JSON must still gate the step."""
+        bindir = _stub_abicheck(
+            tmp_path,
+            exit_code=1,
+            report=_MALFORMED,
+            stderr=(
+                "Contract coverage incomplete for the selected --contract "
+                "domain: old/export_table. Exit code floored to 1."
+            ),
+        )
+        outputs = _run_action(
+            tmp_path,
+            {
+                "INPUT_MODE": "compare",
+                "INPUT_OLD_LIBRARY": _lib(tmp_path, "libold.so"),
+                "INPUT_NEW_LIBRARY": _lib(tmp_path, "libnew.so"),
+                "INPUT_FORMAT": "json",
+                "INPUT_OUTPUT_FILE": str(tmp_path / "report.json"),
+            },
+            bindir,
+        )
+        assert outputs["_exit"] == 1, outputs["_stdout"]

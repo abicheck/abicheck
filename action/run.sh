@@ -1244,11 +1244,28 @@ PYQUERY
 # renderer — which omits the ledger — the same fact is announced on stderr.
 # Absent both (no --contract-evaluation), the field reads 0 and the mapping
 # below is exactly what it was.
+#
+# The JSON answer is AUTHORITATIVE when readable, and the stderr grep is
+# reached only when it is not (Codex review, P1): an earlier revision fell
+# through to the stderr grep unconditionally whenever the JSON read "0", not
+# just when the JSON was unreadable. `contract.unresolved: warn` deliberately
+# zeroes the exit contribution while still wording the stderr notice as
+# "Contract coverage incomplete..." (just with an "Accepted by
+# contract.unresolved: warn" effect clause, per `_coverage_message`) — so
+# whenever both a readable JSON *and* that stderr notice existed together
+# (true for every markdown-format single-pair `compare`, and, since this
+# same commit's own P1 fix, every non-JSON release `compare` too), the grep
+# still matched and defeated the acceptance mechanism entirely. `_report_
+# query` prints nothing (empty string) only when the report is genuinely
+# unreadable/absent — that emptiness, not the printed value, is what decides
+# whether the stderr fallback is even consulted.
 _coverage_gated() {
-  local _src
+  local _src _contribution
   _src=$(_json_report_src)
-  if [[ "$(_report_query "$_src" coverage_contribution)" == "1" ]]; then
-    return 0
+  _contribution=$(_report_query "$_src" coverage_contribution)
+  if [[ -n "$_contribution" ]]; then
+    [[ "$_contribution" == "1" ]]
+    return
   fi
   echo "$STDERR_CONTENT" | grep -q 'Contract coverage incomplete'
 }
