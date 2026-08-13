@@ -221,6 +221,50 @@ def test_scan_evidence_kind_excluded_from_exact_totals_when_truncated():
     assert model.counts == (0, 0, 0)
 
 
+def test_scan_incomplete_total_includes_truncated_evidence_occurrences():
+    # Codex review: `model.incomplete` only ever holds the itemized (capped)
+    # evidence-quality findings from diff["findings"] -- a further
+    # occurrence cut by the report cap survives only in
+    # diff["findings_truncated_kinds"], which the exact breaking/review
+    # scalars already account for (see the test above) but the
+    # analysis-incomplete count itself did not, so a diff with 25
+    # source_fact_coverage_incomplete findings capped at 20 rendered
+    # "20 analysis incomplete" right next to a truncation note claiming the
+    # header counts above were exact.
+    report = _scan_report(
+        verdict="COMPATIBLE_WITH_RISK",
+        exit_code=0,
+        diff={
+            "breaking": 0,
+            "api_break": 0,
+            # The raw scalar counts every risk-bucket finding the comparison
+            # actually produced, itemized or cap-cut alike -- 20 itemized +
+            # 5 in the truncation ledger below.
+            "risk": 25,
+            "compatible": 0,
+            "findings": [
+                {
+                    "bucket": "risk",
+                    "kind": "source_fact_coverage_incomplete",
+                    "symbol": f"evidence:tu_{i}",
+                    "description": "incomplete source-fact coverage",
+                    "finding_id": f"e{i}",
+                }
+                for i in range(20)
+            ],
+            "findings_truncated": True,
+            "findings_truncated_kinds": {"source_fact_coverage_incomplete": 5},
+        },
+    )
+    model = build_model(report)
+    assert model.counts == (0, 0, 0)
+    assert len(model.incomplete) == 20
+    assert model.incomplete_total == 25
+    body = render_comment(model, sha="abc1234", detail="standard")
+    assert "25 analysis incomplete" in body
+    assert "20 analysis incomplete" not in body
+
+
 def test_scan_promoted_evidence_kind_keeps_incomplete_blocking():
     # Codex review: pulling an evidence-quality finding out of breaking/
     # review into incomplete correctly excluded it from the compatibility

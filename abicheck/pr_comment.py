@@ -1225,7 +1225,7 @@ def _header_block(model: CommentModel, short_sha: str) -> list[str]:
     # compatibility — see module docstring) and only shown when non-zero, so
     # every existing report's summary line is unchanged.
     if model.incomplete:
-        counts_line += f" · {len(model.incomplete)} analysis incomplete"
+        counts_line += f" · {model.incomplete_total} analysis incomplete"
     return [
         MARKER,
         "",
@@ -1364,7 +1364,7 @@ def _incomplete_note(model: CommentModel) -> list[str]:
         return []
     if not model.breaking and not (model.review and not model.incomplete_blocking):
         return []
-    n = len(model.incomplete)
+    n = model.incomplete_total
     word = "finding" if n == 1 else "findings"
     return [
         f"> 🛑 {n} analysis-coverage {word} below — some real changes may not "

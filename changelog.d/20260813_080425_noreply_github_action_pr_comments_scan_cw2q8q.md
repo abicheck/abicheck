@@ -94,3 +94,18 @@ it should read in CHANGELOG.md. Delete the other sections.
   kind (`dwarf_info_missing`) promoted by `quality_issues: error`, which
   previously double-counted into both the Breaking total and Incomplete
   section at once.
+- **`scan --secondary-format text` next to a `--format json` primary run**
+  no longer silently loses the ADR-049 §7 coverage-gate explanation: the
+  stderr notice explaining a coverage-floored exit code (e.g. "Exit code
+  floored to 1") now fires whenever *either* renderer in play is `text` —
+  previously it only checked the primary format, so the secondary text
+  report (which, unlike JSON, never carries the coverage ledger itself) had
+  no explanation reachable anywhere for why the run exited non-zero.
+- **The sticky comment's exact "N analysis incomplete" count** now accounts
+  for evidence-quality findings cut by the report cap, the same way the
+  Breaking/Review/Safe totals already do: `diff["findings_truncated_kinds"]`
+  can record a cut occurrence of e.g. `source_fact_coverage_incomplete` that
+  never made it into the itemized list, and the header count previously
+  read only `len(model.incomplete)` — under-reporting (e.g. "20 analysis
+  incomplete" for 25 real occurrences) right next to a truncation note
+  claiming the counts above were exact.

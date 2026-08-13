@@ -221,6 +221,27 @@ class CommentModel:
     scan_findings_truncated: bool = False
     scan_additions_truncated: bool = False
     scan_quality_truncated: bool = False
+    # The exact analysis-incomplete total (Codex review, follow-up to the
+    # three totals above): `diff["findings_truncated_kinds"]` can cut an
+    # evidence-quality occurrence (e.g. 25 `source_fact_coverage_incomplete`
+    # findings capped at 20) the same way it cuts an ordinary breaking/review
+    # finding, but `model.incomplete` itself only ever holds what fit under
+    # that same cap -- so `len(self.incomplete)` alone silently under-reports
+    # while the truncation note next to it claims the counts above are exact.
+    # `pr_comment_scan.from_scan` derives this from `model.incomplete`'s own
+    # length plus the truncated ledger's evidence-kind cut count. `None`
+    # falls back to `len(self.incomplete)`, same convention as the three
+    # fields above (and the only value `compare`'s non-scan modes ever set).
+    scan_incomplete_total: int | None = None
+
+    @property
+    def incomplete_total(self) -> int:
+        """Exact analysis-incomplete count -- see `scan_incomplete_total`."""
+        return (
+            self.scan_incomplete_total
+            if self.scan_incomplete_total is not None
+            else len(self.incomplete)
+        )
 
     @property
     def counts(self) -> tuple[int, int, int]:
@@ -245,7 +266,7 @@ class CommentModel:
         plus the analysis-incomplete bucket (so `should_post("changes")`
         still fires on a report that carries only a coverage gap)."""
         b, r, s = self.counts
-        return b + r + s + len(self.incomplete)
+        return b + r + s + self.incomplete_total
 
 
 #: GitHub Actions' own checkout convention doubles the repo name as its own

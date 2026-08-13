@@ -601,8 +601,13 @@ def _emit_scan_report(
     # ADR-049 §7: a coverage-gated exit must say so. `scan --format json`
     # carries the ledger in its own summary; every other renderer ignores
     # those keys, so without this the command prints "Verdict: NO_CHANGE"
-    # and then fails with no explanation (Codex review).
-    if fmt != "json":
+    # and then fails with no explanation (Codex review). A secondary `text`
+    # report has the identical gap even when the primary format is `json`
+    # (Codex review, follow-up): the primary JSON carries the ledger, but the
+    # secondary text file doesn't, and this stderr notice is the only place
+    # that gap gets explained -- so it must fire whenever *either* renderer
+    # in play is `text`, not only when the primary one is.
+    if fmt != "json" or secondary_fmt == "text":
         from .contract_coverage_exit import coverage_diagnostic_from_summary
 
         # `outcome.exit_code` has ALREADY had the coverage floor folded in

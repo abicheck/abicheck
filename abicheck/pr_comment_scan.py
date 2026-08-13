@@ -367,6 +367,28 @@ def _scan_findings_evidence_kind_counts(
     return counts
 
 
+def _scan_findings_evidence_truncated_extra(diff: dict[str, object] | None) -> int:
+    """Evidence-quality occurrences cut from ``diff["findings"]`` by the
+    report cap (``diff["findings_truncated_kinds"]``), summed across every
+    bucket -- the exact delta between ``model.incomplete``'s own length
+    (itemized, capped, like every other classified list) and the true count
+    of evidence-quality findings the comparison actually produced (Codex
+    review: a diff with 25 `source_fact_coverage_incomplete` findings capped
+    at 20 rendered "20 analysis incomplete" next to a truncation note
+    claiming the header counts were exact). Reuses the same ledger
+    ``_scan_findings_evidence_kind_counts`` already reads for the breaking/
+    review scalar exclusion, just without attributing it to a bucket.
+    """
+    truncated_kinds = diff.get("findings_truncated_kinds") if diff else None
+    if not isinstance(truncated_kinds, dict):
+        return 0
+    return sum(
+        cut
+        for kind, cut in truncated_kinds.items()
+        if kind in _EVIDENCE_KIND_VALUES and isinstance(cut, int)
+    )
+
+
 def _scan_evidence_incomplete_blocking(
     evidence_counts: dict[str, int],
     gate_api_break: bool,
@@ -909,6 +931,9 @@ def from_scan(
         scan_findings_truncated=bool(diff_dict and diff_dict.get("findings_truncated")),
         scan_additions_truncated=bool(diff_dict and diff_dict.get("additions_truncated")),
         scan_quality_truncated=bool(diff_dict and diff_dict.get("quality_truncated")),
+        scan_incomplete_total=(
+            len(incomplete) + _scan_findings_evidence_truncated_extra(diff_dict)
+        ),
     )
 
 
