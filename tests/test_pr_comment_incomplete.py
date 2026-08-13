@@ -712,7 +712,9 @@ def test_release_contract_coverage_contribution_creates_blocking_incomplete_find
     # `--on=changes` policy would then skip (or delete) the sticky comment
     # even though the release's own exit code had already failed.
     report = _release_report()
+    report["libraries"][1]["contract_coverage_failure_count"] = 1
     report["libraries"][1]["contract_coverage_exit_contribution"] = 1
+    report["contract_coverage_failure_count"] = 1
     report["contract_coverage_exit_contribution"] = 1
     model = build_model(report)
     assert model.mode == "release"
@@ -733,7 +735,9 @@ def test_release_contract_coverage_finding_renders_in_full_detail_body():
     # actual "Incomplete for: ..." detail naming the affected library was
     # unreachable in the rendered comment body -- full detail included.
     report = _release_report()
+    report["libraries"][1]["contract_coverage_failure_count"] = 1
     report["libraries"][1]["contract_coverage_exit_contribution"] = 1
+    report["contract_coverage_failure_count"] = 1
     report["contract_coverage_exit_contribution"] = 1
     model = build_model(report)
     body = render_comment(model, sha="x", detail="full")
@@ -741,8 +745,32 @@ def test_release_contract_coverage_finding_renders_in_full_detail_body():
     assert "Incomplete for: libbar.so.2" in body
 
 
-def test_release_contract_coverage_zero_contribution_is_not_incomplete():
+def test_release_contract_coverage_warn_accepted_is_advisory_not_hidden():
+    # Codex review (CLI-audit P2, second follow-up): `contract.unresolved:
+    # warn` deliberately zeroes the exit-code contribution while the
+    # failures themselves stay real -- gating finding creation on the
+    # contribution alone (the first fix) made this case invisible again,
+    # the exact failure mode the first fix existed to close. The failure
+    # *count* (never zeroed by warn) is what creation must key on; the
+    # contribution alone decides blocking.
     report = _release_report()
+    report["libraries"][1]["contract_coverage_failure_count"] = 1
+    report["libraries"][1]["contract_coverage_exit_contribution"] = 0
+    report["contract_coverage_failure_count"] = 1
+    report["contract_coverage_exit_contribution"] = 0
+    model = build_model(report)
+    assert len(model.incomplete) == 1
+    assert "libbar.so.2" in model.incomplete[0].detail
+    assert "contract.unresolved: warn" in model.incomplete[0].detail
+    assert model.incomplete_blocking is False
+    assert model.total_changes == 1
+    _, title = _header_for(model)
+    assert title == "Analysis coverage reduced"
+
+
+def test_release_contract_coverage_zero_failure_count_is_not_incomplete():
+    report = _release_report()
+    report["contract_coverage_failure_count"] = 0
     report["contract_coverage_exit_contribution"] = 0
     model = build_model(report)
     assert model.incomplete == []
@@ -751,6 +779,7 @@ def test_release_contract_coverage_zero_contribution_is_not_incomplete():
 
 def test_release_report_without_contract_evaluation_is_unaffected():
     report = _release_report()
+    assert "contract_coverage_failure_count" not in report
     assert "contract_coverage_exit_contribution" not in report
     model = build_model(report)
     assert model.incomplete == []
@@ -758,10 +787,12 @@ def test_release_report_without_contract_evaluation_is_unaffected():
 
 
 def test_release_contract_coverage_without_per_library_detail_still_blocks():
-    # A release-level contribution with no per-library key set (shouldn't
-    # normally happen -- the release CLI always stamps both together -- but
-    # must degrade safely rather than silently dropping the signal).
+    # A release-level count/contribution with no per-library key set
+    # (shouldn't normally happen -- the release CLI always stamps all three
+    # together -- but must degrade safely rather than silently dropping the
+    # signal).
     report = _release_report()
+    report["contract_coverage_failure_count"] = 1
     report["contract_coverage_exit_contribution"] = 1
     model = build_model(report)
     assert len(model.incomplete) == 1
@@ -771,7 +802,8 @@ def test_release_contract_coverage_without_per_library_detail_still_blocks():
 
 def test_release_contract_coverage_malformed_shape_degrades_safely():
     report = _release_report()
-    report["contract_coverage_exit_contribution"] = "not an int"
+    report["contract_coverage_failure_count"] = "not an int"
+    report["contract_coverage_exit_contribution"] = 1
     model = build_model(report)
     assert model.incomplete == []
     assert model.incomplete_blocking is False
@@ -782,7 +814,9 @@ def test_release_contract_coverage_skips_non_dict_library_entries():
     # for which library contributed, not raise.
     report = _release_report()
     report["libraries"].append("not a dict")
+    report["libraries"][1]["contract_coverage_failure_count"] = 1
     report["libraries"][1]["contract_coverage_exit_contribution"] = 1
+    report["contract_coverage_failure_count"] = 1
     report["contract_coverage_exit_contribution"] = 1
     model = build_model(report)
     assert len(model.incomplete) == 1

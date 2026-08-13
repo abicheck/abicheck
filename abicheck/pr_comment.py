@@ -1038,51 +1038,71 @@ def _release_lib_row(
     return name, verdict, nb, nr, ns
 
 
-def _release_contract_coverage_findings(report: dict[str, object]) -> list[Finding]:
+def _release_contract_coverage_findings(
+    report: dict[str, object],
+) -> tuple[list[Finding], bool]:
     """Coarse analysis-incomplete finding(s) for a release (directory/
-    package) report, from the release-level ``contract_coverage_exit_
-    contribution`` int (``cli_compare_release_helpers.py``'s max()-aggregated
-    ledger fold across every library) — the release schema's counterpart to
-    :func:`_contract_coverage_findings`'s per-provider ``contract_coverage_
-    failures`` list (Codex review, CLI-audit P2).
+    package) report, from the release-level ``contract_coverage_failure_
+    count``/``contract_coverage_exit_contribution`` ints (``cli_compare_
+    release_helpers.py``'s aggregated ledger fold across every library) —
+    the release schema's counterpart to :func:`_contract_coverage_findings`'s
+    per-provider ``contract_coverage_failures`` list (Codex review,
+    CLI-audit P2).
 
-    Coarser by necessity: the release JSON has no aggregated ``contract_
-    coverage_failures`` array (only each library's own int contribution), so
-    this can name *which libraries* contributed but not *which provider*
-    fell short within them — a caller wanting that detail still needs
-    ``--format json``'s per-library section. Still real, unsuppressible
-    signal: any nonzero contribution here already raised the release's own
-    exit code via ``max()`` (ADR-049 Phase 7, unconditional), so treating it
-    as blocking is correct even without the provider breakdown.
+    Returns ``(findings, blocking)`` rather than a bare list: **the two ints
+    answer different questions and must not be conflated** (Codex review,
+    CLI-audit P2 follow-up). ``contract_coverage_failure_count`` (a plain sum,
+    never zeroed) says whether a coverage gap exists at all — the signal a
+    finding's *presence* is built from. ``contract_coverage_exit_contribution``
+    (the ``max()``-folded 0/1 that actually reached the real exit code) says
+    whether it was accepted by ``contract.unresolved: warn`` — a run so
+    configured deliberately zeroes the contribution while the failures stay
+    real and unsuppressible (AGENTS.md's contract_coverage_exit.py entry: "an
+    acceptance of incomplete assurance, not a way to hide it"). Gating finding
+    creation on the contribution alone (an earlier revision of this function)
+    made a warn-accepted release-level gap invisible everywhere this report
+    is read from — the same failure mode :func:`_contract_coverage_findings`
+    never has, since it renders unconditionally on the single-pair report's
+    always-present ``contract_coverage_failures`` array.
 
-    Always ``[]`` when the run never passed ``--contract-evaluation`` — the
-    key is entirely absent then, mirroring the single-pair report's own
-    "no key" (not "empty list") convention.
+    Coarser than the single-pair version by necessity: the release JSON has
+    no aggregated ``contract_coverage_failures`` array (only each library's
+    own int fields), so this can name *which libraries* were affected but not
+    *which provider* fell short within them — a caller wanting that detail
+    still needs ``--format json``'s per-library section.
+
+    Always ``([], False)`` when the run never passed ``--contract-evaluation``
+    — both keys are entirely absent then, mirroring the single-pair report's
+    own "no key" (not "empty list") convention.
     """
+    failure_count = report.get("contract_coverage_failure_count")
+    if not isinstance(failure_count, int) or failure_count == 0:
+        return [], False
     contribution = report.get("contract_coverage_exit_contribution")
-    if not isinstance(contribution, int) or contribution == 0:
-        return []
+    blocking = isinstance(contribution, int) and contribution != 0
     affected: list[str] = []
     libraries = report.get("libraries")
     if isinstance(libraries, list):
         for lib in libraries:
             if not isinstance(lib, dict):
                 continue
-            lib_contribution = lib.get("contract_coverage_exit_contribution")
-            if isinstance(lib_contribution, int) and lib_contribution:
+            lib_count = lib.get("contract_coverage_failure_count")
+            if isinstance(lib_count, int) and lib_count:
                 affected.append(str(lib.get("library", "?")))
     detail = (
         f"Incomplete for: {', '.join(affected)}"
         if affected
-        else "See --format json's per-library contract_coverage_exit_contribution for detail"
+        else "See --format json's per-library contract_coverage_failure_count for detail"
     )
+    if not blocking:
+        detail += " (accepted by contract.unresolved: warn)"
     return [
         Finding(
             kind="contract_coverage_failure",
             symbol="Contract evidence: release contract-coverage ledger",
             detail=detail,
         )
-    ]
+    ], blocking
 
 
 def _from_release(
@@ -1113,13 +1133,18 @@ def _from_release(
     **The orthogonal contract-coverage ledger (ADR-049 Phase 7) is not the
     same gap and is closed here** (Codex review, CLI-audit P2): unlike the
     per-library kind-level findings above, the release JSON *does* already
-    carry an authoritative ``contract_coverage_exit_contribution`` int (both
-    release-wide and per-library) — see :func:`_release_contract_coverage_
-    findings`. Without this, a release whose only problem was incomplete
-    contract coverage had ``incomplete == []`` and zero changes, so the
-    default ``--on=changes`` policy silently skipped (or deleted) the sticky
-    comment, and ``--on=always`` rendered "No ABI changes" beside a release
-    that had already failed its exit code.
+    carry authoritative ``contract_coverage_failure_count``/``contract_
+    coverage_exit_contribution`` ints (both release-wide and per-library) —
+    see :func:`_release_contract_coverage_findings`. Without this, a release
+    whose only problem was incomplete contract coverage had ``incomplete ==
+    []`` and zero changes, so the default ``--on=changes`` policy silently
+    skipped (or deleted) the sticky comment, and ``--on=always`` rendered "No
+    ABI changes" beside a release that had already failed its exit code —
+    and, in a follow-up review round, an advisory (``contract.unresolved:
+    warn``-accepted) coverage gap stayed invisible even after that fix, since
+    ``warn`` deliberately zeroes the exit contribution the first fix gated
+    finding-creation on. See that function's own docstring for why the two
+    ints must be read separately.
     """
     rows: list[tuple[str, str, int, int, int]] = []
     levels = _severity_levels(report)
@@ -1156,7 +1181,7 @@ def _from_release(
     )
     removed = report.get("unmatched_old")
     added = report.get("unmatched_new")
-    incomplete = _release_contract_coverage_findings(report)
+    incomplete, incomplete_blocking = _release_contract_coverage_findings(report)
     return CommentModel(
         mode="release",
         subject=f"{n_libs} librar{'y' if n_libs == 1 else 'ies'}",
@@ -1165,11 +1190,12 @@ def _from_release(
         policy="strict_abi",
         library_rows=rows,
         incomplete=incomplete,
-        # Any nonzero release-level contribution already raised the real
-        # exit code unconditionally (ADR-049 Phase 7's max() fold) — no
-        # severity/gate-flag combination to check, unlike
-        # `_incomplete_is_blocking`'s per-finding compare-mode logic.
-        incomplete_blocking=bool(incomplete),
+        # Blocking follows the release-level exit-code contribution, not
+        # merely whether a finding exists — a `contract.unresolved: warn`
+        # run still creates the finding (real, unsuppressible signal) but
+        # deliberately zeroed the contribution, so it must render advisory,
+        # not blocking (see `_release_contract_coverage_findings`).
+        incomplete_blocking=incomplete_blocking,
         breaking_categories=frozenset(categories),
         breaking_severities=frozenset(severities),
         removed_libraries=[str(x) for x in removed]

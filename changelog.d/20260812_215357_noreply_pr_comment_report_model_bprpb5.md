@@ -47,7 +47,29 @@ A new changelog fragment. See changelog.d/README.md for the workflow.
   JSON's `contract_coverage_exit_contribution` (release-level and
   per-library) now produces a blocking analysis-incomplete finding naming
   the affected librar(y/ies), same as the single-pair `compare` report's
-  `contract_coverage_failures` ledger already did.
+  `contract_coverage_failures` ledger already did. **The release-mode
+  finding was also unreachable in the rendered comment body**: the release
+  path's own `_body_sections` early return skipped `model.incomplete`
+  entirely, so only the headline/count surfaced it, never the actual
+  "Incomplete for: ..." detail naming the affected library — now appended
+  after the per-library results table, same as compare mode's own section.
+- **Release-mode contract-coverage now stays visible under
+  `contract.unresolved: warn`** — a real second gap in the fix above, found
+  in review: `contract.unresolved: warn` deliberately zeroes the exit-code
+  contribution while the underlying failures stay real (an acceptance of
+  incomplete assurance, not a way to hide it — see `contract_coverage_
+  exit.py`'s own module docstring), but the first release-mode fix gated
+  *finding creation itself* on that same now-zeroed contribution, making a
+  warn-accepted coverage gap invisible all over again. `cli_compare_
+  release.py` now stamps a second, never-zeroed
+  `contract_coverage_failure_count` (release-level and per-library,
+  alongside the existing `contract_coverage_exit_contribution`) that finding
+  creation keys on instead, with blocking-ness still following the
+  contribution alone — an advisory (warn-accepted) release finding now
+  renders `⚠️ Analysis coverage reduced` rather than not rendering at all.
+  `compare` on a directory/package operand also announces this to stderr
+  for a warn-accepted gap now, worded as accepted rather than blocking,
+  mirroring single-pair `compare`'s own `coverage_failure_diagnostic`.
 - **`compare` on a directory/package operand now announces incomplete
   contract coverage to stderr for every non-JSON output format**, not just
   `--format json`'s own `contract_coverage_exit_contribution` field — the

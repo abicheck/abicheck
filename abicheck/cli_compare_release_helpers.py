@@ -589,6 +589,7 @@ def _format_release_summary(
     severity_config: SeverityConfig | None = None,
     severity_exit_code: int | None = None,
     contract_coverage_exit_contribution: int = 0,
+    contract_coverage_failure_count: int = 0,
 ) -> str:
     """Format the release comparison summary as JSON, markdown, or JUnit XML."""
     if fmt == "junit":
@@ -611,6 +612,7 @@ def _format_release_summary(
             severity_config=severity_config,
             severity_exit_code=severity_exit_code,
             contract_coverage_exit_contribution=contract_coverage_exit_contribution,
+            contract_coverage_failure_count=contract_coverage_failure_count,
         )
     return _format_release_markdown(
         worst_verdict,
@@ -687,6 +689,7 @@ def _format_release_json(
     severity_config: SeverityConfig | None = None,
     severity_exit_code: int | None = None,
     contract_coverage_exit_contribution: int = 0,
+    contract_coverage_failure_count: int = 0,
 ) -> str:
     """Render the release summary as a JSON document."""
     changed_libraries = [
@@ -728,6 +731,13 @@ def _format_release_json(
         summary["contract_coverage_exit_contribution"] = (
             contract_coverage_exit_contribution
         )
+        # Independent of the exit-code fold above: `contract.unresolved:
+        # warn` deliberately zeroes the contribution while the failures
+        # themselves stay real (Codex review, CLI-audit P2 follow-up) --
+        # without this, a warn-accepted release-level coverage gap would be
+        # indistinguishable from a genuinely clean run anywhere this JSON is
+        # read from. Same "present only when active" gate as the field above.
+        summary["contract_coverage_failure_count"] = contract_coverage_failure_count
     # Release-level public-surface scoping rollup (ADR-024, issue #235).
     # Present only when --scope-public-headers was active (per-library
     # entries then carry a "scope_resolved" key).
