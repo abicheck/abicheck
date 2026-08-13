@@ -155,6 +155,48 @@ class TestChangeSymbolBindingStamp:
         change = _check_removed_function("_Z1fv", f_old, {}, elf_only_mode=False)
         assert change.symbol_binding is None
 
+    def test_func_visibility_changed_stamps_symbol_binding(self) -> None:
+        # Codex review, upstream ask #1: FUNC_VISIBILITY_CHANGED (a public
+        # export demoted to HIDDEN, not a removal) is the other common
+        # export-loss shape a `binding:` selector needs to scope, alongside
+        # the four removal kinds -- an unstamped visibility-hidden finding
+        # forced oneDAL's own reclassify rules to fall back to a kind-global
+        # override instead of a binding-scoped one.
+        from abicheck.model import Visibility
+
+        f_old = Function(
+            name="f",
+            mangled="_Z1fv",
+            return_type="void",
+            visibility=Visibility.PUBLIC,
+            elf_binding=SymbolBinding.WEAK,
+        )
+        f_hidden = Function(
+            name="f",
+            mangled="_Z1fv",
+            return_type="void",
+            visibility=Visibility.HIDDEN,
+        )
+        change = _check_removed_function(
+            "_Z1fv", f_old, {"_Z1fv": f_hidden}, elf_only_mode=False
+        )
+        assert change.kind == ChangeKind.FUNC_VISIBILITY_CHANGED
+        assert change.symbol_binding == "weak"
+
+    def test_func_visibility_changed_no_binding_captured_is_none(self) -> None:
+        from abicheck.model import Visibility
+
+        f_old = Function(
+            name="f", mangled="_Z1fv", return_type="void", visibility=Visibility.PUBLIC
+        )
+        f_hidden = Function(
+            name="f", mangled="_Z1fv", return_type="void", visibility=Visibility.HIDDEN
+        )
+        change = _check_removed_function(
+            "_Z1fv", f_old, {"_Z1fv": f_hidden}, elf_only_mode=False
+        )
+        assert change.symbol_binding is None
+
     def test_var_removed_stamps_symbol_binding(self) -> None:
         v_old = Variable(
             name="g", mangled="g", type="int", elf_binding=SymbolBinding.GLOBAL

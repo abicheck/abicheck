@@ -288,6 +288,8 @@ def _check_removed_function(
             name=f_old.name,
             old_value=f_old.visibility.value,
             new_value=f_hidden.visibility.value,
+            # See Change.symbol_binding's docstring -- stamped here too, not just on removal below.
+            symbol_binding=f_old.elf_binding.value if f_old.elf_binding else None,
         )
     removed_kind = (
         ChangeKind.FUNC_REMOVED_ELF_ONLY

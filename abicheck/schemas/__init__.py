@@ -627,7 +627,28 @@ REPORT_SCHEMA_VERSION = "2.34"
 #:        exact "N safe" header count (once the count itself was corrected
 #:        to read the full ``diff.compatible`` scalar) with nothing
 #:        itemized underneath it to explain what those N findings were.
-SCAN_SCHEMA_VERSION = "1.13"
+#: 1.14 -- upstream ask #2 (Codex review): ``scan --format json`` had no
+#:        policy-audit disclosure at all -- a reviewer saw a downgraded
+#:        verdict with no way to tell which rule produced it, unlike the
+#:        ``compare``/report path (``reporter._add_policy_overrides``,
+#:        report_schema_version 2.30/2.31). The ``diff`` block gains the
+#:        identical two top-level keys, byte-for-byte the same shape
+#:        (``ReclassifyRule.to_report_dict()`` encoding, shared with
+#:        ``reporter.py``/``sarif.py`` so the three can't drift): optional
+#:        ``policy_overrides`` (kind -> verdict, from ``PolicyFile.overrides``)
+#:        and ``policy_reclassify`` (the active, non-expired
+#:        ``PolicyFile.reclassify`` rule set), plus ``policy_file`` (the
+#:        source path) when either is present. Each finding dict
+#:        (``_baseline_finding_dicts``, ``findings``/``additions``/
+#:        ``quality``/``suppressed``) also gains the optional
+#:        ``reclassified_by`` key -- the same per-finding audit value
+#:        ``compare``'s ``change.reclassified_by`` (report_schema_version
+#:        2.31) already stamps, computed by the identical
+#:        ``reporter._reclassified_by_for_change`` helper so the two commands
+#:        can't disagree about which rule decided a shared finding. All keys
+#:        are additive and omitted when no policy file (or no active rule)
+#:        applies, so an ordinary scan is unchanged from 1.13.
+SCAN_SCHEMA_VERSION = "1.14"
 
 _SCHEMA_DIR = Path(__file__).resolve().parent
 COMPARE_REPORT_SCHEMA_PATH = _SCHEMA_DIR / "compare_report.schema.json"

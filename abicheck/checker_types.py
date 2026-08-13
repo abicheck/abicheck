@@ -353,9 +353,12 @@ class Change:
     # precedent predates this dataclass's own instance of the same bug).
     vtable_covers_unverifiable_layout_gap: bool = field(default=False, kw_only=True)
     # ELF symbol linkage (Function.elf_binding / Variable.elf_binding's value
-    # string — "global"/"weak"/"local"/"unique"/"other") of the removed
-    # symbol, stamped by diff_symbols._check_removed_function/_var_removed on
-    # FUNC_REMOVED/FUNC_REMOVED_ELF_ONLY/VAR_REMOVED findings, and by
+    # string — "global"/"weak"/"local"/"unique"/"other") of the removed (or
+    # visibility-hidden) symbol, stamped by
+    # diff_symbols._check_removed_function/_var_removed on
+    # FUNC_REMOVED/FUNC_REMOVED_ELF_ONLY/VAR_REMOVED/FUNC_VISIBILITY_CHANGED
+    # findings (the old side's binding — still real ELF-linkage evidence for
+    # a symbol that went hidden, not just one that vanished outright), and by
     # diff_platform._diff_elf_deleted_fallback on FUNC_DELETED_ELF_FALLBACK
     # (the other common export-disappearance path — a function still
     # declared but silently absent from .dynsym). None for every other

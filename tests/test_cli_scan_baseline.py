@@ -308,6 +308,9 @@ class TestBaselineSummaryKeysArePinned:
             "quality_truncated",
             "quality_total",
             "policy",
+            "policy_overrides",
+            "policy_reclassify",
+            "policy_file",
         }
     )
 
@@ -343,6 +346,26 @@ class TestBaselineSummaryKeysArePinned:
             )
             for i in range(30)
         ]
+        from pathlib import Path
+
+        from abicheck.checker_policy import Verdict
+        from abicheck.policy_file import PolicyFile
+        from abicheck.reclassify import ReclassifyRule
+
+        policy_file = PolicyFile(
+            base_policy="strict_abi",
+            overrides={ChangeKind.FUNC_VISIBILITY_CHANGED: Verdict.COMPATIBLE_WITH_RISK},
+            reclassify=[
+                ReclassifyRule(
+                    to_verdict=Verdict.COMPATIBLE_WITH_RISK,
+                    change_kind="func_removed",
+                    symbol_pattern="_Z.*",
+                    binding="weak",
+                    reason="COMDAT-inline demotions",
+                )
+            ],
+            source_path=Path("policy.yml"),
+        )
         return types.SimpleNamespace(
             breaking=breaking,
             source_breaks=[],
@@ -356,6 +379,7 @@ class TestBaselineSummaryKeysArePinned:
             ],
             suppressed_changes=suppressed,
             policy="strict_abi",
+            policy_file=policy_file,
         )
 
     def test_every_emitted_key_is_pinned(self) -> None:
@@ -377,6 +401,116 @@ class TestBaselineSummaryKeysArePinned:
         diff = self._diff_exercising_every_optional_key()
         summary = csb._baseline_summary(diff, max_findings=5)
         assert self._KNOWN_KEYS <= set(summary)
+
+
+class TestBaselinePolicyDisclosure:
+    """``scan --format json`` policy-audit disclosure (Codex review, upstream
+    ask #2): the resolved ``policy_overrides``/``policy_reclassify`` rule set
+    and each finding's own ``reclassified_by`` attribution, mirroring what
+    ``compare``'s JSON report already discloses via
+    ``reporter._add_policy_overrides``/``_reclassified_by_for_change``.
+    """
+
+    @staticmethod
+    def _diff_with_policy_file(policy_file):
+        from abicheck.checker_policy import ChangeKind
+        from abicheck.checker_types import Change
+
+        change = Change(
+            kind=ChangeKind.FUNC_REMOVED, symbol="_Z1fv", description="d", symbol_binding="weak"
+        )
+        return types.SimpleNamespace(
+            breaking=[change],
+            source_breaks=[],
+            risk=[],
+            compatible=[],
+            not_evaluated=[],
+            detector_results=[],
+            suppressed_changes=[],
+            policy="strict_abi",
+            policy_file=policy_file,
+        )
+
+    def test_no_policy_file_omits_disclosure_keys(self) -> None:
+        diff = self._diff_with_policy_file(None)
+        summary = csb._baseline_summary(diff)
+        assert "policy_overrides" not in summary
+        assert "policy_reclassify" not in summary
+        assert "policy_file" not in summary
+        assert "reclassified_by" not in summary["findings"][0]
+
+    def test_kind_global_override_is_disclosed(self) -> None:
+        from pathlib import Path
+
+        from abicheck.checker_policy import ChangeKind, Verdict
+        from abicheck.policy_file import PolicyFile
+
+        policy_file = PolicyFile(
+            base_policy="strict_abi",
+            overrides={ChangeKind.FUNC_REMOVED: Verdict.COMPATIBLE_WITH_RISK},
+            source_path=Path("policy.yml"),
+        )
+        diff = self._diff_with_policy_file(policy_file)
+        summary = csb._baseline_summary(diff)
+        assert summary["policy_overrides"] == {"func_removed": "COMPATIBLE_WITH_RISK"}
+        assert summary["policy_file"] == "policy.yml"
+
+    def test_selector_scoped_reclassify_rule_is_disclosed_active_only(self) -> None:
+        from pathlib import Path
+
+        from abicheck.checker_policy import Verdict
+        from abicheck.policy_file import PolicyFile
+        from abicheck.reclassify import ReclassifyRule
+
+        active = ReclassifyRule(
+            to_verdict=Verdict.COMPATIBLE_WITH_RISK,
+            symbol_pattern="_Z1.*",
+            binding="weak",
+            reason="COMDAT-inline demotions",
+        )
+        import datetime
+
+        expired = ReclassifyRule(
+            to_verdict=Verdict.COMPATIBLE,
+            symbol_pattern="_Z2.*",
+            expires=datetime.date(2000, 1, 1),
+        )
+        policy_file = PolicyFile(
+            base_policy="strict_abi",
+            reclassify=[active, expired],
+            source_path=Path("policy.yml"),
+        )
+        diff = self._diff_with_policy_file(policy_file)
+        summary = csb._baseline_summary(diff)
+        assert len(summary["policy_reclassify"]) == 1
+        assert summary["policy_reclassify"][0]["to"] == "COMPATIBLE_WITH_RISK"
+        assert summary["policy_reclassify"][0]["binding"] == "weak"
+        assert summary["policy_file"] == "policy.yml"
+        # The rule actually decided this finding's verdict -- disclosed
+        # per-finding too, not just as part of the active rule set.
+        assert summary["findings"][0]["reclassified_by"] == "COMDAT-inline demotions"
+
+    def test_non_matching_rule_leaves_finding_undisclosed(self) -> None:
+        from pathlib import Path
+
+        from abicheck.checker_policy import Verdict
+        from abicheck.policy_file import PolicyFile
+        from abicheck.reclassify import ReclassifyRule
+
+        rule = ReclassifyRule(
+            to_verdict=Verdict.COMPATIBLE_WITH_RISK,
+            symbol_pattern="_Znomatch.*",
+            reason="unrelated",
+        )
+        policy_file = PolicyFile(
+            base_policy="strict_abi", reclassify=[rule], source_path=Path("policy.yml")
+        )
+        diff = self._diff_with_policy_file(policy_file)
+        summary = csb._baseline_summary(diff)
+        # The rule is still disclosed as part of the active rule set...
+        assert len(summary["policy_reclassify"]) == 1
+        # ...but never attributed to a finding it didn't actually decide.
+        assert "reclassified_by" not in summary["findings"][0]
 
 
 class TestPublicProvenanceSet:
