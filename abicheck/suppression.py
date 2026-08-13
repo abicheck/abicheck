@@ -862,8 +862,8 @@ def _matches_binding(binding: str, change: Change) -> bool:
 
     ``change.symbol_binding`` is ``None`` for every change kind other than
     ``FUNC_REMOVED``/``FUNC_REMOVED_ELF_ONLY``/``VAR_REMOVED``/
-    ``FUNC_DELETED_ELF_FALLBACK`` (the only kinds any detector stamps it
-    on), and also ``None`` on one of those whose binding
+    ``FUNC_DELETED_ELF_FALLBACK``/``FUNC_VISIBILITY_CHANGED`` (the only
+    kinds any detector stamps it on), and also ``None`` on one of those whose binding
     was never captured (non-ELF platform, older snapshot, no matching
     ``.dynsym`` entry). A rule with an explicit ``binding:`` selector never
     matches either case — an unknown binding is not the same fact as a
@@ -1016,11 +1016,11 @@ class Suppression:
     # AbiSnapshot's own PR #582 fix — see those fields' docstrings.
     binding: str | None = field(default=None, kw_only=True)
     """``"global" | "weak" | "local" | "unique" | "other"`` — the removed
-    symbol's ELF linkage (``Change.symbol_binding``, from
-    ``Function.elf_binding``/``Variable.elf_binding``). Only ever set on a
-    ``FUNC_REMOVED``/``FUNC_REMOVED_ELF_ONLY``/``VAR_REMOVED``/
-    ``FUNC_DELETED_ELF_FALLBACK`` finding; a rule combining this with any
-    other ``change_kind`` never matches.
+    (or visibility-hidden) symbol's ELF linkage (``Change.symbol_binding``,
+    from ``Function.elf_binding``/``Variable.elf_binding``). Only ever set
+    on a ``FUNC_REMOVED``/``FUNC_REMOVED_ELF_ONLY``/``VAR_REMOVED``/
+    ``FUNC_DELETED_ELF_FALLBACK``/``FUNC_VISIBILITY_CHANGED`` finding; a
+    rule combining this with any other ``change_kind`` never matches.
     Conjunctive with every other selector (AND semantics), like
     :attr:`member_name` — combine with :attr:`symbol_pattern` or
     :attr:`namespace` to scope it. Never matches a change whose binding was

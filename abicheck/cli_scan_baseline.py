@@ -291,7 +291,11 @@ def _addition_finding_dicts(
         c for c in getattr(diff, "compatible", None) or ()
         if _change_kind_str(c) in _ADDITION_KIND_VALUES
     ]
-    dicts = _baseline_finding_dicts(addition_changes[:cap], "compatible")
+    dicts = _baseline_finding_dicts(
+        addition_changes[:cap],
+        "compatible",
+        policy_file=getattr(diff, "policy_file", None),
+    )
     return dicts, len(addition_changes) > len(dicts), len(addition_changes)
 
 
@@ -319,7 +323,11 @@ def _quality_finding_dicts(
         c for c in getattr(diff, "compatible", None) or ()
         if _change_kind_str(c) not in _ADDITION_KIND_VALUES
     ]
-    dicts = _baseline_finding_dicts(quality_changes[:cap], "compatible")
+    dicts = _baseline_finding_dicts(
+        quality_changes[:cap],
+        "compatible",
+        policy_file=getattr(diff, "policy_file", None),
+    )
     return dicts, len(quality_changes) > len(dicts), len(quality_changes)
 
 
@@ -356,7 +364,9 @@ def _add_severity_blocking_compatible_findings(
         return
     cap = _resolve_max_baseline_findings(max_findings)
     findings: list[dict[str, Any]] = list(summary.get("findings") or [])
-    added = _baseline_finding_dicts(blocking, "compatible")
+    added = _baseline_finding_dicts(
+        blocking, "compatible", policy_file=getattr(diff, "policy_file", None)
+    )
     # Both groups get a share; neither may evict the other outright. Two
     # opposite failures were found here in successive reviews, and each fix
     # caused the next:
@@ -501,6 +511,7 @@ def _baseline_finding_dicts(
     bucket: str,
     *,
     pre_suppression_bucket_of: Any = None,
+    policy_file: Any = None,
 ) -> list[dict[str, Any]]:
     """Project *changes* (one verdict bucket) into small, renderable dicts.
 
@@ -538,8 +549,17 @@ def _baseline_finding_dicts(
     means a suppressed finding's *entry* must say more than "suppressed";
     without this a reader could not tell a suppressed ABI break apart from a
     suppressed cosmetic quality note.
+
+    *policy_file*, when given, is the run's resolved ``PolicyFile`` (same
+    object ``DiffResult.policy_file`` carries) -- passed through to stamp
+    ``reclassified_by`` the identical way ``reporter._change_to_dict`` does
+    for ``compare``'s own JSON report (Codex review, upstream ask #2):
+    without it, a ``scan --format json`` reader saw a downgraded verdict
+    with no way to tell *which* ``reclassify:`` rule produced it, unlike the
+    compare/report path.
     """
     from .finding_identity import report_finding_id
+    from .reporter import _reclassified_by_for_change
 
     findings = []
     for c in changes:
@@ -560,6 +580,9 @@ def _baseline_finding_dicts(
         binding = getattr(c, "symbol_binding", None)
         if binding:
             entry["symbol_binding"] = binding
+        reclassified_by = _reclassified_by_for_change(c, policy_file)
+        if reclassified_by:
+            entry["reclassified_by"] = reclassified_by
         _add_contract_fields(entry, c)
         if bucket == "suppressed":
             entry["suppression_rule"] = getattr(c, "suppression_rule", None)
@@ -736,6 +759,33 @@ def _baseline_summary(diff: Any, max_findings: int | None = None) -> dict[str, A
     resolved_policy = getattr(diff, "policy", None)
     if resolved_policy is not None:
         summary["policy"] = resolved_policy
+    # Codex review, upstream ask #2: `scan --format json` carried the
+    # resolved policy *name* (above) but never the active `policy_overrides`/
+    # `policy_reclassify` rule set `compare`'s own JSON report discloses
+    # (`reporter._add_policy_overrides`) -- a reviewer saw a downgraded
+    # verdict with no way to tell which rule produced it, unlike the
+    # compare/report path. Mirrors that function's shape exactly (same key
+    # names, same `ReclassifyRule.to_report_dict()` encoding) but reads
+    # `policy_file` via `getattr` rather than a direct attribute access,
+    # matching every other duck-typed read in this function -- `diff` here
+    # is a real `DiffResult` in production but a lightweight stand-in
+    # (`SimpleNamespace`) in several existing tests that don't model every
+    # field.
+    policy_file = getattr(diff, "policy_file", None)
+    if policy_file is not None and getattr(policy_file, "overrides", None):
+        summary["policy_overrides"] = {
+            kind.value: verdict.value for kind, verdict in policy_file.overrides.items()
+        }
+        if getattr(policy_file, "source_path", None):
+            summary["policy_file"] = str(policy_file.source_path)
+    if policy_file is not None and getattr(policy_file, "reclassify", None):
+        from .reclassify import active_reclassify_rules
+
+        active = active_reclassify_rules(policy_file.reclassify)
+        if active:
+            summary["policy_reclassify"] = [rule.to_report_dict() for rule in active]
+            if getattr(policy_file, "source_path", None):
+                summary["policy_file"] = str(policy_file.source_path)
     # ADR-049 D9 conserves every detector fact in exactly one visible
     # outcome. The four buckets above are the *compatibility* axis, so since
     # Phase 7 they exclude findings contract evaluation did not score -- and
@@ -800,7 +850,9 @@ def _baseline_summary(diff: Any, max_findings: int | None = None) -> dict[str, A
     ):
         remaining = max(0, cap - len(findings))
         included, excluded = bucket_changes[:remaining], bucket_changes[remaining:]
-        findings.extend(_baseline_finding_dicts(included, bucket_name))
+        findings.extend(
+            _baseline_finding_dicts(included, bucket_name, policy_file=policy_file)
+        )
         # Keep tallying excluded kinds across every remaining bucket (not just
         # the one that first hit the cap) -- a bucket entirely past the cap
         # would otherwise contribute nothing to `findings_truncated_kinds`,
@@ -849,6 +901,7 @@ def _baseline_summary(diff: Any, max_findings: int | None = None) -> dict[str, A
             suppressed_changes[:cap],
             "suppressed",
             pre_suppression_bucket_of=lambda c: _pre_suppression_bucket(diff, c),
+            policy_file=policy_file,
         )
         if len(suppressed_changes) > cap:
             summary["suppressed_truncated"] = True

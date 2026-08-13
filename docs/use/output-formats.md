@@ -720,15 +720,30 @@ The block also carries `policy` — the resolved compatibility policy name
 real comparison (absent only for the `NOT_COMPARABLE`/audit-only `diff`
 shapes, which never reach policy classification).
 
+Since schema 1.14, the block also discloses the active `--policy-file`
+audit trail — previously a `scan --format json` reader could see a
+downgraded verdict with no way to tell which rule produced it, unlike the
+`compare`/report path. `policy_overrides` (a `ChangeKind -> verdict` map)
+and `policy_reclassify` (the active, non-expired selector-scoped
+`reclassify:` rule set — see [Suppressions](suppressions.md)) mirror
+`compare`'s own JSON report byte-for-byte, and `policy_file` names the
+source path when either is present. Each `findings`/`additions`/`quality`/
+`suppressed` entry also gains an optional `reclassified_by` key naming
+which rule actually decided that finding's verdict. All four keys are
+omitted when no policy file (or no active rule) applies.
+
 ```json
 {
-  "scan_schema_version": "1.13",
+  "scan_schema_version": "1.14",
   "diff": {
     "breaking": 25,
     "findings": ["... 20 entries ..."],
     "findings_truncated": true,
     "findings_truncated_kinds": {"func_removed": 5},
-    "additions": ["... up to 20 entries ..."]
+    "additions": ["... up to 20 entries ..."],
+    "policy_overrides": {"func_removed": "COMPATIBLE_WITH_RISK"},
+    "policy_reclassify": [{"to": "COMPATIBLE_WITH_RISK", "binding": "weak"}],
+    "policy_file": "policy.yml"
   }
 }
 ```
