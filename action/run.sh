@@ -1066,6 +1066,23 @@ elif [[ "$MODE" == "scan" ]]; then
     if [[ -n "$OUTPUT_FILE" ]]; then
       CMD+=(-o "$OUTPUT_FILE")
     fi
+
+    # Render a second, always-unfiltered JSON report from this same scan run
+    # for the sticky PR comment (--secondary-format), instead of re-invoking
+    # abicheck a second time just to get JSON -- the same reasoning compare
+    # mode's own --secondary-format wiring above already documents, and the
+    # cost is sharper here: a re-run could redo a --depth build/source scan
+    # (Codex review — a naive rerun-on-text-format fallback would double
+    # potentially expensive work and describe a second, separately
+    # budget-metered run rather than the one whose status actually gated the
+    # step). Only needed when the primary format isn't already JSON, and
+    # --artifact-set has no single-artifact JSON shape to render a second
+    # time (the CLI itself rejects --secondary-* there too).
+    if [[ "$FORMAT" != "json" && "${INPUT_PR_COMMENT:-true}" == "true" \
+       && -z "$SCAN_ARTIFACT_SET" ]]; then
+      PR_JSON=$(mktemp "${RUNNER_TEMP:-/tmp}/abicheck-pr-json.XXXXXX")
+      CMD+=(--secondary-format json --secondary-output "$PR_JSON")
+    fi
   fi
 
 else
@@ -2022,7 +2039,7 @@ _maybe_post_pr_comment() {
   PR_BODY=$(mktemp "${RUNNER_TEMP:-/tmp}/abicheck-pr-body.XXXXXX")
   if [[ -s "$PR_JSON" ]]; then
     : # Already populated by the primary run's --secondary-format (compare
-      # mode, non-json primary format) — nothing left to do.
+      # or scan mode, non-json primary format) — nothing left to do.
   elif _can_reuse_primary_json; then
     # The primary run already produced a faithful JSON report — reuse it instead
     # of re-running the whole comparison.

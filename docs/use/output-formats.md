@@ -696,12 +696,14 @@ surface, `ChangeKind`'s `ADDITION_KINDS`), itemized the same shape as
 made any of them the run's blocking cause. Capped independently of
 `findings`' own budget (the same `--max-findings`/
 `ABICHECK_MAX_BASELINE_FINDINGS` cap), with `additions_truncated` set when
-that cap was hit — both keys are omitted when `compatible` has no
-addition-shaped entry. This is what lets a `scan --against` PR comment (see
-the Action's own `pr-comment`/`pr-comment-on` inputs,
-[GitHub Action usage](github-action.md)) render a green "public API
-additions" section the same way `compare`'s own JSON report already does via
-its full `changes` list.
+that cap was hit, alongside `additions_total` (the exact, untruncated
+addition count — `compatible`'s own scalar mixes additions and quality
+findings, so it can't answer "how many additions, exactly" on its own). All
+three keys are omitted when `compatible` has no addition-shaped entry. This
+is what lets a `scan --against` PR comment (see the Action's own
+`pr-comment`/`pr-comment-on` inputs, [GitHub Action usage](github-action.md))
+render a green "public API additions" section the same way `compare`'s own
+JSON report already does via its full `changes` list.
 
 ```json
 {

@@ -31,10 +31,101 @@ from __future__ import annotations
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+import click
+
 from .buildsource.scan_levels import EvidenceDepth
 
 if TYPE_CHECKING:
     from .buildsource.scan_levels import SourceMethod
+
+
+# --- operand/flag validation (click-free, no ScanOutcome dependency) --------
+
+
+def reject_incoherent_scan_operands(
+    *,
+    artifact: Path | None,
+    artifact_set: str | None,
+    against: Path | None,
+    dry_run: bool,
+    bundle_system_providers: str,
+) -> None:
+    """Reject operand/flag combinations ``scan`` cannot serve.
+
+    An empty ``--artifact-set`` is rejected explicitly rather than left to
+    collapse to ``Path("") == Path(".")`` and audit the whole CWD (CodeRabbit
+    review). ``--artifact-set`` is audit-only -- there is no old side for a set
+    -- so ``--against`` is rejected with it, and ``--dry-run`` is not wired for
+    it yet. ``--bundle-system-providers`` is the mirror case: it only means
+    something *for* a set.
+    """
+    if artifact_set is not None and not artifact_set.strip():
+        raise click.UsageError("--artifact-set must not be empty.")
+    if (artifact is not None) == (artifact_set is not None):
+        raise click.UsageError(
+            "scan requires exactly one of ARTIFACT or --artifact-set."
+        )
+    if artifact_set is not None:
+        if against is not None:
+            raise click.UsageError(
+                "--against is not supported with --artifact-set "
+                "(audit-only -- no old side for a set)."
+            )
+        if dry_run:
+            raise click.UsageError(
+                "--dry-run is not yet supported with --artifact-set."
+            )
+    elif bundle_system_providers:
+        raise click.UsageError("--bundle-system-providers requires --artifact-set.")
+
+
+def reject_incoherent_secondary_output(
+    *,
+    dry_run: bool,
+    output: Path | None,
+    secondary_fmt: str | None,
+    secondary_output: Path | None,
+    artifact_set: str | None,
+) -> None:
+    """Reject a ``--secondary-*`` combination that cannot mean anything,
+    mirroring ``compare``'s own ``_reject_incoherent_compare_flags`` (same
+    four checks, adapted to scan's ``text``/``json``-only format choice and
+    its ``--artifact-set`` shape, which has no secondary render at all).
+    """
+    if artifact_set is not None and (
+        secondary_fmt is not None or secondary_output is not None
+    ):
+        raise click.UsageError(
+            "--secondary-format/--secondary-output are not supported with "
+            "--artifact-set -- there is no single-artifact report to render "
+            "a second time."
+        )
+    if dry_run and secondary_output is not None:
+        raise click.UsageError(
+            "--dry-run cannot be combined with --secondary-output: a dry "
+            "run performs no analysis and writes nothing, so there is no "
+            "secondary report to produce."
+        )
+    if secondary_fmt is not None and secondary_output is None:
+        raise click.UsageError(
+            "--secondary-format requires --secondary-output: writing two "
+            "output formats to the same stream would be ambiguous."
+        )
+    if secondary_output is not None and secondary_fmt is None:
+        raise click.UsageError(
+            "--secondary-output requires --secondary-format: with no "
+            "format given there is nothing to render, and the path would "
+            "be silently ignored."
+        )
+    if (
+        secondary_output is not None
+        and output is not None
+        and secondary_output.resolve() == output.resolve()
+    ):
+        raise click.UsageError(
+            "--secondary-output must differ from --output/-o, or the "
+            "secondary render would silently overwrite the primary report."
+        )
 
 
 # --- coverage-row helpers (snapshot → report rows) ---------------------------

@@ -582,12 +582,12 @@ REPORT_SCHEMA_VERSION = "2.34"
 #:        per-TU macro divergence; see that module's own docstring). ``0``
 #:        when nothing was truncated, so an ordinary scan is unchanged from
 #:        1.11.
-#: 1.13 -- the ``diff`` block gains an always-on ``additions`` array (plus an
-#:        optional ``additions_truncated`` boolean): the addition-shaped
-#:        subset of ``diff.compatible`` (new public-API surface --
-#:        ``ChangeKind``'s ``ADDITION_KINDS``), itemized the same shape as
-#:        ``findings`` (``bucket: "compatible"``) regardless of whether
-#:        severity policy made any of them blocking. Previously
+#: 1.13 -- the ``diff`` block gains an always-on ``additions`` array (plus
+#:        optional ``additions_truncated``/``additions_total`` fields): the
+#:        addition-shaped subset of ``diff.compatible`` (new public-API
+#:        surface -- ``ChangeKind``'s ``ADDITION_KINDS``), itemized the same
+#:        shape as ``findings`` (``bucket: "compatible"``) regardless of
+#:        whether severity policy made any of them blocking. Previously
 #:        ``diff.compatible`` contributed only its bare count unless
 #:        promoted to blocking by ``--severity-addition error`` (see 1.9's
 #:        ``severity`` block) -- with no way to render *what* was added, a
@@ -597,7 +597,13 @@ REPORT_SCHEMA_VERSION = "2.34"
 #:        ``changes`` list. Capped independently of ``findings``' own budget
 #:        (same ``--max-findings``/``ABICHECK_MAX_BASELINE_FINDINGS`` cap),
 #:        so a large addition set can never crowd out a real gating finding.
-#:        Both keys are additive and omitted when ``diff.compatible`` has no
+#:        ``additions_total`` is the exact, untruncated addition count
+#:        (Codex review) -- emitted alongside ``additions_truncated`` only
+#:        when ``additions`` was itself capped, since ``diff.compatible``'s
+#:        own scalar mixes additions and quality findings and so cannot
+#:        answer "how many additions, exactly" on its own; the PR comment's
+#:        header count needs this to stay exact under truncation. All three
+#:        keys are additive and omitted when ``diff.compatible`` has no
 #:        addition-shaped entry, so an ordinary scan with no new public API
 #:        is unchanged from 1.12.
 SCAN_SCHEMA_VERSION = "1.13"

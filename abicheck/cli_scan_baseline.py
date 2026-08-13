@@ -263,7 +263,9 @@ _COMPATIBLE_SEVERITY_CATEGORIES = frozenset({"addition", "quality_issues"})
 _ADDITION_KIND_VALUES = frozenset(k.value for k in ADDITION_KINDS)
 
 
-def _addition_finding_dicts(diff: Any, cap: int) -> tuple[list[dict[str, Any]], bool]:
+def _addition_finding_dicts(
+    diff: Any, cap: int
+) -> tuple[list[dict[str, Any]], bool, int]:
     """Always-on itemization of new public-API surface, for a PR comment.
 
     ``diff.compatible`` normally contributes only its bare count to
@@ -278,13 +280,19 @@ def _addition_finding_dicts(diff: Any, cap: int) -> tuple[list[dict[str, Any]], 
     (`_ADDITION_KIND_VALUES`, never a quality finding) unconditionally,
     capped independently of the gating findings above so a large addition set
     can never crowd out a real gating finding from the shared budget.
+
+    Returns ``(dicts, truncated, total)`` -- ``total`` is the exact,
+    untruncated addition count (Codex review): ``diff.compatible``'s own
+    scalar mixes additions and quality findings, so the PR comment has no
+    other way to render an exact "N safe" header count once ``dicts`` itself
+    is capped below ``total``.
     """
     addition_changes = [
         c for c in getattr(diff, "compatible", None) or ()
         if _change_kind_str(c) in _ADDITION_KIND_VALUES
     ]
     dicts = _baseline_finding_dicts(addition_changes[:cap], "compatible")
-    return dicts, len(addition_changes) > len(dicts)
+    return dicts, len(addition_changes) > len(dicts), len(addition_changes)
 
 
 def _add_severity_blocking_compatible_findings(
@@ -766,11 +774,12 @@ def _baseline_summary(diff: Any, max_findings: int | None = None) -> dict[str, A
     # `_addition_finding_dicts`'s own docstring) -- separate from `findings`
     # above, which only ever names a `diff.compatible` entry when severity
     # policy made it the blocking cause.
-    additions, additions_truncated = _addition_finding_dicts(diff, cap)
+    additions, additions_truncated, additions_total = _addition_finding_dicts(diff, cap)
     if additions:
         summary["additions"] = additions
         if additions_truncated:
             summary["additions_truncated"] = True
+            summary["additions_total"] = additions_total
 
     # ADR-049 Phase 5: surface the same suppression audit trail `compare`'s
     # own JSON report already exposes (`DiffResult.suppressed_changes`,

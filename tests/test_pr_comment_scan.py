@@ -369,3 +369,133 @@ def test_scan_not_comparable_reachable_through_action_exit_mapping():
     model = build_model(report)
     assert model.mode == "scan"
     assert model.incomplete_blocking is True
+
+
+def test_scan_promoted_addition_not_duplicated_in_safe_bucket():
+    # Codex review: schema 1.13's always-on `diff.additions` unconditionally
+    # includes every addition, so a compatible finding promoted to blocking
+    # by `addition: error` (which also lands in `diff.findings` per
+    # `cli_scan_baseline._add_severity_blocking_compatible_findings`) was
+    # rendering under both "Blocked by policy" (breaking) and the green
+    # "Public API additions" (safe) section at once.
+    report = _scan_report(
+        verdict="SEVERITY_ERROR",
+        exit_code=1,
+        diff={
+            "breaking": 0,
+            "api_break": 0,
+            "risk": 0,
+            "compatible": 1,
+            "severity": {"config": {"addition": "error"}},
+            "findings": [
+                {
+                    "bucket": "compatible",
+                    "kind": "func_added",
+                    "symbol": "_Z3newv",
+                    "description": "added",
+                    "finding_id": "shared-id-1",
+                },
+            ],
+            "additions": [
+                {
+                    "bucket": "compatible",
+                    "kind": "func_added",
+                    "symbol": "_Z3newv",
+                    "description": "added",
+                    "finding_id": "shared-id-1",
+                },
+            ],
+        },
+    )
+    model = build_model(report)
+    # One finding total: Breaking, not Breaking *and* safe.
+    assert model.counts == (1, 0, 0)
+    assert model.breaking[0].category == "addition"
+    body = render_comment(model, sha="abc1234", detail="full")
+    assert body.count("_Z3newv") == 1 or body.count("newv") == 1
+
+
+def test_scan_safe_total_exact_when_additions_truncated():
+    # Codex review (follow-up): `diff.additions` is itself capped at
+    # --max-findings, so len(model.safe) alone under-reports a diff with
+    # more real additions than the cap -- `additions_total` (schema 1.13)
+    # is the exact, untruncated count.
+    report = _scan_report(
+        diff={
+            "breaking": 0,
+            "api_break": 0,
+            "risk": 0,
+            "compatible": 0,
+            "additions": [
+                {
+                    "bucket": "compatible",
+                    "kind": "func_added",
+                    "symbol": f"_Z{i}v",
+                    "description": "added",
+                    "finding_id": f"a{i}",
+                }
+                for i in range(20)
+            ],
+            "additions_truncated": True,
+            "additions_total": 25,
+        },
+    )
+    model = build_model(report)
+    assert model.counts == (0, 0, 25)
+    assert len(model.safe) == 20  # itemized rows stay capped
+    body = render_comment(model, sha="abc1234", detail="standard")
+    assert "25 safe" in body
+    assert "truncated" in body.lower()
+
+
+def test_scan_safe_total_subtracts_promoted_additions_from_the_true_total():
+    # Combining both fixes: 3 real additions total, one of which was
+    # promoted to Breaking by severity policy -- the safe count must be 2,
+    # not 3 (the promoted one isn't double-counted) and not 1 (the
+    # itemized-but-not-promoted ones must still count).
+    report = _scan_report(
+        verdict="SEVERITY_ERROR",
+        exit_code=1,
+        diff={
+            "breaking": 0,
+            "api_break": 0,
+            "risk": 0,
+            "compatible": 1,
+            "severity": {"config": {"addition": "error"}},
+            "findings": [
+                {
+                    "bucket": "compatible",
+                    "kind": "func_added",
+                    "symbol": "_Z1v",
+                    "description": "added",
+                    "finding_id": "promoted-1",
+                },
+            ],
+            "additions": [
+                {
+                    "bucket": "compatible",
+                    "kind": "func_added",
+                    "symbol": "_Z1v",
+                    "description": "added",
+                    "finding_id": "promoted-1",
+                },
+                {
+                    "bucket": "compatible",
+                    "kind": "func_added",
+                    "symbol": "_Z2v",
+                    "description": "added",
+                    "finding_id": "safe-1",
+                },
+                {
+                    "bucket": "compatible",
+                    "kind": "func_added",
+                    "symbol": "_Z3v",
+                    "description": "added",
+                    "finding_id": "safe-2",
+                },
+            ],
+        },
+    )
+    model = build_model(report)
+    assert model.counts == (1, 0, 2)
+    assert len(model.safe) == 2

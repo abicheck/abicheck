@@ -194,11 +194,21 @@ class CommentModel:
     # the header for a diff with more real findings than that).
     scan_breaking_total: int | None = None
     scan_review_total: int | None = None
+    # The exact "safe" (additions) total -- `diff["additions"]`'s own cap
+    # (Codex review, follow-up to the two fields above) makes `len(safe)`
+    # under-report a truncated additions list exactly the same way the raw
+    # classified-list lengths did for breaking/review; unlike those two,
+    # there's no scalar count to fall back on (`diff["compatible"]` mixes
+    # additions and quality findings), so `pr_comment_scan.from_scan`
+    # derives this from `diff["additions_total"]` (schema 1.13) instead.
+    # `None` falls back to `len(self.safe)`, same convention as the two
+    # fields above.
+    scan_safe_total: int | None = None
     # Whether `diff["findings"]`/`diff["additions"]` were themselves
     # truncated below the report cap -- surfaced as an explicit note
     # (`pr_comment_scan.scan_note`) so "showing N of M" is never silent,
-    # even though `scan_breaking_total`/`scan_review_total` above keep the
-    # header counts exact regardless.
+    # even though `scan_breaking_total`/`scan_review_total`/
+    # `scan_safe_total` above keep the header counts exact regardless.
     scan_findings_truncated: bool = False
     scan_additions_truncated: bool = False
 
@@ -215,7 +225,7 @@ class CommentModel:
             return (
                 self.scan_breaking_total,
                 self.scan_review_total or 0,
-                len(self.safe),
+                self.scan_safe_total if self.scan_safe_total is not None else len(self.safe),
             )
         return len(self.breaking), len(self.review), len(self.safe)
 

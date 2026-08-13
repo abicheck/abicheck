@@ -303,6 +303,7 @@ class TestBaselineSummaryKeysArePinned:
             "suppressed_truncated_kinds",
             "additions",
             "additions_truncated",
+            "additions_total",
         }
     )
 
@@ -324,7 +325,8 @@ class TestBaselineSummaryKeysArePinned:
             for i in range(30)
         ]
         # An addition-shaped `ChangeKind` (FUNC_ADDED is in ADDITION_KINDS),
-        # more than the cap (5) so `additions_truncated` is reachable too.
+        # more than the cap (5) so `additions_truncated`/`additions_total`
+        # are reachable too.
         additions = [
             Change(kind=ChangeKind.FUNC_ADDED, symbol=f"_Za{i:02d}v", description="d")
             for i in range(30)

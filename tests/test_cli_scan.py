@@ -485,6 +485,115 @@ def test_scan_json_format_is_structured(runner, baseline_snap, new_snap_compatib
     assert {"L0_binary", "L2_header", "pattern_scan"} <= layers
 
 
+def test_scan_secondary_format_writes_json_alongside_primary_text(
+    runner, baseline_snap, new_snap_compatible, tmp_path
+):
+    # The GitHub Action's own PR-comment renderer uses this to get JSON
+    # out of the default `--format text` invocation without a second,
+    # potentially --depth build/source-expensive scan (Codex review).
+    primary = tmp_path / "primary.txt"
+    secondary = tmp_path / "secondary.json"
+    res = runner.invoke(
+        main,
+        [
+            "scan",
+            str(new_snap_compatible),
+            "--against",
+            str(baseline_snap),
+            "-o",
+            str(primary),
+            "--secondary-format",
+            "json",
+            "--secondary-output",
+            str(secondary),
+        ],
+    )
+    assert res.exit_code == 0, res.output
+    assert "Verdict: COMPATIBLE" in primary.read_text(encoding="utf-8")
+    payload = json.loads(secondary.read_text(encoding="utf-8"))
+    assert payload["verdict"] == "COMPATIBLE"
+    assert payload["scan_schema_version"]
+
+
+def test_scan_secondary_format_requires_secondary_output(runner, new_snap_compatible):
+    res = runner.invoke(
+        main, ["scan", str(new_snap_compatible), "--secondary-format", "json"]
+    )
+    assert res.exit_code != 0
+    assert "--secondary-format requires --secondary-output" in res.output
+
+
+def test_scan_secondary_output_requires_secondary_format(
+    runner, new_snap_compatible, tmp_path
+):
+    res = runner.invoke(
+        main,
+        [
+            "scan",
+            str(new_snap_compatible),
+            "--secondary-output",
+            str(tmp_path / "x.json"),
+        ],
+    )
+    assert res.exit_code != 0
+    assert "--secondary-output requires --secondary-format" in res.output
+
+
+def test_scan_secondary_output_must_differ_from_primary(
+    runner, new_snap_compatible, tmp_path
+):
+    same = tmp_path / "same.json"
+    res = runner.invoke(
+        main,
+        [
+            "scan",
+            str(new_snap_compatible),
+            "-o",
+            str(same),
+            "--secondary-format",
+            "json",
+            "--secondary-output",
+            str(same),
+        ],
+    )
+    assert res.exit_code != 0
+    assert "--secondary-output must differ from --output" in res.output
+
+
+def test_scan_secondary_output_rejected_with_dry_run(runner, new_snap_compatible, tmp_path):
+    res = runner.invoke(
+        main,
+        [
+            "scan",
+            str(new_snap_compatible),
+            "--dry-run",
+            "--secondary-format",
+            "json",
+            "--secondary-output",
+            str(tmp_path / "x.json"),
+        ],
+    )
+    assert res.exit_code != 0
+    assert "--dry-run cannot be combined with --secondary-output" in res.output
+
+
+def test_scan_secondary_output_rejected_with_artifact_set(runner, tmp_path):
+    res = runner.invoke(
+        main,
+        [
+            "scan",
+            "--artifact-set",
+            str(tmp_path),
+            "--secondary-format",
+            "json",
+            "--secondary-output",
+            str(tmp_path / "x.json"),
+        ],
+    )
+    assert res.exit_code != 0
+    assert "not supported with --artifact-set" in res.output
+
+
 def test_audit_mode_runs_without_baseline(runner, tmp_path):
     # An exported symbol with no public declaration → exported_not_public (RISK).
     # Absence of --against already means a one-build audit (no separate flag).

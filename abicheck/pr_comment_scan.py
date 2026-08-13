@@ -71,8 +71,9 @@ def _scan_findings_to_buckets(
     demangled_map: dict[str, str],
     gate_api_break: bool,
     levels: dict[str, str],
-) -> tuple[list[Finding], list[Finding]]:
-    """Classify ``diff["findings"]`` (the gating buckets) into (breaking, review).
+) -> tuple[list[Finding], list[Finding], frozenset[str]]:
+    """Classify ``diff["findings"]`` (the gating buckets) into (breaking, review,
+    promoted_ids).
 
     Mirrors ``_bucket_changes``'s severity/category/gate logic, adapted to
     scan's ``bucket``-keyed finding dicts. ``not_evaluated`` entries (ADR-049
@@ -80,12 +81,22 @@ def _scan_findings_to_buckets(
     entirely) and ``suppressed`` entries (reported separately, never inside
     ``findings``) are skipped -- neither is a compatibility claim, so
     neither belongs in any of the three buckets.
+
+    ``promoted_ids`` collects the ``finding_id`` of every ``bucket:
+    "compatible"`` entry landed in ``breaking`` (only reachable via a
+    severity-config promotion -- see the inline comment below) so
+    :func:`_scan_additions_to_safe` can skip rendering the identical change
+    a second time in the green "Public API additions" section (Codex
+    review: schema 1.13's always-on ``diff.additions`` array unconditionally
+    includes every addition, so a promoted one was rendering under both
+    "Blocked by policy" *and* the green section at once).
     """
     breaking: list[Finding] = []
     review: list[Finding] = []
     target = {"breaking": breaking, "review": review}
+    promoted_ids: set[str] = set()
     if not isinstance(findings_raw, list):
-        return breaking, review
+        return breaking, review, frozenset()
     for c in findings_raw:
         if not isinstance(c, dict):
             continue
@@ -110,6 +121,16 @@ def _scan_findings_to_buckets(
             # this branch is unreachable in practice; skip defensively
             # rather than silently dropping a real bucket-target mismatch.
             continue
+        if sev == "compatible" and category == "addition":
+            # Restricted to the "addition" category specifically (not
+            # "quality_issues") -- only an addition-shaped promoted entry
+            # can also appear in `diff.additions` at all, so this set is
+            # exactly the one `_scan_additions_to_safe`'s `exclude_ids`
+            # needs, and exactly what the exact-safe-total math below
+            # subtracts.
+            finding_id = c.get("finding_id")
+            if isinstance(finding_id, str) and finding_id:
+                promoted_ids.add(finding_id)
         loc = c.get("source_location")
         display_symbol, mangled_evidence = _demangle_symbol(
             str(c.get("symbol", "")), demangled_map
@@ -125,21 +146,30 @@ def _scan_findings_to_buckets(
                 mangled=mangled_evidence,
             )
         )
-    return breaking, review
+    return breaking, review, frozenset(promoted_ids)
 
 
 def _scan_additions_to_safe(
-    additions_raw: object, demangled_map: dict[str, str]
+    additions_raw: object,
+    demangled_map: dict[str, str],
+    exclude_ids: frozenset[str] = frozenset(),
 ) -> list[Finding]:
     """Classify the always-on ``diff["additions"]`` list (schema 1.13+) into
     Safe-bucket ``Finding``s, each tagged ``category="addition"`` so they
     render in the same "➕ Public API additions" section `compare` uses.
+
+    ``exclude_ids`` (finding IDs already rendered under Breaking by a
+    severity-config promotion -- see ``_scan_findings_to_buckets``) are
+    skipped here so the same change never renders in both sections at once.
     """
     safe: list[Finding] = []
     if not isinstance(additions_raw, list):
         return safe
     for c in additions_raw:
         if not isinstance(c, dict):
+            continue
+        finding_id = c.get("finding_id")
+        if isinstance(finding_id, str) and finding_id in exclude_ids:
             continue
         loc = c.get("source_location")
         display_symbol, mangled_evidence = _demangle_symbol(
@@ -294,10 +324,10 @@ def from_scan(
             )
     demangled_map = demangle_batch(symbols)
 
-    breaking, review = _scan_findings_to_buckets(
+    breaking, review, promoted_addition_ids = _scan_findings_to_buckets(
         findings_raw, demangled_map, gate_api_break, levels
     )
-    safe = _scan_additions_to_safe(additions_raw, demangled_map)
+    safe = _scan_additions_to_safe(additions_raw, demangled_map, promoted_addition_ids)
 
     incomplete: list[Finding] = []
     incomplete_blocking = False
@@ -336,6 +366,25 @@ def from_scan(
         promoted_compatible = sum(1 for f in breaking if f.severity == "compatible")
         true_counts = (true_counts[0] + promoted_compatible, true_counts[1])
 
+    # Exact "safe" (additions) total, immune to `diff["additions"]`'s own
+    # cap (Codex review, follow-up to the truncated-counts fix above): when
+    # additions were themselves truncated, `diff["additions_total"]` is the
+    # exact pre-cap count (schema 1.13); otherwise `additions_raw`'s own
+    # length already is exact, since it was never capped. Either way,
+    # subtract the addition-shaped promoted entries this function already
+    # excluded from `safe` above (`promoted_addition_ids`), so the header
+    # count and the itemized "Public API additions" section can never
+    # silently disagree about the same policy-promoted change.
+    scan_safe_total: int | None = None
+    if diff_dict is not None:
+        additions_total_raw = diff_dict.get("additions_total")
+        total_additions = (
+            additions_total_raw
+            if isinstance(additions_total_raw, int)
+            else len(additions_raw) if isinstance(additions_raw, list) else 0
+        )
+        scan_safe_total = max(0, total_additions - len(promoted_addition_ids))
+
     return CommentModel(
         mode="scan",
         subject=str(report.get("subject") or "artifact"),
@@ -357,6 +406,7 @@ def from_scan(
         scan_audit_only=audit_only,
         scan_breaking_total=true_counts[0] if true_counts else None,
         scan_review_total=true_counts[1] if true_counts else None,
+        scan_safe_total=scan_safe_total,
         scan_findings_truncated=bool(diff_dict and diff_dict.get("findings_truncated")),
         scan_additions_truncated=bool(diff_dict and diff_dict.get("additions_truncated")),
     )

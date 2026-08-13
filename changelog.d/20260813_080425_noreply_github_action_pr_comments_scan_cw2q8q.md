@@ -16,4 +16,12 @@ it should read in CHANGELOG.md. Delete the other sections.
   summary line, without a second `compare` run. `scan --against`'s JSON gained
   an always-on `additions` array (schema `1.13`, `cli_scan_baseline.py`) so
   the comment can render new public-API surface the same way `compare`'s own
-  report already does.
+  report already does; `NOT_COMPARABLE` (a scope/profile mismatch) is now its
+  own Action verdict, and header counts stay exact even when a large diff's
+  `findings`/`additions` were truncated below the report cap.
+- **`scan` gained `--secondary-format`/`--secondary-output`**, mirroring
+  `compare`'s own flags: render a second output format (typically JSON)
+  from the same scan run without re-running it. The GitHub Action's own
+  PR-comment renderer uses this to avoid a second, potentially
+  `--depth build/source`-expensive scan when the primary step output stays
+  the documented default `--format text`.
