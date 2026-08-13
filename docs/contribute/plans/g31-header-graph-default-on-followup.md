@@ -411,6 +411,42 @@ narrower scope in mind pending a dedicated follow-up.
   initializer) remain castxml-only — no clang-side extraction exists for
   any of the three — so their detectors, and the sibling
   producer-mismatch tests covering them, are unchanged.
+
+  **`is_override`/`is_abstract` closed in a still-later pass** (G31 Phase C
+  backend audit), once a real conda-forge castxml build (0.7.0) and clang
+  18 were available in this environment to verify against.
+  `Function.is_override` reads clang's `OverrideAttr` child node (whether
+  the `override` keyword was written — the same semantics castxml's own
+  `attributes`-string regex search already uses, not the broader
+  no-keyword-required "genuinely overrides a base virtual" signal
+  `dumper_clang_vtable.py` separately reconstructs); confirmed empirically
+  that clang's JSON AST has no direct boolean key for it, only the child
+  node, mirroring `_clang_final_attr`/`_clang_deprecated_message`'s own
+  established child-node-detection pattern. `RecordType.is_abstract` reads
+  `definitionData.isAbstract`, following the identical
+  presence-recovers-True/absence-recovers-False convention
+  `_clang_record_type_traits` already established for
+  `isStandardLayout`/`isTriviallyCopyable` — confirmed this is real
+  semantic computation, not a shallow "declares a pure virtual directly"
+  check: a three-class hierarchy (an abstract base, a concrete override,
+  and a second derived class that leaves the pure virtual unimplemented)
+  correctly reports the third class as abstract too. Both detectors'
+  producer gate moved from `both_castxml_backed_fact` to
+  `both_known_backed_fact` (mirroring `deprecated`'s own earlier fix in
+  this same pass), since both facts are now genuinely cross-producer with
+  directly-comparable values (a plain bool, not a backend-specific
+  encoding). `snapshot_cache._SNAPSHOT_CACHE_VERSION` bumped (v16) so an
+  upgrading user's warm clang/hybrid cache entry is re-extracted instead of
+  replaying a snapshot with both facts silently unset. Verified end-to-end
+  against real compiled examples through the actual `abicheck dump
+  --ast-frontend clang` CLI, not just at the unit level. `TypeField.default`
+  (member initializer) remains the one item from this list not yet closed
+  (see the separate entry earlier in this file for its own status).
+  `_clang_method_is_override`/`_OVERRIDE_ELIGIBLE_KINDS`/
+  `_clang_record_is_abstract`/`_clang_record_type_traits` all moved to
+  `dumper_clang_qualifiers.py` in the same pass (`dumper_clang.py` sits at
+  its 2000-line hard cap), re-exported from `dumper_clang.py` for
+  backward-compatible import paths.
   - `RecordType.is_standard_layout`/`is_trivially_copyable` — a separate,
     already-tri-state-gated (no producer check at all, just the existing
     None-means-unknown convention) pair `dumper_castxml.py`'s own code

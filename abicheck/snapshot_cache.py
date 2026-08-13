@@ -45,7 +45,7 @@ MAX_ENTRIES: int = 100
 #: key invalidates all previously-cached entries on upgrade rather than risk
 #: serving a stale snapshot computed by an older, behaviorally-different
 #: abicheck version.
-_SNAPSHOT_CACHE_VERSION: str = "16"
+_SNAPSHOT_CACHE_VERSION: str = "17"
 # v2: castxml's CvQualifiedType type-name spelling changed for a
 # volatile-qualified pointer/reference VALUE (now a suffix, "T * volatile",
 # matching clang's own convention, rather than always a prefix) -- an
@@ -212,6 +212,18 @@ _SNAPSHOT_CACHE_VERSION: str = "16"
 # ``binding:`` suppression selector never match until the entry happened to
 # expire or was manually cleared. Bumped so the upgrade forces re-extraction
 # instead.
+#
+# v17 (G31 Phase C backend audit): the direct-clang backend started
+# extracting ``Function.is_override`` (from a real ``OverrideAttr`` child
+# node) and ``RecordType.is_abstract`` (from ``definitionData.isAbstract``),
+# until now unconditionally ``None`` on every clang-parsed declaration (both
+# facts were castxml-only). An upgrading user's warm clang/hybrid cache entry
+# would keep replaying a snapshot with both facts silently unset -- and,
+# correspondingly, the two now-live diff detectors
+# (``func_override_specifier``/``type_became_abstract``) permanently
+# declining every clang-side comparison via ``both_known_backed_fact`` --
+# until the entry happened to expire or was manually cleared. Bumped so the
+# upgrade forces re-extraction instead.
 
 
 def _get_cache_dir() -> Path:

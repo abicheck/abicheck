@@ -86,8 +86,12 @@ from .dumper_clang_expr import (  # noqa: F401  (some re-exported for tests)
 # just referenced) so the historical ``dumper_clang._name`` import paths that
 # tests and sibling modules already use keep resolving.
 from .dumper_clang_qualifiers import (  # noqa: F401  (compatibility re-exports)
+    _OVERRIDE_ELIGIBLE_KINDS,
+    _clang_method_is_override,
     _clang_param_is_restrict,
     _clang_param_is_va_list,
+    _clang_record_is_abstract,
+    _clang_record_type_traits,
     _desugared_qualtype,
     _field_own_cv_source,
     _last_top_level_ptr_end,
@@ -642,46 +646,6 @@ def _clang_deprecated_message(node: dict[str, Any]) -> str | None:
         if isinstance(child, dict) and child.get("kind") == "DeprecatedAttr":
             return str(child.get("message", ""))
     return None
-
-
-def _clang_record_type_traits(node: dict[str, Any]) -> tuple[bool | None, bool | None]:
-    """``(is_standard_layout, is_trivially_copyable)`` from a record's own
-    ``definitionData`` (G31 Phase C schema-completeness audit).
-
-    Verified against real ``clang -ast-dump=json`` output (Clang 18) before
-    wiring this up, following G28 Phase 1's discipline: a ``CXXRecordDecl``'s
-    ``definitionData`` carries ``isStandardLayout``/``isTriviallyCopyable`` as
-    boolean keys, but — confirmed empirically, not assumed from clang's own
-    schema docs — clang's ``JSONNodeDumper`` only *emits* a ``definitionData``
-    boolean key when the trait is ``true``; a record that does **not** have
-    the trait has the key entirely absent rather than present with a literal
-    ``false`` (e.g. a class with a private member is not standard-layout, and
-    its ``definitionData`` has no ``isStandardLayout`` key at all, confirmed
-    by direct comparison against a plain-public-members struct which does).
-    So presence recovers ``True``, and absence — while ``definitionData``
-    itself is present — recovers ``False``.
-
-    A record with no ``definitionData`` at all yields ``(None, None)`` —
-    "not collected", not "false" — matching this module's existing
-    ``RecordType.is_standard_layout``/``is_trivially_copyable`` tri-state
-    convention (see ``diff_layout.py``'s own True-vs-None handling, which
-    only fires ``STANDARD_LAYOUT_LOST``/``TRIVIALLY_COPYABLE_LOST`` on an
-    explicit ``True`` on one side, never treating "unknown" as a regression).
-    This happens for two real cases, confirmed empirically: a plain C
-    ``RecordDecl`` (these are C++-only type-trait concepts, so a C struct's
-    node carries no ``definitionData`` key whatsoever — not "trivially true
-    by default", genuinely absent), and an incomplete/forward-declared record
-    (filtered out upstream by ``_is_record_definition`` before this is ever
-    called, but kept conservative here too in case that guard's scope ever
-    narrows).
-    """
-    definition_data = node.get("definitionData")
-    if not isinstance(definition_data, dict):
-        return None, None
-    return (
-        bool(definition_data.get("isStandardLayout", False)),
-        bool(definition_data.get("isTriviallyCopyable", False)),
-    )
 
 
 def _clang_var_alignment_bits(node: dict[str, Any]) -> int | None:
@@ -1362,6 +1326,12 @@ class _ClangAstParser:
                     contract_attributes=_clang_contract_attributes(node),
                     exception_spec=_clang_exception_spec(quals),
                     deprecated=_clang_deprecated_message(node),
+                    # G31 Phase C backend audit -- see _clang_method_is_override.
+                    is_override=(
+                        _clang_method_is_override(node)
+                        if kind in _OVERRIDE_ELIGIBLE_KINDS
+                        else None
+                    ),
                 )
             )
         return funcs
@@ -1601,6 +1571,8 @@ class _ClangAstParser:
             and all(f.name in injected for f in fields),
             source_location=self._source_location(entry),
             deprecated=deprecated,
+            # G31 Phase C backend audit -- see _clang_record_is_abstract.
+            is_abstract=_clang_record_is_abstract(node),
         )
 
     def _parse_fields(self, node: dict[str, Any]) -> list[TypeField]:

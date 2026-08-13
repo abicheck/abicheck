@@ -93,7 +93,6 @@ from .elf_symbol_filter import (
     is_abi_relevant_elf_symbol,
 )
 from .fact_provenance import (
-    both_castxml_backed_fact,
     both_known_backed_fact,
     fact_producer,
     func_fact_key,
@@ -1795,12 +1794,17 @@ def _diff_func_override_specifier(old: AbiSnapshot, new: AbiSnapshot) -> list[Ch
     that can carry the specifier at all — see ``Function.is_override``'s
     docstring); ``None`` means not applicable / not determined, not "no
     override". Also gated per-pair on
-    :func:`fact_provenance.both_castxml_backed_fact`: unlike ``is_final``,
-    ``is_override`` is castxml-only today, so a clang-parsed side's
-    unconditional ``None`` must not be misread as "override was removed"
-    (Codex review, PR #582) — and a per-declaration check (rather than the
-    whole-snapshot ``_both_castxml_backed``) is what correctly supports a
-    ``--ast-frontend hybrid`` snapshot (G28 Phase 3).
+    :func:`fact_provenance.both_known_backed_fact`: G31 Phase C's backend
+    audit wired real ``is_override`` extraction into the direct-clang
+    backend too (matching castxml's own "was the `override` keyword
+    written" semantics, via clang's ``OverrideAttr`` child node — see
+    ``dumper_clang._clang_method_is_override``), so this is now a
+    cross-producer, directly-comparable bool (not a backend-specific
+    encoding), the same shape ``deprecated`` already has — the narrower
+    :func:`fact_provenance.both_castxml_backed_fact` would wrongly keep
+    declining a genuine clang-vs-clang or clang-vs-castxml pair. A
+    per-declaration check (rather than a whole-snapshot gate) is what
+    correctly supports a ``--ast-frontend hybrid`` snapshot (G28 Phase 3).
     """
     changes: list[Change] = []
     old_map = _public_functions(old)
@@ -1812,9 +1816,7 @@ def _diff_func_override_specifier(old: AbiSnapshot, new: AbiSnapshot) -> list[Ch
             continue
         if f_old.is_override is None or f_new.is_override is None:
             continue
-        if not both_castxml_backed_fact(
-            old, new, func_fact_key(mangled, "is_override")
-        ):
+        if not both_known_backed_fact(old, new, func_fact_key(mangled, "is_override")):
             continue
         if f_old.is_override == f_new.is_override:
             continue

@@ -411,3 +411,109 @@ def _reduce_opaque_kind_set(kinds: set[str] | None) -> str | None:
         return next(iter(kinds))
     folded = {"struct" if k == "class" else k for k in kinds}
     return folded.pop() if len(folded) == 1 else min(kinds)
+
+
+def _clang_method_is_override(node: dict[str, Any]) -> bool:
+    """Explicit C++11 ``override`` specifier on *node* (G31 Phase C backend
+    audit) — the direct-clang counterpart to ``dumper_castxml.py``'s
+    ``is_override`` (a compound-``attributes``-string regex search for the
+    ``override`` token), matching its exact semantics: whether the keyword
+    was actually written, not whether the method genuinely overrides a base
+    virtual (that broader, no-keyword-required signal is
+    ``dumper_clang_vtable.py``'s separate reconstruction job).
+
+    Verified against real ``clang -ast-dump=json`` output (Clang 18): unlike
+    ``virtual``/``pure``, which are plain boolean keys on the node itself,
+    an explicit ``override`` is signaled by a child ``OverrideAttr`` node
+    under ``"inner"`` — the same child-node convention
+    ``dumper_clang._clang_final_attr``/``_clang_deprecated_message`` already
+    read for ``final``/``[[deprecated]]``.
+    """
+    return any(
+        isinstance(child, dict) and child.get("kind") == "OverrideAttr"
+        for child in node.get("inner", []) or []
+    )
+
+
+#: clang node kinds castxml's own ``is_override`` restricts to (its
+#: ``Method``/``Destructor``/``Converter``/``OperatorMethod`` XML tags) —
+#: only a member-function kind that can actually be virtual. Deliberately
+#: excludes ``CXXConstructorDecl`` (a constructor can never be virtual) and
+#: ``FunctionDecl`` (a free function/operator can't either); clang has no
+#: separate "operator method" node kind the way castxml's XML schema does —
+#: an overloaded operator is an ordinary ``CXXMethodDecl`` here, already
+#: covered.
+_OVERRIDE_ELIGIBLE_KINDS = frozenset(
+    {"CXXMethodDecl", "CXXDestructorDecl", "CXXConversionDecl"}
+)
+
+
+def _clang_record_is_abstract(node: dict[str, Any]) -> bool | None:
+    """``RecordType.is_abstract`` from a record's own ``definitionData`` (G31
+    Phase C backend audit) — the direct-clang counterpart to
+    ``dumper_castxml.py``'s ``el.get("abstract") == "1"`` (castxml's own real
+    semantic-analysis attribute).
+
+    Verified against real ``clang -ast-dump=json`` output (Clang 18) before
+    wiring this up, following the exact same presence-recovers-``True``/
+    absence-recovers-``False`` convention
+    ``dumper_clang._clang_record_type_traits`` already established for
+    ``isStandardLayout``/``isTriviallyCopyable``: ``definitionData.isAbstract``
+    is present only when the class genuinely has an unoverridden pure
+    virtual — this is real semantic computation from clang's own class
+    analysis, not a shallow "does this class itself declare a pure virtual"
+    check: a derived class that inherits a pure virtual from a base WITHOUT
+    overriding it still reads ``isAbstract: True`` (confirmed with a real
+    three-class hierarchy: an abstract base, a concrete override, and a
+    second derived class that leaves the pure virtual unimplemented — the
+    third class is genuinely abstract too, and clang reports it as such).
+
+    ``None`` (not ``False``) when ``definitionData`` itself is absent — the
+    same two real cases ``dumper_clang._clang_record_type_traits`` documents
+    (a plain C ``RecordDecl``, or an incomplete/forward-declared record
+    already filtered upstream).
+    """
+    definition_data = node.get("definitionData")
+    if not isinstance(definition_data, dict):
+        return None
+    return bool(definition_data.get("isAbstract", False))
+
+
+def _clang_record_type_traits(node: dict[str, Any]) -> tuple[bool | None, bool | None]:
+    """``(is_standard_layout, is_trivially_copyable)`` from a record's own
+    ``definitionData`` (G31 Phase C schema-completeness audit).
+
+    Verified against real ``clang -ast-dump=json`` output (Clang 18) before
+    wiring this up, following G28 Phase 1's discipline: a ``CXXRecordDecl``'s
+    ``definitionData`` carries ``isStandardLayout``/``isTriviallyCopyable`` as
+    boolean keys, but — confirmed empirically, not assumed from clang's own
+    schema docs — clang's ``JSONNodeDumper`` only *emits* a ``definitionData``
+    boolean key when the trait is ``true``; a record that does **not** have
+    the trait has the key entirely absent rather than present with a literal
+    ``false`` (e.g. a class with a private member is not standard-layout, and
+    its ``definitionData`` has no ``isStandardLayout`` key at all, confirmed
+    by direct comparison against a plain-public-members struct which does).
+    So presence recovers ``True``, and absence — while ``definitionData``
+    itself is present — recovers ``False``.
+
+    A record with no ``definitionData`` at all yields ``(None, None)`` —
+    "not collected", not "false" — matching this module's existing
+    ``RecordType.is_standard_layout``/``is_trivially_copyable`` tri-state
+    convention (see ``diff_layout.py``'s own True-vs-None handling, which
+    only fires ``STANDARD_LAYOUT_LOST``/``TRIVIALLY_COPYABLE_LOST`` on an
+    explicit ``True`` on one side, never treating "unknown" as a regression).
+    This happens for two real cases, confirmed empirically: a plain C
+    ``RecordDecl`` (these are C++-only type-trait concepts, so a C struct's
+    node carries no ``definitionData`` key whatsoever — not "trivially true
+    by default", genuinely absent), and an incomplete/forward-declared record
+    (filtered out upstream by ``dumper_clang._is_record_definition`` before
+    this is ever called, but kept conservative here too in case that guard's
+    scope ever narrows).
+    """
+    definition_data = node.get("definitionData")
+    if not isinstance(definition_data, dict):
+        return None, None
+    return (
+        bool(definition_data.get("isStandardLayout", False)),
+        bool(definition_data.get("isTriviallyCopyable", False)),
+    )

@@ -936,6 +936,127 @@ def test_parse_types_populates_standard_layout_and_trivially_copyable() -> None:
     assert types["NotStdLayout"].is_trivially_copyable is True
 
 
+def test_clang_method_is_override() -> None:
+    from abicheck.dumper_clang import _clang_method_is_override
+
+    not_override = {"kind": "CXXMethodDecl", "name": "f", "virtual": True}
+    is_override = {
+        "kind": "CXXMethodDecl",
+        "name": "f",
+        "inner": [{"kind": "OverrideAttr"}],
+    }
+    assert _clang_method_is_override(not_override) is False
+    assert _clang_method_is_override(is_override) is True
+
+
+def test_clang_record_is_abstract() -> None:
+    from abicheck.dumper_clang import _clang_record_is_abstract
+
+    no_definition_data = {"kind": "RecordDecl", "name": "PlainC"}
+    abstract = {
+        "kind": "CXXRecordDecl",
+        "name": "Abstract1",
+        "definitionData": {"isAbstract": True},
+    }
+    # Confirmed against real clang -ast-dump=json: a trait that does NOT
+    # hold has its key entirely absent, never present as a literal false.
+    concrete = {
+        "kind": "CXXRecordDecl",
+        "name": "Concrete1",
+        "definitionData": {},
+    }
+    assert _clang_record_is_abstract(no_definition_data) is None
+    assert _clang_record_is_abstract(abstract) is True
+    assert _clang_record_is_abstract(concrete) is False
+
+
+def test_parse_functions_populates_is_override() -> None:
+    # G31 Phase C backend audit: previously Function.is_override was never
+    # populated by the direct-clang backend at all, leaving the already-built
+    # FUNC_OVERRIDE_SPECIFIER_ADDED/REMOVED detector permanently dead on that
+    # backend for any cross-producer or clang-vs-clang comparison (verified
+    # end-to-end against a real compiled example before wiring this up).
+    root = _tu(
+        {
+            "kind": "CXXRecordDecl",
+            "name": "Base",
+            "tagUsed": "struct",
+            "loc": {"file": "include/foo.h", "line": 1},
+            "completeDefinition": True,
+            "inner": [
+                {
+                    "kind": "CXXMethodDecl",
+                    "name": "f",
+                    "mangledName": "_ZN4Base1fEv",
+                    "type": {"qualType": "void ()"},
+                    "virtual": True,
+                },
+            ],
+        },
+        {
+            "kind": "CXXRecordDecl",
+            "name": "Derived",
+            "tagUsed": "struct",
+            "loc": {"file": "include/foo.h", "line": 5},
+            "completeDefinition": True,
+            "inner": [
+                {
+                    "kind": "CXXMethodDecl",
+                    "name": "f",
+                    "mangledName": "_ZN7Derived1fEv",
+                    "type": {"qualType": "void ()"},
+                    "inner": [{"kind": "OverrideAttr"}],
+                },
+                {
+                    "kind": "CXXConstructorDecl",
+                    "name": "Derived",
+                    "mangledName": "_ZN7DerivedC1Ev",
+                    "type": {"qualType": "void ()"},
+                },
+            ],
+        },
+    )
+    funcs = {
+        f.mangled: f for f in _ClangAstParser(root, set(), set()).parse_functions()
+    }
+    assert funcs["_ZN4Base1fEv"].is_override is False
+    assert funcs["_ZN7Derived1fEv"].is_override is True
+    # A constructor can never carry `override` -- None (not applicable),
+    # not a computed False, matching castxml's own tri-state convention.
+    assert funcs["_ZN7DerivedC1Ev"].is_override is None
+
+
+def test_parse_types_populates_is_abstract() -> None:
+    # G31 Phase C backend audit: previously RecordType.is_abstract was never
+    # populated by the direct-clang backend at all, leaving the already-built
+    # TYPE_BECAME_ABSTRACT detector permanently dead on that backend for any
+    # cross-producer or clang-vs-clang comparison (verified end-to-end
+    # against a real compiled example before wiring this up).
+    root = _tu(
+        {
+            "kind": "CXXRecordDecl",
+            "name": "Abstract1",
+            "tagUsed": "struct",
+            "loc": {"file": "include/foo.h", "line": 1},
+            "completeDefinition": True,
+            "definitionData": {"isAbstract": True},
+            "inner": [],
+        },
+        {
+            "kind": "CXXRecordDecl",
+            "name": "Concrete1",
+            "tagUsed": "struct",
+            "loc": {"file": "include/foo.h", "line": 5},
+            "completeDefinition": True,
+            "definitionData": {},
+            "inner": [],
+        },
+    )
+    types = {t.name: t for t in _ClangAstParser(root, set(), set()).parse_types()}
+    assert types["Abstract1"].is_abstract is True
+    assert types["Concrete1"].is_abstract is False
+
+
 def test_parse_types_and_enums_populate_deprecated() -> None:
     # Mirrors dumper_castxml's own deprecated wiring -- the direct-clang
     # backend previously left Function/Variable/TypeField/RecordType/

@@ -49,12 +49,13 @@ def _snap(
     ast_producer="castxml",
 ):
     # ast_producer defaults to "castxml" (not None): every detector under
-    # test here gates on castxml (is_override/is_abstract, still genuinely
-    # castxml-only) or a same-producer check (field default, G31 Phase C —
-    # clang now populates it too, but with a non-cross-comparable value
-    # representation) — a bare from_headers=True snapshot with
-    # ast_producer=None would fail either gate and every test below would
-    # see zero changes (Codex review, PR #582).
+    # test here gates on a known-producer check (deprecated/is_scoped/
+    # is_override/is_abstract, all cross-producer since G31 Phase C) or a
+    # same-producer check (field default — clang now populates it too, but
+    # with a non-cross-comparable value representation) — a bare
+    # from_headers=True snapshot with ast_producer=None would fail either
+    # gate and every test below would see zero changes (Codex review, PR
+    # #582).
     return AbiSnapshot(
         library="libtest.so.1",
         version=version,
@@ -407,26 +408,34 @@ class TestEnumDeprecatedChanged:
 # changed.
 #
 # G31 Phase C (docs/contribute/plans/g31-header-graph-default-on-followup.md)
-# closed that gap for three of these facts — deprecated (every surface
-# kind), EnumType.is_scoped, and TypeField.default — by wiring real
-# extraction into the direct-clang backend too (dumper_clang.py's
-# _clang_deprecated_message / the enum's "scopedEnumTag" handling /
-# _field_initializer_value), verified against real clang -ast-dump=json
-# output. deprecated/is_scoped's VALUES are directly cross-comparable
-# between backends (a plain message string / a plain bool, not a
-# backend-specific encoding), so a castxml-vs-clang pair for either is now a
-# genuine, correctly-detected comparison, not a producer-mismatch false
-# positive — see TestDeprecatedCrossProducerNowComparable below, which
-# replaces what used to be four more "does not false-positive" cases in
-# this class. TypeField.default is different: both backends now populate
-# it, but their VALUE REPRESENTATIONS are not cross-comparable (castxml
-# keeps the verbatim source expression, clang falls back to a
+# closed that gap across two passes, for five of these facts — deprecated
+# (every surface kind), EnumType.is_scoped, and TypeField.default in the
+# first pass; RecordType.is_abstract and Function.is_override in a later
+# backend-audit pass — by wiring real extraction into the direct-clang
+# backend too (dumper_clang.py's _clang_deprecated_message / the enum's
+# "scopedEnumTag" handling / _field_initializer_value /
+# _clang_record_is_abstract / _clang_method_is_override), verified against
+# real clang -ast-dump=json output. deprecated/is_scoped/is_abstract/
+# is_override's VALUES are all directly cross-comparable between backends
+# (a plain message string or a plain bool, not a backend-specific
+# encoding), so a castxml-vs-clang pair for any of them is now a genuine,
+# correctly-detected comparison, not a producer-mismatch false positive —
+# see TestDeprecatedCrossProducerNowComparable and
+# TestOverrideAndAbstractCrossProducerNowComparable below, which replace
+# what used to be several more "does not false-positive" cases in this
+# class. TypeField.default is different: both backends now populate it,
+# but their VALUE REPRESENTATIONS are not cross-comparable (castxml keeps
+# the verbatim source expression, clang falls back to a
 # literal/structural fingerprint) — same shape as Param.default — so a
 # castxml-vs-clang MISMATCH is still correctly declined (the test below is
 # unchanged in outcome), while a same-producer clang-vs-clang pair now
-# fires for real — see TestFieldDefaultCrossProducer below. is_abstract and
-# is_override remain castxml-only (no clang-side extraction exists for
-# either), so their producer-mismatch tests are unchanged.
+# fires for real — see TestFieldDefaultCrossProducer below. The two tests
+# immediately below (is_abstract/is_override with an explicit None on one
+# side) are no longer "producer capability mismatch" cases as such — both
+# facts are now genuinely cross-producer — but they remain valid coverage
+# of the ordinary tri-state "either side unknown/not-applicable" guard
+# (e.g. a constructor, which can never carry `override`), independent of
+# both_known_backed_fact.
 
 
 def _clang_snap(**kwargs):
@@ -561,6 +570,62 @@ class TestDeprecatedCrossProducerNowComparable:
         unknown_producer_new = _snap(functions=[f_new], ast_producer="some_future_tool")
         r = compare(_snap(functions=[f_old]), unknown_producer_new)
         assert ChangeKind.FUNC_DEPRECATED_REMOVED not in _kinds(r)
+
+
+class TestOverrideAndAbstractCrossProducerNowComparable:
+    """G31 Phase C backend audit: RecordType.is_abstract and
+    Function.is_override used to be castxml-only, so a castxml-vs-clang
+    comparison for either was gated OFF entirely (see
+    TestProducerMismatchDoesNotFalsePositive above, which used to carry
+    "does not false-positive" cases for exactly this scenario). Now that
+    the direct-clang backend genuinely extracts both facts too
+    (dumper_clang.py's _clang_record_is_abstract /
+    _clang_method_is_override — verified against real clang -ast-dump=json
+    output before wiring this up), a castxml-vs-clang (or clang-vs-clang)
+    pair is a real, correctly-detected comparison, not a producer-mismatch
+    false positive — because a clang-tagged snapshot's is_abstract=False/
+    is_override=False unambiguously means "not abstract"/"no override
+    keyword", exactly like castxml's, rather than "clang doesn't know."
+    """
+
+    def test_type_became_abstract_fires_across_castxml_to_clang(self):
+        t_old = RecordType(name="Shape", kind="class", size_bits=64, is_abstract=False)
+        t_new = RecordType(name="Shape", kind="class", size_bits=64, is_abstract=True)
+        r = compare(_snap(types=[t_old]), _clang_snap(types=[t_new]))
+        assert ChangeKind.TYPE_BECAME_ABSTRACT in _kinds(r)
+
+    def test_func_override_specifier_added_fires_across_castxml_to_clang(self):
+        f_old = _pub_func(
+            "Derived::draw", "_ZN7Derived4drawEv", is_virtual=True, is_override=False
+        )
+        f_new = _pub_func(
+            "Derived::draw", "_ZN7Derived4drawEv", is_virtual=True, is_override=True
+        )
+        r = compare(_snap(functions=[f_old]), _clang_snap(functions=[f_new]))
+        assert ChangeKind.FUNC_OVERRIDE_SPECIFIER_ADDED in _kinds(r)
+
+    def test_type_became_abstract_fires_clang_to_clang(self):
+        t_old = RecordType(name="Shape", kind="class", size_bits=64, is_abstract=False)
+        t_new = RecordType(name="Shape", kind="class", size_bits=64, is_abstract=True)
+        r = compare(_clang_snap(types=[t_old]), _clang_snap(types=[t_new]))
+        assert ChangeKind.TYPE_BECAME_ABSTRACT in _kinds(r)
+
+    def test_func_override_specifier_added_fires_clang_to_clang(self):
+        f_old = _pub_func(
+            "Derived::draw", "_ZN7Derived4drawEv", is_virtual=True, is_override=False
+        )
+        f_new = _pub_func(
+            "Derived::draw", "_ZN7Derived4drawEv", is_virtual=True, is_override=True
+        )
+        r = compare(_clang_snap(functions=[f_old]), _clang_snap(functions=[f_new]))
+        assert ChangeKind.FUNC_OVERRIDE_SPECIFIER_ADDED in _kinds(r)
+
+    def test_is_abstract_still_skipped_for_a_genuinely_unknown_producer(self):
+        t_old = RecordType(name="Shape", kind="class", size_bits=64, is_abstract=False)
+        t_new = RecordType(name="Shape", kind="class", size_bits=64, is_abstract=True)
+        unknown_producer_new = _snap(types=[t_new], ast_producer="some_future_tool")
+        r = compare(_snap(types=[t_old]), unknown_producer_new)
+        assert ChangeKind.TYPE_BECAME_ABSTRACT not in _kinds(r)
 
 
 class TestFieldDefaultCrossProducer:
