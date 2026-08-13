@@ -20,10 +20,14 @@ side-effect-free functions that ``_render_text`` and ``run_scan_core`` compose.
 Keeping them here holds ``cli_scan.py`` under the 2000-line hard cap while
 decomposing the two long methods into legible pieces.
 
-No import cycle: this module imports only from :mod:`abicheck.buildsource`. The
-render helpers take the ``ScanOutcome`` dataclass as ``Any`` rather than importing
-it from :mod:`abicheck.cli_scan` (even under ``TYPE_CHECKING``), which would form a
-cli_scan ↔ cli_scan_helpers cycle the import-cycles gate flags.
+No import cycle: this module imports only from :mod:`abicheck.buildsource`
+and, function-locally, the dependency-free :mod:`abicheck.cli_secondary_output`
+leaf (never :mod:`abicheck.cli_options` itself -- see
+:func:`reject_incoherent_scan_secondary_output`'s own docstring for why that
+distinction matters). The render helpers take the ``ScanOutcome`` dataclass
+as ``Any`` rather than importing it from :mod:`abicheck.cli_scan` (even under
+``TYPE_CHECKING``), which would form a cli_scan ↔ cli_scan_helpers cycle the
+import-cycles gate flags.
 """
 
 from __future__ import annotations
@@ -31,10 +35,98 @@ from __future__ import annotations
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+import click
+
 from .buildsource.scan_levels import EvidenceDepth
 
 if TYPE_CHECKING:
     from .buildsource.scan_levels import SourceMethod
+
+
+# --- operand/flag validation (click-free, no ScanOutcome dependency) --------
+
+
+def reject_incoherent_scan_operands(
+    *,
+    artifact: Path | None,
+    artifact_set: str | None,
+    against: Path | None,
+    dry_run: bool,
+    bundle_system_providers: str,
+) -> None:
+    """Reject operand/flag combinations ``scan`` cannot serve.
+
+    An empty ``--artifact-set`` is rejected explicitly rather than left to
+    collapse to ``Path("") == Path(".")`` and audit the whole CWD (CodeRabbit
+    review). ``--artifact-set`` is audit-only -- there is no old side for a set
+    -- so ``--against`` is rejected with it, and ``--dry-run`` is not wired for
+    it yet. ``--bundle-system-providers`` is the mirror case: it only means
+    something *for* a set.
+    """
+    if artifact_set is not None and not artifact_set.strip():
+        raise click.UsageError("--artifact-set must not be empty.")
+    if (artifact is not None) == (artifact_set is not None):
+        raise click.UsageError(
+            "scan requires exactly one of ARTIFACT or --artifact-set."
+        )
+    if artifact_set is not None:
+        if against is not None:
+            raise click.UsageError(
+                "--against is not supported with --artifact-set "
+                "(audit-only -- no old side for a set)."
+            )
+        if dry_run:
+            raise click.UsageError(
+                "--dry-run is not yet supported with --artifact-set."
+            )
+    elif bundle_system_providers:
+        raise click.UsageError("--bundle-system-providers requires --artifact-set.")
+
+
+def reject_incoherent_scan_secondary_output(
+    *,
+    dry_run: bool,
+    output: Path | None,
+    secondary_fmt: str | None,
+    secondary_output: Path | None,
+    artifact_set: str | None,
+) -> None:
+    """Reject a ``--secondary-*`` combination that cannot mean anything.
+
+    The four checks common to any command carrying the shared
+    ``cli_secondary_output.secondary_output_options`` pair (dry-run,
+    half-given pair either direction, same-file collision) now live once in
+    ``cli_secondary_output.reject_incoherent_secondary_output`` -- previously
+    duplicated byte-for-byte from ``compare``'s own
+    ``_reject_incoherent_compare_flags`` (Codex review). Imported from the
+    dependency-free ``cli_secondary_output`` leaf module rather than from
+    ``cli_options`` itself: this module sits on an existing import path back
+    into ``cli_options`` (``cli_options -> cli_resolve -> service_scan ->
+    scan_engine -> cli_scan_helpers``), so a ``cli_scan_helpers ->
+    cli_options`` edge would close a real cycle the AI-readiness
+    ``import-cycle-growth`` gate rejects -- see ``cli_secondary_output``'s
+    own module docstring. This wrapper adds only the one check specific to
+    ``scan``: ``--artifact-set`` has no single-artifact report to render a
+    second time at all.
+    """
+    from .cli_secondary_output import (
+        reject_incoherent_secondary_output as _reject_shared,
+    )
+
+    if artifact_set is not None and (
+        secondary_fmt is not None or secondary_output is not None
+    ):
+        raise click.UsageError(
+            "--secondary-format/--secondary-output are not supported with "
+            "--artifact-set -- there is no single-artifact report to render "
+            "a second time."
+        )
+    _reject_shared(
+        dry_run=dry_run,
+        output=output,
+        secondary_fmt=secondary_fmt,
+        secondary_output=secondary_output,
+    )
 
 
 # --- coverage-row helpers (snapshot → report rows) ---------------------------

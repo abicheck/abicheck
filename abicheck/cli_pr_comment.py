@@ -37,6 +37,15 @@ from .cli import _write_or_echo
 @click.argument("report", type=click.Path(exists=True, path_type=Path))
 @click.option("--sha", default="", help="Commit SHA being scanned (PR head).")
 @click.option(
+    "--subject",
+    default=None,
+    help="Artifact/library name shown in the comment header. ``scan``'s own "
+    "JSON report carries no such field (unlike ``compare``'s ``library``) -- "
+    "pass the scanned artifact's basename here (see action/run.sh). Ignored "
+    "for a compare/appcompat/release report, which already names its "
+    "subject from the report itself.",
+)
+@click.option(
     "--detail",
     type=click.Choice(["summary", "standard", "full"]),
     default="standard",
@@ -88,6 +97,7 @@ from .cli import _write_or_echo
 def pr_comment_cmd(
     report: Path,
     sha: str,
+    subject: str | None,
     detail: str,
     post_on: str,
     run_label: str | None,
@@ -100,11 +110,12 @@ def pr_comment_cmd(
 
     REPORT is a JSON file from 'abicheck compare --format json' (directory/
     package fan-out and --used-by/--required-symbol(s) scoped reports all
-    produce a compatible shape). When --on=never, or --on=changes and the
-    report has no changes, nothing is written (an empty --output file is
-    produced) so the caller can skip posting. Action/library-only: invoke as
-    `python -m abicheck.cli_pr_comment`, not `abicheck pr-comment` (this is
-    not a public abicheck subcommand).
+    produce a compatible shape) or 'abicheck scan --against ... --format
+    json' (recognised by its own 'scan_schema_version' key). When
+    --on=never, or --on=changes and the report has no changes, nothing is
+    written (an empty --output file is produced) so the caller can skip
+    posting. Action/library-only: invoke as `python -m abicheck.cli_pr_comment`,
+    not `abicheck pr-comment` (this is not a public abicheck subcommand).
 
     \b
     Example:
@@ -120,6 +131,12 @@ def pr_comment_cmd(
 
     if not isinstance(data, dict):
         raise click.ClickException("JSON report must be an object")
+
+    if subject and "subject" not in data:
+        # Only `scan`'s report shape reads this (see `pr_comment_scan.from_scan`)
+        # -- a compare/appcompat/release report already names its own
+        # subject from the report itself and never looks at this key.
+        data["subject"] = subject
 
     model = build_model(data, gate_api_break=gate_api_break, gate_breaking=gate_breaking)
     if not should_post(model, post_on):

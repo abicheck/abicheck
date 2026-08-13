@@ -582,7 +582,52 @@ REPORT_SCHEMA_VERSION = "2.34"
 #:        per-TU macro divergence; see that module's own docstring). ``0``
 #:        when nothing was truncated, so an ordinary scan is unchanged from
 #:        1.11.
-SCAN_SCHEMA_VERSION = "1.12"
+#: 1.13 -- the ``diff`` block gains an always-on ``additions`` array (plus
+#:        optional ``additions_truncated``/``additions_total`` fields): the
+#:        addition-shaped subset of ``diff.compatible`` (new public-API
+#:        surface -- ``ChangeKind``'s ``ADDITION_KINDS``), itemized the same
+#:        shape as ``findings`` (``bucket: "compatible"``) regardless of
+#:        whether severity policy made any of them blocking. Previously
+#:        ``diff.compatible`` contributed only its bare count unless
+#:        promoted to blocking by ``--severity-addition error`` (see 1.9's
+#:        ``severity`` block) -- with no way to render *what* was added, a
+#:        ``scan --against`` PR comment (``pr_comment_scan.from_scan``) had no
+#:        source for a green "public API additions" section the way
+#:        ``compare``'s own JSON report already supports via its full
+#:        ``changes`` list. Capped independently of ``findings``' own budget
+#:        (same ``--max-findings``/``ABICHECK_MAX_BASELINE_FINDINGS`` cap),
+#:        so a large addition set can never crowd out a real gating finding.
+#:        ``additions_total`` is the exact, untruncated addition count
+#:        (Codex review) -- emitted alongside ``additions_truncated`` only
+#:        when ``additions`` was itself capped, since ``diff.compatible``'s
+#:        own scalar mixes additions and quality findings and so cannot
+#:        answer "how many additions, exactly" on its own; the PR comment's
+#:        header count needs this to stay exact under truncation. All three
+#:        keys are additive and omitted when ``diff.compatible`` has no
+#:        addition-shaped entry, so an ordinary scan with no new public API
+#:        is unchanged from 1.12. The ``diff`` block also gains ``policy``
+#:        (Codex review): the resolved compatibility policy name
+#:        (``DiffResult.policy``, e.g. ``"strict_abi"``) that classified
+#:        these buckets, the same fact ``compare``'s own JSON report has
+#:        always carried at its top level -- without it, ``scan
+#:        --against``'s sticky PR comment (``pr_comment_scan.from_scan``)
+#:        had no way to report which policy actually gated a non-default
+#:        ``--policy`` run and silently rendered the ``"strict_abi"``
+#:        fallback regardless. Additive and always present alongside the
+#:        other ``diff`` fields on a real comparison (only absent for the
+#:        ``NOT_COMPARABLE``/audit-only ``diff`` shapes, which never reach
+#:        policy classification at all). The ``diff`` block also gains
+#:        ``quality`` (plus optional ``quality_truncated``/``quality_total``
+#:        fields), ``additions``'s exact complement: the compatible-but-
+#:        non-addition subset of ``diff.compatible`` (a quality-category
+#:        change like ``func_noexcept_added``, or a policy-demoted removal
+#:        reclassified compatible), itemized the same shape and under the
+#:        same cap as ``additions`` (Codex review, follow-up). Without it, a
+#:        scan whose only compatible findings were quality-shaped had an
+#:        exact "N safe" header count (once the count itself was corrected
+#:        to read the full ``diff.compatible`` scalar) with nothing
+#:        itemized underneath it to explain what those N findings were.
+SCAN_SCHEMA_VERSION = "1.13"
 
 _SCHEMA_DIR = Path(__file__).resolve().parent
 COMPARE_REPORT_SCHEMA_PATH = _SCHEMA_DIR / "compare_report.schema.json"

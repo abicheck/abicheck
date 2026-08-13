@@ -161,6 +161,8 @@ topics:
     canonical_page: use/cli-usage.md
     fact_sources:
       - abicheck/cli.py
+      - abicheck/cli_scan.py
+      - abicheck/cli_secondary_output.py
     reference_page: reference/cli-reference.md
     task_pages:
       - use/dump-compare-flags.md
@@ -281,8 +283,10 @@ topics:
       - abicheck/sarif.py
       - abicheck/junit_report.py
       - abicheck/schemas/__init__.py
+      - abicheck/cli_scan.py
       - abicheck/cli_scan_baseline.py
       - abicheck/scan_engine.py
+      - abicheck/cli_secondary_output.py
     allowed_summaries:
       - start/first-report.md
       - start/choose-your-workflow.md

@@ -384,6 +384,77 @@ class TestScanPreCoverageBaseExit:
         ) == 4
 
 
+class TestScanEmitReportCoverageDiagnostic:
+    """`_emit_scan_report`'s ADR-049 §7 coverage notice must fire whenever a
+    *text* renderer is in play, not only when the primary ``--format`` is
+    ``text``.
+
+    Codex review: the guard checked only the primary ``fmt``, so a ``scan
+    --format json --secondary-format text`` run wrote a secondary text report
+    with no ledger of its own (unlike JSON) and no stderr notice either --
+    the coverage-gated exit had no explanation anywhere reachable from the
+    text side.
+    """
+
+    @staticmethod
+    def _outcome(tmp_path):
+        from abicheck.buildsource.risk import RiskScore
+        from abicheck.scan_engine import ScanOutcome
+
+        return ScanOutcome(
+            mode="pr", resolved_method="s5", depth="source",
+            collect_mode="off", risk=RiskScore(total=0), auto=True,
+            changed_path_count=0, changed_path_source="none",
+            diff_summary={
+                "breaking": 0,
+                "api_break": 0,
+                "risk": 0,
+                "compatible": 0,
+                "contract_coverage_failures": [
+                    {"side": "old", "provider": "export_table"}
+                ],
+                "contract_coverage_exit_contribution": 1,
+            },
+            verdict="COMPATIBLE", exit_code=1,
+        )
+
+    def test_json_primary_with_no_secondary_stays_silent(self, tmp_path, capsys):
+        from abicheck.cli_scan import _emit_scan_report
+
+        with pytest.raises(SystemExit):
+            _emit_scan_report(self._outcome(tmp_path), "json", None)
+        assert "Exit code floored" not in capsys.readouterr().err
+
+    def test_text_primary_emits_the_notice(self, tmp_path, capsys):
+        from abicheck.cli_scan import _emit_scan_report
+
+        with pytest.raises(SystemExit):
+            _emit_scan_report(self._outcome(tmp_path), "text", None)
+        assert "Exit code floored" in capsys.readouterr().err
+
+    def test_json_primary_with_text_secondary_emits_the_notice(self, tmp_path, capsys):
+        from abicheck.cli_scan import _emit_scan_report
+
+        secondary = tmp_path / "report.txt"
+        with pytest.raises(SystemExit):
+            _emit_scan_report(
+                self._outcome(tmp_path), "json", None,
+                secondary_fmt="text", secondary_output=secondary,
+            )
+        assert "Exit code floored" in capsys.readouterr().err
+
+    def test_json_primary_with_json_secondary_stays_silent(self, tmp_path, capsys):
+        from abicheck.cli_scan import _emit_scan_report
+
+        secondary = tmp_path / "report.json"
+        with pytest.raises(SystemExit):
+            _emit_scan_report(
+                self._outcome(tmp_path), "json", None,
+                secondary_fmt="json", secondary_output=secondary,
+            )
+        assert "Exit code floored" not in capsys.readouterr().err
+
+
 class TestScanDryRunExitCodePreview:
     """`--dry-run` must preview the exit-code contract the real run would use.
 
@@ -483,6 +554,115 @@ def test_scan_json_format_is_structured(runner, baseline_snap, new_snap_compatib
     # Coverage is mandatory and explicit (ADR-035 §4a): L0-L2 rows always present.
     layers = {row["layer"] for row in payload["coverage"]}
     assert {"L0_binary", "L2_header", "pattern_scan"} <= layers
+
+
+def test_scan_secondary_format_writes_json_alongside_primary_text(
+    runner, baseline_snap, new_snap_compatible, tmp_path
+):
+    # The GitHub Action's own PR-comment renderer uses this to get JSON
+    # out of the default `--format text` invocation without a second,
+    # potentially --depth build/source-expensive scan (Codex review).
+    primary = tmp_path / "primary.txt"
+    secondary = tmp_path / "secondary.json"
+    res = runner.invoke(
+        main,
+        [
+            "scan",
+            str(new_snap_compatible),
+            "--against",
+            str(baseline_snap),
+            "-o",
+            str(primary),
+            "--secondary-format",
+            "json",
+            "--secondary-output",
+            str(secondary),
+        ],
+    )
+    assert res.exit_code == 0, res.output
+    assert "Verdict: COMPATIBLE" in primary.read_text(encoding="utf-8")
+    payload = json.loads(secondary.read_text(encoding="utf-8"))
+    assert payload["verdict"] == "COMPATIBLE"
+    assert payload["scan_schema_version"]
+
+
+def test_scan_secondary_format_requires_secondary_output(runner, new_snap_compatible):
+    res = runner.invoke(
+        main, ["scan", str(new_snap_compatible), "--secondary-format", "json"]
+    )
+    assert res.exit_code != 0
+    assert "--secondary-format requires --secondary-output" in res.output
+
+
+def test_scan_secondary_output_requires_secondary_format(
+    runner, new_snap_compatible, tmp_path
+):
+    res = runner.invoke(
+        main,
+        [
+            "scan",
+            str(new_snap_compatible),
+            "--secondary-output",
+            str(tmp_path / "x.json"),
+        ],
+    )
+    assert res.exit_code != 0
+    assert "--secondary-output requires --secondary-format" in res.output
+
+
+def test_scan_secondary_output_must_differ_from_primary(
+    runner, new_snap_compatible, tmp_path
+):
+    same = tmp_path / "same.json"
+    res = runner.invoke(
+        main,
+        [
+            "scan",
+            str(new_snap_compatible),
+            "-o",
+            str(same),
+            "--secondary-format",
+            "json",
+            "--secondary-output",
+            str(same),
+        ],
+    )
+    assert res.exit_code != 0
+    assert "--secondary-output must differ from --output" in res.output
+
+
+def test_scan_secondary_output_rejected_with_dry_run(runner, new_snap_compatible, tmp_path):
+    res = runner.invoke(
+        main,
+        [
+            "scan",
+            str(new_snap_compatible),
+            "--dry-run",
+            "--secondary-format",
+            "json",
+            "--secondary-output",
+            str(tmp_path / "x.json"),
+        ],
+    )
+    assert res.exit_code != 0
+    assert "--dry-run cannot be combined with --secondary-output" in res.output
+
+
+def test_scan_secondary_output_rejected_with_artifact_set(runner, tmp_path):
+    res = runner.invoke(
+        main,
+        [
+            "scan",
+            "--artifact-set",
+            str(tmp_path),
+            "--secondary-format",
+            "json",
+            "--secondary-output",
+            str(tmp_path / "x.json"),
+        ],
+    )
+    assert res.exit_code != 0
+    assert "not supported with --artifact-set" in res.output
 
 
 def test_audit_mode_runs_without_baseline(runner, tmp_path):

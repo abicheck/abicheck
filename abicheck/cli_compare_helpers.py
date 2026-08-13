@@ -98,6 +98,7 @@ from .cli_resolve import (
     _resolve_compare_snapshots,
     classify_compare_operand,
 )
+from .cli_secondary_output import reject_incoherent_secondary_output
 from .contract_coverage_exit import announce_coverage_floor, fold_coverage_exit
 from .contract_scoped_promotion import stamp_scoped_result_findings
 from .errors import AbicheckError, ProfileMismatchError, ScopeMismatchError
@@ -542,13 +543,11 @@ def _reject_incoherent_compare_flags(
     aimed at one file, a ``--contract`` domain with no evaluator to select
     for, a dry run asked to write a report. Raised as ``UsageError`` (exit
     64) up front, so none of them is discovered after an expensive compare.
+
+    The four ``--secondary-*`` coherence checks are shared with ``scan``
+    (Codex review) -- see ``cli_options.reject_incoherent_secondary_output``,
+    which this delegates to rather than duplicating them here.
     """
-    if dry_run and secondary_output is not None:
-        raise click.UsageError(
-            "--dry-run cannot be combined with --secondary-output: a dry run "
-            "performs no analysis and writes nothing, so there is no "
-            "secondary report to produce."
-        )
     if contract_mode is not None and not contract_evaluation:
         # `--contract` selects the domain the shadow evaluator judges
         # against, so on its own it would silently do nothing: no finding
@@ -560,27 +559,12 @@ def _reject_incoherent_compare_flags(
             "and without that flag no contract decision is computed at all."
         )
 
-    if secondary_fmt is not None and secondary_output is None:
-        raise click.UsageError(
-            "--secondary-format requires --secondary-output: writing two "
-            "output formats to the same stream would be ambiguous."
-        )
-    if secondary_output is not None and secondary_fmt is None:
-        raise click.UsageError(
-            "--secondary-output requires --secondary-format: with no format "
-            "given there is nothing to render, and the path would be silently "
-            "ignored."
-        )
-    if (
-        secondary_output is not None
-        and output is not None
-        and secondary_output.resolve() == output.resolve()
-    ):
-        raise click.UsageError(
-            "--secondary-output must differ from --output/-o: writing both "
-            "formats to the same file would silently overwrite the primary "
-            "report with the secondary one."
-        )
+    reject_incoherent_secondary_output(
+        dry_run=dry_run,
+        output=output,
+        secondary_fmt=secondary_fmt,
+        secondary_output=secondary_output,
+    )
 
 
 

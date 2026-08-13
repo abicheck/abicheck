@@ -42,6 +42,7 @@ import click
 
 from .buildsource.risk import RiskRules
 from .buildsource.scan_levels import EvidenceDepth, SourceMethod
+from .checker_policy import ADDITION_KINDS
 
 if TYPE_CHECKING:
     from .environment_matrix import EnvironmentMatrix
@@ -254,6 +255,72 @@ def _resolve_max_baseline_findings(max_findings: int | None) -> int:
 #: deliberately does not itemize -- they carry no verdict, so under the legacy
 #: scheme they are exactly the "additions/quality noise" that comment names.
 _COMPATIBLE_SEVERITY_CATEGORIES = frozenset({"addition", "quality_issues"})
+
+#: Kind value strings that constitute new public-API surface -- the same
+#: registry-sourced set `pr_comment.py` uses for `compare`'s own "Public API
+#: additions" section (`ADDITION_KINDS`, not a hand-picked list -- picks up a
+#: kind that doesn't end in "_added" too, e.g. `type_field_added_compatible`).
+_ADDITION_KIND_VALUES = frozenset(k.value for k in ADDITION_KINDS)
+
+
+def _addition_finding_dicts(
+    diff: Any, cap: int
+) -> tuple[list[dict[str, Any]], bool, int]:
+    """Always-on itemization of new public-API surface, for a PR comment.
+
+    ``diff.compatible`` normally contributes only its bare count to
+    ``_baseline_summary`` (see ``_COMPATIBLE_SEVERITY_CATEGORIES``'s own
+    docstring -- "additions/quality noise this summary was never meant to
+    itemize"), and is itemized above only when severity policy made one of
+    them the run's actual blocking cause. Rendering a ``scan --against``
+    result as a sticky PR comment (``pr_comment_scan.from_scan``) needs more than
+    that: a green "➕ Public API additions" table, the same thing `compare`'s
+    own JSON report already carries via its full `changes` list -- so this
+    itemizes just the addition-shaped subset of `diff.compatible`
+    (`_ADDITION_KIND_VALUES`, never a quality finding) unconditionally,
+    capped independently of the gating findings above so a large addition set
+    can never crowd out a real gating finding from the shared budget.
+
+    Returns ``(dicts, truncated, total)`` -- ``total`` is the exact,
+    untruncated addition count (Codex review): ``diff.compatible``'s own
+    scalar mixes additions and quality findings, so the PR comment has no
+    other way to render an exact "N safe" header count once ``dicts`` itself
+    is capped below ``total``.
+    """
+    addition_changes = [
+        c for c in getattr(diff, "compatible", None) or ()
+        if _change_kind_str(c) in _ADDITION_KIND_VALUES
+    ]
+    dicts = _baseline_finding_dicts(addition_changes[:cap], "compatible")
+    return dicts, len(addition_changes) > len(dicts), len(addition_changes)
+
+
+def _quality_finding_dicts(
+    diff: Any, cap: int
+) -> tuple[list[dict[str, Any]], bool, int]:
+    """Always-on itemization of :func:`_addition_finding_dicts`'s complement
+    -- the compatible-but-non-addition subset of ``diff.compatible`` (a
+    quality-category change like ``func_noexcept_added``, or a
+    policy-demoted removal reclassified compatible).
+
+    Codex review, follow-up to the exact-safe-total fix in
+    ``pr_comment_scan.from_scan``: that fix corrected the *count* to read
+    the full ``diff.compatible`` scalar, but a scan whose only compatible
+    findings were quality-shaped still had nothing to itemize -- the
+    header could say "3 safe" with an empty green section and no way to
+    tell a reviewer what those three findings actually were. Mirrors
+    ``_addition_finding_dicts`` exactly (same cap, same ``"compatible"``
+    bucket label, same ``(dicts, truncated, total)`` return shape) with the
+    membership test inverted, capped independently of both the gating
+    findings and the addition findings so neither crowds this one out of
+    the shared report.
+    """
+    quality_changes = [
+        c for c in getattr(diff, "compatible", None) or ()
+        if _change_kind_str(c) not in _ADDITION_KIND_VALUES
+    ]
+    dicts = _baseline_finding_dicts(quality_changes[:cap], "compatible")
+    return dicts, len(quality_changes) > len(dicts), len(quality_changes)
 
 
 def _add_severity_blocking_compatible_findings(
@@ -655,6 +722,20 @@ def _baseline_summary(diff: Any, max_findings: int | None = None) -> dict[str, A
         "risk": len(diff.risk),
         "compatible": len(diff.compatible),
     }
+    # Codex review: the resolved `--policy` (e.g. "strict_abi", or whatever
+    # a non-default policy name/config resolved to) that actually classified
+    # these buckets was never surfaced anywhere in `scan --against`'s JSON,
+    # unlike `compare`'s own report (`reporter.py` always emits it) -- a
+    # consumer had no way to tell which policy gated a `scan --against` run
+    # without a separate `compare` invocation. `diff.policy` is the same
+    # string `_build_severity_json`/`classify_change_object` above are
+    # already keyed on. Duck-typed like the other optional reads in this
+    # function: a real `DiffResult` always carries it, but this module is
+    # also driven with lightweight stand-ins in tests that model only the
+    # buckets they exercise.
+    resolved_policy = getattr(diff, "policy", None)
+    if resolved_policy is not None:
+        summary["policy"] = resolved_policy
     # ADR-049 D9 conserves every detector fact in exactly one visible
     # outcome. The four buckets above are the *compatibility* axis, so since
     # Phase 7 they exclude findings contract evaluation did not score -- and
@@ -730,6 +811,28 @@ def _baseline_summary(diff: Any, max_findings: int | None = None) -> dict[str, A
         if total_gating > cap:
             summary["findings_truncated"] = True
             _accumulate_kind_counts(summary, "findings_truncated_kinds", cut_kinds)
+
+    # Always-on itemization of new public-API surface (see
+    # `_addition_finding_dicts`'s own docstring) -- separate from `findings`
+    # above, which only ever names a `diff.compatible` entry when severity
+    # policy made it the blocking cause.
+    additions, additions_truncated, additions_total = _addition_finding_dicts(diff, cap)
+    if additions:
+        summary["additions"] = additions
+        if additions_truncated:
+            summary["additions_truncated"] = True
+            summary["additions_total"] = additions_total
+
+    # Always-on itemization of the complementary compatible-but-non-addition
+    # subset (Codex review, follow-up) -- see `_quality_finding_dicts`'s own
+    # docstring for why this exists alongside `additions` rather than
+    # folded into it.
+    quality, quality_truncated, quality_total = _quality_finding_dicts(diff, cap)
+    if quality:
+        summary["quality"] = quality
+        if quality_truncated:
+            summary["quality_truncated"] = True
+            summary["quality_total"] = quality_total
 
     # ADR-049 Phase 5: surface the same suppression audit trail `compare`'s
     # own JSON report already exposes (`DiffResult.suppressed_changes`,

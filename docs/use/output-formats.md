@@ -689,14 +689,46 @@ symbol linkage was captured also carries `symbol_binding`
 [Suppressions](suppressions.md)), so a `binding:`-scoped suppression's
 match/no-match is auditable from `scan --against` too.
 
+Since schema 1.13, the block also carries an always-on `additions` array —
+the addition-shaped subset of the `compatible` bucket (new public-API
+surface, `ChangeKind`'s `ADDITION_KINDS`), itemized the same shape as
+`findings` (`"bucket": "compatible"`) regardless of whether severity policy
+made any of them the run's blocking cause. Capped independently of
+`findings`' own budget (the same `--max-findings`/
+`ABICHECK_MAX_BASELINE_FINDINGS` cap), with `additions_truncated` set when
+that cap was hit, alongside `additions_total` (the exact, untruncated
+addition count — `compatible`'s own scalar mixes additions and quality
+findings, so it can't answer "how many additions, exactly" on its own). All
+three keys are omitted when `compatible` has no addition-shaped entry. This
+is what lets a `scan --against` PR comment (see the Action's own
+`pr-comment`/`pr-comment-on` inputs, [GitHub Action usage](github-action.md))
+render a green "public API additions" section the same way `compare`'s own
+JSON report already does via its full `changes` list.
+
+The block also carries `quality` (plus optional `quality_truncated`/
+`quality_total`) — `additions`'s exact complement, itemizing the
+compatible-but-non-addition subset of `compatible` (a quality-category
+change like `func_noexcept_added`, or a policy-demoted removal reclassified
+compatible) the same shape and under the same cap as `additions`, so the
+comment's "safe" total (which reads the full `compatible` scalar) always has
+a matching set of itemized rows to show a reviewer, whichever shape those
+findings take.
+
+The block also carries `policy` — the resolved compatibility policy name
+(e.g. `"strict_abi"`) that actually classified these buckets, the same fact
+`compare`'s own top-level JSON report has always carried. Present on any
+real comparison (absent only for the `NOT_COMPARABLE`/audit-only `diff`
+shapes, which never reach policy classification).
+
 ```json
 {
-  "scan_schema_version": "1.11",
+  "scan_schema_version": "1.13",
   "diff": {
     "breaking": 25,
     "findings": ["... 20 entries ..."],
     "findings_truncated": true,
-    "findings_truncated_kinds": {"func_removed": 5}
+    "findings_truncated_kinds": {"func_removed": 5},
+    "additions": ["... up to 20 entries ..."]
   }
 }
 ```

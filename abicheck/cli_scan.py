@@ -95,6 +95,7 @@ from .cli_options import (
     policy_options,
     resolve_compile_context,
     scope_options,
+    secondary_output_options,
     severity_options,
     split_sided_paths,
     verbose_option,
@@ -115,6 +116,8 @@ from .cli_scan_helpers import (  # noqa: F401 - coverage/depth helpers re-export
     _source_abi_coverage,
     _uses_debug_presence_only,
     l4_coverage_advisories,
+    reject_incoherent_scan_operands as _reject_incoherent_scan_operands,
+    reject_incoherent_scan_secondary_output as _reject_incoherent_secondary_output,
     render_baseline_lines,
     render_coverage_lines,
     render_crosscheck_lines,
@@ -552,26 +555,59 @@ def _scan_pre_coverage_base_exit(outcome: ScanOutcome) -> int:
     return _verdict_exit_code(outcome.verdict)
 
 
-def _emit_scan_report(
-    outcome: ScanOutcome, fmt: str, output: Path | None, *, show_suppressed: bool = False
-) -> None:
-    """Render the scan outcome, write/echo it, and exit non-zero on a verdict."""
-    text = (
+def _render_scan_report_text(
+    outcome: ScanOutcome, fmt: str, *, show_suppressed: bool = False
+) -> str:
+    return (
         json.dumps(outcome.to_dict(), indent=2)
         if fmt == "json"
         else _render_text(outcome, show_suppressed=show_suppressed)
     )
+
+
+def _emit_scan_report(
+    outcome: ScanOutcome,
+    fmt: str,
+    output: Path | None,
+    *,
+    show_suppressed: bool = False,
+    secondary_fmt: str | None = None,
+    secondary_output: Path | None = None,
+) -> None:
+    """Render the scan outcome, write/echo it, and exit non-zero on a verdict.
+
+    ``secondary_fmt``/``secondary_output`` render the same already-computed
+    ``outcome`` a second time to a second path -- e.g. a human ``--format
+    text`` report alongside a ``--secondary-format json`` artifact for
+    tooling -- without a second scan (mirrors ``compare --secondary-format``;
+    see the GitHub Action's own PR-comment renderer, which uses exactly this
+    to avoid re-running a potentially --depth build/source-expensive scan
+    just to get JSON out of a --format text invocation).
+    """
+    text = _render_scan_report_text(outcome, fmt, show_suppressed=show_suppressed)
     if output:
         _safe_write_output(output, text)
         click.echo(f"Report written to {output}", err=True)
     else:
         click.echo(text)
 
+    if secondary_fmt is not None and secondary_output is not None:
+        secondary_text = _render_scan_report_text(
+            outcome, secondary_fmt, show_suppressed=show_suppressed
+        )
+        _safe_write_output(secondary_output, secondary_text)
+        click.echo(f"Secondary report written to {secondary_output}", err=True)
+
     # ADR-049 §7: a coverage-gated exit must say so. `scan --format json`
     # carries the ledger in its own summary; every other renderer ignores
     # those keys, so without this the command prints "Verdict: NO_CHANGE"
-    # and then fails with no explanation (Codex review).
-    if fmt != "json":
+    # and then fails with no explanation (Codex review). A secondary `text`
+    # report has the identical gap even when the primary format is `json`
+    # (Codex review, follow-up): the primary JSON carries the ledger, but the
+    # secondary text file doesn't, and this stderr notice is the only place
+    # that gap gets explained -- so it must fire whenever *either* renderer
+    # in play is `text`, not only when the primary one is.
+    if fmt != "json" or secondary_fmt == "text":
         from .contract_coverage_exit import coverage_diagnostic_from_summary
 
         # `outcome.exit_code` has ALREADY had the coverage floor folded in
@@ -1026,43 +1062,6 @@ def _resolve_scan_evaluation_config(
     return resolved_config, policy_file
 
 
-def _reject_incoherent_scan_operands(
-    *,
-    artifact: Path | None,
-    artifact_set: str | None,
-    against: Path | None,
-    dry_run: bool,
-    bundle_system_providers: str,
-) -> None:
-    """Reject operand/flag combinations ``scan`` cannot serve.
-
-    An empty ``--artifact-set`` is rejected explicitly rather than left to
-    collapse to ``Path("") == Path(".")`` and audit the whole CWD (CodeRabbit
-    review). ``--artifact-set`` is audit-only -- there is no old side for a set
-    -- so ``--against`` is rejected with it, and ``--dry-run`` is not wired for
-    it yet. ``--bundle-system-providers`` is the mirror case: it only means
-    something *for* a set.
-    """
-    if artifact_set is not None and not artifact_set.strip():
-        raise click.UsageError("--artifact-set must not be empty.")
-    if (artifact is not None) == (artifact_set is not None):
-        raise click.UsageError(
-            "scan requires exactly one of ARTIFACT or --artifact-set."
-        )
-    if artifact_set is not None:
-        if against is not None:
-            raise click.UsageError(
-                "--against is not supported with --artifact-set "
-                "(audit-only -- no old side for a set)."
-            )
-        if dry_run:
-            raise click.UsageError(
-                "--dry-run is not yet supported with --artifact-set."
-            )
-    elif bundle_system_providers:
-        raise click.UsageError("--bundle-system-providers requires --artifact-set.")
-
-
 def _discover_scan_project_config(
     build_config: Path | None, sources: Path | None, against: Path | None,
 ) -> tuple[Path | None, Any, str | None]:
@@ -1385,6 +1384,17 @@ def _discover_scan_project_config(
     default=None,
     help="Write output to this path (default: stdout).",
 )
+@secondary_output_options(
+    ["text", "json"],
+    format_help="Emit a second output format from this same scan run, without "
+    "re-running it a second time (e.g. a human --format text report "
+    "alongside a --secondary-format json artifact for tooling -- the "
+    "GitHub Action's own PR-comment renderer uses exactly this to avoid a "
+    "second, potentially --depth build/source-expensive scan for the "
+    "default --format text invocation). Requires --secondary-output "
+    "(writing two formats to the same stream would be ambiguous). Not "
+    "supported with --artifact-set.",
+)
 @verbose_option
 @compile_context_options  # dump↔scan L2 compile-context parity (ADR-037 D3)
 def scan_cmd(
@@ -1431,6 +1441,8 @@ def scan_cmd(
     allow_build_query: bool,
     fmt: str,
     output: Path | None,
+    secondary_fmt: str | None,
+    secondary_output: Path | None,
     verbose: bool,
     header_backend: str = "auto",
     gcc_path: str | None = None,
@@ -1502,6 +1514,10 @@ def scan_cmd(
     _reject_incoherent_scan_operands(
         artifact=artifact, artifact_set=artifact_set, against=against,
         dry_run=dry_run, bundle_system_providers=bundle_system_providers,
+    )
+    _reject_incoherent_secondary_output(
+        dry_run=dry_run, output=output, secondary_fmt=secondary_fmt,
+        secondary_output=secondary_output, artifact_set=artifact_set,
     )
     if artifact_set is not None:
         _reject_comparison_only_flags(no_baseline_reason="drop --artifact-set")
@@ -1951,4 +1967,11 @@ def scan_cmd(
 
         drain_build_dir_cleanups(build_dir_cleanups)
 
-    _emit_scan_report(core.outcome, fmt, output, show_suppressed=show_suppressed)
+    _emit_scan_report(
+        core.outcome,
+        fmt,
+        output,
+        show_suppressed=show_suppressed,
+        secondary_fmt=secondary_fmt,
+        secondary_output=secondary_output,
+    )

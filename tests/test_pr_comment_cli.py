@@ -118,3 +118,39 @@ def test_cli_pr_comment_no_gate_breaking_mirrors_fail_on_breaking(tmp_path):
     body = out.read_text(encoding="utf-8")
     assert "Analysis coverage reduced" in body
     assert "Source analysis incomplete" not in body
+
+
+def _scan_report():
+    return {
+        "scan_schema_version": "1.13",
+        "verdict": "COMPATIBLE",
+        "exit_code": 0,
+        "diff": None,
+    }
+
+
+def test_cli_pr_comment_subject_applies_to_scan_report(tmp_path):
+    report = tmp_path / "scan.json"
+    report.write_text(json.dumps(_scan_report()), encoding="utf-8")
+    out = tmp_path / "comment.md"
+    result = _run_cli(
+        [str(report), "--subject", "libfoo.so", "--on", "always", "-o", str(out)]
+    )
+    assert result.exit_code == 0
+    body = out.read_text(encoding="utf-8")
+    assert "libfoo.so" in body
+
+
+def test_cli_pr_comment_subject_ignored_for_compare_report(tmp_path):
+    # compare's own `library` field already names the subject -- --subject
+    # must never override it.
+    report = tmp_path / "report.json"
+    report.write_text(json.dumps(_compare_report()), encoding="utf-8")
+    out = tmp_path / "comment.md"
+    result = _run_cli(
+        [str(report), "--subject", "should-not-appear", "-o", str(out)]
+    )
+    assert result.exit_code == 0
+    body = out.read_text(encoding="utf-8")
+    assert "libfoo.so" in body
+    assert "should-not-appear" not in body

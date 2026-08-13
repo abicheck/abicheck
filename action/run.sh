@@ -101,6 +101,34 @@ _is_release_style_operand() {
   return 1
 }
 
+# Whether the user's own `extra-args` passthrough already requests
+# `--secondary-format`/`--secondary-output` (documented, supported usage —
+# `extra-args` is a general CLI escape hatch). If it does, injecting our own
+# internal pair ahead of it is unsafe: Click applies both occurrences and
+# the *last* one wins, so the actual scan/compare run would silently honor
+# the user's pair instead of ours, writing their chosen format/path rather
+# than the internal `$PR_JSON` sidecar this script expects to read back --
+# `$PR_JSON` then stays an empty mktemp file, and `_maybe_post_pr_comment`
+# falls through to a full rerun anyway (which the internal injection exists
+# specifically to avoid), except now confusingly alongside a stray empty
+# temp file (Codex review). Skipping our own injection when the user's is
+# present restores the older, always-correct "no PR_JSON at all" fallback
+# path instead.
+#
+# A simple substring/word-boundary check on the raw string, matching this
+# script's existing extra-args handling (`CMD+=($INPUT_EXTRA_ARGS)`, plain
+# word-splitting, not full shell quoting) -- good enough to catch the
+# documented flag spellings without parsing arbitrary quoting.
+_extra_args_has_secondary_output() {
+  case " ${INPUT_EXTRA_ARGS:-} " in
+    *' --secondary-format '* | *' --secondary-format='* \
+      | *' --secondary-output '* | *' --secondary-output='*)
+      return 0
+      ;;
+  esac
+  return 1
+}
+
 # ---------------------------------------------------------------------------
 # Build the abicheck command
 # ---------------------------------------------------------------------------
@@ -1066,6 +1094,27 @@ elif [[ "$MODE" == "scan" ]]; then
     if [[ -n "$OUTPUT_FILE" ]]; then
       CMD+=(-o "$OUTPUT_FILE")
     fi
+
+    # Render a second, always-unfiltered JSON report from this same scan run
+    # for the sticky PR comment (--secondary-format), instead of re-invoking
+    # abicheck a second time just to get JSON -- the same reasoning compare
+    # mode's own --secondary-format wiring above already documents, and the
+    # cost is sharper here: a re-run could redo a --depth build/source scan
+    # (Codex review — a naive rerun-on-text-format fallback would double
+    # potentially expensive work and describe a second, separately
+    # budget-metered run rather than the one whose status actually gated the
+    # step). Only needed when the primary format isn't already JSON, and
+    # --artifact-set has no single-artifact JSON shape to render a second
+    # time (the CLI itself rejects --secondary-* there too). Also skipped
+    # when the user's own `extra-args` already requests `--secondary-format`/
+    # `--secondary-output` (Codex review, follow-up) -- see
+    # `_extra_args_has_secondary_output`'s own docstring for why injecting
+    # ours anyway would be actively wrong, not merely redundant.
+    if [[ "$FORMAT" != "json" && "${INPUT_PR_COMMENT:-true}" == "true" \
+       && -z "$SCAN_ARTIFACT_SET" ]] && ! _extra_args_has_secondary_output; then
+      PR_JSON=$(mktemp "${RUNNER_TEMP:-/tmp}/abicheck-pr-json.XXXXXX")
+      CMD+=(--secondary-format json --secondary-output "$PR_JSON")
+    fi
   fi
 
 else
@@ -1093,7 +1142,16 @@ echo ""
 ABICHECK_EXIT=0
 ABICHECK_OUTPUT=""
 STDERR_FILE=$(mktemp)
-trap 'rm -f "$STDERR_FILE" "${_STDOUT_JSON_FILE:-}"; rm -rf "${_BASELINE_CLEANUP:-}"' EXIT
+#: PR_JSON (Codex review) is created well after this trap is installed --
+#: either by the primary CMD's own --secondary-format/--secondary-output
+#: (compare/scan, non-JSON primary format) or by `_maybe_post_pr_comment`'s
+#: reuse-or-rerun fallback -- but bash re-evaluates a single-quoted trap
+#: string at EXIT time, so referencing it here (like `_STDOUT_JSON_FILE`/
+#: `_BASELINE_CLEANUP` already do) cleans it up whenever it exists, even on
+#: a non-PR-comment run or `pr-comment-on: never` where the temp file was
+#: still created but never posted. Without this, a persistent self-hosted
+#: runner accumulates one JSON report per scan run indefinitely.
+trap 'rm -f "$STDERR_FILE" "${_STDOUT_JSON_FILE:-}" "${PR_JSON:-}"; rm -rf "${_BASELINE_CLEANUP:-}"' EXIT
 
 if [[ -n "${OUTPUT_FILE:-}" ]]; then
   # Output goes to file; capture stderr separately for error detection
@@ -1669,6 +1727,17 @@ elif [[ "$MODE" == "scan" ]]; then
       2) VERDICT="API_BREAK"; _escalate_verdict_to_report ;;
       4) VERDICT="BREAKING" ;;
       5) VERDICT="BUDGET_OVERFLOW" ;;
+      6)
+        # NOT_COMPARABLE (ADR-050 D2: a scope/profile mismatch between the
+        # candidate and --against baseline) is a valid, reportable outcome,
+        # not a CLI/operational failure -- keeping it out of VERDICT="ERROR"
+        # matters beyond wording: the PR-comment step's own ERROR guard
+        # (`_maybe_post_pr_comment`) skips posting entirely on ERROR, which
+        # made a real, JSON-report-carrying NOT_COMPARABLE result silently
+        # produce no sticky comment even though `pr_comment_scan.py` renders
+        # it as a blocking "analysis incomplete" finding (Codex review).
+        VERDICT="NOT_COMPARABLE"
+        ;;
       *)
         VERDICT="ERROR"
         if _is_cli_error; then
@@ -1819,6 +1888,9 @@ if [[ "${INPUT_ADD_JOB_SUMMARY:-true}" == "true" && "$MODE" != "dump" ]]; then
       BUDGET_OVERFLOW)
         echo "> **Verdict: BUDGET_OVERFLOW** ⏱️ — Scan exceeded the configured \`budget\`. Pin a shallower level (--depth) or raise the budget; a budget never silently shrinks scope."
         ;;
+      NOT_COMPARABLE)
+        echo "> **Verdict: NOT_COMPARABLE** 🛑 — The candidate and \`--against\` baseline were not extracted under a comparable profile/scope contract (ADR-050 D2), so no compatibility comparison ran. This is not an ABI/API break; see the JSON report's \`diff.reason\` for what mismatched."
+        ;;
       COVERAGE_INCOMPLETE)
         # ADR-049's orthogonal contract-coverage axis (exit code 1). Naming
         # which provider fell short is the actionable part — "old/export_table"
@@ -1915,11 +1987,23 @@ fi
 _can_reuse_primary_json() {
   # Reuse the primary run's output as the comment's JSON report instead of
   # re-running the comparison — but only when it is a faithful, unfiltered
-  # report. It must already be JSON, written to a non-empty file, and free of
-  # display filters (--show-only / --stat) that hide gated changes from the
-  # comment (which _build_json_cmd strips for exactly that reason).
+  # report. It must already be JSON, actually available somewhere
+  # (_json_report_src, defined near the top of the script — it already
+  # falls back from $OUTPUT_FILE through the stdout-mode $_STDOUT_JSON_FILE;
+  # its middle fallback, $PR_JSON, is always empty at this call site, since
+  # the caller only reaches here after its own "already populated" check on
+  # PR_JSON came back empty), and free of display filters (--show-only /
+  # --stat) that hide gated changes from the comment (which _build_json_cmd
+  # strips for exactly that reason).
+  #
+  # Codex review: the stdout-JSON case (format: json, no output-file) used
+  # to fall through this check — it only ever looked at $OUTPUT_FILE, never
+  # the already-materialized $_STDOUT_JSON_FILE — silently re-running the
+  # whole scan/compare a second time just to get JSON that had already been
+  # produced, for scan doubling potentially expensive --depth build/source
+  # work and describing a separate, budget-metered run.
   [[ "${FORMAT:-}" == "json" ]] || return 1
-  [[ -n "${OUTPUT_FILE:-}" && -s "${OUTPUT_FILE:-}" ]] || return 1
+  [[ -n "$(_json_report_src)" ]] || return 1
   local arg
   for arg in ${CMD[@]+"${CMD[@]}"}; do
     case "$arg" in
@@ -1962,15 +2046,31 @@ _build_json_cmd() {
 _maybe_post_pr_comment() {
   [[ "${INPUT_PR_COMMENT:-true}" == "true" ]] || return 0
   case "$MODE" in
-    compare) ;;
+    compare | scan) ;;
     *) return 0 ;;
   esac
+  # `scan --artifact-set` (ADR-056) has no old side and no single scanned
+  # artifact -- its JSON is a per-library audit list, a different shape
+  # `pr_comment_scan.py`'s `from_scan` doesn't handle (it expects one
+  # `diff`/`findings`/`additions` block for one artifact). Skip rather than
+  # render a misleading or crashing comment.
+  if [[ "$MODE" == "scan" && -n "${SCAN_ARTIFACT_SET:-}" ]]; then
+    echo "abicheck: scan --artifact-set has no single-artifact JSON shape; skipping PR comment."
+    return 0
+  fi
   # A dry run performed no real comparison -- posting a comment would either
   # show nothing (no PR_JSON) or silently trigger a second, real compare just
   # to produce one, defeating the point of --dry-run. Skip entirely.
   [[ "${INPUT_DRY_RUN:-false}" == "true" ]] && return 0
   [[ "${INPUT_PR_COMMENT_ON:-changes}" == "never" ]] && return 0
   [[ "$VERDICT" == "ERROR" ]] && return 0
+  # scan's own _BudgetOverflow handler (abicheck/cli_scan.py) exits 5 before
+  # _emit_scan_report ever runs, so neither --secondary-output nor a JSON
+  # primary output was written -- there is no report to reuse, and
+  # re-running would just re-execute the same budget-limited (and
+  # potentially expensive) scan only to hit the identical overflow again
+  # with nothing new to show for it (Codex review).
+  [[ "$VERDICT" == "BUDGET_OVERFLOW" ]] && return 0
   case "${GITHUB_EVENT_NAME:-}" in
     pull_request | pull_request_target) ;;
     *)
@@ -1999,11 +2099,11 @@ _maybe_post_pr_comment() {
   PR_BODY=$(mktemp "${RUNNER_TEMP:-/tmp}/abicheck-pr-body.XXXXXX")
   if [[ -s "$PR_JSON" ]]; then
     : # Already populated by the primary run's --secondary-format (compare
-      # mode, non-json primary format) — nothing left to do.
+      # or scan mode, non-json primary format) — nothing left to do.
   elif _can_reuse_primary_json; then
     # The primary run already produced a faithful JSON report — reuse it instead
     # of re-running the whole comparison.
-    cp "$OUTPUT_FILE" "$PR_JSON"
+    cp "$(_json_report_src)" "$PR_JSON"
   else
     _build_json_cmd
     # Re-run for JSON; a non-zero exit here is expected on breaks — the report
@@ -2038,13 +2138,28 @@ _maybe_post_pr_comment() {
     run_url="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
   fi
 
-  python3 -m abicheck.cli_pr_comment "$PR_JSON" \
+  # scan's own JSON carries no artifact/library name (unlike compare's
+  # "library") -- name it explicitly so the comment header doesn't just say
+  # "artifact" (pr_comment_scan.py's `from_scan` fallback).
+  local subject_args=()
+  if [[ "$MODE" == "scan" && -n "${SCAN_ARTIFACT:-}" ]]; then
+    subject_args=(--subject "$(basename -- "$SCAN_ARTIFACT")")
+  fi
+
+  # Codex review: on a Windows Git Bash runner, `actions/setup-python`
+  # exposes `python`/`python.exe` but not always `python3` -- a hard-coded
+  # `python3` here would silently fail (swallowed by the trailing `|| true`
+  # below), leaving PR_BODY empty and the comment skipped or an existing
+  # sticky one deleted. `$_PY_BIN` is the same resolved interpreter every
+  # other Python invocation in this script already uses.
+  "$_PY_BIN" -m abicheck.cli_pr_comment "$PR_JSON" \
     --sha "${head_sha:-${GITHUB_SHA:-}}" \
     --detail "${INPUT_PR_COMMENT_DETAIL:-standard}" \
     --on "${INPUT_PR_COMMENT_ON:-changes}" \
     --run-label "run #${GITHUB_RUN_NUMBER:-?}" \
     ${run_url:+--report-url "$run_url"} \
     ${PR_GATE_ARGS[@]+"${PR_GATE_ARGS[@]}"} \
+    ${subject_args[@]+"${subject_args[@]}"} \
     -o "$PR_BODY" || true
 
   if [[ ! -s "$PR_BODY" ]]; then
@@ -2188,6 +2303,16 @@ elif [[ "$MODE" == "scan" ]]; then
 
   if [[ "$VERDICT" == "BUDGET_OVERFLOW" ]]; then
     echo "::error::Scan exceeded its budget. Pin a shallower level or raise the budget."
+    FINAL_EXIT=1
+  fi
+
+  # NOT_COMPARABLE (exit 6, ADR-050 D2) unconditionally fails the step, same
+  # as ERROR did before this verdict was split out of it above -- no
+  # fail-on-* flag governs it, since a scope/profile mismatch means no
+  # compatibility comparison ran at all, not that one ran and found (or
+  # didn't find) a break.
+  if [[ "$VERDICT" == "NOT_COMPARABLE" ]]; then
+    echo "::error::scan --against reported NOT_COMPARABLE: the candidate and baseline were not extracted under a comparable profile/scope contract. See the JSON report's diff.reason for what mismatched."
     FINAL_EXIT=1
   fi
 
