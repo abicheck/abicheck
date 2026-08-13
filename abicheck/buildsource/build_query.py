@@ -814,6 +814,7 @@ def run_inferred_build_query(
             return None
         if not _resolve_query_launcher(cmd, system, which, extractors):
             return None
+        query_start = time.monotonic()
         proc = _run_query_process(cmd, system, sources, timeout, merged, extractors)
         if proc is None:
             return None
@@ -823,12 +824,27 @@ def run_inferred_build_query(
         # zero-config `--sources` path previously always reported 0 targets
         # regardless of workspace contents. Run after the primary query so a
         # cquery failure never affects whether the primary aquery evidence
-        # (compile/link units) is merged.
-        cquery_stdout = (
-            _run_bazel_cquery_supplement(sources, timeout, which, merged)
-            if system == "bazel"
-            else None
-        )
+        # (compile/link units) is merged. Shares *timeout*'s budget with the
+        # aquery call just completed rather than getting its own fresh
+        # allotment: without an active scan --budget (deadline.remaining() is
+        # None), each of `_run_query_process`/`_run_bazel_cquery_supplement`
+        # would otherwise independently cap at the full local `timeout`
+        # default, so a slow aquery followed by a hung cquery could still
+        # block for nearly 2x INFERRED_QUERY_TIMEOUT_S (Codex review). A
+        # remaining budget that's already exhausted skips the supplement
+        # outright rather than handing `run_bounded` a non-positive timeout.
+        cquery_remaining = max(0.0, timeout - (time.monotonic() - query_start))
+        cquery_stdout: str | None = None
+        if system == "bazel":
+            if cquery_remaining > 0:
+                cquery_stdout = _run_bazel_cquery_supplement(
+                    sources, cquery_remaining, which, merged
+                )
+            else:
+                merged.diagnostics.append(
+                    "build_query_auto: bazel cquery supplement skipped — "
+                    "aquery already used the full inferred-query timeout budget"
+                )
         return _merge_query_result(
             proc,
             system,

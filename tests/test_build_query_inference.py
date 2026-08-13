@@ -191,6 +191,24 @@ class _FakeProc:
         self.stderr = stderr
 
 
+def _fake_monotonic_sequence(*values):
+    """A ``time.monotonic`` stand-in yielding *values* in order, then repeating
+    the last one for any further call. Avoids over-fitting a test to the exact
+    number of ``time.monotonic()`` calls an implementation detail (like a
+    nested ``deadline.deadline_scope()``) happens to make."""
+    it = iter(values)
+    last = [values[-1]]
+
+    def _fake() -> float:
+        try:
+            last[0] = next(it)
+        except StopIteration:
+            pass
+        return last[0]
+
+    return _fake
+
+
 def test_run_cmake_ingests_out_of_tree_and_merges(tmp_path: Path, monkeypatch):
     # cmake configures into an OUT-OF-TREE temp dir (never under --sources); the
     # compile DB is ingested + merged and the temp dir removed. Returns None
@@ -1181,6 +1199,87 @@ def test_run_bazel_cquery_supplement_failure_does_not_demote_aquery_status(
     assert len(merged.compile_units) == 1
     assert ext[-1].status == "ok"  # aquery ingest still succeeds
     assert any("cquery supplement" in d for d in merged.diagnostics)
+
+
+def test_run_bazel_cquery_supplement_shares_timeout_budget_with_aquery(
+    tmp_path: Path, monkeypatch
+):
+    # Codex review, PR #751: without an active scan deadline, aquery and the
+    # cquery supplement must not each independently get their own full local
+    # `timeout` -- that could block for nearly 2x the default 600s ceiling.
+    # The supplement's own effective timeout is `timeout - elapsed(aquery)`,
+    # so a slow aquery leaves the supplement a correspondingly smaller share.
+    (tmp_path / "MODULE.bazel").write_text("module(name='x')\n")
+    seen_cquery_timeouts: list[float] = []
+
+    def fake_run(cmd, **kw):
+        if cmd[1] == "cquery":
+            seen_cquery_timeouts.append(kw["timeout"])
+            return _FakeProc(0, stdout='{"results": []}')
+        return _FakeProc(0, stdout='{"actions": []}')
+
+    # 1st call = query_start (0.0); 2nd call = the aquery-side
+    # `deadline.deadline_scope()` entry (irrelevant to the assertion, `run_bounded`
+    # itself is replaced above so it makes no further monotonic() calls of its
+    # own); 3rd call = the elapsed-time read back in run_inferred_build_query,
+    # simulating a 450s-slow aquery against a 600s local `timeout`. Any further
+    # call (e.g. the cquery-side deadline_scope entry) repeats the last value --
+    # by then the cquery timeout has already been computed and passed along.
+    monkeypatch.setattr(_bq.deadline, "run_bounded", fake_run)
+    monkeypatch.setattr(
+        _bq.time, "monotonic", _fake_monotonic_sequence(0.0, 0.0, 450.0)
+    )
+    merged, ext = BuildEvidence(), []
+    out = run_inferred_build_query(
+        tmp_path, merged, ext, which=lambda tool: f"/usr/bin/{tool}"
+    )
+    assert out is None
+    assert len(seen_cquery_timeouts) == 1
+    # Remaining budget is timeout(600) - elapsed(450) = 150, not a fresh 600.
+    assert seen_cquery_timeouts[0] == pytest.approx(150.0)
+
+
+def test_run_bazel_cquery_supplement_skipped_when_aquery_exhausts_budget(
+    tmp_path: Path, monkeypatch
+):
+    # When aquery alone already consumed the whole local timeout budget, the
+    # cquery supplement must be skipped outright (never handed a
+    # non-positive timeout) rather than attempted with 0s left.
+    (tmp_path / "MODULE.bazel").write_text("module(name='x')\n")
+    aquery_json = json.dumps(
+        {
+            "actions": [
+                {
+                    "mnemonic": "CppCompile",
+                    "arguments": ["/usr/bin/g++", "-c", "impl.cc", "-o", "impl.o"],
+                    "primaryOutputId": "1",
+                }
+            ],
+            "artifacts": [{"id": "1", "execPath": "impl.o"}],
+        }
+    )
+    called = {"cquery": False}
+
+    def fake_run(cmd, **kw):
+        if cmd[1] == "cquery":
+            called["cquery"] = True
+        return _FakeProc(0, stdout=aquery_json)
+
+    # Same call-position reasoning as the test above: 1st call = query_start,
+    # 2nd = the aquery-side deadline_scope entry (irrelevant), 3rd = the
+    # elapsed-time read -- here simulating an aquery that alone already used
+    # up (and exceeded) the whole 600s local `timeout`.
+    monkeypatch.setattr(_bq.deadline, "run_bounded", fake_run)
+    monkeypatch.setattr(
+        _bq.time, "monotonic", _fake_monotonic_sequence(0.0, 0.0, 10_000.0)
+    )
+    merged, ext = BuildEvidence(), []
+    out = run_inferred_build_query(
+        tmp_path, merged, ext, which=lambda tool: f"/usr/bin/{tool}"
+    )
+    assert out is None
+    assert called["cquery"] is False
+    assert any("budget" in d for d in merged.diagnostics)
 
 
 def test_collect_inline_pack_defers_build_dir_cleanup(tmp_path: Path, monkeypatch):
