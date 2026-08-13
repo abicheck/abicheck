@@ -53,4 +53,15 @@ it should read in CHANGELOG.md. Delete the other sections.
   just to still hit the same `BUDGET_OVERFLOW` for the comment. The
   Action's own `verdict`/`exit-code` output docs (and generated
   `docs/reference/github-action-inputs.md`) now document `NOT_COMPARABLE`
-  and exit code 6 alongside the other `scan` outcomes.
+  and exit code 6 alongside the other `scan` outcomes. `compare` and
+  `scan` now share one `--secondary-format`/`--secondary-output` decorator
+  and coherence validator (`cli_secondary_output.py`) instead of two
+  independently drifting inline copies. The comment's safe-finding count
+  is derived from the diff's full `compatible` scalar rather than only its
+  addition-shaped subset, so a scan whose only findings are
+  compatible-but-non-addition (a quality-category change, or a
+  policy-demoted removal) no longer reports zero changes and gets its
+  sticky comment silently skipped. The comment header now
+  Markdown-escapes the scanned artifact's subject (an untrusted filename
+  passed through the Action's `--subject`), closing a Markdown-injection
+  vector via a crafted backtick/newline in the artifact name.

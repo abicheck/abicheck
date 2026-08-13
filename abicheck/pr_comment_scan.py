@@ -516,26 +516,38 @@ def from_scan(
             (crosscheck_total, 0) if gate_api_break else (0, crosscheck_total)
         )
 
-    # Exact "safe" (additions) total, immune to `diff["additions"]`'s own
-    # cap (Codex review, follow-up to the truncated-counts fix above): when
-    # additions were themselves truncated, `diff["additions_total"]` is the
-    # exact pre-cap count (schema 1.13); otherwise `additions_raw`'s own
-    # length already is exact, since it was never capped. Either way,
-    # subtract the exact count of addition-shaped promoted entries (from
-    # `_scan_promoted_compatible_counts`'s own severity-category scalar, not
-    # a length derived from any capped list), so the header count and the
-    # itemized "Public API additions" section (now wholesale-empty whenever
-    # `addition_promoted` is set, see `_scan_additions_to_safe`) can never
-    # silently disagree about how many changes were promoted.
+    # Exact "safe" total, derived from `diff["compatible"]` (Codex review,
+    # follow-up): the earlier revision derived this solely from
+    # `diff["additions"]`/`additions_total` -- but those itemize only the
+    # addition-shaped subset of `compatible` (`ChangeKind`'s
+    # `ADDITION_KINDS`, see `cli_scan_baseline._addition_finding_dicts`), so
+    # a compatible-but-non-addition finding (a quality-category change like
+    # `func_noexcept_added`, or a policy-demoted removal reclassified
+    # compatible) was invisible to this total entirely -- not merely
+    # unitemized. A diff whose only findings were of that shape reported
+    # zero changes across every bucket, so `pr-comment-on: changes` skipped
+    # (or sticky mode deleted) a comment for a real, non-empty scan result.
+    # `diff["compatible"]` is the exact, unfiltered scalar `_baseline_summary`
+    # always emits (`len(diff.compatible)`, never capped), so subtracting
+    # both promoted-category counts here yields the exact non-promoted-safe
+    # total regardless of finding shape.
+    #
+    # Known residual gap, not fixed here: only the addition-shaped subset is
+    # actually itemizable (`diff["additions"]` never carries a non-addition
+    # compatible finding's kind/symbol/location at all -- schema 1.13 has no
+    # field for it), so `len(model.safe)` can be smaller than
+    # `scan_safe_total` even with nothing truncated, and `scan_note` has no
+    # "N more not shown" line to explain it in that shape specifically. A
+    # correct fix needs `cli_scan_baseline.py` to itemize the full
+    # `compatible` bucket (a new schema field/version, its own review), not
+    # a same-round extension of this total. Undercounting the total to zero
+    # -- the actual reported bug -- is closed either way.
     scan_safe_total: int | None = None
     if diff_dict is not None:
-        additions_total_raw = diff_dict.get("additions_total")
-        total_additions = (
-            additions_total_raw
-            if isinstance(additions_total_raw, int)
-            else len(additions_raw) if isinstance(additions_raw, list) else 0
+        raw_compatible = _as_int(diff_dict.get("compatible"))
+        scan_safe_total = max(
+            0, raw_compatible - promoted_addition_count - promoted_quality_count
         )
-        scan_safe_total = max(0, total_additions - promoted_addition_count)
 
     return CommentModel(
         mode="scan",

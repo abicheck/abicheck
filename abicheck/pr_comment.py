@@ -1262,8 +1262,15 @@ def _header_block(model: CommentModel, short_sha: str) -> list[str]:
     emoji, title = _header(model)
     b, r, s = model.counts
     head_ref = f"**Head `{short_sha}`**" if short_sha else "**Head**"
+    # Codex review: `model.subject` can come straight from an untrusted
+    # scanned-artifact basename (the Action's `run.sh` passes it through
+    # `--subject`) -- a crafted filename containing a backtick or newline
+    # could terminate this code span and inject arbitrary Markdown into the
+    # sticky comment otherwise. `_esc` (used everywhere else a value is
+    # rendered inside a code span) neutralizes both.
     context = (
-        f"{head_ref} vs `{model.old_label}` · `{model.policy}` · `{model.subject}`"
+        f"{head_ref} vs `{_esc(model.old_label)}` · `{_esc(model.policy)}` · "
+        f"`{_esc(model.subject)}`"
     )
     counts_line = f"**{b} breaking** · {r} needs review · {s} safe"
     # The incomplete count is a distinct axis (analysis quality, not

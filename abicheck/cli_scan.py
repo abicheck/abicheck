@@ -95,6 +95,7 @@ from .cli_options import (
     policy_options,
     resolve_compile_context,
     scope_options,
+    secondary_output_options,
     severity_options,
     split_sided_paths,
     verbose_option,
@@ -116,7 +117,7 @@ from .cli_scan_helpers import (  # noqa: F401 - coverage/depth helpers re-export
     _uses_debug_presence_only,
     l4_coverage_advisories,
     reject_incoherent_scan_operands as _reject_incoherent_scan_operands,
-    reject_incoherent_secondary_output as _reject_incoherent_secondary_output,
+    reject_incoherent_scan_secondary_output as _reject_incoherent_secondary_output,
     render_baseline_lines,
     render_coverage_lines,
     render_crosscheck_lines,
@@ -1378,27 +1379,15 @@ def _discover_scan_project_config(
     default=None,
     help="Write output to this path (default: stdout).",
 )
-@click.option(
-    "--secondary-format",
-    "secondary_fmt",
-    type=click.Choice(["text", "json"]),
-    default=None,
-    help="Emit a second output format from this same scan run, without "
+@secondary_output_options(
+    ["text", "json"],
+    format_help="Emit a second output format from this same scan run, without "
     "re-running it a second time (e.g. a human --format text report "
     "alongside a --secondary-format json artifact for tooling -- the "
     "GitHub Action's own PR-comment renderer uses exactly this to avoid a "
     "second, potentially --depth build/source-expensive scan for the "
     "default --format text invocation). Requires --secondary-output "
     "(writing two formats to the same stream would be ambiguous).",
-)
-@click.option(
-    "--secondary-output",
-    "secondary_output",
-    type=click.Path(dir_okay=False, path_type=Path),
-    default=None,
-    help="File path to write --secondary-format's output to. Must differ "
-    "from --output/-o, or the secondary render would silently overwrite "
-    "the primary report.",
 )
 @verbose_option
 @compile_context_options  # dump↔scan L2 compile-context parity (ADR-037 D3)

@@ -41,6 +41,7 @@ from .cli_params import (
     SIDED_SOURCES_PARAM,
     SIDED_STR_PARAM,
 )
+from .cli_secondary_output import secondary_output_options as _secondary_output_options
 
 if TYPE_CHECKING:
     from .service_scan import CompileContext
@@ -965,6 +966,20 @@ def output_options(
         return func
 
     return deco
+
+
+#: The ``--secondary-format``/``--secondary-output`` decorator factory
+#: (Codex review: previously declared inline, separately, by ``compare``
+#: and ``scan --against``, with drifted help text and duplicated
+#: ``reject_incoherent_*`` validation logic) lives in the dependency-free
+#: ``cli_secondary_output`` leaf module, not here -- ``cli_scan_helpers.py``
+#: needs its validator half and sits on an existing import path back into
+#: this module (``cli_options -> cli_resolve -> service_scan -> scan_engine
+#: -> cli_scan_helpers``), so a ``cli_scan_helpers -> cli_options`` edge
+#: would close a real import cycle. Re-exported here only for the two CLI
+#: modules (``cli.py``/``cli_scan.py``) that apply it as a decorator
+#: alongside every other option group defined in this file.
+secondary_output_options = _secondary_output_options
 
 
 #: ADR-049 D8 pack selection, shared by `compare` and `scan --against`.

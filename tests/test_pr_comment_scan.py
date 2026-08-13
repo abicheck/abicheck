@@ -158,7 +158,13 @@ def test_scan_additions_render_as_public_api_additions():
             "breaking": 0,
             "api_break": 0,
             "risk": 0,
-            "compatible": 3,
+            # "compatible" must match the real total the additions list is
+            # itemizing (schema 1.13's `additions` is always a subset of
+            # `compatible`) -- the exact-total fix reads this scalar
+            # directly, so a mismatched fixture value now surfaces here
+            # rather than being silently masked by the old additions-only
+            # computation.
+            "compatible": 1,
             "additions": [
                 {
                     "bucket": "compatible",
@@ -257,6 +263,28 @@ def test_scan_subject_defaults_to_artifact_when_absent():
 def test_scan_subject_uses_report_provided_value():
     model = build_model(_scan_report(subject="libfoo.so"))
     assert model.subject == "libfoo.so"
+
+
+def test_scan_subject_with_backtick_does_not_break_out_of_code_span():
+    # Codex review: run.sh passes an untrusted scanned-artifact basename
+    # through --subject; a crafted filename containing a backtick could
+    # otherwise terminate the header's code span and inject arbitrary
+    # Markdown (a fake heading, a link, ...) into the sticky comment. The
+    # raw value is stored as-is on the model (escaping is a render-time
+    # concern, not a storage one) -- this asserts the rendered body itself
+    # never lets the injected heading escape the code span.
+    model = build_model(_scan_report(subject="evil`\n## Injected heading\n`lib.so"))
+    body = render_comment(model, sha="abc1234", detail="standard")
+    # The injected text survives as inert plain text (escaping isn't
+    # required to strip it, only to neutralize its Markdown significance),
+    # but it must never land on its own line -- that's what would make it
+    # render as a real Markdown heading rather than harmless code-span text.
+    assert not any(
+        line.strip() == "## Injected heading" for line in body.splitlines()
+    )
+    header_line = next(line for line in body.splitlines() if line.startswith("**Head"))
+    assert "\n" not in header_line
+    assert "## Injected heading" in header_line  # present, but inert inside the span
 
 
 def test_scan_severity_gate_reads_from_diff_not_top_level():
@@ -457,7 +485,10 @@ def test_scan_safe_total_exact_when_additions_truncated():
             "breaking": 0,
             "api_break": 0,
             "risk": 0,
-            "compatible": 0,
+            # Matches additions_total (25) below -- every compatible
+            # finding here is addition-shaped, none quality-shaped (see
+            # this scalar's role in the exact-total fix).
+            "compatible": 25,
             "additions": [
                 {
                     "bucket": "compatible",
@@ -584,6 +615,54 @@ def test_scan_promoted_count_exact_even_when_findings_list_is_capped():
     )
     model = build_model(report)
     assert model.counts == (25, 0, 0)
+
+
+def test_scan_compatible_quality_finding_counted_when_no_additions_present():
+    # Codex review: a compatible-but-non-addition finding (a quality-category
+    # change like `func_noexcept_added`, or a policy-demoted removal) lands
+    # in `diff.compatible` but never in `diff.additions` (which itemizes
+    # only ADDITION_KINDS). Deriving the safe total solely from
+    # `diff.additions`/`additions_total` made a diff whose only findings
+    # were of this shape report zero changes across every bucket -- the
+    # default `pr-comment-on: changes` skipped (or sticky mode deleted) a
+    # comment for a real, non-empty scan result.
+    report = _scan_report(
+        diff={
+            "breaking": 0,
+            "api_break": 0,
+            "risk": 0,
+            "compatible": 3,
+            # No "additions" key at all -- every one of the 3 compatible
+            # findings is quality-shaped, not addition-shaped.
+        },
+    )
+    model = build_model(report)
+    assert model.counts == (0, 0, 3)
+    assert should_post(model, "changes")
+
+
+def test_scan_compatible_quality_total_subtracts_promoted_quality_count():
+    # Combining with the quality_issues promotion: 5 compatible findings
+    # total, 2 of which were promoted to blocking by `quality_issues: error`
+    # -- the safe total must be exactly 3, not 5 (over-counting the
+    # promoted ones as also safe) and not 0 (under-counting the unpromoted
+    # ones, the bug this fix closes).
+    report = _scan_report(
+        verdict="SEVERITY_ERROR",
+        exit_code=1,
+        diff={
+            "breaking": 0,
+            "api_break": 0,
+            "risk": 0,
+            "compatible": 5,
+            "severity": {
+                "config": {"quality_issues": "error"},
+                "categories": {"quality_issues": {"severity": "error", "count": 2}},
+            },
+        },
+    )
+    model = build_model(report)
+    assert model.counts == (2, 0, 3)
 
 
 def test_scan_audit_only_surfaces_api_break_crosscheck_findings():
