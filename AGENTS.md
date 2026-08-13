@@ -2473,7 +2473,12 @@ Once a root command genuinely clears the bar above, pick the right home:
   clang. Not verified against a live castxml run (no castxml binary
   available in this environment to reproduce the XML shape directly) —
   the castxml-side mechanism above is taken from the original report, not
-  independently re-derived from castxml's own output.
+  independently re-derived from castxml's own output. **Update (G31 Phase
+  C, later pass): now independently re-derived, against a real
+  conda-forge castxml 0.7.0 build, and the "opposite directions" framing
+  in this paragraph does not hold — see the "Option (b) closed" note at
+  the end of this entry, below, for the reproduction and its
+  implications.**
 
   **Attempted fix, reverted (three review rounds):** a
   `qualified_name_segments.dedup_versioned_namespace_alias_items()`
@@ -2589,6 +2594,60 @@ Once a root command genuinely clears the bar above, pick the right home:
   dropping information from one side's snapshot in isolation — a
   materially larger, cross-cutting change on its own, not a follow-up
   patch to the same per-snapshot helper.
+
+  **Option (b) closed (G31 Phase C, real conda-forge castxml build):** a
+  real, policy-conformant castxml (0.7.0, `conda-forge`, within the
+  `>=0.6.11,<0.8.0` range `castxml_policy.py` enforces, bundled Clang
+  20.1.8) is now available and was used to reproduce this construct
+  directly through the exact invocation shape `_build_castxml_command`
+  emits (`--castxml-cc-gnu (g++ -x c)`/`--castxml-cc-gnu g++`, matching
+  real header-dump usage) — **the originally-hypothesized castxml
+  duplication mechanism does not reproduce.** For `namespace detail {
+  namespace v1 { constexpr int cpu_feature_map = 42; } using
+  v1::cpu_feature_map; }`, real castxml emits exactly **one** `<Variable>`
+  element (`context="_13"`, i.e. `v1` — never `detail`), and that single
+  element's id is listed in *both* `detail`'s and `v1`'s `<Namespace
+  members="...">` attribute — a shared reference, not two elements. There
+  is no `<Using...>`-shaped XML tag in castxml's schema at all (checked
+  against castxml's own `--help`), and forcing the value to be ODR-used
+  (`&cpu_feature_map` from an inline function) does not change this.
+  Since `dumper_castxml.py`'s `_variable_els`/`_iter_public_constants()`
+  iterate the flat, once-per-XML-element id map (`_build_id_map`), not
+  either namespace's `members` list, they see this construct exactly once
+  too — `_qualified_name()` resolves it to `detail::v1::cpu_feature_map`
+  only; the alias spelling `detail::cpu_feature_map` never enters
+  `AbiSnapshot.constants` on this castxml version, at all. The identical
+  single-element behavior was independently confirmed for the sibling
+  type-dedup case this entry cross-references (`struct range` in `v1`,
+  `using v1::range;` in `detail`): one `<Struct>` element, shared between
+  both namespaces' `members` lists, never a duplicate. **What this means
+  for the entry above:** the "castxml over-reports (duplicate keys),
+  clang under-reports (missing alias)" asymmetry this entry documented
+  was written from an unverified report and does not hold for the
+  currently-supported castxml version range — for this exact construct,
+  both backends now demonstrably fail the *same* way (silent false
+  negative: the alias spelling is absent from the snapshot entirely,
+  matching the clang-side finding already confirmed above). This does not
+  retroactively invalidate the original report (98 alias groups across
+  267 constants, real oneDAL headers) — that scan may have used a
+  different castxml build, or the real duplication may come from a
+  different source construct entirely (e.g. two independent, textually
+  separate definitions sharing a value, rather than a language-level
+  using-declaration/using-directive) that this pass did not have the
+  original headers to reproduce against. It does mean: (1) the three
+  reverted name-shape-heuristic attempts documented above were correctly
+  reverted regardless of this finding (their unsoundness was proven by
+  counterexample, independent of whether castxml duplicates), so nothing
+  here reopens that question; (2) a future fix attempt should design for
+  the *false-negative* alias-identity gap confirmed symmetric on both
+  backends (option (a)'s `UsingShadowDecl.target` clang-side threading is
+  now the best-founded starting point, since it is real, already-present
+  AST identity, not a heuristic), rather than a castxml-side dedup this
+  evidence no longer motivates; (3) closing this for real still needs the
+  original large-scale report's exact source construct identified before
+  trusting any fix against it — not attempted here, since the oneDAL
+  headers that produced the original 98/267 count are not available in
+  this environment either.
 - **`AbiSnapshot.typedefs` is a flat `dict[str, str]` keyed by bare
   (unqualified) name on both header backends — a member/nested typedef
   silently collides with, and can be overwritten by, any other typedef
