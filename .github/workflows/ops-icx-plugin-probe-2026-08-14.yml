@@ -29,23 +29,29 @@ jobs:
           apt-cache policy intel-oneapi-compiler-dpcpp-cpp
           sudo apt-get install -y --no-install-recommends intel-oneapi-compiler-dpcpp-cpp
 
-      - name: Inspect compiler and test current plugin build
+      - name: Inspect, build, and load-test plugins
         shell: bash
         run: |
-          set -uo pipefail
+          # This is an evidence-gathering probe. Individual failures are recorded
+          # and must not stop later compatibility experiments.
+          set +e
+          set -o pipefail
           OUT=icx-plugin-probe-results
           mkdir -p "$OUT"
           exec > >(tee "$OUT/probe.log") 2>&1
-          source /opt/intel/oneapi/compiler/latest/env/vars.sh
+
+          source /opt/intel/oneapi/setvars.sh --force >/dev/null 2>&1
           ICPX="$(command -v icpx)"
           ICX="$(command -v icx)"
+          echo "icpx=$ICPX"
+          echo "icx=$ICX"
 
           icpx --version | tee "$OUT/icpx-version.txt"
           icpx -v 2>&1 | tee "$OUT/icpx-v.txt"
           echo | icpx -dM -E -x c++ - | sort | tee "$OUT/icpx-macros.txt"
           CLANG_MAJOR="$(awk '$2 == "__clang_major__" {print $3}' "$OUT/icpx-macros.txt" | tail -1)"
-          echo "clang_major=$CLANG_MAJOR" | tee "$OUT/detected-version.txt"
-          echo "intel_llvm_compiler=$(awk '$2 == "__INTEL_LLVM_COMPILER" {print $3}' "$OUT/icpx-macros.txt" | tail -1)" | tee -a "$OUT/detected-version.txt"
+          INTEL_LLVM="$(awk '$2 == "__INTEL_LLVM_COMPILER" {print $3}' "$OUT/icpx-macros.txt" | tail -1)"
+          printf 'clang_major=%s\nintel_llvm_compiler=%s\n' "$CLANG_MAJOR" "$INTEL_LLVM" | tee "$OUT/detected-version.txt"
           icpx -print-resource-dir | tee "$OUT/icpx-resource-dir.txt"
           icpx -print-search-dirs | tee "$OUT/icpx-search-dirs.txt"
 
@@ -53,57 +59,61 @@ jobs:
           #include <iostream>
           int main() { std::cout << "icpx-ok\n"; }
           CPP
-          set +e
           icpx -std=c++17 "$OUT/hello.cpp" -o "$OUT/hello" >"$OUT/hello-build.stdout" 2>"$OUT/hello-build.stderr"
           echo $? > "$OUT/hello-build.rc"
           "$OUT/hello" >"$OUT/hello-run.stdout" 2>"$OUT/hello-run.stderr"
           echo $? > "$OUT/hello-run.rc"
-          set -e
 
           dpkg-query -W -f='${binary:Package}\t${Version}\n' 'intel-oneapi-compiler*' 2>&1 | sort | tee "$OUT/intel-packages.txt"
           find /opt/intel/oneapi/compiler -type f \( -name LLVMConfig.cmake -o -name ClangConfig.cmake -o -name FrontendPluginRegistry.h -o -name 'libclang-cpp.so*' -o -name 'libclangBasic*' -o -name 'libLLVM*.so*' \) -print | sort | tee "$OUT/intel-devel-files.txt"
           file -L "$ICPX" | tee "$OUT/icpx-file.txt"
           ldd "$ICPX" 2>&1 | tee "$OUT/icpx-ldd.txt"
-          readelf -Ws "$ICPX" 2>/dev/null | grep -E 'FrontendPluginRegistry|CompilerInstance|ASTConsumer' | head -100 | tee "$OUT/icpx-exported-clang-symbols.txt" || true
+          readelf -Ws "$ICPX" 2>/dev/null | grep -E 'FrontendPluginRegistry|CompilerInstance|ASTConsumer' | head -100 | tee "$OUT/icpx-exported-clang-symbols.txt"
 
           cat > "$OUT/empty.cpp" <<'CPP'
           int value = 1;
           CPP
-          set +e
           icpx -### -fplugin=/tmp/does-not-exist-abicheck.so -c "$OUT/empty.cpp" >"$OUT/icpx-fplugin-dryrun.stdout" 2>"$OUT/icpx-fplugin-dryrun.stderr"
           echo $? > "$OUT/icpx-fplugin-dryrun.rc"
           icpx -fplugin=/tmp/does-not-exist-abicheck.so -c "$OUT/empty.cpp" -o "$OUT/empty.o" >"$OUT/icpx-fplugin.stdout" 2>"$OUT/icpx-fplugin.stderr"
           echo $? > "$OUT/icpx-fplugin.rc"
-          set -e
 
-          set +e
-          cmake -S contrib/abicheck-clang-plugin -B "$OUT/build-intel-distribution" -G Ninja -DCMAKE_C_COMPILER="$ICX" -DCMAKE_CXX_COMPILER="$ICPX" -DCMAKE_PREFIX_PATH=/opt/intel/oneapi/compiler/latest >"$OUT/cmake-intel-distribution.stdout" 2>"$OUT/cmake-intel-distribution.stderr"
+          cmake -S contrib/abicheck-clang-plugin -B "$OUT/build-intel-distribution" -G Ninja \
+            -DCMAKE_C_COMPILER="$ICX" -DCMAKE_CXX_COMPILER="$ICPX" \
+            -DCMAKE_PREFIX_PATH=/opt/intel/oneapi/compiler/latest \
+            >"$OUT/cmake-intel-distribution.stdout" 2>"$OUT/cmake-intel-distribution.stderr"
           echo $? > "$OUT/cmake-intel-distribution.rc"
-          set -e
 
           wget -q https://apt.llvm.org/llvm.sh -O "$OUT/llvm.sh"
           chmod +x "$OUT/llvm.sh"
-          set +e
           sudo "$OUT/llvm.sh" "$CLANG_MAJOR" >"$OUT/llvm-install.stdout" 2>"$OUT/llvm-install.stderr"
           echo $? > "$OUT/llvm-install.rc"
           sudo apt-get install -y --no-install-recommends "clang-$CLANG_MAJOR" "llvm-$CLANG_MAJOR-dev" "libclang-$CLANG_MAJOR-dev" >"$OUT/llvm-dev-install.stdout" 2>"$OUT/llvm-dev-install.stderr"
           echo $? > "$OUT/llvm-dev-install.rc"
-          set -e
 
           LLVM_PREFIX="/usr/lib/llvm-$CLANG_MAJOR"
-          UP_CLANG="$(command -v clang-$CLANG_MAJOR || true)"
-          UP_CLANGXX="$(command -v clang++-$CLANG_MAJOR || true)"
+          UP_CLANG="$(command -v clang-$CLANG_MAJOR)"
+          UP_CLANGXX="$(command -v clang++-$CLANG_MAJOR)"
           [[ -n "$UP_CLANGXX" ]] && "$UP_CLANGXX" --version | tee "$OUT/upstream-clang-version.txt"
-          find "$LLVM_PREFIX" -type f \( -name LLVMConfig.cmake -o -name ClangConfig.cmake -o -name FrontendPluginRegistry.h \) -print | sort | tee "$OUT/upstream-devel-files.txt" || true
+          find "$LLVM_PREFIX" -type f \( -name LLVMConfig.cmake -o -name ClangConfig.cmake -o -name FrontendPluginRegistry.h \) -print | sort | tee "$OUT/upstream-devel-files.txt"
 
           build_plugin() {
-            local label="$1" cc="$2" cxx="$3" dir="$OUT/build-$1"
-            set +e
-            cmake -S contrib/abicheck-clang-plugin -B "$dir" -G Ninja -DCMAKE_C_COMPILER="$cc" -DCMAKE_CXX_COMPILER="$cxx" -DCMAKE_PREFIX_PATH="$LLVM_PREFIX" >"$OUT/cmake-$label.stdout" 2>"$OUT/cmake-$label.stderr"
-            local rc=$?; echo "$rc" > "$OUT/cmake-$label.rc"
-            if [[ $rc -eq 0 ]]; then cmake --build "$dir" >"$OUT/build-$label.stdout" 2>"$OUT/build-$label.stderr"; echo $? > "$OUT/build-$label.rc"; else echo 125 > "$OUT/build-$label.rc"; fi
-            set -e
+            local label="$1" cc="$2" cxx="$3"
+            local dir="$OUT/build-$label"
+            cmake -S contrib/abicheck-clang-plugin -B "$dir" -G Ninja \
+              -DCMAKE_C_COMPILER="$cc" -DCMAKE_CXX_COMPILER="$cxx" \
+              -DCMAKE_PREFIX_PATH="$LLVM_PREFIX" \
+              >"$OUT/cmake-$label.stdout" 2>"$OUT/cmake-$label.stderr"
+            local rc=$?
+            echo "$rc" > "$OUT/cmake-$label.rc"
+            if [[ $rc -eq 0 ]]; then
+              cmake --build "$dir" >"$OUT/build-$label.stdout" 2>"$OUT/build-$label.stderr"
+              echo $? > "$OUT/build-$label.rc"
+            else
+              echo 125 > "$OUT/build-$label.rc"
+            fi
           }
+
           if [[ -n "$UP_CLANG" && -n "$UP_CLANGXX" ]]; then
             build_plugin upstream "$UP_CLANG" "$UP_CLANGXX"
             build_plugin icpx-upstream-headers "$ICX" "$ICPX"
@@ -122,7 +132,10 @@ jobs:
           class Consumer final : public clang::ASTConsumer {};
           class Action final : public clang::PluginASTAction {
           protected:
-            std::unique_ptr<clang::ASTConsumer> CreateASTConsumer(clang::CompilerInstance &, llvm::StringRef) override { llvm::errs() << "ABICHECK_ICX_PLUGIN_PROBE_RAN\n"; return std::make_unique<Consumer>(); }
+            std::unique_ptr<clang::ASTConsumer> CreateASTConsumer(clang::CompilerInstance &, llvm::StringRef) override {
+              llvm::errs() << "ABICHECK_ICX_PLUGIN_PROBE_RAN\n";
+              return std::make_unique<Consumer>();
+            }
             bool ParseArgs(const clang::CompilerInstance &, const std::vector<std::string> &) override { return true; }
             ActionType getActionType() override { return AddBeforeMainAction; }
           };
@@ -143,13 +156,22 @@ jobs:
           endif()
           set_target_properties(abicheck-icx-probe PROPERTIES PREFIX "lib")
           CMAKE
+
           build_minimal() {
-            local label="$1" cc="$2" cxx="$3" dir="$OUT/minimal-build-$1"
-            set +e
-            cmake -S "$OUT/minimal" -B "$dir" -G Ninja -DCMAKE_C_COMPILER="$cc" -DCMAKE_CXX_COMPILER="$cxx" -DCMAKE_PREFIX_PATH="$LLVM_PREFIX" >"$OUT/minimal-cmake-$label.stdout" 2>"$OUT/minimal-cmake-$label.stderr"
-            local rc=$?; echo "$rc" > "$OUT/minimal-cmake-$label.rc"
-            if [[ $rc -eq 0 ]]; then cmake --build "$dir" >"$OUT/minimal-build-$label.stdout" 2>"$OUT/minimal-build-$label.stderr"; echo $? > "$OUT/minimal-build-$label.rc"; else echo 125 > "$OUT/minimal-build-$label.rc"; fi
-            set -e
+            local label="$1" cc="$2" cxx="$3"
+            local dir="$OUT/minimal-build-$label"
+            cmake -S "$OUT/minimal" -B "$dir" -G Ninja \
+              -DCMAKE_C_COMPILER="$cc" -DCMAKE_CXX_COMPILER="$cxx" \
+              -DCMAKE_PREFIX_PATH="$LLVM_PREFIX" \
+              >"$OUT/minimal-cmake-$label.stdout" 2>"$OUT/minimal-cmake-$label.stderr"
+            local rc=$?
+            echo "$rc" > "$OUT/minimal-cmake-$label.rc"
+            if [[ $rc -eq 0 ]]; then
+              cmake --build "$dir" >"$OUT/minimal-build-$label.stdout" 2>"$OUT/minimal-build-$label.stderr"
+              echo $? > "$OUT/minimal-build-$label.rc"
+            else
+              echo 125 > "$OUT/minimal-build-$label.rc"
+            fi
           }
           if [[ -n "$UP_CLANG" && -n "$UP_CLANGXX" ]]; then
             build_minimal upstream "$UP_CLANG" "$UP_CLANGXX"
@@ -168,26 +190,32 @@ jobs:
           CPP
 
           load_abicheck() {
-            local label="$1" compiler="$2" plugin="$3" facts="$OUT/facts-$1"
-            rm -rf "$facts"; mkdir -p "$facts"
-            set +e
-            "$compiler" -std=c++17 -I"$OUT/probe/include" -fplugin="$plugin" -Xclang -plugin-arg-abicheck-facts -Xclang "out=$facts" -Xclang -plugin-arg-abicheck-facts -Xclang "public-roots=$OUT/probe/include" -c "$OUT/probe/tu.cpp" -o "$OUT/$label.o" >"$OUT/load-$label.stdout" 2>"$OUT/load-$label.stderr"
+            local label="$1" compiler="$2" plugin="$3"
+            local facts="$OUT/facts-$label"
+            rm -rf "$facts"
+            mkdir -p "$facts"
+            "$compiler" -std=c++17 -I"$OUT/probe/include" \
+              -fplugin="$plugin" \
+              -Xclang -plugin-arg-abicheck-facts -Xclang "out=$facts" \
+              -Xclang -plugin-arg-abicheck-facts -Xclang "public-roots=$OUT/probe/include" \
+              -c "$OUT/probe/tu.cpp" -o "$OUT/$label.o" \
+              >"$OUT/load-$label.stdout" 2>"$OUT/load-$label.stderr"
             echo $? > "$OUT/load-$label.rc"
-            set -e
-            find "$facts" -maxdepth 3 -type f -printf '%P\t%s bytes\n' | sort > "$OUT/load-$label-files.txt" || true
+            find "$facts" -maxdepth 3 -type f -printf '%P\t%s bytes\n' | sort > "$OUT/load-$label-files.txt"
           }
           load_minimal() {
             local label="$1" compiler="$2" plugin="$3"
-            set +e
-            "$compiler" -std=c++17 -I"$OUT/probe/include" -fplugin="$plugin" -c "$OUT/probe/tu.cpp" -o "$OUT/minimal-$label.o" >"$OUT/minimal-load-$label.stdout" 2>"$OUT/minimal-load-$label.stderr"
+            "$compiler" -std=c++17 -I"$OUT/probe/include" -fplugin="$plugin" \
+              -c "$OUT/probe/tu.cpp" -o "$OUT/minimal-$label.o" \
+              >"$OUT/minimal-load-$label.stdout" 2>"$OUT/minimal-load-$label.stderr"
             echo $? > "$OUT/minimal-load-$label.rc"
-            set -e
           }
 
           UP_PLUGIN="$OUT/build-upstream/libabicheck-facts.so"
           ICX_PLUGIN="$OUT/build-icpx-upstream-headers/libabicheck-facts.so"
           UP_MIN_PLUGIN="$OUT/minimal-build-upstream/libabicheck-icx-probe.so"
           ICX_MIN_PLUGIN="$OUT/minimal-build-icpx-upstream-headers/libabicheck-icx-probe.so"
+
           [[ -n "$UP_CLANGXX" && -f "$UP_PLUGIN" ]] && load_abicheck upstream-control "$UP_CLANGXX" "$UP_PLUGIN"
           [[ -f "$UP_PLUGIN" ]] && load_abicheck icpx-load-upstream-build "$ICPX" "$UP_PLUGIN"
           [[ -n "$UP_CLANGXX" && -f "$ICX_PLUGIN" ]] && load_abicheck upstream-load-icpx-build "$UP_CLANGXX" "$ICX_PLUGIN"
@@ -208,16 +236,28 @@ jobs:
           {
             printf 'test\trc\tdetail\n'
             for f in "$OUT"/*.rc; do
-              name="$(basename "$f" .rc)"; rc="$(cat "$f")"; detail=''; err="$OUT/${name}.stderr"
-              [[ -f "$err" ]] && detail="$(grep -E -m1 'ABICHECK_ICX_PLUGIN_PROBE_RAN|unable to load plugin|undefined symbol|error:|fatal error:' "$err" || true)"
+              name="$(basename "$f" .rc)"
+              rc="$(cat "$f")"
+              detail=''
+              err="$OUT/${name}.stderr"
+              [[ -f "$err" ]] && detail="$(grep -E -m1 'ABICHECK_ICX_PLUGIN_PROBE_RAN|unable to load plugin|undefined symbol|error:|fatal error:' "$err")"
               printf '%s\t%s\t%s\n' "$name" "$rc" "$detail"
             done
           } | tee "$OUT/result-matrix.tsv"
+
           {
             echo '## ICX / abicheck Clang-plugin probe'
-            echo '```text'; cat "$OUT/icpx-version.txt" "$OUT/detected-version.txt"; echo '```'
-            echo '### Result matrix'; echo '```text'; cat "$OUT/result-matrix.tsv"; echo '```'
-            echo '### Intel frontend-development files'; echo '```text'; if [[ -s "$OUT/intel-devel-files.txt" ]]; then cat "$OUT/intel-devel-files.txt"; else echo '(none found)'; fi; echo '```'
+            echo '```text'
+            cat "$OUT/icpx-version.txt" "$OUT/detected-version.txt"
+            echo '```'
+            echo '### Result matrix'
+            echo '```text'
+            cat "$OUT/result-matrix.tsv"
+            echo '```'
+            echo '### Intel frontend-development files'
+            echo '```text'
+            if [[ -s "$OUT/intel-devel-files.txt" ]]; then cat "$OUT/intel-devel-files.txt"; else echo '(none found)'; fi
+            echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
           exit 0
 
