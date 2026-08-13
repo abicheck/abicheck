@@ -468,6 +468,78 @@ def test_scan_gate_api_break_promotes_api_break_to_breaking():
     assert model.counts == (1, 0, 0)
 
 
+def test_scan_gate_api_break_does_not_promote_under_demoted_severity_scheme():
+    # Codex review: the legacy scheme's fixed api_break -> breaking mapping
+    # (the test above) is unconditional -- but under the severity-aware
+    # scheme with `potential_breaking` left at its non-error default,
+    # `action/run.sh`'s ADVISORY_BREAK keeps the run's real exit at 0
+    # regardless of `fail-on-api-break`/gate_api_break. Applying the legacy
+    # mapping here rendered a "Source API break blocks this PR" headline
+    # beside an actually-green Action check.
+    report = _scan_report(
+        verdict="COMPATIBLE_WITH_RISK",
+        exit_code=0,
+        diff={
+            "breaking": 0,
+            "api_break": 1,
+            "risk": 0,
+            "compatible": 0,
+            "severity": {
+                "config": {"potential_breaking": "warning"},
+                "categories": {},
+            },
+            "findings": [
+                {
+                    "bucket": "api_break",
+                    "kind": "func_signature_changed",
+                    "symbol": "_Z3barv",
+                    "description": "signature changed",
+                    "finding_id": "x5",
+                },
+            ],
+        },
+    )
+    model = build_model(report, gate_api_break=True)
+    assert model.counts == (0, 1, 0)
+    assert len(model.breaking) == 0
+    assert len(model.review) == 1
+    body = render_comment(model, sha="abc1234", detail="standard")
+    assert "Source API break blocks this PR" not in body
+
+
+def test_scan_promoted_evidence_kind_not_blocking_under_demoted_severity_scheme():
+    # Same fix, the incomplete-bucket-blocking path: an evidence-quality
+    # api_break-bucket finding must not read as blocking either, under the
+    # identical demoted-severity-scheme + gate_api_break combination.
+    report = _scan_report(
+        verdict="COMPATIBLE_WITH_RISK",
+        exit_code=0,
+        diff={
+            "breaking": 0,
+            "api_break": 1,
+            "risk": 0,
+            "compatible": 0,
+            "severity": {
+                "config": {"potential_breaking": "warning"},
+                "categories": {},
+            },
+            "findings": [
+                {
+                    "bucket": "api_break",
+                    "kind": "evidence_required_missing",
+                    "symbol": "evidence:source_abi",
+                    "description": "required evidence layer missing",
+                    "finding_id": "e1",
+                },
+            ],
+        },
+    )
+    model = build_model(report, gate_api_break=True)
+    assert model.counts == (0, 0, 0)
+    assert len(model.incomplete) == 1
+    assert model.incomplete_blocking is False
+
+
 def test_scan_risk_and_coverage_render_in_scan_note():
     model = build_model(_scan_report())
     body = render_comment(model, sha="abc1234", detail="standard")

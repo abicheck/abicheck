@@ -127,7 +127,17 @@ def _scan_findings_to_buckets(
             )
             continue
         bucket = _SEVERITY_BUCKET.get(sev, "review")
-        if gate_api_break and sev == "api_break":
+        # `fail-on-api-break`'s fixed api_break -> breaking mapping only
+        # holds under the *legacy* exit-code scheme (`levels == {}`) -- under
+        # the severity-aware scheme, `action/run.sh`'s ADVISORY_BREAK keeps
+        # the run's real exit at 0 whenever `potential_breaking` is left at
+        # its non-error default, regardless of `fail-on-api-break`, so
+        # promoting the finding here unconditionally rendered a "Source API
+        # break blocks this PR" headline beside an actually-green check
+        # (Codex review). The category check right below already covers the
+        # severity-aware case correctly (unconditional on the gate flag,
+        # exactly mirroring `compare`'s own `_bucket_changes`).
+        if gate_api_break and not levels and sev == "api_break":
             bucket = "breaking"
         category = _finding_category(sev, kind)
         if levels.get(category) == "error":
@@ -408,14 +418,21 @@ def _scan_evidence_incomplete_blocking(
       override could reclassify one there);
     - an ``"api_break"``/``"risk"``-bucket occurrence blocks under a
       ``potential_breaking: error`` severity promotion (folds both,
-      exactly like :func:`_scan_true_counts`'s own promotion), or,
-      api_break only, under ``--gate-api-break``/``fail-on-api-break``.
+      exactly like :func:`_scan_true_counts`'s own promotion), or, under the
+      *legacy* exit-code scheme only, api_break alone under
+      ``--gate-api-break``/``fail-on-api-break`` (Codex review, follow-up:
+      the severity-aware scheme's ``action/run.sh`` ADVISORY_BREAK keeps the
+      real exit at 0 whenever ``potential_breaking`` is left at its
+      non-error default, regardless of ``fail-on-api-break`` -- an earlier
+      revision applied the legacy fixed api_break->exit-2 mapping
+      unconditionally, which claimed a promoted evidence-quality finding
+      was blocking a run that was, in truth, exiting 0).
     """
     if evidence_counts.get("breaking", 0) > 0 and gate_breaking:
         return True
     if levels.get("potential_breaking") == "error":
         return (evidence_counts.get("api_break", 0) + evidence_counts.get("risk", 0)) > 0
-    if gate_api_break:
+    if gate_api_break and not levels:
         return evidence_counts.get("api_break", 0) > 0
     return False
 
@@ -447,15 +464,28 @@ def _scan_true_counts(
     which bucket a promotion would otherwise have moved its raw count into.
 
     Only the two promotions expressible purely from the scalar totals are
-    applied: ``--gate-api-break`` (api_break -> breaking) and a
-    ``potential_breaking: error`` severity config (api_break + risk ->
-    breaking, since that category IS exactly those two raw severities). An
-    ``addition``/``quality_issues`` promotion (a *compatible*-bucket finding
-    promoted to blocking) is deliberately not folded in here -- the raw
-    ``compatible`` scalar mixes additions and quality findings with no way
-    to tell them apart -- see :func:`_scan_promoted_compatible_counts`
-    instead, which reads the exact per-category counts the ``severity``
-    block itself already carries.
+    applied: ``--gate-api-break`` (api_break -> breaking, *legacy exit-code
+    scheme only* -- see below) and a ``potential_breaking: error`` severity
+    config (api_break + risk -> breaking, since that category IS exactly
+    those two raw severities). An ``addition``/``quality_issues`` promotion
+    (a *compatible*-bucket finding promoted to blocking) is deliberately not
+    folded in here -- the raw ``compatible`` scalar mixes additions and
+    quality findings with no way to tell them apart -- see
+    :func:`_scan_promoted_compatible_counts` instead, which reads the exact
+    per-category counts the ``severity`` block itself already carries.
+
+    ``gate_api_break``'s fixed api_break -> breaking mapping only applies
+    when ``levels`` is empty (the legacy exit-code scheme, where that
+    mapping really is unconditional) (Codex review): under the
+    severity-aware scheme, ``action/run.sh``'s ADVISORY_BREAK keeps the
+    run's real exit at 0 whenever ``potential_breaking`` is left at its
+    non-error default, regardless of ``fail-on-api-break`` -- applying the
+    legacy mapping there folded an advisory-only api_break finding into the
+    exact Breaking total, rendering a "Source API break blocks this PR"
+    headline next to an actually-green Action check. The severity-aware case
+    is handled entirely by the ``potential_breaking: error`` branch above,
+    unconditional on ``gate_api_break`` -- exactly mirroring ``compare``'s
+    own ``_bucket_changes``.
     """
     if not isinstance(diff, dict):
         return None
@@ -468,7 +498,7 @@ def _scan_true_counts(
         breaking += raw_api_break + raw_risk
         raw_api_break = 0
         raw_risk = 0
-    elif gate_api_break:
+    elif gate_api_break and not levels:
         breaking += raw_api_break
         raw_api_break = 0
     review = raw_api_break + raw_risk

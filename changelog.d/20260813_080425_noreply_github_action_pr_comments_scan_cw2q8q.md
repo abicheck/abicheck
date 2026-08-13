@@ -109,3 +109,14 @@ it should read in CHANGELOG.md. Delete the other sections.
   read only `len(model.incomplete)` — under-reporting (e.g. "20 analysis
   incomplete" for 25 real occurrences) right next to a truncation note
   claiming the counts above were exact.
+- **`fail-on-api-break` no longer promotes an api_break finding to Breaking
+  under a severity-aware `scan --against` run that left `potential_breaking`
+  at its non-error default** (`warning`/`info`): the sticky comment
+  previously rendered "Source API break blocks this PR" — including for a
+  promoted evidence-quality finding — next to an actually-green Action
+  check, because `action/run.sh`'s own ADVISORY_BREAK logic keeps the real
+  exit at 0 in exactly this scheme/config combination regardless of
+  `fail-on-api-break`. The fixed api_break → breaking mapping now applies
+  only under the legacy exit-code scheme, where it really is unconditional;
+  the severity-aware case already renders correctly from the resolved
+  `potential_breaking` category level alone.
