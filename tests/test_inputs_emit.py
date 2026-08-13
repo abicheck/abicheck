@@ -1670,3 +1670,180 @@ def test_emit_none_when_no_backend(tmp_path: Path, monkeypatch) -> None:
         ["c++", "-c", "src/foo.cpp"], tmp_path, inputs_dir=tmp_path / "pk"
     )
     assert out is None
+
+
+def test_emit_warns_when_no_backend_resolves(tmp_path: Path, monkeypatch, capsys) -> None:
+    # The old silent-empty behavior (no diagnostic at all) is the bug being
+    # regression-tested here, not just the return value.
+    monkeypatch.setattr(
+        "abicheck.buildsource.source_extractors.resolver.select_source_backend",
+        lambda extractor, **kw: (None, None),
+    )
+    out = emit_facts_for_command(
+        ["icpx", "-c", "src/foo.cpp"], tmp_path, inputs_dir=tmp_path / "pk"
+    )
+    assert out is None
+    assert "no usable source-ABI extractor" in capsys.readouterr().err
+
+
+def test_emit_defaults_clang_bin_to_clang_family_wrapped_compiler(
+    tmp_path: Path, monkeypatch
+) -> None:
+    # An icpx/dpcpp-only image never has a bare "clang" on PATH — the wrapper
+    # must resolve the clang backend against the compiler it is actually
+    # wrapping, not a hardcoded "clang" that silently reads as unavailable.
+    captured: dict = {}
+
+    def _fake_select(extractor, **kw):
+        captured.update(kw)
+        return None, None
+
+    monkeypatch.setattr(
+        "abicheck.buildsource.source_extractors.resolver.select_source_backend",
+        _fake_select,
+    )
+    emit_facts_for_command(
+        ["icpx", "-c", "src/foo.cpp"], tmp_path, inputs_dir=tmp_path / "pk"
+    )
+    assert captured["clang_bin"] == "icpx"
+
+
+def test_emit_strips_launcher_before_resolving_clang_bin(
+    tmp_path: Path, monkeypatch
+) -> None:
+    captured: dict = {}
+
+    def _fake_select(extractor, **kw):
+        captured.update(kw)
+        return None, None
+
+    monkeypatch.setattr(
+        "abicheck.buildsource.source_extractors.resolver.select_source_backend",
+        _fake_select,
+    )
+    emit_facts_for_command(
+        ["ccache", "clang++", "-c", "src/foo.cpp"], tmp_path, inputs_dir=tmp_path / "pk"
+    )
+    assert captured["clang_bin"] == "clang++"
+
+
+def test_emit_skips_ccache_config_overrides_before_resolving_clang_bin(
+    tmp_path: Path, monkeypatch
+) -> None:
+    # ccache's own documented invocation form, `ccache KEY=VALUE ... compiler
+    # [compiler options]` (ccache manual, "Configuration" section), prefixes
+    # the real compiler with bare KEY=VALUE config-override tokens — those
+    # must be skipped too, not just the launcher name itself.
+    captured: dict = {}
+
+    def _fake_select(extractor, **kw):
+        captured.update(kw)
+        return None, None
+
+    monkeypatch.setattr(
+        "abicheck.buildsource.source_extractors.resolver.select_source_backend",
+        _fake_select,
+    )
+    emit_facts_for_command(
+        ["ccache", "compiler_check=content", "icpx", "-c", "src/foo.cpp"],
+        tmp_path,
+        inputs_dir=tmp_path / "pk",
+    )
+    assert captured["clang_bin"] == "icpx"
+
+
+def test_emit_keeps_default_clang_bin_for_non_clang_family_compiler(
+    tmp_path: Path, monkeypatch
+) -> None:
+    # A GCC/MSVC wrapped compiler is not itself a clang-compatible driver —
+    # the plain "clang" default (resolved separately on PATH) is unchanged.
+    captured: dict = {}
+
+    def _fake_select(extractor, **kw):
+        captured.update(kw)
+        return None, None
+
+    monkeypatch.setattr(
+        "abicheck.buildsource.source_extractors.resolver.select_source_backend",
+        _fake_select,
+    )
+    emit_facts_for_command(
+        ["g++", "-c", "src/foo.cpp"], tmp_path, inputs_dir=tmp_path / "pk"
+    )
+    assert captured["clang_bin"] == "clang"
+
+
+# -- Generalized clang_bin resolution matrix ----------------------------------
+#
+# The bug this whole section guards against has one shape, seen twice already
+# (a hardcoded "clang" default silently ignoring the real wrapped compiler;
+# then a launcher-config-override token silently ignoring it a second way):
+# *some* wrapped-compiler spelling reaches the fallback path instead of its
+# own real driver, with no diagnostic. A handful of hand-picked examples only
+# proves the cases someone thought to write down. This matrix is the
+# generalization — every clang-family alias, crossed with every launcher
+# wrapping shape (bare / ccache / ccache+overrides / chained launchers),
+# checked against the exact same resolver `dump --sources`'s own `--gcc-path`
+# handling uses (`dumper_clang.resolve_source_frontend_clang_bin`), so this
+# stays a same-answer check rather than a second, independently-guessable one.
+
+
+def _resolved_clang_bin(command: list[str], tmp_path: Path, monkeypatch) -> str | None:
+    captured: dict = {}
+
+    def _fake_select(extractor, **kw):
+        captured.update(kw)
+        return None, None
+
+    monkeypatch.setattr(
+        "abicheck.buildsource.source_extractors.resolver.select_source_backend",
+        _fake_select,
+    )
+    emit_facts_for_command(command, tmp_path, inputs_dir=tmp_path / "pk")
+    return captured.get("clang_bin")
+
+
+#: Every alias `_is_clang_family_binary` recognizes (dumper_clang.py), plus a
+#: versioned/CL-style spelling of each shape it must also cover.
+_CLANG_FAMILY_COMPILERS = [
+    "clang",
+    "clang++",
+    "clang-18",
+    "clang-cl",
+    "clang-cl-20",
+    "icx",
+    "icpx",
+    "dpcpp",
+    "dpcpp-cl",
+]
+#: Real, non-clang-family compilers — must always resolve to the "clang"
+#: fallback (a bare "clang" on PATH is a separate, independently-resolved
+#: concern; this wrapper must never guess a GCC/MSVC binary is clang-safe).
+_NON_CLANG_FAMILY_COMPILERS = ["gcc", "g++", "cc", "c++", "cl", "cl.exe", "icc"]
+#: Launcher-wrapping shapes to cross every compiler spelling against.
+_LAUNCHER_PREFIXES: list[list[str]] = [
+    [],
+    ["ccache"],
+    ["ccache", "compiler_check=content"],
+    ["ccache", "debug=true", "run_second_cpp=false"],
+    ["sccache"],
+    ["ccache", "distcc"],
+]
+
+
+@pytest.mark.parametrize("compiler", _CLANG_FAMILY_COMPILERS)
+@pytest.mark.parametrize("launcher_prefix", _LAUNCHER_PREFIXES, ids=lambda p: "+".join(p) or "bare")
+def test_clang_family_compiler_always_resolves_regardless_of_launcher(
+    compiler: str, launcher_prefix: list[str], tmp_path: Path, monkeypatch
+) -> None:
+    command = [*launcher_prefix, compiler, "-c", "src/foo.cpp"]
+    assert _resolved_clang_bin(command, tmp_path, monkeypatch) == compiler
+
+
+@pytest.mark.parametrize("compiler", _NON_CLANG_FAMILY_COMPILERS)
+@pytest.mark.parametrize("launcher_prefix", _LAUNCHER_PREFIXES, ids=lambda p: "+".join(p) or "bare")
+def test_non_clang_family_compiler_falls_back_to_plain_clang(
+    compiler: str, launcher_prefix: list[str], tmp_path: Path, monkeypatch
+) -> None:
+    command = [*launcher_prefix, compiler, "-c", "src/foo.cpp"]
+    assert _resolved_clang_bin(command, tmp_path, monkeypatch) == "clang"

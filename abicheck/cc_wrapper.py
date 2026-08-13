@@ -153,10 +153,44 @@ def emit_facts_for_command(
     units = compile_units_from_command(command, directory)
     if not units:
         return None
+    from .buildsource.source_extractors._argv import strip_launchers
     from .buildsource.source_extractors.resolver import select_source_backend
+    from .dumper_clang import resolve_source_frontend_clang_bin
 
-    _choice, impl = select_source_backend(extractor)
+    # The wrapper's whole job is to replay the TU under the *exact* compiler
+    # the real build invoked (argv[0], after unwrapping a ccache/distcc-style
+    # launcher, incl. ccache's own leading KEY=VALUE config overrides) —
+    # defaulting to plain "clang" here would silently ignore that compiler on
+    # a clang-family-only image (e.g. icpx/dpcpp with no bare "clang" on
+    # PATH) and make the clang backend read as unavailable with no
+    # diagnostic, even though it could have run against the wrapped compiler.
+    # Reuses the same resolver `dump --sources`/`--build-info` already use
+    # for their own `--gcc-path`-driven L4 replay (dumper_clang.py's own
+    # docstring: "a dump/scan driven by a non-default toolchain... always
+    # shelled out to a plain clang/clang++ ... instead, failing every
+    # invocation") — one tested implementation for "derive the real
+    # clang-compatible driver from context instead of hardcoding a default",
+    # not a second, drive-by copy of the same logic. `exclude_cl_style=False`
+    # matches every other L4-replay caller: unlike the S2 preprocessor
+    # pre-scan (fixed GNU-mode flags), `ClangSourceExtractor` itself already
+    # detects a CL compile unit and re-drives the same binary with
+    # ``--driver-mode=cl``, so excluding a `clang-cl`/`dpcpp-cl` wrapped
+    # compiler here would silently fall back to a plain, non-CL clang that
+    # cannot parse the real build context.
+    argv = strip_launchers(list(command))
+    wrapped_bin = argv[0] if argv and argv[0] and not argv[0].startswith("-") else None
+    clang_bin = resolve_source_frontend_clang_bin(
+        wrapped_bin, None, exclude_cl_style=False
+    )
+
+    choice, impl = select_source_backend(extractor, clang_bin=clang_bin)
     if impl is None:
+        reason = getattr(choice, "reason", "") or "no backend selected"
+        click.echo(
+            f"abicheck-cc: no usable source-ABI extractor available "
+            f"({reason}); skipping fact extraction for {command[0]!r}",
+            err=True,
+        )
         return None
     target_id = f"target://{library}" if library else ""
     init_inputs_pack(inputs_dir, library=library, version=version, created_by="abicheck-cc")

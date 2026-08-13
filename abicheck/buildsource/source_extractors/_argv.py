@@ -64,6 +64,14 @@ _VERSION_SUFFIX_RE = re.compile(r"-\d+(?:\.\d+)*$")
 COMPILER_LAUNCHERS = frozenset(
     {"ccache", "sccache", "distcc", "icecc", "icerun", "buildcache"}
 )
+#: ccache's own documented per-invocation config-override form —
+#: ``ccache KEY=VALUE ... compiler [compiler options]`` (ccache manual,
+#: "Configuration" section, e.g. ``ccache compiler_check="%compiler%
+#: --version" gcc -c foo.c``) — lets a caller override a config setting
+#: without touching ``ccache.conf``/env vars. A bare ``KEY=VALUE`` token here
+#: is never a flag (it never starts with ``-``), so it is unambiguous against
+#: real compiler argv.
+_LAUNCHER_CONFIG_OVERRIDE_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*=")
 #: Preprocessor macro define/undef option prefixes. Their *values* reach the
 #: compiler verbatim (argv, no shell expansion), so a literal ``~`` in e.g.
 #: ``-DDEFAULT_DIR=~/app`` must NOT be home-expanded during replay — unlike the
@@ -175,12 +183,20 @@ def basename(path: str) -> str:
 
 
 def strip_launchers(argv: list[str]) -> list[str]:
-    """Drop leading compiler-launcher tokens (``ccache``/``sccache``/…)."""
+    """Drop leading compiler-launcher tokens (``ccache``/``sccache``/…).
+
+    Also skips any ``KEY=VALUE`` per-invocation config-override tokens ccache
+    accepts immediately after its own name (``ccache compiler_check=content
+    gcc -c foo.c``) — otherwise the override token, not the real compiler, is
+    left as the new ``argv[0]``.
+    """
     i = 0
     while i < len(argv) and basename(argv[i]).lower().removesuffix(
         ".exe"
     ) in COMPILER_LAUNCHERS:
         i += 1
+        while i < len(argv) and _LAUNCHER_CONFIG_OVERRIDE_RE.match(argv[i]):
+            i += 1
     return argv[i:]
 
 
