@@ -134,8 +134,12 @@
   while the real gate (`compute_gate_decision`) correctly excludes
   `NOT_EVALUATED` findings — reading the display count fabricated a
   nonzero Breaking total and a "blocked by policy" headline for a run
-  whose real exit was clean. Corrected by subtracting the itemized-list-
-  derived `NOT_EVALUATED` count back out.
+  whose real exit was clean. Corrected (after a first attempt that read
+  from a list where the target rows can never actually appear) by deriving
+  the promoted count from `diff["additions"]`/`diff["quality"]` instead —
+  those are already gate-eligible-only by construction, since they itemize
+  `diff.compatible`, which itself excludes every `NOT_EVALUATED` finding
+  before the addition/quality split ever runs.
 - **The scan header's exact breaking/review totals no longer go negative**
   under a narrow, inconsistent-report edge case: the truncated portion of
   an evidence-quality finding count is attributed to that kind's

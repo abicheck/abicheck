@@ -696,6 +696,18 @@ def test_scan_breaking_categories_survive_cap_when_addition_reserves_the_slot():
                     "finding_id": "a1",
                 },
             ],
+            # diff["additions"] is a separate, always-on itemization
+            # (independent cap from "findings" above) -- a real report
+            # carries the same addition here too.
+            "additions": [
+                {
+                    "bucket": "compatible",
+                    "kind": "func_added",
+                    "symbol": "new_api_fn",
+                    "description": "new public function",
+                    "finding_id": "a1",
+                },
+            ],
         },
     )
     model = build_model(report)
@@ -809,6 +821,15 @@ def test_scan_severity_gate_reads_from_diff_not_top_level():
                 "categories": {"addition": {"severity": "error", "count": 1}},
             },
             "findings": [
+                {
+                    "bucket": "compatible",
+                    "kind": "func_added",
+                    "symbol": "_Z3newv",
+                    "description": "added",
+                    "finding_id": "x6",
+                },
+            ],
+            "additions": [
                 {
                     "bucket": "compatible",
                     "kind": "func_added",
@@ -1165,6 +1186,25 @@ def test_scan_compatible_quality_total_subtracts_promoted_quality_count():
                 "config": {"quality_issues": "error"},
                 "categories": {"quality_issues": {"severity": "error", "count": 2}},
             },
+            # 3 addition-category (safe, unaffected by quality_issues:error)
+            # + 2 quality-category (promoted to Breaking as a whole, since
+            # quality_issues:error blocks the entire category) = 5.
+            "additions": [
+                {
+                    "bucket": "compatible", "kind": "func_added",
+                    "symbol": f"_Z3new{i}v", "description": "added",
+                    "finding_id": f"add{i}",
+                }
+                for i in range(3)
+            ],
+            "quality": [
+                {
+                    "bucket": "compatible", "kind": "func_noexcept_added",
+                    "symbol": f"_Z3qual{i}v", "description": "noexcept added",
+                    "finding_id": f"qual{i}",
+                }
+                for i in range(2)
+            ],
         },
     )
     model = build_model(report)
@@ -1556,15 +1596,27 @@ def test_scan_against_baseline_gate_api_break_moves_promoted_crosscheck_to_break
 
 
 def test_scan_not_evaluated_addition_not_counted_as_promoted():
-    # Codex review: severity.categorize_changes's per-category `count` is a
-    # *display* count -- it classifies purely by kind and does not exclude
-    # a --contract-evaluation finding ADR-049 D1 left NOT_EVALUATED (proven
+    # Codex review, two rounds. Round 1: severity.categorize_changes's
+    # per-category `count` is a *display* count -- it classifies purely by
+    # kind over diff.changes (unfiltered) and does not exclude a
+    # --contract-evaluation finding ADR-049 D1 left NOT_EVALUATED (proven
     # outside the declared contract). compute_gate_decision (the real exit
     # code) correctly excludes it via gate_eligible_changes, so an
     # `addition: error`-configured category whose only finding is
     # NOT_EVALUATED never actually gates -- but reading the raw display
     # count fabricated a nonzero Breaking total and a "blocked by policy"
     # headline for a run whose real exit was clean.
+    #
+    # Round 2 (this fixture): a NOT_EVALUATED finding can never actually
+    # reach diff["additions"]/diff["quality"] in a real report --
+    # checker_types.DiffResult.compatible (what
+    # cli_scan_baseline._addition_finding_dicts/_quality_finding_dicts draw
+    # from) already excludes every NOT_EVALUATED finding *before* the
+    # addition/quality split runs. So the real-world shape of "the only
+    # addition finding was out of contract" is an *empty* diff["additions"]
+    # (nothing gate-eligible to itemize), not an itemized-but-marked entry
+    # -- the fixture below reflects that, rather than a shape the real
+    # pipeline cannot produce.
     report = _scan_report(
         verdict="COMPATIBLE",
         exit_code=0,
@@ -1572,26 +1624,22 @@ def test_scan_not_evaluated_addition_not_counted_as_promoted():
             "breaking": 0,
             "api_break": 0,
             "risk": 0,
-            "compatible": 1,
+            # The one real compatible finding was NOT_EVALUATED, so it
+            # never reaches diff.compatible (and therefore never reaches
+            # "compatible" here) at all -- gate_eligible_changes and
+            # DiffResult.compatible agree on that exclusion.
+            "compatible": 0,
             "severity": {
                 "config": {"addition": "error"},
+                # The display count still sees the raw, unfiltered change
+                # (this is the field the fix no longer reads).
                 "categories": {"addition": {"count": 1}},
             },
-            "additions": [
-                {
-                    "bucket": "compatible",
-                    "kind": "func_added",
-                    "symbol": "new_api_fn",
-                    "description": "new public function, out of contract",
-                    "finding_id": "a1",
-                    "compatibility_evaluation_status": "NOT_EVALUATED",
-                    "compatibility_decision": None,
-                },
-            ],
+            # No "additions" key at all -- nothing gate-eligible to itemize.
         },
     )
     model = build_model(report)
-    assert model.counts == (0, 0, 1)
+    assert model.counts == (0, 0, 0)
     body = render_comment(model, sha="abc1234", detail="standard")
     assert "Public API expansion requires approval" not in body
     assert "Gate: BLOCKED" not in body

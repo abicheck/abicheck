@@ -539,29 +539,35 @@ def _scan_true_counts(
     return breaking, review
 
 
-def _scan_not_evaluated_count(raw: object) -> int:
-    """Count of itemized findings in *raw* (``additions_raw``/``quality_raw``)
-    whose ``--contract-evaluation`` status is ``NOT_EVALUATED``
-    (``cli_scan_baseline._add_contract_fields``: absent entirely when
-    contract evaluation didn't run, so this is always ``0`` for an ordinary
-    scan).
+def _scan_gate_eligible_compatible_count(
+    raw: object, diff: dict[str, object] | None, total_key: str, truncated_key: str
+) -> int:
+    """Exact count of gate-eligible compatible findings behind one of
+    ``diff["additions"]``/``diff["quality"]`` (*raw*, *total_key*/
+    *truncated_key* name which pair).
 
-    Itemized-only, like every other cap-limited count in this module: a
-    ``NOT_EVALUATED`` occurrence cut by the report cap before it could be
-    itemized isn't counted here either way, which is the safe direction for
-    the one caller that matters -- :func:`_scan_promoted_compatible_counts`
-    subtracts this from a display count that *always* includes every
-    NOT_EVALUATED occurrence regardless of truncation, so under-subtracting
-    can only ever under-correct back toward the old (already-shipped)
-    behavior, never invent a new overcount.
+    "Gate-eligible" here means what ``diff["compatible"]`` itself already
+    means: ``checker_types.DiffResult.compatible`` is built from
+    ``self._evaluated_changes()``, which excludes every ``--contract-
+    evaluation`` ``NOT_EVALUATED`` finding *before* the addition/quality
+    split ever runs (``cli_scan_baseline._addition_finding_dicts``/
+    ``_quality_finding_dicts`` both draw from ``diff.compatible``, never
+    ``diff.changes``) -- so every entry *raw* itemizes, and every occurrence
+    ``total_key`` counts, is already gate-eligible by construction, with no
+    further NOT_EVALUATED filtering needed here (Codex review, follow-up: an
+    earlier revision tried to subtract a NOT_EVALUATED count from these same
+    itemized dicts, which can never fire -- a NOT_EVALUATED finding can
+    never reach `additions_raw`/`quality_raw` in the first place, so that
+    subtraction was always zero in practice).
+
+    ``diff[total_key]`` (e.g. ``"additions_total"``) is only ever serialized
+    when the itemized list was truncated below the report cap
+    (``cli_scan_baseline._baseline_summary``) -- when it wasn't, the
+    itemized list's own length already *is* the exact total.
     """
-    if not isinstance(raw, list):
-        return 0
-    return sum(
-        1
-        for c in raw
-        if isinstance(c, dict) and c.get("compatibility_evaluation_status") == "NOT_EVALUATED"
-    )
+    if isinstance(diff, dict) and diff.get(truncated_key):
+        return _as_int(diff.get(total_key))
+    return len(raw) if isinstance(raw, list) else 0
 
 
 def _scan_promoted_compatible_counts(
@@ -571,58 +577,50 @@ def _scan_promoted_compatible_counts(
     quality_raw: object = None,
 ) -> tuple[int, int]:
     """Exact ``(promoted_addition_count, promoted_quality_count)`` for a
-    severity-config-promoted ``compatible`` category, read from
-    ``diff["severity"]["categories"]`` -- unlike counting the classified
-    ``breaking`` list built from ``diff["findings"]``, this is immune to
-    that list's own cap.
+    severity-config-promoted ``compatible`` category -- immune both to
+    ``diff["findings"]``'s report cap (like the classified ``breaking`` list
+    built from it) and to ``--contract-evaluation``'s ``NOT_EVALUATED``
+    findings (Codex review, two rounds):
 
-    Codex review, follow-up to :func:`_scan_true_counts`: an earlier
-    revision counted ``sum(1 for f in breaking if f.severity ==
-    "compatible")`` on the theory that ``cli_scan_baseline._add_severity_
-    blocking_compatible_findings``'s reserved-floor design guarantees every
-    promoted entry survives the cap -- checking that function again shows
-    the floor guarantees only a *minimum* representation (``max(1, cap //
-    4)``), not completeness, so a diff with more promoted entries than fit
-    in the shared findings budget undercounted both the Breaking total and
-    (by extension) the "safe" total it was subtracted from.
-    ``reporter._build_severity_json``'s ``categories.<name>.count`` is
-    computed from the full, unfiltered change set
-    (``severity.categorize_changes``), so it is exact regardless of any
-    report-level truncation.
+    Round 1 read ``diff["severity"]["categories"]["addition"]["count"]``
+    (``reporter._build_severity_json``'s ``categorize_changes(diff.changes,
+    ...)`` -- classifies purely by kind over the *unfiltered* change set,
+    the same reasoning ``_scan_true_counts``'s own docstring already
+    documents for the Breaking-total case: a diff with more promoted
+    entries than fit in the shared findings budget undercounted this if
+    read from the classified list instead). That count is exact against
+    truncation, but not against contract evaluation: ADR-049 D1 leaves a
+    finding proven outside the declared contract (or unresolved for want of
+    evidence) ``NOT_EVALUATED``, which ``compute_gate_decision`` (the real
+    exit code) correctly excludes via ``gate_eligible_changes`` but
+    ``categorize_changes`` does not -- so a category whose only findings
+    were all ``NOT_EVALUATED`` still read ``count > 0`` here, folding a
+    nonzero Breaking total (and a "blocked by policy" headline) into a run
+    whose real exit was clean.
 
-    Codex review, follow-up: that ``count`` is a *display* count --
-    ``categorize_changes`` classifies purely by kind and does not filter out
-    a ``--contract-evaluation`` finding ADR-049 D1 left ``NOT_EVALUATED``
-    (proven outside the declared contract / unresolved for want of
-    evidence). ``compute_gate_decision`` (what the real exit code and
-    ``blocking_categories`` come from) correctly excludes those via
-    ``gate_eligible_changes`` -- so a category whose only findings are all
-    ``NOT_EVALUATED`` reads as ``count > 0`` here even though it never
-    actually gated anything, and folding that raw display count into
-    ``from_scan``'s exact Breaking total invented a nonzero total (and a
-    "blocked by policy" headline) for a run whose real exit was clean.
-    :func:`_scan_not_evaluated_count` subtracts the itemized-list-derived
-    NOT_EVALUATED count back out.
+    Round 2's attempted fix (subtracting a NOT_EVALUATED count read back off
+    ``additions_raw``/``quality_raw``) could never actually fire: those
+    lists are built from ``diff.compatible``, which already excludes every
+    NOT_EVALUATED finding *before* the addition/quality split runs -- so a
+    NOT_EVALUATED finding can never appear there to subtract. The correct
+    fix reads :func:`_scan_gate_eligible_compatible_count` instead --
+    ``additions_total``/``quality_total`` (or, unmarked, the itemized
+    list's own length) is *already* gate-eligible-only by construction,
+    with nothing left to filter.
     """
     if not isinstance(diff, dict):
         return 0, 0
-    severity = diff.get("severity")
-    categories = severity.get("categories") if isinstance(severity, dict) else None
-    if not isinstance(categories, dict):
-        return 0, 0
-
-    def _category_count(name: str) -> int:
-        entry = categories.get(name)
-        count = entry.get("count") if isinstance(entry, dict) else None
-        return count if isinstance(count, int) else 0
-
     promoted_addition = (
-        max(0, _category_count("addition") - _scan_not_evaluated_count(additions_raw))
+        _scan_gate_eligible_compatible_count(
+            additions_raw, diff, "additions_total", "additions_truncated"
+        )
         if levels.get("addition") == "error"
         else 0
     )
     promoted_quality = (
-        max(0, _category_count("quality_issues") - _scan_not_evaluated_count(quality_raw))
+        _scan_gate_eligible_compatible_count(
+            quality_raw, diff, "quality_total", "quality_truncated"
+        )
         if levels.get("quality_issues") == "error"
         else 0
     )
