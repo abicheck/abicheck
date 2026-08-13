@@ -50,4 +50,7 @@ it should read in CHANGELOG.md. Delete the other sections.
   compatibility policy name, so the comment footer reports the policy that
   actually classified the run instead of always the `strict_abi` fallback.
   The Action itself no longer re-runs a budget-limited scan a second time
-  just to still hit the same `BUDGET_OVERFLOW` for the comment.
+  just to still hit the same `BUDGET_OVERFLOW` for the comment. The
+  Action's own `verdict`/`exit-code` output docs (and generated
+  `docs/reference/github-action-inputs.md`) now document `NOT_COMPARABLE`
+  and exit code 6 alongside the other `scan` outcomes.
