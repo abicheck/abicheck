@@ -30,6 +30,7 @@ from abicheck.buildsource.build_evidence import BuildEvidence
 from abicheck.buildsource.build_query import (
     ABICHECK_BUILD_DIR,
     detect_build_system,
+    inferred_bazel_cquery_command,
     inferred_query_command,
     run_inferred_build_query,
 )
@@ -1078,6 +1079,108 @@ def test_run_bazel_empty_action_graph_is_partial(tmp_path: Path, monkeypatch):
     )
     assert ext[-1].name == "build_query_auto"
     assert ext[-1].status == "partial"  # no CppCompile actions
+
+
+def test_bazel_cquery_command_is_fixed_and_scoped(tmp_path: Path):
+    cmd = inferred_bazel_cquery_command()
+    assert cmd[:2] == ["bazel", "cquery"]
+    assert "--output=jsonproto" in cmd
+    assert cmd[-1] == "deps(//...)"
+    # No --include_param_files here: cquery's jsonproto carries target fields
+    # inline, unlike aquery's action argv which spills to @params files.
+    assert "--include_param_files" not in cmd
+
+
+def test_run_bazel_populates_targets_from_cquery_supplement(
+    tmp_path: Path, monkeypatch
+):
+    # Regression: zero-config `--sources` on a Bazel workspace previously only
+    # ever ran `bazel aquery`, which never populates BuildEvidence.targets —
+    # only BazelAdapter's cquery-processing method appends to `ev.targets`.
+    (tmp_path / "MODULE.bazel").write_text("module(name='x')\n")
+    aquery_json = json.dumps(
+        {
+            "actions": [
+                {
+                    "mnemonic": "CppCompile",
+                    "arguments": ["/usr/bin/g++", "-c", "impl.cc", "-o", "impl.o"],
+                    "primaryOutputId": "1",
+                }
+            ],
+            "artifacts": [{"id": "1", "execPath": "impl.o"}],
+        }
+    )
+    cquery_json = json.dumps(
+        {
+            "results": [
+                {
+                    "target": {
+                        "rule": {
+                            "name": "//:math",
+                            "ruleClass": "cc_library",
+                            "attribute": [
+                                {"name": "srcs", "stringListValue": ["impl.cc"]},
+                            ],
+                        }
+                    },
+                    "configurationId": "cfg1",
+                }
+            ]
+        }
+    )
+
+    def fake_run(cmd, **kw):
+        if cmd[1] == "cquery":
+            return _FakeProc(0, stdout=cquery_json)
+        return _FakeProc(0, stdout=aquery_json)
+
+    monkeypatch.setattr(_bq.deadline, "run_bounded", fake_run)
+    merged, ext = BuildEvidence(), []
+    out = run_inferred_build_query(
+        tmp_path, merged, ext, which=lambda tool: f"/usr/bin/{tool}"
+    )
+    assert out is None
+    assert len(merged.targets) == 1
+    assert merged.targets[0].id == "target:////:math"
+    assert ext[-1].status in ("ok", "partial")
+    assert "target(s)" in ext[-1].detail
+
+
+def test_run_bazel_cquery_supplement_failure_does_not_demote_aquery_status(
+    tmp_path: Path, monkeypatch
+):
+    # The cquery supplement is best-effort: its own failure must not turn an
+    # otherwise-successful aquery ingest into a "failed" extractor record —
+    # only a diagnostic, and BuildEvidence.targets simply stays empty.
+    (tmp_path / "MODULE.bazel").write_text("module(name='x')\n")
+    aquery_json = json.dumps(
+        {
+            "actions": [
+                {
+                    "mnemonic": "CppCompile",
+                    "arguments": ["/usr/bin/g++", "-c", "impl.cc", "-o", "impl.o"],
+                    "primaryOutputId": "1",
+                }
+            ],
+            "artifacts": [{"id": "1", "execPath": "impl.o"}],
+        }
+    )
+
+    def fake_run(cmd, **kw):
+        if cmd[1] == "cquery":
+            return _FakeProc(1, stderr="cquery boom")
+        return _FakeProc(0, stdout=aquery_json)
+
+    monkeypatch.setattr(_bq.deadline, "run_bounded", fake_run)
+    merged, ext = BuildEvidence(), []
+    out = run_inferred_build_query(
+        tmp_path, merged, ext, which=lambda tool: f"/usr/bin/{tool}"
+    )
+    assert out is None
+    assert merged.targets == []
+    assert len(merged.compile_units) == 1
+    assert ext[-1].status == "ok"  # aquery ingest still succeeds
+    assert any("cquery supplement" in d for d in merged.diagnostics)
 
 
 def test_collect_inline_pack_defers_build_dir_cleanup(tmp_path: Path, monkeypatch):
