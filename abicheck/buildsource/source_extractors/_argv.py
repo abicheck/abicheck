@@ -191,9 +191,10 @@ def strip_launchers(argv: list[str]) -> list[str]:
     left as the new ``argv[0]``.
     """
     i = 0
-    while i < len(argv) and basename(argv[i]).lower().removesuffix(
-        ".exe"
-    ) in COMPILER_LAUNCHERS:
+    while (
+        i < len(argv)
+        and basename(argv[i]).lower().removesuffix(".exe") in COMPILER_LAUNCHERS
+    ):
         i += 1
         while i < len(argv) and _LAUNCHER_CONFIG_OVERRIDE_RE.match(argv[i]):
             i += 1
@@ -201,13 +202,38 @@ def strip_launchers(argv: list[str]) -> list[str]:
 
 
 def pick_compiler_binary(compile_unit: CompileUnit, override: str | None) -> str:
-    """Pick the compiler binary an extractor should emulate for this TU.
+    """Pick the compiler binary an extractor should EMULATE for this TU.
 
     Prefers the compiler actually recorded in the build action (``argv[0]``,
     after unwrapping any launcher) so a clang/clang-cl/cross TU is replayed
     against its real builtin include paths, target defaults, and accepted flags.
     Falls back to g++/gcc by language when no command is available; an explicit
     ``override`` always wins.
+
+    **This is emulation identity, not invocation identity — do not use it to
+    gate whether a flag is safe to append to the command an extractor is
+    about to run.** Without an explicit ``override``, this falls back to the
+    real build's own recorded ``argv[0]`` (e.g. ``icpx``) purely so flag
+    *shape* (MSVC ``/D``/``/I`` vs. GNU ``-D``/``-I``, language-standard
+    spelling, …) matches what the real build used — it says nothing about
+    which binary a given extractor is genuinely going to shell out to. A
+    caller in `castxml.py` passes this value as castxml's own
+    ``--castxml-cc-<id> <path>`` *argument* (castxml itself is invoked, and
+    is explicitly designed to accept an arbitrary compiler identity to
+    emulate), so appending a flag there based on this result is safe by
+    construction. A caller in `clang.py`/`clang_public_roots.py` that
+    instead builds an argv for **this same binary to execute directly**
+    must gate any binary-capability-specific flag (e.g. an Intel-only
+    ``-fsycl-host-only``) on the extractor's own actually-invoked binary
+    (its own ``clang_bin``, distinct from this function's return value)
+    instead — conflating the two let `-fsycl-host-only` get appended to a
+    genuinely stock ``clang`` invocation whenever a SYCL TU's real build
+    happened to use an Intel driver, which stock clang hard-rejects as
+    "unknown argument" (Codex review, `source_extractors/clang.py`'s
+    `_clang_context_args`). See that function's own docstring for the fix
+    and `tests/test_source_extractors_clang.py`'s
+    ``TestSyclHostOnlyGatedOnInvokedBinary`` for the regression matrix any
+    future binary-capability-gated flag addition here should extend.
     """
     if override:
         return override
@@ -238,13 +264,34 @@ def _carry_abi_relevant_flags(
     Skips flags whose prefix matches a structured toolchain option (sysroot,
     target, isysroot) because those are already emitted from the structured
     fields and the split spelling would dangle if re-appended.
+
+    *seen* is checked but never updated by this loop (Codex review, fresh
+    evidence): an earlier revision added each carried flag to *seen* as it
+    went, which silently dropped every REPEAT of an already-carried literal
+    token. That is wrong for a toggle-style flag pair sharing one spelling
+    across BOTH states (``-fsycl``/``-fno-sycl``, ``-fexceptions``/
+    ``-fno-exceptions``, …): a real, layered build config can legitimately
+    record the identical flag more than once
+    (``extract_abi_relevant_flags`` preserves every occurrence, in order,
+    with no dedup of its own), and only the LAST occurrence decides the
+    real compiler's effective state. Deduping WITHIN this carry-through
+    collapsed a sequence like ``-fno-sycl -fsycl -fno-sycl`` down to
+    ``-fno-sycl -fsycl`` (dropping the second, decisive ``-fno-sycl`` as a
+    "duplicate" of the first) — silently reversing the real effective
+    state from disabled to enabled. Checking only the CALLER's initial
+    *seen* (flags already emitted from the structured fields) still avoids
+    re-emitting those, which is this function's only documented purpose;
+    every occurrence of a flag genuinely repeated within
+    ``abi_relevant_flags`` itself is now carried through faithfully, in
+    the real build's own order and multiplicity, so last-flag-wins
+    scanning downstream (e.g. ``dumper_clang._needs_sycl_host_only``) sees
+    the same sequence the real compiler did.
     """
     for flag in abi_relevant_flags:
         if flag.startswith(STRUCTURED_TOOLCHAIN_FLAG_PREFIXES):
             continue
         if flag not in seen:
             out.append(flag)
-            seen.add(flag)
 
 
 def _match_gnu_include_search(tok: str, argv: list[str], i: int, out: list[str]) -> int:
@@ -283,7 +330,9 @@ def _match_gnu_forced_include(tok: str, argv: list[str], i: int, out: list[str])
     return i
 
 
-def _match_msvc_include_search(tok: str, argv: list[str], i: int, out: list[str]) -> int:
+def _match_msvc_include_search(
+    tok: str, argv: list[str], i: int, out: list[str]
+) -> int:
     """Try to match an MSVC ``/I`` include-search token (MSVC mode only).
 
     Returns the new ``i`` after consumption, or the original ``i`` if no match.
@@ -298,7 +347,9 @@ def _match_msvc_include_search(tok: str, argv: list[str], i: int, out: list[str]
     return i
 
 
-def _match_msvc_forced_include(tok: str, argv: list[str], i: int, out: list[str]) -> int:
+def _match_msvc_forced_include(
+    tok: str, argv: list[str], i: int, out: list[str]
+) -> int:
     """Try to match an MSVC ``/FI`` forced-include token (MSVC mode only).
 
     Returns the new ``i`` after consumption, or the original ``i`` if no match.
@@ -314,9 +365,7 @@ def _match_msvc_forced_include(tok: str, argv: list[str], i: int, out: list[str]
     return i
 
 
-def _scan_argv_for_extra_flags(
-    argv: list[str], cc_id: str, out: list[str]
-) -> None:
+def _scan_argv_for_extra_flags(argv: list[str], cc_id: str, out: list[str]) -> None:
     """Walk ``argv`` and append forced-include / include-search tokens to ``out``.
 
     Handles GNU and (when ``cc_id == "msvc"``) MSVC option families.  Each

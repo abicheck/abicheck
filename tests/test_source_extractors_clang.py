@@ -21,6 +21,7 @@ the fast lane; the end-to-end clang run is marked ``integration``.
 from __future__ import annotations
 
 import os
+import re
 import textwrap
 from pathlib import Path
 
@@ -663,6 +664,55 @@ def test_build_command_carries_abi_flags_and_unwraps_launcher() -> None:
     assert "ccache" not in cmd
 
 
+def test_replay_extra_flags_preserves_repeated_toggle_flags_in_order() -> None:
+    """A layered build config can legitimately record the SAME literal flag
+    more than once (e.g. a base default followed by a target-specific
+    override, followed by a later reset) -- ``extract_abi_relevant_flags``
+    preserves every occurrence, in order, with no dedup of its own. An
+    earlier revision of ``_carry_abi_relevant_flags`` deduped WITHIN the
+    carry-through itself, silently dropping every repeat of an
+    already-carried token -- collapsing ``-fno-sycl -fsycl -fno-sycl`` down
+    to ``-fno-sycl -fsycl`` and reversing the real last-flag-wins state from
+    disabled to enabled (Codex review). Every occurrence must now survive,
+    in the original order, so downstream last-flag-wins scanning sees
+    exactly what the real compiler saw."""
+    from abicheck.buildsource.source_extractors._argv import replay_extra_flags
+
+    cu = _cu(
+        argv=["icpx", "-fno-sycl", "-fsycl", "-fno-sycl", "-c", "foo.cpp"],
+        abi_relevant_flags=["-fno-sycl", "-fsycl", "-fno-sycl"],
+    )
+    extra = replay_extra_flags(cu, [], "gnu")
+    assert extra == ["-fno-sycl", "-fsycl", "-fno-sycl"]
+
+
+def test_build_command_respects_final_disabled_sycl_toggle_despite_earlier_enable() -> (
+    None
+):
+    """The end-to-end consequence of the dedup-ordering bug above: a
+    compile unit recorded as ``-fno-sycl -fsycl -fno-sycl`` (SYCL enabled
+    then explicitly disabled again -- last-flag-wins means SYCL is OFF for
+    this real TU) must NOT get ``-fsycl-host-only`` appended, even on a
+    genuinely Intel-family invoked binary. Appending it would fabricate a
+    SYCL-host AST for a TU the real build compiled WITHOUT SYCL (Codex
+    review)."""
+    cu = _cu(
+        argv=["icpx", "-fno-sycl", "-fsycl", "-fno-sycl", "-c", "foo.cpp"],
+        abi_relevant_flags=["-fno-sycl", "-fsycl", "-fno-sycl"],
+    )
+    cmd = build_clang_command(cu, Path("foo.cpp"), clang_bin="icpx")
+    assert "-fsycl-host-only" not in cmd
+    # The sanity check: the SAME sequence ending in -fsycl (SYCL enabled)
+    # DOES still get the flag appended, proving this isn't just "never
+    # appends" but genuinely reads the final toggle state.
+    enabled_cu = _cu(
+        argv=["icpx", "-fno-sycl", "-fsycl", "-c", "foo.cpp"],
+        abi_relevant_flags=["-fno-sycl", "-fsycl"],
+    )
+    enabled_cmd = build_clang_command(enabled_cu, Path("foo.cpp"), clang_bin="icpx")
+    assert "-fsycl-host-only" in enabled_cmd
+
+
 def test_build_command_carries_sycl_language_mode() -> None:
     """-fsycl must reach the reconstructed L4 replay command via
     abi_relevant_flags -- a resolved --gcc-path override can now actually
@@ -675,6 +725,347 @@ def test_build_command_carries_sycl_language_mode() -> None:
     )
     cmd = build_clang_command(cu, Path("foo.cpp"), clang_bin="icpx")
     assert "-fsycl" in cmd
+
+
+def test_build_command_collapses_sycl_to_host_only_pass() -> None:
+    """A real build's own recorded ``-fsycl`` on an Intel oneAPI driver makes
+    the driver run a device pass AND a host pass, each emitting a full JSON
+    document to the same stdout stream -- breaking the single-document JSON
+    reader (``Extra data`` at the host/device split, reported against a real
+    2.8GB -fsycl oneDAL TU). ``-fsycl-host-only`` must be appended so the
+    reconstructed command emits exactly one document, mirroring the identical
+    fix already shipped for the L2 header-AST backend."""
+    cu = _cu(
+        argv=["icpx", "-fsycl", "-c", "foo.cpp"],
+        abi_relevant_flags=["-fsycl"],
+    )
+    ast_cmd = build_clang_command(cu, Path("foo.cpp"), clang_bin="icpx")
+    assert "-fsycl-host-only" in ast_cmd
+    macro_cmd = build_clang_macro_command(cu, Path("foo.cpp"), clang_bin="icpx")
+    assert "-fsycl-host-only" in macro_cmd
+
+
+def test_build_command_sycl_host_only_skipped_for_non_intel_driver() -> None:
+    """Stock upstream clang hard-rejects ``-fsycl-host-only`` ("unknown
+    argument") -- appending it unconditionally for any clang-family binary
+    would turn a working ``--gcc-path clang`` + ``-fsycl`` replay into a
+    guaranteed failure."""
+    cu = _cu(
+        argv=["clang++", "-fsycl", "-c", "foo.cpp"],
+        abi_relevant_flags=["-fsycl"],
+    )
+    cmd = build_clang_command(cu, Path("foo.cpp"), clang_bin="clang++")
+    assert "-fsycl-host-only" not in cmd
+
+
+def test_build_command_sycl_host_only_skipped_when_already_pinned() -> None:
+    """A caller that already pinned a single pass explicitly must not get a
+    redundant/conflicting second one appended."""
+    cu = _cu(
+        argv=["icpx", "-fsycl", "-fsycl-device-only", "-c", "foo.cpp"],
+        abi_relevant_flags=["-fsycl", "-fsycl-device-only"],
+    )
+    cmd = build_clang_command(cu, Path("foo.cpp"), clang_bin="icpx")
+    assert "-fsycl-host-only" not in cmd
+    assert cmd.count("-fsycl-device-only") == 1
+
+
+def test_build_command_sycl_host_only_gated_on_invoked_binary_not_recorded_argv() -> (
+    None
+):
+    """The host-only decision must be gated on the binary this command will
+    actually be RUN with (``clang_bin``), not on ``pick_compiler_binary``'s
+    *emulated* compiler, which falls back to the compile unit's own recorded
+    ``argv[0]`` when no ``--gcc-path``/``compiler_binary`` override is given.
+    Without an override, L4 replay invokes the generic default ``"clang"``
+    even for a TU whose real build used ``icpx`` -- appending
+    ``-fsycl-host-only`` there would hit stock clang's "unknown argument"
+    hard-rejection on every such SYCL TU (Codex review)."""
+    cu = _cu(
+        argv=["icpx", "-fsycl", "-c", "foo.cpp"],
+        abi_relevant_flags=["-fsycl"],
+    )
+    # No explicit clang_bin/compiler_binary override -- mirrors
+    # `_make_source_extractor`'s own default (`compiler_binary=None` whenever
+    # `clang_bin == "clang"`), so `pick_compiler_binary` falls back to `cu`'s
+    # own recorded `argv[0]` ("icpx") purely for flag-shape emulation, while
+    # the binary actually invoked stays the generic default.
+    cmd = build_clang_command(cu, Path("foo.cpp"))
+    assert cmd[0] == "clang"
+    assert "-fsycl-host-only" not in cmd
+    macro_cmd = build_clang_macro_command(cu, Path("foo.cpp"))
+    assert "-fsycl-host-only" not in macro_cmd
+
+
+class TestSyclHostOnlyGatedOnInvokedBinary:
+    """Generalized regression matrix for the Codex-flagged P1 above: a
+    binary-capability-gated flag (``-fsycl-host-only``) must depend ONLY on
+    the binary a command will actually be RUN with (``clang_bin``), never on
+    ``pick_compiler_binary``'s *emulated* compiler (``cc_bin``, which falls
+    back to the compile unit's own recorded ``argv[0]`` absent an explicit
+    override -- see ``_argv.pick_compiler_binary``'s own docstring for why
+    the two must never be conflated). The individual example tests above
+    pin the specific reported scenario; this class sweeps a matrix so the
+    SAME class of bug (a future binary-specific flag gated on the wrong one
+    of the two binaries) is caught for any invoked/recorded combination, not
+    just the one pair a hand-picked example happened to cover.
+    """
+
+    #: Clang-family binaries `_is_intel_sycl_driver` recognizes as
+    #: DPC++-capable -- the flag must be appended for every one of these when
+    #: actually invoked, regardless of what the compile unit's own argv[0]
+    #: recorded.
+    _INTEL_DRIVERS = ("icpx", "dpcpp", "dpcpp-cl")
+    #: Non-Intel clang-family (and non-clang) binaries -- none of these
+    #: understand ``-fsycl-host-only``; it must never be appended for any of
+    #: them, regardless of what the compile unit's own argv[0] recorded.
+    _NON_INTEL_DRIVERS = ("clang", "clang++", "clang-cl", "gcc", "g++")
+    #: Swept independently of the invoked binary above -- this is exactly the
+    #: input ``pick_compiler_binary`` falls back to reading when no explicit
+    #: ``compiler_binary`` override is given, and it must have NO bearing on
+    #: the outcome once ``clang_bin`` is passed explicitly.
+    _RECORDED_ARGV0 = ("clang", "icpx", "dpcpp", "gcc", "cl.exe")
+
+    @pytest.mark.parametrize("invoked", _INTEL_DRIVERS)
+    @pytest.mark.parametrize("recorded_argv0", _RECORDED_ARGV0)
+    def test_appended_for_intel_invoked_binary_regardless_of_recorded_argv0(
+        self, invoked: str, recorded_argv0: str
+    ) -> None:
+        cu = _cu(
+            argv=[recorded_argv0, "-fsycl", "-c", "foo.cpp"],
+            abi_relevant_flags=["-fsycl"],
+        )
+        ast_cmd = build_clang_command(cu, Path("foo.cpp"), clang_bin=invoked)
+        assert "-fsycl-host-only" in ast_cmd
+        macro_cmd = build_clang_macro_command(cu, Path("foo.cpp"), clang_bin=invoked)
+        assert "-fsycl-host-only" in macro_cmd
+
+    @pytest.mark.parametrize("invoked", _NON_INTEL_DRIVERS)
+    @pytest.mark.parametrize("recorded_argv0", _RECORDED_ARGV0)
+    def test_skipped_for_non_intel_invoked_binary_regardless_of_recorded_argv0(
+        self, invoked: str, recorded_argv0: str
+    ) -> None:
+        cu = _cu(
+            argv=[recorded_argv0, "-fsycl", "-c", "foo.cpp"],
+            abi_relevant_flags=["-fsycl"],
+        )
+        ast_cmd = build_clang_command(cu, Path("foo.cpp"), clang_bin=invoked)
+        assert "-fsycl-host-only" not in ast_cmd
+        macro_cmd = build_clang_macro_command(cu, Path("foo.cpp"), clang_bin=invoked)
+        assert "-fsycl-host-only" not in macro_cmd
+
+    @pytest.mark.parametrize("recorded_argv0", _RECORDED_ARGV0)
+    def test_skipped_with_no_override_regardless_of_recorded_argv0(
+        self, recorded_argv0: str
+    ) -> None:
+        """The extractor's own real default (no ``--gcc-path``, so
+        ``clang_bin``/``compiler_binary`` are never passed at all) always
+        invokes plain ``"clang"`` -- never Intel-family -- no matter what the
+        compile unit's own build recorded itself as."""
+        cu = _cu(
+            argv=[recorded_argv0, "-fsycl", "-c", "foo.cpp"],
+            abi_relevant_flags=["-fsycl"],
+        )
+        cmd = build_clang_command(cu, Path("foo.cpp"))
+        assert cmd[0] == "clang"
+        assert "-fsycl-host-only" not in cmd
+
+    @pytest.mark.parametrize("pin", ("-fsycl-host-only", "-fsycl-device-only"))
+    def test_explicitly_pinned_pass_degrades_on_non_intel_instead_of_reinterpreting(
+        self, pin: str
+    ) -> None:
+        """``-fsycl-host-only`` and ``-fsycl-device-only`` look symmetric and
+        MUST be treated symmetrically: an earlier revision of this fix
+        silently dropped ``-fsycl-host-only`` on the (wrong) assumption that
+        stock clang's bare ``-fsycl`` already parses as an ordinary,
+        roughly-host-shaped pass. Confirmed empirically against a real
+        clang install that this is false: bare ``-fsycl`` with NO selector
+        defines ``__SYCL_DEVICE_ONLY__`` (device context by default), so
+        dropping just ``-fsycl-host-only`` silently replayed an explicitly
+        HOST-pinned TU as device code -- the identical misrepresentation
+        risk already recognized for ``-fsycl-device-only`` (Codex review,
+        second round). Both selectors now raise identically for a non-Intel
+        invoked binary rather than ever guessing which context to
+        (mis)represent."""
+        cu = _cu(
+            argv=["icpx", "-fsycl", pin, "-c", "foo.cpp"],
+            abi_relevant_flags=["-fsycl", pin],
+        )
+        with pytest.raises(SourceExtractionError, match=re.escape(pin)):
+            build_clang_command(cu, Path("foo.cpp"), clang_bin="clang")
+        with pytest.raises(SourceExtractionError, match=re.escape(pin)):
+            build_clang_macro_command(cu, Path("foo.cpp"), clang_bin="clang")
+        # An Intel-family invoked binary genuinely understands the flag --
+        # must NOT raise, and must keep it (a real, honorable single-pass pin).
+        intel_cmd = build_clang_command(cu, Path("foo.cpp"), clang_bin="icpx")
+        assert pin in intel_cmd
+
+    def test_bare_unselected_sycl_flag_is_left_alone_on_non_intel_binary(self) -> None:
+        """A bare, unselected ``-fsycl`` (no explicit host/device pin either
+        way) is deliberately NOT treated as a degrade-worthy mismatch --
+        matching the L2 header-AST backend's own established "accepted
+        approximation" for this ambiguous shape (there is no explicit,
+        recorded intent this replay would be contradicting)."""
+        cu = _cu(
+            argv=["icpx", "-fsycl", "-c", "foo.cpp"],
+            abi_relevant_flags=["-fsycl"],
+        )
+        cmd = build_clang_command(cu, Path("foo.cpp"), clang_bin="clang")
+        assert "-fsycl" in cmd
+        assert "-fsycl-host-only" not in cmd
+        assert "-fsycl-device-only" not in cmd
+
+    def test_needs_sycl_host_only_is_the_single_l2_l4_source_of_truth(self) -> None:
+        """L4's predicate must be the SAME function object the L2 header-AST
+        backend uses (``dumper_clang._needs_sycl_host_only``), not an
+        independently reimplemented copy that could silently drift out of
+        sync with the last-flag-wins ``-fsycl``/``-fno-sycl`` scan or the
+        legacy ``dpcpp``/``dpcpp-cl`` SYCL-implied-by-default handling."""
+        from abicheck import dumper_clang
+        from abicheck.buildsource.source_extractors import clang as clang_mod
+
+        assert clang_mod._needs_sycl_host_only is dumper_clang._needs_sycl_host_only
+
+    @pytest.mark.slow
+    def test_property_intel_only_sycl_pass_flags_never_reach_a_non_intel_invoked_binary(
+        self,
+    ) -> None:
+        """The STRUCTURAL invariant behind the whole matrix above, checked
+        generatively rather than against a fixed list of examples: for ANY
+        invoked binary name and ANY compile unit (recorded argv[0], SYCL
+        flags, pinning), neither ``-fsycl-host-only`` nor
+        ``-fsycl-device-only`` may ever appear in a successfully BUILT
+        command unless the binary genuinely invoked understands them --
+        whether abicheck would have appended one itself, or the real
+        build's own recorded argv/abi_relevant_flags already carried one
+        through. That second path is not hypothetical: this exact property
+        test, run against an earlier revision of this fix that only closed
+        the insertion side, found it (a real build recorded as ``icpx
+        -fsycl-host-only``, replayed against a plain ``clang`` invocation,
+        reproduced "unknown argument"). A recorded explicit pass selector
+        (either one) on a non-Intel invoked binary is a NAMES-A-DIFFERENT-
+        COMPILATION-CONTEXT case, not a plain unsupported-flag case (Codex
+        review, two rounds -- the first fix treated the two selectors
+        asymmetrically, silently dropping ``-fsycl-host-only`` on the
+        mistaken assumption that stock clang's bare ``-fsycl`` is
+        host-shaped; confirmed empirically against a real clang install
+        that it is device-shaped by default instead): it must degrade that
+        TU (``SourceExtractionError``) rather than silently drop the
+        selector and replay it under a DIFFERENT context than the one
+        actually recorded, so this property checks for the raise in
+        EITHER pinned case, symmetrically, instead of a clean command. A
+        bare, unselected ``-fsycl`` stays a clean (non-raising) command,
+        matching the L2 backend's own accepted approximation for that
+        ambiguous shape. Also fuzzes casing/``.exe`` suffixes and random
+        recorded-argv0/flag noise, so a future regression shaped differently
+        from any single hand-picked example still falls out of this
+        property rather than needing its own new example test."""
+        from hypothesis import given, settings, strategies as st
+
+        driver_stem = st.sampled_from(
+            [
+                "icx",
+                "icpx",
+                "dpcpp",
+                "dpcpp-cl",
+                "clang",
+                "clang++",
+                "clang-cl",
+                "gcc",
+                "g++",
+                "cl",
+            ]
+        )
+        binary_name = st.builds(
+            lambda stem, exe: f"{stem}{'.exe' if exe else ''}",
+            driver_stem,
+            st.booleans(),
+        )
+        sycl_flag = st.sampled_from(
+            ["-fsycl", "-fno-sycl", "-fsycl-host-only", "-fsycl-device-only"]
+        )
+        _PASS_SELECTORS = {"-fsycl-host-only", "-fsycl-device-only"}
+
+        @given(
+            invoked=binary_name,
+            recorded_argv0=binary_name,
+            flags=st.lists(sycl_flag, max_size=3),
+        )
+        @settings(max_examples=200, deadline=None)
+        def _check(invoked: str, recorded_argv0: str, flags: list[str]) -> None:
+            cu = _cu(
+                argv=[recorded_argv0, *flags, "-c", "foo.cpp"],
+                abi_relevant_flags=list(flags),
+            )
+            invoked_is_intel = Path(invoked).stem.lower().removesuffix(".exe") in {
+                "icx",
+                "icpx",
+                "dpcpp",
+                "dpcpp-cl",
+            }
+            pinned_on_non_intel = not invoked_is_intel and (
+                _PASS_SELECTORS & set(flags)
+            )
+            for builder in (build_clang_command, build_clang_macro_command):
+                if pinned_on_non_intel:
+                    with pytest.raises(SourceExtractionError):
+                        builder(cu, Path("foo.cpp"), clang_bin=invoked)
+                    continue
+                cmd = builder(cu, Path("foo.cpp"), clang_bin=invoked)
+                assert cmd[0] == invoked
+                pinned = _PASS_SELECTORS & set(cmd)
+                if pinned:
+                    assert invoked_is_intel, (
+                        f"{pinned} reached a non-Intel invoked binary {invoked!r} "
+                        f"(recorded argv[0]={recorded_argv0!r}, flags={flags!r})"
+                    )
+
+        _check()
+
+    @pytest.mark.slow
+    def test_property_host_only_insertion_reflects_true_last_flag_wins_state(
+        self,
+    ) -> None:
+        """Generalizes ``test_replay_extra_flags_preserves_repeated_toggle_
+        flags_in_order``/``test_build_command_respects_final_disabled_sycl_
+        toggle_despite_earlier_enable`` above: for ANY sequence of
+        ``-fsycl``/``-fno-sycl`` toggles -- including repeats, exactly what
+        a layered build config can legitimately record -- on a compile unit
+        replayed via a genuinely Intel-family invoked binary,
+        ``-fsycl-host-only`` must be appended iff the LAST toggle in the
+        ORIGINAL, un-deduped sequence actually enables SYCL (honoring a
+        legacy ``dpcpp`` driver's own SYCL-on-by-default), computed here
+        independently of ``_needs_sycl_host_only``'s own implementation so
+        this test cannot pass merely by re-deriving the same bug. Directly
+        exercises the code path an earlier revision of the carry-through
+        dedup corrupted (Codex review)."""
+        from hypothesis import given, settings, strategies as st
+
+        from abicheck.dumper_clang import _dpcpp_defaults_sycl_on
+
+        intel_driver = st.sampled_from(["icpx", "icx", "dpcpp"])
+        toggle = st.sampled_from(["-fsycl", "-fno-sycl"])
+
+        @given(invoked=intel_driver, toggles=st.lists(toggle, max_size=5))
+        @settings(max_examples=200, deadline=None)
+        def _check(invoked: str, toggles: list[str]) -> None:
+            cu = _cu(
+                argv=[invoked, *toggles, "-c", "foo.cpp"],
+                abi_relevant_flags=list(toggles),
+            )
+            enabled = _dpcpp_defaults_sycl_on(invoked)
+            for tok in toggles:
+                if tok == "-fsycl":
+                    enabled = True
+                elif tok == "-fno-sycl":
+                    enabled = False
+            cmd = build_clang_command(cu, Path("foo.cpp"), clang_bin=invoked)
+            assert ("-fsycl-host-only" in cmd) == enabled, (
+                f"invoked={invoked!r} toggles={toggles!r} expected "
+                f"enabled={enabled} but got cmd={cmd!r}"
+            )
+
+        _check()
 
 
 # -- source_abi_from_clang_ast (pure, D4) ------------------------------------
@@ -2447,6 +2838,20 @@ def test_extract_rechecks_deadline_after_loading_ast(monkeypatch) -> None:  # ty
 def test_extract_invalid_json_raises(monkeypatch) -> None:  # type: ignore[no-untyped-def]
     extractor = _patch_run(monkeypatch, lambda cmd, **kw: _emit_ast(kw, "{not json"))
     with pytest.raises(SourceExtractionError, match="not valid JSON"):
+        extractor.extract(_cu(), public_header_roots=["include/foo.h"])
+
+
+def test_extract_two_document_json_raises_actionable_hint(monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    """A flag combination this codebase doesn't already collapse to a single
+    pass (unlikely once ``-fsycl-host-only`` is appended for the Intel-driver
+    case, but not provably exhaustive over every offload flag) still hits
+    ``json.load``'s "Extra data" error on a two-document stream. The message
+    must name the actual cause instead of a bare byte-offset."""
+    import json
+
+    payload = json.dumps(_ast()) + json.dumps(_ast())
+    extractor = _patch_run(monkeypatch, lambda cmd, **kw: _emit_ast(kw, payload))
+    with pytest.raises(SourceExtractionError, match="more than one JSON document"):
         extractor.extract(_cu(), public_header_roots=["include/foo.h"])
 
 

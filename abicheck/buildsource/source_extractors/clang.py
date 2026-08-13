@@ -61,6 +61,7 @@ from pathlib import Path
 from typing import Any
 
 from ... import deadline
+from ...dumper_clang import _is_intel_sycl_driver, _needs_sycl_host_only
 from ...header_conditionals import _include_guard_macro, _strip_comments
 from ..build_evidence import CompileUnit
 from ..model import LayerConfidence
@@ -127,8 +128,31 @@ from .clang_source_edges import build_source_edges
 #: clang extractor schema/behaviour version, recorded in the dump provenance and
 #: folded into the per-TU cache key (ADR-030 D8). Bump on ANY recipe change so a
 #: stale ``--cache-dir`` never reuses an old dump. 0.8: also folds in the
-#: resolved compiler override (Codex review).
-CLANG_EXTRACTOR_VERSION = "0.8"
+#: resolved compiler override (Codex review). 0.9: the reconstructed command now
+#: appends ``-fsycl-host-only`` for a SYCL-enabled Intel oneAPI invocation
+#: (Codex review) -- a pre-0.9 cache entry for the same TU was built without
+#: that flag and must not be reused as-is. 0.10/0.11: a real build's own
+#: recorded ``-fsycl-host-only``/``-fsycl-device-only`` (Intel-only SYCL
+#: pass-selector flags carried through via ``abi_relevant_flags``) on a
+#: non-Intel invoked binary now degrades that one TU (a clear
+#: SourceExtractionError) instead of failing on the raw "unknown argument".
+#: 0.10 first shipped this only for ``-fsycl-device-only``, silently
+#: STRIPPING a recorded ``-fsycl-host-only`` instead -- confirmed against a
+#: real clang install (Codex review) that this was itself wrong: stock
+#: clang's bare ``-fsycl`` defines ``__SYCL_DEVICE_ONLY__`` (device context
+#: by default), so dropping just the host-only selector silently replayed
+#: an explicitly host-pinned TU as device code. 0.11 raises for both
+#: selectors symmetrically; a bare, unselected ``-fsycl`` (ambiguous, no
+#: explicit pin either way) is left carried through as-is, matching the L2
+#: header-AST backend's own established "accepted approximation" for that
+#: shape (see ``_needs_sycl_host_only``'s own docstring). 0.12:
+#: ``_argv._carry_abi_relevant_flags`` (shared by castxml/clang) no longer
+#: dedups a repeated flag WITHIN ``abi_relevant_flags`` itself -- a real,
+#: layered build config can legitimately record the same toggle-style flag
+#: more than once (e.g. ``-fno-sycl -fsycl -fno-sycl``), and the old dedup
+#: silently dropped every repeat, corrupting last-flag-wins state for any
+#: such pair, not just SYCL (Codex review).
+CLANG_EXTRACTOR_VERSION = "0.12"
 
 
 @functools.lru_cache(maxsize=8)
@@ -217,13 +241,46 @@ def _std_flag(standard: str, msvc: bool) -> list[str]:
 
 
 def _clang_context_args(
-    compile_unit: CompileUnit, compiler_binary: str | None
+    compile_unit: CompileUnit, compiler_binary: str | None, *, clang_bin: str = "clang"
 ) -> tuple[list[str], bool]:
     """The shared compile-context argv prefix (no mode tail / source) and msvc flag.
 
     Mirrors the compile unit's language standard, defines/undefines, include and
     system-include paths, sysroot, target triple, and ABI-relevant flags, so both
     the AST pass and the macro pass parse the same TU the real build compiled.
+
+    A real build's own recorded ``-fsycl`` (carried through via
+    ``replay_extra_flags``'s ``ABI_RELEVANT_FLAG_PREFIXES``) makes Intel's
+    oneAPI DPC++/C++ driver (icx/icpx/dpcpp[-cl]) run *two* separate ``-cc1``
+    passes for one compile — a SYCL device-side pass and a host-side pass,
+    each writing a complete document to the same stdout stream back-to-back
+    with no separator, which breaks both the AST pass's single-document JSON
+    reader and the macro pass's single-stream text reader. Mirrors the fix
+    already shipped for the L2 header-AST backend
+    (``dumper_ast_config._build_clang_header_command`` /
+    ``dumper_clang._needs_sycl_host_only``): append ``-fsycl-host-only`` here
+    too, collapsing the compile back to the single host-side pass that
+    actually links into the scanned binary — the device pass describes
+    SPIR-V kernel code that never becomes part of the host ``.so``'s
+    exported symbols, so L4 replay has no use for it either way. A no-op for
+    any non-Intel driver, or when the caller's own flags already pin a
+    single pass (``-fsycl-host-only``/``-fsycl-device-only``) or explicitly
+    disable SYCL (``-fno-sycl`` last-flag-wins) — see
+    ``_needs_sycl_host_only``'s own docstring for the full precedence.
+
+    The host-only decision is gated on *clang_bin* — the binary this command
+    will actually be run with — not on ``pick_compiler_binary``'s *emulated*
+    compiler below (``cc_bin``, used only for flag-shape decisions like
+    ``msvc``/language-standard translation). Without ``--gcc-path``/an
+    explicit ``compiler_binary`` override, ``cc_bin`` falls back to the real
+    build's own recorded ``argv[0]`` (e.g. ``icpx``) purely to emulate its
+    accepted flag shape, while *clang_bin* stays the generic default
+    (``"clang"``) that is genuinely invoked. Gating on ``cc_bin`` instead
+    would append ``-fsycl-host-only`` to a stock clang invocation whenever a
+    SYCL TU's real build happened to use an Intel driver — stock clang
+    hard-rejects the flag ("unknown argument"), turning every such TU into a
+    failed/partial L4 extraction instead of the single ordinary pass stock
+    clang already parses a bare ``-fsycl`` as (Codex review).
     """
     cc_bin = pick_compiler_binary(compile_unit, compiler_binary)
     msvc = is_msvc_mode(cc_bin)
@@ -264,6 +321,43 @@ def _clang_context_args(
             if not flag.startswith("-std=")
             and not flag.lower().startswith(("/std:", "-std:"))
         ]
+    if not _is_intel_sycl_driver(clang_bin):
+        # A real build's own recorded -fsycl-host-only/-fsycl-device-only
+        # (carried through above via replay_extra_flags's abi_relevant_flags/
+        # argv scan) each pin a SPECIFIC SYCL compilation pass -- and stock
+        # clang cannot honor either: it hard-rejects both as "unknown
+        # argument", AND (confirmed empirically against a real clang 18
+        # install) its own bare -fsycl with NEITHER selector compiles as
+        # DEVICE context by default (defines __SYCL_DEVICE_ONLY__), not
+        # host. So dropping -fsycl-device-only and falling through to a
+        # bare -fsycl "coincidentally" matches its recorded pass -- but
+        # dropping -fsycl-host-only does NOT: it silently flips an
+        # explicitly HOST-pinned TU into a device-context compile (Codex
+        # review; an earlier revision of this fix got exactly this
+        # asymmetry wrong, treating the two selectors as interchangeable).
+        # Both therefore degrade this one TU explicitly (a clear message,
+        # not the raw "unknown argument") rather than ever stamping source
+        # facts for a DIFFERENT compilation context than the one actually
+        # recorded. A bare, unselected -fsycl (no explicit pin either way)
+        # is deliberately left alone -- carried through as-is, matching the
+        # L2 header-AST backend's own established accepted approximation
+        # for that ambiguous shape (see this function's own docstring).
+        pinned = {"-fsycl-host-only", "-fsycl-device-only"} & set(extra)
+        if pinned:
+            raise SourceExtractionError(
+                f"compile unit {compile_unit.source!r} was recorded with "
+                f"{sorted(pinned)!r} (an Intel-only SYCL pass-selector "
+                "flag), but the binary this command will actually run "
+                f"with ({clang_bin!r}) is not an Intel oneAPI DPC++/C++ "
+                "driver and cannot honor it. L4 source-ABI replay has no "
+                "way to correctly represent that pass under a different "
+                "compiler, so this translation unit degrades to partial "
+                "coverage rather than being silently replayed under the "
+                "wrong compilation context -- pass --gcc-path pointing at "
+                "the real icx/icpx/dpcpp driver to extract it."
+            )
+    if _needs_sycl_host_only(clang_bin, [*cmd, *extra]):
+        extra = [*extra, "-fsycl-host-only"]
     cmd += extra
     return cmd, msvc
 
@@ -279,7 +373,7 @@ def build_clang_command(
 
     A clang-cl/MSVC compile unit is driven through clang's ``cl`` driver mode.
     """
-    cmd, _msvc = _clang_context_args(compile_unit, compiler_binary)
+    cmd, _msvc = _clang_context_args(compile_unit, compiler_binary, clang_bin=clang_bin)
     # Syntax-only AST dump to stdout as JSON. -ferror-limit=0 keeps parsing past
     # recoverable errors so a single bad decl does not blank the whole dump.
     return [
@@ -307,7 +401,7 @@ def build_clang_macro_command(
     ``public_macro_value_changed`` to ever fire (Codex review #339, P2). Same
     compile context as the AST pass so the macro set matches the real build.
     """
-    cmd, msvc = _clang_context_args(compile_unit, compiler_binary)
+    cmd, msvc = _clang_context_args(compile_unit, compiler_binary, clang_bin=clang_bin)
     # cl-driver mode ignores -dD; clang-cl's `/d1PP` is the documented "retain
     # macro definitions in /E mode" flag, so a Windows/clang-cl build still emits
     # #define directives for macros_from_preprocessor (Codex review #339, P2). We
@@ -317,54 +411,6 @@ def build_clang_macro_command(
     else:
         preprocess = ["-E", "-dD"]
     return [clang_bin, *cmd, *preprocess, "-ferror-limit=0", str(source)]
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
 
 class _ClassifyContext:
@@ -1441,8 +1487,29 @@ class ClangSourceExtractor:
                 with open(ast_path, "rb") as fh:  # bytes: json detects encoding
                     ast_root = json.load(fh)
             except ValueError as exc:
+                # "Extra data" means a second top-level JSON value follows the
+                # first — some other flag not already collapsed to a single
+                # pass above (`_clang_context_args`'s `-fsycl-host-only`
+                # insertion) made this compile emit more than one document to
+                # the same stdout stream (e.g. an OpenMP/CUDA offload target
+                # flag, or a non-Intel SYCL-capable driver this codebase
+                # doesn't yet special-case) — name the likely cause here
+                # rather than a bare byte-offset, mirroring the identical hint
+                # `dumper_clang_errors._parse_clang_ast_result` gives the L2
+                # header-AST backend for the same failure shape.
+                hint = ""
+                if isinstance(exc, json.JSONDecodeError) and exc.msg == "Extra data":
+                    hint = (
+                        " -- this looks like more than one JSON document on "
+                        "stdout, which happens when a compiler flag makes "
+                        "clang run multiple -cc1 passes for one compile (e.g. "
+                        "an unpinned SYCL/OpenMP/CUDA offload flag); pin a "
+                        "single compilation pass (e.g. -fsycl-host-only) in "
+                        "the build's own recorded flags"
+                    )
                 raise SourceExtractionError(
-                    f"clang AST for {compile_unit.source} was not valid JSON: {exc}"
+                    f"clang AST for {compile_unit.source} was not valid JSON: "
+                    f"{exc}{hint}"
                 ) from exc
         finally:
             ast_path.unlink(missing_ok=True)
