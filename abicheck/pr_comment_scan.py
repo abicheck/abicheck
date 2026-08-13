@@ -191,6 +191,62 @@ def _suppressed_count_scan(diff: dict[str, object] | None) -> int:
     return count if isinstance(count, int) else 0
 
 
+def _as_int(value: object) -> int:
+    if isinstance(value, bool):
+        return int(value)
+    if isinstance(value, (int, float)):
+        return int(value)
+    return 0
+
+
+def _scan_true_counts(
+    diff: dict[str, object] | None,
+    gate_api_break: bool,
+    levels: dict[str, str],
+) -> tuple[int, int] | None:
+    """Exact (breaking, review) totals from ``diff``'s own scalar counts --
+    unlike the classified ``Finding`` lists built from ``diff["findings"]``,
+    unaffected by that list's report cap (default 20, ``scan
+    --max-findings``). ``None`` when ``diff`` carries no scalar counts to
+    read (audit-only / ``NOT_COMPARABLE``) -- callers fall back to the
+    classified-list lengths in that case, same as every other mode.
+
+    Codex review: a scan diff with more real breaking/api_break/risk
+    findings than the report cap previously rendered a comment header
+    undercounting them (e.g. "20 breaking" for 25 real breaks), since the
+    header was built purely from ``len()`` of the (possibly-truncated)
+    classified lists.
+
+    Only the two promotions expressible purely from the scalar totals are
+    applied: ``--gate-api-break`` (api_break -> breaking) and a
+    ``potential_breaking: error`` severity config (api_break + risk ->
+    breaking, since that category IS exactly those two raw severities). An
+    ``addition``/``quality_issues`` promotion (a *compatible*-bucket finding
+    promoted to blocking) is deliberately not folded in here: the raw
+    ``compatible`` scalar mixes additions and quality findings with no way
+    to tell them apart from the scalar alone -- but every promoted entry is
+    already included in ``findings`` regardless of the ordinary cap
+    (``cli_scan_baseline._add_severity_blocking_compatible_findings``'s own
+    reserved-floor design), so the classified ``breaking`` list already
+    counts that narrower case correctly without needing this override.
+    """
+    if not isinstance(diff, dict):
+        return None
+    raw_breaking = _as_int(diff.get("breaking"))
+    raw_api_break = _as_int(diff.get("api_break"))
+    raw_risk = _as_int(diff.get("risk"))
+    breaking = raw_breaking
+    if levels.get("potential_breaking") == "error":
+        breaking += raw_api_break + raw_risk
+        raw_api_break = 0
+        raw_risk = 0
+    elif gate_api_break:
+        breaking += raw_api_break
+        raw_api_break = 0
+    review = raw_api_break + raw_risk
+    return breaking, review
+
+
 def from_scan(
     report: dict[str, object],
     gate_api_break: bool = False,
@@ -211,6 +267,7 @@ def from_scan(
       doesn't misreport "no ABI changes" as if a comparison had actually run.
     """
     diff = report.get("diff")
+    diff_dict = diff if isinstance(diff, dict) else None
     findings_raw: object = None
     additions_raw: object = None
     not_comparable_reason: str | None = None
@@ -222,7 +279,13 @@ def from_scan(
             findings_raw = diff.get("findings")
             additions_raw = diff.get("additions")
 
-    levels = _severity_levels(report)
+    # `_run_baseline_compare`'s own severity-gate block and the
+    # contract-coverage ledger both nest inside `report["diff"]`, not at the
+    # top level the way `compare`'s own report carries them -- reading the
+    # top-level `report` here (as an earlier revision did) always saw an
+    # absent key (Codex review: a real `--severity-addition error` /
+    # `--contract-evaluation` scan silently lost both signals).
+    levels = _severity_levels(diff_dict) if diff_dict is not None else {}
     symbols: list[str] = []
     for raw in (findings_raw, additions_raw):
         if isinstance(raw, list):
@@ -248,14 +311,30 @@ def from_scan(
             )
         )
         incomplete_blocking = True
-    incomplete = incomplete + _contract_coverage_findings(report)
-    contract_exit = report.get("contract_coverage_exit_contribution")
+    incomplete = incomplete + (
+        _contract_coverage_findings(diff_dict) if diff_dict is not None else []
+    )
+    contract_exit = diff_dict.get("contract_coverage_exit_contribution") if diff_dict else None
     contract_coverage_blocking = isinstance(contract_exit, int) and contract_exit >= 1
     if contract_coverage_blocking:
         incomplete_blocking = True
 
     risk = report.get("risk")
     verdict = report.get("verdict")
+    true_counts = _scan_true_counts(diff_dict, gate_api_break, levels)
+    if true_counts is not None:
+        # `_scan_true_counts` only folds the two promotions expressible
+        # from the raw breaking/api_break/risk scalars -- an
+        # addition/quality_issues severity-config promotion moves a
+        # *compatible*-severity finding into `breaking` too (see that
+        # function's own docstring), invisible to those scalars entirely.
+        # Every such entry is already in the classified `breaking` list
+        # (the reserved-floor design in `_add_severity_blocking_compatible_
+        # findings` guarantees it survives the cap), so count it directly
+        # from there rather than trying to derive it from `diff["compatible"]`
+        # (which mixes additions and quality findings with no way to split).
+        promoted_compatible = sum(1 for f in breaking if f.severity == "compatible")
+        true_counts = (true_counts[0] + promoted_compatible, true_counts[1])
 
     return CommentModel(
         mode="scan",
@@ -271,13 +350,15 @@ def from_scan(
         contract_coverage_blocking=contract_coverage_blocking,
         breaking_categories=_breaking_categories(breaking),
         breaking_severities=_breaking_severities(breaking),
-        suppressed_count=_suppressed_count_scan(
-            diff if isinstance(diff, dict) else None
-        ),
+        suppressed_count=_suppressed_count_scan(diff_dict),
         scan_verdict=str(verdict) if verdict is not None else None,
         scan_risk=risk if isinstance(risk, dict) else None,
         scan_coverage_lines=_scan_coverage_lines(report),
         scan_audit_only=audit_only,
+        scan_breaking_total=true_counts[0] if true_counts else None,
+        scan_review_total=true_counts[1] if true_counts else None,
+        scan_findings_truncated=bool(diff_dict and diff_dict.get("findings_truncated")),
+        scan_additions_truncated=bool(diff_dict and diff_dict.get("additions_truncated")),
     )
 
 
@@ -311,4 +392,19 @@ def scan_note(model: CommentModel) -> list[str]:
         out += [f"> 🔎 Scan: {' · '.join(bits)}", ""]
     if model.scan_coverage_lines:
         out += [f"> 📊 Coverage: {', '.join(model.scan_coverage_lines)}", ""]
+    if model.scan_findings_truncated or model.scan_additions_truncated:
+        truncated = [
+            label
+            for label, flag in (
+                ("gating findings", model.scan_findings_truncated),
+                ("additions", model.scan_additions_truncated),
+            )
+            if flag
+        ]
+        out += [
+            f"> ✂️ {' and '.join(truncated)} itemized below were truncated at the "
+            f"report cap (`scan --max-findings`) — the counts above are exact "
+            f"regardless.",
+            "",
+        ]
     return out

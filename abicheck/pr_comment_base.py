@@ -183,6 +183,24 @@ class CommentModel:
     # "✅ No ABI changes" headline as if a baseline comparison had run and
     # found nothing.
     scan_audit_only: bool = False
+    # scan mode only: the exact (breaking, needs-review) totals from
+    # `diff`'s own scalar `breaking`/`api_break`/`risk` counts (already
+    # gate/severity-promotion-adjusted -- see `pr_comment_scan._scan_true_
+    # counts`), independent of whether `diff["findings"]` was truncated
+    # below the report cap. `None` when `diff` carries no scalar counts to
+    # read (audit-only / NOT_COMPARABLE) -- `counts` then falls back to the
+    # classified-list lengths, same as every other mode (Codex review: a
+    # scan `findings` list capped at the default 20 previously undercounted
+    # the header for a diff with more real findings than that).
+    scan_breaking_total: int | None = None
+    scan_review_total: int | None = None
+    # Whether `diff["findings"]`/`diff["additions"]` were themselves
+    # truncated below the report cap -- surfaced as an explicit note
+    # (`pr_comment_scan.scan_note`) so "showing N of M" is never silent,
+    # even though `scan_breaking_total`/`scan_review_total` above keep the
+    # header counts exact regardless.
+    scan_findings_truncated: bool = False
+    scan_additions_truncated: bool = False
 
     @property
     def counts(self) -> tuple[int, int, int]:
@@ -192,6 +210,12 @@ class CommentModel:
                 sum(r[2] for r in self.library_rows),
                 sum(r[3] for r in self.library_rows),
                 sum(r[4] for r in self.library_rows),
+            )
+        if self.mode == "scan" and self.scan_breaking_total is not None:
+            return (
+                self.scan_breaking_total,
+                self.scan_review_total or 0,
+                len(self.safe),
             )
         return len(self.breaking), len(self.review), len(self.safe)
 

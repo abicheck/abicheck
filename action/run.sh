@@ -1669,6 +1669,17 @@ elif [[ "$MODE" == "scan" ]]; then
       2) VERDICT="API_BREAK"; _escalate_verdict_to_report ;;
       4) VERDICT="BREAKING" ;;
       5) VERDICT="BUDGET_OVERFLOW" ;;
+      6)
+        # NOT_COMPARABLE (ADR-050 D2: a scope/profile mismatch between the
+        # candidate and --against baseline) is a valid, reportable outcome,
+        # not a CLI/operational failure -- keeping it out of VERDICT="ERROR"
+        # matters beyond wording: the PR-comment step's own ERROR guard
+        # (`_maybe_post_pr_comment`) skips posting entirely on ERROR, which
+        # made a real, JSON-report-carrying NOT_COMPARABLE result silently
+        # produce no sticky comment even though `pr_comment_scan.py` renders
+        # it as a blocking "analysis incomplete" finding (Codex review).
+        VERDICT="NOT_COMPARABLE"
+        ;;
       *)
         VERDICT="ERROR"
         if _is_cli_error; then
@@ -1818,6 +1829,9 @@ if [[ "${INPUT_ADD_JOB_SUMMARY:-true}" == "true" && "$MODE" != "dump" ]]; then
         ;;
       BUDGET_OVERFLOW)
         echo "> **Verdict: BUDGET_OVERFLOW** ⏱️ — Scan exceeded the configured \`budget\`. Pin a shallower level (--depth) or raise the budget; a budget never silently shrinks scope."
+        ;;
+      NOT_COMPARABLE)
+        echo "> **Verdict: NOT_COMPARABLE** 🛑 — The candidate and \`--against\` baseline were not extracted under a comparable profile/scope contract (ADR-050 D2), so no compatibility comparison ran. This is not an ABI/API break; see the JSON report's \`diff.reason\` for what mismatched."
         ;;
       COVERAGE_INCOMPLETE)
         # ADR-049's orthogonal contract-coverage axis (exit code 1). Naming
@@ -2206,6 +2220,16 @@ elif [[ "$MODE" == "scan" ]]; then
 
   if [[ "$VERDICT" == "BUDGET_OVERFLOW" ]]; then
     echo "::error::Scan exceeded its budget. Pin a shallower level or raise the budget."
+    FINAL_EXIT=1
+  fi
+
+  # NOT_COMPARABLE (exit 6, ADR-050 D2) unconditionally fails the step, same
+  # as ERROR did before this verdict was split out of it above -- no
+  # fail-on-* flag governs it, since a scope/profile mismatch means no
+  # compatibility comparison ran at all, not that one ran and found (or
+  # didn't find) a break.
+  if [[ "$VERDICT" == "NOT_COMPARABLE" ]]; then
+    echo "::error::scan --against reported NOT_COMPARABLE: the candidate and baseline were not extracted under a comparable profile/scope contract. See the JSON report's diff.reason for what mismatched."
     FINAL_EXIT=1
   fi
 
