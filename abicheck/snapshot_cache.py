@@ -45,7 +45,7 @@ MAX_ENTRIES: int = 100
 #: key invalidates all previously-cached entries on upgrade rather than risk
 #: serving a stale snapshot computed by an older, behaviorally-different
 #: abicheck version.
-_SNAPSHOT_CACHE_VERSION: str = "17"
+_SNAPSHOT_CACHE_VERSION: str = "19"
 # v2: castxml's CvQualifiedType type-name spelling changed for a
 # volatile-qualified pointer/reference VALUE (now a suffix, "T * volatile",
 # matching clang's own convention, rather than always a prefix) -- an
@@ -225,14 +225,14 @@ _SNAPSHOT_CACHE_VERSION: str = "17"
 # until the entry happened to expire or was manually cleared. Bumped so the
 # upgrade forces re-extraction instead.
 #
-# v17 (G31 Phase C continuation, same pass): two changes bundled together,
+# v18 (G31 Phase C continuation, same pass): two changes bundled together,
 # both purely additive so neither needs its own version bump alone, but a
 # warm cache entry from before either shipped would keep replaying a
 # snapshot/merge missing the new data:
 #   - ``AbiSnapshot.typedefs_qualified`` (schema v25): both header backends
 #     now also populate a fully-qualified-name-keyed twin of ``typedefs``,
 #     closing the bare-name member-typedef collision gap documented on that
-#     field. A pre-v17 cache entry has an unconditionally empty
+#     field. A pre-v18 cache entry has an unconditionally empty
 #     ``typedefs_qualified`` even when the underlying headers would produce
 #     real entries.
 #   - the hybrid merge (``dumper_hybrid.py``) started stamping
@@ -241,10 +241,21 @@ _SNAPSHOT_CACHE_VERSION: str = "17"
 #     clang-only entities) -- without it, ``both_known_backed_fact`` saw no
 #     recorded provenance for a clang-only declaration's is_override/
 #     is_abstract and silently declined to compare a real transition, even
-#     though v16 above already made the underlying facts real. A pre-v17
+#     though v17 above already made the underlying facts real. A pre-v18
 #     hybrid cache entry's ``fact_provenance`` dict is missing these two
 #     entries for every clang-only declaration.
 # Bumped so the upgrade forces re-extraction instead of replaying either gap.
+#
+# v19 (G31 Phase C continuation, same pass, Codex review): v18's own
+# clang-only ``is_abstract`` hybrid-merge provenance stamp used the
+# namespace-qualified key, but ``diff_types.py``'s own lookup only ever
+# reads the bare-name key (matching ``_merge_record_type``'s pre-existing
+# bare convention for this one fact specifically) -- so the v18 stamp was
+# silently inert for any namespaced clang-only type. A warm hybrid cache
+# entry computed under v18 has the wrong (qualified) key recorded, which
+# would keep making a real abstractness transition on a namespaced
+# clang-only type undetectable even after upgrading to the fix. Bumped so
+# the upgrade forces re-extraction instead of replaying the inert stamp.
 
 
 def _get_cache_dir() -> Path:

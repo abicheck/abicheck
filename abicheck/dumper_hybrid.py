@@ -764,8 +764,15 @@ def merge_snapshots(castxml_snap: AbiSnapshot, clang_snap: AbiSnapshot) -> AbiSn
         # clang-sourced, and without this stamp both_known_backed_fact
         # sees no recorded provenance for it and declines to compare a
         # real abstractness transition on a type that exists on both
-        # sides only via clang (Codex review, fresh evidence).
-        provenance[type_fact_key(type_key, "is_abstract")] = "clang"
+        # sides only via clang (Codex review, fresh evidence). BARE key
+        # (not qualified type_key, unlike "deprecated" above): is_abstract
+        # is the one fact `_merge_record_type` deliberately keys bare
+        # (see that function's own comment), because `diff_types._diff_types`
+        # only ever looks it up via the bare `type_fact_key(t_old.name,
+        # "is_abstract")` -- a qualified key here would silently mismatch
+        # that lookup and make this stamp inert for a namespaced type
+        # (Codex review, fresh evidence, third round).
+        provenance[type_fact_key(t.name, "is_abstract")] = "clang"
         for f in t.fields:
             provenance[field_fact_key(type_key, f.name, "deprecated")] = "clang"
             # "default" joined "deprecated" as a genuinely clang-sourced field

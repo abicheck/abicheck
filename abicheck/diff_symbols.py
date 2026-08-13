@@ -1793,18 +1793,14 @@ def _diff_func_override_specifier(old: AbiSnapshot, new: AbiSnapshot) -> list[Ch
     only fire when BOTH sides record it (and only for a member-function form
     that can carry the specifier at all — see ``Function.is_override``'s
     docstring); ``None`` means not applicable / not determined, not "no
-    override". Also gated per-pair on
-    :func:`fact_provenance.both_known_backed_fact`: G31 Phase C's backend
-    audit wired real ``is_override`` extraction into the direct-clang
-    backend too (matching castxml's own "was the `override` keyword
-    written" semantics, via clang's ``OverrideAttr`` child node — see
-    ``dumper_clang._clang_method_is_override``), so this is now a
-    cross-producer, directly-comparable bool (not a backend-specific
-    encoding), the same shape ``deprecated`` already has — the narrower
-    :func:`fact_provenance.both_castxml_backed_fact` would wrongly keep
-    declining a genuine clang-vs-clang or clang-vs-castxml pair. A
-    per-declaration check (rather than a whole-snapshot gate) is what
-    correctly supports a ``--ast-frontend hybrid`` snapshot (G28 Phase 3).
+    override". Gated per-pair on :func:`fact_provenance.both_known_backed_fact`
+    (not the narrower ``both_castxml_backed_fact``): G31 Phase C wired real
+    ``is_override`` extraction into the direct-clang backend too
+    (``dumper_clang._clang_method_is_override``, matching castxml's own "was
+    `override` written" semantics via clang's ``OverrideAttr`` child node),
+    so this is now a cross-producer, directly-comparable bool, the same
+    shape ``deprecated`` already has. A per-declaration check (not a
+    whole-snapshot gate) is what correctly supports ``--ast-frontend hybrid``.
     """
     changes: list[Change] = []
     old_map = _public_functions(old)

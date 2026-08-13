@@ -1204,8 +1204,16 @@ class TestClangOnlyDeclarationProvenance:
 
     def test_clang_only_type_is_abstract_is_stamped(self):
         # Same reasoning as is_override above, for RecordType.is_abstract.
+        # Namespaced (qualified_name != name), unlike a bare-name type --
+        # this is what a previous revision's stamp got wrong: it keyed the
+        # provenance entry by the QUALIFIED type_map_key(t), but
+        # diff_types._diff_types only ever looks is_abstract's provenance up
+        # via the BARE type_fact_key(t_old.name, ...) -- a mismatch that a
+        # bare-named type's own test couldn't catch, since bare == qualified
+        # there (Codex review, fresh evidence, third round).
         clang_t = RecordType(
             name="OnlyInClang",
+            qualified_name="ns::OnlyInClang",
             kind="class",
             size_bits=64,
             is_abstract=True,
@@ -1213,9 +1221,47 @@ class TestClangOnlyDeclarationProvenance:
         castxml = _snap(ast_producer="castxml")
         clang = _snap(types=[clang_t], ast_producer="clang")
         merged = merge_snapshots(castxml, clang)
-        key = type_fact_key("OnlyInClang", "is_abstract")
-        assert merged.fact_provenance[key] == "clang"
-        assert fact_producer(merged, key) == "clang"
+        # The bare key -- matching diff_types.py's own lookup -- must be
+        # stamped, not the qualified one.
+        bare_key = type_fact_key("OnlyInClang", "is_abstract")
+        qualified_key = type_fact_key("ns::OnlyInClang", "is_abstract")
+        assert merged.fact_provenance[bare_key] == "clang"
+        assert fact_producer(merged, bare_key) == "clang"
+        assert qualified_key not in merged.fact_provenance
+
+    def test_clang_only_namespaced_type_abstractness_transition_is_detected_end_to_end(
+        self,
+    ):
+        # The actual regression the bare-vs-qualified-key fix above closes:
+        # a namespaced type existing on BOTH snapshot sides only via clang,
+        # gaining abstractness between old and new, must fire the real
+        # detector through the full compare() pipeline.
+        from abicheck.checker import ChangeKind, compare
+
+        old_clang_only = RecordType(
+            name="Shape",
+            qualified_name="ns::Shape",
+            kind="class",
+            size_bits=64,
+            is_abstract=False,
+        )
+        new_clang_only = RecordType(
+            name="Shape",
+            qualified_name="ns::Shape",
+            kind="class",
+            size_bits=64,
+            is_abstract=True,
+        )
+        old_merged = merge_snapshots(
+            _snap(ast_producer="castxml"),
+            _snap(types=[old_clang_only], ast_producer="clang"),
+        )
+        new_merged = merge_snapshots(
+            _snap(ast_producer="castxml"),
+            _snap(types=[new_clang_only], ast_producer="clang"),
+        )
+        result = compare(old_merged, new_merged)
+        assert ChangeKind.TYPE_BECAME_ABSTRACT in {c.kind for c in result.changes}
 
     def test_clang_only_method_override_transition_is_detected_end_to_end(self):
         from abicheck.checker import ChangeKind, compare
