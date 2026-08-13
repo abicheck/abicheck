@@ -498,7 +498,8 @@ def dump_cmd(so_path: Path | None, headers: tuple[Path, ...], includes: tuple[Pa
              frontend_context: str = "host",
              _resolved_compile_context: CompileContext | None = None,
              _resolved_collect_mode: str | None = None,
-             _resolved_include_labels: dict[Path, str] | None = None) -> None:
+             _resolved_include_labels: dict[Path, str] | None = None,
+             _resolved_lang_explicit: bool | None = None) -> None:
     """Dump ABI snapshot of a shared library to JSON.
 
     \b
@@ -531,6 +532,34 @@ def dump_cmd(so_path: Path | None, headers: tuple[Path, ...], includes: tuple[Pa
         )
     reject_snapshot_compression_conflict(output, snapshot_compression)
     _setup_verbosity(verbose)
+
+    # G31 Phase C follow-up (AGENTS.md "dump --lang c++ is silently discarded
+    # ..." known gap): --lang carries a Click default of "c++" (LANG_DEFAULT),
+    # so the resolved `lang` string alone can never distinguish a genuinely
+    # explicit `--lang c++` request from the unspecified default -- both
+    # produce the identical value. `perform_elf_dump` (and the ELF header-AST
+    # passes it drives) normalizes a non-"c" `lang` to `None` for the common
+    # default case, to preserve auto-detection -- but that squash previously
+    # discarded an explicit request too, since there was nothing here to tell
+    # the two apart. Resolved once, from Click's own parameter-source
+    # bookkeeping, and threaded through so the primary snapshot pass and the
+    # header-graph pass agree on the same explicit-vs-auto-detected decision.
+    #
+    # `_resolved_lang_explicit` (Codex review): the private hook
+    # `_embed_inline_source_side`'s nested `ctx.invoke(dump_cmd, ...)` uses to
+    # hand in an explicitness already computed against *compare*'s own real
+    # ctx -- mirrors `_resolved_compile_context`/`_resolved_collect_mode`/
+    # `_resolved_include_labels` immediately above. Without it, this
+    # ctx.invoke sub-context has no COMMANDLINE parameter source for `lang`
+    # (the same loss those other hooks already exist to work around), so a
+    # `compare --lang c++ --old-sources tree/` side would silently resolve
+    # `lang_explicit=False` here regardless of what the user actually typed.
+    lang_explicit = (
+        _resolved_lang_explicit
+        if _resolved_lang_explicit is not None
+        else click.get_current_context().get_parameter_source("lang")
+        == click.core.ParameterSource.COMMANDLINE
+    )
 
     # ADR-050 D3: parsed before the collect/compile-context resolution below so
     # a bad manifest fails fast, and validated against the *raw* CLI values
@@ -760,6 +789,7 @@ def dump_cmd(so_path: Path | None, headers: tuple[Path, ...], includes: tuple[Pa
             depth=depth, compile_db_context_matched=compile_db_matched,
             include_dependencies=include_dependencies,
             snapshot_compression=snapshot_compression,
+            lang_explicit=lang_explicit,
         )
         return
 
@@ -784,6 +814,7 @@ def dump_cmd(so_path: Path | None, headers: tuple[Path, ...], includes: tuple[Pa
         includes=includes,
         version=version,
         lang=lang,
+        lang_explicit=lang_explicit,
         gcc_path=gcc_path,
         gcc_prefix=gcc_prefix,
         effective_gcc_options=effective_gcc_options,
@@ -1250,6 +1281,7 @@ def _embed_inline_source_side(
     includes: tuple[Path, ...] | list[Path],
     version: str,
     lang: str,
+    lang_explicit: bool = False,
     header_backend: str,
     compile_context: object,
     frontend_explicit: bool,
@@ -1294,6 +1326,17 @@ def _embed_inline_source_side(
     ``--old/new-sources`` tree bypassed ``--debug-root`` entirely (the inline
     dump used its own unset defaults), so a stripped binary on this side still
     lost its DWARF even though the sibling non-inline path was fixed.
+
+    ``lang_explicit`` (G31 Phase C follow-up, Codex review): whether ``lang``
+    is a genuinely explicit ``--lang`` on *compare*'s own real ``ctx``, mirroring
+    ``frontend_explicit``/``nostdinc_explicit`` immediately below — the nested
+    ``ctx.invoke(dump_cmd, ...)`` below has no ``COMMANDLINE`` parameter
+    source of its own for ``lang``, so without this a `compare --lang c++
+    --old-sources tree/` side would silently auto-detect instead of honoring
+    the explicit request on a language-ambiguous header. Forwarded via
+    ``dump_cmd``'s private ``_resolved_lang_explicit`` hook, the same shape
+    ``_resolved_compile_context``/``_resolved_collect_mode``/
+    ``_resolved_include_labels`` already use.
 
     ``include_labels`` (ADR-050 D1, CodeRabbit review): this side's already-
     resolved ``path -> label`` map from a labeled ``--include
@@ -1431,6 +1474,7 @@ def _embed_inline_source_side(
         includes=merged_includes,
         version=version,
         lang=lang,
+        _resolved_lang_explicit=lang_explicit,
         _resolved_compile_context=frozen_cc,
         follow_deps=follow_deps,
         search_paths=search_paths,

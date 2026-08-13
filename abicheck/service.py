@@ -307,6 +307,7 @@ def resolve_input(
     version: str = "",
     lang: str = "c++",
     *,
+    lang_explicit: bool = False,
     is_elf: bool | None = None,
     pdb_path: Path | None = None,
     dwarf_only: bool = False,
@@ -364,6 +365,15 @@ def resolve_input(
         notify: Optional callback for user-facing progress notes (e.g. "following
             a linker script", "no headers provided"); *None* logs to the module
             logger. The CLI passes a ``click.echo(..., err=True)`` wrapper.
+        lang_explicit: Whether *lang* is a genuinely explicit request rather
+            than the request-level default (G31 Phase C follow-up — see
+            :attr:`abicheck.api_types.DumpRequest.lang_explicit`). ``False``
+            (the default) preserves this function's pre-existing behavior:
+            *lang* is honored only when it equals ``"c"``, otherwise the
+            header-AST pass auto-detects. ``True`` forces *lang* on the
+            primary snapshot pass and the header-only graph pass alike, even
+            on a language-ambiguous header where auto-detection would guess
+            wrong.
 
     Raises:
         SnapshotError: If the snapshot cannot be loaded from the input.
@@ -382,6 +392,7 @@ def resolve_input(
             _includes,
             version,
             lang,
+            lang_explicit=lang_explicit,
             dwarf_only=dwarf_only,
             debug_roots=debug_roots,
             enable_debuginfod=enable_debuginfod,
@@ -410,6 +421,7 @@ def resolve_input(
             _includes,
             version,
             lang,
+            lang_explicit=lang_explicit,
             pdb_path=pdb_path,
             dwarf_only=dwarf_only,
             debug_roots=debug_roots,
@@ -488,6 +500,7 @@ def resolve_input(
                     _includes,
                     version,
                     lang,
+                    lang_explicit=lang_explicit,
                     dwarf_only=dwarf_only,
                     debug_roots=debug_roots,
                     enable_debuginfod=enable_debuginfod,
@@ -542,6 +555,7 @@ def _run_dump_uncached(
     version: str = "",
     lang: str = "c++",
     *,
+    lang_explicit: bool = False,
     pdb_path: Path | None = None,
     dwarf_only: bool = False,
     debug_roots: list[Path] | None = None,
@@ -615,10 +629,20 @@ def _run_dump_uncached(
     # anything at all -- with a case-*insensitive* `lang.lower() == "c"`,
     # so the two branches deliberately differ (Codex review, twice: the
     # first pass wrongly assumed PE/Mach-O never normalized `lang` at all).
+    #
+    # G31 Phase C follow-up: `lang_explicit` (from `DumpRequest.lang_explicit`/
+    # `CompareRequest.lang_explicit`) widens the "force" condition beyond a
+    # bare `lang == "c"` -- a genuinely explicit request forces whatever
+    # language the caller named (not just "c"), on both this graph pass and
+    # `_dump_elf`/`_try_header_scoped_dump`'s own primary pass below, so the
+    # two can never silently disagree about which language mode parsed the
+    # library's own headers (AGENTS.md "dump --lang c++ is silently
+    # discarded ..." known gap). `False` (the default) is a no-op: identical
+    # to the pre-existing behavior above.
     _header_graph_lang = (
-        (lang if lang == "c" else None)
+        (lang if (lang_explicit or lang == "c") else None)
         if binary_fmt == "elf"
-        else (lang if lang.lower() == "c" else None)
+        else (lang if (lang_explicit or lang.lower() == "c") else None)
     )
     # An explicit --ast-frontend on the compile context wins over the bare
     # header_backend arg (the latter is the compare-path default carrier).
@@ -656,6 +680,7 @@ def _run_dump_uncached(
             "includes": includes,
             "version": version,
             "lang": lang,
+            "lang_explicit": lang_explicit,
             "pdb_path": pdb_path,
             "dwarf_only": dwarf_only,
             "debug_roots": debug_roots,
@@ -730,6 +755,7 @@ def _run_dump_uncached(
                 _includes,
                 version,
                 lang,
+                lang_explicit=lang_explicit,
                 dwarf_only=dwarf_only,
                 debug_roots=debug_roots,
                 enable_debuginfod=enable_debuginfod,
@@ -786,6 +812,7 @@ def _run_dump_uncached(
                 headers=_headers,
                 includes=_includes,
                 lang=lang,
+                lang_explicit=lang_explicit,
                 pdb_path=pdb_path,
                 header_backend=eff_backend,
                 compile=compile,
@@ -814,6 +841,7 @@ def _run_dump_uncached(
                 includes=_includes,
                 header_backend=eff_backend,
                 lang=lang,
+                lang_explicit=lang_explicit,
                 compile=compile,
                 public_headers=public_headers,
                 public_header_dirs=public_header_dirs,
@@ -883,6 +911,8 @@ def _finish_native_snapshot(
 @functools.wraps(_run_dump_uncached)  # name lookup below so patching sticks
 def _call_run_dump_uncached(*args: Any, **kwargs: Any) -> AbiSnapshot:
     return _run_dump_uncached(*args, **kwargs)
+
+
 run_dump = wrap_run_dump_with_dependency_scope(_call_run_dump_uncached)
 # CodeRabbit: both functools.wraps() above copy __name__ down the chain from _run_dump_uncached, so run_dump.__name__ read as "_run_dump_uncached" -- wrong for any introspecting caller. __signature__ is unaffected.
 run_dump.__name__ = "run_dump"
@@ -901,6 +931,7 @@ def _apply_native_provenance(
     origin stays ``UNKNOWN`` and behaviour is unchanged.
     """
     from .provenance import apply_provenance
+
     return apply_provenance(snap, public_headers, public_header_dirs)
 
 
@@ -1045,6 +1076,11 @@ def _attach_header_graph(
         public_header_paths=[str(p) for p in (public_headers or [])],
         public_dir_paths=[str(p) for p in (public_header_dirs or [])],
         header_paths=[str(p) for p in resolved_headers],
+        # Real per-declaration provenance for a hybrid merge (empty dict on
+        # every other snapshot, a harmless no-op there) — G31 Phase C
+        # hybrid-graph provenance-tagging; see build_header_only_graph's own
+        # docstring and dumper_hybrid.merge_snapshots' "visibility" stamp.
+        fact_provenance=snap.fact_provenance,
     )
     if header_graph_includes and resolved_headers and cc.frontend_context == "host":
         # `ClangHeaderIncludeExtractor` drives a plain `clang -M` per header
@@ -1166,6 +1202,7 @@ def _dump_elf(
     version: str,
     lang: str,
     *,
+    lang_explicit: bool = False,
     dwarf_only: bool = False,
     debug_roots: list[Path] | None = None,
     enable_debuginfod: bool = False,
@@ -1289,7 +1326,14 @@ def _dump_elf(
             gcc_option_tokens=eff_tokens,
             sysroot=cc.sysroot,
             nostdinc=cc.nostdinc,
-            lang=lang if lang == "c" else None,
+            # G31 Phase C follow-up: an explicit request (`lang_explicit`)
+            # forces `lang` here regardless of value, matching this call's
+            # own `_header_graph_lang` sibling in `run_dump` above -- both
+            # must agree on the same explicit-vs-auto-detected decision
+            # (AGENTS.md "dump --lang c++ is silently discarded ..." known
+            # gap). `lang_explicit=False` (the default) is a no-op: identical
+            # to the pre-existing "force only bare 'c'" behavior.
+            lang=lang if (lang_explicit or lang == "c") else None,
             dwarf_only=dwarf_only,
             debug_format=debug_format,
             symbols_only=symbols_only,
@@ -1318,6 +1362,7 @@ def _extract_pdb_debug(
     try:
         from .pdb_metadata import parse_pdb_debug_info
         from .pdb_utils import locate_pdb
+
         pdb_file = locate_pdb(path, pdb_path_override=pdb_path, allow_network=False)
         if pdb_file is not None:
             meta, adv = parse_pdb_debug_info(pdb_file)
@@ -1336,6 +1381,7 @@ def _dump_pe(
     headers: list[Path] | None = None,
     includes: list[Path] | None = None,
     lang: str = "c++",
+    lang_explicit: bool = False,
     pdb_path: Path | None = None,
     header_backend: str = "auto",
     compile: CompileContext | None = None,
@@ -1381,6 +1427,7 @@ def _dump_pe(
             includes or [],
             version,
             lang,
+            lang_explicit=lang_explicit,
             header_backend=header_backend,
             compile=compile,
             public_headers=public_headers,
@@ -1439,6 +1486,7 @@ def _dump_macho(
     headers: list[Path] | None = None,
     includes: list[Path] | None = None,
     lang: str = "c++",
+    lang_explicit: bool = False,
     header_backend: str = "auto",
     compile: CompileContext | None = None,
     public_headers: list[Path] | None = None,
@@ -1476,6 +1524,7 @@ def _dump_macho(
             includes or [],
             version,
             lang,
+            lang_explicit=lang_explicit,
             header_backend=header_backend,
             compile=compile,
             public_headers=public_headers,
@@ -1593,6 +1642,7 @@ def load_env_matrix(path: Path | None) -> EnvironmentMatrix | None:
     if path is None:
         return None
     from .environment_matrix import EnvironmentMatrix
+
     try:
         # from_yaml converts malformed YAML to ValueError, so no yaml import
         # is needed here (abicheck.service has no import-untyped override).
@@ -1823,6 +1873,7 @@ def run_compare(
         contract_mode=contract_mode,
     )
     return run_compare_request(request)
+
 
 # ── Compare pipeline (ADR-055 D1): `run_compare_request`'s two phases live in
 # the leaf module ``service_compare_pipeline`` so the native ``compare`` CLI can

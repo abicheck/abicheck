@@ -158,6 +158,7 @@ def _tu_jobs(n_units: int) -> int:
         return cap
     return auto
 
+
 #: Signature of ``dumper._header_ast_parser`` -- injected by the caller
 #: rather than imported, see this module's own docstring.
 HeaderAstParserFn = Callable[..., "_CastxmlParser | _ClangAstParser"]
@@ -234,6 +235,7 @@ def run_tu_fragment(
         types=tuple(parser.parse_types()),
         enums=tuple(parser.parse_enums()),
         typedefs=parser.parse_typedefs(),
+        typedefs_qualified=parser.parse_typedefs_qualified(),
         constants=parser.parse_constants(),
         ast_producer="clang" if isinstance(parser, _ClangAstParser) else "castxml",
         ast_toolchain=_parser_ast_toolchain(parser),
@@ -527,6 +529,7 @@ class ElfHeaderAstResult:
     types: tuple[RecordType, ...]
     enums: tuple[EnumType, ...]
     typedefs: dict[str, str]
+    typedefs_qualified: dict[str, str]
     constants: dict[str, str]
     ast_producer: str
     ast_toolchain: dict[str, str]
@@ -640,6 +643,7 @@ def resolve_header_ast_result(
             types=fragment.types,
             enums=fragment.enums,
             typedefs=fragment.typedefs,
+            typedefs_qualified=fragment.typedefs_qualified,
             constants=fragment.constants,
             ast_producer=fragment.ast_producer,
             ast_toolchain=fragment.ast_toolchain,
@@ -656,6 +660,7 @@ def resolve_header_ast_result(
         types=merged.types,
         enums=merged.enums,
         typedefs=merged.typedefs,
+        typedefs_qualified=merged.typedefs_qualified,
         constants=merged.constants,
         ast_producer=merged.ast_producer,
         ast_toolchain=merged.ast_toolchain,

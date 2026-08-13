@@ -216,6 +216,7 @@ def _dump_native_binary(
     version: str,
     lang: str,
     *,
+    lang_explicit: bool = False,
     pdb_path: Path | None = None,
     dwarf_only: bool = False,
     debug_format: str | None = None,
@@ -255,6 +256,7 @@ def _dump_native_binary(
             includes,
             version,
             lang,
+            lang_explicit=lang_explicit,
             pdb_path=pdb_path,
             dwarf_only=dwarf_only,
             debug_format=debug_format,
@@ -514,6 +516,7 @@ def _resolve_compare_snapshots(
     old_dump_manifest: DumpManifest | None = None,
     new_dump_manifest: DumpManifest | None = None,
     include_dependencies: bool = False,
+    lang_explicit: bool = False,
 ) -> tuple[AbiSnapshot, AbiSnapshot]:
     """Load both ABI snapshots and (optionally) populate ELF dependency info.
 
@@ -524,6 +527,13 @@ def _resolve_compare_snapshots(
     then ``compare base.json new.so`` compare consistently by default,
     instead of the historical asymmetry (a filtered ``dump`` baseline vs.
     compare's always-unfiltered live-binary dumping).
+
+    ``lang_explicit`` (G31 Phase C follow-up): whether ``lang`` reflects a
+    genuinely explicit ``--lang`` on the command line rather than Click's
+    own default (which is the identical, indistinguishable string) — see
+    ``cli.compare_cmd``'s own detection and
+    :attr:`abicheck.api_types.CompareRequest.lang_explicit`. ``False`` (the
+    default) preserves this function's pre-existing behavior for both sides.
 
     ``header_backend`` is the both-sides default; ``old_header_backend`` /
     ``new_header_backend`` override it for one side only (``None`` = inherit).
@@ -613,6 +623,7 @@ def _resolve_compare_snapshots(
             compile=_side_compile(new_header_backend),
         ),
         lang=lang,
+        lang_explicit=lang_explicit,
         frontend=header_backend,
         dwarf_only=dwarf_only,
         debug_format=debug_format,

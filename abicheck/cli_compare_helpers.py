@@ -787,6 +787,17 @@ def _embed_inline_source_sides(
         ctx.get_parameter_source("header_backend")
         == click.core.ParameterSource.COMMANDLINE
     )
+    # G31 Phase C follow-up (Codex review): --lang has the identical
+    # ctx.invoke-loses-COMMANDLINE-source problem as --ast-frontend/
+    # --nostdinc immediately above -- without this, a `compare --lang c++
+    # --old-sources tree/` side would silently resolve `lang_explicit=False`
+    # in the nested `dump_cmd` invocation below regardless of what the user
+    # actually typed, discarding the explicit request on a
+    # language-ambiguous header exactly like the bug this file's sibling
+    # non-inline path (run_compare's own `lang_explicit`) already fixed.
+    _lang_explicit = (
+        ctx.get_parameter_source("lang") == click.core.ParameterSource.COMMANDLINE
+    )
 
     _src_tmp = tempfile.mkdtemp(prefix="abicheck-compare-src-")
     # Cleanup on context teardown so the temp dir never leaks, even if an
@@ -795,6 +806,7 @@ def _embed_inline_source_sides(
     old_input, old_sources, old_build_info = _embed_inline_source_side(
         ctx, input_path=old_input, sources=old_sources,
         headers=old_h, includes=old_inc, version=old_version, lang=lang,
+        lang_explicit=_lang_explicit,
         header_backend=old_header_backend or header_backend,
         compile_context=compile_context,
         frontend_explicit=_frontend_explicit or old_header_backend is not None,
@@ -817,6 +829,7 @@ def _embed_inline_source_sides(
     new_input, new_sources, new_build_info = _embed_inline_source_side(
         ctx, input_path=new_input, sources=new_sources,
         headers=new_h, includes=new_inc, version=new_version, lang=lang,
+        lang_explicit=_lang_explicit,
         header_backend=new_header_backend or header_backend,
         compile_context=compile_context,
         frontend_explicit=_frontend_explicit or new_header_backend is not None,
@@ -1254,6 +1267,19 @@ def run_compare(
     )
     _setup_verbosity(verbose)
 
+    # G31 Phase C follow-up (AGENTS.md "dump --lang c++ is silently
+    # discarded ..." known gap): --lang carries the same Click default
+    # ("c++", indistinguishable from a genuine --lang c++) that dump_cmd's
+    # own lang_explicit detection exists to resolve — mirrors the
+    # already-established _frontend_explicit/_nostdinc_explicit pattern in
+    # _embed_inline_source_sides below. Threaded through
+    # _resolve_compare_snapshots -> CompareRequest.lang_explicit so a live
+    # ELF/PE/Mach-O side's header-AST pass honors an explicit request on a
+    # language-ambiguous header instead of silently auto-detecting past it.
+    lang_explicit = (
+        ctx.get_parameter_source("lang") == click.core.ParameterSource.COMMANDLINE
+    )
+
     required_symbols, required_symbols_from_file, required_symbols_sha = (
         load_required_symbols(required_symbols_opt, required_symbols_file)
     )
@@ -1567,6 +1593,7 @@ def run_compare(
         old_dump_manifest=old_manifest_obj,
         new_dump_manifest=new_manifest_obj,
         include_dependencies=include_dependencies,
+        lang_explicit=lang_explicit,
     )
 
     suppression, pf = _load_suppression_and_policy(

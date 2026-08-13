@@ -147,6 +147,7 @@ def resolve_side_snapshot(
     evidence: SideEvidence,
     *,
     lang: str,
+    lang_explicit: bool = False,
     header_backend: str,
     fmt: str | None,
     public_headers: list[Path],
@@ -164,6 +165,12 @@ def resolve_side_snapshot(
     :class:`~abicheck.service_compare_evidence.SideEvidence` (headers, compile
     context, dump manifest), then embeds the side's inline L3-L5 build/source
     evidence when it declares any.
+
+    ``lang_explicit`` (G31 Phase C follow-up): whether *lang* reflects a
+    genuinely explicit request rather than a request-level default — see
+    :attr:`abicheck.api_types.CompareRequest.lang_explicit` /
+    :attr:`abicheck.api_types.DumpRequest.lang_explicit`. Forwarded to
+    :func:`abicheck.service.resolve_input` unchanged.
     """
     from . import service
 
@@ -175,6 +182,7 @@ def resolve_side_snapshot(
             includes,
             side.version,
             lang,
+            lang_explicit=lang_explicit,
             is_elf=True if fmt == "elf" else None,
             pdb_path=side.pdb,
             debug_roots=list(side.debug_roots) or None,

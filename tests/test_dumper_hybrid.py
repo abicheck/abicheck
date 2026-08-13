@@ -842,6 +842,73 @@ class TestParamDefaultsProvenance:
         )
 
 
+class TestDeclarationVisibilityProvenance:
+    """G31 Phase C hybrid-graph provenance-tagging: every merged function AND
+    variable also gets a "visibility"-named fact_provenance entry recording
+    which backend contributed the DECLARATION ITSELF (not a per-field value
+    merge like the other entries this module writes) — the one
+    header_graph.build_header_only_graph() reads to stamp a hybrid graph
+    node's own attrs["visibility_provenance"]."""
+
+    def test_castxml_sourced_function_tagged_castxml(self):
+        f = Function(name="foo", mangled="_Z3fooi", return_type="void")
+        castxml = _snap(functions=[f], ast_producer="castxml")
+        clang = _snap(ast_producer="clang")
+        merged = merge_snapshots(castxml, clang)
+        assert (
+            merged.fact_provenance[func_fact_key("_Z3fooi", "visibility")] == "castxml"
+        )
+
+    def test_clang_only_function_tagged_clang(self):
+        cf = Function(name="bar", mangled="_Z3bari", return_type="void")
+        castxml = _snap(ast_producer="castxml")
+        clang = _snap(functions=[cf], ast_producer="clang")
+        merged = merge_snapshots(castxml, clang)
+        assert merged.fact_provenance[func_fact_key("_Z3bari", "visibility")] == "clang"
+
+    def test_castxml_sourced_variable_tagged_castxml(self):
+        v = Variable(name="g", mangled="g", type="int")
+        castxml = _snap(variables=[v], ast_producer="castxml")
+        clang = _snap(ast_producer="clang")
+        merged = merge_snapshots(castxml, clang)
+        assert merged.fact_provenance[var_fact_key("g", "visibility")] == "castxml"
+
+    def test_clang_only_variable_tagged_clang(self):
+        cv = Variable(name="h", mangled="h", type="int")
+        castxml = _snap(ast_producer="castxml")
+        clang = _snap(variables=[cv], ast_producer="clang")
+        merged = merge_snapshots(castxml, clang)
+        assert merged.fact_provenance[var_fact_key("h", "visibility")] == "clang"
+
+    def test_ctor_dtor_reconciled_function_tagged_castxml_under_real_key(self):
+        # Mirrors TestParamDefaultsProvenance's identical case: the
+        # declaration is castxml's even though ctor/dtor reconciliation
+        # rewrote its key to the real clang mangled name.
+        synthetic = f"{SYNTHETIC_CTOR_KEY_PREFIX}ns::Widget(int)"
+        castxml_ctor = Function(
+            name="Widget",
+            mangled=synthetic,
+            return_type="void",
+            params=[Param(name="n", type="int")],
+            access=AccessLevel.PUBLIC,
+        )
+        real_mangled = "_ZN2ns6WidgetC1Ei"
+        clang_ctor = Function(
+            name="Widget",
+            mangled=real_mangled,
+            return_type="void",
+            params=[Param(name="n", type="int")],
+            access=AccessLevel.PUBLIC,
+        )
+        castxml = _snap(functions=[castxml_ctor], ast_producer="castxml")
+        clang = _snap(functions=[clang_ctor], ast_producer="clang")
+        merged = merge_snapshots(castxml, clang)
+        assert (
+            merged.fact_provenance[func_fact_key(real_mangled, "visibility")]
+            == "castxml"
+        )
+
+
 class TestTypeAndFieldFactBackfill:
     def test_type_is_abstract_and_deprecated_from_castxml(self):
         t = RecordType(
@@ -1116,6 +1183,114 @@ class TestClangOnlyDeclarationProvenance:
         result = compare(old_merged, new_merged)
         assert ChangeKind.FUNC_DEPRECATED_ADDED in {c.kind for c in result.changes}
 
+    def test_clang_only_method_is_override_is_stamped(self):
+        # Codex review, fresh evidence (PR #736 follow-up): a clang-only
+        # method's is_override value is genuinely clang-sourced, matching
+        # the deprecated stamp above -- without it, both_known_backed_fact
+        # sees no recorded provenance and silently declines to compare a
+        # real override-specifier transition.
+        clang_f = Function(
+            name="run",
+            mangled="_ZN4Impl3runEv",
+            return_type="void",
+            is_override=True,
+        )
+        castxml = _snap(ast_producer="castxml")
+        clang = _snap(functions=[clang_f], ast_producer="clang")
+        merged = merge_snapshots(castxml, clang)
+        key = func_fact_key("_ZN4Impl3runEv", "is_override")
+        assert merged.fact_provenance[key] == "clang"
+        assert fact_producer(merged, key) == "clang"
+
+    def test_clang_only_type_is_abstract_is_stamped(self):
+        # Same reasoning as is_override above, for RecordType.is_abstract.
+        # Namespaced (qualified_name != name), unlike a bare-name type --
+        # this is what a previous revision's stamp got wrong: it keyed the
+        # provenance entry by the QUALIFIED type_map_key(t), but
+        # diff_types._diff_types only ever looks is_abstract's provenance up
+        # via the BARE type_fact_key(t_old.name, ...) -- a mismatch that a
+        # bare-named type's own test couldn't catch, since bare == qualified
+        # there (Codex review, fresh evidence, third round).
+        clang_t = RecordType(
+            name="OnlyInClang",
+            qualified_name="ns::OnlyInClang",
+            kind="class",
+            size_bits=64,
+            is_abstract=True,
+        )
+        castxml = _snap(ast_producer="castxml")
+        clang = _snap(types=[clang_t], ast_producer="clang")
+        merged = merge_snapshots(castxml, clang)
+        # The bare key -- matching diff_types.py's own lookup -- must be
+        # stamped, not the qualified one.
+        bare_key = type_fact_key("OnlyInClang", "is_abstract")
+        qualified_key = type_fact_key("ns::OnlyInClang", "is_abstract")
+        assert merged.fact_provenance[bare_key] == "clang"
+        assert fact_producer(merged, bare_key) == "clang"
+        assert qualified_key not in merged.fact_provenance
+
+    def test_clang_only_namespaced_type_abstractness_transition_is_detected_end_to_end(
+        self,
+    ):
+        # The actual regression the bare-vs-qualified-key fix above closes:
+        # a namespaced type existing on BOTH snapshot sides only via clang,
+        # gaining abstractness between old and new, must fire the real
+        # detector through the full compare() pipeline.
+        from abicheck.checker import ChangeKind, compare
+
+        old_clang_only = RecordType(
+            name="Shape",
+            qualified_name="ns::Shape",
+            kind="class",
+            size_bits=64,
+            is_abstract=False,
+        )
+        new_clang_only = RecordType(
+            name="Shape",
+            qualified_name="ns::Shape",
+            kind="class",
+            size_bits=64,
+            is_abstract=True,
+        )
+        old_merged = merge_snapshots(
+            _snap(ast_producer="castxml"),
+            _snap(types=[old_clang_only], ast_producer="clang"),
+        )
+        new_merged = merge_snapshots(
+            _snap(ast_producer="castxml"),
+            _snap(types=[new_clang_only], ast_producer="clang"),
+        )
+        result = compare(old_merged, new_merged)
+        assert ChangeKind.TYPE_BECAME_ABSTRACT in {c.kind for c in result.changes}
+
+    def test_clang_only_method_override_transition_is_detected_end_to_end(self):
+        from abicheck.checker import ChangeKind, compare
+
+        old_clang_only = Function(
+            name="run",
+            mangled="_ZN4Impl3runEv",
+            return_type="void",
+            is_override=False,
+        )
+        new_clang_only = Function(
+            name="run",
+            mangled="_ZN4Impl3runEv",
+            return_type="void",
+            is_override=True,
+        )
+        old_merged = merge_snapshots(
+            _snap(ast_producer="castxml"),
+            _snap(functions=[old_clang_only], ast_producer="clang"),
+        )
+        new_merged = merge_snapshots(
+            _snap(ast_producer="castxml"),
+            _snap(functions=[new_clang_only], ast_producer="clang"),
+        )
+        result = compare(old_merged, new_merged)
+        assert ChangeKind.FUNC_OVERRIDE_SPECIFIER_ADDED in {
+            c.kind for c in result.changes
+        }
+
 
 class TestNamespaceQualifiedMerging:
     """Codex review, fresh evidence: merge_snapshots() matched castxml/clang
@@ -1213,17 +1388,13 @@ class TestNamespaceQualifiedMerging:
             name="Foo", qualified_name="b::Foo", kind="class", deprecated="msg"
         )
         castxml = _snap(types=[a_foo_castxml], ast_producer="castxml")
-        clang = _snap(
-            types=[a_foo_clang, b_foo_clang_only], ast_producer="clang"
-        )
+        clang = _snap(types=[a_foo_clang, b_foo_clang_only], ast_producer="clang")
         merged = merge_snapshots(castxml, clang)
 
         assert (
             merged.fact_provenance[type_fact_key("a::Foo", "deprecated")] == "castxml"
         )
-        assert (
-            merged.fact_provenance[type_fact_key("b::Foo", "deprecated")] == "clang"
-        )
+        assert merged.fact_provenance[type_fact_key("b::Foo", "deprecated")] == "clang"
         # The stale-collision shape this fix closes: both used to share the
         # single bare key below.
         assert type_fact_key("Foo", "deprecated") not in merged.fact_provenance
@@ -1257,6 +1428,63 @@ class TestNamespaceQualifiedMerging:
 
         result = compare(old_legacy_hybrid, new_merged)
         assert ChangeKind.TYPE_DEPRECATED_ADDED in {c.kind for c in result.changes}
+
+
+class TestTypedefsQualifiedMerge:
+    """Codex review, fresh evidence (schema v25 follow-up): unlike bare
+    ``typedefs`` (deliberately left verbatim from castxml_snap, same as
+    constants/ELF/PE/Mach-O metadata), ``typedefs_qualified``'s whole
+    purpose is to recover a qualified alias type_reachability.py's scan
+    would otherwise miss -- leaving it castxml-only in a hybrid merge
+    defeats that purpose for any alias only clang's own parse captured."""
+
+    def test_clang_only_qualified_typedef_survives_the_merge(self):
+        castxml = _snap(
+            ast_producer="castxml", typedefs_qualified={"Foo::value_type": "int"}
+        )
+        clang = _snap(
+            ast_producer="clang",
+            typedefs_qualified={"Bar::value_type": "std::string"},
+        )
+        merged = merge_snapshots(castxml, clang)
+        assert merged.typedefs_qualified == {
+            "Foo::value_type": "int",
+            "Bar::value_type": "std::string",
+        }
+
+    def test_castxml_wins_on_a_genuine_key_disagreement(self):
+        castxml = _snap(ast_producer="castxml", typedefs_qualified={"ns::Alias": "int"})
+        clang = _snap(ast_producer="clang", typedefs_qualified={"ns::Alias": "long"})
+        merged = merge_snapshots(castxml, clang)
+        assert merged.typedefs_qualified == {"ns::Alias": "int"}
+
+    def test_clang_only_qualified_typedef_closes_a_real_reachability_gap_end_to_end(
+        self,
+    ):
+        # The actual regression this closes: a public signature spelled
+        # with a qualified alias only clang's own parse captured must
+        # still resolve through the merged hybrid snapshot.
+        from abicheck.model import Function, RecordType
+        from abicheck.type_reachability import directly_referenced_stdlib_types
+
+        castxml = _snap(ast_producer="castxml")
+        clang = _snap(
+            ast_producer="clang",
+            typedefs_qualified={"Api::value_type": "std::string"},
+        )
+        merged = merge_snapshots(castxml, clang)
+        merged = replace(
+            merged,
+            functions=[
+                Function(
+                    name="get",
+                    mangled="get",
+                    return_type="Api::value_type",
+                )
+            ],
+            types=[RecordType(name="std::string", kind="class")],
+        )
+        assert directly_referenced_stdlib_types(merged) == frozenset({"std::string"})
 
 
 class TestFactProvenanceHelpers:

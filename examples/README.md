@@ -1,7 +1,7 @@
 # ABI Scenario Catalog
 
 <!-- BEGIN GENERATED: catalog-headline (keep counts in sync with examples/ground_truth.json) -->
-This directory contains **196 cases** (191 single-library + 5 multi-library bundle cases, the latter tracked under [ADR-023](../docs/contribute/adr/023-bundle-aware-multi-binary-analysis.md)) demonstrating real-world ABI/API break scenarios. Most cases are a minimal, compilable C/C++ example with:
+This directory contains **197 cases** (192 single-library + 5 multi-library bundle cases, the latter tracked under [ADR-023](../docs/contribute/adr/023-bundle-aware-multi-binary-analysis.md)) demonstrating real-world ABI/API break scenarios. Most cases are a minimal, compilable C/C++ example with:
 <!-- END GENERATED: catalog-headline -->
 
 - Paired `v1/` and `v2/` source + headers.
@@ -33,7 +33,7 @@ The catalog drives abicheck's benchmark and serves as an encyclopedia of ABI pit
 |---------|-------|-------------------------|------|
 | BREAKING | 107 | `BREAKING_KINDS` | 🔴 |
 | API_BREAK | 17 | `API_BREAK_KINDS` | 🟠 |
-| COMPATIBLE_WITH_RISK | 30 | `RISK_KINDS` | 🟡 |
+| COMPATIBLE_WITH_RISK | 31 | `RISK_KINDS` | 🟡 |
 | COMPATIBLE (addition) | 9 | `ADDITION_KINDS` | 🟢 |
 | COMPATIBLE (quality) | 21 | `QUALITY_KINDS` | 🟡 |
 | NO_CHANGE | 7 | — | ✅ |
@@ -87,10 +87,10 @@ Commands below use `PYTHONPATH=.`.
 | Check | Command | Executed where | Scope | Result | Status |
 |---|---|---|---:|---|---|
 | Build/autodiscovery | `python -m pytest tests/test_example_autodiscovery.py -v --tb=short -m integration` | CI Linux, gcc/clang | 209 integration items | gcc: 149 passed / 55 skipped / 5 xfailed; clang: 149 passed / 54 skipped / 6 xfailed | Green default single-library build lane. `case115_bit_int_width_changed` needs a `_BitInt`-capable CastXML-bundled Clang; a sandbox with an older bundled Clang (unrelated to the fix in this catalog) sees it fail there instead of building — see `docs/contribute/examples-validation-runbook.md` |
-| Default/debug verdicts | `PYTHONPATH=. python tests/validate_examples.py --toolchain {gcc,clang} --json` | CI Linux, gcc/clang | 196 catalog cases | gcc: 153 PASS / 5 XFAIL / 38 SKIP; clang: 153 PASS / 6 XFAIL / 37 SKIP | Green default/debug verdict lane |
-| Runtime smoke | `PYTHONPATH=. python validation/scripts/run_example_runtime_smoke.py --json` | Linux proof run | 196 catalog cases | 88 DEMONSTRATED / 69 NO_RUNTIME_SIGNAL / 1 BASELINE_SIGNAL / 38 SKIP | Passing; no BUILD_ERROR. The runner now compares each app's baseline exit code against a per-case `runtime_baseline_exit` in `ground_truth.json` (default 0) instead of hardcoding zero, so apps that deliberately return a computed value (e.g. case111's `ets(42).local()` returning `42`) are no longer misread as a broken baseline. `case06_visibility` is the one remaining, intentionally-unwhitelisted case — see "Known validation gaps" below |
-| Release headers | `python tests/validate_examples.py --artifact-variant release-headers --json` | CI Linux artifact | 196 catalog cases | 146 PASS / 5 XFAIL / 45 SKIP | Informational; the false-risk regression on `case61_var_added` (`exported_object_alignment_reduced`) is fixed — CastXML now resolves a variable's natural type alignment as declared-alignment corroboration even without an explicit `alignas` override |
-| Stripped headers | `python tests/validate_examples.py --artifact-variant stripped-headers --json` | CI Linux artifact | 196 catalog cases | 141 PASS / 5 FAIL / 5 XFAIL / 45 SKIP | Informational; reduced-evidence signal-loss backlog (below) |
+| Default/debug verdicts | `PYTHONPATH=. python tests/validate_examples.py --toolchain {gcc,clang} --json` | CI Linux, gcc/clang | 197 catalog cases | gcc: 153 PASS / 5 XFAIL / 39 SKIP; clang: 153 PASS / 6 XFAIL / 38 SKIP | Green default/debug verdict lane |
+| Runtime smoke | `PYTHONPATH=. python validation/scripts/run_example_runtime_smoke.py --json` | Linux proof run | 197 catalog cases | 88 DEMONSTRATED / 69 NO_RUNTIME_SIGNAL / 1 BASELINE_SIGNAL / 39 SKIP | Passing; no BUILD_ERROR. The runner now compares each app's baseline exit code against a per-case `runtime_baseline_exit` in `ground_truth.json` (default 0) instead of hardcoding zero, so apps that deliberately return a computed value (e.g. case111's `ets(42).local()` returning `42`) are no longer misread as a broken baseline. `case06_visibility` is the one remaining, intentionally-unwhitelisted case — see "Known validation gaps" below |
+| Release headers | `python tests/validate_examples.py --artifact-variant release-headers --json` | CI Linux artifact | 197 catalog cases | 146 PASS / 5 XFAIL / 46 SKIP | Informational; the false-risk regression on `case61_var_added` (`exported_object_alignment_reduced`) is fixed — CastXML now resolves a variable's natural type alignment as declared-alignment corroboration even without an explicit `alignas` override |
+| Stripped headers | `python tests/validate_examples.py --artifact-variant stripped-headers --json` | CI Linux artifact | 197 catalog cases | 141 PASS / 5 FAIL / 5 XFAIL / 46 SKIP | Informational; reduced-evidence signal-loss backlog (below) |
 | Build/source smoke | `python tests/validate_examples.py case01 case04 case98 case105 case122 case129 case130 case131 case132 case133 --artifact-variant build-source --json` | CI Linux artifact | 10 representative cases | 10 PASS | Informational, clean. Not full L3-L5 coverage — see "Known validation gaps" |
 
 Counts above are from the most recent full catalog run this table was refreshed against; re-run
@@ -169,7 +169,7 @@ the way it previously did (stale at a 169-case catalog for several releases).
   needs a real compilable `v1`/`v2` pair; of the catalog's L3/L4/L5 cases, only 7
   are `single-library`-owned (`case98`, `case105`, `case122`, `case130`-`case133`)
   and all 7 are in `BUILD_SOURCE_PROOF_CASES` (plus `case01`/`case04`/`case129` as
-  L0/L1 regression smoke for the variant itself). The other 14 L3-L5 cases are
+  L0/L1 regression smoke for the variant itself). The other 15 L3-L5 cases are
   `g20`/`l3l4l5`/`reconcile`-owned: they ship committed snapshot fixtures instead
   of compilable sources by design (some, like `case160`-`162`'s L5 source-graph
   deltas, can't be derived deterministically from a real build) and are proven by
@@ -455,6 +455,7 @@ Expected non-pass buckets are already represented in `ground_truth.json`:
 | [194](case194_header_graph_rename_reconciled/README.md) | Internal Dependency Target Renamed, Safely Reconciled | Risk | 🟡 COMPATIBLE_WITH_RISK (bad practice) |
 | [195](case195_header_graph_ambiguous_rename_not_reconciled/README.md) | Ambiguous Simultaneous Rename, Correctly Not Reconciled | Risk | 🟡 COMPATIBLE_WITH_RISK (bad practice) |
 | [196](case196_header_graph_move_reconciled/README.md) | Declaration Reconciled as Moved Across a Compound Edit | Risk | 🟡 COMPATIBLE_WITH_RISK (bad practice) |
+| [197](case197_header_graph_identity_reconciled/README.md) | Declaration Reconciled as Identity-Reconciled (Header Unchanged) | Risk | 🟡 COMPATIBLE_WITH_RISK (bad practice) |
 <!-- END GENERATED: case-index -->
 
 ---

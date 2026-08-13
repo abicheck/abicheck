@@ -29,6 +29,7 @@ from xml.etree.ElementTree import (
     Element,  # type annotation only; parsing uses defusedxml
 )
 
+from . import dumper_castxml_typedefs as _typedefs_helpers
 from .model import (
     AccessLevel,
     EnumMember,
@@ -1385,12 +1386,8 @@ class _CastxmlParser:
         return out
 
     def _qualified_name(self, el: Any) -> str:
-        """Build a namespace/class-qualified name by walking ``context``.
-
-        ``A::kLimit`` for a constant in namespace ``A``; ``C::kLimit`` for a
-        static data member of ``C``; the bare name for a global. Stops at the
-        global namespace (castxml name ``"::"``).
-        """
+        """Namespace/class-qualified name by walking ``context`` (bare name
+        for a global; stops at the castxml global-namespace name ``"::"``)."""
         parts = [el.get("name", "")]
         ctx_id = el.get("context", "")
         seen: set[str] = set()
@@ -1945,18 +1942,19 @@ class _CastxmlParser:
         return self._type_name(id_)
 
     def parse_typedefs(self) -> dict[str, str]:
-        typedefs: dict[str, str] = {}
-        for el in self._typedef_els:
-            name = el.get("name", "")
-            if not name:
-                continue
-            if self._is_builtin_element(el):
-                continue
-            type_id = el.get("type", "")
-            # Flatten typedef chains: alias → alias2 → int  stored as  alias → int
-            underlying = self._underlying_type_name(type_id) if type_id else "?"
-            typedefs[name] = underlying
-        return typedefs
+        return _typedefs_helpers.parse_typedefs(
+            self._typedef_els, self._is_builtin_element, self._underlying_type_name
+        )
+
+    def parse_typedefs_qualified(self) -> dict[str, str]:
+        """Same mapping as :meth:`parse_typedefs`, keyed by qualified name
+        (see ``AbiSnapshot.typedefs_qualified``'s docstring for why)."""
+        return _typedefs_helpers.parse_typedefs_qualified(
+            self._typedef_els,
+            self._is_builtin_element,
+            self._underlying_type_name,
+            self._qualified_name,
+        )
 
     def _iter_public_typedefs(self) -> list[tuple[str, str, str]]:
         """``(qualified_name, underlying_type, declaring_header)`` for every

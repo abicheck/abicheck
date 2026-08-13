@@ -34,6 +34,7 @@ from abicheck.buildsource.source_graph import (
     is_internal_dependency_node,
     is_public_dependency_node,
 )
+from abicheck.fact_provenance import func_fact_key, var_fact_key
 from abicheck.model import (
     AbiSnapshot,
     EnumType,
@@ -155,6 +156,87 @@ def test_variable_decl_seeded_the_same_way() -> None:
     graph = build_header_only_graph(_snapshot(variables=[var]))
     node = next(n for n in graph.nodes if n.id == "decl://g_count")
     assert node.attrs["visibility"] == "public_header"
+
+
+# ── hybrid-graph provenance tagging (G31 Phase C) ───────────────────────────
+
+
+def test_fact_provenance_stamps_visibility_provenance_on_function_node() -> None:
+    fn = Function(
+        name="pub_api",
+        mangled="_Z7pub_apiv",
+        return_type="void",
+        source_header=PUBLIC_HEADER,
+        origin=ScopeOrigin.PUBLIC_HEADER,
+    )
+    graph = build_header_only_graph(
+        _snapshot(functions=[fn]),
+        fact_provenance={func_fact_key("_Z7pub_apiv", "visibility"): "clang"},
+    )
+    node = next(n for n in graph.nodes if n.id == "decl://_Z7pub_apiv")
+    assert node.attrs["visibility_provenance"] == "clang"
+    # The value itself is unaffected -- only the new, additive attr appears.
+    assert node.attrs["visibility"] == "public_header"
+
+
+def test_fact_provenance_stamps_visibility_provenance_on_variable_node() -> None:
+    var = Variable(
+        name="g_count",
+        mangled="g_count",
+        type="int",
+        source_header=PUBLIC_HEADER,
+        origin=ScopeOrigin.PUBLIC_HEADER,
+    )
+    graph = build_header_only_graph(
+        _snapshot(variables=[var]),
+        fact_provenance={var_fact_key("g_count", "visibility"): "castxml"},
+    )
+    node = next(n for n in graph.nodes if n.id == "decl://g_count")
+    assert node.attrs["visibility_provenance"] == "castxml"
+
+
+def test_no_fact_provenance_leaves_attr_absent() -> None:
+    """No provenance map (a plain, non-hybrid snapshot's real call shape) is
+    a pure no-op -- the additive attr must never appear from nothing."""
+    fn = Function(name="f", mangled="_Z1fv", return_type="void")
+    graph = build_header_only_graph(_snapshot(functions=[fn]))
+    node = next(n for n in graph.nodes if n.id == "decl://_Z1fv")
+    assert "visibility_provenance" not in node.attrs
+
+
+def test_empty_fact_provenance_dict_leaves_attr_absent() -> None:
+    """An empty dict (every non-hybrid AbiSnapshot.fact_provenance default)
+    must behave identically to None, not raise or stamp a spurious attr."""
+    fn = Function(name="f", mangled="_Z1fv", return_type="void")
+    graph = build_header_only_graph(_snapshot(functions=[fn]), fact_provenance={})
+    node = next(n for n in graph.nodes if n.id == "decl://_Z1fv")
+    assert "visibility_provenance" not in node.attrs
+
+
+def test_fact_provenance_with_no_matching_key_leaves_attr_absent() -> None:
+    """A provenance map that simply doesn't name this declaration (e.g. it
+    names a DIFFERENT mangled symbol) must not stamp anything either."""
+    fn = Function(name="f", mangled="_Z1fv", return_type="void")
+    graph = build_header_only_graph(
+        _snapshot(functions=[fn]),
+        fact_provenance={func_fact_key("_Z9unrelatedv", "visibility"): "clang"},
+    )
+    node = next(n for n in graph.nodes if n.id == "decl://_Z1fv")
+    assert "visibility_provenance" not in node.attrs
+
+
+def test_fact_provenance_with_no_mangled_name_leaves_attr_absent() -> None:
+    """A declaration with no recorded mangled symbol still seeds a node --
+    _decl_identity falls back to the bare name -- but there's no mangled key
+    to look up in fact_provenance, so the lookup must be skipped entirely
+    rather than raising or matching on an empty string."""
+    fn = Function(name="f", mangled="", return_type="void")
+    graph = build_header_only_graph(
+        _snapshot(functions=[fn]),
+        fact_provenance={func_fact_key("", "visibility"): "clang"},
+    )
+    node = next(n for n in graph.nodes if n.id == "decl://f")
+    assert "visibility_provenance" not in node.attrs
 
 
 # ── type-node + edge folding (ast_root supplied) ────────────────────────────

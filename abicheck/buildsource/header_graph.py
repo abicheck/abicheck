@@ -92,6 +92,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
+from ..fact_provenance import func_fact_key, var_fact_key
 from ..model import AbiSnapshot, ScopeOrigin
 from ..provenance import build_public_set, classify_origin
 from .call_graph import augment_graph_with_calls, parse_clang_ast_calls
@@ -523,6 +524,7 @@ def build_header_only_graph(
     public_header_paths: list[str] | None = None,
     public_dir_paths: list[str] | None = None,
     header_paths: list[str] | None = None,
+    fact_provenance: dict[str, str] | None = None,
 ) -> SourceGraphSummary:
     """Build a header-only semantic graph from an L2 :class:`AbiSnapshot`.
 
@@ -545,6 +547,30 @@ def build_header_only_graph(
     point). Without this, such a header would get no node at all, leaving a
     later :func:`ClangHeaderIncludeExtractor` include edge with no valid
     source endpoint to attach to.
+
+    *fact_provenance* is *snapshot*'s own ``AbiSnapshot.fact_provenance`` map
+    (empty/``None`` for a single-backend snapshot, real for a
+    ``--ast-frontend hybrid`` merge) — G31 Phase C's hybrid-graph
+    provenance-tagging. A hybrid snapshot's ``source_decl`` node ``attrs``
+    already carries ``visibility`` (the entity's own ``ScopeOrigin``, unified
+    identically for a castxml-primary or clang-only-appended declaration by
+    ``provenance.apply_provenance()`` after the merge — so the value itself
+    never differs by backend); what it doesn't carry is WHICH backend that
+    entity's declaration record came from in the first place, which is the
+    one thing a hybrid merge can't unify away (a clang-only-appended function
+    exists in the graph at all only because clang, not castxml, saw it).
+    When *fact_provenance* names a node's declaration (via
+    ``fact_provenance.func_fact_key``/``var_fact_key(mangled, "visibility")``
+    — see ``dumper_hybrid.merge_snapshots``'s own "Declaration-existence
+    provenance" doc bullet for what writes this), the node's ``attrs`` also
+    gets a ``visibility_provenance`` entry (``"castxml"``/``"clang"``) — pure
+    enrichment, additive only, never changing an existing attr's meaning or
+    absent for a non-hybrid/unrecorded declaration. No current L5 detector
+    reads it; it exists so a future one can discount/flag a RISK finding
+    resting on a clang-backfilled-only declaration specifically, the same
+    class of "this finding's evidence, verify it if that matters"
+    annotation ``LAYOUT_UNVERIFIABLE`` already provides for layout facts
+    (see AGENTS.md's "Findings emitted from absent evidence" entry).
     """
     graph = SourceGraphSummary()
     header_segs, dir_segs, have_public_set = build_public_set(
@@ -577,11 +603,24 @@ def build_header_only_graph(
         if not identity:
             return
         node_id = _decl_node_id(identity)
-        attrs = (
+        attrs: dict[str, Any] = (
             {"visibility": entity.origin.value}
             if entity.origin != ScopeOrigin.UNKNOWN
             else {}
         )
+        if fact_provenance:
+            mangled = getattr(entity, "mangled", "")
+            if mangled:
+                # A mangled symbol name is either a function's or a
+                # variable's, never genuinely both (Itanium/MSVC mangling
+                # encodes the signature), so trying the function key first
+                # and falling back to the variable key is safe -- no runtime
+                # isinstance/import needed for a TYPE_CHECKING-only pair.
+                origin_producer = fact_provenance.get(
+                    func_fact_key(mangled, "visibility")
+                ) or fact_provenance.get(var_fact_key(mangled, "visibility"))
+                if origin_producer:
+                    attrs["visibility_provenance"] = origin_producer
         graph.add_node(
             GraphNode(
                 id=node_id,

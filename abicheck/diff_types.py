@@ -68,7 +68,7 @@ from .elf_symbol_filter import (
     exported_symbol_names,
 )
 from .fact_provenance import (
-    both_castxml_backed_fact,
+    both_known_backed_fact,
     enum_fact_key,
     type_fact_key,
 )
@@ -299,11 +299,16 @@ def _diff_types(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
                 new_funcs,
                 old_types,
                 new_types,
-                # Per-type key, not the whole-snapshot _both_castxml_backed:
-                # correctly supports a --ast-frontend hybrid snapshot (G28
-                # Phase 3), where is_abstract is castxml-backed per
-                # declaration, not uniformly across the whole snapshot.
-                castxml_backed=both_castxml_backed_fact(
+                # Per-type key, not a whole-snapshot gate: correctly supports
+                # a --ast-frontend hybrid snapshot (G28 Phase 3), where
+                # is_abstract's producer is recorded per declaration, not
+                # uniformly across the whole snapshot. both_known_backed_fact
+                # (not the narrower both_castxml_backed_fact): G31 Phase C's
+                # backend audit wired real is_abstract extraction into the
+                # direct-clang backend too (dumper_clang._clang_record_is_
+                # abstract, from clang's own definitionData.isAbstract), so
+                # this is now a cross-producer, directly-comparable bool.
+                castxml_backed=both_known_backed_fact(
                     old, new, type_fact_key(name, "is_abstract")
                 ),
                 cv_facts_reliable=cv_facts_reliable,
@@ -465,12 +470,14 @@ def _append_type_abstract_changes(
     Tri-state, same rationale as ``_append_type_finality_changes``: only fire
     when BOTH sides record it; ``None`` means the dumper couldn't determine
     it (DWARF/symbols-only mode, older snapshots, or an opaque record with no
-    member list to have judged it from) rather than "not abstract". Unlike
-    ``is_final`` (populated by both the castxml and clang header backends),
-    ``is_abstract`` is castxml-only today — the caller (``_diff_type_pair``)
-    additionally gates this call on ``castxml_backed`` so a clang-parsed
-    side's unconditional ``None`` is never misread as "no longer abstract"
-    (Codex review, PR #582).
+    member list to have judged it from) rather than "not abstract". Both the
+    castxml and direct-clang header backends now populate ``is_abstract``
+    (G31 Phase C backend audit; previously clang-only-``None``) — the caller
+    (``_diff_type_pair``) still gates this call on ``castxml_backed`` (now
+    computed via ``both_known_backed_fact``, not the narrower
+    ``both_castxml_backed_fact``) so a legacy or unresolved-producer side's
+    unconditional ``None`` is never misread as "no longer abstract" (Codex
+    review, PR #582).
     """
     if t_old.is_abstract is None or t_new.is_abstract is None:
         return

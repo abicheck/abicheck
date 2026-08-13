@@ -244,9 +244,10 @@ class Function:
     deprecated: str | None = None
     # Explicit C++11 `override` specifier on a virtual method declaration.
     # Tri-state like is_explicit/is_hidden_friend: True/False = captured;
-    # None = dumper/loader does not know (older snapshots, non-castxml
-    # producers, or a non-virtual/non-method declaration for which the
-    # specifier is not applicable).
+    # None = dumper/loader does not know (older snapshots, DWARF/symbols-only
+    # mode, or a non-virtual/non-method declaration for which the specifier
+    # is not applicable). Populated by both header backends since G31 Phase C
+    # (castxml's own `attributes` regex; clang's `OverrideAttr` child node).
     is_override: bool | None = None
     # Qualified name of the class whose body declares this friend (the
     # `befriending` owner in castxml terms), e.g. "ns::Foo". None when the
@@ -435,9 +436,10 @@ class RecordType:
     qualified_name: str | None = None
     # Whether the class/struct declares at least one pure virtual function
     # (making it abstract — cannot be instantiated). Tri-state like
-    # ``is_final``: True/False = captured (castxml's `abstract` attribute);
-    # None = dumper/loader could not determine (DWARF/symbols-only mode,
-    # older snapshots). The diff skips comparison when either side is None.
+    # ``is_final``: True/False = captured (castxml's `abstract` attribute;
+    # clang's `definitionData.isAbstract` since G31 Phase C); None =
+    # dumper/loader could not determine (DWARF/symbols-only mode, older
+    # snapshots). The diff skips comparison when either side is None.
     is_abstract: bool | None = None
     # See Function.deprecated for the message-string convention.
     deprecated: str | None = None
@@ -567,11 +569,11 @@ class AbiSnapshot:
     elf_only_mode: bool = False  # True when dumped without headers (all functions are ELF_ONLY provenance)
     from_headers: bool = False  # True when the ABI surface was parsed from public headers (castxml/AST), as opposed to DWARF debug info or the symbol table. Drives the HEADER_AWARE evidence tier — DWARF-derived declarations populate the same functions/types lists but must NOT be mistaken for header-level evidence.
     # Which L2 header-AST backend produced this snapshot ("castxml" | "clang" |
-    # "hybrid"), set only when from_headers is True. Some facts are captured by
-    # only one backend today (RecordType.is_abstract, Function.is_override —
-    # castxml-only; see dumper_clang.py for why deprecated/EnumType.is_scoped/
-    # TypeField.default are NOT in this list despite originally being
-    # castxml-only too, G31 Phase C closed that gap for all three);
+    # "hybrid"), set only when from_headers is True. Some facts were captured
+    # by only one backend originally (deprecated/EnumType.is_scoped/
+    # TypeField.default/RecordType.is_abstract/Function.is_override —
+    # castxml-only; see dumper_clang.py — G31 Phase C's backend audit closed
+    # that gap for all five, across two passes);
     # TypeField.default and Param.default (both now cross-producer but NOT
     # cross-comparable — castxml keeps the verbatim source expression, clang
     # a literal/structural fingerprint) still need detectors to gate on BOTH
@@ -1053,6 +1055,30 @@ class AbiSnapshot:
     # build, without touching the irrecoverable ambiguity of an old,
     # untagged snapshot.
     dependency_scope: str | None = field(default=None, kw_only=True)
+
+    # Fully-qualified typedef alias -> underlying type name (schema v25,
+    # G31 Phase C). Additive twin of ``typedefs`` above, not a replacement:
+    # ``typedefs`` is keyed by *bare* (unqualified) name on both header
+    # backends, so two distinct member typedefs sharing a bare spelling in
+    # different classes/namespaces (e.g. two unrelated ``value_type``
+    # member aliases — an extremely common STL-container-shaped pattern)
+    # silently collide, and whichever declaration a backend visits last
+    # wins; the other's aliasing information is dropped from the snapshot
+    # entirely with no way to recover it downstream (see AGENTS.md's "Known
+    # gaps" entry for the full incident history). Since a qualified name is
+    # unique per declaration, this dict cannot suffer that collision — both
+    # header backends populate it using the same scope-joining they already
+    # use for every other declaration kind, so it carries no *new*
+    # collision-avoidance logic of its own, just a different key shape.
+    # ``typedefs`` itself is deliberately left untouched (same key, same
+    # values, same silent-overwrite behavior) so no existing consumer's
+    # behavior changes — this is a pure addition for a consumer able to use
+    # qualified identity, not a schema replacement. Empty for every
+    # snapshot produced by a DWARF-only dump (which never had per-class
+    # qualified typedef scoping in the first place) and for any snapshot
+    # predating this field. See ``type_reachability_spelling.
+    # _typedef_spelling_targets`` for the first consumer.
+    typedefs_qualified: dict[str, str] = field(default_factory=dict, kw_only=True)
 
     # Runtime-only provenance qualifier (not serialized — popped in
     # snapshot_to_dict). True when ``from_headers`` was *inferred* for a legacy

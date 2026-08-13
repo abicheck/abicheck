@@ -31,13 +31,13 @@ compatibility rules, and its top-level structure.
 ## Schema version
 
 Every snapshot carries a top-level **`schema_version`** field — a single
-**integer** (not `MAJOR.MINOR`). The current value is **`24`** (see
+**integer** (not `MAJOR.MINOR`). The current value is **`25`** (see
 `abicheck/serialization.py`'s `SCHEMA_VERSION` for the authoritative,
 up-to-date value and the full per-version history comment).
 
 ```json
 {
-  "schema_version": 24,
+  "schema_version": 25,
   "library": "libfoo.so.1",
   "version": "1.2.3"
 }
@@ -83,7 +83,13 @@ System V spelling; see `dumper_clang_qualifiers._clang_param_is_va_list`),
 and (v24) whether the castxml backend's `Variable.access` facts are
 reliable (`castxml_var_access_facts_reliable`, G31 Phase C continued — no
 backend had populated this fact at all before this version; see
-`dumper_castxml._CastxmlParser._access_level`).
+`dumper_castxml._CastxmlParser._access_level`), and (v25) a fully-qualified-
+name-keyed twin of `typedefs` (`AbiSnapshot.typedefs_qualified`, G31 Phase C
+continued) that closes a bare-name collision between two member typedefs
+sharing a spelling in different classes/namespaces — needs no reliability
+flag, since an empty dict degrades identically to "no typedefs at all" for
+a pre-v25 snapshot, unlike the real-but-wrong scalar defaults v19-v23 above
+guard against.
 
 ### Forward / backward compatibility
 
@@ -94,7 +100,7 @@ is determined entirely by comparing the file's `schema_version` against the
 | File `schema_version` | Behavior on load |
 |-----------------------|------------------|
 | **Missing** | Treated as `1` (the pre-versioning format) and loaded normally. |
-| **Older or equal** to this build (`<= 24`) | Loaded cleanly. Fields introduced by newer versions are absent and fall back to their defaults (`None`, empty, or a tri-state `None` that suppresses the detectors depending on that evidence). No warning. |
+| **Older or equal** to this build (`<= 25`) | Loaded cleanly. Fields introduced by newer versions are absent and fall back to their defaults (`None`, empty, or a tri-state `None` that suppresses the detectors depending on that evidence). No warning. |
 | **Newer** than this build, **and** `< 14` | Loaded **best-effort** with a `UserWarning` ("Data may be incomplete or misinterpreted. Upgrade abicheck…"). The load is **not** aborted — unrecognised keys are ignored and recognised keys are read. |
 | **Newer** than this build, **and** `>= 14` | **Hard-rejected** — `IncompatibleSnapshotSchemaError` — instead of warn-and-continue. |
 
@@ -159,7 +165,7 @@ serializer (`abicheck/serialization.py`) from the `AbiSnapshot` model
 
 | Key | Type | Meaning |
 |-----|------|---------|
-| `schema_version` | int | Snapshot format version (currently `24`). |
+| `schema_version` | int | Snapshot format version (currently `25`). |
 | `library` | string | Library identity, e.g. `libfoo.so.1`. |
 | `version` | string | Library version string, e.g. `1.2.3`. |
 | `source_path` | string \| null | Original path the snapshot was taken from. |
@@ -241,7 +247,8 @@ gets backfilled, only report on it.
 | `variables` | array | Exported global/static variables. |
 | `types` | array | Records (struct/class/union) with fields, bases, vtable, and layout descriptors. |
 | `enums` | array | Enumerations with members and underlying type. |
-| `typedefs` | object | Typedef name → underlying type. |
+| `typedefs` | object | Typedef name → underlying type. Bare-name-keyed; two distinct member typedefs sharing a spelling in different classes/namespaces collide onto one key (see `typedefs_qualified`). |
+| `typedefs_qualified` | object | Fully-qualified-name-keyed twin of `typedefs` (schema v25) — collision-free. Empty for a pre-v25 snapshot or one produced without per-class qualified typedef scoping (e.g. DWARF-only). |
 | `constants` | object | Preprocessor/compile-time constants (name → value). |
 
 ### Evidence-tier and mode flags
@@ -289,7 +296,7 @@ files:
 | | Snapshot (`dump`) | Comparison report (`compare --format json`) |
 |-|-------------------|---------------------------------------------|
 | **Version field** | `schema_version` | `report_schema_version` |
-| **Type** | integer (currently `24`) | string `MAJOR.MINOR` (e.g. `1.0`) |
+| **Type** | integer (currently `25`) | string `MAJOR.MINOR` (e.g. `1.0`) |
 | **Describes** | one library's ABI surface | the diff between two snapshots |
 
 A snapshot has no `report_schema_version`, and a report has no

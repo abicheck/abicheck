@@ -1,0 +1,203 @@
+# Case 197: Declaration Reconciled as Identity-Reconciled (Header Unchanged)
+
+**Category:** Risk (Source Graph / Reconciliation) | **Verdict:** 🟡 COMPATIBLE_WITH_RISK
+
+## Verdict and consumer impact
+
+This is the sibling scenario to
+[case196](../case196_header_graph_move_reconciled/README.md), isolating the
+*other* outcome ADR-048's graph reconciliation can classify a genuine
+node-identity change into. A private, never-exported internal helper
+`demo::detail::helper` keeps its exact qualified name *and* its declaring
+header (`include/demo/detail.h`, unchanged on both sides of this fixture) —
+only its parameter type changes from `int` to `long`, which moves its
+Itanium mangled name (`_ZN4demo6detail6helperEi` →
+`_ZN4demo6detail6helperEl`) and therefore the L5 graph node's own id. Because
+the qualified name is unchanged, the alias tier still pairs the two nodes —
+but because the declaring file did *not* change this time,
+`graph_reconcile._classify_outcome` falls to its residual branch (neither
+`renamed` nor `moved` individually fired) and classifies the outcome as
+`declaration_identity_reconciled` rather than `declaration_moved`.
+
+This is the identical fixture design as case196 — same private+inline
+helper, same public inline caller, same new-side-only dependency edge, same
+real `source_graph.mark_source_edges_extractor_coverage()` certification —
+with exactly one variable held constant: the declaring header path. Case196
+varies both the signature *and* the header path to reach `declaration_moved`;
+this case varies only the signature, holding the header path fixed, to reach
+`declaration_identity_reconciled` — the two cases together cover both
+non-"pure-rename" outcomes `_classify_outcome` can produce for a
+signature-perturbed node.
+
+A public **inline** function, `demo::process`, genuinely starts calling the
+helper — only on the **new** side of this fixture — for the same reason
+case196's does: an inline caller's body is emitted into every consumer TU
+that includes the header, so its call is consumer-visible under any
+reasonable reachability notion, sidestepping the question of which
+reachability predicate a given detector happens to use.
+
+`demo::detail::helper` is deliberately **inline too**, for the same
+linkability reason case196 documents: since `demo::process`'s body
+(including its call to `detail::helper`) is emitted into *every consumer's
+own* translation unit, an ordinary out-of-line, non-exported
+`detail::helper` would leave that consumer-emitted call as an unresolved
+external symbol reference — a real link failure, not a purely internal,
+risk-only change. Making `detail::helper` inline too means its own body is
+*also* emitted into that same consumer TU, so the call resolves locally
+with no external symbol needed at all.
+
+Both fixture surfaces carry a `coverage.fact_set`/`fact_family_states`
+rollup naming the one `source_edges` producer whose coverage genuinely
+matches a full, unfiltered call/type-graph replay
+(`source_graph._FULL_WALK_SOURCE_EDGES_PRODUCER`), certified through the
+*real* `source_graph.mark_source_edges_extractor_coverage()` helper rather
+than a hand-forced `extractor_passes["call_graph"] = True`. With both sides
+genuinely certified this way, the old side's zero calls is a **confirmed**
+zero and the new side's one call is a **genuinely new** dependency.
+`source_graph_findings._internal_dependency_findings` (the
+`public_api_internal_dependency_added` producer, demonstrated in
+[case160](../case160_public_api_internal_dep_added/README.md)) therefore
+correctly fires here, alongside `graph_reconcile`'s own
+`declaration_identity_reconciled` on the helper.
+
+The helper is deliberately **private**, for the same reason case196's is: a
+*public* function's mangled-name-moving signature change is itself a real,
+independent BREAKING change, which would contradict `ground_truth.json`'s
+invariant that one canonical verdict applies to the scenario a case
+describes. With the identity-perturbing edit confined to a
+`private_header`-visibility declaration never present in the exported
+symbol table, a real end-to-end `compare()` of this exact scenario has
+nothing BREAKING to contradict — `COMPATIBLE_WITH_RISK` is the genuinely
+correct canonical answer, carried entirely by the two RISK-tier L5 findings
+this fixture reproduces.
+
+## Old/new diff
+
+| v1 (conceptual) | v2 (conceptual) |
+|------|------|
+| `// include/demo/api.h`<br>`#include "demo/detail.h"`<br>`inline void process() { /* does not call helper yet */ }`<br><br>`// include/demo/detail.h`<br>`namespace detail { inline void helper(int) { /* ... */ } }` | `// include/demo/api.h`<br>`#include "demo/detail.h"`<br>`inline void process() { detail::helper(1L); }`<br><br>`// include/demo/detail.h`<br>`namespace detail { inline void helper(long) { /* ... */ } }` |
+
+This case ships a hand-built pair of evidence-model fixtures (`old.json` /
+`new.json`, `SourceGraphSummary` objects) instead of compiled `v1`/`v2`
+sources. Like case196, these fixtures are produced by running real
+`SourceEntity`/`BuildEvidence` facts through the actual production fold
+(`source_graph.build_source_graph`) — the same function `dump --sources`/
+`--build-info` calls — so the two node ids are genuinely distinct for the
+reason a real extractor would make them distinct, not because the generator
+invented an artificial id. See
+[`scripts/gen_l3l4l5_examples.py`](../../scripts/gen_l3l4l5_examples.py).
+
+## abicheck command
+
+There is no compiled binary or header pair to point `abicheck compare` at —
+the fixture is a raw `SourceGraphSummary`, the same evidence object
+`dump --sources`/`--build-info` would embed inside a real snapshot. The
+reproducible command runs abicheck's source-graph diff function directly:
+
+```bash
+python3 -c "
+import json
+from abicheck.buildsource.source_graph import SourceGraphSummary, diff_source_graph_findings
+old = SourceGraphSummary.from_dict(json.load(open('old.json')))
+new = SourceGraphSummary.from_dict(json.load(open('new.json')))
+for c in diff_source_graph_findings(old, new):
+    print(c.kind.value, c.symbol, c.old_value, '->', c.new_value)
+"
+```
+
+## Expected abicheck finding
+
+```text
+public_api_internal_dependency_added demo::process no internal dependency -> reaches 1 internal decl(s)/type(s)
+declaration_identity_reconciled demo::detail::helper demo::detail::helper -> demo::detail::helper
+```
+
+Verdict: COMPATIBLE_WITH_RISK — both are pure L5-evidence risk annotations.
+Because the identity-perturbing edit lands on a `private_header`-visibility
+declaration, a real binary comparison of this exact scenario has no
+BREAKING/API_BREAK finding to sit alongside them; reconciliation only
+explains/localizes, it never suppresses or replaces another finding
+(ADR-028 D3).
+
+## Minimum evidence
+
+`min_evidence: L5` — recognizing the two nodes as "the same declaration,
+resignatured" instead of an unrelated remove+add pair requires the derived
+source graph's canonical-identity/alias matching (G31 Phase B, ADR-048):
+both nodes share the qualified name `demo::detail::helper`. No lower
+evidence tier carries graph node identity at all.
+
+## Why abicheck catches it
+
+`abicheck.buildsource.graph_reconcile` runs canonical-identity and
+graph-reconciliation matching between the old and new source graphs. Here,
+the qualified name is unchanged on both sides, so the alias tier resolves
+the match directly. `graph_reconcile._classify_outcome` then compares each
+side's declaring file, recovered from the real `SOURCE_DECLARES` edge
+`build_source_graph` creates from each function's `SourceLocation`: unlike
+case196, the file is *also* unchanged here — neither the `renamed`
+condition (name changed) nor the `moved` condition (file changed) holds
+individually, so the outcome falls to the residual branch and is classified
+`declaration_identity_reconciled`. The `demo::process` →
+`demo::detail::helper` `DECL_CALLS_DECL` edge exists only in the new graph,
+and both graphs mark their call-graph pass as confirmed (so the old side's
+absence is a proven zero, not missing evidence): this satisfies
+`graph_reconcile._public_reachable_ids`'s gate (a purely-internal,
+never-publicly-reached signature change would otherwise be suppressed
+rather than reported as RISK) *and* is itself the genuinely-new dependency
+`source_graph_findings._internal_dependency_findings` correctly credits as
+newly reached.
+
+## Runtime failure demonstration
+
+There's no `app.c` here and no crash to demonstrate — `demo::detail::helper`
+is never exported as a symbol, and (being inline itself) resolves entirely
+within each consumer's own translation unit, so no consumer binary ever
+references it as an external symbol and no real binary-level break exists
+to demonstrate. The real-world scenario is a CI job that runs abicheck with
+`--sources`/`--build-info` evidence across two releases and posts the
+findings to a PR: without reconciliation, a reviewer sees an unexplained
+"`demo::detail::helper` removed, `demo::detail::helper` added" pair (same
+name, same header, different mangled symbol — easy to misread as an
+unrelated pair of internal declarations, or even as an extraction glitch
+since the header didn't move) and has to manually confirm whether it
+matters; with it, the PR comment notes the pair is the same internal
+declaration, resignatured in place, alongside a separate note that
+`demo::process` picked up a new internal dependency in the same release —
+legibility for an entirely internal refactor, not a break to chase down.
+
+## Safe redesign
+
+No fix needed — `demo::detail::helper` is a private implementation detail.
+`demo::process` being inline does mean its body — including the call to
+`helper` — is compiled into each consumer's own translation unit (that
+consumer-compiled dependency is exactly what the RISK finding above
+reports); what stays invisible to every consumer is `helper` itself: it is
+never independently exported or nameable, so no consumer links against it
+as a symbol or could reference it directly even if it wanted to. If this
+helper needs to become part of the public API, promote it deliberately
+(move its declaration to a public header, export it) rather than relying
+on it staying accidentally reachable only through `demo::process`'s own
+translation unit.
+
+**Real-world example:** resignaturing a private helper in place (no header
+reorganization involved) is routine during ordinary internal refactors;
+without a reconciliation step, a generated changelog or ABI report would
+otherwise list the pair as two unrelated, unexplained internal symbol
+changes — indistinguishable from a genuine removal-plus-unrelated-addition.
+
+## Cross-tool comparison
+
+`abidiff`/`abi-compliance-checker` operate on compiled binaries and debug
+info; neither has an equivalent to abicheck's source-graph canonical-identity
+and reconciliation machinery, and neither would see anything here at all —
+`demo::detail::helper` is entirely internal and outside either tool's
+ABI-surface scope regardless. This finding and its reconciliation are unique
+to abicheck's L5 build-source evidence layer (ADR-048). Contrast with
+[case196](../case196_header_graph_move_reconciled/README.md) (the sibling
+case where the declaring header *also* changes, reached instead via the
+`declaration_moved` outcome), and with
+[case194](../case194_header_graph_rename_reconciled/README.md)/
+[case195](../case195_header_graph_ambiguous_rename_not_reconciled/README.md)
+(pure renames, no signature change, resolved via the weaker
+structural-context tier or deliberately left unreconciled).

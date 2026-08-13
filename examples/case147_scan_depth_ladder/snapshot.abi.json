@@ -221,7 +221,7 @@
   "platform": null,
   "python_api": null,
   "python_ext": null,
-  "schema_version": 24,
+  "schema_version": 25,
   "scope_fallback": null,
   "source_mtime": null,
   "source_mtime_epoch": false,
@@ -229,6 +229,7 @@
   "source_size": null,
   "sycl": null,
   "typedefs": {},
+  "typedefs_qualified": {},
   "types": [
     {
       "alignment_bits": null,

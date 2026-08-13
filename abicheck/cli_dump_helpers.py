@@ -1284,6 +1284,7 @@ def handle_non_elf_dump(
     compile_db_context_matched: bool = False,
     include_dependencies: bool = False,
     snapshot_compression: str = "auto",
+    lang_explicit: bool = False,
 ) -> None:
     """Handle the PE/Mach-O native dump path and output writing (split from cli.py).
 
@@ -1348,6 +1349,7 @@ def handle_non_elf_dump(
             list(eff_includes),
             version,
             lang,
+            lang_explicit=lang_explicit,
             pdb_path=pdb_path,
             public_headers=list(public_headers),
             public_header_dirs=list(public_header_dirs),
@@ -1571,6 +1573,7 @@ def perform_elf_dump(
     include_labels: dict[Path, str] | None = None,
     include_dependencies: bool = False,
     snapshot_compression: str = "auto",
+    lang_explicit: bool = False,
 ) -> None:
     """Run the ELF dump pipeline and write output.
 
@@ -1624,8 +1627,25 @@ def perform_elf_dump(
     :func:`abicheck.dumper_scoping.scope_snapshot_excluding_dependencies`;
     this flag opts out and keeps the old, unfiltered full dump — see that
     module's docstring for exactly what "dependency" means here.
+
+    ``lang_explicit`` (G31 Phase C follow-up, AGENTS.md "dump --lang c++ is
+    silently discarded ..." known gap): whether the caller's ``lang`` came
+    from a genuine ``--lang`` on the command line rather than Click's
+    ``LANG_DEFAULT`` fallback -- the two are otherwise indistinguishable,
+    since the default itself is the non-empty string ``"c++"``. Both the
+    primary snapshot's clang header-AST pass and the header-graph pass below
+    derive their own ``force_cpp`` decision from ``lang`` normalized the same
+    way, so an explicit request is honored by both instead of only the
+    (unsquashed) header-graph pass, and a non-explicit default still lets
+    auto-detection run on both instead of one unconditionally forcing C++.
     """
     compiler = "cc" if lang == "c" else "c++"
+    # See the ``lang_explicit`` docstring note above: forward the raw `lang`
+    # only when it reflects a genuine user request (an explicit "c" is
+    # inherently a request too, since "c" is never Click's own default) --
+    # otherwise squash to `None` so the header-AST passes below auto-detect,
+    # exactly as they did before `lang_explicit` existed.
+    _effective_lang = lang if (lang_explicit or lang == "c") else None
     resolved_headers = expand_header_inputs(list(headers)) if headers else []
     # ADR-050 D1 follow-up (G30 pilot validation): fold -H/--header's own directory
     # arguments into the extraction contract's scope (not just
@@ -1714,7 +1734,7 @@ def perform_elf_dump(
                 gcc_option_tokens=tuple(gcc_option_tokens) + tuple(deferred),
                 sysroot=sysroot,
                 nostdinc=nostdinc,
-                lang=lang if lang == "c" else None,
+                lang=_effective_lang,
                 dwarf_only=dwarf_only,
                 debug_format=effective_debug_format,
                 public_headers=list(public_headers),
@@ -1881,7 +1901,17 @@ def perform_elf_dump(
             _HEADER_GRAPH_INCLUDES_ENABLED and not dwarf_only,
             list(headers),
             list(eff_includes),
-            lang,
+            # Same `_effective_lang` the primary snapshot pass above just
+            # used (not the raw `lang`) -- previously this passed the raw,
+            # unsquashed CLI value unconditionally, so a non-explicit
+            # default ("c++", Click's own LANG_DEFAULT) unconditionally
+            # forced C++ mode here regardless of what the primary pass
+            # auto-detected, and an explicit request only ever reached this
+            # pass, never the primary one. Passing the identical resolved
+            # value keeps both passes' `force_cpp` decision -- and their
+            # `_clang_header_dump` cache key -- in agreement (AGENTS.md
+            # "dump --lang c++ is silently discarded ..." known gap).
+            _effective_lang,
             effective_compile_context,
             list(public_headers),
             list(public_header_dirs),

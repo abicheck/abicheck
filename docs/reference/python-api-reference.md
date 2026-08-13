@@ -51,6 +51,7 @@ A fully-specified comparison request — the single input to ``run_compare``.
 | `dependency_search_paths` | `tuple[Path, ...]` | `()` |
 | `ld_library_path` | `str` | `''` |
 | `frontend_context` | `str` | `'host'` |
+| `lang_explicit` | `bool` | `False` |
 
 ## `CompareResult`
 
@@ -119,6 +120,7 @@ A fully-specified snapshot-extraction request — the input to ``run_dump_reques
 | `dependency_search_paths` | `tuple[Path, ...]` | `()` |
 | `ld_library_path` | `str` | `''` |
 | `frontend_context` | `str` | `'host'` |
+| `lang_explicit` | `bool` | `False` |
 
 ## `InputSpec`
 
@@ -411,6 +413,7 @@ Auto-detect input type and return an ABI snapshot.
 | `version` | `str` | `''` |
 | `lang` | `str` | `'c++'` |
 | *(keyword-only below)* | | |
+| `lang_explicit` | `bool` | `False` |
 | `is_elf` | `bool \| None` | `None` |
 | `pdb_path` | `Path \| None` | `None` |
 | `dwarf_only` | `bool` | `False` |
@@ -501,6 +504,7 @@ Extract an ABI snapshot from a native binary (ELF, PE, or Mach-O).
 | `version` | `str` | `''` |
 | `lang` | `str` | `'c++'` |
 | *(keyword-only below)* | | |
+| `lang_explicit` | `bool` | `False` |
 | `pdb_path` | `Path \| None` | `None` |
 | `dwarf_only` | `bool` | `False` |
 | `debug_roots` | `list[Path] \| None` | `None` |

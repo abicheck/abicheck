@@ -290,6 +290,7 @@ def merge_fragments(
             types=(),
             enums=(),
             typedefs={},
+            typedefs_qualified={},
             constants={},
             ast_producer="castxml",
             ast_toolchain={},
@@ -455,6 +456,21 @@ def merge_fragments(
         ),
         kind="typedef",
     )
+    # typedefs_qualified (schema v25, G31 Phase C): keyed by fully-qualified
+    # name, so unlike `typedefs` above this does NOT inherit the bare-name
+    # cross-TU collision the comment above documents -- two distinct
+    # declarations always carry distinct qualified names. The same TU
+    # legitimately re-parsing an identical shared header still needs
+    # `_merge_scalar_group`'s existing same-key/same-value dedup, so this
+    # reuses that helper rather than a plain dict union.
+    typedefs_qualified = _merge_scalar_group(
+        (
+            (f.tu_name, name, value)
+            for f in ordered
+            for name, value in f.typedefs_qualified.items()
+        ),
+        kind="typedef",
+    )
     constants = _merge_scalar_group(
         (
             (f.tu_name, name, value)
@@ -477,6 +493,7 @@ def merge_fragments(
         types=types,
         enums=enums,
         typedefs=typedefs,
+        typedefs_qualified=typedefs_qualified,
         constants=constants,
         ast_producer=representative.ast_producer,
         ast_toolchain=representative.ast_toolchain,

@@ -57,7 +57,9 @@ def _mini_root() -> Element:
     SubElement(fn, "Argument", name="v", type="t_const_int")
 
     # variable + enum + enum values
-    SubElement(root, "Variable", id="v1", name="g_counter", mangled="g_counter", type="t_int")
+    SubElement(
+        root, "Variable", id="v1", name="g_counter", mangled="g_counter", type="t_int"
+    )
     en = SubElement(root, "Enumeration", id="e1", name="Mode")
     SubElement(en, "EnumValue", name="FAST", init="1")
     SubElement(en, "EnumValue", name="SLOW", init="2")
@@ -130,6 +132,30 @@ def test_small_utilities() -> None:
         (1, "b"),
         (None, "a"),
     ]
+
+
+def test_parse_typedefs_qualified_disambiguates_bare_name_collision() -> None:
+    # G31 Phase C: two unrelated member typedefs sharing the bare spelling
+    # "value_type" in different classes previously collided in the plain
+    # `typedefs` dict (whichever was parsed last silently won) -- the
+    # qualified twin (`AbiSnapshot.typedefs_qualified`, schema v25) must
+    # carry both, distinctly.
+    root = Element("GCC_XML")
+    SubElement(root, "FundamentalType", id="t1", name="int")
+    SubElement(root, "FundamentalType", id="t2", name="double")
+    SubElement(root, "Class", id="c1", name="Foo")
+    SubElement(root, "Class", id="c2", name="Bar")
+    SubElement(root, "Typedef", id="t3", name="value_type", type="t1", context="c1")
+    SubElement(root, "Typedef", id="t4", name="value_type", type="t2", context="c2")
+    p = _CastxmlParser(root, set(), set())
+    # The plain (bare-keyed) dict still collides -- unchanged, pre-existing
+    # behavior, whichever declaration was visited last wins.
+    assert p.parse_typedefs() == {"value_type": "double"}
+    # The qualified twin disambiguates both.
+    assert p.parse_typedefs_qualified() == {
+        "Foo::value_type": "int",
+        "Bar::value_type": "double",
+    }
 
 
 def test_cache_key_changes_with_inputs(tmp_path: Path) -> None:

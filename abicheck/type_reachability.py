@@ -132,6 +132,34 @@ __all__ = [
 ]
 
 
+def _merged_typedefs(snapshot: AbiSnapshot) -> dict[str, str]:
+    """``snapshot.typedefs`` (bare-name-keyed, lossy under a cross-class
+    collision) plus every entry ``snapshot.typedefs_qualified`` carries
+    (fully-qualified-name-keyed, collision-free -- schema v25, G31 Phase C).
+
+    Closes the false-negative half of the bare-name typedef collision gap
+    documented on ``AbiSnapshot.typedefs_qualified``: when two distinct
+    member typedefs share a bare spelling (e.g. two unrelated ``value_type``
+    aliases in different classes), only one survives in ``typedefs`` at all
+    -- the other's aliasing information was previously unrecoverable by the
+    time it reached this module. Merging in the qualified twin does not
+    remove that pre-existing ambiguity (a bare spelling shared by two
+    classes is still genuinely ambiguous, and every ambiguity-tracking rule
+    in :func:`_typedef_spelling_targets` and its siblings already handles
+    that safely -- dropping rather than guessing), it only restores the
+    *previously invisible* declaration to the vocabulary these functions
+    scan, so it can be resolved via its own qualified/namespace-suffix
+    spellings instead of never appearing at all.
+
+    A snapshot predating this field (or one from a producer that never had
+    per-class qualified typedef scoping, e.g. DWARF-only) has an empty
+    ``typedefs_qualified``, so this degrades to exactly the prior
+    ``dict(snapshot.typedefs)`` behavior -- purely additive, no consumer
+    regression possible.
+    """
+    return {**snapshot.typedefs, **snapshot.typedefs_qualified}
+
+
 class _StdlibReferenceScan:
     """Mutable state of one :func:`directly_referenced_stdlib_types` walk.
 
@@ -926,7 +954,7 @@ def _run_stdlib_reference_scan(
     scan = _StdlibReferenceScan(
         stdlib_identities,
         non_stdlib_identities,
-        dict(snapshot.typedefs),
+        _merged_typedefs(snapshot),
         enum_identities,
     )
     stop_when_exhausted = not full_scan
@@ -1447,14 +1475,14 @@ def directly_referenced_stdlib_type_spellings(
     # is what actually collides with a stdlib identity's own stripped
     # spelling, since the dict key itself is never equal to that suffix.
     typedef_spelling_targets = _typedef_spelling_targets(
-        dict(snapshot.typedefs), non_stdlib_identities
+        _merged_typedefs(snapshot), non_stdlib_identities
     )
     # The raw candidate vocabulary, separate from the resolved index above:
     # an ambiguous spelling (two typedefs disagreeing) is dropped from
     # `typedef_spelling_targets` rather than resolved, but it is exactly as
     # untrustworthy as a resolved, disagreeing one for this collision check.
     typedef_candidate_spellings = _typedef_candidate_spellings(
-        dict(snapshot.typedefs), non_stdlib_identities
+        _merged_typedefs(snapshot), non_stdlib_identities
     )
     # Collision counts are computed over EVERY stdlib identity the snapshot
     # carries, not just the referenced subset -- an unreferenced sibling

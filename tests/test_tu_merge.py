@@ -347,6 +347,7 @@ def test_merge_fragments_empty_returns_empty_result():
         types=(),
         enums=(),
         typedefs={},
+        typedefs_qualified={},
         constants={},
         ast_producer="castxml",
         ast_toolchain={},

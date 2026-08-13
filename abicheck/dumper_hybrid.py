@@ -52,6 +52,18 @@ their two independent :class:`~abicheck.model.AbiSnapshot`\\ s to
   ``abicheck/fact_provenance.py``), so detectors can tell which backend
   backs a fact apart from an unbacked one on a per-declaration basis
   instead of trusting a whole-snapshot producer tag.
+- **Declaration-existence provenance** (G31 Phase C, hybrid-graph
+  provenance-tagging): every merged function/variable also gets a
+  ``"visibility"``-named ``fact_provenance`` entry recording which backend
+  contributed the *declaration itself* (``"castxml"`` for a castxml-primary
+  entry, ``"clang"`` for a clang-only-appended one) — not a per-field value
+  merge like every other entry above, since this snapshot's own
+  ``origin``/``ScopeOrigin`` classification (``provenance.apply_provenance()``)
+  runs identically over both kinds of entry afterwards. The one consumer is
+  :func:`abicheck.buildsource.header_graph.build_header_only_graph`, which
+  reads it back to stamp each L2 graph node's own
+  ``attrs["visibility_provenance"]`` — see that function's docstring for why
+  the graph needed this and not the flat snapshot's other detectors.
 
 **Layout facts**: castxml remains the PRIMARY layout source — its own real
 size/alignment/offset/vtable data is never overridden. When the optional G28
@@ -85,9 +97,12 @@ precedent this module already sets for ``RecordType.is_abstract``.
 ``has_anonymous_aggregate_fields`` is not provably inert the same way — see
 :func:`_merge_record_type`'s own comment.
 
-Everything not explicitly merged below (typedefs, constants, ELF/PE/Mach-O
-metadata, DWARF metadata, ...) is taken verbatim from the castxml snapshot,
-which is used as the base via ``dataclasses.replace``.
+Everything not explicitly merged below (bare-keyed ``typedefs``, constants,
+ELF/PE/Mach-O metadata, DWARF metadata, ...) is taken verbatim from the
+castxml snapshot, which is used as the base via ``dataclasses.replace`` --
+except ``typedefs_qualified`` (schema v25), which IS explicitly unioned
+from both sides (see the merge's own comment on that field) since its
+whole purpose is recovering an alias a single backend alone would miss.
 """
 
 from __future__ import annotations
@@ -401,7 +416,11 @@ def _backfill_function_facts(
     # NOT routed through _backfill_fact/provenance: this isn't a producer
     # disagreement to record, just recovering a fact that was always there
     # under the right key.
-    if f.elf_binding is None and clang_f is not None and clang_f.elf_binding is not None:
+    if (
+        f.elf_binding is None
+        and clang_f is not None
+        and clang_f.elf_binding is not None
+    ):
         updates["elf_binding"] = clang_f.elf_binding
     if (
         f.elf_visibility is None
@@ -450,8 +469,22 @@ def _merge_functions(
     # "castxml" (Codex review: a clang-only function is still comparable
     # against ANOTHER clang-only declaration of itself, exactly like a plain
     # ``--ast-frontend clang`` run already does today).
+    # "visibility" records which backend contributed the DECLARATION ITSELF
+    # (castxml-primary vs. clang-only-appended), not a per-field value merge
+    # like every other key this function writes — consumed by
+    # buildsource.header_graph.build_header_only_graph() to stamp
+    # GraphNode.attrs["visibility_provenance"] on the L2 header-only graph's
+    # source_decl nodes (G31 Phase C hybrid-graph provenance-tagging;
+    # docs/contribute/plans/g31-header-graph-default-on-followup.md). A
+    # castxml-primary function's ScopeOrigin classification and a
+    # clang-only-appended one's both go through the identical
+    # provenance.apply_provenance() pass afterwards, so this key is not
+    # itself the classification — it's which backend's declaration record
+    # that classification was computed from, the same distinction
+    # "param_defaults" above already tracks for a different consumer.
     for f in merged:
         provenance[func_fact_key(f.mangled, "param_defaults")] = "castxml"
+        provenance[func_fact_key(f.mangled, "visibility")] = "castxml"
 
     merged_mangled = {f.mangled for f in merged}
     clang_only = [cf for cf in clang_funcs if cf.mangled not in merged_mangled]
@@ -464,6 +497,17 @@ def _merge_functions(
         # deprecation transition on a declaration that exists on both sides
         # only via clang (Codex review, fresh evidence).
         provenance[func_fact_key(cf.mangled, "deprecated")] = "clang"
+        # Same reasoning as "deprecated" immediately above, for
+        # is_override (G31 Phase C's is_override/is_abstract backend
+        # audit): a clang-only method's is_override IS genuinely
+        # clang-sourced, and without this stamp
+        # both_known_backed_fact(old, new, func_fact_key(mangled,
+        # "is_override")) sees no recorded provenance for it and declines
+        # to compare a real override-specifier transition on a method
+        # that exists on both sides only via clang (Codex review, fresh
+        # evidence).
+        provenance[func_fact_key(cf.mangled, "is_override")] = "clang"
+        provenance[func_fact_key(cf.mangled, "visibility")] = "clang"
     merged.extend(clang_only)
     return merged
 
@@ -721,6 +765,21 @@ def merge_snapshots(castxml_snap: AbiSnapshot, clang_snap: AbiSnapshot) -> AbiSn
         # qualification for this same fact above.
         type_key = type_map_key(t)
         provenance[type_fact_key(type_key, "deprecated")] = "clang"
+        # Same reasoning as "deprecated" immediately above, for is_abstract
+        # (G31 Phase C's is_override/is_abstract backend audit): a
+        # clang-only type's own is_abstract value IS genuinely
+        # clang-sourced, and without this stamp both_known_backed_fact
+        # sees no recorded provenance for it and declines to compare a
+        # real abstractness transition on a type that exists on both
+        # sides only via clang (Codex review, fresh evidence). BARE key
+        # (not qualified type_key, unlike "deprecated" above): is_abstract
+        # is the one fact `_merge_record_type` deliberately keys bare
+        # (see that function's own comment), because `diff_types._diff_types`
+        # only ever looks it up via the bare `type_fact_key(t_old.name,
+        # "is_abstract")` -- a qualified key here would silently mismatch
+        # that lookup and make this stamp inert for a namespaced type
+        # (Codex review, fresh evidence, third round).
+        provenance[type_fact_key(t.name, "is_abstract")] = "clang"
         for f in t.fields:
             provenance[field_fact_key(type_key, f.name, "deprecated")] = "clang"
             # "default" joined "deprecated" as a genuinely clang-sourced field
@@ -753,12 +812,19 @@ def merge_snapshots(castxml_snap: AbiSnapshot, clang_snap: AbiSnapshot) -> AbiSn
         _merge_variable(v, clang_vars_by_mangled.get(v.mangled), provenance)
         for v in castxml_snap.variables
     ]
+    # "visibility" mirrors _merge_functions' identical stamp above -- which
+    # backend contributed the declaration itself, consumed by
+    # header_graph.build_header_only_graph() for its graph-node provenance
+    # tag, not a per-field value merge.
+    for v in castxml_snap.variables:
+        provenance[var_fact_key(v.mangled, "visibility")] = "castxml"
     castxml_var_mangled = {v.mangled for v in castxml_snap.variables}
     clang_only_variables = [
         v for v in clang_variables if v.mangled not in castxml_var_mangled
     ]
     for v in clang_only_variables:
         provenance[var_fact_key(v.mangled, "deprecated")] = "clang"
+        provenance[var_fact_key(v.mangled, "visibility")] = "clang"
     merged_variables.extend(clang_only_variables)
 
     merged = replace(
@@ -767,6 +833,25 @@ def merge_snapshots(castxml_snap: AbiSnapshot, clang_snap: AbiSnapshot) -> AbiSn
         variables=merged_variables,
         types=merged_types,
         enums=merged_enums,
+        # typedefs_qualified (schema v25, G31 Phase C continued, Codex
+        # review): unlike bare `typedefs` (left verbatim from castxml_snap,
+        # same as constants/ELF/PE/Mach-O metadata -- see this function's
+        # own docstring), this field's whole purpose is to recover a
+        # qualified typedef alias `type_reachability.py`'s scan would
+        # otherwise miss. Leaving it castxml-only defeats that purpose for
+        # a hybrid dump: a declaration only clang appended (or a typedef
+        # only clang's own parse captured under this qualified key) would
+        # never make it into `merged.typedefs_qualified`, so a public
+        # signature referencing it through that alias could still miss a
+        # reachable `std::` field. Union both sides -- qualified keys are
+        # unique per declaration, so a real cross-backend disagreement on
+        # the SAME key is not expected; castxml's own value wins on the
+        # rare disagreement, matching "castxml remains the base" elsewhere
+        # in this merge.
+        typedefs_qualified={
+            **clang_snap.typedefs_qualified,
+            **castxml_snap.typedefs_qualified,
+        },
         ast_producer="hybrid",
         ast_toolchain={
             **{

@@ -264,12 +264,11 @@ FACT_ROWS: tuple[FactRow, ...] = (
         "Function",
         "is_override",
         _FULL,
-        _NONE,
+        _FULL,
         hybrid_backfilled=True,
         note=(
-            "No clang-side extraction exists, so the hybrid backfill for this "
-            "fact is inert — it is listed as backfilled because "
-            "`dumper_hybrid._backfill_function_facts` does name it."
+            "clang side wired in G31 Phase C backend audit, from a real "
+            "`OverrideAttr` child node (`dumper_clang._clang_method_is_override`)."
         ),
     ),
     FactRow("Function", "hidden_friend_owner", _FULL, _FULL),
@@ -545,11 +544,13 @@ FACT_ROWS: tuple[FactRow, ...] = (
         "RecordType",
         "is_abstract",
         _FULL,
-        _NONE,
+        _FULL,
         hybrid_backfilled=True,
         note=(
-            "No clang-side extraction exists, so the hybrid backfill for this "
-            "fact is inert (same shape as `Function.is_override`)."
+            "clang side wired in G31 Phase C backend audit, from "
+            "`definitionData.isAbstract` (`dumper_clang._clang_record_is_abstract`) "
+            "— real semantic computation (an inherited-and-unoverridden pure "
+            "virtual counts), not just a direct-declaration check."
         ),
     ),
     FactRow(

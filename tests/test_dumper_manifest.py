@@ -272,6 +272,9 @@ class _StubParser:
     def parse_typedefs(self):
         return {}
 
+    def parse_typedefs_qualified(self):
+        return {}
+
     def parse_constants(self):
         return {}
 

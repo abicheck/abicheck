@@ -652,6 +652,69 @@ def build_cases() -> dict[str, tuple[str, dict[str, Any], dict[str, Any]]]:
         l5j_new_graph.to_dict(),
     )
 
+    # case197: the sibling scenario to case196, isolating ADR-048's
+    # OTHER non-"pure move" reconciliation outcome
+    # (graph_reconcile.OUTCOME_RECONCILED / "declaration_identity_reconciled").
+    # _classify_outcome() reports `declaration_moved` when the qualified-name
+    # alias tier pairs two nodes AND the declaring file changed; it reports
+    # `declaration_identity_reconciled` -- the residual "neither individually
+    # fired" branch -- when the qualified name is paired but the declaring
+    # file stayed the SAME. case196 changes the header path
+    # (detail_v1.h -> detail_v2.h) alongside the signature; this case is the
+    # identical fixture with the header path held constant on both sides, so
+    # only the mangled-name-moving signature change (int -> long) perturbs
+    # node identity and the file-unchanged branch is what actually fires.
+    # Reuses every design decision case196's own extended comment already
+    # justifies (private+inline helper so the scenario stays
+    # COMPATIBLE_WITH_RISK rather than a real BREAKING export removal, an
+    # inline public caller so the internal call is consumer-visible, the
+    # new-side-only source_edges row so dependency reachability's raw-node-id
+    # comparison stays literally true, and the real
+    # mark_source_edges_extractor_coverage() certification rather than a
+    # hand-forced extractor_passes flag) -- only the header-path constant
+    # differs, which is exactly the one variable this case exists to isolate.
+    _SAME_PATH = "include/demo/detail.h"
+    l5k_old_surface = SourceAbiSurface(
+        library="libdemo.so",
+        reachable_inline_bodies=[
+            _pub_caller(),
+            _helper_entity("_ZN4demo6detail6helperEi", _SAME_PATH),
+        ],
+        coverage={
+            "fact_family_states": {"source_edges": "empty-confirmed"},
+            "fact_set": {"producer": _FULL_WALK_PRODUCER},
+        },
+    )
+    l5k_new_surface = SourceAbiSurface(
+        library="libdemo.so",
+        reachable_inline_bodies=[
+            _pub_caller(),
+            _helper_entity("_ZN4demo6detail6helperEl", _SAME_PATH),
+        ],
+        source_edges=[
+            {
+                "edge": "DECL_CALLS_DECL",
+                "src": "_ZN4demo7processEv",
+                "dst": "_ZN4demo6detail6helperEl",
+            }
+        ],
+        coverage={
+            "fact_family_states": {"source_edges": "complete"},
+            "fact_set": {"producer": _FULL_WALK_PRODUCER},
+        },
+    )
+    l5k_old_graph = build_source_graph(l5j_build, l5k_old_surface)
+    l5k_new_graph = build_source_graph(l5j_build, l5k_new_surface)
+    mark_source_edges_extractor_coverage(l5k_old_graph, l5k_old_surface)
+    mark_source_edges_extractor_coverage(l5k_new_graph, l5k_new_surface)
+    l5k_old_graph.finalize()
+    l5k_new_graph.finalize()
+    cases["case197_header_graph_identity_reconciled"] = (
+        "L5",
+        l5k_old_graph.to_dict(),
+        l5k_new_graph.to_dict(),
+    )
+
     return cases
 
 

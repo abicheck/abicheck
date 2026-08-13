@@ -288,6 +288,18 @@ class TestDumpCacheExtraKey:
         k_after = _dump_cache_extra_key("elf", "auto", None, None)
         assert k_before == k_after
 
+    def test_differs_by_lang_explicit(self):
+        # G31 Phase C follow-up: the identical `lang` string resolves to a
+        # genuinely different force-C++-vs-auto-detect decision depending on
+        # `lang_explicit` (see `DumpRequest.lang_explicit`) -- on a
+        # language-ambiguous header this produces a different parsed AST, so
+        # a cache entry for one must never be served for the other.
+        k_auto = _dump_cache_extra_key("elf", "clang", None, None, "c++")
+        k_explicit = _dump_cache_extra_key(
+            "elf", "clang", None, None, "c++", lang_explicit=True
+        )
+        assert k_auto != k_explicit
+
     def test_invalid_frontend_pin_uses_same_fallback_cache_identity(
         self, monkeypatch
     ):
@@ -435,6 +447,33 @@ class TestCachedRunDump:
         monkeypatch.setattr(snapshot_cache_mod, "_SNAPSHOT_CACHE_VERSION", "NEW")
         cached_run_dump(fake_run_dump, binary, "elf", [], [], "1.0", "c++")
         assert len(calls) == 2  # re-run, not served from the old-version entry
+
+    def test_lang_explicit_reaches_run_dump_and_keys_separately(self, tmp_path):
+        # G31 Phase C follow-up: `lang_explicit` must reach the real
+        # `run_dump` call (not silently dropped), and two calls differing
+        # only in `lang_explicit` must not share a cache entry -- see
+        # TestDumpCacheExtraKey.test_differs_by_lang_explicit for the key
+        # half of this guarantee.
+        binary = tmp_path / "lib.so"
+        binary.write_bytes(b"ELF fake content")
+        received: list[bool] = []
+
+        def fake_run_dump(
+            path, binary_fmt, headers, includes, version, lang,
+            *, lang_explicit=False, **kwargs,
+        ):
+            received.append(lang_explicit)
+            return _sample_snap()
+
+        cached_run_dump(
+            fake_run_dump, binary, "elf", [], [], "1.0", "c++",
+            lang_explicit=False, header_backend="clang",
+        )
+        cached_run_dump(
+            fake_run_dump, binary, "elf", [], [], "1.0", "c++",
+            lang_explicit=True, header_backend="clang",
+        )
+        assert received == [False, True]
 
     def test_input_change_during_dump_is_not_cached_under_new_key(self, tmp_path):
         binary = tmp_path / "lib.so"
