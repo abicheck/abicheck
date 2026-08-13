@@ -120,6 +120,36 @@ class TestReportCanonicalFindingId:
         stub = _Stub()
         assert report_canonical_finding_id(stub) == report_finding_id(stub)
 
+    def test_matches_across_differing_type_spelling_on_a_non_equivalent_category_kind(
+        self,
+    ):
+        # Regression (Codex review, PR #753): FUNC_RETURN_CHANGED is not in
+        # _EQUIVALENT_CHANGE_CATEGORIES, so old_value/new_value flow straight
+        # into the discriminator -- and therefore into every identity tier,
+        # including CANONICAL. Without canonicalizing them, CastXML's
+        # "char const*" and Clang's "char const *" for the identical
+        # return-type change hashed to two different canonical ids.
+        def return_changed(old: str, new: str) -> Change:
+            return Change(
+                kind=ChangeKind.FUNC_RETURN_CHANGED,
+                symbol="_Z3fooi",
+                description=f"Return type changed: {old} -> {new}",
+                old_value=old,
+                new_value=new,
+                source_location=None,
+            )
+
+        castxml = return_changed("char const*", "int const*")
+        clang = return_changed("char const *", "int const *")
+        assert report_canonical_finding_id(castxml) == report_canonical_finding_id(
+            clang
+        )
+        # A genuinely different return-type change must still differ.
+        different = return_changed("char const*", "long const*")
+        assert report_canonical_finding_id(castxml) != report_canonical_finding_id(
+            different
+        )
+
 
 class TestReporterEmitsCanonicalFindingId:
     def test_change_to_dict_includes_canonical_finding_id(self):
@@ -135,6 +165,34 @@ class TestReporterEmitsCanonicalFindingId:
         assert entry["canonical_finding_id"] == report_canonical_finding_id(change)
         # Joinable with, but distinct from, the pre-existing finding_id.
         assert entry["finding_id"] == report_finding_id(change)
+
+    def test_out_of_surface_changes_include_canonical_finding_id_without_contract_evaluation(
+        self,
+    ):
+        # Regression (Codex review, PR #753): _add_contract_evaluation_fields
+        # used to return before stamping finding_id/canonical_finding_id
+        # whenever contract_relevance was unset -- which is every ordinary
+        # run without --contract-evaluation -- so out_of_surface_changes
+        # entries (built by the same helper) silently lacked both ids.
+        change = _func_removed(
+            "_Z3fooi", description="Function removed: foo(int)", source_location=None
+        )
+        change.surface_exclusion_reason = "non-public-type"
+        result = DiffResult(
+            old_version="1.0",
+            new_version="2.0",
+            library="lib",
+            changes=[],
+            scope_to_public_surface=True,
+            out_of_surface_changes=[change],
+        )
+        report = json.loads(to_json(result))
+        (entry,) = report["surface_scope"]["out_of_surface_changes"]
+        assert entry["finding_id"] == report_finding_id(change)
+        assert entry["canonical_finding_id"] == report_canonical_finding_id(change)
+        # No contract_evaluation=True on this run, so the contract-specific
+        # fields must still be absent -- only the id stamping is unconditional.
+        assert "contract_relevance" not in entry
 
 
 class TestFindingIdSuppressionSelector:

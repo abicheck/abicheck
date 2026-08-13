@@ -1068,7 +1068,11 @@ def _stringify_change_value(value: object) -> str:
 
 
 def _change_discriminator(
-    change: Change, kind_value: str, *, include_description: bool = True
+    change: Change,
+    kind_value: str,
+    *,
+    include_description: bool = True,
+    canonicalize_values: bool = False,
 ) -> str:
     """The part of a finding's identity that tells it apart from another
     finding sharing the same symbol.
@@ -1095,6 +1099,20 @@ def _change_discriminator(
     though ``old_value``/``new_value`` do not (Codex review: verified
     changing only the sampled export still produced a different synthetic
     primary id).
+
+    ``canonicalize_values=True`` additionally runs ``old_value``/``new_value``
+    through :func:`~abicheck.name_classification.canonicalize_type_name`
+    before joining -- used only by :func:`report_canonical_finding_id`'s
+    call into :func:`resolve_change_identity` (Codex review, fresh
+    evidence). Without it, a kind outside :data:`_EQUIVALENT_CHANGE_
+    CATEGORIES` (e.g. ``FUNC_RETURN_CHANGED``) folds the *raw* type
+    spelling into every identity tier including CANONICAL -- CastXML's
+    ``"char const*"`` and Clang's ``"char const *"`` for the identical
+    change would then hash to two different canonical ids, defeating the
+    whole point of a backend-independent identity. Harmless on a
+    non-type-spelling value (a version string, an integer, a boolean) --
+    the function only strips constructs those never contain, otherwise
+    just collapsing whitespace.
     """
     category = _EQUIVALENT_CHANGE_CATEGORIES.get(kind_value)
     if category is not None:
@@ -1121,17 +1139,25 @@ def _change_discriminator(
         side_match = _MISMATCH_SIDE_RE.match(change.description or "")
         side = side_match.group(1) if side_match else ""
         return f"evidence:{side}:{evidence}"
-    parts = [
-        kind_value,
-        _stringify_change_value(change.old_value),
-        _stringify_change_value(change.new_value),
-    ]
-    if include_description:
+    old_str = _stringify_change_value(change.old_value)
+    new_str = _stringify_change_value(change.new_value)
+    if canonicalize_values:
+        old_str = canonicalize_type_name(old_str)
+        new_str = canonicalize_type_name(new_str)
+    parts = [kind_value, old_str, new_str]
+    # canonicalize_values also drops description: it's derived free text
+    # that routinely embeds the same raw type spelling old_value/new_value
+    # do (see the docstring above), so keeping it here would silently
+    # reopen the exact backend-sensitivity gap canonicalizing old_value/
+    # new_value alone was meant to close.
+    if include_description and not canonicalize_values:
         parts.append(change.description or "")
     return "\x1f".join(parts)
 
 
-def resolve_change_identity(change: Change) -> FindingIdentity:
+def resolve_change_identity(
+    change: Change, *, canonicalize_values: bool = False
+) -> FindingIdentity:
     """Tiered identity for an already-emitted flat finding
     (:class:`~abicheck.checker_types.Change`).
 
@@ -1151,6 +1177,15 @@ def resolve_change_identity(change: Change) -> FindingIdentity:
     symbol (Codex review: a bare ``mangled:<symbol>`` canonical id would
     collapse unrelated findings and violate this module's stated dedup-key
     contract).
+
+    ``canonicalize_values=False`` (the default) preserves this function's
+    pre-existing, exact-value discriminator for its established callers
+    (``diff_filtering.py``'s cross-detector dedup, ``aggregate_findings.py``,
+    ``contract_evaluation.py``) -- none of which need, or were verified
+    against, a type-spelling-insensitive comparison. Pass ``True`` only for
+    a genuinely cross-backend use (:func:`report_canonical_finding_id`),
+    where :func:`_change_discriminator`'s own docstring explains why the
+    raw value must not leak into a "backend-independent" identity.
     """
     kind_value = str(getattr(change.kind, "value", change.kind))
     is_batch = _is_batch_shaped_change(change, kind_value)
@@ -1204,7 +1239,10 @@ def resolve_change_identity(change: Change) -> FindingIdentity:
     # sample-independent, since `discriminator` (used in `sig`, every
     # alias, and the REDUCED-tier synthetic basis) would still vary.
     discriminator = _change_discriminator(
-        change, kind_value, include_description=not is_batch
+        change,
+        kind_value,
+        include_description=not is_batch,
+        canonicalize_values=canonicalize_values,
     )
     sig = f"sig:{qn}\x1f{discriminator}"
     rel = source_relative_identity(source_location or "", entity_symbol or "")
@@ -1441,20 +1479,29 @@ def report_canonical_finding_id(c: object) -> str:
     **not** guaranteed unique per finding. It is :func:`resolve_change_identity`'s
     ``primary_id`` (mangled-symbol CANONICAL tier when available, a
     normalized qualified-name+kind+parameter-signature NORMALIZED tier
-    otherwise), the same producer-agnostic identity ``diff_filtering.py``'s
-    cross-detector dedup and ``diff_symbols.py``'s old/new symbol matching
-    already key on. That tier's own :func:`canonicalize_type_name` step is
-    what makes it stable across header backends: CastXML (``char const*``)
-    and Clang's ``-ast-dump=json`` (``char const *``) spell an otherwise-
-    identical parameter type differently, but resolve to the same
-    NORMALIZED id (see that function's own docstring for the concrete
-    case). ``report_finding_id``'s own ``source_location``/``description``
-    inputs are exactly the fields two header backends are *not* guaranteed
-    to spell identically (a raw file:line, or a description embedding a
-    raw type spelling) — which is why it is not itself usable as a
-    suppression key meant to survive a `--ast-frontend castxml` vs.
-    `--ast-frontend clang` switch, and why this sibling id exists instead
-    of widening that one's contract.
+    otherwise), called with ``canonicalize_values=True`` -- the one thing
+    that call has that ``diff_filtering.py``'s cross-detector dedup and
+    ``diff_symbols.py``'s old/new symbol matching's own (default,
+    uncanonicalized) calls don't need. Without it, a kind outside
+    ``_EQUIVALENT_CHANGE_CATEGORIES`` (most kinds -- e.g.
+    ``FUNC_RETURN_CHANGED``) folds ``change.old_value``/``new_value``
+    *verbatim* into every identity tier including CANONICAL, so CastXML's
+    ``"char const*"`` and Clang's ``"char const *"`` for the identical
+    return-type change would hash to two different canonical ids -- exactly
+    the discrepancy :func:`canonicalize_type_name` exists to normalize
+    (Codex review, fresh evidence: an earlier revision of this function
+    called :func:`resolve_change_identity` with the default, and the claim
+    in this docstring that the NORMALIZED tier was already canonicalized
+    was simply wrong for any non-equivalent-category kind).
+    ``canonicalize_values=True`` also drops raw ``description`` from the
+    discriminator, for the same reason: it routinely embeds the same raw
+    type spelling ``old_value``/``new_value`` do. ``report_finding_id``'s
+    own ``source_location``/``description`` inputs are exactly the fields
+    two header backends are *not* guaranteed to spell identically (a raw
+    file:line, or a description embedding a raw type spelling) — which is
+    why it is not itself usable as a suppression key meant to survive a
+    `--ast-frontend castxml` vs. `--ast-frontend clang` switch, and why
+    this sibling id exists instead of widening that one's contract.
 
     A batch-shaped finding (e.g. an allocator-replacement summary covering
     many symbols) resolves through the same REDUCED-tier fallback
@@ -1490,7 +1537,10 @@ def report_canonical_finding_id(c: object) -> str:
     already accepts for the identical reason).
     """
     try:
-        primary_id = resolve_change_identity(c).primary_id  # type: ignore[arg-type]
+        primary_id = resolve_change_identity(
+            c,  # type: ignore[arg-type]
+            canonicalize_values=True,
+        ).primary_id
     except AttributeError:
         return report_finding_id(c)
     return hashlib.sha256(primary_id.encode("utf-8")).hexdigest()[:16]
