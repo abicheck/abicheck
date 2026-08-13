@@ -55,33 +55,31 @@ install_dir="${install_base}/${CASTXML_TAG}/${asset%.tar.gz}"
 bin_dir="${install_dir}/bin"
 castxml_bin="${bin_dir}/castxml"
 
-if [ ! -x "$castxml_bin" ]; then
-  work_dir="$(mktemp -d "${TMPDIR:-/tmp}/abicheck-castxml.XXXXXX")"
-  trap 'rm -rf "$work_dir"' EXIT
-  archive="${work_dir}/${asset}"
-  url="${CASTXML_RELEASE_BASE}/${asset}"
+work_dir="$(mktemp -d "${TMPDIR:-/tmp}/abicheck-castxml.XXXXXX")"
+trap 'rm -rf "$work_dir"' EXIT
+archive="${work_dir}/${asset}"
+url="${CASTXML_RELEASE_BASE}/${asset}"
 
-  if [ -n "${ABICHECK_CASTXML_ARCHIVE:-}" ]; then
-    [ -f "$ABICHECK_CASTXML_ARCHIVE" ] || fail "ABICHECK_CASTXML_ARCHIVE does not exist: ${ABICHECK_CASTXML_ARCHIVE}"
-    echo "Installing pinned CastXML ${CASTXML_TAG} from local archive: ${ABICHECK_CASTXML_ARCHIVE}"
-    cp "$ABICHECK_CASTXML_ARCHIVE" "$archive"
-  else
-    echo "Downloading pinned CastXML ${CASTXML_TAG}: ${asset}"
-    curl --fail --location --silent --show-error --retry 3 --retry-all-errors \
-      --output "$archive" "$url"
-  fi
-  printf '%s  %s\n' "$sha256" "$archive" | sha256sum --check --strict -
-
-  extract_dir="${work_dir}/extract"
-  mkdir -p "$extract_dir"
-  # Official archives contain one top-level `castxml/` directory.
-  tar -xzf "$archive" -C "$extract_dir" --strip-components=1
-  [ -x "${extract_dir}/bin/castxml" ] || fail "Archive ${asset} does not contain castxml/bin/castxml."
-
-  mkdir -p "$(dirname "$install_dir")"
-  rm -rf "$install_dir"
-  mv "$extract_dir" "$install_dir"
+if [ -n "${ABICHECK_CASTXML_ARCHIVE:-}" ]; then
+  [ -f "$ABICHECK_CASTXML_ARCHIVE" ] || fail "ABICHECK_CASTXML_ARCHIVE does not exist: ${ABICHECK_CASTXML_ARCHIVE}"
+  echo "Installing pinned CastXML ${CASTXML_TAG} from local archive: ${ABICHECK_CASTXML_ARCHIVE}"
+  cp "$ABICHECK_CASTXML_ARCHIVE" "$archive"
+else
+  echo "Downloading pinned CastXML ${CASTXML_TAG}: ${asset}"
+  curl --fail --location --silent --show-error --retry 3 --retry-all-errors \
+    --output "$archive" "$url"
 fi
+printf '%s  %s\n' "$sha256" "$archive" | sha256sum --check --strict -
+
+extract_dir="${work_dir}/extract"
+mkdir -p "$extract_dir"
+# Official archives contain one top-level `castxml/` directory.
+tar -xzf "$archive" -C "$extract_dir" --strip-components=1
+[ -x "${extract_dir}/bin/castxml" ] || fail "Archive ${asset} does not contain castxml/bin/castxml."
+
+mkdir -p "$(dirname "$install_dir")"
+rm -rf "$install_dir"
+mv "$extract_dir" "$install_dir"
 
 version_output="$($castxml_bin --version 2>&1)" || fail "Pinned CastXML failed its version probe."
 castxml_version="$(printf '%s\n' "$version_output" | sed -nE 's/^castxml version ([^[:space:]]+).*/\1/p' | head -1)"
