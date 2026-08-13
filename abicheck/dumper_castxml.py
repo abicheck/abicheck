@@ -500,14 +500,11 @@ class _CastxmlParser:
     def _type_alignment_bits(self, id_: str, depth: int = 0) -> int | None:
         """Natural (computed) alignment in bits for a type id, if castxml exposes it.
 
-        Distinct from a Variable's own ``align`` attribute (an *explicit*
-        alignas/``__attribute__((aligned))`` override on the declaration —
-        see ``parse_variables``): this walks through cv-qualifiers, typedefs,
-        elaborated-type wrappers, and array types to the nearest type node
-        with its own ``align`` and reads that value, which castxml populates with the
-        compiler's actual computed alignment (the same attribute
-        ``_build_record_type`` already trusts unconditionally for
-        structs/unions/classes). ``ArrayType`` carries no ``align``/``size``
+        Unlike a Variable's own explicit ``align`` attribute (see
+        ``parse_variables``), this walks through cv-qualifiers, typedefs,
+        elaborated types, and arrays to the nearest type node with ``align``.
+        CastXML populates it with the compiler's computed alignment, as trusted
+        by ``_build_record_type`` for records. ``ArrayType`` carries no ``align``/``size``
         of its own (confirmed empirically: an array's alignment is always its
         element type's) — recursing into its ``type`` is required, not just
         an optimization, or every exported array global would silently fall
