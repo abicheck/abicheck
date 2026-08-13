@@ -1338,6 +1338,38 @@ def test_cquery_supplement_skipped_when_aquery_exits_nonzero(
     assert ext[-1].status == "failed"
 
 
+def test_cquery_supplement_deadline_exceeded_degrades_to_diagnostic(
+    tmp_path: Path, monkeypatch
+):
+    from abicheck import deadline
+
+    def _raise(*_a, **_k):
+        raise deadline.DeadlineExceeded(-1.0)
+
+    monkeypatch.setattr(_bq.deadline, "run_bounded", _raise)
+    merged = BuildEvidence()
+    out = _bq._run_bazel_cquery_supplement(
+        tmp_path, 600.0, lambda tool: f"/usr/bin/{tool}", merged
+    )
+    assert out is None
+    assert any("cquery supplement aborted" in d for d in merged.diagnostics)
+
+
+def test_cquery_supplement_subprocess_error_degrades_to_diagnostic(
+    tmp_path: Path, monkeypatch
+):
+    def boom(*_a, **_k):
+        raise OSError("no bazel")
+
+    monkeypatch.setattr(_bq.deadline, "run_bounded", boom)
+    merged = BuildEvidence()
+    out = _bq._run_bazel_cquery_supplement(
+        tmp_path, 600.0, lambda tool: f"/usr/bin/{tool}", merged
+    )
+    assert out is None
+    assert any("cquery supplement failed to run" in d for d in merged.diagnostics)
+
+
 def test_collect_inline_pack_defers_build_dir_cleanup(tmp_path: Path, monkeypatch):
     # Fast-lane guard for the cleanup-lifetime contract (the real end-to-end check
     # lives in tests/test_scan_levels_integration.py): when a caller passes
