@@ -546,10 +546,11 @@ cover the surrounding first-party trees this file doesn't detail.
   problem, don't stop at a patch for the one call site or input that
   triggered it. Trace it to its root cause, and implement a generalized
   fix — one that closes the whole class of failure, not just the observed
-  case — plus generalized tests that exercise the underlying contract
-  (property-style tests over the fixed input, per this file's own
-  "Primitive-level property tests" guidance above), not only a regression
-  test pinned to the original repro. If a genuinely general fix isn't
+  case — plus generalized tests that state the underlying primitive's or
+  detector's contract as invariants (property-style tests, per this
+  file's own "Primitive-level property tests" guidance below), not only a
+  regression test pinned to the original repro — a fixed-example test only
+  forecloses the one input it names. If a genuinely general fix isn't
   feasible in one pass, say so explicitly and record the gap (see "Known
   gaps" below) rather than quietly shipping a narrow patch as if it were
   the complete fix.
