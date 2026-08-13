@@ -31,6 +31,7 @@ import yaml
 
 from abicheck.checker_policy import ChangeKind
 from abicheck.checker_types import Change, DiffResult
+from abicheck.diff_helpers import make_change
 from abicheck.finding_identity import report_canonical_finding_id, report_finding_id
 from abicheck.reporter import to_json
 from abicheck.suppression import Suppression, SuppressionList
@@ -148,6 +149,91 @@ class TestReportCanonicalFindingId:
         different = return_changed("char const*", "long const*")
         assert report_canonical_finding_id(castxml) != report_canonical_finding_id(
             different
+        )
+
+
+class TestCanonicalFindingIdScopedCanonicalization:
+    """Regressions from two follow-up Codex review rounds on PR #753's
+    initial fix: canonicalizing every kind's old/new corrupted non-type
+    values, and unconditionally dropping description (the first attempted
+    fix for that) collided distinct findings that differ only by a
+    per-item identity (e.g. a field/parameter name) description embeds via
+    ``change_registry``'s ``{detail}`` template placeholder.
+    """
+
+    def test_distinct_parameters_on_the_same_function_stay_distinct(self):
+        # PARAM_POINTER_LEVEL_CHANGED is not a type-bearing kind (old/new
+        # are pointer-depth integers); its per-parameter identity lives
+        # only in description via {detail}. Two different parameters with
+        # the identical depth transition must not collide.
+        a = make_change(
+            ChangeKind.PARAM_POINTER_LEVEL_CHANGED,
+            symbol="_Z3fooPiPi",
+            name="foo",
+            detail="a",
+            old="1",
+            new="2",
+        )
+        b = make_change(
+            ChangeKind.PARAM_POINTER_LEVEL_CHANGED,
+            symbol="_Z3fooPiPi",
+            name="foo",
+            detail="b",
+            old="1",
+            new="2",
+        )
+        assert report_canonical_finding_id(a) != report_canonical_finding_id(b)
+
+    def test_whitespace_sensitive_macro_values_are_not_corrupted(self):
+        # PUBLIC_MACRO_VALUE_CHANGED's old/new are raw macro replacement
+        # text, not a type spelling -- canonicalize_type_name's whitespace
+        # collapse must not be applied to it, or two semantically distinct
+        # macro-value transitions would hash identically.
+        a = make_change(
+            ChangeKind.PUBLIC_MACRO_VALUE_CHANGED,
+            symbol="FOO",
+            name="FOO",
+            old="a  b",
+            new="c  d",
+            description="Macro FOO changed",
+        )
+        b = make_change(
+            ChangeKind.PUBLIC_MACRO_VALUE_CHANGED,
+            symbol="FOO",
+            name="FOO",
+            old="a b",
+            new="c d",
+            description="Macro FOO changed",
+        )
+        assert report_canonical_finding_id(a) != report_canonical_finding_id(b)
+
+    def test_struct_field_type_changed_is_backend_stable_but_field_identity_survives(
+        self,
+    ):
+        # struct_field_type_changed's own description_template embeds BOTH
+        # a per-field identity ({detail}) AND the raw old/new type spelling
+        # -- the hardest case: canonicalizing the whole description must
+        # normalize the backend-sensitive type text while leaving the
+        # field-name discriminator intact.
+        def field_changed(field: str, old: str, new: str) -> Change:
+            return make_change(
+                ChangeKind.STRUCT_FIELD_TYPE_CHANGED,
+                symbol="Widget",
+                name="Widget",
+                detail=field,
+                old=old,
+                new=new,
+            )
+
+        castxml = field_changed("ptr", "char const*", "int const*")
+        clang = field_changed("ptr", "char const *", "int const *")
+        assert report_canonical_finding_id(castxml) == report_canonical_finding_id(
+            clang
+        )
+        # A different field with the identical type transition must differ.
+        other_field = field_changed("other", "char const*", "int const*")
+        assert report_canonical_finding_id(castxml) != report_canonical_finding_id(
+            other_field
         )
 
 

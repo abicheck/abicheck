@@ -1039,6 +1039,36 @@ _EQUIVALENT_CHANGE_CATEGORIES = {
     "func_deleted_dwarf": "func_deletion",
 }
 
+# Kinds whose old_value/new_value (and, for a handful, description) genuinely
+# hold a C/C++ type spelling -- verified individually against each kind's
+# emission call site and change_registry.py description_template, not
+# guessed. Used only by _change_discriminator's canonicalize_values=True path
+# (report_canonical_finding_id) to decide which findings need
+# canonicalize_type_name normalization at all (Codex review, PR #753, two
+# follow-up rounds): applying it to every kind corrupted non-type old/new
+# text (e.g. PUBLIC_MACRO_VALUE_CHANGED's raw macro replacement text, where
+# whitespace is semantically meaningful), and unconditionally dropping
+# description to avoid that same corruption instead collided distinct
+# findings that share kind+symbol+old+new and differ only by a per-item
+# identity description embeds via change_registry's `{detail}` (e.g.
+# TYPE_FIELD_TYPE_CHANGED's own sibling struct_field_type_changed embeds a
+# field name this way). Deliberately not exhaustive -- every kind here was
+# checked against a real call site; a kind absent from this set still has
+# the pre-fix backend-spelling-mismatch gap on canonical_finding_id, and
+# adding it needs the same per-kind verification, not a blanket sweep.
+_TYPE_BEARING_DISCRIMINATOR_KINDS = frozenset(
+    {
+        "func_return_changed",
+        "var_type_changed",
+        "type_field_type_changed",
+        "struct_field_type_changed",
+        "union_field_type_changed",
+        "typedef_base_changed",
+        "template_param_type_changed",
+        "template_return_type_changed",
+    }
+)
+
 
 def _stringify_change_value(value: object) -> str:
     """Deterministic string form of a ``Change.old_value``/``new_value``.
@@ -1100,19 +1130,37 @@ def _change_discriminator(
     changing only the sampled export still produced a different synthetic
     primary id).
 
-    ``canonicalize_values=True`` additionally runs ``old_value``/``new_value``
-    through :func:`~abicheck.name_classification.canonicalize_type_name`
-    before joining -- used only by :func:`report_canonical_finding_id`'s
-    call into :func:`resolve_change_identity` (Codex review, fresh
-    evidence). Without it, a kind outside :data:`_EQUIVALENT_CHANGE_
-    CATEGORIES` (e.g. ``FUNC_RETURN_CHANGED``) folds the *raw* type
+    ``canonicalize_values=True`` -- used only by
+    :func:`report_canonical_finding_id`'s call into
+    :func:`resolve_change_identity` -- runs ``old_value``/``new_value``,
+    and (for the same kinds) ``description``, through
+    :func:`~abicheck.name_classification.canonicalize_type_name` before
+    joining, but **only** for :data:`_TYPE_BEARING_DISCRIMINATOR_KINDS`.
+    Without it, a kind like ``FUNC_RETURN_CHANGED`` folds the *raw* type
     spelling into every identity tier including CANONICAL -- CastXML's
     ``"char const*"`` and Clang's ``"char const *"`` for the identical
-    change would then hash to two different canonical ids, defeating the
-    whole point of a backend-independent identity. Harmless on a
-    non-type-spelling value (a version string, an integer, a boolean) --
-    the function only strips constructs those never contain, otherwise
-    just collapsing whitespace.
+    change would then hash to two different canonical ids (Codex review).
+    Scoped to that allowlist rather than every kind (Codex review, follow-up
+    round): canonicalizing an arbitrary kind's ``old_value``/``new_value``
+    corrupts a non-type value where whitespace is semantically meaningful
+    (e.g. ``PUBLIC_MACRO_VALUE_CHANGED``'s raw macro replacement text).
+    ``description`` is **never dropped** for this reason too (an earlier
+    revision of this fix did, and review found real collisions: several
+    kinds -- e.g. ``struct_field_type_changed``'s own sibling
+    ``type_field_type_changed`` -- embed a per-item identity, such as a
+    field name, in ``description`` via ``change_registry``'s ``{detail}``
+    template placeholder, with no other structured field carrying it;
+    dropping description collapsed two distinct findings on the same
+    symbol/kind/old/new differing only by which field/parameter changed).
+    Canonicalizing the whole description sentence for an allowlisted kind
+    is safe rather than corrupting: :func:`canonicalize_type_name`'s
+    struct/const-prefix rewrites only ever match at the very start of the
+    string, and its pointer/reference-sigil spacing pass only touches
+    ``*``/``&`` characters -- neither construct appears in an ordinary
+    field/parameter name, so the identifying part of the sentence survives
+    untouched while any embedded raw type spelling (e.g.
+    ``struct_field_type_changed``'s own template embeds ``{old} → {new}``)
+    normalizes the same way ``old_value``/``new_value`` do.
     """
     category = _EQUIVALENT_CHANGE_CATEGORIES.get(kind_value)
     if category is not None:
@@ -1139,19 +1187,20 @@ def _change_discriminator(
         side_match = _MISMATCH_SIDE_RE.match(change.description or "")
         side = side_match.group(1) if side_match else ""
         return f"evidence:{side}:{evidence}"
+    canonicalize_this_kind = (
+        canonicalize_values and kind_value in _TYPE_BEARING_DISCRIMINATOR_KINDS
+    )
     old_str = _stringify_change_value(change.old_value)
     new_str = _stringify_change_value(change.new_value)
-    if canonicalize_values:
+    if canonicalize_this_kind:
         old_str = canonicalize_type_name(old_str)
         new_str = canonicalize_type_name(new_str)
     parts = [kind_value, old_str, new_str]
-    # canonicalize_values also drops description: it's derived free text
-    # that routinely embeds the same raw type spelling old_value/new_value
-    # do (see the docstring above), so keeping it here would silently
-    # reopen the exact backend-sensitivity gap canonicalizing old_value/
-    # new_value alone was meant to close.
-    if include_description and not canonicalize_values:
-        parts.append(change.description or "")
+    if include_description:
+        desc = change.description or ""
+        if canonicalize_this_kind:
+            desc = canonicalize_type_name(desc)
+        parts.append(desc)
     return "\x1f".join(parts)
 
 
