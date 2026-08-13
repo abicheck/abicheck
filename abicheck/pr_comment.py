@@ -1211,18 +1211,24 @@ _POLICY_ONLY_HEADER: dict[frozenset[str], tuple[str, str]] = {
 
 
 def _header(model: CommentModel) -> tuple[str, str]:
-    if model.scoped_verdict is not None and not model.contract_coverage_blocking:
-        # `contract_coverage_blocking` is deliberately checked here, not
-        # just later at the ordinary `incomplete_blocking` branch (Codex
-        # review): the contract-coverage axis folds into the real exit code
-        # unconditionally, on top of *any* other verdict including a scoped
-        # one — a --used-by/--required-symbol run reporting a scoped
-        # COMPATIBLE verdict does not silence an orthogonal coverage
-        # failure that already turned the real exit code non-zero. When
-        # both are present, fall through to the rest of this function
-        # instead of returning the scoped header early, so a genuine
-        # full-library break (checked next) still wins if present, and the
-        # incomplete-blocking branch below is reached otherwise.
+    if model.scoped_verdict is not None:
+        # `contract_coverage_blocking` is checked FIRST, ahead of the scoped
+        # header itself (Codex review, two rounds): the contract-coverage
+        # axis folds into the real exit code unconditionally, on top of
+        # *any* other verdict including a scoped one — a
+        # --used-by/--required-symbol run reporting a scoped COMPATIBLE
+        # verdict does not silence an orthogonal coverage failure that
+        # already turned the real exit code non-zero. This must return
+        # directly here, not merely skip the scoped-header return and fall
+        # through to the rest of the function: under scoping, the *raw*
+        # `b`/`r`/`s` bucket counts below are the full, unscoped library
+        # diff (kept only as informational context, per this module's own
+        # design) and are not part of the actual gate — falling through
+        # would let an unrelated full-library break the scoped consumer
+        # never even sees win the headline instead of correctly naming the
+        # orthogonal coverage axis that is what's actually failing.
+        if model.contract_coverage_blocking:
+            return "🛑", "Source analysis incomplete"
         header = _SCOPED_HEADER.get(model.scoped_verdict)
         if header is not None:
             return header

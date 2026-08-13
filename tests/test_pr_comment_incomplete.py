@@ -574,6 +574,49 @@ def test_contract_coverage_blocking_overrides_scoped_compatible_headline():
     assert "Compatible (scoped)" not in body
 
 
+def test_contract_coverage_blocking_wins_over_unscoped_breaking_bucket_too():
+    # Codex review (second round): the fix above must return the coverage
+    # headline directly, not merely skip the scoped-header return and fall
+    # through to the rest of _header() — the full-library `breaking` bucket
+    # is informational-only under scoping (not part of the actual gate), so
+    # it must not steal the headline back from the orthogonal coverage axis
+    # that is what's actually failing the scoped consumer's own gate.
+    report = _compare_report()  # non-empty: carries real breaking findings
+    report["full_verdict"] = report["verdict"]
+    report["verdict"] = "COMPATIBLE"
+    report["used_by"] = [
+        {
+            "app": "/opt/app/bin/myapp",
+            "verdict": "COMPATIBLE",
+            "required_symbol_count": 3,
+            "missing_symbols": [],
+            "missing_versions": [],
+            "relevant_change_count": 0,
+            "symbol_coverage": 100.0,
+        }
+    ]
+    report["contract_coverage_failures"] = [
+        {
+            "provider": "export_table",
+            "side": "new",
+            "record_id": "libfoo.so",
+            "reason": "export table not captured",
+            "status": "unresolved",
+            "completeness": "absent",
+            "mode": "exports",
+            "suppressible": False,
+        }
+    ]
+    report["contract_coverage_exit_contribution"] = 1
+    model = build_model(report)
+    assert model.scoped_verdict == "COMPATIBLE"
+    assert model.contract_coverage_blocking is True
+    assert model.counts[0] > 0  # the unscoped bucket really does have breaks
+    body = render_comment(model, sha="x")
+    assert "Source analysis incomplete" in body
+    assert "ABI BREAKING" not in body
+
+
 def test_contract_coverage_advisory_does_not_override_scoped_compatible():
     # The inverse: when contract coverage did NOT contribute to the exit
     # code (contribution 0, or the key absent entirely), the scoped

@@ -2171,13 +2171,18 @@ elif [[ "$MODE" == "scan" ]]; then
 
   # ADR-049 Phase 7's contract-coverage axis is orthogonal and unconditional
   # -- no fail-on-* flag disables it, matching the SEVERITY_ERROR tier above
-  # (AGENTS.md: "no fail-on-* condition at all"). Without this check the step
-  # stayed green for a coverage-only exit: VERDICT/GATE_TIER is set to
-  # COVERAGE_INCOMPLETE above but was never read here (Codex review) --
-  # `_coverage_gated()` already reads the report's own zeroed contribution
-  # under `contract.unresolved: warn`, so VERDICT never reaches this value in
-  # that case to begin with.
-  if [[ "${GATE_TIER:-$VERDICT}" == "COVERAGE_INCOMPLETE" ]]; then
+  # (AGENTS.md: "no fail-on-* condition at all... a coverage failure raises
+  # a clean 0 to 1 and can never lower a gate's 2/4"). Reads `_coverage_
+  # gated()` DIRECTLY rather than keying off VERDICT/GATE_TIER=="COVERAGE_
+  # INCOMPLETE" (an earlier revision did the latter, Codex review): the
+  # max-fold means a higher-priority axis (a real BREAKING/API_BREAK) wins
+  # the VERDICT/GATE_TIER label and the CLI's own exit code, so that label
+  # never reaches "COVERAGE_INCOMPLETE" even though contract_coverage_
+  # exit_contribution genuinely is 1 -- with fail-on-breaking: false, that
+  # left the coverage floor completely unenforced. `_coverage_gated()`
+  # already reads the report's own zeroed contribution under `contract.
+  # unresolved: warn`, so this stays inert in that case regardless.
+  if _coverage_gated; then
     echo "::error::abicheck scan could not close the selected --contract domain on the available evidence; see contract_coverage_failures in the JSON report. Accept incomplete assurance with contract.unresolved: warn to allow."
     FINAL_EXIT=1
   fi
@@ -2210,8 +2215,12 @@ else
   fi
 
   # ADR-049 Phase 7's contract-coverage axis, unconditional exactly like the
-  # scan-mode check above and for the same reason -- see that comment.
-  if [[ "${GATE_TIER:-$VERDICT}" == "COVERAGE_INCOMPLETE" ]]; then
+  # scan-mode check above and for the same reason -- see that comment. Reads
+  # `_coverage_gated()` directly rather than the VERDICT/GATE_TIER label, so
+  # a BREAKING/API_BREAK exit that outranks the coverage axis in the max-fold
+  # (and, with the matching fail-on-* flag false, would otherwise leave the
+  # step green) cannot silently swallow it.
+  if _coverage_gated; then
     echo "::error::abicheck could not close the selected --contract domain on the available evidence; see contract_coverage_failures in the JSON report. Accept incomplete assurance with contract.unresolved: warn to allow."
     FINAL_EXIT=1
   fi
