@@ -224,6 +224,27 @@ _SNAPSHOT_CACHE_VERSION: str = "17"
 # declining every clang-side comparison via ``both_known_backed_fact`` --
 # until the entry happened to expire or was manually cleared. Bumped so the
 # upgrade forces re-extraction instead.
+#
+# v17 (G31 Phase C continuation, same pass): two changes bundled together,
+# both purely additive so neither needs its own version bump alone, but a
+# warm cache entry from before either shipped would keep replaying a
+# snapshot/merge missing the new data:
+#   - ``AbiSnapshot.typedefs_qualified`` (schema v25): both header backends
+#     now also populate a fully-qualified-name-keyed twin of ``typedefs``,
+#     closing the bare-name member-typedef collision gap documented on that
+#     field. A pre-v17 cache entry has an unconditionally empty
+#     ``typedefs_qualified`` even when the underlying headers would produce
+#     real entries.
+#   - the hybrid merge (``dumper_hybrid.py``) started stamping
+#     ``is_override``/``is_abstract`` provenance for a clang-only-appended
+#     method/type (previously only "deprecated" got this treatment for
+#     clang-only entities) -- without it, ``both_known_backed_fact`` saw no
+#     recorded provenance for a clang-only declaration's is_override/
+#     is_abstract and silently declined to compare a real transition, even
+#     though v16 above already made the underlying facts real. A pre-v17
+#     hybrid cache entry's ``fact_provenance`` dict is missing these two
+#     entries for every clang-only declaration.
+# Bumped so the upgrade forces re-extraction instead of replaying either gap.
 
 
 def _get_cache_dir() -> Path:

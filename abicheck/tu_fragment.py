@@ -57,6 +57,11 @@ class TuFragment:
     types: tuple[RecordType, ...] = ()
     enums: tuple[EnumType, ...] = ()
     typedefs: dict[str, str] = field(default_factory=dict)
+    # Qualified-name-keyed twin of ``typedefs`` (schema v25, G31 Phase C —
+    # see ``AbiSnapshot.typedefs_qualified``). Carried per-fragment so
+    # ``tu_merge.merge_fragments`` can fold it the same way it already
+    # folds ``typedefs`` itself.
+    typedefs_qualified: dict[str, str] = field(default_factory=dict)
     constants: dict[str, str] = field(default_factory=dict)
     ast_producer: str = "castxml"
     ast_toolchain: dict[str, str] = field(default_factory=dict)
@@ -84,6 +89,7 @@ class MergedTuFragments:
     types: tuple[RecordType, ...]
     enums: tuple[EnumType, ...]
     typedefs: dict[str, str]
+    typedefs_qualified: dict[str, str]
     constants: dict[str, str]
     ast_producer: str
     ast_toolchain: dict[str, str]

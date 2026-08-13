@@ -977,6 +977,33 @@ class TestTypedefCandidateSpellingsExactKeyCollision:
         assert "ns::Alias" in candidates
 
 
+class TestTypedefsQualifiedClosesBareNameCollisionFalseNegative:
+    """G31 Phase C: ``snapshot.typedefs`` collides two distinct member
+    typedefs sharing a bare spelling ("value_type") in different classes --
+    only one survives (whichever the producer visited last), a real,
+    previously-undetectable false negative. ``snapshot.typedefs_qualified``
+    (schema v25) carries both distinctly; a public signature spelled with
+    the full qualified alias (as a real header backend prints it) must
+    resolve through it, not the bare dict's arbitrary survivor."""
+
+    def test_typedefs_qualified_resolves_signature_the_bare_dict_lost(self) -> None:
+        snap = AbiSnapshot(
+            library="libfoo.so",
+            version="1.0",
+            functions=[_fn("get", return_type="Api::value_type")],
+            types=[RecordType(name="std::string", kind="class")],
+        )
+        # The bare dict lost Api's real typedef target to an unrelated
+        # bare-name collision with Foo's own -- pre-existing, deliberately
+        # unchanged lossy behavior.
+        snap.typedefs = {"value_type": "Unrelated"}
+        snap.typedefs_qualified = {
+            "Foo::value_type": "Unrelated",
+            "Api::value_type": "std::string",
+        }
+        assert directly_referenced_stdlib_types(snap) == frozenset({"std::string"})
+
+
 class TestDeepTypedefChainDoesNotRecurse:
     """Codex review, fresh evidence: a snapshot with a long chain of
     typedef aliases (`A0 -> A1 -> A2 -> ... -> std::string`) previously

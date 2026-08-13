@@ -2593,6 +2593,50 @@ def test_parse_typedefs() -> None:
     }
 
 
+def test_parse_typedefs_qualified_disambiguates_bare_name_collision() -> None:
+    # G31 Phase C: two unrelated member typedefs sharing the bare spelling
+    # "value_type" in different classes previously collided in the plain
+    # `typedefs` dict (whichever was parsed last silently won) -- the
+    # qualified twin must carry both, distinctly.
+    root = _tu(
+        {
+            "kind": "CXXRecordDecl",
+            "name": "Foo",
+            "loc": {"file": "include/foo.h", "line": 1},
+            "inner": [
+                {
+                    "kind": "TypedefDecl",
+                    "name": "value_type",
+                    "loc": {"line": 2},
+                    "type": {"qualType": "int"},
+                },
+            ],
+        },
+        {
+            "kind": "CXXRecordDecl",
+            "name": "Bar",
+            "loc": {"file": "include/foo.h", "line": 3},
+            "inner": [
+                {
+                    "kind": "TypedefDecl",
+                    "name": "value_type",
+                    "loc": {"line": 4},
+                    "type": {"qualType": "double"},
+                },
+            ],
+        },
+    )
+    parser = _ClangAstParser(root, set(), set())
+    # The plain (bare-keyed) dict still collides -- unchanged, pre-existing
+    # behavior, whichever declaration was visited last wins.
+    assert parser.parse_typedefs() == {"value_type": "double"}
+    # The qualified twin disambiguates both.
+    assert parser.parse_typedefs_qualified() == {
+        "Foo::value_type": "int",
+        "Bar::value_type": "double",
+    }
+
+
 def test_builtin_file_declarations_skipped() -> None:
     root = _tu(
         {

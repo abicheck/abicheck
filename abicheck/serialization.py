@@ -266,6 +266,19 @@ from .model import (
 #     False so `diff_symbols._diff_var_access` declines to trust it, instead
 #     of reporting a false `VAR_ACCESS_WIDENED` for every private/protected
 #     static member purely from a tool upgrade.
+#   25 — G31 Phase C continued: `AbiSnapshot.typedefs_qualified`, a
+#     fully-qualified-name-keyed twin of `typedefs` populated by both header
+#     backends, added to close the bare-name collision gap documented in
+#     AGENTS.md's "Known gaps" (two member typedefs sharing a bare spelling
+#     in different classes/namespaces silently overwrote one another in
+#     `typedefs`). Needs no reliability flag, unlike v19-v23 above: an empty
+#     dict is not "real but wrong" here the way a blanket `False`/`None`
+#     scalar was for those facts — a pre-v25 snapshot's empty
+#     `typedefs_qualified` is exactly the same value a v25+ snapshot with no
+#     typedefs at all would carry, and every consumer already treats the
+#     unqualified `typedefs` dict as the fallback source of truth, so
+#     "empty" degrades cleanly to "no extra qualified-identity data
+#     available" rather than being misread as a real fact.
 #
 # Reading an OLDER snapshot (the direction every CI baseline actually hits —
 # a baseline is committed once and outlives however many abicheck pin bumps
@@ -278,7 +291,7 @@ from .model import (
 # doesn't hit any producer-specific threshold above stays silent, since every
 # CI baseline is *always* some number of versions behind and warning
 # regardless of relevance would just be noise.
-SCHEMA_VERSION: int = 24
+SCHEMA_VERSION: int = 25
 
 # Schema version at which CastXML field CV facts became reliable (see v9 above).
 _MIN_SCHEMA_VERSION_FOR_CV_FACTS = 9
@@ -1020,6 +1033,7 @@ def snapshot_from_dict(d: dict[str, Any]) -> AbiSnapshot:
     ]
     enums = [_enum_type_from_dict(e) for e in d.get("enums", [])]
     typedefs: dict[str, str] = d.get("typedefs", {})
+    typedefs_qualified: dict[str, str] = d.get("typedefs_qualified", {})
     elf_data = d.get("elf")
     pe_data = d.get("pe")
     macho_data = d.get("macho")
@@ -1380,6 +1394,7 @@ def snapshot_from_dict(d: dict[str, Any]) -> AbiSnapshot:
         types=types,
         enums=enums,
         typedefs=typedefs,
+        typedefs_qualified=typedefs_qualified,
         elf=elf,
         pe=pe,
         macho=macho,

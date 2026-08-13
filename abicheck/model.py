@@ -1056,6 +1056,30 @@ class AbiSnapshot:
     # untagged snapshot.
     dependency_scope: str | None = field(default=None, kw_only=True)
 
+    # Fully-qualified typedef alias -> underlying type name (schema v25,
+    # G31 Phase C). Additive twin of ``typedefs`` above, not a replacement:
+    # ``typedefs`` is keyed by *bare* (unqualified) name on both header
+    # backends, so two distinct member typedefs sharing a bare spelling in
+    # different classes/namespaces (e.g. two unrelated ``value_type``
+    # member aliases — an extremely common STL-container-shaped pattern)
+    # silently collide, and whichever declaration a backend visits last
+    # wins; the other's aliasing information is dropped from the snapshot
+    # entirely with no way to recover it downstream (see AGENTS.md's "Known
+    # gaps" entry for the full incident history). Since a qualified name is
+    # unique per declaration, this dict cannot suffer that collision — both
+    # header backends populate it using the same scope-joining they already
+    # use for every other declaration kind, so it carries no *new*
+    # collision-avoidance logic of its own, just a different key shape.
+    # ``typedefs`` itself is deliberately left untouched (same key, same
+    # values, same silent-overwrite behavior) so no existing consumer's
+    # behavior changes — this is a pure addition for a consumer able to use
+    # qualified identity, not a schema replacement. Empty for every
+    # snapshot produced by a DWARF-only dump (which never had per-class
+    # qualified typedef scoping in the first place) and for any snapshot
+    # predating this field. See ``type_reachability_spelling.
+    # _typedef_spelling_targets`` for the first consumer.
+    typedefs_qualified: dict[str, str] = field(default_factory=dict, kw_only=True)
+
     # Runtime-only provenance qualifier (not serialized — popped in
     # snapshot_to_dict). True when ``from_headers`` was *inferred* for a legacy
     # snapshot that predates the explicit ``from_headers`` key, rather than set

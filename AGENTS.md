@@ -2614,6 +2614,47 @@ Once a root command genuinely clears the bar above, pick the right home:
   Filed here per this file's own convention rather than attempted under
   this pass's time budget.
 
+  **Closed, additively, in a later pass (G31 Phase C continued).** Rather
+  than replacing `AbiSnapshot.typedefs`'s key shape — which would have
+  meant re-verifying every one of its existing consumers
+  (`type_reachability.py`, `diff_types.py`, `surface.py`) against a changed
+  contract, plus every external Python-API caller reading that field
+  directly — the actual fix is purely additive: a new field,
+  `AbiSnapshot.typedefs_qualified` (schema v25), a fully-qualified-name-keyed
+  twin populated by both `dumper_castxml.py`'s and `dumper_clang.py`'s
+  `parse_typedefs_qualified()` (using the identical `_qualified_name()`/
+  `_qualified()` scope-joining every other declaration kind in those modules
+  already uses) alongside the existing, deliberately-unchanged
+  `parse_typedefs()`. Since a qualified name is unique per declaration, this
+  twin cannot suffer the bare-name collision at all — both `Foo::value_type`
+  and `Bar::value_type` survive as distinct entries where only one bare
+  `value_type` could before. Threaded through the ELF manifest per-TU merge
+  path too (`TuFragment`/`MergedTuFragments`/`ElfHeaderAstResult` in
+  `tu_fragment.py`/`tu_merge.py`/`dumper_manifest.py`), closing the identical,
+  separately-documented "Known, accepted limitation" comment `tu_merge.py`
+  carried for the multi-TU case specifically. Only one consumer was wired to
+  actually use the new field: `type_reachability.py`'s
+  `directly_referenced_stdlib_types()` (via a new `_merged_typedefs()` helper
+  that folds `typedefs_qualified` into the flat dict already passed to
+  `_typedef_spelling_targets()` and siblings) — closing the real false
+  negative where a public signature spelled with the qualified alias the
+  bare dict had already lost could silently miss a reachable `std::` field.
+  `diff_types.py`'s typedef diffing and `surface.py`'s typedef-following in
+  `_walk_type_closure` are **not** wired to the new field in this pass — each
+  is its own scoped follow-up, not a drive-by extension, since each has its
+  own call shape and (per this file's own established discipline) needs its
+  own test coverage before trusting a change to it. No reliability flag was
+  needed for the new field (unlike the `*_facts_reliable` flags v19–v23 use
+  for a real-but-wrong scalar default): an empty `typedefs_qualified` is
+  exactly the same value a genuinely-typedef-free snapshot would carry, so a
+  pre-v25 snapshot degrades cleanly to "no extra qualified data available"
+  rather than being misread as a real fact — see `serialization.py`'s own
+  v25 history-comment entry for the full reasoning. Verified via new unit
+  tests on both header backends directly (`_CastxmlParser.
+  parse_typedefs_qualified`/`_ClangAstParser.parse_typedefs_qualified`) and
+  an end-to-end `type_reachability` regression proving the bare dict's lossy
+  collision no longer hides a real `std::` field.
+
 ## What NOT to do
 
 - Don't hand-edit `CHANGELOG.md`'s `## [Unreleased]` section directly — add a `changelog.d/` fragment instead (see Conventions above); CI enforces this

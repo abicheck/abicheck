@@ -1183,6 +1183,68 @@ class TestClangOnlyDeclarationProvenance:
         result = compare(old_merged, new_merged)
         assert ChangeKind.FUNC_DEPRECATED_ADDED in {c.kind for c in result.changes}
 
+    def test_clang_only_method_is_override_is_stamped(self):
+        # Codex review, fresh evidence (PR #736 follow-up): a clang-only
+        # method's is_override value is genuinely clang-sourced, matching
+        # the deprecated stamp above -- without it, both_known_backed_fact
+        # sees no recorded provenance and silently declines to compare a
+        # real override-specifier transition.
+        clang_f = Function(
+            name="run",
+            mangled="_ZN4Impl3runEv",
+            return_type="void",
+            is_override=True,
+        )
+        castxml = _snap(ast_producer="castxml")
+        clang = _snap(functions=[clang_f], ast_producer="clang")
+        merged = merge_snapshots(castxml, clang)
+        key = func_fact_key("_ZN4Impl3runEv", "is_override")
+        assert merged.fact_provenance[key] == "clang"
+        assert fact_producer(merged, key) == "clang"
+
+    def test_clang_only_type_is_abstract_is_stamped(self):
+        # Same reasoning as is_override above, for RecordType.is_abstract.
+        clang_t = RecordType(
+            name="OnlyInClang",
+            kind="class",
+            size_bits=64,
+            is_abstract=True,
+        )
+        castxml = _snap(ast_producer="castxml")
+        clang = _snap(types=[clang_t], ast_producer="clang")
+        merged = merge_snapshots(castxml, clang)
+        key = type_fact_key("OnlyInClang", "is_abstract")
+        assert merged.fact_provenance[key] == "clang"
+        assert fact_producer(merged, key) == "clang"
+
+    def test_clang_only_method_override_transition_is_detected_end_to_end(self):
+        from abicheck.checker import ChangeKind, compare
+
+        old_clang_only = Function(
+            name="run",
+            mangled="_ZN4Impl3runEv",
+            return_type="void",
+            is_override=False,
+        )
+        new_clang_only = Function(
+            name="run",
+            mangled="_ZN4Impl3runEv",
+            return_type="void",
+            is_override=True,
+        )
+        old_merged = merge_snapshots(
+            _snap(ast_producer="castxml"),
+            _snap(functions=[old_clang_only], ast_producer="clang"),
+        )
+        new_merged = merge_snapshots(
+            _snap(ast_producer="castxml"),
+            _snap(functions=[new_clang_only], ast_producer="clang"),
+        )
+        result = compare(old_merged, new_merged)
+        assert ChangeKind.FUNC_OVERRIDE_SPECIFIER_ADDED in {
+            c.kind for c in result.changes
+        }
+
 
 class TestNamespaceQualifiedMerging:
     """Codex review, fresh evidence: merge_snapshots() matched castxml/clang

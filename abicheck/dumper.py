@@ -1612,6 +1612,7 @@ def _dump_elf(
         types=_backfilled_types,
         enums=list(ast_result.enums),
         typedefs=ast_result.typedefs,
+        typedefs_qualified=ast_result.typedefs_qualified,
         constants=ast_result.constants,
         elf=elf_meta,
         dwarf=dwarf_meta,
@@ -1794,6 +1795,7 @@ def _dump_macho(
         types=parser.parse_types(),
         enums=parser.parse_enums(),
         typedefs=parser.parse_typedefs(),
+        typedefs_qualified=parser.parse_typedefs_qualified(),
         constants=parser.parse_constants(),
         macho=macho_meta,
         # Reached only when headers were supplied and castxml ran (the no-header
@@ -1916,6 +1918,7 @@ def _dump_pe(
         types=parser.parse_types(),
         enums=parser.parse_enums(),
         typedefs=parser.parse_typedefs(),
+        typedefs_qualified=parser.parse_typedefs_qualified(),
         constants=parser.parse_constants(),
         pe=pe_meta,
         # Reached only when headers were supplied and castxml ran (the no-header

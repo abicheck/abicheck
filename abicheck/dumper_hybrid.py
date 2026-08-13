@@ -490,6 +490,16 @@ def _merge_functions(
         # deprecation transition on a declaration that exists on both sides
         # only via clang (Codex review, fresh evidence).
         provenance[func_fact_key(cf.mangled, "deprecated")] = "clang"
+        # Same reasoning as "deprecated" immediately above, for
+        # is_override (G31 Phase C's is_override/is_abstract backend
+        # audit): a clang-only method's is_override IS genuinely
+        # clang-sourced, and without this stamp
+        # both_known_backed_fact(old, new, func_fact_key(mangled,
+        # "is_override")) sees no recorded provenance for it and declines
+        # to compare a real override-specifier transition on a method
+        # that exists on both sides only via clang (Codex review, fresh
+        # evidence).
+        provenance[func_fact_key(cf.mangled, "is_override")] = "clang"
         provenance[func_fact_key(cf.mangled, "visibility")] = "clang"
     merged.extend(clang_only)
     return merged
@@ -748,6 +758,14 @@ def merge_snapshots(castxml_snap: AbiSnapshot, clang_snap: AbiSnapshot) -> AbiSn
         # qualification for this same fact above.
         type_key = type_map_key(t)
         provenance[type_fact_key(type_key, "deprecated")] = "clang"
+        # Same reasoning as "deprecated" immediately above, for is_abstract
+        # (G31 Phase C's is_override/is_abstract backend audit): a
+        # clang-only type's own is_abstract value IS genuinely
+        # clang-sourced, and without this stamp both_known_backed_fact
+        # sees no recorded provenance for it and declines to compare a
+        # real abstractness transition on a type that exists on both
+        # sides only via clang (Codex review, fresh evidence).
+        provenance[type_fact_key(type_key, "is_abstract")] = "clang"
         for f in t.fields:
             provenance[field_fact_key(type_key, f.name, "deprecated")] = "clang"
             # "default" joined "deprecated" as a genuinely clang-sourced field

@@ -1735,6 +1735,25 @@ class _ClangAstParser:
             typedefs[name] = underlying or "?"
         return typedefs
 
+    def parse_typedefs_qualified(self) -> dict[str, str]:
+        """Same alias -> underlying-type mapping as :meth:`parse_typedefs`,
+        keyed by the fully namespace/class-qualified name instead of the
+        bare local name -- see ``AbiSnapshot.typedefs_qualified``'s
+        docstring for why ``parse_typedefs`` cannot be relied on alone for
+        a member typedef whose bare spelling collides across classes.
+        """
+        typedefs: dict[str, str] = {}
+        for entry in self._typedefs:
+            node = entry.node
+            if _is_builtin_file(entry.file):
+                continue
+            name = str(node.get("name", ""))
+            if not name:
+                continue
+            underlying = _typedef_underlying(node)
+            typedefs[self._qualified(entry)] = underlying or "?"
+        return typedefs
+
 
 # ─── pure node helpers (module-level so they are unit-testable on their own) ──
 
