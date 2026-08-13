@@ -1962,9 +1962,18 @@ _build_json_cmd() {
 _maybe_post_pr_comment() {
   [[ "${INPUT_PR_COMMENT:-true}" == "true" ]] || return 0
   case "$MODE" in
-    compare) ;;
+    compare | scan) ;;
     *) return 0 ;;
   esac
+  # `scan --artifact-set` (ADR-056) has no old side and no single scanned
+  # artifact -- its JSON is a per-library audit list, a different shape
+  # `pr_comment_scan.py`'s `from_scan` doesn't handle (it expects one
+  # `diff`/`findings`/`additions` block for one artifact). Skip rather than
+  # render a misleading or crashing comment.
+  if [[ "$MODE" == "scan" && -n "${SCAN_ARTIFACT_SET:-}" ]]; then
+    echo "abicheck: scan --artifact-set has no single-artifact JSON shape; skipping PR comment."
+    return 0
+  fi
   # A dry run performed no real comparison -- posting a comment would either
   # show nothing (no PR_JSON) or silently trigger a second, real compare just
   # to produce one, defeating the point of --dry-run. Skip entirely.
@@ -2038,6 +2047,14 @@ _maybe_post_pr_comment() {
     run_url="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
   fi
 
+  # scan's own JSON carries no artifact/library name (unlike compare's
+  # "library") -- name it explicitly so the comment header doesn't just say
+  # "artifact" (pr_comment_scan.py's `from_scan` fallback).
+  local subject_args=()
+  if [[ "$MODE" == "scan" && -n "${SCAN_ARTIFACT:-}" ]]; then
+    subject_args=(--subject "$(basename -- "$SCAN_ARTIFACT")")
+  fi
+
   python3 -m abicheck.cli_pr_comment "$PR_JSON" \
     --sha "${head_sha:-${GITHUB_SHA:-}}" \
     --detail "${INPUT_PR_COMMENT_DETAIL:-standard}" \
@@ -2045,6 +2062,7 @@ _maybe_post_pr_comment() {
     --run-label "run #${GITHUB_RUN_NUMBER:-?}" \
     ${run_url:+--report-url "$run_url"} \
     ${PR_GATE_ARGS[@]+"${PR_GATE_ARGS[@]}"} \
+    ${subject_args[@]+"${subject_args[@]}"} \
     -o "$PR_BODY" || true
 
   if [[ ! -s "$PR_BODY" ]]; then

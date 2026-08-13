@@ -301,6 +301,8 @@ class TestBaselineSummaryKeysArePinned:
             "suppressed",
             "suppressed_truncated",
             "suppressed_truncated_kinds",
+            "additions",
+            "additions_truncated",
         }
     )
 
@@ -321,11 +323,17 @@ class TestBaselineSummaryKeysArePinned:
             )
             for i in range(30)
         ]
+        # An addition-shaped `ChangeKind` (FUNC_ADDED is in ADDITION_KINDS),
+        # more than the cap (5) so `additions_truncated` is reachable too.
+        additions = [
+            Change(kind=ChangeKind.FUNC_ADDED, symbol=f"_Za{i:02d}v", description="d")
+            for i in range(30)
+        ]
         return types.SimpleNamespace(
             breaking=breaking,
             source_breaks=[],
             risk=[],
-            compatible=[],
+            compatible=additions,
             not_evaluated=[breaking[0]],
             detector_results=[
                 types.SimpleNamespace(

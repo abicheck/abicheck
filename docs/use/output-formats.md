@@ -689,14 +689,29 @@ symbol linkage was captured also carries `symbol_binding`
 [Suppressions](suppressions.md)), so a `binding:`-scoped suppression's
 match/no-match is auditable from `scan --against` too.
 
+Since schema 1.13, the block also carries an always-on `additions` array —
+the addition-shaped subset of the `compatible` bucket (new public-API
+surface, `ChangeKind`'s `ADDITION_KINDS`), itemized the same shape as
+`findings` (`"bucket": "compatible"`) regardless of whether severity policy
+made any of them the run's blocking cause. Capped independently of
+`findings`' own budget (the same `--max-findings`/
+`ABICHECK_MAX_BASELINE_FINDINGS` cap), with `additions_truncated` set when
+that cap was hit — both keys are omitted when `compatible` has no
+addition-shaped entry. This is what lets a `scan --against` PR comment (see
+the Action's own `pr-comment`/`pr-comment-on` inputs,
+[GitHub Action usage](github-action.md)) render a green "public API
+additions" section the same way `compare`'s own JSON report already does via
+its full `changes` list.
+
 ```json
 {
-  "scan_schema_version": "1.11",
+  "scan_schema_version": "1.13",
   "diff": {
     "breaking": 25,
     "findings": ["... 20 entries ..."],
     "findings_truncated": true,
-    "findings_truncated_kinds": {"func_removed": 5}
+    "findings_truncated_kinds": {"func_removed": 5},
+    "additions": ["... up to 20 entries ..."]
   }
 }
 ```

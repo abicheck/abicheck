@@ -56,7 +56,7 @@ back to a different, unrequested behavior.
 | `format: json` | yes | n/a (always JSON) | yes | yes |
 | `format: markdown` / `text` | yes | n/a (always JSON) | `text` only | `markdown` only |
 | `upload-sarif: true` | yes (needs `format: sarif`) | **error** | **error** | **error** |
-| `pr-comment` | yes | no-op | no-op | no-op |
+| `pr-comment` | yes | no-op | yes (single artifact only — no-op with `new-library-set`) | no-op |
 
 For a multi-library release directory (several `.so`/`.dll`/`.dylib` files),
 use `mode: compare` with a directory/package operand — it fans out to a
@@ -248,7 +248,7 @@ extra-args: '--strict-suppressions --require-justification'
 | `severity-addition` | — | Severity for additions: `error`, `warning`, or `info` (compare mode only) |
 | `extra-args` | `''` | Additional CLI arguments passed to abicheck |
 | `add-job-summary` | `true` | Write summary to Job Summary panel (ignored for dump mode) |
-| `pr-comment` | `true` | Post a sticky ABI report comment on the PR (compare mode, including directory/package comparisons). No-op outside `pull_request` events. |
+| `pr-comment` | `true` | Post a sticky ABI report comment on the PR (compare mode, including directory/package comparisons; scan mode for a single artifact — not `new-library-set`). No-op outside `pull_request` events. |
 | `pr-comment-mode` | `update` | `update` keeps one comment and edits it in place; `new` posts a fresh comment each run |
 | `pr-comment-on` | `changes` | When to comment: `changes`, `always`, or `never` |
 | `pr-comment-detail` | `standard` | Comment detail: `summary`, `standard`, or `full` |

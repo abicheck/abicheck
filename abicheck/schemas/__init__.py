@@ -582,7 +582,25 @@ REPORT_SCHEMA_VERSION = "2.34"
 #:        per-TU macro divergence; see that module's own docstring). ``0``
 #:        when nothing was truncated, so an ordinary scan is unchanged from
 #:        1.11.
-SCAN_SCHEMA_VERSION = "1.12"
+#: 1.13 -- the ``diff`` block gains an always-on ``additions`` array (plus an
+#:        optional ``additions_truncated`` boolean): the addition-shaped
+#:        subset of ``diff.compatible`` (new public-API surface --
+#:        ``ChangeKind``'s ``ADDITION_KINDS``), itemized the same shape as
+#:        ``findings`` (``bucket: "compatible"``) regardless of whether
+#:        severity policy made any of them blocking. Previously
+#:        ``diff.compatible`` contributed only its bare count unless
+#:        promoted to blocking by ``--severity-addition error`` (see 1.9's
+#:        ``severity`` block) -- with no way to render *what* was added, a
+#:        ``scan --against`` PR comment (``pr_comment_scan.from_scan``) had no
+#:        source for a green "public API additions" section the way
+#:        ``compare``'s own JSON report already supports via its full
+#:        ``changes`` list. Capped independently of ``findings``' own budget
+#:        (same ``--max-findings``/``ABICHECK_MAX_BASELINE_FINDINGS`` cap),
+#:        so a large addition set can never crowd out a real gating finding.
+#:        Both keys are additive and omitted when ``diff.compatible`` has no
+#:        addition-shaped entry, so an ordinary scan with no new public API
+#:        is unchanged from 1.12.
+SCAN_SCHEMA_VERSION = "1.13"
 
 _SCHEMA_DIR = Path(__file__).resolve().parent
 COMPARE_REPORT_SCHEMA_PATH = _SCHEMA_DIR / "compare_report.schema.json"

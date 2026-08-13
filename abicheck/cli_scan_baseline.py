@@ -42,6 +42,7 @@ import click
 
 from .buildsource.risk import RiskRules
 from .buildsource.scan_levels import EvidenceDepth, SourceMethod
+from .checker_policy import ADDITION_KINDS
 
 if TYPE_CHECKING:
     from .environment_matrix import EnvironmentMatrix
@@ -254,6 +255,36 @@ def _resolve_max_baseline_findings(max_findings: int | None) -> int:
 #: deliberately does not itemize -- they carry no verdict, so under the legacy
 #: scheme they are exactly the "additions/quality noise" that comment names.
 _COMPATIBLE_SEVERITY_CATEGORIES = frozenset({"addition", "quality_issues"})
+
+#: Kind value strings that constitute new public-API surface -- the same
+#: registry-sourced set `pr_comment.py` uses for `compare`'s own "Public API
+#: additions" section (`ADDITION_KINDS`, not a hand-picked list -- picks up a
+#: kind that doesn't end in "_added" too, e.g. `type_field_added_compatible`).
+_ADDITION_KIND_VALUES = frozenset(k.value for k in ADDITION_KINDS)
+
+
+def _addition_finding_dicts(diff: Any, cap: int) -> tuple[list[dict[str, Any]], bool]:
+    """Always-on itemization of new public-API surface, for a PR comment.
+
+    ``diff.compatible`` normally contributes only its bare count to
+    ``_baseline_summary`` (see ``_COMPATIBLE_SEVERITY_CATEGORIES``'s own
+    docstring -- "additions/quality noise this summary was never meant to
+    itemize"), and is itemized above only when severity policy made one of
+    them the run's actual blocking cause. Rendering a ``scan --against``
+    result as a sticky PR comment (``pr_comment_scan.from_scan``) needs more than
+    that: a green "➕ Public API additions" table, the same thing `compare`'s
+    own JSON report already carries via its full `changes` list -- so this
+    itemizes just the addition-shaped subset of `diff.compatible`
+    (`_ADDITION_KIND_VALUES`, never a quality finding) unconditionally,
+    capped independently of the gating findings above so a large addition set
+    can never crowd out a real gating finding from the shared budget.
+    """
+    addition_changes = [
+        c for c in getattr(diff, "compatible", None) or ()
+        if _change_kind_str(c) in _ADDITION_KIND_VALUES
+    ]
+    dicts = _baseline_finding_dicts(addition_changes[:cap], "compatible")
+    return dicts, len(addition_changes) > len(dicts)
 
 
 def _add_severity_blocking_compatible_findings(
@@ -730,6 +761,16 @@ def _baseline_summary(diff: Any, max_findings: int | None = None) -> dict[str, A
         if total_gating > cap:
             summary["findings_truncated"] = True
             _accumulate_kind_counts(summary, "findings_truncated_kinds", cut_kinds)
+
+    # Always-on itemization of new public-API surface (see
+    # `_addition_finding_dicts`'s own docstring) -- separate from `findings`
+    # above, which only ever names a `diff.compatible` entry when severity
+    # policy made it the blocking cause.
+    additions, additions_truncated = _addition_finding_dicts(diff, cap)
+    if additions:
+        summary["additions"] = additions
+        if additions_truncated:
+            summary["additions_truncated"] = True
 
     # ADR-049 Phase 5: surface the same suppression audit trail `compare`'s
     # own JSON report already exposes (`DiffResult.suppressed_changes`,
