@@ -930,8 +930,14 @@ def _finalize_release_output(
         )
         if _affected:
             if contract_coverage_exit_contribution == 0:
+                # Exact wording match with single-pair compare's own
+                # `_coverage_message` (contract_coverage_exit.py) --
+                # `=`, not `:` -- deliberately, so a consumer distinguishing
+                # "accepted" from "genuinely gated" (e.g. action/run.sh's
+                # `_coverage_gated()`) can match one phrase regardless of
+                # which command produced the notice (Codex review).
                 _effect = (
-                    "Accepted by contract.unresolved: warn, so it "
+                    "Accepted by contract.unresolved=warn, so it "
                     "contributes 0 to the release exit code"
                 )
             else:

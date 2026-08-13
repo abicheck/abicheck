@@ -21,7 +21,7 @@ Covers the release JSON's `contract_coverage_exit_contribution`/
 `contract_coverage_failure_count` fields (release-level and per-library),
 `_compare_one_library`'s real stamping of both, and `_finalize_release_
 output`'s stderr notice for non-JSON formats — including the
-`contract.unresolved: warn`-accepted advisory case, where the exit-code
+`contract.unresolved=warn`-accepted advisory case, where the exit-code
 contribution is deliberately zeroed while the failure count stays real
 (CLI-audit P1/P2, Codex review).
 """
@@ -155,7 +155,7 @@ def test_compare_one_library_stamps_contract_coverage_failure_count(
 
 
 def test_release_json_contract_coverage_failure_count_independent_of_warn() -> None:
-    # CLI-audit P2 follow-up (Codex review): `contract.unresolved: warn`
+    # CLI-audit P2 follow-up (Codex review): `contract.unresolved=warn`
     # zeroes the exit-code contribution while the failure count stays real
     # -- both fields must be independently readable from the JSON so a
     # consumer can tell "clean" apart from "accepted incomplete assurance".
@@ -240,7 +240,7 @@ def test_release_stderr_announces_contract_coverage_for_non_json_format(capsys) 
 
 
 def test_release_stderr_announces_warn_accepted_gap_as_advisory(capsys) -> None:
-    # CLI-audit P2 follow-up (Codex review): `contract.unresolved: warn`
+    # CLI-audit P2 follow-up (Codex review): `contract.unresolved=warn`
     # zeroes the exit-code contribution while the failures stay real --
     # the notice must still fire (worded as accepted, not as a blocking
     # contribution), mirroring single-pair `compare`'s own
@@ -276,7 +276,7 @@ def test_release_stderr_announces_warn_accepted_gap_as_advisory(capsys) -> None:
     err = capsys.readouterr().err
     assert "Contract coverage incomplete" in err
     assert "libb.so" in err
-    assert "contract.unresolved: warn" in err
+    assert "contract.unresolved=warn" in err
     assert "contributes 0" in err
 
 

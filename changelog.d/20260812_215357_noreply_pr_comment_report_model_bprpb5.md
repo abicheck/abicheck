@@ -5,19 +5,26 @@ A new changelog fragment. See changelog.d/README.md for the workflow.
 ### Fixed
 
 - **`action/run.sh`'s `_coverage_gated()` no longer defeats
-  `contract.unresolved: warn`** — a real bug found in review, distinct from
-  (and pre-dating) the release-mode work in this fragment: whenever a
-  readable JSON report answered `contract_coverage_exit_contribution: 0`,
-  the function still fell through to grepping stderr for "Contract coverage
-  incomplete" — a substring the diagnostic notice contains even in the
-  `warn`-accepted case (worded "Accepted by contract.unresolved: warn..."
-  rather than "Contributes N..."). Any run with both a readable JSON (true
-  for most markdown-format `compare`/`scan` invocations) *and* that stderr
-  notice therefore failed the step regardless of `warn`, defeating the
-  documented acceptance mechanism entirely. The JSON answer is now
-  authoritative whenever the report is readable; the stderr fallback is
-  reached only when it genuinely is not (an unreadable/malformed/absent
-  report).
+  `contract.unresolved=warn`** — a real bug found in review, distinct from
+  (and pre-dating) the release-mode work in this fragment; closed in two
+  rounds. Round one: whenever a readable JSON report answered
+  `contract_coverage_exit_contribution: 0`, the function still fell through
+  to grepping stderr for "Contract coverage incomplete" — a substring the
+  diagnostic notice contains even in the `warn`-accepted case (worded
+  "Accepted by `contract.unresolved=warn`..." rather than "Contributes
+  N..."). Any run with both a readable JSON (true for most markdown-format
+  `compare`/`scan` invocations) *and* that stderr notice therefore failed
+  the step regardless of `warn`. Fixed by making the JSON answer
+  authoritative whenever the report is readable. Round two: that fix only
+  covered the readable-JSON branch — the genuine no-JSON-at-all stderr
+  fallback (a non-JSON directory/package `compare` outside a `pull_request`
+  event, exactly the shape this fragment's own release-mode stderr notice
+  introduced) still matched the bare substring regardless of the accepted
+  wording, since the grep itself never excluded it. Fixed by excluding the
+  "Accepted by `contract.unresolved=warn`" phrase from that fallback grep
+  too, and by making the release notice's wording match single-pair
+  `compare`'s own (`=`, not `:`) exactly so one exclusion phrase covers
+  both.
 - **Sticky PR comment no longer folds analysis-quality findings into "Needs
   review"** — `layer_coverage_asymmetric`, `evidence_required_missing`,
   `source_fact_coverage_incomplete`, and `dwarf_info_missing` are

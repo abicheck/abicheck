@@ -1415,22 +1415,28 @@ class TestCoverageGatedTrustsAReadableZero:
     JSON report's own `contract_coverage_exit_contribution: 0` and stop
     there -- not fall through to grepping stderr for the substring "Contract
     coverage incomplete", which the notice contains regardless of whether
-    the effect clause reads "Accepted by contract.unresolved: warn" or
-    "Contributes N to..." (Codex review, P1).
+    the effect clause reads "Accepted by contract.unresolved=warn" or
+    "Contributes N to..." (Codex review, P1, two rounds).
 
-    An earlier revision fell through unconditionally whenever the JSON read
-    "0", not only when the JSON was unreadable -- so a `contract.unresolved:
-    warn`-accepted run (report says 0, but the stderr notice still names the
-    axis, worded as accepted) still matched the grep and set `FINAL_EXIT=1`,
-    defeating the acceptance mechanism this feature exists to provide. Real
-    for both compare and scan, since both share `_coverage_gated()`.
+    Round one: an earlier revision fell through unconditionally whenever the
+    JSON read "0", not only when the JSON was unreadable -- so a
+    `contract.unresolved=warn`-accepted run (report says 0, but the stderr
+    notice still names the axis, worded as accepted) still matched the grep
+    and set `FINAL_EXIT=1`, defeating the acceptance mechanism this feature
+    exists to provide. Real for both compare and scan, since both share
+    `_coverage_gated()`. Round two (below, `TestCoverageGatedFallbackIgnores
+    Accepted`): the fix above only covers the "readable JSON" branch -- the
+    genuine no-JSON-at-all fallback (a non-JSON directory/package `compare`
+    outside a `pull_request` event, this same PR's own P1 release fix) still
+    matched the bare substring regardless of the accepted wording, since the
+    grep itself never excluded it.
     """
 
     @staticmethod
     def _warn_accepted_stderr() -> str:
         return (
             "Contract coverage incomplete for the selected --contract "
-            "domain: old/export_table. Accepted by contract.unresolved: "
+            "domain: old/export_table. Accepted by contract.unresolved="
             "warn, so it contributes 0 to the exit code (ADR-049 "
             "contract-coverage axis)."
         )
@@ -1519,5 +1525,82 @@ class TestCoverageGatedTrustsAReadableZero:
                 "INPUT_OUTPUT_FILE": str(tmp_path / "report.json"),
             },
             bindir,
+        )
+        assert outputs["_exit"] == 1, outputs["_stdout"]
+
+
+class TestCoverageGatedFallbackIgnoresAccepted:
+    """The genuine no-JSON-at-all stderr fallback must itself distinguish
+    the "Accepted by contract.unresolved=warn" wording from a real gate
+    (Codex review, P1, second round) -- exactly the shape a directory/
+    package `compare` takes with a non-JSON format outside a `pull_request`
+    event (this PR's own P1 release fix): `--secondary-format` is rejected
+    for a release-style operand, and the Action's PR-comment JSON rerun only
+    fires on `pull_request`/`pull_request_target`, so this fallback is the
+    ONLY signal available at all -- there is no readable-JSON branch to
+    fall back on first. A single-file operand always gets a secondary JSON
+    regardless of format/PR-context (see `PR_JSON` wiring), so this needs a
+    real directory operand to reach the genuine no-JSON path at all.
+    """
+
+    def _release_outputs(
+        self, tmp_path: Path, *, exit_code: int, stderr: str
+    ) -> dict:
+        bindir = tmp_path / "bin"
+        bindir.mkdir()
+        stub = bindir / "abicheck"
+        stub.write_text(
+            "#!/usr/bin/env bash\n"
+            'echo "# ABI report"\n'
+            f'printf "%s\\n" {json.dumps(stderr)} >&2\n'
+            f"exit {exit_code}\n",
+            encoding="utf-8",
+        )
+        stub.chmod(0o755)
+        old = tmp_path / "old_release"
+        new = tmp_path / "new_release"
+        for d in (old, new):
+            d.mkdir()
+            (d / "libfoo.so").write_bytes(b"\x7fELF")
+        return _run_action(
+            tmp_path,
+            {
+                "INPUT_MODE": "compare",
+                "INPUT_OLD_LIBRARY": str(old),
+                "INPUT_NEW_LIBRARY": str(new),
+                "INPUT_FORMAT": "markdown",
+            },
+            bindir,
+        )
+
+    def test_a_warn_accepted_gap_with_no_json_at_all_does_not_fail_the_step(
+        self, tmp_path: Path
+    ) -> None:
+        outputs = self._release_outputs(
+            tmp_path,
+            exit_code=0,
+            stderr=(
+                "Contract coverage incomplete for the selected --contract "
+                "domain in: liba.so. Accepted by contract.unresolved=warn, "
+                "so it contributes 0 to the release exit code (ADR-049 "
+                "contract-coverage axis)."
+            ),
+        )
+        assert outputs["_exit"] == 0, outputs["_stdout"]
+
+    def test_a_genuinely_gated_no_json_release_still_fails_the_step(
+        self, tmp_path: Path
+    ) -> None:
+        """The inverse: no "Accepted by ..." clause at all -- a real
+        contribution -- must still gate the step through this same
+        fallback, unaffected by the exclusion above."""
+        outputs = self._release_outputs(
+            tmp_path,
+            exit_code=0,
+            stderr=(
+                "Contract coverage incomplete for the selected --contract "
+                "domain in: liba.so. Contributes 1 to the release exit "
+                "code (ADR-049 contract-coverage axis)."
+            ),
         )
         assert outputs["_exit"] == 1, outputs["_stdout"]

@@ -1267,7 +1267,19 @@ _coverage_gated() {
     [[ "$_contribution" == "1" ]]
     return
   fi
-  echo "$STDERR_CONTENT" | grep -q 'Contract coverage incomplete'
+  # The genuine "no JSON at all" fallback (Codex review, second P1 round):
+  # the stderr notice itself says "Contract coverage incomplete..." even
+  # for a `contract.unresolved=warn`-accepted gap (just with an "Accepted
+  # by contract.unresolved=warn" effect clause, per `_coverage_message`
+  # in contract_coverage_exit.py -- both single-pair `compare` and this
+  # PR's own release-mode notice use that exact phrase, deliberately kept
+  # in sync). A bare substring match on "Contract coverage incomplete"
+  # cannot tell the two apart, so it must also confirm the acceptance
+  # phrase is absent -- exactly the shape a non-JSON release `compare`
+  # takes outside a `pull_request` event, where this fallback is the ONLY
+  # signal available at all.
+  echo "$STDERR_CONTENT" | grep -q 'Contract coverage incomplete' \
+    && ! echo "$STDERR_CONTENT" | grep -q 'Accepted by contract.unresolved=warn'
 }
 
 # The compatibility axis's own exit code, from the JSON report's severity gate
