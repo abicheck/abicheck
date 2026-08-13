@@ -32,8 +32,13 @@ it should read in CHANGELOG.md. Delete the other sections.
   and green "Public API additions" sections at once, and the exact
   promoted/addition totals now come from the severity gate's own
   per-category counts rather than a possibly report-capped finding list.
-  An audit-only scan (no `--against`) whose cross-check results alone
-  produced `API_BREAK` (or a `--crosscheck KEY=error` promotion) now
-  surfaces those findings in the comment too, instead of silently
-  rendering (or deleting) a green "no baseline to compare" comment next
-  to a red `fail-on-api-break` check.
+  A scan whose cross-check results alone produced `API_BREAK` (or a
+  `--crosscheck KEY=error` promotion) now surfaces those findings in the
+  comment — for an audit-only run (no `--against`) *and* for a baseline
+  comparison alike, since cross-check is a separate evidence axis from the
+  diff itself — instead of silently rendering (or deleting) a green "no
+  changes" comment next to a red `fail-on-api-break` check. An
+  `addition: error` severity promotion (which raises every addition-shaped
+  finding to blocking, never a subset) now empties the green "Public API
+  additions" section wholesale instead of excluding only the promoted
+  entries a truncated `diff.findings` list happened to still carry.

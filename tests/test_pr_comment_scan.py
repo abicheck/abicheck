@@ -452,11 +452,14 @@ def test_scan_safe_total_exact_when_additions_truncated():
     assert "truncated" in body.lower()
 
 
-def test_scan_safe_total_subtracts_promoted_additions_from_the_true_total():
-    # Combining both fixes: 3 real additions total, one of which was
-    # promoted to Breaking by severity policy -- the safe count must be 2,
-    # not 3 (the promoted one isn't double-counted) and not 1 (the
-    # itemized-but-not-promoted ones must still count).
+def test_scan_addition_promotion_empties_the_entire_safe_section():
+    # `diff["additions"]` (`cli_scan_baseline._addition_finding_dicts`)
+    # itemizes only addition-category compatible changes, always -- so an
+    # `addition: error` severity config promotes every one of them to
+    # blocking at once, never a subset. There is no realistic mixed
+    # promoted/unpromoted split within one report's additions list; the
+    # exact-count math (`_scan_promoted_compatible_counts`) and the
+    # itemized safe section must agree that the whole category emptied out.
     report = _scan_report(
         verdict="SEVERITY_ERROR",
         exit_code=1,
@@ -464,10 +467,10 @@ def test_scan_safe_total_subtracts_promoted_additions_from_the_true_total():
             "breaking": 0,
             "api_break": 0,
             "risk": 0,
-            "compatible": 1,
+            "compatible": 3,
             "severity": {
                 "config": {"addition": "error"},
-                "categories": {"addition": {"severity": "error", "count": 1}},
+                "categories": {"addition": {"severity": "error", "count": 3}},
             },
             "findings": [
                 {
@@ -478,6 +481,7 @@ def test_scan_safe_total_subtracts_promoted_additions_from_the_true_total():
                     "finding_id": "promoted-1",
                 },
             ],
+            "findings_truncated": True,
             "additions": [
                 {
                     "bucket": "compatible",
@@ -491,21 +495,28 @@ def test_scan_safe_total_subtracts_promoted_additions_from_the_true_total():
                     "kind": "func_added",
                     "symbol": "_Z2v",
                     "description": "added",
-                    "finding_id": "safe-1",
+                    "finding_id": "promoted-2",
                 },
                 {
                     "bucket": "compatible",
                     "kind": "func_added",
                     "symbol": "_Z3v",
                     "description": "added",
-                    "finding_id": "safe-2",
+                    "finding_id": "promoted-3",
                 },
             ],
         },
     )
     model = build_model(report)
-    assert model.counts == (1, 0, 2)
-    assert len(model.safe) == 2
+    # Codex review: `diff["findings"]` is independently capped from
+    # `diff["additions"]` -- here only 1 of the 3 promoted additions made
+    # it into `findings` (`findings_truncated: True`). An ID-based
+    # exclusion sourced from that truncated list would have left the
+    # other two promoted additions rendered green even though the exact
+    # header already reports zero safe. `addition_promoted` empties the
+    # whole safe section wholesale instead, so the two must agree.
+    assert model.counts == (3, 0, 0)
+    assert model.safe == []
 
 
 def test_scan_promoted_count_exact_even_when_findings_list_is_capped():
@@ -638,3 +649,62 @@ def test_scan_audit_only_advisory_crosscheck_not_surfaced():
     assert model.scan_audit_only is True
     body = render_comment(model, sha="abc1234", detail="standard")
     assert "Scan audit — no baseline to compare" in body
+
+
+def test_scan_against_baseline_surfaces_api_break_crosscheck_findings():
+    # Codex review: cross-check is a separate evidence axis from the
+    # baseline diff (ADR-035 D4) -- a `scan --against` run with a
+    # completely clean diff can still be raised to API_BREAK purely by an
+    # API_BREAK_KINDS cross-check finding (or a `--crosscheck KEY=error`
+    # promotion). Restricting the crosscheck-findings helper to
+    # `audit_only` silently dropped that signal for every baseline
+    # comparison, rendering a green "no ABI changes" comment next to a red
+    # `fail-on-api-break` check.
+    report = _scan_report(
+        verdict="API_BREAK",
+        exit_code=2,
+        diff={
+            "breaking": 0,
+            "api_break": 0,
+            "risk": 0,
+            "compatible": 0,
+        },
+        crosscheck={
+            "version": 1,
+            "findings": 3,
+            "counts_by_check": {"header_build_context_mismatch": 3},
+            "coverage": [],
+            "providers": {},
+        },
+        crosscheck_severities={},
+    )
+    model = build_model(report)
+    assert model.scan_audit_only is False
+    assert model.counts == (0, 1, 0)
+    assert model.review[0].kind == "header_build_context_mismatch"
+    assert "3 occurrence" in model.review[0].detail
+    body = render_comment(model, sha="abc1234", detail="standard")
+    assert "Scan audit" not in body
+
+
+def test_scan_against_baseline_gate_api_break_moves_crosscheck_to_breaking():
+    report = _scan_report(
+        verdict="API_BREAK",
+        exit_code=2,
+        diff={
+            "breaking": 0,
+            "api_break": 0,
+            "risk": 0,
+            "compatible": 0,
+        },
+        crosscheck={
+            "version": 1,
+            "findings": 1,
+            "counts_by_check": {"header_build_context_mismatch": 1},
+            "coverage": [],
+            "providers": {},
+        },
+        crosscheck_severities={},
+    )
+    model = build_model(report, gate_api_break=True)
+    assert model.counts == (1, 0, 0)

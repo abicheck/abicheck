@@ -71,32 +71,22 @@ def _scan_findings_to_buckets(
     demangled_map: dict[str, str],
     gate_api_break: bool,
     levels: dict[str, str],
-) -> tuple[list[Finding], list[Finding], frozenset[str]]:
-    """Classify ``diff["findings"]`` (the gating buckets) into (breaking, review,
-    promoted_ids).
+) -> tuple[list[Finding], list[Finding]]:
+    """Classify ``diff["findings"]`` (the gating buckets) into (breaking,
+    review).
 
     Mirrors ``_bucket_changes``'s severity/category/gate logic, adapted to
     scan's ``bucket``-keyed finding dicts. ``not_evaluated`` entries (ADR-049
     D9: contract relevance excluded them from compatibility scoring
     entirely) and ``suppressed`` entries (reported separately, never inside
     ``findings``) are skipped -- neither is a compatibility claim, so
-    neither belongs in any of the three buckets.
-
-    ``promoted_ids`` collects the ``finding_id`` of every ``bucket:
-    "compatible"`` entry landed in ``breaking`` (only reachable via a
-    severity-config promotion -- see the inline comment below) so
-    :func:`_scan_additions_to_safe` can skip rendering the identical change
-    a second time in the green "Public API additions" section (Codex
-    review: schema 1.13's always-on ``diff.additions`` array unconditionally
-    includes every addition, so a promoted one was rendering under both
-    "Blocked by policy" *and* the green section at once).
+    neither belongs in either bucket.
     """
     breaking: list[Finding] = []
     review: list[Finding] = []
     target = {"breaking": breaking, "review": review}
-    promoted_ids: set[str] = set()
     if not isinstance(findings_raw, list):
-        return breaking, review, frozenset()
+        return breaking, review
     for c in findings_raw:
         if not isinstance(c, dict):
             continue
@@ -121,16 +111,6 @@ def _scan_findings_to_buckets(
             # this branch is unreachable in practice; skip defensively
             # rather than silently dropping a real bucket-target mismatch.
             continue
-        if sev == "compatible" and category == "addition":
-            # Restricted to the "addition" category specifically (not
-            # "quality_issues") -- only an addition-shaped promoted entry
-            # can also appear in `diff.additions` at all, so this set is
-            # exactly the one `_scan_additions_to_safe`'s `exclude_ids`
-            # needs, and exactly what the exact-safe-total math below
-            # subtracts.
-            finding_id = c.get("finding_id")
-            if isinstance(finding_id, str) and finding_id:
-                promoted_ids.add(finding_id)
         loc = c.get("source_location")
         display_symbol, mangled_evidence = _demangle_symbol(
             str(c.get("symbol", "")), demangled_map
@@ -146,30 +126,36 @@ def _scan_findings_to_buckets(
                 mangled=mangled_evidence,
             )
         )
-    return breaking, review, frozenset(promoted_ids)
+    return breaking, review
 
 
 def _scan_additions_to_safe(
     additions_raw: object,
     demangled_map: dict[str, str],
-    exclude_ids: frozenset[str] = frozenset(),
+    addition_promoted: bool = False,
 ) -> list[Finding]:
     """Classify the always-on ``diff["additions"]`` list (schema 1.13+) into
     Safe-bucket ``Finding``s, each tagged ``category="addition"`` so they
     render in the same "➕ Public API additions" section `compare` uses.
 
-    ``exclude_ids`` (finding IDs already rendered under Breaking by a
-    severity-config promotion -- see ``_scan_findings_to_buckets``) are
-    skipped here so the same change never renders in both sections at once.
+    ``addition_promoted`` (``levels.get("addition") == "error"``, the
+    severity-config promotion that moves *every* addition-category finding
+    to Breaking) short-circuits to an empty list: once that promotion is in
+    effect, every entry in ``diff["additions"]`` is inherently blocking, so
+    none belongs in the green section at all (Codex review, follow-up to an
+    earlier ID-based exclusion: ``diff["findings"]`` is independently capped
+    from ``diff["additions"]``, so a promoted addition dropped by the
+    findings-list cap was never in the exclusion set and still rendered
+    green even though the exact header total already correctly counted it
+    as blocking).
     """
+    if addition_promoted:
+        return []
     safe: list[Finding] = []
     if not isinstance(additions_raw, list):
         return safe
     for c in additions_raw:
         if not isinstance(c, dict):
-            continue
-        finding_id = c.get("finding_id")
-        if isinstance(finding_id, str) and finding_id in exclude_ids:
             continue
         loc = c.get("source_location")
         display_symbol, mangled_evidence = _demangle_symbol(
@@ -317,13 +303,15 @@ def _scan_promoted_compatible_counts(
     return promoted_addition, promoted_quality
 
 
-def _scan_audit_crosscheck_findings(report: dict[str, object]) -> list[Finding]:
-    """Synthetic, count-only ``Finding``s for an audit-only (no ``--against``)
-    scan's cross-check results that actually gated the run -- an
-    ``API_BREAK_KINDS`` finding, or any check the maintainer promoted with
-    ``--crosscheck KEY=error`` (see ``scan_engine._audit_exit_code``/
-    ``_crosscheck_severity_exit``, the only two ways an audit-only scan
-    reaches ``API_BREAK``/exit 2).
+def _scan_crosscheck_findings(report: dict[str, object]) -> list[Finding]:
+    """Synthetic, count-only ``Finding``s for a scan's cross-check results
+    that actually gated the run -- an ``API_BREAK_KINDS`` finding, or any
+    check the maintainer promoted with ``--crosscheck KEY=error`` (see
+    ``scan_engine._audit_exit_code``/``_crosscheck_severity_exit``). Applies
+    to both an audit-only run (no ``--against``) and a baseline-comparison
+    run (``scan --against``) alike -- cross-check is a separate evidence
+    axis from the baseline diff (ADR-035 D4), so it can gate a run whose
+    ``diff`` itself is entirely clean.
 
     Codex review: an audit-only scan's ``diff`` is always ``None`` (there is
     no baseline to compare), so before this helper existed
@@ -332,6 +320,11 @@ def _scan_audit_crosscheck_findings(report: dict[str, object]) -> list[Finding]:
     skipped (or a stale sticky one deleted) even when ``fail-on-api-break``
     had just turned the check red, and with ``always`` it rendered the
     green "Scan audit — no baseline to compare" headline right next to it.
+    A follow-up review found the same gap on the baseline-comparison side:
+    restricting this helper to ``audit_only`` left a clean baseline diff
+    next to a silently-dropped cross-check-driven ``API_BREAK`` promotion,
+    since ``diff["findings"]``/``diff["additions"]`` never carry cross-check
+    results at all -- they're a wholly separate top-level report key.
 
     ``CrosscheckResult.to_dict()`` (``report["crosscheck"]``) carries no
     itemized finding detail (symbol/location) -- only
@@ -422,23 +415,25 @@ def from_scan(
             )
     demangled_map = demangle_batch(symbols)
 
-    breaking, review, promoted_addition_ids = _scan_findings_to_buckets(
+    breaking, review = _scan_findings_to_buckets(
         findings_raw, demangled_map, gate_api_break, levels
     )
-    safe = _scan_additions_to_safe(additions_raw, demangled_map, promoted_addition_ids)
-    if audit_only:
-        # No `diff` at all to classify -- the only findings an audit-only
-        # run can report are its own cross-check results (see the helper's
-        # own docstring for why this render is coarser than the baseline
-        # case: aggregate counts, not per-symbol rows). --gate-api-break
-        # (fail-on-api-break) moves them to Breaking, mirroring how the
-        # ordinary baseline-comparison path treats an api_break severity
-        # finding under the same flag.
-        audit_findings = _scan_audit_crosscheck_findings(report)
-        if gate_api_break:
-            breaking = breaking + audit_findings
-        else:
-            review = review + audit_findings
+    addition_promoted = levels.get("addition") == "error"
+    safe = _scan_additions_to_safe(additions_raw, demangled_map, addition_promoted)
+
+    # Cross-check is a separate evidence axis from the baseline diff (ADR-035
+    # D4) that never nests inside `diff["findings"]`/`diff["additions"]`, so
+    # it needs surfacing regardless of whether this run is audit-only or a
+    # baseline comparison (see the helper's own docstring for the coarser,
+    # aggregate-count render this produces). --gate-api-break
+    # (fail-on-api-break) moves a gating result to Breaking, mirroring how
+    # the ordinary baseline-comparison path treats an api_break severity
+    # finding under the same flag.
+    crosscheck_findings = _scan_crosscheck_findings(report)
+    if gate_api_break:
+        breaking = breaking + crosscheck_findings
+    else:
+        review = review + crosscheck_findings
 
     incomplete: list[Finding] = []
     incomplete_blocking = False
@@ -478,17 +473,27 @@ def from_scan(
             true_counts[0] + promoted_addition_count + promoted_quality_count,
             true_counts[1],
         )
+        # Cross-check findings are folded into the exact scalar totals too
+        # (not just the classified `breaking`/`review` lists above) --
+        # `len(crosscheck_findings)` is itself exact (one row per gating
+        # `ChangeKind`, never capped), so this can't disagree with the
+        # itemized section the way a capped list's length could.
+        if gate_api_break:
+            true_counts = (true_counts[0] + len(crosscheck_findings), true_counts[1])
+        else:
+            true_counts = (true_counts[0], true_counts[1] + len(crosscheck_findings))
 
     # Exact "safe" (additions) total, immune to `diff["additions"]`'s own
     # cap (Codex review, follow-up to the truncated-counts fix above): when
     # additions were themselves truncated, `diff["additions_total"]` is the
     # exact pre-cap count (schema 1.13); otherwise `additions_raw`'s own
     # length already is exact, since it was never capped. Either way,
-    # subtract the exact count of addition-shaped promoted entries (never
-    # `len(promoted_addition_ids)`, which -- like the classified `breaking`
-    # list above -- only ever sees what fit in the shared findings budget),
-    # so the header count and the itemized "Public API additions" section
-    # can never silently disagree about how many changes were promoted.
+    # subtract the exact count of addition-shaped promoted entries (from
+    # `_scan_promoted_compatible_counts`'s own severity-category scalar, not
+    # a length derived from any capped list), so the header count and the
+    # itemized "Public API additions" section (now wholesale-empty whenever
+    # `addition_promoted` is set, see `_scan_additions_to_safe`) can never
+    # silently disagree about how many changes were promoted.
     scan_safe_total: int | None = None
     if diff_dict is not None:
         additions_total_raw = diff_dict.get("additions_total")
