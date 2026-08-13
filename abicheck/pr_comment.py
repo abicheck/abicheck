@@ -940,7 +940,7 @@ def _header(model: CommentModel) -> tuple[str, str]:
         and model.scan_audit_only
         and not model.breaking
         and not model.review
-        and not model.incomplete
+        and not model.has_incomplete
     ):
         # An audit-only `scan` (no `--against` baseline at all) ran no
         # comparison, so every compatibility bucket is necessarily empty —
@@ -1002,7 +1002,7 @@ def _header(model: CommentModel) -> tuple[str, str]:
         # happen — every mode populates breaking_categories) — fall back to
         # the conservative default rather than under-stating a red check.
         return "❌", "ABI BREAKING"
-    if model.incomplete and model.incomplete_blocking:
+    if model.has_incomplete and model.incomplete_blocking:
         # A hard evidence-policy failure fails the run the same way a
         # genuine break does (ADR-033 D7 / a gated coverage risk), so it
         # takes the same headline priority as `b` above — ahead of a
@@ -1029,7 +1029,7 @@ def _header(model: CommentModel) -> tuple[str, str]:
         if review_sevs == {"risk"}:
             return "⚠️", "Compatibility risk — review recommended"
         return "⚠️", "Review recommended"
-    if model.incomplete:
+    if model.has_incomplete:
         return "⚠️", "Analysis coverage reduced"
     if s:
         return "✅", "No compatibility impact detected"
@@ -1120,12 +1120,20 @@ def _findings_table(
     detail: str,
     *,
     open_default: bool,
+    count: int | None = None,
 ) -> list[str]:
-    if not findings:
+    # `count` overrides the header's displayed number when it can diverge
+    # from `len(findings)` -- currently only the analysis-incomplete bucket,
+    # whose exact total (`model.incomplete_total`) can exceed the itemized
+    # list when the report cap truncated some or all of it (Codex review).
+    # Every other caller leaves this `None` and gets `len(findings)`, same
+    # as before.
+    n = count if count is not None else len(findings)
+    if n == 0:
         return []
     is_open = " open" if (detail == "full" or open_default) else ""
     out = [
-        f"<details{is_open}><summary>{title} ({len(findings)})</summary>",
+        f"<details{is_open}><summary>{title} ({n})</summary>",
         "",
         "| Change | Symbol | Detail |",
         "|---|---|---|",
@@ -1224,7 +1232,7 @@ def _header_block(model: CommentModel, short_sha: str) -> list[str]:
     # The incomplete count is a distinct axis (analysis quality, not
     # compatibility — see module docstring) and only shown when non-zero, so
     # every existing report's summary line is unchanged.
-    if model.incomplete:
+    if model.has_incomplete:
         counts_line += f" · {model.incomplete_total} analysis incomplete"
     return [
         MARKER,
@@ -1351,6 +1359,32 @@ def _gate_note(model: CommentModel) -> list[str]:
     ]
 
 
+def _incomplete_findings_for_table(model: CommentModel) -> list[Finding]:
+    """`model.incomplete`, or -- when the report cap truncated *every*
+    analysis-incomplete finding, leaving the itemized list empty even though
+    `model.incomplete_total` is exact and positive (Codex review) -- one
+    synthetic placeholder row, so `_findings_table` (called with
+    ``count=model.incomplete_total``) still renders a section instead of
+    silently vanishing next to a truncation note claiming the counts above
+    are exact.
+    """
+    if model.incomplete or model.incomplete_total <= 0:
+        return model.incomplete
+    n = model.incomplete_total
+    word = "finding" if n == 1 else "findings"
+    return [
+        Finding(
+            kind="",
+            symbol="(truncated)",
+            detail=(
+                f"{n} analysis-incomplete {word} were cut by the report cap "
+                "before any could be itemized; see the full JSON report for "
+                "detail."
+            ),
+        )
+    ]
+
+
 def _incomplete_note(model: CommentModel) -> list[str]:
     """Explain the analysis-incomplete bucket when it did *not* win the
     headline — a genuine breaking finding, or (for a merely-advisory
@@ -1360,7 +1394,7 @@ def _incomplete_note(model: CommentModel) -> list[str]:
     degraded, rather than discovering it only in the collapsed details
     section below.
     """
-    if not model.incomplete:
+    if not model.has_incomplete:
         return []
     if not model.breaking and not (model.review and not model.incomplete_blocking):
         return []
@@ -1385,9 +1419,10 @@ def _body_sections(model: CommentModel, detail: str) -> list[str]:
         # incomplete bucket, appended after the per-library results table.
         return _release_table(model, detail) + _findings_table(
             "🛑 Analysis incomplete",
-            model.incomplete,
+            _incomplete_findings_for_table(model),
             detail,
-            open_default=bool(model.incomplete),
+            open_default=model.has_incomplete,
+            count=model.incomplete_total,
         )
     cats = model.breaking_categories
     breaking_title = (
@@ -1403,9 +1438,10 @@ def _body_sections(model: CommentModel, detail: str) -> list[str]:
     )
     out += _findings_table(
         "🛑 Analysis incomplete",
-        model.incomplete,
+        _incomplete_findings_for_table(model),
         detail,
-        open_default=(not model.breaking and bool(model.incomplete)),
+        open_default=(not model.breaking and model.has_incomplete),
+        count=model.incomplete_total,
     )
     out += _findings_table(
         "⚠️ Needs review",

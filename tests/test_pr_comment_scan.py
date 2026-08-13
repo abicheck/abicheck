@@ -265,6 +265,52 @@ def test_scan_incomplete_total_includes_truncated_evidence_occurrences():
     assert "20 analysis incomplete" not in body
 
 
+def test_scan_fully_truncated_incomplete_bucket_still_renders():
+    # Codex review, follow-up: when earlier buckets (20 breaking findings)
+    # consume the entire shared findings cap, every analysis-incomplete
+    # occurrence is cut before it can be itemized -- model.incomplete_total
+    # is exact and positive, but model.incomplete itself is empty. Every
+    # render-time check keyed on `bool(model.incomplete)` alone (headline,
+    # count line, note, section) silently omitted the whole bucket in that
+    # case, right next to a truncation note claiming the counts above were
+    # exact.
+    report = _scan_report(
+        verdict="BREAKING",
+        exit_code=4,
+        diff={
+            # The raw scalar counts every breaking-bucket finding regardless
+            # of whether it fit under the shared findings cap.
+            "breaking": 20,
+            "api_break": 0,
+            "risk": 5,
+            "compatible": 0,
+            "findings": [
+                {
+                    "bucket": "breaking",
+                    "kind": "func_removed",
+                    "symbol": f"_Z3fn{i}v",
+                    "description": "function removed",
+                    "finding_id": f"b{i}",
+                }
+                for i in range(20)
+            ],
+            "findings_truncated": True,
+            # All 5 risk-bucket occurrences were cut entirely -- none made it
+            # into the itemized "findings" list above.
+            "findings_truncated_kinds": {"source_fact_coverage_incomplete": 5},
+        },
+    )
+    model = build_model(report)
+    assert model.counts == (20, 0, 0)
+    assert model.incomplete == []
+    assert model.incomplete_total == 5
+    assert model.has_incomplete is True
+    body = render_comment(model, sha="abc1234", detail="standard")
+    assert "5 analysis incomplete" in body
+    assert "Analysis incomplete (5)" in body
+    assert "were cut by the report cap" in body
+
+
 def test_scan_promoted_evidence_kind_keeps_incomplete_blocking():
     # Codex review: pulling an evidence-quality finding out of breaking/
     # review into incomplete correctly excluded it from the compatibility

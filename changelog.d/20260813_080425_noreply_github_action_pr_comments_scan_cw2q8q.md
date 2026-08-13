@@ -120,3 +120,17 @@ it should read in CHANGELOG.md. Delete the other sections.
   only under the legacy exit-code scheme, where it really is unconditional;
   the severity-aware case already renders correctly from the resolved
   `potential_breaking` category level alone.
+- **A fully report-cap-truncated analysis-incomplete bucket now still
+  renders**: when earlier buckets (e.g. 20 breaking findings) consumed the
+  entire shared findings cap, every analysis-incomplete occurrence could be
+  cut before any of it was itemized — `model.incomplete_total` stayed exact
+  and positive, but `model.incomplete` itself was empty, and every
+  render-time check (headline, header count, note, section) was keyed on
+  `bool(model.incomplete)` alone, so the comment silently omitted the whole
+  bucket right next to a truncation note claiming the counts above were
+  exact. `CommentModel.has_incomplete` now covers both cases, and the
+  section itself renders a placeholder row naming the exact cut count when
+  nothing survived itemization, instead of vanishing outright. This applies
+  to `compare`'s and `release`'s own analysis-incomplete bucket too (shared
+  rendering code), though neither mode's own list is currently cap-truncated
+  in a way that reaches the empty-but-nonzero case.

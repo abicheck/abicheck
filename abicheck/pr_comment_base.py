@@ -244,6 +244,22 @@ class CommentModel:
         )
 
     @property
+    def has_incomplete(self) -> bool:
+        """Whether the analysis-incomplete bucket has anything to report --
+        `bool(self.incomplete)` alone misses the case where the report cap
+        truncated *every* analysis-incomplete finding, leaving the itemized
+        list empty even though `incomplete_total` is exact and positive
+        (Codex review: a scan with 20 breaking findings followed by 5
+        cap-cut `source_fact_coverage_incomplete` findings has
+        `incomplete_total == 5` but `incomplete == []`, so every headline/
+        note/section check keyed on `bool(model.incomplete)` alone silently
+        omitted the whole bucket -- next to a truncation note claiming the
+        counts above were exact). Every such check should use this property
+        instead of testing `model.incomplete` for truthiness.
+        """
+        return bool(self.incomplete) or self.incomplete_total > 0
+
+    @property
     def counts(self) -> tuple[int, int, int]:
         """(breaking, needs-review, safe) totals across the report."""
         if self.mode == "release":
