@@ -1917,7 +1917,7 @@ def test_extract_from_build_merges_richer_data_across_tus_instead_of_dropping_it
     monkeypatch.setattr(
         extractor,
         "_extract_from_compile_unit",
-        lambda cu: per_unit[cu.source],
+        lambda cu, *, diagnostics=None: per_unit[cu.source],
     )
     build = BuildEvidence(
         compile_units=[

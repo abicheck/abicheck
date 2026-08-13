@@ -1902,35 +1902,39 @@ class ClangTypeGraphExtractor:
         return shutil.which(self.clang_bin) is not None
 
     def _extract_from_safe_args(
-        self, argv: list[str], cwd: str | None = None
+        self,
+        argv: list[str],
+        cwd: str | None = None,
+        *,
+        diagnostics: list[str] | None = None,
     ) -> list[TypeEdge]:
         """Run ``clang -Xclang -ast-dump=json -fsyntax-only`` with pre-sanitized args.
 
         The bounded run itself lives in :func:`clang_ast_run.run_clang_ast_dump`,
-        shared verbatim with the call-graph pass; only the parser applied to the
-        resulting AST differs between the two.
+        shared verbatim with the call-graph pass; only the parser differs.
         """
+        diag = self.diagnostics if diagnostics is None else diagnostics
         if not self.available():
-            self.diagnostics.append(f"{self.clang_bin} not found in PATH")
+            diag.append(f"{self.clang_bin} not found in PATH")
             return []
-        ast = run_clang_ast_dump(
-            self.clang_bin, argv, cwd=cwd, diagnostics=self.diagnostics
-        )
+        ast = run_clang_ast_dump(self.clang_bin, argv, cwd=cwd, diagnostics=diag)
         if ast is None:
             return []
         try:
             return parse_clang_ast_types(ast)
         except (ValueError, RecursionError) as exc:
-            self.diagnostics.append(f"could not parse clang AST JSON: {exc}")
+            diag.append(f"could not parse clang AST JSON: {exc}")
             return []
 
     def _extract_from_compile_unit(
-        self, cu: BuildEvidenceCompileUnit
+        self, cu: BuildEvidenceCompileUnit, *, diagnostics: list[str] | None = None
     ) -> list[TypeEdge]:
         from .call_graph import _replay_cwd, _safe_clang_args_from_compile_unit
 
         argv = _safe_clang_args_from_compile_unit(cu)
-        return self._extract_from_safe_args(argv, cwd=_replay_cwd(cu))
+        return self._extract_from_safe_args(
+            argv, cwd=_replay_cwd(cu), diagnostics=diagnostics
+        )
 
     def extract_from_build(self, build: BuildEvidence) -> list[TypeEdge]:
         """Extract type edges across every compile unit in *build* (best effort)."""
@@ -1971,19 +1975,25 @@ class ClangTypeGraphExtractor:
                     # run first (Codex review).
                     all_edges[idx] = _merge_type_edges(all_edges[idx], e)
 
+        def _probe(cu: BuildEvidenceCompileUnit) -> tuple[list[TypeEdge], list[str]]:
+            local_diagnostics: list[str] = []
+            edges = self._extract_from_compile_unit(cu, diagnostics=local_diagnostics)
+            return edges, local_diagnostics
+
         try:
             if self.last_jobs > 1 and len(units) > 1:
                 pool_worker = partial(
-                    _deadline_bound_worker,
-                    deadline.current_deadline_ts(),
-                    self._extract_from_compile_unit,
+                    _deadline_bound_worker, deadline.current_deadline_ts(), _probe
                 )
                 with ThreadPoolExecutor(max_workers=self.last_jobs) as pool:
-                    for edges in pool.map(pool_worker, units):
+                    for edges, local_diagnostics in pool.map(pool_worker, units):
                         add_edges(edges)
+                        self.diagnostics.extend(local_diagnostics)
             else:
                 for cu in units:
-                    add_edges(self._extract_from_compile_unit(cu))
+                    edges, local_diagnostics = _probe(cu)
+                    add_edges(edges)
+                    self.diagnostics.extend(local_diagnostics)
         finally:
             self.last_elapsed_s = time.monotonic() - start
 

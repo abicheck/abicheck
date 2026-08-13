@@ -953,7 +953,7 @@ def test_extract_from_build_dedupes_across_compile_units(monkeypatch) -> None:
         RESOLUTION_OVERRIDE_CONFIRMED,
     )
 
-    def _fake_extract(cu: CompileUnit) -> list[OverrideEdge]:
+    def _fake_extract(cu: CompileUnit, *, diagnostics=None) -> list[OverrideEdge]:
         return [edge]
 
     monkeypatch.setattr(ext, "_extract_from_compile_unit", _fake_extract)

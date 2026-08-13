@@ -571,7 +571,18 @@ REPORT_SCHEMA_VERSION = "2.34"
 #:        shares the same ``--suppress`` surface as ``compare``, so a
 #:        binding-scoped suppression's match/no-match needs to be auditable
 #:        here too. Additive optional key, present only when captured.
-SCAN_SCHEMA_VERSION = "1.11"
+#: 1.12 -- the top-level ``preprocessor_scan`` block gained an additive
+#:        ``probes_truncated`` int (``PreprocessorScanResult``'s own
+#:        ``PREPROCESSOR_SCAN_VERSION`` bumped 1 -> 2 in lockstep — see that
+#:        module for the fact-shape rationale): compile units / public
+#:        headers skipped by the new ``ABICHECK_PREPROCESSOR_SCAN_MAX_PROBES``
+#:        cap (perf fix for ``scan --depth build``'s S2 preprocessor
+#:        pre-scan — parallelized, but deliberately NOT deduped by compile
+#:        context, since flag-based dedup could silently hide a real
+#:        per-TU macro divergence; see that module's own docstring). ``0``
+#:        when nothing was truncated, so an ordinary scan is unchanged from
+#:        1.11.
+SCAN_SCHEMA_VERSION = "1.12"
 
 _SCHEMA_DIR = Path(__file__).resolve().parent
 COMPARE_REPORT_SCHEMA_PATH = _SCHEMA_DIR / "compare_report.schema.json"

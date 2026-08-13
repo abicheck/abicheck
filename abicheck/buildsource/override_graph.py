@@ -705,9 +705,11 @@ class ClangOverrideGraphExtractor:
     #: :func:`augment_graph_with_overrides`'s ``virtual_methods`` parameter
     #: (Codex review, fresh evidence — see that function's own docstring).
     #: Mutated from :meth:`_extract_from_safe_args`, which may run inside a
-    #: thread-pool worker (same as ``diagnostics.append`` already does) —
-    #: ``set.update`` from multiple threads is the same accepted CPython/GIL
-    #: pattern this class already relies on for ``diagnostics``.
+    #: thread-pool worker — ``set.update`` from multiple threads is safe
+    #: under CPython's GIL, and unlike ``diagnostics`` (a list, order-
+    #: sensitive — see :meth:`extract_from_build`'s own docstring) a *set*
+    #: has no order to get wrong in the first place, so no further fix is
+    #: needed here.
     last_virtual_methods: set[str] = field(default_factory=set)
     #: Every class identity found to directly declare its own virtual
     #: destructor across the most recent :meth:`extract_from_build` call
@@ -722,14 +724,17 @@ class ClangOverrideGraphExtractor:
         return shutil.which(self.clang_bin) is not None
 
     def _extract_from_safe_args(
-        self, argv: list[str], cwd: str | None = None
+        self,
+        argv: list[str],
+        cwd: str | None = None,
+        *,
+        diagnostics: list[str] | None = None,
     ) -> list[OverrideEdge]:
+        diag = self.diagnostics if diagnostics is None else diagnostics
         if not self.available():
-            self.diagnostics.append(f"{self.clang_bin} not found in PATH")
+            diag.append(f"{self.clang_bin} not found in PATH")
             return []
-        ast = run_clang_ast_dump(
-            self.clang_bin, argv, cwd=cwd, diagnostics=self.diagnostics
-        )
+        ast = run_clang_ast_dump(self.clang_bin, argv, cwd=cwd, diagnostics=diag)
         if ast is None:
             return []
         try:
@@ -740,21 +745,28 @@ class ClangOverrideGraphExtractor:
             )
             return edges
         except (ValueError, RecursionError) as exc:
-            self.diagnostics.append(f"could not parse clang AST JSON: {exc}")
+            diag.append(f"could not parse clang AST JSON: {exc}")
             return []
 
     def _extract_from_compile_unit(
-        self, cu: BuildEvidenceCompileUnit
+        self, cu: BuildEvidenceCompileUnit, *, diagnostics: list[str] | None = None
     ) -> list[OverrideEdge]:
         from .call_graph import _replay_cwd, _safe_clang_args_from_compile_unit
 
         argv = _safe_clang_args_from_compile_unit(cu)
-        return self._extract_from_safe_args(argv, cwd=_replay_cwd(cu))
+        return self._extract_from_safe_args(
+            argv, cwd=_replay_cwd(cu), diagnostics=diagnostics
+        )
 
     def extract_from_build(self, build: BuildEvidence) -> list[OverrideEdge]:
         """Extract override edges across every compile unit in *build*
         (best effort). Mirrors ``ClangTypeGraphExtractor.extract_from_build``
-        exactly, including its cross-TU dedup-by-(src,dst) merge."""
+        exactly, including its cross-TU dedup-by-(src,dst) merge, and
+        ``ClangCallGraphExtractor.extract_from_build``'s deterministic-
+        diagnostics-ordering fix — each unit's diagnostics are collected into
+        a fresh per-call list and only folded into ``self.diagnostics`` on
+        the single driving thread, in ``pool.map``'s own input-ordered
+        iteration."""
         from .call_graph import _call_graph_jobs, _deadline_bound_worker
 
         self.last_virtual_methods = set()
@@ -781,19 +793,29 @@ class ClangOverrideGraphExtractor:
                 seen.add(key)
                 all_edges.append(e)
 
+        def _probe(
+            cu: BuildEvidenceCompileUnit,
+        ) -> tuple[list[OverrideEdge], list[str]]:
+            local_diagnostics: list[str] = []
+            edges = self._extract_from_compile_unit(cu, diagnostics=local_diagnostics)
+            return edges, local_diagnostics
+
         try:
             if self.last_jobs > 1 and len(units) > 1:
                 pool_worker = partial(
                     _deadline_bound_worker,
                     deadline.current_deadline_ts(),
-                    self._extract_from_compile_unit,
+                    _probe,
                 )
                 with ThreadPoolExecutor(max_workers=self.last_jobs) as pool:
-                    for edges in pool.map(pool_worker, units):
+                    for edges, local_diagnostics in pool.map(pool_worker, units):
                         add_edges(edges)
+                        self.diagnostics.extend(local_diagnostics)
             else:
                 for cu in units:
-                    add_edges(self._extract_from_compile_unit(cu))
+                    edges, local_diagnostics = _probe(cu)
+                    add_edges(edges)
+                    self.diagnostics.extend(local_diagnostics)
         finally:
             self.last_elapsed_s = time.monotonic() - start
 

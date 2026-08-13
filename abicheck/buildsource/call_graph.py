@@ -44,7 +44,7 @@ from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field, replace
 from functools import partial
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, TypeVar
 
 from .. import deadline
 from ..build_context import _extract_flags
@@ -1166,20 +1166,29 @@ def _call_graph_jobs(n_units: int) -> int:
     return jobs
 
 
+#: Generic over a worker's own return shape -- originally always
+#: ``list[Any]`` (one AST-pass's edge/range list), now also the
+#: ``(edges, local_diagnostics)`` tuple every ``Clang*GraphExtractor``'s
+#: ``extract_from_build`` uses to keep its ``diagnostics`` list
+#: deterministically input-ordered instead of subprocess-completion-ordered
+#: (see each extractor's own ``extract_from_build`` docstring).
+_WorkerResult = TypeVar("_WorkerResult")
+
+
 def _deadline_bound_worker(
     deadline_ts: float | None,
-    worker: Callable[[BuildEvidenceCompileUnit], list[Any]],
+    worker: Callable[[BuildEvidenceCompileUnit], _WorkerResult],
     unit: BuildEvidenceCompileUnit,
-) -> list[Any]:
+) -> _WorkerResult:
     """Re-establish a captured scan deadline inside a ThreadPoolExecutor worker.
 
     ``contextvars`` don't cross a ``ThreadPoolExecutor`` boundary, so a worker
     submitted from ``extract_from_build`` would otherwise see no active
     deadline and each clang subprocess call inside it would run to its full
     fixed 120s regardless of ``--budget`` (Codex review, PR #591; same
-    pattern as ``source_replay._deadline_bound_worker``). Shared by both
-    :meth:`ClangCallGraphExtractor.extract_from_build` and
-    ``ClangTypeGraphExtractor.extract_from_build`` (``type_graph.py``).
+    pattern as ``source_replay._deadline_bound_worker``). Shared by every
+    ``Clang*GraphExtractor.extract_from_build`` in this package (call/
+    callback/override/macro/type/template graphs).
     """
     with deadline.with_deadline_ts(deadline_ts):
         return worker(unit)
@@ -1215,36 +1224,58 @@ class ClangCallGraphExtractor:
         )
 
     def _extract_from_safe_args(
-        self, argv: list[str], cwd: str | None = None
+        self,
+        argv: list[str],
+        cwd: str | None = None,
+        *,
+        diagnostics: list[str] | None = None,
     ) -> list[CallEdge]:
         """Run ``clang -Xclang -ast-dump=json -fsyntax-only`` with pre-sanitized args.
 
         The bounded run itself lives in :func:`clang_ast_run.run_clang_ast_dump`,
         shared verbatim with the type-graph pass; only the parser applied to the
         resulting AST differs between the two.
+
+        *diagnostics*, when given, is appended to instead of ``self.diagnostics``
+        — see :meth:`extract_from_build`'s own docstring for why a parallel
+        caller passes a fresh per-unit list here rather than the shared one.
         """
+        diag = self.diagnostics if diagnostics is None else diagnostics
         if not self.available():
-            self.diagnostics.append(f"{self.clang_bin} not found in PATH")
+            diag.append(f"{self.clang_bin} not found in PATH")
             return []
-        ast = run_clang_ast_dump(
-            self.clang_bin, argv, cwd=cwd, diagnostics=self.diagnostics
-        )
+        ast = run_clang_ast_dump(self.clang_bin, argv, cwd=cwd, diagnostics=diag)
         if ast is None:
             return []
         try:
             return parse_clang_ast_calls(ast)
         except (ValueError, RecursionError) as exc:
-            self.diagnostics.append(f"could not parse clang AST JSON: {exc}")
+            diag.append(f"could not parse clang AST JSON: {exc}")
             return []
 
     def _extract_from_compile_unit(
-        self, cu: BuildEvidenceCompileUnit
+        self, cu: BuildEvidenceCompileUnit, *, diagnostics: list[str] | None = None
     ) -> list[CallEdge]:
         argv = _safe_clang_args_from_compile_unit(cu)
-        return self._extract_from_safe_args(argv, cwd=_replay_cwd(cu))
+        return self._extract_from_safe_args(
+            argv, cwd=_replay_cwd(cu), diagnostics=diagnostics
+        )
 
     def extract_from_build(self, build: BuildEvidence) -> list[CallEdge]:
-        """Extract call edges across every compile unit in *build* (best effort)."""
+        """Extract call edges across every compile unit in *build* (best effort).
+
+        Each unit's own diagnostics are collected into a *fresh, per-call*
+        list (never the shared ``self.diagnostics`` directly) and only
+        folded into ``self.diagnostics`` back on this (single) driving
+        thread, in the loop below -- which iterates ``pool.map``'s result in
+        *input* order, not worker-completion order. Appending straight to
+        ``self.diagnostics`` from inside a worker (the original shape here)
+        would still be individually thread-safe (``list.append`` is GIL-
+        atomic) but nondeterministically *ordered* across identical, pinned
+        inputs -- see :mod:`abicheck.parallel_probe`'s module docstring,
+        which documents this exact bug class found here across all six
+        ``Clang*GraphExtractor`` classes in this package (Codex review).
+        """
         start = time.monotonic()
         units = [cu for cu in build.compile_units if cu.source]
         self.last_jobs = _call_graph_jobs(len(units))
@@ -1266,19 +1297,27 @@ class ClangCallGraphExtractor:
                     seen.add(key)
                     all_edges.append(e)
 
+        def _probe(cu: BuildEvidenceCompileUnit) -> tuple[list[CallEdge], list[str]]:
+            local_diagnostics: list[str] = []
+            edges = self._extract_from_compile_unit(cu, diagnostics=local_diagnostics)
+            return edges, local_diagnostics
+
         try:
             if self.last_jobs > 1 and len(units) > 1:
                 pool_worker = partial(
                     _deadline_bound_worker,
                     deadline.current_deadline_ts(),
-                    self._extract_from_compile_unit,
+                    _probe,
                 )
                 with ThreadPoolExecutor(max_workers=self.last_jobs) as pool:
-                    for edges in pool.map(pool_worker, units):
+                    for edges, local_diagnostics in pool.map(pool_worker, units):
                         add_edges(edges)
+                        self.diagnostics.extend(local_diagnostics)
             else:
                 for cu in units:
-                    add_edges(self._extract_from_compile_unit(cu))
+                    edges, local_diagnostics = _probe(cu)
+                    add_edges(edges)
+                    self.diagnostics.extend(local_diagnostics)
         finally:
             self.last_elapsed_s = time.monotonic() - start
 
