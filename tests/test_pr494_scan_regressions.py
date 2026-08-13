@@ -94,6 +94,9 @@ def test_scan_baseline_compare_preserves_hard_l0_elf_removal(monkeypatch) -> Non
     # `tests/test_scan_compare_parity.py` against `compare`'s own.
     (finding,) = summary["findings"]
     assert finding.pop("finding_id")
+    # canonical_finding_id (schema 2.36) is finding_id's backend-independent
+    # sibling -- see finding_identity.report_canonical_finding_id.
+    assert finding.pop("canonical_finding_id")
     assert finding == {
         "bucket": "breaking",
         "kind": "func_removed_elf_only",

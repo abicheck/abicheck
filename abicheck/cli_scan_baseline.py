@@ -288,7 +288,8 @@ def _addition_finding_dicts(
     is capped below ``total``.
     """
     addition_changes = [
-        c for c in getattr(diff, "compatible", None) or ()
+        c
+        for c in getattr(diff, "compatible", None) or ()
         if _change_kind_str(c) in _ADDITION_KIND_VALUES
     ]
     dicts = _baseline_finding_dicts(
@@ -320,7 +321,8 @@ def _quality_finding_dicts(
     the shared report.
     """
     quality_changes = [
-        c for c in getattr(diff, "compatible", None) or ()
+        c
+        for c in getattr(diff, "compatible", None) or ()
         if _change_kind_str(c) not in _ADDITION_KIND_VALUES
     ]
     dicts = _baseline_finding_dicts(
@@ -332,7 +334,10 @@ def _quality_finding_dicts(
 
 
 def _add_severity_blocking_compatible_findings(
-    summary: dict[str, Any], diff: Any, gate: dict[str, Any], max_findings: int | None = None
+    summary: dict[str, Any],
+    diff: Any,
+    gate: dict[str, Any],
+    max_findings: int | None = None,
 ) -> None:
     """Itemize compatible findings when severity made *them* the blocking cause.
 
@@ -558,7 +563,7 @@ def _baseline_finding_dicts(
     with no way to tell *which* ``reclassify:`` rule produced it, unlike the
     compare/report path.
     """
-    from .finding_identity import report_finding_id
+    from .finding_identity import report_canonical_finding_id, report_finding_id
     from .reporter import _reclassified_by_for_change
 
     findings = []
@@ -571,6 +576,9 @@ def _baseline_finding_dicts(
             "description": getattr(c, "description", None),
             "source_location": getattr(c, "source_location", None),
             "finding_id": report_finding_id(c),
+            # Backend-independent sibling of finding_id (schema 2.36) --
+            # see finding_identity.report_canonical_finding_id's docstring.
+            "canonical_finding_id": report_canonical_finding_id(c),
         }
         # ELF symbol linkage of a removed symbol (Change.symbol_binding) --
         # scan --against shares the same --suppress surface as compare, so
@@ -1022,9 +1030,16 @@ def _run_baseline_compare(
     from .errors import AbicheckError
     from .service import compare_snapshots, resolve_input
 
-    bl_headers, bl_includes, bl_public_headers, bl_public_dirs = _resolve_baseline_header_scope(
-        baseline, headers, includes, public_headers, public_header_dirs,
-        baseline_headers, baseline_includes,
+    bl_headers, bl_includes, bl_public_headers, bl_public_dirs = (
+        _resolve_baseline_header_scope(
+            baseline,
+            headers,
+            includes,
+            public_headers,
+            public_header_dirs,
+            baseline_headers,
+            baseline_includes,
+        )
     )
     try:
         old_snap = resolve_input(

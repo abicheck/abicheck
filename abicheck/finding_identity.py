@@ -1431,6 +1431,71 @@ def report_finding_id(c: object) -> str:
     return hashlib.sha256(key.encode("utf-8")).hexdigest()[:16]
 
 
+def report_canonical_finding_id(c: object) -> str:
+    """Backend-independent finding identity for cross-producer suppression
+    (schema 2.36, additive; ``suppression.py``'s ``finding_id:`` selector).
+
+    Unlike :func:`report_finding_id` -- which folds in ``source_location``
+    and ``description`` specifically to disambiguate two same-kind,
+    same-symbol findings from each other -- this id is deliberately
+    **not** guaranteed unique per finding. It is :func:`resolve_change_identity`'s
+    ``primary_id`` (mangled-symbol CANONICAL tier when available, a
+    normalized qualified-name+kind+parameter-signature NORMALIZED tier
+    otherwise), the same producer-agnostic identity ``diff_filtering.py``'s
+    cross-detector dedup and ``diff_symbols.py``'s old/new symbol matching
+    already key on. That tier's own :func:`canonicalize_type_name` step is
+    what makes it stable across header backends: CastXML (``char const*``)
+    and Clang's ``-ast-dump=json`` (``char const *``) spell an otherwise-
+    identical parameter type differently, but resolve to the same
+    NORMALIZED id (see that function's own docstring for the concrete
+    case). ``report_finding_id``'s own ``source_location``/``description``
+    inputs are exactly the fields two header backends are *not* guaranteed
+    to spell identically (a raw file:line, or a description embedding a
+    raw type spelling) — which is why it is not itself usable as a
+    suppression key meant to survive a `--ast-frontend castxml` vs.
+    `--ast-frontend clang` switch, and why this sibling id exists instead
+    of widening that one's contract.
+
+    A batch-shaped finding (e.g. an allocator-replacement summary covering
+    many symbols) resolves through the same REDUCED-tier fallback
+    :func:`resolve_change_identity` already documents for that shape — this
+    function adds no special-casing of its own.
+
+    Unlike :func:`report_finding_id`, :func:`resolve_change_identity` reads
+    ``change.qualified_name``/``change.kind`` via plain attribute access
+    (not ``getattr`` with a default) -- a real :class:`~abicheck.checker_types.Change`
+    always has both, but a lightweight test double standing in for one (see
+    ``cli_scan_baseline._baseline_finding_dicts``'s own "safe to call against
+    fakes/stubs" contract, which this id is emitted alongside) may not. That
+    case degrades to :func:`report_finding_id` itself -- self-consistent and
+    still deterministic, just not guaranteed cross-backend-stable for the
+    one input this function couldn't resolve a real identity for.
+
+    **Never returns ``primary_id`` verbatim.** ``primary_id``'s own aliases
+    embed a literal ``\\x1f`` (ASCII unit separator) field delimiter (see
+    ``resolve_change_identity``'s ``sig``/``mangled:``/``qualified:``
+    construction) -- valid inside a Python string and inside a JSON string
+    (``json.dumps`` escapes control characters), but YAML's spec forbids an
+    unescaped C0 control character in a plain scalar, so a value copied
+    verbatim out of a JSON report into a ``--suppress`` YAML file's
+    ``finding_id:`` selector would fail to parse (confirmed empirically:
+    PyYAML's ``safe_load`` raises ``ReaderError: unacceptable character
+    #x001f``). Hashed into the same fixed-length hex-digest shape
+    :func:`report_finding_id` already uses instead, which is unconditionally
+    printable/YAML-safe/copy-pasteable, and preserves everything this
+    function's contract actually promises: two changes with the same
+    ``primary_id`` still hash identically, and different ``primary_id``s
+    practically never collide (SHA-256, birthday-bound truncated to 16 hex
+    chars -- the same collision risk this function's ``finding_id`` sibling
+    already accepts for the identical reason).
+    """
+    try:
+        primary_id = resolve_change_identity(c).primary_id  # type: ignore[arg-type]
+    except AttributeError:
+        return report_finding_id(c)
+    return hashlib.sha256(primary_id.encode("utf-8")).hexdigest()[:16]
+
+
 def missing_contract_kind(gate_scope: object) -> str:
     """The synthetic finding kind a missing contract member is reported under.
 

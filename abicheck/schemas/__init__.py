@@ -427,7 +427,24 @@ from typing import Any
 #:       Additive: new enum members plus one new optional key, same shape
 #:       as ``NO_BASELINE``/``baseline_bootstrap``'s own 2.13 addition
 #:       (Codex review, fresh evidence).
-REPORT_SCHEMA_VERSION = "2.35"
+#: 2.36 — every ``changes[]``/``root_causes[]``/audit-ledger finding entry
+#:       (``out_of_surface_changes``, ``suppression.suppressed_changes``,
+#:       reconciled/filtered-internal entries) gains ``canonical_finding_id``
+#:       alongside the existing ``finding_id``. Unlike ``finding_id`` (which
+#:       folds in ``source_location``/``description`` to disambiguate two
+#:       same-kind findings on one symbol, fields two header backends are
+#:       not guaranteed to spell identically), this sibling is
+#:       ``finding_identity.resolve_change_identity()``'s producer-agnostic
+#:       ``primary_id`` — stable across a ``--ast-frontend castxml`` vs.
+#:       ``--ast-frontend clang`` switch on the same underlying change, so a
+#:       ``--suppress`` rule written against one header backend's report can
+#:       reliably match the equivalent finding in the other's (the new
+#:       ``finding_id:`` suppression selector — see ``suppression.py``'s
+#:       ``Suppression.finding_id``). Additive optional key. Renumbered from
+#:       a conflicting 2.35 when the PR #755 rebase claimed that version
+#:       first (same "renumber, don't reuse" convention as the 2.32 entry
+#:       above).
+REPORT_SCHEMA_VERSION = "2.36"
 
 #: SemVer-style (MAJOR.MINOR) version of the ``scan`` JSON output, emitted as
 #: ``scan_schema_version`` at the top level of both public scan dict shapes:
@@ -659,7 +676,12 @@ REPORT_SCHEMA_VERSION = "2.35"
 #:        can't disagree about which rule decided a shared finding. All keys
 #:        are additive and omitted when no policy file (or no active rule)
 #:        applies, so an ordinary scan is unchanged from 1.13.
-SCAN_SCHEMA_VERSION = "1.14"
+#: 1.15 -- ``_baseline_finding_dicts`` entries gain ``canonical_finding_id``
+#:        alongside the existing ``finding_id`` (see ``REPORT_SCHEMA_VERSION``
+#:        2.36's identical addition to ``compare``'s ``changes[]`` -- the two
+#:        bump together since ``finding_id``/``canonical_finding_id`` are
+#:        joinable across both report shapes by design). Additive key.
+SCAN_SCHEMA_VERSION = "1.15"
 
 _SCHEMA_DIR = Path(__file__).resolve().parent
 COMPARE_REPORT_SCHEMA_PATH = _SCHEMA_DIR / "compare_report.schema.json"
