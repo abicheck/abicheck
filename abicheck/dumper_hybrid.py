@@ -52,6 +52,18 @@ their two independent :class:`~abicheck.model.AbiSnapshot`\\ s to
   ``abicheck/fact_provenance.py``), so detectors can tell which backend
   backs a fact apart from an unbacked one on a per-declaration basis
   instead of trusting a whole-snapshot producer tag.
+- **Declaration-existence provenance** (G31 Phase C, hybrid-graph
+  provenance-tagging): every merged function/variable also gets a
+  ``"visibility"``-named ``fact_provenance`` entry recording which backend
+  contributed the *declaration itself* (``"castxml"`` for a castxml-primary
+  entry, ``"clang"`` for a clang-only-appended one) — not a per-field value
+  merge like every other entry above, since this snapshot's own
+  ``origin``/``ScopeOrigin`` classification (``provenance.apply_provenance()``)
+  runs identically over both kinds of entry afterwards. The one consumer is
+  :func:`abicheck.buildsource.header_graph.build_header_only_graph`, which
+  reads it back to stamp each L2 graph node's own
+  ``attrs["visibility_provenance"]`` — see that function's docstring for why
+  the graph needed this and not the flat snapshot's other detectors.
 
 **Layout facts**: castxml remains the PRIMARY layout source — its own real
 size/alignment/offset/vtable data is never overridden. When the optional G28
@@ -450,8 +462,22 @@ def _merge_functions(
     # "castxml" (Codex review: a clang-only function is still comparable
     # against ANOTHER clang-only declaration of itself, exactly like a plain
     # ``--ast-frontend clang`` run already does today).
+    # "visibility" records which backend contributed the DECLARATION ITSELF
+    # (castxml-primary vs. clang-only-appended), not a per-field value merge
+    # like every other key this function writes — consumed by
+    # buildsource.header_graph.build_header_only_graph() to stamp
+    # GraphNode.attrs["visibility_provenance"] on the L2 header-only graph's
+    # source_decl nodes (G31 Phase C hybrid-graph provenance-tagging;
+    # docs/contribute/plans/g31-header-graph-default-on-followup.md). A
+    # castxml-primary function's ScopeOrigin classification and a
+    # clang-only-appended one's both go through the identical
+    # provenance.apply_provenance() pass afterwards, so this key is not
+    # itself the classification — it's which backend's declaration record
+    # that classification was computed from, the same distinction
+    # "param_defaults" above already tracks for a different consumer.
     for f in merged:
         provenance[func_fact_key(f.mangled, "param_defaults")] = "castxml"
+        provenance[func_fact_key(f.mangled, "visibility")] = "castxml"
 
     merged_mangled = {f.mangled for f in merged}
     clang_only = [cf for cf in clang_funcs if cf.mangled not in merged_mangled]
@@ -464,6 +490,7 @@ def _merge_functions(
         # deprecation transition on a declaration that exists on both sides
         # only via clang (Codex review, fresh evidence).
         provenance[func_fact_key(cf.mangled, "deprecated")] = "clang"
+        provenance[func_fact_key(cf.mangled, "visibility")] = "clang"
     merged.extend(clang_only)
     return merged
 
@@ -753,12 +780,19 @@ def merge_snapshots(castxml_snap: AbiSnapshot, clang_snap: AbiSnapshot) -> AbiSn
         _merge_variable(v, clang_vars_by_mangled.get(v.mangled), provenance)
         for v in castxml_snap.variables
     ]
+    # "visibility" mirrors _merge_functions' identical stamp above -- which
+    # backend contributed the declaration itself, consumed by
+    # header_graph.build_header_only_graph() for its graph-node provenance
+    # tag, not a per-field value merge.
+    for v in castxml_snap.variables:
+        provenance[var_fact_key(v.mangled, "visibility")] = "castxml"
     castxml_var_mangled = {v.mangled for v in castxml_snap.variables}
     clang_only_variables = [
         v for v in clang_variables if v.mangled not in castxml_var_mangled
     ]
     for v in clang_only_variables:
         provenance[var_fact_key(v.mangled, "deprecated")] = "clang"
+        provenance[var_fact_key(v.mangled, "visibility")] = "clang"
     merged_variables.extend(clang_only_variables)
 
     merged = replace(

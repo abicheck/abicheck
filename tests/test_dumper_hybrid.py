@@ -842,6 +842,73 @@ class TestParamDefaultsProvenance:
         )
 
 
+class TestDeclarationVisibilityProvenance:
+    """G31 Phase C hybrid-graph provenance-tagging: every merged function AND
+    variable also gets a "visibility"-named fact_provenance entry recording
+    which backend contributed the DECLARATION ITSELF (not a per-field value
+    merge like the other entries this module writes) — the one
+    header_graph.build_header_only_graph() reads to stamp a hybrid graph
+    node's own attrs["visibility_provenance"]."""
+
+    def test_castxml_sourced_function_tagged_castxml(self):
+        f = Function(name="foo", mangled="_Z3fooi", return_type="void")
+        castxml = _snap(functions=[f], ast_producer="castxml")
+        clang = _snap(ast_producer="clang")
+        merged = merge_snapshots(castxml, clang)
+        assert (
+            merged.fact_provenance[func_fact_key("_Z3fooi", "visibility")] == "castxml"
+        )
+
+    def test_clang_only_function_tagged_clang(self):
+        cf = Function(name="bar", mangled="_Z3bari", return_type="void")
+        castxml = _snap(ast_producer="castxml")
+        clang = _snap(functions=[cf], ast_producer="clang")
+        merged = merge_snapshots(castxml, clang)
+        assert merged.fact_provenance[func_fact_key("_Z3bari", "visibility")] == "clang"
+
+    def test_castxml_sourced_variable_tagged_castxml(self):
+        v = Variable(name="g", mangled="g", type="int")
+        castxml = _snap(variables=[v], ast_producer="castxml")
+        clang = _snap(ast_producer="clang")
+        merged = merge_snapshots(castxml, clang)
+        assert merged.fact_provenance[var_fact_key("g", "visibility")] == "castxml"
+
+    def test_clang_only_variable_tagged_clang(self):
+        cv = Variable(name="h", mangled="h", type="int")
+        castxml = _snap(ast_producer="castxml")
+        clang = _snap(variables=[cv], ast_producer="clang")
+        merged = merge_snapshots(castxml, clang)
+        assert merged.fact_provenance[var_fact_key("h", "visibility")] == "clang"
+
+    def test_ctor_dtor_reconciled_function_tagged_castxml_under_real_key(self):
+        # Mirrors TestParamDefaultsProvenance's identical case: the
+        # declaration is castxml's even though ctor/dtor reconciliation
+        # rewrote its key to the real clang mangled name.
+        synthetic = f"{SYNTHETIC_CTOR_KEY_PREFIX}ns::Widget(int)"
+        castxml_ctor = Function(
+            name="Widget",
+            mangled=synthetic,
+            return_type="void",
+            params=[Param(name="n", type="int")],
+            access=AccessLevel.PUBLIC,
+        )
+        real_mangled = "_ZN2ns6WidgetC1Ei"
+        clang_ctor = Function(
+            name="Widget",
+            mangled=real_mangled,
+            return_type="void",
+            params=[Param(name="n", type="int")],
+            access=AccessLevel.PUBLIC,
+        )
+        castxml = _snap(functions=[castxml_ctor], ast_producer="castxml")
+        clang = _snap(functions=[clang_ctor], ast_producer="clang")
+        merged = merge_snapshots(castxml, clang)
+        assert (
+            merged.fact_provenance[func_fact_key(real_mangled, "visibility")]
+            == "castxml"
+        )
+
+
 class TestTypeAndFieldFactBackfill:
     def test_type_is_abstract_and_deprecated_from_castxml(self):
         t = RecordType(
@@ -1213,17 +1280,13 @@ class TestNamespaceQualifiedMerging:
             name="Foo", qualified_name="b::Foo", kind="class", deprecated="msg"
         )
         castxml = _snap(types=[a_foo_castxml], ast_producer="castxml")
-        clang = _snap(
-            types=[a_foo_clang, b_foo_clang_only], ast_producer="clang"
-        )
+        clang = _snap(types=[a_foo_clang, b_foo_clang_only], ast_producer="clang")
         merged = merge_snapshots(castxml, clang)
 
         assert (
             merged.fact_provenance[type_fact_key("a::Foo", "deprecated")] == "castxml"
         )
-        assert (
-            merged.fact_provenance[type_fact_key("b::Foo", "deprecated")] == "clang"
-        )
+        assert merged.fact_provenance[type_fact_key("b::Foo", "deprecated")] == "clang"
         # The stale-collision shape this fix closes: both used to share the
         # single bare key below.
         assert type_fact_key("Foo", "deprecated") not in merged.fact_provenance

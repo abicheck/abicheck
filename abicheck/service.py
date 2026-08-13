@@ -911,6 +911,8 @@ def _finish_native_snapshot(
 @functools.wraps(_run_dump_uncached)  # name lookup below so patching sticks
 def _call_run_dump_uncached(*args: Any, **kwargs: Any) -> AbiSnapshot:
     return _run_dump_uncached(*args, **kwargs)
+
+
 run_dump = wrap_run_dump_with_dependency_scope(_call_run_dump_uncached)
 # CodeRabbit: both functools.wraps() above copy __name__ down the chain from _run_dump_uncached, so run_dump.__name__ read as "_run_dump_uncached" -- wrong for any introspecting caller. __signature__ is unaffected.
 run_dump.__name__ = "run_dump"
@@ -929,6 +931,7 @@ def _apply_native_provenance(
     origin stays ``UNKNOWN`` and behaviour is unchanged.
     """
     from .provenance import apply_provenance
+
     return apply_provenance(snap, public_headers, public_header_dirs)
 
 
@@ -1073,6 +1076,11 @@ def _attach_header_graph(
         public_header_paths=[str(p) for p in (public_headers or [])],
         public_dir_paths=[str(p) for p in (public_header_dirs or [])],
         header_paths=[str(p) for p in resolved_headers],
+        # Real per-declaration provenance for a hybrid merge (empty dict on
+        # every other snapshot, a harmless no-op there) — G31 Phase C
+        # hybrid-graph provenance-tagging; see build_header_only_graph's own
+        # docstring and dumper_hybrid.merge_snapshots' "visibility" stamp.
+        fact_provenance=snap.fact_provenance,
     )
     if header_graph_includes and resolved_headers and cc.frontend_context == "host":
         # `ClangHeaderIncludeExtractor` drives a plain `clang -M` per header
@@ -1354,6 +1362,7 @@ def _extract_pdb_debug(
     try:
         from .pdb_metadata import parse_pdb_debug_info
         from .pdb_utils import locate_pdb
+
         pdb_file = locate_pdb(path, pdb_path_override=pdb_path, allow_network=False)
         if pdb_file is not None:
             meta, adv = parse_pdb_debug_info(pdb_file)
@@ -1633,6 +1642,7 @@ def load_env_matrix(path: Path | None) -> EnvironmentMatrix | None:
     if path is None:
         return None
     from .environment_matrix import EnvironmentMatrix
+
     try:
         # from_yaml converts malformed YAML to ValueError, so no yaml import
         # is needed here (abicheck.service has no import-untyped override).
@@ -1863,6 +1873,7 @@ def run_compare(
         contract_mode=contract_mode,
     )
     return run_compare_request(request)
+
 
 # ── Compare pipeline (ADR-055 D1): `run_compare_request`'s two phases live in
 # the leaf module ``service_compare_pipeline`` so the native ``compare`` CLI can

@@ -1808,6 +1808,34 @@ narrower scope in mind pending a dedicated follow-up.
   already an open dict). No `SOURCE_GRAPH_VERSION` bump needed unless a new
   detector starts depending on the new attr's presence for correctness
   rather than reading it as optional enrichment.
+
+  **Closed in a later pass, exactly matching the scoped design above.**
+  `dumper_hybrid.merge_snapshots` now stamps a `"visibility"`-named
+  `fact_provenance` entry for every merged function/variable — `"castxml"`
+  for a castxml-primary entry (including a synthetic ctor/dtor key
+  reconciled to a real clang mangled name — the *declaration* is still
+  castxml's, mirroring the identical reasoning `"param_defaults"` already
+  uses for the same case), `"clang"` for a clang-only-appended one.
+  `header_graph.build_header_only_graph` gained the exact optional
+  `fact_provenance` parameter the design sketch named; `seed_decl()` reads
+  it back (trying the function key first, falling back to the variable key
+  — a mangled symbol name is never genuinely both, so no runtime
+  `isinstance`/import is needed for the `Function`/`Variable` pair, which
+  stayed `TYPE_CHECKING`-only) and stamps the additive
+  `attrs["visibility_provenance"]` when found. `service._attach_header_graph`
+  threads `snap.fact_provenance` through — already present and unused, not
+  discarded, exactly as the design sketch found — with no other call site
+  needing a change, since `snap` at that call site is already the
+  post-merge object for a hybrid dump. Verified end-to-end against a real
+  compiled library through the actual `abicheck dump --ast-frontend hybrid`
+  CLI (castxml 0.7.0 + clang 18 + g++, conda-forge), not just at the unit
+  level: every `source_decl` node in the resulting `source_graph.nodes`
+  correctly carries `visibility_provenance: "castxml"` for a header both
+  backends parsed identically. No `SOURCE_GRAPH_VERSION` bump, matching the
+  design sketch's own prediction — the new attr is additive enrichment no
+  existing reader depends on. No detector consumes it yet, same as before;
+  this closes only the plumbing gap the design sketch scoped, not a new
+  detection capability.
 - **Header-defined body fingerprints** (finalized scope, not attempted):
   detect a behavior-preserving vs. behavior-changing inline/template body
   edit in a header, distinct from a signature change — today invisible to
