@@ -97,9 +97,12 @@ precedent this module already sets for ``RecordType.is_abstract``.
 ``has_anonymous_aggregate_fields`` is not provably inert the same way — see
 :func:`_merge_record_type`'s own comment.
 
-Everything not explicitly merged below (typedefs, constants, ELF/PE/Mach-O
-metadata, DWARF metadata, ...) is taken verbatim from the castxml snapshot,
-which is used as the base via ``dataclasses.replace``.
+Everything not explicitly merged below (bare-keyed ``typedefs``, constants,
+ELF/PE/Mach-O metadata, DWARF metadata, ...) is taken verbatim from the
+castxml snapshot, which is used as the base via ``dataclasses.replace`` --
+except ``typedefs_qualified`` (schema v25), which IS explicitly unioned
+from both sides (see the merge's own comment on that field) since its
+whole purpose is recovering an alias a single backend alone would miss.
 """
 
 from __future__ import annotations
@@ -413,7 +416,11 @@ def _backfill_function_facts(
     # NOT routed through _backfill_fact/provenance: this isn't a producer
     # disagreement to record, just recovering a fact that was always there
     # under the right key.
-    if f.elf_binding is None and clang_f is not None and clang_f.elf_binding is not None:
+    if (
+        f.elf_binding is None
+        and clang_f is not None
+        and clang_f.elf_binding is not None
+    ):
         updates["elf_binding"] = clang_f.elf_binding
     if (
         f.elf_visibility is None
@@ -826,6 +833,25 @@ def merge_snapshots(castxml_snap: AbiSnapshot, clang_snap: AbiSnapshot) -> AbiSn
         variables=merged_variables,
         types=merged_types,
         enums=merged_enums,
+        # typedefs_qualified (schema v25, G31 Phase C continued, Codex
+        # review): unlike bare `typedefs` (left verbatim from castxml_snap,
+        # same as constants/ELF/PE/Mach-O metadata -- see this function's
+        # own docstring), this field's whole purpose is to recover a
+        # qualified typedef alias `type_reachability.py`'s scan would
+        # otherwise miss. Leaving it castxml-only defeats that purpose for
+        # a hybrid dump: a declaration only clang appended (or a typedef
+        # only clang's own parse captured under this qualified key) would
+        # never make it into `merged.typedefs_qualified`, so a public
+        # signature referencing it through that alias could still miss a
+        # reachable `std::` field. Union both sides -- qualified keys are
+        # unique per declaration, so a real cross-backend disagreement on
+        # the SAME key is not expected; castxml's own value wins on the
+        # rare disagreement, matching "castxml remains the base" elsewhere
+        # in this merge.
+        typedefs_qualified={
+            **clang_snap.typedefs_qualified,
+            **castxml_snap.typedefs_qualified,
+        },
         ast_producer="hybrid",
         ast_toolchain={
             **{

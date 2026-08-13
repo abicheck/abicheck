@@ -1430,6 +1430,63 @@ class TestNamespaceQualifiedMerging:
         assert ChangeKind.TYPE_DEPRECATED_ADDED in {c.kind for c in result.changes}
 
 
+class TestTypedefsQualifiedMerge:
+    """Codex review, fresh evidence (schema v25 follow-up): unlike bare
+    ``typedefs`` (deliberately left verbatim from castxml_snap, same as
+    constants/ELF/PE/Mach-O metadata), ``typedefs_qualified``'s whole
+    purpose is to recover a qualified alias type_reachability.py's scan
+    would otherwise miss -- leaving it castxml-only in a hybrid merge
+    defeats that purpose for any alias only clang's own parse captured."""
+
+    def test_clang_only_qualified_typedef_survives_the_merge(self):
+        castxml = _snap(
+            ast_producer="castxml", typedefs_qualified={"Foo::value_type": "int"}
+        )
+        clang = _snap(
+            ast_producer="clang",
+            typedefs_qualified={"Bar::value_type": "std::string"},
+        )
+        merged = merge_snapshots(castxml, clang)
+        assert merged.typedefs_qualified == {
+            "Foo::value_type": "int",
+            "Bar::value_type": "std::string",
+        }
+
+    def test_castxml_wins_on_a_genuine_key_disagreement(self):
+        castxml = _snap(ast_producer="castxml", typedefs_qualified={"ns::Alias": "int"})
+        clang = _snap(ast_producer="clang", typedefs_qualified={"ns::Alias": "long"})
+        merged = merge_snapshots(castxml, clang)
+        assert merged.typedefs_qualified == {"ns::Alias": "int"}
+
+    def test_clang_only_qualified_typedef_closes_a_real_reachability_gap_end_to_end(
+        self,
+    ):
+        # The actual regression this closes: a public signature spelled
+        # with a qualified alias only clang's own parse captured must
+        # still resolve through the merged hybrid snapshot.
+        from abicheck.model import Function, RecordType
+        from abicheck.type_reachability import directly_referenced_stdlib_types
+
+        castxml = _snap(ast_producer="castxml")
+        clang = _snap(
+            ast_producer="clang",
+            typedefs_qualified={"Api::value_type": "std::string"},
+        )
+        merged = merge_snapshots(castxml, clang)
+        merged = replace(
+            merged,
+            functions=[
+                Function(
+                    name="get",
+                    mangled="get",
+                    return_type="Api::value_type",
+                )
+            ],
+            types=[RecordType(name="std::string", kind="class")],
+        )
+        assert directly_referenced_stdlib_types(merged) == frozenset({"std::string"})
+
+
 class TestFactProvenanceHelpers:
     def test_castxml_producer_is_always_backed(self):
         snap = _snap(ast_producer="castxml")
