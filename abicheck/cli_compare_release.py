@@ -285,8 +285,22 @@ def _compare_one_library(
             # _exit_compare_release, the same "raises a clean 0 to 1, never
             # lowers a real 2/4" rule a single-pair `compare` applies.
             from .contract_coverage_exit import coverage_exit_floor
+            from .contract_coverage_ledger import coverage_failures_for_context
 
             entry["contract_coverage_exit_contribution"] = coverage_exit_floor(result)
+            # The *count* of failures is independent of the exit floor above
+            # -- `contract.unresolved: warn` deliberately zeroes the floor
+            # while the failures themselves stay real and unsuppressible
+            # (AGENTS.md's contract_coverage_exit.py entry: "an acceptance
+            # of incomplete assurance, not a way to hide it"). Without a
+            # separate count, a release-level `warn`-accepted coverage gap
+            # is invisible everywhere the release JSON is read from, since
+            # this schema has no per-library `contract_coverage_failures`
+            # array the way a single-pair `compare` report does (Codex
+            # review, CLI-audit P2 follow-up).
+            entry["contract_coverage_failure_count"] = len(
+                coverage_failures_for_context(result.contract_context)
+            )
         if scope_to_public_surface:
             # Per-library public-surface scoping outcome (ADR-024, issue #235),
             # aggregated into the release-level scope block by the formatter.
@@ -847,6 +861,7 @@ def _finalize_release_output(
     severity_exit_code: int | None = None,
     severity_config: SeverityConfig | None = None,
     contract_coverage_exit_contribution: int = 0,
+    contract_coverage_failure_count: int = 0,
 ) -> None:
     """Write summary output, step summary, per-library dir report, then exit."""
     text = _format_release_summary(
@@ -866,6 +881,7 @@ def _finalize_release_output(
         severity_config=severity_config,
         severity_exit_code=severity_exit_code,
         contract_coverage_exit_contribution=contract_coverage_exit_contribution,
+        contract_coverage_failure_count=contract_coverage_failure_count,
     )
     _write_or_echo(output, text)
 
@@ -882,6 +898,62 @@ def _finalize_release_output(
             old_map,
             new_map,
         )
+
+    # ADR-049 Phase 7's orthogonal contract-coverage axis, release/package
+    # parity (CLI-audit P1, Codex review): a single-pair `compare` announces
+    # a stderr notice whenever the rendered format doesn't already carry the
+    # ledger (`contract_coverage_exit.announce_coverage_floor`), so a caller
+    # reading only stderr (or `action/run.sh`'s own `_coverage_gated()`
+    # stderr fallback, reached whenever no JSON report exists -- e.g. a
+    # directory/package operand outside a `pull_request` event, where the
+    # Action's PR-comment JSON rerun never fires) can still tell the axis
+    # fired. The release path folds the same contribution into its exit code
+    # unconditionally (`_exit_compare_release`) but, unlike single-pair
+    # `compare`, never said so anywhere except `--format json`'s own
+    # `contract_coverage_exit_contribution` field -- so a markdown-format
+    # release run gave no visible reason for an exit code coverage alone
+    # raised. Only `--format json` already states it; every other format
+    # gets this one line.
+    #
+    # Gated on *failure count*, not exit contribution (Codex review,
+    # CLI-audit P2 follow-up): `contract.unresolved: warn` deliberately
+    # zeroes the exit contribution while the failures themselves stay real
+    # -- an advisory (warn-accepted) coverage gap must still be announced,
+    # exactly as single-pair `compare`'s own `coverage_failure_diagnostic`
+    # speaks regardless of the floor (see its `floor == 0` "Accepted by
+    # contract.unresolved=warn" wording).
+    if contract_coverage_failure_count != 0 and fmt != "json":
+        _affected = sorted(
+            str(lib.get("library"))
+            for lib in library_results
+            if isinstance(lib, dict) and lib.get("contract_coverage_failure_count", 0)
+        )
+        if _affected:
+            if contract_coverage_exit_contribution == 0:
+                # Exact wording match with single-pair compare's own
+                # `_coverage_message` (contract_coverage_exit.py) --
+                # `=`, not `:` -- deliberately, so a consumer distinguishing
+                # "accepted" from "genuinely gated" (e.g. action/run.sh's
+                # `_coverage_gated()`) can match one phrase regardless of
+                # which command produced the notice (Codex review).
+                _effect = (
+                    "Accepted by contract.unresolved=warn, so it "
+                    "contributes 0 to the release exit code"
+                )
+            else:
+                _effect = (
+                    f"Contributes {contract_coverage_exit_contribution} to "
+                    "the release exit code"
+                )
+            click.echo(
+                "Contract coverage incomplete for the selected --contract "
+                "domain in: "
+                + ", ".join(_affected)
+                + f". {_effect} (ADR-049 contract-coverage axis). See "
+                "contract_coverage_failure_count in --format json output "
+                "for per-library detail.",
+                err=True,
+            )
 
     _exit_compare_release(
         worst_verdict,
@@ -1488,6 +1560,20 @@ def compare_release_cmd(
                 ),
                 default=0,
             )
+            # Summed, not max()'d: unlike the exit-code floor above (a 0/1
+            # gate, where max is the right fold), this is a plain count of
+            # how many failures exist across the whole release -- real even
+            # when `contract.unresolved: warn` zeroed every library's own
+            # exit contribution. Stays 0 (not omitted) for a run that never
+            # passed --contract-evaluation, same as the count field above.
+            contract_coverage_failure_count = sum(
+                count
+                for entry in library_results
+                if isinstance(entry, dict)
+                and isinstance(
+                    count := entry.get("contract_coverage_failure_count", 0), int
+                )
+            )
 
             # Compute the severity-aware exit code while per-library DiffResults
             # are still stashed (before _strip_diff_results_and_adjust_verdict).
@@ -1570,6 +1656,7 @@ def compare_release_cmd(
                 severity_exit_code=severity_exit_code,
                 severity_config=severity_config,
                 contract_coverage_exit_contribution=contract_coverage_exit_contribution,
+                contract_coverage_failure_count=contract_coverage_failure_count,
             )
         finally:
             _cleanup_temp_dirs(_temp_dir_paths, keep_extracted)

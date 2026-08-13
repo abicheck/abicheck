@@ -1273,13 +1273,42 @@ PYQUERY
 # renderer — which omits the ledger — the same fact is announced on stderr.
 # Absent both (no --contract-evaluation), the field reads 0 and the mapping
 # below is exactly what it was.
+#
+# The JSON answer is AUTHORITATIVE when readable, and the stderr grep is
+# reached only when it is not (Codex review, P1): an earlier revision fell
+# through to the stderr grep unconditionally whenever the JSON read "0", not
+# just when the JSON was unreadable. `contract.unresolved: warn` deliberately
+# zeroes the exit contribution while still wording the stderr notice as
+# "Contract coverage incomplete..." (just with an "Accepted by
+# contract.unresolved: warn" effect clause, per `_coverage_message`) — so
+# whenever both a readable JSON *and* that stderr notice existed together
+# (true for every markdown-format single-pair `compare`, and, since this
+# same commit's own P1 fix, every non-JSON release `compare` too), the grep
+# still matched and defeated the acceptance mechanism entirely. `_report_
+# query` prints nothing (empty string) only when the report is genuinely
+# unreadable/absent — that emptiness, not the printed value, is what decides
+# whether the stderr fallback is even consulted.
 _coverage_gated() {
-  local _src
+  local _src _contribution
   _src=$(_json_report_src)
-  if [[ "$(_report_query "$_src" coverage_contribution)" == "1" ]]; then
-    return 0
+  _contribution=$(_report_query "$_src" coverage_contribution)
+  if [[ -n "$_contribution" ]]; then
+    [[ "$_contribution" == "1" ]]
+    return
   fi
-  echo "$STDERR_CONTENT" | grep -q 'Contract coverage incomplete'
+  # The genuine "no JSON at all" fallback (Codex review, second P1 round):
+  # the stderr notice itself says "Contract coverage incomplete..." even
+  # for a `contract.unresolved=warn`-accepted gap (just with an "Accepted
+  # by contract.unresolved=warn" effect clause, per `_coverage_message`
+  # in contract_coverage_exit.py -- both single-pair `compare` and this
+  # PR's own release-mode notice use that exact phrase, deliberately kept
+  # in sync). A bare substring match on "Contract coverage incomplete"
+  # cannot tell the two apart, so it must also confirm the acceptance
+  # phrase is absent -- exactly the shape a non-JSON release `compare`
+  # takes outside a `pull_request` event, where this fallback is the ONLY
+  # signal available at all.
+  echo "$STDERR_CONTENT" | grep -q 'Contract coverage incomplete' \
+    && ! echo "$STDERR_CONTENT" | grep -q 'Accepted by contract.unresolved=warn'
 }
 
 # The compatibility axis's own exit code, from the JSON report's severity gate
@@ -1993,6 +2022,14 @@ _maybe_post_pr_comment() {
   if [[ "${INPUT_FAIL_ON_API_BREAK:-false}" == "true" ]]; then
     PR_GATE_ARGS+=(--gate-api-break)
   fi
+  # Mirror fail-on-breaking too (default true) — only affects the
+  # analysis-incomplete bucket's blocking headline (Codex review): without
+  # this, a policy override promoting a coverage-gap finding to
+  # severity: "breaking" would always render the blocking headline even
+  # when fail-on-breaking: false left the check green.
+  if [[ "${INPUT_FAIL_ON_BREAKING:-true}" == "false" ]]; then
+    PR_GATE_ARGS+=(--no-gate-breaking)
+  fi
 
   # Link the workflow run (where the full JSON/SARIF report is uploaded as an
   # artifact) so a condensed/truncated comment always points at the full detail.
@@ -2190,6 +2227,24 @@ elif [[ "$MODE" == "scan" ]]; then
     FINAL_EXIT=1
   fi
 
+  # ADR-049 Phase 7's contract-coverage axis is orthogonal and unconditional
+  # -- no fail-on-* flag disables it, matching the SEVERITY_ERROR tier above
+  # (AGENTS.md: "no fail-on-* condition at all... a coverage failure raises
+  # a clean 0 to 1 and can never lower a gate's 2/4"). Reads `_coverage_
+  # gated()` DIRECTLY rather than keying off VERDICT/GATE_TIER=="COVERAGE_
+  # INCOMPLETE" (an earlier revision did the latter, Codex review): the
+  # max-fold means a higher-priority axis (a real BREAKING/API_BREAK) wins
+  # the VERDICT/GATE_TIER label and the CLI's own exit code, so that label
+  # never reaches "COVERAGE_INCOMPLETE" even though contract_coverage_
+  # exit_contribution genuinely is 1 -- with fail-on-breaking: false, that
+  # left the coverage floor completely unenforced. `_coverage_gated()`
+  # already reads the report's own zeroed contribution under `contract.
+  # unresolved: warn`, so this stays inert in that case regardless.
+  if _coverage_gated; then
+    echo "::error::abicheck scan could not close the selected --contract domain on the available evidence; see contract_coverage_failures in the JSON report. Accept incomplete assurance with contract.unresolved: warn to allow."
+    FINAL_EXIT=1
+  fi
+
 else
   # compare mode: BREAKING/API_BREAK follow fail-on flags; REMOVED_LIBRARY
   # only appears when --fail-on-removed-library was passed to the CLI
@@ -2214,6 +2269,17 @@ else
   # Severity-driven exit code 1 (from --severity-* flags)
   if [[ "${GATE_TIER:-$VERDICT}" == "SEVERITY_ERROR" ]]; then
     echo "::error::Severity-level error detected by abicheck."
+    FINAL_EXIT=1
+  fi
+
+  # ADR-049 Phase 7's contract-coverage axis, unconditional exactly like the
+  # scan-mode check above and for the same reason -- see that comment. Reads
+  # `_coverage_gated()` directly rather than the VERDICT/GATE_TIER label, so
+  # a BREAKING/API_BREAK exit that outranks the coverage axis in the max-fold
+  # (and, with the matching fail-on-* flag false, would otherwise leave the
+  # step green) cannot silently swallow it.
+  if _coverage_gated; then
+    echo "::error::abicheck could not close the selected --contract domain on the available evidence; see contract_coverage_failures in the JSON report. Accept incomplete assurance with contract.unresolved: warn to allow."
     FINAL_EXIT=1
   fi
 fi

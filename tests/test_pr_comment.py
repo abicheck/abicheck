@@ -12,11 +12,10 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Tests for the sticky PR-comment renderer and the ``pr-comment`` CLI."""
+"""Tests for the sticky PR-comment renderer (see test_pr_comment_cli.py for
+the ``pr-comment`` CLI command)."""
 
 from __future__ import annotations
-
-import json
 
 import pytest
 
@@ -139,6 +138,10 @@ def test_compare_detail_text_renders_value_delta():
     model = build_model(_compare_report())
     size_change = next(f for f in model.breaking if f.symbol == "struct Ctx")
     assert "16 → 24" in size_change.detail
+
+
+# Analysis-incomplete-bucket tests live in test_pr_comment_incomplete.py
+# (this file's own line-count cap; CLAUDE.md's "Files that are large" section).
 
 
 def test_used_by_scoped_compatible_overrides_breaking_headline():
@@ -346,6 +349,15 @@ def test_appcompat_missing_symbols_count_as_breaking():
     assert model.counts == (3, 0, 0)
     assert model.subject == "myapp"
     assert any(f.symbol == "foo_legacy" for f in model.breaking)
+
+
+def test_appcompat_missing_symbols_are_demangled():
+    report = _appcompat_report()
+    report["missing_symbols"] = ["_ZNK12abicheck_lab10Calculator8multiplyEii"]
+    model = build_model(report)
+    missing = next(f for f in model.breaking if f.kind == "symbol_missing")
+    assert missing.symbol == "abicheck_lab::Calculator::multiply(int, int) const"
+    assert missing.mangled == "_ZNK12abicheck_lab10Calculator8multiplyEii"
 
 
 def test_appcompat_missing_version_counts_as_breaking():
@@ -890,6 +902,9 @@ def test_render_includes_marker_header_sha_and_counts():
 
 
 def test_render_header_review_when_no_breaking():
+    # A single-severity api_break review bucket names the actual reason
+    # instead of the generic "Review recommended" (item 1 of the PR-comment
+    # wording pass: no unexplained "Review recommended").
     report = _compare_report(
         [
             {
@@ -901,8 +916,45 @@ def test_render_header_review_when_no_breaking():
         ]
     )
     body = render_comment(build_model(report), sha="deadbeef")
+    assert "Source API changed; binary ABI unchanged" in body
+    assert "⚠️" in body
+
+
+def test_render_header_review_mixed_severities_stays_generic():
+    report = _compare_report(
+        [
+            {
+                "kind": "enum_member_added",
+                "symbol": "E::X",
+                "description": "d",
+                "severity": "api_break",
+            },
+            {
+                "kind": "type_layout_risk",
+                "symbol": "T",
+                "description": "d2",
+                "severity": "risk",
+            },
+        ]
+    )
+    body = render_comment(build_model(report), sha="deadbeef")
     assert "Review recommended" in body
     assert "⚠️" in body
+
+
+def test_render_header_review_risk_only():
+    report = _compare_report(
+        [
+            {
+                "kind": "type_layout_risk",
+                "symbol": "T",
+                "description": "d2",
+                "severity": "risk",
+            },
+        ]
+    )
+    body = render_comment(build_model(report), sha="deadbeef")
+    assert "Compatibility risk — review recommended" in body
 
 
 def test_render_header_safe_only():
@@ -917,7 +969,7 @@ def test_render_header_safe_only():
         ]
     )
     body = render_comment(build_model(report), sha="deadbeef")
-    assert "Compatible — safe changes only" in body
+    assert "No compatibility impact detected" in body
 
 
 def test_render_header_no_changes():
@@ -938,10 +990,197 @@ def test_full_detail_expands_all_sections():
     assert body.count("<details open>") == 3
 
 
+def test_breaking_finding_renders_impact_field():
+    # A breaking finding's `impact` field (change_registry.py's per-kind
+    # consequence text, already emitted by reporter.py) answers "what does
+    # this actually do" — the comment must surface it, not just the raw
+    # kind/description. Labelled "Impact:", not "Fix:" (Codex review: not
+    # every impact= entry is an actionable remediation step).
+    report = _compare_report(
+        [
+            {
+                "kind": "func_removed",
+                "symbol": "foo_init",
+                "description": "removed",
+                "severity": "breaking",
+                "impact": "Old binaries call a symbol that no longer exists; "
+                "dynamic linker will refuse to load or crash at call site.",
+            },
+        ]
+    )
+    body = render_comment(build_model(report), sha="x", detail="full")
+    assert "**Impact:**" in body
+    assert "**Fix:**" not in body
+    assert "dynamic linker will refuse to load" in body
+
+
+def test_mangled_symbol_demangled_with_mangled_kept_as_linker_evidence():
+    # A raw Itanium-mangled linker symbol (diff_symbols.py's `Change.symbol`
+    # for function changes) is unreadable to a maintainer — the demangled
+    # signature must be primary, with the mangled form kept as linker
+    # evidence, not silently dropped.
+    report = _compare_report(
+        [
+            {
+                "kind": "func_params_changed",
+                "symbol": "_ZNK12abicheck_lab10Calculator8multiplyEii",
+                "description": "signature changed",
+                "severity": "breaking",
+            },
+        ]
+    )
+    model = build_model(report)
+    finding = model.breaking[0]
+    assert finding.symbol == "abicheck_lab::Calculator::multiply(int, int) const"
+    assert finding.mangled == "_ZNK12abicheck_lab10Calculator8multiplyEii"
+    body = render_comment(model, sha="x", detail="full")
+    assert "abicheck_lab::Calculator::multiply(int, int) const" in body
+    assert "linker: `_ZNK12abicheck_lab10Calculator8multiplyEii`" in body
+
+
+def test_non_mangled_symbol_left_unchanged_with_no_linker_evidence():
+    report = _compare_report(
+        [
+            {
+                "kind": "type_size_changed",
+                "symbol": "struct Ctx",
+                "description": "grew",
+                "severity": "breaking",
+            },
+        ]
+    )
+    model = build_model(report)
+    finding = model.breaking[0]
+    assert finding.symbol == "struct Ctx"
+    assert finding.mangled == ""
+
+
+def test_location_ci_workdir_doubled_segment_stripped_per_finding():
+    # The doubled-checkout-dir heuristic (.../work/<repo>/<repo>/...) is
+    # applied independently per finding — deliberately NOT a cross-location
+    # "strip whatever's common" pass (see `_CI_WORKDIR_RE`'s own docstring
+    # for why: that over-strips a real shared subdirectory like `include/`).
+    report = _compare_report(
+        [
+            {
+                "kind": "func_removed",
+                "symbol": "foo_init",
+                "description": "removed",
+                "severity": "breaking",
+                "source_location": "/home/runner/work/abicheck_lab/abicheck_lab/include/abicheck_lab/math.h:10",
+            },
+            {
+                "kind": "type_size_changed",
+                "symbol": "struct Ctx",
+                "description": "grew",
+                "severity": "breaking",
+                "source_location": "/home/runner/work/abicheck_lab/abicheck_lab/include/abicheck_lab/other.h:20",
+            },
+        ]
+    )
+    model = build_model(report)
+    locations = {f.location for f in model.breaking}
+    assert locations == {
+        "include/abicheck_lab/math.h:10",
+        "include/abicheck_lab/other.h:20",
+    }
+
+
+def test_location_doubled_directory_outside_work_not_stripped():
+    # CodeRabbit review: the CI-workdir pattern must be anchored to a
+    # literal `work/` segment — an earlier revision matched *any* doubled
+    # adjacent directory anywhere in an absolute path, which would strip a
+    # genuine repository path like /srv/vendor/vendor/... down to
+    # "include/a.h", discarding real path components.
+    report = _compare_report(
+        [
+            {
+                "kind": "func_removed",
+                "symbol": "foo_init",
+                "description": "removed",
+                "severity": "breaking",
+                "source_location": "/srv/vendor/vendor/include/a.h:1",
+            },
+        ]
+    )
+    model = build_model(report)
+    assert model.breaking[0].location == "/srv/vendor/vendor/include/a.h:1"
+
+
+def test_location_shared_real_subdirectory_not_over_stripped():
+    # Two findings legitimately sharing a real subdirectory (not a CI
+    # checkout root) must keep that directory in the displayed path — only
+    # the recognized CI-workdir shape is ever stripped.
+    report = _compare_report(
+        [
+            {
+                "kind": "func_removed",
+                "symbol": "foo_init",
+                "description": "removed",
+                "severity": "breaking",
+                "source_location": "/opt/build/include/foo.h:10",
+            },
+            {
+                "kind": "type_size_changed",
+                "symbol": "struct Ctx",
+                "description": "grew",
+                "severity": "breaking",
+                "source_location": "/opt/build/include/bar.h:20",
+            },
+        ]
+    )
+    model = build_model(report)
+    locations = {f.location for f in model.breaking}
+    assert locations == {"/opt/build/include/foo.h:10", "/opt/build/include/bar.h:20"}
+
+
+def test_location_without_shared_prefix_or_ci_pattern_left_unchanged():
+    report = _compare_report(
+        [
+            {
+                "kind": "func_removed",
+                "symbol": "foo_init",
+                "description": "removed",
+                "severity": "breaking",
+                "source_location": "/opt/build/foo.h:10",
+            },
+            {
+                "kind": "type_size_changed",
+                "symbol": "struct Ctx",
+                "description": "grew",
+                "severity": "breaking",
+                "source_location": "/srv/other/bar.h:20",
+            },
+        ]
+    )
+    model = build_model(report)
+    locations = {f.location for f in model.breaking}
+    assert locations == {"/opt/build/foo.h:10", "/srv/other/bar.h:20"}
+
+
+def test_location_without_a_colon_left_unchanged():
+    # A location with no ":line" suffix at all (e.g. source_fact_coverage_
+    # incomplete's bracketed "[L4]" tier marker) must not raise or corrupt
+    # the string — _normalize_location's no-colon branch.
+    report = _compare_report(
+        [
+            {
+                "kind": "func_removed",
+                "symbol": "foo_init",
+                "description": "removed",
+                "severity": "breaking",
+                "source_location": "[L4]",
+            },
+        ]
+    )
+    model = build_model(report)
+    assert model.breaking[0].location == "[L4]"
+
+
 def test_safe_quality_section_full_detail_table_with_rows():
     # Quality-only compatible findings keep their own per-symbol table in
     # full detail — the fixture above is all-additions, so this exercises
-    # the "✅ Safe" section's full-detail path specifically.
+    # the "ℹ️ Informational findings" section's full-detail path specifically.
     report = _compare_report(
         [
             {
@@ -953,7 +1192,7 @@ def test_safe_quality_section_full_detail_table_with_rows():
         ]
     )
     body = render_comment(build_model(report), sha="x", detail="full")
-    assert "✅ Safe (1)" in body
+    assert "ℹ️ Informational findings (1)" in body
     assert "soname_bump_unnecessary" in body
     assert "unnecessary bump" in body
 
@@ -1229,7 +1468,7 @@ def test_finding_with_only_location_renders_location_cell():
 
 def test_safe_quality_section_caps_symbols_per_kind():
     # Quality (non-addition) compatible findings keep the terse
-    # kind:symbols-with-cap rendering in the "✅ Safe" section — additions
+    # kind:symbols-with-cap rendering in the "ℹ️ Informational findings" section — additions
     # are split out into their own section (see tests below) and use a
     # different (per-symbol table) rendering, so this cap only applies here.
     changes = [
@@ -1270,12 +1509,12 @@ def test_additions_render_as_own_section_with_detail():
     )
     body = render_comment(build_model(report), sha="x")
     assert "➕ Public API additions (1)" in body
-    assert "✅ Safe (1)" in body
+    assert "ℹ️ Informational findings (1)" in body
     # the addition shows the same per-symbol detail as Breaking/Needs review
     assert "new exported function" in body
     assert "foo.h:42" in body
     # the addition doesn't leak into the quality-only Safe section
-    additions_block = body.split("➕ Public API additions")[1].split("✅ Safe")[0]
+    additions_block = body.split("➕ Public API additions")[1].split("ℹ️ Informational findings")[0]
     assert "foo_v2" in additions_block
     assert "libfoo" not in additions_block
 
@@ -1328,7 +1567,7 @@ def test_additions_section_absent_when_only_quality_findings():
     )
     body = render_comment(build_model(report), sha="x")
     assert "➕ Public API additions" not in body
-    assert "✅ Safe (1)" in body
+    assert "ℹ️ Informational findings (1)" in body
 
 
 def test_additions_section_full_detail_flat_rows():
@@ -1428,56 +1667,5 @@ def test_header_untracked_category_falls_back_to_abi_breaking():
     assert "## ❌ abicheck — ABI BREAKING" in body
 
 
-# ---------------------------------------------------------------------------
-# CLI command
-#
-# `pr-comment` is Action/library-only (ADR-043 D1): not a registered `abicheck`
-# subcommand, invoked as `python -m abicheck.cli_pr_comment` (see
-# action/run.sh). Tests below drive the standalone Click command object
-# directly rather than through `abicheck.cli.main`.
-# ---------------------------------------------------------------------------
-
-
-def _run_cli(args):
-    from click.testing import CliRunner
-
-    from abicheck.cli_pr_comment import pr_comment_cmd
-
-    return CliRunner().invoke(pr_comment_cmd, args)
-
-
-def test_cli_pr_comment_writes_body(tmp_path):
-    report = tmp_path / "report.json"
-    report.write_text(json.dumps(_compare_report()), encoding="utf-8")
-    out = tmp_path / "comment.md"
-    result = _run_cli([str(report), "--sha", "abc1234", "-o", str(out)])
-    assert result.exit_code == 0
-    body = out.read_text(encoding="utf-8")
-    assert MARKER in body
-    assert "ABI BREAKING" in body
-
-
-def test_cli_pr_comment_skip_writes_empty_file(tmp_path):
-    report = tmp_path / "report.json"
-    report.write_text(json.dumps(_compare_report([])), encoding="utf-8")
-    out = tmp_path / "comment.md"
-    result = _run_cli([str(report), "--on", "changes", "-o", str(out)])
-    assert result.exit_code == 0
-    # nothing to post → empty file so the action's `-s` check skips
-    assert out.read_text(encoding="utf-8") == ""
-
-
-def test_cli_pr_comment_invalid_json_errors(tmp_path):
-    report = tmp_path / "bad.json"
-    report.write_text("{not json", encoding="utf-8")
-    result = _run_cli([str(report)])
-    assert result.exit_code != 0
-    assert "Cannot read JSON report" in result.output
-
-
-def test_cli_pr_comment_non_object_errors(tmp_path):
-    report = tmp_path / "arr.json"
-    report.write_text("[1, 2, 3]", encoding="utf-8")
-    result = _run_cli([str(report)])
-    assert result.exit_code != 0
-    assert "must be an object" in result.output
+# `pr-comment` CLI command tests live in test_pr_comment_cli.py (this file's
+# own line-count cap; CLAUDE.md's "Files that are large" section).
