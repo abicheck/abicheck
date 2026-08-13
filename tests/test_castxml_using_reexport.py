@@ -37,20 +37,33 @@ snapshot at all; the failure mode is a silent false negative, matching
 the direct-clang backend's already-documented behavior for the identical
 construct, not the "castxml over-reports" asymmetry originally reported.
 
-Two independent layers are checked per case, so a future castxml release
-that changes this is caught either way:
+Three independent layers are checked per case, so a future castxml
+release that changes this is caught either way:
 
 1. The **raw XML** itself — the exact element count for the tag in
-   question, and that the single element's id is listed in *both*
-   namespaces' own ``members=`` attribute. This is deliberately not
-   routed through ``_CastxmlParser`` at all: if a future castxml starts
-   emitting an equivalent using-shadow/back-reference element under some
-   *other* tag name (not ``Variable``/``Struct``), this raw check does not
-   see it and only the parser-level check below would catch it via a
-   changed constant/type count.
+   question, that the single element's id is listed in *both*
+   namespaces' own ``members=`` attribute, and (``_assert_no_alias_shaped_
+   tags``) that no *other* element in the document carries a tag name that
+   looks alias-related (``using``/``alias``/``shadow``), so a hypothetical
+   future using-shadow tag under some name this suite didn't anticipate
+   still fails loudly rather than silently passing both the exact-count
+   check (which only looks at ``Variable``/``Struct``) and the
+   parser-level check below (whose element lists are also tag-filtered,
+   per ``_build_id_map``, so an unrecognized tag is invisible to it too).
 2. The **parser-level result** (``parse_constants()``/``parse_types()``),
    confirming the flat-iteration behavior ``dumper_castxml.py`` actually
    exhibits reads through correctly to the model.
+3. **The real production entry point** (``TestUsingReexportAgainstProductionDumpPath``
+   below) — a real compiled ``.so`` dumped through ``abicheck.dumper.dump(
+   ..., header_backend="castxml")``, the same function ``compare``/``dump``
+   CLI commands call. Layers 1-2 hand-invoke castxml directly (mirroring
+   ``_build_castxml_command``'s flags) specifically so the raw-XML schema
+   is inspectable at all — ``dump()`` does not expose the intermediate XML
+   — but that means they don't exercise aggregate-header construction, the
+   supported-version gate, or compiler *resolution* (as opposed to the
+   emulation flag alone) the way a real dump does. Layer 3 closes that gap
+   by going through the identical public entry point and asserting on the
+   resulting ``AbiSnapshot`` instead.
 
 If a future castxml release changes this (starts emitting a second
 element, or an equivalent using-shadow back-reference), these tests
@@ -69,7 +82,8 @@ from xml.etree.ElementTree import Element, parse as et_parse
 
 import pytest
 
-from abicheck.dumper import _CastxmlParser
+from abicheck.dumper import _CastxmlParser, dump
+from abicheck.model import AbiSnapshot
 
 pytestmark = pytest.mark.integration
 
@@ -147,6 +161,29 @@ def _namespace_members(root: Element, name: str) -> set[str]:
     raise AssertionError(f"no <Namespace name={name!r}> element in castxml output")
 
 
+# Substrings a hypothetical future using-shadow/back-reference tag would
+# plausibly carry (mirroring clang's own `UsingDecl`/`UsingShadowDecl`
+# naming). Not exhaustive by construction — a tag name outside this
+# vocabulary would still slip through — but it's a real, cheap check this
+# suite didn't have before, and it's what actually makes the "raw XML"
+# layer's fail-loudly claim true for the shape of change most likely to be
+# made (castxml adopting clang's own vocabulary for the construct).
+_ALIAS_TAG_SUBSTRINGS = ("using", "alias", "shadow")
+
+
+def _assert_no_alias_shaped_tags(root: Element) -> None:
+    tags = {el.tag for el in root.iter()}
+    suspicious = {
+        tag for tag in tags if any(s in tag.lower() for s in _ALIAS_TAG_SUBSTRINGS)
+    }
+    assert not suspicious, (
+        f"castxml output now contains alias-shaped tag(s) {suspicious!r} "
+        "that this test's Variable/Struct-only counts don't account for — "
+        "re-derive this test (and AGENTS.md's 'Option (b) closed' note) "
+        "against the new schema"
+    )
+
+
 class TestUsingReexportDoesNotDuplicateAgainstRealCastxml:
     def test_reexported_constant_is_not_duplicated(self, tmp_path: Path) -> None:
         root, parser = _run_castxml(
@@ -177,6 +214,7 @@ class TestUsingReexportDoesNotDuplicateAgainstRealCastxml:
         # a second, independent declaration.
         assert var_id in _namespace_members(root, "v1")
         assert var_id in _namespace_members(root, "detail")
+        _assert_no_alias_shaped_tags(root)
 
         # --- Parser layer ----------------------------------------------------
         constants = parser.parse_constants()
@@ -212,10 +250,92 @@ class TestUsingReexportDoesNotDuplicateAgainstRealCastxml:
         assert struct_id is not None
         assert struct_id in _namespace_members(root, "v1")
         assert struct_id in _namespace_members(root, "detail")
+        _assert_no_alias_shaped_tags(root)
 
         # --- Parser layer ----------------------------------------------------
         types = parser.parse_types()
         names = [t.qualified_name or t.name for t in types if "range" in (t.name or "")]
         # Exactly one `range` record, qualified under `v1` — never a second
         # one reachable only as `detail::range`.
+        assert names == ["detail::v1::range"]
+
+
+class TestUsingReexportAgainstProductionDumpPath:
+    """The identical constructs, this time through the real ``dump()``
+    entry point (a compiled ``.so`` + ``header_backend="castxml"``) rather
+    than a hand-invoked castxml command — so aggregate-header construction,
+    compiler *resolution* (not just the emulation flag), and the
+    supported-version gate are all exercised for real, the way
+    ``TestUsingReexportDoesNotDuplicateAgainstRealCastxml`` above cannot
+    (it hand-invokes castxml specifically to inspect the raw XML, which
+    ``dump()`` does not expose)."""
+
+    def _dump_via_production_path(
+        self, tmp_path: Path, header_source: str
+    ) -> AbiSnapshot:
+        if shutil.which("castxml") is None:
+            pytest.skip("castxml not installed")
+        cc = _resolve_castxml_cc()
+        if cc is None:
+            pytest.skip("no g++ or cl.exe on PATH to compile the fixture library")
+        cc_id, cc_bin = cc
+        if cc_id != "gnu":
+            # Compiling the tiny fixture .so below uses a hardcoded g++
+            # invocation (mirroring the established pattern in
+            # test_castxml_clang_parity_gate.py); an MSVC-only host (no
+            # g++/MinGW) can still run the raw-XML tests above via cl.exe,
+            # but building a real .so here needs its own MSVC-specific
+            # compile step this test doesn't attempt.
+            pytest.skip(
+                "compiling the fixture .so here needs g++, not just castxml-cc-msvc"
+            )
+        header = tmp_path / "lib.hpp"
+        header.write_text(textwrap.dedent(header_source))
+        src = tmp_path / "lib.cpp"
+        src.write_text('#include "lib.hpp"\n')
+        so = tmp_path / "liblib.so"
+        subprocess.run(
+            [cc_bin, "-shared", "-fPIC", "-o", str(so), str(src), f"-I{tmp_path}"],
+            check=True,
+            capture_output=True,
+            timeout=_CASTXML_TIMEOUT_SECONDS,
+        )
+        return dump(so, [header], header_backend="castxml")
+
+    def test_reexported_constant_is_not_duplicated(self, tmp_path: Path) -> None:
+        snapshot = self._dump_via_production_path(
+            tmp_path,
+            """
+            namespace detail {
+            namespace v1 {
+            constexpr int cpu_feature_map = 42;
+            }
+            using v1::cpu_feature_map;
+            }
+            """,
+        )
+        assert snapshot.constants.get("detail::v1::cpu_feature_map") == "42"
+        assert "detail::cpu_feature_map" not in snapshot.constants
+        assert sum(1 for k in snapshot.constants if "cpu_feature_map" in k) == 1
+
+    def test_reexported_type_is_not_duplicated(self, tmp_path: Path) -> None:
+        snapshot = self._dump_via_production_path(
+            tmp_path,
+            """
+            namespace detail {
+            namespace v1 {
+            struct range {
+                int lo;
+                int hi;
+            };
+            }
+            using v1::range;
+            }
+            """,
+        )
+        names = [
+            t.qualified_name or t.name
+            for t in snapshot.types
+            if "range" in (t.name or "")
+        ]
         assert names == ["detail::v1::range"]
