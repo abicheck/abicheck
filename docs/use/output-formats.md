@@ -705,6 +705,12 @@ is what lets a `scan --against` PR comment (see the Action's own
 render a green "public API additions" section the same way `compare`'s own
 JSON report already does via its full `changes` list.
 
+The block also carries `policy` — the resolved compatibility policy name
+(e.g. `"strict_abi"`) that actually classified these buckets, the same fact
+`compare`'s own top-level JSON report has always carried. Present on any
+real comparison (absent only for the `NOT_COMPARABLE`/audit-only `diff`
+shapes, which never reach policy classification).
+
 ```json
 {
   "scan_schema_version": "1.13",

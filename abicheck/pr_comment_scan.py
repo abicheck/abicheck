@@ -542,7 +542,17 @@ def from_scan(
         subject=str(report.get("subject") or "artifact"),
         old_label="baseline",
         new_label="candidate",
-        policy=str(report.get("policy", "strict_abi")),
+        # Codex review: `_run_baseline_compare`'s resolved policy nests
+        # inside `report["diff"]["policy"]` (`cli_scan_baseline.
+        # _baseline_summary`), the same place its severity-gate block and
+        # the contract-coverage ledger already nest -- not at the top level
+        # `report.get("policy", ...)` read here before, which always saw
+        # the default fallback and silently misreported a non-default
+        # `--policy` in the comment footer.
+        policy=str(
+            (diff_dict.get("policy") if diff_dict is not None else None)
+            or "strict_abi"
+        ),
         breaking=breaking,
         review=review,
         safe=safe,

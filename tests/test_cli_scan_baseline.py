@@ -304,6 +304,7 @@ class TestBaselineSummaryKeysArePinned:
             "additions",
             "additions_truncated",
             "additions_total",
+            "policy",
         }
     )
 
@@ -343,6 +344,7 @@ class TestBaselineSummaryKeysArePinned:
                 )
             ],
             suppressed_changes=suppressed,
+            policy="strict_abi",
         )
 
     def test_every_emitted_key_is_pinned(self) -> None:

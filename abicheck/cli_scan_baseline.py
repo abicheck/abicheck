@@ -694,6 +694,20 @@ def _baseline_summary(diff: Any, max_findings: int | None = None) -> dict[str, A
         "risk": len(diff.risk),
         "compatible": len(diff.compatible),
     }
+    # Codex review: the resolved `--policy` (e.g. "strict_abi", or whatever
+    # a non-default policy name/config resolved to) that actually classified
+    # these buckets was never surfaced anywhere in `scan --against`'s JSON,
+    # unlike `compare`'s own report (`reporter.py` always emits it) -- a
+    # consumer had no way to tell which policy gated a `scan --against` run
+    # without a separate `compare` invocation. `diff.policy` is the same
+    # string `_build_severity_json`/`classify_change_object` above are
+    # already keyed on. Duck-typed like the other optional reads in this
+    # function: a real `DiffResult` always carries it, but this module is
+    # also driven with lightweight stand-ins in tests that model only the
+    # buckets they exercise.
+    resolved_policy = getattr(diff, "policy", None)
+    if resolved_policy is not None:
+        summary["policy"] = resolved_policy
     # ADR-049 D9 conserves every detector fact in exactly one visible
     # outcome. The four buckets above are the *compatibility* axis, so since
     # Phase 7 they exclude findings contract evaluation did not score -- and

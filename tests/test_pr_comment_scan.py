@@ -58,6 +58,34 @@ def test_build_model_recognizes_scan_report():
     assert model.mode == "scan"
 
 
+def test_scan_reports_the_resolved_policy_from_the_diff_block():
+    # Codex review: `_run_baseline_compare`'s resolved policy nests inside
+    # `report["diff"]["policy"]` (`cli_scan_baseline._baseline_summary`),
+    # the same place its severity-gate block and contract-coverage ledger
+    # already nest -- reading a top-level `report["policy"]` (which scan's
+    # own JSON never populates) always silently fell back to the
+    # "strict_abi" default, misreporting a non-default `--policy` run.
+    report = _scan_report(
+        diff={
+            "breaking": 0,
+            "api_break": 0,
+            "risk": 0,
+            "compatible": 0,
+            "policy": "abicc_default",
+        },
+    )
+    model = build_model(report)
+    assert model.policy == "abicc_default"
+
+
+def test_scan_policy_falls_back_to_strict_abi_when_absent():
+    # An audit-only run (diff=None) has no policy classification to report
+    # at all -- the footer still needs a value, so it falls back to the
+    # documented default rather than rendering blank/None.
+    model = build_model(_scan_report(diff=None))
+    assert model.policy == "strict_abi"
+
+
 def test_scan_report_with_no_diff_is_audit_only():
     model = build_model(_scan_report(diff=None))
     assert model.scan_audit_only is True

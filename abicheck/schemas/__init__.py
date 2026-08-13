@@ -605,7 +605,18 @@ REPORT_SCHEMA_VERSION = "2.34"
 #:        header count needs this to stay exact under truncation. All three
 #:        keys are additive and omitted when ``diff.compatible`` has no
 #:        addition-shaped entry, so an ordinary scan with no new public API
-#:        is unchanged from 1.12.
+#:        is unchanged from 1.12. The ``diff`` block also gains ``policy``
+#:        (Codex review): the resolved compatibility policy name
+#:        (``DiffResult.policy``, e.g. ``"strict_abi"``) that classified
+#:        these buckets, the same fact ``compare``'s own JSON report has
+#:        always carried at its top level -- without it, ``scan
+#:        --against``'s sticky PR comment (``pr_comment_scan.from_scan``)
+#:        had no way to report which policy actually gated a non-default
+#:        ``--policy`` run and silently rendered the ``"strict_abi"``
+#:        fallback regardless. Additive and always present alongside the
+#:        other ``diff`` fields on a real comparison (only absent for the
+#:        ``NOT_COMPARABLE``/audit-only ``diff`` shapes, which never reach
+#:        policy classification at all).
 SCAN_SCHEMA_VERSION = "1.13"
 
 _SCHEMA_DIR = Path(__file__).resolve().parent

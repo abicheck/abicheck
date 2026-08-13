@@ -2023,6 +2023,13 @@ _maybe_post_pr_comment() {
   [[ "${INPUT_DRY_RUN:-false}" == "true" ]] && return 0
   [[ "${INPUT_PR_COMMENT_ON:-changes}" == "never" ]] && return 0
   [[ "$VERDICT" == "ERROR" ]] && return 0
+  # scan's own _BudgetOverflow handler (abicheck/cli_scan.py) exits 5 before
+  # _emit_scan_report ever runs, so neither --secondary-output nor a JSON
+  # primary output was written -- there is no report to reuse, and
+  # re-running would just re-execute the same budget-limited (and
+  # potentially expensive) scan only to hit the identical overflow again
+  # with nothing new to show for it (Codex review).
+  [[ "$VERDICT" == "BUDGET_OVERFLOW" ]] && return 0
   case "${GITHUB_EVENT_NAME:-}" in
     pull_request | pull_request_target) ;;
     *)

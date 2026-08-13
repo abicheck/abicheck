@@ -46,3 +46,8 @@ it should read in CHANGELOG.md. Delete the other sections.
   finding to blocking, never a subset) now empties the green "Public API
   additions" section wholesale instead of excluding only the promoted
   entries a truncated `diff.findings` list happened to still carry.
+  `scan --against`'s JSON also gained `diff.policy`, the resolved
+  compatibility policy name, so the comment footer reports the policy that
+  actually classified the run instead of always the `strict_abi` fallback.
+  The Action itself no longer re-runs a budget-limited scan a second time
+  just to still hit the same `BUDGET_OVERFLOW` for the comment.
