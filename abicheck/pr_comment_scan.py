@@ -706,15 +706,55 @@ def from_scan(
     risk = report.get("risk")
     verdict = report.get("verdict")
     evidence_counts = _scan_findings_evidence_kind_counts(findings_raw, diff_dict)
+    # A promoted compatible-category evidence-quality finding (most notably
+    # `dwarf_info_missing` under `quality_issues: error`) is itself itemized
+    # in `diff["additions"]`/`diff["quality"]` regardless of promotion state
+    # (Codex review, follow-up) -- so its occurrence(s) can be counted here
+    # even though `_scan_additions_to_safe`/`_scan_quality_to_safe` already
+    # short-circuit to `([], [])` on `promoted=True` (nothing to add to
+    # `incomplete` from *that* call site once promoted; it's `diff.findings`,
+    # via `_scan_findings_to_buckets`'s own evidence-kind check, that
+    # actually itemizes it under `incomplete` in the promoted case). Without
+    # this, `_scan_promoted_compatible_counts`'s exact per-category scalar
+    # (which counts every promoted compatible finding in that category,
+    # evidence-shaped or not) folded the evidence occurrence into the
+    # Breaking total on top of it already being itemized under Incomplete --
+    # double-counted across two sections, with a spurious "ABI BREAKING"
+    # headline for what is really an evidence-policy failure. Same
+    # itemized-only limitation as `_scan_findings_evidence_kind_counts`'s own
+    # docstring: exact only for what fit under the report cap.
+    promoted_evidence_addition_count = (
+        sum(
+            1
+            for c in additions_raw
+            if isinstance(c, dict) and str(c.get("kind", "")) in _EVIDENCE_KIND_VALUES
+        )
+        if addition_promoted and isinstance(additions_raw, list)
+        else 0
+    )
+    promoted_evidence_quality_count = (
+        sum(
+            1
+            for c in quality_raw
+            if isinstance(c, dict) and str(c.get("kind", "")) in _EVIDENCE_KIND_VALUES
+        )
+        if quality_promoted and isinstance(quality_raw, list)
+        else 0
+    )
     # Codex review, follow-up: pulling an evidence-quality finding out of
     # `breaking`/`review` into `incomplete` correctly excluded it from the
     # compatibility totals, but left `incomplete_blocking` untouched -- a
     # run whose *only* gating cause was e.g. a promoted
     # `evidence_required_missing` (or, under `--gate-api-break`, any
-    # api_break-bucket evidence kind) still exited non-zero, but the
+    # api_break-bucket evidence kind, or a promoted compatible evidence
+    # kind like `dwarf_info_missing`) still exited non-zero, but the
     # comment rendered the soft "⚠️ Analysis coverage reduced" headline
     # next to an actually-red Action check.
-    if _scan_evidence_incomplete_blocking(evidence_counts, gate_api_break, gate_breaking, levels):
+    if (
+        _scan_evidence_incomplete_blocking(evidence_counts, gate_api_break, gate_breaking, levels)
+        or promoted_evidence_addition_count > 0
+        or promoted_evidence_quality_count > 0
+    ):
         incomplete_blocking = True
     true_counts = _scan_true_counts(diff_dict, gate_api_break, levels, evidence_counts)
     promoted_addition_count, promoted_quality_count = _scan_promoted_compatible_counts(
@@ -728,8 +768,15 @@ def from_scan(
         # entirely. Uses the exact per-category severity counts (see
         # `_scan_promoted_compatible_counts`'s own docstring for why the
         # classified `breaking` list's own length is not a safe substitute).
+        # The evidence-kind portion of each promoted category is excluded
+        # (subtracted right back out) since those occurrences render under
+        # Incomplete, never Breaking (see the comment above).
         true_counts = (
-            true_counts[0] + promoted_addition_count + promoted_quality_count,
+            true_counts[0]
+            + promoted_addition_count
+            + promoted_quality_count
+            - promoted_evidence_addition_count
+            - promoted_evidence_quality_count,
             true_counts[1],
         )
         # Cross-check findings are folded into the exact scalar totals too

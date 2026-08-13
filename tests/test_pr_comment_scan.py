@@ -931,6 +931,59 @@ def test_scan_quality_promotion_empties_the_quality_section_wholesale():
     assert model.safe == []
 
 
+def test_scan_promoted_dwarf_info_missing_excluded_from_breaking_total():
+    # Codex review: dwarf_info_missing is COMPATIBLE by default severity, so
+    # a `quality_issues: error` promotion moves it into `diff.findings`
+    # with `bucket: "compatible"` -- `_scan_findings_to_buckets`'s own
+    # evidence-kind check already routes it to `incomplete`, but
+    # `_scan_promoted_compatible_counts`'s exact per-category scalar
+    # (`categories.quality_issues.count`) still counted every promoted
+    # compatible finding in that category, evidence-shaped or not, folding
+    # it into the Breaking total too -- double-counted across two
+    # sections, with a spurious "ABI BREAKING" headline for what is really
+    # an evidence-policy failure (exit 1), not a detected break.
+    report = _scan_report(
+        verdict="SEVERITY_ERROR",
+        exit_code=1,
+        diff={
+            "breaking": 0,
+            "api_break": 0,
+            "risk": 0,
+            "compatible": 1,
+            "severity": {
+                "config": {"quality_issues": "error"},
+                "categories": {"quality_issues": {"severity": "error", "count": 1}},
+            },
+            "findings": [
+                {
+                    "bucket": "compatible",
+                    "kind": "dwarf_info_missing",
+                    "symbol": "",
+                    "description": "no DWARF debug info",
+                    "finding_id": "d1",
+                },
+            ],
+            "quality": [
+                {
+                    "bucket": "compatible",
+                    "kind": "dwarf_info_missing",
+                    "symbol": "",
+                    "description": "no DWARF debug info",
+                    "finding_id": "d1",
+                },
+            ],
+        },
+    )
+    model = build_model(report)
+    assert model.counts == (0, 0, 0)
+    assert len(model.incomplete) == 1
+    assert model.incomplete[0].kind == "dwarf_info_missing"
+    assert model.incomplete_blocking is True
+    body = render_comment(model, sha="abc1234", detail="standard")
+    assert "ABI BREAKING" not in body
+    assert "Source analysis incomplete" in body
+
+
 def test_scan_audit_only_surfaces_api_break_crosscheck_findings():
     # Codex review: an audit-only run (no --against) always has diff=None,
     # but scan_engine._audit_exit_code can still publish API_BREAK/exit 2

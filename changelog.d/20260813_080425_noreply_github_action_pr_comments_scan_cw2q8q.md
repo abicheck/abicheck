@@ -90,4 +90,7 @@ it should read in CHANGELOG.md. Delete the other sections.
   gating cause was a promoted or `--gate-api-break`'d evidence-quality
   finding now keeps the sticky comment's blocking "🛑 Source analysis
   incomplete" headline instead of understating it as the advisory "⚠️
-  Analysis coverage reduced".
+  Analysis coverage reduced" — including a compatible-severity evidence
+  kind (`dwarf_info_missing`) promoted by `quality_issues: error`, which
+  previously double-counted into both the Breaking total and Incomplete
+  section at once.
