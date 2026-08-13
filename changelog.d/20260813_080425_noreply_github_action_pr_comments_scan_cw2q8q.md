@@ -86,4 +86,8 @@ it should read in CHANGELOG.md. Delete the other sections.
   than a detected API/ABI change. The exact header totals now exclude
   these occurrences too — including ones cut by the report cap and
   recoverable only from the truncation ledger — so the count never
-  disagrees with what's itemized under Review/Safe.
+  disagrees with what's itemized under Review/Safe. A run whose only
+  gating cause was a promoted or `--gate-api-break`'d evidence-quality
+  finding now keeps the sticky comment's blocking "🛑 Source analysis
+  incomplete" headline instead of understating it as the advisory "⚠️
+  Analysis coverage reduced".

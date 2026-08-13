@@ -329,11 +329,21 @@ def _scan_findings_evidence_kind_counts(
     ``diff["findings_truncated_kinds"]`` (``cli_scan_baseline.
     _accumulate_kind_counts``) is a kind -> cut-count ledger with no bucket
     of its own, so the truncated portion is attributed to that kind's fixed
-    default bucket (``_EVIDENCE_KIND_DEFAULT_BUCKET``) -- correct unless an
-    unusual policy ``overrides:`` rule reclassified one of these four
-    specific kinds, a narrower assumption than a real per-instance answer
-    but one this module already accepts elsewhere (see
-    :func:`_scan_true_counts`'s own module-wide promotion-folding scope).
+    default bucket (``_EVIDENCE_KIND_DEFAULT_BUCKET``).
+
+    Known gap, not fixed here (Codex review, follow-up): if a maintainer's
+    policy file ``overrides:`` one of these four specific kinds to a
+    *different* bucket than its registry default, a *truncated* (cap-cut)
+    occurrence is still attributed to the old default bucket here, since
+    ``findings_truncated_kinds`` carries no per-instance resolved-bucket
+    information to read instead -- subtracting from the wrong scalar in
+    that narrow, compounding edge case (truncation *and* an unusual
+    evidence-kind override both present at once). A correct fix needs
+    ``cli_scan_baseline.py`` to record the truncated ledger keyed by
+    resolved bucket, not kind alone -- a schema addition (new field, version
+    bump, doc/test updates), not a same-round extension of this function.
+    The itemized portion is unaffected (it already reads each finding's own
+    real, already-resolved ``bucket``).
     """
     counts = {"breaking": 0, "api_break": 0, "risk": 0}
     if isinstance(findings_raw, list):
@@ -355,6 +365,37 @@ def _scan_findings_evidence_kind_counts(
             if default_bucket in counts:
                 counts[default_bucket] += cut
     return counts
+
+
+def _scan_evidence_incomplete_blocking(
+    evidence_counts: dict[str, int],
+    gate_api_break: bool,
+    gate_breaking: bool,
+    levels: dict[str, str],
+) -> bool:
+    """Whether the evidence-quality findings pulled into ``incomplete``
+    (:func:`_scan_findings_evidence_kind_counts`) actually gated this run's
+    exit code -- mirroring ``compare``'s own ``_incomplete_is_blocking``
+    folding rules (Codex review, follow-up), scoped to scan's simpler
+    raw-scalar promotion model (the same one :func:`_scan_true_counts`
+    already applies):
+
+    - a ``"breaking"``-bucket occurrence always blocks under
+      ``gate_breaking`` (mirrors an ordinary breaking finding -- none of
+      the four evidence kinds default to this bucket today, but a policy
+      override could reclassify one there);
+    - an ``"api_break"``/``"risk"``-bucket occurrence blocks under a
+      ``potential_breaking: error`` severity promotion (folds both,
+      exactly like :func:`_scan_true_counts`'s own promotion), or,
+      api_break only, under ``--gate-api-break``/``fail-on-api-break``.
+    """
+    if evidence_counts.get("breaking", 0) > 0 and gate_breaking:
+        return True
+    if levels.get("potential_breaking") == "error":
+        return (evidence_counts.get("api_break", 0) + evidence_counts.get("risk", 0)) > 0
+    if gate_api_break:
+        return evidence_counts.get("api_break", 0) > 0
+    return False
 
 
 def _scan_true_counts(
@@ -665,6 +706,16 @@ def from_scan(
     risk = report.get("risk")
     verdict = report.get("verdict")
     evidence_counts = _scan_findings_evidence_kind_counts(findings_raw, diff_dict)
+    # Codex review, follow-up: pulling an evidence-quality finding out of
+    # `breaking`/`review` into `incomplete` correctly excluded it from the
+    # compatibility totals, but left `incomplete_blocking` untouched -- a
+    # run whose *only* gating cause was e.g. a promoted
+    # `evidence_required_missing` (or, under `--gate-api-break`, any
+    # api_break-bucket evidence kind) still exited non-zero, but the
+    # comment rendered the soft "⚠️ Analysis coverage reduced" headline
+    # next to an actually-red Action check.
+    if _scan_evidence_incomplete_blocking(evidence_counts, gate_api_break, gate_breaking, levels):
+        incomplete_blocking = True
     true_counts = _scan_true_counts(diff_dict, gate_api_break, levels, evidence_counts)
     promoted_addition_count, promoted_quality_count = _scan_promoted_compatible_counts(
         diff_dict, levels
@@ -739,6 +790,19 @@ def from_scan(
     # per-category severity scalar counts every compatible entry in that
     # category, evidence-shaped or not) -- counting them again here would
     # double-subtract.
+    #
+    # Known gap, not fixed here (Codex review, follow-up): this itemized
+    # count only ever sees what `additions_raw`/`quality_raw` actually
+    # carry -- if `diff["quality"]` was itself truncated at the shared cap
+    # (`quality_truncated: True`) and a `dwarf_info_missing`-shaped entry
+    # fell past it, that occurrence stays silently counted as "safe" in
+    # `scan_safe_total` and never appears in `incomplete`. Unlike
+    # `diff["findings"]`, `diff["quality"]`/`diff["additions"]` carry no
+    # per-kind truncation ledger (only the aggregate `quality_total`/
+    # `additions_total` scalars) for this function to recover an exact
+    # count from -- the same schema addition
+    # `_scan_findings_evidence_kind_counts`'s own docstring describes would
+    # be needed here too, not a same-round patch.
     evidence_compatible_count = 0
     if not addition_promoted and isinstance(additions_raw, list):
         evidence_compatible_count += sum(

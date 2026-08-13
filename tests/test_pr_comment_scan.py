@@ -221,6 +221,77 @@ def test_scan_evidence_kind_excluded_from_exact_totals_when_truncated():
     assert model.counts == (0, 0, 0)
 
 
+def test_scan_promoted_evidence_kind_keeps_incomplete_blocking():
+    # Codex review: pulling an evidence-quality finding out of breaking/
+    # review into incomplete correctly excluded it from the compatibility
+    # totals, but a run whose only gating cause was a promoted
+    # evidence_required_missing (api_break-bucket by default) still exited
+    # non-zero -- the comment must not render the soft "Analysis coverage
+    # reduced" headline next to an actually-red Action check.
+    report = _scan_report(
+        verdict="SEVERITY_ERROR",
+        exit_code=1,
+        diff={
+            "breaking": 0,
+            # Matches the one api_break-bucket finding below -- the raw
+            # scalar counts every api_break-bucket finding regardless of
+            # kind, evidence-shaped or not.
+            "api_break": 1,
+            "risk": 0,
+            "compatible": 0,
+            "severity": {
+                "config": {"potential_breaking": "error"},
+                "categories": {},
+            },
+            "findings": [
+                {
+                    "bucket": "api_break",
+                    "kind": "evidence_required_missing",
+                    "symbol": "evidence:source_abi",
+                    "description": "required evidence layer missing",
+                    "finding_id": "e1",
+                },
+            ],
+        },
+    )
+    model = build_model(report)
+    assert model.counts == (0, 0, 0)
+    assert len(model.incomplete) == 1
+    assert model.incomplete_blocking is True
+    body = render_comment(model, sha="abc1234", detail="standard")
+    assert "Source analysis incomplete" in body
+    assert "Analysis coverage reduced" not in body
+
+
+def test_scan_unpromoted_evidence_kind_is_not_blocking():
+    # The complement: an evidence-quality finding that did NOT gate the run
+    # (no --gate-api-break, no potential_breaking promotion) stays
+    # non-blocking.
+    report = _scan_report(
+        verdict="COMPATIBLE_WITH_RISK",
+        exit_code=0,
+        diff={
+            "breaking": 0,
+            "api_break": 0,
+            "risk": 1,
+            "compatible": 0,
+            "findings": [
+                {
+                    "bucket": "risk",
+                    "kind": "layer_coverage_asymmetric",
+                    "symbol": "",
+                    "description": "baseline has an evidence layer the candidate lacks",
+                    "finding_id": "e1",
+                },
+            ],
+        },
+    )
+    model = build_model(report)
+    assert model.incomplete_blocking is False
+    body = render_comment(model, sha="abc1234", detail="standard")
+    assert "Analysis coverage reduced" in body
+
+
 def test_scan_dwarf_info_missing_routes_to_incomplete_not_safe():
     # Codex review: dwarf_info_missing is COMPATIBLE by default severity, so
     # it lands in diff["quality"] (never diff["findings"]) -- an
