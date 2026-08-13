@@ -71,3 +71,8 @@ it should read in CHANGELOG.md. Delete the other sections.
   interpreter** (`$_PY_BIN`, already used by every other Python invocation
   in `run.sh`) instead of a hard-coded `python3`, which could silently fail
   on a Windows Git Bash runner where only `python`/`python.exe` is on PATH.
+- **The temporary JSON report the Action writes for the sticky comment is
+  now removed by the script's cleanup trap**, alongside the other temp
+  files it already cleaned up — previously leaked on every non-JSON,
+  single-artifact `compare`/`scan` run, accumulating indefinitely on a
+  persistent self-hosted runner.

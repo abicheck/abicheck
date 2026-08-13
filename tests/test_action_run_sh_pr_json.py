@@ -32,11 +32,16 @@ the real file, don't hand-copy it" discipline as
 from __future__ import annotations
 
 import os
+import re
 import subprocess
 import tempfile
 from pathlib import Path
 
 RUN_SH = Path(__file__).resolve().parents[1] / "action" / "run.sh"
+#: The EXIT-trap line that cleans up STDERR_FILE/_STDOUT_JSON_FILE/PR_JSON/
+#: _BASELINE_CLEANUP -- extracted via regex (not hand-copied) so a future
+#: edit to the real trap is exercised here rather than silently drifting.
+_EXIT_TRAP_LINE = re.compile(r"^trap '.*' EXIT$", re.MULTILINE)
 _JSON_REPORT_SRC_START_MARKER = "_json_report_src() {"
 _JSON_REPORT_SRC_END_MARKER = "\n}\n"
 _FUNCS_START_MARKER = "_can_reuse_primary_json() {"
@@ -217,3 +222,43 @@ CMD=(abicheck scan liblib.so --format json)
             "TEST_STDOUT_JSON": str(stdout_json),
         })
         assert pr_json.read_text(encoding="utf-8") == '{"source": "stdout-json"}'
+
+
+class TestExitTrapCleansUpPrJson:
+    def test_pr_json_removed_by_the_exit_trap(self, tmp_path):
+        # Codex review: PR_JSON (created by --secondary-format/--secondary-
+        # output, or _maybe_post_pr_comment's own fallback mktemp) was never
+        # added to the script's cleanup trap -- only STDERR_FILE/
+        # _STDOUT_JSON_FILE/_BASELINE_CLEANUP were. On a persistent
+        # self-hosted runner that leaks one JSON report per scan run,
+        # indefinitely, even on a non-PR event or `pr-comment-on: never`
+        # where the file was created but never posted.
+        text = RUN_SH.read_text(encoding="utf-8")
+        match = _EXIT_TRAP_LINE.search(text)
+        assert match, "EXIT trap line not found in run.sh"
+        trap_line = match.group(0)
+        assert '"${PR_JSON:-}"' in trap_line
+
+        pr_json = tmp_path / "pr.json"
+        pr_json.write_text('{"source": "leftover"}', encoding="utf-8")
+        stderr_file = tmp_path / "stderr.txt"
+        stderr_file.write_text("", encoding="utf-8")
+        script = f"""
+STDERR_FILE="$TEST_STDERR_FILE"
+PR_JSON="$TEST_PR_JSON"
+{trap_line}
+true
+"""
+        result = subprocess.run(
+            [_bash_executable(), "-c", script],
+            capture_output=True,
+            text=True,
+            env=dict(
+                os.environ,
+                TEST_STDERR_FILE=str(stderr_file),
+                TEST_PR_JSON=str(pr_json),
+            ),
+            timeout=30,
+        )
+        assert result.returncode == 0, result.stderr
+        assert not pr_json.exists()

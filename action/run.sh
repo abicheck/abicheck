@@ -1110,7 +1110,16 @@ echo ""
 ABICHECK_EXIT=0
 ABICHECK_OUTPUT=""
 STDERR_FILE=$(mktemp)
-trap 'rm -f "$STDERR_FILE" "${_STDOUT_JSON_FILE:-}"; rm -rf "${_BASELINE_CLEANUP:-}"' EXIT
+#: PR_JSON (Codex review) is created well after this trap is installed --
+#: either by the primary CMD's own --secondary-format/--secondary-output
+#: (compare/scan, non-JSON primary format) or by `_maybe_post_pr_comment`'s
+#: reuse-or-rerun fallback -- but bash re-evaluates a single-quoted trap
+#: string at EXIT time, so referencing it here (like `_STDOUT_JSON_FILE`/
+#: `_BASELINE_CLEANUP` already do) cleans it up whenever it exists, even on
+#: a non-PR-comment run or `pr-comment-on: never` where the temp file was
+#: still created but never posted. Without this, a persistent self-hosted
+#: runner accumulates one JSON report per scan run indefinitely.
+trap 'rm -f "$STDERR_FILE" "${_STDOUT_JSON_FILE:-}" "${PR_JSON:-}"; rm -rf "${_BASELINE_CLEANUP:-}"' EXIT
 
 if [[ -n "${OUTPUT_FILE:-}" ]]; then
   # Output goes to file; capture stderr separately for error detection
