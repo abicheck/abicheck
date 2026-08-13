@@ -134,3 +134,16 @@ it should read in CHANGELOG.md. Delete the other sections.
   to `compare`'s and `release`'s own analysis-incomplete bucket too (shared
   rendering code), though neither mode's own list is currently cap-truncated
   in a way that reaches the empty-but-nonzero case.
+- **A real ABI break no longer mislabels as a policy-only block when a
+  small `--max-findings` cap reserves the shared findings-list budget for a
+  severity-promoted compatible addition/quality finding instead**:
+  `cli_scan_baseline._add_severity_blocking_compatible_findings`'s reserved
+  floor only guarantees a *minimum* itemized representation for a promoted
+  compatible category, not completeness, so e.g. `--max-findings 1` could
+  push a genuine ABI break out of the itemized list entirely even with
+  `diff["breaking"] == 1` and a `BREAKING` verdict. `breaking_categories`/
+  `breaking_severities` — previously derived only from that possibly-capped
+  itemized list — now also draw from the same exact per-category scalars
+  already used elsewhere for the header's exact totals, so the headline
+  ("ABI BREAKING") and gate note no longer contradict the real verdict (and
+  no longer render a false "Compatibility: COMPATIBLE" claim next to it).

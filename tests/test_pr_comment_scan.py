@@ -586,6 +586,53 @@ def test_scan_promoted_evidence_kind_not_blocking_under_demoted_severity_scheme(
     assert model.incomplete_blocking is False
 
 
+def test_scan_breaking_categories_survive_cap_when_addition_reserves_the_slot():
+    # Codex review: with a small enough report cap (e.g. --max-findings 1),
+    # cli_scan_baseline._add_severity_blocking_compatible_findings's
+    # reserved floor can consume the *entire* shared findings-list budget
+    # for a severity-addition-error-promoted compatible finding, pushing a
+    # real ABI break out of the itemized list entirely -- even though
+    # diff["breaking"] == 1 and the run is genuinely BREAKING.
+    # breaking_categories/breaking_severities, derived purely from the
+    # itemized (capped) list, then held only "addition", mislabeling the
+    # headline as a policy-only block ("Public API expansion requires
+    # approval") and even rendering a "Compatibility: COMPATIBLE" claim next
+    # to a real ABI break.
+    report = _scan_report(
+        verdict="BREAKING",
+        exit_code=4,
+        diff={
+            "breaking": 1,
+            "api_break": 0,
+            "risk": 0,
+            "compatible": 1,
+            "severity": {
+                "config": {"addition": "error"},
+                "categories": {"addition": {"count": 1}},
+            },
+            # The report cap reserved the sole itemized slot for the
+            # promoted compatible addition, dropping the real ABI break.
+            "findings": [
+                {
+                    "bucket": "compatible",
+                    "kind": "func_added",
+                    "symbol": "new_api_fn",
+                    "description": "new public function",
+                    "finding_id": "a1",
+                },
+            ],
+        },
+    )
+    model = build_model(report)
+    assert model.counts == (2, 0, 0)
+    assert "abi_breaking" in model.breaking_categories
+    assert "breaking" in model.breaking_severities
+    body = render_comment(model, sha="abc1234", detail="standard")
+    assert "ABI BREAKING" in body
+    assert "Compatibility: COMPATIBLE" not in body
+    assert "Public API expansion requires approval" not in body
+
+
 def test_scan_risk_and_coverage_render_in_scan_note():
     model = build_model(_scan_report())
     body = render_comment(model, sha="abc1234", detail="standard")

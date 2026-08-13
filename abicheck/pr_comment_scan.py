@@ -547,6 +547,71 @@ def _scan_promoted_compatible_counts(
     return promoted_addition, promoted_quality
 
 
+def _scan_exact_breaking_categories(
+    diff: dict[str, object] | None,
+    gate_api_break: bool,
+    levels: dict[str, str],
+    evidence_counts: dict[str, int],
+    promoted_addition_count: int,
+    promoted_quality_count: int,
+    promoted_evidence_addition_count: int,
+    promoted_evidence_quality_count: int,
+) -> tuple[frozenset[str], frozenset[str]]:
+    """``(categories, severities)`` genuinely contributing to the exact
+    Breaking total (mirrors ``_scan_true_counts``'s own promotion logic and
+    the promoted-compatible folds in :func:`from_scan`), independent of
+    ``diff["findings"]``'s report cap (Codex review).
+
+    ``model.breaking_categories``/``model.breaking_severities`` (via the
+    shared ``_breaking_categories``/``_breaking_severities`` helpers) used to
+    be derived purely from the itemized, possibly-capped ``breaking``
+    ``Finding`` list -- correct for ``compare``, whose ``changes`` list is
+    never capped, but not for ``scan``:
+    ``cli_scan_baseline._add_severity_blocking_compatible_findings``'s
+    reserved-floor design only *guarantees a minimum* representation for a
+    promoted compatible category inside the shared, capped ``findings``
+    list, not completeness -- with a small enough cap (e.g. ``--max-findings
+    1``), that reservation can consume the entire budget, pushing a real ABI
+    break out of the itemized list entirely. Deriving the headline purely
+    from what survived the cap then mislabeled a genuine ``BREAKING``
+    verdict as a policy-only block ("Public API expansion requires
+    approval"), even rendering "Compatibility: COMPATIBLE" text next to it.
+
+    The result is meant to be unioned with the itemized-list-derived sets,
+    not replace them -- this covers only what the four exact scalar/
+    per-category-count sources already used elsewhere in :func:`from_scan`
+    can prove; cross-check findings (which carry their own severity but no
+    severity-config category) are exempt from the same cap and stay
+    correctly represented by the itemized list alone.
+    """
+    categories: set[str] = set()
+    severities: set[str] = set()
+    if isinstance(diff, dict):
+        raw_breaking = _as_int(diff.get("breaking")) - evidence_counts.get("breaking", 0)
+        raw_api_break = _as_int(diff.get("api_break")) - evidence_counts.get("api_break", 0)
+        raw_risk = _as_int(diff.get("risk")) - evidence_counts.get("risk", 0)
+        if raw_breaking > 0:
+            categories.add("abi_breaking")
+            severities.add("breaking")
+        if levels.get("potential_breaking") == "error":
+            if raw_api_break > 0:
+                categories.add("potential_breaking")
+                severities.add("api_break")
+            if raw_risk > 0:
+                categories.add("potential_breaking")
+                severities.add("risk")
+        elif gate_api_break and not levels and raw_api_break > 0:
+            categories.add("potential_breaking")
+            severities.add("api_break")
+    if promoted_addition_count - promoted_evidence_addition_count > 0:
+        categories.add("addition")
+        severities.add("compatible")
+    if promoted_quality_count - promoted_evidence_quality_count > 0:
+        categories.add("quality_issues")
+        severities.add("compatible")
+    return frozenset(categories), frozenset(severities)
+
+
 def _scan_crosscheck_findings(
     report: dict[str, object], audit_only: bool
 ) -> tuple[list[Finding], int]:
@@ -926,6 +991,16 @@ def from_scan(
             - evidence_compatible_count,
         )
 
+    _exact_breaking_categories, _exact_breaking_severities = _scan_exact_breaking_categories(
+        diff_dict,
+        gate_api_break,
+        levels,
+        evidence_counts,
+        promoted_addition_count,
+        promoted_quality_count,
+        promoted_evidence_addition_count,
+        promoted_evidence_quality_count,
+    )
     return CommentModel(
         mode="scan",
         subject=str(report.get("subject") or "artifact"),
@@ -948,8 +1023,8 @@ def from_scan(
         incomplete=incomplete,
         incomplete_blocking=incomplete_blocking,
         contract_coverage_blocking=contract_coverage_blocking,
-        breaking_categories=_breaking_categories(breaking),
-        breaking_severities=_breaking_severities(breaking),
+        breaking_categories=_breaking_categories(breaking) | _exact_breaking_categories,
+        breaking_severities=_breaking_severities(breaking) | _exact_breaking_severities,
         suppressed_count=_suppressed_count_scan(diff_dict),
         scan_verdict=str(verdict) if verdict is not None else None,
         scan_risk=risk if isinstance(risk, dict) else None,
