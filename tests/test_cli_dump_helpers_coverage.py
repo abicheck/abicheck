@@ -1041,7 +1041,7 @@ def test_perform_elf_dump_explicit_lang_reaches_header_graph(
 
     monkeypatch.setattr("abicheck.service._attach_header_graph", fake_attach)
 
-    events, _stamp, _write, _expand, _populate = _elf_dump_callables()
+    _events, _stamp, _write, _expand, _populate = _elf_dump_callables()
 
     from abicheck.service_scan import CompileContext
 

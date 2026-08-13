@@ -168,12 +168,17 @@ legibility for an entirely internal refactor, not a break to chase down.
 
 ## Safe redesign
 
-No fix needed — `demo::detail::helper` is a private implementation detail;
-neither its signature change nor `demo::process`'s new call to it is
-visible to any consumer of `libdemo.so`. If this helper needs to become
-part of the public API, promote it deliberately (move its declaration to a
-public header, export it) rather than relying on it staying accidentally
-reachable only through `demo::process`'s own translation unit.
+No fix needed — `demo::detail::helper` is a private implementation detail.
+`demo::process` being inline does mean its body — including the call to
+`helper` — is compiled into each consumer's own translation unit (that
+consumer-compiled dependency is exactly what the RISK finding above
+reports); what stays invisible to every consumer is `helper` itself: it is
+never independently exported or nameable, so no consumer links against it
+as a symbol or could reference it directly even if it wanted to. If this
+helper needs to become part of the public API, promote it deliberately
+(move its declaration to a public header, export it) rather than relying
+on it staying accidentally reachable only through `demo::process`'s own
+translation unit.
 
 **Real-world example:** resignaturing a private helper in place (no header
 reorganization involved) is routine during ordinary internal refactors;
