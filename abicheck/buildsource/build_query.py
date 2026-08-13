@@ -650,6 +650,10 @@ def _run_bazel_cquery_supplement(
     if cmd[0] == "bazel" and which("bazel") is None and which("bazelisk") is not None:
         cmd[0] = "bazelisk"
     if not _query_tool_available(cmd[0], which):
+        merged.diagnostics.append(
+            f"build_query_auto: bazel cquery supplement unavailable: "
+            f"`{cmd[0]}` is not installed"
+        )
         return None
     scan_remaining = deadline.remaining()
     effective_timeout = (
@@ -835,7 +839,12 @@ def run_inferred_build_query(
         # outright rather than handing `run_bounded` a non-positive timeout.
         cquery_remaining = max(0.0, timeout - (time.monotonic() - query_start))
         cquery_stdout: str | None = None
-        if system == "bazel":
+        # A nonzero aquery exit is handled by `_merge_query_result` below as a
+        # `failed` extractor record without ever looking at `cquery_stdout` --
+        # running the supplement in that case would spend up to the whole
+        # remaining budget on a result that's guaranteed to be discarded
+        # (Codex review).
+        if system == "bazel" and proc.returncode == 0:
             if cquery_remaining > 0:
                 cquery_stdout = _run_bazel_cquery_supplement(
                     sources, cquery_remaining, which, merged

@@ -1282,6 +1282,62 @@ def test_run_bazel_cquery_supplement_skipped_when_aquery_exhausts_budget(
     assert any("budget" in d for d in merged.diagnostics)
 
 
+def test_cquery_supplement_records_diagnostic_when_launcher_unavailable(
+    tmp_path: Path, monkeypatch
+):
+    # CodeRabbit review, PR #751: the missing-launcher branch previously
+    # returned silently -- record a diagnostic like every other cquery
+    # supplement failure path does. `which` reports `bazel` available for
+    # the two primary-aquery-side lookups (the launcher-swap check and
+    # _query_tool_available), then unavailable from the third call onward,
+    # simulating the launcher vanishing before the cquery supplement's own
+    # (separate) availability check runs.
+    (tmp_path / "MODULE.bazel").write_text("module(name='x')\n")
+    call_count = {"n": 0}
+
+    def fake_which(_tool):
+        call_count["n"] += 1
+        return "/usr/bin/bazel" if call_count["n"] <= 2 else None
+
+    monkeypatch.setattr(
+        _bq.deadline,
+        "run_bounded",
+        lambda cmd, **kw: _FakeProc(0, stdout='{"actions": []}'),
+    )
+    merged, ext = BuildEvidence(), []
+    out = run_inferred_build_query(tmp_path, merged, ext, which=fake_which)
+    assert out is None
+    assert merged.targets == []
+    assert any("cquery supplement unavailable" in d for d in merged.diagnostics)
+
+
+def test_cquery_supplement_skipped_when_aquery_exits_nonzero(
+    tmp_path: Path, monkeypatch
+):
+    # Codex review, PR #751: a nonzero aquery exit is handled by
+    # _merge_query_result as a `failed` extractor record without ever
+    # looking at cquery_stdout -- running the supplement in that case would
+    # spend up to the whole remaining budget on a result guaranteed to be
+    # discarded.
+    (tmp_path / "MODULE.bazel").write_text("module(name='x')\n")
+    called = {"cquery": False}
+
+    def fake_run(cmd, **kw):
+        if cmd[1] == "cquery":
+            called["cquery"] = True
+            return _FakeProc(0, stdout='{"results": []}')
+        return _FakeProc(1, stderr="analysis error")
+
+    monkeypatch.setattr(_bq.deadline, "run_bounded", fake_run)
+    merged, ext = BuildEvidence(), []
+    out = run_inferred_build_query(
+        tmp_path, merged, ext, which=lambda tool: f"/usr/bin/{tool}"
+    )
+    assert out is None
+    assert called["cquery"] is False
+    assert ext[-1].status == "failed"
+
+
 def test_collect_inline_pack_defers_build_dir_cleanup(tmp_path: Path, monkeypatch):
     # Fast-lane guard for the cleanup-lifetime contract (the real end-to-end check
     # lives in tests/test_scan_levels_integration.py): when a caller passes
