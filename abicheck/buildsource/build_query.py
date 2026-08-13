@@ -347,6 +347,28 @@ def inferred_query_command(
     return None
 
 
+def inferred_bazel_cquery_command() -> list[str]:
+    """The fixed, abicheck-authored ``bazel cquery`` companion to the aquery
+    command above.
+
+    Zero-config ``--sources`` on a Bazel workspace previously only ever ran
+    ``bazel aquery`` — never ``cquery`` — so ``BuildEvidence.targets`` stayed
+    empty no matter what the workspace contained: verified directly against
+    :class:`~.adapters.bazel.BazelAdapter`, whose ``_collect_cquery`` method
+    is the *only* one that ever appends to ``ev.targets`` (``_collect_aquery``
+    only ever populates ``compile_units``/``link_units``). This mirrors that
+    gap the same way an explicit ``--build-info`` bazel-cquery/-aquery pair
+    already can (see ``BazelAdapter.__init__``'s ``cquery=``/``aquery=``
+    parameters), scoped to the identical ``deps(//...)`` universe the aquery
+    command above resolves so the two stay consistent with each other. No
+    ``--include_param_files``: unlike aquery's action argv (which spills
+    long command lines to ``@params`` files that must be expanded to see
+    real source/flag content), cquery's jsonproto already carries each
+    target's fields inline.
+    """
+    return ["bazel", "cquery", "--output=jsonproto", "deps(//...)"]
+
+
 @dataclass(frozen=True)
 class _MakeLauncher:
     """Resolved GNU Make executable plus the user-facing spelling we probed."""
@@ -607,6 +629,65 @@ def _ingest_make_dry_run_transcript(
         merged.diagnostics.append(f"build_query_auto: make ingest failed ({exc})")
 
 
+def _run_bazel_cquery_supplement(
+    sources: Path,
+    timeout: float,
+    which: Callable[[str], str | None],
+    merged: BuildEvidence,
+) -> str | None:
+    """Best-effort ``bazel cquery`` companion to the aquery query above.
+
+    Returns the cquery stdout on success, or ``None`` on any failure (missing
+    tool, timeout, non-zero exit, subprocess error). Deliberately silent on
+    failure rather than appending a ``failed`` :class:`ExtractorRecord`: this
+    is a *supplement* to the aquery-derived compile/link evidence (it only
+    ever adds ``BuildEvidence.targets``), never the primary signal, so its
+    own failure must not demote an otherwise-successful aquery ingest from
+    ``ok``/``partial`` to ``failed``. Still recorded as a diagnostic so the
+    miss is visible without changing the extractor's own status.
+    """
+    cmd = inferred_bazel_cquery_command()
+    if cmd[0] == "bazel" and which("bazel") is None and which("bazelisk") is not None:
+        cmd[0] = "bazelisk"
+    if not _query_tool_available(cmd[0], which):
+        merged.diagnostics.append(
+            f"build_query_auto: bazel cquery supplement unavailable: "
+            f"`{cmd[0]}` is not installed"
+        )
+        return None
+    scan_remaining = deadline.remaining()
+    effective_timeout = (
+        timeout if scan_remaining is None else min(timeout, scan_remaining)
+    )
+    try:
+        with deadline.deadline_scope(effective_timeout):
+            proc = deadline.run_bounded(  # noqa: S603 - fixed abicheck-authored argv, shell=False
+                cmd,
+                cwd=str(sources),
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+                timeout=timeout,
+            )
+    except deadline.DeadlineExceeded as exc:
+        merged.diagnostics.append(
+            f"build_query_auto: bazel cquery supplement aborted: scan deadline exceeded ({exc})"
+        )
+        return None
+    except (OSError, subprocess.SubprocessError) as exc:
+        merged.diagnostics.append(
+            f"build_query_auto: bazel cquery supplement failed to run: {exc}"
+        )
+        return None
+    if proc.returncode != 0:
+        merged.diagnostics.append(
+            f"build_query_auto: bazel cquery supplement exited {proc.returncode}: "
+            f"{(proc.stderr or '').strip()[:200]}"
+        )
+        return None
+    return str(proc.stdout)
+
+
 def _merge_query_result(
     proc: subprocess.CompletedProcess[str],
     system: str,
@@ -614,6 +695,8 @@ def _merge_query_result(
     merged: BuildEvidence,
     extractors: list[ExtractorRecord],
     build_dir: Path | None,
+    *,
+    cquery_stdout: str | None = None,
 ) -> Path | None:
     """Merge a completed inferred query into *merged*, recording failures as diagnostics."""
     if proc.returncode != 0 and system == "make":
@@ -646,6 +729,7 @@ def _merge_query_result(
             merged,
             extractors,
             build_dir=build_dir,
+            cquery_stdout=cquery_stdout,
         )
     except (OSError, ValueError, KeyError, TypeError) as exc:
         extractors.append(
@@ -734,10 +818,51 @@ def run_inferred_build_query(
             return None
         if not _resolve_query_launcher(cmd, system, which, extractors):
             return None
+        query_start = time.monotonic()
         proc = _run_query_process(cmd, system, sources, timeout, merged, extractors)
         if proc is None:
             return None
-        return _merge_query_result(proc, system, sources, merged, extractors, build_dir)
+        # Bazel gets a second, best-effort `cquery` run alongside the primary
+        # `aquery` above: aquery alone never populates `BuildEvidence.targets`
+        # (only BazelAdapter's cquery-processing method does), so the
+        # zero-config `--sources` path previously always reported 0 targets
+        # regardless of workspace contents. Run after the primary query so a
+        # cquery failure never affects whether the primary aquery evidence
+        # (compile/link units) is merged. Shares *timeout*'s budget with the
+        # aquery call just completed rather than getting its own fresh
+        # allotment: without an active scan --budget (deadline.remaining() is
+        # None), each of `_run_query_process`/`_run_bazel_cquery_supplement`
+        # would otherwise independently cap at the full local `timeout`
+        # default, so a slow aquery followed by a hung cquery could still
+        # block for nearly 2x INFERRED_QUERY_TIMEOUT_S (Codex review). A
+        # remaining budget that's already exhausted skips the supplement
+        # outright rather than handing `run_bounded` a non-positive timeout.
+        cquery_remaining = max(0.0, timeout - (time.monotonic() - query_start))
+        cquery_stdout: str | None = None
+        # A nonzero aquery exit is handled by `_merge_query_result` below as a
+        # `failed` extractor record without ever looking at `cquery_stdout` --
+        # running the supplement in that case would spend up to the whole
+        # remaining budget on a result that's guaranteed to be discarded
+        # (Codex review).
+        if system == "bazel" and proc.returncode == 0:
+            if cquery_remaining > 0:
+                cquery_stdout = _run_bazel_cquery_supplement(
+                    sources, cquery_remaining, which, merged
+                )
+            else:
+                merged.diagnostics.append(
+                    "build_query_auto: bazel cquery supplement skipped — "
+                    "aquery already used the full inferred-query timeout budget"
+                )
+        return _merge_query_result(
+            proc,
+            system,
+            sources,
+            merged,
+            extractors,
+            build_dir,
+            cquery_stdout=cquery_stdout,
+        )
     finally:
         _schedule_build_dir_release(build_dir, release, cleanup)
 
@@ -750,6 +875,8 @@ def _ingest_query_output(
     extractors: list[ExtractorRecord],
     build_dir: Path | None = None,
     query_returncode: int = 0,
+    *,
+    cquery_stdout: str | None = None,
 ) -> Path | None:
     """Parse a successful query's output and merge it into *merged* (returns None).
 
@@ -795,18 +922,39 @@ def _ingest_query_output(
         ) as tf:
             tf.write(stdout)
             aq = Path(tf.name)
+        cq: Path | None = None
+        if cquery_stdout:
+            with tempfile.NamedTemporaryFile(
+                "w", suffix=".cquery.json", delete=False
+            ) as tf2:
+                tf2.write(cquery_stdout)
+                cq = Path(tf2.name)
         try:
             # workspace=sources anchors the aquery's relative source/include
-            # paths to the tree so source matching + L4 replay resolve.
-            ev = BazelAdapter(aquery=aq, workspace=sources, allow_query=False).collect()
+            # paths to the tree so source matching + L4 replay resolve. cq is
+            # None when the best-effort cquery supplement didn't produce
+            # output (BazelAdapter treats a None cquery as simply "no
+            # cquery evidence", same as an explicit --build-info aquery-only
+            # pack) — ev.targets then stays empty, same as before this fix.
+            ev = BazelAdapter(
+                aquery=aq, cquery=cq, workspace=sources, allow_query=False
+            ).collect()
         finally:
             aq.unlink(missing_ok=True)
+            if cq is not None:
+                cq.unlink(missing_ok=True)
         merged.merge(ev)
+        detail = f"auto-ran `bazel aquery`; {len(ev.compile_units)} compile unit(s)"
+        detail += (
+            f", `bazel cquery`; {len(ev.targets)} target(s)"
+            if cq is not None
+            else "; bazel cquery supplement unavailable, 0 target(s)"
+        )
         extractors.append(
             ExtractorRecord(
                 name="build_query_auto",
                 status="ok" if ev.compile_units else "partial",
-                detail=f"auto-ran `bazel aquery`; {len(ev.compile_units)} compile unit(s)",
+                detail=detail,
             )
         )
         return None

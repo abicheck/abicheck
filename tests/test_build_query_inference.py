@@ -30,6 +30,7 @@ from abicheck.buildsource.build_evidence import BuildEvidence
 from abicheck.buildsource.build_query import (
     ABICHECK_BUILD_DIR,
     detect_build_system,
+    inferred_bazel_cquery_command,
     inferred_query_command,
     run_inferred_build_query,
 )
@@ -188,6 +189,24 @@ class _FakeProc:
         self.returncode = returncode
         self.stdout = stdout
         self.stderr = stderr
+
+
+def _fake_monotonic_sequence(*values):
+    """A ``time.monotonic`` stand-in yielding *values* in order, then repeating
+    the last one for any further call. Avoids over-fitting a test to the exact
+    number of ``time.monotonic()`` calls an implementation detail (like a
+    nested ``deadline.deadline_scope()``) happens to make."""
+    it = iter(values)
+    last = [values[-1]]
+
+    def _fake() -> float:
+        try:
+            last[0] = next(it)
+        except StopIteration:
+            pass
+        return last[0]
+
+    return _fake
 
 
 def test_run_cmake_ingests_out_of_tree_and_merges(tmp_path: Path, monkeypatch):
@@ -1078,6 +1097,277 @@ def test_run_bazel_empty_action_graph_is_partial(tmp_path: Path, monkeypatch):
     )
     assert ext[-1].name == "build_query_auto"
     assert ext[-1].status == "partial"  # no CppCompile actions
+
+
+def test_bazel_cquery_command_is_fixed_and_scoped(tmp_path: Path):
+    cmd = inferred_bazel_cquery_command()
+    assert cmd[:2] == ["bazel", "cquery"]
+    assert "--output=jsonproto" in cmd
+    assert cmd[-1] == "deps(//...)"
+    # No --include_param_files here: cquery's jsonproto carries target fields
+    # inline, unlike aquery's action argv which spills to @params files.
+    assert "--include_param_files" not in cmd
+
+
+def test_run_bazel_populates_targets_from_cquery_supplement(
+    tmp_path: Path, monkeypatch
+):
+    # Regression: zero-config `--sources` on a Bazel workspace previously only
+    # ever ran `bazel aquery`, which never populates BuildEvidence.targets —
+    # only BazelAdapter's cquery-processing method appends to `ev.targets`.
+    (tmp_path / "MODULE.bazel").write_text("module(name='x')\n")
+    aquery_json = json.dumps(
+        {
+            "actions": [
+                {
+                    "mnemonic": "CppCompile",
+                    "arguments": ["/usr/bin/g++", "-c", "impl.cc", "-o", "impl.o"],
+                    "primaryOutputId": "1",
+                }
+            ],
+            "artifacts": [{"id": "1", "execPath": "impl.o"}],
+        }
+    )
+    cquery_json = json.dumps(
+        {
+            "results": [
+                {
+                    "target": {
+                        "rule": {
+                            "name": "//:math",
+                            "ruleClass": "cc_library",
+                            "attribute": [
+                                {"name": "srcs", "stringListValue": ["impl.cc"]},
+                            ],
+                        }
+                    },
+                    "configurationId": "cfg1",
+                }
+            ]
+        }
+    )
+
+    def fake_run(cmd, **kw):
+        if cmd[1] == "cquery":
+            return _FakeProc(0, stdout=cquery_json)
+        return _FakeProc(0, stdout=aquery_json)
+
+    monkeypatch.setattr(_bq.deadline, "run_bounded", fake_run)
+    merged, ext = BuildEvidence(), []
+    out = run_inferred_build_query(
+        tmp_path, merged, ext, which=lambda tool: f"/usr/bin/{tool}"
+    )
+    assert out is None
+    assert len(merged.targets) == 1
+    assert merged.targets[0].id == "target:////:math"
+    assert ext[-1].status in ("ok", "partial")
+    assert "target(s)" in ext[-1].detail
+
+
+def test_run_bazel_cquery_supplement_failure_does_not_demote_aquery_status(
+    tmp_path: Path, monkeypatch
+):
+    # The cquery supplement is best-effort: its own failure must not turn an
+    # otherwise-successful aquery ingest into a "failed" extractor record —
+    # only a diagnostic, and BuildEvidence.targets simply stays empty.
+    (tmp_path / "MODULE.bazel").write_text("module(name='x')\n")
+    aquery_json = json.dumps(
+        {
+            "actions": [
+                {
+                    "mnemonic": "CppCompile",
+                    "arguments": ["/usr/bin/g++", "-c", "impl.cc", "-o", "impl.o"],
+                    "primaryOutputId": "1",
+                }
+            ],
+            "artifacts": [{"id": "1", "execPath": "impl.o"}],
+        }
+    )
+
+    def fake_run(cmd, **kw):
+        if cmd[1] == "cquery":
+            return _FakeProc(1, stderr="cquery boom")
+        return _FakeProc(0, stdout=aquery_json)
+
+    monkeypatch.setattr(_bq.deadline, "run_bounded", fake_run)
+    merged, ext = BuildEvidence(), []
+    out = run_inferred_build_query(
+        tmp_path, merged, ext, which=lambda tool: f"/usr/bin/{tool}"
+    )
+    assert out is None
+    assert merged.targets == []
+    assert len(merged.compile_units) == 1
+    assert ext[-1].status == "ok"  # aquery ingest still succeeds
+    assert any("cquery supplement" in d for d in merged.diagnostics)
+
+
+def test_run_bazel_cquery_supplement_shares_timeout_budget_with_aquery(
+    tmp_path: Path, monkeypatch
+):
+    # Codex review, PR #751: without an active scan deadline, aquery and the
+    # cquery supplement must not each independently get their own full local
+    # `timeout` -- that could block for nearly 2x the default 600s ceiling.
+    # The supplement's own effective timeout is `timeout - elapsed(aquery)`,
+    # so a slow aquery leaves the supplement a correspondingly smaller share.
+    (tmp_path / "MODULE.bazel").write_text("module(name='x')\n")
+    seen_cquery_timeouts: list[float] = []
+
+    def fake_run(cmd, **kw):
+        if cmd[1] == "cquery":
+            seen_cquery_timeouts.append(kw["timeout"])
+            return _FakeProc(0, stdout='{"results": []}')
+        return _FakeProc(0, stdout='{"actions": []}')
+
+    # 1st call = query_start (0.0); 2nd call = the aquery-side
+    # `deadline.deadline_scope()` entry (irrelevant to the assertion, `run_bounded`
+    # itself is replaced above so it makes no further monotonic() calls of its
+    # own); 3rd call = the elapsed-time read back in run_inferred_build_query,
+    # simulating a 450s-slow aquery against a 600s local `timeout`. Any further
+    # call (e.g. the cquery-side deadline_scope entry) repeats the last value --
+    # by then the cquery timeout has already been computed and passed along.
+    monkeypatch.setattr(_bq.deadline, "run_bounded", fake_run)
+    monkeypatch.setattr(
+        _bq.time, "monotonic", _fake_monotonic_sequence(0.0, 0.0, 450.0)
+    )
+    merged, ext = BuildEvidence(), []
+    out = run_inferred_build_query(
+        tmp_path, merged, ext, which=lambda tool: f"/usr/bin/{tool}"
+    )
+    assert out is None
+    assert len(seen_cquery_timeouts) == 1
+    # Remaining budget is timeout(600) - elapsed(450) = 150, not a fresh 600.
+    assert seen_cquery_timeouts[0] == pytest.approx(150.0)
+
+
+def test_run_bazel_cquery_supplement_skipped_when_aquery_exhausts_budget(
+    tmp_path: Path, monkeypatch
+):
+    # When aquery alone already consumed the whole local timeout budget, the
+    # cquery supplement must be skipped outright (never handed a
+    # non-positive timeout) rather than attempted with 0s left.
+    (tmp_path / "MODULE.bazel").write_text("module(name='x')\n")
+    aquery_json = json.dumps(
+        {
+            "actions": [
+                {
+                    "mnemonic": "CppCompile",
+                    "arguments": ["/usr/bin/g++", "-c", "impl.cc", "-o", "impl.o"],
+                    "primaryOutputId": "1",
+                }
+            ],
+            "artifacts": [{"id": "1", "execPath": "impl.o"}],
+        }
+    )
+    called = {"cquery": False}
+
+    def fake_run(cmd, **kw):
+        if cmd[1] == "cquery":
+            called["cquery"] = True
+        return _FakeProc(0, stdout=aquery_json)
+
+    # Same call-position reasoning as the test above: 1st call = query_start,
+    # 2nd = the aquery-side deadline_scope entry (irrelevant), 3rd = the
+    # elapsed-time read -- here simulating an aquery that alone already used
+    # up (and exceeded) the whole 600s local `timeout`.
+    monkeypatch.setattr(_bq.deadline, "run_bounded", fake_run)
+    monkeypatch.setattr(
+        _bq.time, "monotonic", _fake_monotonic_sequence(0.0, 0.0, 10_000.0)
+    )
+    merged, ext = BuildEvidence(), []
+    out = run_inferred_build_query(
+        tmp_path, merged, ext, which=lambda tool: f"/usr/bin/{tool}"
+    )
+    assert out is None
+    assert called["cquery"] is False
+    assert any("budget" in d for d in merged.diagnostics)
+
+
+def test_cquery_supplement_records_diagnostic_when_launcher_unavailable(
+    tmp_path: Path, monkeypatch
+):
+    # CodeRabbit review, PR #751: the missing-launcher branch previously
+    # returned silently -- record a diagnostic like every other cquery
+    # supplement failure path does. `which` reports `bazel` available for
+    # the two primary-aquery-side lookups (the launcher-swap check and
+    # _query_tool_available), then unavailable from the third call onward,
+    # simulating the launcher vanishing before the cquery supplement's own
+    # (separate) availability check runs.
+    (tmp_path / "MODULE.bazel").write_text("module(name='x')\n")
+    call_count = {"n": 0}
+
+    def fake_which(_tool):
+        call_count["n"] += 1
+        return "/usr/bin/bazel" if call_count["n"] <= 2 else None
+
+    monkeypatch.setattr(
+        _bq.deadline,
+        "run_bounded",
+        lambda cmd, **kw: _FakeProc(0, stdout='{"actions": []}'),
+    )
+    merged, ext = BuildEvidence(), []
+    out = run_inferred_build_query(tmp_path, merged, ext, which=fake_which)
+    assert out is None
+    assert merged.targets == []
+    assert any("cquery supplement unavailable" in d for d in merged.diagnostics)
+
+
+def test_cquery_supplement_skipped_when_aquery_exits_nonzero(
+    tmp_path: Path, monkeypatch
+):
+    # Codex review, PR #751: a nonzero aquery exit is handled by
+    # _merge_query_result as a `failed` extractor record without ever
+    # looking at cquery_stdout -- running the supplement in that case would
+    # spend up to the whole remaining budget on a result guaranteed to be
+    # discarded.
+    (tmp_path / "MODULE.bazel").write_text("module(name='x')\n")
+    called = {"cquery": False}
+
+    def fake_run(cmd, **kw):
+        if cmd[1] == "cquery":
+            called["cquery"] = True
+            return _FakeProc(0, stdout='{"results": []}')
+        return _FakeProc(1, stderr="analysis error")
+
+    monkeypatch.setattr(_bq.deadline, "run_bounded", fake_run)
+    merged, ext = BuildEvidence(), []
+    out = run_inferred_build_query(
+        tmp_path, merged, ext, which=lambda tool: f"/usr/bin/{tool}"
+    )
+    assert out is None
+    assert called["cquery"] is False
+    assert ext[-1].status == "failed"
+
+
+def test_cquery_supplement_deadline_exceeded_degrades_to_diagnostic(
+    tmp_path: Path, monkeypatch
+):
+    from abicheck import deadline
+
+    def _raise(*_a, **_k):
+        raise deadline.DeadlineExceeded(-1.0)
+
+    monkeypatch.setattr(_bq.deadline, "run_bounded", _raise)
+    merged = BuildEvidence()
+    out = _bq._run_bazel_cquery_supplement(
+        tmp_path, 600.0, lambda tool: f"/usr/bin/{tool}", merged
+    )
+    assert out is None
+    assert any("cquery supplement aborted" in d for d in merged.diagnostics)
+
+
+def test_cquery_supplement_subprocess_error_degrades_to_diagnostic(
+    tmp_path: Path, monkeypatch
+):
+    def boom(*_a, **_k):
+        raise OSError("no bazel")
+
+    monkeypatch.setattr(_bq.deadline, "run_bounded", boom)
+    merged = BuildEvidence()
+    out = _bq._run_bazel_cquery_supplement(
+        tmp_path, 600.0, lambda tool: f"/usr/bin/{tool}", merged
+    )
+    assert out is None
+    assert any("cquery supplement failed to run" in d for d in merged.diagnostics)
 
 
 def test_collect_inline_pack_defers_build_dir_cleanup(tmp_path: Path, monkeypatch):
