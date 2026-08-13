@@ -78,25 +78,46 @@ pytestmark = pytest.mark.integration
 _CASTXML_TIMEOUT_SECONDS = 60
 
 
+def _resolve_castxml_cc() -> tuple[str, str] | None:
+    """Pick a real ``(cc_id, cc_bin)`` pair to emulate, mirroring
+    ``dumper_ast_config._resolve_cc``'s own "msvc if cl.exe, else gnu" rule
+    — not just Linux/macOS's g++. The Windows leg of the ``integration-tests``
+    CI matrix installs castxml + MSVC's ``cl.exe`` but no g++/MinGW (see
+    ``.github/workflows/ci.yml``), so hardcoding ``g++`` here would break
+    that required leg. Returns ``None`` when neither compiler is on PATH,
+    so the caller can skip instead of invoking a missing executable.
+    """
+    if shutil.which("g++") is not None:
+        return "gnu", "g++"
+    if shutil.which("cl") is not None:
+        return "msvc", "cl"
+    return None
+
+
 def _run_castxml(tmp_path: Path, source: str) -> tuple[Element, _CastxmlParser]:
     """Run real castxml on *source* and return both the raw XML root and a
     ``_CastxmlParser`` over it, so tests can assert on either layer."""
     if shutil.which("castxml") is None:
         pytest.skip("castxml not installed")
+    cc = _resolve_castxml_cc()
+    if cc is None:
+        pytest.skip("no g++ or cl.exe on PATH to drive castxml's compiler emulation")
+    cc_id, cc_bin = cc
     header = tmp_path / "lib.hpp"
     header.write_text(textwrap.dedent(source))
     xml_path = tmp_path / "lib.xml"
     # Mirrors `_build_castxml_command`'s real compiler-emulation flag
-    # (`--castxml-cc-gnu g++`) rather than castxml's bare default, so this
-    # reproduces the exact XML shape the production dump path sees.
+    # (`--castxml-cc-<id> <bin>`) rather than castxml's bare default, so
+    # this reproduces the exact XML shape the production dump path sees.
+    std_flag = "/std:c++17" if cc_id == "msvc" else "-std=c++17"
     try:
         proc = subprocess.run(
             [
                 "castxml",
                 "--castxml-output=1",
-                "--castxml-cc-gnu",
-                "g++",
-                "-std=c++17",
+                f"--castxml-cc-{cc_id}",
+                cc_bin,
+                std_flag,
                 str(header),
                 "-o",
                 str(xml_path),
