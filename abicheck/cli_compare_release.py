@@ -883,6 +883,41 @@ def _finalize_release_output(
             new_map,
         )
 
+    # ADR-049 Phase 7's orthogonal contract-coverage axis, release/package
+    # parity (CLI-audit P1, Codex review): a single-pair `compare` announces
+    # a stderr notice whenever the rendered format doesn't already carry the
+    # ledger (`contract_coverage_exit.announce_coverage_floor`), so a caller
+    # reading only stderr (or `action/run.sh`'s own `_coverage_gated()`
+    # stderr fallback, reached whenever no JSON report exists -- e.g. a
+    # directory/package operand outside a `pull_request` event, where the
+    # Action's PR-comment JSON rerun never fires) can still tell the axis
+    # fired. The release path folds the same contribution into its exit code
+    # unconditionally (`_exit_compare_release`) but, unlike single-pair
+    # `compare`, never said so anywhere except `--format json`'s own
+    # `contract_coverage_exit_contribution` field -- so a markdown-format
+    # release run gave no visible reason for an exit code coverage alone
+    # raised. Only `--format json` already states it; every other format
+    # gets this one line.
+    if contract_coverage_exit_contribution != 0 and fmt != "json":
+        _affected = sorted(
+            str(lib.get("library"))
+            for lib in library_results
+            if isinstance(lib, dict)
+            and lib.get("contract_coverage_exit_contribution", 0)
+        )
+        if _affected:
+            click.echo(
+                "Contract coverage incomplete for the selected --contract "
+                "domain in: "
+                + ", ".join(_affected)
+                + f". Contributes {contract_coverage_exit_contribution} to the "
+                "release exit code (ADR-049 contract-coverage axis). See "
+                "contract_coverage_exit_contribution in --format json output "
+                "for per-library detail, or accept incomplete assurance with "
+                "contract.unresolved: warn.",
+                err=True,
+            )
+
     _exit_compare_release(
         worst_verdict,
         fail_on_removed,

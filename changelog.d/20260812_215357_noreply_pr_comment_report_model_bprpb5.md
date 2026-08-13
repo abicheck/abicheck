@@ -26,15 +26,39 @@ A new changelog fragment. See changelog.d/README.md for the workflow.
   unconditionally — that's compare's own exit-code-1 `SEVERITY_ERROR` tier,
   which has no `fail-on-*` gate at all.
 - **Release-mode (`compare` on directory/package operands) reports still
-  fold evidence-coverage findings into their per-library counts** rather
-  than a separate incomplete count — documented, not fixed, in this pass:
-  the release JSON's per-library `findings` list is capped (10 total,
+  fold ordinary evidence-coverage findings into their per-library counts**
+  rather than a separate incomplete count — documented, not fixed, in this
+  pass: the release JSON's per-library `findings` list is capped (10 total,
   possibly truncated) and carries no `severity` field, so any bucketing
   built on it would be unavoidably best-effort/sample-based, unlike the
   exhaustive `compare`/`appcompat` path. A correct fix needs an
   authoritative per-category evidence-finding count added to
   `cli_compare_release.py`'s release JSON schema — a separate, scoped
   change, not a `pr_comment.py`-only fix.
+- **Release-mode sticky comment now surfaces the orthogonal contract-
+  coverage ledger** (ADR-049 Phase 7), a materially different, already-
+  available signal from the per-library findings-list gap above: a release
+  whose only problem was incomplete `--contract-evaluation` coverage
+  previously had `incomplete == []` and zero changes, so the default
+  `--on=changes` policy silently skipped (or deleted) the sticky comment
+  even though the release's own exit code had already failed via the
+  ledger's unconditional `max()` fold, and `--on=always` rendered
+  "No ABI changes" beside a release that had already failed. The release
+  JSON's `contract_coverage_exit_contribution` (release-level and
+  per-library) now produces a blocking analysis-incomplete finding naming
+  the affected librar(y/ies), same as the single-pair `compare` report's
+  `contract_coverage_failures` ledger already did.
+- **`compare` on a directory/package operand now announces incomplete
+  contract coverage to stderr for every non-JSON output format**, not just
+  `--format json`'s own `contract_coverage_exit_contribution` field — the
+  release fan-out already folded the contribution into its real exit code
+  unconditionally, but (unlike single-pair `compare`'s `announce_coverage_
+  floor`) never said why anywhere else. This closes a real gap in `action/
+  run.sh`'s own `_coverage_gated()` gate: outside a `pull_request` event (or
+  with PR comments disabled), the Action's secondary-JSON/PR-comment rerun
+  never runs for a release-style operand, so `_coverage_gated()`'s stderr
+  fallback was the only way it could ever detect the axis — and that
+  fallback had nothing to grep for release runs until now.
 - **Sticky PR comment "Needs review" headline names the actual reason**
   instead of a generic `⚠️ Review recommended` whenever every finding in the
   bucket agrees on one severity: `⚠️ Source API changed; binary ABI

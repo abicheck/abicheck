@@ -677,3 +677,104 @@ def test_contract_coverage_failures_malformed_shapes_degrade_safely():
     assert model_bad_item.incomplete == []
 
 
+# ── release-mode contract-coverage ledger (CLI-audit P2, Codex review) ─────
+
+
+def _release_report() -> dict:
+    return {
+        "verdict": "COMPATIBLE",
+        "old_dir": "/pkg/old",
+        "new_dir": "/pkg/new",
+        "libraries": [
+            {
+                "library": "libfoo.so.1",
+                "verdict": "COMPATIBLE",
+                "breaking": 0,
+                "source_breaks": 0,
+                "compatible_additions": 0,
+            },
+            {
+                "library": "libbar.so.2",
+                "verdict": "COMPATIBLE",
+                "breaking": 0,
+                "source_breaks": 0,
+                "compatible_additions": 0,
+            },
+        ],
+        "unmatched_old": [],
+        "unmatched_new": [],
+    }
+
+
+def test_release_contract_coverage_contribution_creates_blocking_incomplete_finding():
+    # Without this, a release whose only problem was incomplete contract
+    # coverage had `incomplete == []` and 0 changes — the default
+    # `--on=changes` policy would then skip (or delete) the sticky comment
+    # even though the release's own exit code had already failed.
+    report = _release_report()
+    report["libraries"][1]["contract_coverage_exit_contribution"] = 1
+    report["contract_coverage_exit_contribution"] = 1
+    model = build_model(report)
+    assert model.mode == "release"
+    assert len(model.incomplete) == 1
+    assert model.incomplete[0].kind == "contract_coverage_failure"
+    assert "libbar.so.2" in model.incomplete[0].detail
+    assert "libfoo.so.1" not in model.incomplete[0].detail
+    assert model.incomplete_blocking is True
+    assert model.total_changes == 1
+    _, title = _header_for(model)
+    assert title == "Source analysis incomplete"
+
+
+def test_release_contract_coverage_zero_contribution_is_not_incomplete():
+    report = _release_report()
+    report["contract_coverage_exit_contribution"] = 0
+    model = build_model(report)
+    assert model.incomplete == []
+    assert model.incomplete_blocking is False
+
+
+def test_release_report_without_contract_evaluation_is_unaffected():
+    report = _release_report()
+    assert "contract_coverage_exit_contribution" not in report
+    model = build_model(report)
+    assert model.incomplete == []
+    assert model.incomplete_blocking is False
+
+
+def test_release_contract_coverage_without_per_library_detail_still_blocks():
+    # A release-level contribution with no per-library key set (shouldn't
+    # normally happen -- the release CLI always stamps both together -- but
+    # must degrade safely rather than silently dropping the signal).
+    report = _release_report()
+    report["contract_coverage_exit_contribution"] = 1
+    model = build_model(report)
+    assert len(model.incomplete) == 1
+    assert "per-library" in model.incomplete[0].detail
+    assert model.incomplete_blocking is True
+
+
+def test_release_contract_coverage_malformed_shape_degrades_safely():
+    report = _release_report()
+    report["contract_coverage_exit_contribution"] = "not an int"
+    model = build_model(report)
+    assert model.incomplete == []
+    assert model.incomplete_blocking is False
+
+
+def test_release_contract_coverage_skips_non_dict_library_entries():
+    # A malformed (non-dict) libraries entry must be skipped when scanning
+    # for which library contributed, not raise.
+    report = _release_report()
+    report["libraries"].append("not a dict")
+    report["libraries"][1]["contract_coverage_exit_contribution"] = 1
+    report["contract_coverage_exit_contribution"] = 1
+    model = build_model(report)
+    assert len(model.incomplete) == 1
+    assert "libbar.so.2" in model.incomplete[0].detail
+
+
+def _header_for(model):
+    from abicheck.pr_comment import _header
+
+    return _header(model)

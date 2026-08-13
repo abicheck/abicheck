@@ -20,6 +20,7 @@ from abicheck.cli_compare_release import (
     _compare_release_parallel,
     _discover_include_roots,
     _extract_if_package,
+    _finalize_release_output,
     _format_release_json,
     _prepare_compare_release_inputs,
 )
@@ -1653,6 +1654,156 @@ def test_release_json_emits_contract_coverage_block_when_active() -> None:
         contract_coverage_exit_contribution=1,
     )
     assert json.loads(out)["contract_coverage_exit_contribution"] == 1
+
+
+def test_release_stderr_announces_contract_coverage_for_non_json_format(capsys) -> None:
+    # CLI-audit P1 (Codex review): action/run.sh's `_coverage_gated()` falls
+    # back to grepping stderr for "Contract coverage incomplete" whenever no
+    # JSON report exists -- exactly the shape of a directory/package
+    # (release) `compare` outside a `pull_request` event, since the release
+    # fan-out rejects `--secondary-format` and the Action's PR-comment JSON
+    # rerun only fires on `pull_request`/`pull_request_target`. A markdown
+    # (or any non-json) release format must announce the same notice
+    # single-pair `compare` already does via `announce_coverage_floor`.
+    libs = [
+        {
+            "library": "liba.so",
+            "verdict": "NO_CHANGE",
+            "contract_coverage_exit_contribution": 0,
+        },
+        {
+            "library": "libb.so",
+            "verdict": "NO_CHANGE",
+            "contract_coverage_exit_contribution": 1,
+        },
+    ]
+    with pytest.raises(SystemExit) as exc_info:
+        _finalize_release_output(
+            "markdown",
+            "NO_CHANGE",
+            Path("/o"),
+            Path("/n"),
+            libs,
+            [],
+            [],
+            {},
+            {},
+            [],
+            [],
+            None,
+            None,
+            None,
+            False,
+            False,
+            contract_coverage_exit_contribution=1,
+        )
+    assert exc_info.value.code == 1
+    err = capsys.readouterr().err
+    assert "Contract coverage incomplete" in err
+    assert "libb.so" in err
+    assert "liba.so" not in err
+
+
+def test_release_stderr_no_notice_when_no_library_carries_per_library_key(capsys) -> None:
+    # A release-level contribution with no per-library entry carrying the
+    # key at all (shouldn't normally happen -- the release CLI always
+    # stamps both together) must not fabricate an "in: " list with nothing
+    # in it; the aggregate `_exit_compare_release` fold still applies
+    # regardless (unaffected by this stderr-only notice).
+    libs = [{"library": "liba.so", "verdict": "NO_CHANGE"}]
+    with pytest.raises(SystemExit) as exc_info:
+        _finalize_release_output(
+            "markdown",
+            "NO_CHANGE",
+            Path("/o"),
+            Path("/n"),
+            libs,
+            [],
+            [],
+            {},
+            {},
+            [],
+            [],
+            None,
+            None,
+            None,
+            False,
+            False,
+            contract_coverage_exit_contribution=1,
+        )
+    assert exc_info.value.code == 1
+    err = capsys.readouterr().err
+    assert "Contract coverage incomplete" not in err
+
+
+def test_release_stderr_omits_contract_coverage_notice_for_json_format(capsys) -> None:
+    # --format json already states contract_coverage_exit_contribution in the
+    # rendered report -- a second stderr copy would be redundant, mirroring
+    # single-pair compare's report_carries_the_ledger check.
+    libs = [
+        {
+            "library": "libb.so",
+            "verdict": "NO_CHANGE",
+            "contract_coverage_exit_contribution": 1,
+        }
+    ]
+    with pytest.raises(SystemExit):
+        _finalize_release_output(
+            "json",
+            "NO_CHANGE",
+            Path("/o"),
+            Path("/n"),
+            libs,
+            [],
+            [],
+            {},
+            {},
+            [],
+            [],
+            None,
+            None,
+            None,
+            False,
+            False,
+            contract_coverage_exit_contribution=1,
+        )
+    err = capsys.readouterr().err
+    assert "Contract coverage incomplete" not in err
+
+
+def test_release_stderr_silent_when_contract_coverage_contribution_zero(capsys) -> None:
+    # A NO_CHANGE verdict with a zero coverage contribution falls all the way
+    # through `_exit_compare_release` without calling `sys.exit` at all (the
+    # process exits 0 naturally) -- so, unlike the other cases here, no
+    # SystemExit is raised.
+    libs = [
+        {
+            "library": "liba.so",
+            "verdict": "NO_CHANGE",
+            "contract_coverage_exit_contribution": 0,
+        }
+    ]
+    _finalize_release_output(
+        "markdown",
+        "NO_CHANGE",
+        Path("/o"),
+        Path("/n"),
+        libs,
+        [],
+        [],
+        {},
+        {},
+        [],
+        [],
+        None,
+        None,
+        None,
+        False,
+        False,
+        contract_coverage_exit_contribution=0,
+    )
+    err = capsys.readouterr().err
+    assert "Contract coverage incomplete" not in err
 
 
 def test_release_json_omits_contract_coverage_block_by_default() -> None:

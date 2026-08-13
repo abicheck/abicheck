@@ -480,6 +480,21 @@ folds into the real exit code regardless of any other axis, including a
 whose contract coverage also failed still renders the blocking headline,
 not "✅ Compatible (scoped)".
 
+A directory/package (release) operand carries the same contract-coverage
+ledger, coarsened to which librar(y/ies) contributed rather than
+per-provider detail (the release JSON has no aggregated
+`contract_coverage_failures` array, only each library's own
+`contract_coverage_exit_contribution` int) — a release whose only problem
+is incomplete contract coverage still renders the blocking "🛑 Source
+analysis incomplete" headline rather than silently posting no comment (or
+"No ABI changes") because every ordinary compatibility bucket was empty.
+For any non-`pull_request` trigger (or `pr-comment: false`), where the
+Action never builds a JSON report for a release-style operand, `abicheck`
+itself also announces this to the job's stderr log so the fact isn't
+silently invisible there either — the ordinary release Markdown/step
+summary doesn't carry it (only `--format json`'s own
+`contract_coverage_exit_contribution` field does).
+
 A breaking/review finding's row also carries, when the report provides them:
 the **demangled C++ signature** as the primary Symbol value (with the raw
 mangled linker symbol kept alongside as evidence, in full detail — see

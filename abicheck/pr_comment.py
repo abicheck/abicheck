@@ -1038,6 +1038,53 @@ def _release_lib_row(
     return name, verdict, nb, nr, ns
 
 
+def _release_contract_coverage_findings(report: dict[str, object]) -> list[Finding]:
+    """Coarse analysis-incomplete finding(s) for a release (directory/
+    package) report, from the release-level ``contract_coverage_exit_
+    contribution`` int (``cli_compare_release_helpers.py``'s max()-aggregated
+    ledger fold across every library) — the release schema's counterpart to
+    :func:`_contract_coverage_findings`'s per-provider ``contract_coverage_
+    failures`` list (Codex review, CLI-audit P2).
+
+    Coarser by necessity: the release JSON has no aggregated ``contract_
+    coverage_failures`` array (only each library's own int contribution), so
+    this can name *which libraries* contributed but not *which provider*
+    fell short within them — a caller wanting that detail still needs
+    ``--format json``'s per-library section. Still real, unsuppressible
+    signal: any nonzero contribution here already raised the release's own
+    exit code via ``max()`` (ADR-049 Phase 7, unconditional), so treating it
+    as blocking is correct even without the provider breakdown.
+
+    Always ``[]`` when the run never passed ``--contract-evaluation`` — the
+    key is entirely absent then, mirroring the single-pair report's own
+    "no key" (not "empty list") convention.
+    """
+    contribution = report.get("contract_coverage_exit_contribution")
+    if not isinstance(contribution, int) or contribution == 0:
+        return []
+    affected: list[str] = []
+    libraries = report.get("libraries")
+    if isinstance(libraries, list):
+        for lib in libraries:
+            if not isinstance(lib, dict):
+                continue
+            lib_contribution = lib.get("contract_coverage_exit_contribution")
+            if isinstance(lib_contribution, int) and lib_contribution:
+                affected.append(str(lib.get("library", "?")))
+    detail = (
+        f"Incomplete for: {', '.join(affected)}"
+        if affected
+        else "See --format json's per-library contract_coverage_exit_contribution for detail"
+    )
+    return [
+        Finding(
+            kind="contract_coverage_failure",
+            symbol="Contract evidence: release contract-coverage ledger",
+            detail=detail,
+        )
+    ]
+
+
 def _from_release(
     report: dict[str, object], gate_api_break: bool = False
 ) -> CommentModel:
@@ -1062,6 +1109,17 @@ def _from_release(
     authoritative per-category evidence-finding count to the release JSON
     schema itself — a `cli_compare_release.py` change, not a rendering-only
     fix confined to this module.
+
+    **The orthogonal contract-coverage ledger (ADR-049 Phase 7) is not the
+    same gap and is closed here** (Codex review, CLI-audit P2): unlike the
+    per-library kind-level findings above, the release JSON *does* already
+    carry an authoritative ``contract_coverage_exit_contribution`` int (both
+    release-wide and per-library) — see :func:`_release_contract_coverage_
+    findings`. Without this, a release whose only problem was incomplete
+    contract coverage had ``incomplete == []`` and zero changes, so the
+    default ``--on=changes`` policy silently skipped (or deleted) the sticky
+    comment, and ``--on=always`` rendered "No ABI changes" beside a release
+    that had already failed its exit code.
     """
     rows: list[tuple[str, str, int, int, int]] = []
     levels = _severity_levels(report)
@@ -1098,6 +1156,7 @@ def _from_release(
     )
     removed = report.get("unmatched_old")
     added = report.get("unmatched_new")
+    incomplete = _release_contract_coverage_findings(report)
     return CommentModel(
         mode="release",
         subject=f"{n_libs} librar{'y' if n_libs == 1 else 'ies'}",
@@ -1105,6 +1164,12 @@ def _from_release(
         new_label=_basename(report.get("new_dir", "new")),
         policy="strict_abi",
         library_rows=rows,
+        incomplete=incomplete,
+        # Any nonzero release-level contribution already raised the real
+        # exit code unconditionally (ADR-049 Phase 7's max() fold) — no
+        # severity/gate-flag combination to check, unlike
+        # `_incomplete_is_blocking`'s per-finding compare-mode logic.
+        incomplete_blocking=bool(incomplete),
         breaking_categories=frozenset(categories),
         breaking_severities=frozenset(severities),
         removed_libraries=[str(x) for x in removed]
