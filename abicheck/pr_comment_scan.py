@@ -514,9 +514,19 @@ def _scan_true_counts(
     if not isinstance(diff, dict):
         return None
     ev = evidence_counts or {}
-    raw_breaking = _as_int(diff.get("breaking")) - ev.get("breaking", 0)
-    raw_api_break = _as_int(diff.get("api_break")) - ev.get("api_break", 0)
-    raw_risk = _as_int(diff.get("risk")) - ev.get("risk", 0)
+    # Floored at 0 (CodeRabbit review): the truncated portion of
+    # `evidence_counts` is attributed to each kind's *default* bucket, not
+    # its real resolved one, when a maintainer's policy `overrides:` moved
+    # that kind to a different bucket (the known gap
+    # `_scan_findings_evidence_kind_counts`'s own docstring documents) --
+    # under that narrow, compounding combination (truncation + an unusual
+    # evidence-kind override) the subtraction can exceed the raw scalar for
+    # that bucket. Un-floored, that rendered a nonsensical "-1 breaking" in
+    # the comment header; `scan_safe_total` below already guards the
+    # identical class of subtraction the same way.
+    raw_breaking = max(0, _as_int(diff.get("breaking")) - ev.get("breaking", 0))
+    raw_api_break = max(0, _as_int(diff.get("api_break")) - ev.get("api_break", 0))
+    raw_risk = max(0, _as_int(diff.get("risk")) - ev.get("risk", 0))
     breaking = raw_breaking
     if levels.get("potential_breaking") == "error":
         breaking += raw_api_break + raw_risk

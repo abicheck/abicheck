@@ -177,3 +177,19 @@ it should read in CHANGELOG.md. Delete the other sections.
   nonzero Breaking total and a "blocked by policy" headline for a run
   whose real exit was clean. Corrected by subtracting the itemized-list-
   derived `NOT_EVALUATED` count back out.
+- **The scan header's exact breaking/review totals no longer go negative**
+  under a narrow, inconsistent-report edge case: the truncated portion of
+  an evidence-quality finding count is attributed to that kind's
+  registry-default bucket, which can (under an unusual maintainer policy
+  override, combined with truncation) exceed the raw scalar it's being
+  subtracted from. Floored at 0, matching the guard `scan_safe_total`
+  already had for the identical class of subtraction.
+- **A crafted scanned-artifact filename containing a lone carriage return
+  (`\r`, not just `\n`) could still inject Markdown into the sticky
+  comment's header**: `_esc` now neutralizes `\r` too — CommonMark treats a
+  bare carriage return as a line ending exactly like `\n`, which the
+  original backtick/`\n` injection fix didn't cover.
+- **`docs/reference/github-action-inputs.md`'s generated `verdict` output
+  description now wraps `--severity-*`/`--exit-code-scheme` in code spans**
+  (fixed at the `action.yml` source and regenerated), clearing a
+  markdownlint MD037 warning.

@@ -548,10 +548,19 @@ def _esc(value: object) -> str:
     # Sanitise for a single markdown table cell: escape pipes, neutralise
     # backticks (which would break the surrounding code span) and flatten
     # newlines. C/C++ symbols never contain backticks, so this is defensive.
+    #
+    # A lone `\r` is flattened too (Codex review, follow-up to the
+    # backtick/`\n` injection fix): CommonMark treats a bare carriage return
+    # as a line ending exactly like `\n`, so an untrusted value containing
+    # one (e.g. the Action's `--subject`, a scanned-artifact basename) could
+    # still terminate the header's code-span line and inject Markdown even
+    # after `\n` alone was neutralized.
     return (
         str(value)
         .replace("|", "\\|")
         .replace("`", "ˋ")
+        .replace("\r\n", " ")
+        .replace("\r", " ")
         .replace("\n", " ")
         .strip()
     )

@@ -647,8 +647,8 @@ outputs:
       fail-on-removed-library set), or ERROR.
       For dump: COMPATIBLE or ERROR.
       For scan: COMPATIBLE, SEVERITY_ERROR (with --against and a
-      --severity-*/--exit-code-scheme setting, when an error-level category
-      has findings), COVERAGE_INCOMPLETE, API_BREAK, BREAKING,
+      `--severity-*` or `--exit-code-scheme` setting, when an error-level
+      category has findings), COVERAGE_INCOMPLETE, API_BREAK, BREAKING,
       NOT_COMPARABLE (with --against, when the candidate and baseline were
       not extracted under a comparable profile/scope contract -- ADR-050
       D2 -- so no comparison could run at all; this verdict fails the step

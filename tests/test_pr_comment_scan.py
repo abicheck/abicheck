@@ -749,6 +749,50 @@ def test_scan_subject_with_backtick_does_not_break_out_of_code_span():
     assert "## Injected heading" in header_line  # present, but inert inside the span
 
 
+def test_scan_subject_with_carriage_return_does_not_break_out_of_code_span():
+    # Codex review, follow-up: `_esc` neutralized `\n` but not a lone `\r` --
+    # CommonMark treats a bare carriage return as a line ending too, so it
+    # could still terminate the header's code-span line even after the
+    # backtick/`\n` fix above.
+    model = build_model(_scan_report(subject="evil`\r## Injected heading\r`lib.so"))
+    body = render_comment(model, sha="abc1234", detail="standard")
+    assert not any(
+        line.strip() == "## Injected heading" for line in body.splitlines()
+    )
+    header_line = next(line for line in body.splitlines() if line.startswith("**Head"))
+    assert "\r" not in header_line
+    assert "## Injected heading" in header_line  # present, but inert inside the span
+
+
+def test_scan_true_counts_floors_at_zero_when_evidence_subtraction_underflows():
+    # CodeRabbit review: the truncated portion of evidence_counts is
+    # attributed to each kind's registry-*default* bucket, not necessarily
+    # its real resolved one (a documented known gap under a policy
+    # override) -- so the raw-scalar-minus-evidence-count subtraction can,
+    # in an inconsistent/edge-case report, exceed the raw scalar for that
+    # bucket. Unfloored, that rendered a nonsensical "-2 needs review" in
+    # the comment header.
+    report = _scan_report(
+        verdict="COMPATIBLE",
+        exit_code=0,
+        diff={
+            "breaking": 0,
+            "api_break": 0,
+            "risk": 0,
+            "compatible": 0,
+            "findings_truncated": True,
+            # evidence_required_missing's registry-default bucket is
+            # "api_break" -- this ledger entry alone (with a zero raw
+            # api_break scalar) would underflow to -2 without the floor.
+            "findings_truncated_kinds": {"evidence_required_missing": 2},
+        },
+    )
+    model = build_model(report)
+    assert model.counts == (0, 0, 0)
+    body = render_comment(model, sha="abc1234", detail="standard")
+    assert "-2" not in body
+
+
 def test_scan_severity_gate_reads_from_diff_not_top_level():
     # Codex review: `_run_baseline_compare` nests the resolved severity
     # gate inside `report["diff"]["severity"]`, not the top level.
