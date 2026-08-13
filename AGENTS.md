@@ -533,6 +533,27 @@ cover the surrounding first-party trees this file doesn't detail.
   touches `abicheck/**/*.py` without a fragment, and every PR editing that
   shared section directly was the reason it kept conflicting.
 
+## Decision-making principles
+
+- **Time estimates are not a factor in technical decisions.** Don't scope,
+  simplify, defer, or pick an implementation approach because it's
+  "faster" or "quicker to ship" — there is no deadline or velocity
+  criterion here. Judge an approach purely on correctness, generality, and
+  fit with the codebase's existing architecture. If a thorough fix is the
+  right one, do the thorough fix; don't downgrade to a smaller patch on
+  time-cost grounds.
+- **Fix the cause, not the instance.** When you find a bug or a reported
+  problem, don't stop at a patch for the one call site or input that
+  triggered it. Trace it to its root cause, and implement a generalized
+  fix — one that closes the whole class of failure, not just the observed
+  case — plus generalized tests that exercise the underlying contract
+  (property-style tests over the fixed input, per this file's own
+  "Primitive-level property tests" guidance above), not only a regression
+  test pinned to the original repro. If a genuinely general fix isn't
+  feasible in one pass, say so explicitly and record the gap (see "Known
+  gaps" below) rather than quietly shipping a narrow patch as if it were
+  the complete fix.
+
 ## Known mypy issues
 
 CI runs `mypy abicheck/` as a required gate. The baseline is currently **0 errors** — the previously-documented 26 errors were all `unused-ignore` / `no-any-return` / `misc` warnings on third-party calls (pyelftools, click). They are suppressed in `pyproject.toml` via per-module `disable_error_code` overrides, which keeps the file portable across mypy releases without churning the underlying `# type: ignore` comments.
@@ -2497,3 +2518,5 @@ Once a root command genuinely clears the bar above, pick the right home:
 - Don't add platform-specific code without considering cross-platform compatibility
 - Don't extend `IMPORT_CYCLE_ALLOWLIST` in `scripts/check_ai_readiness.py` to make a new cycle pass, and never as a routine step to unblock CI. The existing large CLI/service entry documents an accepted, by-design registration pattern (Click sibling commands registering back on `cli.main`) — a *new* member outside that documented pattern is very likely a real dependency-direction problem, not another instance of it. Prefer a function-local import or moving the shared logic to a leaf module both sides can depend on. If the coupling really is intentional, extending the allowlist needs an ADR (or explicit maintainer sign-off) recorded in the PR, the same bar as any other architectural exception — not a comment justifying it inline and moving on.
 - Don't hand-duplicate a command, invariant, or count from this file into an adapter (`CLAUDE.md`, `.github/copilot-instructions.md`, `.cursor/rules/`) — point the adapter back here instead (see the table at the top of this file).
+- Don't let time/effort estimates ("this would take too long", "quicker to just patch") drive a technical implementation decision — see "Decision-making principles" above.
+- Don't ship a narrow, site-specific patch for a bug without first tracing it to its root cause and considering a generalized fix and generalized test — see "Decision-making principles" above.
