@@ -529,8 +529,36 @@ def _scan_true_counts(
     return breaking, review
 
 
+def _scan_not_evaluated_count(raw: object) -> int:
+    """Count of itemized findings in *raw* (``additions_raw``/``quality_raw``)
+    whose ``--contract-evaluation`` status is ``NOT_EVALUATED``
+    (``cli_scan_baseline._add_contract_fields``: absent entirely when
+    contract evaluation didn't run, so this is always ``0`` for an ordinary
+    scan).
+
+    Itemized-only, like every other cap-limited count in this module: a
+    ``NOT_EVALUATED`` occurrence cut by the report cap before it could be
+    itemized isn't counted here either way, which is the safe direction for
+    the one caller that matters -- :func:`_scan_promoted_compatible_counts`
+    subtracts this from a display count that *always* includes every
+    NOT_EVALUATED occurrence regardless of truncation, so under-subtracting
+    can only ever under-correct back toward the old (already-shipped)
+    behavior, never invent a new overcount.
+    """
+    if not isinstance(raw, list):
+        return 0
+    return sum(
+        1
+        for c in raw
+        if isinstance(c, dict) and c.get("compatibility_evaluation_status") == "NOT_EVALUATED"
+    )
+
+
 def _scan_promoted_compatible_counts(
-    diff: dict[str, object] | None, levels: dict[str, str]
+    diff: dict[str, object] | None,
+    levels: dict[str, str],
+    additions_raw: object = None,
+    quality_raw: object = None,
 ) -> tuple[int, int]:
     """Exact ``(promoted_addition_count, promoted_quality_count)`` for a
     severity-config-promoted ``compatible`` category, read from
@@ -551,6 +579,20 @@ def _scan_promoted_compatible_counts(
     computed from the full, unfiltered change set
     (``severity.categorize_changes``), so it is exact regardless of any
     report-level truncation.
+
+    Codex review, follow-up: that ``count`` is a *display* count --
+    ``categorize_changes`` classifies purely by kind and does not filter out
+    a ``--contract-evaluation`` finding ADR-049 D1 left ``NOT_EVALUATED``
+    (proven outside the declared contract / unresolved for want of
+    evidence). ``compute_gate_decision`` (what the real exit code and
+    ``blocking_categories`` come from) correctly excludes those via
+    ``gate_eligible_changes`` -- so a category whose only findings are all
+    ``NOT_EVALUATED`` reads as ``count > 0`` here even though it never
+    actually gated anything, and folding that raw display count into
+    ``from_scan``'s exact Breaking total invented a nonzero total (and a
+    "blocked by policy" headline) for a run whose real exit was clean.
+    :func:`_scan_not_evaluated_count` subtracts the itemized-list-derived
+    NOT_EVALUATED count back out.
     """
     if not isinstance(diff, dict):
         return 0, 0
@@ -564,9 +606,15 @@ def _scan_promoted_compatible_counts(
         count = entry.get("count") if isinstance(entry, dict) else None
         return count if isinstance(count, int) else 0
 
-    promoted_addition = _category_count("addition") if levels.get("addition") == "error" else 0
+    promoted_addition = (
+        max(0, _category_count("addition") - _scan_not_evaluated_count(additions_raw))
+        if levels.get("addition") == "error"
+        else 0
+    )
     promoted_quality = (
-        _category_count("quality_issues") if levels.get("quality_issues") == "error" else 0
+        max(0, _category_count("quality_issues") - _scan_not_evaluated_count(quality_raw))
+        if levels.get("quality_issues") == "error"
+        else 0
     )
     return promoted_addition, promoted_quality
 
@@ -819,7 +867,15 @@ def from_scan(
     # the ordinary baseline-comparison path treats an api_break severity
     # finding under the same flag.
     crosscheck_findings, crosscheck_total = _scan_crosscheck_findings(report, audit_only)
-    if gate_api_break:
+    # NOT_COMPARABLE unconditionally governs this run's exit (scope/profile
+    # mismatch, exit 6) -- `scan_engine.run_scan_core` deliberately skips
+    # cross-check severity folding entirely when no baseline comparison ran
+    # (Codex review), so a promoted cross-check here never actually gated
+    # anything. Keep it review-only regardless of `gate_api_break`, rather
+    # than letting a promotion move it into Breaking next to the real,
+    # unconditional NOT_COMPARABLE block below -- which would headline
+    # "Source API break blocks this PR" for what is really a scope mismatch.
+    if gate_api_break and not_comparable_reason is None:
         breaking = breaking + crosscheck_findings
     else:
         review = review + crosscheck_findings
@@ -899,7 +955,7 @@ def from_scan(
         incomplete_blocking = True
     true_counts = _scan_true_counts(diff_dict, gate_api_break, levels, evidence_counts)
     promoted_addition_count, promoted_quality_count = _scan_promoted_compatible_counts(
-        diff_dict, levels
+        diff_dict, levels, additions_raw, quality_raw
     )
     if true_counts is not None:
         # `_scan_true_counts` only folds the two promotions expressible from
@@ -925,8 +981,11 @@ def from_scan(
         # `crosscheck_total` is the exact summed occurrence count across
         # every gating kind, never `len(crosscheck_findings)` (one
         # aggregate row per kind, which undercounts a kind with more than
-        # one real occurrence -- Codex review).
-        if gate_api_break:
+        # one real occurrence -- Codex review). Same NOT_COMPARABLE
+        # exclusion as the itemized-list fold above -- a promoted
+        # cross-check's severity was never actually folded into this run's
+        # real exit code (Codex review, follow-up).
+        if gate_api_break and not_comparable_reason is None:
             true_counts = (true_counts[0] + crosscheck_total, true_counts[1])
         else:
             true_counts = (true_counts[0], true_counts[1] + crosscheck_total)

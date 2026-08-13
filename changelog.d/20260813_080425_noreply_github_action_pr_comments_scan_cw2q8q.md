@@ -159,3 +159,21 @@ it should read in CHANGELOG.md. Delete the other sections.
   as blocking even with `fail-on-breaking: false`. The `potential_breaking`
   branch already had this right; the `abi_breaking` branch previously
   didn't check the resolved level at all.
+- **A promoted `--crosscheck` finding no longer renders as Breaking on a
+  `NOT_COMPARABLE` run**: `scan_engine.run_scan_core` deliberately skips
+  cross-check severity folding entirely when a scope/profile mismatch means
+  no baseline comparison ran (exit unconditionally `6`), so a promoted
+  cross-check never actually gated that run's exit code —
+  `fail-on-api-break` no longer moves it into Breaking next to the real,
+  unconditional `NOT_COMPARABLE` block, which previously produced a "Source
+  API break blocks this PR" headline for what is really a scope mismatch.
+- **A `--contract-evaluation` addition/quality finding left `NOT_EVALUATED`
+  (proven outside the declared contract, or unresolved for want of
+  evidence) is no longer counted as promoted by a `severity-addition:
+  error`/`severity-quality-issues: error` config**: the severity JSON's
+  per-category `count` is a *display* count (classified purely by kind),
+  while the real gate (`compute_gate_decision`) correctly excludes
+  `NOT_EVALUATED` findings — reading the display count fabricated a
+  nonzero Breaking total and a "blocked by policy" headline for a run
+  whose real exit was clean. Corrected by subtracting the itemized-list-
+  derived `NOT_EVALUATED` count back out.

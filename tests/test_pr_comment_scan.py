@@ -1509,3 +1509,75 @@ def test_scan_against_baseline_gate_api_break_moves_promoted_crosscheck_to_break
     )
     model = build_model(report, gate_api_break=True)
     assert model.counts == (1, 0, 0)
+
+
+def test_scan_not_evaluated_addition_not_counted_as_promoted():
+    # Codex review: severity.categorize_changes's per-category `count` is a
+    # *display* count -- it classifies purely by kind and does not exclude
+    # a --contract-evaluation finding ADR-049 D1 left NOT_EVALUATED (proven
+    # outside the declared contract). compute_gate_decision (the real exit
+    # code) correctly excludes it via gate_eligible_changes, so an
+    # `addition: error`-configured category whose only finding is
+    # NOT_EVALUATED never actually gates -- but reading the raw display
+    # count fabricated a nonzero Breaking total and a "blocked by policy"
+    # headline for a run whose real exit was clean.
+    report = _scan_report(
+        verdict="COMPATIBLE",
+        exit_code=0,
+        diff={
+            "breaking": 0,
+            "api_break": 0,
+            "risk": 0,
+            "compatible": 1,
+            "severity": {
+                "config": {"addition": "error"},
+                "categories": {"addition": {"count": 1}},
+            },
+            "additions": [
+                {
+                    "bucket": "compatible",
+                    "kind": "func_added",
+                    "symbol": "new_api_fn",
+                    "description": "new public function, out of contract",
+                    "finding_id": "a1",
+                    "compatibility_evaluation_status": "NOT_EVALUATED",
+                    "compatibility_decision": None,
+                },
+            ],
+        },
+    )
+    model = build_model(report)
+    assert model.counts == (0, 0, 1)
+    body = render_comment(model, sha="abc1234", detail="standard")
+    assert "Public API expansion requires approval" not in body
+    assert "Gate: BLOCKED" not in body
+
+
+def test_scan_not_comparable_does_not_promote_crosscheck_to_breaking():
+    # Codex review: scan_engine.run_scan_core deliberately skips cross-check
+    # severity folding when the run is NOT_COMPARABLE (no baseline
+    # comparison ran, exit unconditionally 6) -- a promoted cross-check
+    # never actually gated this run's real exit code, so gate_api_break must
+    # not move it into Breaking next to the real, unconditional
+    # NOT_COMPARABLE block. That would headline "Source API break blocks
+    # this PR" for what is really a scope/profile mismatch.
+    report = _scan_report(
+        verdict="NOT_COMPARABLE",
+        exit_code=6,
+        diff={"reason": "profile/scope mismatch"},
+        crosscheck={
+            "version": 1,
+            "findings": 1,
+            "counts_by_check": {"identity_collision_detected": 1},
+            "coverage": [],
+            "providers": {},
+        },
+        crosscheck_severities={"identity_collision_detected": "error"},
+    )
+    model = build_model(report, gate_api_break=True)
+    assert model.counts == (0, 1, 0)
+    assert len(model.breaking) == 0
+    assert model.incomplete_blocking is True  # from the NOT_COMPARABLE block itself
+    body = render_comment(model, sha="abc1234", detail="standard")
+    assert "Source API break blocks this PR" not in body
+    assert "Source analysis incomplete" in body
