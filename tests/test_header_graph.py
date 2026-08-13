@@ -225,6 +225,20 @@ def test_fact_provenance_with_no_matching_key_leaves_attr_absent() -> None:
     assert "visibility_provenance" not in node.attrs
 
 
+def test_fact_provenance_with_no_mangled_name_leaves_attr_absent() -> None:
+    """A declaration with no recorded mangled symbol still seeds a node --
+    _decl_identity falls back to the bare name -- but there's no mangled key
+    to look up in fact_provenance, so the lookup must be skipped entirely
+    rather than raising or matching on an empty string."""
+    fn = Function(name="f", mangled="", return_type="void")
+    graph = build_header_only_graph(
+        _snapshot(functions=[fn]),
+        fact_provenance={func_fact_key("", "visibility"): "clang"},
+    )
+    node = next(n for n in graph.nodes if n.id == "decl://f")
+    assert "visibility_provenance" not in node.attrs
+
+
 # ── type-node + edge folding (ast_root supplied) ────────────────────────────
 
 
