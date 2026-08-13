@@ -157,6 +157,7 @@ def test_isolated_module_runner_enables_user_site_for_system_site_venv(
 
 def test_python_tool_steps_use_isolated_module_lookup() -> None:
     """Tool steps must not let repository-root modules shadow installed tools."""
+    runner = str(ROOT / "scripts" / "run_isolated_module.py")
     for step_name in {
         "lint",
         "fmt-check",
@@ -170,7 +171,44 @@ def test_python_tool_steps_use_isolated_module_lookup() -> None:
         "slow",
     }:
         cmd = _step(step_name).cmd
-        assert cmd[:3] == (sys.executable, "-I", "-m"), step_name
+        assert cmd[:3] == (sys.executable, "-I", runner), step_name
+
+
+def test_isolated_module_runner_preserves_user_site_without_root_shadowing(
+    tmp_path: Path,
+) -> None:
+    """A user-site tool is usable, but a same-named cwd module cannot win."""
+    import os
+    import subprocess
+
+    user_base = tmp_path / "user-base"
+    user_site = (
+        user_base
+        / "lib"
+        / f"python{sys.version_info.major}.{sys.version_info.minor}"
+        / "site-packages"
+    )
+    user_site.mkdir(parents=True)
+    (user_site / "verify_runner_probe.py").write_text(
+        "print('trusted-user-site')\n", encoding="utf-8"
+    )
+    checkout = tmp_path / "checkout"
+    checkout.mkdir()
+    (checkout / "verify_runner_probe.py").write_text(
+        "print('untrusted-checkout')\n", encoding="utf-8"
+    )
+
+    cmd = verify._py("verify_runner_probe")
+    proc = subprocess.run(
+        cmd,
+        cwd=checkout,
+        env={**os.environ, "PYTHONUSERBASE": str(user_base)},
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert proc.returncode == 0, proc.stderr
+    assert proc.stdout.strip() == "trusted-user-site"
 
 
 def test_pr_profile_is_superset_of_fast_checks() -> None:
