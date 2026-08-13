@@ -580,7 +580,10 @@ def test_scan_audit_only_surfaces_api_break_crosscheck_findings():
     )
     model = build_model(report)
     assert model.scan_audit_only is True
-    assert model.counts == (0, 1, 0)
+    # Codex review, follow-up: the exact review total is the summed
+    # cross-check occurrence count (3), not len() of the one aggregate row
+    # this single kind renders as.
+    assert model.counts == (0, 3, 0)
     assert model.review[0].kind == "header_build_context_mismatch"
     assert "3 occurrence" in model.review[0].detail
     assert should_post(model, "changes")
@@ -624,7 +627,7 @@ def test_scan_audit_only_promoted_crosscheck_surfaced():
         crosscheck_severities={"identity_collision_detected": "error"},
     )
     model = build_model(report)
-    assert model.counts == (0, 1, 0)
+    assert model.counts == (0, 2, 0)
     assert "promoted to error" in model.review[0].detail
 
 
@@ -651,18 +654,58 @@ def test_scan_audit_only_advisory_crosscheck_not_surfaced():
     assert "Scan audit — no baseline to compare" in body
 
 
-def test_scan_against_baseline_surfaces_api_break_crosscheck_findings():
+def test_scan_against_baseline_surfaces_promoted_crosscheck_findings():
     # Codex review: cross-check is a separate evidence axis from the
     # baseline diff (ADR-035 D4) -- a `scan --against` run with a
-    # completely clean diff can still be raised to API_BREAK purely by an
-    # API_BREAK_KINDS cross-check finding (or a `--crosscheck KEY=error`
-    # promotion). Restricting the crosscheck-findings helper to
-    # `audit_only` silently dropped that signal for every baseline
-    # comparison, rendering a green "no ABI changes" comment next to a red
-    # `fail-on-api-break` check.
+    # completely clean diff can still be raised to API_BREAK purely by a
+    # `--crosscheck KEY=error` promotion (`scan_engine.
+    # _crosscheck_severity_exit`, folded into `_run_baseline_compare`
+    # unconditionally, unlike the audit-only path's blanket
+    # `API_BREAK_KINDS` check below). Restricting the crosscheck-findings
+    # helper to `audit_only` silently dropped that signal for every
+    # baseline comparison, rendering a green "no ABI changes" comment next
+    # to a red `fail-on-api-break` check.
     report = _scan_report(
         verdict="API_BREAK",
         exit_code=2,
+        diff={
+            "breaking": 0,
+            "api_break": 0,
+            "risk": 0,
+            "compatible": 0,
+        },
+        crosscheck={
+            "version": 1,
+            "findings": 3,
+            "counts_by_check": {"identity_collision_detected": 3},
+            "coverage": [],
+            "providers": {},
+        },
+        crosscheck_severities={"identity_collision_detected": "error"},
+    )
+    model = build_model(report)
+    assert model.scan_audit_only is False
+    # Exact review total is the summed occurrence count (3), not the
+    # single aggregate row this one kind renders as.
+    assert model.counts == (0, 3, 0)
+    assert model.review[0].kind == "identity_collision_detected"
+    assert "3 occurrence" in model.review[0].detail
+    body = render_comment(model, sha="abc1234", detail="standard")
+    assert "Scan audit" not in body
+
+
+def test_scan_against_baseline_unpromoted_api_break_crosscheck_stays_advisory():
+    # Codex review, follow-up: unlike the audit-only path
+    # (`scan_engine._audit_exit_code`, which gates on ANY `API_BREAK_KINDS`
+    # finding), `_run_baseline_compare` only ever folds
+    # `_crosscheck_severity_exit` -- an *explicitly promoted* check -- into
+    # a baseline comparison's exit code. An un-promoted `API_BREAK_KINDS`
+    # cross-check must stay advisory-only here, not render as a review (or,
+    # under --gate-api-break, breaking) finding next to an otherwise
+    # COMPATIBLE baseline diff.
+    report = _scan_report(
+        verdict="COMPATIBLE",
+        exit_code=0,
         diff={
             "breaking": 0,
             "api_break": 0,
@@ -679,15 +722,12 @@ def test_scan_against_baseline_surfaces_api_break_crosscheck_findings():
         crosscheck_severities={},
     )
     model = build_model(report)
-    assert model.scan_audit_only is False
-    assert model.counts == (0, 1, 0)
-    assert model.review[0].kind == "header_build_context_mismatch"
-    assert "3 occurrence" in model.review[0].detail
-    body = render_comment(model, sha="abc1234", detail="standard")
-    assert "Scan audit" not in body
+    assert model.counts == (0, 0, 0)
+    model_gated = build_model(report, gate_api_break=True)
+    assert model_gated.counts == (0, 0, 0)
 
 
-def test_scan_against_baseline_gate_api_break_moves_crosscheck_to_breaking():
+def test_scan_against_baseline_gate_api_break_moves_promoted_crosscheck_to_breaking():
     report = _scan_report(
         verdict="API_BREAK",
         exit_code=2,
@@ -700,11 +740,11 @@ def test_scan_against_baseline_gate_api_break_moves_crosscheck_to_breaking():
         crosscheck={
             "version": 1,
             "findings": 1,
-            "counts_by_check": {"header_build_context_mismatch": 1},
+            "counts_by_check": {"identity_collision_detected": 1},
             "coverage": [],
             "providers": {},
         },
-        crosscheck_severities={},
+        crosscheck_severities={"identity_collision_detected": "error"},
     )
     model = build_model(report, gate_api_break=True)
     assert model.counts == (1, 0, 0)

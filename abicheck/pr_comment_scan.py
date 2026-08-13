@@ -303,15 +303,27 @@ def _scan_promoted_compatible_counts(
     return promoted_addition, promoted_quality
 
 
-def _scan_crosscheck_findings(report: dict[str, object]) -> list[Finding]:
+def _scan_crosscheck_findings(
+    report: dict[str, object], audit_only: bool
+) -> tuple[list[Finding], int]:
     """Synthetic, count-only ``Finding``s for a scan's cross-check results
-    that actually gated the run -- an ``API_BREAK_KINDS`` finding, or any
-    check the maintainer promoted with ``--crosscheck KEY=error`` (see
-    ``scan_engine._audit_exit_code``/``_crosscheck_severity_exit``). Applies
-    to both an audit-only run (no ``--against``) and a baseline-comparison
-    run (``scan --against``) alike -- cross-check is a separate evidence
-    axis from the baseline diff (ADR-035 D4), so it can gate a run whose
-    ``diff`` itself is entirely clean.
+    that actually gated the run, plus the exact total occurrence count
+    across the included kinds (the second element -- immune to a single
+    kind's multiple occurrences collapsing to "one" row, see below).
+
+    Applies to both an audit-only run (no ``--against``) and a
+    baseline-comparison run (``scan --against``) alike -- cross-check is a
+    separate evidence axis from the baseline diff (ADR-035 D4), so it can
+    gate a run whose ``diff`` itself is entirely clean. Which kinds gate
+    differs by mode, though (Codex review, fresh evidence):
+    ``scan_engine._audit_exit_code`` raises an audit-only run's exit code
+    on ANY ``API_BREAK_KINDS`` finding, promoted or not, but
+    ``_run_baseline_compare`` only ever folds ``_crosscheck_severity_exit``
+    -- an *explicitly promoted* (``--crosscheck KEY=error``) cross-check --
+    into a baseline comparison's exit code; an un-promoted
+    ``API_BREAK_KINDS`` cross-check stays advisory-only there and must not
+    render as a review/breaking finding next to an otherwise-COMPATIBLE
+    baseline diff.
 
     Codex review: an audit-only scan's ``diff`` is always ``None`` (there is
     no baseline to compare), so before this helper existed
@@ -332,25 +344,35 @@ def _scan_crosscheck_findings(report: dict[str, object]) -> list[Finding]:
     renders as one aggregate row rather than one row per instance, coarser
     than compare's own per-symbol findings. Still the difference between an
     accurate "N cross-check finding(s)" review section and total silence
-    next to a red check.
+    next to a red check. A follow-up review found the aggregate-row count
+    itself leaking into the exact summary total (``len(findings)`` counting
+    "1" for a kind with 7 real occurrences) -- callers must use this
+    function's own returned total, not ``len()`` of the itemized list.
     """
     from .checker_policy import API_BREAK_KINDS
 
     crosscheck = report.get("crosscheck")
     counts = crosscheck.get("counts_by_check") if isinstance(crosscheck, dict) else None
     if not isinstance(counts, dict):
-        return []
+        return [], 0
     severities_raw = report.get("crosscheck_severities")
     severities = severities_raw if isinstance(severities_raw, dict) else {}
     api_break_values = {k.value for k in API_BREAK_KINDS}
     findings: list[Finding] = []
+    total = 0
     for kind, count in counts.items():
         if not isinstance(count, int) or count <= 0:
             continue
         promoted = severities.get(kind) == "error"
-        if kind not in api_break_values and not promoted:
-            # Advisory-only (RISK-tier or an un-promoted check): never gates
-            # an audit-only run, so it's not what the reader needs
+        if promoted:
+            pass
+        elif audit_only and kind in api_break_values:
+            pass
+        else:
+            # Either advisory-only (RISK-tier, un-promoted) or -- on a
+            # baseline-comparison run -- an un-promoted API_BREAK_KINDS
+            # cross-check, which stays advisory there (see docstring):
+            # never gates this run, so it's not what the reader needs
             # explained next to the verdict/exit code.
             continue
         detail = f"{count} occurrence(s)"
@@ -365,7 +387,8 @@ def _scan_crosscheck_findings(report: dict[str, object]) -> list[Finding]:
                 severity="api_break",
             )
         )
-    return findings
+        total += count
+    return findings, total
 
 
 def from_scan(
@@ -429,7 +452,7 @@ def from_scan(
     # (fail-on-api-break) moves a gating result to Breaking, mirroring how
     # the ordinary baseline-comparison path treats an api_break severity
     # finding under the same flag.
-    crosscheck_findings = _scan_crosscheck_findings(report)
+    crosscheck_findings, crosscheck_total = _scan_crosscheck_findings(report, audit_only)
     if gate_api_break:
         breaking = breaking + crosscheck_findings
     else:
@@ -475,13 +498,23 @@ def from_scan(
         )
         # Cross-check findings are folded into the exact scalar totals too
         # (not just the classified `breaking`/`review` lists above) --
-        # `len(crosscheck_findings)` is itself exact (one row per gating
-        # `ChangeKind`, never capped), so this can't disagree with the
-        # itemized section the way a capped list's length could.
+        # `crosscheck_total` is the exact summed occurrence count across
+        # every gating kind, never `len(crosscheck_findings)` (one
+        # aggregate row per kind, which undercounts a kind with more than
+        # one real occurrence -- Codex review).
         if gate_api_break:
-            true_counts = (true_counts[0] + len(crosscheck_findings), true_counts[1])
+            true_counts = (true_counts[0] + crosscheck_total, true_counts[1])
         else:
-            true_counts = (true_counts[0], true_counts[1] + len(crosscheck_findings))
+            true_counts = (true_counts[0], true_counts[1] + crosscheck_total)
+    else:
+        # Audit-only: there is no `diff` to derive scalar totals from at
+        # all, and the only findings an audit-only run can produce are its
+        # own cross-check results (see `_scan_crosscheck_findings`'s own
+        # docstring) -- so the exact total is exactly `crosscheck_total`,
+        # not `len()` of the itemized (per-kind, not per-occurrence) list.
+        true_counts = (
+            (crosscheck_total, 0) if gate_api_break else (0, crosscheck_total)
+        )
 
     # Exact "safe" (additions) total, immune to `diff["additions"]`'s own
     # cap (Codex review, follow-up to the truncated-counts fix above): when
@@ -523,8 +556,8 @@ def from_scan(
         scan_risk=risk if isinstance(risk, dict) else None,
         scan_coverage_lines=_scan_coverage_lines(report),
         scan_audit_only=audit_only,
-        scan_breaking_total=true_counts[0] if true_counts else None,
-        scan_review_total=true_counts[1] if true_counts else None,
+        scan_breaking_total=true_counts[0],
+        scan_review_total=true_counts[1],
         scan_safe_total=scan_safe_total,
         scan_findings_truncated=bool(diff_dict and diff_dict.get("findings_truncated")),
         scan_additions_truncated=bool(diff_dict and diff_dict.get("additions_truncated")),
