@@ -40,6 +40,7 @@ from __future__ import annotations
 
 from .demangle import demangle_batch
 from .pr_comment_base import (
+    _EVIDENCE_KIND_VALUES,
     _SEVERITY_BUCKET,
     CommentModel,
     Finding,
@@ -48,6 +49,7 @@ from .pr_comment_base import (
     _contract_coverage_findings,
     _demangle_symbol,
     _esc,
+    _evidence_symbol_label,
     _finding_category,
     _normalize_location,
     _severity_levels,
@@ -71,22 +73,36 @@ def _scan_findings_to_buckets(
     demangled_map: dict[str, str],
     gate_api_break: bool,
     levels: dict[str, str],
-) -> tuple[list[Finding], list[Finding]]:
+) -> tuple[list[Finding], list[Finding], list[Finding]]:
     """Classify ``diff["findings"]`` (the gating buckets) into (breaking,
-    review).
+    review, incomplete).
 
     Mirrors ``_bucket_changes``'s severity/category/gate logic, adapted to
     scan's ``bucket``-keyed finding dicts. ``not_evaluated`` entries (ADR-049
     D9: contract relevance excluded them from compatibility scoring
     entirely) and ``suppressed`` entries (reported separately, never inside
     ``findings``) are skipped -- neither is a compatibility claim, so
-    neither belongs in either bucket.
+    neither belongs in any bucket.
+
+    An evidence-quality kind (``_EVIDENCE_KIND_VALUES``, shared with
+    ``compare``'s own ``_bucket_changes``) is pulled out into ``incomplete``
+    before the severity/category/gate logic below even runs -- exactly
+    mirroring ``compare``'s own ordering (Codex review, follow-up): these
+    kinds describe the *comparison's own evidence coverage*, not a detected
+    API/ABI change, so routing them through the generic compatibility
+    buckets produced a misleading "Compatibility risk blocks this PR"
+    headline for what is really a missing-evidence signal. This doesn't
+    change either exact header total (``scan_breaking_total``/
+    ``scan_review_total`` are derived from ``diff``'s own scalar counts, not
+    from these classified lists' lengths -- see ``_scan_true_counts``), only
+    which section a reader sees the finding rendered under.
     """
     breaking: list[Finding] = []
     review: list[Finding] = []
+    incomplete: list[Finding] = []
     target = {"breaking": breaking, "review": review}
     if not isinstance(findings_raw, list):
-        return breaking, review
+        return breaking, review, incomplete
     for c in findings_raw:
         if not isinstance(c, dict):
             continue
@@ -96,6 +112,19 @@ def _scan_findings_to_buckets(
             # "not_evaluated" / "suppressed" / anything unrecognized.
             continue
         kind = str(c.get("kind", ""))
+        if kind in _EVIDENCE_KIND_VALUES:
+            loc = c.get("source_location")
+            symbol = _evidence_symbol_label(kind, str(c.get("symbol", "")))
+            incomplete.append(
+                Finding(
+                    kind=kind,
+                    symbol=symbol,
+                    detail=str(c.get("description", "") or ""),
+                    location=_normalize_location(str(loc)) if loc else None,
+                    severity=sev,
+                )
+            )
+            continue
         bucket = _SEVERITY_BUCKET.get(sev, "review")
         if gate_api_break and sev == "api_break":
             bucket = "breaking"
@@ -126,7 +155,7 @@ def _scan_findings_to_buckets(
                 mangled=mangled_evidence,
             )
         )
-    return breaking, review
+    return breaking, review, incomplete
 
 
 def _scan_compatible_list_to_safe(
@@ -505,7 +534,7 @@ def from_scan(
             )
     demangled_map = demangle_batch(symbols)
 
-    breaking, review = _scan_findings_to_buckets(
+    breaking, review, evidence_incomplete = _scan_findings_to_buckets(
         findings_raw, demangled_map, gate_api_break, levels
     )
     addition_promoted = levels.get("addition") == "error"
@@ -528,7 +557,7 @@ def from_scan(
     else:
         review = review + crosscheck_findings
 
-    incomplete: list[Finding] = []
+    incomplete: list[Finding] = list(evidence_incomplete)
     incomplete_blocking = False
     if not_comparable_reason is not None:
         incomplete.append(

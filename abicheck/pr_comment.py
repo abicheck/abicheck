@@ -80,6 +80,7 @@ from datetime import datetime, timezone
 from .demangle import demangle_batch
 from .pr_comment_base import (
     _ADDITION_KIND_VALUES,
+    _EVIDENCE_KIND_VALUES,
     _SEVERITY_BUCKET,
     CommentModel,
     Finding,
@@ -88,74 +89,21 @@ from .pr_comment_base import (
     _contract_coverage_findings,
     _demangle_symbol,
     _esc,
+    _evidence_symbol_label,
     _finding_category,
     _normalize_location,
     _severity_levels,
 )
 from .pr_comment_scan import from_scan, scan_note
 
-# Kind value strings that mean "this comparison's own evidence was degraded
-# or incomplete" rather than "this is a compatibility finding" — see the
-# module docstring's "analysis incomplete" bucket. Every kind here describes
-# the *comparison's* own evidence coverage, never a change to the library's
-# own API/ABI, so none of them belong in the Breaking/Needs review/Safe
-# compatibility buckets (Codex review: `source_fact_coverage_incomplete` and
-# `dwarf_info_missing` are the same class of signal as the two kinds this set
-# originally shipped with, and were previously left in Needs review/Safe —
-# exactly the confusion this bucket exists to remove):
-#
-# - `layer_coverage_asymmetric` — advisory RISK: the baseline was scanned
-#   with an evidence layer the candidate lacks.
-# - `evidence_required_missing` — a policy-declared-mandatory evidence layer
-#   is absent (ADR-033 D7); one finding per missing layer.
-# - `source_fact_coverage_incomplete` — advisory RISK: L4 source-fact
-#   evidence used an incomplete or incompatible fact-set (ADR-038 C.8).
-# - `dwarf_info_missing` — COMPATIBLE by default severity: struct/enum
-#   layout comparison was skipped for lack of DWARF debug info.
-_EVIDENCE_KIND_VALUES = frozenset(
-    {
-        "layer_coverage_asymmetric",
-        "evidence_required_missing",
-        "source_fact_coverage_incomplete",
-        "dwarf_info_missing",
-    }
-)
-
-# Friendlier default labels for the evidence-incomplete kinds above, used
-# whenever the finding's own `symbol` is an internal marker rather than
-# something naming a change in the library's surface (an empty string, a
-# bracketed sentinel like "<dwarf>", or an "evidence:<layer>" key) — showing
-# one of those verbatim in the Symbol column reads as internal-tool noise to
-# a maintainer.
-_EVIDENCE_KIND_DEFAULT_LABEL = {
-    "layer_coverage_asymmetric": "Evidence coverage",
-    "evidence_required_missing": "Required evidence",
-    "source_fact_coverage_incomplete": "Source-fact coverage",
-    "dwarf_info_missing": "Debug info coverage",
-}
-
-# `evidence_required_missing` emits one finding *per missing layer*
-# (`evidence:build_context` / `evidence:source_abi` / `evidence:graph_summary`
-# — see `buildsource/evidence_policy.py`'s `_REQUIRE_EVIDENCE_LAYERS`), so
-# collapsing all of them to one flat "Required evidence" label would make the
-# standard-detail renderer's own by-symbol grouping (`_group_by_api`) fold
-# distinct layer requirements into a single row, hiding which layer(s) are
-# actually missing (Codex review).
-_EVIDENCE_LAYER_LABEL = {
-    "build_context": "build context",
-    "source_abi": "source ABI",
-    "graph_summary": "source graph",
-}
-
-
-def _evidence_symbol_label(kind: str, raw_symbol: str) -> str:
-    """Friendly, per-layer-distinct display label for an analysis-incomplete
-    finding's ``symbol`` — see the two constants above."""
-    if kind == "evidence_required_missing" and raw_symbol.startswith("evidence:"):
-        layer_key = raw_symbol.split(":", 1)[1]
-        layer_label = _EVIDENCE_LAYER_LABEL.get(layer_key, layer_key.replace("_", " "))
-        return f"Required evidence: {layer_label}"
-    return _EVIDENCE_KIND_DEFAULT_LABEL.get(kind, raw_symbol or kind)
+# `_EVIDENCE_KIND_VALUES`/`_evidence_symbol_label` (the "analysis incomplete"
+# bucket's kind classification -- see the module docstring above) now live
+# in `pr_comment_base.py`, shared with `pr_comment_scan.py`'s own finding
+# classification (Codex review, follow-up: a `scan --against` diff can carry
+# the identical evidence-quality kinds through `diff.findings`, and routing
+# them through the generic compatibility-severity buckets there produced a
+# misleading "Compatibility risk" headline for what is really a
+# missing-evidence signal).
 
 # Hidden marker used to find-and-update the sticky comment across runs.
 MARKER = "<!-- abicheck-sticky-report -->"

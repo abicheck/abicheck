@@ -152,6 +152,45 @@ def test_scan_api_break_finding_renders_in_review_bucket():
     assert model.review[0].severity == "api_break"
 
 
+def test_scan_evidence_quality_finding_routes_to_incomplete_not_review():
+    # Codex review: an evidence-quality kind (source_fact_coverage_
+    # incomplete/layer_coverage_asymmetric/evidence_required_missing/
+    # dwarf_info_missing) describes the *comparison's own* evidence
+    # coverage, not a detected API/ABI change -- compare's own
+    # `_bucket_changes` already pulls these into the "analysis incomplete"
+    # bucket ahead of the compatibility severity/gate logic. Scan's own
+    # findings classification must do the same, not render a misleading
+    # "Compatibility risk blocks this PR" headline for a missing-evidence
+    # signal.
+    report = _scan_report(
+        verdict="COMPATIBLE_WITH_RISK",
+        exit_code=0,
+        diff={
+            "breaking": 0,
+            "api_break": 0,
+            "risk": 1,
+            "compatible": 0,
+            "findings": [
+                {
+                    "bucket": "risk",
+                    "kind": "source_fact_coverage_incomplete",
+                    "symbol": "",
+                    "description": "L4 source-fact evidence incomplete",
+                    "finding_id": "e1",
+                },
+            ],
+        },
+    )
+    model = build_model(report)
+    assert model.review == []
+    assert model.breaking == []
+    assert len(model.incomplete) == 1
+    assert model.incomplete[0].kind == "source_fact_coverage_incomplete"
+    assert model.incomplete[0].symbol == "Source-fact coverage"
+    body = render_comment(model, sha="abc1234", detail="standard")
+    assert "Compatibility risk blocks this PR" not in body
+
+
 def test_scan_additions_render_as_public_api_additions():
     report = _scan_report(
         diff={

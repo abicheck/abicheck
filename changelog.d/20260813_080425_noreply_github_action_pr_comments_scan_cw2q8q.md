@@ -76,3 +76,9 @@ it should read in CHANGELOG.md. Delete the other sections.
   files it already cleaned up — previously leaked on every non-JSON,
   single-artifact `compare`/`scan` run, accumulating indefinitely on a
   persistent self-hosted runner.
+- **A `scan --against` evidence-quality finding** (e.g.
+  `source_fact_coverage_incomplete`, `layer_coverage_asymmetric`) now
+  renders in the comment's "Analysis incomplete" section, matching
+  `compare`'s own report, instead of a misleading "Compatibility risk
+  blocks this PR" headline for what is really a missing-evidence signal
+  rather than a detected API/ABI change.
