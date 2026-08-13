@@ -101,6 +101,34 @@ _is_release_style_operand() {
   return 1
 }
 
+# Whether the user's own `extra-args` passthrough already requests
+# `--secondary-format`/`--secondary-output` (documented, supported usage —
+# `extra-args` is a general CLI escape hatch). If it does, injecting our own
+# internal pair ahead of it is unsafe: Click applies both occurrences and
+# the *last* one wins, so the actual scan/compare run would silently honor
+# the user's pair instead of ours, writing their chosen format/path rather
+# than the internal `$PR_JSON` sidecar this script expects to read back --
+# `$PR_JSON` then stays an empty mktemp file, and `_maybe_post_pr_comment`
+# falls through to a full rerun anyway (which the internal injection exists
+# specifically to avoid), except now confusingly alongside a stray empty
+# temp file (Codex review). Skipping our own injection when the user's is
+# present restores the older, always-correct "no PR_JSON at all" fallback
+# path instead.
+#
+# A simple substring/word-boundary check on the raw string, matching this
+# script's existing extra-args handling (`CMD+=($INPUT_EXTRA_ARGS)`, plain
+# word-splitting, not full shell quoting) -- good enough to catch the
+# documented flag spellings without parsing arbitrary quoting.
+_extra_args_has_secondary_output() {
+  case " ${INPUT_EXTRA_ARGS:-} " in
+    *' --secondary-format '* | *' --secondary-format='* \
+      | *' --secondary-output '* | *' --secondary-output='*)
+      return 0
+      ;;
+  esac
+  return 1
+}
+
 # ---------------------------------------------------------------------------
 # Build the abicheck command
 # ---------------------------------------------------------------------------
@@ -1077,9 +1105,13 @@ elif [[ "$MODE" == "scan" ]]; then
     # budget-metered run rather than the one whose status actually gated the
     # step). Only needed when the primary format isn't already JSON, and
     # --artifact-set has no single-artifact JSON shape to render a second
-    # time (the CLI itself rejects --secondary-* there too).
+    # time (the CLI itself rejects --secondary-* there too). Also skipped
+    # when the user's own `extra-args` already requests `--secondary-format`/
+    # `--secondary-output` (Codex review, follow-up) -- see
+    # `_extra_args_has_secondary_output`'s own docstring for why injecting
+    # ours anyway would be actively wrong, not merely redundant.
     if [[ "$FORMAT" != "json" && "${INPUT_PR_COMMENT:-true}" == "true" \
-       && -z "$SCAN_ARTIFACT_SET" ]]; then
+       && -z "$SCAN_ARTIFACT_SET" ]] && ! _extra_args_has_secondary_output; then
       PR_JSON=$(mktemp "${RUNNER_TEMP:-/tmp}/abicheck-pr-json.XXXXXX")
       CMD+=(--secondary-format json --secondary-output "$PR_JSON")
     fi

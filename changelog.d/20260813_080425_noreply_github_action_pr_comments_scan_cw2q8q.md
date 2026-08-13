@@ -156,3 +156,13 @@
   description now wraps `--severity-*`/`--exit-code-scheme` in code spans**
   (fixed at the `action.yml` source and regenerated), clearing a
   markdownlint MD037 warning.
+- **`scan` mode's Action step no longer silently loses its own PR-comment
+  JSON sidecar when the caller's own `extra-args` already requests
+  `--secondary-format`/`--secondary-output`**: the internal injection used
+  to run unconditionally, and since Click applies both occurrences of a
+  flag with the last one winning, the caller's pair silently won —
+  leaving the internal sidecar file empty and triggering an unnecessary
+  (and, for `--depth build/source`, potentially expensive) rerun anyway to
+  populate the PR comment. The injection is now skipped whenever
+  `extra-args` already carries either flag, falling back to the
+  already-existing rerun path cleanly instead.

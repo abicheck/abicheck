@@ -247,3 +247,48 @@ class TestIsReleaseStyleOperand:
         f = tmp_path / "libfoo.so.1"
         f.write_bytes(b"\x7fELF" + b"\x00" * 92)
         assert not _run_predicate(f'_is_release_style_operand "{f}"')
+
+
+@pytest.mark.skipif(not RUN_SH.is_file(), reason="action/run.sh not found")
+class TestExtraArgsHasSecondaryOutput:
+    """Codex review: injecting the Action's own internal
+    ``--secondary-format``/``--secondary-output`` pair ahead of the user's
+    ``extra-args`` passthrough is unsafe when the user's own ``extra-args``
+    already requests one -- Click applies both and the *last* wins, so the
+    real run would silently honor the user's pair instead of the Action's,
+    leaving the internal sidecar file empty and triggering an unnecessary
+    (and, for ``scan --depth build/source``, potentially expensive) rerun
+    anyway. ``_extra_args_has_secondary_output`` detects that case so the
+    caller can skip its own injection instead.
+    """
+
+    def _predicate(self, extra_args: str) -> bool:
+        return _run_predicate(
+            f'INPUT_EXTRA_ARGS={extra_args!r} _extra_args_has_secondary_output'
+        )
+
+    def test_absent_extra_args(self) -> None:
+        assert not self._predicate("")
+
+    def test_unrelated_extra_args(self) -> None:
+        assert not self._predicate("--verbose --gate-api-break")
+
+    def test_secondary_format_space_separated(self) -> None:
+        assert self._predicate("--secondary-format text")
+
+    def test_secondary_format_equals_form(self) -> None:
+        assert self._predicate("--secondary-format=text")
+
+    def test_secondary_output_space_separated(self) -> None:
+        assert self._predicate("--secondary-output out.json")
+
+    def test_secondary_output_equals_form(self) -> None:
+        assert self._predicate("--secondary-output=out.json")
+
+    def test_secondary_flag_at_the_end_of_extra_args(self) -> None:
+        assert self._predicate("--verbose --secondary-format text")
+
+    def test_does_not_false_positive_on_a_substring(self) -> None:
+        # A flag merely containing "secondary-format" as a substring (not a
+        # real standalone token) must not trip the detector.
+        assert not self._predicate("--not-a-secondary-format-flag")
