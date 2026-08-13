@@ -1,0 +1,208 @@
+name: Ops ICX plugin visibility probe 2026-08-14
+
+on:
+  push:
+    branches: [ops/icx-plugin-visibility-probe-2026-08-14]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      - name: Install ICX and Clang 22 development files
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends ca-certificates wget gpg-agent cmake ninja-build build-essential file binutils
+          wget -qO- https://apt.repos.intel.com/intel-gpg-keys/GPG-PUB-KEY-INTEL-SW-PRODUCTS.PUB | gpg --dearmor | sudo tee /usr/share/keyrings/oneapi-archive-keyring.gpg >/dev/null
+          echo 'deb [signed-by=/usr/share/keyrings/oneapi-archive-keyring.gpg] https://apt.repos.intel.com/oneapi all main' | sudo tee /etc/apt/sources.list.d/oneAPI.list >/dev/null
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends intel-oneapi-compiler-dpcpp-cpp
+          wget -q https://apt.llvm.org/llvm.sh -O /tmp/llvm.sh
+          chmod +x /tmp/llvm.sh
+          sudo /tmp/llvm.sh 22
+          sudo apt-get install -y --no-install-recommends clang-22 llvm-22-dev libclang-22-dev
+
+      - name: Probe symbol visibility and build variants
+        shell: bash
+        run: |
+          set +e
+          set -o pipefail
+          OUT=icx-plugin-visibility-results
+          mkdir -p "$OUT"
+          exec > >(tee "$OUT/probe.log") 2>&1
+          source /opt/intel/oneapi/setvars.sh --force >/dev/null 2>&1
+          ICPX="$(command -v icpx)"
+          ICX="$(command -v icx)"
+          FRONTEND=/opt/intel/oneapi/compiler/latest/bin/compiler/clang
+          LLVM_PREFIX=/usr/lib/llvm-22
+
+          icpx --version | tee "$OUT/icpx-version.txt"
+          clang++-22 --version | tee "$OUT/upstream-version.txt"
+          printf 'icpx=%s\nfrontend=%s\n' "$ICPX" "$FRONTEND" | tee "$OUT/paths.txt"
+
+          file -L "$FRONTEND" | tee "$OUT/frontend-file.txt"
+          ldd "$FRONTEND" 2>&1 | tee "$OUT/frontend-ldd.txt"
+          readelf -d "$FRONTEND" 2>&1 | tee "$OUT/frontend-dynamic.txt"
+          readelf -Ws "$FRONTEND" 2>/dev/null | grep -E 'PluginASTAction|FrontendPluginRegistry|ASTFrontendAction|FrontendAction' | tee "$OUT/frontend-plugin-symbols-all.txt"
+          nm -D "$FRONTEND" 2>/dev/null | grep -E 'PluginASTAction|FrontendPluginRegistry|ASTFrontendAction|FrontendAction' | tee "$OUT/frontend-plugin-symbols-dynamic.txt"
+          objdump -T "$FRONTEND" 2>/dev/null | grep -E 'PluginASTAction|FrontendPluginRegistry|ASTFrontendAction|FrontendAction' | tee "$OUT/frontend-plugin-symbols-objdump.txt"
+
+          mkdir -p "$OUT/src"
+          cat > "$OUT/src/tu.cpp" <<'CPP'
+          int answer() { return 42; }
+          CPP
+
+          cat > "$OUT/src/load_only.c" <<'C'
+          #include <unistd.h>
+          __attribute__((constructor)) static void loaded(void) {
+            static const char msg[] = "ABICHECK_ICX_DLOPEN_ONLY_RAN\n";
+            (void)!write(2, msg, sizeof(msg) - 1);
+          }
+          C
+          cc -shared -fPIC "$OUT/src/load_only.c" -o "$OUT/libload-only.so"
+          icpx -fplugin="$OUT/libload-only.so" -c "$OUT/src/tu.cpp" -o "$OUT/load-only.o" >"$OUT/load-only.stdout" 2>"$OUT/load-only.stderr"
+          echo $? > "$OUT/load-only.rc"
+
+          cat > "$OUT/src/ProbePlugin.cpp" <<'CPP'
+          #include "clang/AST/ASTConsumer.h"
+          #include "clang/Frontend/CompilerInstance.h"
+          #include "clang/Frontend/FrontendPluginRegistry.h"
+          #include "llvm/Support/raw_ostream.h"
+          #include <memory>
+          #include <string>
+          #include <vector>
+          namespace {
+          class Consumer final : public clang::ASTConsumer {};
+          class Action final : public clang::PluginASTAction {
+          protected:
+            std::unique_ptr<clang::ASTConsumer> CreateASTConsumer(clang::CompilerInstance &, llvm::StringRef) override {
+              llvm::errs() << "ABICHECK_ICX_AST_PLUGIN_RAN\n";
+              return std::make_unique<Consumer>();
+            }
+            bool ParseArgs(const clang::CompilerInstance &, const std::vector<std::string> &) override { return true; }
+            ActionType getActionType() override { return AddBeforeMainAction; }
+          };
+          }
+          static clang::FrontendPluginRegistry::Add<Action> X("abicheck-icx-probe", "ICX AST plugin probe");
+          CPP
+          cat > "$OUT/src/CMakeLists.txt" <<'CMAKE'
+          cmake_minimum_required(VERSION 3.20)
+          project(icx_plugin_probe C CXX)
+          find_package(LLVM REQUIRED CONFIG)
+          find_package(Clang REQUIRED CONFIG)
+          add_library(icx-probe MODULE ProbePlugin.cpp)
+          target_include_directories(icx-probe SYSTEM PRIVATE ${LLVM_INCLUDE_DIRS} ${CLANG_INCLUDE_DIRS})
+          target_compile_definitions(icx-probe PRIVATE ${LLVM_DEFINITIONS})
+          target_compile_features(icx-probe PRIVATE cxx_std_17)
+          set_target_properties(icx-probe PROPERTIES PREFIX "lib")
+          if(FORCE_NO_RTTI)
+            target_compile_options(icx-probe PRIVATE -fno-rtti)
+          endif()
+          if(LINK_CLANG_CPP)
+            find_library(CLANG_CPP_LIBRARY NAMES clang-cpp libclang-cpp.so.22.1 PATHS ${LLVM_LIBRARY_DIRS} NO_DEFAULT_PATH REQUIRED)
+            target_link_libraries(icx-probe PRIVATE ${CLANG_CPP_LIBRARY})
+          endif()
+          CMAKE
+
+          build_minimal() {
+            local label="$1" cxx="$2" nortti="$3" linkcpp="$4"
+            local dir="$OUT/build-minimal-$label"
+            cmake -S "$OUT/src" -B "$dir" -G Ninja \
+              -DCMAKE_C_COMPILER="$ICX" -DCMAKE_CXX_COMPILER="$cxx" \
+              -DCMAKE_PREFIX_PATH="$LLVM_PREFIX" \
+              -DFORCE_NO_RTTI="$nortti" -DLINK_CLANG_CPP="$linkcpp" \
+              >"$OUT/cmake-minimal-$label.stdout" 2>"$OUT/cmake-minimal-$label.stderr"
+            echo $? > "$OUT/cmake-minimal-$label.rc"
+            cmake --build "$dir" >"$OUT/build-minimal-$label.stdout" 2>"$OUT/build-minimal-$label.stderr"
+            echo $? > "$OUT/build-minimal-$label.rc"
+          }
+          build_minimal upstream-default clang++-22 OFF OFF
+          build_minimal upstream-nortti clang++-22 ON OFF
+          build_minimal icpx-nortti "$ICPX" ON OFF
+          build_minimal upstream-nortti-linked clang++-22 ON ON
+          build_minimal icpx-nortti-linked "$ICPX" ON ON
+
+          cmake -S contrib/abicheck-clang-plugin -B "$OUT/build-abicheck-nortti" -G Ninja \
+            -DCMAKE_C_COMPILER="$ICX" -DCMAKE_CXX_COMPILER="$ICPX" \
+            -DCMAKE_PREFIX_PATH="$LLVM_PREFIX" -DCMAKE_CXX_FLAGS=-fno-rtti \
+            >"$OUT/cmake-abicheck-nortti.stdout" 2>"$OUT/cmake-abicheck-nortti.stderr"
+          echo $? > "$OUT/cmake-abicheck-nortti.rc"
+          cmake --build "$OUT/build-abicheck-nortti" >"$OUT/build-abicheck-nortti.stdout" 2>"$OUT/build-abicheck-nortti.stderr"
+          echo $? > "$OUT/build-abicheck-nortti.rc"
+
+          test_load() {
+            local label="$1" compiler="$2" plugin="$3"
+            "$compiler" -fplugin="$plugin" -c "$OUT/src/tu.cpp" -o "$OUT/$label.o" >"$OUT/load-$label.stdout" 2>"$OUT/load-$label.stderr"
+            echo $? > "$OUT/load-$label.rc"
+          }
+          test_explicit() {
+            local label="$1" compiler="$2" plugin="$3"
+            "$compiler" -Xclang -load -Xclang "$plugin" -Xclang -plugin -Xclang abicheck-icx-probe -c "$OUT/src/tu.cpp" -o "$OUT/$label.o" >"$OUT/explicit-$label.stdout" 2>"$OUT/explicit-$label.stderr"
+            echo $? > "$OUT/explicit-$label.rc"
+          }
+
+          for variant in upstream-default upstream-nortti icpx-nortti upstream-nortti-linked icpx-nortti-linked; do
+            SO="$OUT/build-minimal-$variant/libicx-probe.so"
+            [[ -f "$SO" ]] || continue
+            file "$SO" > "$OUT/$variant.file.txt"
+            ldd "$SO" > "$OUT/$variant.ldd.txt" 2>&1
+            nm -D --undefined-only "$SO" > "$OUT/$variant.undefined.txt" 2>&1
+            test_load "upstream-$variant" clang++-22 "$SO"
+            test_load "icpx-$variant" "$ICPX" "$SO"
+            test_explicit "icpx-$variant" "$ICPX" "$SO"
+          done
+
+          ABI_SO="$OUT/build-abicheck-nortti/libabicheck-facts.so"
+          if [[ -f "$ABI_SO" ]]; then
+            clang++-22 -std=c++17 -fplugin="$ABI_SO" \
+              -Xclang -plugin-arg-abicheck-facts -Xclang "out=$OUT/facts-upstream" \
+              -c "$OUT/src/tu.cpp" -o "$OUT/abicheck-upstream.o" \
+              >"$OUT/load-abicheck-upstream.stdout" 2>"$OUT/load-abicheck-upstream.stderr"
+            echo $? > "$OUT/load-abicheck-upstream.rc"
+            "$ICPX" -std=c++17 -fplugin="$ABI_SO" \
+              -Xclang -plugin-arg-abicheck-facts -Xclang "out=$OUT/facts-icpx" \
+              -c "$OUT/src/tu.cpp" -o "$OUT/abicheck-icpx.o" \
+              >"$OUT/load-abicheck-icpx.stdout" 2>"$OUT/load-abicheck-icpx.stderr"
+            echo $? > "$OUT/load-abicheck-icpx.rc"
+          fi
+
+          {
+            printf 'test\trc\tdetail\n'
+            for f in "$OUT"/*.rc; do
+              name="$(basename "$f" .rc)"
+              rc="$(cat "$f")"
+              detail=''
+              for err in "$OUT/$name.stderr" "$OUT/load-${name#load-}.stderr" "$OUT/explicit-${name#explicit-}.stderr"; do
+                if [[ -f "$err" ]]; then
+                  detail="$(grep -E -m1 'ABICHECK_ICX_|unable to load plugin|undefined symbol|unable to find plugin|error:|fatal error:' "$err")"
+                  [[ -n "$detail" ]] && break
+                fi
+              done
+              printf '%s\t%s\t%s\n' "$name" "$rc" "$detail"
+            done
+          } | tee "$OUT/result-matrix.tsv"
+
+          echo '=== ICX dynamic plugin symbols ==='
+          if [[ -s "$OUT/frontend-plugin-symbols-dynamic.txt" ]]; then cat "$OUT/frontend-plugin-symbols-dynamic.txt"; else echo '(none)'; fi
+          echo '=== Result matrix ==='
+          cat "$OUT/result-matrix.tsv"
+          exit 0
+
+      - name: Upload evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: icx-plugin-visibility-${{ github.sha }}
+          path: icx-plugin-visibility-results/
+          if-no-files-found: error
+          retention-days: 30
