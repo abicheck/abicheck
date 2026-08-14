@@ -540,7 +540,69 @@ def _mask_pinned_abi_flags(
     ]
 
 
-def _context_flags(cu: CompileUnit) -> list[str]:
+#: ``CompileUnit.standard``'s two language families, as returned by
+#: :func:`_derived_standard_language_family`/:func:`_forced_language_family`.
+_LANG_FAMILY_C = "c"
+_LANG_FAMILY_CXX = "c++"
+
+
+def _derived_standard_language_family(standard: str) -> str | None:
+    """Which language family (C vs. C++) *standard* (a ``CompileUnit.
+    standard`` value, e.g. ``"c17"``/``"c++20"``/``"gnu++17"``/``"gnu11"``)
+    belongs to, or ``None`` for an empty/unrecognized value.
+
+    A GNU-dialect C++ standard is spelled ``"gnu++NN"`` -- not
+    ``"gnuc++NN"`` -- so a plain ``"c++"``-prefix check after stripping a
+    ``"gnu"`` prefix would wrongly read it as C (Codex review, caught by
+    this function's own unit test). Checking for the ``"++"`` marker
+    anywhere in the value instead correctly covers both ``"c++20"`` and
+    ``"gnu++17"`` while still reading ``"c17"``/``"gnu11"`` as C, mirroring
+    how a real compiler treats ``-std=gnu++17`` as a C++ standard and
+    ``-std=gnu11`` as a C standard.
+    """
+    if not standard:
+        return None
+    return _LANG_FAMILY_CXX if "++" in standard else _LANG_FAMILY_C
+
+
+def _forced_language_family(lang: str | None, *, lang_explicit: bool) -> str | None:
+    """Which language family the caller *explicitly* forced for this parse,
+    if any (Codex review, ``discussion_r3787398644``).
+
+    Mirrors ``dumper._resolve_force_cpp``'s own "an explicit ``--lang
+    c++``/``cpp`` always wins" contract and the ``lang_explicit`` convention
+    AGENTS.md's "Known gaps" section establishes (the ``--lang c++``/
+    ``lang_explicit`` toolchain-identity precedent this module's own
+    docstring already points to): only a genuinely explicit request pins a
+    family here. ``lang_explicit=False`` (the default -- includes Click's
+    own non-explicit ``"c++"`` default value) returns ``None``, a no-op,
+    so an auto-detected/default-language parse is completely unaffected by
+    this function and keeps forwarding every derived ``-std=`` exactly as
+    before.
+    """
+    if not lang_explicit or not lang:
+        return None
+    return _LANG_FAMILY_CXX if lang.upper() in ("C++", "CPP") else _LANG_FAMILY_C
+
+
+def _standard_conflicts_with_forced_language(
+    standard: str, forced_language: str | None
+) -> bool:
+    """Whether *standard*'s own language family disagrees with *forced_language*.
+
+    ``False`` whenever nothing was explicitly forced (``forced_language is
+    None``) or *standard* has no recognizable family of its own (empty) --
+    the pre-existing, unconditional behavior in both cases. Only a genuine,
+    resolved disagreement (a C-family derived standard while C++ was
+    explicitly forced, or vice versa) returns ``True``.
+    """
+    if forced_language is None:
+        return False
+    derived_family = _derived_standard_language_family(standard)
+    return derived_family is not None and derived_family != forced_language
+
+
+def _context_flags(cu: CompileUnit, *, forced_language: str | None = None) -> list[str]:
     """Render one ``CompileUnit``'s context as literal castxml/clang argv tokens.
 
     Mirrors ``BuildContext.to_castxml_flags()`` (ADR-020a's ``-p``/
@@ -579,9 +641,34 @@ def _context_flags(cu: CompileUnit) -> list[str]:
     genuinely independent of every structured field this function already
     renders (``-fPIC``, ``-fno-omit-frame-pointer``, ``-target-abi``, ...)
     survives into the final command.
+
+    *forced_language* (``discussion_r3787398644``, Codex review): the
+    language family (``"c"``/``"c++"``) the caller *explicitly* requested
+    for this parse, or ``None`` (the default, a complete no-op) when
+    nothing was explicitly forced. A matched compile unit's own
+    ``cu.standard`` can genuinely disagree in family with an explicitly
+    forced language -- e.g. the matched unit is plain C (``standard=
+    "c17"``) while the caller passed ``DumpRequest(lang="c++",
+    lang_explicit=True)`` to force a C++ parse of the same header(s). Since
+    a real compiler rejects a C-family ``-std=`` in C++ mode outright
+    (confirmed: Clang aborts with "invalid argument '-std=c17' not allowed
+    with 'C++'"), forwarding the matched unit's derived standard verbatim
+    in that case breaks a supported, explicit language override rather than
+    merely being redundant with it. Per the finding's own suggested
+    resolution -- "omit a derived standard whose language family conflicts
+    with the explicitly selected mode" -- this only ever *drops* the
+    conflicting derived ``-std=`` token; it never synthesizes a translated
+    equivalent (no ``c17`` -> ``c++17`` guessing), matching this module's
+    existing fail-closed-over-guessing discipline. Every other field this
+    function renders (target triple, sysroot, defines/undefines, include
+    paths, other ABI-relevant flags) is untouched by *forced_language* --
+    only the one field whose family can actually conflict with a forced
+    language is ever omitted.
     """
     flags: list[str] = []
-    if cu.standard:
+    if cu.standard and not _standard_conflicts_with_forced_language(
+        cu.standard, forced_language
+    ):
         flags.append(f"-std={cu.standard}")
     if cu.target_triple:
         flags.append(f"--target={cu.target_triple}")
@@ -644,6 +731,8 @@ def resolve_header_compile_context(
     headers: Sequence[Path],
     *,
     explicit: CompileContext | None = None,
+    lang: str | None = None,
+    lang_explicit: bool = False,
 ) -> HeaderCompileContextResolution:
     """Resolve a single L2 :class:`CompileContext` from L3 ``CompileUnit`` facts.
 
@@ -652,6 +741,21 @@ def resolve_header_compile_context(
     or no header the given ``CompileUnit``s reference — rather than raising,
     so a caller with no L3 evidence (or a header the build evidence simply
     doesn't cover) sees the exact same behavior as before this module existed.
+
+    *lang*/*lang_explicit* (``discussion_r3787398644``, Codex review): the
+    caller's own requested parse language, threaded the same additive,
+    default-``None``/``False`` way ``DumpRequest.lang``/``lang_explicit`` are
+    threaded through ``resolve_input``/``run_dump`` elsewhere in this codebase
+    (see AGENTS.md's "Known gaps" ``--lang c++``/``lang_explicit`` entry) —
+    a no-op for every existing caller that doesn't pass them. When
+    *lang_explicit* is ``True`` and it disagrees in language *family* with the
+    resolved compile unit's own ``standard`` (e.g. the matched unit is C
+    (``standard="c17"``) while the caller explicitly forced ``lang="c++"``),
+    the conflicting derived ``-std=`` token is omitted from the rendered
+    context rather than forwarded verbatim — forwarding it would hand a
+    C-family standard flag to a forced-C++ parse, which a real compiler
+    rejects outright (see :func:`_context_flags`'s own docstring for the
+    confirmed repro). Every other derived field is unaffected.
 
     *explicit* is the caller's own, already-supplied L2 context (``evidence.
     compile`` on the service_input_resolution path) — when given, any
@@ -687,7 +791,8 @@ def resolve_header_compile_context(
         )
 
     ((_sig, units),) = by_signature.items()
-    flags = _context_flags(units[0])
+    forced_language = _forced_language_family(lang, lang_explicit=lang_explicit)
+    flags = _context_flags(units[0], forced_language=forced_language)
     context = CompileContext(gcc_option_tokens=tuple(flags))
     return HeaderCompileContextResolution(
         context=context, matched_unit_count=len(matched)

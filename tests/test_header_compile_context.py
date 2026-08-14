@@ -198,6 +198,181 @@ def test_resolve_derives_c_standard_not_only_cxx(tmp_path: Path) -> None:
     assert "-std=c17" in result.context.gcc_option_tokens
 
 
+def test_resolve_omits_conflicting_c_standard_when_cxx_explicitly_forced(
+    tmp_path: Path,
+) -> None:
+    """Codex review, discussion_r3787398644: the matched compile unit is C
+    with standard="c17", but the caller explicitly requested C++
+    (lang="c++", lang_explicit=True). Forwarding the matched unit's derived
+    -std=c17 into a forced-C++ header invocation makes Clang abort with
+    "invalid argument '-std=c17' not allowed with 'C++'" -- so the
+    conflicting derived standard must be omitted, not forwarded.
+
+    Without the fix, this asserts False (the pre-fix code renders
+    "-std=c17" here unconditionally) -- i.e. this test fails against the
+    pre-fix code and passes after it.
+    """
+    header = tmp_path / "widget.h"
+    header.write_text("struct Widget { int x; };\n", encoding="utf-8")
+    src = tmp_path / "widget.c"
+    src.write_text('#include "widget.h"\nint f(void) { return 0; }\n', encoding="utf-8")
+    cu = _cu(source=str(src), directory=str(tmp_path), language="C", standard="c17")
+    ev = BuildEvidence(compile_units=[cu])
+    result = resolve_header_compile_context(
+        ev, [header], lang="c++", lang_explicit=True
+    )
+    assert result.matched is True
+    assert result.context is not None
+    tokens = result.context.gcc_option_tokens
+    assert not any(t.startswith("-std=") for t in tokens), tokens
+
+
+def test_resolve_keeps_matching_cxx_standard_when_cxx_explicitly_forced(
+    tmp_path: Path,
+) -> None:
+    """The non-conflicting counterpart: a matched C++ unit's own -std= is
+    still forwarded when the explicitly forced language agrees with it --
+    forced_language must only ever suppress a genuine conflict, never a
+    standard that already agrees."""
+    header = tmp_path / "widget.h"
+    header.write_text("struct Widget { int x; };\n", encoding="utf-8")
+    src = tmp_path / "widget.cpp"
+    src.write_text('#include "widget.h"\nint f() { return 0; }\n', encoding="utf-8")
+    cu = _cu(source=str(src), directory=str(tmp_path), language="CXX", standard="c++20")
+    ev = BuildEvidence(compile_units=[cu])
+    result = resolve_header_compile_context(
+        ev, [header], lang="c++", lang_explicit=True
+    )
+    assert result.matched is True
+    assert result.context is not None
+    assert "-std=c++20" in result.context.gcc_option_tokens
+
+
+def test_resolve_keeps_c_standard_when_language_not_explicitly_forced(
+    tmp_path: Path,
+) -> None:
+    """lang_explicit=False (the default -- includes an unspecified/auto-detect
+    request) must be a complete no-op: the matched unit's own -std=c17 is
+    still forwarded exactly as before, even if a non-explicit ``lang="c++"``
+    (e.g. Click's own default) happens to be passed alongside it."""
+    header = tmp_path / "widget.h"
+    header.write_text("struct Widget { int x; };\n", encoding="utf-8")
+    src = tmp_path / "widget.c"
+    src.write_text('#include "widget.h"\nint f(void) { return 0; }\n', encoding="utf-8")
+    cu = _cu(source=str(src), directory=str(tmp_path), language="C", standard="c17")
+    ev = BuildEvidence(compile_units=[cu])
+    result = resolve_header_compile_context(
+        ev, [header], lang="c++", lang_explicit=False
+    )
+    assert result.matched is True
+    assert result.context is not None
+    assert "-std=c17" in result.context.gcc_option_tokens
+
+
+def test_resolve_omits_conflicting_cxx_standard_when_c_explicitly_forced(
+    tmp_path: Path,
+) -> None:
+    """The reverse conflict direction: a matched C++ unit's -std=c++20 must
+    be omitted when the caller explicitly forces lang="c" -- symmetric with
+    the C-forced-into-C++ case the review finding names."""
+    header = tmp_path / "widget.h"
+    header.write_text("struct Widget { int x; };\n", encoding="utf-8")
+    src = tmp_path / "widget.cpp"
+    src.write_text('#include "widget.h"\nint f() { return 0; }\n', encoding="utf-8")
+    cu = _cu(source=str(src), directory=str(tmp_path), language="CXX", standard="c++20")
+    ev = BuildEvidence(compile_units=[cu])
+    result = resolve_header_compile_context(ev, [header], lang="c", lang_explicit=True)
+    assert result.matched is True
+    assert result.context is not None
+    tokens = result.context.gcc_option_tokens
+    assert not any(t.startswith("-std=") for t in tokens), tokens
+
+
+# ---------------------------------------------------------------------------
+# 1b. Pure-function unit tests for the language-family helpers
+#     (discussion_r3787398644), mirroring _is_structured_field_flag's own
+#     small-helper-with-direct-tests treatment above.
+# ---------------------------------------------------------------------------
+
+
+def test_derived_standard_language_family() -> None:
+    from abicheck.buildsource.header_compile_context import (
+        _derived_standard_language_family,
+    )
+
+    assert _derived_standard_language_family("c17") == "c"
+    assert _derived_standard_language_family("c11") == "c"
+    assert _derived_standard_language_family("gnu11") == "c"
+    assert _derived_standard_language_family("c++20") == "c++"
+    assert _derived_standard_language_family("gnu++17") == "c++"
+    assert _derived_standard_language_family("") is None
+
+
+def test_forced_language_family() -> None:
+    from abicheck.buildsource.header_compile_context import _forced_language_family
+
+    assert _forced_language_family("c++", lang_explicit=True) == "c++"
+    assert _forced_language_family("cpp", lang_explicit=True) == "c++"
+    assert _forced_language_family("c", lang_explicit=True) == "c"
+    # Not explicit: always a no-op regardless of the lang value.
+    assert _forced_language_family("c++", lang_explicit=False) is None
+    assert _forced_language_family("c", lang_explicit=False) is None
+    # No lang at all: a no-op even if lang_explicit were somehow True.
+    assert _forced_language_family(None, lang_explicit=True) is None
+    assert _forced_language_family("", lang_explicit=True) is None
+
+
+def test_standard_conflicts_with_forced_language() -> None:
+    from abicheck.buildsource.header_compile_context import (
+        _standard_conflicts_with_forced_language,
+    )
+
+    assert _standard_conflicts_with_forced_language("c17", "c++") is True
+    assert _standard_conflicts_with_forced_language("c++20", "c") is True
+    assert _standard_conflicts_with_forced_language("c17", "c") is False
+    assert _standard_conflicts_with_forced_language("c++20", "c++") is False
+    # No forced language: never a conflict, regardless of standard.
+    assert _standard_conflicts_with_forced_language("c17", None) is False
+    # Empty/unrecognized standard: nothing to conflict with.
+    assert _standard_conflicts_with_forced_language("", "c++") is False
+
+
+def test_explicit_pin_of_covers_bare_operand_and_malformed_options_branches() -> None:
+    """Direct unit coverage for ``_ExplicitPin.of``'s less-common branches
+    (bare-operand ``-target``/``-isysroot``/``-D``/``-U`` spellings, and a
+    malformed ``gcc_options`` string) that no existing end-to-end
+    ``resolve_header_compile_context(..., explicit=...)`` case happens to
+    exercise -- these are pre-existing branches from earlier P0.3 review
+    rounds, added here per Codex's coverage note on this PR rather than a
+    fresh finding of this pass."""
+    from abicheck.buildsource.header_compile_context import _ExplicitPin
+
+    # Malformed gcc_options (unbalanced quote) must degrade to "no tokens
+    # from it" rather than raising.
+    pin = _ExplicitPin.of(CompileContext(gcc_options="'unterminated"))
+    assert pin == _ExplicitPin()
+
+    # Bare (space-separated-operand) spellings of -target/-isysroot/-D/-U.
+    pin = _ExplicitPin.of(
+        CompileContext(
+            gcc_option_tokens=(
+                "-target",
+                "aarch64-linux-gnu",
+                "-isysroot",
+                "/sdk",
+                "-D",
+                "FOO=1",
+                "-U",
+                "BAR",
+            )
+        )
+    )
+    assert pin.target_triple is True
+    assert pin.sysroot is True
+    assert "FOO" in pin.defines
+    assert "BAR" in pin.undefines
+
+
 def test_resolve_strips_dangling_target_operand_flag(tmp_path: Path) -> None:
     """Finding 1: a compile DB spelling ``-target aarch64-linux-gnu`` as two
     separate argv tokens has only the bare ``-target`` switch captured into
@@ -743,6 +918,35 @@ def test_derive_l2_compile_context_from_compile_db(tmp_path: Path) -> None:
         _run_cleanups(cleanups)
 
 
+def test_derive_l2_compile_context_omits_conflicting_c_standard_when_cxx_forced(
+    tmp_path: Path,
+) -> None:
+    """discussion_r3787398644, threaded down to derive_l2_compile_context:
+    a real compile_commands.json matching to a C compile unit
+    (standard=c17, via the .c source extension), with the caller explicitly
+    forcing lang="c++" -- the derived -std=c17 must not be forwarded."""
+    from abicheck.buildsource.l2_seed import derive_l2_compile_context
+
+    header = tmp_path / "widget.h"
+    header.write_text("struct Widget { int x; };\n", encoding="utf-8")
+    src = tmp_path / "widget.c"
+    src.write_text('#include "widget.h"\n', encoding="utf-8")
+    _write_compile_db(tmp_path, src, ["-std=c17"])
+
+    ctx, cleanups = derive_l2_compile_context(
+        [header], None, tmp_path, lang="c++", lang_explicit=True
+    )
+    try:
+        assert ctx is not None
+        assert not any(t.startswith("-std=") for t in ctx.gcc_option_tokens), (
+            ctx.gcc_option_tokens
+        )
+    finally:
+        from abicheck.buildsource.inline import _run_cleanups
+
+        _run_cleanups(cleanups)
+
+
 def test_derive_l2_compile_context_no_inputs_is_none() -> None:
     from abicheck.buildsource.l2_seed import derive_l2_compile_context
 
@@ -1065,6 +1269,66 @@ def test_resolve_side_snapshot_stamps_parsed_with_build_context(
     assert snap.parsed_with_build_context is True
 
 
+def test_resolve_side_snapshot_omits_conflicting_c_standard_when_cxx_forced(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """discussion_r3787398644, threaded all the way through resolve_side_
+    snapshot (the exact caller ``service_dump_pipeline.run_dump_request``
+    uses): a matched C compile unit (standard=c17) with the side's own
+    ``lang="c++", lang_explicit=True`` must not carry -std=c17 into the
+    compile context handed to ``service.resolve_input``.
+
+    Without the fix, ``compile_ctx.gcc_option_tokens`` contains
+    "-std=c17" here -- exactly the token a real forced-C++ Clang/CastXML
+    invocation rejects (see the module-level docstring in
+    ``header_compile_context._context_flags`` for the confirmed repro).
+    """
+    from abicheck import service_input_resolution as sir
+    from abicheck.api_types import InputSpec
+    from abicheck.model import AbiSnapshot
+    from abicheck.service_compare_evidence import SideEvidence
+
+    header = tmp_path / "widget.h"
+    header.write_text("struct Widget { int x; };\n", encoding="utf-8")
+    src = tmp_path / "widget.c"
+    src.write_text('#include "widget.h"\n', encoding="utf-8")
+    _write_compile_db(tmp_path, src, ["-std=c17"])
+
+    so = tmp_path / "lib.so"
+    so.write_bytes(b"\x7fELF" + b"\x00" * 100)
+
+    captured: dict[str, object] = {}
+
+    def _fake_resolve_input(*args: object, **kwargs: object) -> AbiSnapshot:
+        captured.update(kwargs)
+        return AbiSnapshot(library="lib", version="1.0", from_headers=True)
+
+    import abicheck.service as service_mod
+
+    monkeypatch.setattr(service_mod, "resolve_input", _fake_resolve_input)
+
+    side = InputSpec(path=so, headers=(header,), version="1.0", sources=tmp_path)
+    evidence = SideEvidence(
+        headers=[header], compile=None, collect_mode="off", dump_manifest=None
+    )
+    snap = sir.resolve_side_snapshot(
+        side,
+        evidence,
+        lang="c++",
+        lang_explicit=True,
+        header_backend="clang",
+        fmt="elf",
+        public_headers=[],
+        public_header_dirs=[],
+    )
+    compile_ctx = captured["compile"]
+    assert isinstance(compile_ctx, CompileContext)
+    assert not any(t.startswith("-std=") for t in compile_ctx.gcc_option_tokens), (
+        compile_ctx.gcc_option_tokens
+    )
+    assert snap.parsed_with_build_context is True
+
+
 def test_resolve_side_snapshot_does_not_stamp_when_unmatched(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -1235,6 +1499,40 @@ def test_e2e_with_l3_evidence_context_is_genuinely_applied(
     assert snap.from_headers is True
     assert snap.parsed_with_build_context is True
     assert _widget_fields(snap) == ["x", "y"]  # fixed: matches the real ABI
+
+
+@pytestmark_e2e
+def test_e2e_forced_cxx_dump_succeeds_against_c_compile_unit_std(
+    c_widget_lib: tuple[Path, Path, Path],
+) -> None:
+    """End-to-end reproduction of ``discussion_r3787398644``'s own repro:
+    ``run_dump_request`` with a real ``gcc -std=c17`` compile database
+    matched against the requested header(s), and the caller explicitly
+    forcing a C++ parse (``DumpRequest``'s own default ``lang="c++"``, plus
+    ``lang_explicit=True``).
+
+    Before the fix, this raises: the matched C compile unit's own
+    ``-std=c17`` is forwarded verbatim into the forced-C++ Clang header
+    invocation, and Clang aborts with "invalid argument '-std=c17' not
+    allowed with 'C++'" -- reproduced directly against this fixture without
+    the fix applied. After the fix, the conflicting derived standard is
+    omitted and the dump succeeds, with the real L3 context (target
+    triple/defines/etc.) still genuinely applied.
+    """
+    from abicheck import service
+    from abicheck.api_types import DumpRequest, InputSpec
+
+    so, header, src_dir = c_widget_lib
+    req = DumpRequest(
+        input=InputSpec(path=so, headers=(header,), version="1.0", sources=src_dir),
+        frontend="clang",
+        lang_explicit=True,  # lang defaults to "c++" -- the finding's own repro
+    )
+    snap = service.run_dump_request(req)
+    assert snap.from_headers is True
+    assert snap.parsed_with_build_context is True
+    widget = next(t for t in snap.types if t.name == "Widget")
+    assert [f.name for f in widget.fields] == ["x", "y"]
 
 
 @pytestmark_e2e

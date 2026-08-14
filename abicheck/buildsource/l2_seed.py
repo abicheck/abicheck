@@ -307,6 +307,8 @@ def derive_l2_compile_context(
     build_compile_db: str | None = None,
     allow_inferred_build_query: bool = True,
     explicit: CompileContext | None = None,
+    lang: str | None = None,
+    lang_explicit: bool = False,
 ) -> tuple[CompileContext | None, list[Callable[[], None]]]:
     """Best-effort L2 :class:`CompileContext` derived from the build's L3
     ``CompileUnit`` facts (P0.3).
@@ -317,6 +319,16 @@ def derive_l2_compile_context(
     field it already pins (e.g. an explicit ``-std=c++20``) excuses a
     same-field-only disagreement across the matched compile units instead of
     failing closed on it (Finding 3; see that function's own docstring).
+
+    *lang*/*lang_explicit* (``discussion_r3787398644``, Codex review):
+    forwarded unchanged to :func:`~abicheck.buildsource.
+    header_compile_context.resolve_header_compile_context` — the same
+    additive, default-``None``/``False`` threading pattern as *explicit*
+    above, so a caller's explicitly-forced parse language (e.g.
+    ``DumpRequest(lang="c++", lang_explicit=True)``) suppresses a matched
+    compile unit's own derived ``-std=`` when its language family conflicts,
+    rather than forwarding a C-family standard into a forced-C++ parse (see
+    that function's own docstring for the confirmed repro).
 
     Sibling of :func:`derive_l2_include_dirs`, sharing its exact pack-
     resolution precedence (explicit ``--build-info``/``--sources`` pack ->
@@ -380,7 +392,11 @@ def derive_l2_compile_context(
         )
         build_evidence = pack.build_evidence if pack is not None else None
         resolution = resolve_header_compile_context(
-            build_evidence, list(headers), explicit=explicit
+            build_evidence,
+            list(headers),
+            explicit=explicit,
+            lang=lang,
+            lang_explicit=lang_explicit,
         )
         if resolution.context is None:
             _run_cleanups(cleanups)

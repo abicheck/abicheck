@@ -171,6 +171,77 @@ def widget_lib(tmp_path: Path) -> tuple[Path, Path, Path]:
     return so, header, tmp_path
 
 
+_C_WIDGET_HEADER = """
+#pragma once
+struct Widget {
+    int x;
+    int y;
+};
+int touch(struct Widget* w);
+"""
+
+_C_WIDGET_SOURCE = """
+#include "widget.h"
+int touch(struct Widget* w) { return w->x; }
+"""
+
+
+@pytest.fixture
+def c_widget_lib(tmp_path: Path) -> tuple[Path, Path, Path]:
+    """Build a real, plain-C .so plus its public header and a
+    compile_commands.json recording a real ``gcc -std=c17`` compile of it.
+
+    Shared by ``tests/test_header_compile_context.py``'s P0.3
+    ``@pytest.mark.integration`` end-to-end suite (real clang/gcc required)
+    for ``discussion_r3787398644``'s own repro shape: a matched C compile
+    unit (``standard="c17"``) with the caller explicitly forcing a C++
+    parse of the same header via ``DumpRequest(lang="c++",
+    lang_explicit=True)``.
+    """
+    if not (_have_tool("clang") and _have_tool("gcc")):
+        pytest.skip("clang and gcc are required for this P0.3 integration test")
+    header = tmp_path / "widget.h"
+    header.write_text(_C_WIDGET_HEADER, encoding="utf-8")
+    src = tmp_path / "widget.c"
+    src.write_text(_C_WIDGET_SOURCE, encoding="utf-8")
+    so = tmp_path / "libwidget.so"
+    subprocess.run(
+        [
+            "gcc",
+            "-shared",
+            "-fPIC",
+            "-std=c17",
+            "-o",
+            str(so),
+            str(src),
+            f"-I{tmp_path}",
+        ],
+        check=True,
+        capture_output=True,
+    )
+    (tmp_path / "compile_commands.json").write_text(
+        json.dumps(
+            [
+                {
+                    "directory": str(tmp_path),
+                    "file": str(src),
+                    "arguments": [
+                        "gcc",
+                        "-c",
+                        str(src),
+                        "-o",
+                        "widget.o",
+                        "-fPIC",
+                        "-std=c17",
+                    ],
+                }
+            ]
+        ),
+        encoding="utf-8",
+    )
+    return so, header, tmp_path
+
+
 def pytest_addoption(parser: pytest.Parser) -> None:
     """Register --update-goldens CLI option for golden-output tests."""
     parser.addoption(

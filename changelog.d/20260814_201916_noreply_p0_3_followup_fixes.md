@@ -74,3 +74,27 @@
   structured-field-covered raw flags from the rendered tail, so the two
   code paths (comparison vs. rendering) share one source of truth instead
   of two independently-evolving copies.
+- **A sixth review round found the matched compile unit's own derived
+  `-std=` could be forwarded straight into a header parse whose language
+  was explicitly forced to the *other* family, and a real Clang invocation
+  rejects that combination outright.** Confirmed end to end: a matched C
+  compile unit (`standard="c17"`) with the caller explicitly requesting
+  `DumpRequest(lang="c++", lang_explicit=True)` forwarded `-std=c17` into
+  the forced-C++ header invocation, and Clang aborted with `invalid
+  argument '-std=c17' not allowed with 'C++'` — a supported, explicit
+  language override could no longer parse the header.
+  `resolve_header_compile_context()`/`derive_l2_compile_context()`/
+  `_seeded_compile_context()`/`resolve_side_snapshot()` now thread the
+  caller's own requested language (`lang`/`lang_explicit`) down to
+  `_context_flags()`, the same additive, default-`None`/`False` pattern
+  this codebase already uses for `DumpRequest.lang`/`lang_explicit`
+  elsewhere. Two new pure helpers, `_derived_standard_language_family()`
+  and `_forced_language_family()`, resolve each side's language family
+  (`"c"`/`"c++"`), and `_context_flags()` omits the derived `-std=` token
+  only when the two families genuinely disagree — never synthesizing a
+  translated equivalent (no `c17` → `c++17` guessing), and never touching
+  any other derived field (target triple, sysroot, defines/undefines,
+  include paths, other ABI-relevant flags). A non-explicit language
+  request (`lang_explicit=False`, including Click's own non-explicit
+  `"c++"` default) remains a complete no-op, so every existing caller's
+  behavior is unchanged.
