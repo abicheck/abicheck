@@ -24,9 +24,9 @@ classification axes** in the codebase, which had been conflated:
 
 | Axis | Question it answers | Home |
 |------|---------------------|------|
-| **Verdict** — BREAKING / API_BREAK / RISK / COMPATIBLE | "does this break the ABI, and does it gate CI?" | `checker_policy`, `severity`, `DiffResult._effective_verdict_for_change` |
-| **Display severity** — HIGH / MEDIUM / LOW | ABICC-style report colouring | `report_classifications` |
-| **Origin** — rtti / internal / public | "is a big breaking count just RTTI/internal churn?" | `report_summary` |
+| **Verdict** (BREAKING / API_BREAK / RISK / COMPATIBLE) | "does this break the ABI, and does it gate CI?" | `checker_policy`, `severity`, `DiffResult._effective_verdict_for_change` |
+| **Display severity** (HIGH / MEDIUM / LOW) | ABICC-style report colouring | `report_classifications` |
+| **Origin** (rtti / internal / public) | "is a big breaking count just RTTI/internal churn?" | `report_summary` |
 
 Because every renderer re-computed the verdict axis on its own (and the PR
 comment used yet another string-keyed bucket dict), the formats could *disagree*

@@ -541,7 +541,7 @@ default, and a **concept/constraint** dependency. The first two are absent
 because clang's JSON carries nothing to resolve; the third needs a graph node
 kind that does not exist yet. The AST evidence for each, and what closing the
 third would take, is recorded once in
-[G29 Phase 5 item 5](../contribute/plans/g29-impact-analysis-layer.md#phase-5--new-semantic-graph-families)
+[G29 Phase 5 item 5](../contribute/plans/g29-impact-analysis-layer.md#phase-5-new-semantic-graph-families)
 — the rationale owner for these decisions — rather than restated here.
 
 ## `EntityResolver` (ADR-046 D4, scoped implementation)

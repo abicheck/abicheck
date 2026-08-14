@@ -12,7 +12,7 @@ facts); medium for B (vtable reconstruction is genuinely hard; scoped tri-state
 guards keep it from fabricating findings).
 
 Windows and macOS gaps found in the same evaluation are **deferred** — recorded
-in [Deferred: macOS / Windows](#deferred-macos--windows-later-stage) so they are
+in [Deferred: macOS / Windows](#deferred-macos-windows-later-stage) so they are
 not lost, but the active work is Linux/ELF.
 
 ---

@@ -6,7 +6,7 @@
 
 **What you'll learn on this page**
 
-- What an **ABI** is, in one sentence, with no jargon.
+- What an **ABI** actually is, in one sentence, with no jargon.
 - Why an app can crash after a library upgrade *even though nobody recompiled
   it*.
 - The difference between a change that is **safe**, **risky**, or **breaking**.
@@ -45,6 +45,10 @@ writes the wrong bytes. The result is a crash, or worse, quietly corrupted data.
 ---
 
 ## API vs ABI, in one sentence each
+
+> **Full definitions:** [ABI/API Handling](../abi-api-handling.md) is the
+> canonical page for these terms; the two bullets below are the deliberately
+> compressed, one-sentence version this five-minute on-ramp needs.
 
 - An **API** (Application Programming Interface) is the **source-level** contract
   — the function names and types you write against in the headers. Break it and

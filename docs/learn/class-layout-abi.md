@@ -17,12 +17,17 @@ It complements two neighbouring pages:
 
 ## ABI vs API, and where "layout" sits
 
-- **API** is the *source* contract: declarations, overload sets, access control,
-  default arguments, templates, inline bodies, constants. Breaking it means a
-  consumer must change or fix their *source* — recompilation is required, even
-  if some already-built binaries keep running. abicheck classifies these as
-  **`API_BREAK`** (`api_break: true`).
-- **ABI** is the *compiled* contract: object size and alignment,
+> **Full definitions:** [ABI/API Handling](abi-api-handling.md) is the
+> canonical page for what these terms mean generally; the two bullets below
+> are the *layout-specific* restatement this page needs to talk about class
+> objects specifically.
+
+- **API**, here: the *source* contract — declarations, overload sets, access
+  control, default arguments, templates, inline bodies, constants. Breaking it
+  means a consumer must change or fix their *source* — recompilation is
+  required, even if some already-built binaries keep running. abicheck
+  classifies these as **`API_BREAK`** (`api_break: true`).
+- **ABI**, here: the *compiled* contract — object size and alignment,
   base-subobject offsets, vptr placement, vtable slot order, calling
   convention, mangled names, RTTI representation, symbol visibility. Breaking it
   means an **already-compiled** consumer is now wrong — it reads the wrong
@@ -188,7 +193,7 @@ are labelled `MEDIUM` confidence.
 |---------------------|------------------------|------------------------------|
 | Linux x86-64, GCC/Clang | Itanium C++ ABI + ELF + SysV AMD64 | Layout drift, vtable slot changes, RTTI/visibility, libstdc++ dual ABI. **Use Linux as the canonical gate** (richest validation). |
 | Windows x64, MSVC | MS x64 calling conv., decorated names, `/Zp`/`#pragma pack`, `/GR`, `/EH` | Decorated-name drift, packing, cross-DLL concrete C++ types. PDB layout cross-check is supported but non-blocking in places. |
-| Windows x64, Clang-cl | MSVC-compat target (work-in-progress in corners) | "Mostly works" assumptions around member-pointer / `[[no_unique_address]]` / vtordisp edge cases. |
+| Windows x64, Clang-cl | MSVC-compat target with known edge-case gaps | Don't assume member-pointer / `[[no_unique_address]]` / vtordisp handling matches MSVC exactly in every corner. |
 | Linux AArch64, GCC/Clang | Arm `cppabi64` + generic C++ ABI + AAPCS64 | Same layout/vtable risks as x86-64, plus PCS-sensitive calling convention. |
 | 32-bit Arm | AAPCS32 + alternate member-function-pointer rules (Thumb bit) | Member-pointer assumptions and EH interop. |
 
