@@ -1153,7 +1153,58 @@ class TestClangPluginArtifactProducer:
             tmp_path,
         )
         assert result.returncode == 1
-        assert "emitted no facts" in result.stdout
+        assert "emitted no valid facts" in result.stdout
+
+    def test_plugin_artifact_with_invalid_pack_contents_fails(
+        self, tmp_path: Path
+    ) -> None:
+        # Regression (Codex review): validate_inputs_pack() can return a
+        # positive tu_count *and* report.errors at once (e.g. duplicate
+        # tu_ids) -- a stale/incompatible artifact that emits at least one
+        # readable-but-invalid TU record must still fail the smoke test,
+        # not just a zero-TU pack.
+        script = tmp_path / "fake-compiler-duplicate-tu"
+        script.write_text(
+            "#!/bin/sh\n"
+            'if [ "$1" = "-dM" ]; then\n'
+            "  printf '#define __clang_major__ 18\\n'\n"
+            "  exit 0\n"
+            "fi\n"
+            'outdir=""\n'
+            'for arg in "$@"; do\n'
+            '  case "$arg" in\n'
+            '    out=*) outdir="${arg#out=}" ;;\n'
+            "  esac\n"
+            "done\n"
+            'if [ -n "$outdir" ]; then\n'
+            '  python3 -c "\n'
+            "import sys\n"
+            "from abicheck.buildsource.inputs_emit import init_inputs_pack, append_source_facts\n"
+            "from abicheck.buildsource.source_abi import SourceAbiTu\n"
+            "init_inputs_pack(sys.argv[1], library='fake')\n"
+            "append_source_facts(sys.argv[1], [\n"
+            "    SourceAbiTu(tu_id='cu://smoke', target_id='target://fake', source='smoke.cpp'),\n"
+            "    SourceAbiTu(tu_id='cu://smoke', target_id='target://fake', source='smoke.cpp'),\n"
+            "])\n"
+            '" "$outdir" || exit 1\n'
+            "fi\n"
+            "exit 0\n"
+        )
+        script.chmod(0o755)
+        artifact = tmp_path / "libabicheck-facts.so"
+        artifact.write_bytes(b"loadable-but-emits-an-invalid-pack")
+        result, _, _ = _run_action(
+            {
+                "INPUT_PHASE": "prepare",
+                "INPUT_PRODUCER": "clang-plugin",
+                "INPUT_COMPILER": str(script),
+                "INPUT_PLUGIN_ARTIFACT": str(artifact),
+            },
+            tmp_path,
+        )
+        assert result.returncode == 1
+        assert "emitted no valid facts" in result.stdout
+        assert "duplicate tu_id" in result.stdout
 
     def test_relative_plugin_artifact_is_resolved_to_absolute(
         self, tmp_path: Path

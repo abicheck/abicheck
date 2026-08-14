@@ -569,6 +569,13 @@ _finish_clang_plugin() {
   # this now, before the caller's real (potentially expensive) build runs,
   # is strictly earlier than the identical tu_count==0 check phase: verify
   # already performs on the real pack.
+  # Check report.errors too, not just tu_count -- a stale/incompatible
+  # artifact can genuinely load, register the "abicheck-facts" action, and
+  # write a TU record that validate_inputs_pack() still flags as invalid
+  # (e.g. an incompatible fact-set version/name), same as _verify_pack
+  # checks on the real pack below. Leaving this unchecked would accept the
+  # artifact and export its flags before the caller's real build runs,
+  # defeating the point of catching a stale artifact early (Codex review).
   local smoke_validate
   if ! smoke_validate=$(python3 -c '
 import sys
@@ -579,11 +586,14 @@ try:
 except (FileNotFoundError, ValueError) as exc:
     print(f"not a readable abicheck_inputs pack: {exc}")
     sys.exit(1)
+if report.errors:
+    print("pack validation error(s): " + "; ".join(report.errors))
+    sys.exit(1)
 if report.tu_count == 0:
     print("zero TU records written")
     sys.exit(1)
 ' "$smoke_out"); then
-    _fail "the Clang plugin at '$plugin_so' loaded into '$COMPILER' and exited successfully, but the smoke-test compile emitted no facts ($smoke_validate) -- this usually means the loaded shared object is not actually the abicheck-facts plugin (a wrong or stale plugin-artifact, or a build that produced a different plugin under the same filename)."
+    _fail "the Clang plugin at '$plugin_so' loaded into '$COMPILER' and exited successfully, but the smoke-test compile emitted no valid facts ($smoke_validate) -- this usually means the loaded shared object is not actually the abicheck-facts plugin, or is a stale/incompatible build of it (a wrong or stale plugin-artifact, or a build that produced a different plugin under the same filename)."
   fi
   echo "Clang plugin smoke test passed ($plugin_so loads into $COMPILER, and emitted real TU facts)."
   _reset_output_dir
