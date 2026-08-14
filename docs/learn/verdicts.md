@@ -38,7 +38,7 @@ groups every fixture by both verdict and category.
 > **A verdict is a fact; the release decision is policy.** For how these verdicts
 > map onto SemVer version bumps and product-contract decisions (and why the same
 > change can be breaking for one product and a non-event for another), see
-> [Compatibility as a Product Contract](abi-series/00-product-contract.md#3-semantic-versioning-turning-the-promise-into-a-number).
+> [Compatibility as a Product Contract](abi-series/00-product-contract.md#4-semantic-versioning-turning-the-promise-into-a-number).
 
 > **Beyond the five core verdicts.** `compare` in severity-aware mode (any
 > `--severity-*` flag) can also report **`SEVERITY_ERROR`** with exit code `1`

@@ -14,6 +14,10 @@
 
 - Why ABI/API compatibility is a **promise the product makes**, not just a
   property a tool reads out of a binary.
+- That "compatible" is really several different questions — source, binary,
+  behavioral, data, deployment, ecosystem, operational, and build-profile —
+  and why naming which one you mean resolves most "is this a break?"
+  arguments before they start.
 - How to write down your **public surface** — the thing the promise is about —
   before you ever run a checker.
 - How [Semantic Versioning](https://semver.org/) turns that promise into a
@@ -63,7 +67,49 @@ tell the tool what your contract actually is.
 
 ---
 
-## 2. Define the public surface *before* you check
+## 2. Compatibility is not one question — name which kind you mean
+
+"Is this change compatible?" is really several independent questions, and
+conflating them is the single most common source of confusion in ABI/API
+discussions — a change can be compatible along one axis and breaking along
+another at the same time. Before reading further, know which of these you're
+actually asking about:
+
+| Dimension | The question it answers | A representative break |
+|-----------|--------------------------|-------------------------|
+| **Source / API compatibility** | Does existing source code still *compile* against the new headers? | A default argument was removed; a function became `explicit` |
+| **Binary / ABI compatibility** | Does an already-*built* consumer binary still link, load, and run correctly against the new library? | A symbol was removed; a struct's layout changed |
+| **Behavioral / semantic compatibility** | For the same inputs, does the operation still mean the same thing? | A function starts returning a different value, or changes its side effects, for inputs that used to behave one way |
+| **Data / wire / storage compatibility** | Are values that cross a boundary — serialized files, network messages, shared memory, on-disk records — still interpreted the same way? | An enum value's meaning was reassigned; a struct used as a wire format changed layout |
+| **Deployment / environment compatibility** | Will the binary still run on every platform/OS version it was promised to support? | A dependency's minimum runtime version (glibc floor, macOS deployment target) was silently raised by a rebuild |
+| **Ecosystem / consumer compatibility** | Does *this specific* application, plugin, or binding keep working? | A plugin's vtable/callback contract changed; a language binding's assumed struct layout moved |
+| **Operational compatibility** | Can you upgrade, roll back, or run two versions side by side? | A SONAME wasn't bumped for an incompatible change, so upgrade-in-place breaks running processes |
+| **Build-profile comparability** | Were the two things being compared even built under conditions that make the comparison meaningful? | Comparing a GCC build against a Clang build of "the same" library, or two different C++ standard-library ABI modes |
+
+A static ABI/API checker like abicheck is strongest on the first two rows
+(source and binary compatibility) and progressively weaker moving down the
+table — see [Evidence & Detectability](../evidence-and-detectability.md) for
+exactly what artifact comparison can and cannot prove, and don't read a clean
+binary-compatibility verdict as a behavioral, wire-format, or deployment
+guarantee it never claimed to make. The rest of this series is organized
+mostly around the *mechanisms* behind source and binary compatibility (Parts
+1–6), because that's the part a static comparison can actually observe and
+prove; the other dimensions get their own, narrower treatment where the
+series already covers them —
+[deployment/runtime floors](../dependency-floors.md),
+[plugin/ecosystem contracts](../../use/plugin-systems.md), and
+[build-profile comparability](../../reference/platforms.md) each have their
+own page rather than being folded into "ABI" generically.
+
+> **Rule of thumb:** name the dimension before you argue about whether a
+> change is "a break." A change that's a real source break and a total binary
+> non-event (e.g. a removed default argument) and a change that's the reverse
+> (e.g. a removed but never-called private symbol) are both real — they're
+> just answers to different questions.
+
+---
+
+## 3. Define the public surface *before* you check
 
 Before checking ABI/API stability, write down what is actually promised. The
 public surface is the union of:
@@ -99,7 +145,7 @@ had" — see [Part 5 — Linker & ELF](05-linker-elf.md).
 
 ---
 
-## 3. Semantic Versioning: turning the promise into a number
+## 4. Semantic Versioning: turning the promise into a number
 
 [SemVer](https://semver.org/) says a project **must declare a public API**, and
 then the version number communicates compatibility:
@@ -109,7 +155,7 @@ then the version number communicates compatibility:
 - **PATCH** — backward-compatible bug fixes.
 
 That maps cleanly onto abicheck's [verdicts](../verdicts.md) — *but only after*
-the public API is declared (§2). abicheck detects the change and classifies it;
+the public API is declared (§3). abicheck detects the change and classifies it;
 **you** decide what the classification means for your version number and release.
 
 ### abicheck verdict → SemVer action
@@ -144,7 +190,7 @@ different rows above depending on policy:
 
 ---
 
-## 4. Name your contract shape
+## 5. Name your contract shape
 
 "Public surface" looks different for different kinds of products. Identify which
 shape you are before reasoning about breaks.
@@ -189,7 +235,7 @@ comparison is necessary but **insufficient** — see
 
 ---
 
-## 5. Where this leaves you
+## 6. Where this leaves you
 
 You now have the framing the rest of the series builds on:
 
@@ -199,9 +245,9 @@ You now have the framing the rest of the series builds on:
 
 Carry these two questions into every later part:
 
-1. **Was the thing that changed part of the promised public surface?** (§2)
+1. **Was the thing that changed part of the promised public surface?** (§3)
 2. **What does my versioning policy say I must do about a change of this
-   class?** (§3)
+   class?** (§4)
 
 Next: [Part 1 — Foundations](01-foundations.md) shows *how* a change becomes a
 break at the machine level. If you want to know *which* evidence abicheck (or
