@@ -86,20 +86,31 @@ actually asking about:
 | **Operational compatibility** | Can you upgrade, roll back, or run two versions side by side? | A SONAME wasn't bumped for an incompatible change, so upgrade-in-place breaks running processes |
 | **Build-profile comparability** | Were the two things being compared even built under conditions that make the comparison meaningful? | Comparing a GCC build against a Clang build of "the same" library, or two different C++ standard-library ABI modes |
 
-A static ABI/API checker like abicheck is strongest on the first two rows
-(source and binary compatibility) and progressively weaker moving down the
-table — see [Evidence & Detectability](../evidence-and-detectability.md) for
-exactly what artifact comparison can and cannot prove, and don't read a clean
-binary-compatibility verdict as a behavioral, wire-format, or deployment
-guarantee it never claimed to make. The rest of this series is organized
-mostly around the *mechanisms* behind source and binary compatibility (Parts
-1–6), because that's the part a static comparison can actually observe and
-prove; the other dimensions get their own, narrower treatment where the
-series already covers them —
-[deployment/runtime floors](../dependency-floors.md),
-[plugin/ecosystem contracts](../../use/plugin-systems.md), and
-[build-profile comparability](../../reference/platforms.md) each have their
-own page rather than being folded into "ABI" generically.
+Coverage varies by dimension rather than falling off in a straight line: a
+static ABI/API checker like abicheck proves source and binary compatibility
+directly (Parts 1–6 are organized around exactly those mechanisms, since
+that's what a static comparison can observe), and it also *enforces* two of
+the others outright rather than merely gesturing at them — a genuinely
+incomparable build profile is a hard failure
+([exit `16`/`not_comparable`](../../reference/exit-codes.md), escapable only
+with the explicit
+[`--diagnostic-comparison`](../../reference/cli-reference.md) opt-out that
+stamps the result untrustworthy), and a deployment/runtime-floor regression
+is its own detected finding, not a gap (see
+[Dependency & Runtime Floors](../dependency-floors.md)). What it genuinely
+cannot prove from artifacts alone is behavioral and data/wire-format
+compatibility — see [Evidence & Detectability](../evidence-and-detectability.md)
+for exactly what artifact comparison can and cannot prove, and don't read a
+clean binary-compatibility verdict as a behavioral or wire-format guarantee
+it never claimed to make. The other dimensions get their own, narrower
+treatment where the series already covers them —
+[deployment/runtime floors](../dependency-floors.md) and
+[plugin/ecosystem contracts](../../use/plugin-systems.md) each have their
+own page; build-profile comparability doesn't yet have a single narrative
+page of its own — its mechanics are documented where they're enforced, in
+the [exit-code reference](../../reference/exit-codes.md) and
+[CLI reference](../../reference/cli-reference.md) — rather than being folded
+into "ABI" generically.
 
 > **Rule of thumb:** name the dimension before you argue about whether a
 > change is "a break." A change that's a real source break and a total binary
