@@ -1200,58 +1200,40 @@ _ATOMIC_SLOT_RE = re.compile(r"^_Atomic\b")
 
 def _canonicalize_atomic_slot(value: str) -> str:
     """Canonicalize one ``diff_atomic.py`` type-slot spelling for the
-    identity discriminator (Codex review, fresh evidence, two rounds).
+    identity discriminator (Codex review, two rounds).
 
-    ``dumper_castxml.py`` cannot model C11 ``_Atomic`` at all -- it emits a
-    bare ``Unimplemented`` node with no reference to the wrapped type, so
-    its own ``_type_name()`` spells the *inner content* of the qualifier as
-    the literal, lossy sentinel ``"_Atomic"`` (see that function's own
-    comment). The direct-clang backend, by contrast, retains the real
-    wrapped spelling clang's own AST printer produces (e.g.
-    ``"_Atomic(struct Foo *)"``). Plain :func:`canonicalize_type_name`
-    normalizes whitespace/const-ordering/pointer-sigil spacing, but has no
-    notion of "these two spellings name the same qualified type" -- so
-    without this helper, CastXML's bare sentinel and Clang's concrete
-    spelling would never hash to the same canonical id for the identical
-    qualifier-added/-removed transition, defeating the whole point of
-    adding ``atomic_qualifier_changed`` to
-    :data:`_TYPE_BEARING_DISCRIMINATOR_KINDS`.
+    ``dumper_castxml.py`` cannot model C11 ``_Atomic`` -- it emits a bare
+    ``Unimplemented`` node with no reference to the wrapped type, so its
+    ``_type_name()`` spells the qualifier's *inner content* as the literal,
+    lossy sentinel ``"_Atomic"``. The direct-clang backend retains the real
+    wrapped spelling (e.g. ``"_Atomic(struct Foo *)"``). Plain
+    :func:`canonicalize_type_name` has no notion these name the same
+    qualified type, so without this helper CastXML's sentinel and Clang's
+    concrete spelling never hash to the same canonical id.
 
     Safe to collapse everything *inside* an ``_Atomic(...)`` wrapper (or a
-    bare ``"_Atomic"`` with nothing following) down to a fixed marker for
-    identity purposes: ``diff_atomic.py``'s own detection (``_has_atomic``)
-    only ever tests *presence* of the qualifier via a regex search, never
-    compares the wrapped type across old/new -- two genuinely different
-    ``_Atomic``-wrapped inner types on the same slot can never both reach
-    this detector as two distinct findings (it only fires on a presence
-    transition, and continues past an unchanged, still-``_Atomic`` slot
-    entirely) -- so no discriminating information about the wrapped
-    content is lost.
+    bare ``"_Atomic"``) to a fixed marker: ``diff_atomic.py``'s own
+    detection (``_has_atomic``) only tests qualifier *presence*, never
+    compares the wrapped type across old/new, so no discriminating
+    information about the wrapped content is lost.
 
     **Not** safe to collapse a declarator applied *outside* the wrapper
-    (Codex review, second round, fresh evidence): ``dumper_castxml.py``'s
-    ``PointerType``/``ReferenceType`` handling appends its own sigil as a
-    suffix onto whatever it wraps (``self._type_name(pointee) + "*"``), so
+    (round 2): ``dumper_castxml.py``'s ``PointerType``/``ReferenceType``
+    handling appends its own sigil suffix onto whatever it wraps, so
     "pointer to atomic T" (``_Atomic(T) *`` on Clang) spells as
     ``"_Atomic*"`` on CastXML -- distinguishably different from "atomic
-    pointer to T" (``_Atomic(T *)`` on Clang), which spells as the bare
-    ``"_Atomic"`` sentinel (the Atomic node itself is what's wrapped, so no
-    outer sigil is ever appended). These are two different qualified types
-    -- collapsing both down to one identical sentinel (an earlier revision
-    of this function did exactly that) would let an exact ``finding_id``
-    suppression accepted for one transition silently suppress the other,
-    unrelated one. Splitting on the ``_Atomic(...)`` wrapper's own matching
-    close paren (or the bare-sentinel case, with no parens at all) and
-    canonicalizing only what follows preserves this one signal CastXML
-    genuinely retains, while still discarding the wrapped inner type
-    CastXML cannot recover.
+    pointer to T" (``_Atomic(T *)`` on Clang), spelled as the bare
+    ``"_Atomic"`` sentinel (the Atomic node wraps the pointer, so no outer
+    sigil is ever appended). These are two different qualified types --
+    collapsing both to one sentinel would let a ``finding_id`` suppression
+    accepted for one silently suppress the other. Splitting on the
+    wrapper's own matching close paren and canonicalizing only what
+    follows preserves this one signal CastXML retains, while discarding
+    the wrapped inner content it cannot recover.
 
-    The *unqualified* side of the transition (the plain, non-``_Atomic``
-    type both backends spell reliably) is left to ordinary
-    :func:`canonicalize_type_name` normalization by this function's only
-    caller, since that side's exact spelling IS backend-comparable and
-    still needs to distinguish, e.g., an unrelated base-type change from a
-    pure qualifier change.
+    The *unqualified* side of the transition (spelled reliably by both
+    backends) is left to ordinary :func:`canonicalize_type_name`
+    normalization by this function's only caller.
     """
     stripped = value.strip()
     match = _ATOMIC_SLOT_RE.match(stripped)
