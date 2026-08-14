@@ -94,13 +94,39 @@ A build of this plugin only loads into the exact clang it was built against
   can point at an ordinary same-major upstream package, as this
   re-verification's own upstream-LLVM-22 build demonstrates) — also fixed,
   same pass. Regression coverage:
-  `tests/test_action_collect_facts.py`'s
+  `tests/test_action_collect_facts_intel_llvm_messages.py`'s
   `TestClangPluginSmokeFailureMessage`/
   `TestClangPluginBundledPrefixProvenanceMessage`. Neither fix changes
   guardrail *behavior* (the refusal still fires, the smoke test still
   fails closed) — only which explanation a reader sees, so don't revert
   either wording change to "simplify" the message without re-reading why
   it was split in the first place.
+  **The "wrong source commit" question is now closed, with a debugger-
+  confirmed root cause, not just a repeated crash.** A further pass built
+  the plugin against the real, public `github.com/intel/llvm` `sycl`
+  branch's `v7.0.0` tag (independently confirmed to report `Clang version:
+  22.1.0`, matching real `icpx`, tagged 11 days before the actual product
+  build date) instead of vanilla upstream LLVM — it crashed with the
+  identical stack regardless. A `gdb`-attached debug build pinpoints the
+  exact defect: `deriveRootsFromIncludes`'s range-for over `hso.
+  UserEntries` dereferences a `std::vector` with `begin_ == 0x0` while
+  `end_` is a live, non-null address — the signature of reading a real
+  `HeaderSearchOptions::UserEntries` object through the wrong field layout,
+  not a plugin logic bug (confirmed by a same-toolchain control: the
+  identical plugin, built against vanilla apt LLVM 22 with no RTTI/stdlib
+  overrides and loaded into vanilla apt `clang++-22`, exits 0 with a valid
+  pack). The likeliest remaining source of the drift, given matching
+  source: `icpx`'s `clang-22` binary statically links its own C++ runtime
+  (`ldd`/`readelf -d` show no `libc++.so`/`libstdc++.so` dependency at
+  all), while this plugin dynamically links a *separate* apt-provided
+  `libc++.so.1`/`libc++abi.so.1` — two nominally-compatible but
+  independently-built `libc++` copies, not guaranteed byte-identical
+  without an externally-verified match. See README.md's "Root-cause
+  precision" subsection for the full writeup. This sharpens, but does not
+  change, the section's conclusion: a fix needs Intel's actual internal
+  build (the statically-linked runtime specifically, not just the
+  Clang/LLVM source tree) — a third attempt should not spend time hunting
+  for a different public source commit, that question is answered.
 - This asymmetry is *why* the plugin is optional infrastructure: Full source
   scan and the `abicheck-cc` wrapper remain the portable, always-supported
   producers. Don't propose making the plugin required without addressing

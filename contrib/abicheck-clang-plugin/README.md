@@ -440,7 +440,7 @@ install root) as for an explicit, unverified `llvm-cmake-prefix` override
 (which can point at an ordinary same-major upstream package, as this
 re-verification's own upstream-LLVM-22 build demonstrates). See
 `actions/collect-facts/run.sh`'s `_finish_clang_plugin`/`_prepare_clang_plugin`
-and `tests/test_action_collect_facts.py`'s
+and `tests/test_action_collect_facts_intel_llvm_messages.py`'s
 `TestClangPluginSmokeFailureMessage`/`TestClangPluginBundledPrefixProvenanceMessage`.
 
 None of this changes the section's guidance: the plugin is not a certified
@@ -452,6 +452,76 @@ for the agent-facing summary and the remaining open items (a machine-checked
 compiler/artifact compatibility manifest beyond the SHA-256 integrity check,
 and smoke-test wording that currently reads as an LLVM-major mismatch even
 when the major already matches).
+
+### Root-cause precision: a debugger-confirmed corrupted `std::vector`, not just "it crashes"
+
+A further pass built the plugin against the **real, public Intel LLVM fork
+source** (`github.com/intel/llvm`, the `sycl` branch's `v7.0.0` tag —
+independently confirmed by its own `cmake` configure step to report `Clang
+version: 22.1.0`, matching real `icpx` 2026.1.1's `__clang_major__`, and
+tagged 2026-07-13, eleven days before the 20260724 build date) instead of
+vanilla upstream LLVM, on the theory that the earlier findings above might
+be a *source-commit* mismatch (public upstream Clang vs. Intel's own fork)
+rather than a genuine, unrecoverable ABI drift. It is not:
+
+- The plugin (same `-DABICHECK_PLUGIN_RTTI=off -DABICHECK_PLUGIN_STDLIB=libc++`
+  recipe) built cleanly against this real fork source and crashed inside
+  real `icpx` with the **identical** stack and signal — same function,
+  same line, same SIGSEGV.
+- A debug build (`-DCMAKE_BUILD_TYPE=Debug`) of that same fork-sourced
+  plugin, inspected live under `gdb` attached to real `icpx`, pinpoints the
+  crash precisely: `deriveRootsFromIncludes`'s `for (const auto &e : hso.
+  UserEntries)` range-for loop dereferences a `std::vector` whose iterator
+  state is internally inconsistent — `__begin1.__i_ == 0x0` (a null begin
+  pointer) while `__end1.__i_` is a real, non-null heap address. A
+  genuinely empty `std::vector` has `begin() == end()`, both null or both
+  equal; `begin_` reading as null while `end_` reads as a live pointer is
+  the signature of reading a `std::vector<HeaderSearchOptions::Entry>`
+  object through the **wrong field layout** — bytes written by whatever
+  object model `icpx`'s own (differently-built) frontend code actually
+  used for `clang::HeaderSearchOptions`, reinterpreted through this
+  plugin's own compiled understanding of that same class. This is a
+  concrete confirmation of "frontend object-layout parity," not just a
+  restatement of it — the specific object crossing the ABI boundary badly
+  is `HeaderSearchOptions::UserEntries` (a `std::vector<Entry>`), not
+  something diffuse across "the frontend hierarchy" in general.
+- **Control case, same environment, ruling out a plain logic bug:** the
+  identical plugin source, built against vanilla apt LLVM/Clang 22
+  (`CMAKE_PREFIX_PATH=/usr/lib/llvm-22`, `CMAKE_CXX_COMPILER=clang++-22`,
+  **no** RTTI/stdlib overrides — a fully self-consistent, single-toolchain
+  pair) and loaded into vanilla apt `clang++-22` on the identical trivial
+  smoke-test translation unit, exits 0 and emits a real, valid
+  `abicheck_inputs/manifest.json`. The crash is not present when nothing
+  crosses a toolchain boundary at all — it requires the specific
+  icx-vs.-everything-else mismatch, however that mismatch actually arises.
+- **A further, narrower hypothesis for *why* the exact-matching-tag build
+  still failed, worth recording even though it could not be verified
+  further in this environment:** real `icpx`'s own `clang-22` binary (a
+  168MB static executable) has **no** `libc++.so`/`libstdc++.so` runtime
+  dependency at all (`ldd`/`readelf -d` show only `libc`/`libm`/`libgcc_s`/
+  `libpthread`/`librt`/`libz` — its C++ standard library is statically
+  linked in). This plugin's own build, by contrast, dynamically links
+  against `/lib/x86_64-linux-gnu/libc++.so.1`/`libc++abi.so.1` (whatever
+  `libc++-<major>-dev` apt package was installed) — a *different, separate*
+  copy of the C++ runtime from whatever `icpx` statically embedded. Two
+  `libc++` builds nominally targeting "the same" ABI version are not
+  guaranteed byte-identical in every internal representation absent an
+  externally-verified match (allocator internals, assertion/hardening
+  build flags, `_LIBCPP_ABI_VERSION`/`_LIBCPP_ABI_NAMESPACE`), and this is
+  exactly the class of drift a corrupted-but-not-obviously-wrong
+  `std::vector` layout would produce. If a future attempt has access to
+  Intel's actual internal build (not just the public source), the
+  `libc++`/`libc++abi` build Intel statically links into `icpx` — not just
+  the Clang/LLVM source commit — is the thing that would need to match
+  exactly; matching source alone (as this pass did) is demonstrably
+  insufficient on its own.
+
+This does not change the section's conclusion (no certified path exists
+without Intel's own internal build), but it does close off the "maybe the
+public fork source was just the wrong commit" question this section
+previously left open, and gives a follow-up attempt a specific, falsifiable
+target (the statically-linked runtime, not the Clang/LLVM source tree)
+rather than another round of "try a slightly different commit."
 
 ### Recommended distribution model: certified artifact, not same-major rebuild
 

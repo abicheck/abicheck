@@ -38,6 +38,7 @@ from abicheck.buildsource.source_extractors import (
     source_abi_from_clang_ast,
 )
 from abicheck.buildsource.source_extractors.clang import (
+    _clang_compiler_family,
     _equivalent_public_roots_for_unit,
     _path_suffixes,
 )
@@ -2675,6 +2676,60 @@ def test_extract_runs_macro_pass(monkeypatch) -> None:  # type: ignore[no-untype
     assert len(calls) == 3
     assert any(e.qualified_name == "FOO_SIZE" for e in tu.macros)
     assert tu.fact_set["compiler_version"] == "18.1.3"
+    assert tu.fact_set["compiler_family"] == "clang"
+
+
+@pytest.mark.parametrize(
+    ("clang_bin", "expected"),
+    [
+        ("clang", "clang"),
+        ("clang++", "clang"),
+        ("/usr/bin/clang-18", "clang"),
+        ("gcc", "clang"),
+        ("icx", "intel-llvm"),
+        ("icpx", "intel-llvm"),
+        ("dpcpp", "intel-llvm"),
+        ("dpcpp-cl", "intel-llvm"),
+        ("/opt/intel/oneapi/compiler/2026.1/bin/icpx", "intel-llvm"),
+        ("icpx.exe", "intel-llvm"),
+    ],
+)
+def test_clang_compiler_family(clang_bin: str, expected: str) -> None:
+    # Regression: default_fact_set's compiler_family default of "clang"
+    # silently collapsed every Intel oneAPI (icx/icpx/dpcpp/dpcpp-cl) wrapper
+    # pack to the same generic label a vanilla Clang run would carry -- real
+    # testing against a real icpx wrapper pack confirmed exactly this
+    # (source_facts recorded "compiler_family": "clang" with no trace the
+    # frontend was actually a downstream fork). This is the same name-based
+    # recognition _is_intel_sycl_driver already uses for a real AST-parsing
+    # decision, not a new, weaker heuristic invented for this label alone.
+    assert _clang_compiler_family(clang_bin) == expected
+
+
+def test_extract_stamps_intel_llvm_compiler_family(monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    import json
+
+    from abicheck.buildsource.source_extractors import clang as clang_mod
+    from abicheck.buildsource.source_extractors.clang import _clang_compiler_version
+
+    _clang_compiler_version.cache_clear()
+
+    def handler(cmd, **kw):  # type: ignore[no-untyped-def]
+        if "-ast-dump=json" in cmd:
+            return _emit_ast(kw, json.dumps(_ast()))
+        if "-dumpversion" in cmd:
+            return _Result(0, "22.1.0\n")
+        return _Result(0, "")
+
+    extractor = ClangSourceExtractor(clang_bin="icpx")
+    monkeypatch.setattr(extractor, "available", lambda: True)
+    monkeypatch.setattr(clang_mod.deadline, "run_bounded", handler)
+    monkeypatch.setattr(clang_mod.subprocess, "run", handler)
+    tu = extractor.extract(
+        _cu(source="foo.cpp"), public_header_roots=["include/foo.h"], target_id="t"
+    )
+    assert tu.fact_set["compiler_family"] == "intel-llvm"
+    assert tu.fact_set["compiler_version"] == "22.1.0"
 
 
 def test_extract_macro_pass_failure_is_diagnostic(monkeypatch) -> None:  # type: ignore[no-untyped-def]
