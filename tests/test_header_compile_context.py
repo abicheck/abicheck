@@ -107,6 +107,34 @@ def test_resolve_returns_empty_when_no_unit_references_the_header(
     assert result.context is None
 
 
+def test_resolve_expands_directory_header_input_before_matching(
+    tmp_path: Path,
+) -> None:
+    # A `-H`/InputSpec.headers entry may name a whole directory rather than a
+    # single file (the normal L2 path expands it via
+    # `service_scan.expand_header_inputs` before parsing). Passing the raw,
+    # unexpanded directory here must not silently no-op: it should be
+    # expanded to its real header files first, so a compile unit that
+    # `#include`s one of those files is still matched and the derived context
+    # still applies -- reproducing the reported gap (before the fix, matching
+    # against the directory path itself finds no `#include "headers"`-shaped
+    # text in any TU, so nothing matches and `parsed_with_build_context`
+    # never gets stamped).
+    header_dir = tmp_path / "headers"
+    header_dir.mkdir()
+    header = header_dir / "widget.h"
+    header.write_text("struct Widget { int x; };\n", encoding="utf-8")
+    src = tmp_path / "widget.cpp"
+    src.write_text('#include "widget.h"\nint f() { return 0; }\n', encoding="utf-8")
+    cu = _cu(source=str(src), directory=str(tmp_path), standard="c++20")
+    ev = BuildEvidence(compile_units=[cu])
+    result = resolve_header_compile_context(ev, [header_dir])
+    assert result.matched is True
+    assert result.matched_unit_count == 1
+    assert result.context is not None
+    assert "-std=c++20" in result.context.gcc_option_tokens
+
+
 def test_resolve_derives_context_from_single_matching_unit(tmp_path: Path) -> None:
     header = tmp_path / "widget.h"
     header.write_text("struct Widget { int x; };\n", encoding="utf-8")
@@ -389,6 +417,49 @@ def test_resolve_explicit_define_resolves_macro_only_disagreement(
     explicit = CompileContext(gcc_option_tokens=("-DFOO=2",))
     result = resolve_header_compile_context(ev, [header], explicit=explicit)
     assert result.matched is True
+
+
+def test_resolve_agreeing_structured_fields_with_different_raw_flag_spellings_not_ambiguous(
+    tmp_path: Path,
+) -> None:
+    # Two compile units that resolve to the IDENTICAL structured
+    # target_triple/sysroot, but whose adapter-captured raw
+    # `abi_relevant_flags` spell the flag that produced it differently
+    # (a complete single-token `--target=X` vs. a split two-token `-target`
+    # survivor, likewise for sysroot) must NOT be reported as ambiguous --
+    # the raw spelling carries no information the structured field doesn't
+    # already carry, and this holds with no explicit CompileContext at all
+    # (unlike the Finding-3 tests above, which need an explicit pin to
+    # excuse a genuine structured-field disagreement, this is a spelling-
+    # only non-disagreement the signature must never have raised on in the
+    # first place).
+    header = tmp_path / "widget.h"
+    header.write_text("struct Widget { int x; };\n", encoding="utf-8")
+    src_a = tmp_path / "a.cpp"
+    src_a.write_text('#include "widget.h"\n', encoding="utf-8")
+    src_b = tmp_path / "b.cpp"
+    src_b.write_text('#include "widget.h"\n', encoding="utf-8")
+    unit_a = _cu(
+        source=str(src_a),
+        directory=str(tmp_path),
+        standard="c++20",
+        target_triple="aarch64-linux-gnu",
+        sysroot="/opt/sysroot",
+        abi_relevant_flags=["--target=aarch64-linux-gnu", "--sysroot=/opt/sysroot"],
+    )
+    unit_b = _cu(
+        source=str(src_b),
+        directory=str(tmp_path),
+        standard="c++20",
+        target_triple="aarch64-linux-gnu",
+        sysroot="/opt/sysroot",
+        abi_relevant_flags=["-target", "-isysroot"],
+    )
+    ev = BuildEvidence(compile_units=[unit_a, unit_b])
+    result = resolve_header_compile_context(ev, [header])
+    assert result.matched is True
+    assert result.matched_unit_count == 2
+    assert result.context is not None
 
 
 def test_resolve_multiple_headers_union_of_matches(tmp_path: Path) -> None:

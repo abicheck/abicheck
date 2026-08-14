@@ -79,6 +79,8 @@ from typing import TYPE_CHECKING
 from .._compiler_options import explicit_language_standard
 from ..compile_context import CompileContext
 from ..errors import HeaderCompileContextAmbiguousError
+from ..header_utils import iter_directory_headers
+from .build_query import PRUNED_HEADER_DIR_SEGMENTS
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -132,6 +134,51 @@ def _compile_unit_references_header(cu: CompileUnit, header_resolved: Path) -> b
         if include_arg == header_name or str(header_resolved).endswith(include_arg):
             return True
     return False
+
+
+def _expand_header_directories(headers: Sequence[Path]) -> list[Path]:
+    """Expand any directory-shaped entry in *headers* into its real header files.
+
+    ``InputSpec.headers``/``-H`` may name a whole directory rather than an
+    individual header file, and the normal L2 path already expands such an
+    entry (``service_scan.expand_header_inputs``) into its actual header
+    files before parsing -- without this, matching against the raw directory
+    path itself finds no ``#include "<dirname>"``-shaped text in any TU
+    source, so no compile unit is ever matched and this whole seam silently
+    no-ops for a directory input.
+
+    Deliberately *not* a call to ``service_scan.expand_header_inputs``
+    itself: that function lives in the CLI/service import-cycle-allowlisted
+    cluster, and (transitively, via ``scan_engine`` -> ``buildsource.
+    l2_seed``) importing it from here -- a `buildsource/` leaf module
+    `l2_seed.py` itself calls into -- closes a real import cycle
+    (``header_compile_context`` -> ``service_scan`` -> ``scan_engine`` ->
+    ``buildsource.l2_seed`` -> ``header_compile_context``), exactly what
+    AGENTS.md's "What NOT to do" asks a change to avoid rather than
+    resolve by extending ``IMPORT_CYCLE_ALLOWLIST``. Reusing
+    ``header_utils.iter_directory_headers`` directly instead (the same
+    walk ``expand_header_inputs`` itself delegates to, filtered by the
+    identical ``HEADER_SUFFIXES``/pruned-segment set) keeps the expanded
+    header set identical to what L2 actually parses, without the cycle.
+
+    Best-effort, matching this module's own contract: a header path that
+    doesn't exist, isn't a file/directory, or is an empty header directory
+    is silently dropped rather than raised -- ``expand_header_inputs``
+    itself raises ``ValidationError`` for those cases (real user-facing
+    validation for an explicit ``-H``), but this function only ever
+    degrades to "no evidence to apply" for the P0.3 seam, never surfaces a
+    new failure mode for a header the seam merely couldn't expand.
+    """
+    out: list[Path] = []
+    for h in headers:
+        if h.is_dir():
+            out.extend(iter_directory_headers(h, PRUNED_HEADER_DIR_SEGMENTS))
+        elif h.is_file():
+            out.append(h)
+        # Neither a file nor a directory (missing, broken symlink, ...): best
+        # effort, drop it -- matches `_compile_unit_references_header`'s own
+        # silent-skip-on-unreadable-input contract for the source side.
+    return out
 
 
 def _matching_compile_units(
@@ -241,6 +288,46 @@ class _ExplicitPin:
         )
 
 
+#: Raw ``abi_relevant_flags`` prefixes that are just alternate spellings of a
+#: field this signature already compares *structurally* (``target_triple``/
+#: ``sysroot``/``standard``). ``CompileUnit.abi_relevant_flags`` is captured
+#: from raw argv by ``buildsource.adapters.base.extract_abi_relevant_flags``
+#: (a prefix match over ``ABI_RELEVANT_FLAG_PREFIXES``) independently of the
+#: adapter's own structured-field derivation, so two compile units resolving
+#: to the *identical* structured value (e.g. ``target_triple ==
+#: "aarch64-linux-gnu"`` on both) can still carry differently-spelled raw
+#: survivors of the same flag (a complete single-token ``--target=X`` on one
+#: unit, a split two-token ``-target X`` on another — the same ambiguity
+#: already named in ``source_extractors._argv.STRUCTURED_TOOLCHAIN_FLAG_
+#: PREFIXES``, which this list mirrors for the identical reason: those raw
+#: flags "must NOT be carried through" as their own signal once a structured
+#: field already represents them). Comparing the raw duplicates here as well
+#: would raise a false ``HeaderCompileContextAmbiguousError`` even though the
+#: two units' *effective* contexts genuinely agree. Excluding them from the
+#: signature is safe in the same "only ever turns ambiguous into single-
+#: context" direction ``_EffectiveContextSignature``'s own docstring already
+#: relies on: a raw flag excluded here is still compared, just via its
+#: structured field instead, so no real disagreement can be hidden by this
+#: exclusion — only a spelling-only non-disagreement stops being flagged as
+#: one. ``-std=``/``/std:`` (standard) is included too: a compile unit could
+#: in principle carry both a structured ``standard`` and a raw ``-std=...``
+#: survivor in ``abi_relevant_flags`` (the adapter's own extraction and its
+#: structured-field derivation are independent passes over the same argv),
+#: and the identical spelling-divergence risk applies. Unlike
+#: :class:`_ExplicitPin`'s masking below (which only excludes a dimension the
+#: *caller* explicitly pinned), this exclusion is unconditional -- it never
+#: depends on whether an ``explicit`` context was even given, since the raw
+#: flag is redundant with its structured field regardless.
+_STRUCTURED_FIELD_FLAG_PREFIXES = (
+    "--sysroot",
+    "-isysroot",
+    "--target",
+    "-target",
+    "-std=",
+    "/std:",
+)
+
+
 @dataclass(frozen=True)
 class _EffectiveContextSignature:
     """The ABI-relevant fields the plan's point 1 + point 3 name, normalized.
@@ -260,6 +347,15 @@ class _EffectiveContextSignature:
     disagree only on a dimension the caller already pinned no longer read as
     a materially different signature, while a disagreement on any other,
     unpinned dimension still does.
+
+    ``abi_relevant_flags`` here is *also* not ``cu.abi_relevant_flags``
+    verbatim, independent of ``pin``: see ``_STRUCTURED_FIELD_FLAG_PREFIXES``
+    and :func:`_mask_pinned_abi_flags` — a raw flag already fully represented
+    by ``target_triple``/``sysroot``/``standard`` is excluded unconditionally,
+    so two compile units that agree on the structured value but spell the
+    flag that produced it differently (``--target=X`` vs. ``-target X``)
+    compare equal here instead of falsely disagreeing, whether or not the
+    caller pinned anything.
     """
 
     language: str
@@ -295,30 +391,33 @@ class _EffectiveContextSignature:
 
 
 def _mask_pinned_abi_flags(flags: Sequence[str], pin: _ExplicitPin) -> list[str]:
-    """Drop ``cu.abi_relevant_flags`` entries a pinned dimension already
-    covers (Finding 3, continued).
+    """Drop ``cu.abi_relevant_flags`` entries a structured field already
+    covers.
 
     ``adapters.base.extract_abi_relevant_flags`` records the *same* raw
     ``-std=``/``-target``/``--target=``/``--sysroot``/``-isysroot`` tokens
     into ``CompileUnit.abi_relevant_flags`` that also feed the *structured*
-    ``standard``/``target_triple``/``sysroot`` fields masked above — so
-    without this, a std-only disagreement pinned via ``explicit`` still
-    showed up as a differing ``abi_relevant_flags`` tuple (the raw
-    ``-std=c++17``/``-std=c++20`` tokens themselves), reopening the exact
-    ambiguity the structured-field masking above was meant to close.
+    ``standard``/``target_triple``/``sysroot`` fields
+    :meth:`_EffectiveContextSignature.of` already compares directly (see
+    ``_STRUCTURED_FIELD_FLAG_PREFIXES``'s own docstring) -- so two units
+    agreeing on the structured value but spelling the flag that produced it
+    differently (a complete ``--target=X`` vs. a split ``-target X``
+    survivor) must not read as disagreeing raw-flag tuples.
+
+    Unconditional, not gated on *pin*: this is a strict superset of what a
+    pin-conditioned exclusion would give (Finding 3's own motivating case —
+    a std-only disagreement the caller has explicitly pinned via
+    ``explicit`` still needing its raw ``-std=c++17``/``-std=c++20``
+    survivors excluded, or it would reopen the exact ambiguity the
+    structured-field pin-masking in ``.of()`` was meant to close, is one
+    instance of the general rule this function already applies regardless
+    of ``pin``). *pin* is accepted for a symmetrical call signature with the
+    structured-field masking above and is reserved for a future dimension
+    (e.g. a pinned macro spelled only as a raw flag) that genuinely needs
+    per-pin conditioning rather than the unconditional rule; it plays no
+    role in today's target/sysroot/standard exclusion.
     """
-    out: list[str] = []
-    for f in flags:
-        if pin.standard and (f.startswith("-std=") or f.startswith("/std:")):
-            continue
-        if pin.target_triple and (f == "-target" or f.startswith("--target=")):
-            continue
-        if pin.sysroot and (
-            f in ("--sysroot", "-isysroot") or f.startswith("--sysroot=")
-        ):
-            continue
-        out.append(f)
-    return out
+    return [f for f in flags if not f.startswith(_STRUCTURED_FIELD_FLAG_PREFIXES)]
 
 
 #: Bare switch spellings whose operand is a *separate*, following argv token
@@ -439,7 +538,7 @@ def resolve_header_compile_context(
     """
     if build_evidence is None or not build_evidence.compile_units or not headers:
         return _EMPTY_RESOLUTION
-    resolved_headers = [Path(h) for h in headers]
+    resolved_headers = _expand_header_directories([Path(h) for h in headers])
     matched = _matching_compile_units(build_evidence.compile_units, resolved_headers)
     if not matched:
         return _EMPTY_RESOLUTION
