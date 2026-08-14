@@ -1138,7 +1138,7 @@ def compare(
             internal_namespaces=_internal_namespaces(policy_file),
         )
 
-    return DiffResult(
+    result = DiffResult(
         old_version=old.version,
         new_version=new.version,
         library=old.library,
@@ -1170,3 +1170,28 @@ def compare(
         assurance=assurance,
         contract_context=contract_context,
     )
+    # P0.4 — computed last, from data the pipeline above already produced
+    # (evidence tiers, comparability outcome, contract context, whatever
+    # BuildSourcePack either side already carries). A pure rollup over the
+    # just-built `result`, never a new probe; see analysis_assurance.py's
+    # own module docstring for the full rationale and what is deferred.
+    #
+    # `checker.compare()` only ever sees each snapshot's own *embedded*
+    # BuildSourcePack (`old.build_source`/`new.build_source`) — it has no
+    # visibility into an out-of-band `--old/new-build-info`/
+    # `--old/new-sources` pack directory the `compare` CLI may have
+    # resolved separately (`_resolve_side_pack`), so it passes exactly what
+    # it has. A caller that resolved such a pack must recompute this with
+    # the real pack passed explicitly (P1 review; see
+    # `compute_analysis_assurance`'s own docstring and
+    # `cli_compare_helpers._report_compare_result`'s recomputation).
+    from .analysis_assurance import compute_analysis_assurance
+
+    result.analysis_assurance = compute_analysis_assurance(
+        result,
+        old,
+        new,
+        old_pack=getattr(old, "build_source", None),
+        new_pack=getattr(new, "build_source", None),
+    )
+    return result

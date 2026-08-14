@@ -4,6 +4,8 @@ audience:
   - library-maintainer
   - ci-owner
 level: intermediate
+canonical_for:
+  - analysis-assurance
 lifecycle: active
 generated: false
 ---
@@ -91,6 +93,33 @@ contributes `0/1/2/4`: a compatible addition can block, and a breaking finding
 can be demoted. Only legacy output without a gate block falls back from
 compatibility verdict to `2`/`4`. Existing command-specific `5`, `8`, and `64`
 behavior is as documented below.
+
+## Analysis-assurance contribution (P0.4)
+
+`compare` always computes and reports `analysis_assurance` — a third,
+orthogonal axis alongside the compatibility verdict and the policy/severity
+gate, answering "how complete and trustworthy was the evidence behind this
+comparison" independently of whatever the verdict says. Its `status` field is
+one of `complete`, `partial`, `failed`, `not_comparable`, or `not_requested`,
+and it is always present in `--format json` output (`analysis_assurance`
+top-level key), regardless of any flag.
+
+By itself this changes **nothing** about any exit code — `analysis_assurance`
+is purely informational until a caller opts in. Passing `--require-complete-
+analysis` makes `compare` additionally contribute exit `1` whenever
+`analysis_assurance.status` is not `complete`, folded with the same `max`
+discipline the contract-coverage axis above uses: it raises a clean `0` to
+`1` and **never lowers** a `2`/`4` — incomplete assurance cannot demote a real
+ABI break to "warnings only", and it never rewrites the compatibility verdict,
+any finding, or the severity gate's own contribution.
+
+`--require-complete-analysis` is single-pair only; a directory/package
+(release) `compare` rejects it (P0.6, run-plan-aware aggregation, is the
+tracked follow-up for extending this axis to the release fan-out).
+
+**Without `--require-complete-analysis` every pre-existing invocation's exit
+code is unchanged**, exactly as `--contract-evaluation`'s own coverage axis
+requires no opt-in flag change either.
 
 ## Commands removed in the ADR-043 CLI reset
 

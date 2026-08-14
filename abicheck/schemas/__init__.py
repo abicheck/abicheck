@@ -455,7 +455,21 @@ from typing import Any
 #:       root-target scoping (every report before this feature, and every
 #:       non-L3_build row), so no pre-existing consumer's parsing breaks.
 #:       Additive optional keys.
-REPORT_SCHEMA_VERSION = "2.37"
+#: 2.38 — new top-level ``analysis_assurance`` object (P0.4,
+#:       ``analysis_assurance.py``): the third leg of the
+#:       compatibility-verdict / analysis-assurance / policy-gate split,
+#:       answering "how complete and trustworthy was the evidence" as its
+#:       own axis, orthogonal to ``verdict``. Unconditionally present (every
+#:       ``checker.compare()`` call populates it) rather than gated behind a
+#:       flag, unlike ``contract_context`` -- see that module's own
+#:       docstring. Additive top-level key, versioned internally via its own
+#:       ``analysis_assurance.schema_version`` so a consumer can version-check
+#:       the sub-object without caring about this report schema's own
+#:       MAJOR.MINOR. Renumbered from a conflicting 2.37 when the origin/main
+#:       rebase claimed that version first for P0.2's ``layer_coverage``
+#:       root-target keys (same "renumber, don't reuse" convention as the
+#:       2.32/2.36 entries above).
+REPORT_SCHEMA_VERSION = "2.38"
 
 #: SemVer-style (MAJOR.MINOR) version of the ``scan`` JSON output, emitted as
 #: ``scan_schema_version`` at the top level of both public scan dict shapes:

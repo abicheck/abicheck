@@ -1014,6 +1014,7 @@ def _reject_flags_unsupported_for_set_inputs(
     used_by_apps: tuple[Path, ...], required_symbols: tuple[str, ...],
     diagnostic_comparison: bool, audit_suppressions: bool,
     pack_paths: tuple[Path, ...], include_labels: dict[Path, str] | None,
+    require_complete_analysis: bool = False,
 ) -> None:
     """Reject the single-pair-only flags on a directory/package compare.
 
@@ -1037,6 +1038,7 @@ def _reject_flags_unsupported_for_set_inputs(
         audit_suppressions=audit_suppressions,
         pack_paths=pack_paths,
         include_labels=include_labels,
+        require_complete_analysis=require_complete_analysis,
     )
     _reject_compile_context_for_set_inputs(ctx, project_cfg)
     _reject_evidence_flags_for_set_inputs(ctx)
@@ -1062,6 +1064,7 @@ def _report_compare_result(
     secondary_fmt: str | None, secondary_output: Path | None,
     old_build_info: Path | None, new_build_info: Path | None,
     old_sources: Path | None, new_sources: Path | None,
+    require_complete_analysis: bool = False,
 ) -> None:
     """Everything after the comparison: annotate, scope, render, exit.
 
@@ -1078,6 +1081,30 @@ def _report_compare_result(
     # Pass all injected findings (probe-matrix + evidence) so artifact-backed
     # excludes them — none come from L0-L2 diffing.
     attach_evidence_metrics(result, evidence_metrics, extra_changes or [])
+
+    # P0.4 (P1 review): recompute analysis_assurance now that the *real*
+    # evidence pack behind this comparison's findings is known.
+    # checker.compare() (inside compare_snapshots above) only ever saw each
+    # snapshot's own *embedded* BuildSourcePack -- an out-of-band
+    # --old/new-build-info / --old/new-sources pack directory is resolved
+    # separately via _resolve_side_pack and used to produce this run's real
+    # findings/coverage (prepare_embedded_build_source, before
+    # compare_snapshots was even called) without ever being attached back
+    # onto old/new. Without this, analysis_assurance would silently reflect
+    # whatever (possibly absent, possibly stale) payload the bare snapshots
+    # carry instead of the pack that actually backed this run -- defeating
+    # --require-complete-analysis's whole purpose. Re-resolving here is
+    # cheap (pure pack-directory metadata load, no diffing) and mirrors the
+    # identical, already-reviewed fix _fold_evidence_depth_into_json applies
+    # for the same class of gap on old_evidence_depth/new_evidence_depth.
+    from .analysis_assurance import compute_analysis_assurance
+    from .cli_buildsource_helpers import _resolve_side_pack
+
+    result.analysis_assurance = compute_analysis_assurance(
+        result, old, new,
+        old_pack=_resolve_side_pack(old_build_info, old_sources, old),
+        new_pack=_resolve_side_pack(new_build_info, new_sources, new),
+    )
 
     if explain_patterns:
         echo_pattern_modulations(result)
@@ -1097,6 +1124,49 @@ def _report_compare_result(
         exit_code_scheme=resolved_cfg.exit_code_scheme, sev_config=sev_config,
         verify_runtime=verify_runtime, suppression=suppression,
     )
+
+    # P0.4 (P2 review): fold the orthogonal coverage/analysis-assurance
+    # floors into the scoped exit code *before* any report gets rendered
+    # below, and write the folded value back onto `result.scoped_exit_code`
+    # -- the exact field SARIF's `gateExitCode`/`scopedExitCode`, JUnit's
+    # `abicheck.gate_exit_code`/`abicheck.scoped_exit_code`, and HTML's gate
+    # banner all read directly (`getattr(result, "scoped_exit_code", ...)`,
+    # no folding of their own). Previously this fold ran only right before
+    # `sys.exit` below, *after* `_write_or_echo` had already serialized both
+    # the primary and secondary reports from the pre-floor value -- so an
+    # artifact could show a passing 0 gate while the process actually exited
+    # 1 under `--require-complete-analysis` (Codex review, reproduced).
+    # Folding here, and persisting the result back onto `result` rather than
+    # only a local variable, means every renderer downstream -- present or
+    # future -- reads the one authoritative, already-floored value with no
+    # render-order dependency, mirroring how `_exit_with_severity_or_verdict`
+    # (cli.py) applies both floors immediately after computing its own base
+    # exit code and before returning control to its caller.
+    if scoped_exit_code is not None:
+        from .analysis_assurance import (
+            assurance_floor_diagnostic,
+            fold_analysis_assurance_exit,
+        )
+
+        announce_coverage_floor(
+            result,
+            base_exit=scoped_exit_code,
+            fmt=fmt,
+            stat=stat,
+            secondary_fmt=secondary_fmt,
+        )
+        scoped_exit_code = fold_coverage_exit(scoped_exit_code, result)
+        diagnostic = assurance_floor_diagnostic(
+            result,
+            require_complete=require_complete_analysis,
+            base_exit=scoped_exit_code,
+        )
+        if diagnostic is not None:
+            click.echo(diagnostic, err=True)
+        scoped_exit_code = fold_analysis_assurance_exit(
+            scoped_exit_code, result, require_complete=require_complete_analysis
+        )
+        result.scoped_exit_code = scoped_exit_code  # type: ignore[attr-defined]
 
     if audit_suppressions:
         _attach_suppression_audit(result, suppression)
@@ -1163,12 +1233,18 @@ def _report_compare_result(
         # ADR-043: --used-by / --required-symbol(s) scope the primary verdict
         # to the application/plugin-host contract, floored at the worst
         # scoped result -- the full library verdict stays informational only.
-        # ADR-049 §7's coverage axis is orthogonal to that scoping.
-        announce_coverage_floor(result, base_exit=scoped_exit_code, fmt=fmt, stat=stat, secondary_fmt=secondary_fmt)
-        sys.exit(fold_coverage_exit(scoped_exit_code, result))
+        # ADR-049 §7's coverage axis and P0.4's analysis-assurance axis are
+        # both orthogonal to that scoping. Both floors were already folded
+        # into `scoped_exit_code` (and persisted onto `result.scoped_exit_code`)
+        # above, before any report was rendered (P2 review) -- this is just
+        # the terminal exit, not a second fold.
+        sys.exit(scoped_exit_code)
 
     _announce_exit_scheme(resolved_cfg.exit_code_scheme, fmt=fmt, stat=stat)
-    _exit_with_severity_or_verdict(result, sev_config, resolved_cfg.exit_code_scheme, fmt, stat, secondary_fmt)
+    _exit_with_severity_or_verdict(
+        result, sev_config, resolved_cfg.exit_code_scheme, fmt, stat, secondary_fmt,
+        require_complete_analysis=require_complete_analysis,
+    )
 
 
 def run_compare(
@@ -1252,6 +1328,7 @@ def run_compare(
     old_dump_manifest: Path | None = None,
     new_dump_manifest: Path | None = None,
     frontend_context: str = "host",
+    require_complete_analysis: bool = False,
 ) -> None:
     """Run the single-pair (or set fan-out) ``compare`` flow and exit accordingly."""
     from .dry_run import reject_dry_run_with_output
@@ -1362,6 +1439,7 @@ def run_compare(
             audit_suppressions=audit_suppressions,
             pack_paths=pack_paths,
             include_labels=include_labels,
+            require_complete_analysis=require_complete_analysis,
         )
 
     # Parsed after the directory/package rejection above (not before, like an
@@ -1725,6 +1803,7 @@ def run_compare(
         secondary_fmt=secondary_fmt, secondary_output=secondary_output,
         old_build_info=old_build_info, new_build_info=new_build_info,
         old_sources=old_sources, new_sources=new_sources,
+        require_complete_analysis=require_complete_analysis,
     )
 
 

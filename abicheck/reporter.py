@@ -205,6 +205,10 @@ def to_stat_json(
     d["evidence_tiers"] = list(result.evidence_tiers)
     if result.coverage_warnings:
         d["coverage_warnings"] = list(result.coverage_warnings)
+    from .analysis_assurance import analysis_assurance_report_dict
+
+    if (block := analysis_assurance_report_dict(result)) is not None:
+        d["analysis_assurance"] = block
     return json.dumps(d, indent=indent)
 
 
@@ -282,23 +286,19 @@ def _add_reconciled(d: dict[str, object], result: DiffResult) -> None:
 
 
 def _add_contract_context(d: dict[str, object], result: DiffResult) -> None:
-    """Attach ADR-049 Phase 4's persisted contract blocks to a JSON dict.
-
-    Emits ``contract_context`` -- the ``contract_evidence`` /
-    ``evaluation_context`` / ``decision_receipt`` sibling group (plan
-    Section 5.1) -- whenever ``compare(..., contract_evaluation=True)``
-    assembled one, and nothing at all otherwise (never a null placeholder).
-    Serialized through :mod:`abicheck.contract_context_io` rather than
-    hand-built here, so the block a report writes is byte-for-byte the one
-    :func:`~abicheck.contract_replay.replay_original_decisions` reads back --
-    a second, report-local encoding is exactly how a round-trip guarantee
-    stops holding.
-
-    Called from all three JSON paths (full, leaf, root-cause) for the same
-    reason ``_add_surface_scope``/``_add_reconciled`` are: each builds its own
-    dict, so a ledger added to only one of them silently disappears under
-    ``--report-mode``.
+    """ADR-049 Phase 4's persisted contract blocks, plus P0.4's unconditional
+    ``analysis_assurance`` (piggybacked here, unguarded below, to stay under
+    the file-size cap). ``contract_context`` itself stays opt-in
+    (``compare(..., contract_evaluation=True)``), serialized via
+    :mod:`abicheck.contract_context_io` to match
+    :func:`~abicheck.contract_replay.replay_original_decisions`. Called from
+    all three JSON paths, same as ``_add_surface_scope``/``_add_reconciled``.
     """
+    from .analysis_assurance import analysis_assurance_report_dict
+
+    if (block := analysis_assurance_report_dict(result)) is not None:
+        d["analysis_assurance"] = block
+
     ctx = result.contract_context
     if ctx is None:
         return

@@ -157,6 +157,30 @@ class TestReportValidatesAgainstSchema:
         payload = json.loads(reporter.to_json(compare(snap, snap)))
         self._validate(payload)
 
+    def test_no_change_report_carries_analysis_assurance(self):
+        """P0.4 (schema 2.37): analysis_assurance is unconditionally present
+        on every real compare-report JSON (a verdict from the five Verdict
+        enum values), not just for a run that requested deeper evidence."""
+        f = _fn("api", "_Z3apiv")
+        snap = AbiSnapshot(library="libfoo.so.1", version="1.0", functions=[f])
+        payload = json.loads(reporter.to_json(compare(snap, snap)))
+        assert "analysis_assurance" in payload
+        self._validate(payload)
+
+    def test_report_missing_analysis_assurance_is_rejected(self):
+        """P2 review (finding 3): analysis_assurance was documented and
+        emitted as unconditional for schema 2.37, but was never added to the
+        top-level `required` array, so a report missing it silently
+        validated. A real, well-formed report with the key stripped must now
+        fail schema validation."""
+        f = _fn("api", "_Z3apiv")
+        snap = AbiSnapshot(library="libfoo.so.1", version="1.0", functions=[f])
+        payload = json.loads(reporter.to_json(compare(snap, snap)))
+        assert "analysis_assurance" in payload
+        del payload["analysis_assurance"]
+        with pytest.raises(jsonschema.ValidationError):
+            self._validate(payload)
+
     def test_breaking_report_validates(self):
         old, new = _breaking_pair()
         payload = json.loads(reporter.to_json(compare(old, new)))

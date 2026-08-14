@@ -529,6 +529,16 @@ class DiffResult:
     # fold_coverage_exit`` derives the orthogonal coverage contribution from
     # it, so a run carrying one can exit ``1`` on that axis (ADR-049 §7).
     contract_context: object | None = None
+    # P0.4 — the orthogonal "how complete/trustworthy was the evidence"
+    # answer (analysis_assurance.py), sitting beside `verdict` (what changed)
+    # and the severity/gate exit code (whether to fail the build) as the
+    # third leg of a three-way split. Always populated by `checker.compare()`
+    # (never `None` for a `DiffResult` it returned) -- typed as `object` for
+    # the same reason `contract_context` above is: `analysis_assurance.py`
+    # imports `DiffResult` from this module to build one, so a real
+    # annotation here would be circular. Narrow with `isinstance` at any
+    # consumption site (see `reporter._add_analysis_assurance`).
+    analysis_assurance: object | None = None
 
     def _effective_kind_sets(
         self,

@@ -530,6 +530,7 @@ _OPTION_SET_SNAPSHOT: dict[str, tuple[str, ...]] = {
         "--recommend",
         "--reconcile-build-context",
         "--report-mode",
+        "--require-complete-analysis",
         "--require-justification",
         "--required-symbol",
         "--required-symbols",
