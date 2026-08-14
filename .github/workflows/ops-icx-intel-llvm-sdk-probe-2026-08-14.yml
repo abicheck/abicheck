@@ -1,0 +1,53 @@
+name: Ops ICX Intel LLVM SDK probe 2026-08-14
+
+on:
+  push:
+    branches: [ops/icx-intel-llvm-sdk-probe-2026-08-14]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 75
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.13"
+
+      - name: Install product ICX and build tools
+        shell: bash
+        run: |
+          set -euxo pipefail
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends \
+            ca-certificates wget gpg-agent cmake ninja-build build-essential \
+            file binutils jq libc++-dev libc++abi-dev
+          wget -qO- https://apt.repos.intel.com/intel-gpg-keys/GPG-PUB-KEY-INTEL-SW-PRODUCTS.PUB \
+            | gpg --dearmor \
+            | sudo tee /usr/share/keyrings/oneapi-archive-keyring.gpg >/dev/null
+          echo 'deb [signed-by=/usr/share/keyrings/oneapi-archive-keyring.gpg] https://apt.repos.intel.com/oneapi all main' \
+            | sudo tee /etc/apt/sources.list.d/oneAPI.list >/dev/null
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends intel-oneapi-compiler-dpcpp-cpp
+          python -m pip install -e .
+
+      - name: Inspect exact-date Intel LLVM package and try scan
+        shell: bash
+        run: bash tools/ops/icx_intel_llvm_sdk_probe.sh
+
+      - name: Upload evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: icx-intel-llvm-sdk-${{ github.sha }}
+          path: icx-intel-llvm-sdk-results/
+          if-no-files-found: error
+          retention-days: 30
+          compression-level: 1
