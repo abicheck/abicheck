@@ -1189,6 +1189,54 @@ def _canonicalize_params_list(value: str) -> str:
     )
 
 
+# Matches an `_Atomic`-qualified spelling in either form castxml/clang emit:
+# a bare `_Atomic` sentinel (castxml, see below) or a real wrapped spelling
+# like `_Atomic(struct Foo *)` (clang). Anchored to the whole string (after
+# stripping) rather than reusing diff_atomic.py's own word-boundary search,
+# since this helper's job is "is this ENTIRE type-slot spelling the atomic
+# side of the transition", not "does _Atomic appear anywhere".
+_ATOMIC_SLOT_RE = re.compile(r"^_Atomic\b")
+
+
+def _canonicalize_atomic_slot(value: str) -> str:
+    """Canonicalize one ``diff_atomic.py`` type-slot spelling for the
+    identity discriminator (Codex review, fresh evidence).
+
+    ``dumper_castxml.py`` cannot model C11 ``_Atomic`` at all -- it emits a
+    bare ``Unimplemented`` node with no reference to the wrapped type, so
+    its own ``_type_name()`` spells the qualified side of the transition as
+    the literal, lossy sentinel ``"_Atomic"`` (see that function's own
+    comment). The direct-clang backend, by contrast, retains the real
+    wrapped spelling clang's own AST printer produces (e.g.
+    ``"_Atomic(struct Foo *)"``). Plain :func:`canonicalize_type_name`
+    normalizes whitespace/const-ordering/pointer-sigil spacing, but has no
+    notion of "these two spellings name the same qualified type" -- so
+    without this helper, CastXML's bare sentinel and Clang's concrete
+    spelling would never hash to the same canonical id for the identical
+    qualifier-added/-removed transition, defeating the whole point of
+    adding ``atomic_qualifier_changed`` to
+    :data:`_TYPE_BEARING_DISCRIMINATOR_KINDS`.
+
+    Safe to collapse the qualified side down to the bare ``"_Atomic"``
+    sentinel for identity purposes: ``diff_atomic.py``'s own detection
+    (``_has_atomic``) only ever tests *presence* of the qualifier via a
+    regex search, never compares the wrapped type across old/new -- two
+    genuinely different ``_Atomic``-wrapped inner types on the same slot
+    can never both reach this detector as two distinct findings (the
+    detector only fires on a presence transition, and continues past an
+    unchanged, still-``_Atomic`` slot entirely) -- so no real discriminating
+    information is lost. The *unqualified* side of the transition (the
+    plain, non-``_Atomic`` type both backends spell reliably) is left to
+    ordinary :func:`canonicalize_type_name` normalization, since that side's
+    exact spelling IS backend-comparable and still needs to distinguish,
+    e.g., an unrelated base-type change from a pure qualifier change.
+    """
+    stripped = value.strip()
+    if _ATOMIC_SLOT_RE.match(stripped):
+        return "_Atomic"
+    return canonicalize_type_name(stripped)
+
+
 def _stringify_change_value(value: object) -> str:
     """Deterministic string form of a ``Change.old_value``/``new_value``.
 
@@ -1406,6 +1454,13 @@ def _change_discriminator(
             # canonicalization, not one whole-string call.
             old_str = _canonicalize_params_list(old_str)
             new_str = _canonicalize_params_list(new_str)
+        elif kind_value == "atomic_qualifier_changed":
+            # See _canonicalize_atomic_slot's own docstring: CastXML's bare
+            # "_Atomic" sentinel and Clang's real wrapped spelling must
+            # collapse to the same value, which plain canonicalize_type_name
+            # cannot do on its own.
+            old_str = _canonicalize_atomic_slot(old_str)
+            new_str = _canonicalize_atomic_slot(new_str)
         else:
             old_str = canonicalize_type_name(old_str)
             new_str = canonicalize_type_name(new_str)
@@ -1420,10 +1475,25 @@ def _change_discriminator(
                 # raw old/new substrings with their already-canonicalized
                 # forms directly, rather than canonicalizing the sentence
                 # as one opaque blob.
-                if raw_old_str:
-                    desc = desc.replace(raw_old_str, old_str)
-                if raw_new_str:
-                    desc = desc.replace(raw_new_str, new_str)
+                #
+                # Substitute the LONGER raw string first (Codex review,
+                # fresh evidence): atomic_qualifier_changed's own
+                # "qualifier added" direction embeds the unqualified raw
+                # spelling verbatim *inside* the qualified one (e.g. raw_old
+                # "struct Foo *" is a literal substring of raw_new
+                # "_Atomic(struct Foo *)") -- replacing the shorter raw_old
+                # first would also rewrite the copy embedded inside
+                # raw_new's own span before raw_new's own replace ever runs,
+                # so raw_new's exact text no longer appears in desc and its
+                # replace becomes a silent no-op, leaving the qualified
+                # side's stale, backend-specific spelling in the discriminator.
+                for raw, canon in sorted(
+                    ((raw_old_str, old_str), (raw_new_str, new_str)),
+                    key=lambda pair: len(pair[0]),
+                    reverse=True,
+                ):
+                    if raw:
+                        desc = desc.replace(raw, canon)
             else:
                 desc = canonicalize_type_name(desc)
         parts.append(desc)

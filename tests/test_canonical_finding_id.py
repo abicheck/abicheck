@@ -32,7 +32,11 @@ import yaml
 from abicheck.checker_policy import ChangeKind
 from abicheck.checker_types import Change, DiffResult
 from abicheck.diff_helpers import make_change
-from abicheck.finding_identity import report_canonical_finding_id, report_finding_id
+from abicheck.finding_identity import (
+    report_canonical_finding_id,
+    report_finding_id,
+    resolve_change_identity,
+)
 from abicheck.reporter import to_json
 from abicheck.suppression import Suppression, SuppressionList
 
@@ -370,12 +374,16 @@ class TestCanonicalFindingIdScopedCanonicalization:
             # diff_atomic.py: `detail` is a fixed direction string
             # ("qualifier added"/"qualifier removed"), never a per-item
             # identity -- old/new are the raw iter_type_slot_changes()
-            # type-slot spellings.
+            # type-slot spellings. CastXML cannot model _Atomic at all and
+            # spells the qualified side as the bare, lossy sentinel
+            # "_Atomic" (dumper_castxml.py's own _type_name()); Clang keeps
+            # the real wrapped spelling -- _canonicalize_atomic_slot is what
+            # collapses these to the same canonical id.
             (
                 ChangeKind.ATOMIC_QUALIFIER_CHANGED,
                 "qualifier added",
                 "struct Foo*",
-                "_Atomic(struct Foo*)",
+                "_Atomic",
                 "struct Foo *",
                 "_Atomic(struct Foo *)",
             ),
@@ -395,16 +403,22 @@ class TestCanonicalFindingIdScopedCanonicalization:
             # transition.
             (
                 ChangeKind.BIT_INT_WIDTH_CHANGED,
-                "_BitInt width changed 17 → 17",
+                "_BitInt width changed 17 → 33",
                 "_BitInt(17)*",
+                "_BitInt(33) *",
                 "_BitInt(17) *",
-                "_BitInt(17) *",
-                "_BitInt(17)*",
+                "_BitInt(33)*",
             ),
         ],
     )
     def test_type_slot_kinds_are_backend_stable(
-        self, kind, detail, old_castxml, new_castxml, old_clang, new_clang
+        self,
+        kind: ChangeKind,
+        detail: str,
+        old_castxml: str,
+        new_castxml: str,
+        old_clang: str,
+        new_clang: str,
     ):
         # Regression (canonical-id-backend-gap): ATOMIC_QUALIFIER_CHANGED,
         # CHAR8T_MIGRATION, and BIT_INT_WIDTH_CHANGED were all missing from
@@ -504,6 +518,70 @@ class TestCanonicalFindingIdScopedCanonicalization:
         assert report_canonical_finding_id(
             width_17_to_33
         ) != report_canonical_finding_id(width_17_to_65)
+
+    def test_atomic_qualifier_changed_castxml_lossy_sentinel_matches_clang(self):
+        # Regression (Codex review, canonical-id-backend-gap, P1 finding):
+        # dumper_castxml.py cannot model C11 _Atomic at all and spells the
+        # qualified side as the bare, lossy sentinel "_Atomic" -- Clang keeps
+        # the real wrapped spelling ("_Atomic(struct Foo *)"). Plain
+        # canonicalize_type_name has no notion that these name the same
+        # qualified type, so the fix's first revision (canonicalize_type_name
+        # alone) still failed to match here even after atomic_qualifier_changed
+        # was added to the allowlist -- _canonicalize_atomic_slot is what
+        # closes it.
+        castxml = make_change(
+            ChangeKind.ATOMIC_QUALIFIER_CHANGED,
+            symbol="_Z3fooPKc",
+            name="parameter 0 of '_Z3fooPKc'",
+            detail="qualifier added",
+            old="struct Foo*",
+            new="_Atomic",
+        )
+        clang = make_change(
+            ChangeKind.ATOMIC_QUALIFIER_CHANGED,
+            symbol="_Z3fooPKc",
+            name="parameter 0 of '_Z3fooPKc'",
+            detail="qualifier added",
+            old="struct Foo *",
+            new="_Atomic(struct Foo *)",
+        )
+        assert report_canonical_finding_id(castxml) == report_canonical_finding_id(
+            clang
+        )
+
+    def test_atomic_qualifier_changed_description_substitution_handles_containment(
+        self,
+    ):
+        # Regression (Codex review, fresh evidence): _change_discriminator's
+        # description substitution replaced raw_old_str, then raw_new_str,
+        # unconditionally in that order. For a "qualifier added" transition
+        # the unqualified raw_old spelling ("struct Foo *") is a literal
+        # substring of the qualified raw_new spelling
+        # ("_Atomic(struct Foo *)") -- replacing raw_old first also rewrote
+        # the copy embedded inside raw_new's own span, so raw_new's exact
+        # text no longer appeared in the description and its own replace
+        # silently no-opped, leaving the qualified side's stale,
+        # backend-specific spelling in the discriminator. Verified directly
+        # against the rendered description, not just the opaque hash.
+        clang = make_change(
+            ChangeKind.ATOMIC_QUALIFIER_CHANGED,
+            symbol="_Z3fooPKc",
+            name="parameter 0 of '_Z3fooPKc'",
+            detail="qualifier added",
+            old="struct Foo *",
+            new="_Atomic(struct Foo *)",
+        )
+        canonical_desc_fragment = "Foo * → _Atomic"
+        # The rendered description must fully collapse the qualified side to
+        # the bare sentinel -- not leave a stale "_Atomic(Foo *)" behind.
+        assert (
+            canonical_desc_fragment
+            in resolve_change_identity(clang, canonicalize_values=True).primary_id
+        )
+        assert (
+            "_Atomic(Foo *)"
+            not in resolve_change_identity(clang, canonicalize_values=True).primary_id
+        )
 
     def test_equivalent_category_kinds_still_distinguish_old_new(self):
         # Regression (Codex review, PR #753, fourth round): a bare
