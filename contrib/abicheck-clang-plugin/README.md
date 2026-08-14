@@ -406,7 +406,7 @@ work as designed and narrows what "experimental" means in practice:
   smoke test before it reaches a real build, so the failure mode here is
   "the certified-artifact path has no certified artifact yet to point at,"
   not "an incompatible artifact silently ships."
-- **The `abicheck-cc` wrapper path is the one confirmed working end to end
+- **The `abicheck-cc` wrapper path is the one confirmed working end-to-end
   against real `icpx`** in this same re-run: `abicheck-cc icpx` observing a
   real compile, through `abicheck dump --build-info`, to a `scan
   --build-info --depth source` producing L4 source-ABI replay and an L5
