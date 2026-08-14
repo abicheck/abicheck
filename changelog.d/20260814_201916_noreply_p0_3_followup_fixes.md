@@ -55,3 +55,22 @@
   unit (i.e. the structured field actually captured the value, making the
   raw flag truly redundant); when `standard` is empty, `/std:` stays in the
   ambiguity signature so two disagreeing units still raise.
+- **A review finding on the *rendering* path, not the ambiguity-signature
+  comparison: `_context_flags()` still appended a raw, structured-field-
+  covered flag after the correct rendering it duplicates.** The masking
+  above (`_is_structured_field_flag()`) was wired only into the
+  ambiguity-*comparison* path (`_mask_pinned_abi_flags()`), so two compile
+  units spelling an equivalent sysroot as `--sysroot=/…/sdk` and
+  `--sysroot=sdk`/`-isysroot sdk` correctly compared as agreeing — but
+  `_context_flags()` itself, which renders the literal argv passed to
+  castxml/clang, still appended the selected unit's raw, unmodified
+  survivor after the already-rendered, absolute structured `--sysroot=`
+  token. A real compiler's last-flag-wins semantics then let the trailing,
+  uncorrected *relative* raw flag silently override the correct one, so
+  the header was parsed against a sysroot relative to abicheck's own
+  current directory rather than the compile unit's — potentially failing
+  or producing incorrect L2 evidence. `_context_flags()` now reuses the
+  identical `_is_structured_field_flag()` predicate to exclude the same
+  structured-field-covered raw flags from the rendered tail, so the two
+  code paths (comparison vs. rendering) share one source of truth instead
+  of two independently-evolving copies.
