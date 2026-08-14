@@ -30,6 +30,13 @@ from collections.abc import Callable, Iterable
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
+_MODULE_RUNNER = Path(__file__).resolve().with_name("run_isolated_module.py")
+
+
+def _isolated_module_command(*mod_args: str) -> tuple[str, ...]:
+    return (sys.executable, "-I", str(_MODULE_RUNNER), *mod_args)
+
+
 # Make `abicheck` importable when the package is not pip-installed (e.g. when
 # the script runs as the first CI step before `pip install -e .`).
 if str(ROOT) not in sys.path:
@@ -1383,21 +1390,24 @@ def check_import_cycles(f: Findings) -> None:
 def check_mypy_baseline(f: Findings) -> None:
     """Run `mypy abicheck/` and ensure the error count hasn't drifted upward.
 
-    Skipped (with a single info line) when mypy is unavailable. Invoked as
-    ``sys.executable -m mypy`` rather than a bare ``mypy`` resolved via PATH
-    (`shutil.which`) — a bare command name can resolve to a *different*
-    install than the one pinned for this interpreter (`mypy==1.19.1` per
-    pyproject.toml's `[dev]` extra), which silently ran the wrong mypy
-    version here and reported a false baseline drift (CLAUDE.md "M0-3" —
-    the same PATH-ambiguity class scripts/verify.py's `_py()` helper exists
-    to close, just found again in this script's own bespoke invocation).
+    Skipped (with a single info line) when mypy is unavailable. Invoked via
+    an isolated ``sys.executable`` module runner rather than a bare ``mypy``
+    resolved via PATH (`shutil.which`) — a bare command name can resolve to
+    a *different* install than the one pinned for this interpreter
+    (`mypy==1.19.1` per pyproject.toml's `[dev]` extra), which silently ran
+    the wrong mypy version here and reported a false baseline drift
+    (CLAUDE.md "M0-3" — the same PATH-ambiguity class scripts/verify.py's
+    `_py()` helper exists to close). The runner starts Python with ``-I``
+    and restores the base interpreter's user site, additionally preventing
+    a repository-root ``mypy.py`` from shadowing the installed tool while
+    this check runs with ``cwd=ROOT`` (P0.3, security hardening).
     """
     if importlib.util.find_spec("mypy") is None:
         print("mypy-baseline: mypy not installed, skipping")
         return
     try:
         proc = subprocess.run(
-            [sys.executable, "-m", "mypy", "abicheck"],
+            _isolated_module_command("mypy", "abicheck"),
             cwd=ROOT,
             capture_output=True,
             text=True,

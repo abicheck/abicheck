@@ -64,6 +64,12 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
+_MODULE_RUNNER = Path(__file__).resolve().with_name("run_isolated_module.py")
+
+
+def _isolated_module_command(*mod_args: str) -> tuple[str, ...]:
+    return (sys.executable, "-I", str(_MODULE_RUNNER), *mod_args)
+
 
 FAST = "fast"
 PR = "pr"
@@ -159,7 +165,7 @@ def _need_modules(*names: str) -> Callable[[], str | None]:
 
 
 def _py(*mod_args: str) -> tuple[str, ...]:
-    """Invoke an installed Python console tool as `sys.executable -m <mod_args>`.
+    """Invoke an installed Python tool without repository-root shadowing.
 
     For ``pytest``/``mypy``/``ruff``/``mkdocs`` — packages that expose a
     `python -m <name>` entry point. Never a bare command name: PATH can
@@ -167,11 +173,19 @@ def _py(*mod_args: str) -> tuple[str, ...]:
     ".[dev]"` put on this interpreter (e.g. a stray user-level `pytest`
     missing the `xdist`/`cov` plugins) — the exact reproducibility gap M0-3
     exists to close, just one layer lower than the mypy-version drift it was
-    written for. For a local ``scripts/*.py`` file (not an importable
-    module), use `_pyscript` instead — `-m` takes a dotted module name, not a
-    file path.
+    written for.
+
+    The interpreter starts under ``-I`` (isolated mode), so a PR-planted
+    repository-root ``pytest.py``/``mypy.py``/``ruff.py`` cannot be imported
+    in place of the real, installed tool during ``-m`` module lookup (P0.3,
+    security hardening) — CI running these checks with ``cwd=ROOT`` was
+    otherwise exactly the shadowing vector. ``run_isolated_module.py`` then
+    restores the base interpreter's/venv's normal user-site visibility so a
+    ``pip install --user`` tool remains resolvable. For a local
+    ``scripts/*.py`` file (not an importable module), use `_pyscript`
+    instead — `-m` takes a dotted module name, not a file path.
     """
-    return (sys.executable, "-m", *mod_args)
+    return _isolated_module_command(*mod_args)
 
 
 def _pyscript(path: str, *args: str) -> tuple[str, ...]:
@@ -438,7 +452,7 @@ STEPS: tuple[Step, ...] = (
         description="Mutation-score survivor-baseline gate",
     ),
     Step(
-        # Builds dist/ itself (`python -m build`), then `twine check`s the
+        # Builds dist/ itself (`python -I -m build`), then `twine check`s the
         # result, then validates its metadata — self-contained, so this step
         # doesn't require a caller to have already populated dist/.
         #

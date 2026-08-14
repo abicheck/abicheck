@@ -134,7 +134,17 @@ elif [[ -f "$BASELINE_PATH" ]]; then
       # naive Python-side zstd fallback on Python 3.10/3.11 without a
       # system zstd binary could extract a `../`-escaping member outside
       # $BASELINE_DIR before the symlink/manifest checks below even run).
-      python3 -c '
+      # -I (isolated mode, supported since Python 3.10, this project's
+      # floor): do not prepend the script's own directory / the current
+      # working directory to sys.path, and ignore PYTHONPATH/other PYTHON*
+      # env vars entirely. Without it, a malicious caller repository could
+      # plant its own abicheck/package.py in the checkout (or point
+      # PYTHONPATH at one) and have *that* file imported instead of the
+      # installed abicheck package -- python3 -c's implicit "prepend cwd"
+      # behavior is exactly the shadowing vector. (Safe-path mode, -P,
+      # would also close the cwd-prepend half, but is 3.11+ only and still
+      # honors PYTHONPATH -- -I is strictly stronger and portable to 3.10.)
+      python3 -I -c '
 import sys
 from pathlib import Path
 from abicheck.package import TarExtractor
@@ -152,7 +162,9 @@ TarExtractor._safe_extract_zst_tar(Path(sys.argv[1]), Path(sys.argv[2]))
       # already closed by routing through this same extractor (Codex
       # review). `tarfile.open`'s default mode auto-detects gzip vs. plain
       # tar from the file itself, so one call handles both extensions.
-      python3 -c '
+      # -I: see the .tar.zst branch above -- same workspace-shadowing risk,
+      # same fix.
+      python3 -I -c '
 import sys
 from pathlib import Path
 from abicheck.package import TarExtractor
@@ -235,7 +247,11 @@ if [[ -n "$CANDIDATE_BUILD_OUTPUT" ]]; then
   if [[ ! -f "$CANDIDATE_BUILD_OUTPUT" ]]; then
     _fail "candidate-build-output '$CANDIDATE_BUILD_OUTPUT' does not exist."
   fi
-  CANDIDATE_EVIDENCE_PRODUCER=$(python3 -c '
+  # -I: defense in depth -- this snippet only imports stdlib json/sys today,
+  # but isolating every python3 -c invocation this Action runs against a
+  # caller-controlled workspace is the invariant, not "isolate the ones that
+  # happen to import abicheck today."
+  CANDIDATE_EVIDENCE_PRODUCER=$(python3 -I -c '
 import json, sys
 with open(sys.argv[1], encoding="utf-8") as f:
     data = json.load(f)
@@ -269,7 +285,14 @@ fi
 
 echo "::group::Resolve baseline ($CHANNEL / $KIND / $PROFILE)"
 set +e
-RESOLVE_STDOUT=$(python3 "$ACTION_PATH/resolve_baseline.py" "${RESOLVE_ARGS[@]}")
+# -I: resolve_baseline.py imports abicheck.buildsource.baseline_set -- same
+# workspace-shadowing risk as the extraction snippets above (a caller-set
+# PYTHONPATH could otherwise substitute a shadow abicheck/buildsource/
+# baseline_set.py during every resolution, not just during extraction).
+# resolve_baseline.py itself does no sys.path manipulation, so isolating it
+# is safe: Python still adds $ACTION_PATH (this Action's own, trusted
+# directory) as sys.path[0] for a script invocation regardless of -I.
+RESOLVE_STDOUT=$(python3 -I "$ACTION_PATH/resolve_baseline.py" "${RESOLVE_ARGS[@]}")
 RESOLVE_EXIT=$?
 set -e
 echo "$RESOLVE_STDOUT"

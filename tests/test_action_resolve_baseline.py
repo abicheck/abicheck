@@ -807,6 +807,48 @@ class TestArchiveExtraction:
         assert outputs.get("outcome") == "resolved"
         assert Path(outputs["snapshot-path"]).is_file()
 
+    def test_tar_extraction_ignores_workspace_shadow_package(
+        self, tmp_path: Path
+    ) -> None:
+        """P0.2: a malicious caller repository must not be able to plant its
+        own abicheck/package.py (or point PYTHONPATH at one) and have that
+        file imported instead of the installed distribution during archive
+        extraction (Codex review)."""
+        baseline_dir = tmp_path / "baseline-src"
+        _write_manifest(baseline_dir, artifacts=[_target_artifact("libpvxs")])
+        (baseline_dir / "libpvxs.abicheck.json").write_text("{}", encoding="utf-8")
+
+        archive_path = tmp_path / "baseline.tar"
+        with tarfile.open(archive_path, "w") as tf:
+            tf.add(baseline_dir, arcname=".")
+
+        marker = tmp_path / "workspace-package-imported"
+        shadow_pkg = tmp_path / "abicheck"
+        shadow_pkg.mkdir()
+        (shadow_pkg / "__init__.py").write_text("", encoding="utf-8")
+        (shadow_pkg / "package.py").write_text(
+            "from pathlib import Path\n"
+            f"Path({str(marker)!r}).write_text('imported', encoding='utf-8')\n"
+            "raise RuntimeError('workspace shadow package imported')\n",
+            encoding="utf-8",
+        )
+
+        result, outputs = _run_action(
+            {
+                "INPUT_BASELINE_PATH": str(archive_path),
+                "INPUT_CHANNEL": "release-contract",
+                "INPUT_TARGET": "libpvxs",
+                "INPUT_PROFILE": PROFILE,
+                # A hostile caller can point PYTHONPATH at its workspace;
+                # extraction must still import the installed distribution.
+                "PYTHONPATH": str(tmp_path),
+            },
+            tmp_path,
+        )
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert outputs.get("outcome") == "resolved"
+        assert not marker.exists()
+
     def test_tar_gz_archive_with_nested_directory_is_descended_into(
         self, tmp_path: Path
     ) -> None:
