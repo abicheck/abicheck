@@ -98,3 +98,23 @@
   request (`lang_explicit=False`, including Click's own non-explicit
   `"c++"` default) remains a complete no-op, so every existing caller's
   behavior is unchanged.
+- **An eighth review round found the `/std:` masking above still relied on
+  `bool(cu.standard)`, which proves only that *some* token populated the
+  structured field — not that `/std:` itself did, or that the two agree.**
+  `clang-cl` accepts BOTH GCC/Clang's `-std=` and MSVC's `/std:` on one
+  command line, and per real `clang-cl` semantics the LATER, MSVC-style
+  `/std:` wins (confirmed empirically: `clang-cl -std=c++17 /std:c++20`
+  compiles under C++20, `-std=` ignored) — but `build_context.py`'s
+  `-std=` capture has no notion of that precedence, so a compile unit like
+  `clang-cl -std=c++17 /std:c++20` gets `cu.standard == "c++17"` (from
+  `-std=`, not from `/std:`) while the real, honored standard is `c++20`.
+  `standard_captured=bool(cu.standard)` therefore masked away the
+  disagreeing `/std:c++20` survivor as "redundant," silently parsing under
+  the wrong standard. `_is_structured_field_flag()` now takes the actual
+  `cu_standard` string and, via a new
+  `_msvc_std_flag_matches_captured_standard()` helper, compares each
+  `/std:` token's own value (case-normalized) against `cu_standard`
+  directly — masking only when they genuinely agree, and retaining `/std:`
+  in both the ambiguity signature and the rendered context whenever they
+  disagree, matching what a real `clang-cl`/`cl.exe` invocation actually
+  honors.

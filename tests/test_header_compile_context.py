@@ -834,6 +834,78 @@ def test_resolve_msvc_std_colon_stays_masked_when_standard_field_populated_and_a
     assert result.context is not None
 
 
+def test_resolve_msvc_std_colon_retained_when_disagreeing_with_populated_standard_field(
+    tmp_path: Path,
+) -> None:
+    """P2 review finding (``discussion_r3787584574``): ``clang-cl`` accepts
+    BOTH GCC/Clang's ``-std=`` and MSVC's ``/std:`` on one command line, and
+    per real ``clang-cl`` semantics the LATER, MSVC-style ``/std:`` wins --
+    confirmed empirically (``clang-cl -std=c++17 /std:c++20`` compiles under
+    C++20, ``-std=`` ignored). ``cu.standard`` here is populated to
+    ``"c++17"`` by the co-present ``-std=c++17`` token (mirroring
+    ``build_context.py``'s unconditional ``-std=`` capture), NOT by the
+    disagreeing ``/std:c++20`` survivor also present in
+    ``abi_relevant_flags`` -- so ``bool(cu.standard)`` alone (the previous,
+    now-wrong gate) would have wrongly treated ``/std:c++20`` as redundant
+    with the structured field and masked it away. The fix instead compares
+    the ``/std:`` token's own value against ``cu.standard`` and, finding
+    them disagree, retains ``/std:c++20`` in the rendered context -- which
+    is what a real ``clang-cl`` invocation actually honors."""
+    header = tmp_path / "widget.h"
+    header.write_text("struct Widget { int x; };\n", encoding="utf-8")
+    src = tmp_path / "a.cpp"
+    src.write_text('#include "widget.h"\n', encoding="utf-8")
+    unit = _cu(
+        source=str(src),
+        directory=str(tmp_path),
+        standard="c++17",
+        abi_relevant_flags=["-std=c++17", "/std:c++20"],
+    )
+    ev = BuildEvidence(compile_units=[unit])
+    result = resolve_header_compile_context(ev, [header])
+    assert result.matched is True
+    assert result.context is not None
+    tokens = list(result.context.gcc_option_tokens)
+    assert "/std:c++20" in tokens
+    # -std=c++17 (rendered from the structured field) must come *before*
+    # /std:c++20 in the final token list, so real compiler last-flag-wins
+    # semantics let /std:c++20 -- what clang-cl actually honors -- win.
+    assert tokens.index("-std=c++17") < tokens.index("/std:c++20")
+
+
+def test_resolve_msvc_std_colon_disagreement_raises_even_with_standard_field_populated(
+    tmp_path: Path,
+) -> None:
+    """Companion to the above: since ``/std:`` now stays in the per-unit
+    ambiguity signature whenever it disagrees with ``cu.standard`` (rather
+    than being unconditionally masked once ``cu.standard`` is merely
+    non-empty), two compile units both carrying a populated ``cu.standard``
+    from a co-present ``-std=`` -- but disagreeing ``/std:`` survivors --
+    must still raise ``HeaderCompileContextAmbiguousError``, not silently
+    collapse into one signature."""
+    header = tmp_path / "widget.h"
+    header.write_text("struct Widget { int x; };\n", encoding="utf-8")
+    src_a = tmp_path / "a.cpp"
+    src_a.write_text('#include "widget.h"\n', encoding="utf-8")
+    src_b = tmp_path / "b.cpp"
+    src_b.write_text('#include "widget.h"\n', encoding="utf-8")
+    unit_a = _cu(
+        source=str(src_a),
+        directory=str(tmp_path),
+        standard="c++17",
+        abi_relevant_flags=["-std=c++17", "/std:c++20"],
+    )
+    unit_b = _cu(
+        source=str(src_b),
+        directory=str(tmp_path),
+        standard="c++17",
+        abi_relevant_flags=["-std=c++17", "/std:c++23"],
+    )
+    ev = BuildEvidence(compile_units=[unit_a, unit_b])
+    with pytest.raises(HeaderCompileContextAmbiguousError):
+        resolve_header_compile_context(ev, [header])
+
+
 def test_resolve_multiple_headers_union_of_matches(tmp_path: Path) -> None:
     h1 = tmp_path / "a.h"
     h1.write_text("struct A {};\n", encoding="utf-8")
