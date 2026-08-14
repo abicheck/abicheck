@@ -259,7 +259,21 @@ jobs:
           python -m venv base_env
           ./base_env/bin/pip install -q --upgrade pip
           ./base_env/bin/pip install -q -e "./base[dev]"
-          ./base_env/bin/python base/scripts/benchmark_scaling.py \
+          # Run HEAD's own copy of the harness (not base's stale one) against
+          # base's installed package: benchmark_scaling.py prefers an
+          # already-importable `abicheck` over a same-directory checkout
+          # specifically so this works (see its own sys.path comment). Two
+          # reasons this matters, not just one: (1) the base branch's copy of
+          # this script may not support a flag this PR just added (e.g.
+          # --meta) -- a bare `set -e` failure here previously blocked the
+          # whole job before base.json was even written; (2) if this PR also
+          # changed the measurement *statistic* (as it did: median replaces
+          # min), running each side's own script would compare two different
+          # statistics against each other, a systematic bias independent of
+          # any real performance change (Codex review on PR #768). Running one
+          # harness against both installs removes both problems at the root
+          # instead of chasing them per-flag/per-methodology-change.
+          ./base_env/bin/python head/scripts/benchmark_scaling.py \
             --sizes 500 1000 2000 --repeat 5 \
             --meta git_sha=${{ github.event.pull_request.base.sha }} \
             --meta side=base \
@@ -427,40 +441,49 @@ jobs:
           python -m venv base_env
           ./base_env/bin/pip install -q --upgrade pip
           ./base_env/bin/pip install -q -e "./base[dev]"
-          # The base script may predate this gate entirely (a PR introducing
-          # it, or one from before it existed) -- that specific "script not
-          # present on base" case is the only one allowed to fall through to
-          # the report-only path below. Any other failure (a fixture-compile
-          # crash, a clang crash, the AST-attach verification catching a
-          # degraded pass) must fail this job rather than be silently
-          # swallowed by a blanket `|| true` (Codex review, fresh evidence).
-          if [ -f base/scripts/check_header_graph_perf.py ]; then
-            set +e
-            ./base_env/bin/python base/scripts/check_header_graph_perf.py \
-              --sizes 25 100 400 --repeat 5 --require-castxml \
-              --json-out base_header_graph.json 2>&1 | tee base_measure.log
-            status=${PIPESTATUS[0]}
-            set -e
-            if [ "$status" -ne 0 ]; then
-              # --require-castxml turns *any* castxml unusability into a
-              # hard failure -- including the one case that's a legitimate
-              # cross-checkout mismatch rather than a real regression: a PR
-              # that bumps the pinned castxml version together with its
-              # supported-range policy leaves the base checkout's *older*
-              # castxml_policy.py rejecting the single castxml install this
-              # job set up from head's script, since only one system castxml
-              # is installed for both measurements. That specific rejection
-              # degrades to report-only, exactly like "script not present on
-              # base" above; every other failure still propagates (Codex
-              # review, fresh evidence).
-              if grep -q "^FAIL: castxml version rejected by this build's policy:" base_measure.log; then
-                echo "Base branch's castxml policy rejects the installed pinned castxml (cross-checkout version-policy mismatch) -- report-only." >&2
-              else
-                exit "$status"
-              fi
+          # Run HEAD's own copy of the gate (not base's stale one) against
+          # base's installed abicheck package -- see benchmark_scaling.py's
+          # identical fix (and its own, more detailed comment) for the full
+          # reasoning: comparing a median computed by head's harness against
+          # a min() a stale base-branch copy of this same script would
+          # compute biases every comparison independent of any real
+          # performance change, and a base script predating a flag this PR
+          # just added would simply crash the step outright (Codex review on
+          # PR #768).
+          set +e
+          ./base_env/bin/python head/scripts/check_header_graph_perf.py \
+            --sizes 25 100 400 --repeat 5 --require-castxml \
+            --json-out base_header_graph.json 2>&1 | tee base_measure.log
+          status=${PIPESTATUS[0]}
+          set -e
+          if [ "$status" -ne 0 ]; then
+            # Two legitimate, non-regression reasons head's harness can fail
+            # against base's installed package -- both degrade to report-only
+            # exactly like a genuinely absent base measurement; every OTHER
+            # failure (a fixture-compile crash, a clang crash, the AST-attach
+            # verification catching a degraded pass) still propagates and
+            # fails this job rather than being silently swallowed (Codex
+            # review, fresh evidence):
+            # (1) --require-castxml turns any castxml unusability into a hard
+            #     failure -- including a legitimate cross-checkout mismatch: a
+            #     PR that bumps the pinned castxml version together with its
+            #     supported-range policy leaves base's *older*
+            #     castxml_policy.py rejecting the one system castxml this job
+            #     installed (from head's install script) for both sides;
+            # (2) base's installed abicheck package predates the header-graph
+            #     feature this gate measures entirely -- head's harness
+            #     imports service._attach_header_graph unconditionally, so a
+            #     base commit from before that existed (G31 Phase A) surfaces
+            #     as an ImportError rather than the old "script file not
+            #     present on base" signal (which no longer applies now that
+            #     head's copy always exists).
+            if grep -q "^FAIL: castxml version rejected by this build's policy:" base_measure.log; then
+              echo "Base branch's castxml policy rejects the installed pinned castxml (cross-checkout version-policy mismatch) -- report-only." >&2
+            elif grep -qE "(ImportError|ModuleNotFoundError):.*_attach_header_graph" base_measure.log; then
+              echo "Base branch's installed abicheck predates the header-graph feature this gate measures -- report-only." >&2
+            else
+              exit "$status"
             fi
-          else
-            echo "Gate not present on base branch -- report-only." >&2
           fi
 
       - name: Measure head and compare to base
@@ -476,7 +499,7 @@ jobs:
               --regress-tolerance 0.3 --regress-min-delta-ms 10 \
               | tee header_graph_regression.txt
           else
-            echo "No base measurement available (gate not present on base branch) -- report-only." \
+            echo "No base measurement available (base predates this gate's feature, or a cross-checkout castxml-policy mismatch) -- report-only." \
               | tee header_graph_regression.txt
             ./head_env/bin/python head/scripts/check_header_graph_perf.py \
               --sizes 25 100 400 --repeat 5 --require-castxml \

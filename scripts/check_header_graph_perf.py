@@ -118,6 +118,7 @@ Usage::
 from __future__ import annotations
 
 import argparse
+import importlib.util
 import json
 import math
 import os
@@ -129,7 +130,19 @@ import time
 from pathlib import Path
 from typing import Any
 
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+# Prefer an already-importable `abicheck` over the checkout sitting next to
+# this script, inserting the repo root only as a fallback -- NOT
+# unconditionally. This is what lets this exact script file be pointed at a
+# *different* installed abicheck than the one physically next to it:
+# performance.yml's `header-graph-regression` job runs THIS copy (the PR
+# head's) against both the head venv's and the base venv's separately-
+# installed packages, so both sides are measured with the identical
+# harness/statistics (Codex review on PR #768 — see benchmark_scaling.py's
+# own, more detailed comment on the identical pattern for the full
+# reasoning). A bare `python scripts/check_header_graph_perf.py` with no
+# install still works exactly as before.
+if importlib.util.find_spec("abicheck") is None:
+    sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 # Sibling module (this script's own directory) — the shared median/percentile/
 # regression-threshold math this script and benchmark_scaling.py both use.

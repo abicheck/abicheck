@@ -90,6 +90,7 @@ from __future__ import annotations
 import argparse
 import functools
 import gc
+import importlib.util
 import json
 import math
 import platform
@@ -110,9 +111,25 @@ from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any
 
-REPO_DIR = Path(__file__).resolve().parent.parent
-if str(REPO_DIR) not in sys.path:
-    sys.path.insert(0, str(REPO_DIR))
+# Prefer an already-importable `abicheck` (e.g. `pip install -e .` in the
+# active venv) over the checkout sitting next to this script, inserting
+# REPO_DIR only as a fallback -- NOT unconditionally. This is what lets this
+# exact script file be pointed at a *different* installed abicheck than the
+# one physically next to it: performance.yml's `regression` job runs THIS
+# copy (the PR head's) against both the head venv's and the base venv's
+# separately-installed packages, so both sides are measured with the
+# identical harness/statistics (Codex review on PR #768 — comparing a
+# median computed by this file's own measure() against a `min()` computed by
+# a stale base-branch copy of this same file systematically biases every
+# comparison, independent of any real performance change; running one
+# harness against both installs removes the mismatch instead of chasing it
+# per-flag). A bare `python scripts/benchmark_scaling.py` with no install
+# still works exactly as before: find_spec() fails, so this falls through to
+# the same REPO_DIR insertion this always did.
+if importlib.util.find_spec("abicheck") is None:
+    REPO_DIR = Path(__file__).resolve().parent.parent
+    if str(REPO_DIR) not in sys.path:
+        sys.path.insert(0, str(REPO_DIR))
 
 # Sibling module (this script's own directory, not the repo root above) — the
 # shared median/percentile/regression-threshold math this script and
