@@ -166,15 +166,29 @@ from .clang_source_edges import build_source_edges
 CLANG_EXTRACTOR_VERSION = "0.13"
 
 
+@functools.lru_cache(maxsize=8)
 def _clang_compiler_family(clang_bin: str) -> str:
     """The ``compiler_family`` label for *clang_bin* (ADR-038 C.8 fact_set).
 
     Defaults to ``"clang"`` for an ordinary vanilla/Apple/Debian Clang, but
-    reports ``"intel-llvm"`` for Intel's oneAPI DPC++/C++ Compiler fork
-    (icx/icpx/dpcpp/dpcpp-cl) via :func:`abicheck.dumper_clang.
-    _is_intel_sycl_driver` -- the same name-based recognition this codebase
-    already trusts for a real AST-parsing decision (``_needs_sycl_host_only``),
-    not a new, weaker heuristic invented just for this label.
+    reports ``"intel-llvm"`` for Intel's oneAPI DPC++/C++ Compiler fork.
+    Primarily resolved the same way ``actions/collect-facts/run.sh``'s
+    ``_is_intel_llvm_compiler`` does: probing for the ``__INTEL_LLVM_COMPILER``
+    predefined macro (``clang_bin -dM -E -x c++ -``), a vendor-scoped signal
+    that recognizes the fork regardless of how the binary is named/invoked
+    (a conventional ``clang``/``clang++`` symlink or a custom-named toolchain
+    wrapper included) -- unlike a name-based check, which cannot. Cached per
+    binary path (``functools.lru_cache``, mirroring :func:`_clang_compiler_
+    version`'s identical cost shape at the same per-TU call site, so this
+    costs one extra subprocess call per unique *clang_bin* for a whole scan,
+    not one per TU). Falls back to :func:`abicheck.dumper_clang.
+    _is_intel_sycl_driver`'s name-based recognition (icx/icpx/dpcpp/dpcpp-cl)
+    only if the macro probe itself fails to run at all (compiler not found,
+    times out, or rejects ``-dM -E``) -- a real, if weaker, signal is still
+    better than silently defaulting to "clang" (Codex review: an earlier
+    revision used the name check as primary and never attempted the macro
+    probe, missing Intel's fork whenever it's invoked through a
+    conventionally-named symlink or wrapper).
 
     Without this, ``default_fact_set``'s ``compiler_family`` default of
     ``"clang"`` silently collapsed every Intel oneAPI wrapper-collected
@@ -192,14 +206,21 @@ def _clang_compiler_family(clang_bin: str) -> str:
     release build without DWARF debug info had no other producer-identity
     signal at all to recover it from (DWARF's own ``DW_AT_producer`` string
     is a separate, independent identity source that isn't always present).
-    Deliberately does not attempt the stronger, macro-based
-    ``__INTEL_LLVM_COMPILER`` probe ``actions/collect-facts/run.sh``'s
-    ``_is_intel_llvm_compiler`` uses (a predefined-macro subprocess call) --
-    that script resolves a single top-level compiler once per Action
-    invocation, while this function is on this extractor's per-TU
-    ``_stamp_fact_set_and_coverage`` path and reuses an existing, cheap,
-    already-relied-upon check instead of adding a second probe per TU.
     """
+    try:
+        r = subprocess.run(
+            [clang_bin, "-dM", "-E", "-x", "c++", "-"],
+            input="",
+            capture_output=True,
+            text=True,
+            timeout=5,
+            check=False,
+        )
+        if r.returncode == 0:
+            return "intel-llvm" if "__INTEL_LLVM_COMPILER" in r.stdout else "clang"
+    except (OSError, subprocess.TimeoutExpired):
+        pass
+    return "intel-llvm" if _is_intel_sycl_driver(clang_bin) else "clang"
     return "intel-llvm" if _is_intel_sycl_driver(clang_bin) else "clang"
 
 

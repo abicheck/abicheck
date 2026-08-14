@@ -103,8 +103,14 @@ namespace {
 // Producer id, recorded in the manifest's `created_by` and the TU `extractor`
 // field. Bump on any change to the emitted-record recipe. 0.5: populate
 // read_files (P1 #15-16) and source_edges (P1 #17-18) during the existing AST
-// walk instead of reporting them `unsupported`.
-constexpr const char *kPluginVersion = "0.5";
+// walk instead of reporting them `unsupported`. 0.6: fact_set.compiler_family
+// (ADR-038 C.8) now reports "intel-llvm" for Intel's oneAPI fork instead of
+// the previous unconditional "clang" (see kCompilerFamily below) -- a pre-0.6
+// TU record and a 0.6+ one can carry a different compiler_family for the
+// identical underlying compiler, so producer_version must distinguish them
+// (Codex review, PR #756: an unbumped version left old and new records
+// indistinguishable to a consumer/artifact diagnostic comparing packs).
+constexpr const char *kPluginVersion = "0.6";
 
 // ADR-038 C.8: the canonical fact-set identity every SourceAbiTu producer
 // stamps (abicheck.buildsource.source_abi.SOURCE_ABI_FACT_SET_NAME/VERSION —

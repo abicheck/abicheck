@@ -2646,11 +2646,12 @@ def test_extract_runs_macro_pass(monkeypatch) -> None:  # type: ignore[no-untype
     from abicheck.buildsource.source_extractors import clang as clang_mod
     from abicheck.buildsource.source_extractors.clang import _clang_compiler_version
 
-    # The compiler-version lookup (ADR-038 C.8 fact_set) is process-lifetime
-    # cached by clang_bin, so a prior test in this session may have already
-    # warmed it — clear it so this test's call count is deterministic
-    # regardless of execution order.
+    # The compiler-version/-family lookups (ADR-038 C.8 fact_set) are
+    # process-lifetime cached by clang_bin, so a prior test in this session
+    # may have already warmed them — clear both so this test's call count is
+    # deterministic regardless of execution order.
     _clang_compiler_version.cache_clear()
+    _clang_compiler_family.cache_clear()
 
     calls: list[list[str]] = []
 
@@ -2660,6 +2661,8 @@ def test_extract_runs_macro_pass(monkeypatch) -> None:  # type: ignore[no-untype
             return _emit_ast(kw, json.dumps(_ast()))
         if "-dumpversion" in cmd:
             return _Result(0, "18.1.3\n")
+        if "-dM" in cmd:
+            return _Result(0, "#define __clang_major__ 18\n")
         return _Result(0, '# 1 "include/foo.h" 1\n#define FOO_SIZE 16\n')
 
     extractor = _patch_run(monkeypatch, handler)
@@ -2667,13 +2670,15 @@ def test_extract_runs_macro_pass(monkeypatch) -> None:  # type: ignore[no-untype
     # effort provenance lookup (like dumper.py's castxml --version note) and
     # deliberately does NOT go through deadline.run_bounded — patch it here
     # too so this test's call count stays deterministic without depending on
-    # a real clang install.
+    # a real clang install. _clang_compiler_family's "-dM -E -x c++ -" probe
+    # shares that same rationale.
     monkeypatch.setattr(clang_mod.subprocess, "run", handler)
     tu = extractor.extract(
         _cu(source="foo.cpp"), public_header_roots=["include/foo.h"], target_id="t"
     )
-    # AST pass + macro pass + the (cached-per-binary) compiler-version lookup.
-    assert len(calls) == 3
+    # AST pass + macro pass + the (cached-per-binary) compiler-version and
+    # compiler-family lookups.
+    assert len(calls) == 4
     assert any(e.qualified_name == "FOO_SIZE" for e in tu.macros)
     assert tu.fact_set["compiler_version"] == "18.1.3"
     assert tu.fact_set["compiler_family"] == "clang"
@@ -2694,16 +2699,74 @@ def test_extract_runs_macro_pass(monkeypatch) -> None:  # type: ignore[no-untype
         ("icpx.exe", "intel-llvm"),
     ],
 )
-def test_clang_compiler_family(clang_bin: str, expected: str) -> None:
-    # Regression: default_fact_set's compiler_family default of "clang"
-    # silently collapsed every Intel oneAPI (icx/icpx/dpcpp/dpcpp-cl) wrapper
-    # pack to the same generic label a vanilla Clang run would carry -- real
-    # testing against a real icpx wrapper pack confirmed exactly this
-    # (source_facts recorded "compiler_family": "clang" with no trace the
-    # frontend was actually a downstream fork). This is the same name-based
-    # recognition _is_intel_sycl_driver already uses for a real AST-parsing
-    # decision, not a new, weaker heuristic invented for this label alone.
+def test_clang_compiler_family_falls_back_to_name_when_binary_missing(
+    clang_bin: str, expected: str
+) -> None:
+    # None of these binaries exist on this test host under these bare names,
+    # so the primary __INTEL_LLVM_COMPILER macro probe (subprocess spawn)
+    # fails with OSError and _clang_compiler_family falls back to
+    # _is_intel_sycl_driver's name-based recognition -- the same fallback
+    # this function documents using when the probe itself can't run at all.
+    # See test_clang_compiler_family_prefers_macro_probe_over_name below for
+    # direct coverage of the (now primary) macro-probe path itself.
+    _clang_compiler_family.cache_clear()
     assert _clang_compiler_family(clang_bin) == expected
+
+
+def test_clang_compiler_family_prefers_macro_probe_over_name(monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    # Regression (Codex review, PR #756): a name-only check misses Intel's
+    # fork whenever it's invoked through a conventionally-named clang/clang++
+    # symlink or a custom-named toolchain wrapper. The primary signal is now
+    # the __INTEL_LLVM_COMPILER predefined macro (actions/collect-facts/
+    # run.sh's _is_intel_llvm_compiler probe, mirrored here), which recognizes
+    # the fork regardless of how the binary is named.
+    from abicheck.buildsource.source_extractors import clang as clang_mod
+
+    _clang_compiler_family.cache_clear()
+    calls: list[list[str]] = []
+
+    def fake_run(cmd, **kw):  # type: ignore[no-untyped-def]
+        calls.append(cmd)
+        return _Result(0, "#define __INTEL_LLVM_COMPILER 20260101\n")
+
+    monkeypatch.setattr(clang_mod.subprocess, "run", fake_run)
+    # A plain "clang++"-named binary -- _is_intel_sycl_driver alone would
+    # never recognize this as Intel's fork; the macro probe does.
+    assert _clang_compiler_family("clang++") == "intel-llvm"
+    assert calls and calls[0][:1] == ["clang++"]
+    assert "-dM" in calls[0] and "__INTEL_LLVM_COMPILER" not in calls[0]
+
+
+def test_clang_compiler_family_macro_probe_negative(monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    # A real, successful probe that simply finds no Intel macro (an ordinary
+    # vanilla Clang) must resolve "clang" from the probe itself, not fall
+    # through to the name-based fallback (which would agree here anyway, but
+    # the probe result -- not a coincidence -- must be what decides it).
+    from abicheck.buildsource.source_extractors import clang as clang_mod
+
+    _clang_compiler_family.cache_clear()
+    monkeypatch.setattr(
+        clang_mod.subprocess,
+        "run",
+        lambda cmd, **kw: _Result(0, "#define __clang_major__ 18\n"),
+    )
+    assert _clang_compiler_family("clang++") == "clang"
+
+
+def test_clang_compiler_family_is_cached_per_binary(monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    from abicheck.buildsource.source_extractors import clang as clang_mod
+
+    _clang_compiler_family.cache_clear()
+    calls: list[list[str]] = []
+
+    def fake_run(cmd, **kw):  # type: ignore[no-untyped-def]
+        calls.append(cmd)
+        return _Result(0, "#define __INTEL_LLVM_COMPILER 20260101\n")
+
+    monkeypatch.setattr(clang_mod.subprocess, "run", fake_run)
+    assert _clang_compiler_family("icpx") == "intel-llvm"
+    assert _clang_compiler_family("icpx") == "intel-llvm"
+    assert len(calls) == 1  # second call served from the lru_cache
 
 
 def test_extract_stamps_intel_llvm_compiler_family(monkeypatch) -> None:  # type: ignore[no-untyped-def]
@@ -2713,12 +2776,15 @@ def test_extract_stamps_intel_llvm_compiler_family(monkeypatch) -> None:  # type
     from abicheck.buildsource.source_extractors.clang import _clang_compiler_version
 
     _clang_compiler_version.cache_clear()
+    _clang_compiler_family.cache_clear()
 
     def handler(cmd, **kw):  # type: ignore[no-untyped-def]
         if "-ast-dump=json" in cmd:
             return _emit_ast(kw, json.dumps(_ast()))
         if "-dumpversion" in cmd:
             return _Result(0, "22.1.0\n")
+        if "-dM" in cmd:
+            return _Result(0, "#define __INTEL_LLVM_COMPILER 20260101\n")
         return _Result(0, "")
 
     extractor = ClangSourceExtractor(clang_bin="icpx")
