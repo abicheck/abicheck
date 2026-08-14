@@ -39,3 +39,19 @@
   actual structured spellings: exact `-target`/`--target`/`--sysroot`/
   `-isysroot` (separate-operand switches) plus the single-token combined
   forms `--target=...`/`--sysroot=...`/`-std=...`/`/std:...`.
+- **A further review finding on the same masking: MSVC `/std:` was
+  unconditionally treated as redundant with `CompileUnit.standard`, which
+  it never populates.** `-std=` (GCC/Clang) is always parsed into the
+  structured `standard` field whenever present, so masking it out of the
+  ambiguity signature can never hide a real disagreement — but nothing in
+  this codebase parses MSVC's `/std:` into `CompileUnit.standard` at all
+  (`adapters/base.py`'s own `_add_generic_flag_option` normalizes it into a
+  separate `BuildOption` only when `cu.standard` is empty). Two MSVC
+  compile units disagreeing only on `/std:c++17` vs. `/std:c++20`, with
+  `standard` empty on both, were therefore silently collapsed to one
+  signature — applying the first unit's standard — instead of raising
+  `HeaderCompileContextAmbiguousError`. `/std:` is now masked only when
+  `CompileUnit.standard` is genuinely populated for that specific compile
+  unit (i.e. the structured field actually captured the value, making the
+  raw flag truly redundant); when `standard` is empty, `/std:` stays in the
+  ambiguity signature so two disagreeing units still raise.

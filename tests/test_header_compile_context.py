@@ -536,6 +536,76 @@ def test_resolve_exact_target_and_sysroot_spellings_still_masked(
     assert result.matched_unit_count == 2
 
 
+def test_resolve_msvc_std_colon_disagreement_with_unpopulated_standard_field_still_raises(
+    tmp_path: Path,
+) -> None:
+    """Review finding: MSVC ``/std:`` is never parsed into
+    ``CompileUnit.standard`` (unlike GCC/Clang's ``-std=``), so when
+    ``standard`` is empty on both units, the raw ``/std:c++17``/
+    ``/std:c++20`` survivor in ``abi_relevant_flags`` is the ONLY signal
+    recording the language standard at all. Unconditionally masking it (the
+    way ``-std=``/``--target=``/``--sysroot=`` are unconditionally masked)
+    would silently collapse these two genuinely-disagreeing MSVC units into
+    one signature and apply the first unit's standard -- this must instead
+    raise ``HeaderCompileContextAmbiguousError``."""
+    header = tmp_path / "widget.h"
+    header.write_text("struct Widget { int x; };\n", encoding="utf-8")
+    src_a = tmp_path / "a.cpp"
+    src_a.write_text('#include "widget.h"\n', encoding="utf-8")
+    src_b = tmp_path / "b.cpp"
+    src_b.write_text('#include "widget.h"\n', encoding="utf-8")
+    unit_a = _cu(
+        source=str(src_a),
+        directory=str(tmp_path),
+        standard="",
+        abi_relevant_flags=["/std:c++17"],
+    )
+    unit_b = _cu(
+        source=str(src_b),
+        directory=str(tmp_path),
+        standard="",
+        abi_relevant_flags=["/std:c++20"],
+    )
+    ev = BuildEvidence(compile_units=[unit_a, unit_b])
+    with pytest.raises(HeaderCompileContextAmbiguousError):
+        resolve_header_compile_context(ev, [header])
+
+
+def test_resolve_msvc_std_colon_stays_masked_when_standard_field_populated_and_agrees(
+    tmp_path: Path,
+) -> None:
+    """Companion to the test above: once ``CompileUnit.standard`` genuinely
+    captured the language standard for BOTH units (and they agree), a
+    ``/std:`` survivor in ``abi_relevant_flags`` really is redundant and
+    must stay masked -- including when it carries a differing raw spelling
+    from what produced the now-agreeing structured value, mirroring the
+    already-established ``--target=``/``-target`` spelling-divergence
+    tolerance."""
+    header = tmp_path / "widget.h"
+    header.write_text("struct Widget { int x; };\n", encoding="utf-8")
+    src_a = tmp_path / "a.cpp"
+    src_a.write_text('#include "widget.h"\n', encoding="utf-8")
+    src_b = tmp_path / "b.cpp"
+    src_b.write_text('#include "widget.h"\n', encoding="utf-8")
+    unit_a = _cu(
+        source=str(src_a),
+        directory=str(tmp_path),
+        standard="c++20",
+        abi_relevant_flags=["/std:c++20"],
+    )
+    unit_b = _cu(
+        source=str(src_b),
+        directory=str(tmp_path),
+        standard="c++20",
+        abi_relevant_flags=["/std:c++20"],
+    )
+    ev = BuildEvidence(compile_units=[unit_a, unit_b])
+    result = resolve_header_compile_context(ev, [header])
+    assert result.matched is True
+    assert result.matched_unit_count == 2
+    assert result.context is not None
+
+
 def test_resolve_multiple_headers_union_of_matches(tmp_path: Path) -> None:
     h1 = tmp_path / "a.h"
     h1.write_text("struct A {};\n", encoding="utf-8")

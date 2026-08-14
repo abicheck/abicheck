@@ -325,15 +325,36 @@ class _ExplicitPin:
 #: relies on: a raw flag excluded here is still compared, just via its
 #: structured field instead, so no real disagreement can be hidden by this
 #: exclusion — only a spelling-only non-disagreement stops being flagged as
-#: one. ``-std=``/``/std:`` (standard) is included too: a compile unit could
-#: in principle carry both a structured ``standard`` and a raw ``-std=...``
+#: one. ``-std=`` (standard) is included too: a compile unit could in
+#: principle carry both a structured ``standard`` and a raw ``-std=...``
 #: survivor in ``abi_relevant_flags`` (the adapter's own extraction and its
 #: structured-field derivation are independent passes over the same argv),
 #: and the identical spelling-divergence risk applies. Unlike
 #: :class:`_ExplicitPin`'s masking below (which only excludes a dimension the
 #: *caller* explicitly pinned), this exclusion is unconditional -- it never
 #: depends on whether an ``explicit`` context was even given, since the raw
-#: flag is redundant with its structured field regardless.
+#: flag is redundant with its structured field regardless. This holds for
+#: ``-std=`` specifically because it is *always* captured into
+#: ``CompileUnit.standard`` whenever present: ``build_context.py``'s
+#: ``_consume_std_extra`` matches every ``-std=...`` token unconditionally
+#: (``_STD_RE``) and assigns ``ctx.language_standard`` from it, with no path
+#: that leaves a real ``-std=`` token unconsumed -- so masking it can never
+#: hide a disagreement the structured field doesn't already carry.
+#:
+#: **MSVC's ``/std:`` does NOT get the same unconditional treatment (review
+#: finding) -- it is masked only when ``CompileUnit.standard`` is actually
+#: populated for that unit.** Nothing in this codebase parses ``/std:`` into
+#: ``CompileUnit.standard`` at all: ``abicheck/buildsource/adapters/base.py``'s
+#: ``_add_generic_flag_option`` says so explicitly ("MSVC ``/std:`` is not
+#: parsed into cu.standard") and only normalizes it into a *separate*
+#: ``BuildOption``, itself gated on ``if not cu.standard``. So for a typical
+#: MSVC compile unit ``cu.standard`` is empty and the raw
+#: ``/std:c++17``/``/std:c++20`` token in ``abi_relevant_flags`` is the
+#: *only* place the standard is recorded at all -- masking it unconditionally
+#: would collapse two MSVC units that genuinely disagree on their language
+#: standard into one signature and silently apply the first unit's standard,
+#: instead of raising ``HeaderCompileContextAmbiguousError``. See
+#: :func:`_is_structured_field_flag`'s ``standard_captured`` parameter.
 #: The bare, separate-operand switch spellings (whose own following argv
 #: token is the operand, captured structurally instead — see
 #: ``_DANGLING_OPERAND_FLAGS`` below for the identical set used the same way
@@ -359,28 +380,53 @@ _STRUCTURED_FIELD_EXACT_FLAGS = frozenset(
 )
 
 #: The complete, single-token combined-form spellings (operand attached via
-#: ``=``/``:``) — safe to match by prefix since each is already a fixed,
-#: literal lead-in with no sibling flag sharing it: no real clang/gcc/MSVC
-#: flag begins with ``--target=``, ``--sysroot=``, ``-std=``, or ``/std:``
-#: other than the flag itself (checked against a real ``clang --help``/
-#: ``clang -cc1 --help`` for the exact same reason as the exact-match set
-#: above — unlike the bare ``-target``/``--sysroot`` switches, none of these
-#: combined forms collide with an unrelated flag).
+#: ``=``) — safe to match by prefix since each is already a fixed, literal
+#: lead-in with no sibling flag sharing it: no real clang/gcc flag begins
+#: with ``--target=``, ``--sysroot=``, or ``-std=`` other than the flag
+#: itself (checked against a real ``clang --help``/``clang -cc1 --help`` for
+#: the exact same reason as the exact-match set above — unlike the bare
+#: ``-target``/``--sysroot`` switches, none of these combined forms collide
+#: with an unrelated flag). Each of these is *always* fully redundant with
+#: its structured field once present (see the module-level comment above for
+#: ``-std=``'s own justification), so unconditional prefix-masking is safe
+#: for all three. ``/std:`` is deliberately **not** in this tuple — see
+#: ``_STRUCTURED_FIELD_CONDITIONAL_FLAG_PREFIXES`` below.
 _STRUCTURED_FIELD_FLAG_PREFIXES = (
     "--target=",
     "--sysroot=",
     "-std=",
-    "/std:",
 )
 
+#: Combined-form spellings that are redundant with a structured field only
+#: *conditionally*, per compile unit — currently just MSVC's ``/std:``,
+#: which is never parsed into ``CompileUnit.standard`` (see the module-level
+#: comment above ``_STRUCTURED_FIELD_EXACT_FLAGS`` for the full reasoning).
+#: Masking a flag in this tuple requires the caller to separately confirm
+#: the corresponding structured field is genuinely populated for *that*
+#: compile unit (``_is_structured_field_flag``'s ``standard_captured``).
+_STRUCTURED_FIELD_CONDITIONAL_FLAG_PREFIXES = ("/std:",)
 
-def _is_structured_field_flag(flag: str) -> bool:
+
+def _is_structured_field_flag(flag: str, *, standard_captured: bool) -> bool:
     """Whether *flag* is fully represented by a structured
-    ``target_triple``/``sysroot``/``standard`` field already, per the two
-    sets above.
+    ``target_triple``/``sysroot``/``standard`` field already, per the sets
+    above.
+
+    ``standard_captured`` must be ``bool(cu.standard)`` for the compile unit
+    *flag* came from — it gates only the conditional ``/std:`` prefix
+    (``_STRUCTURED_FIELD_CONDITIONAL_FLAG_PREFIXES``): a ``/std:`` token is
+    redundant with the structured ``standard`` field only when that field
+    was genuinely populated for this unit, since nothing in this codebase
+    ever parses ``/std:`` itself into ``CompileUnit.standard``. The other
+    prefixes/exact flags are unconditionally redundant and ignore this
+    argument.
     """
-    return flag in _STRUCTURED_FIELD_EXACT_FLAGS or flag.startswith(
+    if flag in _STRUCTURED_FIELD_EXACT_FLAGS or flag.startswith(
         _STRUCTURED_FIELD_FLAG_PREFIXES
+    ):
+        return True
+    return standard_captured and flag.startswith(
+        _STRUCTURED_FIELD_CONDITIONAL_FLAG_PREFIXES
     )
 
 
@@ -441,12 +487,16 @@ class _EffectiveContextSignature:
             include_paths=tuple(cu.include_paths),
             system_include_paths=tuple(cu.system_include_paths),
             abi_relevant_flags=tuple(
-                _mask_pinned_abi_flags(cu.abi_relevant_flags, pin)
+                _mask_pinned_abi_flags(
+                    cu.abi_relevant_flags, pin, standard_captured=bool(cu.standard)
+                )
             ),
         )
 
 
-def _mask_pinned_abi_flags(flags: Sequence[str], pin: _ExplicitPin) -> list[str]:
+def _mask_pinned_abi_flags(
+    flags: Sequence[str], pin: _ExplicitPin, *, standard_captured: bool
+) -> list[str]:
     """Drop ``cu.abi_relevant_flags`` entries a structured field already
     covers.
 
@@ -472,8 +522,20 @@ def _mask_pinned_abi_flags(flags: Sequence[str], pin: _ExplicitPin) -> list[str]
     (e.g. a pinned macro spelled only as a raw flag) that genuinely needs
     per-pin conditioning rather than the unconditional rule; it plays no
     role in today's target/sysroot/standard exclusion.
+
+    ``standard_captured`` (``bool(cu.standard)`` for the compile unit *flags*
+    came from) is passed straight through to ``_is_structured_field_flag``
+    and is genuinely conditional, unlike *pin*: it gates only the MSVC
+    ``/std:`` prefix, which — unlike ``-std=`` — is never parsed into
+    ``CompileUnit.standard``, so it is redundant with the structured field
+    only when that field happens to be populated for this specific unit (see
+    ``_STRUCTURED_FIELD_CONDITIONAL_FLAG_PREFIXES``'s own docstring).
     """
-    return [f for f in flags if not _is_structured_field_flag(f)]
+    return [
+        f
+        for f in flags
+        if not _is_structured_field_flag(f, standard_captured=standard_captured)
+    ]
 
 
 #: Bare switch spellings whose operand is a *separate*, following argv token
