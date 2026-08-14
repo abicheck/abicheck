@@ -339,6 +339,47 @@ class TestCanonicalFindingIdScopedCanonicalization:
             different
         )
 
+    def test_func_removal_category_collapses_across_producers_with_inconsistent_values(
+        self,
+    ):
+        # Regression (Codex review, PR #753, round 5): diff_symbols.py's
+        # rich ELF detector stamps old_value=f_old.name for FUNC_REMOVED,
+        # while diff_platform.py's PE/Mach-O export-table detectors leave
+        # old_value/new_value unset for the *identical* removed-symbol
+        # event -- folding those inconsistent values into the discriminator
+        # defeated the whole point of the category fold for this pair. The
+        # discriminator must drop old/new for "func_removal"/"func_addition"
+        # entirely and collapse on category alone.
+        rich = make_change(
+            ChangeKind.FUNC_REMOVED,
+            symbol="_Z3fooi",
+            name="foo",
+            old="foo",
+            new=None,
+            description="Function foo removed",
+        )
+        raw_export = make_change(
+            ChangeKind.FUNC_REMOVED,
+            symbol="_Z3fooi",
+            name="foo",
+            old=None,
+            new=None,
+            description="new export in DLL: foo",
+        )
+        assert report_canonical_finding_id(rich) == report_canonical_finding_id(
+            raw_export
+        )
+        # A genuinely different symbol's removal must still differ.
+        other = make_change(
+            ChangeKind.FUNC_REMOVED,
+            symbol="_Z3bari",
+            name="bar",
+            old=None,
+            new=None,
+            description="new export in DLL: bar",
+        )
+        assert report_canonical_finding_id(rich) != report_canonical_finding_id(other)
+
 
 class TestReporterEmitsCanonicalFindingId:
     def test_change_to_dict_includes_canonical_finding_id(self):

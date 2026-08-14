@@ -1136,6 +1136,31 @@ _CATEGORY_VALUE_UNIT_DIVISOR = {
     "type_alignment_changed": 8,
 }
 
+#: Categories where old_value/new_value must be dropped from the
+#: canonicalize_values discriminator entirely, rather than folded in
+#: (Codex review, fresh evidence, PR #753 round 5): unlike the size/
+#: alignment pair above -- where old/new differ only by *unit* across
+#: producers and normalizing fixes the fold -- a removed/added symbol can
+#: have at most one such event per (symbol, category) in a single
+#: comparison, so old/new carries no disambiguating power here at all,
+#: only producer-specific noise. Confirmed for "func_removal": the rich
+#: ELF detector (diff_symbols._check_removed_function) stamps
+#: old_value=f_old.name, while the PE/Mach-O export-table detectors
+#: (diff_platform._diff_pe/_diff_macho_exports) leave old_value/new_value
+#: unset entirely -- so the identical removed-function event folds to two
+#: different discriminators ("category:func_removal\x1f<name>\x1f" vs.
+#: "category:func_removal\x1f\x1f") depending purely on which detector's
+#: finding survived reconciliation, defeating this fold's whole purpose
+#: for the one pair it exists to reconcile. "func_addition" carries the
+#: identical asymmetry for the same two detector families. The remaining
+#: three categories ("var_removal"/"var_addition"/"version_def_removal")
+#: are not included here: each is populated by exactly one detector
+#: family with consistent old/new population (verified by reading every
+#: producer of each), so there is no cross-producer inconsistency to
+#: guard against for them, and dropping their values would only lose
+#: information for no benefit.
+_VALUE_INSENSITIVE_CATEGORIES = frozenset({"func_removal", "func_addition"})
+
 
 def _divide_numeric_string(value: str, divisor: int) -> str:
     """Return ``str(int(value) // divisor)``, or *value* unchanged if it
@@ -1215,7 +1240,13 @@ def _change_discriminator(
     """
     category = _EQUIVALENT_CHANGE_CATEGORIES.get(kind_value)
     if category is not None:
-        if not canonicalize_values:
+        if not canonicalize_values or category in _VALUE_INSENSITIVE_CATEGORIES:
+            # See _VALUE_INSENSITIVE_CATEGORIES: for these categories old/
+            # new is producer-inconsistent noise, not a disambiguator (at
+            # most one such event exists per symbol/category in a single
+            # comparison), so folding it in would defeat the fold instead
+            # of refining it -- same bare-category discriminator as the
+            # non-canonicalize_values path above.
             return f"category:{category}"
         # canonicalize_values (report_canonical_finding_id): a bare
         # category discriminates the rich-vs-L0 *kind* pair away, which is
