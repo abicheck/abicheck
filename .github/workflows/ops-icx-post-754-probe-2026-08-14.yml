@@ -1,0 +1,268 @@
+name: Ops ICX post-754 plugin probe 2026-08-14
+
+on:
+  push:
+    branches: [ops/icx-post-754-probe-2026-08-14]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 80
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.13"
+
+      - name: Install ICX, upstream LLVM 22 SDK, and test tools
+        shell: bash
+        run: |
+          set -euxo pipefail
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends \
+            ca-certificates wget gpg-agent cmake ninja-build build-essential \
+            file binutils jq
+
+          wget -qO- https://apt.repos.intel.com/intel-gpg-keys/GPG-PUB-KEY-INTEL-SW-PRODUCTS.PUB \
+            | gpg --dearmor \
+            | sudo tee /usr/share/keyrings/oneapi-archive-keyring.gpg >/dev/null
+          echo 'deb [signed-by=/usr/share/keyrings/oneapi-archive-keyring.gpg] https://apt.repos.intel.com/oneapi all main' \
+            | sudo tee /etc/apt/sources.list.d/oneAPI.list >/dev/null
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends intel-oneapi-compiler-dpcpp-cpp
+
+          key=/tmp/llvm-snapshot.gpg.key
+          wget -q -O "$key" https://apt.llvm.org/llvm-snapshot.gpg.key
+          got=$(gpg --show-keys --with-colons --with-fingerprint "$key" \
+                | awk -F: '/^fpr:/ {print $10; exit}')
+          test "$got" = "6084F3CF814B57C1CF12EFD515CF4D18AF4F7421"
+          sudo install -m 0644 "$key" /etc/apt/trusted.gpg.d/apt.llvm.org.asc
+          codename=$(. /etc/os-release && echo "$VERSION_CODENAME")
+          echo "deb http://apt.llvm.org/${codename}/ llvm-toolchain-${codename}-22 main" \
+            | sudo tee /etc/apt/sources.list.d/llvm.list >/dev/null
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends \
+            clang-22 llvm-22-dev libclang-22-dev libc++-22-dev libc++abi-22-dev
+
+          python -m pip install -e .
+
+          source /opt/intel/oneapi/setvars.sh --force >/dev/null 2>&1
+          dirname "$(command -v icpx)" >> "$GITHUB_PATH"
+          for var in CMPLR_ROOT LD_LIBRARY_PATH LIBRARY_PATH CPATH CPLUS_INCLUDE_PATH; do
+            value="${!var-}"
+            [[ -z "$value" ]] || printf '%s=%s\n' "$var" "$value" >> "$GITHUB_ENV"
+          done
+
+          mkdir -p post754-results icx-wrapper-fixture/include
+          cat > icx-wrapper-fixture/include/widget.hpp <<'CPP'
+          #pragma once
+          namespace demo {
+          struct widget { int value; };
+          int answer(widget);
+          }
+          CPP
+          cat > icx-wrapper-fixture/widget.cpp <<'CPP'
+          #include "widget.hpp"
+          int demo::answer(widget w) { return w.value + 42; }
+          CPP
+
+      - name: Guardrail — stock ICX must refuse the unsafe apt fallback
+        id: guardrail
+        continue-on-error: true
+        uses: ./actions/collect-facts
+        with:
+          phase: prepare
+          producer: clang-plugin
+          compiler: icpx
+          sources: .
+          output: post754-results/guardrail-pack
+          public-roots: icx-wrapper-fixture/include
+          install-deps: 'true'
+
+      - name: Explicit upstream LLVM 22 prefix — build then reject in real smoke
+        id: explicit_prefix
+        continue-on-error: true
+        uses: ./actions/collect-facts
+        with:
+          phase: prepare
+          producer: clang-plugin
+          compiler: icpx
+          sources: .
+          output: post754-results/explicit-prefix-pack
+          public-roots: icx-wrapper-fixture/include
+          llvm-cmake-prefix: /usr/lib/llvm-22/lib/cmake
+          install-deps: 'false'
+
+      - name: Build a known-mismatched artifact with the new CMake keys
+        id: manual_plugin
+        continue-on-error: true
+        shell: bash
+        run: |
+          set -euxo pipefail
+          source /opt/intel/oneapi/setvars.sh --force >/dev/null 2>&1
+          build="$PWD/post754-results/manual-upstream-plugin"
+          cmake -S contrib/abicheck-clang-plugin -B "$build" -G Ninja \
+            -DCMAKE_BUILD_TYPE=Debug \
+            -DCMAKE_CXX_COMPILER="$(command -v icpx)" \
+            -DCMAKE_PREFIX_PATH=/usr/lib/llvm-22/lib/cmake \
+            -DABICHECK_PLUGIN_RTTI=off \
+            -DABICHECK_PLUGIN_STDLIB=libc++ \
+            > post754-results/manual-cmake.stdout \
+            2> post754-results/manual-cmake.stderr
+          cmake --build "$build" -v \
+            > post754-results/manual-build.stdout \
+            2> post754-results/manual-build.stderr
+          plugin=$(realpath "$build/libabicheck-facts.so")
+          sha=$(sha256sum "$plugin" | awk '{print $1}')
+          echo "plugin=$plugin" >> "$GITHUB_OUTPUT"
+          echo "sha=$sha" >> "$GITHUB_OUTPUT"
+          file "$plugin" | tee post754-results/manual-plugin-file.txt
+          ldd "$plugin" | tee post754-results/manual-plugin-ldd.txt
+          printf '%s  %s\n' "$sha" "$plugin" > post754-results/manual-plugin-sha256.txt
+
+      - name: Prebuilt artifact path — digest passes, runtime smoke must reject mismatch
+        id: artifact_reject
+        if: steps.manual_plugin.outcome == 'success'
+        continue-on-error: true
+        uses: ./actions/collect-facts
+        with:
+          phase: prepare
+          producer: clang-plugin
+          compiler: icpx
+          sources: .
+          output: post754-results/artifact-pack
+          public-roots: icx-wrapper-fixture/include
+          plugin-artifact: ${{ steps.manual_plugin.outputs.plugin }}
+          plugin-artifact-sha256: ${{ steps.manual_plugin.outputs.sha }}
+          install-deps: 'false'
+
+      - name: Prepare portable wrapper path for ICX
+        id: wrapper_prepare
+        continue-on-error: true
+        uses: ./actions/collect-facts
+        with:
+          phase: prepare
+          producer: wrapper
+          compiler: icpx
+          sources: icx-wrapper-fixture
+          output: icx-wrapper-fixture/abicheck_inputs
+          public-roots: icx-wrapper-fixture/include
+          library: icx_widget
+          extractor: clang
+          install-deps: 'false'
+
+      - name: Build through abicheck-cc and collect ICX facts
+        id: wrapper_build
+        if: steps.wrapper_prepare.outcome == 'success'
+        continue-on-error: true
+        shell: bash
+        run: |
+          set -o pipefail
+          source /opt/intel/oneapi/setvars.sh --force >/dev/null 2>&1
+          abicheck-cc "$(command -v icpx)" \
+            -std=c++17 -g -fPIC -shared \
+            -I"$PWD/icx-wrapper-fixture/include" \
+            "$PWD/icx-wrapper-fixture/widget.cpp" \
+            -o "$PWD/icx-wrapper-fixture/libwidget.so" \
+            > post754-results/wrapper-build.stdout \
+            2> post754-results/wrapper-build.stderr
+          rc=$?
+          echo "$rc" > post754-results/wrapper-build.rc
+          find icx-wrapper-fixture/abicheck_inputs -type f -print -exec wc -c {} \; \
+            > post754-results/wrapper-facts-files.txt 2>&1
+          exit "$rc"
+
+      - name: Verify wrapper facts pack
+        id: wrapper_verify
+        if: steps.wrapper_build.outcome == 'success'
+        continue-on-error: true
+        uses: ./actions/collect-facts
+        with:
+          phase: verify
+          producer: wrapper
+          sources: icx-wrapper-fixture
+          output: icx-wrapper-fixture/abicheck_inputs
+          install-deps: 'false'
+
+      - name: Ingest wrapper facts and run scan
+        id: wrapper_scan
+        if: steps.wrapper_verify.outcome == 'success'
+        continue-on-error: true
+        shell: bash
+        run: |
+          set +e
+          abicheck dump icx-wrapper-fixture/libwidget.so \
+            -H icx-wrapper-fixture/include/widget.hpp \
+            --build-info icx-wrapper-fixture/abicheck_inputs \
+            -o icx-wrapper-fixture/baseline.json \
+            > post754-results/wrapper-dump.stdout \
+            2> post754-results/wrapper-dump.stderr
+          dump_rc=$?
+          echo "$dump_rc" > post754-results/wrapper-dump.rc
+
+          scan_rc=127
+          if [[ "$dump_rc" -eq 0 ]]; then
+            abicheck scan icx-wrapper-fixture/libwidget.so \
+              --against icx-wrapper-fixture/baseline.json \
+              --build-info icx-wrapper-fixture/abicheck_inputs \
+              --depth source --format json \
+              > post754-results/wrapper-scan.stdout \
+              2> post754-results/wrapper-scan.stderr
+            scan_rc=$?
+          fi
+          echo "$scan_rc" > post754-results/wrapper-scan.rc
+          exit "$scan_rc"
+
+      - name: Write result matrix
+        if: always()
+        shell: bash
+        run: |
+          artifact_outcome='skipped'
+          if [[ "${{ steps.manual_plugin.outcome }}" == 'success' ]]; then
+            artifact_outcome='${{ steps.artifact_reject.outcome }}'
+          fi
+          {
+            printf 'probe\toutcome\n'
+            printf 'guardrail\t%s\n' '${{ steps.guardrail.outcome }}'
+            printf 'explicit_upstream_prefix\t%s\n' '${{ steps.explicit_prefix.outcome }}'
+            printf 'manual_new_keys_build\t%s\n' '${{ steps.manual_plugin.outcome }}'
+            printf 'mismatched_artifact_smoke\t%s\n' "$artifact_outcome"
+            printf 'wrapper_prepare\t%s\n' '${{ steps.wrapper_prepare.outcome }}'
+            printf 'wrapper_build\t%s\n' '${{ steps.wrapper_build.outcome }}'
+            printf 'wrapper_verify\t%s\n' '${{ steps.wrapper_verify.outcome }}'
+            printf 'wrapper_dump_scan\t%s\n' '${{ steps.wrapper_scan.outcome }}'
+          } | tee post754-results/result-matrix.tsv
+
+          cp -f icx-wrapper-fixture/baseline.json post754-results/ 2>/dev/null || true
+          cp -a icx-wrapper-fixture/abicheck_inputs post754-results/wrapper-pack 2>/dev/null || true
+          cp -f icx-wrapper-fixture/libwidget.so post754-results/ 2>/dev/null || true
+
+      - name: Upload evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: icx-post-754-${{ github.sha }}
+          path: post754-results/
+          if-no-files-found: error
+          retention-days: 30
+          compression-level: 6
+
+      - name: Assert expected post-fix state
+        if: always()
+        shell: bash
+        run: |
+          test '${{ steps.guardrail.outcome }}' = failure
+          test '${{ steps.explicit_prefix.outcome }}' = failure
+          test '${{ steps.manual_plugin.outcome }}' = success
+          test '${{ steps.artifact_reject.outcome }}' = failure
+          test '${{ steps.wrapper_prepare.outcome }}' = success
+          test '${{ steps.wrapper_build.outcome }}' = success
+          test '${{ steps.wrapper_verify.outcome }}' = success
+          test '${{ steps.wrapper_scan.outcome }}' = success
