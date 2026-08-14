@@ -104,8 +104,11 @@ own page rather than being folded into "ABI" generically.
 > **Rule of thumb:** name the dimension before you argue about whether a
 > change is "a break." A change that's a real source break and a total binary
 > non-event (e.g. a removed default argument) and a change that's the reverse
-> (e.g. a removed but never-called private symbol) are both real — they're
-> just answers to different questions.
+> — source-compatible but binary-breaking (e.g. a struct gains a field that
+> shifts existing members' offsets: code that only names existing fields
+> still compiles unchanged, but a consumer built against the old layout now
+> reads the wrong bytes) — are both real; they're just answers to different
+> questions.
 
 ---
 
