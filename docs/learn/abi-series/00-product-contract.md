@@ -86,22 +86,18 @@ actually asking about:
 | **Operational compatibility** | Can you upgrade, roll back, or run two versions side by side? | A SONAME wasn't bumped for an incompatible change, so upgrade-in-place breaks running processes |
 | **Build-profile comparability** | Were the two things being compared even built under conditions that make the comparison meaningful? | Comparing a GCC build against a Clang build of "the same" library, or two different C++ standard-library ABI modes |
 
-Coverage varies by dimension rather than falling off in a straight line: a
-static ABI/API checker like abicheck can prove a *detected* source or binary
-incompatibility is real, and its false-positive/false-negative rate on both
-depends entirely on the evidence it was given — a headerless comparison can
-miss a layout change, and without sources it cannot see `#define` macro
-values at all, or fully compare an inline/template body's *content* (a
-header-only run does automatically build a call/reference graph over
-in-header bodies for reachability purposes — see [Part 8](08-detection.md)
-— but that's structural, not a body-content diff; body-content changes still
-need L4 source replay) (Parts 1–6 are organized around these mechanisms,
-since they're what a static comparison can observe at all; how much of them
-it actually sees is a function of `--depth`, not a fixed guarantee — see
-[Evidence & Detectability](../evidence-and-detectability.md)'s per-layer FP/FN
-table). A clean result therefore means "no incompatibility found in the
-evidence supplied," not "compatibility proved" — the distinction this whole
-page exists to make precise. It also *enforces* two of the other dimensions
+Coverage varies by dimension rather than falling off in a straight line. A
+static ABI/API checker like abicheck reports source and binary
+incompatibilities it can observe in the evidence it was given — Parts 1–6
+are organized around exactly these two mechanisms, since they're what a
+static comparison can observe at all. **Exactly what it can observe, how
+that scales with `--depth`, and its measured false-positive/false-negative
+rate at each evidence level are not restated here** — see
+[Evidence & Detectability](../evidence-and-detectability.md), the one page
+that owns those guarantees precisely, rather than risk this page drifting
+out of sync with it. The takeaway for this page: a clean result means "no
+incompatibility found in the evidence supplied," not "compatibility
+proved." It also *enforces* two of the other dimensions
 outright rather than merely gesturing at them — a genuinely
 incomparable build profile is a hard failure
 ([exit `16`/`not_comparable`](../../reference/exit-codes.md), escapable only

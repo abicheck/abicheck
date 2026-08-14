@@ -316,8 +316,12 @@ were public itself.
 
 That graph is **L5**, built from structural edges (a public type embedding,
 inheriting from, or holding a field/base of an internal one) and behavioral
-edges (one declaration's body calling or referencing another) folded on top
-of the L4 source-fact surface. The full mechanics — the edge kinds, how
+edges (one declaration's body calling or referencing another) — populated
+either from header-only evidence alone (built automatically for `--depth
+headers` and above, no `--sources`/`--build-info` needed, capturing
+in-header inline/template bodies) or from a build-integrated L4 source-fact
+surface when one is supplied, with the latter adding coverage the former
+can't reach (out-of-line bodies). The full mechanics — the edge kinds, how
 nodes and edges degrade gracefully when no build/graph evidence is
 available, the `reachability_state`/`public_reachable` fields a finding
 carries, and the ADR-044 dispatcher scenario worked end to end — are on
