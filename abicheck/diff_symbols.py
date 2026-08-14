@@ -83,7 +83,6 @@ from .diff_symbols_variables import (
     var_access_changes,
 )
 from .dumper_castxml import (
-    SYNTHETIC_CTOR_KEY_PREFIX,
     is_synthetic_ctor_key,
     is_synthetic_dtor_key,
 )
@@ -99,6 +98,10 @@ from .fact_provenance import (
     var_fact_key,
 )
 from .finding_identity import SymbolIdentityIndex
+from .finding_identity_ctor_dtor import (
+    reconcile_ctor_dtor_key_drift,
+    synthetic_ctor_scope as _synthetic_ctor_scope,
+)
 from .model import (
     AbiSnapshot,
     AccessLevel,
@@ -937,6 +940,11 @@ def _diff_functions(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
 
     matched_by_name: set[str] = set()
 
+    ctor_dtor_consumed_new, ctor_dtor_changes = reconcile_ctor_dtor_key_drift(
+        old_map, new_map, _check_function_signature, params_unconfirmed, is_llp64
+    )
+    changes.extend(ctor_dtor_changes)
+
     for mangled, f_old in old_map.items():
         changes.extend(
             _match_old_function(
@@ -952,6 +960,8 @@ def _diff_functions(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
         )
 
     for mangled, f_new in new_map.items():
+        if mangled in ctor_dtor_consumed_new:
+            continue
         if mangled not in old_map and f_new.name not in matched_by_name:
             virtual_break = virtual_method_addition(
                 f_new, old_owner_classes, old_types, new_types, old_virtual_sigs
@@ -989,17 +999,6 @@ def _diff_functions(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
 # substring .replace() previously turned ``myconst`` into ``my`` and made the
 # copy/move constructor look like a converting overload (Codex review).
 _CV_QUALIFIER_RE = re.compile(r"\b(?:const|volatile)\b")
-
-
-def _synthetic_ctor_scope(mangled: str) -> str | None:
-    """Qualified scope in a castxml synthetic-ctor key (``SYNTHETIC_CTOR_KEY_PREFIX
-    + "scope(params)"``), or ``None`` (Codex review, PR #608 follow-up).
-    """
-    if not is_synthetic_ctor_key(mangled):
-        return None
-    body = mangled[len(SYNTHETIC_CTOR_KEY_PREFIX) :]
-    paren = body.find("(")
-    return body[:paren] if paren != -1 else None
 
 
 def _converting_ctors_by_class(
