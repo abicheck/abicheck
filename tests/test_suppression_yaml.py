@@ -57,6 +57,35 @@ class TestRawFindingIdsByIndex:
         )
         assert raw_finding_ids_by_index(text) == {0: "111"}
 
+    def test_two_separate_merge_key_occurrences_last_one_wins(self):
+        # Regression (Codex review, PR #753, round 9): `<<: *a` followed by
+        # a SEPARATE `<<: *b` (not one `<<: [*a, *b]` sequence) mirrors
+        # real dict-update semantics -- the later merge overwrites the
+        # earlier one for a key both define (verified directly against
+        # yaml.safe_load). An earlier revision's `merged is None` guard
+        # kept only the first occurrence's resolution.
+        text = (
+            "version: 1\n"
+            "a: &a\n  finding_id: '111'\n"
+            "b: &b\n  finding_id: '222'\n"
+            "suppressions:\n"
+            "  - <<: *a\n    <<: *b\n    reason: r\n"
+        )
+        assert raw_finding_ids_by_index(text) == {0: "222"}
+
+    def test_second_merge_without_the_key_does_not_clear_the_first(self):
+        # A later merge whose own source never defines finding_id at all
+        # must not overwrite an earlier merge's real value -- a dict
+        # update only touches keys the update actually contains.
+        text = (
+            "version: 1\n"
+            "a: &a\n  finding_id: '111'\n"
+            "b: &b\n  reason: unrelated\n"
+            "suppressions:\n"
+            "  - <<: *a\n    <<: *b\n    reason: r\n"
+        )
+        assert raw_finding_ids_by_index(text) == {0: "111"}
+
     def test_duplicate_top_level_suppressions_key_last_one_wins(self):
         # Regression (Codex review, PR #753, round 8): yaml.safe_load()
         # resolves a duplicate top-level key to the LAST value too -- an

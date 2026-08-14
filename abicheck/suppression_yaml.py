@@ -46,6 +46,17 @@ def _raw_scalar_for_key(node: yaml.MappingNode, key: str) -> str | None:
     instead of raising the intended missing-selector error (Codex review,
     fresh evidence).
 
+    Two separate ``<<:`` occurrences in the same mapping (``<<: *a`` then
+    ``<<: *b``, as opposed to one ``<<: [*a, *b]`` sequence) are also
+    handled: a later merge overwrites an earlier one for a key BOTH
+    define, matching real dict-update semantics (verified directly
+    against ``yaml.safe_load``) -- but a later merge whose own sources
+    never define this key at all leaves an earlier merge's value
+    untouched, since a real dict update only overwrites keys the update
+    actually contains (Codex review, fresh evidence: an earlier revision's
+    ``merged is None`` guard kept only the FIRST ``<<:`` occurrence's
+    resolution, silently ignoring a later one that should have won).
+
     (Also handles ``defaults: &d {finding_id: ...}`` followed by
     ``- <<: *d``, which bypasses a plain direct key/value scan entirely
     since the merge key's own value is a mapping *node reference*, not a
@@ -58,8 +69,16 @@ def _raw_scalar_for_key(node: yaml.MappingNode, key: str) -> str | None:
         if isinstance(k, yaml.ScalarNode) and k.tag == _MERGE_TAG:
             sources = v.value if isinstance(v, yaml.SequenceNode) else [v]
             for source in sources:
-                if isinstance(source, yaml.MappingNode) and merged is None:
-                    merged = _raw_scalar_for_key(source, key)
+                # First source within THIS occurrence's own sequence wins
+                # (YAML merge-sequence spec) -- but a LATER `<<:` occurrence
+                # overwrites an earlier one's result, so this inner loop
+                # still stops at the first hit while the outer loop keeps
+                # scanning across occurrences.
+                if isinstance(source, yaml.MappingNode):
+                    resolved = _raw_scalar_for_key(source, key)
+                    if resolved is not None:
+                        merged = resolved
+                        break
         elif (
             isinstance(k, yaml.ScalarNode)
             and k.value == key

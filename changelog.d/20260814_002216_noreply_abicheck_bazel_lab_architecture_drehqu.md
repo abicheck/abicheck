@@ -82,3 +82,11 @@
   now also carries `canonical_finding_id`, closing the one entry that
   bypasses `_change_to_dict` and is frequently the response's only
   blocking finding.
+- **A second, separate `<<:` merge-key occurrence in one suppression entry
+  now correctly overwrites the first for a key both define** — matching
+  real `yaml.safe_load` dict-update semantics; a later merge whose own
+  source never defines the key at all still leaves an earlier merge's
+  value untouched. Also registers `abicheck/suppression_yaml.py`,
+  `abicheck/finding_identity.py`, and `abicheck/cli_compare_fold.py` as
+  fact sources for the `suppressions`/`output-formats` doc topics
+  (`docs/_meta/topics.yaml`).
