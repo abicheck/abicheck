@@ -35,10 +35,14 @@ real deployment scenario it needed to cover was a different one.
 Each row is checking the same underlying contract from a different vantage
 point, and — this is the part worth internalizing — **a change can be safe
 in one direction and unsafe in another.** A newly *added* optional
-parameter with a default is safe for old source recompiled against new
-headers (backward-compatible addition) but is a hard compile error for new
-source built against *old* headers that don't declare it (forward
-direction, if that's a scenario your project supports at all). A newly
+parameter with a default is safe, for an ordinary call expression, in old
+source recompiled against new headers (backward-compatible addition) —
+though not universally: it changes the function's *type*, so source taking
+its address for a function pointer (`void (*p)(int) = &f;` against
+`f(int, int = 0)`) stops compiling even in that same direction. In the
+*forward* direction the addition is a hard compile error outright, for any
+usage: new source built against *old* headers that don't declare the
+parameter (if that's a scenario your project supports at all). A newly
 *added* exported symbol is invisible to an old, already-linked consumer
 (the backward direction is unaffected — nothing calls a symbol that didn't
 exist when it was built) but breaks the forward direction the moment a

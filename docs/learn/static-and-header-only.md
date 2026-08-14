@@ -66,17 +66,17 @@ That does not mean nothing can go wrong. What remains:
 (`.so`/`.dll`/`.dylib`) directly; a static library's `.a`/`.lib` archive
 isn't a first-class input the way a shared object is, and `compare`
 positionally requires two such artifacts (or JSON snapshots) — there's no
-`-H`-alone invocation with no operand at all. The practical way to validate
-a static library's source/API compatibility with abicheck today is the same
-no-binary source-fact path as the header-only case below: `dump --sources
-<dir> --depth source` against the library's own sources (its implementation
-`.cpp` files, in this case — a static library, unlike a header-only one,
-actually has them to replay), then `compare` the two resulting JSON
-snapshots. This is an L3–L5 source-fact comparison, not an L2 header-AST
-one — see the header-only section below for exactly what that distinction
-means; validating the *compiled* archive's object-format/compiler-ABI
-compatibility from its `.a`/`.lib` file directly isn't something abicheck
-does today.
+`-H`-alone, no-operand invocation, and (see the header-only section below
+for why) no fully-supported way to compare two no-binary source snapshots
+against each other either. Unlike a header-only library, though, a static
+library's implementation is real, compilable `.cpp` code — so the practical
+way to validate it today is to build an ordinary shared object from those
+same sources (a purpose-built `.so` consumers never ship, existing purely
+to give the archive's own API a real binary to attach evidence to) and run
+the standard binary+headers comparison against *that*, the same way you
+would for a genuine dynamic library. Validating the *compiled* archive's
+object-format/compiler-ABI compatibility from its `.a`/`.lib` file directly
+isn't something abicheck does today.
 
 ## Header-only libraries: the whole surface is the inline-body concern
 
@@ -98,25 +98,25 @@ public API, unconditionally**:
   library's versioning is effectively always at the granularity of "whatever
   headers were included at each consumer's most recent build."
 - Because there's no separate binary artifact, checking a header-only
-  library needs source-level evidence rather than binary evidence: a real
-  translation unit (a test/example from the library itself, or a
-  purpose-written probe TU that instantiates the public API) built through
-  a real compile database or build integration, replayed via `dump
-  --sources`/`--build-info`, then compared the same way two binary
-  snapshots are compared. **This is deliberately not spelled out as a
-  single copy-pasteable command here** — getting every piece right (a real
-  TU to replay, a compile database or fact pack to replay it through,
-  public roots configured to match how the headers actually resolve) is
-  exactly the kind of setup [Producing Source Facts](../use/producing-source-facts.md)
-  and [Dump/Compare Flags](../use/dump-compare-flags.md) own and keep
-  current; a docs page maintained separately from those is the wrong place
-  for it to also live, per this whole site's own one-fact-one-place rule.
-  Skip that setup and the run can silently produce few or no public facts,
-  reading `NO_CHANGE` for a real change rather than flagging the missing
-  evidence — every mechanism in
-  [Evidence & Detectability](evidence-and-detectability.md) still applies
-  to what a *correctly configured* run can see; correct configuration is
-  the load-bearing part.
+  library needs source-level evidence rather than binary evidence. **This is
+  a genuine gap in today's tooling, not a solved problem with an
+  unintuitive flag combination**: `dump`'s no-binary path
+  (`dump --sources`/`--build-info` with no artifact) produces an L3/L4/L5
+  source-fact snapshot whose own documented purpose is to be *combined*
+  with a binary-side dump — `dump libfoo.so -H include/ --sources . ...` —
+  not compared standalone against another source-only snapshot; there is no
+  binary to fold it onto for a library that never produces one. The closest
+  practical workaround today is compiling a small stub translation unit
+  that `#include`s and instantiates the public API into an actual `.so`,
+  and dumping/comparing *that* — an ordinary binary+headers comparison, on
+  an artifact that exists only to give the header-only API something to
+  attach evidence to — rather than relying on any no-binary snapshot
+  comparison this tool doesn't yet fully support. See
+  [Producing Source Facts](../use/producing-source-facts.md) and
+  [Dump/Compare Flags](../use/dump-compare-flags.md) for how the supported
+  binary+headers path works; every mechanism in
+  [Evidence & Detectability](evidence-and-detectability.md) applies once
+  you have a real snapshot to apply it to.
 - ODR (One Definition Rule) violations are a risk here too, as they are for
   any inline/template declaration in a *dynamic* library's public headers
   (the same declarations that make a dynamic library's own public inline

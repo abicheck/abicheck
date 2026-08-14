@@ -67,11 +67,17 @@ result.
 
 ```bash
 # Source-only: infer the compile DB, replay L4, fold the L5 graph, all inline.
-abicheck dump --sources . -H include/ --depth source -o libfoo.src.json
+# No binary and no -H here -- a source-only (no-SO_PATH) dump has no header
+# AST step at all (dump_source_only()), so -H is silently ignored on this
+# path; this snapshot carries L3/L4/L5 facts only, meant to be combined with
+# a binary-side dump (below), not compared standalone against another
+# source-only snapshot.
+abicheck dump --sources . --depth source -o libfoo.src.json
 
-# Or against a real binary in one shot (L0–L5 in one snapshot). Unseeded
-# `--depth source` already analyses the whole target (the old separate `full`
-# rung collapsed into `source` — ADR-043):
+# Against a real binary in one shot (L0–L5 in one snapshot, -H included). This
+# is the supported path when you want a full, directly-comparable snapshot.
+# Unseeded `--depth source` already analyses the whole target (the old
+# separate `full` rung collapsed into `source` — ADR-043):
 abicheck dump libfoo.so -H include/ --sources . --compile-db build/compile_commands.json \
   --depth source -o libfoo.full.json
 ```
