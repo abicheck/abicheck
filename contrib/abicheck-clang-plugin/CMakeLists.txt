@@ -31,15 +31,33 @@ set(ABICHECK_PLUGIN_STDLIB "auto" CACHE STRING
   "C++ standard library ABI to build the plugin against: auto (toolchain default), libc++, or libstdc++.")
 set_property(CACHE ABICHECK_PLUGIN_STDLIB PROPERTY STRINGS auto libc++ libstdc++)
 
+# The cache STRINGS property above is GUI-only (a CMake ComboBox hint) --
+# CMake does not enforce it on a value supplied via -D, so a case mismatch
+# or typo (e.g. -DABICHECK_PLUGIN_RTTI=OFF, the CMake ON/OFF convention)
+# would otherwise silently fall through both case-sensitive STREQUAL
+# branches below, matching neither "off" nor "auto" and producing a plugin
+# missing the ABI fix the caller explicitly asked for -- exactly the
+# Intel-oneAPI load/crash failure this option exists to prevent (Codex
+# review). Normalize case, then fail loudly on anything else.
+string(TOLOWER "${ABICHECK_PLUGIN_RTTI}" _abicheck_plugin_rtti)
+if(NOT _abicheck_plugin_rtti MATCHES "^(auto|on|off)$")
+  message(FATAL_ERROR "ABICHECK_PLUGIN_RTTI must be one of auto, on, off (got: '${ABICHECK_PLUGIN_RTTI}')")
+endif()
+
+string(TOLOWER "${ABICHECK_PLUGIN_STDLIB}" _abicheck_plugin_stdlib)
+if(NOT _abicheck_plugin_stdlib MATCHES "^(auto|libc\\+\\+|libstdc\\+\\+)$")
+  message(FATAL_ERROR "ABICHECK_PLUGIN_STDLIB must be one of auto, libc++, libstdc++ (got: '${ABICHECK_PLUGIN_STDLIB}')")
+endif()
+
 # LLVM/Clang are conventionally built without RTTI; a plugin that links their
 # symbols must match, or it fails to load (undefined typeinfo). Honor the
 # loading toolchain's setting when CMake exposes it, unless the caller
 # overrides it explicitly (a vendor-bundled LLVM/Clang CMake package does not
 # always populate LLVM_ENABLE_RTTI, so "auto" can mean "unknown, assume RTTI
 # is on" rather than "confirmed on").
-if(ABICHECK_PLUGIN_RTTI STREQUAL "off")
+if(_abicheck_plugin_rtti STREQUAL "off")
   target_compile_options(abicheck-facts PRIVATE -fno-rtti)
-elseif(ABICHECK_PLUGIN_RTTI STREQUAL "auto" AND NOT LLVM_ENABLE_RTTI)
+elseif(_abicheck_plugin_rtti STREQUAL "auto" AND NOT LLVM_ENABLE_RTTI)
   target_compile_options(abicheck-facts PRIVATE -fno-rtti)
 endif()
 
@@ -50,10 +68,10 @@ endif()
 # with mismatched container layouts and crashes rather than merely failing
 # to load. "auto" (the default) changes nothing, matching every existing
 # vanilla-Clang build.
-if(ABICHECK_PLUGIN_STDLIB STREQUAL "libc++")
+if(_abicheck_plugin_stdlib STREQUAL "libc++")
   target_compile_options(abicheck-facts PRIVATE -stdlib=libc++)
   target_link_options(abicheck-facts PRIVATE -stdlib=libc++)
-elseif(ABICHECK_PLUGIN_STDLIB STREQUAL "libstdc++")
+elseif(_abicheck_plugin_stdlib STREQUAL "libstdc++")
   target_compile_options(abicheck-facts PRIVATE -stdlib=libstdc++)
   target_link_options(abicheck-facts PRIVATE -stdlib=libstdc++)
 endif()
