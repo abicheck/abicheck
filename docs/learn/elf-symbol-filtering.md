@@ -16,9 +16,17 @@ generated: false
 # ELF-Only Mode and Symbol Filtering
 
 When `abicheck compare` (or `abicheck dump`) is run **without header files** — i.e.
-directly against `.so` binaries — the tool operates in *ELF-only mode*. In this
-mode the public ABI surface is inferred entirely from exported ELF symbols (`.dynsym`),
-with no source-level type information available.
+directly against `.so` binaries — the public ABI surface is inferred from
+exported ELF symbols (`.dynsym`), with no source-level type information
+available. This is not automatically "symbols only," though: if the binary
+carries usable DWARF debug info, `dumper._dump_elf()` tries
+`_try_dwarf_snapshot()` first and gets real L1 type/layout evidence from it,
+falling back to a pure `.dynsym`-derived snapshot
+(`_build_symbol_only_snapshot()`) only when DWARF is absent or unusable.
+"ELF-only" in the strict, symbols-only sense applies to a stripped binary
+with no headers and no usable debug info — an unstripped no-header build can
+still produce real layout findings, which aren't the heuristic-filter false
+positives this page is about.
 
 ## Why false positives can occur in ELF-only mode
 
@@ -37,39 +45,57 @@ reported 91 false-positive breaks caused by `ix86_*` symbols).
 
 ## How abicheck filters these symbols
 
-`abicheck` applies an ABI-relevance filter (`_is_abi_relevant_symbol`) when parsing
-`.dynsym` in ELF-only mode. Symbols are excluded when they match any of the following:
+`abicheck` applies an ABI-relevance filter, `is_abi_relevant_elf_symbol()` in
+[`elf_symbol_filter.py`](https://github.com/abicheck/abicheck/blob/main/abicheck/elf_symbol_filter.py),
+when reading `.dynsym`. It excludes a symbol when it matches any of several
+categories — the function itself, not this page, is the exact list, since a
+hand-copied prefix table here would drift the moment the filter changes:
 
-**GCC / compiler-internal prefixes** (`ix86_`, `x86_64_`, `__cpu_model`, `__cpu_features`,
-`_ZGV*`, `__svml_*`, `__libm_sse2_*`, `__libm_avx_*`)
+- **ELF linker artifacts** — exact names like `_init`/`_fini`/`__bss_start`
+  emitted by the toolchain/linker itself, never part of a library's own ABI.
+- **Virtual-override thunks** (`_ZTh`/`_ZTv`/`_ZTc`) — compiler-generated
+  vtable artifacts whose churn mirrors the owning class's vtable; owned by a
+  separate detector, not reported as their own symbol here.
+- **GCC/compiler-internal prefixes** (`ix86_`, `x86_64_`, `__cpu_model`,
+  `__cpu_features`, `_ZGV*`, `__svml_*`, `__libm_sse2_*`, `__libm_avx_*`) —
+  statically-linked compiler runtime (libgcc, SVML) leaking into `.dynsym`.
+- **C++ standard-library prefixes** — `std::`/`__gnu_cxx::`/`__cxxabiv1::`
+  and their mangled equivalents (`_ZNSt`, `_ZNKSt`, and the volatile/
+  ref-qualified variants, `_ZdlPv`/`_ZnwSt`/etc. for `new`/`delete`), plus
+  the *stdlib/runtime-namespaced* RTTI prefixes from the shared
+  `STDLIB_RTTI_PREFIXES` table (`name_classification.py`) — **not** a
+  blanket `_ZTI`/`_ZTS` match: a user type's own RTTI symbols are not
+  filtered by this rule, only the standard library's.
+- **Private C double-underscore separator** — any non-C++-mangled symbol
+  (not starting with `_Z`) whose name contains `__` after the first two
+  characters — matches `H5C__flush`/`MPI__send`-style internal naming while
+  leaving system symbols (which start with `__` or `_[A-Z]`) unaffected.
 
-**C++ standard-library prefixes** (`_ZNSt`, `_ZNKSt`, `_ZNSt3__1`, `_ZdlPv`, `_ZnwSt`,
-`_ZnaSt`, `_ZdaPv`, `_ZTVN10__cxxabiv`, `_ZTI`, `_ZTS`, `_ZSt`)
-
-**Private C double-underscore separator** — any non-C++-mangled symbol (i.e. not
-starting with `_Z`) whose name contains `__` after the first two characters.
-This matches patterns like `H5C__flush` or `MPI__send` while leaving system symbols
-(which start with `__` or `_[A-Z]`) unaffected.
+This filter runs whenever a symbol's visibility is ELF-derived, **whether or
+not headers were supplied** — supplying `-H` does not bypass it. A library
+that intentionally exports a name matching one of these categories (unlikely,
+but the private-separator heuristic in particular can false-positive on a
+real convention like `MPI__send`) has that export silently dropped from the
+inferred surface either way; open an issue if you hit a real case.
 
 ## Limitations of the filter
 
-- The filter is heuristic. A library that intentionally exports a symbol matching
-  one of the filtered prefixes (unlikely but possible) will have it silently ignored.
-- Non-standard SIMD / math libraries with different naming conventions are not covered;
-  open an issue if you encounter new patterns causing false positives.
-- In **header mode** (when headers are supplied), this filter is not applied — castxml
-  provides accurate type information and the ELF surface is used only for visibility
-  decisions, not for inferring the API surface.
+- The filter is heuristic and, per above, applies with or without headers.
+  A library that intentionally exports a name matching one of its categories
+  will have it silently ignored regardless of `-H`.
+- Non-standard SIMD / math libraries with different naming conventions are not
+  covered; open an issue if you encounter new patterns causing false positives.
 
-## Mitigation for header mode
+## Why headers still help
 
-For the most accurate results, always supply public headers:
+Supplying headers does not bypass the filter above, but it materially
+improves accuracy elsewhere: it gives abicheck real source-level type
+information (instead of inferring everything from exported names alone) and
+scopes the public surface to what the headers actually declare.
 
 ```bash
 abicheck compare old.so new.so -H include/foo.h
 ```
-
-This eliminates ELF-only mode entirely and removes the need for heuristic filtering.
 
 ## Header scoping on PE and Mach-O
 
