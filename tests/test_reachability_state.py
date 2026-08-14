@@ -813,6 +813,30 @@ class TestSuppressionReachabilityUnknownDiagnostic:
         )
         assert "allow_unknown_reachability" in diag.description
 
+    def test_finding_id_only_rule_renders_selector_not_bare_fallback(self) -> None:
+        """A finding_id-only rule (no symbol/pattern/namespace/source_location)
+        must render its own identity in the diagnostic, not fall through to
+        the ambiguous bare "?" fallback (Codex review, PR #753 round 5 —
+        mirrors the identical fix already made to cli_compare_fold.py's
+        _suppression_rule_label)."""
+        from abicheck.finding_identity import report_canonical_finding_id
+
+        old, new, raw_change = _degraded_call_graph_scenario()
+        finding_id = report_canonical_finding_id(raw_change)
+        suppression = SuppressionList([
+            Suppression(
+                finding_id=finding_id,
+                reachability="proven-unreachable-only",
+                reason="wants proof",
+            )
+        ])
+        ctx = DEFAULT_PIPELINE.run([raw_change], old, new, suppression=suppression)
+        diag = next(
+            c for c in ctx.kept if c.kind == ChangeKind.SUPPRESSION_REACHABILITY_UNKNOWN
+        )
+        assert finding_id in diag.description
+        assert "'?'" not in diag.description
+
     def test_allow_unknown_reachability_suppresses_with_no_diagnostic(self) -> None:
         old, new, raw_change = _degraded_call_graph_scenario()
         suppression = SuppressionList([

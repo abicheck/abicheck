@@ -749,6 +749,13 @@ def _suppression_rule_label(rule: Any, index: int) -> str:
             "namespace",
             "entity_namespace",
             "cause_namespace",
+            # Canonical (backend-independent) identity selector (Codex
+            # review, fresh evidence, PR #753): a finding_id-only rule with
+            # no label/reason previously rendered as a bare `rule#<index>`,
+            # indistinguishable from every other unlabeled rule in the same
+            # bucket -- the exact ambiguity every other selector here
+            # already avoids.
+            "finding_id",
             # Symbol-linkage selector (Codex review, fresh evidence): two
             # rules sharing every other selector but differing on `binding`
             # (e.g. one `weak`, one `global`) match disjoint findings and
