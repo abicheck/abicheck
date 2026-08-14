@@ -367,6 +367,64 @@ class TestFailureTaxonomy:
         assert result.returncode == 1
         assert outputs.get("outcome") == "ambiguous"
 
+    def test_allow_new_target_missing_from_set_is_advisory_and_non_fatal(
+        self, tmp_path: Path
+    ) -> None:
+        baseline_dir = tmp_path / "baseline"
+        _write_manifest(baseline_dir, artifacts=[_target_artifact("libpvxsIoc")])
+        result, outputs = _run_action(
+            {
+                "INPUT_BASELINE_PATH": str(baseline_dir),
+                "INPUT_CHANNEL": "release-contract",
+                "INPUT_TARGET": "libpvxs",
+                "INPUT_PROFILE": PROFILE,
+                "INPUT_ALLOW_NEW_TARGET": "true",
+            },
+            tmp_path,
+        )
+        assert result.returncode == 0
+        assert outputs.get("outcome") == "new_target"
+
+    def test_allow_new_target_false_default_still_ambiguous(
+        self, tmp_path: Path
+    ) -> None:
+        baseline_dir = tmp_path / "baseline"
+        _write_manifest(baseline_dir, artifacts=[_target_artifact("libpvxsIoc")])
+        result, outputs = _run_action(
+            {
+                "INPUT_BASELINE_PATH": str(baseline_dir),
+                "INPUT_CHANNEL": "release-contract",
+                "INPUT_TARGET": "libpvxs",
+                "INPUT_PROFILE": PROFILE,
+            },
+            tmp_path,
+        )
+        assert result.returncode == 1
+        assert outputs.get("outcome") == "ambiguous"
+
+    def test_allow_new_target_ignored_for_bundle_kind(self, tmp_path: Path) -> None:
+        # run.sh only forwards --allow-new-target for --kind target -- a
+        # bundle resolution with a missing member still reports ambiguous
+        # even when allow-new-target: true is set (abicheck.buildsource.
+        # baseline_set.resolve_bundle has no allow_new_target parameter at
+        # all).
+        baseline_dir = tmp_path / "baseline"
+        _write_manifest(baseline_dir, artifacts=[])
+        result, outputs = _run_action(
+            {
+                "INPUT_BASELINE_PATH": str(baseline_dir),
+                "INPUT_CHANNEL": "release-contract",
+                "INPUT_KIND": "bundle",
+                "INPUT_BUNDLE": "pvxs-release",
+                "INPUT_BUNDLE_MEMBERS": '["libpvxs"]',
+                "INPUT_PROFILE": PROFILE,
+                "INPUT_ALLOW_NEW_TARGET": "true",
+            },
+            tmp_path,
+        )
+        assert result.returncode == 1
+        assert outputs.get("outcome") == "ambiguous"
+
     def test_wrong_profile(self, tmp_path: Path) -> None:
         baseline_dir = tmp_path / "baseline"
         _write_manifest(

@@ -416,7 +416,18 @@ from typing import Any
 #:       ``additionalProperties: false`` without listing this key, so valid
 #:       output using the feature failed validation against the bundled
 #:       schema. Additive optional key (Codex review, fresh evidence).
-REPORT_SCHEMA_VERSION = "2.34"
+#: 2.35 — ``verdict`` gains a third sentinel value, ``"NEW_TARGET"``
+#:       (``check_report.NEW_TARGET_VERDICT``), and
+#:       ``check_evidence_coverage.state`` gains ``"new_target"`` --
+#:       ``actions/check-target``'s new ``allow-new-target``-opted-in
+#:       report shape for a target genuinely absent from an otherwise-
+#:       resolved baseline-set (e.g. a new library's first release). A new
+#:       optional ``baseline_new_target`` boolean, mirroring the existing
+#:       ``baseline_bootstrap``, is set ``true`` only on that report.
+#:       Additive: new enum members plus one new optional key, same shape
+#:       as ``NO_BASELINE``/``baseline_bootstrap``'s own 2.13 addition
+#:       (Codex review, fresh evidence).
+REPORT_SCHEMA_VERSION = "2.35"
 
 #: SemVer-style (MAJOR.MINOR) version of the ``scan`` JSON output, emitted as
 #: ``scan_schema_version`` at the top level of both public scan dict shapes:

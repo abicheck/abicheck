@@ -105,6 +105,8 @@ MODE=""
 RESOLVE_ARGS=()
 if [[ "$RESOLVE_RAN" == "true" && "$RESOLVE_OUTCOME" == "not_found" && "$RESOLVE_BOOTSTRAP" == "true" ]]; then
   MODE="bootstrap"
+elif [[ "$RESOLVE_RAN" == "true" && "$RESOLVE_OUTCOME" == "new_target" ]]; then
+  MODE="new-target"
 elif [[ "$RESOLVE_RAN" == "true" && "$RESOLVE_OUTCOME" != "resolved" ]]; then
   MODE="operational-error"
   OUTCOME="${RESOLVE_OUTCOME:-ambiguous}"
@@ -149,6 +151,8 @@ if [[ "$MODE" == "augment" ]]; then
   ENVELOPE_ARGS+=(--report-in "$ANALYSIS_REPORT_PATH" --analysis-exit-code "$ANALYSIS_EXIT_CODE")
 elif [[ "$MODE" == "bootstrap" ]]; then
   ENVELOPE_ARGS+=(--resolve-message "${RESOLVE_MESSAGE:-no baseline set exists yet for this channel.}")
+elif [[ "$MODE" == "new-target" ]]; then
+  ENVELOPE_ARGS+=(--resolve-message "${RESOLVE_MESSAGE:-target not found in this baseline-set yet.}")
 else
   ENVELOPE_ARGS+=("${RESOLVE_ARGS[@]}")
 fi

@@ -353,6 +353,36 @@ class TestValidateInputs:
         )
         assert result.returncode == 64
 
+    def test_bundle_kind_rejects_allow_new_target(self, tmp_path: Path) -> None:
+        # resolve_bundle() never returns new_target (a bundle comparison
+        # needs one coherent release where every member already coexisted)
+        # -- project_targets.py already rejects allow_new_target: true on a
+        # bundle check in the generated config path, but that never runs
+        # for a direct check-target caller.
+        result = _run(
+            VALIDATE_SH,
+            {
+                **_BASE_IDENTITY,
+                "INPUT_KIND": "bundle",
+                "INPUT_BASELINE_PATH": "./b",
+                "INPUT_BUNDLE_MEMBERS": '["libpvxs", "libpvxsIoc"]',
+                "INPUT_ALLOW_NEW_TARGET": "true",
+            },
+            tmp_path,
+        )
+        assert result.returncode == 64
+
+    def test_unknown_allow_new_target_fails(self, tmp_path: Path) -> None:
+        result = _run(
+            VALIDATE_SH,
+            {
+                **_BASE_IDENTITY,
+                "INPUT_ALLOW_NEW_TARGET": "yes",
+            },
+            tmp_path,
+        )
+        assert result.returncode == 64
+
     def test_bundle_kind_rejects_non_library_target_kind(self, tmp_path: Path) -> None:
         result = _run(
             VALIDATE_SH,
@@ -834,6 +864,33 @@ class TestFinalizeBootstrap:
 @pytest.mark.skipif(
     not RUN_SH.is_file(), reason="actions/check-target/run.sh not found"
 )
+class TestFinalizeNewTarget:
+    def test_new_target_pass_never_fails_the_job(self, tmp_path: Path) -> None:
+        result, outputs = _run_finalize(
+            {
+                **_BASE_IDENTITY,
+                "INPUT_BASELINE_REQUIRED": "false",
+                "RESOLVE_RAN": "true",
+                "RESOLVE_OUTCOME": "new_target",
+                "RESOLVE_BOOTSTRAP": "false",
+                "RESOLVE_MESSAGE": "target 'libpvxs' is not in this baseline-set's manifest.",
+                "ANALYSIS_RAN": "false",
+            },
+            tmp_path,
+        )
+        assert result.returncode == 0, result.stderr
+        assert outputs["outcome"] == "new_target"
+        assert outputs["verdict"] == "NEW_TARGET"
+        report = json.loads((tmp_path / outputs["report-path"]).read_text())
+        assert report["baseline_new_target"] is True
+        assert "baseline_bootstrap" not in report
+        assert report["operational_errors"] == []
+        assert report["check_evidence_coverage"]["state"] == "new_target"
+
+
+@pytest.mark.skipif(
+    not RUN_SH.is_file(), reason="actions/check-target/run.sh not found"
+)
 class TestFinalizeEvidenceDegradation:
     """ADR-047 §7's effective_depth reads the real achieved depth straight
     from the analysis report's own old_evidence_depth/new_evidence_depth --
@@ -1126,4 +1183,44 @@ class TestExpectedProjectRefForwardedToResolveBaseline:
         resolve_step = next(s for s in steps if s.get("name") == "Resolve baseline")
         assert resolve_step["with"]["expected-project-ref"] == (
             "${{ inputs.expected-project-ref }}"
+        )
+
+
+class TestAllowNewTargetForwardedToResolveBaseline:
+    """Same shape of regression risk as
+    TestExpectedProjectRefForwardedToResolveBaseline above: a declared but
+    unforwarded input would silently make check-target's allow-new-target
+    input a no-op."""
+
+    def test_action_yml_declares_the_input(self) -> None:
+        import yaml
+
+        action_yml = ACTION_DIR / "action.yml"
+        data = yaml.safe_load(action_yml.read_text(encoding="utf-8"))
+        assert "allow-new-target" in data["inputs"]
+        assert data["inputs"]["allow-new-target"]["required"] is False
+        assert data["inputs"]["allow-new-target"]["default"] == "false"
+
+    def test_resolve_step_forwards_it(self) -> None:
+        import yaml
+
+        action_yml = ACTION_DIR / "action.yml"
+        data = yaml.safe_load(action_yml.read_text(encoding="utf-8"))
+        steps = data["runs"]["steps"]
+        resolve_step = next(s for s in steps if s.get("name") == "Resolve baseline")
+        assert resolve_step["with"]["allow-new-target"] == (
+            "${{ inputs.allow-new-target }}"
+        )
+
+    def test_validate_step_forwards_it(self) -> None:
+        import yaml
+
+        action_yml = ACTION_DIR / "action.yml"
+        data = yaml.safe_load(action_yml.read_text(encoding="utf-8"))
+        steps = data["runs"]["steps"]
+        validate_step = next(
+            s for s in steps if s.get("name") == "Validate check-target inputs"
+        )
+        assert validate_step["env"]["INPUT_ALLOW_NEW_TARGET"] == (
+            "${{ inputs.allow-new-target }}"
         )

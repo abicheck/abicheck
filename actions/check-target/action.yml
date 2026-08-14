@@ -109,6 +109,27 @@ inputs:
       Ignored when baseline-channel is 'none'.
     required: false
     default: ''
+  allow-new-target:
+    description: >
+      Forwarded to resolve-baseline's allow-new-target input -- 'false'
+      (default) means a target absent from an otherwise-resolved
+      baseline-set always fails as ambiguous; 'true' opts this check into
+      the new_target outcome instead, an advisory, non-fatal lifecycle
+      state for a target this check has explicitly designed to tolerate
+      the first appearance of (e.g. a new library's first release, checked
+      against a baseline-set that predates it -- see resolve-baseline's own
+      input for the full rationale). Only meaningful for kind: target: a
+      'true' value is a hard usage error (validate-inputs.sh, exit 64) when
+      kind is bundle -- a bundle comparison needs one coherent release
+      where every member already coexisted, so there is no well-defined
+      old side for a member that's new -- and is a no-op (never even
+      reaches resolve-baseline) when baseline-channel is 'none'. A
+      run-plan check that sets this should also set baseline-required:
+      'false', or a required-coverage gate would still block on the
+      target's first appearance (see check_report.NEW_TARGET_VERDICT's own
+      docstring).
+    required: false
+    default: 'false'
   requested-depth:
     description: 'Evidence-depth this check asks for: binary, headers, build, or source (ADR-047 §7).'
     required: true
@@ -298,13 +319,13 @@ inputs:
 
 outputs:
   outcome:
-    description: 'resolve-baseline outcome (resolved, not_found, ambiguous, wrong_profile, stale_schema, incompatible_evidence, wrong_project_ref, stale_generation), or "skipped" when baseline-channel is none.'
+    description: 'resolve-baseline outcome (resolved, not_found, ambiguous, wrong_profile, stale_schema, incompatible_evidence, wrong_project_ref, stale_generation, new_target), or "skipped" when baseline-channel is none.'
     value: ${{ steps.finalize.outputs.outcome }}
   check-id:
     description: "This check's full identity: target@profile#baseline_channel@requested_depth."
     value: ${{ steps.finalize.outputs.check-id }}
   verdict:
-    description: 'The legacy verdict field (a Verdict enum value, "ERROR" for an operational failure, or "NO_BASELINE" for a bootstrap pass).'
+    description: 'The legacy verdict field (a Verdict enum value, "ERROR" for an operational failure, "NO_BASELINE" for a bootstrap pass, or "NEW_TARGET" for an allow-new-target-opted-in pass).'
     value: ${{ steps.finalize.outputs.verdict }}
   compatibility-verdict:
     description: 'ADR-047 §7''s new compatibility_verdict field (empty when unavailable).'
@@ -334,6 +355,7 @@ runs:
         INPUT_EVIDENCE_PRODUCER: ${{ inputs.evidence-producer }}
         INPUT_CONSUMER_BINARY: ${{ inputs.consumer-binary }}
         INPUT_CONTRACT_FILE: ${{ inputs.contract-file }}
+        INPUT_ALLOW_NEW_TARGET: ${{ inputs.allow-new-target }}
       run: bash "${{ github.action_path }}/validate-inputs.sh"
 
     # ── Capture this Action's own identity before any nested `uses:` step ──
@@ -438,6 +460,7 @@ runs:
         candidate-build-output: ${{ inputs.candidate-build-output }}
         expected-project-ref: ${{ inputs.expected-project-ref }}
         expected-baseline-generation: ${{ inputs.expected-baseline-generation }}
+        allow-new-target: ${{ inputs.allow-new-target }}
         python-version: ${{ inputs.python-version }}
 
     # ── Evidence collection (ADR-047 §4's collect-facts composition note: ──

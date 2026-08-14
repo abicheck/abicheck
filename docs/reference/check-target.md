@@ -6,7 +6,8 @@ check** — [ADR-047](../contribute/adr/047-github-actions-integration-model.md)
 §4's single high-level primitive — and, once its own input validation
 passes, always emits the [report envelope](#report-envelope-adr-047-7)
 (§7), regardless of whether the baseline resolved, was a bootstrap "no
-baseline yet" pass, or failed outright. An invalid invocation (e.g. a
+baseline yet" pass, a "target new to this baseline-set" pass
+(`allow-new-target: true`), or failed outright. An invalid invocation (e.g. a
 missing required input, or an unsupported input combination) is rejected
 up front, before any of that, and produces no report or outputs at all.
 
@@ -115,6 +116,7 @@ caller-provided directory of the candidate build's own member binaries.
 | `baseline-path` | when channel ≠ `none` | `''` | Forwarded to `resolve-baseline`. |
 | `baseline-required` | no | `true` | Forwarded to `resolve-baseline`'s `required`. |
 | `candidate-build-output` | no | `''` | Forwarded to `resolve-baseline`'s `incompatible_evidence` check. |
+| `allow-new-target` | no | `false` | Forwarded to `resolve-baseline`'s `allow-new-target` — `false` means a target absent from an otherwise-resolved baseline-set always fails `ambiguous`; `true` opts this check into the `new_target` outcome instead, an advisory, non-fatal lifecycle state for a target checked before it has ever been published in a baseline-set (e.g. a new library's first release). Only meaningful for `kind: target`; rejected outright for `kind: bundle` (a bundle comparison needs one coherent release where every member already coexisted). Pair with `baseline-required: false`, or a required-coverage gate would still block on the target's first appearance. |
 | `requested-depth` | yes | — | `binary` \| `headers` \| `build` \| `source` — for `kind: bundle`, only `binary` is supported (`headers`/`build`/`source` are all rejected: a bundle's baseline is always raw binaries with no historical header/build/source evidence staged per member). |
 | `gate-mode` | no | `local` | `local` \| `deferred` \| `advisory`. |
 | `project` | no | `${{ github.repository }}` | Recorded in the report envelope. |
@@ -134,7 +136,7 @@ caller-provided directory of the candidate build's own member binaries.
 |--------|---------|
 | `outcome` | The `resolve-baseline` outcome, or `skipped` when `baseline-channel: none`. |
 | `check-id` | `target@profile#baseline_channel@requested_depth` — always includes the depth suffix, even in the common single-depth case (ADR-047 §7). |
-| `verdict` | The legacy `verdict` field: one of the five `Verdict` values, `ERROR` (operational failure), or `NO_BASELINE` (bootstrap pass — deliberately not a `Verdict` member, never a compatibility verdict). |
+| `verdict` | The legacy `verdict` field: one of the five `Verdict` values, `ERROR` (operational failure), `NO_BASELINE` (bootstrap pass), or `NEW_TARGET` (`allow-new-target: true` pass) — the latter two are deliberately not `Verdict` members, never a compatibility verdict. |
 | `compatibility-verdict` | Mirrors `verdict`'s casing, empty when unavailable (an operational-failure or bootstrap report). |
 | `policy-gate-decision` | `pass` or `fail` — this check's own real gate decision, computed before any `gate-mode: advisory` neutralization. |
 | `report-path` | Path to the final, enriched report JSON. |
@@ -178,9 +180,11 @@ own) — neither of those two carries `report_schema_version`.
   compatibility finding.
 - `publication` — whether/where this report was actually published.
 
-A `resolve-baseline` failure or a bootstrap ("no baseline published yet")
-pass synthesizes this same envelope from scratch — a report always exists,
-even when no comparison ever ran.
+A `resolve-baseline` failure, a bootstrap ("no baseline published yet")
+pass, or a new-target ("baseline-set resolved but has no entry for this
+target yet", `allow-new-target: true`) pass all synthesize this same
+envelope from scratch — a report always exists, even when no comparison
+ever ran.
 
 ## Example
 

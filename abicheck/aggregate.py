@@ -201,6 +201,22 @@ DEFAULT_REPORT_PREFIX = "abi-report-"
 #: fan-in preserves it as a blocking gate rather than a verdictless report.
 _OPERATIONAL_ERROR_VERDICT = "ERROR"
 
+#: ``actions/check-target``'s two advisory, never-a-compatibility-verdict
+#: sentinels (``check_report.BOOTSTRAP_VERDICT``/``NEW_TARGET_VERDICT`` —
+#: duplicated as bare strings here rather than imported, same as
+#: ``_OPERATIONAL_ERROR_VERDICT`` above, to keep this module free of a
+#: dependency on ``buildsource``). Both fall through :func:`parse_report_verdict`
+#: to ``None`` (neither is a real :class:`Verdict` member), which is correct
+#: for the compatibility/coverage axes -- an unavailable ``TargetReport``
+#: paired with ``required: false``, per each report builder's own docstring.
+#: Read only by :func:`_load_report_file` below, to give each its own
+#: human-readable ``reason`` instead of the generic "report carried no ABI
+#: verdict" every other verdictless report gets -- otherwise an
+#: intentionally-tolerated new-library first release reads identically to a
+#: malformed/corrupt report in the aggregate JSON/text output (Codex review).
+_BOOTSTRAP_VERDICT = "NO_BASELINE"
+_NEW_TARGET_VERDICT = "NEW_TARGET"
+
 
 def _check_manifest_version(raw: Any) -> None:
     """Validate an optional manifest ``aggregate_manifest_version`` field.
@@ -1628,13 +1644,22 @@ def _load_report_file(path: Path, *, prefix: str) -> _LoadedReport:
             )
         if gate is None:
             gate = GateInfo.legacy_from_verdict(verdict)
+    raw_verdict = data.get("verdict")
+    if verdict is not None:
+        unavailable_reason = None
+    elif raw_verdict == _BOOTSTRAP_VERDICT:
+        unavailable_reason = "no baseline published yet (bootstrap)"
+    elif raw_verdict == _NEW_TARGET_VERDICT:
+        unavailable_reason = "target not yet in this baseline-set (new_target)"
+    else:
+        unavailable_reason = "report carried no ABI verdict"
     return _LoadedReport(
         target_id=target_id,
         verdict=verdict,
         gate=gate,
         library=data.get("library"),
         head_sha=head_sha,
-        reason=None if verdict is not None else "report carried no ABI verdict",
+        reason=unavailable_reason,
         path=path,
         contract_coverage_exit=_contract_coverage_exit(data),
         contract_coverage_incomplete=_contract_coverage_incomplete(data),

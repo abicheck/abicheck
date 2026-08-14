@@ -21,6 +21,7 @@ REQUESTED_DEPTH="${INPUT_REQUESTED_DEPTH:-}"
 EVIDENCE_PRODUCER="${INPUT_EVIDENCE_PRODUCER:-}"
 CONSUMER_BINARY="${INPUT_CONSUMER_BINARY:-}"
 CONTRACT_FILE="${INPUT_CONTRACT_FILE:-}"
+ALLOW_NEW_TARGET="${INPUT_ALLOW_NEW_TARGET:-false}"
 
 # ── Required-input checks run before the enum/case validations below, so an
 # empty required input (name, profile, baseline-channel, requested-depth)
@@ -127,7 +128,23 @@ if [[ "$KIND" == "bundle" ]]; then
     # member baseline header staging exists.
     _fail "requested-depth 'headers' is not supported when kind is 'bundle' -- a bundle's baseline is always raw binaries with no historical header snapshot, so a headers-depth bundle compare would parse both sides against the SAME current checkout's headers, silently missing any header-only change. Use requested-depth: binary for a bundle check, or kind: target to compare one library at headers depth."
   fi
+  if [[ "$ALLOW_NEW_TARGET" == "true" ]]; then
+    # abicheck.buildsource.baseline_set.resolve_bundle never returns
+    # new_target (see its own docstring): a bundle comparison needs one
+    # coherent release where every member already coexisted, so "this
+    # member is new" has no well-defined old side. abicheck/buildsource/
+    # project_targets.py already rejects allow_new_target: true on a
+    # bundle check in the generated .abicheck.yml/run-plan.json path, but
+    # that validation never runs for a caller invoking check-target
+    # directly -- reject it here too, same rationale as the
+    # baseline-channel: none guard above.
+    _fail "allow-new-target: true is not supported when kind is 'bundle' -- a bundle comparison needs one coherent release where every member already coexisted, so there is no well-defined old side for a member that's new. Scope the new member individually with a kind: target check instead."
+  fi
 fi
+case "$ALLOW_NEW_TARGET" in
+  true | false) ;;
+  *) _fail "allow-new-target '$ALLOW_NEW_TARGET' is not recognized. Use 'true' or 'false'." ;;
+esac
 if [[ "$TARGET_KIND" == "app-consumer" && -z "$CONSUMER_BINARY" ]]; then
   _fail "consumer-binary is required when target-kind is 'app-consumer'."
 fi

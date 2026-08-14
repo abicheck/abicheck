@@ -96,6 +96,27 @@ OPERATIONAL_ERROR_VERDICT = "ERROR"
 #: never opens a coverage gap.
 BOOTSTRAP_VERDICT = "NO_BASELINE"
 
+#: A ``new_target`` resolution (a target genuinely absent from an otherwise-
+#: resolved baseline-set, on a check that opted into ``allow_new_target``) is
+#: the same shape of "advisory pass, never a compatibility verdict" as
+#: :data:`BOOTSTRAP_VERDICT` above, and is kept as its own distinct sentinel
+#: rather than reusing that one: ``NO_BASELINE`` means "no baseline-set could
+#: be resolved at all," while a ``new_target`` check DID resolve a real,
+#: healthy baseline-set -- it just doesn't (yet) cover this particular
+#: target, a materially different fact a report reader should not have to
+#: infer from ``check_evidence_coverage.reasons`` alone. Same
+#: ``LEGACY_VERDICT_VALUES``/``OPERATIONAL_ERROR_VERDICT``-exclusion
+#: reasoning, and the same pairing convention, apply as for
+#: :data:`BOOTSTRAP_VERDICT`: this parses to ``None`` under
+#: ``aggregate.parse_report_verdict``, so a ``new_target`` check is
+#: ``TargetReport.analyzed is False`` the same way a bootstrap one is --
+#: expected to be paired with ``required: false`` in the run-plan, or a
+#: required-coverage gate would otherwise block every release that
+#: introduces a genuinely new target. See
+#: ``abicheck.buildsource.baseline_set.ResolveOutcome.NEW_TARGET``'s own
+#: docstring for the full lifecycle-state rationale.
+NEW_TARGET_VERDICT = "NEW_TARGET"
+
 #: ``resolve-baseline``'s failure outcomes (ADR-047 §6, plus
 #: ``wrong_project_ref``) that are never a compatibility verdict -- distinct
 #: from ``not_found`` + bootstrap, which is an advisory pass, not a failure.
@@ -635,6 +656,63 @@ def build_bootstrap_report(
         "operational_errors": [],
         "publication": {"state": "skipped", "channels": []},
         "verdict": BOOTSTRAP_VERDICT,
+        "message": resolve_message,
+    }
+    if project is not None:
+        report["project"] = project
+    if head_sha is not None:
+        report["head_sha"] = head_sha
+    if base_ref is not None:
+        report["base_ref"] = base_ref
+    if tool_version is not None:
+        report["tool_version"] = tool_version
+    if action_version is not None:
+        report["action_version"] = action_version
+    return report
+
+
+def build_new_target_report(
+    *,
+    name: str,
+    profile_id: str,
+    baseline_channel: str,
+    requested_depth: str,
+    resolve_message: str,
+    project: str | None = None,
+    head_sha: str | None = None,
+    base_ref: str | None = None,
+    tool_version: str | None = None,
+    action_version: str | None = None,
+) -> dict[str, Any]:
+    """Synthesize the "target new to this baseline-set" advisory pass.
+
+    Mirrors :func:`build_bootstrap_report` structurally -- see
+    :data:`NEW_TARGET_VERDICT`'s own docstring for why this is a distinct
+    lifecycle state rather than reusing ``baseline_bootstrap``/
+    ``BOOTSTRAP_VERDICT``: the baseline-set itself resolved cleanly here, it
+    simply carries no artifact for this particular target yet.
+    """
+    check_id = build_check_id(name, profile_id, baseline_channel, requested_depth)
+    report: dict[str, Any] = {
+        "report_schema_version": REPORT_SCHEMA_VERSION,
+        "check_id": check_id,
+        "target_id": check_id,
+        "target": name,
+        "profile_id": profile_id,
+        "baseline_channel": baseline_channel,
+        "requested_depth": requested_depth,
+        "check_evidence_coverage": {
+            "state": "new_target",
+            "reasons": ["target_not_in_baseline_set"],
+        },
+        "baseline_new_target": True,
+        # compatibility_verdict omitted, not null -- same reasoning as
+        # build_bootstrap_report above: this check never produced a
+        # compatibility result to report.
+        "policy_gate_decision": "pass",
+        "operational_errors": [],
+        "publication": {"state": "skipped", "channels": []},
+        "verdict": NEW_TARGET_VERDICT,
         "message": resolve_message,
     }
     if project is not None:

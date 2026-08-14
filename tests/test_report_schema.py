@@ -682,6 +682,58 @@ class TestNotComparableReportSchema:
             self._validate(payload)
 
 
+@_requires_jsonschema
+class TestCheckTargetSyntheticReportsValidateAgainstSchema:
+    """`actions/check-target`'s synthesized-from-scratch report shapes
+    (`check_report.build_operational_error_report`/`build_bootstrap_report`/
+    `build_new_target_report`) -- distinct from `TestReportValidatesAgainstSchema`
+    above, which only exercises reports built from a real `checker.compare()`
+    result. Regression coverage for the finding that the packaged schema's
+    `verdict`/`check_evidence_coverage.state` enums lagged the wire vocabulary
+    these builders actually emit (Codex review)."""
+
+    def _validate(self, payload: dict) -> None:
+        schema = load_compare_report_schema()
+        jsonschema.validate(instance=payload, schema=schema)
+
+    def test_operational_error_report_validates(self):
+        from abicheck.buildsource.check_report import build_operational_error_report
+
+        report = build_operational_error_report(
+            name="libpvxs",
+            profile_id="linux-x86_64-gcc13-release",
+            baseline_channel="accepted-main",
+            requested_depth="headers",
+            resolve_outcome="ambiguous",
+            resolve_message="target 'libpvxs' is not in this baseline-set's manifest.",
+        )
+        self._validate(report)
+
+    def test_bootstrap_report_validates(self):
+        from abicheck.buildsource.check_report import build_bootstrap_report
+
+        report = build_bootstrap_report(
+            name="libpvxs",
+            profile_id="linux-x86_64-gcc13-release",
+            baseline_channel="release-contract",
+            requested_depth="headers",
+            resolve_message="no baseline set exists yet.",
+        )
+        self._validate(report)
+
+    def test_new_target_report_validates(self):
+        from abicheck.buildsource.check_report import build_new_target_report
+
+        report = build_new_target_report(
+            name="libnew",
+            profile_id="linux-x86_64-gcc13-release",
+            baseline_channel="release-contract",
+            requested_depth="source",
+            resolve_message="target 'libnew' is not in this baseline-set's manifest.",
+        )
+        self._validate(report)
+
+
 class TestEvidenceDepthValidator:
     """Direct unit coverage for checker_types.validate_evidence_depth/
     EVIDENCE_DEPTH_VALUES -- the shared depth-spelling guard both

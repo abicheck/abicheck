@@ -47,6 +47,7 @@ REQUIRED="${INPUT_REQUIRED:-true}"
 CANDIDATE_BUILD_OUTPUT="${INPUT_CANDIDATE_BUILD_OUTPUT:-}"
 EXPECTED_PROJECT_REF="${INPUT_EXPECTED_PROJECT_REF:-}"
 EXPECTED_BASELINE_GENERATION="${INPUT_EXPECTED_BASELINE_GENERATION:-}"
+ALLOW_NEW_TARGET="${INPUT_ALLOW_NEW_TARGET:-false}"
 ACTION_PATH="${ACTION_PATH:-$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)}"
 
 # A newline in channel (or baseline-path, which _fail_ambiguous may embed
@@ -67,6 +68,10 @@ esac
 case "$REQUIRED" in
   true | false) ;;
   *) _fail "required '$REQUIRED' is not recognized. Use 'true' or 'false'." ;;
+esac
+case "$ALLOW_NEW_TARGET" in
+  true | false) ;;
+  *) _fail "allow-new-target '$ALLOW_NEW_TARGET' is not recognized. Use 'true' or 'false'." ;;
 esac
 if [[ "$KIND" == "target" && -z "$TARGET" ]]; then
   _fail "target input is required when kind is 'target'."
@@ -258,6 +263,9 @@ fi
 if [[ -n "$EXPECTED_BASELINE_GENERATION" ]]; then
   RESOLVE_ARGS+=(--expected-baseline-generation "$EXPECTED_BASELINE_GENERATION")
 fi
+if [[ "$KIND" == "target" ]]; then
+  RESOLVE_ARGS+=(--allow-new-target "$ALLOW_NEW_TARGET")
+fi
 
 echo "::group::Resolve baseline ($CHANNEL / $KIND / $PROFILE)"
 set +e
@@ -284,6 +292,9 @@ if [[ $RESOLVE_EXIT -eq 64 ]]; then
   _fail "resolve-baseline usage error: $MESSAGE"
 elif [[ "$OUTCOME" == "not_found" && "$BOOTSTRAP" == "true" ]]; then
   echo "::notice::baseline not found for channel '$CHANNEL' ($MESSAGE) -- bootstrap: required=false, treating as an advisory 'no baseline yet' pass."
+  exit 0
+elif [[ "$OUTCOME" == "new_target" ]]; then
+  echo "::notice::target not found in channel '$CHANNEL''s baseline-set ($MESSAGE) -- allow-new-target: true, treating as an advisory 'new target' pass."
   exit 0
 elif [[ $RESOLVE_EXIT -ne 0 ]]; then
   _fail "resolve-baseline failed ($OUTCOME): $MESSAGE"

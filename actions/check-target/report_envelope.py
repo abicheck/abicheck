@@ -30,6 +30,10 @@ Exactly one of three modes runs, selected by ``--mode``:
   from scratch (no ``--report-in``).
 - ``bootstrap`` -- ``resolve-baseline`` returned ``not_found``/bootstrap; no
   comparison ever ran, synthesize the advisory "no baseline yet" report.
+- ``new-target`` -- ``resolve-baseline`` returned ``new_target`` (this
+  check's baseline-set resolved cleanly but has no artifact for this target
+  yet, and the check opted into ``allow-new-target``); no comparison ever
+  ran, synthesize the advisory "target new to this baseline-set" report.
 """
 
 from __future__ import annotations
@@ -43,6 +47,7 @@ from abicheck.buildsource.check_report import (
     RESOLVE_FAILURE_OUTCOMES,
     augment_report,
     build_bootstrap_report,
+    build_new_target_report,
     build_operational_error_report,
     final_exit_code,
 )
@@ -88,7 +93,9 @@ def _outputs_for_report(report: dict[str, object], report_out: Path) -> dict[str
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
-        "--mode", required=True, choices=["augment", "operational-error", "bootstrap"]
+        "--mode",
+        required=True,
+        choices=["augment", "operational-error", "bootstrap", "new-target"],
     )
     parser.add_argument(
         "--report-in",
@@ -158,6 +165,19 @@ def main(argv: list[str] | None = None) -> int:
         operational_error = True
     elif args.mode == "bootstrap":
         report = build_bootstrap_report(
+            name=args.name,
+            profile_id=args.profile_id,
+            baseline_channel=args.baseline_channel,
+            requested_depth=args.requested_depth,
+            resolve_message=args.resolve_message,
+            project=project,
+            head_sha=head_sha,
+            base_ref=base_ref,
+            tool_version=tool_version,
+            action_version=action_version,
+        )
+    elif args.mode == "new-target":
+        report = build_new_target_report(
             name=args.name,
             profile_id=args.profile_id,
             baseline_channel=args.baseline_channel,

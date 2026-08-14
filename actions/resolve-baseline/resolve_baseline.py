@@ -117,6 +117,17 @@ def main(argv: list[str] | None = None) -> int:
         "baseline_generation to match exactly (a non-negative integer), or "
         "empty to skip the stale_generation check.",
     )
+    parser.add_argument(
+        "--allow-new-target",
+        default="false",
+        choices=["true", "false"],
+        help="'true' -- a target genuinely absent from an otherwise-resolved "
+        "baseline-set's manifest reports the new_target outcome (an "
+        "advisory, non-fatal lifecycle state -- e.g. this library's first "
+        "release) instead of ambiguous. 'false' (default) -- unchanged "
+        "behavior. Ignored for --kind bundle, which never supports "
+        "new_target (see resolve_target()'s own docstring).",
+    )
     args = parser.parse_args(argv)
 
     expected_baseline_generation: int | None = None
@@ -173,6 +184,7 @@ def main(argv: list[str] | None = None) -> int:
             candidate_evidence_producer=candidate_evidence_producer,
             expected_project_ref=args.expected_project_ref,
             expected_baseline_generation=expected_baseline_generation,
+            allow_new_target=args.allow_new_target == "true",
         )
     else:
         try:
@@ -204,6 +216,8 @@ def main(argv: list[str] | None = None) -> int:
     if result.outcome == ResolveOutcome.RESOLVED:
         return 0
     if result.outcome == ResolveOutcome.NOT_FOUND and result.bootstrap:
+        return 0
+    if result.outcome == ResolveOutcome.NEW_TARGET:
         return 0
     return 1
 

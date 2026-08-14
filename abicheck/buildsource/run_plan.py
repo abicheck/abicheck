@@ -317,6 +317,13 @@ class RunPlanCheck:
     #: matching toolchain. Empty when the profile declares none, which lets
     #: the caller's workflow-level default stand.
     dependency_source: str = ""
+    #: This cell's ``checks[].allow_new_target`` (``CheckSpec.
+    #: allow_new_target``), forwarded as ``check-target``'s own
+    #: ``allow-new-target`` input. ``False`` for every ``kind: bundle`` cell
+    #: (``_generate_bundle_checks`` never sets it -- see
+    #: ``CheckSpec.allow_new_target``'s own docstring for why a bundle check
+    #: can never support this lifecycle state).
+    allow_new_target: bool = False
 
     def to_dict(self) -> dict[str, Any]:
         d: dict[str, Any] = {
@@ -360,6 +367,8 @@ class RunPlanCheck:
         d["runs_on"] = self.runs_on
         if self.dependency_source:
             d["dependency_source"] = self.dependency_source
+        if self.allow_new_target:
+            d["allow_new_target"] = True
         return d
 
     @classmethod
@@ -400,6 +409,7 @@ class RunPlanCheck:
             ),
             runs_on=_opt_str(d.get("runs_on"), DEFAULT_PROFILE_RUNNER_LABEL),
             dependency_source=_opt_str(d.get("dependency_source")),
+            allow_new_target=bool(d.get("allow_new_target", False)),
         )
 
 
@@ -677,6 +687,7 @@ def _generate_target_checks(
                     ),
                     runs_on=runs_on,
                     dependency_source=dependency_source,
+                    allow_new_target=check.allow_new_target,
                 )
             )
     return out

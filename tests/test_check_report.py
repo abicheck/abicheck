@@ -28,10 +28,12 @@ import pytest
 
 from abicheck.buildsource.check_report import (
     BOOTSTRAP_VERDICT,
+    NEW_TARGET_VERDICT,
     OPERATIONAL_ERROR_VERDICT,
     augment_report,
     build_bootstrap_report,
     build_check_id,
+    build_new_target_report,
     build_operational_error_report,
     derive_effective_depth,
     final_exit_code,
@@ -1027,6 +1029,55 @@ class TestBuildBootstrapReport:
             baseline_channel="release-contract",
             requested_depth="headers",
             resolve_message="no baseline set exists yet.",
+        )
+        assert "project" not in report
+        assert "head_sha" not in report
+        assert "base_ref" not in report
+        assert "tool_version" not in report
+        assert "action_version" not in report
+
+
+class TestBuildNewTargetReport:
+    def test_shape_is_never_a_compatibility_verdict(self):
+        report = build_new_target_report(
+            name="libnew",
+            profile_id="p",
+            baseline_channel="release-contract",
+            requested_depth="source",
+            resolve_message="target 'libnew' is not in this baseline-set's manifest.",
+            project="epics-base/pvxs",
+            head_sha="deadbeef",
+            base_ref="main",
+            tool_version="abicheck 0.x.y",
+            action_version="abicheck/abicheck@v1",
+        )
+        assert report["verdict"] == NEW_TARGET_VERDICT
+        assert report["verdict"] != BOOTSTRAP_VERDICT
+        assert report["verdict"] not in {
+            "NO_CHANGE",
+            "COMPATIBLE",
+            "COMPATIBLE_WITH_RISK",
+            "API_BREAK",
+            "BREAKING",
+            "ERROR",
+        }
+        assert report["baseline_new_target"] is True
+        assert "baseline_bootstrap" not in report
+        assert "compatibility_verdict" not in report
+        assert report["check_evidence_coverage"]["state"] == "new_target"
+        assert report["operational_errors"] == []
+        assert report["policy_gate_decision"] == "pass"
+        assert report["message"].startswith("target 'libnew'")
+        assert report["project"] == "epics-base/pvxs"
+        assert report["tool_version"] == "abicheck 0.x.y"
+
+    def test_optional_fields_omitted_when_not_given(self):
+        report = build_new_target_report(
+            name="libnew",
+            profile_id="p",
+            baseline_channel="release-contract",
+            requested_depth="source",
+            resolve_message="target 'libnew' is not in this baseline-set's manifest.",
         )
         assert "project" not in report
         assert "head_sha" not in report
