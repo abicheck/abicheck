@@ -52,7 +52,7 @@ perfectly fine for the first purpose can be a real break for the second:
 - **Struct layout used as a wire format.** A struct passed by value across
   an API boundary is an ABI concern; the *same struct* memcpy'd into a file
   or a network buffer is now also a wire-format concern, and every ABI
-  layout change (`type_size_changed`, `type_field_reordered`,
+  layout change (`type_size_changed`, `type_field_offset_changed`,
   `struct_packing_changed`, endianness assumptions baked into raw byte
   layout) is also potentially a data-format break for every file or message
   already written in the old layout.

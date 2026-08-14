@@ -68,14 +68,15 @@ isn't a first-class input the way a shared object is, and `compare`
 positionally requires two such artifacts (or JSON snapshots) — there's no
 `-H`-alone invocation with no operand at all. The practical way to validate
 a static library's source/API compatibility with abicheck today is the same
-source-snapshot path as the header-only case below: `dump --sources <dir>
--H include/ --depth source` against the library's own sources (its
-implementation `.cpp` files, in this case — a static library, unlike a
-header-only one, actually has them to replay), then `compare` the two
-resulting JSON snapshots. This covers source and public-surface-scoping
-concerns fully, independent of the archive format; validating the
-*compiled* archive's object-format/compiler-ABI compatibility from its
-`.a`/`.lib` file directly isn't something abicheck does today.
+no-binary source-fact path as the header-only case below: `dump --sources
+<dir> --depth source` against the library's own sources (its implementation
+`.cpp` files, in this case — a static library, unlike a header-only one,
+actually has them to replay), then `compare` the two resulting JSON
+snapshots. This is an L3–L5 source-fact comparison, not an L2 header-AST
+one — see the header-only section below for exactly what that distinction
+means; validating the *compiled* archive's object-format/compiler-ABI
+compatibility from its `.a`/`.lib` file directly isn't something abicheck
+does today.
 
 ## Header-only libraries: the whole surface is the inline-body concern
 
@@ -97,26 +98,37 @@ public API, unconditionally**:
   library's versioning is effectively always at the granularity of "whatever
   headers were included at each consumer's most recent build."
 - Because there's no separate binary artifact, checking a header-only
-  library needs a source or build anchor rather than a binary one: `dump
-  --sources <dir> -H include/ --depth source` replays the library's own
-  translation units (its test/example sources, or a minimal TU written
-  specifically to instantiate the public API) to produce a snapshot with no
-  binary operand at all, and `compare old.src.json new.src.json` diffs two
-  such snapshots the same way it diffs two binaries. Every finding from that
-  path is at the source/API level — every mechanism in
+  library needs a source anchor rather than a binary one: `dump --sources
+  <dir> --depth source` (no binary operand, and — in this no-artifact
+  path specifically — no separate `-H`; the CLI's own source-only dump
+  reads declarations from the replayed translation units themselves, not
+  from a header-scoping flag) replays the library's own translation units
+  (its test/example sources, or a minimal TU written specifically to
+  instantiate the public API) into a snapshot, and `compare old.src.json
+  new.src.json` diffs two such snapshots the same way it diffs two
+  binaries. This is genuinely an **L3–L5 source-fact comparison**, not the
+  L2 header-AST comparison a binary+`-H` run produces — every mechanism in
   [Evidence & Detectability](evidence-and-detectability.md) still applies,
-  just anchored at L2–L5 instead of starting from L0/L1 binary evidence,
-  since there's no binary to provide it.
-- ODR (One Definition Rule) violations become a live risk the moment two
-  translation units see *different* versions of the same header-only
-  declaration (a partial update, a vendored copy alongside a system-installed
-  one) — a class of bug that has no equivalent in the dynamic-library world,
-  where there's exactly one definition living in the shared object.
+  just without an L0/L1/L2 layer to anchor it, since there's no binary or
+  header-scoping input to provide one.
+- ODR (One Definition Rule) violations are a risk here too, as they are for
+  any inline/template declaration in a *dynamic* library's public headers
+  (the same declarations that make a dynamic library's own public inline
+  functions "public inline" in
+  [the hub's dispatcher scenario](abi-api-handling.md#the-l5-graph-reachability-not-just-structure))
+  — this isn't unique to the header-only shape, just proportionally larger:
+  a header-only library's *entire* public surface is inline/template
+  declarations, so the exposure to "two translation units silently seeing
+  different versions of the same header" (a partial update, a vendored copy
+  alongside a system-installed one) is much wider than for a dynamic
+  library, where only the inline/template subset of the public headers
+  carries this risk.
 
 ## Practical guidance
 
 - For a static library, treat header/source compatibility with the same
-  rigor as a dynamic library's — check it with `abicheck compare -H` — and
+  rigor as a dynamic library's — check it with the same `dump --sources`
+  source-fact comparison described above — and
   additionally pin/document the supported compiler and standard-library ABI
   range explicitly, since there's no runtime check equivalent to a loader
   refusing an incompatible SONAME.
