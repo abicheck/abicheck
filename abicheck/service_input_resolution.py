@@ -43,6 +43,8 @@ function-local import also keeps this module out of ``service``'s import cycle
 from __future__ import annotations
 
 import dataclasses
+import os
+import shlex
 from typing import TYPE_CHECKING
 
 from .errors import SnapshotError, ValidationError
@@ -151,8 +153,8 @@ def _merge_l3_compile_context(
 
     Mirrors ``-p``/``--compile-db``'s existing precedence for ``dump``
     (``cli_helpers_compare._merge_gcc_options``): the build-derived flags lead
-    and the caller's own explicit ``gcc_option_tokens`` are appended after —
-    so an explicit, later token still wins any literal redefinition (e.g. a
+    and the caller's own explicit representation is appended after — so an
+    explicit, later token still wins any literal redefinition (e.g. a
     caller's own ``-DFOO=2`` after a derived ``-DFOO=1`` — the compiler uses
     the last ``-D`` for a given macro) without this function needing to know
     which tokens actually conflict. ``derived`` with no tokens at all (a
@@ -160,14 +162,52 @@ def _merge_l3_compile_context(
     evidence, see ``header_compile_context``'s own docstring) is a no-op here;
     the caller still stamps ``parsed_with_build_context`` in that case since
     context genuinely *was* resolved and applied (as the empty flag list).
+
+    Finding 2: "derived leads, explicit wins" only holds if *every*
+    representation of the explicit value actually lands after every derived
+    token in the rendered command — not just ``gcc_option_tokens`` entries.
+    Both header command builders (``dumper_ast_config._build_castxml_command``/
+    ``_build_clang_header_command``) render the structured ``sysroot`` field
+    and the free-form ``gcc_options`` string *before* ``gcc_option_tokens``,
+    so merely prepending ``derived.gcc_option_tokens`` to
+    ``explicit.gcc_option_tokens`` (as before) left ``explicit.sysroot``/
+    ``explicit.gcc_options`` — rendered earlier in the command — silently
+    overridden by a later, conflicting derived token instead of winning.
+    Folding both structured representations into trailing tokens (and
+    clearing the structured fields, so the command builders no longer also
+    emit them in their old, too-early position) puts every explicit
+    representation strictly after every derived one, regardless of which of
+    the three explicit channels (``sysroot``, ``gcc_options``,
+    ``gcc_option_tokens``) it came through.
     """
     if derived is None:
         return explicit
     if explicit is None:
         return derived
+    explicit_tail: list[str] = []
+    if explicit.sysroot is not None:
+        explicit_tail.append(f"--sysroot={explicit.sysroot.as_posix()}")
+    if explicit.gcc_options:
+        try:
+            explicit_tail.extend(
+                shlex.split(explicit.gcc_options, posix=os.name != "nt")
+            )
+        except ValueError:
+            # Malformed --gcc-options must not abort the merge (mirrors
+            # _compiler_options.explicit_language_standard's own handling of
+            # the identical failure mode) -- fall back to forwarding it
+            # verbatim as one token so it is at least still present, rather
+            # than silently dropped.
+            explicit_tail.append(explicit.gcc_options)
     return dataclasses.replace(
         explicit,
-        gcc_option_tokens=(*derived.gcc_option_tokens, *explicit.gcc_option_tokens),
+        sysroot=None,
+        gcc_options=None,
+        gcc_option_tokens=(
+            *derived.gcc_option_tokens,
+            *explicit_tail,
+            *explicit.gcc_option_tokens,
+        ),
     )
 
 
@@ -207,6 +247,11 @@ def _seeded_compile_context(
         sources=side.sources,
         build_config=None,
         allow_inferred_build_query=False,
+        # Finding 3: fold the caller's own already-explicit context into
+        # ambiguity resolution so a field it already pins (e.g. an explicit
+        # -std=c++20) excuses a same-field-only disagreement across matched
+        # compile units instead of failing closed on it.
+        explicit=evidence.compile,
     )
     if derived is None:
         return evidence.compile, False, cleanups

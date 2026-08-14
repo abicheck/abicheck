@@ -250,9 +250,17 @@ def derive_l2_compile_context(
     build_query: str | None = None,
     build_compile_db: str | None = None,
     allow_inferred_build_query: bool = True,
+    explicit: CompileContext | None = None,
 ) -> tuple[CompileContext | None, list[Callable[[], None]]]:
     """Best-effort L2 :class:`CompileContext` derived from the build's L3
     ``CompileUnit`` facts (P0.3).
+
+    *explicit* is the caller's own already-supplied L2 context (typically
+    ``evidence.compile``) — forwarded to :func:`~abicheck.buildsource.
+    header_compile_context.resolve_header_compile_context` unchanged, so a
+    field it already pins (e.g. an explicit ``-std=c++20``) excuses a
+    same-field-only disagreement across the matched compile units instead of
+    failing closed on it (Finding 3; see that function's own docstring).
 
     Sibling of :func:`derive_l2_include_dirs`, sharing its exact pack-
     resolution precedence (explicit ``--build-info``/``--sources`` pack ->
@@ -312,7 +320,9 @@ def derive_l2_compile_context(
             defer_cleanup=cleanups,
         )
         build_evidence = pack.build_evidence if pack is not None else None
-        resolution = resolve_header_compile_context(build_evidence, list(headers))
+        resolution = resolve_header_compile_context(
+            build_evidence, list(headers), explicit=explicit
+        )
         if resolution.context is None:
             _run_cleanups(cleanups)
             return None, []

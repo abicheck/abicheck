@@ -69,11 +69,14 @@ pick one" heuristic.
 
 from __future__ import annotations
 
+import os
 import re
-from dataclasses import dataclass
+import shlex
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from .._compiler_options import explicit_language_standard
 from ..compile_context import CompileContext
 from ..errors import HeaderCompileContextAmbiguousError
 
@@ -147,6 +150,97 @@ def _matching_compile_units(
     return matched
 
 
+def _explicit_pin_tokens(explicit: CompileContext | None) -> list[str]:
+    """Flatten one explicit :class:`CompileContext`'s free-form + repeatable
+    options into a single token list, for presence-only scanning below.
+
+    Mirrors how both header command builders (``dumper_ast_config.py``)
+    combine the two fields (``gcc_options`` shlex-split, then
+    ``gcc_option_tokens`` verbatim) -- deliberately best-effort: a malformed
+    ``gcc_options`` string degrades to "no tokens from it" rather than
+    raising, since this is only used to *widen* what's accepted (Finding 3),
+    never to narrow it.
+    """
+    if explicit is None:
+        return []
+    tokens: list[str] = []
+    if explicit.gcc_options:
+        try:
+            tokens.extend(shlex.split(explicit.gcc_options, posix=os.name != "nt"))
+        except ValueError:
+            pass
+    tokens.extend(explicit.gcc_option_tokens)
+    return tokens
+
+
+@dataclass(frozen=True)
+class _ExplicitPin:
+    """Which ABI-relevant *dimensions* an explicit :class:`CompileContext`
+    already resolves (Finding 3).
+
+    A caller who already pinned a field via ``--gcc-options``/
+    ``--gcc-option`` (or the structured ``sysroot`` field) does not need the
+    L3 evidence to agree on that field too -- ``resolve_header_compile_
+    context`` masks a pinned field out of the multi-unit ambiguity
+    comparison below, so a genuine disagreement on a *different*,
+    unpinned field still fails closed (only the pinned dimension is
+    excused, per field, not "any explicit override excuses every
+    disagreement").
+
+    Presence-only, not value-resolving: this deliberately does not attempt
+    to compute what the *effective* value of a pinned field ends up being
+    (that's ``dataclasses.replace``/last-flag-wins compiler semantics once
+    the derived and explicit contexts are actually merged and rendered,
+    handled by ``service_input_resolution._merge_l3_compile_context``) --
+    only whether the caller stated an opinion on it at all.
+    """
+
+    standard: bool = False
+    target_triple: bool = False
+    sysroot: bool = False
+    defines: frozenset[str] = field(default_factory=frozenset)
+    undefines: frozenset[str] = field(default_factory=frozenset)
+
+    @classmethod
+    def of(cls, explicit: CompileContext | None) -> _ExplicitPin:
+        if explicit is None:
+            return cls()
+        tokens = _explicit_pin_tokens(explicit)
+        target_triple = False
+        sysroot = explicit.sysroot is not None
+        defines: set[str] = set()
+        undefines: set[str] = set()
+        i = 0
+        n = len(tokens)
+        while i < n:
+            tok = tokens[i]
+            if tok in ("-target", "--target") or tok.startswith("--target="):
+                target_triple = True
+            elif tok in ("--sysroot", "-isysroot") or tok.startswith("--sysroot="):
+                sysroot = True
+            elif tok == "-D" and i + 1 < n:
+                defines.add(tokens[i + 1].split("=", 1)[0])
+                i += 1
+            elif tok.startswith("-D") and len(tok) > 2:
+                defines.add(tok[2:].split("=", 1)[0])
+            elif tok == "-U" and i + 1 < n:
+                undefines.add(tokens[i + 1])
+                i += 1
+            elif tok.startswith("-U") and len(tok) > 2:
+                undefines.add(tok[2:])
+            i += 1
+        return cls(
+            standard=explicit_language_standard(
+                explicit.gcc_options, explicit.gcc_option_tokens
+            )
+            is not None,
+            target_triple=target_triple,
+            sysroot=sysroot,
+            defines=frozenset(defines),
+            undefines=frozenset(undefines),
+        )
+
+
 @dataclass(frozen=True)
 class _EffectiveContextSignature:
     """The ABI-relevant fields the plan's point 1 + point 3 name, normalized.
@@ -159,6 +253,13 @@ class _EffectiveContextSignature:
     semantic-equivalence check — a stricter "agree" test can only ever turn a
     would-be single-context case into a (still-safe) ambiguous one, never the
     reverse, so this stays on the conservative, fail-closed side.
+
+    A field (or, for ``defines``/``undefines``, one specific macro key) that
+    *pin* (see :class:`_ExplicitPin`) already resolves for the caller is
+    masked to a shared placeholder here (Finding 3) — so two units that
+    disagree only on a dimension the caller already pinned no longer read as
+    a materially different signature, while a disagreement on any other,
+    unpinned dimension still does.
     """
 
     language: str
@@ -172,18 +273,70 @@ class _EffectiveContextSignature:
     abi_relevant_flags: tuple[str, ...]
 
     @classmethod
-    def of(cls, cu: CompileUnit) -> _EffectiveContextSignature:
+    def of(
+        cls, cu: CompileUnit, pin: _ExplicitPin | None = None
+    ) -> _EffectiveContextSignature:
+        pin = pin or _ExplicitPin()
         return cls(
             language=cu.language,
-            standard=cu.standard,
-            target_triple=cu.target_triple,
-            sysroot=cu.sysroot or "",
-            defines=tuple(sorted(cu.defines.items())),
-            undefines=tuple(sorted(cu.undefines)),
+            standard="" if pin.standard else cu.standard,
+            target_triple="" if pin.target_triple else cu.target_triple,
+            sysroot="" if pin.sysroot else (cu.sysroot or ""),
+            defines=tuple(
+                sorted((k, v) for k, v in cu.defines.items() if k not in pin.defines)
+            ),
+            undefines=tuple(sorted(u for u in cu.undefines if u not in pin.undefines)),
             include_paths=tuple(cu.include_paths),
             system_include_paths=tuple(cu.system_include_paths),
-            abi_relevant_flags=tuple(cu.abi_relevant_flags),
+            abi_relevant_flags=tuple(
+                _mask_pinned_abi_flags(cu.abi_relevant_flags, pin)
+            ),
         )
+
+
+def _mask_pinned_abi_flags(flags: Sequence[str], pin: _ExplicitPin) -> list[str]:
+    """Drop ``cu.abi_relevant_flags`` entries a pinned dimension already
+    covers (Finding 3, continued).
+
+    ``adapters.base.extract_abi_relevant_flags`` records the *same* raw
+    ``-std=``/``-target``/``--target=``/``--sysroot``/``-isysroot`` tokens
+    into ``CompileUnit.abi_relevant_flags`` that also feed the *structured*
+    ``standard``/``target_triple``/``sysroot`` fields masked above — so
+    without this, a std-only disagreement pinned via ``explicit`` still
+    showed up as a differing ``abi_relevant_flags`` tuple (the raw
+    ``-std=c++17``/``-std=c++20`` tokens themselves), reopening the exact
+    ambiguity the structured-field masking above was meant to close.
+    """
+    out: list[str] = []
+    for f in flags:
+        if pin.standard and (f.startswith("-std=") or f.startswith("/std:")):
+            continue
+        if pin.target_triple and (f == "-target" or f.startswith("--target=")):
+            continue
+        if pin.sysroot and (
+            f in ("--sysroot", "-isysroot") or f.startswith("--sysroot=")
+        ):
+            continue
+        out.append(f)
+    return out
+
+
+#: Bare switch spellings whose operand is a *separate*, following argv token
+#: (``-target aarch64-linux-gnu``, ``--sysroot /sdk``, ``-isysroot /sdk``).
+#: ``extract_abi_relevant_flags`` (``buildsource/adapters/base.py``) captures
+#: only the switch itself for these — its match is a plain prefix check with
+#: no lookahead, unlike ``_extract_flags`` (``build_context.py``), which
+#: consumes the operand token too and stores the resolved value in
+#: ``CompileUnit.target_triple``/``.sysroot``. Forwarding one of these bare
+#: tokens verbatim from ``cu.abi_relevant_flags`` therefore never recovers a
+#: lost value (the operand was never captured there in the first place) — it
+#: only emits a dangling switch that a real compiler either rejects outright
+#: or, worse, silently pairs with whatever token happens to follow it in the
+#: constructed command. This function already renders the equivalent,
+#: complete ``--target=``/``--sysroot=`` combined form from the structured
+#: ``cu.target_triple``/``cu.sysroot`` fields a few lines above, so dropping
+#: the bare duplicate here loses nothing (finding 1).
+_DANGLING_OPERAND_FLAGS = frozenset({"-target", "--sysroot", "-isysroot"})
 
 
 def _context_flags(cu: CompileUnit) -> list[str]:
@@ -205,16 +358,28 @@ def _context_flags(cu: CompileUnit) -> list[str]:
     if cu.target_triple:
         flags.append(f"--target={cu.target_triple}")
     if cu.sysroot:
-        flags.append(f"--sysroot={_resolve_cu_relative_path(cu.sysroot, cu.directory)}")
+        # .as_posix() (not str()/plain f-string interpolation), matching the
+        # exact convention both header command builders already use for a
+        # sysroot Path (dumper_ast_config.py's `sysroot.as_posix()` in both
+        # `_build_castxml_command`/`_build_clang_header_command`) -- a plain
+        # `str(WindowsPath(...))` renders native `\`-separated components,
+        # producing a `--sysroot=C:\opt\sysroot` token that a castxml/clang
+        # invocation does not parse the same way as the forward-slash form
+        # every other sysroot-flag rendering in this codebase emits.
+        flags.append(
+            f"--sysroot={_resolve_cu_relative_path(cu.sysroot, cu.directory).as_posix()}"
+        )
     for macro, value in sorted(cu.defines.items()):
         flags.append(f"-D{macro}={value}" if value else f"-D{macro}")
     for macro in sorted(cu.undefines):
         flags.append(f"-U{macro}")
     for inc in cu.include_paths:
-        flags.extend(["-I", str(_resolve_cu_relative_path(inc, cu.directory))])
+        flags.extend(["-I", _resolve_cu_relative_path(inc, cu.directory).as_posix()])
     for inc in cu.system_include_paths:
-        flags.extend(["-isystem", str(_resolve_cu_relative_path(inc, cu.directory))])
-    flags.extend(cu.abi_relevant_flags)
+        flags.extend(
+            ["-isystem", _resolve_cu_relative_path(inc, cu.directory).as_posix()]
+        )
+    flags.extend(f for f in cu.abi_relevant_flags if f not in _DANGLING_OPERAND_FLAGS)
     return flags
 
 
@@ -245,6 +410,8 @@ _EMPTY_RESOLUTION = HeaderCompileContextResolution()
 def resolve_header_compile_context(
     build_evidence: BuildEvidence | None,
     headers: Sequence[Path],
+    *,
+    explicit: CompileContext | None = None,
 ) -> HeaderCompileContextResolution:
     """Resolve a single L2 :class:`CompileContext` from L3 ``CompileUnit`` facts.
 
@@ -254,10 +421,21 @@ def resolve_header_compile_context(
     so a caller with no L3 evidence (or a header the build evidence simply
     doesn't cover) sees the exact same behavior as before this module existed.
 
+    *explicit* is the caller's own, already-supplied L2 context (``evidence.
+    compile`` on the service_input_resolution path) — when given, any
+    ABI-relevant dimension it already pins (an explicit ``-std=``/
+    ``--target=``/``--sysroot=``/``-isysroot`` or a specific ``-D``/``-U``
+    macro; see :class:`_ExplicitPin`) is excluded from the multi-unit
+    ambiguity comparison below, since the caller's own value wins that
+    dimension regardless of what the matched compile units say (Finding 3).
+    Per-field, not per-request: a genuine disagreement on any *other*,
+    unpinned dimension still fails closed.
+
     Raises :class:`~abicheck.errors.HeaderCompileContextAmbiguousError` when
     two or more of the matched ``CompileUnit``s disagree on an ABI-relevant
-    field — the one case this function refuses to guess at (see the module
-    docstring's "single-context vs. ambiguous" section).
+    field the caller has not already pinned via *explicit* — the one case
+    this function refuses to guess at (see the module docstring's
+    "single-context vs. ambiguous" section).
     """
     if build_evidence is None or not build_evidence.compile_units or not headers:
         return _EMPTY_RESOLUTION
@@ -266,9 +444,10 @@ def resolve_header_compile_context(
     if not matched:
         return _EMPTY_RESOLUTION
 
+    pin = _ExplicitPin.of(explicit)
     by_signature: dict[_EffectiveContextSignature, list[CompileUnit]] = {}
     for cu in matched:
-        by_signature.setdefault(_EffectiveContextSignature.of(cu), []).append(cu)
+        by_signature.setdefault(_EffectiveContextSignature.of(cu, pin), []).append(cu)
 
     if len(by_signature) > 1:
         raise HeaderCompileContextAmbiguousError(

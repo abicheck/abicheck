@@ -112,6 +112,15 @@ def test_resolve_derives_context_from_single_matching_unit(tmp_path: Path) -> No
     header.write_text("struct Widget { int x; };\n", encoding="utf-8")
     src = tmp_path / "widget.cpp"
     src.write_text('#include "widget.h"\nint f() { return 0; }\n', encoding="utf-8")
+    # Real, platform-native absolute paths under tmp_path -- a hand-typed
+    # POSIX literal like "/opt/sysroot" isn't even a valid absolute path on
+    # Windows (no drive letter), so it would silently exercise
+    # _resolve_cu_relative_path's "join with directory" branch instead of
+    # the "already absolute" branch a real CompileUnit's sysroot/include
+    # paths take on every platform.
+    sysroot_dir = tmp_path / "sysroot"
+    inc_dir = tmp_path / "inc"
+    sysinc_dir = tmp_path / "sysinc"
     cu = _cu(
         source=str(src),
         directory=str(tmp_path),
@@ -119,9 +128,9 @@ def test_resolve_derives_context_from_single_matching_unit(tmp_path: Path) -> No
         target_triple="x86_64-linux-gnu",
         defines={"WIDGET_EXTRA": "1", "FLAG": ""},
         undefines=["NDEBUG"],
-        include_paths=["/opt/inc"],
-        system_include_paths=["/opt/sysinc"],
-        sysroot="/opt/sysroot",
+        include_paths=[str(inc_dir)],
+        system_include_paths=[str(sysinc_dir)],
+        sysroot=str(sysroot_dir),
         abi_relevant_flags=["-fPIC", "-fno-omit-frame-pointer"],
     )
     ev = BuildEvidence(compile_units=[cu])
@@ -132,14 +141,74 @@ def test_resolve_derives_context_from_single_matching_unit(tmp_path: Path) -> No
     tokens = result.context.gcc_option_tokens
     assert "-std=c++20" in tokens
     assert "--target=x86_64-linux-gnu" in tokens
-    assert "--sysroot=/opt/sysroot" in tokens
+    # Compare against the same forward-slash-normalized rendering the
+    # production code emits (.as_posix()), not a raw, platform-dependent
+    # string -- this is the actual cross-platform contract, not an
+    # incidental one that only happens to hold on POSIX.
+    assert f"--sysroot={sysroot_dir.as_posix()}" in tokens
     assert "-DWIDGET_EXTRA=1" in tokens
     assert "-DFLAG" in tokens
     assert "-UNDEBUG" in tokens
-    assert "-I" in tokens and "/opt/inc" in tokens
-    assert "-isystem" in tokens and "/opt/sysinc" in tokens
+    assert "-I" in tokens and inc_dir.as_posix() in tokens
+    assert "-isystem" in tokens and sysinc_dir.as_posix() in tokens
     assert "-fPIC" in tokens
     assert "-fno-omit-frame-pointer" in tokens
+
+
+def test_resolve_strips_dangling_target_operand_flag(tmp_path: Path) -> None:
+    """Finding 1: a compile DB spelling ``-target aarch64-linux-gnu`` as two
+    separate argv tokens has only the bare ``-target`` switch captured into
+    ``abi_relevant_flags`` (the adapter's naive prefix match has no
+    lookahead) -- forwarding it verbatim alongside the structured
+    ``--target=`` rendering would emit a dangling, operand-less switch.
+    """
+    header = tmp_path / "widget.h"
+    header.write_text("struct Widget { int x; };\n", encoding="utf-8")
+    src = tmp_path / "widget.cpp"
+    src.write_text('#include "widget.h"\n', encoding="utf-8")
+    cu = _cu(
+        source=str(src),
+        directory=str(tmp_path),
+        target_triple="aarch64-linux-gnu",
+        # Mirrors extract_abi_relevant_flags's real output for a two-token
+        # "-target aarch64-linux-gnu": only the bare switch is captured.
+        abi_relevant_flags=["-target", "-fPIC"],
+    )
+    ev = BuildEvidence(compile_units=[cu])
+    result = resolve_header_compile_context(ev, [header])
+    assert result.context is not None
+    tokens = result.context.gcc_option_tokens
+    assert tokens.count("--target=aarch64-linux-gnu") == 1
+    assert "-target" not in tokens  # the dangling bare switch is dropped
+    assert "-fPIC" in tokens  # unrelated flags still forwarded
+    # No malformed/dangling trailing switch anywhere in the rendered tokens.
+    assert tokens[-1] != "-target"
+
+
+def test_resolve_strips_dangling_sysroot_operand_flags(tmp_path: Path) -> None:
+    """Finding 1: same shape for --sysroot and -isysroot's separate-token forms."""
+    header = tmp_path / "widget.h"
+    header.write_text("struct Widget { int x; };\n", encoding="utf-8")
+    src = tmp_path / "widget.cpp"
+    src.write_text('#include "widget.h"\n', encoding="utf-8")
+    # A real, platform-native absolute path (not a hand-typed POSIX literal
+    # like "/sdk", which isn't absolute on Windows -- see the analogous fix
+    # in test_resolve_derives_context_from_single_matching_unit above).
+    sdk_dir = tmp_path / "sdk"
+    cu = _cu(
+        source=str(src),
+        directory=str(tmp_path),
+        sysroot=str(sdk_dir),
+        abi_relevant_flags=["--sysroot", "-isysroot"],
+    )
+    ev = BuildEvidence(compile_units=[cu])
+    result = resolve_header_compile_context(ev, [header])
+    assert result.context is not None
+    tokens = result.context.gcc_option_tokens
+    expected = f"--sysroot={sdk_dir.as_posix()}"
+    assert tokens.count(expected) == 1
+    assert "--sysroot" not in tokens
+    assert "-isysroot" not in tokens
 
 
 def test_resolve_matches_by_bare_filename_include(tmp_path: Path) -> None:
@@ -222,6 +291,106 @@ def test_resolve_disagreeing_abi_flags_fail_closed(tmp_path: Path) -> None:
         resolve_header_compile_context(ev, [header])
 
 
+# ---------------------------------------------------------------------------
+# 1b. Finding 3: an explicit override resolves a same-field-only ambiguity
+# ---------------------------------------------------------------------------
+
+
+def test_resolve_explicit_std_resolves_std_only_disagreement(tmp_path: Path) -> None:
+    header = tmp_path / "widget.h"
+    header.write_text("struct Widget { int x; };\n", encoding="utf-8")
+    src_a = tmp_path / "a.cpp"
+    src_a.write_text('#include "widget.h"\n', encoding="utf-8")
+    src_b = tmp_path / "b.cpp"
+    src_b.write_text('#include "widget.h"\n', encoding="utf-8")
+    unit_a = _cu(source=str(src_a), directory=str(tmp_path), standard="c++17")
+    unit_b = _cu(source=str(src_b), directory=str(tmp_path), standard="c++20")
+    ev = BuildEvidence(compile_units=[unit_a, unit_b])
+    explicit = CompileContext(gcc_option_tokens=("-std=c++20",))
+    # No error: the std-only disagreement is excused by the explicit pin.
+    result = resolve_header_compile_context(ev, [header], explicit=explicit)
+    assert result.matched is True
+    assert result.matched_unit_count == 2
+
+
+def test_resolve_genuine_disagreement_with_no_explicit_override_still_fails(
+    tmp_path: Path,
+) -> None:
+    header = tmp_path / "widget.h"
+    header.write_text("struct Widget { int x; };\n", encoding="utf-8")
+    src_a = tmp_path / "a.cpp"
+    src_a.write_text('#include "widget.h"\n', encoding="utf-8")
+    src_b = tmp_path / "b.cpp"
+    src_b.write_text('#include "widget.h"\n', encoding="utf-8")
+    unit_a = _cu(source=str(src_a), directory=str(tmp_path), standard="c++17")
+    unit_b = _cu(source=str(src_b), directory=str(tmp_path), standard="c++20")
+    ev = BuildEvidence(compile_units=[unit_a, unit_b])
+    # An explicit override for an *unrelated* dimension (a macro) must not
+    # excuse the genuine, unpinned std disagreement.
+    explicit = CompileContext(gcc_option_tokens=("-DUNRELATED=1",))
+    with pytest.raises(HeaderCompileContextAmbiguousError):
+        resolve_header_compile_context(ev, [header], explicit=explicit)
+    # Same with no explicit context at all.
+    with pytest.raises(HeaderCompileContextAmbiguousError):
+        resolve_header_compile_context(ev, [header])
+
+
+def test_resolve_partial_explicit_override_still_fails_for_remaining_field(
+    tmp_path: Path,
+) -> None:
+    """Disagreement on two fields (std, target); only std is pinned
+    explicitly -- must still fail closed on the unpinned target disagreement."""
+    header = tmp_path / "widget.h"
+    header.write_text("struct Widget { int x; };\n", encoding="utf-8")
+    src_a = tmp_path / "a.cpp"
+    src_a.write_text('#include "widget.h"\n', encoding="utf-8")
+    src_b = tmp_path / "b.cpp"
+    src_b.write_text('#include "widget.h"\n', encoding="utf-8")
+    unit_a = _cu(
+        source=str(src_a),
+        directory=str(tmp_path),
+        standard="c++17",
+        target_triple="x86_64-linux-gnu",
+    )
+    unit_b = _cu(
+        source=str(src_b),
+        directory=str(tmp_path),
+        standard="c++20",
+        target_triple="aarch64-linux-gnu",
+    )
+    ev = BuildEvidence(compile_units=[unit_a, unit_b])
+    explicit = CompileContext(gcc_option_tokens=("-std=c++20",))
+    with pytest.raises(HeaderCompileContextAmbiguousError):
+        resolve_header_compile_context(ev, [header], explicit=explicit)
+
+
+def test_resolve_explicit_define_resolves_macro_only_disagreement(
+    tmp_path: Path,
+) -> None:
+    """Per-macro, not whole-field: an explicit -DFOO=2 excuses disagreement
+    on FOO specifically, without needing to pin every macro."""
+    header = tmp_path / "widget.h"
+    header.write_text("struct Widget { int x; };\n", encoding="utf-8")
+    src_a = tmp_path / "a.cpp"
+    src_a.write_text('#include "widget.h"\n', encoding="utf-8")
+    src_b = tmp_path / "b.cpp"
+    src_b.write_text('#include "widget.h"\n', encoding="utf-8")
+    unit_a = _cu(
+        source=str(src_a),
+        directory=str(tmp_path),
+        defines={"FOO": "1", "SHARED": "1"},
+    )
+    unit_b = _cu(
+        source=str(src_b),
+        directory=str(tmp_path),
+        defines={"FOO": "2", "SHARED": "1"},
+    )
+    ev = BuildEvidence(compile_units=[unit_a, unit_b])
+    explicit = CompileContext(gcc_option_tokens=("-DFOO=2",))
+    result = resolve_header_compile_context(ev, [header], explicit=explicit)
+    assert result.matched is True
+
+
 def test_resolve_multiple_headers_union_of_matches(tmp_path: Path) -> None:
     h1 = tmp_path / "a.h"
     h1.write_text("struct A {};\n", encoding="utf-8")
@@ -242,8 +411,16 @@ def test_resolve_expands_redacted_home_relative_source(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     # CompileUnit.source/directory are redacted (home -> "~") for persistence
-    # (ADR-032 D7); resolution must expand them back before reading.
+    # (ADR-032 D7); resolution must expand them back before reading via
+    # Path.expanduser(), which is genuinely platform-native: POSIX reads
+    # HOME, Windows reads USERPROFILE (falling back to HOMEDRIVE+HOMEPATH)
+    # and does not consult HOME at all. Both (not just HOME) -- os.path.
+    # expanduser("~") reads a different env var depending on platform, the
+    # same cross-platform pattern test_include_graph.py/test_archive_graph.py
+    # already use for the identical situation -- must be set for this test
+    # to exercise real expansion on every CI platform rather than only POSIX.
     monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setenv("USERPROFILE", str(tmp_path))
     header = tmp_path / "widget.h"
     header.write_text("struct Widget { int x; };\n", encoding="utf-8")
     src = tmp_path / "widget.cpp"
@@ -356,6 +533,49 @@ def test_derive_l2_compile_context_ambiguous_raises_and_drains_cleanups(
         derive_l2_compile_context([header], None, tmp_path)
 
 
+def test_derive_l2_compile_context_explicit_std_resolves_ambiguity(
+    tmp_path: Path,
+) -> None:
+    """Finding 3, threaded through the real ``derive_l2_compile_context``
+    entry point (not just the lower-level ``resolve_header_compile_context``
+    call above)."""
+    from abicheck.buildsource.l2_seed import derive_l2_compile_context
+
+    header = tmp_path / "widget.h"
+    header.write_text("struct Widget { int x; };\n", encoding="utf-8")
+    src_a = tmp_path / "a.cpp"
+    src_a.write_text('#include "widget.h"\n', encoding="utf-8")
+    src_b = tmp_path / "b.cpp"
+    src_b.write_text('#include "widget.h"\n', encoding="utf-8")
+    (tmp_path / "compile_commands.json").write_text(
+        json.dumps(
+            [
+                {
+                    "directory": str(tmp_path),
+                    "file": str(src_a),
+                    "arguments": ["c++", "-c", str(src_a), "-std=c++17"],
+                },
+                {
+                    "directory": str(tmp_path),
+                    "file": str(src_b),
+                    "arguments": ["c++", "-c", str(src_b), "-std=c++20"],
+                },
+            ]
+        ),
+        encoding="utf-8",
+    )
+    explicit = CompileContext(gcc_option_tokens=("-std=c++20",))
+    ctx, cleanups = derive_l2_compile_context(
+        [header], None, tmp_path, explicit=explicit
+    )
+    try:
+        assert ctx is not None
+    finally:
+        from abicheck.buildsource.inline import _run_cleanups
+
+        _run_cleanups(cleanups)
+
+
 def test_derive_l2_compile_context_swallows_non_ambiguous_errors(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -383,8 +603,61 @@ def test_merge_l3_compile_context_derived_leads_explicit_wins() -> None:
     explicit = CompileContext(gcc_option_tokens=("-DFOO=2",), sysroot=Path("/x"))
     merged = _merge_l3_compile_context(explicit, derived)
     assert merged is not None
-    assert merged.gcc_option_tokens == ("-DFOO=1", "-fPIC", "-DFOO=2")
-    assert merged.sysroot == Path("/x")  # explicit-only fields preserved
+    # Finding 2: explicit's structured `sysroot` is folded into a trailing
+    # token (and the structured field cleared) so it lands strictly after
+    # every derived token in the actually-rendered command, not before it.
+    assert merged.gcc_option_tokens == (
+        "-DFOO=1",
+        "-fPIC",
+        "--sysroot=/x",
+        "-DFOO=2",
+    )
+    assert merged.sysroot is None
+
+
+def test_merge_l3_compile_context_explicit_gcc_options_string_folded_after_derived() -> (
+    None
+):
+    """Finding 2: the free-form ``gcc_options`` string channel, not just
+    ``sysroot``, must also land after every derived token."""
+    from abicheck.service_input_resolution import _merge_l3_compile_context
+
+    derived = CompileContext(gcc_option_tokens=("-DFOO=1",))
+    explicit = CompileContext(gcc_options="-DFOO=2 -DBAR=3")
+    merged = _merge_l3_compile_context(explicit, derived)
+    assert merged is not None
+    assert merged.gcc_option_tokens == ("-DFOO=1", "-DFOO=2", "-DBAR=3")
+    assert merged.gcc_options is None
+
+
+def test_merge_l3_compile_context_conflicting_sysroot_explicit_wins_in_rendered_command(
+    tmp_path: Path,
+) -> None:
+    """End-to-end-shaped: build the actual castxml command from a merged
+    context carrying a derived AND an explicit, conflicting sysroot, and
+    assert the *last* --sysroot= token (the one that wins under real
+    compiler last-flag-wins semantics) is the explicit one."""
+    from abicheck.dumper_ast_config import _build_castxml_command
+    from abicheck.service_input_resolution import _merge_l3_compile_context
+
+    derived = CompileContext(gcc_option_tokens=("--sysroot=/derived",))
+    explicit = CompileContext(sysroot=Path("/explicit"))
+    merged = _merge_l3_compile_context(explicit, derived)
+    assert merged is not None
+    cmd = _build_castxml_command(
+        "g++",
+        "gnu",
+        [],
+        tmp_path / "out.xml",
+        tmp_path / "agg.h",
+        sysroot=merged.sysroot,
+        gcc_options=merged.gcc_options,
+        gcc_option_tokens=merged.gcc_option_tokens,
+        force_cpp=True,
+    )
+    sysroot_tokens = [tok for tok in cmd if tok.startswith("--sysroot=")]
+    assert sysroot_tokens == ["--sysroot=/derived", "--sysroot=/explicit"]
+    assert sysroot_tokens[-1] == "--sysroot=/explicit"  # last-flag-wins: explicit
 
 
 def test_merge_l3_compile_context_none_derived_is_noop() -> None:
